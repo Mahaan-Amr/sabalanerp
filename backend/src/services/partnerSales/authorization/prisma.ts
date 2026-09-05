@@ -114,13 +114,14 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
       // A financial chain must be explicitly selected by the owning command.
       // Never infer the requester from the Case creator or the latest request.
       const opportunity = await tx.partnerCorrectionOpportunity.findUnique({ where: { id: target.correctionOpportunityId },
-        select: { caseId: true, requesterId: true } });
+        select: { caseId: true, requesterId: true, scope: true } });
       if (root.kind !== 'CASE' || opportunity?.caseId !== root.id) resource = null;
       else {
         // Its root/requester are immutable. Reject mismatches before taking an
         // unrelated aggregate's child lock; valid locks remain root-first.
         await tx.$queryRaw`SELECT id FROM partner_correction_opportunities WHERE id = ${target.correctionOpportunityId} FOR UPDATE`;
         resource.requesterId = opportunity.requesterId;
+        resource.correctionScope = opportunity.scope;
       }
     }
     const authority = actor?.isActive && resource ? await resolveAuthority(tx, { actorId, root }) : { grants: [], authorizationRevision: 1 };

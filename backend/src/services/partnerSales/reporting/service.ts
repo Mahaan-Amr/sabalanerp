@@ -128,7 +128,7 @@ export class PartnerReportingService {
       const expiresAt = new Date(new Date(snapshot.capturedAt).getTime() + 15 * 60_000).toISOString();
       const artifact: FrozenExport = { id: randomUUID(), actorId: result.actorId, expiresAt,
         query, report: result.report, roots: result.roots, contentHash: await this.runtime.canonicalHash(result.report) };
-      await this.exports.put(artifact);
+      await snapshot.putExport(artifact);
       return artifact;
     });
     return { exportId: artifact.id, snapshotId: artifact.report.snapshotId, capturedAt: artifact.report.capturedAt,

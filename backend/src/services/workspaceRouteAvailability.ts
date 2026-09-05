@@ -1,11 +1,23 @@
 import type { PrismaClient } from '@prisma/client';
 import { resolveNarrowFeatureAccess } from './narrowFeatureAccess';
 import { getEffectiveUserAccess } from './effectiveAccessService';
+import { readScopedActions } from './effectiveAccessService';
 
-type Rule = { pattern: RegExp; workspace: string; features: string[]; level?: 'view' | 'edit' | 'admin'; narrow?: boolean };
+type Rule = { pattern: RegExp; workspace: string; features: string[]; level?: 'view' | 'edit' | 'admin'; narrow?: boolean;
+  partnerPurposes?: readonly string[] };
 
 // Backend-owned route contract. Clients consume only the resulting decision.
 const rules: Rule[] = [
+  // Partner entry points require an explicit Partner-domain grant in addition
+  // to workspace admission. Legacy workspace membership never opts an actor in.
+  { pattern: /^\/dashboard\/sales\/partners(?:\/|$)/, workspace: 'sales', features: [],
+    partnerPurposes: ['ONBOARDING', 'MANAGEMENT', 'ACCOUNTING', 'CRM'] },
+  { pattern: /^\/dashboard\/sales\/partner-inquiries(?:\/|$)/, workspace: 'sales', features: [],
+    partnerPurposes: ['RESPONDER'] },
+  { pattern: /^\/dashboard\/sales\/partner-cases(?:\/|$)/, workspace: 'sales', features: [],
+    partnerPurposes: ['PARTNER', 'MANAGEMENT', 'ACCOUNTING', 'FULFILLMENT'] },
+  { pattern: /^\/dashboard\/hr\/partners(?:\/|$)/, workspace: 'hr', features: [],
+    partnerPurposes: ['ONBOARDING', 'MANAGEMENT'] },
   { pattern: /^\/dashboard\/hr\/permissions/, workspace: 'hr', features: ['AUTHORITY_RESPONSIBILITY_ADMINISTRATION'] },
   { pattern: /^\/dashboard\/hr\/users/, workspace: 'hr', features: ['USER_ADMINISTRATION'] },
   { pattern: /^\/dashboard\/hr\/migration/, workspace: 'hr', features: ['DATA_MIGRATION_RECONCILIATION'] },
@@ -54,6 +66,7 @@ const rules: Rule[] = [
 export const resolveWorkspaceRouteAvailability = async (
   prisma: PrismaClient,
   input: { userId: string; role: string; path: string },
+  scopedResolver = readScopedActions,
 ) => {
   if (input.role === 'ADMIN' || /\/duties(?:\/|$)/.test(input.path)) return { allowed: true, reason: null };
   const rule = rules.find((candidate) => candidate.pattern.test(input.path));
@@ -65,12 +78,23 @@ export const resolveWorkspaceRouteAvailability = async (
     return { allowed, reason: allowed ? null : 'دسترسی فعال به این فضای کاری ثبت نشده است. مدیر همان فضای کاری باید مجوز را بررسی کند.' };
   }
   const requiredRank = { view: 1, edit: 2, admin: 3 }[rule.level || 'view'];
-  const allowed = rule.narrow
+  const effective = await getEffectiveUserAccess(prisma, { userId: input.userId, userRole: input.role });
+  const workspaceAllowed = effective.workspaces.some((grant) => grant.workspace === rule.workspace);
+  const partnerAllowed = rule.partnerPurposes
+    ? (await prisma.$transaction(tx => scopedResolver(tx, input.userId, 'PARTNER'))).grants
+      .some(grant => rule.partnerPurposes!.includes(grant.purpose))
+    : true;
+  const partnerPersona = rule.partnerPurposes
+    ? Boolean(await prisma.partnerProfile.findUnique({ where: { userId: input.userId }, select: { id: true } }))
+    : false;
+  const allowed = rule.partnerPurposes
+    ? partnerAllowed && (partnerPersona || workspaceAllowed)
+    : rule.narrow
     ? (await Promise.all(rule.features.map((feature) => resolveNarrowFeatureAccess(prisma, {
       userId: input.userId, role: input.role, workspace: rule.workspace, feature,
       requiredPermission: rule.level || 'view',
     })))).some((decision) => decision.allowed)
-    : (await getEffectiveUserAccess(prisma, { userId: input.userId, userRole: input.role })).features.some(
+    : effective.features.some(
       (grant) => rule.features.includes(grant.feature) && ({ view: 1, edit: 2, admin: 3 }[grant.permission] >= requiredRank),
     );
   return { allowed, reason: allowed ? null : 'مجوز فعال لازم برای این بخش ثبت نشده است. مدیر همان فضای کاری باید مجوز مرتبط را بررسی کند.' };

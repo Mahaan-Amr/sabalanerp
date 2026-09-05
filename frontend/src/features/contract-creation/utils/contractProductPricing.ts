@@ -88,7 +88,29 @@ export const getContractProductNonServiceSubtotal = (product: ContractProduct): 
 
 export const reconcileContractProductPricing = (product: ContractProduct): ContractProduct => {
   const components = getContractProductPriceComponents(product);
-  if (components.reconciledTotal === components.savedTotal) return product;
+  const existingPricing = (product.meta as any)?.pricing;
+  const preparedPricingFieldsAreComplete = [
+    'materialBase',
+    'mandatoryAmount',
+    'cuttingCost',
+    'toolsCost',
+    'finishingCost',
+    'totalPrice'
+  ].every((key) => Object.prototype.hasOwnProperty.call(existingPricing || {}, key));
+  const preparedPricingIsCanonical = product.productType === 'prepared' &&
+    existingPricing?.authority === 'canonical-current-save' &&
+    existingPricing?.reconciled === true &&
+    preparedPricingFieldsAreComplete &&
+    toFiniteNumber(existingPricing.materialBase) === components.materialBase &&
+    toFiniteNumber(existingPricing.mandatoryAmount) === components.mandatoryAmount &&
+    toFiniteNumber(existingPricing.cuttingCost) === components.cuttingCost &&
+    toFiniteNumber(existingPricing.toolsCost) === components.toolsCost &&
+    toFiniteNumber(existingPricing.finishingCost) === components.finishingCost &&
+    toFiniteNumber(existingPricing.totalPrice) === components.reconciledTotal;
+  if (
+    components.reconciledTotal === components.savedTotal &&
+    (product.productType !== 'prepared' || preparedPricingIsCanonical)
+  ) return product;
 
   return {
     ...product,
@@ -96,7 +118,10 @@ export const reconcileContractProductPricing = (product: ContractProduct): Contr
     meta: {
       ...(product.meta || {}),
       pricing: {
-        ...((product.meta as any)?.pricing || {}),
+        ...(existingPricing || {}),
+        ...(product.productType === 'prepared'
+          ? { authority: 'canonical-current-save' }
+          : {}),
         materialBase: components.materialBase,
         mandatoryAmount: components.mandatoryAmount,
         cuttingCost: components.cuttingCost,

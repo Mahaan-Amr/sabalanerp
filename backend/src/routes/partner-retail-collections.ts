@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import * as contracts from '@sabalanerp/partner-sales-contracts';
 import type { Result } from '@sabalanerp/partner-sales-contracts';
+import { Router, type Request } from 'express';
+import { prisma } from '../lib/prisma';
+import { protect, type AuthRequest } from '../middleware/auth';
+import { createPrismaRetailCollectionRepository } from '../services/partnerSales/retailCollections/prismaRepository';
+import { createPartnerRetailCollectionsService } from '../services/partnerSales/retailCollections/service';
 
 export type CollectionRequest = { query: unknown; body: unknown; params: Record<string, string> };
 export type CollectionResponse = {
@@ -15,6 +20,7 @@ export interface CollectionRouter {
 
 export interface RequestBoundRetailCollectionService {
   execute(command: unknown): Promise<Result<unknown>>;
+  read?(expected: contracts.RevisionRef): Promise<Result<unknown>>;
 }
 
 export function registerPartnerRetailCollectionRoutes(router: CollectionRouter, dependencies: {
@@ -42,5 +48,30 @@ export function registerPartnerRetailCollectionRoutes(router: CollectionRouter, 
   };
 
   router.post('/commands', handle((service, request) => service.execute(request.body)));
+  router.post('/query', handle((service, request) => {
+    const expected = contracts.RevisionRefSchema.safeParse(request.body);
+    return expected.success && service.read ? service.read(expected.data)
+      : Promise.resolve({ ok: false, error: contracts.partnerError('INVALID_PAYLOAD') });
+  }));
   return router;
 }
+
+function correlation(request: Request) {
+  const supplied = request.get('X-Correlation-Id');
+  return supplied && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(supplied) ? supplied : randomUUID();
+}
+
+export function createPartnerRetailCollectionRouter() {
+  const router = Router();
+  router.use(protect);
+  registerPartnerRetailCollectionRoutes(router, { serviceFor: async (request: CollectionRequest) => {
+    const authenticated = request as AuthRequest;
+    if (!authenticated.user) throw contracts.partnerError('FORBIDDEN');
+    const repository = createPrismaRetailCollectionRepository({ database: prisma, actorId: authenticated.user.id,
+      correlationId: correlation(authenticated) });
+    return createPartnerRetailCollectionsService(repository);
+  } });
+  return router;
+}
+
+export default createPartnerRetailCollectionRouter();

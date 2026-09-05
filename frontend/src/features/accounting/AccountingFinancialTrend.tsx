@@ -12,7 +12,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { ErpCard, ErpInlineState, ErpSegmentedControl, ErpSkeleton } from '@/components/erp';
+import { ErpCard, ErpInlineState, ErpSegmentedControl, ErpSkeleton, ErpSummaryGrid } from '@/components/erp';
+import { formatPartnerMoney } from '../partner-sales/presentation';
 import {
   financialTrendToman,
   type FinancialTrendRange,
@@ -157,6 +158,21 @@ export function AccountingFinancialTrend({
         </div>
       )}
     </ErpCard>
+    {source?.partnerSeries?.map(series => (
+      <ErpCard key={series.currency} className="mt-4 p-4 sm:p-5">
+        <h3 className="sds-text-primary text-base font-semibold">حساب همکاران · {series.currency === 'IRT' ? 'تومان' : 'ریال'}</h3>
+        <div className="mt-3 max-h-80 space-y-4 overflow-y-auto">
+          {series.points.map(point => (
+            <div key={point.periodKey}>
+              <p className="sds-text-muted mb-2 text-sm">{point.label}</p>
+              <ErpSummaryGrid columns={3} items={(Object.keys(seriesLabels) as SeriesKey[]).map(key => ({
+                label: seriesLabels[key], value: formatPartnerMoney(point[key], series.currency),
+              }))} />
+            </div>
+          ))}
+        </div>
+      </ErpCard>
+    ))}
     </section>
   );
 }

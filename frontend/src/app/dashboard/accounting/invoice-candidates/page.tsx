@@ -1,11 +1,12 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { FaEye, FaFileInvoice, FaSync, FaTrashAlt } from 'react-icons/fa';
-import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
+import { FaCheckCircle, FaEye, FaFileInvoice, FaSync, FaTrashAlt } from 'react-icons/fa';
+import { ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
-import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money } from '@/features/accounting/accountingUi';
+import { emptyAccountingPagination, FinancialInvoiceApprovalForm, type FinancialInvoiceApprovalPayload,
+  readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import {
   canonicalizeInvoiceCandidatesQuery,
@@ -52,7 +53,11 @@ export default function AccountingInvoiceCandidatesPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState(query.search);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [approvalTarget, setApprovalTarget] = useState<any | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
 
   const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeInvoiceCandidatesQuery>) => {
     const serialized = next.params.toString();
@@ -76,6 +81,8 @@ export default function AccountingInvoiceCandidatesPage() {
   }, [query.search, searchInput, updateQuery]);
 
   const loadRows = useCallback(async () => {
+    const version = ++requestVersion.current;
+    setRows([]); setDeleteTarget(null); setApprovalTarget(null); setLoadError(null);
     try {
       setLoading(true);
       const response = await accountingAPI.getFinancialRecords({
@@ -89,20 +96,25 @@ export default function AccountingInvoiceCandidatesPage() {
         page: query.page,
         pageSize: pagination.pageSize,
       });
+      if (version !== requestVersion.current) return;
+      if (!response.data.success) throw new Error('Accounting read failed');
       if (response.data.success) {
         const data = readAccountingListResponse<any>(response.data.data);
         setRows(data.items);
         setPagination({ page: data.page, pageSize: data.pageSize, total: data.total });
       }
     } catch (error) {
-      console.error('Error loading invoice candidates:', error);
+      if (version !== requestVersion.current) return;
+      setPagination(current => ({ ...current, total: 0 }));
+      setLoadError(accountingFailureMessage(error, 'صورتحساب‌ها بارگیری نشد؛ دسترسی و اتصال را بررسی کنید و دوباره به‌روزرسانی کنید.'));
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }, [pagination.pageSize, query.cutoff, query.date, query.page, query.period, query.search, query.status, query.view]);
 
   useEffect(() => {
     loadRows();
+    return () => { requestVersion.current += 1; };
   }, [loadRows]);
 
   const deleteDraftRecord = async (row: any) => {
@@ -124,13 +136,38 @@ export default function AccountingInvoiceCandidatesPage() {
     }
   };
 
+  const approveFinancialInvoice = async (payload: FinancialInvoiceApprovalPayload) => {
+    if (!approvalTarget) return;
+    setActionError(null);
+    setActionSuccess(null);
+    setActionLoading(approvalTarget.id);
+    try {
+      await accountingAPI.executeAction({ kind: 'APPROVE_FINANCIAL_INVOICE', ...payload });
+      setApprovalTarget(null);
+      setActionSuccess('عملیات حسابداری با موفقیت ثبت شد');
+      await loadRows();
+    } catch (error) {
+      console.error('Financial invoice approval failed:', error);
+      setActionError((error as any)?.response?.data?.error || (error as any)?.response?.data?.message || 'تایید مالی انجام نشد');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const rowActions = (row: any): ErpAction[] => [
     ...(row.contractId ? [{ label: 'مشاهده پرونده', href: `/dashboard/accounting/contracts/${row.contractId}`, icon: FaEye, tone: 'primary' as const }] : []),
+    {
+      label: 'تایید مالی',
+      icon: FaCheckCircle,
+      tone: 'success',
+      disabled: ['ISSUED', 'POSTED', 'VOIDED'].includes(row.status) || actionLoading === row.id,
+      onClick: () => { setActionError(null); setActionSuccess(null); setApprovalTarget(row); },
+    },
     {
       label: 'حذف پیش‌نویس',
       icon: FaTrashAlt,
       tone: 'danger',
-      disabled: row.status !== 'DRAFT' || actionLoading === row.id,
+      disabled: row.sourceKind === 'PARTNER_INTERNAL_RECORD' || row.status !== 'DRAFT' || actionLoading === row.id,
       onClick: () => setDeleteTarget(row),
     },
   ];
@@ -140,7 +177,7 @@ export default function AccountingInvoiceCandidatesPage() {
       id: 'invoice',
       header: 'پیش‌نویس صورتحساب',
       priority: 'primary',
-      cell: (row) => (
+      cell: (row) => row.sourceKind === 'PARTNER_INTERNAL_RECORD' ? <PartnerAccountingIdentity context={row.partnerContext} /> : (
         <div>
           <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{row.id}</p>
           <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">قرارداد: {row.contract?.contractNumber || row.contractId || '—'}</p>
@@ -150,7 +187,8 @@ export default function AccountingInvoiceCandidatesPage() {
     },
     { id: 'amount', header: 'مبلغ', mobileLabel: 'مبلغ', priority: 'secondary', align: 'end', cell: (row) => money(row.amount, row.currency) },
     { id: 'status', header: 'وضعیت', mobileLabel: 'وضعیت', priority: 'secondary', cell: (row) => <StatusBadge status={row.status} /> },
-    { id: 'items', header: 'اقلام', mobileLabel: 'اقلام', priority: 'meta', cell: (row) => (row.invoiceItems?.length || 0).toLocaleString('fa-IR') },
+    { id: 'items', header: 'اقلام', mobileLabel: 'اقلام', priority: 'meta', cell: (row) => (row.sourceKind === 'PARTNER_INTERNAL_RECORD'
+      ? row.sourceSnapshot?.partnerPreparation?.products?.length ?? 0 : row.invoiceItems?.length || 0).toLocaleString('fa-IR') },
     { id: 'date', header: 'تاریخ ایجاد', mobileLabel: 'تاریخ ایجاد', priority: 'meta', cell: (row) => dateFa(row.createdAt) },
   ];
 
@@ -182,6 +220,15 @@ export default function AccountingInvoiceCandidatesPage() {
       footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="رکورد" />}
       emptyState={<ErpEmptyState icon={FaFileInvoice} title="صورتحسابی در این فیلتر وجود ندارد" description="این نتیجه خالی، جمعیت انتخاب‌شده در داشبورد یا فیلترهای فعلی را نشان می‌دهد." />}
     >
+      {actionSuccess && <ErpInlineState kind="success" title={actionSuccess} />}
+      {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadRows }} />}
+      {actionError && !deleteTarget && !approvalTarget && <ErpInlineState kind="error" title={actionError} />}
+      <ErpSheet open={Boolean(approvalTarget)} onClose={() => setApprovalTarget(null)} title="تایید مالی صورتحساب"
+        presentation="modal" pending={Boolean(actionLoading)}>
+        {actionError && <ErpInlineState kind="error" title={actionError} />}
+        <FinancialInvoiceApprovalForm invoice={approvalTarget} busy={Boolean(actionLoading)} compact
+          onApprove={approveFinancialInvoice} />
+      </ErpSheet>
       <AccountingActionModal
         open={Boolean(deleteTarget)}
         title="حذف پیش‌نویس رکورد مالی"

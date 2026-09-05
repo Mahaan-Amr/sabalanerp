@@ -9,6 +9,7 @@ import {
 import { CONTRACT_EDIT_LEASE_TTL_MS, CONTRACT_CREATION_DRAFT_TTL_MS } from '../../contractEditSessionService';
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../../contractRecoveryProtection';
 import { decodeTechnicalRecovery, decodeTechnicalReceipt, type TechnicalRecoveryRecord } from './technicalRecoveryRecords';
+import { lockPartnerOperationsControl } from '../authorization/technicalRollout';
 
 export interface PartnerTechnicalRecoveryDependencies {
   readonly actorId: string;
@@ -33,7 +34,10 @@ export function createPrismaPartnerTechnicalRecoveryService(input: {
   database: PrismaClient; actorId: string; authorize: PartnerTechnicalRecoveryDependencies['authorize'];
 }): PartnerTechnicalRecoveryPort {
   return createPartnerTechnicalRecoveryService({ actorId: input.actorId, authorize: input.authorize,
-    transaction: work => input.database.$transaction(work) });
+    transaction: work => input.database.$transaction(async tx => {
+      await lockPartnerOperationsControl(tx);
+      return work(tx);
+    }) });
 }
 
 /** Shared serialization and authority gate for checkpoint and validated save. */

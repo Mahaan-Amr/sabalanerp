@@ -148,8 +148,11 @@ api.interceptors.request.use(async (config) => {
 });
 
 // Response interceptor to handle errors
+let unauthorizedRedirectStarted = false;
+
 api.interceptors.response.use(
   (response) => {
+    if (response.config.url === '/auth/login') unauthorizedRedirectStarted = false;
     clearRetryKey(response.config as RetryAwareConfig);
     return response;
   },
@@ -159,7 +162,11 @@ api.interceptors.response.use(
         typeof window !== 'undefined'
         && !window.location.pathname.startsWith('/login')
         && !isPublicVerificationPath(window.location.pathname)
-      ) window.location.href = '/login';
+        && !unauthorizedRedirectStarted
+      ) {
+        unauthorizedRedirectStarted = true;
+        window.location.replace('/login');
+      }
     }
     const status = Number(error.response?.status || 0);
     if (error.response) {
@@ -291,6 +298,16 @@ export const systemRecoveryAPI = {
     confirmationPhrase: string;
     breakGlassReason?: string;
   }) => api.post(`/system-recovery/${id}/restore`, data),
+};
+
+export const shipmentStatementOperationsAPI = {
+  getState: () => api.get('/shipment-statement-operations'),
+  transition: (data: {
+    action: 'PAUSE_PLANNED' | 'PAUSE_INCIDENT' | 'RESUME';
+    reason: string;
+    adminPassword: string;
+    expectedRevision: number;
+  }) => api.post('/shipment-statement-operations/transitions', data),
 };
 
 // Users API
@@ -979,14 +996,19 @@ export const accountingAPI = {
   updateSettings: (data: any) => api.put('/accounting/settings', data),
   executeAction: (data: any) => api.post('/accounting/actions', data),
   getBiometricConnectorDiagnostics: () => api.get('/biometric-connector/diagnostics'),
+  createBiometricDiagnosticCommand: (workstationId: string) => api.post('/biometric-connector/diagnostics/command', { workstationId }),
+  completeBiometricDiagnostic: (data: any) => api.post('/biometric-connector/diagnostics/result', data),
 };
 
 export const dispatchConfirmationAPI = {
   getCapabilities: () => api.get('/dispatch-confirmation/capabilities'),
   enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment`, data),
+  createEnrollmentCommand: (personnelId: string, data: { workstationId: string; finger: string }) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-commands`, data),
   withdrawEnrollment: (enrollmentId: string, reason: string) => api.post(`/dispatch-confirmation/enrollments/${enrollmentId}/withdraw`, { reason }),
   startSession: (waybillId: string, workstationId: string) => api.post(`/dispatch-confirmation/waybills/${waybillId}/sessions`, { workstationId }),
   verifyBiometric: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-attempts`, {}),
+  createBiometricCommand: (sessionId: string, finger: 'RIGHT_INDEX' | 'LEFT_INDEX') => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-command`, { finger }),
+  completeBiometricAttempt: (sessionId: string, data: any) => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-attempts`, data),
   beginFallback: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/fallback`, {}),
   resendOtp: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/otp/resend`, {}),
   verifyOtp: (sessionId: string, code: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/otp/verify`, { code }),

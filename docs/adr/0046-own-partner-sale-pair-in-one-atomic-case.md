@@ -39,6 +39,10 @@ The product owner explicitly approved the Partner-specific exception in [Resolve
 
 Admin company-wide scope and all permitted named actions remain available with audit. These are explicit Partner domain exceptions applied through the central authorization decision, not a competing permission system. Ordinary internal Sales permissions and correction workflows remain unchanged.
 
+### Partner dispatch-document audiences
+
+The product owner resolved the conflict between the post-cutover paired-document rule in #256 and the price-free direct delivery in #323 during #334 acceptance on 2026-09-03: Partner dispatch retains atomic waybill-plus-statement issuance, but the customer waybill contains no economics or private internal-record number. The wholesale statement is restricted to authorized internal Accounting users and derives exclusively from approved Sabalan-to-Partner evidence. The final Customer remains only the physical recipient, never Sabalan's debtor. Retrieval, print, replacement, adjustment, and combined read models must enforce these audiences server-side; hiding a button is insufficient. Ordinary shipment documents, their pricing gates, and their access rules remain unchanged.
+
 ## Consequences
 
 - All Partner Sale Case writers, transitions, corrections, projections, and downstream commands must enter through the Case aggregate with expected revision/state, command identity, compare-and-swap semantics, and transactional reauthorization.

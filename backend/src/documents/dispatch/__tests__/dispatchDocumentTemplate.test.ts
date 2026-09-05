@@ -43,6 +43,7 @@ const statement: DispatchDocumentRenderData = {
     netAmount: '123453332223.000000000000',
   },
 };
+if ('sourceKind' in statement.payload) throw new Error('ordinary statement fixture became a Partner document');
 
 const statementHtml = renderDispatchDocumentHtml(statement, {
   logoDataUri: 'data:image/jpeg;base64,official-logo',
@@ -138,5 +139,39 @@ const positiveAdjustmentHtml = renderDispatchDocumentHtml({
   },
 });
 assert.match(positiveAdjustmentHtml, /\+۱٬۱۵۰٬۰۰۰/);
+
+const partnerWaybillHtml = renderDispatchDocumentHtml({
+  ...common,
+  kind: 'WAYBILL',
+  payload: {
+    sourceKind: 'PARTNER_CASE',
+    allocationRevisionId: 'partner-allocation-revision-1',
+    caseNumber: 'PC-1405-0042',
+    deliveryReference: 'تحویل شهریور',
+    lines: [{ productRowId: 'partner-row-1', label: 'سنگ تراورتن عمده', unit: 'متر مربع', quantity: '7.250' }],
+  },
+});
+assert.match(partnerWaybillHtml, /PC-1405-0042/);
+assert.match(partnerWaybillHtml, /تحویل شهریور/);
+assert.match(partnerWaybillHtml, /partner-row-1/);
+assert.doesNotMatch(partnerWaybillHtml,
+  /مبلغ|قیمت|ناخالص|تخفیف|خالص|ریال|wholesale|financialApproval|internalRecord|contractItem/i,
+  'the Partner customer waybill must remain price-free and must not expose internal wholesale evidence');
+
+const partnerStatementHtml = renderDispatchDocumentHtml({
+  ...common,
+  kind: 'STATEMENT',
+  payload: {
+    sourceKind: 'PARTNER_CASE',
+    caseNumber: 'PC-1405-0042',
+    deliveryReference: 'تحویل شهریور',
+    currency: 'ریال',
+    lines: [{ productRowId: 'partner-row-1', label: 'سنگ تراورتن عمده', unit: 'متر مربع', quantity: '7.250',
+      grossAmount: '7250000.000000000000', allocatedDiscount: '0.000000000000', netAmount: '7250000.000000000000' }],
+    grossAmount: '7250000.000000000000', allocatedDiscount: '0.000000000000', netAmount: '7250000.000000000000',
+  },
+});
+assert.match(partnerStatementHtml, /۷٬۲۵۰٬۰۰۰/);
+assert.match(partnerStatementHtml, /صورت‌حساب محموله مشتری/);
 
 console.log('Dispatch document HTML template tests passed.');

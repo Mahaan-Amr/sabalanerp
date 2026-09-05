@@ -62,8 +62,10 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
     }
     const items: Array<PartnerTechnicalProduct | PartnerTechnicalOperation> = [];
     for (const { result } of projectedRows.slice(0, limit)) {
-      if (!result.ok) return result;
-      items.push(result.value);
+      // A malformed legacy catalog row is not safe to expose, but it must not
+      // turn an otherwise valid Partner catalog into a total outage. Omit only
+      // that row; later save still resolves and revalidates the exact snapshot.
+      if (result.ok) items.push(result.value);
     }
     const refreshed = await authority.authorize('CASE_READ', root);
     if (!refreshed.ok) return refreshed;

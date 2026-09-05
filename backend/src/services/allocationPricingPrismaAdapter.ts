@@ -7,6 +7,7 @@ import {
   persistedApprovedPricingVersionIntegrityMatches,
 } from './approvedPricing';
 import { pricedAllocationIntegrityHash } from './pricedAllocationLedger';
+import { loadShipmentStatementRuntimeStateUnderLock } from './dispatchDocuments/runtimeState';
 
 type Tx = Prisma.TransactionClient;
 const json = (value: unknown) => value as Prisma.InputJsonValue;
@@ -34,10 +35,7 @@ const lockRows = async (tx: Tx, table: string, column: string, ids: string[]) =>
 
 export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPricingBindingPort => {
   return ({
-  loadCutover: async () => tx.shipmentStatementCutover.findUnique({
-    where: { id: 'customer-shipment-statements' },
-    select: { enabled: true, cutoverAt: true },
-  }),
+  loadCutover: async () => loadShipmentStatementRuntimeStateUnderLock(tx),
 
   lockPricingScope: async (keys) => {
     for (const key of [...new Set(keys)].sort((left, right) => left.localeCompare(right))) {

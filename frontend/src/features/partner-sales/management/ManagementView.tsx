@@ -57,7 +57,10 @@ export function ManagementView({ view, now, disabled, onChoose }: {
             {item.commercialTerms && <ErpCard className="space-y-3 p-4"><ErpFieldView label="شرایط تجاری" value={item.commercialTerms.summary} />{action('COMMERCIAL_TERMS_MANAGE')}</ErpCard>}
             {item.creditTerms && <ErpCard className="space-y-3 p-4"><ErpFieldView label="اعتبار و پرداخت به سبلان" value={item.creditTerms.summary} />{action('CREDIT_TERMS_MANAGE')}</ErpCard>}
             {item.responder && <ErpCard className="space-y-3 p-4"><ErpFieldView label="پاسخ‌دهنده قیمت" value={item.responder.displayName || 'تعیین نشده'} />
-              <div className="flex flex-wrap gap-3">{action('RESPONDER_ASSIGN')}{action('RESPONDER_REASSIGN')}</div>
+              <div className="flex flex-wrap gap-3">{action('RESPONDER_ASSIGN')}
+                <ProjectedAction action="RESPONDER_REASSIGN" actions={item.responder.pendingInquiries.flatMap(inquiry => inquiry.actions)}
+                  now={now} disabled={disabled} onClick={() => onChoose({ action: 'RESPONDER_REASSIGN', profile: item })} />
+              </div>
             </ErpCard>}
             {item.conversion && <ErpCard className="space-y-3 p-4"><h3 className="font-bold">تبدیل کاربر داخلی</h3>
               <p className="sds-text-secondary">{item.conversion.irreversible ? 'بازگشت این کاربر به شخصیت داخلی ممکن نیست.' : item.conversion.started ? 'تبدیل در حال بررسی است.' : 'تبدیل هنوز آغاز نشده است.'}</p>

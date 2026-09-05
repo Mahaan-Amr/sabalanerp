@@ -212,6 +212,116 @@ const run = async () => {
       /zero-discount evidence is malformed or conflicting/,
     );
   }
+
+  const preparedProductRowId = 'prepared-product-regression-row';
+  const preparedContractData = JSON.parse(JSON.stringify(source.contractData));
+  const preparedProduct = {
+    rowId: preparedProductRowId,
+    productRowId: preparedProductRowId,
+    productId: source.items[0]!.productId,
+    productType: 'prepared',
+    stoneName: 'Prepared product regression fixture',
+    preparedKind: 'readyPiece',
+    preparedUnit: 'count',
+    preparedQuantity: 200,
+    quantity: 200,
+    unitPrice: 200_000,
+    pricePerSquareMeter: 200_000,
+    originalTotalPrice: 40_000_000,
+    totalPrice: 40_000_000,
+    appliedSubServices: [],
+    totalSubServiceCost: 0,
+    finishings: [],
+    isMandatory: false,
+    mandatoryPercentage: 0,
+  };
+  preparedContractData.products = [
+    ...preparedContractData.products,
+    preparedProduct,
+  ];
+  preparedContractData.discount = null;
+  const sourceTotalAmount = Number(source.totalAmount?.toString() ?? 0);
+  assert(Number.isFinite(sourceTotalAmount));
+  const mixedContractTotal = sourceTotalAmount + 40_000_000;
+  preparedContractData.payment = {
+    currency: source.currency,
+    totalContractAmount: mixedContractTotal,
+    payments: [],
+  };
+  const createdMixedContract = await createContract({
+    title: `${source.title} mixed prepared evidence QA`,
+    titlePersian: `${source.titlePersian} آزمون ترکیبی محصول آماده`,
+    customerId: source.customerId,
+    departmentId: source.departmentId,
+    content: source.content,
+    totalAmount: mixedContractTotal,
+    currency: source.currency,
+    contractData: preparedContractData,
+    _relations: {
+      items: [
+        ...source.items.map(item => ({
+          productId: item.productId,
+          productRowId: item.productRowId,
+          productType: item.productType,
+          quantity: Number(item.quantity.toString()),
+          unitPrice: Number(item.unitPrice.toString()),
+          totalPrice: Number(item.totalPrice.toString()),
+          description: item.description,
+          isMandatory: item.isMandatory,
+          mandatoryPercentage: item.mandatoryPercentage == null
+            ? null
+            : Number(item.mandatoryPercentage.toString()),
+          originalTotalPrice: item.originalTotalPrice == null
+            ? null
+            : Number(item.originalTotalPrice.toString()),
+          stairSystemId: item.stairSystemId,
+          stairPartType: item.stairPartType,
+        })),
+        {
+          productId: source.items[0]!.productId,
+          productRowId: preparedProductRowId,
+          productType: 'prepared',
+          quantity: 200,
+          unitPrice: 200_000,
+          totalPrice: 40_000_000,
+          description: null,
+          isMandatory: false,
+          mandatoryPercentage: null,
+          originalTotalPrice: 40_000_000,
+          stairSystemId: null,
+          stairPartType: null,
+        },
+      ],
+    },
+  }, source.createdBy, undefined, transactionHarness);
+  const savedMixedData = createdMixedContract.contractData as any;
+  const mixedPlan = buildLegacyContractMigrationPlan({
+    id: createdMixedContract.id,
+    totalAmount: createdMixedContract.totalAmount,
+    contractData: savedMixedData,
+  }, 1);
+  assert(mixedPlan.ok, 'the mixed prepared contract must rebuild its canonical graph');
+  const mixedProjection = projectCanonicalProductGraph(mixedPlan.graph, 'accounting');
+  assert(
+    mixedProjection.products.some(product => product.productType !== 'prepared'),
+    'the regression fixture must retain at least one non-prepared product',
+  );
+  const preparedProjection = mixedProjection.products.find(
+    product => product.productRowId === preparedProductRowId,
+  );
+  assert.equal(preparedProjection?.baseAmountToman, '40000000');
+  const mixedProductSnapshots = new Map<string, Readonly<Record<string, unknown>>>(
+    savedMixedData.products.map((product: Record<string, unknown>) => [String(product.rowId), product] as const),
+  );
+  const expectedMixedBase = contractDiscountEligibleBase(
+    mixedProductSnapshots,
+    mixedProjection.products,
+  );
+  assert.equal(savedMixedData.discount.baseSubtotal, expectedMixedBase.toString());
+  assert.equal(
+    savedMixedData.products.find((product: any) => product.rowId === preparedProductRowId)?.meta?.isLayer,
+    false,
+  );
 };
 
 run()

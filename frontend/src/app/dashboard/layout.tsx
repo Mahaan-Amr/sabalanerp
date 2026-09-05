@@ -383,7 +383,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         const returnTo = `${window.location.pathname}${window.location.search}`;
         if (returnTo.startsWith('/dashboard')) sessionStorage.setItem('post-login-return-to', returnTo);
       }
-      router.push('/login');
+      const status = error && typeof error === 'object' && 'response' in error
+        ? Number((error as { response?: { status?: unknown } }).response?.status || 0)
+        : 0;
+      // The shared HTTP client owns 401 navigation. Starting a second Next.js
+      // transition here can cancel both redirects and strand an anonymous user.
+      if (status !== 401) router.replace('/login');
     } finally {
       setLoading(false);
     }

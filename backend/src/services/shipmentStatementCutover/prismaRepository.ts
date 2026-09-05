@@ -1,5 +1,8 @@
 import type { PrismaClient } from '@prisma/client';
 import type { ShipmentStatementCutoverRepository } from '.';
+import { SHIPMENT_STATEMENT_OPERATIONS_LOCK } from '../dispatchDocuments/featureGate';
+import { startShipmentStatementOperationsForSignedCutoverUnderLock } from '../shipmentStatementOperations';
+import { assertProtectedProductionCutoverBoundary } from './productionBoundary';
 
 const CUTOVER_ID = 'customer-shipment-statements';
 
@@ -12,9 +15,22 @@ export class PrismaShipmentStatementCutoverRepository implements ShipmentStateme
     return state;
   }
 
-  async activate(input: { expectedDisabled: true; migrationManifestId: string; integrityHash: string; activatedBy: string; expiresAt: Date }) {
+  async activate(input: { expectedDisabled: true; migrationManifestId: string; integrityHash: string; activatedBy: string; expiresAt: Date;
+    productionBoundary?: { deploymentId: string; leaseToken: string; releaseId: string; targetCommit: string } }) {
     return this.prisma.$transaction(async tx => {
-      const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT transaction_timestamp() AS "now"`;
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', SHIPMENT_STATEMENT_OPERATIONS_LOCK);
+      if (input.productionBoundary) {
+        await assertProtectedProductionCutoverBoundary(tx, {
+          sourceCommit: input.productionBoundary.targetCommit,
+          releaseId: input.productionBoundary.releaseId,
+          environment: {
+            NODE_ENV: 'production',
+            DEPLOYMENT_ID: input.productionBoundary.deploymentId,
+            DEPLOYMENT_LEASE_TOKEN: input.productionBoundary.leaseToken,
+          },
+        });
+      }
+      const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS "now"`;
       if (!clock) throw new Error('Database cutover clock is unavailable.');
       if (clock.now.getTime() > input.expiresAt.getTime()) {
         throw new Error('The GO cutover manifest expired according to the database clock.');
@@ -38,6 +54,9 @@ export class PrismaShipmentStatementCutoverRepository implements ShipmentStateme
         RETURNING "enabled", "cutoverAt", "activatedAt", "activatedBy", "manifestId", "integrityHash"
       `;
       if (!updated[0]) throw new Error('Customer Shipment Statements are already activated; cutover is one-way.');
+      await startShipmentStatementOperationsForSignedCutoverUnderLock(tx, {
+        actorId: input.activatedBy, cutoverIntegrityHash: input.integrityHash,
+      });
       return updated[0];
     });
   }

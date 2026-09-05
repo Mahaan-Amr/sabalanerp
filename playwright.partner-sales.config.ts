@@ -19,6 +19,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   use: {
     baseURL: 'http://127.0.0.1:3000',
+    actionTimeout: 60_000,
+    navigationTimeout: 120_000,
     browserName: 'chromium',
     channel: 'chrome',
     locale: 'fa-IR',

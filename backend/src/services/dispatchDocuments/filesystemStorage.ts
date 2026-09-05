@@ -1,4 +1,4 @@
-import { mkdir, open, readFile } from 'node:fs/promises';
+import { mkdir, open, readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { DispatchArtifactStorage } from './ports';
 
@@ -25,5 +25,9 @@ export const createFilesystemDispatchArtifactStorage = (root: string): DispatchA
   async read(storageKey) {
     try { return new Uint8Array(await readFile(resolveKey(root, storageKey))); }
     catch (error: any) { if (error?.code === 'ENOENT') return null; throw error; }
+  },
+  async discard(storageKey) {
+    try { await unlink(resolveKey(root, storageKey)); }
+    catch (error: any) { if (error?.code !== 'ENOENT') throw error; }
   },
 });

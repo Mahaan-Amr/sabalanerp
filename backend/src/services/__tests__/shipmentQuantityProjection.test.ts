@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   projectShipmentQuantities,
+  projectPartnerShipmentQuantities,
   type ShipmentQuantityEvidence,
 } from '../shipmentQuantityProjection';
 
@@ -25,6 +26,30 @@ const evidence = (
   sourceVersion: 1,
   integrityHash: `hash-${id}`,
   ...overrides,
+});
+
+test('Partner shipments share reservation, exit and verified-return arithmetic without retail ContractItem identities', () => {
+  const partnerEvidence = (id: string, kind: ShipmentQuantityEvidence['kind'], quantity: string,
+    overrides: Partial<ShipmentQuantityEvidence> = {}) => {
+    const { contractId: _contract, contractItemId: _item, ...fact } = evidence(id, kind, quantity, overrides);
+    return { ...fact, sourceKind: 'PARTNER_CASE' as const, caseId: 'case-1', internalRecordId: 'internal-1', lineageId: 'lineage-1' };
+  };
+  const facts = [partnerEvidence('contracted', 'CONTRACTED_SET', '5.000'),
+    partnerEvidence('reserved', 'ALLOCATION_FINALIZED', '3.000'),
+    partnerEvidence('exit', 'PHYSICAL_EXIT', '2.000'),
+    partnerEvidence('released', 'ALLOCATION_RELEASED', '1.000'),
+    partnerEvidence('return', 'GUARD_RETURN_VERIFIED', '1.000', { guardReturnValidated: true }),
+  ];
+  assert.equal(projectPartnerShipmentQuantities(facts).rows[0].health, 'EVIDENCE_CONFLICT', 'return must await its posted Accounting correction');
+  const result = projectPartnerShipmentQuantities([...facts,
+    partnerEvidence('correction', 'DISPATCH_CORRECTION_POSTED', '-1.000', { returnEvidenceId: 'return' })]);
+  assert.deepEqual(result.rows[0].quantities, { contracted: '5.000', finalizedReserved: '0.000',
+    physicallyDispatched: '1.000', availableToLoad: '4.000' });
+  assert.equal(result.rows[0].health, 'CURRENT');
+  assert.equal(result.rows[0].sourceKind, 'PARTNER_CASE');
+  assert.equal(result.rows[0].lineageId, 'lineage-1');
+  assert.equal('contractId' in result.rows[0], false);
+  assert.equal('contractItemId' in result.rows[0], false);
 });
 
 test('reconciles scale-three quantities as mutually exclusive buckets', () => {

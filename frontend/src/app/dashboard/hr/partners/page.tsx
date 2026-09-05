@@ -1,8 +1,10 @@
-import { notFound } from 'next/navigation';
 import ManagementFixturePreview from '@/features/partner-sales/management/ManagementFixturePreview';
+import { PartnerManagementRuntime } from '@/features/partner-sales/workspaces/PartnerManagementRuntime';
 
-// Identity-only entry. Production binding is supplied by the shared shell owner in issue 334.
-export default function HrPartnerIdentityPage({ searchParams }: { searchParams: { fixture?: string } }) {
-  if (process.env.NEXT_PUBLIC_ENABLE_PROTOTYPES !== '1' || searchParams.fixture !== 'HR') notFound();
-  return <ManagementFixturePreview persona="HR" />;
+export default async function HrPartnerIdentityPage(props: { searchParams: Promise<{ fixture?: string }> }) {
+  const searchParams = await props.searchParams;
+  if (process.env.NEXT_PUBLIC_ENABLE_PROTOTYPES === '1' && searchParams.fixture === 'HR') {
+    return <ManagementFixturePreview persona="HR" />;
+  }
+  return <PartnerManagementRuntime />;
 }

@@ -18,6 +18,8 @@ async function fixture(run: (tx: Prisma.TransactionClient, actorId: string, pref
       await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'ACTIVE' } });
       await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
         enrollmentPaused: false, operationalPaused: false } });
+      await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+        cohortId: actorId, enrollmentPaused: false, operationalPaused: false } });
       await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
         actorId, eligibilityEvidence: { fixture: true } } });
       await run(tx, actorId, prefix); throw rollback;

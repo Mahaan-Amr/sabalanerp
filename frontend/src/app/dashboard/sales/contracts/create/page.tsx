@@ -2,7 +2,7 @@
 
 import nextDynamic from 'next/dynamic';
 import { ErpLoading } from '@/components/erp';
-import { PartnerCreationBoundary } from '@/features/contract-creation/partner/PartnerCreationChannel';
+import { PartnerCreationRuntime } from '@/features/contract-creation/partner/PartnerCreationRuntime';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,5 +15,5 @@ const CreateContractWizardClient = nextDynamic(
 );
 
 export default function CreateContractPage() {
-  return <PartnerCreationBoundary><CreateContractWizardClient /></PartnerCreationBoundary>;
+  return <PartnerCreationRuntime ordinary={<CreateContractWizardClient />} />;
 }

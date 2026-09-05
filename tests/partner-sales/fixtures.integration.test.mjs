@@ -66,3 +66,29 @@ test('cleanup refuses a future cascading FK to a unique non-ID key', async () =>
     assert.equal(await fixtureFootprint(fixture.namespace), 4);
   });
 });
+
+test('cleanup accepts an inspectable composite foreign key that includes the owned ID', async () => {
+  await withFixture(`partner-qa-${randomUUID()}`, async (fixture) => {
+    // Model a future schema relation without persisting DDL or allowing a cascade.
+    // The referenced ID remains inspectable even though the key has two columns.
+    await localSql(`
+      BEGIN;
+      SET LOCAL lock_timeout = '3s';
+      CREATE UNIQUE INDEX partner_qa_user_id_email_fixture_unique ON public.users(id, email);
+      CREATE TABLE public."${fixture.namespace}-composite-fk" (
+        user_id text,
+        user_email text,
+        FOREIGN KEY (user_id, user_email) REFERENCES public.users(id, email) ON DELETE CASCADE
+      );
+      DO $assert$
+      BEGIN
+        EXECUTE $cleanup_sql$ ${fixtureCleanupSql(fixture.namespace, { transaction: false })} $cleanup_sql$;
+        IF EXISTS (SELECT 1 FROM public.users WHERE id = '${fixture.namespace}') THEN
+          RAISE EXCEPTION 'Inspectable composite cleanup did not remove its fixture';
+        END IF;
+      END $assert$;
+      ROLLBACK;
+    `);
+    assert.equal(await fixtureFootprint(fixture.namespace), 4);
+  });
+});

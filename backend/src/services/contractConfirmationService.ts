@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import smsService from './smsService';
 import { recordContractCancellation } from './salesAttributionService';
 import type { PartnerConfirmationHooks } from './partnerSales/customerOutput/existingFlow';
+import { createPrismaPartnerConfirmationHooks } from './partnerSales/customerOutput/prismaHooks';
 
 
 const LINK_TTL_DAYS = parseInt(process.env.CONTRACT_CONFIRM_LINK_TTL_DAYS || '60', 10);
@@ -27,6 +28,8 @@ export interface SendConfirmationResult {
     status: string;
     phoneNumber: string;
     publicLink?: string;
+    /** Local sandbox acceptance only; never present in production. */
+    debugOtp?: string;
     expiresAt: string;
     otpExpiresAt: string;
     messageId?: string;
@@ -987,5 +990,4 @@ export class ContractConfirmationService {
   }
 }
 
-export const contractConfirmationService = new ContractConfirmationService();
-
+export const contractConfirmationService = new ContractConfirmationService(createPrismaPartnerConfirmationHooks());

@@ -5,7 +5,7 @@ import {
   canonicalHash, partnerError,
   type InquiryIdentity, type PartnerCommand, type PartnerCommandPort, type PartnerQueryV2Port, type Result,
 } from '@sabalanerp/partner-sales-contracts';
-import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
+import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { parseInquiryDefinition, type ConfigurationRef, type InquiryDefinition } from './definition';
 import { createPartnerInquiryQuery } from './query';
 type Transaction = Prisma.TransactionClient;
@@ -46,7 +46,10 @@ async function publishCommitted<T extends Result<{ replayed: boolean; eventIds: 
 }
 
 export function createPrismaPartnerInquiryService(input: Omit<PartnerInquiryDependencies, 'transaction'> & { database: PrismaClient }) {
-  return createPartnerInquiryService({ ...input, transaction: run => input.database.$transaction(run) });
+  return createPartnerInquiryService({ ...input, transaction: run => input.database.$transaction(async tx => {
+    await lockPartnerOperationsControl(tx);
+    return run(tx);
+  }, { timeout: 30_000 }) });
 }
 
 function decodeReceipt(value: unknown): { commandId: string; eventIds: string[] } | undefined {

@@ -14,8 +14,14 @@ import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { requireHrFeature } from '../middleware/hrAuthorization';
 import { authorizeHrUser } from '../services/hrAuthorizationService';
+import { BiometricWorkstationGateway, readBiometricWorkstationConfig } from '../services/biometricWorkstationGateway';
 
 const router = express.Router();
+const simulatorEnabled = () => process.env.NODE_ENV !== 'production' && process.env.BIOMETRIC_CONNECTOR_MODE === 'simulator';
+const workstationGateway = () => {
+  try { return new BiometricWorkstationGateway(prisma, readBiometricWorkstationConfig()); }
+  catch { throw new DispatchConfirmationConflictError('Biometric workstations are not configured.'); }
+};
 const unavailableConnector: BiometricConnector = { execute: async (command) => ({ commandId: command.commandId, operation: command.operation,
   availability: 'UNAVAILABLE', device: { model: 'UNCONFIGURED', serial: 'UNCONFIGURED', connectorVersion: 'none', sdkVersion: 'none' },
   captureQuality: { state: 'NOT_EVALUATED' }, liveness: { state: 'NOT_EVALUATED' }, match: { state: 'NOT_EVALUATED' },
@@ -25,7 +31,7 @@ const service = () => {
   const encodedKey = process.env.BIOMETRIC_TEMPLATE_KEY_BASE64 || '';
   const key = Buffer.from(encodedKey, 'base64');
   if (key.length !== 32) throw new DispatchConfirmationConflictError('Biometric template protection is not configured.');
-  const simulatorAllowed = process.env.NODE_ENV !== 'production' && process.env.BIOMETRIC_CONNECTOR_MODE === 'simulator';
+  const simulatorAllowed = simulatorEnabled();
   return new DispatchConfirmationService(prisma, { connector: simulatorAllowed ? new DeterministicBiometricSimulator() : unavailableConnector,
     vault: new ProtectedTemplateVault({ activeKeyId: 'dispatch-v1', keys: { 'dispatch-v1': key } }),
     otpSecret: process.env.DISPATCH_CONFIRMATION_OTP_SECRET || '',
@@ -67,10 +73,39 @@ router.post('/governance-policies', hrManage, async (req: AuthRequest, res) => {
     counselApprovedAt: new Date(req.body.counselApprovedAt), activeFrom: req.body.activeFrom ? new Date(req.body.activeFrom) : undefined, actorId: req.user!.id }) }); }
   catch (error) { return handle(res, error); }
 });
+router.post('/internal-drivers/:personnelId/enrollment-commands', hrManage, async (req: AuthRequest, res) => {
+  try {
+    if (simulatorEnabled()) throw new DispatchConfirmationConflictError('Physical enrollment commands are disabled in simulator mode.');
+    await service().assertEnrollmentCaptureAllowed(req.params.personnelId);
+    const data = await workstationGateway().issueEnrollment({ workstationId: String(req.body.workstationId || ''), actorId: req.user!.id,
+      personnelId: req.params.personnelId, finger: String(req.body.finger || '') });
+    return res.status(201).json({ success: true, data });
+  } catch (error) { return handle(res, error); }
+});
 router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: AuthRequest, res) => {
   try {
-    if (process.env.NODE_ENV === 'production' || process.env.BIOMETRIC_CONNECTOR_MODE !== 'simulator') throw new DispatchConfirmationConflictError('Enrollment capture connector is not configured; arbitrary biometric uploads are disabled.');
     if (req.body.rawImage || req.body.fingerprintImage || req.body.templates || req.body.protectedTemplateMaterial) throw new DispatchConfirmationValidationError('Raw or caller-supplied biometric material is not accepted.');
+    if (!simulatorEnabled()) {
+      if (!Array.isArray(req.body.captures) || req.body.captures.length < 2) throw new DispatchConfirmationValidationError('At least two approved connector captures are required.');
+      const gateway = workstationGateway();
+      const claimed: Awaited<ReturnType<typeof gateway.claimEnrollmentCapture>>[] = [];
+      let success = false;
+      try {
+        for (const capture of req.body.captures) claimed.push(await gateway.claimEnrollmentCapture({ challengeId: String(capture.challengeId || ''), actorId: req.user!.id,
+          signedResponse: capture.signedResponse, transportEnvelope: capture.transportEnvelope }));
+        if (claimed.some((item) => item.challenge.subjectId !== req.params.personnelId) || new Set(claimed.map((item) => item.challenge.finger)).size < 2) throw new DispatchConfirmationValidationError('Enrollment captures do not belong to two distinct fingers for this driver.');
+        const templates = claimed.map((item) => ({ finger: item.challenge.finger!, format: 'ISO-19794-2', material: item.material,
+          deviceEvidence: { commandId: item.challenge.id, deviceModel: item.response.result.device.model, deviceSerial: item.response.result.device.serial,
+            captureQuality: item.response.result.captureQuality, liveness: item.response.result.liveness }, provenance: 'APPROVED_CONNECTOR' as const }));
+        const data = await service().enrollInternalDriver({ personnelId: req.params.personnelId, acknowledgement: req.body.acknowledgement,
+          confirmationPhone: req.body.confirmationPhone, templates, actorId: req.user!.id });
+        success = true;
+        return res.status(201).json({ success: true, data });
+      } finally {
+        claimed.forEach((item) => item.material.fill(0));
+        if (claimed.length) await gateway.complete(claimed.map((item) => item.challenge.id), success);
+      }
+    }
     const fingers = Array.isArray(req.body.fingers) ? req.body.fingers.map(String) : [];
     const capture = new DeterministicBiometricSimulator();
     const templates = await Promise.all(fingers.map(async (finger: string) => {
@@ -96,9 +131,30 @@ router.post('/waybills/:waybillId/sessions', accountingManage, async (req: AuthR
   catch (error) { return handle(res, error); }
 });
 router.post('/sessions/:sessionId/biometric-attempts', accountingManage, async (req: AuthRequest, res) => {
-  try { return res.json({ success: true, data: await service().verifyInternalBiometric({ sessionId: req.params.sessionId, actorId: req.user!.id,
-    scenario: process.env.NODE_ENV === 'production' ? undefined : req.body.scenario }) }); }
+  try {
+    if (simulatorEnabled()) return res.json({ success: true, data: await service().verifyInternalBiometric({ sessionId: req.params.sessionId, actorId: req.user!.id, scenario: req.body.scenario }) });
+    const gateway = workstationGateway();
+    const claimed = await gateway.claimVerification({ challengeId: String(req.body.challengeId || ''), actorId: req.user!.id, signedResponse: req.body.signedResponse });
+    let success = false;
+    try {
+      if (claimed.challenge.contextId !== req.params.sessionId) throw new DispatchConfirmationValidationError('Biometric result belongs to another confirmation session.');
+      const data = await service().recordInternalBiometricResult({ sessionId: req.params.sessionId, actorId: req.user!.id, result: claimed.response.result });
+      success = true;
+      return res.json({ success: true, data });
+    } finally { await gateway.complete([claimed.challenge.id], success); }
+  }
   catch (error) { return handle(res, error); }
+});
+router.post('/sessions/:sessionId/biometric-command', accountingManage, async (req: AuthRequest, res) => {
+  try {
+    if (simulatorEnabled()) throw new DispatchConfirmationConflictError('Physical verification commands are disabled in simulator mode.');
+    const prepared = await service().prepareInternalBiometric(req.params.sessionId, req.user!.id, req.body.finger ? String(req.body.finger) : undefined);
+    try {
+      const data = await workstationGateway().issueVerification({ workstationId: prepared.workstationId, actorId: req.user!.id,
+        sessionId: prepared.sessionId, driverId: prepared.driverId, waybillIntegrityHash: prepared.waybillIntegrityHash, expectedTemplate: prepared.expectedTemplate });
+      return res.status(201).json({ success: true, data });
+    } finally { prepared.expectedTemplate.fill(0); }
+  } catch (error) { return handle(res, error); }
 });
 router.post('/sessions/:sessionId/fallback', accountingManage, async (req: AuthRequest, res) => {
   try { return res.json({ success: true, data: await service().beginInternalFallback({ sessionId: req.params.sessionId, actorId: req.user!.id }) }); }

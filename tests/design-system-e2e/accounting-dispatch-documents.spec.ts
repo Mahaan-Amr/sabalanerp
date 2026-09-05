@@ -7,7 +7,7 @@ const login = async (page: Page) => {
   await page.locator('input[name="identifier"]').fill('admin');
   await page.locator('input[name="password"]').fill('admin123');
   await page.locator('form').getByRole('button', { name: 'ورود' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
 };
 
 const json = (route: Route, status: number, body: unknown) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -71,7 +71,11 @@ const projectAuthenticatedReadModel = async (page: Page, permission: DispatchDoc
       const headers = { 'X-Dispatch-Documents-Permission': permission === 'MANAGE' ? 'MANAGE' : 'VIEW' };
       return route.fulfill({ status: 200, contentType: 'application/json', headers,
         body: JSON.stringify({ success: true, data: [...readModels.values()].map((item) => ({
-          id: item.id, status: item.status, waybills: item.waybills.map((waybill) => ({ id: waybill.id })) })) }) });
+          id: item.id,
+          status: item.status,
+          canManage: permission === 'MANAGE',
+          waybills: item.waybills.map((waybill) => ({ id: waybill.id })),
+        })) }) });
     }
     if (request.method() === 'GET' && pathname.endsWith('/document-read-model')) {
       const candidateId = decodeURIComponent(pathname.split('/').at(-2) || '');

@@ -25,6 +25,7 @@ import {
 } from './operationsPolicy';
 import { parseStableIdentity, type StableIdentity } from './stableIdentity';
 import { parseCanonicalDecimal } from './canonicalDecimal';
+import { calculatePricing } from './packingPricing';
 import { parseCanonicalProductGraph } from './productGraphSerialization';
 import { findGraphIntegrityConflicts } from './graphIntegrity';
 import {
@@ -188,6 +189,27 @@ const resolveLegacyProductReference = (
   return { value };
 };
 
+type PreparedCommercialUnit = 'count' | 'squareMeter' | 'ton';
+
+const normalizePreparedCommercialQuantity = (
+  value: unknown,
+  unit: PreparedCommercialUnit
+) => {
+  const parsed = new Decimal(parseCanonicalDecimal(String(value ?? '')));
+  if (!parsed.gt(0)) {
+    throw new TypeError('Prepared product quantity is invalid.');
+  }
+  if (unit === 'count') {
+    if (!parsed.isInteger()) {
+      throw new TypeError('Prepared product count must be an integer.');
+    }
+    return parseCanonicalDecimal(parsed.toFixed(0));
+  }
+  return parseCanonicalDecimal(
+    parsed.toDecimalPlaces(3, Decimal.ROUND_HALF_UP).toFixed(3)
+  );
+};
+
 export const readLegacyProductGraph = ({
   contractId,
   revision,
@@ -266,6 +288,127 @@ export const readLegacyProductGraph = ({
         legacySnapshot
       }
     });
+    if (productType.value === 'prepared') {
+      try {
+        const preparedUnit = String(product.preparedUnit ?? '').trim() as PreparedCommercialUnit;
+        if (!['count', 'squareMeter', 'ton'].includes(preparedUnit)) {
+          throw new TypeError('Prepared product unit is missing or unsupported.');
+        }
+        const rawPreparedQuantity = product.preparedQuantity;
+        const rawQuantity = product.quantity;
+        const normalizedPreparedQuantity = rawPreparedQuantity === undefined || rawPreparedQuantity === null
+          ? null
+          : normalizePreparedCommercialQuantity(rawPreparedQuantity, preparedUnit);
+        const normalizedQuantity = rawQuantity === undefined || rawQuantity === null
+          ? null
+          : normalizePreparedCommercialQuantity(rawQuantity, preparedUnit);
+        const preparedQuantity = normalizedPreparedQuantity ?? normalizedQuantity;
+        if (preparedQuantity === null) {
+          throw new TypeError('Prepared product quantity is missing.');
+        }
+        if (
+          normalizedPreparedQuantity !== null &&
+          normalizedQuantity !== null &&
+          normalizedPreparedQuantity !== normalizedQuantity
+        ) {
+          throw new TypeError('Prepared product quantity evidence conflicts.');
+        }
+        const rawQuantityDifference = rawPreparedQuantity !== undefined && rawPreparedQuantity !== null &&
+          rawQuantity !== undefined && rawQuantity !== null
+          ? new Decimal(String(rawPreparedQuantity)).minus(String(rawQuantity)).toFixed()
+          : null;
+        if (
+          product.unitPrice !== undefined &&
+          product.unitPrice !== null &&
+          product.pricePerSquareMeter !== undefined &&
+          product.pricePerSquareMeter !== null &&
+          !new Decimal(String(product.unitPrice)).eq(String(product.pricePerSquareMeter))
+        ) {
+          throw new TypeError('Prepared product unit-price evidence conflicts.');
+        }
+        const unitPrice = parseCanonicalDecimal(String(
+          product.unitPrice ?? product.pricePerSquareMeter ?? ''
+        ));
+        const quantity = new Decimal(preparedQuantity);
+        const rate = new Decimal(unitPrice);
+        if (!quantity.gt(0) || rate.lt(0)) {
+          throw new TypeError('Prepared product quantity and unit price are invalid.');
+        }
+        const pricing = calculatePricing({
+          policyVersion: calculationPolicy.pricing,
+          roundingPolicyVersion: calculationPolicy.rounding,
+          lines: [{
+            lineId: 'base-material',
+            quantity: preparedQuantity,
+            rateToman: unitPrice
+          }]
+        });
+        if (
+          product.originalTotalPrice !== undefined &&
+          product.originalTotalPrice !== null &&
+          !new Decimal(String(product.originalTotalPrice)).eq(pricing.totalAmountToman)
+        ) {
+          throw new TypeError('Prepared product base-price evidence conflicts.');
+        }
+        if (
+          product.totalPrice === undefined ||
+          product.totalPrice === null ||
+          !new Decimal(String(product.totalPrice)).eq(pricing.totalAmountToman)
+        ) {
+          throw new TypeError('Prepared product total-price evidence is missing or conflicts.');
+        }
+        rows[rows.length - 1] = {
+          ...rows[rows.length - 1],
+          commercial: {
+            requestedQuantity: preparedQuantity,
+            baseRateToman: unitPrice,
+            baseAmountToman: pricing.totalAmountToman,
+            totalAmountToman: pricing.totalAmountToman,
+            calculationSnapshot: normalizeLegacyJson({
+              productFamily: 'prepared',
+              unit: preparedUnit,
+              quantity: preparedQuantity,
+              quantityPolicy: {
+                scale: preparedUnit === 'count' ? 0 : 3,
+                rounding: 'ROUND_HALF_UP'
+              },
+              quantityNormalization: {
+                policyVersion: 'commercial-quantity-v1',
+                unit: preparedUnit,
+                scale: preparedUnit === 'count' ? 0 : 3,
+                rounding: 'ROUND_HALF_UP',
+                rawWitnesses: {
+                  preparedQuantity: rawPreparedQuantity === undefined || rawPreparedQuantity === null
+                    ? null
+                    : String(rawPreparedQuantity),
+                  quantity: rawQuantity === undefined || rawQuantity === null
+                    ? null
+                    : String(rawQuantity)
+                },
+                normalizedWitnesses: {
+                  preparedQuantity: normalizedPreparedQuantity,
+                  quantity: normalizedQuantity
+                },
+                rawDifference: rawQuantityDifference,
+                sealedQuantity: preparedQuantity
+              },
+              unitPriceToman: unitPrice,
+              pricing
+            }) as CanonicalJsonObject,
+            legacySnapshot
+          }
+        };
+      } catch (error) {
+        conflicts.push({
+          code: 'legacy-canonical-input-invalid',
+          path: ['products', String(index), 'preparedProduct'],
+          productRowId,
+          message: error instanceof Error
+            ? error.message
+            : 'Prepared product pricing evidence is invalid.'
+        });
+      }
+    }
     if (product.longitudinalPolicyInput !== undefined) {
       try {
         const policyInput = parseLongitudinalProductInput(

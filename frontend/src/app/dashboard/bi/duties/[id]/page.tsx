@@ -1,5 +1,6 @@
 import { DestinationDutyDetail } from '@/features/hr-duties/DestinationDutyDetail';
 
-export default function DutyDetailPage({ params }: { params: { id: string } }) {
+export default async function DutyDetailPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return <DestinationDutyDetail workspace="bi" dutyId={params.id} />;
 }

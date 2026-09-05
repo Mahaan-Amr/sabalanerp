@@ -3,6 +3,7 @@ import { AccountingDispatchWaybillStatus, DispatchBuyerSmsStatus, GuardDriverQue
 import { refreshProjectionContracts } from './dispatchAllocation';
 import { appendQueueEvent } from './guardDriverQueue';
 import { shipmentQuantityEvidenceIntegrityHash } from './shipmentQuantityProjectionStore';
+import { shipmentSourceForAllocationLine } from './allocationSource';
 
 type Tx = Prisma.TransactionClient;
 export class PhysicalGateExitValidationError extends Error {}
@@ -138,13 +139,13 @@ export class PhysicalGateExitService {
         waybillId: waybill.id, queueTurnId: turn.id, allocationRevisionId: revision.id, occurredAt: at, recordedAt: at,
         recordedBy: actorId, snapshot: json(snapshot), integrityHash: digest(snapshot) } });
       for (const line of revision.lines) {
-        const evidence = { id: `${exitId}:${line.id}`, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+        const evidence = { id: `${exitId}:${line.id}`, ...shipmentSourceForAllocationLine(line),
           productRowId: line.productRowId, unit: line.unit, kind: 'PHYSICAL_EXIT' as const, quantity: line.quantity.toFixed(3),
           effectiveAt: at.toISOString(), recordedAt: at.toISOString(), sourceType: 'GUARD_PHYSICAL_EXIT', sourceId: `${exitId}:${line.id}`,
           sourceVersion: 1, integrityHash: '', metadata: { loadingId: revision.loadingId, waybillId: waybill.id, physicalExitId: exitId,
             authorizationId: authorization.id, allocationLineId: line.id, allocationRevisionId: revision.id } };
         evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
-        await tx.shipmentQuantityEvidence.create({ data: { contractId: evidence.contractId, contractItemId: evidence.contractItemId,
+        await tx.shipmentQuantityEvidence.create({ data: { ...shipmentSourceForAllocationLine(line),
           productRowId: evidence.productRowId, unit: evidence.unit, kind: evidence.kind, quantity: line.quantity,
           effectiveAt: at, recordedAt: at, sourceType: evidence.sourceType, sourceId: evidence.sourceId, sourceVersion: 1,
           integrityHash: evidence.integrityHash, metadata: json(evidence.metadata) } });
@@ -177,7 +178,8 @@ export class PhysicalGateExitService {
           beforeStatus: 'ACTIVE', afterStatus: 'CONSUMED', physicalExitId: exitId,
           waybillId: waybill.id, queueTurnId: turn.id, sessionId: authorization.sessionId,
           authorizationIntegrityHash: authorization.integrityHash, correlationId: exitId }, actorId, at });
-      await refreshProjectionContracts(tx, revision.lines.map((line) => line.sourceContractId));
+      await refreshProjectionContracts(tx, revision.lines.filter(line => line.sourceKind === 'SALES_CONTRACT')
+        .map(line => shipmentSourceForAllocationLine(line).contractId).filter((id): id is string => Boolean(id)));
         return tx.guardPhysicalExit.findUniqueOrThrow({ where: { id: physicalExit.id }, include: { smsIntent: true } });
       });
       if ('expired' in result) throw new PhysicalGateExitConflictError('The exit authorization expired before physical exit.');

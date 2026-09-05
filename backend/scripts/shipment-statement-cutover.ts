@@ -1,5 +1,6 @@
 import { exec, execFileSync } from 'node:child_process';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
 import { link, mkdir, mkdtemp, open, readFile, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -16,9 +17,11 @@ import {
   type CutoverEvidence,
 } from '../src/services/shipmentStatementCutover';
 import { PrismaShipmentStatementCutoverRepository } from '../src/services/shipmentStatementCutover/prismaRepository';
-import { buildLegacyPricingManifest, loadLegacyPricingCandidates } from '../src/services/legacyApprovedPricing';
+import { assertProtectedProductionCutoverBoundary } from '../src/services/shipmentStatementCutover/productionBoundary';
+import { buildLegacyPricingManifest, createPrismaLegacyPricingSealWriter, loadLegacyPricingCandidates,
+  parseLegacyPricingReviews, runLegacyPricingSeal, toPersistedPricingReadiness } from '../src/services/legacyApprovedPricing';
 
-const usage = 'Usage: shipment-statement-cutover.ts manifest --evidence <json> --artifacts <dir> --out <json> | activate --manifest <json> --receipt <json>';
+const usage = 'Usage: shipment-statement-cutover.ts legacy --evidence <json> --artifacts <dir> --out <json> [--reviews <json>] | cohort --out <json> | manifest --evidence <json> --artifacts <dir> --out <json> | activate --manifest <json> --receipt <json>';
 const args = process.argv.slice(2);
 const command = args.shift();
 const option = (name: string) => {
@@ -36,8 +39,29 @@ const requiredEnvironment = (name: string) => {
   return value;
 };
 const requiredEnvironmentList = (name: string) => requiredEnvironment(name).split(',').map(value => value.trim()).filter(Boolean);
+const requiredSecret = (name: string) => {
+  const file = process.env[`${name}_FILE`]?.trim();
+  if (file) {
+    const metadata = statSync(file);
+    if (!metadata.isFile()) throw new Error(`${name}_FILE must reference a regular file.`);
+    if (process.env.NODE_ENV === 'production' && (metadata.mode & 0o077) !== 0) {
+      throw new Error(`${name}_FILE must not be readable or writable by group or other users.`);
+    }
+    const value = readFileSync(file, 'utf8').trim();
+    if (!value) throw new Error(`${name}_FILE is empty.`);
+    return value;
+  }
+  if (process.env.NODE_ENV === 'production') throw new Error(`Production requires ${name}_FILE; raw secret environment values are forbidden.`);
+  return requiredEnvironment(name);
+};
 
-const signingKey = requiredEnvironment('SHIPMENT_STATEMENT_CUTOVER_SIGNING_KEY');
+const cutoverSigningKey = () => requiredSecret('SHIPMENT_STATEMENT_CUTOVER_SIGNING_KEY');
+const cohortApprovalVerifier = () => {
+  const approvalKey = requiredSecret('SHIPMENT_STATEMENT_COHORT_APPROVAL_KEY');
+  const signingKey = cutoverSigningKey();
+  if (approvalKey === signingKey) throw new Error('The cohort approval key must be independent from the cutover signing key.');
+  return { keyId: requiredEnvironment('SHIPMENT_STATEMENT_COHORT_APPROVAL_KEY_ID'), signingKey: approvalKey };
+};
 const prisma = new PrismaClient();
 const repository = new PrismaShipmentStatementCutoverRepository(prisma);
 
@@ -49,7 +73,12 @@ const recaptureLegacyCohort = async () => {
   const manifest = buildLegacyPricingManifest(candidates);
   return { manifestHash: manifest.manifestHash, sourceContractCount: manifest.sourceContractCount,
     sourceApprovalRecordCount: manifest.sourceApprovalRecordCount, sourceRowCount: manifest.sourceRowCount,
-    counts: manifest.counts };
+    counts: manifest.counts, entries: manifest.entries.map(entry => ({
+      contractId: entry.contractId,
+      sourceFinancialRecordId: entry.sourceFinancialRecordId,
+      sourceEvidenceHash: entry.sourceEvidenceHash,
+      status: entry.status,
+    })) };
 };
 
 const repositoryRoot = basename(process.cwd()).toLowerCase() === 'backend' ? resolve(process.cwd(), '..') : process.cwd();
@@ -81,15 +110,96 @@ const writeReceipt = async (destination: string, receipt: Record<string, unknown
   }
 };
 
+const legacySealOutput = (apply: boolean, manifest: ReturnType<typeof buildLegacyPricingManifest>,
+  sealRun: Awaited<ReturnType<typeof runLegacyPricingSeal>> | null) => ({
+  mode: apply ? 'APPLY' as const : 'DRY_RUN' as const,
+  status: sealRun?.status ?? 'COMPLETED' as const,
+  reason: sealRun?.reason ?? null,
+  beforeManifest: sealRun?.beforeManifest ?? manifest,
+  afterManifest: sealRun?.afterManifest ?? manifest,
+  sourceComparison: sealRun?.sourceComparison ?? { matched: true, differences: [] },
+  sealResults: sealRun?.results ?? [],
+  outcomeCounts: sealRun?.outcomeCounts ?? { SEALED: 0, REPLAYED: 0 },
+  persistedReadinessProjection: (sealRun?.afterManifest ?? manifest).entries.map(entry => ({
+    contractId: entry.contractId, sourceFinancialRecordId: entry.sourceFinancialRecordId,
+    ...toPersistedPricingReadiness(entry),
+  })),
+});
+
 const run = async () => {
+  const sourceCommit = process.env.NODE_ENV === 'production'
+    ? requiredEnvironment('DEPLOYMENT_TARGET_COMMIT')
+    : execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  await assertProtectedProductionCutoverBoundary(prisma, {
+    sourceCommit,
+    releaseId: requiredEnvironment('SHIPMENT_STATEMENT_RELEASE_ID'),
+  });
+  if (command === 'legacy') {
+    const artifactDirectory = requiredOption('--artifacts');
+    await mkdir(artifactDirectory, { recursive: true });
+    const reviewsPath = option('--reviews');
+    const reviews = reviewsPath
+      ? parseLegacyPricingReviews(JSON.parse(await readFile(resolve(reviewsPath), 'utf8')))
+      : [];
+    const capture = () => prisma.$transaction(
+      tx => loadLegacyPricingCandidates(tx, reviews),
+      { isolationLevel: 'Serializable' as const, maxWait: 10_000, timeout: 120_000 },
+    );
+    const dryCandidates = await capture();
+    const dryManifest = buildLegacyPricingManifest(dryCandidates);
+    const applyRun = await runLegacyPricingSeal(dryCandidates, createPrismaLegacyPricingSealWriter(prisma), { recapture: capture });
+    if (applyRun.status !== 'COMPLETED') throw new Error(`Legacy pricing apply failed: ${applyRun.reason || 'unknown reason'}`);
+    const repeatCandidates = await capture();
+    const repeatManifest = buildLegacyPricingManifest(repeatCandidates);
+    const repeatRun = await runLegacyPricingSeal(repeatCandidates, createPrismaLegacyPricingSealWriter(prisma), { recapture: capture });
+    if (repeatRun.status !== 'COMPLETED') throw new Error(`Legacy pricing repeat failed: ${repeatRun.reason || 'unknown reason'}`);
+    const dryPath = join(artifactDirectory, 'legacy-dry-run.json');
+    const applyPath = join(artifactDirectory, 'legacy-apply.json');
+    const repeatPath = join(artifactDirectory, 'legacy-repeat.json');
+    const cohortPath = join(artifactDirectory, 'live-cohort.json');
+    const cohortApprovalPath = join(artifactDirectory, 'live-cohort-approval.json');
+    await writeReceipt(dryPath, legacySealOutput(false, dryManifest, null));
+    await writeReceipt(applyPath, legacySealOutput(true, dryManifest, applyRun));
+    await writeReceipt(repeatPath, legacySealOutput(true, repeatManifest, repeatRun));
+    const evidence = JSON.parse(await readFile(requiredOption('--evidence'), 'utf8')) as CutoverEvidence;
+    evidence.legacy = { ...evidence.legacy, dryRunArtifactPath: dryPath, applyArtifactPath: applyPath,
+      repeatArtifactPath: repeatPath, cohortArtifactPath: cohortPath, cohortApprovalArtifactPath: cohortApprovalPath };
+    await writeReceipt(requiredOption('--out'), evidence as unknown as Record<string, unknown>);
+    console.log(JSON.stringify({ dryRunArtifactPath: dryPath, applyArtifactPath: applyPath,
+      repeatArtifactPath: repeatPath, manifestHash: repeatRun.afterManifest.manifestHash }));
+    return;
+  }
+  if (command === 'cohort') {
+    const reviewer = requiredEnvironment('SHIPMENT_STATEMENT_COHORT_REVIEWER_ID');
+    const reviewedAt = new Date().toISOString();
+    const current = await recaptureLegacyCohort();
+    const cohort = { schemaVersion: 1, sourceManifestHash: current.manifestHash,
+      entries: current.entries.map(entry => ({
+        contractId: entry.contractId,
+        sourceFinancialRecordId: entry.sourceFinancialRecordId,
+        sourceEvidenceHash: entry.sourceEvidenceHash,
+        decision: entry.status === 'REPAIR_REQUIRED' ? 'EXCLUDE_BLOCKED' : 'INCLUDE',
+        reviewedBy: reviewer,
+        reviewedAt,
+        reason: entry.status === 'REPAIR_REQUIRED'
+          ? 'Blocked pre-cutover revision remains waybill-only pending source-owned correction.'
+          : 'Included in the exact drained production release cohort.',
+      })) };
+    await writeReceipt(requiredOption('--out'), cohort);
+    console.log(JSON.stringify({ sourceManifestHash: current.manifestHash,
+      sourceContractCount: current.sourceContractCount, counts: current.counts, reviewer, reviewedAt }));
+    return;
+  }
   if (command === 'manifest') {
+    const signingKey = cutoverSigningKey();
     const callerEvidence = JSON.parse(await readFile(requiredOption('--evidence'), 'utf8')) as CutoverEvidence;
     const currentLegacy = await recaptureLegacyCohort();
     const unresolvedLegacy = Number(currentLegacy.counts.REPAIR_REQUIRED ?? 0)
       + Number(currentLegacy.counts.EVIDENCE_CONFLICT ?? 0) + Number(currentLegacy.counts.STALE ?? 0);
     const unreviewedLegacy = Number(currentLegacy.counts.LEGACY_REVIEW_REQUIRED ?? 0);
     let evidence: CutoverEvidence;
-    if (unresolvedLegacy !== 0 || unreviewedLegacy !== 0) {
+    const hasReviewedReleaseCohort = Boolean(callerEvidence.legacy.cohortArtifactPath?.trim());
+    if ((unresolvedLegacy !== 0 || unreviewedLegacy !== 0) && !hasReviewedReleaseCohort) {
       evidence = structuredClone(callerEvidence);
       evidence.environment = { composeProject: 'sabalanerp-local', servicesHealthy: false };
       evidence.deployment.additiveMigrationsOnly = false;
@@ -99,13 +209,15 @@ const run = async () => {
       evidence.legacy = { ...evidence.legacy, manifestHash: currentLegacy.manifestHash,
         dryRunCompleted: false, applyCompleted: false, repeatCompleted: false, repeatCreatedCount: 0,
         unresolvedCount: unresolvedLegacy, quarantinedCount: unresolvedLegacy, unreviewedCohortCount: unreviewedLegacy };
+    } else if (process.env.NODE_ENV === 'production') {
+      evidence = await verifyFileBackedCutoverEvidence(callerEvidence, recaptureLegacyCohort, cohortApprovalVerifier(), sourceCommit);
     } else {
       const captured = await captureAuthoritativeCutoverGates(callerEvidence, {
-        artifactDirectory: requiredOption('--artifacts'), sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+        artifactDirectory: requiredOption('--artifacts'), sourceCommit,
         incidentContacts: requiredEnvironmentList('SHIPMENT_STATEMENT_INCIDENT_CONTACTS'),
         monitoringChecks: requiredEnvironmentList('SHIPMENT_STATEMENT_MONITORING_CHECKS'), run: runCommand,
       });
-      evidence = await verifyFileBackedCutoverEvidence(captured, async () => currentLegacy);
+      evidence = await verifyFileBackedCutoverEvidence(captured, recaptureLegacyCohort, cohortApprovalVerifier(), sourceCommit);
     }
     const state = await repository.loadState();
     evidence.deployment.databaseGateEnabled = state.enabled;
@@ -126,7 +238,6 @@ const run = async () => {
       beforeAmountScale12: item.beforeAmountTotal?.toFixed(12) ?? null,
       afterAmountScale12: item.afterAmountTotal?.toFixed(12) ?? null,
       beforeEvidenceHash: item.beforeEvidenceHash, afterEvidenceHash: item.afterEvidenceHash }));
-    const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const manifest = buildCutoverManifest({ releaseId: requiredEnvironment('SHIPMENT_STATEMENT_RELEASE_ID'),
       migrationManifestId: migration.id, createdAt: new Date().toISOString(),
       createdBy: requiredEnvironment('SHIPMENT_STATEMENT_CUTOVER_ACTOR_ID'), sourceCommit, evidence,
@@ -137,13 +248,15 @@ const run = async () => {
     return;
   }
   if (command === 'activate') {
+    const signingKey = cutoverSigningKey();
     const source = requiredOption('--manifest');
     const manifest = await readAndVerifyCutoverManifest(source, signingKey);
-    const currentFileEvidence = await verifyFileBackedCutoverEvidence(manifest.evidence, recaptureLegacyCohort);
+    const currentFileEvidence = await verifyFileBackedCutoverEvidence(
+      manifest.evidence, recaptureLegacyCohort, cohortApprovalVerifier(), sourceCommit,
+    );
     if (JSON.stringify(currentFileEvidence) !== JSON.stringify(manifest.evidence)) {
       throw new Error('File-backed cutover evidence changed after the manifest was signed; rerun every gate.');
     }
-    const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     if (sourceCommit !== manifest.sourceCommit) throw new Error('The signed cutover manifest belongs to a different source commit.');
     const currentMigration = await prisma.shipmentStatementMigrationManifest.findUnique({ where: { id: manifest.migrationManifestId },
       include: { runs: { orderBy: { runNumber: 'desc' }, take: 2, include: { evidence: true } } } });
@@ -153,20 +266,22 @@ const run = async () => {
     if (JSON.stringify(currentRuns) !== JSON.stringify(manifest.evidence.deployment.migrationRuns)) {
       throw new Error('Migration evidence changed after the cutover manifest was signed; rerun the gates.');
     }
-    const activationArtifacts = await mkdtemp(join(tmpdir(), 'shipment-cutover-activation-'));
-    try {
+    if (process.env.NODE_ENV !== 'production') {
+      const activationArtifacts = await mkdtemp(join(tmpdir(), 'shipment-cutover-activation-'));
+      try {
       const captured = await captureAuthoritativeCutoverGates(manifest.evidence, {
         artifactDirectory: activationArtifacts, sourceCommit,
         incidentContacts: requiredEnvironmentList('SHIPMENT_STATEMENT_INCIDENT_CONTACTS'),
         monitoringChecks: requiredEnvironmentList('SHIPMENT_STATEMENT_MONITORING_CHECKS'), run: runCommand,
       });
-      const verified = await verifyFileBackedCutoverEvidence(captured, recaptureLegacyCohort);
+      const verified = await verifyFileBackedCutoverEvidence(captured, recaptureLegacyCohort, cohortApprovalVerifier(), sourceCommit);
       assertAuthoritativeGateParity(manifest.evidence, verified);
       if (evaluateCutoverEvidence(verified).decision !== 'GO') {
         throw new Error('The immediately repeated authoritative cutover gates returned NO-GO.');
       }
-    } finally {
-      await rm(activationArtifacts, { recursive: true, force: true });
+      } finally {
+        await rm(activationArtifacts, { recursive: true, force: true });
+      }
     }
     const activatedBy = requiredEnvironment('SHIPMENT_STATEMENT_CUTOVER_ACTOR_ID');
     const result = await activateShipmentStatementCutover({ repository, manifest, activatedBy, signingKey, environment: process.env });

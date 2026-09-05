@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { AccountingDispatchWaybillStatus, GuardDriverQueueTurnStatus, Prisma, PrismaClient } from '@prisma/client';
 import { isRetryableDispatchTransactionError, refreshProjectionContracts } from './dispatchAllocation';
 import { appendQueueEvent } from './guardDriverQueue';
-import { guardReturnValidationFailure, shipmentQuantityEvidenceIntegrityHash } from './shipmentQuantityProjectionStore';
+import { guardReturnValidationFailure, shipmentQuantityEvidenceIntegrityHash, shipmentQuantitySourceFields } from './shipmentQuantityProjectionStore';
 import { normalizeDispatchCorrectionDraft, StatementCorrectionPolicyError, type StatementCorrectionKind } from './dispatchCorrectionAdjustmentPolicy';
 import {
   persistStatementAdjustment,
@@ -11,6 +11,7 @@ import {
 import type { ConfiguredStatementAdjustmentArtifactPreparer } from './statementAdjustmentRuntime';
 import { verifyDispatchArtifactStorageUnderLock } from './dispatchDocuments';
 import { approvedPricingOperationalContractItemId } from './approvedPricing';
+import { ordinaryAllocationLine, shipmentSourceForAllocationLine } from './allocationSource';
 
 type Tx = Prisma.TransactionClient;
 type Authority = { actorRole: string; workspace: string; workspacePermission: string; feature?: string; featurePermission?: string };
@@ -151,6 +152,10 @@ export const createDispatchCorrection = (prisma: PrismaClient, input: { waybillI
   actorId: string; authority: Authority;
   reversalOfId?: string }) => serializable(prisma, async (tx) => {
   const waybill = await waybillContext(tx, required(input.waybillId, 'waybillId'));
+  if (waybill.candidate.allocationRevision.sourceKind !== 'SALES_CONTRACT') {
+    throw new DispatchRecoveryConflictError('اصلاح ارسال پرونده همکار باید از گردش بازگشت تأییدشده همان پرونده انجام شود.');
+  }
+  const ordinaryRevisionLines = waybill.candidate.allocationRevision.lines.map(ordinaryAllocationLine);
   validDate(input.effectiveAt, 'effectiveAt');
   if (input.effectiveAt > new Date()) throw new DispatchRecoveryValidationError('Correction effectiveAt cannot be in the future.');
   if (waybill.status !== AccountingDispatchWaybillStatus.EXIT_RECORDED || (!waybill.physicalExit && !waybill.manualOutageExit)) {
@@ -165,7 +170,7 @@ export const createDispatchCorrection = (prisma: PrismaClient, input: { waybillI
   let normalized: ReturnType<typeof normalizeDispatchCorrectionDraft>;
   try {
     normalized = normalizeDispatchCorrectionDraft({ lines: input.lines, reattributions: input.reattributions,
-      reversalOfId: input.reversalOfId }, waybill.candidate.allocationRevision.lines.map((line) => ({
+      reversalOfId: input.reversalOfId }, ordinaryRevisionLines.map((line) => ({
       contractId: line.sourceContractId, contractItemId: line.sourceContractItemId, productRowId: line.productRowId,
       unit: line.unit, pricingVersionId: pricingVersionByItem.get(line.sourceContractItemId) || '',
     })));
@@ -227,7 +232,9 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
     await lock(tx, [`DISPATCH_CORRECTION:${input.correctionId}`]);
     const scope = await tx.dispatchCorrection.findUnique({ where: { id: input.correctionId }, select: {
       waybillId: true, waybill: { select: { candidate: { select: { allocationRevision: { select: {
-        lines: { select: { sourceContractId: true, sourceContractItemId: true, productRowId: true, unit: true } },
+        sourceKind: true,
+        lines: { select: { sourceKind: true, sourceContractId: true, sourceContractItemId: true,
+          productId: true, productRowId: true, unit: true } },
         pricingReferences: { select: { pricingVersionId: true, pricingVersion: { select: { rows: { select: {
           id: true, contractItemId: true,
         } } } } } },
@@ -262,13 +269,17 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
     const at = issuedAt;
     const policy = await correctionPostingPolicy(tx, correction);
     if (policy.kind === 'REATTRIBUTION') {
+      if (scope.waybill.candidate.allocationRevision.sourceKind !== 'SALES_CONTRACT') {
+        throw new DispatchRecoveryConflictError('اصلاح انتساب پرونده همکار به گردش بازگشت تأییدشده نیاز دارد.');
+      }
+      const ordinaryScopeLines = scope.waybill.candidate.allocationRevision.lines.map(ordinaryAllocationLine);
       const pricingVersionByItem = new Map(scope.waybill.candidate.allocationRevision.pricingReferences.flatMap((reference) =>
         reference.pricingVersion.rows.map((row) => [approvedPricingOperationalContractItemId(row), reference.pricingVersionId] as const)));
       let expected: ReturnType<typeof normalizeDispatchCorrectionDraft>;
       try {
         expected = normalizeDispatchCorrectionDraft({ reattributions: Array.isArray(policy.reattributions)
           ? policy.reattributions as Array<{ sourceContractItemId: string; destinationContractItemId: string; quantity: string | number }> : [] },
-        scope.waybill.candidate.allocationRevision.lines.map((line) => ({ contractId: line.sourceContractId,
+        ordinaryScopeLines.map((line) => ({ contractId: line.sourceContractId,
           contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit,
           pricingVersionId: pricingVersionByItem.get(line.sourceContractItemId) || '' })));
       } catch (error) {
@@ -368,7 +379,7 @@ export const verifyGuardPhysicalReturn = (prisma: PrismaClient, input: { movemen
   if (!movement || !dispatchEvidence) throw new DispatchRecoveryValidationError('Return movement and dispatch evidence are required.');
   const validatedDispatchEvidence = await withDispatchLoadingAttribution(tx, dispatchEvidence);
   const quantity = positiveQuantity(input.quantity);
-  const evidence = { id: randomUUID(), contractId: dispatchEvidence.contractId, contractItemId: dispatchEvidence.contractItemId,
+  const evidence = { id: randomUUID(), ...shipmentQuantitySourceFields(dispatchEvidence),
     productRowId: dispatchEvidence.productRowId, unit: dispatchEvidence.unit, kind: 'GUARD_RETURN_VERIFIED' as const,
     quantity: quantity.toFixed(3), effectiveAt: movement.occurredAt.toISOString(), recordedAt: new Date().toISOString(),
     sourceType: 'GUARD_RETURN_MOVEMENT', sourceId: `${movement.id}:${dispatchEvidence.id}`, sourceVersion: 1, integrityHash: '',
@@ -388,7 +399,7 @@ export const verifyGuardPhysicalReturn = (prisma: PrismaClient, input: { movemen
   evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
   const created = await tx.shipmentQuantityEvidence.create({ data: { ...evidence, quantity, effectiveAt: movement.occurredAt,
     recordedAt: new Date(evidence.recordedAt), metadata: json(evidence.metadata) } });
-  await refreshProjectionContracts(tx, [created.contractId]);
+  if (created.contractId) await refreshProjectionContracts(tx, [created.contractId]);
   await appendAudit(tx, { aggregateType: 'GUARD_RETURN', aggregateId: created.id, eventType: 'PHYSICAL_RETURN_VERIFIED',
     payload: { movementId: movement.id, dispatchEvidenceId: dispatchEvidence.id, quantity: quantity.toFixed(3),
       effectiveAt: movement.occurredAt, recordedAt: created.recordedAt, integrityHash: created.integrityHash },
@@ -551,7 +562,7 @@ export const registerManualOutageExit = (prisma: PrismaClient, input: { id: stri
       guardApprovedBy: record.guardApprovedBy, biometricSuccess: false, otpSuccess: false, paperEvidence: record.paperEvidence };
     const integrityHash = digest(snapshot);
     for (const line of revision.lines) {
-      const evidence = { id: randomUUID(), contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+      const evidence = { id: randomUUID(), ...shipmentSourceForAllocationLine(line),
         productRowId: line.productRowId, unit: line.unit, kind: 'MANUAL_OUTAGE_EXIT' as const, quantity: line.quantity.toFixed(3),
         effectiveAt: record.actualOccurredAt.toISOString(), recordedAt: at.toISOString(), sourceType: 'MANUAL_OUTAGE_EXIT',
         sourceId: `${record.id}:${line.id}`, sourceVersion: 1, integrityHash: '', metadata: { loadingId: revision.loadingId,
@@ -582,7 +593,8 @@ export const registerManualOutageExit = (prisma: PrismaClient, input: { id: stri
     if (!phoneNumber) await tx.dispatchEvidenceException.create({ data: { exceptionType: 'BUYER_EXIT_SMS_NEEDS_ATTENTION',
       aggregateType: 'MANUAL_OUTAGE_EXIT', aggregateId: record.id, createdBy: input.actorId,
       detail: json({ paperNumber: record.paperNumber, reason: 'No confirmed buyer notification phone was snapshotted.' }) } });
-    await refreshProjectionContracts(tx, revision.lines.map((line) => line.sourceContractId));
+    await refreshProjectionContracts(tx, revision.lines.filter(line => line.sourceKind === 'SALES_CONTRACT')
+      .map(line => shipmentSourceForAllocationLine(line).contractId).filter((id): id is string => Boolean(id)));
     await appendAudit(tx, { aggregateType: 'MANUAL_OUTAGE_EXIT', aggregateId: record.id, eventType: 'MANUAL_OUTAGE_EXIT_REGISTERED',
       payload: { paperNumber: record.paperNumber, waybillId: waybill.id, actualOccurredAt: record.actualOccurredAt,
         recordedAt: at, before: { waybill: 'ISSUED', queueTurn: 'LOADING_FINALIZED' },

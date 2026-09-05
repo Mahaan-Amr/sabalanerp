@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput } from '@/components/erp';
+import { ErpField, ErpInput, ErpTextarea } from '@/components/erp';
 import React from 'react';
 import {
   FaBalanceScale,
@@ -19,6 +19,7 @@ import { ErpBadge, ErpButton, ErpCard, type ErpTone } from '@/components/erp';
 import { formatPrice, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { InlineFieldError } from '@/lib/formErrors';
+import { formatPartnerMoney, readPartnerDecimalInput } from '../partner-sales/presentation';
 
 export type AccountingMetric = {
   count?: number;
@@ -91,6 +92,12 @@ export type AccountingPaginatedResult<T> = {
 };
 
 export const emptyAccountingPagination = { page: 1, pageSize: 50, total: 0 };
+
+export const accountingFailureMessage = (error: unknown, fallback: string) => {
+  const body = (error as { response?: { data?: { message?: unknown; error?: unknown } } })?.response?.data;
+  const message = body?.message || body?.error;
+  return typeof message === 'string' && /[\u0600-\u06ff]/.test(message) ? message : fallback;
+};
 
 export const readAccountingListResponse = <T,>(payload: any, fallbackPageSize = 50): AccountingPaginatedResult<T> => {
   if (Array.isArray(payload)) {
@@ -172,6 +179,7 @@ export const correctionStatusLabels: Record<string, string> = {
 };
 
 export const money = (amount?: string | number | null, _currency = 'ریال') => {
+  if (_currency === 'IRR' || _currency === 'IRT') return formatPartnerMoney(amount, _currency);
   const value = toFiniteNumber(amount);
   return formatPrice(value, 'ریال');
 };
@@ -180,6 +188,17 @@ export const dateFa = (value?: string | Date | null) => {
   if (!value) return '—';
   return PersianCalendar.formatForDisplay(String(value));
 };
+
+export function PartnerAccountingIdentity({ context }: { context?: {
+  caseNumber: string; internalRecordNumber: string; debtor: { displayName: string };
+} | null }) {
+  if (!context) return <span className="sds-text-secondary">شواهد پرونده نیاز به بررسی دارد</span>;
+  return <div>
+    <p className="font-semibold">پرونده {context.caseNumber}</p>
+    <p className="mt-1 text-xs sds-text-secondary">طرف حساب همکار: {context.debtor.displayName}</p>
+    <p className="mt-1 text-xs sds-text-secondary">سند داخلی: {context.internalRecordNumber}</p>
+  </div>;
+}
 
 export const toneForStatus = (status?: string): ErpTone => {
   if (!status) return 'neutral';
@@ -298,7 +317,9 @@ export type FinancialInvoiceApprovalPayload = {
   invoiceId: string;
   systemInvoiceNumber: string;
   systemInvoiceDate: string;
-  sepidarAmount: number;
+  sepidarAmount: string | number;
+  externalReference?: string;
+  downstreamNote?: string;
 };
 
 type FinancialInvoiceApprovalFormProps = {
@@ -309,6 +330,9 @@ type FinancialInvoiceApprovalFormProps = {
     systemInvoiceNumber?: string | null;
     systemInvoiceDate?: string | null;
     sepidarAmount?: string | number | null;
+    metadata?: { mode?: string } | null;
+    sourceKind?: string;
+    currency?: string;
   } | null;
   busy?: boolean;
   compact?: boolean;
@@ -327,20 +351,31 @@ export function FinancialInvoiceApprovalForm({
   const [systemInvoiceNumber, setSystemInvoiceNumber] = React.useState('');
   const [systemInvoiceDate, setSystemInvoiceDate] = React.useState(PersianCalendar.now());
   const [sepidarAmount, setSepidarAmount] = React.useState(0);
-  const [errors, setErrors] = React.useState<Partial<Record<'systemInvoiceNumber' | 'systemInvoiceDate' | 'sepidarAmount', string>>>({});
+  const [partnerAmount, setPartnerAmount] = React.useState('');
+  const [externalReference, setExternalReference] = React.useState('');
+  const [downstreamNote, setDownstreamNote] = React.useState('');
+  const [errors, setErrors] = React.useState<Partial<Record<'systemInvoiceNumber' | 'systemInvoiceDate' | 'sepidarAmount' | 'externalReference', string>>>({});
 
   React.useEffect(() => {
     if (!invoice) return;
     setSystemInvoiceNumber(invoice.systemInvoiceNumber || '');
     setSystemInvoiceDate(invoice.systemInvoiceDate ? PersianCalendar.toPersian(invoice.systemInvoiceDate) : PersianCalendar.now());
     setSepidarAmount(invoice.sepidarAmount != null ? toFiniteNumber(invoice.sepidarAmount) : 0);
+    setPartnerAmount(invoice.sepidarAmount == null ? '' : String(invoice.sepidarAmount));
+    setExternalReference('');
+    setDownstreamNote('');
     setErrors({});
   }, [invoice?.id]);
 
   if (!invoice) return null;
 
   const expectedAmount = toFiniteNumber(invoice.amount);
-  const hasMismatch = sepidarAmount > 0 && Math.round(sepidarAmount) !== Math.round(expectedAmount);
+  const partnerReplacement = invoice.metadata?.mode === 'PARTNER_SHARED_CORRECTION_REPLACEMENT';
+  const isPartner = invoice.sourceKind === 'PARTNER_INTERNAL_RECORD' || partnerReplacement;
+  const exactAmount = readPartnerDecimalInput(partnerAmount);
+  const exactExpected = readPartnerDecimalInput(String(invoice.amount));
+  const hasMismatch = isPartner ? Boolean(partnerAmount && exactAmount !== exactExpected)
+    : sepidarAmount > 0 && Math.round(sepidarAmount) !== Math.round(expectedAmount);
   const locked = isInvoiceLocked(invoice);
   const fieldClass = (field: keyof typeof errors) =>
     `min-h-11 w-full rounded-lg border bg-[var(--sds-surface-subtle)] px-3 text-sm text-[var(--sds-text-primary)] outline-none focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] ${errors[field] ? 'border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'}`;
@@ -360,12 +395,15 @@ export function FinancialInvoiceApprovalForm({
     if (!systemInvoiceNumber.trim()) {
       nextErrors.systemInvoiceNumber = 'شماره فاکتور سیستمی الزامی است';
     }
+    if (partnerReplacement && !externalReference.trim()) {
+      nextErrors.externalReference = 'مرجع واقعی ابطال صورتحساب قبلی را وارد کنید';
+    }
     if (!systemInvoiceDate.trim()) {
       nextErrors.systemInvoiceDate = 'تاریخ فاکتور سیستمی الزامی است';
     }
-    if (sepidarAmount <= 0) {
+    if (isPartner ? exactAmount === null || exactAmount === '0' || exactAmount.startsWith('-') : sepidarAmount <= 0) {
       nextErrors.sepidarAmount = 'مبلغ سپیدار باید بیشتر از صفر باشد';
-    } else if (Math.round(sepidarAmount) !== Math.round(expectedAmount)) {
+    } else if (isPartner ? exactAmount !== exactExpected : Math.round(sepidarAmount) !== Math.round(expectedAmount)) {
       nextErrors.sepidarAmount = 'مبلغ سپیدار باید با مبلغ صورتحساب برابر باشد';
     }
 
@@ -378,7 +416,8 @@ export function FinancialInvoiceApprovalForm({
       invoiceId: invoice.id,
       systemInvoiceNumber: systemInvoiceNumber.trim(),
       systemInvoiceDate: PersianCalendar.toGregorian(systemInvoiceDate).toISOString(),
-      sepidarAmount,
+      sepidarAmount: isPartner ? exactAmount! : sepidarAmount,
+      ...(partnerReplacement ? { externalReference: externalReference.trim(), downstreamNote: downstreamNote.trim() } : {}),
     });
   };
 
@@ -389,7 +428,7 @@ export function FinancialInvoiceApprovalForm({
         <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] sm:grid-cols-3">
           <span>شماره فاکتور: {invoice.systemInvoiceNumber || '—'}</span>
           <span>تاریخ: {invoice.systemInvoiceDate ? dateFa(invoice.systemInvoiceDate) : '—'}</span>
-          <span>مبلغ سپیدار: {money(invoice.sepidarAmount)}</span>
+          <span>مبلغ سپیدار: {money(invoice.sepidarAmount, invoice.currency)}</span>
         </div>
       </div>
     );
@@ -426,8 +465,10 @@ export function FinancialInvoiceApprovalForm({
           <InlineFieldError message={errors.systemInvoiceDate} className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]" />
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ سپیدار (ریال)</span>
-          <FormattedNumberInput
+          <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ سپیدار ({invoice.currency === 'IRT' ? 'تومان' : 'ریال'})</span>
+          {isPartner ? <ErpInput value={partnerAmount} inputMode="decimal" dir="ltr" disabled={busy}
+            onChange={event => { clearError('sepidarAmount'); setPartnerAmount(event.target.value); }}
+            placeholder="مبلغ سپیدار" className={fieldClass('sepidarAmount')} /> : <FormattedNumberInput
             value={sepidarAmount}
             onChange={(value) => {
               clearError('sepidarAmount');
@@ -436,13 +477,24 @@ export function FinancialInvoiceApprovalForm({
             min={0}
             placeholder="مبلغ سپیدار"
             className={fieldClass('sepidarAmount')}
-          />
+          />}
           <InlineFieldError message={errors.sepidarAmount} className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]" />
         </label>
       </div>
+      {partnerReplacement && <div className="mt-3 space-y-3">
+        <ErpField label="مرجع ابطال صورتحساب قبلی" error={errors.externalReference}>
+          <ErpInput value={externalReference} onChange={event => {
+            clearError('externalReference'); setExternalReference(event.target.value);
+          }} disabled={busy} />
+        </ErpField>
+        <ErpField label="مستند تسویه و اصلاح سوابق پایین‌دستی">
+          <ErpTextarea value={downstreamNote} onChange={event => setDownstreamNote(event.target.value)} disabled={busy} />
+        </ErpField>
+        <p className="text-xs text-[var(--sds-text-secondary)]">تعهد قبلی تا تکمیل همه تأییدهای اصلاح پرونده برقرار می‌ماند.</p>
+      </div>}
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className={`text-xs ${hasMismatch ? 'text-[var(--sds-danger)] dark:text-[var(--sds-danger)]' : 'text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]'}`}>
-          مبلغ صورتحساب سبلان: {money(expectedAmount)}
+          مبلغ صورتحساب سبلان: {money(isPartner ? invoice.amount : expectedAmount, invoice.currency)}
         </p>
         <ErpButton
           label="تایید مالی"

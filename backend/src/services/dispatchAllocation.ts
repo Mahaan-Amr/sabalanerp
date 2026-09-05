@@ -17,6 +17,25 @@ import { isPostCutoverFinalization } from './dispatchDocuments/featureGate';
 import type { createDispatchDocuments } from './dispatchDocuments/service';
 import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing } from './allocationPricingBinding';
 import { createPrismaAllocationPricingBindingPort } from './allocationPricingPrismaAdapter';
+import { canonicalHash, canonicalJson, RevisionRefSchema, IdSchema, partnerError,
+  type Result, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
+import { createPartnerFulfillmentAdapter } from './partnerSales/fulfillment/adapter';
+import { createPrismaPartnerFulfillmentRepository } from './partnerSales/fulfillment/prismaRepository';
+import { lockPartnerOperationsControl, authorizePartnerTechnicalRollout } from './partnerSales/authorization/technicalRollout';
+import { partnerPredecessorIsFrozen } from './partnerSales/corrections/mutationFreeze';
+import { authorizePartnerLoading, validPartnerLoadingActor as validLoadingActor, type PartnerLoadingActor } from './partnerSales/fulfillment/loadingAuthority';
+import { allocateLoadingNumber } from './logisticsLoadingNumber';
+import type { PartnerLoadingSource } from './partnerSales/fulfillment/repository';
+import { readPartnerSnapshot } from './partnerSales/authorization/readSnapshot';
+import { preparePartnerLoadingQueueChange } from './partnerSales/fulfillment/loadingQueue';
+import { PartnerLoadingCommandError } from './partnerSales/fulfillment/loadingAuthority';
+import { buildPartnerAllocationDraftRows, readPartnerAllocationDrafts, type PartnerAllocationLineInput } from './partnerSales/fulfillment/allocationDraft';
+import { randomUUID } from 'node:crypto';
+import { PartnerShipmentPricingConflictError, readPartnerApprovedShipmentPricing } from './partnerSales/fulfillment/approvedPricing';
+import { allocatePricedRevision, pricedAllocationIntegrityHash,
+  type LockedPartnerApprovedPricingVersion, type PartnerPricedRevisionLine } from './pricedAllocationLedger';
+import { readPartnerShipmentQuantityProjection } from './partnerSales/fulfillment/quantityStore';
+import { ordinaryAllocationLine } from './allocationSource';
 
 type Database = PrismaClient;
 type Tx = Prisma.TransactionClient;
@@ -27,9 +46,10 @@ export const installDispatchDocumentsCommands = (commands: DispatchDocumentsComm
 const candidateRequiresAtomicDocuments = async (prisma: Database, candidateId: string) => {
   const [candidate, cutover] = await Promise.all([
     prisma.accountingDispatchCandidate.findUnique({ where: { id: candidateId },
-      select: { allocationRevision: { select: { finalizedAt: true } } } }),
+      select: { allocationRevision: { select: { sourceKind: true, finalizedAt: true } } } }),
     prisma.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' } }),
   ]);
+  if (candidate?.allocationRevision.sourceKind === 'PARTNER_CASE') return true;
   return Boolean(candidate && cutover?.cutoverAt && isPostCutoverFinalization(candidate.allocationRevision.finalizedAt, cutover.cutoverAt));
 };
 const waybillRequiresAtomicDocuments = async (prisma: Database, waybillId: string) => {
@@ -118,6 +138,94 @@ export const isRetryableDispatchTransactionError = (error: unknown) => error ins
   && (error.code === 'P2034'
     || (error.code === 'P2010' && ['40001', '40P01'].includes(String(error.meta?.code || ''))));
 
+type PartnerLoadingRead = { loadingId: string; loadingNumber: string; status: string; source: PartnerLoadingSource;
+  allocations: Extract<Awaited<ReturnType<typeof readPartnerAllocationDrafts>>, { ok: true }>['value'] };
+const partnerFailure = (code: Parameters<typeof partnerError>[0]): Result<never> => ({ ok: false, error: partnerError(code) });
+
+/** Apply Case visibility before SQL pagination/counts. Ordinary shipment
+ * population and its existing workspace/feature policy remain unchanged. */
+export const withLogisticsLoadingReadScope = <T>(prisma: Database, input: PartnerLoadingActor,
+  read: (scope: { database: Tx; where: (where?: Prisma.LogisticsLoadingWhereInput) => Prisma.LogisticsLoadingWhereInput }) => Promise<T>) =>
+  readPartnerSnapshot(prisma, async tx => {
+    if (!validLoadingActor(input)) throw new DispatchAllocationValidationError('Invalid loading read context.');
+    const cases = await tx.partnerSaleCase.findMany({ where: { loadings: { some: {} } }, select: { id: true }, orderBy: { id: 'asc' } });
+    const allowed: string[] = [];
+    for (const row of cases) if ((await authorizePartnerLoading(tx, input, row.id, 'READ')).ok) allowed.push(row.id);
+    const access: Prisma.LogisticsLoadingWhereInput = { OR: [{ sourceKind: 'SALES_CONTRACT' },
+      { sourceKind: 'PARTNER_CASE', partnerCaseId: { in: allowed } }] };
+    return read({ database: tx, where: (where = {}) => ({ AND: [access, where] }) });
+  });
+
+/** Creates the existing Logistics loading aggregate, owned by one canonical
+ * Case delivery. Draft creation does not reserve quantities or approve prices. */
+export const createPartnerCaseLoading = (prisma: Database, input: PartnerLoadingActor & {
+  expected: RevisionRef; deliveryId: string; idempotencyKey: string;
+}): Promise<Result<{ loadingId: string; replayed: boolean }>> => serializable(prisma, async tx => {
+  if (!validLoadingActor(input) || !RevisionRefSchema.safeParse(input.expected).success ||
+      !IdSchema.safeParse(input.deliveryId).success || !IdSchema.safeParse(input.idempotencyKey).success) return partnerFailure('INVALID_PAYLOAD');
+  await lockPartnerOperationsControl(tx);
+  await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${input.expected.caseId} FOR UPDATE`;
+  const authorized = await authorizePartnerLoading(tx, input, input.expected.caseId, 'CREATE');
+  if (!authorized.ok) return authorized;
+  const adapter = createPartnerFulfillmentAdapter(createPrismaPartnerFulfillmentRepository({ database: tx, ...input }));
+  const source = await adapter.readLoadingSource(input.expected, input.deliveryId);
+  if (!source.ok) return source;
+  const identity = { actorId: input.actorId, operation: 'PARTNER_LOADING_CREATE', targetScope: input.expected.caseId, key: input.idempotencyKey };
+  const payloadHash = await canonicalHash({ operation: identity.operation, expected: input.expected, deliveryId: input.deliveryId });
+  const previous = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: identity } });
+  if (previous) {
+    if (previous.payloadHash !== payloadHash) return partnerFailure('IDEMPOTENCY_CONFLICT');
+    const outcome = previous.outcome as Prisma.JsonObject;
+    const loading = typeof outcome?.loadingId === 'string' ? await tx.logisticsLoading.findUnique({ where: { id: outcome.loadingId } }) : null;
+    if (!loading || loading.sourceKind !== 'PARTNER_CASE' || loading.partnerCaseId !== input.expected.caseId ||
+        loading.partnerCaseRevision !== input.expected.revision || loading.partnerIntegrityHash !== input.expected.integrityHash ||
+        loading.partnerDeliveryId !== input.deliveryId || loading.customerId !== source.value.recipient.customerId || loading.projectId !== null ||
+        loading.partnerSourceHash !== await canonicalHash(source.value) ||
+        canonicalJson(loading.partnerSourceSnapshot) !== canonicalJson(source.value)) return partnerFailure('INTEGRITY_CONFLICT');
+    return { ok: true, value: { loadingId: loading.id, replayed: true } };
+  }
+  const caseRow = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: input.expected.caseId }, select: { profileId: true } });
+  const rollout = await authorizePartnerTechnicalRollout(tx, caseRow.profileId, 'COMMITTED_FULFILLMENT');
+  if (!rollout.ok) return rollout;
+  if (await partnerPredecessorIsFrozen(tx, input.expected.caseId, input.expected.revision)) return partnerFailure('STATE_CONFLICT');
+  await assertCanonicalDispatchCommandAllowed(tx);
+  const loading = await tx.logisticsLoading.create({ data: { loadingNumber: await allocateLoadingNumber(tx),
+    sourceKind: 'PARTNER_CASE', customerId: source.value.recipient.customerId,
+    partnerCaseId: input.expected.caseId, partnerCaseRevision: input.expected.revision,
+    partnerIntegrityHash: input.expected.integrityHash, partnerDeliveryId: input.deliveryId,
+    partnerSourceSnapshot: json(source.value), partnerSourceHash: await canonicalHash(source.value), createdBy: input.actorId } });
+  await tx.partnerCommandOutcome.create({ data: { id: `partner-loading:${(await canonicalHash(identity)).slice(10)}`,
+    ...identity, payloadHash, outcome: { loadingId: loading.id } } });
+  await appendAudit(tx, { aggregateType: 'LOGISTICS_LOADING', aggregateId: loading.id, eventType: 'LOADING_CREATED',
+    actorId: input.actorId, payload: { sourceKind: 'PARTNER_CASE', owner: input.expected, deliveryId: input.deliveryId,
+      sourceHash: loading.partnerSourceHash, correlationId: input.correlationId, idempotencyKey: input.idempotencyKey,
+      reason: input.reason ?? null, effectiveAuthority: authorized.value } });
+  return { ok: true, value: { loadingId: loading.id, replayed: false } };
+});
+
+export const readPartnerCaseLoading = (prisma: Database, input: PartnerLoadingActor & {
+  loadingId: string;
+}): Promise<Result<PartnerLoadingRead>> => serializable(prisma, async tx => {
+  if (!validLoadingActor(input) || !IdSchema.safeParse(input.loadingId).success) return partnerFailure('INVALID_PAYLOAD');
+  await lockPartnerOperationsControl(tx);
+  const loading = await tx.logisticsLoading.findUnique({ where: { id: input.loadingId } });
+  if (!loading || loading.sourceKind !== 'PARTNER_CASE' || !loading.partnerCaseId) return partnerFailure('NOT_FOUND');
+  const authorized = await authorizePartnerLoading(tx, input, loading.partnerCaseId, 'READ');
+  if (!authorized.ok) return authorized;
+  const expected = RevisionRefSchema.safeParse({ caseId: loading.partnerCaseId,
+    revision: loading.partnerCaseRevision, integrityHash: loading.partnerIntegrityHash });
+  if (!expected.success || !loading.partnerDeliveryId) return partnerFailure('INTEGRITY_CONFLICT');
+  const source = await createPartnerFulfillmentAdapter(createPrismaPartnerFulfillmentRepository({ database: tx, ...input }))
+    .readLoadingEvidence(expected.data, loading.partnerDeliveryId);
+  if (!source.ok) return source;
+  if (loading.partnerSourceHash !== await canonicalHash(source.value) ||
+      canonicalJson(loading.partnerSourceSnapshot) !== canonicalJson(source.value)) return partnerFailure('INTEGRITY_CONFLICT');
+  const allocations = await readPartnerAllocationDrafts(tx, input, loading.id, source.value);
+  if (!allocations.ok) return allocations;
+  return { ok: true, value: { loadingId: loading.id, loadingNumber: loading.loadingNumber, status: loading.status,
+    source: source.value, allocations: allocations.value } };
+});
+
 const bindRevisionPricing = async (tx: Tx, input: {
   allocationRevisionId: string;
   finalizedAt: Date;
@@ -147,19 +255,28 @@ type FinalizedAllocationRow = {
   sourceContractId: string; sourceContractItemId: string; productRowId: string; productId: string;
   quantity: Prisma.Decimal; unit: string; snapshot: unknown;
 };
+type PartnerFinalizedAllocationRow = {
+  sourceKind: 'PARTNER_CASE'; sourceContractId: null; sourceContractItemId: null; productId: null;
+  partnerCaseId: string; partnerCaseRevision: number; partnerIntegrityHash: string;
+  partnerDeliveryId: string; partnerLineageId: string; productRowId: string;
+  quantity: Prisma.Decimal; unit: string; snapshot: unknown;
+};
+type PricingBindingResult = { path: 'LEGACY_WAYBILL_ONLY' | 'ATOMIC_WAYBILL_STATEMENT';
+  pricingVersionIds: string[]; eventIntegrityHashes: string[] };
 
 const persistFinalizedAllocationRevision = async (tx: Tx, input: {
   revisionData: Prisma.LogisticsAllocationRevisionUncheckedCreateInput;
-  rows: FinalizedAllocationRow[];
+  rows: FinalizedAllocationRow[] | PartnerFinalizedAllocationRow[];
   loadingLines: Map<string, string>;
   actorId: string;
-  scope: { customerId: string; projectId: string; destination: string };
+  scope?: { customerId: string; projectId: string; destination: string };
   expectedCurrency: string;
   finalizedAt: Date;
   revisionEventType: string;
   idempotencyKey: string;
   effectiveAuthority: unknown;
-  revisionAuditPayload: (result: { candidateId: string; snapshotHash: string; pricingBinding: Awaited<ReturnType<typeof bindRevisionPricing>> }) => unknown;
+  partnerPricing?: LockedPartnerApprovedPricingVersion & { preparationEvidenceHash: string };
+  revisionAuditPayload: (result: { candidateId: string; snapshotHash: string; pricingBinding: PricingBindingResult }) => unknown;
   afterRevisionCreated?: (revision: { id: string }) => Promise<void>;
 }) => {
   const revision = await tx.logisticsAllocationRevision.create({ data: input.revisionData });
@@ -168,7 +285,39 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
     allocationRevisionLineId: string; contractId: string; contractItemId: string;
     productRowId: string; quantity: string; unit: string;
   }> = [];
+  const partnerPricedLines: PartnerPricedRevisionLine[] = [];
   for (const line of input.rows) {
+    if ('sourceKind' in line) {
+      const lineSnapshot = stableValue({ revisionId: revision.id, sourceKind: line.sourceKind,
+        owner: { caseId: line.partnerCaseId, revision: line.partnerCaseRevision, integrityHash: line.partnerIntegrityHash },
+        deliveryId: line.partnerDeliveryId, lineageId: line.partnerLineageId, productRowId: line.productRowId,
+        quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot });
+      const revisionLine = await tx.logisticsAllocationRevisionLine.create({ data: { revisionId: revision.id,
+        sourceKind: 'PARTNER_CASE', sourceContractId: null, sourceContractItemId: null, productId: null,
+        partnerCaseId: line.partnerCaseId, partnerCaseRevision: line.partnerCaseRevision,
+        partnerIntegrityHash: line.partnerIntegrityHash, partnerDeliveryId: line.partnerDeliveryId,
+        partnerLineageId: line.partnerLineageId, productRowId: line.productRowId,
+        quantity: line.quantity, unit: line.unit, snapshot: json(line.snapshot), integrityHash: digest(lineSnapshot) } });
+      partnerPricedLines.push({ sourceKind: 'PARTNER_CASE', caseId: line.partnerCaseId,
+        internalRecordId: String(input.revisionData.partnerInternalRecordId), allocationRevisionLineId: revisionLine.id,
+        productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit });
+      const evidence = { id: revisionLine.id, sourceKind: 'PARTNER_CASE' as const, contractId: null, contractItemId: null,
+        partnerCaseId: line.partnerCaseId, partnerLineageId: line.partnerLineageId,
+        partnerCaseRevision: line.partnerCaseRevision, partnerIntegrityHash: line.partnerIntegrityHash,
+        productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const,
+        quantity: line.quantity.toFixed(3), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
+        sourceType: 'PARTNER_LOGISTICS_ALLOCATION_REVISION', sourceId: revisionLine.id, sourceVersion: 1,
+        integrityHash: '', metadata: { loadingId: input.revisionData.loadingId, revisionId: revision.id,
+          deliveryId: line.partnerDeliveryId } };
+      evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
+      await tx.shipmentQuantityEvidence.create({ data: { sourceKind: 'PARTNER_CASE', contractId: null, contractItemId: null,
+        partnerCaseId: line.partnerCaseId, partnerLineageId: line.partnerLineageId,
+        partnerCaseRevision: line.partnerCaseRevision, partnerIntegrityHash: line.partnerIntegrityHash,
+        productRowId: line.productRowId, unit: line.unit, kind: evidence.kind, quantity: line.quantity,
+        effectiveAt: input.finalizedAt, recordedAt: input.finalizedAt, sourceType: evidence.sourceType,
+        sourceId: evidence.sourceId, sourceVersion: 1, integrityHash: evidence.integrityHash, metadata: json(evidence.metadata) } });
+      continue;
+    }
     const lineSnapshot = stableValue({ revisionId: revision.id, contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
       quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot });
@@ -193,9 +342,64 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
       sourceType: evidence.sourceType, sourceId: evidence.sourceId, sourceVersion: 1,
       integrityHash: evidence.integrityHash, metadata: json(evidence.metadata) } });
   }
-  const pricingBinding = await bindRevisionPricing(tx, { allocationRevisionId: revision.id,
-    finalizedAt: input.finalizedAt, actorId: input.actorId, scope: input.scope,
-    expectedCurrency: input.expectedCurrency, lines: pricedLines });
+  let pricingBinding: PricingBindingResult;
+  if (input.partnerPricing) {
+    const pricing = input.partnerPricing;
+    const reference = await tx.partnerAllocationRevisionPricing.create({ data: { allocationRevisionId: revision.id,
+      caseId: pricing.caseId, caseRevision: Number(input.revisionData.partnerCaseRevision),
+      integrityHash: String(input.revisionData.partnerIntegrityHash), internalRecordId: pricing.internalRecordId,
+      sourceFinancialRecordId: pricing.sourceFinancialRecordId, financialApprovalEvidenceId: pricing.id,
+      preparationEvidenceHash: pricing.preparationEvidenceHash, readinessEvidenceHash: pricing.readinessEvidenceHash,
+      currency: pricing.currency, grossAmount: pricing.grossAmount, discountAmount: pricing.discountAmount,
+      netAmount: pricing.netAmount, pricingIntegrityHash: pricing.integrityHash } });
+    const priorRows = await tx.partnerPricedAllocationEvent.findMany({ where: {
+      approvalEvidenceId: { in: pricing.rows.map(row => row.id) },
+      pricingReference: { caseId: pricing.caseId, internalRecordId: pricing.internalRecordId } },
+      include: { allocationRevisionLine: true, pricingReference: true }, orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
+    const prior = priorRows.map(row => {
+      const sequence = Number((row.evidence as Prisma.JsonObject).ledgerSequence);
+      const payload = { sourceKind: 'PARTNER_CASE' as const, caseId: row.pricingReference.caseId,
+        internalRecordId: row.pricingReference.internalRecordId,
+        allocationRevisionLineId: row.allocationRevisionLineId, productRowId: row.allocationRevisionLine.productRowId,
+        quantity: row.quantity.toFixed(3), unit: row.allocationRevisionLine.unit,
+        pricingVersionId: row.pricingReference.financialApprovalEvidenceId, pricingRowId: row.approvalEvidenceId,
+        grossAmount: row.grossAmount.toFixed(12), discountAmount: row.discountAmount.toFixed(12),
+        netAmount: row.netAmount.toFixed(12), consumesFinalRemainder: row.consumesFinalRemainder,
+        evidence: row.evidence, recordedBy: row.recordedBy };
+      return { pricingRowId: row.approvalEvidenceId, pricingVersionId: row.pricingReference.financialApprovalEvidenceId,
+        quantity: payload.quantity, grossAmount: payload.grossAmount, discountAmount: payload.discountAmount,
+        ledgerSequence: sequence, integrityVerified: Number.isSafeInteger(sequence) && sequence > 0 &&
+          row.integrityHash === pricedAllocationIntegrityHash(payload) };
+    });
+    const calculated = allocatePricedRevision({ versions: [pricing], priorEvents: prior, lines: partnerPricedLines });
+    const partnerEventHashes: string[] = [];
+    for (const event of calculated.events) {
+      const { ledgerSequence: _sequence, ...hashPayload } = event;
+      const payload = { ...hashPayload, recordedBy: input.actorId };
+      const eventHash = pricedAllocationIntegrityHash(payload);
+      partnerEventHashes.push(eventHash);
+      const stored = await tx.partnerPricedAllocationEvent.create({ data: { allocationRevisionLineId: event.allocationRevisionLineId,
+        pricingReferenceId: reference.id, approvalEvidenceId: event.pricingRowId, quantity: event.quantity,
+        grossAmount: event.grossAmount, discountAmount: event.discountAmount, netAmount: event.netAmount,
+        consumesFinalRemainder: event.consumesFinalRemainder, evidence: json(event.evidence), integrityHash: eventHash,
+        recordedAt: input.finalizedAt, recordedBy: input.actorId } });
+      await appendAudit(tx, { aggregateType: 'PRICED_ALLOCATION_EVENT', aggregateId: stored.id,
+        eventType: 'PRICED_ALLOCATION_RECORDED', actorId: input.actorId, recordedAt: input.finalizedAt,
+        payload: { workspace: 'logistics', effectiveAuthority: input.effectiveAuthority,
+          reason: 'Finalized Partner allocation pricing', correlationId: `${revision.id}:${input.idempotencyKey}`,
+          idempotencyKey: input.idempotencyKey, before: { state: 'UNPRICED' }, after: { state: 'PRICED' },
+          allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash,
+          financialApprovalEvidenceId: pricing.id, approvalEvidenceId: event.pricingRowId,
+          pricedEventIntegrityHash: eventHash } });
+    }
+    pricingBinding = { path: 'ATOMIC_WAYBILL_STATEMENT', pricingVersionIds: [pricing.id],
+      eventIntegrityHashes: partnerEventHashes };
+  } else {
+    if (!input.scope) throw new DispatchAllocationConflictError('Ordinary allocation pricing scope is missing.');
+    pricingBinding = await bindRevisionPricing(tx, { allocationRevisionId: revision.id,
+      finalizedAt: input.finalizedAt, actorId: input.actorId, scope: input.scope,
+      expectedCurrency: input.expectedCurrency, lines: pricedLines });
+  }
   if (pricingBinding.path === 'ATOMIC_WAYBILL_STATEMENT') {
     const events = await tx.dispatchPricedAllocationEvent.findMany({ where: { allocationRevisionId: revision.id },
       orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
@@ -290,8 +494,13 @@ export type CanonicalAllocationLineInput = {
 };
 
 export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
-  loadingId: string; queueTurnId: string; lines: CanonicalAllocationLineInput[]; actorId: string;
+  loadingId: string; queueTurnId: string; lines: Array<CanonicalAllocationLineInput | PartnerAllocationLineInput>; actorId: string;
+  expected?: RevisionRef; correlationId?: string; reason?: string;
 }) => serializable(prisma, async (tx) => {
+  const actor = { ...input, correlationId: input.correlationId || randomUUID() };
+  const source = await preparePartnerLoadingQueueChange(tx, actor, 'ALLOCATE');
+  if (!source.ok) return { partnerFailure: source.error };
+  if (source.value.sourceKind === 'PARTNER_CASE' && !validLoadingActor(actor)) return { partnerFailure: partnerError('INVALID_PAYLOAD') };
   await assertCanonicalDispatchCommandAllowed(tx);
   await lockKeys(tx, [`GUARD_QUEUE:${input.queueTurnId}`, `LOGISTICS_LOADING:${input.loadingId}`]);
   const [loading, turn] = await Promise.all([
@@ -305,10 +514,21 @@ export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
     throw new DispatchAllocationConflictError('The canonical queue turn must be reserved by this loading.');
   }
   if (!Array.isArray(input.lines) || input.lines.length === 0) throw new DispatchAllocationValidationError('At least one allocation line is required.');
-  const ids = input.lines.map((line) => required(line.sourceContractItemId, 'sourceContractItemId'));
+  let rows: Array<Omit<Prisma.LogisticsAllocationDraftLineCreateManyInput, 'draftId'>>;
+  if (source.value.sourceKind === 'PARTNER_CASE') {
+    const selected = await createPartnerFulfillmentAdapter(createPrismaPartnerFulfillmentRepository({ database: tx, ...actor }))
+      .readLoadingSource(source.value.owner, source.value.deliveryId);
+    if (!selected.ok) return { partnerFailure: selected.error };
+    const built = await buildPartnerAllocationDraftRows(selected.value, input.lines);
+    if (!built.ok) return { partnerFailure: built.error };
+    rows = built.value;
+  } else {
+  if (input.lines.some(line => !('sourceContractItemId' in line))) throw new DispatchAllocationValidationError('Ordinary allocations require contract rows.');
+  const ordinaryLines = input.lines as CanonicalAllocationLineInput[];
+  const ids = ordinaryLines.map((line) => required(line.sourceContractItemId, 'sourceContractItemId'));
   const items = await tx.contractItem.findMany({ where: { id: { in: ids } }, include: { contract: true, product: true } });
   const byId = new Map(items.map((item) => [item.id, item]));
-  const rows = input.lines.map((line) => {
+  rows = ordinaryLines.map((line) => {
     const item = byId.get(line.sourceContractItemId);
     if (!item) throw new DispatchAllocationValidationError(`Contract row ${line.sourceContractItemId} was not found.`);
     if (item.contract.customerId !== loading.customerId) throw new DispatchAllocationValidationError('Allocation rows must belong to the loading customer.');
@@ -320,8 +540,14 @@ export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
         productId: item.productId, productName: item.product.namePersian || item.product.name }),
     };
   });
+  }
+  // Preserve ordinary-to-ordinary draft transfer, but never reassign a private
+  // draft when its physical queue turn is reused by another loading.
+  const ordinaryPrevious = source.value.sourceKind === 'SALES_CONTRACT'
+    ? await tx.logisticsAllocationDraft.findFirst({ where: { queueTurnId: turn.id, loading: { sourceKind: 'SALES_CONTRACT' } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true } }) : null;
   const draft = await tx.logisticsAllocationDraft.upsert({
-    where: { queueTurnId: turn.id },
+    where: ordinaryPrevious ? { id: ordinaryPrevious.id } : { loadingId_queueTurnId: { loadingId: loading.id, queueTurnId: turn.id } },
     create: { loadingId: loading.id, queueTurnId: turn.id, createdBy: input.actorId },
     update: { loadingId: loading.id },
   });
@@ -330,6 +556,9 @@ export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
   await appendAudit(tx, { aggregateType: 'LOGISTICS_ALLOCATION_DRAFT', aggregateId: draft.id,
     eventType: 'DRAFT_SAVED', payload: { loadingId: loading.id, queueTurnId: turn.id, lines: rows }, actorId: input.actorId });
   return tx.logisticsAllocationDraft.findUniqueOrThrow({ where: { id: draft.id }, include: { lines: true, queueTurn: true } });
+}).then(outcome => {
+  if ('partnerFailure' in outcome) throw new PartnerLoadingCommandError(outcome.partnerFailure);
+  return outcome;
 });
 
 export const refreshProjectionContracts = async (tx: Tx, contractIds: string[]) => {
@@ -345,12 +574,162 @@ export const refreshProjectionContracts = async (tx: Tx, contractIds: string[]) 
   }
 };
 
+const ordinaryDraftLine = (line: Prisma.LogisticsAllocationDraftLineGetPayload<object>) => {
+  if (line.sourceKind !== 'SALES_CONTRACT' || !line.sourceContractId || !line.sourceContractItemId || !line.productId ||
+      line.partnerCaseId !== null || line.partnerCaseRevision !== null || line.partnerIntegrityHash !== null ||
+      line.partnerDeliveryId !== null || line.partnerLineageId !== null) {
+    throw new DispatchAllocationConflictError('An ordinary loading cannot contain Partner allocation rows.');
+  }
+  return { sourceContractId: line.sourceContractId, sourceContractItemId: line.sourceContractItemId,
+    productRowId: line.productRowId, productId: line.productId, quantity: line.quantity,
+    unit: line.unit, snapshot: line.snapshot };
+};
+
+const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
+  loadingId: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
+}, source: PartnerLoadingSource, pricing: LockedPartnerApprovedPricingVersion & { preparationEvidenceHash: string }) => {
+  const previous = await tx.logisticsAllocationBatch.findUnique({
+    where: { loadingId_idempotencyKey: { loadingId: input.loadingId, idempotencyKey: input.idempotencyKey } },
+    include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } },
+  });
+  if (previous) return previous;
+  const loading = await tx.logisticsLoading.findUnique({ where: { id: input.loadingId }, include: {
+    customer: true, canonicalAllocationDrafts: { include: { lines: true, queueTurn: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } } });
+  if (!loading || loading.sourceKind !== 'PARTNER_CASE' || loading.partnerCaseId !== source.owner.caseId ||
+      loading.partnerDeliveryId !== source.deliveryId || loading.partnerSourceHash !== await canonicalHash(source) ||
+      canonicalJson(loading.partnerSourceSnapshot) !== canonicalJson(source)) throw new DispatchAllocationConflictError('منبع بارگیری پرونده همکار تغییر کرده است.');
+  if (loading.status !== 'DRAFT') throw new DispatchAllocationConflictError('فقط بارگیری پیش‌نویس قابل نهایی‌سازی است.');
+  const active = loading.canonicalAllocationDrafts.filter(draft =>
+    draft.queueTurn.loadingId === loading.id && draft.queueTurn.status === GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING);
+  if (!active.length) throw new DispatchAllocationValidationError('حداقل یک تخصیص فعال راننده لازم است.');
+  await lockKeys(tx, [...active.map(draft => `GUARD_QUEUE:${draft.queueTurnId}`),
+    ...active.map(draft => `LOGISTICS_ALLOCATION_DRAFT:${draft.id}`),
+    ...source.rows.map(row => `PARTNER_SHIPMENT_LINEAGE:${row.lineageId}`),
+    ...pricing.rows.map(row => `PARTNER_APPROVED_PRICING_ROW:${row.id}`)]);
+  await lockQueueTurns(tx, active.map(draft => draft.queueTurnId));
+  const locked = await tx.logisticsAllocationDraft.findMany({ where: { id: { in: active.map(draft => draft.id) } },
+    include: { lines: true, queueTurn: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  if (locked.length !== active.length) throw new DispatchAllocationConflictError('تخصیص راننده در هنگام نهایی‌سازی تغییر کرد.');
+  const byRow = new Map(source.rows.map(row => [row.productRowId, row]));
+  const requested = new Map<string, Prisma.Decimal>();
+  for (const draft of locked) {
+    if (draft.queueTurn.loadingId !== loading.id || draft.queueTurn.status !== GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING ||
+        !await isGuardQueueTurnCurrentlyReady(tx, draft.queueTurn) || !draft.lines.length) {
+      throw new DispatchAllocationConflictError('راننده یا وسیله نقلیه دیگر آماده نیست.');
+    }
+    for (const line of draft.lines) {
+      const canonical = byRow.get(line.productRowId);
+      if (line.sourceKind !== 'PARTNER_CASE' || line.partnerCaseId !== source.owner.caseId ||
+          line.partnerCaseRevision !== source.owner.revision || line.partnerIntegrityHash !== source.owner.integrityHash ||
+          line.partnerDeliveryId !== source.deliveryId || line.partnerLineageId !== canonical?.lineageId ||
+          line.sourceContractId !== null || line.sourceContractItemId !== null || line.productId !== null ||
+          line.unit !== canonical.unit || line.quantity.lte(0)) throw new DispatchAllocationConflictError('شواهد ردیف تخصیص با تحویل انتخابی همخوان نیست.');
+      requested.set(line.productRowId, (requested.get(line.productRowId) || new Prisma.Decimal(0)).add(line.quantity));
+    }
+  }
+  const projection = await readPartnerShipmentQuantityProjection(tx, source.owner.caseId);
+  for (const [productRowId, amount] of requested) {
+    const selected = byRow.get(productRowId)!;
+    const balance = projection.rows.find(row => row.productRowId === productRowId && row.unit === selected.unit);
+    if (!balance || balance.health !== 'CURRENT' || !balance.quantities ||
+        amount.gt(balance.quantities.availableToLoad) || amount.gt(selected.plannedQuantity)) {
+      throw new DispatchAllocationConflictError('مقدار تخصیص از مانده معتبر یا تحویل انتخابی بیشتر است.');
+    }
+  }
+  const priorDeliveryRows = await tx.logisticsAllocationRevisionLine.groupBy({ by: ['productRowId'], where: {
+    sourceKind: 'PARTNER_CASE', partnerCaseId: source.owner.caseId, partnerDeliveryId: source.deliveryId,
+    revision: { candidate: { status: { in: [AccountingDispatchCandidateStatus.PENDING, AccountingDispatchCandidateStatus.ACCEPTED] } } },
+  },
+    _sum: { quantity: true } });
+  for (const prior of priorDeliveryRows) {
+    const proposed = requested.get(prior.productRowId) || new Prisma.Decimal(0);
+    const selected = byRow.get(prior.productRowId);
+    if (!selected || proposed.add(prior._sum.quantity || 0).gt(selected.plannedQuantity)) {
+      throw new DispatchAllocationConflictError('مقدار نهایی این تحویل از برنامه مصوب بیشتر است.');
+    }
+  }
+  const now = (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now;
+  const batch = await tx.logisticsAllocationBatch.create({ data: { loadingId: loading.id,
+    idempotencyKey: input.idempotencyKey, finalizedAt: now, finalizedBy: input.actorId } });
+  for (const draft of locked) {
+    const prior = await tx.logisticsAllocationRevision.aggregate({ where: { loadingId: loading.id,
+      queueTurnId: draft.queueTurnId }, _max: { revisionNumber: true } });
+    const revisionNumber = (prior._max.revisionNumber || 0) + 1;
+    const snapshot = stableValue({ schemaVersion: 1, sourceKind: 'PARTNER_CASE',
+      loading: { id: loading.id, number: loading.loadingNumber,
+        customer: { id: source.recipient.customerId, name: source.recipient.displayName },
+        destination: source.recipient.destination, deliveryId: source.deliveryId, plannedDate: source.plannedDate },
+      queueTurn: { id: draft.queueTurn.id, driverSource: draft.queueTurn.driverSource,
+        admissionSnapshot: draft.queueTurn.admissionSnapshot, admissionIntegrityHash: draft.queueTurn.integrityHash },
+      revisionNumber, finalizedAt: now,
+      notification: { confirmationPhone: source.recipient.phone, source: 'PARTNER_VERIFIED_CUSTOMER_OUTPUT', capturedAt: now },
+      lines: draft.lines.map(line => ({ productRowId: line.productRowId,
+        lineageId: line.partnerLineageId, quantity: line.quantity.toFixed(3), unit: line.unit,
+        snapshot: line.snapshot })) });
+    const rows: PartnerFinalizedAllocationRow[] = draft.lines.map(line => ({ sourceKind: 'PARTNER_CASE',
+      sourceContractId: null, sourceContractItemId: null, productId: null,
+      partnerCaseId: source.owner.caseId, partnerCaseRevision: source.owner.revision,
+      partnerIntegrityHash: source.owner.integrityHash, partnerDeliveryId: source.deliveryId,
+      partnerLineageId: line.partnerLineageId!, productRowId: line.productRowId,
+      quantity: line.quantity, unit: line.unit, snapshot: line.snapshot }));
+    await persistFinalizedAllocationRevision(tx, { revisionData: { sourceKind: 'PARTNER_CASE', batchId: batch.id,
+      loadingId: loading.id, queueTurnId: draft.queueTurnId, revisionNumber, snapshot: json(snapshot),
+      integrityHash: digest(snapshot), finalizedAt: now, finalizedBy: input.actorId,
+      partnerCaseId: source.owner.caseId, partnerCaseRevision: source.owner.revision,
+      partnerIntegrityHash: source.owner.integrityHash, partnerInternalRecordId: source.internalRecordId,
+      partnerDeliveryId: source.deliveryId }, rows, loadingLines: new Map(), actorId: input.actorId,
+      expectedCurrency: pricing.currency, finalizedAt: now, partnerPricing: pricing,
+      revisionEventType: 'ALLOCATION_FINALIZED', idempotencyKey: input.idempotencyKey,
+      effectiveAuthority: input.effectiveAuthority,
+      revisionAuditPayload: ({ candidateId, snapshotHash, pricingBinding }) => ({ candidateId, snapshotHash,
+        sourceKind: 'PARTNER_CASE', owner: source.owner, deliveryId: source.deliveryId,
+        documentPath: pricingBinding.path, financialApprovalEvidenceId: pricing.id,
+        pricedEventIntegrityHashes: pricingBinding.eventIntegrityHashes }) });
+  }
+  await tx.logisticsLoading.update({ where: { id: loading.id }, data: { status: 'FINALIZED', finalizedAt: now,
+    finalizedBy: input.actorId } });
+  for (const draft of locked) {
+    const changed = await tx.guardDriverQueueTurn.updateMany({ where: { id: draft.queueTurnId,
+      status: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING, loadingId: loading.id },
+      data: { status: GuardDriverQueueTurnStatus.LOADING_FINALIZED, finalizedAt: now, finalizedBy: input.actorId } });
+    if (changed.count !== 1) throw new DispatchAllocationConflictError('وضعیت نوبت راننده تغییر کرد.');
+    await appendQueueEvent(tx, { turnId: draft.queueTurnId, eventType: 'LOADING_FINALIZED',
+      fromStatus: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING, toStatus: GuardDriverQueueTurnStatus.LOADING_FINALIZED,
+      actorId: input.actorId, payload: { loadingId: loading.id, batchId: batch.id,
+        source: { sourceKind: 'PARTNER_CASE', owner: source.owner, deliveryId: source.deliveryId,
+          sourceHash: await canonicalHash(source) } } });
+  }
+  return tx.logisticsAllocationBatch.findUniqueOrThrow({ where: { id: batch.id },
+    include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } } });
+};
+
 export const finalizeCanonicalLoadingAllocations = async (prisma: Database, input: {
   loadingId: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
+  expected?: RevisionRef; correlationId?: string; reason?: string;
 }) => serializable(prisma, async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   await lockKeys(tx, [`LOGISTICS_LOADING:${input.loadingId}`]);
+  const sourceOwner = await tx.logisticsLoading.findUnique({ where: { id: input.loadingId }, select: { sourceKind: true } });
+  if (sourceOwner?.sourceKind === 'PARTNER_CASE') {
+    const source = await preparePartnerLoadingQueueChange(tx, { ...input,
+      correlationId: input.correlationId || randomUUID() }, 'FINALIZE');
+    if (!source.ok) return { partnerFailure: source.error };
+    if (source.value.sourceKind !== 'PARTNER_CASE') return { partnerFailure: partnerError('INTEGRITY_CONFLICT') };
+    const canonical = await createPartnerFulfillmentAdapter(createPrismaPartnerFulfillmentRepository({ database: tx,
+      actorId: input.actorId, correlationId: input.correlationId || randomUUID(), reason: input.reason }))
+      .readLoadingSource(source.value.owner, source.value.deliveryId);
+    if (!canonical.ok) return { partnerFailure: canonical.error };
+    let pricing;
+    try { pricing = await readPartnerApprovedShipmentPricing(tx, canonical.value); }
+    catch (error) {
+      if (error instanceof PartnerShipmentPricingConflictError) throw new DispatchAllocationConflictError(error.message);
+      throw error;
+    }
+    return finalizePartnerLoadingAllocations(tx, { loadingId: input.loadingId,
+      idempotencyKey, actorId: input.actorId, effectiveAuthority: input.effectiveAuthority }, canonical.value, pricing);
+  }
   const previous = await tx.logisticsAllocationBatch.findUnique({
     where: { loadingId_idempotencyKey: { loadingId: input.loadingId, idempotencyKey } },
     include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } },
@@ -362,10 +741,12 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
       canonicalAllocationDrafts: { include: { lines: true, queueTurn: true }, orderBy: { createdAt: 'asc' } } },
   });
   if (!loading) throw new DispatchAllocationValidationError('Loading was not found.');
+  if (!loading.project) throw new DispatchAllocationConflictError('Ordinary loading project evidence is missing.');
   if (loading.status !== 'DRAFT') throw new DispatchAllocationConflictError('Only a draft loading can be finalized.');
   if (loading.canonicalAllocationDrafts.length === 0) throw new DispatchAllocationValidationError('At least one canonical driver allocation is required.');
-  const itemIds = loading.canonicalAllocationDrafts.flatMap((draft) => draft.lines.map((line) => line.sourceContractItemId));
-  const initialContractIds = [...new Set(loading.canonicalAllocationDrafts
+  const initialDrafts = loading.canonicalAllocationDrafts.map(draft => ({ ...draft, lines: draft.lines.map(ordinaryDraftLine) }));
+  const itemIds = initialDrafts.flatMap((draft) => draft.lines.map((line) => line.sourceContractItemId));
+  const initialContractIds = [...new Set(initialDrafts
     .flatMap((draft) => draft.lines.map((line) => line.sourceContractId)))];
   const draftIds = loading.canonicalAllocationDrafts.map((draft) => draft.id);
   await lockKeys(tx, [
@@ -381,8 +762,9 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
   await lockQueueTurns(tx, loading.canonicalAllocationDrafts.map((draft) => draft.queueTurnId));
   await lockPricingContracts(tx, initialContractIds);
   await lockShipmentTruth(tx, itemIds);
-  const refreshedDrafts = await tx.logisticsAllocationDraft.findMany({ where: { id: { in: draftIds } },
-    include: { lines: true, queueTurn: true }, orderBy: { createdAt: 'asc' } });
+  const refreshedDrafts = (await tx.logisticsAllocationDraft.findMany({ where: { id: { in: draftIds } },
+    include: { lines: true, queueTurn: true }, orderBy: { createdAt: 'asc' } }))
+    .map(draft => ({ ...draft, lines: draft.lines.map(ordinaryDraftLine) }));
   if (refreshedDrafts.length !== draftIds.length) throw new DispatchAllocationConflictError('An allocation draft changed during finalization.');
   const lockedItems = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, include: { contract: true } });
   const lockedItemsById = new Map(lockedItems.map((item) => [item.id, item]));
@@ -470,6 +852,9 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
   await refreshProjectionContracts(tx, contractIds);
   return tx.logisticsAllocationBatch.findUniqueOrThrow({ where: { id: batch.id },
     include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } } });
+}).then(outcome => {
+  if ('partnerFailure' in outcome) throw new PartnerLoadingCommandError(outcome.partnerFailure);
+  return outcome;
 });
 
 export const createSuccessorAllocationRevision = async (prisma: Database, input: {
@@ -481,6 +866,10 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     include: { candidate: true, successorRevision: true, lines: true,
       loading: { include: { customer: true, project: true, lines: true } }, queueTurn: true } });
   if (!initialPredecessor) throw new DispatchAllocationValidationError('Predecessor allocation revision was not found.');
+  if (initialPredecessor.sourceKind !== 'SALES_CONTRACT' || initialPredecessor.loading.sourceKind !== 'SALES_CONTRACT') {
+    throw new DispatchAllocationConflictError('اصلاح تخصیص بارگیری پرونده همکار به شواهد همان پرونده نیاز دارد.');
+  }
+  const initialPredecessorLines = initialPredecessor.lines.map(ordinaryAllocationLine);
   const previousBatch = await tx.logisticsAllocationBatch.findUnique({
     where: { loadingId_idempotencyKey: { loadingId: initialPredecessor.loadingId, idempotencyKey } },
     include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } },
@@ -490,9 +879,9 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
   if (!Array.isArray(input.lines) || input.lines.length === 0) throw new DispatchAllocationValidationError('At least one successor line is required.');
   const itemIds = input.lines.map((line) => required(line.sourceContractItemId, 'sourceContractItemId'));
   const initiallyRequestedItems = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, select: { id: true, contractId: true } });
-  const transferItemIds = [...new Set([...itemIds, ...initialPredecessor.lines.map((line) => line.sourceContractItemId)])];
+  const transferItemIds = [...new Set([...itemIds, ...initialPredecessorLines.map((line) => line.sourceContractItemId)])];
   const pricingContractIds = [...new Set([...initiallyRequestedItems.map((item) => item.contractId),
-    ...initialPredecessor.lines.map((line) => line.sourceContractId)])];
+    ...initialPredecessorLines.map((line) => line.sourceContractId)])];
   await lockKeys(tx, [`LOGISTICS_ALLOCATION_REVISION:${initialPredecessor.id}`,
     `LOGISTICS_LOADING:${initialPredecessor.loadingId}`,
     `ACCOUNTING_DISPATCH_CANDIDATE:${initialPredecessor.candidate.id}`,
@@ -510,6 +899,8 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     include: { candidate: true, successorRevision: true, lines: true,
       loading: { include: { customer: true, project: true, lines: true } }, queueTurn: true } });
   if (!predecessor?.candidate) throw new DispatchAllocationConflictError('The predecessor changed during successor finalization.');
+  const predecessorLines = predecessor.lines.map(ordinaryAllocationLine);
+  if (!predecessor.loading.project) throw new DispatchAllocationConflictError('Ordinary loading project evidence is missing.');
   if (predecessor.successorRevision) throw new DispatchAllocationConflictError('This allocation already has a successor revision.');
   const refreshedCandidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: predecessor.candidate.id } });
   if (!refreshedCandidate) throw new DispatchAllocationConflictError('The predecessor candidate changed during successor finalization.');
@@ -542,7 +933,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
   if (stalePricingTransfer) {
     try {
       assertExactStableReservationTransfer(
-        predecessor.lines.map((line) => ({ contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+        predecessorLines.map((line) => ({ contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
           productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit })),
         rows.map((line) => ({ contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
           productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit })),
@@ -559,7 +950,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     for (const row of projection.rows) {
       if (row.health !== 'CURRENT' || !row.quantities) throw new DispatchAllocationConflictError(`Shipment row ${row.contractItemId} is not current.`);
       const transferred = stalePricingTransfer
-        ? predecessor.lines.filter((line) => line.sourceContractItemId === row.contractItemId)
+        ? predecessorLines.filter((line) => line.sourceContractItemId === row.contractItemId)
           .reduce((sum, line) => sum.add(line.quantity), new Prisma.Decimal(0))
         : new Prisma.Decimal(0);
       projections.set(row.contractItemId, { amount: new Prisma.Decimal(row.quantities.availableToLoad).add(transferred), unit: row.unit });
@@ -603,7 +994,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
       stalePricingTransfer, documentPath: pricingBinding.path, pricingVersionIds: pricingBinding.pricingVersionIds,
       pricedEventIntegrityHashes: pricingBinding.eventIntegrityHashes }),
     afterRevisionCreated: stalePricingTransfer ? async (revision) => {
-      for (const line of predecessor.lines) {
+      for (const line of predecessorLines) {
         const release = { id: `${revision.id}:${line.id}`, contractId: line.sourceContractId,
           contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit,
           kind: 'ALLOCATION_RELEASED' as const, quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(),
@@ -620,7 +1011,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
   });
   await refreshProjectionContracts(tx, [
     ...rows.map((line) => line.sourceContractId),
-    ...(stalePricingTransfer ? predecessor.lines.map((line) => line.sourceContractId) : []),
+    ...(stalePricingTransfer ? predecessorLines.map((line) => line.sourceContractId) : []),
   ]);
   return tx.logisticsAllocationBatch.findUniqueOrThrow({ where: { id: batch.id },
     include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } } });
@@ -687,8 +1078,15 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
   await tx.accountingDispatchWorkItem.update({ where: { candidateId: candidate.id }, data: { status: 'COMPLETED', completedAt: now } });
   if (input.action !== 'ACCEPT') {
     for (const line of candidate.allocationRevision.lines) {
+      const source = line.sourceKind === 'PARTNER_CASE' && line.partnerCaseId && line.partnerLineageId &&
+        line.partnerCaseRevision && line.partnerIntegrityHash && line.sourceContractId === null && line.sourceContractItemId === null
+        ? { sourceKind: 'PARTNER_CASE' as const, contractId: null, contractItemId: null,
+          partnerCaseId: line.partnerCaseId, partnerLineageId: line.partnerLineageId,
+          partnerCaseRevision: line.partnerCaseRevision, partnerIntegrityHash: line.partnerIntegrityHash }
+        : (() => { const ordinary = ordinaryAllocationLine(line); return {
+          contractId: ordinary.sourceContractId, contractItemId: ordinary.sourceContractItemId }; })();
       const evidence = {
-        id: `${candidate.id}:${line.id}`, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+        id: `${candidate.id}:${line.id}`, ...source,
         productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_RELEASED' as const,
         quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(), recordedAt: now.toISOString(),
         sourceType: 'ACCOUNTING_CANDIDATE_DISPOSITION', sourceId: `${candidate.id}:${line.id}`, sourceVersion: 1,
@@ -702,7 +1100,8 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
         integrityHash: evidence.integrityHash, metadata: json(evidence.metadata),
       } });
     }
-    await refreshProjectionContracts(tx, candidate.allocationRevision.lines.map((line) => line.sourceContractId));
+    await refreshProjectionContracts(tx, candidate.allocationRevision.lines.filter(line => line.sourceKind === 'SALES_CONTRACT')
+      .map(ordinaryAllocationLine).map(line => line.sourceContractId));
   }
   const waybill = input.action === 'ACCEPT' ? await issueWaybill(tx, { ...candidate, status, allocationRevision: candidate.allocationRevision }, input.actorId) : null;
   const result = publicCandidateResult({ ...updated, status }, waybill);

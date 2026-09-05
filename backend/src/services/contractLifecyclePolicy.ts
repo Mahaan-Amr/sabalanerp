@@ -11,6 +11,10 @@ export const PARTNER_CASE_RETENTION_BLOCKER: ContractLifecycleBlocker = {
   code: 'PARTNER_CASE_RETAINED', count: 1, label: 'پرونده شماره‌دار فروش همکار',
 };
 
+export const PARTNER_CASE_LIFECYCLE_BLOCKER: ContractLifecycleBlocker = {
+  code: 'PARTNER_CASE_LIFECYCLE', count: 1, label: 'چرخه قرارداد مشتری فقط از پرونده فروش همکار تغییر می‌کند',
+};
+
 export const contractHardDeleteEligibility = ({
   status,
   numberedPartnerCase = false,
@@ -54,9 +58,11 @@ export const contractHardDeleteEligibility = ({
 
 export const contractDeactivationEligibility = ({
   alreadyInactive,
+  numberedPartnerCase = false,
   openOperations,
 }: {
   alreadyInactive: boolean;
+  numberedPartnerCase?: boolean;
   openOperations: {
     deliveries: number;
     loadings: number;
@@ -67,6 +73,7 @@ export const contractDeactivationEligibility = ({
   };
 }) => {
   const blockers: ContractLifecycleBlocker[] = [];
+  if (numberedPartnerCase) blockers.push(PARTNER_CASE_LIFECYCLE_BLOCKER);
   if (alreadyInactive) blockers.push({ code: 'ALREADY_INACTIVE', count: 1, label: 'قرارداد از قبل غیرفعال است' });
   if (openOperations.deliveries > 0) blockers.push({ code: 'OPEN_DELIVERIES', count: openOperations.deliveries, label: 'تحویل‌های باز', ...(openOperations.deliveryDetails ? { details: openOperations.deliveryDetails } : {}) });
   if (openOperations.loadings > 0) blockers.push({ code: 'OPEN_LOADINGS', count: openOperations.loadings, label: 'بارگیری‌های باز', ...(openOperations.loadingDetails ? { details: openOperations.loadingDetails } : {}) });

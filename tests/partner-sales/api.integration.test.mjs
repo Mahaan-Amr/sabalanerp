@@ -9,10 +9,10 @@ test('internal Sales create grant permits Standard and Collaboration entry, but 
   await withFixture(`partner-qa-${randomUUID()}`, async ({ namespace, token }) => {
     const get = async (path, authenticated = true) => {
       const response = await fetch(`${target.backend}${path}`, {
-        headers: authenticated ? { cookie: `sabalan_session=${token}` } : {},
+        headers: { Connection: 'close', ...(authenticated ? { cookie: `sabalan_session=${token}` } : {}) },
         redirect: 'error', signal: AbortSignal.timeout(15_000),
       });
-      return { status: response.status, body: await response.json() };
+      return { status: response.status, headers: response.headers, body: await response.json() };
     };
     assert.equal((await get('/api/auth/me', false)).status, 401);
     const identity = await get('/api/auth/me');
@@ -21,6 +21,8 @@ test('internal Sales create grant permits Standard and Collaboration entry, but 
     for (const path of ['/dashboard/sales/contracts/create', '/dashboard/sales/contracts/collaboration/create']) {
       const availability = await get(`/api/dashboard/route-availability?path=${encodeURIComponent(path)}`);
       assert.equal(availability.status, 200);
+      assert.equal(availability.headers.get('cache-control'), 'private, no-store');
+      assert.match(availability.headers.get('vary') || '', /Cookie/);
       assert.equal(availability.body.data.allowed, true);
     }
     const denied = await get('/api/dashboard/route-availability?path=%2Fdashboard%2Fsales%2Fcontracts%2Funowned%2Fedit');

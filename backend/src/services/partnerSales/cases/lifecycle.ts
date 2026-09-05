@@ -15,9 +15,11 @@ import {
   type RevisionRef,
   type CaseState,
 } from '@sabalanerp/partner-sales-contracts';
-import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
+import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { buildCaseCancellationEvent, buildCaseCommitmentEvent, projectCustomerContractStatus } from './events';
+import { caseComparableAmount } from '../reporting/comparable';
 import { buildCaseProjections, type CaseRevisionProjectionEvidence } from './projections';
+import { subtract } from '../reporting/money';
 
 type Transaction = Prisma.TransactionClient;
 type Commit = Extract<ReturnType<typeof PartnerCommandSchema.parse>, { type: 'CASE_COMMIT' }>;
@@ -77,8 +79,8 @@ function projectionEvidence(input: { graphHash: string; graph: Prisma.JsonValue;
   if (products.some(row => !row) || !wholesaleTotals || !retailTotals ||
       typeof wholesaleTotals.payable !== 'string' || typeof retailTotals.payable !== 'string') return undefined;
   try {
-    return { ...input, products, resaleDifference: new Prisma.Decimal(retailTotals.payable)
-      .minus(wholesaleTotals.payable).toString() } as unknown as CaseRevisionProjectionEvidence;
+    return { ...input, products, resaleDifference: subtract(retailTotals.payable,
+      wholesaleTotals.payable) } as unknown as CaseRevisionProjectionEvidence;
   } catch { return undefined; }
 }
 
@@ -99,8 +101,7 @@ async function clock(tx: Transaction) {
   return { date: instant.slice(0, 10), instant };
 }
 
-async function lockCase(tx: Transaction, caseId: string) {
-  await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
+async function readCase(tx: Transaction, caseId: string) {
   return tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
     id: true, caseNumber: true, profileId: true, headRevision: true, integrityHash: true, state: true,
     stateRevision: true, internalRecordId: true, customerContractId: true, commitmentEventId: true,
@@ -113,6 +114,11 @@ async function lockCase(tx: Transaction, caseId: string) {
     customerContract: { select: { contractNumber: true, partnerRevision: true, partnerIntegrityHash: true,
       status: true, signedAt: true, printedAt: true } },
   } });
+}
+
+async function lockCase(tx: Transaction, caseId: string) {
+  await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
+  return readCase(tx, caseId);
 }
 
 type LockedCase = NonNullable<Awaited<ReturnType<typeof lockCase>>>;
@@ -170,6 +176,29 @@ async function parseViews(tx: Transaction, row: LockedCase) {
       customer.data.revision !== row.headRevision || customer.data.contractNumber !== row.customerContract.contractNumber ||
       computedOutputHash !== outputHash) return undefined;
   return { partner: { ...partner.data, state: row.state }, accounting: { ...accounting.data, state: row.state } };
+}
+
+/** Read-only consumer seam. It performs the same hash/provenance rebuild as the
+ * lifecycle writer without taking its mutation lock. Authorization remains the
+ * caller's responsibility and must execute in the same transaction snapshot. */
+export async function readCurrentPartnerCaseViews(tx: Transaction, caseId: string) {
+  const row = await readCase(tx, caseId);
+  if (!row) return undefined;
+  const views = await parseViews(tx, row);
+  return views ? { row, ...views } : undefined;
+}
+
+/** Immutable revision projection read for staged Accounting work. It validates
+ * canonical content with the same rebuild as current reads, without claiming
+ * that this revision is the effective head or changing reciprocal Case links. */
+export async function readPartnerRevisionProjections(tx: Transaction, owner: RevisionRef) {
+  const row = await readCase(tx, owner.caseId);
+  const revision = await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: {
+    caseId: owner.caseId, revision: owner.revision } } });
+  if (!row || !revision || revision.integrityHash !== owner.integrityHash) return undefined;
+  return parseViews(tx, { ...row, headRevision: owner.revision, integrityHash: owner.integrityHash, state: 'DRAFT', head: revision,
+    internalRecord: { ...row.internalRecord, expectedRevision: owner.revision, integrityHash: owner.integrityHash },
+    customerContract: { ...row.customerContract, partnerRevision: owner.revision, partnerIntegrityHash: owner.integrityHash } });
 }
 
 async function historicalPartner(tx: Transaction, saved: ReturnType<typeof receipt>) {
@@ -350,7 +379,7 @@ Promise<ExecutionResult> {
     ...(command.trigger === 'SIGNED' ? { isSigned: true, signedAt: new Date(output.value.occurredAt),
       signedBy: dependencies.actorId } : { printedAt: new Date(output.value.occurredAt) }),
     ...(firstCommitment ? { realizedSellerId: row.profile.userId, realizedSellerSource: 'PARTNER_CASE_COMMITMENT',
-      realizedAt: new Date(output.value.occurredAt), realizedAmount: views.accounting.totals.payable } : {}),
+      realizedAt: new Date(output.value.occurredAt), realizedAmount: caseComparableAmount(views.accounting.totals) } : {}),
   } });
   await tx.partnerCaseEvent.create({ data: { id: factEventId, caseId, caseRevision: row.headRevision,
     integrityHash: row.integrityHash, sequence, stateRevision: firstCommitment ? undefined : stateRevision,
@@ -365,7 +394,7 @@ Promise<ExecutionResult> {
       correlationId: command.correlationId, actorId: dependencies.actorId, recordedAt: at.instant,
       effectiveDate: output.value.occurredAt.slice(0, 10), owner, trigger: command.trigger,
       internalRecordId: row.internalRecordId, salesCreditOwnerId: row.profile.userId,
-      sabalanNetAmount: { amount: views.accounting.totals.payable, currency: views.accounting.totals.currency } });
+      sabalanNetAmount: { amount: caseComparableAmount(views.accounting.totals), currency: views.accounting.totals.currency } });
     await tx.partnerCaseEvent.create({ data: { id: commitmentEventId, caseId, caseRevision: row.headRevision,
       integrityHash: row.integrityHash, sequence: sequence + 1, stateRevision, type: commitment.type,
       fromState: 'CUSTOMER_APPROVED', toState: 'COMMITTED', actorId: dependencies.actorId,
@@ -383,7 +412,10 @@ Promise<ExecutionResult> {
 
 export function createPrismaPartnerCaseLifecycleService(input: Omit<PartnerCaseLifecycleDependencies, 'transaction'> & {
   database: PrismaClient }) {
-  return createPartnerCaseLifecycleService({ ...input, transaction: work => input.database.$transaction(work) });
+  return createPartnerCaseLifecycleService({ ...input, transaction: work => input.database.$transaction(async tx => {
+    await lockPartnerOperationsControl(tx);
+    return work(tx);
+  }) });
 }
 
 export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifecycleDependencies): PartnerCommandPort & {

@@ -30,6 +30,14 @@ export type LockedApprovedPricingVersion = Omit<ApprovedPricingVersionContract, 
   rows: LockedApprovedPricingRow[];
 };
 
+/** Published internal wholesale approval, not a retail SalesContract alias.
+ * The binding adapter verifies the immutable invoice/Case proof before this
+ * calculation seam; the money algorithm is shared with ordinary shipments. */
+export type LockedPartnerApprovedPricingVersion = Omit<LockedApprovedPricingVersion, 'contractId' | 'rows'> & {
+  sourceKind: 'PARTNER_CASE'; caseId: string; internalRecordId: string;
+  rows: Array<Omit<LockedApprovedPricingRow, 'contractItemId'>>;
+};
+
 export type PricedRevisionLine = {
   allocationRevisionLineId: string;
   contractId: string;
@@ -38,6 +46,13 @@ export type PricedRevisionLine = {
   quantity: string;
   unit: string;
 };
+export type PartnerPricedRevisionLine = Omit<PricedRevisionLine, 'contractId' | 'contractItemId'> & {
+  sourceKind: 'PARTNER_CASE'; caseId: string; internalRecordId: string;
+};
+type PricingVersion = LockedApprovedPricingVersion | LockedPartnerApprovedPricingVersion;
+type PricingLine = PricedRevisionLine | PartnerPricedRevisionLine;
+const sourceIdentity = (source: PricingVersion | PricingLine) => 'sourceKind' in source
+  ? JSON.stringify(['PARTNER_CASE', source.caseId, source.internalRecordId]) : JSON.stringify(['SALES_CONTRACT', source.contractId]);
 
 export type PriorPricedAllocationEvent = {
   pricingRowId: string;
@@ -67,7 +82,7 @@ export type PricedAllocationEvidence = {
   ledgerSequence: number;
 };
 
-export type CalculatedPricedAllocationEvent = PricedRevisionLine & {
+type CalculatedAmounts = {
   pricingVersionId: string;
   pricingRowId: string;
   grossAmount: string;
@@ -77,6 +92,9 @@ export type CalculatedPricedAllocationEvent = PricedRevisionLine & {
   ledgerSequence: number;
   evidence: PricedAllocationEvidence;
 };
+export type CalculatedPricedAllocationEvent = PricedRevisionLine & CalculatedAmounts;
+type PricedResult<Line extends PricingLine> = { events: Array<Line & CalculatedAmounts>;
+  totals: { quantitiesByUnit: Record<string, string>; grossAmount: string; discountAmount: string; netAmount: string } };
 
 const pow10 = (scale: number) => 10n ** BigInt(scale);
 
@@ -119,8 +137,8 @@ export const pricedAllocationIntegrityHash = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
 
 type RowState = {
-  version: LockedApprovedPricingVersion;
-  row: LockedApprovedPricingRow;
+  version: PricingVersion;
+  row: PricingVersion['rows'][number];
   contracted: bigint;
   grossTarget: bigint;
   discountTarget: bigint;
@@ -131,21 +149,22 @@ type RowState = {
 };
 
 const prepareStates = (
-  versions: LockedApprovedPricingVersion[],
+  versions: PricingVersion[],
   priorEvents: PriorPricedAllocationEvent[],
-): { versionsByContract: Map<string, LockedApprovedPricingVersion>; statesByRow: Map<string, RowState> } => {
-  const versionsByContract = new Map<string, LockedApprovedPricingVersion>();
+): { versionsBySource: Map<string, PricingVersion>; statesByRow: Map<string, RowState> } => {
+  const versionsBySource = new Map<string, PricingVersion>();
   const statesByRow = new Map<string, RowState>();
   let currency: string | null = null;
-  for (const version of [...versions].sort((left, right) => left.contractId.localeCompare(right.contractId))) {
-    if (versionsByContract.has(version.contractId)) {
-      throw new PricedAllocationInvariantError('DUPLICATE_PRICING_CONTRACT', `Contract ${version.contractId} has multiple bound pricing versions.`);
+  for (const version of [...versions].sort((left, right) => sourceIdentity(left).localeCompare(sourceIdentity(right)))) {
+    const identity = sourceIdentity(version);
+    if (versionsBySource.has(identity)) {
+      throw new PricedAllocationInvariantError('DUPLICATE_PRICING_CONTRACT', `Pricing source ${identity} has multiple bound versions.`);
     }
     if (currency !== null && currency !== version.currency) {
       throw new PricedAllocationInvariantError('CURRENCY_MISMATCH', 'One allocation revision cannot mix pricing currencies.');
     }
     currency = version.currency;
-    versionsByContract.set(version.contractId, version);
+    versionsBySource.set(identity, version);
     const grossTotal = parseFixed(version.grossAmount, MONEY_SCALE);
     const discountTotal = parseFixed(version.discountAmount, MONEY_SCALE);
     const netTotal = parseFixed(version.netAmount, MONEY_SCALE);
@@ -166,7 +185,7 @@ const prepareStates = (
     }
     const basisTotal = eligible.reduce((sum, row) => sum + (bases.get(row.id) || 0n), 0n);
     if (discountTotal !== 0n && basisTotal === 0n) {
-      throw new PricedAllocationInvariantError('MISSING_DISCOUNT_BASIS', `Contract ${version.contractId} has discount without eligible basis.`);
+      throw new PricedAllocationInvariantError('MISSING_DISCOUNT_BASIS', `Pricing source ${identity} has discount without eligible basis.`);
     }
     let allocatedDiscount = 0n;
     let rowGrossTotal = 0n;
@@ -200,28 +219,36 @@ const prepareStates = (
     state.discount += parseFixed(prior.discountAmount, MONEY_SCALE);
     state.ledgerSequence = prior.ledgerSequence;
   }
-  return { versionsByContract, statesByRow };
+  return { versionsBySource, statesByRow };
 };
 
-export const allocatePricedRevision = (input: {
+export function allocatePricedRevision(input: {
   versions: LockedApprovedPricingVersion[];
   priorEvents: PriorPricedAllocationEvent[];
   lines: PricedRevisionLine[];
-}): { events: CalculatedPricedAllocationEvent[]; totals: { quantitiesByUnit: Record<string, string>; grossAmount: string; discountAmount: string; netAmount: string } } => {
-  const { versionsByContract, statesByRow } = prepareStates(input.versions, input.priorEvents);
-  const events: CalculatedPricedAllocationEvent[] = [];
+}): PricedResult<PricedRevisionLine>;
+export function allocatePricedRevision(input: {
+  versions: LockedPartnerApprovedPricingVersion[]; priorEvents: PriorPricedAllocationEvent[]; lines: PartnerPricedRevisionLine[];
+}): PricedResult<PartnerPricedRevisionLine>;
+export function allocatePricedRevision(input: {
+  versions: PricingVersion[]; priorEvents: PriorPricedAllocationEvent[]; lines: PricingLine[];
+}): PricedResult<PricingLine> {
+  const { versionsBySource, statesByRow } = prepareStates(input.versions, input.priorEvents);
+  const events: PricedResult<PricingLine>['events'] = [];
   const quantitiesByUnit = new Map<string, bigint>();
   let totalGross = 0n;
   let totalDiscount = 0n;
   for (const line of input.lines) {
-    const version = versionsByContract.get(line.contractId);
-    if (!version) throw new PricedAllocationInvariantError('MISSING_PRICING_VERSION', `Contract ${line.contractId} has no bound pricing version.`);
-    const row = version.rows.find((candidate) => candidate.contractItemId === line.contractItemId);
-    if (!row) throw new PricedAllocationInvariantError('MISSING_PRICING_ROW', `Contract item ${line.contractItemId} has no approved pricing row.`);
+    const version = versionsBySource.get(sourceIdentity(line));
+    if (!version) throw new PricedAllocationInvariantError('MISSING_PRICING_VERSION', 'Allocation source has no bound pricing version.');
+    const row = version.rows.find(candidate => 'sourceKind' in line
+      ? !('contractItemId' in candidate) && candidate.productRowId === line.productRowId
+      : 'contractItemId' in candidate && candidate.contractItemId === line.contractItemId);
+    if (!row) throw new PricedAllocationInvariantError('MISSING_PRICING_ROW', 'Allocation row has no approved pricing row.');
     if (row.productRowId !== line.productRowId) {
-      throw new PricedAllocationInvariantError('ROW_IDENTITY_MISMATCH', `Contract item ${line.contractItemId} stable identity changed.`);
+      throw new PricedAllocationInvariantError('ROW_IDENTITY_MISMATCH', 'Allocation stable row identity changed.');
     }
-    if (row.unit !== line.unit) throw new PricedAllocationInvariantError('UNIT_MISMATCH', `Contract item ${line.contractItemId} unit changed.`);
+    if (row.unit !== line.unit) throw new PricedAllocationInvariantError('UNIT_MISMATCH', 'Allocation row unit changed.');
     const state = statesByRow.get(row.id)!;
     const quantity = parseFixed(line.quantity, QUANTITY_SCALE);
     if (quantity === 0n) throw new PricedAllocationInvariantError('INVALID_FIXED_POINT', 'Priced allocation deltas cannot be zero.');

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   DispatchDocumentConflictError,
+  DispatchDocumentAuthorizationError,
   DispatchDocumentEvidenceConflictError,
   DispatchDocumentIntegrityError,
   DispatchDocumentNotAvailableError,
@@ -22,7 +23,9 @@ import { PilotSafetyPauseError } from '../dispatchCutover';
 const bytes = (value: string) => new TextEncoder().encode(value);
 const sha256 = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 
-const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean; failSourceEvidence?: boolean } = {}) => {
+const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean; failSourceEvidence?: boolean;
+  denyAcceptAfterStaging?: boolean; denyReplaceAfterStaging?: boolean; ambiguousAcceptAfterCommit?: boolean;
+  restrictStatementAccess?: boolean } = {}) => {
   const files = new Map<string, Uint8Array>();
   const state = {
     commands: new Map<string, { command: string; fingerprint: string; value: unknown }>(),
@@ -44,6 +47,8 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
     },
     allocateWaybillNumber: async () => (++nextNumber).toString(),
     acceptAndIssue: async (input) => {
+      if (options.denyAcceptAfterStaging) throw new DispatchDocumentAuthorizationError('revoked');
+      if (options.ambiguousAcceptAfterCommit) throw new Error('commit acknowledgement lost');
       if (input.expectedSourceIntegrityHash !== 'source-hash') throw new DispatchDocumentConflictError('stale');
       const result = { candidateId: input.candidateId, status: 'ACCEPTED' as const, waybill: input.waybill };
       state.issued.push(input);
@@ -69,6 +74,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       return result;
     },
     replaceWaybill: async (input) => {
+      if (options.denyReplaceAfterStaging) throw new DispatchDocumentAuthorizationError('revoked');
       state.replacements.push(input);
       state.issued.push({ waybill: input.replacement, artifacts: input.artifacts });
       const result = { voided: { id: input.waybillId, number: '7001', status: 'VOIDED' as const }, replacement: input.replacement };
@@ -102,6 +108,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       files.set(storageKey, content);
     },
     read: async (storageKey) => files.get(storageKey) ?? null,
+    discard: async (storageKey) => { files.delete(storageKey); },
   };
   const sourceReader: DispatchDocumentSourceReader = {
     readPrimaryBundle: async ({ candidateId, waybill }) => ({
@@ -155,7 +162,10 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       }
       return { bytes: bytes(`pdf:${input.kind}`), mediaType: 'application/pdf' };
     } },
-    access: { canReadWaybill: async ({ actorId }) => actorId === 'allowed', canReadCandidate: async ({ actorId }) => actorId === 'allowed' },
+    access: { canReadWaybill: async ({ actorId }) => ['allowed', 'allowed-internal'].includes(actorId),
+      canReadCandidate: async ({ actorId }) => ['allowed', 'allowed-internal'].includes(actorId),
+      canReadDocuments: async ({ actorId, kinds }: { actorId: string; kinds: DispatchDocumentKind[] }) =>
+        !options.restrictStatementAccess || kinds.every(kind => kind === 'WAYBILL') || actorId === 'allowed-internal' },
     incidents: { report: async input => { state.incidents.push(input); } },
     id: (() => { let value = 0; return () => `id-${++value}`; })(),
     now: () => new Date('2026-08-09T12:00:00.000Z'),
@@ -167,6 +177,7 @@ const run = async () => {
   assert.deepEqual(parseDispatchDocumentKinds(['STATEMENT', 'WAYBILL']), ['STATEMENT', 'WAYBILL']);
   assert.throws(() => parseDispatchDocumentKinds(['WAYBILL', 'UNKNOWN']), DispatchDocumentValidationError);
   assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentValidationError('invalid')), 400);
+  assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentAuthorizationError('revoked')), 403);
   assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentConflictError('conflict')), 409);
   assert.equal(dispatchDocumentHttpStatus(new PilotSafetyPauseError('paused')), 409);
   assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentNotAvailableError()), 404);
@@ -177,6 +188,30 @@ const run = async () => {
   assert.deepEqual(state.issued[0].artifacts.map((artifact: PublishedDispatchArtifact) => artifact.kind), ['WAYBILL', 'STATEMENT']);
   assert.equal(state.issued[0].artifacts[0].generatorVersion, 'generator-v1');
   assert.equal(files.size, 2);
+  {
+    const restricted = makeHarness({ restrictStatementAccess: true });
+    const pair = await restricted.service.decideCandidate({ candidateId: 'candidate-1', action: 'ACCEPT',
+      idempotencyKey: 'partner-pair', actorId: 'accountant' });
+    const waybillId = pair.waybill!.id;
+    const artifacts: PublishedDispatchArtifact[] = restricted.state.issued[0].artifacts;
+    const request = { waybillId, actorId: 'allowed', correlationId: 'partner-download' };
+    assert.ok((await restricted.service.retrieveArtifact({ ...request, artifactId: artifacts[0].id })).bytes.length);
+    await assert.rejects(() => restricted.service.retrieveArtifact({ ...request, artifactId: artifacts[1].id }),
+      DispatchDocumentNotAvailableError, 'a waybill grant must not expose the wholesale statement');
+    await assert.rejects(() => restricted.service.printHandoff({ ...request, kinds: ['WAYBILL', 'STATEMENT'],
+      idempotencyKey: 'partner-print-both' }), DispatchDocumentNotAvailableError);
+    await assert.rejects(() => restricted.service.printHandoff({ ...request, kinds: ['STATEMENT_ADJUSTMENT'],
+      idempotencyKey: 'partner-adjustment' }), DispatchDocumentNotAvailableError);
+    await assert.rejects(() => restricted.service.getCombinedReadModel({ ...request, candidateId: 'candidate-1' }),
+      DispatchDocumentNotAvailableError, 'the combined model contains internal pricing evidence');
+    const internal = { ...request, actorId: 'allowed-internal' };
+    assert.ok((await restricted.service.retrieveArtifact({ ...internal, artifactId: artifacts[1].id })).bytes.length);
+    const print = await restricted.service.printHandoff({ ...internal, kinds: ['WAYBILL', 'STATEMENT'], idempotencyKey: 'internal-print' });
+    await print.complete.succeeded();
+    await assert.rejects(() => restricted.service.printHandoff({ ...request, kinds: ['WAYBILL', 'STATEMENT'],
+      idempotencyKey: 'internal-print' }), DispatchDocumentNotAvailableError, 'replay must recheck document audience');
+    assert.ok(await restricted.service.getCombinedReadModel({ ...internal, candidateId: 'candidate-1' }));
+  }
   for (const artifact of state.issued[0].artifacts) {
     const content = files.get(artifact.storageKey)!;
     assert.equal(artifact.sha256, sha256(content));
@@ -289,12 +324,30 @@ const run = async () => {
   const storageRetry = makeHarness({ failSecondStageOnce: true });
   await assert.rejects(() => storageRetry.service.decideCandidate({ candidateId: 'candidate-storage-retry', action: 'ACCEPT',
     idempotencyKey: 'storage-retry-key', actorId: 'accountant' }), /simulated storage interruption/);
-  assert.equal(storageRetry.files.size, 1, 'a losing staged file is retained as an unreferenced immutable orphan');
+  assert.equal(storageRetry.files.size, 0, 'a partially staged pair is removed after publication failure');
   assert.equal(storageRetry.state.issued.length, 0);
   await storageRetry.service.decideCandidate({ candidateId: 'candidate-storage-retry', action: 'ACCEPT',
     idempotencyKey: 'storage-retry-key', actorId: 'accountant' });
   assert.equal(storageRetry.state.issued.length, 1);
-  assert.equal(storageRetry.files.size, 3, 'retry publishes a fresh verified pair without overwriting the losing staged file');
+  assert.equal(storageRetry.files.size, 2, 'retry publishes only the committed verified pair');
+
+  const deniedAccept = makeHarness({ denyAcceptAfterStaging: true });
+  await assert.rejects(() => deniedAccept.service.decideCandidate({ candidateId: 'candidate-denied', action: 'ACCEPT',
+    idempotencyKey: 'denied-accept', actorId: 'accountant' }), DispatchDocumentAuthorizationError);
+  assert.equal(deniedAccept.files.size, 0, 'commit-time authorization denial removes both staged PDFs');
+  assert.equal(deniedAccept.state.issued.length, 0);
+
+  const ambiguousAccept = makeHarness({ ambiguousAcceptAfterCommit: true });
+  await assert.rejects(() => ambiguousAccept.service.decideCandidate({ candidateId: 'candidate-ambiguous', action: 'ACCEPT',
+    idempotencyKey: 'ambiguous-accept', actorId: 'accountant' }), /acknowledgement lost/);
+  assert.equal(ambiguousAccept.files.size, 2,
+    'an ambiguous repository failure retains staged bytes for durable-command recovery and reconciliation');
+
+  const deniedReplace = makeHarness({ denyReplaceAfterStaging: true });
+  await assert.rejects(() => deniedReplace.service.replaceWaybill({ waybillId: 'waybill-denied', reason: 'مجوز لغو شد',
+    idempotencyKey: 'denied-replace', actorId: 'accountant' }), DispatchDocumentAuthorizationError);
+  assert.equal(deniedReplace.files.size, 0, 'replacement denial removes both staged successor PDFs');
+  assert.equal(deniedReplace.state.replacements.length, 0);
 
   const adjustmentFiles = new Map<string, Uint8Array>();
   const preparer = createStatementAdjustmentArtifactPreparer({

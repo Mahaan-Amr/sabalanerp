@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,6 +46,8 @@ const passingEvidence = (): CutoverEvidence => ({
     restoredEvidenceHash: sha, sourceEvidenceHash: sha },
   legacy: { dryRunArtifactPath: '', applyArtifactPath: '', repeatArtifactPath: '', dryRunArtifactSha256: sha,
     applyArtifactSha256: sha, repeatArtifactSha256: sha, manifestHash: sha,
+    cohortArtifactPath: '', cohortArtifactSha256: sha, cohortApprovalArtifactPath: '', cohortApprovalArtifactSha256: sha,
+    sourceCounts: {}, releaseCohortCounts: {}, releaseCohortCount: 0, excludedBlockedCount: 0,
     dryRunCompleted: true, applyCompleted: true, repeatCompleted: true, repeatCreatedCount: 0,
     unresolvedCount: 0, quarantinedCount: 0, unreviewedCohortCount: 0 },
   integrity: { artifactPath: '', orphanArtifactCount: 0, incompleteBundleCount: 0, auditGapCount: 0,
@@ -83,6 +85,7 @@ test('file-backed verification rejects hash-shaped caller claims without their a
       sourceApprovalRecordCount: 0,
       sourceRowCount: 0,
       counts: { SEALED: 0, LEGACY_REVIEW_REQUIRED: 0, REPAIR_REQUIRED: 0, EVIDENCE_CONFLICT: 0 },
+      entries: [],
     })),
     /artifact path/i,
   );
@@ -170,19 +173,40 @@ test('file-backed verification recomputes hashes and binds legacy evidence to th
     const output = `passed: ${command}`;
     await writeFile(outputPath, output);
     const semanticDigest = acceptanceSemanticDigest(output);
-    return { command, artifactPath: await writeJson(`acceptance-${index}.json`, { command, exitCode: 0, semanticDigest, outputPath }),
+    return { command, artifactPath: await writeJson(`acceptance-${index}.json`, {
+      command, exitCode: 0, semanticDigest, outputPath, sourceCommit: 'commit-1',
+    }),
       artifactSha256: sha, semanticDigest: sha, exitCode: 99, outputSha256: sha };
   }));
   const current = { manifestHash: 'b'.repeat(64), sourceContractCount: '2', sourceApprovalRecordCount: '2', sourceRowCount: '4',
-    counts: { SEALED: 2, LEGACY_REVIEW_REQUIRED: 0, REPAIR_REQUIRED: 0, EVIDENCE_CONFLICT: 0, STALE: 0 } };
+    counts: { READY: 2, LEGACY_REVIEW_REQUIRED: 0, REPAIR_REQUIRED: 0, EVIDENCE_CONFLICT: 0, STALE: 0 }, entries: [
+      { contractId: 'contract-1', sourceFinancialRecordId: 'approval-1', sourceEvidenceHash: 'c'.repeat(64), status: 'READY' },
+      { contractId: 'contract-2', sourceFinancialRecordId: 'approval-2', sourceEvidenceHash: 'd'.repeat(64), status: 'READY' },
+    ] };
   const legacyManifest = { ...current };
+  const cohortApprovalKey = 'cohort-approval-key-with-32-characters';
+  evidence.legacy.cohortArtifactPath = await writeJson('legacy-cohort.json', {
+    schemaVersion: 1, sourceManifestHash: current.manifestHash, entries: current.entries.map(entry => ({
+      contractId: entry.contractId, sourceFinancialRecordId: entry.sourceFinancialRecordId,
+      sourceEvidenceHash: entry.sourceEvidenceHash, decision: 'INCLUDE', reviewedBy: 'release-owner',
+      reviewedAt: '2026-09-05T10:00:00.000Z', reason: 'Approved release cohort.',
+    })),
+  });
+  const cohortBytes = await readFile(evidence.legacy.cohortArtifactPath);
+  const cohortApprovalPayload = JSON.stringify({ algorithm: 'HMAC-SHA256', keyId: 'cohort-key-1', approvedBy: 'release-owner',
+    cohortSha256: createHash('sha256').update(cohortBytes).digest('hex') });
+  evidence.legacy.cohortApprovalArtifactPath = await writeJson('legacy-cohort-approval.json', {
+    algorithm: 'HMAC-SHA256', keyId: 'cohort-key-1', approvedBy: 'release-owner',
+    signature: createHmac('sha256', cohortApprovalKey).update(cohortApprovalPayload).digest('hex'),
+  });
   evidence.legacy.dryRunArtifactPath = await writeJson('legacy-dry.json', { mode: 'DRY_RUN', status: 'COMPLETED', afterManifest: legacyManifest });
   evidence.legacy.applyArtifactPath = await writeJson('legacy-apply.json', { mode: 'APPLY', status: 'COMPLETED', beforeManifest: legacyManifest, afterManifest: legacyManifest,
     sourceComparison: { matched: true }, outcomeCounts: { SEALED: 2, REPLAYED: 0 } });
   evidence.legacy.repeatArtifactPath = await writeJson('legacy-repeat.json', { mode: 'APPLY', status: 'COMPLETED', beforeManifest: legacyManifest, afterManifest: legacyManifest,
     sourceComparison: { matched: true }, outcomeCounts: { SEALED: 0, REPLAYED: 2 } });
 
-  const verified = await verifyFileBackedCutoverEvidence(evidence, async () => current);
+  const verified = await verifyFileBackedCutoverEvidence(evidence, async () => current,
+    { keyId: 'cohort-key-1', signingKey: cohortApprovalKey }, 'commit-1');
   assert.equal(verified.acceptance[0].exitCode, 0);
   assert.notEqual(verified.acceptance[0].outputSha256, sha);
   assert.equal(verified.recovery.backupSha256, createHash('sha256').update('real backup bytes').digest('hex'));
@@ -190,9 +214,86 @@ test('file-backed verification recomputes hashes and binds legacy evidence to th
   assert.deepEqual(evaluateCutoverEvidence(verified), { decision: 'GO', failures: [] });
 
   await assert.rejects(
+    () => verifyFileBackedCutoverEvidence(evidence, async () => current,
+      { keyId: 'cohort-key-1', signingKey: cohortApprovalKey }, 'different-commit'),
+    /Acceptance source commit/,
+  );
+
+  await assert.rejects(
     () => verifyFileBackedCutoverEvidence(evidence, async () => ({ ...current, manifestHash: 'c'.repeat(64) })),
     /manifest hash does not match/i,
   );
+});
+
+test('hash-bound blocked dispositions keep unresolved legacy rows outside the release cohort', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'shipment-cohort-'));
+  const writeJson = async (name: string, value: unknown) => {
+    const path = join(directory, name);
+    await writeFile(path, JSON.stringify(value));
+    return path;
+  };
+  const backupPath = join(directory, 'backup.dump');
+  await writeFile(backupPath, 'backup');
+  const evidence = passingEvidence();
+  evidence.recovery.artifactPath = await writeJson('recovery.json', { backupPath, backupRestored: true,
+    restoreDrillProject: 'sabalanerp-local', restoredEvidenceHash: sha, sourceEvidenceHash: sha });
+  evidence.recovery.backupPath = backupPath;
+  evidence.integrity.artifactPath = await writeJson('integrity.json', { orphanArtifactCount: 0, incompleteBundleCount: 0,
+    auditGapCount: 0, corruptArtifactCount: 0, recoveryFailures: 0 });
+  evidence.concurrency.artifactPath = await writeJson('concurrency.json', { runs: [
+    { anomalyCount: 0 }, { anomalyCount: 0 }, { anomalyCount: 0 },
+  ] });
+  evidence.acceptance = await Promise.all(CUTOVER_ACCEPTANCE_COMMANDS.map(async (command, index) => {
+    const outputPath = join(directory, `acceptance-${index}.log`);
+    await writeFile(outputPath, 'passed');
+    return { command, artifactPath: await writeJson(`acceptance-${index}.json`, {
+      command, exitCode: 0, semanticDigest: acceptanceSemanticDigest('passed'), outputPath,
+    }), artifactSha256: sha, semanticDigest: sha, exitCode: 99, outputSha256: sha };
+  }));
+  const current = {
+    manifestHash: 'b'.repeat(64), sourceContractCount: '1', sourceApprovalRecordCount: '1', sourceRowCount: '1',
+    counts: { SEALED: 0, LEGACY_REVIEW_REQUIRED: 0, REPAIR_REQUIRED: 1, EVIDENCE_CONFLICT: 0, STALE: 0 },
+    entries: [{ contractId: 'contract-1', sourceFinancialRecordId: 'approval-1', sourceEvidenceHash: 'c'.repeat(64), status: 'REPAIR_REQUIRED' }],
+  };
+  const legacyManifest = { ...current };
+  evidence.legacy.dryRunArtifactPath = await writeJson('legacy-dry.json', { mode: 'DRY_RUN', status: 'COMPLETED', afterManifest: legacyManifest });
+  evidence.legacy.applyArtifactPath = await writeJson('legacy-apply.json', { mode: 'APPLY', status: 'COMPLETED', beforeManifest: legacyManifest,
+    afterManifest: legacyManifest, sourceComparison: { matched: true }, outcomeCounts: { SEALED: 0, REPLAYED: 0 } });
+  evidence.legacy.repeatArtifactPath = await writeJson('legacy-repeat.json', { mode: 'APPLY', status: 'COMPLETED', beforeManifest: legacyManifest,
+    afterManifest: legacyManifest, sourceComparison: { matched: true }, outcomeCounts: { SEALED: 0, REPLAYED: 0 } });
+  const cohortApprovalKey = 'cohort-approval-key-with-32-characters';
+  evidence.legacy.cohortArtifactPath = await writeJson('legacy-cohort.json', { schemaVersion: 1,
+    sourceManifestHash: current.manifestHash, entries: [{ contractId: 'contract-1', sourceFinancialRecordId: 'approval-1',
+      sourceEvidenceHash: 'c'.repeat(64), decision: 'EXCLUDE_BLOCKED', reviewedBy: 'release-owner',
+      reviewedAt: '2026-09-05T10:00:00.000Z', reason: 'Pre-cutover revision remains waybill-only pending source-owned correction.' }] });
+  const cohortBytes = await readFile(evidence.legacy.cohortArtifactPath);
+  const cohortApprovalPayload = JSON.stringify({ algorithm: 'HMAC-SHA256', keyId: 'cohort-key-1', approvedBy: 'release-owner',
+    cohortSha256: createHash('sha256').update(cohortBytes).digest('hex') });
+  evidence.legacy.cohortApprovalArtifactPath = await writeJson('legacy-cohort-approval.json', {
+    algorithm: 'HMAC-SHA256', keyId: 'cohort-key-1', approvedBy: 'release-owner',
+    signature: createHmac('sha256', cohortApprovalKey).update(cohortApprovalPayload).digest('hex'),
+  });
+
+  await assert.rejects(() => verifyFileBackedCutoverEvidence(evidence, async () => current), /approval verifier/i);
+  const verified = await verifyFileBackedCutoverEvidence(evidence, async () => current,
+    { keyId: 'cohort-key-1', signingKey: cohortApprovalKey });
+  assert.equal(verified.legacy.releaseCohortCount, 0);
+  assert.equal(verified.legacy.excludedBlockedCount, 1);
+  assert.equal(verified.legacy.unresolvedCount, 0);
+  assert.deepEqual(evaluateCutoverEvidence(verified), { decision: 'GO', failures: [] });
+
+  const approval = JSON.parse(await readFile(evidence.legacy.cohortApprovalArtifactPath, 'utf8'));
+  approval.approvedBy = 'different-owner';
+  await writeFile(evidence.legacy.cohortApprovalArtifactPath, JSON.stringify(approval));
+  await assert.rejects(() => verifyFileBackedCutoverEvidence(evidence, async () => current,
+    { keyId: 'cohort-key-1', signingKey: cohortApprovalKey }), /approval signature/i);
+  approval.approvedBy = 'release-owner';
+  await writeFile(evidence.legacy.cohortApprovalArtifactPath, JSON.stringify(approval));
+
+  const changed = structuredClone(current);
+  changed.entries[0].sourceEvidenceHash = 'd'.repeat(64);
+  await assert.rejects(() => verifyFileBackedCutoverEvidence(evidence, async () => changed,
+    { keyId: 'cohort-key-1', signingKey: cohortApprovalKey }), /cohort disposition.*hash/i);
 });
 
 test('signed manifests are deterministic, tamper-evident, and created without overwrite', async () => {

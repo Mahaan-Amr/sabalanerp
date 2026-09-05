@@ -10,7 +10,7 @@ Object.assign(globalThis, { React });
 const { renderToStaticMarkup } = frontendRequire('react-dom/server');
 const foundationRequire = createRequire(path.join(root, 'packages/partner-sales-contracts/package.json'));
 const { createPartnerFixtures } = foundationRequire('@sabalanerp/partner-sales-contracts/testing');
-const cssDirectory = path.join(root, 'tmp/qa/customer-output-325/candidate/frontend/.next-build/static/css');
+const cssDirectory = path.join(root, 'frontend/.next-build/static/css');
 const css = fs.readdirSync(cssDirectory).filter(file => file.endsWith('.css')).map(file => fs.readFileSync(path.join(cssDirectory, file), 'utf8')).join('\n');
 const output = path.join(root, 'tmp/qa/customer-output-325/ui');
 fs.mkdirSync(output, { recursive: true });

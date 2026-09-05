@@ -95,6 +95,14 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
 
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const replaceCommittedRoute = useCallback((destination: string) => {
+    router.replace(destination);
+    if (typeof window === 'undefined') return;
+    const expected = new URL(destination, window.location.origin).href;
+    window.setTimeout(() => {
+      if (window.location.href !== expected) window.location.replace(destination);
+    }, 1_000);
+  }, [router]);
 
   const handleCreateContract = useCallback(async () => {
     const isEditMode = mode === 'edit';
@@ -412,7 +420,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             contractId: editContractId as string,
             finalizeRecovery: onCommitted,
             justCreated: false,
-            navigate: (destination) => router.replace(destination)
+            navigate: replaceCommittedRoute
           });
           return;
         }
@@ -426,7 +434,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         await finalizeSuccessfulContractCommit({
           contractId: createdContractId,
           finalizeRecovery: onCommitted,
-          navigate: (destination) => router.replace(
+          navigate: (destination) => replaceCommittedRoute(
             `${destination}&contractNumber=${encodeURIComponent(savedContractNumber)}`
           )
         });
@@ -471,7 +479,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     onCommitted,
     onEditSessionFailure,
     draftStorageKey,
-    router
+    replaceCommittedRoute
   ]);
 
   return {

@@ -8,6 +8,7 @@ import { dispatchConfirmationAPI, dispatchMasterDataAPI } from '@/lib/api';
 import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
 import HrPersianCalendar from '@/features/hr/HrPersianCalendar';
 import { fromIsoDate, toIsoDate } from '@/features/hr/hrUi';
+import { biometricConnectorClient } from '@/lib/biometricConnector';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const field = 'space-y-1.5 text-sm font-medium sds-text-secondary';
@@ -44,7 +45,7 @@ export default function PersonnelDriverEligibilityPage() {
   const run = async (action: () => Promise<any>, message: string) => {
     setSaving(true); setNotice(null);
     try { await action(); setNotice({ kind: 'success', text: message }); setReason(''); await load(); }
-    catch (error: any) { setNotice({ kind: 'error', text: error?.response?.data?.error || 'ثبت صلاحیت ممکن نشد.' }); }
+    catch (error: any) { setNotice({ kind: 'error', text: error?.response?.data?.error || error?.message || 'ثبت صلاحیت ممکن نشد.' }); }
     finally { setSaving(false); }
   };
 
@@ -70,7 +71,14 @@ export default function PersonnelDriverEligibilityPage() {
         <label className={field}>شماره تأیید راننده<ErpInput value={confirmationPhone} onChange={(event) => setConfirmationPhone(event.target.value)} /></label>
         <label className={field}>متن اقرار و رضایت<ErpInput value={biometricAcknowledgement} onChange={(event) => setBiometricAcknowledgement(event.target.value)} /></label>
         <ErpButton label="ثبت بیومتریک با اتصال‌گر" icon={FaUserCheck} disabled={Boolean(enrollmentId) || dispatchTimelineStale || saving || !confirmationPhone.trim() || !biometricAcknowledgement.trim()} onClick={() => void run(async () => {
-          const response = await dispatchConfirmationAPI.enrollInternalDriver(personnelId, { acknowledgement: biometricAcknowledgement.trim(), confirmationPhone: confirmationPhone.trim(), fingers: ['RIGHT_INDEX', 'LEFT_INDEX'], workstationId: 'HR-WEB' });
+          const status = await biometricConnectorClient.status();
+          const captures = [];
+          for (const finger of ['RIGHT_INDEX', 'LEFT_INDEX']) {
+            const issued = await dispatchConfirmationAPI.createEnrollmentCommand(personnelId, { workstationId: status.workstationId, finger });
+            const connectorResult = await biometricConnectorClient.execute(issued.data.data);
+            captures.push({ challengeId: issued.data.data.command.commandId, signedResponse: { response: connectorResult.response, signature: connectorResult.signature }, transportEnvelope: connectorResult.transportEnvelope });
+          }
+          const response = await dispatchConfirmationAPI.enrollInternalDriver(personnelId, { acknowledgement: biometricAcknowledgement.trim(), confirmationPhone: confirmationPhone.trim(), captures });
           setEnrollmentId(response.data.data.id); return response;
         }, 'رضایت و ثبت بیومتریک ذخیره شد.')} />
         {enrollmentId && <><label className={field}>دلیل پس‌گرفتن رضایت<ErpInput value={biometricWithdrawalReason} onChange={(event) => setBiometricWithdrawalReason(event.target.value)} /></label><ErpButton label="پس‌گرفتن رضایت بیومتریک" icon={FaPause} tone="danger" variant="outline" disabled={dispatchTimelineStale || saving || !biometricWithdrawalReason.trim()} onClick={() => void run(() => dispatchConfirmationAPI.withdrawEnrollment(enrollmentId, biometricWithdrawalReason.trim()), 'رضایت بیومتریک پس گرفته شد.')} /></>}

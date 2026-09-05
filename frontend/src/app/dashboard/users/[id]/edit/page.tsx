@@ -1,6 +1,6 @@
 'use client';
 import { ErpInlineState, ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaCheck, FaTimes, FaUserEdit } from 'react-icons/fa';
 import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
@@ -35,7 +35,8 @@ const initialFormState: UserFormState = {
   isActive: true,
 };
 
-export default function EditUserPage({ params }: { params: { id: string } }) {
+export default function EditUserPage(props: { params: Promise<{ id: string }> }) {
+  const params = use(props.params);
   const router = useRouter();
   const [formData, setFormData] = useState<UserFormState>(initialFormState);
   const [departments, setDepartments] = useState<Department[]>([]);

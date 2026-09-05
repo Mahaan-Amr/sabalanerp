@@ -31,6 +31,48 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
   const queueTurn = record(revisionSnapshot.queueTurn);
   const admission = record(queueTurn.admissionSnapshot);
   const lineSnapshots = new Map(candidate.allocationRevision.lines.map(line => [line.id, record(line.snapshot)]));
+  if (pricedAllocation.sourceKind === 'PARTNER_CASE') {
+    const partnerCase = await tx.partnerSaleCase.findUnique({ where: { id: candidate.allocationRevision.partnerCaseId || '' },
+      select: { caseNumber: true } });
+    if (!partnerCase || pricedAllocation.pricingVersions.length !== 1) {
+      throw new DispatchDocumentEvidenceConflictError('Partner document ownership evidence is incomplete.');
+    }
+    const lines = pricedAllocation.lines.map(line => {
+      const sourceLine = candidate.allocationRevision.lines.find(item => item.id === line.allocationRevisionLineId);
+      if (!sourceLine) throw new DispatchDocumentConflictError('Priced allocation line is absent from its allocation revision.');
+      const snapshot = lineSnapshots.get(sourceLine.id) || {};
+      const nestedRow = record(snapshot.row);
+      return { productRowId: line.productRowId,
+        label: String(nestedRow.description || snapshot.description || snapshot.label || line.productRowId),
+        unit: line.unit, quantity: line.quantity, grossAmount: line.grossAmount,
+        allocatedDiscount: line.discountAmount, netAmount: line.netAmount };
+    });
+    const base = { schemaVersion: 1 as const, waybillNumber: identity.number, issuedAt: identity.issuedAt,
+      customerName: String(customer.companyName || customer.name || customer.id || ''),
+      projectOrDestination: String(loading.destination || project.address || project.name || project.id || ''),
+      vehiclePlate: String(admission.vehiclePlate || record(admission.vehicle).plate || ''), templateVersion };
+    const sourceIntegrityHash = dispatchDocumentSourceIntegrityHash({ allocationRevisionId: candidate.allocationRevisionId,
+      allocationIntegrityHash: candidate.allocationRevision.integrityHash, pricedAllocation });
+    const pricing = pricedAllocation.pricingVersions[0];
+    const sourceVersionIdentities = { allocationRevision: candidate.allocationRevisionId,
+      [`partnerFinancialApproval:${pricing.caseId}`]: pricing.financialApprovalEvidenceId };
+    const provenance = { generatorVersion, templateVersion, sourceVersionIdentities,
+      allocationRevisionId: candidate.allocationRevisionId,
+      allocationIntegrityHash: candidate.allocationRevision.integrityHash, sourceIntegrityHash,
+      pricingVersions: pricedAllocation.pricingVersions };
+    const shared = { sourceKind: 'PARTNER_CASE' as const, caseNumber: partnerCase.caseNumber,
+      deliveryReference: String(loading.plannedDate || 'تحویل مصوب') };
+    return { candidateId: candidate.id, allocationRevisionId: candidate.allocationRevisionId, sourceIntegrityHash,
+      pricedAllocation, provenance: { generatorVersion, sourceVersionIdentities },
+      waybillSnapshot: { ...revisionSnapshot, documentProvenance: provenance },
+      waybill: { ...base, kind: 'WAYBILL' as const, documentId: identity.waybillDocumentId,
+        payload: { ...shared, allocationRevisionId: candidate.allocationRevisionId,
+          lines: lines.map(({ grossAmount: _gross, allocatedDiscount: _discount, netAmount: _net, ...line }) => line) } },
+      statement: { ...base, kind: 'STATEMENT' as const, documentId: identity.statementDocumentId,
+        payload: { ...shared, currency: pricedAllocation.currency, lines,
+          grossAmount: pricedAllocation.totals.grossAmount, allocatedDiscount: pricedAllocation.totals.discountAmount,
+          netAmount: pricedAllocation.totals.netAmount } } };
+  }
   const contracts = new Map<string, { contractId: string; contractNumber: string; lines: any[] }>();
   for (const line of pricedAllocation.lines) {
     const sourceLine = candidate.allocationRevision.lines.find(item => item.id === line.allocationRevisionLineId);

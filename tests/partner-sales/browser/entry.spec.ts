@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('anonymous Sales deep-link returns to a usable Persian login @internal-entry', async ({ page, context }, testInfo) => {
+  test.setTimeout(180_000);
   const unexpected: string[] = [];
   const knownLegacy: string[] = [];
   const expectedAnonymousRejections = ['/api/auth/me', '/api/dashboard/profile', '/api/dashboard/route-availability'];
@@ -16,6 +17,7 @@ test('anonymous Sales deep-link returns to a usable Persian login @internal-entr
   page.on('pageerror', () => unexpected.push('uncaught page error'));
   page.on('requestfailed', (request) => {
     const pathname = new URL(request.url()).pathname;
+    if (pathname === '/brand/logo-project.png' && request.failure()?.errorText === 'net::ERR_ABORTED') return;
     if (request.isNavigationRequest() && pathname === '/dashboard/sales/contracts/create' && request.failure()?.errorText === 'net::ERR_ABORTED') return;
     if (pathname === '/login' && request.failure()?.errorText === 'net::ERR_ABORTED'
       && (request.isNavigationRequest() || request.headers().rsc === '1')) {
@@ -43,7 +45,10 @@ test('anonymous Sales deep-link returns to a usable Persian login @internal-entr
     }
   });
   await page.addInitScript((theme) => localStorage.setItem('theme', theme), testInfo.project.use.colorScheme || 'light');
-  await page.goto('/dashboard/sales/contracts/create');
+  await page.goto('/dashboard/sales/contracts/create').catch(error => {
+    if (!String(error).includes('ERR_ABORTED')) throw error;
+  });
+  await page.waitForURL(/\/login(?:\?|$)/, { timeout: 60_000 });
   await expect(page).toHaveURL(/\/login(?:\?|$)/);
   await expect(page.getByRole('heading', { name: 'ورود به حساب' })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');

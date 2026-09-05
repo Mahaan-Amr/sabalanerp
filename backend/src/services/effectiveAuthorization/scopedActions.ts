@@ -22,6 +22,20 @@ export async function resolveScopedActions(tx: Prisma.TransactionClient, actorId
   await tx.$queryRaw`SELECT id FROM users WHERE id = ${actorId} FOR UPDATE`;
   const [version] = await tx.$queryRaw<Array<{ revision: number }>>`
     SELECT revision FROM effective_authorization_state WHERE id = 1 FOR UPDATE`;
+  return scopedActionSnapshot(tx, actorId, domain, version);
+}
+
+/** Advisory/read-model visibility only. It never authorizes a mutation and so
+ * must not join the command lock graph. The returned revision lets callers
+ * identify the snapshot they displayed. */
+export async function readScopedActions(tx: Prisma.TransactionClient, actorId: string, domain: string) {
+  const [version] = await tx.$queryRaw<Array<{ revision: number }>>`
+    SELECT revision FROM effective_authorization_state WHERE id = 1`;
+  return scopedActionSnapshot(tx, actorId, domain, version);
+}
+
+async function scopedActionSnapshot(tx: Prisma.TransactionClient, actorId: string, domain: string,
+  version: { revision: number } | undefined) {
   if (!version) throw new Error('Scoped authority state unavailable');
   const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
   const rows = !actor?.isActive ? [] : await tx.$queryRaw<GrantRow[]>`

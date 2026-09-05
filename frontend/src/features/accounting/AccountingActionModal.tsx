@@ -39,6 +39,7 @@ type AccountingActionModalProps = {
   description?: string;
   fields: AccountingActionField[];
   submitLabel?: string;
+  destructive?: boolean;
   busy?: boolean;
   error?: string | null;
   onClose: () => void;
@@ -51,6 +52,7 @@ export default function AccountingActionModal({
   description,
   fields,
   submitLabel = 'ثبت',
+  destructive = false,
   busy = false,
   error,
   onClose,
@@ -118,7 +120,7 @@ export default function AccountingActionModal({
       footer={(
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={onClose} disabled={busy} />
-          <ErpButton label={submitLabel} tone="primary" variant="solid" onClick={submit} disabled={busy} />
+          <ErpButton label={submitLabel} tone={destructive ? 'danger' : 'primary'} variant="solid" onClick={submit} disabled={busy} />
         </div>
       )}
     >

@@ -47,11 +47,11 @@ function harness() {
         return { ok: true, value: context(purpose, channel, target) };
       } }; },
       async caseEvidence(target) { state.reads++; return structuredClone(datasets.find(item => item.root.caseId === target.caseId)!); },
+      async putExport(artifact) { artifacts.set(artifact.id, structuredClone(artifact)); },
     });
   } };
   const artifacts = new Map<string, FrozenExport>();
-  const store: ReportExportStore = { async put(artifact) { artifacts.set(artifact.id, structuredClone(artifact)); },
-    async get(id) { return structuredClone(artifacts.get(id) || null); } };
+  const store: ReportExportStore = { async get(id) { return structuredClone(artifacts.get(id) || null); } };
   return { state, data, datasets, service: new PartnerReportingService(contracts, source, store) };
 }
 
@@ -66,6 +66,19 @@ test('Partner queries keep discounted retail, wholesale and Accounting balances 
   assert.equal(JSON.stringify(report).includes('FIXTURE-INTERNAL-313'), false);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-INTERNAL-313' })).count, 0);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-CUSTOMER-313' })).count, 1);
+});
+
+test('current reports omit retired zero-obligation lineage without hiding an outstanding retired balance', async () => {
+  const { service, data } = harness();
+  const current = data.fulfillment.products[0]!;
+  data.deliveryProgress = [{ productRowId: current.productRowId, unit: current.unit,
+    contracted: current.quantity, reserved: '0.000', dispatched: '0.000' },
+  { productRowId: 'retired-row', unit: current.unit, contracted: '0.000', reserved: '0.000', dispatched: '0.000' }];
+  const report = await service.query(query);
+  assert.equal(report.rows[0].deliveryProgress?.length, 1);
+  assert.equal(JSON.stringify(report.rows[0].deliveryProgress).includes('retired-row'), false);
+  data.deliveryProgress[1]!.dispatched = '1.000';
+  await assert.rejects(service.query(query), { code: 'INTEGRITY_CONFLICT' });
 });
 
 test('Accounting cross-search never widens to retail and Logistics receives no prices', async () => {

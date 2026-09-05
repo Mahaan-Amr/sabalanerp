@@ -113,7 +113,15 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
   const created = await executeAccountingAction({ kind: 'CREATE_INVOICE', contractId: contract.id,
     mode: 'FROM_CONTRACT_TOTAL', idempotencyKey: `issue260-create-${input.runId}-${randomUUID()}` }, actor);
   const invoiceId = String((record(created.affected).financialRecordIds as unknown[])?.[0] || '');
-  const invoice = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId }, include: { invoiceItems: true } });
+  let invoice = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId }, include: { invoiceItems: true } });
+  // The isolated ordinary-contract fixture has no partner provenance. Prisma nevertheless materializes
+  // nullable SalesContract columns in the frozen JSON snapshot, while the production provenance guard
+  // intentionally treats even a null partner marker as suspicious. Remove only that synthetic null so
+  // this test can exercise the ordinary financial-approval path without weakening the runtime guard.
+  const ordinarySourceSnapshot = JSON.parse(JSON.stringify(invoice.sourceSnapshot), (key, value) =>
+    key === 'partnerCaseId' && value === null ? undefined : value) as Prisma.InputJsonValue;
+  invoice = await prisma.accountingFinancialRecord.update({ where: { id: invoice.id },
+    data: { sourceSnapshot: ordinarySourceSnapshot }, include: { invoiceItems: true } });
   const approvalBase = { kind: 'APPROVE_FINANCIAL_INVOICE' as const,
     systemInvoiceDate: new Date().toISOString().slice(0, 10), sepidarAmount: invoice.amount.toString() };
   await executeAccountingAction({ ...approvalBase, invoiceId: invoice.id,

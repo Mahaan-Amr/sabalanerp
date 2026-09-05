@@ -1,12 +1,14 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaReceipt, FaSync } from 'react-icons/fa';
 import { ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
-import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money } from '@/features/accounting/accountingUi';
+import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import PersianCalendar from '@/lib/persian-calendar';
+import { accountingEventInstant, partnerAccountingTimeFields } from '@/features/accounting/accountingEventTime';
+import { readPartnerDecimalInput } from '@/features/partner-sales/presentation';
 import { canonicalizeReceivablesQuery, patchReceivablesQuery, type ReceivablesQueryState } from '@/features/accounting/accountingQueryState';
 
 const statusOptions = [
@@ -52,6 +54,8 @@ export default function AccountingReceivablesPage() {
   const [receiptTarget, setReceiptTarget] = useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
 
   const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeReceivablesQuery>) => {
     const serialized = next.params.toString();
@@ -75,6 +79,8 @@ export default function AccountingReceivablesPage() {
   }, [query.search, searchInput, updateQuery]);
 
   const loadRows = useCallback(async () => {
+    const version = ++requestVersion.current;
+    setRows([]); setFocus(null); setReceiptTarget(null); setLoadError(null);
     try {
       setLoading(true);
       const response = await accountingAPI.getReceivables({
@@ -89,6 +95,8 @@ export default function AccountingReceivablesPage() {
         page: query.page,
         pageSize: pagination.pageSize,
       });
+      if (version !== requestVersion.current) return;
+      if (!response.data.success) throw new Error('Accounting read failed');
       if (response.data.success) {
         const data = readAccountingListResponse<any>(response.data.data);
         setRows(data.items);
@@ -96,18 +104,23 @@ export default function AccountingReceivablesPage() {
         setFocus(response.data.data?.focus || null);
       }
     } catch (error) {
-      console.error('Error loading receivables:', error);
+      if (version !== requestVersion.current) return;
+      setPagination(current => ({ ...current, total: 0 }));
+      setLoadError(accountingFailureMessage(error, 'دریافتنی‌ها بارگیری نشد؛ دسترسی و اتصال را بررسی کنید و دوباره به‌روزرسانی کنید.'));
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }, [pagination.pageSize, query.cutoff, query.date, query.due, query.page, query.period, query.recordId, query.search, query.status, query.view]);
 
   useEffect(() => {
     loadRows();
+    return () => { requestVersion.current += 1; };
   }, [loadRows]);
 
   const columns: ErpColumn<any>[] = [
-    { id: 'receivable', header: 'دریافتنی', priority: 'primary', cell: (row) => <div><p className="font-semibold">{row.contract?.contractNumber || 'دریافتنی قرارداد'}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{row.contract?.customer?.displayName || row.contractId || '—'}</p></div> },
+    { id: 'receivable', header: 'دریافتنی', priority: 'primary', cell: (row) => row.sourceKind === 'PARTNER_INTERNAL_RECORD'
+      ? <PartnerAccountingIdentity context={row.partnerContext} />
+      : <div><p className="font-semibold">{row.contract?.contractNumber || 'دریافتنی قرارداد'}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{row.contract?.customer?.displayName || row.contractId || '—'}</p></div> },
     { id: 'original', header: 'اصل مبلغ', mobileLabel: 'اصل مبلغ', priority: 'secondary', align: 'end', cell: (row) => money(row.originalAmount, row.currency) },
     { id: 'paid', header: 'پرداخت شده', mobileLabel: 'پرداخت شده', priority: 'secondary', align: 'end', cell: (row) => money(row.paidAmount, row.currency) },
     { id: 'remaining', header: 'مانده', mobileLabel: 'مانده', priority: 'secondary', align: 'end', cell: (row) => <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{money(row.remainingAmount, row.currency)}</span> },
@@ -122,11 +135,13 @@ export default function AccountingReceivablesPage() {
     try {
       await accountingAPI.executeAction({
         kind: 'REGISTER_RECEIPT',
-        contractId: receiptTarget.contractId,
+        ...(receiptTarget.contractId ? { contractId: receiptTarget.contractId } : {}),
         receivableId: receiptTarget.id,
         method: values.method,
-        amount: values.amount,
-        receivedAt: PersianCalendar.toGregorian(String(values.receivedAt)).toISOString(),
+        amount: receiptTarget.sourceKind === 'PARTNER_INTERNAL_RECORD' ? readPartnerDecimalInput(String(values.amount)) : values.amount,
+        receivedAt: receiptTarget.sourceKind === 'PARTNER_INTERNAL_RECORD'
+          ? accountingEventInstant({ timing: values.timing, date: values.eventDate, time: values.eventTime })
+          : PersianCalendar.toGregorian(String(values.receivedAt)).toISOString(),
         note: String(values.note || ''),
         ...(values.method === 'CHECK' ? {
           check: {
@@ -142,14 +157,15 @@ export default function AccountingReceivablesPage() {
       await loadRows();
     } catch (error) {
       console.error('Register receipt failed:', error);
-      setActionError((error as any)?.response?.data?.error || 'ثبت دریافت انجام نشد');
+      setActionError(accountingFailureMessage(error, error instanceof Error && /[\u0600-\u06ff]/.test(error.message)
+        ? error.message : 'ثبت دریافت انجام نشد؛ اطلاعات و مجوز خود را بررسی کنید.'));
     } finally {
       setActionLoading(null);
     }
   };
 
   const rowActions = (row: any): ErpAction[] => [
-    ...(query.view === 'outstanding' ? [] : [
+    ...(query.view === 'outstanding' || (row.sourceKind === 'PARTNER_INTERNAL_RECORD' && !row.partnerActions?.registerReceipt) ? [] : [
     {
       label: 'ثبت دریافت',
       icon: FaReceipt,
@@ -181,6 +197,7 @@ export default function AccountingReceivablesPage() {
       footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="دریافتنی" />}
       emptyState={<ErpEmptyState icon={FaReceipt} title="دریافتنی ثبت نشده است" description="برای قراردادهای مجاز، دریافتنی برنامه‌ریزی شده ایجاد کنید." />}
     >
+      {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadRows }} />}
       {focus?.state === 'missing' && <ErpInlineState kind="stale" title="این دریافتنی دیگر در دسترس نیست؛ فهرست، وضعیت فعلی را نشان می‌دهد." />}
       {focus?.state === 'current-truth' && <ErpInlineState kind="stale" title="وضعیت دریافتنی تغییر کرده است؛ رکورد فعلی بدون تغییر جمعیت فیلترشده بازیابی شد." />}
       {(focus?.state === 'current-truth' || (focus?.state === 'focused' && !focus.inPage)) && focus.record && (
@@ -196,13 +213,13 @@ export default function AccountingReceivablesPage() {
       <AccountingActionModal
         open={Boolean(receiptTarget)}
         title="ثبت دریافت"
-        description={receiptTarget ? `${receiptTarget.contract?.contractNumber || 'قرارداد'} - مانده ${money(receiptTarget.remainingAmount, receiptTarget.currency)}` : undefined}
+        description={receiptTarget ? `${receiptTarget.partnerContext?.caseNumber || receiptTarget.contract?.contractNumber || 'قرارداد'} - مانده ${money(receiptTarget.remainingAmount, receiptTarget.currency)}` : undefined}
         fields={[
-          { id: 'amount', label: 'مبلغ دریافت', type: 'number', required: true, defaultValue: receiptTarget?.remainingAmount || 0 },
+          { id: 'amount', label: 'مبلغ دریافت', type: receiptTarget?.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'text' : 'number', required: true, defaultValue: receiptTarget?.remainingAmount || 0 },
           { id: 'method', label: 'روش دریافت', type: 'select', defaultValue: 'CASH', options: [
             { label: 'نقدی', value: 'CASH' },
             { label: 'حواله بانکی', value: 'BANK_TRANSFER' },
-            { label: 'کارت', value: 'CARD' },
+            ...(receiptTarget?.sourceKind !== 'PARTNER_INTERNAL_RECORD' ? [{ label: 'کارت', value: 'CARD' }] : []),
             { label: 'چک', value: 'CHECK' },
           ] },
           { id: 'checkNumber', label: 'شماره چک', type: 'text', visibleWhen: { fieldId: 'method', equals: 'CHECK' }, requiredWhen: { fieldId: 'method', equals: 'CHECK' } },
@@ -210,7 +227,8 @@ export default function AccountingReceivablesPage() {
           { id: 'checkDueDate', label: 'تاریخ سررسید چک', type: 'date', visibleWhen: { fieldId: 'method', equals: 'CHECK' }, requiredWhen: { fieldId: 'method', equals: 'CHECK' } },
           { id: 'checkHandoverDate', label: 'تاریخ تحویل چک', type: 'date', visibleWhen: { fieldId: 'method', equals: 'CHECK' }, requiredWhen: { fieldId: 'method', equals: 'CHECK' } },
           { id: 'checkNationalCode', label: 'کد ملی صاحب چک', type: 'text', visibleWhen: { fieldId: 'method', equals: 'CHECK' }, requiredWhen: { fieldId: 'method', equals: 'CHECK' } },
-          { id: 'receivedAt', label: 'تاریخ دریافت', type: 'date', required: true },
+          ...(receiptTarget?.sourceKind === 'PARTNER_INTERNAL_RECORD' ? partnerAccountingTimeFields
+            : [{ id: 'receivedAt', label: 'تاریخ دریافت', type: 'date' as const, required: true }]),
           { id: 'note', label: 'یادداشت', type: 'textarea' },
         ]}
         submitLabel="ثبت دریافت"

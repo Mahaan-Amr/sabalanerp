@@ -66,6 +66,8 @@ type CommandReceipt = {
   identity: IdempotencyIdentity;
   intentHash: string;
   value: Omit<RetailCorrectionExecution, 'replayed'>;
+  gate?: { kind: Extract<PartnerCommand, { type: 'CORRECTION_GATE' }>['gate']; outcome: 'APPROVE' | 'REJECT';
+    evidenceId: string; correlationId: string };
 };
 
 export type RetailCorrectionWorkflow = {
@@ -115,6 +117,10 @@ export type RetailCorrectionConfirmationResult =
 
 export type RetailCorrectionDependencies = {
   calendar: TehranWorkingCalendar;
+  sealSuccessorOwner(tx: RetailCorrectionTransaction, input: {
+    predecessor: RevisionRef; retailPrices: readonly RetailPrice[]; customerPaymentPlan: PaymentPlan;
+    retailEvidenceHash: string;
+  }): Promise<Result<RevisionRef>>;
   authorize(tx: RetailCorrectionTransaction, input: AuthorizationRequest): Promise<Result<AuthorizationResult>>;
   verifyCustomerConfirmation(tx: RetailCorrectionTransaction, input: {
     caseId: string;
@@ -167,7 +173,8 @@ function validateRevision(revision: RetailCorrectionRevision, caseId: string): b
   return true;
 }
 
-async function validateWorkflow(record: RetailCorrectionRecord, correction: RetailCorrectionWorkflow): Promise<boolean> {
+async function validateWorkflow(record: RetailCorrectionRecord, correction: RetailCorrectionWorkflow,
+  dependencies: RetailCorrectionDependencies, tx: RetailCorrectionTransaction): Promise<boolean> {
   if (!IdSchema.safeParse(correction.correctionId).success || !IdSchema.safeParse(correction.requesterId).success
       || !PersianReasonSchema.safeParse(correction.reason).success
       || !RevisionRefSchema.safeParse(correction.predecessor).success
@@ -202,7 +209,9 @@ async function validateWorkflow(record: RetailCorrectionRecord, correction: Reta
       retailCollectionEvidence: revision.retailCollectionEvidence,
       savedAt: correction.successorSavedAt,
     });
-    if (integrityHash !== successor.owner.integrityHash) return false;
+    const sealed = await dependencies.sealSuccessorOwner(tx, { predecessor: correction.predecessor,
+      retailPrices: revision.retailPrices, customerPaymentPlan: revision.customerPaymentPlan, retailEvidenceHash: integrityHash });
+    if (!sealed.ok || canonicalJson(sealed.value) !== canonicalJson(successor.owner)) return false;
   }
   const opportunityConsumed = Boolean(correction.opportunity?.savedSuccessor);
   switch (correction.status) {
@@ -233,7 +242,8 @@ async function validateWorkflow(record: RetailCorrectionRecord, correction: Reta
   }
 }
 
-async function validateRecord(record: RetailCorrectionRecord): Promise<boolean> {
+async function validateRecord(record: RetailCorrectionRecord, dependencies: RetailCorrectionDependencies,
+  tx: RetailCorrectionTransaction): Promise<boolean> {
   if (!Number.isSafeInteger(record.sequence) || record.sequence < 1 || !IdSchema.safeParse(record.caseId).success
       || !IdSchema.safeParse(record.partnerSellerId).success || record.state !== 'COMMITTED'
       || !Array.isArray(record.correctionHistory)
@@ -243,10 +253,10 @@ async function validateRecord(record: RetailCorrectionRecord): Promise<boolean> 
         || !IdempotencySchema.safeParse(command.identity).success || !HashSchema.safeParse(command.intentHash).success
         || !RevisionRefSchema.safeParse(command.value.head).success
         || !RevisionRefSchema.safeParse(command.value.effective).success)) return false;
-  if (record.correction && !await validateWorkflow(record, record.correction)) return false;
+  if (record.correction && !await validateWorkflow(record, record.correction, dependencies, tx)) return false;
   for (const historical of record.correctionHistory) {
     if (!['EXPIRED', 'REJECTED', 'EFFECTIVE'].includes(historical.status)
-        || !await validateWorkflow(record, historical)) return false;
+        || !await validateWorkflow(record, historical, dependencies, tx)) return false;
   }
   const correctionIds = [...record.correctionHistory.map(item => item.correctionId),
     ...(record.correction ? [record.correction.correctionId] : [])];
@@ -278,6 +288,8 @@ function withReceipt(record: RetailCorrectionRecord, command: CorrectionCommand,
   value: Omit<RetailCorrectionExecution, 'replayed'>): RetailCorrectionRecord {
   return { ...record, sequence: record.sequence + 1, commands: [...record.commands, {
     commandId: command.commandId, identity: command.idempotency, intentHash, value,
+    ...(command.type === 'CORRECTION_GATE' ? { gate: { kind: command.gate, outcome: command.outcome,
+      evidenceId: command.evidenceId, correlationId: command.correlationId } } : {}),
   }] };
 }
 
@@ -328,9 +340,17 @@ export function createPartnerRetailCorrectionService(
         if (!envelope.ok) return envelope;
         const record = await tx.read(command.expected.caseId);
         if (!record) return failure('NOT_FOUND');
-        if (!await validateRecord(record)) return failure('INTEGRITY_CONFLICT');
+        if (!await validateRecord(record, dependencies, tx)) return failure('INTEGRITY_CONFLICT');
         const prior = replay(record, command, envelope.value);
-        if (prior) return prior;
+        if (prior) {
+          if (!prior.ok) return prior;
+          const authority = await dependencies.authorize(tx, { actorId: command.idempotency.actorId,
+            action: command.type === 'CORRECTION_REQUEST' ? 'CORRECTION_REQUEST'
+              : command.type === 'RETAIL_CORRECTION_SAVE' ? 'RETAIL_CORRECTION_SAVE'
+                : command.gate === 'SALES_SCOPE' ? 'CORRECTION_SCOPE_APPROVE' : 'CUSTOMER_OUTPUT',
+            caseId: record.caseId, ...(command.type === 'CORRECTION_GATE' ? { correctionId: command.correctionId } : {}) });
+          return authority.ok ? prior : authority;
+        }
 
         if (command.type === 'CORRECTION_REQUEST') {
           const expected = checkExpectedRevision(command.expected, record.effective.owner);
@@ -406,7 +426,7 @@ export function createPartnerRetailCorrectionService(
               || opportunity.opportunityId !== command.opportunityId || opportunity.savedSuccessor
               || command.expectedState !== 'COMMITTED') return failure('STATE_CONFLICT');
           const authority = await dependencies.authorize(tx, { actorId: command.idempotency.actorId,
-            action: 'RETAIL_CORRECTION_SAVE', caseId: record.caseId });
+            action: 'RETAIL_CORRECTION_SAVE', caseId: record.caseId, correctionId: correction.correctionId });
           if (!authority.ok) return authority;
           if (authority.value.persona !== 'PARTNER' || command.idempotency.actorId !== record.partnerSellerId) {
             return failure('FORBIDDEN');
@@ -440,8 +460,12 @@ export function createPartnerRetailCorrectionService(
             retailCollectionEvidence: record.effective.retailCollectionEvidence,
             savedAt: currentTime.data,
           };
-          const owner = { caseId: record.caseId, revision: record.effective.owner.revision + 1,
-            integrityHash: await canonicalHash(revisionEvidence) };
+          const sealed = await dependencies.sealSuccessorOwner(tx, { predecessor: record.effective.owner,
+            retailPrices: prices, customerPaymentPlan: plan.data, retailEvidenceHash: await canonicalHash(revisionEvidence) });
+          if (!sealed.ok) return sealed;
+          if (sealed.value.caseId !== record.caseId || sealed.value.revision !== record.effective.owner.revision + 1 ||
+              !RevisionRefSchema.safeParse(sealed.value).success) return failure('INTEGRITY_CONFLICT');
+          const owner = sealed.value;
           const successor: NonNullable<NonNullable<RetailCorrectionRecord['correction']>['successor']> = {
             owner, graphHash: record.effective.graphHash,
             wholesaleCommercialHash: record.effective.wholesaleCommercialHash,
@@ -472,7 +496,7 @@ export function createPartnerRetailCorrectionService(
           const expected = checkExpectedRevision(command.expected, successor.owner);
           if (expected) return { ok: false, error: expected };
           const authority = await dependencies.authorize(tx, { actorId: command.idempotency.actorId,
-            action: 'CUSTOMER_OUTPUT', caseId: record.caseId });
+            action: 'CUSTOMER_OUTPUT', caseId: record.caseId, correctionId: correction.correctionId });
           if (!authority.ok) return authority;
           const value = { commandId: command.commandId, head: successor.owner,
             effective: record.effective.owner, eventIds: [] as string[] };

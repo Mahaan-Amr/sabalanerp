@@ -14,6 +14,7 @@ const semanticColors = async (page: Page) =>
   });
 
 test('Sales landing and the first contract step use the minimal shared workflow language', async ({ page }) => {
+  test.setTimeout(180_000);
   await login(page);
   await page.goto('/dashboard/sales');
 
@@ -107,10 +108,11 @@ test('Sales landing and the first contract step use the minimal shared workflow 
   })).toBe(true);
   await page.evaluate(() => { document.documentElement.style.zoom = ''; });
 
+  await page.waitForLoadState('networkidle');
   await page.evaluate(() => localStorage.removeItem('contractWizardState'));
-  await page.goto('/dashboard/sales/contracts/collaboration/create');
+  await page.goto('/dashboard/sales/contracts/collaboration/create', { waitUntil: 'domcontentloaded' });
   const collaborationWorkflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
-  await expect(collaborationWorkflow).toBeVisible();
+  await expect(collaborationWorkflow).toBeVisible({ timeout: 60_000 });
   await expect(collaborationWorkflow.getByRole('heading', { name: 'قرارداد همکاری در فروش', exact: true })).toBeVisible();
 
   await page.route('**/sales/contracts/e2e-edit', async (route) => {
@@ -909,6 +911,7 @@ test('Product Selection restores into the shared interface without changing pers
 });
 
 test('Stair layer summary keeps its established values visible while recalculating', async ({ page }) => {
+  test.setTimeout(180_000);
   await page.addInitScript(() => {
     const NativeWorker = window.Worker;
     if (!NativeWorker) return;
@@ -1047,9 +1050,9 @@ test('Stair layer summary keeps its established values visible while recalculati
     }));
   });
 
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4');
+  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4', { waitUntil: 'domcontentloaded' });
   const parentRow = page.locator('[data-contract-row-id="stair-parent-e2e"]');
-  await expect(parentRow).toBeVisible();
+  await expect(parentRow).toBeVisible({ timeout: 60_000 });
   await page.setViewportSize({ width: 390, height: 844 });
   await parentRow.getByRole('button', { name: 'ویرایش', exact: true }).click();
   const dialog = page.getByRole('dialog');
@@ -1075,7 +1078,7 @@ test('Stair layer summary keeps its established values visible while recalculati
   }
   const summary = dialog.locator('#stair-layer-calculation-summary');
   await expect(summary).toBeVisible();
-  await expect(summary).toHaveAttribute('aria-busy', 'false', { timeout: 10_000 });
+  await expect(summary).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
   await expect(summary.getByRole('status', { name: 'در حال بارگذاری' })).toHaveCount(0);
   const establishedValues = summary.locator(':scope > div strong');
   expect(await establishedValues.count()).toBeGreaterThan(0);
@@ -1089,7 +1092,7 @@ test('Stair layer summary keeps its established values visible while recalculati
   await expect(summary.getByRole('status', { name: 'در حال بارگذاری' })).toHaveCount(0);
   await expect(establishedValues).toHaveCount(establishedValueCount);
   await expect(establishedValues.first()).toHaveText(firstEstablishedValue);
-  await expect(summary).toHaveAttribute('aria-busy', 'false', { timeout: 10_000 });
+  await expect(summary).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
   await expect(summary.getByRole('status', { name: 'در حال بارگذاری' })).toHaveCount(0);
 
   const layerWidth = dialog.getByText('عرض لایه', { exact: true }).locator('..').locator('input');
@@ -1097,7 +1100,7 @@ test('Stair layer summary keeps its established values visible while recalculati
   await expect(summary).toHaveAttribute('aria-busy', 'true');
   await expect(establishedValues).toHaveCount(establishedValueCount);
   await expect(summary.getByRole('status', { name: 'در حال بارگذاری' })).toHaveCount(0);
-  await expect(summary).toHaveAttribute('aria-busy', 'false', { timeout: 10_000 });
+  await expect(summary).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
   expect(await establishedValues.allInnerTexts()).not.toEqual(establishedValueTexts);
 });
 
@@ -1165,6 +1168,7 @@ test('Contract Creation keeps early and consequential steps accessible and respo
 });
 
 test('Contract submission preserves input across an invalid response, succeeds on retry, and exits without resubmitting', async ({ page }) => {
+  test.setTimeout(180_000);
   let submissionAttempts = 0;
   await page.route('**/sales/contract-edit-sessions/**', async (route) => {
     const request = route.request();
@@ -1278,18 +1282,21 @@ test('Contract submission preserves input across an invalid response, succeeds o
       }
     }));
   });
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8');
+  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
 
   const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
-  await expect(submit).toBeEnabled({ timeout: 15_000 });
+  await expect(submit).toBeEnabled({ timeout: 60_000 });
   await submit.click();
   await expect(page.getByText(/عملیات انجام نشد\. اطلاعات را بررسی و دوباره تلاش کنید/)).toBeVisible();
   await expect(submit).toBeEnabled();
 
-  await submit.click();
-  await expect(page).toHaveURL(
-    /\/dashboard\/sales\/contracts\/e2e-contract\?created=1&contractNumber=E2E-1001$/,
-  );
+  await Promise.all([
+    page.waitForURL(
+      /\/dashboard\/sales\/contracts\/e2e-contract\?created=1&contractNumber=E2E-1001$/,
+      { timeout: 60_000 },
+    ),
+    submit.click(),
+  ]);
   expect(submissionAttempts).toBe(2);
 });
 

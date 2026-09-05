@@ -304,6 +304,7 @@ export default function DashboardPage() {
             { id: 'security', title: 'امنیت سیستم', href: '/dashboard/admin/security', icon: FaUserShield },
             { id: 'management-reports', title: 'گزارش‌های مدیریتی', href: '/dashboard/admin/reports', icon: FaChartLine },
             { id: 'recovery', title: 'پشتیبان‌گیری و بازیابی', href: '/dashboard/admin/system-recovery', icon: FaDatabase },
+            { id: 'shipment-statements', title: 'کنترل صورت‌حساب ارسال', href: '/dashboard/admin/shipment-statements', icon: FaFileContract },
           ]}
         />
       )}

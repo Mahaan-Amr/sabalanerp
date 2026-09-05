@@ -14,6 +14,7 @@
     "typecheck:partner-sales-contracts": "npm --prefix packages/partner-sales-contracts run typecheck",
     "test:partner-sales-contracts": "npm --prefix packages/partner-sales-contracts test",
     "test:partner-sales": "node scripts/run-partner-sales-tests.mjs unit",
+    "test:partner-sales:integration": "node scripts/run-partner-sales-tests.mjs integration",
     "test:partner-sales:local": "node scripts/run-partner-sales-tests.mjs all",
     "test:partner-sales:inventory": "node scripts/run-partner-sales-tests.mjs check-inventory",
     "build:contract-product-graph": "npm --prefix packages/contract-product-graph run build",
@@ -101,8 +102,5 @@
     "@playwright/test": "^1.61.1",
     "concurrently": "^8.2.2",
     "pg": "^8.11.3"
-  },
-  "dependencies": {
-    "xlsx": "^0.18.5"
   }
 }

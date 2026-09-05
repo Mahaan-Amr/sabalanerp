@@ -43,3 +43,10 @@ test('range switching never relabels prior-range data as the newly requested ran
   assert.equal(switching.data, null);
   assert.equal(pendingFinancialTrend(successful, '3m').data, data);
 });
+
+test('private Partner trend is discarded on revalidation or failure', () => {
+  const privateData = { ...data, partnerSeries: [{ currency: 'IRR', points: [] }] };
+  const successful = resolveFinancialTrend(pendingFinancialTrend(), privateData);
+  assert.equal(pendingFinancialTrend(successful, '3m').data, null);
+  assert.equal(failFinancialTrend(successful).data, null);
+});

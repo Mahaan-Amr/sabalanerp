@@ -32,7 +32,8 @@ async function fixture(run: (tx: Prisma.TransactionClient, actorId: string, acce
       const access: PartnerTechnicalRecoveryAccess = { schemaVersion: 1, recoveryId: actorId,
         browserSessionId: 'test-browser', leaseToken: randomUUID(), baseRevision: 0 };
       await tx.salesContractEditSession.create({ data: { draftId: actorId, ownerUserId: actorId,
-        browserSessionId: access.browserSessionId, leaseToken: access.leaseToken, schemaVersion: 2, baseRevision: 0 } });
+        browserSessionId: access.browserSessionId, leaseToken: access.leaseToken, schemaVersion: 2,
+        baseRevision: 0, purpose: 'PARTNER_TECHNICAL' } });
       await run(tx, actorId, access);
       // Command receipts are append-only. Roll back all fixture writes instead
       // of deleting evidence, disabling triggers or creating another database.
@@ -71,6 +72,8 @@ test('real pre-Case authority binds creator-private recovery to the current Part
     await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'ACTIVE' } });
     await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
       enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+      cohortId: actorId, enrollmentPaused: false, operationalPaused: false } });
     await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
       actorId, eligibilityEvidence: { fixture: true } } });
     const dependencies = { actorId, transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => run(tx),
@@ -105,6 +108,8 @@ test('pre-Case technical authority rejects internal ADMIN, pending identity, for
       'active identity outside a release cohort cannot read the mounted technical surface');
     await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
       enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+      cohortId: actorId, enrollmentPaused: false, operationalPaused: false } });
     await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
       actorId, eligibilityEvidence: { fixture: true } } });
     assert.equal((await authorize(tx, request)).ok, true, 'own active Partner bundle, even with a stray legacy role');
@@ -126,6 +131,8 @@ test('real database policy and private catalog evidence produce a validated safe
       commercialAccount: { create: { id: actorId } } } });
     await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
       enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+      cohortId: actorId, enrollmentPaused: false, operationalPaused: false } });
     await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
       actorId, eligibilityEvidence: { fixture: true } } });
     const product = await tx.product.create({ data: { id: actorId, code: actorId, name: actorId, namePersian: 'سنگ تست فنی',
@@ -247,7 +254,8 @@ test('a receipt cannot acknowledge a released and recreated draft that no longer
     // Simulate the existing release/recreate lifecycle. Immutable receipts stay.
     await tx.salesContractEditSession.delete({ where: { draftId: access.recoveryId } });
     await tx.salesContractEditSession.create({ data: { draftId: access.recoveryId, ownerUserId: actorId,
-      browserSessionId: access.browserSessionId, leaseToken: access.leaseToken, schemaVersion: 2, baseRevision: 0 } });
+      browserSessionId: access.browserSessionId, leaseToken: access.leaseToken, schemaVersion: 2,
+      baseRevision: 0, purpose: 'PARTNER_TECHNICAL' } });
     const replay = await service.checkpoint(command);
     if (replay.ok) throw new Error('Receipt acknowledged missing durable progress');
     assert.equal(replay.error.code, 'INTEGRITY_CONFLICT');
@@ -608,7 +616,8 @@ test('discard and recreation of the same recovery ID cannot reissue an old confi
     if (!original.ok) throw new Error(original.error.code);
     await tx.salesContractEditSession.delete({ where: { draftId: access.recoveryId } });
     await tx.salesContractEditSession.create({ data: { draftId: access.recoveryId, ownerUserId: actorId,
-      browserSessionId: access.browserSessionId, leaseToken: access.leaseToken, schemaVersion: 2, baseRevision: 0 } });
+      browserSessionId: access.browserSessionId, leaseToken: access.leaseToken, schemaVersion: 2,
+      baseRevision: 0, purpose: 'PARTNER_TECHNICAL' } });
     const fresh = await createPartnerTechnicalSaveService(dependencies).save({ ...command, idempotencyKey: 'new-incarnation',
       draft: { ...command.draft, rows: [{ ...command.draft.rows[0], configuration: { ...command.draft.rows[0].configuration, quantity: '8' } }] } });
     if (!fresh.ok) throw new Error(fresh.error.code);

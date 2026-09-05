@@ -4,7 +4,7 @@ import {
   ApprovedInquirySchema, PartnerCaseViewSchema, PartnerCommandSchema, canonicalHash, partnerError,
   type PartnerCommandPort, type Result,
 } from '@sabalanerp/partner-sales-contracts';
-import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
+import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { bindApprovalUsage, bindFrozenApprovalUsage, resolveApprovalForUse } from '../inquiries/approvalUsage';
 import { buildCaseProjections } from './projections';
 import { buildRevisionEvidence, validateResolvedDraft, type ApprovedCaseRow, type ResolvedCaseDraft } from './revisions';
@@ -291,14 +291,16 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     if (!stillPreviousProject.ok) return stillPreviousProject;
     const unlinked = await tx.crmPotentialProject.updateMany({ where: { id: previousProjectId,
       customerId: current.customerId,
-      wonSalesContractId: current.customerContractId }, data: { wonSalesContractId: null } });
+      wonSalesContractId: current.customerContractId, partnerRevision: { not: null } },
+      data: { wonSalesContractId: null, partnerRevision: { increment: 1 } } });
     if (unlinked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
   }
   if (resolved.value.projectId && previousProjectId !== resolved.value.projectId) {
     const linked = await tx.crmPotentialProject.updateMany({ where: { id: resolved.value.projectId,
       customerId: resolved.value.customerId, OR: [
         { wonSalesContractId: null }, { wonSalesContractId: current.customerContractId },
-      ] }, data: { wonSalesContractId: current.customerContractId } });
+      ], partnerRevision: { not: null } }, data: { wonSalesContractId: current.customerContractId,
+        partnerRevision: { increment: 1 } } });
     if (linked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
   }
   const consumed = await dependencies.consumeRecovery(tx, { actorId: dependencies.actorId,
@@ -312,7 +314,10 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
 }
 
 export function createPrismaPartnerCaseService(input: Omit<PartnerCaseDependencies, 'transaction'> & { database: PrismaClient }) {
-  return createPartnerCaseService({ ...input, transaction: work => input.database.$transaction(work) });
+  return createPartnerCaseService({ ...input, transaction: work => input.database.$transaction(async tx => {
+    await lockPartnerOperationsControl(tx);
+    return work(tx);
+  }) });
 }
 
 /** Atomic Case-pair writer. All private graph, approval and policy evidence is
@@ -462,8 +467,8 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         currency: evidence.value.retailEnvelope.totals.currency, contractData: json(projections.value.customer) } });
       if (resolved.value.projectId) {
         const linked = await tx.crmPotentialProject.updateMany({ where: { id: resolved.value.projectId,
-          customerId: resolved.value.customerId, wonSalesContractId: null },
-          data: { wonSalesContractId: ids.customerContractId } });
+          customerId: resolved.value.customerId, wonSalesContractId: null, partnerRevision: { not: null } },
+          data: { wonSalesContractId: ids.customerContractId, partnerRevision: { increment: 1 } } });
         if (linked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
       }
       dependencies.failpoint?.('AFTER_PAIR');

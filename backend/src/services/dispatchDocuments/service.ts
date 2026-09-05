@@ -11,9 +11,10 @@ import type {
   PrimaryBundleIdentity,
   PrimaryBundleSource,
 } from './ports';
-import { prepareDispatchArtifact } from './artifactPreparation';
+import { prepareDispatchArtifact, type PreparedDispatchArtifact } from './artifactPreparation';
 
 export class DispatchDocumentValidationError extends Error {}
+export class DispatchDocumentAuthorizationError extends Error {}
 export class DispatchDocumentConflictError extends Error {}
 export class DispatchDocumentEvidenceConflictError extends DispatchDocumentConflictError {}
 export class DispatchDocumentIntegrityError extends Error {}
@@ -60,6 +61,35 @@ const assertRenderSourceConsistency = (source: PrimaryBundleSource) => {
     || priced.totals.netAmount !== statement.netAmount) {
     throw new DispatchDocumentConflictError('Statement totals do not match the bound priced-allocation ledger.');
   }
+  if (priced.sourceKind === 'PARTNER_CASE') {
+    if (!('sourceKind' in statement) || !('sourceKind' in source.waybill.payload)) {
+      throw new DispatchDocumentConflictError('Partner dispatch documents require Partner-owned render sources.');
+    }
+    const sort = <T extends { productRowId: string }>(lines: T[]) => [...lines]
+      .sort((left, right) => left.productRowId.localeCompare(right.productRowId));
+    const pricedLines = sort(priced.lines).map(line => ({ productRowId: line.productRowId, unit: line.unit,
+      quantity: line.quantity, grossAmount: line.grossAmount, allocatedDiscount: line.discountAmount, netAmount: line.netAmount }));
+    const statementLines = sort(statement.lines).map(line => ({ productRowId: line.productRowId, unit: line.unit,
+      quantity: line.quantity, grossAmount: line.grossAmount, allocatedDiscount: line.allocatedDiscount, netAmount: line.netAmount }));
+    const waybillLines = sort(source.waybill.payload.lines).map(line => ({ productRowId: line.productRowId,
+      unit: line.unit, quantity: line.quantity }));
+    const quantities = pricedLines.map(({ grossAmount: _gross, allocatedDiscount: _discount, netAmount: _net, ...line }) => line);
+    if (JSON.stringify(pricedLines) !== JSON.stringify(statementLines) || JSON.stringify(quantities) !== JSON.stringify(waybillLines)) {
+      throw new DispatchDocumentConflictError('Rendered Partner bundle rows do not match the bound priced-allocation ledger.');
+    }
+    const leakedKeys = new Set(['grossAmount', 'allocatedDiscount', 'discountAmount', 'netAmount', 'currency',
+      'wholesaleUnitPrice', 'financialApprovalEvidenceId', 'sourceFinancialRecordId', 'internalRecordId', 'contractItemId']);
+    const containsLeak = (value: unknown): boolean => Array.isArray(value) ? value.some(containsLeak)
+      : Boolean(value && typeof value === 'object' && Object.entries(value as Record<string, unknown>)
+        .some(([key, child]) => leakedKeys.has(key) || containsLeak(child)));
+    if (containsLeak(source.waybill.payload)) {
+      throw new DispatchDocumentConflictError('Partner customer waybill contains internal wholesale evidence.');
+    }
+    return;
+  }
+  if ('sourceKind' in statement || 'sourceKind' in source.waybill.payload) {
+    throw new DispatchDocumentConflictError('Ordinary dispatch documents cannot use a Partner render source.');
+  }
   const pricedLines = [...priced.lines].sort((left, right) => `${left.contractId}:${left.contractItemId}:${left.productRowId}`.localeCompare(`${right.contractId}:${right.contractItemId}:${right.productRowId}`));
   const statementLines = statement.contracts.flatMap(group => group.lines.map(line => ({ contractId: group.contractId, ...line })))
     .sort((left, right) => `${left.contractId}:${left.contractItemId}:${left.productRowId}`.localeCompare(`${right.contractId}:${right.contractItemId}:${right.productRowId}`));
@@ -98,15 +128,26 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
       throw new DispatchDocumentConflictError('Dispatch document source does not match the reserved waybill identity.');
     }
     assertRenderSourceConsistency(source);
-    const prepared = await Promise.all([source.waybill, source.statement].map(renderInput => prepareDispatchArtifact({
-      publisher: dependencies.publisher, storage: dependencies.storage, id, now: () => new Date(root.issuedAt),
-    }, renderInput)));
+    const prepared: PreparedDispatchArtifact[] = [];
+    try {
+      for (const renderInput of [source.waybill, source.statement]) {
+        prepared.push(await prepareDispatchArtifact({ publisher: dependencies.publisher, storage: dependencies.storage,
+          id, now: () => new Date(root.issuedAt) }, renderInput));
+      }
+    } catch (error) {
+      await Promise.all(prepared.map(artifact => dependencies.storage.discard?.(artifact.storageKey)));
+      throw error;
+    }
     const artifacts: PublishedDispatchArtifact[] = prepared.map(artifact => ({ ...artifact, waybillId: root.waybillId,
       adjustmentSequence: null, generatorVersion: source.provenance.generatorVersion,
       sourceVersionIdentities: source.provenance.sourceVersionIdentities }));
     if (artifacts.length !== 2) throw new DispatchDocumentIntegrityError('Primary dispatch bundle is incomplete.');
     void actorId;
     return artifacts;
+  };
+
+  const discard = async (artifacts: PublishedDispatchArtifact[]) => {
+    await Promise.all(artifacts.map(artifact => dependencies.storage.discard?.(artifact.storageKey)));
   };
 
   const decideCandidate = async (input: {
@@ -123,10 +164,10 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     const actorId = required(input.actorId, 'actorId');
     const command = input.action === 'ACCEPT' ? 'ACCEPT_AND_ISSUE' as const : 'REJECT' as const;
     const fingerprint = intentFingerprint({ command, candidateId, action: input.action, reason: input.reason?.trim() || null });
-    const prior = await dependencies.repository.findCommandResult({ scope: 'CANDIDATE', scopeId: candidateId, idempotencyKey,
-      command, intentFingerprint: fingerprint });
-    if (prior) return prior as CandidateDecisionResult;
     const correlationId = input.correlationId?.trim() || id();
+    const prior = await dependencies.repository.findCommandResult({ scope: 'CANDIDATE', scopeId: candidateId, idempotencyKey,
+      command, intentFingerprint: fingerprint, actorId, correlationId });
+    if (prior) return prior as CandidateDecisionResult;
     if (input.action !== 'ACCEPT') {
       if (!['REJECT', 'RETURN'].includes(input.action)) throw new DispatchDocumentValidationError('Unsupported candidate action.');
       return dependencies.repository.rejectCandidate({ candidateId, action: input.action as 'REJECT' | 'RETURN',
@@ -144,40 +185,61 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     if (source.candidateId !== candidateId) throw new DispatchDocumentConflictError('Dispatch source candidate changed.');
     const artifacts = await publish(source, root, actorId);
     const waybill: IssuedWaybill = { id: root.waybillId, number: root.number, status: 'ISSUED', issuedAt: root.issuedAt, replacesWaybillId: null };
-    return dependencies.repository.acceptAndIssue({ candidateId, allocationRevisionId: source.allocationRevisionId,
-      expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
-      waybill, artifacts, idempotencyKey, actorId, correlationId, authority: input.authority, intentFingerprint: fingerprint });
+    try {
+      const result = await dependencies.repository.acceptAndIssue({ candidateId, allocationRevisionId: source.allocationRevisionId,
+        expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
+        waybill, artifacts, idempotencyKey, actorId, correlationId, authority: input.authority, intentFingerprint: fingerprint });
+      if (result.waybill?.id !== waybill.id) await discard(artifacts);
+      return result;
+    } catch (error) {
+      // Unknown repository failures can be an acknowledgement loss after a
+      // successful COMMIT. Keep those bytes for durable-command recovery and
+      // reconciliation; only this typed denial proves artifact metadata did not
+      // commit and permits immediate removal.
+      if (error instanceof DispatchDocumentAuthorizationError) await discard(artifacts);
+      throw error;
+    }
   };
 
   const voidWaybill = async (input: { waybillId: string; reason: string; idempotencyKey: string; actorId: string; correlationId?: string; authority?: unknown }) => {
     const waybillId = required(input.waybillId, 'waybillId');
     const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
+    const actorId = required(input.actorId, 'actorId');
+    const correlationId = input.correlationId?.trim() || id();
     const fingerprint = intentFingerprint({ command: 'VOID', waybillId, reason: input.reason?.trim() || null, authority: input.authority ?? {} });
     const prior = await dependencies.repository.findCommandResult({ scope: 'WAYBILL', scopeId: waybillId, idempotencyKey,
-      command: 'VOID', intentFingerprint: fingerprint });
+      command: 'VOID', intentFingerprint: fingerprint, actorId, correlationId });
     if (prior) return prior;
     return dependencies.repository.voidWaybill({ waybillId, reason: required(input.reason, 'reason'), idempotencyKey,
-      actorId: required(input.actorId, 'actorId'), correlationId: input.correlationId?.trim() || id(), authority: input.authority ?? {},
+      actorId, correlationId, authority: input.authority ?? {},
       intentFingerprint: fingerprint });
   };
 
   const replaceWaybill = async (input: { waybillId: string; reason: string; idempotencyKey: string; actorId: string; correlationId?: string; authority?: unknown }) => {
     const waybillId = required(input.waybillId, 'waybillId');
     const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
+    const actorId = required(input.actorId, 'actorId');
+    const correlationId = input.correlationId?.trim() || id();
     const fingerprint = intentFingerprint({ command: 'REPLACE', waybillId, reason: input.reason?.trim() || null, authority: input.authority ?? {} });
     const prior = await dependencies.repository.findCommandResult({ scope: 'WAYBILL', scopeId: waybillId, idempotencyKey,
-      command: 'REPLACE', intentFingerprint: fingerprint });
+      command: 'REPLACE', intentFingerprint: fingerprint, actorId, correlationId });
     if (prior) return prior;
     const root = await identity();
     const source = await dependencies.sourceReader.readReplacementBundle({ waybillId, replacement: root });
     if (source.predecessorWaybillId !== waybillId) throw new DispatchDocumentConflictError('Replacement source changed.');
-    const artifacts = await publish(source, root, input.actorId);
+    const artifacts = await publish(source, root, actorId);
     const replacement: IssuedWaybill = { id: root.waybillId, number: root.number, status: 'ISSUED', issuedAt: root.issuedAt, replacesWaybillId: waybillId };
-    return dependencies.repository.replaceWaybill({ waybillId, allocationRevisionId: source.allocationRevisionId,
-      expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
-      replacement, artifacts, reason: required(input.reason, 'reason'), idempotencyKey,
-      actorId: required(input.actorId, 'actorId'), correlationId: input.correlationId?.trim() || id(), authority: input.authority ?? {},
-      intentFingerprint: fingerprint });
+    try {
+      const result = await dependencies.repository.replaceWaybill({ waybillId, allocationRevisionId: source.allocationRevisionId,
+        expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
+        replacement, artifacts, reason: required(input.reason, 'reason'), idempotencyKey,
+        actorId, correlationId, authority: input.authority ?? {}, intentFingerprint: fingerprint }) as any;
+      if (result?.replacement?.id !== replacement.id) await discard(artifacts);
+      return result;
+    } catch (error) {
+      if (error instanceof DispatchDocumentAuthorizationError) await discard(artifacts);
+      throw error;
+    }
   };
 
   const assertAccess = async (actorId: string, waybillId: string) => {
@@ -204,6 +266,8 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
         intentFingerprint: retrievalFingerprint });
       throw new DispatchDocumentNotAvailableError();
     }
+    if (!await dependencies.access.canReadDocuments({ actorId: input.actorId, waybillId: input.waybillId,
+      kinds: [artifact.kind] })) throw new DispatchDocumentNotAvailableError();
     try {
       const bytes = await verifiedBytes(artifact);
       let completion: 'PENDING' | 'SUCCEEDED' | 'FAILED' = 'PENDING';
@@ -232,6 +296,9 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     await assertAccess(required(input.actorId, 'actorId'), required(input.waybillId, 'waybillId'));
     const kinds = orderedKinds(input.kinds);
     if (!kinds.length) throw new DispatchDocumentValidationError('At least one document kind is required.');
+    if (!await dependencies.access.canReadDocuments({ actorId: input.actorId, waybillId: input.waybillId, kinds })) {
+      throw new DispatchDocumentNotAvailableError();
+    }
     const operationIdempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
     const attemptId = required(input.correlationId, 'correlationId');
     const fingerprint = intentFingerprint({ command: 'PRINT_HANDOFF', waybillId: input.waybillId, kinds });
@@ -290,6 +357,8 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     const waybillId = input.waybillId?.trim() || undefined;
     if (waybillId) await assertAccess(actorId, waybillId);
     else if (!await dependencies.access.canReadCandidate({ actorId })) throw new DispatchDocumentNotAvailableError();
+    if (!await dependencies.access.canReadDocuments({ actorId, waybillId, candidateId: input.candidateId,
+      kinds: ['WAYBILL', 'STATEMENT', 'STATEMENT_ADJUSTMENT'] })) throw new DispatchDocumentNotAvailableError();
     const model = await dependencies.repository.getCombinedReadModel({ candidateId: required(input.candidateId, 'candidateId'),
       authorizedWaybillId: waybillId });
     if (!model) throw new DispatchDocumentNotAvailableError();

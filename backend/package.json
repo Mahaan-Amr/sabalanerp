@@ -9,12 +9,14 @@
     "duty:migrate:shared-decisions:dry": "tsx src/scripts/migrate-open-shared-decision-duties.ts",
     "dispatch-document:recovery": "tsx scripts/dispatch-document-recovery.ts",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.cutover.json",
     "test:remaining-recovery": "tsx src/services/__tests__/remainingRecoveryGuidance.test.ts",
     "test:remaining-recovery:integration": "tsx src/services/__tests__/remainingRecoveryWrite.integration.test.ts",
     "test:partner-sales-contracts": "npm --prefix ../packages/partner-sales-contracts run test:consumer:backend",
     "test:contract-party-identity": "tsx src/services/__tests__/contractPartyIdentity.test.ts && tsx src/services/__tests__/crmCustomerSearch.test.ts",
     "test:contract-print": "tsx src/utils/__tests__/printTemplateLongitudinalOptimizer.test.ts && tsx src/utils/__tests__/printTemplateProjectName.test.ts && tsx src/utils/__tests__/printTemplateStairLayer.test.ts && tsx src/utils/__tests__/printTemplateOperationLookup.test.ts && tsx src/utils/__tests__/printTemplateAccountingCurrency.test.ts && tsx src/utils/__tests__/printTemplateRemainingRecovery.test.ts",
+    "test:catalog-spreadsheet": "tsx --test src/services/__tests__/catalogSpreadsheetCompatibility.test.ts",
+    "test:partner-customer-pdf": "tsx --test src/services/__tests__/partnerCustomerPdfUpgradeSmoke.test.ts",
     "test:dispatch-document-pdf": "tsx src/documents/dispatch/__tests__/dispatchDocumentTemplate.test.ts && tsx src/documents/dispatch/__tests__/dispatchDocumentPdf.test.ts",
     "verify:dispatch-document-pdfs": "node dist/scripts/verifyDispatchDocumentPdfs.js",
     "test:product-graph-persistence": "tsx src/services/__tests__/contractProductGraphPersistence.test.ts",
@@ -65,6 +67,8 @@
     "test:support-tickets": "tsx src/services/__tests__/supportTicketPolicy.test.ts",
     "test:biometric-connector": "tsx src/services/__tests__/biometricConnector.test.ts",
     "test:shipment-quantities": "tsx src/services/__tests__/shipmentQuantityProjection.test.ts && tsx src/services/__tests__/shipmentContractQuantityVersion.test.ts && tsx src/routes/__tests__/shipmentQuantityApi.test.ts",
+    "test:shipment-statement-operations": "tsx src/services/__tests__/shipmentStatementOperations.test.ts && tsx src/services/__tests__/shipmentStatementCutoverPrismaRepository.test.ts && tsx src/services/__tests__/allocationPricingBinding.test.ts && tsx src/services/__tests__/dispatchDocumentContracts.test.ts && tsx src/services/__tests__/deploymentShipmentStatementCutoverRuntime.test.ts",
+    "test:shipment-statement-operations:db": "tsx src/services/__tests__/shipmentStatementOperationsConcurrency.integration.test.ts",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "db:migrate": "prisma migrate dev",
@@ -92,6 +96,7 @@
     "verify:guard-driver-queue": "tsx scripts/verify-guard-driver-queue.ts",
     "verify:dispatch-allocations": "tsx scripts/verify-dispatch-allocations-waybills.ts",
     "verify:dispatch-confirmation": "tsx scripts/verify-dispatch-confirmation.ts",
+    "reconcile:biometric-connector": "tsx scripts/reconcile-biometric-connector.ts",
     "verify:physical-gate-exit": "tsx scripts/verify-physical-gate-exit.ts",
     "verify:dispatch-corrections-outages": "tsx scripts/verify-dispatch-corrections-outages.ts",
     "verify:dispatch-cutover": "tsx scripts/verify-dispatch-cutover.ts",
@@ -130,7 +135,7 @@
     "@prisma/client": "^5.16.1",
     "@sabalanerp/contract-product-graph": "file:../packages/contract-product-graph",
     "@sabalanerp/partner-sales-contracts": "file:../packages/partner-sales-contracts",
-    "axios": "^1.13.5",
+    "axios": "^1.20.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -138,14 +143,14 @@
     "express-validator": "^7.3.1",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
-    "morgan": "^1.10.0",
+    "morgan": "^1.12.0",
     "multer": "^1.4.5-lts.1",
     "prisma": "^5.16.1",
-    "puppeteer": "^22.15.0",
-    "sanitize-html": "^2.17.0",
+    "puppeteer": "^25.10.0",
+    "sanitize-html": "^2.17.7",
     "socket.io": "^4.7.5",
     "web-push": "^3.6.7",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -161,6 +166,9 @@
     "eslint": "^8.57.0",
     "tsx": "^4.7.1",
     "typescript": "^5.5.3"
+  },
+  "overrides": {
+    "qs": "6.16.0"
   },
   "prisma": {
     "seed": "tsx src/prisma/seed.ts"

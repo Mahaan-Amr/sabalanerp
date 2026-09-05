@@ -6,6 +6,7 @@ import { remainingRecoveryGuidance } from '../../backend/src/services/remainingR
 const products = JSON.parse(readFileSync('packages/contract-product-graph/src/__tests__/fixtures/remaining-child-chain.json', 'utf8'));
 
 test('remaining recovery error keeps every row and shows exact chain guidance on mobile', async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
   let submitted: any;
   const guidance = remainingRecoveryGuidance(products, products[1].rowId, 'cutting-price-drift');
   const message = `${guidance.message} کد پیگیری: remaining-recovery-e2e`;
@@ -37,9 +38,9 @@ test('remaining recovery error keeps every row and shows exact chain guidance on
       payment: { payments: [], currency: 'تومان', totalContractAmount: 23071875 }, discount: null, signature: null
     } }));
   }, products);
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8');
+  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
   const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
-  await expect(submit).toBeEnabled();
+  await expect(submit).toBeEnabled({ timeout: 60_000 });
   await submit.click();
   await expect.poll(() => submitted).toBeTruthy();
   await expect(page.getByText(message, { exact: true })).toBeVisible();

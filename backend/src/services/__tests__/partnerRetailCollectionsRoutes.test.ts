@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { registerPartnerRetailCollectionRoutes, type CollectionHandler } from '../../routes/partner-retail-collections';
 
-test('retail collection route exposes only shared receipt commands through a request-bound service', async () => {
+test('retail collection routes expose shared receipt commands and revision-bound reads through a request-bound service', async () => {
   const handlers = new Map<string, CollectionHandler>();
   const router = {
     get(path: string, handler: CollectionHandler) { handlers.set(`GET ${path}`, handler); },
@@ -13,6 +13,7 @@ test('retail collection route exposes only shared receipt commands through a req
   registerPartnerRetailCollectionRoutes(router, {
     serviceFor: async () => ({
       execute: async input => { calls.push({ method: 'execute', input }); return { ok: true, value: { commandId: 'command-324' } }; },
+      read: async input => { calls.push({ method: 'read', input }); return { ok: true, value: { caseId: input.caseId } }; },
     }),
   });
   const response = () => {
@@ -22,8 +23,13 @@ test('retail collection route exposes only shared receipt commands through a req
   };
   const commandResponse = response();
   await handlers.get('POST /commands')!({ params: {}, query: {}, body: command }, commandResponse.api);
-  assert.deepEqual([...handlers.keys()], ['POST /commands']);
-  assert.deepEqual(calls, [{ method: 'execute', input: command }]);
+  const revision = { caseId: 'case-324', revision: 1,
+    integrityHash: `sha256-v1:${'a'.repeat(64)}` };
+  const queryResponse = response();
+  await handlers.get('POST /query')!({ params: {}, query: {}, body: revision }, queryResponse.api);
+  assert.deepEqual([...handlers.keys()], ['POST /commands', 'POST /query']);
+  assert.deepEqual(calls, [{ method: 'execute', input: command }, { method: 'read', input: revision }]);
   assert.deepEqual(commandResponse.state.body, { success: true, data: { commandId: 'command-324' } });
+  assert.deepEqual(queryResponse.state.body, { success: true, data: { caseId: 'case-324' } });
   assert.equal(commandResponse.state.headers.get('Cache-Control'), 'private, no-store');
 });

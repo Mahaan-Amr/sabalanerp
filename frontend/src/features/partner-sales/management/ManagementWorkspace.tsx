@@ -32,12 +32,15 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
   const running = useRef(false);
   const locked = pending || feedback?.kind === 'uncertain';
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
-  const availability = choice && actionPresentation(choice.profile?.actions || choice.transfer?.actions || resource.view?.actions || [], choice.action, now);
+  const inquiryOptions = choice?.profile?.responder?.pendingInquiries || [];
+  const availabilitySource = choice?.action === 'RESPONDER_REASSIGN'
+    ? inquiryOptions.flatMap(item => item.actions)
+    : choice?.profile?.actions || choice?.transfer?.actions || resource.view?.actions || [];
+  const availability = choice && actionPresentation(availabilitySource, choice.action, now);
   const options = choice?.action === 'PROFILE_CREATE' ? resource.view?.identityCandidates?.map(item => ({ id: item.identityEvidenceId, label: item.displayName })) || []
     : choice?.action === 'COMMERCIAL_TERMS_MANAGE' ? choice.profile?.commercialTerms?.options || []
       : choice?.action === 'CREDIT_TERMS_MANAGE' ? choice.profile?.creditTerms?.options || []
         : choice?.action === 'RESPONDER_ASSIGN' || choice?.action === 'RESPONDER_REASSIGN' ? choice.profile?.responder?.eligibleOptions || [] : null;
-  const inquiryOptions = choice?.profile?.responder?.pendingInquiries || [];
 
   function choose(next: ManagementChoice) {
     setChoice(next); setOption(''); setInquiryId(''); setFieldError(undefined); setFeedback(null); setMustReview(false);
@@ -74,7 +77,8 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
         transition: conversion, dispositionEvidenceIds: conversion === 'RESOLVE' ? choice!.profile!.conversion.dispositionEvidenceIds : [] }, target.profileId);
       else if (target && ['PROFILE_ACTIVATE', 'PROFILE_SUSPEND', 'PROFILE_TERMINATE'].includes(choice!.action)) outcome = await session.submit({ type: 'PROFILE_TRANSITION', ...target,
         to: choice!.action === 'PROFILE_ACTIVATE' ? 'ACTIVE' : choice!.action === 'PROFILE_SUSPEND' ? 'SUSPENDED' : 'TERMINATED',
-        // No client-produced gate truth. The owner must evaluate all current gates in its transaction.
+        // Activation remains unavailable in the production projection until a
+        // versioned evidence transport is composed; other transitions need none.
         gateEvidenceIds: [] }, target.profileId);
       else outcome = { kind: 'error', error: partnerError('FORBIDDEN') };
       setFeedback(outcome);

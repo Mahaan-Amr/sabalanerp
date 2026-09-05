@@ -29,6 +29,13 @@ type MonetaryLine = QuantityLine & {
   netAmount: string;
 };
 
+type PartnerQuantityLine = Omit<QuantityLine, 'contractItemId'>;
+type PartnerMonetaryLine = PartnerQuantityLine & {
+  grossAmount: string;
+  allocatedDiscount: string;
+  netAmount: string;
+};
+
 export type DispatchDocumentRenderData = CommonRenderInput & ({
   kind: 'WAYBILL';
   payload: {
@@ -38,6 +45,12 @@ export type DispatchDocumentRenderData = CommonRenderInput & ({
       contractNumber: string;
       lines: QuantityLine[];
     }>;
+  } | {
+    sourceKind: 'PARTNER_CASE';
+    allocationRevisionId: string;
+    caseNumber: string;
+    deliveryReference: string;
+    lines: PartnerQuantityLine[];
   };
 } | {
   kind: 'STATEMENT';
@@ -51,6 +64,15 @@ export type DispatchDocumentRenderData = CommonRenderInput & ({
       allocatedDiscount: string;
       netAmount: string;
     }>;
+    grossAmount: string;
+    allocatedDiscount: string;
+    netAmount: string;
+  } | {
+    sourceKind: 'PARTNER_CASE';
+    caseNumber: string;
+    deliveryReference: string;
+    currency: string;
+    lines: PartnerMonetaryLine[];
     grossAmount: string;
     allocatedDiscount: string;
     netAmount: string;
@@ -181,6 +203,11 @@ const renderTableHead = (columns: string, columnCount: number, title: string, nu
 
 const renderWaybill = (input: Extract<DispatchDocumentRenderData, { kind: 'WAYBILL' }>, assets: DispatchDocumentAssets) => {
   let row = 0;
+  if ('sourceKind' in input.payload) {
+    const rows = input.payload.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td></tr>`).join('');
+    return `${renderHeader(input, assets, 'بارنامه خروج محموله', input.waybillNumber)}<table>${renderTableHead(quantityColumns, 5, 'بارنامه خروج محموله', input.waybillNumber)}<tbody>
+      <tr class="contract-heading"><td colspan="5">پرونده ${escapeHtml(input.payload.caseNumber)} · ${escapeHtml(input.payload.deliveryReference)}</td></tr>${rows}</tbody></table>`;
+  }
   const groups = input.payload.contracts.map((contract) => `<tbody>
     <tr class="contract-heading"><td colspan="5">قرارداد ${escapeHtml(contract.contractNumber)}</td></tr>
     ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td></tr>`).join('')}
@@ -190,6 +217,12 @@ const renderWaybill = (input: Extract<DispatchDocumentRenderData, { kind: 'WAYBI
 
 const renderStatement = (input: Extract<DispatchDocumentRenderData, { kind: 'STATEMENT' }>, assets: DispatchDocumentAssets) => {
   let row = 0;
+  if ('sourceKind' in input.payload) {
+    const rows = input.payload.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.grossAmount)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.allocatedDiscount)}</td><td class="numeric money strong" data-pdf-cell>${formatMoney(line.netAmount)}</td></tr>`).join('');
+    return `${renderHeader(input, assets, 'صورت‌حساب محموله مشتری', input.waybillNumber)}<table>${renderTableHead(moneyColumns, 8, 'صورت‌حساب محموله مشتری', input.waybillNumber)}<tbody>
+      <tr class="contract-heading"><td colspan="8">پرونده ${escapeHtml(input.payload.caseNumber)} · ${escapeHtml(input.payload.deliveryReference)}</td></tr>${rows}</tbody></table>
+      <section class="grand-total"><span>جمع کل محموله</span><div><small>ناخالص</small><strong>${formatMoney(input.payload.grossAmount)}</strong></div><div><small>تخفیف</small><strong>${formatMoney(input.payload.allocatedDiscount)}</strong></div><div class="net"><small>خالص (${escapeHtml(input.payload.currency)})</small><strong>${formatMoney(input.payload.netAmount)}</strong></div></section>`;
+  }
   const groups = input.payload.contracts.map((contract) => `<tbody>
     <tr class="contract-heading"><td colspan="8">قرارداد ${escapeHtml(contract.contractNumber)}</td></tr>
     ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.grossAmount)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.allocatedDiscount)}</td><td class="numeric money strong" data-pdf-cell>${formatMoney(line.netAmount)}</td></tr>`).join('')}

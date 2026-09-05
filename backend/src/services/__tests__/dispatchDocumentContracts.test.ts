@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   CUSTOMER_SHIPMENT_STATEMENTS_GATE,
+  SHIPMENT_STATEMENT_OPERATIONS_LOCK,
   isCustomerShipmentStatementsEnabled,
   isPostCutoverFinalization,
   isShipmentStatementFlowActive,
@@ -10,6 +11,7 @@ import { DISPATCH_DOCUMENT_COMMAND_SCOPES } from '../dispatchDocuments/contracts
 import { ACCOUNTING_DISPATCH_CANDIDATE_STATUSES } from '../dispatchDocuments/contracts';
 
 assert.equal(CUSTOMER_SHIPMENT_STATEMENTS_GATE, 'CUSTOMER_SHIPMENT_STATEMENTS_ENABLED');
+assert.equal(SHIPMENT_STATEMENT_OPERATIONS_LOCK, 'SHIPMENT_STATEMENT_OPERATIONS:customer-shipment-statements');
 assert.equal(isCustomerShipmentStatementsEnabled({}), false);
 assert.equal(isCustomerShipmentStatementsEnabled({ CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'false' }), false);
 assert.equal(isCustomerShipmentStatementsEnabled({ CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'TRUE' }), false);
@@ -17,12 +19,16 @@ assert.equal(isCustomerShipmentStatementsEnabled({ CUSTOMER_SHIPMENT_STATEMENTS_
 assert.equal(isShipmentStatementFlowActive({}, null), false);
 assert.equal(isShipmentStatementFlowActive(
   { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' },
-  { enabled: false, cutoverAt: null },
+  { enabled: false, cutoverAt: null, operationalPaused: true },
 ), false);
 assert.equal(isShipmentStatementFlowActive(
   { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' },
-  { enabled: true, cutoverAt: new Date('2026-08-09T12:00:00.000Z') },
+  { enabled: true, cutoverAt: new Date('2026-08-09T12:00:00.000Z'), operationalPaused: false },
 ), true);
+assert.equal(isShipmentStatementFlowActive(
+  { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' },
+  { enabled: true, cutoverAt: new Date('2026-08-09T12:00:00.000Z'), operationalPaused: true },
+), false);
 
 const cutoverAt = new Date('2026-08-09T12:00:00.000Z');
 assert.equal(isPostCutoverFinalization(new Date('2026-08-09T11:59:59.999Z'), cutoverAt), false);

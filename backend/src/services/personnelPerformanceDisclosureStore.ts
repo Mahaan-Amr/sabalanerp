@@ -44,7 +44,8 @@ const consequenceRule = (policy: ConsequencePolicyContent, consequenceType: stri
   const rule = policy.rules[consequenceType];
   if (!rule || !Number.isInteger(rule.minimumResults) || rule.minimumResults < 1
     || !Number.isInteger(rule.maximumAgeDays) || rule.maximumAgeDays < 1
-    || !rule.destination?.responsibilityTypeCode || !rule.destination.workspaceCode || !rule.destination.queueCode) {
+    || !rule.destination?.responsibilityTypeCode || !rule.destination.workspaceCode || !rule.destination.queueCode
+    || (rule.requireLegalControl && !rule.legalControlResponsibilityTypeCode)) {
     throw disclosureError('نوع پیامد در سیاست فعال تعریف نشده است.', 'PERFORMANCE_CONSEQUENCE_TYPE_INVALID', 422);
   }
   return rule;
@@ -352,6 +353,81 @@ const analyticsPopulation = async (client: PrismaClient, keyring: PerformanceVau
   });
 };
 
+const analyticsAuthorizedSubjectIds = async (client: PrismaClient) => {
+  const phase = await client.performanceFeaturePhaseVersion.findFirst({ where: { effectiveFrom: { lte: new Date() } }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] });
+  if (!phase?.releaseEnabled || ['SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT', 'RESULT_LEVEL_BADGE'].includes(phase.phase)) return [];
+  if (phase.cohortVersionId) return (await client.performanceCohortMember.findMany({ where: { cohortVersionId: phase.cohortVersionId }, select: { subjectId: true } })).map(({ subjectId }) => subjectId);
+  return (await client.performanceSubject.findMany({ where: { identityDetachedAt: null }, select: { id: true } })).map(({ id }) => id);
+};
+
+const historicalAnalyticsPopulation = async (
+  client: PrismaClient,
+  keyring: PerformanceVaultKey,
+  reportingFrom: Date,
+  reportingTo: Date,
+  namedRanking = false,
+): Promise<PerformanceAnalyticsMember[]> => {
+  const authorizedSubjectIds = await analyticsAuthorizedSubjectIds(client);
+  if (!authorizedSubjectIds.length) return [];
+  const evaluations = await client.performanceEvaluation.findMany({ where: {
+    status: 'ACCEPTED', subjectId: { in: authorizedSubjectIds }, measurementTo: { gte: reportingFrom, lt: reportingTo },
+  } });
+  const results = evaluations.length ? await client.performanceAcceptedResult.findMany({
+    where: { evaluationId: { in: evaluations.map(({ id }) => id) }, status: namedRanking ? PerformanceResultStatus.EFFECTIVE : { in: [PerformanceResultStatus.EFFECTIVE, PerformanceResultStatus.EXPIRED] },
+      ...(namedRanking ? { expiresAt: { gt: new Date() } } : {}) },
+    orderBy: [{ acceptedAt: 'desc' }, { version: 'desc' }],
+  }) : [];
+  const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
+  const latestBySubject = new Map<string, typeof results[number]>();
+  for (const result of [...results].sort((a, b) =>
+    (evaluationById.get(b.evaluationId)?.measurementTo.getTime() ?? 0) - (evaluationById.get(a.evaluationId)?.measurementTo.getTime() ?? 0)
+    || b.version - a.version)) {
+    const evaluation = evaluationById.get(result.evaluationId);
+    if (evaluation && !latestBySubject.has(evaluation.subjectId)) latestBySubject.set(evaluation.subjectId, result);
+  }
+  const subjects = await client.performanceSubject.findMany({
+    where: { id: { in: [...latestBySubject.keys()] }, identityDetachedAt: null },
+  });
+  const relationships = await client.hrEmploymentRelationship.findMany({
+    where: {
+      id: { in: subjects.map(({ employmentRelationshipId }) => employmentRelationshipId).filter((id): id is string => Boolean(id)) },
+      effectiveFrom: { lte: reportingTo }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: reportingFrom } }],
+    }, include: { personnel: { select: { id: true, firstName: true, lastName: true } } },
+  });
+  const relationshipById = new Map(relationships.map((relationship) => [relationship.id, relationship]));
+  const members: PerformanceAnalyticsMember[] = [];
+  for (const subject of subjects) {
+    const relationship = subject.employmentRelationshipId ? relationshipById.get(subject.employmentRelationshipId) : null;
+    const result = latestBySubject.get(subject.id);
+    const evaluation = result ? evaluationById.get(result.evaluationId) : null;
+    if (!relationship || !result || !evaluation) continue;
+    const payload = await readPerformancePayload<ResultPayload>(client, result.encryptedPayloadId, keyring);
+    const sections = await client.performanceEvaluationSection.findMany({ where: { evaluationId: evaluation.id, status: 'ACCEPTED' }, select: { employmentAssignmentId: true } });
+    const assignments = await client.hrEmploymentAssignment.findMany({ where: { id: { in: sections.map(({ employmentAssignmentId }) => employmentAssignmentId) } }, include: { position: { select: { jobId: true } } } });
+    const peerKeys = new Set<string>();
+    for (const assignment of assignments) {
+      const jobId = assignment.position?.jobId;
+      if (!jobId) continue;
+      const memberships = await client.performancePeerFamilyJob.findMany({ where: { jobId } });
+      const family = await client.performancePeerFamilyVersion.findFirst({ where: {
+        id: { in: memberships.map(({ familyVersionId }) => familyVersionId) }, lifecycle: { in: ['ACTIVE', 'RETIRED'] },
+        effectiveFrom: { lte: evaluation.measurementTo },
+      }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] });
+      peerKeys.add(family ? `${family.familyKey}:v${family.version}` : `job:${jobId}`);
+    }
+    if (namedRanking && (peerKeys.size !== 1 || assignments.length !== sections.length || !sections.length)) continue;
+    members.push({
+      subjectId: subject.id, personnelId: relationship.personnel.id,
+      displayName: `${relationship.personnel.firstName} ${relationship.personnel.lastName}`.trim(),
+      employmentRelationshipId: relationship.id, levelCode: result.levelCode,
+      comparabilitySignature: payload.templateSnapshotHash ?? result.levelPolicyVersionId,
+      peerGroupKey: peerKeys.size === 1 ? [...peerKeys][0] : 'aggregate-only',
+      measurementTo: evaluation.measurementTo,
+    });
+  }
+  return members;
+};
+
 const fixedCohortPerformanceTrend = async (
   client: PrismaClient,
   authorizedSubjectIds: readonly string[],
@@ -362,7 +438,7 @@ const fixedCohortPerformanceTrend = async (
   const evaluations = await client.performanceEvaluation.findMany({
     where: {
       status: 'ACCEPTED', subjectId: { in: [...authorizedSubjectIds] },
-      ...(reportingFrom || reportingTo ? { measurementTo: { ...(reportingFrom ? { gte: reportingFrom } : {}), ...(reportingTo ? { lte: reportingTo } : {}) } } : {}),
+      ...(reportingFrom || reportingTo ? { measurementTo: { ...(reportingFrom ? { gte: reportingFrom } : {}), ...(reportingTo ? { lt: reportingTo } : {}) } } : {}),
     }, orderBy: [{ measurementTo: 'desc' }, { id: 'desc' }],
     select: { id: true, subjectId: true, measurementFrom: true, measurementTo: true },
   });
@@ -375,7 +451,9 @@ const fixedCohortPerformanceTrend = async (
   });
   const evaluationById = new Map(relevant.map((evaluation) => [evaluation.id, evaluation]));
   const byPeriod = new Map<string, Map<string, { levelCode: string; resultId: string; evaluationId: string }>>();
-  for (const result of results) {
+  for (const result of [...results].sort((a, b) =>
+    (evaluationById.get(b.evaluationId)?.measurementTo.getTime() ?? 0) - (evaluationById.get(a.evaluationId)?.measurementTo.getTime() ?? 0)
+    || b.version - a.version)) {
     const evaluation = evaluationById.get(result.evaluationId);
     if (!evaluation) continue;
     const periodKey = `${evaluation.measurementTo.getUTCFullYear()}-${String(evaluation.measurementTo.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -387,29 +465,53 @@ const fixedCohortPerformanceTrend = async (
     const subjects = new Set(byPeriod.get(periodKey)?.keys() ?? []);
     return index === 0 ? subjects : new Set([...intersection].filter((subjectId) => subjects.has(subjectId)));
   }, new Set());
-  if (fixedSubjects.size < 10) return { suppressed: true as const, reasonCode: 'TREND_FIXED_COHORT_TOO_SMALL' };
+  const authorizedSubjects = await client.performanceSubject.findMany({
+    where: { id: { in: [...authorizedSubjectIds] }, identityDetachedAt: null }, select: { id: true, employmentRelationshipId: true },
+  });
+  const relationships = await client.hrEmploymentRelationship.findMany({
+    where: { id: { in: authorizedSubjects.map(({ employmentRelationshipId }) => employmentRelationshipId).filter((id): id is string => Boolean(id)) } },
+    select: { id: true, effectiveFrom: true, effectiveTo: true },
+  });
+  const relationshipById = new Map(relationships.map((relationship) => [relationship.id, relationship]));
+  const eligibleByPeriod = new Map(periodKeys.map((periodKey) => {
+    const [year, month] = periodKey.split('-').map(Number);
+    const periodStart = new Date(Date.UTC(year, month - 1, 1));
+    const periodEnd = new Date(Date.UTC(year, month, 1));
+    return [periodKey, new Set(authorizedSubjects.filter(({ employmentRelationshipId }) => {
+      const relationship = employmentRelationshipId ? relationshipById.get(employmentRelationshipId) : null;
+      return Boolean(relationship && relationship.effectiveFrom < periodEnd && (!relationship.effectiveTo || relationship.effectiveTo >= periodStart));
+    }).map(({ id }) => id))] as const;
+  }));
+  const populationPeriods = periodKeys.map((periodKey, index) => {
+    const eligible = eligibleByPeriod.get(periodKey) ?? new Set<string>();
+    const previousEligible = new Set(index + 1 < periodKeys.length ? eligibleByPeriod.get(periodKeys[index + 1]) ?? [] : []);
+    const present = new Set(byPeriod.get(periodKey)?.keys() ?? []);
+    return {
+      periodKey, eligiblePopulationCount: eligible.size,
+      resultPopulationCount: [...present].filter((subjectId) => eligible.has(subjectId)).length,
+      missingResultCount: [...eligible].filter((subjectId) => !present.has(subjectId)).length,
+      entriesSincePrevious: index + 1 < periodKeys.length ? [...eligible].filter((subjectId) => !previousEligible.has(subjectId)).length : 0,
+      exitsSincePrevious: index + 1 < periodKeys.length ? [...previousEligible].filter((subjectId) => !eligible.has(subjectId)).length : 0,
+    };
+  });
+  const exposesSmallDifference = populationPeriods.some((period) => [period.missingResultCount, period.entriesSincePrevious, period.exitsSincePrevious]
+    .some((count) => count > 0 && count < 10) || period.resultPopulationCount < 10);
+  const fixedPeriods = periodKeys.map((periodKey) => ({
+    periodKey,
+    levelDistribution: PERFORMANCE_LEVELS.map((level) => ({
+      levelCode: level.code, labelFa: level.labelFa,
+      count: [...fixedSubjects].filter((subjectId) => byPeriod.get(periodKey)?.get(subjectId)?.levelCode === level.code).length,
+    })),
+  }));
+  const fixedSuppressed = fixedSubjects.size < 10 || fixedPeriods.some(({ levelDistribution }) => levelDistribution.some(({ count }) => count > 0 && count < 10));
   return {
     suppressed: false as const,
-    fixedCohortCount: fixedSubjects.size,
-    periods: periodKeys.map((periodKey) => ({
-      periodKey,
-      levelDistribution: PERFORMANCE_LEVELS.map((level) => ({
-        levelCode: level.code, labelFa: level.labelFa,
-        count: [...fixedSubjects].filter((subjectId) => byPeriod.get(periodKey)?.get(subjectId)?.levelCode === level.code).length,
-      })),
-    })),
-    populationPeriods: periodKeys.map((periodKey, index) => {
-      const present = new Set(byPeriod.get(periodKey)?.keys() ?? []);
-      const previous = new Set(index + 1 < periodKeys.length ? byPeriod.get(periodKeys[index + 1])?.keys() ?? [] : []);
-      return {
-        periodKey,
-        eligiblePopulationCount: authorizedSubjectIds.length,
-        resultPopulationCount: present.size,
-        missingResultCount: authorizedSubjectIds.filter((subjectId) => !present.has(subjectId)).length,
-        entriesSincePrevious: [...present].filter((subjectId) => !previous.has(subjectId)).length,
-        exitsSincePrevious: [...previous].filter((subjectId) => !present.has(subjectId)).length,
-      };
-    }),
+    fixedCohortSuppressed: fixedSuppressed,
+    fixedCohortCount: fixedSuppressed ? undefined : fixedSubjects.size,
+    periods: fixedSuppressed ? [] : fixedPeriods,
+    populationComposition: exposesSmallDifference
+      ? { suppressed: true as const, reasonCode: 'TREND_COMPOSITION_DIFFERENCING_RISK' }
+      : { suppressed: false as const, periods: populationPeriods },
     reconstruction: periodKeys.map((periodKey) => ({
       periodKey,
       members: [...fixedSubjects].map((subjectId) => ({ subjectId, ...byPeriod.get(periodKey)?.get(subjectId) })),
@@ -426,19 +528,32 @@ export const getPerformanceAnalytics = async (client: PrismaClient, input: {
   keyring?: PerformanceVaultKey;
 }) => {
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
-  if ((input.reportingFrom && Number.isNaN(input.reportingFrom.getTime())) || (input.reportingTo && Number.isNaN(input.reportingTo.getTime()))
+  if (Boolean(input.reportingFrom) !== Boolean(input.reportingTo)
+    || (input.reportingFrom && Number.isNaN(input.reportingFrom.getTime())) || (input.reportingTo && Number.isNaN(input.reportingTo.getTime()))
     || (input.reportingFrom && input.reportingTo && (input.reportingFrom > input.reportingTo
       || input.reportingTo.getTime() - input.reportingFrom.getTime() > 366 * 24 * 60 * 60_000))) {
     throw disclosureError('بازه گزارش معتبر نیست یا از یک سال بیشتر است.', 'PERFORMANCE_ANALYTICS_WINDOW_INVALID', 422);
   }
-  const population = await analyticsPopulation(client, keyring);
+  // Complete calendar months form stable disclosure buckets; arbitrary day shifts
+  // would let repeated queries isolate an individual's result.
+  for (const boundary of [input.reportingFrom, input.reportingTo]) {
+    if (boundary && (boundary.getUTCDate() !== 1 || boundary.getUTCHours() || boundary.getUTCMinutes() || boundary.getUTCSeconds() || boundary.getUTCMilliseconds())) {
+      throw disclosureError('بازه گزارش باید از ابتدای ماه تا ابتدای ماه بعد باشد.', 'PERFORMANCE_ANALYTICS_STABLE_PERIOD_REQUIRED', 422);
+    }
+  }
+  const population = input.reportingFrom && input.reportingTo
+    ? await historicalAnalyticsPopulation(client, keyring, input.reportingFrom, input.reportingTo, input.mode === 'NAMED_RANKING')
+    : await analyticsPopulation(client, keyring);
   if (input.personnelIds?.length) throw disclosureError('فیلتر دلخواه افراد برای این گزارش محرمانه مجاز نیست.', 'PERFORMANCE_ANALYTICS_ARBITRARY_SCOPE_FORBIDDEN', 422);
   const selected = population;
   const baseResult = buildPerformanceAnalytics({ population, selected, mode: input.mode });
   const baseSuppressed = 'suppressed' in baseResult && baseResult.suppressed;
+  const authorizedSubjectIds = input.reportingFrom && input.reportingTo
+    ? await analyticsAuthorizedSubjectIds(client)
+    : population.map(({ subjectId }) => subjectId);
   const trend = input.mode === 'NAMED_RANKING' || baseSuppressed
     ? undefined
-    : await fixedCohortPerformanceTrend(client, population.map(({ subjectId }) => subjectId), input.reportingFrom, input.reportingTo);
+    : await fixedCohortPerformanceTrend(client, authorizedSubjectIds, input.reportingFrom, input.reportingTo);
   const result = trend ? { ...baseResult, trend: trend.suppressed ? trend : { ...trend, reconstruction: undefined } } : baseResult;
   const reconstructionId = randomUUID();
   await client.$transaction(async (tx) => {
@@ -599,6 +714,8 @@ export const requestPerformanceExport = async (client: PrismaClient, input: {
   reportKind: 'AGGREGATE' | 'NAMED_RANKING';
   personnelIds?: readonly string[];
   purpose: string;
+  reportingFrom?: Date;
+  reportingTo?: Date;
   keyring?: PerformanceVaultKey;
 }) => {
   if (!['PDF', 'XLSX'].includes(input.exportKind)) throw disclosureError('نوع فایل خروجی معتبر نیست.', 'PERFORMANCE_EXPORT_KIND_INVALID', 422);
@@ -612,6 +729,7 @@ export const requestPerformanceExport = async (client: PrismaClient, input: {
     actorUserId: input.actorUserId,
     personnelIds: input.personnelIds,
     mode: input.reportKind === 'NAMED_RANKING' ? 'NAMED_RANKING' : 'AGGREGATE',
+    reportingFrom: input.reportingFrom, reportingTo: input.reportingTo,
     keyring,
   });
   if (report.suppressed) throw disclosureError(report.messageFa, report.reasonCode, 409);
@@ -842,6 +960,14 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
       || (rule.destination.featureCode && destination.destination.featureCode !== rule.destination.featureCode)) {
       throw disclosureError('مسیر مقصد با نسخه مؤثر سیاست پیامد سازگار نیست.', 'PERFORMANCE_HANDOFF_DESTINATION_POLICY_MISMATCH', 409);
     }
+    const legalControl = rule.requireLegalControl ? await resolveHrNamedResponsibility(tx, {
+      sourceActionCode: 'CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF',
+      responsibilityTypeCode: rule.legalControlResponsibilityTypeCode!, scopeType: 'PERSONNEL', scopeId: input.personnelId,
+      sourceActorUserId: input.actorUserId, disallowedUserIds: [input.actorUserId, destination.assignedUserId],
+    }) : null;
+    if (rule.requireLegalControl && legalControl?.status !== 'RESOLVED') {
+      throw disclosureError('کنترل حقوقی مستقل و مؤثر تعریف‌شده در سیاست در دسترس نیست.', 'PERFORMANCE_HANDOFF_LEGAL_CONTROL_UNRESOLVED', 409);
+    }
     const active = await tx.performanceConsequenceHandoff.findFirst({ where: {
       personnelId: input.personnelId,
       employmentRelationshipId: input.employmentRelationshipId,
@@ -858,10 +984,12 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
     const recentResults = trendCandidates.filter((result, index, all) => all.findIndex(({ evaluationId }) => evaluationId === result.evaluationId) === index).slice(0, 4);
     const recentEvaluations = await tx.performanceEvaluation.findMany({ where: { id: { in: recentResults.map(({ evaluationId }) => evaluationId) } } });
     const recentEvaluationById = new Map(recentEvaluations.map((evaluation) => [evaluation.id, evaluation]));
+    const compensationAt = relationship.status === 'ENDED' && rule.allowEndedRelationship && relationship.effectiveTo
+      ? new Date(relationship.effectiveTo.getTime() - 1) : new Date();
     const compensationAgreement = await tx.hrCompensationAgreement.findFirst({
       where: {
-        employmentRelationshipId: relationship.id, status: 'ACTIVE', effectiveFrom: { lte: new Date() },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }],
+        employmentRelationshipId: relationship.id, status: { in: ['ACTIVE', 'RETIRED'] }, effectiveFrom: { lte: compensationAt },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: compensationAt } }],
       }, orderBy: { version: 'desc' },
     });
     if (rule.requireCompensationContext && (!compensationAgreement
@@ -889,6 +1017,10 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
         queueCode: destination.destination.queueCode,
         version: destination.destination.version,
       },
+      legalControl: legalControl?.status === 'RESOLVED' ? {
+        responsibilityId: legalControl.responsibilityId, assignedUserId: legalControl.assignedUserId,
+        responsibilityTypeCode: rule.legalControlResponsibilityTypeCode, status: 'REQUIRED_BEFORE_DESTINATION_DECISION',
+      } : null,
       selectedResults: results.map((result) => ({
         id: result.id, version: result.version, levelCode: result.levelCode, levelPolicyVersionId: result.levelPolicyVersionId,
         calculationTraceId: result.calculationTraceId, acceptedAt: result.acceptedAt, expiresAt: result.expiresAt,
@@ -1004,7 +1136,7 @@ export const listEligibleConsequenceResults = async (client: PrismaClient, input
 
 export const getPerformanceConsequenceHandoff = async (client: PrismaClient, input: { handoffId: string; actorUserId: string; keyring?: PerformanceVaultKey }) => {
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
-  return client.$transaction(async (tx) => {
+  return runPerformanceSerializableTransaction(client, async (tx) => {
     const handoff = await tx.performanceConsequenceHandoff.findUnique({ where: { id: input.handoffId } });
     if (!handoff) throw disclosureError('ارجاع پیامد پیدا نشد.', 'PERFORMANCE_HANDOFF_NOT_FOUND', 404);
     const packageRecord = handoff.packageId ? await tx.performanceConsequencePackage.findUnique({ where: { id: handoff.packageId } }) : null;
@@ -1016,7 +1148,11 @@ export const getPerformanceConsequenceHandoff = async (client: PrismaClient, inp
       OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
       responsibilityType: { isActive: true },
     } }) : null;
-    const isDestination = packageRecord?.assignedDestinationUserId === input.actorUserId && Boolean(effectiveDestinationAuthority);
+    const destinationPermissions = packageRecord?.assignedDestinationUserId === input.actorUserId
+      ? await activeHrActionPermissionsForUser(tx, input.actorUserId) : [];
+    const isDestination = packageRecord?.assignedDestinationUserId === input.actorUserId
+      && Boolean(effectiveDestinationAuthority)
+      && destinationPermissions.includes('VIEW_ASSIGNED_PERFORMANCE_CONSEQUENCE_HANDOFF');
     if (!isDestination) {
       await requireScopedConsequenceAuthority(tx, { actorUserId: input.actorUserId, personnelId: handoff.personnelId, consequenceType: handoff.consequenceType });
     }
@@ -1032,7 +1168,7 @@ export const getPerformanceConsequenceHandoff = async (client: PrismaClient, inp
     await auditDisclosure(tx, {
       aggregateType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', aggregateId: handoff.id, eventType: 'CONSEQUENCE_HANDOFF_VIEWED',
       actorUserId: input.actorUserId,
-      authorityCodes: [isDestination ? 'PERFORMANCE_CONSEQUENCE_ASSIGNED_DESTINATION' : 'CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF'],
+      authorityCodes: [isDestination ? 'VIEW_ASSIGNED_PERFORMANCE_CONSEQUENCE_HANDOFF' : 'CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF'],
       evidenceHash: handoff.snapshotHash,
     });
     const { encryptedPayloadId: _payloadId, ...publicHandoff } = handoff;

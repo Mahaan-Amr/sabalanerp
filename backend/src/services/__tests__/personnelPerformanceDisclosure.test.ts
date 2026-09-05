@@ -71,12 +71,14 @@ const people = Array.from({ length: 20 }, (_, index) => ({
   measurementTo: new Date(`2026-08-${String(index + 1).padStart(2, '0')}T20:29:59.999Z`),
 }));
 
-const analytics = buildPerformanceAnalytics({ population: people, selected: people.slice(0, 10) });
+assert.equal(buildPerformanceAnalytics({ population: people, selected: people.slice(0, 10) }).suppressed, true, 'small level cells must not be disclosed even in a ten-person group');
+const safePeople = people.map((person) => ({ ...person, levelCode: 'MEETS_EXPECTATIONS' }));
+const analytics = buildPerformanceAnalytics({ population: safePeople, selected: safePeople.slice(0, 10) });
 assert.equal(analytics.suppressed, false);
 assert.ok('levelDistribution' in analytics);
 if (!('levelDistribution' in analytics)) throw new Error('aggregate analytics missing');
 assert.equal(analytics.eligibleCount, 10);
-assert.deepEqual(analytics.levelDistribution.map((row) => row.count), [2, 2, 2, 2, 2]);
+assert.deepEqual(analytics.levelDistribution.map((row) => row.count), [0, 0, 10, 0, 0]);
 assert.equal(analytics.exactScoreStatistics, null, 'mixed/absent exact-score signatures must not manufacture an average');
 
 const differencingAttempt = buildPerformanceAnalytics({ population: people, selected: people.slice(0, 12) });

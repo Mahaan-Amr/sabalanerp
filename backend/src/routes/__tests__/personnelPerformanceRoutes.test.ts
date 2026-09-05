@@ -11,6 +11,7 @@ const registeredRoutes = (router as unknown as {
   : []);
 
 assert.deepEqual(registeredRoutes, [
+  'POST /compensation-agreements',
   'GET /capabilities',
   'GET /rollout',
   'POST /readiness/reconstruct',

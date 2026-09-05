@@ -19,6 +19,9 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'VIEW_PERFORMANCE_AUDIT', labelFa: 'مشاهده حسابرسی عملکرد', level: 'VIEW', prerequisites: [] },
   { code: 'MANAGE_PERFORMANCE_RETENTION', labelFa: 'مدیریت نگهداری و محدودسازی شواهد عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF', labelFa: 'ایجاد واگذاری پیامد عملکرد', level: 'EDIT', prerequisites: [] },
+  { code: 'VIEW_ASSIGNED_PERFORMANCE_CONSEQUENCE_HANDOFF', labelFa: 'مشاهده ارجاع پیامد عملکرد اختصاص‌یافته', level: 'VIEW', prerequisites: [] },
+  { code: 'REVIEW_PERFORMANCE_CONSEQUENCE_LEGAL_CONTROL', labelFa: 'کنترل حقوقی مستقل پیامد عملکرد', level: 'EDIT', prerequisites: [] },
+  { code: 'MANAGE_COMPENSATION_AGREEMENTS', labelFa: 'انتشار توافق جبران خدمت', level: 'ADMIN', prerequisites: [] },
   { code: 'MANAGE_PERFORMANCE_ROLLOUT', labelFa: 'مدیریت مرحله و جامعه فعال‌سازی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'PAUSE_PERFORMANCE_EVALUATION', labelFa: 'توقف ایمن ارزیابی عملکرد', level: 'ADMIN', prerequisites: [] },
 ] as const;
@@ -112,5 +115,7 @@ export const expandHrActionPermissionSelection = (selectedCodes: readonly string
 };
 
 export const actionPermissionsForLegacyAuthority = (authorityCode: string) => (
-  expandHrActionPermissionSelection(LEGACY_AUTHORITY_ACTION_BUNDLES[authorityCode] ?? [])
+  expandHrActionPermissionSelection(authorityCode.startsWith('PERFORMANCE_CONSEQUENCE_LEGAL_CONTROL_')
+    ? ['REVIEW_PERFORMANCE_CONSEQUENCE_LEGAL_CONTROL']
+    : LEGACY_AUTHORITY_ACTION_BUNDLES[authorityCode] ?? [])
 );

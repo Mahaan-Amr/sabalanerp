@@ -1,4 +1,5 @@
 import express from 'express';
+import { publishCompensationAgreement } from '../services/hrCompensationAgreementStore';
 import { prisma } from '../lib/prisma';
 import type { AuthRequest } from '../middleware/auth';
 import { requireHrAuthorization } from '../middleware/hrAuthorization';
@@ -64,6 +65,12 @@ import {
 } from '../services/personnelPerformanceDisclosureStore';
 
 const router = express.Router();
+router.post('/compensation-agreements', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_COMPENSATION_AGREEMENTS'] }), async (req: AuthRequest, res, next) => {
+  try {
+    const agreement = await publishCompensationAgreement(prisma, { ...req.body, actorUserId: req.user!.id });
+    return res.status(201).json({ success: true, agreement: { id: agreement.id, version: agreement.version, effectiveFrom: agreement.effectiveFrom } });
+  } catch (error) { return next(error); }
+});
 const performancePermissionCodes = new Set<string>(PERFORMANCE_ACTION_PERMISSION_CODES);
 
 export const projectPersonnelPerformanceCapabilities = (featureCodes: readonly string[]) => Object.fromEntries(
@@ -324,6 +331,8 @@ router.post('/exports', requestExport, requirePersonnelPerformanceWriteGate('REQ
       reportKind: req.body.reportKind,
       personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : undefined,
       purpose: String(req.body.purpose ?? ''),
+      reportingFrom: req.body.reportingFrom ? new Date(String(req.body.reportingFrom)) : undefined,
+      reportingTo: req.body.reportingTo ? new Date(String(req.body.reportingTo)) : undefined,
     });
     return res.status(202).json({ success: true, export: {
       id: result.receipt.id,

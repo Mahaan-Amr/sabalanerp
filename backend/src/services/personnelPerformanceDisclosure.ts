@@ -106,6 +106,10 @@ export const buildPerformanceAnalytics = (input: {
       })),
     };
   }
+  if (PERFORMANCE_LEVELS.some((level) => {
+    const count = input.selected.filter(({ levelCode }) => levelCode === level.code).length;
+    return count > 0 && count < 10;
+  })) return suppressed('LEVEL_CELL_TOO_SMALL', 'توزیع سطح‌ها برای حفاظت از گروه‌های کوچک قابل نمایش نیست.');
   const signatures = new Set(input.selected.map(({ comparabilitySignature }) => comparabilitySignature));
   const scores = input.selected.map(({ exactScore }) => exactScore).filter((score): score is number => Number.isFinite(score));
   const exactScoreStatistics = signatures.size === 1 && scores.length === input.selected.length
@@ -174,6 +178,7 @@ export type PerformanceConsequenceRule = {
   requireCompensationContext: boolean;
   allowEndedRelationship: boolean;
   requireLegalControl: boolean;
+  legalControlResponsibilityTypeCode?: string;
   destination: { responsibilityTypeCode: string; workspaceCode: string; featureCode?: string; queueCode: string };
 };
 

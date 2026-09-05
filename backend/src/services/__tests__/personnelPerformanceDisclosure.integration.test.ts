@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { prisma } from '../../lib/prisma';
 import { cleanupExpiredPerformanceExports, listEligibleConsequenceResults } from '../personnelPerformanceDisclosureStore';
+import { publishCompensationAgreement } from '../hrCompensationAgreementStore';
 
 const seed = async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], marker: string) => {
       const suffix = Date.now().toString(36);
@@ -36,6 +37,37 @@ const seed = async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
 };
 
 const main = async () => {
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { actor, relationship, suffix } = await seed(tx, 'publish-agreement');
+    const input = {
+      actorUserId: actor.id, employmentRelationshipId: relationship.id,
+      components: [{ title: 'حقوق پایه', amountRials: '100' }], payRangeMinimumRials: '50', payRangeMaximumRials: '200',
+      budgetCode: 'TEST', budgetAvailableRials: '1000', approvalReason: 'انتشار توافق با تأیید مستقل و بودجه معتبر آزمون',
+    };
+    await assert.rejects(() => publishCompensationAgreement(tx, input), (error: any) => error.status === 403);
+    await tx.hrFeatureAccessGrant.create({ data: {
+      stableKey: `${suffix}:agreement-publisher`, userId: actor.id, featureCode: 'MANAGE_COMPENSATION_AGREEMENTS',
+      level: 'ADMIN', effectiveFrom: new Date('2020-01-01'), grantedByUserId: actor.id, reason: 'Isolated agreement publication test',
+    } });
+    const agreement = await publishCompensationAgreement(tx, input);
+    assert.equal(agreement.status, 'ACTIVE');
+    assert.equal(agreement.totalRials.toString(), '100');
+    assert.equal(agreement.approvedByUserId, actor.id);
+    throw new Error('ROLLBACK_AGREEMENT_PUBLICATION');
+  }), /ROLLBACK_AGREEMENT_PUBLICATION/);
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { actor, relationship } = await seed(tx, 'agreement');
+    const agreement = await tx.hrCompensationAgreement.create({ data: {
+      employmentRelationshipId: relationship.id, version: 1, effectiveFrom: new Date('2026-01-01'),
+      componentsJson: [], totalRials: 100, payRangeMinimumRials: 50, payRangeMaximumRials: 200,
+      budgetCode: 'TEST', budgetAvailableRials: 1000, legalControlStatus: 'APPROVED',
+      contentHash: 'a'.repeat(64), createdByUserId: actor.id, approvedByUserId: actor.id, approvedAt: new Date('2025-12-01'),
+    } });
+    await tx.hrCompensationAgreement.update({ where: { id: agreement.id }, data: { status: 'SCHEDULED' } });
+    await tx.hrCompensationAgreement.update({ where: { id: agreement.id }, data: { status: 'ACTIVE' } });
+    await tx.hrCompensationAgreement.update({ where: { id: agreement.id }, data: { effectiveTo: new Date('2026-12-31') } });
+    throw new Error('AGREEMENT_MUTATION_WAS_NOT_REJECTED');
+  }), /immutable/i, 'an active agreement cannot silently change its effective interval');
   await assert.rejects(
     prisma.$transaction(async (tx) => {
       const seeded = await seed(tx, 'immutable');

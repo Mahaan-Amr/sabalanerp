@@ -1,3 +1,4 @@
+import { assessPerformanceEvaluationRetention } from '../services/personnelPerformanceRetentionStore';
 import { placePerformanceLegalHold, decidePerformanceLegalHold, listPerformanceLegalHolds } from '../services/personnelPerformanceLegalHoldStore';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../services/personnelPerformanceOperationsStore';
 import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase } from '../services/personnelPerformancePrivacyStore';
@@ -642,6 +643,12 @@ router.post('/operations/pause', requireHrAuthorization({ actionPermissionCodes:
 router.post('/operations/disable', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, phase: await disablePersonnelPerformanceBeforeFirstWrite(prisma, { actorUserId: req.user!.id, reason: req.body.reason }) }); }
   catch (error) { return next(error); }
+});
+
+router.post('/retention/evaluations/:evaluationId/assess', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, assessment: await assessPerformanceEvaluationRetention(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId,
+  }) }); } catch (error) { return next(error); }
 });
 
 router.get('/legal-holds', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {

@@ -1,4 +1,4 @@
-import { enablePerformanceTestRelease, enrollPerformanceTestCohort } from './personnelPerformanceTestRelease';
+import { enablePerformanceTestRelease, enrollPerformanceTestCohort, publishPerformanceTestRetentionPolicy } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
@@ -6,6 +6,8 @@ import { createPerformancePolicyDraft, updatePerformancePolicyDraft, DEFAULT_CUR
 import { prisma } from '../../lib/prisma';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../personnelPerformanceOperationsStore';
 import { resolvePersonnelPerformanceWriteGate, assertPersonnelPerformanceWriteAdmission } from '../personnelPerformanceRolloutPolicy';
+import { restrictPerformanceEvidence } from '../personnelPerformanceRestrictions';
+import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
 
 const rollback = Symbol('rollback-performance-operations');
 const main = async () => {
@@ -26,6 +28,30 @@ const main = async () => {
       const personnel = await tx.personnel.create({ data: { firstName: 'آزمون', lastName: 'عضویت' } });
       const relationship = await tx.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2020-01-01Z'), createdBy: actor.id } });
       const subject = await tx.performanceSubject.create({ data: { stableKey: suffix, nonDisplayKey: suffix, personnelId: personnel.id, employmentRelationshipId: relationship.id, createdByUserId: actor.id } });
+      await assert.rejects(() => assessPerformanceEvaluationRetention(tx, { actorUserId: actor.id, evaluationId: 'unrelated-evaluation' }),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_RETENTION_PERMISSION_REQUIRED');
+      await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:retention`, userId: actor.id, featureCode: 'MANAGE_PERFORMANCE_RETENTION', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated retention assessment' } });
+      const evaluation = await tx.performanceEvaluation.create({ data: { stableKey: `${suffix}:assessment`, subjectId: subject.id,
+        measurementFrom: new Date('2026-01-01Z'), measurementTo: new Date('2026-03-31Z'), createdByUserId: actor.id } });
+      await publishPerformanceTestRetentionPolicy(tx, actor.id);
+      const assessment = await assessPerformanceEvaluationRetention(tx, { actorUserId: actor.id, evaluationId: evaluation.id });
+      assert.equal(assessment.status, 'REQUIRES_RETENTION_DECISION', 'an open draft has no invented closure anchor');
+      assert.equal(assessment.classification, 'DRAFT');
+      assert.equal(assessment.deleteAfter, null);
+      assert.equal((await assessPerformanceEvaluationRetention(tx, { actorUserId: actor.id, evaluationId: evaluation.id })).id, assessment.id,
+        'unchanged evidence reuses the immutable decision');
+      assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: assessment.id, eventType: 'RETENTION_ASSESSED', encryptedPayloadId: { not: null } } }));
+      for (const featureCode of ['RESTRICT_PERFORMANCE_EVIDENCE', 'RELEASE_PERFORMANCE_RESTRICTION']) await tx.hrFeatureAccessGrant.create({ data: {
+        stableKey: `${suffix}:${featureCode}`, userId: actor.id, featureCode, level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated restriction retention test',
+      } });
+      const restriction = await restrictPerformanceEvidence(tx, { actorUserId: actor.id, evaluationId: evaluation.id, reasonCode: 'EVIDENCE_DISPUTED' });
+      const restrictedAssessment = await assessPerformanceEvaluationRetention(tx, { actorUserId: actor.id, evaluationId: evaluation.id });
+      assert.equal(restrictedAssessment.status, 'DEPENDENCY_OPEN');
+      assert.equal(restrictedAssessment.version, assessment.version + 1);
+      await restrictPerformanceEvidence(tx, { actorUserId: actor.id, evaluationId: evaluation.id, releaseId: restriction.id, reasonCode: 'DISPUTE_CLOSED' });
+      const releasedAssessment = await assessPerformanceEvaluationRetention(tx, { actorUserId: actor.id, evaluationId: evaluation.id });
+      assert.equal(releasedAssessment.status, 'REQUIRES_RETENTION_DECISION');
+      assert.equal(releasedAssessment.version, restrictedAssessment.version + 1);
       const cohort = await enrollPerformanceTestCohort(tx, actor.id, [subject.id]);
       assert.equal((await assertPersonnelPerformanceWriteAdmission(tx, 'SAVE_SUPERVISOR_DRAFT', subject.id)).allowed, true);
       await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'RETIRED' } });

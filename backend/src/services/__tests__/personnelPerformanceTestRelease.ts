@@ -1,6 +1,8 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
+import { persistPerformancePayload, performanceVaultKeyFromEnvironment } from '../personnelPerformancePayloadStore';
+import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
 
 /** Explicit release fixture in the existing local PostgreSQL test harness; never imported by runtime code. */
 export const enablePerformanceTestRelease = async (client: PrismaClient | Prisma.TransactionClient, actorUserId: string) => {
@@ -35,4 +37,29 @@ export const enrollPerformanceTestCohort = async (client: PrismaClient | Prisma.
     cohortVersionId: cohort.id, effectiveFrom: effective.now, recordedByUserId: actorUserId, reason: 'Explicit local workflow cohort fixture',
   } });
   return cohort;
+};
+
+/** Synthetic publication for rollback-only tests; never promotion or owner-approval evidence. */
+export const publishPerformanceTestRetentionPolicy = async (client: PrismaClient | Prisma.TransactionClient, actorUserId: string) => {
+  await enablePerformanceTestRelease(client, actorUserId);
+  const existing = await client.performancePolicyVersion.findFirst({ where: { policyKind: 'RETENTION', lifecycle: 'ACTIVE', effectiveFrom: { lte: new Date() } } });
+  if (existing) return existing;
+  const id = randomUUID();
+  const previewId = randomUUID();
+  const latest = await client.performancePolicyVersion.findFirst({ where: { policyKind: 'RETENTION' }, orderBy: { version: 'desc' } });
+  const payload = await persistPerformancePayload(client, { aggregateType: 'POLICY_VERSION', aggregateId: id,
+    payloadKind: 'POLICY_CONTENT_REVISION_1', schemaVersion: 1, payload: PERFORMANCE_RETENTION_SCHEDULE_V1, keyring: performanceVaultKeyFromEnvironment() });
+  const policy = await client.performancePolicyVersion.create({ data: { id, policyKind: 'RETENTION', version: (latest?.version ?? 0) + 1,
+    predecessorId: latest?.id, contentHash: payload.contentHash, encryptedPayloadId: payload.id, createdByUserId: actorUserId } });
+  const preview = await persistPerformancePayload(client, { aggregateType: 'POLICY_ACTIVATION_PREVIEW', aggregateId: previewId,
+    payloadKind: 'POPULATION_RESULT', schemaVersion: 1, payload: { testFixture: true, population: [] }, keyring: performanceVaultKeyFromEnvironment() });
+  const at = new Date(Date.now() - 10_000);
+  await client.performancePolicyActivationPreview.create({ data: { id: previewId, policyVersionId: id, policyContentHash: policy.contentHash,
+    populationHash: preview.contentHash, encryptedPayloadId: preview.id, eligibleSubjectCount: 0, evaluatedSubjectCount: 0,
+    increasedCount: 0, decreasedCount: 0, unchangedCount: 0, expiredCount: 0, needsNewEvaluationCount: 0, errorCount: 0,
+    resultHash: preview.contentHash, generatedAt: at, confirmedAt: at, confirmedByUserId: actorUserId } });
+  await client.performancePolicyVersion.update({ where: { id }, data: { lifecycle: 'SCHEDULED', effectiveFrom: at,
+    publicationReason: 'Isolated retention test fixture', publishedByUserId: actorUserId, publishedAt: at,
+    activationPreviewId: previewId, activationPreviewHash: preview.contentHash, activationConfirmedAt: at } });
+  return client.performancePolicyVersion.update({ where: { id }, data: { lifecycle: 'ACTIVE' } });
 };

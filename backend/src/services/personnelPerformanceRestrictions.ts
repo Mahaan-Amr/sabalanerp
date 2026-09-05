@@ -39,7 +39,7 @@ export const restrictPerformanceEvidence = async (client: Client, input: {
     }
     const projection = await tx.performanceCurrentLevelProjection.findUnique({ where: { subjectId: evaluation.subjectId } });
     if (projection) await recomputePerformanceProjectionsInTransaction(tx, {
-      now: new Date(), actorUserId: input.actorUserId, reason: input.reasonCode, keyring: performanceVaultKeyFromEnvironment(),
+      now: new Date(), actorUserId: input.actorUserId, reason: input.reasonCode, keyring: performanceVaultKeyFromEnvironment(), subjectIds: [evaluation.subjectId],
     });
     if (!input.releaseId) {
       const results = await tx.performanceAcceptedResult.findMany({ where: { evaluationId: evaluation.id }, select: { id: true } });

@@ -1,4 +1,4 @@
-import { enablePerformanceTestRelease, enrollPerformanceTestCohort } from './personnelPerformanceTestRelease';
+import { enablePerformanceTestRelease, enrollPerformanceTestCohort, publishPerformanceTestRetentionPolicy } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { restrictPerformanceEvidence, activePerformanceRestrictionIds } from '../personnelPerformanceRestrictions';
@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { claimPerformanceExportDownload, encryptPerformanceExportArtifact, getPerformanceConsequenceHandoff } from '../personnelPerformanceDisclosureStore';
 import { persistPerformancePayload, performanceVaultKeyFromEnvironment } from '../personnelPerformancePayloadStore';
+import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
 import { prisma } from '../../lib/prisma';
 import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase } from '../personnelPerformancePrivacyStore';
 
@@ -31,7 +32,7 @@ const main = async () => {
       assert.equal(typeof own.disclosureReceiptId, 'string', 'authorized case reads return their audit receipt');
       await assert.rejects(() => getPerformancePrivacyCase(tx, other.id, request.id), (error: { code?: string }) => error.code === 'PERFORMANCE_PRIVACY_UNAVAILABLE');
       await assert.rejects(() => actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: request.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' }));
-      for (const featureCode of ['ACKNOWLEDGE_PERFORMANCE_PRIVACY_CASE','VERIFY_PERFORMANCE_PRIVACY_IDENTITY','DECIDE_PERFORMANCE_PRIVACY_ACCESS','RESTRICT_PERFORMANCE_EVIDENCE','VIEW_PERFORMANCE_PRIVACY_CASE']) {
+      for (const featureCode of ['ACKNOWLEDGE_PERFORMANCE_PRIVACY_CASE','VERIFY_PERFORMANCE_PRIVACY_IDENTITY','DECIDE_PERFORMANCE_PRIVACY_ACCESS','RESTRICT_PERFORMANCE_EVIDENCE','VIEW_PERFORMANCE_PRIVACY_CASE','DECIDE_PERFORMANCE_ERASURE','MANAGE_PERFORMANCE_RETENTION']) {
         await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:${featureCode}`, userId: other.id, featureCode, level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated privacy test' } });
       }
       await assert.rejects(() => requestPerformancePrivacy(tx, { actorUserId: other.id, subjectId: subject.id, requestKind: 'ACCESS', evaluationIds: [], reason: 'درخواست بدون اختیار ثبت' }));
@@ -47,6 +48,18 @@ const main = async () => {
       assert.equal(answered.status, 'RESPONDED');
       assert.deepEqual(answered.response, { schemaVersion: 1, purpose: 'PERSONNEL_PERFORMANCE_REVIEW', recipientCategories: ['AUTHORIZED_HUMAN_RESOURCES', 'ASSIGNED_SUPERVISORS'], levels: [], withheldCategories: ['THIRD_PARTY_INFORMATION','SUPERVISOR_NARRATIVE','CRITERION_SCORES','OTHER_PERSONNEL_RANKING','INTERNAL_REVIEW_NOTES'] });
       const evaluation = await tx.performanceEvaluation.create({ data: { stableKey: `${suffix}-evaluation`, subjectId: subject.id, measurementFrom: new Date('2026-01-01Z'), measurementTo: new Date('2026-03-31Z'), createdByUserId: actor.id } });
+      await publishPerformanceTestRetentionPolicy(tx, actor.id);
+      const erasure = await requestPerformancePrivacy(tx, { actorUserId: actor.id, subjectId: subject.id, requestKind: 'ERASURE', evaluationIds: [evaluation.id], reason: 'بررسی حذف سابقه شخصی' });
+      await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' });
+      await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 2, action: 'VERIFY', reasonCode: 'IDENTITY_AND_SCOPE_VERIFIED' });
+      await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 3, action: 'RESPOND', reasonCode: 'RETENTION_DECISION_RECORDED' });
+      const erasureResponse = await getPerformancePrivacyCase(tx, actor.id, erasure.id);
+      assert.equal((erasureResponse.response as { decision: string }).decision, 'RETAINED_UNDER_POLICY');
+      assert.equal((erasureResponse.response as { deletionCompleted: boolean }).deletionCompleted, false);
+      assert.equal(await tx.performanceEvaluation.count({ where: { id: evaluation.id } }), 1);
+      await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 4, action: 'CLOSE', reasonCode: 'RESPONSE_DELIVERED' });
+      const closedAssessment = await assessPerformanceEvaluationRetention(tx, { actorUserId: other.id, evaluationId: evaluation.id });
+      assert.equal(closedAssessment.status, 'REQUIRES_RETENTION_DECISION', 'closing a request never invents a draft closure date');
       await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:destination-reader`, userId: other.id, featureCode: 'VIEW_ASSIGNED_PERFORMANCE_CONSEQUENCE_HANDOFF', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated package restriction test' } });
       const responsibilityType = await tx.hrResponsibilityTypeCatalog.create({ data: { code: `TEST-${suffix}`, displayName: 'آزمون مقصد' } });
       const destination = await tx.hrNamedResponsibility.create({ data: { stableKey: `${suffix}:destination`, responsibilityTypeCode: responsibilityType.code, scopeType: 'PERSONNEL', scopeId: person.id, assignedUserId: other.id, effectiveFrom: new Date('2020-01-01Z'), createdByUserId: actor.id } });
@@ -61,6 +74,7 @@ const main = async () => {
       await restrictPerformanceEvidence(tx, { actorUserId: other.id, evaluationId: evaluation.id, reasonCode: 'EVIDENCE_DISPUTED' });
       await assert.rejects(() => getPerformanceConsequenceHandoff(tx, { handoffId, actorUserId: other.id }), (error: { code?: string }) => error.code === 'PERFORMANCE_HANDOFF_SUSPENDED');
       assert.deepEqual(await activePerformanceRestrictionIds(tx, [evaluation.id]), [evaluation.id]);
+      assert.equal((await assessPerformanceEvaluationRetention(tx, { actorUserId: other.id, evaluationId: evaluation.id })).status, 'DEPENDENCY_OPEN', 'a standalone active restriction preserves its scope');
       for (const featureCode of ['REQUEST_PERFORMANCE_EXPORT','VIEW_PERFORMANCE_ANALYTICS']) await tx.hrFeatureAccessGrant.create({ data: {
         stableKey: `${suffix}:${featureCode}`, userId: other.id, featureCode, level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated export restriction test',
       } });
@@ -68,6 +82,7 @@ const main = async () => {
         stableKey: `${suffix}:${userId}:${featureCode}`, userId, featureCode, level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated hold test',
       } });
       const hold = await placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION', aggregateId: evaluation.id, reasonCode: 'OPEN_LEGAL_PROCEEDING' });
+      assert.equal((await assessPerformanceEvaluationRetention(tx, { actorUserId: other.id, evaluationId: evaluation.id })).status, 'LEGAL_HOLD');
       const pendingRelease = await decidePerformanceLegalHold(tx, { actorUserId: actor.id, holdId: hold.id, action: 'APPROVE_RELEASE', reasonCode: 'LEGAL_PROCEEDING_CLOSED' });
       assert.equal(pendingRelease.status, 'ACTIVE');
       const duplicateRelease = await decidePerformanceLegalHold(tx, { actorUserId: actor.id, holdId: hold.id, action: 'APPROVE_RELEASE', reasonCode: 'LEGAL_PROCEEDING_CLOSED' });

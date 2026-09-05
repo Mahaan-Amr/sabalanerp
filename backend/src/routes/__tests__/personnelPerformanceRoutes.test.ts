@@ -72,7 +72,7 @@ assert.deepEqual(registeredRoutes, [
   'GET /operations',
   'POST /operations/pause',
   'POST /operations/disable',
-  'GET /legal-holds',
+  'POST /retention/evaluations/:evaluationId/assess', 'GET /legal-holds',
   'POST /legal-holds',
   'POST /legal-holds/:holdId/decisions',
 ]);

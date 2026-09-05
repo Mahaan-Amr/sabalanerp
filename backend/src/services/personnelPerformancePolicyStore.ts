@@ -396,7 +396,7 @@ const getPolicyContent = async <T extends PerformancePolicyContent>(
 
 type AcceptedResultPayload = { exactScore: string; measurementTo?: string; trace?: unknown };
 
-const listCurrentPerformanceSubjects = async (tx: Prisma.TransactionClient) => {
+const listCurrentPerformanceSubjects = async (tx: Prisma.TransactionClient, subjectIds?: string[]) => {
   const relationships = await tx.hrEmploymentRelationship.findMany({
     where: { status: { in: ['ACTIVE', 'SUSPENDED'] } },
     select: { id: true, personnelId: true },
@@ -405,6 +405,7 @@ const listCurrentPerformanceSubjects = async (tx: Prisma.TransactionClient) => {
     where: {
       employmentRelationshipId: { in: relationships.map(({ id }) => id) },
       identityDetachedAt: null,
+      ...(subjectIds ? { id: { in: subjectIds } } : {}),
     },
     select: { id: true, personnelId: true },
     orderBy: { id: 'asc' },
@@ -428,11 +429,12 @@ const calculatePopulation = async (
   input: {
     now: Date;
     keyring: PerformanceVaultKey;
+    subjectIds?: string[];
     proposed?: { kind: PerformancePolicyKind; id: string; content: PerformancePolicyContent };
   },
 ) => {
-  const subjects = await listCurrentPerformanceSubjects(tx);
-  const projections = await tx.performanceCurrentLevelProjection.findMany();
+  const subjects = await listCurrentPerformanceSubjects(tx, input.subjectIds);
+  const projections = await tx.performanceCurrentLevelProjection.findMany({ where: input.subjectIds ? { subjectId: { in: input.subjectIds } } : {} });
   const projectionBySubject = new Map(projections.map((projection) => [projection.subjectId, projection]));
   const evaluations = await tx.performanceEvaluation.findMany({
     where: { subjectId: { in: subjects.map((subject) => subject.id) } },
@@ -939,8 +941,9 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
   actorUserId: string | null;
   reason: string;
   keyring: PerformanceVaultKey;
+  subjectIds?: string[];
 }) => {
-  const population = await calculatePopulation(tx, { now: input.now, keyring: input.keyring });
+  const population = await calculatePopulation(tx, { now: input.now, keyring: input.keyring, subjectIds: input.subjectIds });
   if (population.preview.counts.errors > 0) {
     throw policyError('بازمحاسبه سطح جاری خطای حل‌نشده دارد و تغییر اتمیک متوقف شد.', 'PERFORMANCE_RECOMPUTATION_FAILED', 409);
   }
@@ -958,10 +961,10 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
     orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }],
     select: { effectiveFrom: true },
   });
-  const subjects = await listCurrentPerformanceSubjects(tx);
+  const subjects = await listCurrentPerformanceSubjects(tx, input.subjectIds);
   const currentSubjectIds = subjects.map(({ id }) => id);
   const staleProjections = await tx.performanceCurrentLevelProjection.findMany({
-    where: { subjectId: { notIn: currentSubjectIds } },
+    where: { subjectId: { notIn: currentSubjectIds, ...(input.subjectIds ? { in: input.subjectIds } : {}) } },
   });
   for (const stale of staleProjections) {
     const auditId = randomUUID();

@@ -509,18 +509,35 @@ const finalizeResolvedEvaluation = async (tx: Prisma.TransactionClient, input: {
   const acceptedCount = await tx.performanceEvaluationSection.count({
     where: { evaluationId: input.evaluationId, status: 'ACCEPTED' },
   });
-  if (!acceptedCount) {
+  const closeNotEvaluable = async (reasonCode: 'NO_EVALUABLE_SECTIONS' | 'INSUFFICIENT_EVALUABLE_COVERAGE', calculationHash: string | null = null) => {
     await tx.performanceEvaluation.update({
       where: { id: input.evaluationId }, data: { status: 'NOT_EVALUABLE', writerVersion: { increment: 1 } },
     });
+    const id = randomUUID();
+    const sections = await tx.performanceEvaluationSection.findMany({ where: { evaluationId: input.evaluationId },
+      select: { id: true, status: true, templateSnapshotId: true }, orderBy: { id: 'asc' } });
+    const decisions = await tx.performanceAuditEvent.findMany({ where: { aggregateType: 'EVALUATION_SECTION', aggregateId: { in: sections.map(({ id }) => id) } },
+      select: { id: true, eventHash: true }, orderBy: { id: 'asc' } });
+    const submissions = await tx.performanceSubmission.findMany({ where: { sectionId: { in: sections.map(({ id }) => id) } }, select: { id: true, contentHash: true }, orderBy: { id: 'asc' } });
+    const reviews = await tx.performanceReview.findMany({ where: { submissionId: { in: submissions.map(({ id }) => id) } }, select: { id: true, submissionId: true, decision: true, encryptedPayloadId: true }, orderBy: { id: 'asc' } });
+    const authorityHash = canonicalPerformanceHash({ actorUserId: input.actorUserId,
+      effectivePermissions: (await activeHrActionPermissionsForUser(tx, input.actorUserId)).sort() });
+    const basis = await persistPerformancePayload(tx, { aggregateType: 'EVALUATION', aggregateId: input.evaluationId,
+      payloadKind: `NOT_EVALUABLE_CLOSURE_${id}`, schemaVersion: 1, keyring: input.keyring,
+      payload: { evaluationId: input.evaluationId, reasonCode, sections, decisions, submissions, reviews, calculationHash, authorityHash } });
+    await tx.performanceAuditEvent.create({ data: { id, aggregateType: 'EVALUATION', aggregateId: input.evaluationId,
+      eventType: 'EVALUATION_NOT_EVALUABLE', actorUserId: input.actorUserId, occurredAt: input.now,
+      authorityHash, reason: reasonCode, encryptedPayloadId: basis.id,
+      eventHash: canonicalPerformanceHash({ id, evaluationId: input.evaluationId, status: 'NOT_EVALUABLE', closedAt: input.now.toISOString(), basisHash: basis.contentHash, authorityHash }) } });
+  };
+  if (!acceptedCount) {
+    await closeNotEvaluable('NO_EVALUABLE_SECTIONS');
     return { status: 'NOT_EVALUABLE' as const };
   }
   const calculationInput = await buildCalculationInput(tx, input.evaluationId, input.keyring);
   const calculation = calculatePerformanceEvaluation(calculationInput);
   if (calculation.status === 'NOT_EVALUABLE') {
-    await tx.performanceEvaluation.update({
-      where: { id: input.evaluationId }, data: { status: 'NOT_EVALUABLE', writerVersion: { increment: 1 } },
-    });
+    await closeNotEvaluable('INSUFFICIENT_EVALUABLE_COVERAGE', canonicalPerformanceHash(calculation));
     return { status: 'NOT_EVALUABLE' as const, calculation };
   }
   if (calculation.status === 'BLOCKED') {

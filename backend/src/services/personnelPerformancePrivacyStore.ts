@@ -1,3 +1,4 @@
+import { assessPerformanceEvaluationRetention } from './personnelPerformanceRetentionStore';
 import { createPerformanceCorrection } from './personnelPerformanceDisclosureStore';
 import { isPerformanceTransactionConflict, normalizePerformanceWriteError } from './personnelPerformanceRolloutPolicy';
 import { randomUUID } from 'node:crypto';
@@ -166,7 +167,12 @@ export const actOnPerformancePrivacyCase = async (client: Client, input: {
     if (record.requestKind === 'CORRECTION' && ids.length && (links.length !== ids.length || corrections.some(({ status }) => status === 'OPEN'))) {
       throw privacyError('اصلاح‌های دامنه درخواست هنوز تصمیم نهایی ندارند.', 'PERFORMANCE_PRIVACY_CORRECTION_PENDING', 409);
     }
-    if (record.requestKind === 'ERASURE' && ids.length) throw privacyError('پاسخ حذف به تصمیم نگهداری و شواهد اجرای حذف نیاز دارد.', 'PERFORMANCE_PRIVACY_ERASURE_PENDING', 409);
+    const retentionDecisions: Array<Awaited<ReturnType<typeof assessPerformanceEvaluationRetention>>> = [];
+    if (record.requestKind === 'ERASURE') {
+      // The open request itself preserves scoped evidence. Record the policy decision rather than
+      // falsely declaring physical erasure or leaving a verified request permanently unanswerable.
+      for (const evaluationId of ids) retentionDecisions.push(await assessPerformanceEvaluationRetention(tx, { actorUserId: input.actorUserId, evaluationId }));
+    }
     const response = record.requestKind === 'ACCESS' ? {
       schemaVersion: 1, purpose: 'PERSONNEL_PERFORMANCE_REVIEW', recipientCategories: ['AUTHORIZED_HUMAN_RESOURCES', 'ASSIGNED_SUPERVISORS', ...(await tx.performanceConsequenceHandoff.count({ where: { subjectId: record.subjectId } }) ? ['AUTHORIZED_CONSEQUENCE_RECIPIENTS'] : [])],
       levels: results.map((result) => ({
@@ -175,6 +181,12 @@ export const actOnPerformancePrivacyCase = async (client: Client, input: {
         correctionStatus: result.supersedesResultId ? 'CORRECTED' : result.status === 'SUPERSEDED' ? 'SUPERSEDED' : 'ORIGINAL',
       })),
       withheldCategories: ['THIRD_PARTY_INFORMATION','SUPERVISOR_NARRATIVE','CRITERION_SCORES','OTHER_PERSONNEL_RANKING','INTERNAL_REVIEW_NOTES'],
+    } : record.requestKind === 'ERASURE' ? {
+      schemaVersion: 1, decision: ids.length ? 'RETAINED_UNDER_POLICY' : 'NO_SCOPED_EVALUATIONS', deletionCompleted: false,
+      reasonCode: input.reasonCode, closedRequestPreservationDays: 90,
+      records: retentionDecisions.map((decision) => ({ retentionDecisionId: decision.id, classification: decision.classification,
+        status: decision.status, policyVersionId: decision.policyVersionId, reviewAfter: decision.deleteAfter?.toISOString() ?? null })),
+      backupStatus: 'INDEPENDENT_CHECKPOINT_POLICY',
     } : {
       schemaVersion: 1, decision: ids.length ? 'CORRECTION_DECIDED' : 'NO_SCOPED_EVALUATIONS',
       reasonCode: input.reasonCode, corrections: corrections.map(({ id, status, decidedAt }) => ({ id, status, decidedAt: decidedAt?.toISOString() ?? null })),

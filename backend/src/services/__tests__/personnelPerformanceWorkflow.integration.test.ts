@@ -370,6 +370,7 @@ const main = async () => {
     });
     assert.equal(noSubmissionResolution.section.status, 'NOT_EVALUABLE');
     assert.equal((await first.performanceEvaluation.findUniqueOrThrow({ where: { id: recoveredTarget.evaluationId! } })).status, 'NOT_EVALUABLE');
+    assert.ok(await first.performanceAuditEvent.findFirst({ where: { aggregateType: 'EVALUATION', aggregateId: recoveredTarget.evaluationId!, eventType: 'EVALUATION_NOT_EVALUABLE' } }), 'final closure must have an immutable retention anchor');
 
     console.log('Personnel performance workflow database integration tests passed.');
   } finally {

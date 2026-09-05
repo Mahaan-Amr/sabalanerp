@@ -1,11 +1,11 @@
-import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
+import { enablePerformanceTestRelease, enrollPerformanceTestCohort } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
 import { createPerformancePolicyDraft, updatePerformancePolicyDraft, DEFAULT_CURRENT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicyStore';
 import { prisma } from '../../lib/prisma';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../personnelPerformanceOperationsStore';
-import { resolvePersonnelPerformanceWriteGate } from '../personnelPerformanceRolloutPolicy';
+import { resolvePersonnelPerformanceWriteGate, assertPersonnelPerformanceWriteAdmission } from '../personnelPerformanceRolloutPolicy';
 
 const rollback = Symbol('rollback-performance-operations');
 const main = async () => {
@@ -20,6 +20,17 @@ const main = async () => {
         password: 'not-used', firstName: 'عامل', lastName: 'آزمون',
       } });
   await enablePerformanceTestRelease(tx, actor.id);
+      await assert.rejects(() => assertPersonnelPerformanceWriteAdmission(tx, 'SAVE_SUPERVISOR_DRAFT', 'outside-cohort'),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_SUBJECT_OUTSIDE_COHORT');
+      await assertPersonnelPerformanceWriteAdmission(tx, 'MANAGE_POLICY');
+      const personnel = await tx.personnel.create({ data: { firstName: 'آزمون', lastName: 'عضویت' } });
+      const relationship = await tx.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2020-01-01Z'), createdBy: actor.id } });
+      const subject = await tx.performanceSubject.create({ data: { stableKey: suffix, nonDisplayKey: suffix, personnelId: personnel.id, employmentRelationshipId: relationship.id, createdByUserId: actor.id } });
+      const cohort = await enrollPerformanceTestCohort(tx, actor.id, [subject.id]);
+      assert.equal((await assertPersonnelPerformanceWriteAdmission(tx, 'SAVE_SUPERVISOR_DRAFT', subject.id)).allowed, true);
+      await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'RETIRED' } });
+      await assert.rejects(() => assertPersonnelPerformanceWriteAdmission(tx, 'SAVE_SUPERVISOR_DRAFT', subject.id),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_SUBJECT_OUTSIDE_COHORT', 'retired cohort membership never admits a write');
       const draft = await createPerformancePolicyDraft(tx, { policyKind: 'CURRENT_LEVEL', content: DEFAULT_CURRENT_LEVEL_POLICY_CONTENT, createdByUserId: actor.id });
       assert.equal((await getPersonnelPerformanceOperationsState(tx)).rollbackMode, 'EVIDENCE_PRESERVING_FIX_FORWARD');
       const latest = await tx.performanceFeaturePhaseVersion.findFirst({ orderBy: { version: 'desc' } });

@@ -663,6 +663,7 @@ router.use((error: unknown, _req: import('express').Request, res: import('expres
   const detail = error && typeof error === 'object' ? error as { code?: unknown; status?: unknown; statusCode?: unknown; message?: unknown } : {};
   const message = typeof detail.message === 'string' ? detail.message : '';
   if (message.includes('PERFORMANCE_SAFETY_PAUSED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_SAFETY_PAUSED', message: 'عملیات به‌دلیل توقف ایمن موقتاً بسته است.' });
+  if (message.includes('PERFORMANCE_CAPABILITY_NOT_ACTIVE')) return res.status(409).json({ success: false, code: 'PERFORMANCE_CAPABILITY_NOT_ACTIVE', message: 'این قابلیت در مرحله فعلی انتشار فعال نیست.' });
   if (message.includes('PERFORMANCE_RELEASE_DISABLED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_RELEASE_DISABLED', message: 'انتشار ارزیابی عملکرد فعال نیست.' });
   if (message.includes('PERFORMANCE_FIX_FORWARD_REQUIRED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_FIX_FORWARD_REQUIRED', message: 'پس از ثبت شواهد فقط توقف ایمن و اصلاح روبه‌جلو مجاز است.' });
   const status = detail.status ?? detail.statusCode;

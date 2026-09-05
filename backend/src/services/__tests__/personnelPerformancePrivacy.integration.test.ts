@@ -1,4 +1,4 @@
-import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
+import { enablePerformanceTestRelease, enrollPerformanceTestCohort } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { restrictPerformanceEvidence, activePerformanceRestrictionIds } from '../personnelPerformanceRestrictions';
@@ -74,10 +74,11 @@ const main = async () => {
       assert.equal(duplicateRelease.status, 'ACTIVE');
       const releasedHold = await decidePerformanceLegalHold(tx, { actorUserId: other.id, holdId: hold.id, action: 'APPROVE_RELEASE', reasonCode: 'LEGAL_PROCEEDING_CLOSED' });
       assert.equal(releasedHold.status, 'RELEASED');
+      const cohort = await enrollPerformanceTestCohort(tx, actor.id, [subject.id]);
       const [{ revision }] = await tx.$queryRaw<Array<{ revision: bigint }>>`SELECT revision FROM performance_disclosure_revision WHERE id = 1`;
       const exportIds: string[] = [];
       const bytes = Buffer.from('isolated confidential export');
-      for (let index = 0; index < 2; index++) {
+      for (let index = 0; index < 3; index++) {
         const exportId = randomUUID(); exportIds.push(exportId);
         const artifactPath = path.join(directory, exportId);
         await writeFile(artifactPath, encryptPerformanceExportArtifact(bytes, createHash('sha256').update('sabalan-local-performance-export-key').digest()));
@@ -91,6 +92,11 @@ const main = async () => {
       assert.deepEqual(downloaded.bytes, bytes);
       await assert.rejects(() => claimPerformanceExportDownload(tx, { exportId: exportIds[0], actorUserId: other.id, token: exportIds[0] }),
         (error: { code?: string }) => error.code === 'PERFORMANCE_EXPORT_LINK_EXPIRED');
+      await tx.$executeRawUnsafe('SAVEPOINT cohort_retirement');
+      await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'RETIRED' } });
+      await assert.rejects(() => claimPerformanceExportDownload(tx, { exportId: exportIds[2], actorUserId: other.id, token: exportIds[2] }),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_EXPORT_EVIDENCE_CHANGED', 'retiring the cohort must invalidate an existing export');
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT cohort_retirement');
       await placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION', aggregateId: evaluation.id, reasonCode: 'NEW_LEGAL_PROCEEDING' });
       await assert.rejects(() => claimPerformanceExportDownload(tx, { exportId: exportIds[1], actorUserId: other.id, token: exportIds[1] }),
         (error: { code?: string }) => error.code === 'PERFORMANCE_EXPORT_EVIDENCE_CHANGED');

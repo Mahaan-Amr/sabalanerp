@@ -95,7 +95,7 @@ export const resolvePersonnelPerformanceWriteGate = async (
     orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
   });
   const cohort = phase?.cohortVersionId ? await client.performanceCohortVersion.findUnique({
-    where: { id: phase.cohortVersionId }, select: { id: true, version: true },
+    where: { id: phase.cohortVersionId, lifecycle: 'ACTIVE', effectiveFrom: { lte: now } }, select: { id: true, version: true },
   }) : null;
   const membership = cohort && subjectId ? await client.performanceCohortMember.findUnique({
     where: { cohortVersionId_subjectId: { cohortVersionId: cohort.id, subjectId } }, select: { id: true },
@@ -111,6 +111,20 @@ export const resolvePersonnelPerformanceWriteGate = async (
       ? { id: pause.id, scope: pause.scope === 'COHORT' ? 'COHORT' : 'ALL' }
       : null,
   }, action);
+};
+
+/** Call inside the writer's transaction before taking narrower aggregate locks or resolving authority. */
+export const assertPersonnelPerformanceWriteAdmission = async (
+  tx: Prisma.TransactionClient, action: PersonnelPerformanceWriteAction, subjectId?: string,
+) => {
+  const fence = await tx.$queryRaw<Array<{ revision: bigint }>>`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+  if (!fence.length) throw Object.assign(new Error('وضعیت انتشار عملکرد در دسترس نیست.'), { code: 'PERFORMANCE_OPERATIONS_FENCE_UNAVAILABLE', status: 409 });
+  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  const decision = await resolvePersonnelPerformanceWriteGate(tx, action, clock.now, subjectId);
+  if (!decision.allowed) throw Object.assign(new Error('عملیات با مرحله انتشار یا عضویت فعلی مجاز نیست.'), {
+    code: `PERFORMANCE_${decision.reason}`, status: 409,
+  });
+  return decision;
 };
 
 export const personnelPerformanceRollbackMode = (hasCanonicalWrite: boolean) => (
@@ -137,9 +151,17 @@ export const findApplicablePerformancePause = async (
   });
 };
 
+export const isPerformanceTransactionConflict = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object' || !('code' in error)) return false;
+  if (error.code === 'P2034') return true;
+  if (error.code !== 'P2010' || !('meta' in error) || !error.meta || typeof error.meta !== 'object' || !('code' in error.meta)) return false;
+  return ['40001', '40P01'].includes(String(error.meta.code));
+};
+
 export const normalizePerformanceWriteError = (error: unknown): unknown => {
+  if (isPerformanceTransactionConflict(error)) return Object.assign(new Error('وضعیت هم‌زمان تغییر کرده است؛ درخواست را دوباره ارسال کنید.'), { code: 'PERFORMANCE_WRITE_RETRY_REQUIRED', status: 409 });
   const message = error instanceof Error ? error.message : '';
-  const codes = ['PERFORMANCE_SAFETY_PAUSED', 'PERFORMANCE_RELEASE_DISABLED', 'PERFORMANCE_FIX_FORWARD_REQUIRED'] as const;
+  const codes = ['PERFORMANCE_SAFETY_PAUSED', 'PERFORMANCE_RELEASE_DISABLED', 'PERFORMANCE_FIX_FORWARD_REQUIRED', 'PERFORMANCE_CAPABILITY_NOT_ACTIVE'] as const;
   const code = codes.find((candidate) => message.includes(candidate));
   return code ? Object.assign(new Error('عملیات با وضعیت فعلی انتشار عملکرد مجاز نیست.'), { code, status: 409 }) : error;
 };

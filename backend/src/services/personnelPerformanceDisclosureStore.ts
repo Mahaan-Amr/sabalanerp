@@ -186,6 +186,10 @@ const requireScopedConsequenceAuthority = async (client: PrismaClient | Prisma.T
   }
 };
 
+const activeDisclosureCohort = (client: PrismaClient, cohortVersionId: string | null | undefined) => cohortVersionId
+  ? client.performanceCohortVersion.findFirst({ where: { id: cohortVersionId, lifecycle: 'ACTIVE', effectiveFrom: { lte: new Date() } }, select: { id: true } })
+  : Promise.resolve(null);
+
 const projectionForPersonnel = async (client: PrismaClient, personnelId: string) => {
   const relationship = await activeRelationshipForPersonnel(client, personnelId);
   if (!relationship) return null;
@@ -196,6 +200,7 @@ const projectionForPersonnel = async (client: PrismaClient, personnelId: string)
   if (!subject) return buildPerformanceBadgeSummary({ state: 'UNEVALUATED', version: 0 });
   const phase = await client.performanceFeaturePhaseVersion.findFirst({ where: { effectiveFrom: { lte: new Date() } }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] });
   if (!phase?.releaseEnabled || ['SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT'].includes(phase.phase)) return null;
+  if (!await activeDisclosureCohort(client, phase.cohortVersionId)) return null;
   if (phase.cohortVersionId) {
     const membership = await client.performanceCohortMember.findUnique({ where: { cohortVersionId_subjectId: { cohortVersionId: phase.cohortVersionId, subjectId: subject.id } } });
     if (!membership) return null;
@@ -290,9 +295,11 @@ export const getPerformanceHistory = async (client: PrismaClient, input: {
 const analyticsPopulation = async (client: PrismaClient, keyring: PerformanceVaultKey): Promise<PerformanceAnalyticsMember[]> => {
   const phase = await client.performanceFeaturePhaseVersion.findFirst({ where: { effectiveFrom: { lte: new Date() } }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] });
   if (!phase?.releaseEnabled || ['SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT', 'RESULT_LEVEL_BADGE'].includes(phase.phase)) return [];
-  const cohortSubjects = phase.cohortVersionId ? await client.performanceCohortMember.findMany({ where: { cohortVersionId: phase.cohortVersionId }, select: { subjectId: true } }) : [];
+  const cohort = await activeDisclosureCohort(client, phase.cohortVersionId);
+  if (!cohort) return [];
+  const cohortSubjects = await client.performanceCohortMember.findMany({ where: { cohortVersionId: cohort.id }, select: { subjectId: true } });
   const projections = await client.performanceCurrentLevelProjection.findMany({
-    where: { state: PerformanceProjectionState.LEVEL, levelCode: { not: null }, ...(phase.cohortVersionId ? { subjectId: { in: cohortSubjects.map(({ subjectId }) => subjectId) } } : {}) },
+    where: { state: PerformanceProjectionState.LEVEL, levelCode: { not: null }, subjectId: { in: cohortSubjects.map(({ subjectId }) => subjectId) } },
   });
   if (!projections.length) return [];
   const subjects = await client.performanceSubject.findMany({ where: { id: { in: projections.map(({ subjectId }) => subjectId) }, identityDetachedAt: null } });
@@ -360,8 +367,9 @@ const analyticsPopulation = async (client: PrismaClient, keyring: PerformanceVau
 const analyticsAuthorizedSubjectIds = async (client: PrismaClient) => {
   const phase = await client.performanceFeaturePhaseVersion.findFirst({ where: { effectiveFrom: { lte: new Date() } }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] });
   if (!phase?.releaseEnabled || ['SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT', 'RESULT_LEVEL_BADGE'].includes(phase.phase)) return [];
-  if (phase.cohortVersionId) return (await client.performanceCohortMember.findMany({ where: { cohortVersionId: phase.cohortVersionId }, select: { subjectId: true } })).map(({ subjectId }) => subjectId);
-  return (await client.performanceSubject.findMany({ where: { identityDetachedAt: null }, select: { id: true } })).map(({ id }) => id);
+  const cohort = await activeDisclosureCohort(client, phase.cohortVersionId);
+  if (!cohort) return [];
+  return (await client.performanceCohortMember.findMany({ where: { cohortVersionId: cohort.id }, select: { subjectId: true } })).map(({ subjectId }) => subjectId);
 };
 
 const historicalAnalyticsPopulation = async (
@@ -770,7 +778,9 @@ export const requestPerformanceExport = async (client: PrismaClient, input: {
       expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
     } });
   });
-  queueMicrotask(() => { void processPerformanceExport(client, receipt.id, keyring); });
+  queueMicrotask(() => { void processPerformanceExport(client, receipt.id, keyring).catch(() => {
+    console.error('Performance export dispatch failed closed; queued work remains available for recovery.');
+  }); });
   return { receipt, downloadToken: token };
 };
 

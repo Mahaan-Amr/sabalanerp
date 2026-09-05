@@ -26,6 +26,12 @@ import {
   type PerformanceTemplatePolicyContent,
 } from './personnelPerformancePolicyStore';
 import { publishNotificationEvent } from './notificationService';
+import { assertPersonnelPerformanceWriteAdmission, type PersonnelPerformanceWriteAction } from './personnelPerformanceRolloutPolicy';
+
+const admitSectionWrite = async (tx: Prisma.TransactionClient, evaluationId: string, action: PersonnelPerformanceWriteAction) => {
+  const evaluation = await tx.performanceEvaluation.findUniqueOrThrow({ where: { id: evaluationId }, select: { subjectId: true } });
+  return assertPersonnelPerformanceWriteAdmission(tx, action, evaluation.subjectId);
+};
 import { requirePerformanceReason, validatePerformanceSubmissionResponses } from './personnelPerformanceWorkflow';
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
 
@@ -261,6 +267,7 @@ export const saveSupervisorPerformanceDraft = async (client: PrismaClient, input
   return runPerformanceSerializableTransaction(client, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'performance-section:' + input.sectionId}, 0))`;
     const { section, user } = await assertSupervisorAuthority(tx, input.sectionId, input.userId, now);
+    await admitSectionWrite(tx, section.evaluationId, 'SAVE_SUPERVISOR_DRAFT');
     if (section.windowClosedAt) throw workflowError('پنجره ارسال این ارزیابی بسته شده است.', 'PERFORMANCE_WINDOW_CLOSED', 409);
     if (!['DRAFT', 'REJECTED'].includes(section.status)) throw workflowError('این بخش در وضعیت قابل ویرایش نیست.', 'PERFORMANCE_SECTION_NOT_EDITABLE', 409);
     if (section.status === 'REJECTED') await tx.performanceEvaluationSection.update({ where: { id: section.id }, data: { status: 'DRAFT' } });
@@ -305,6 +312,7 @@ export const submitSupervisorPerformanceSection = async (client: PrismaClient, i
     }
     if (section.windowClosedAt) throw workflowError('پنجره ارسال این ارزیابی بسته شده است.', 'PERFORMANCE_WINDOW_CLOSED', 409);
     if (section.status !== 'DRAFT') throw workflowError('این بخش دیگر آماده ارسال نیست.', 'PERFORMANCE_SUBMISSION_ALREADY_DECIDED', 409);
+    await admitSectionWrite(tx, section.evaluationId, 'SUBMIT_SUPERVISOR_EVALUATION');
     if (now < section.effectiveTo) throw workflowError('ارسال این بخش پس از پایان بازه مسئولیت ممکن است.', 'PERFORMANCE_SECTION_NOT_ENDED', 409);
     const draft = await tx.performanceDraft.findFirst({
       where: { sectionId: section.id, supervisorUserId: input.userId, status: 'OPEN' }, orderBy: { revision: 'desc' },
@@ -393,6 +401,8 @@ export const claimPerformanceReview = async (client: PrismaClient, input: {
     const submission = await tx.performanceSubmission.findUnique({ where: { id: input.submissionId } });
     const existingReview = await tx.performanceReview.findUnique({ where: { submissionId: input.submissionId } });
     if (!submission || existingReview) throw workflowError('این بررسی قبلاً تکمیل شده است.', 'PERFORMANCE_REVIEW_ALREADY_DECIDED', 409);
+    const section = await tx.performanceEvaluationSection.findUniqueOrThrow({ where: { id: submission.sectionId } });
+    await admitSectionWrite(tx, section.evaluationId, 'DECIDE_HR_REVIEW');
     await tx.performanceReviewClaim.updateMany({
       where: { submissionId: submission.id, releasedAt: null, expiresAt: { lte: now } },
       data: { releasedAt: now, releaseReason: 'پایان خودکار مهلت تصاحب بررسی' },
@@ -570,6 +580,7 @@ export const decidePerformanceReview = async (client: PrismaClient, input: {
     }
     const section = await tx.performanceEvaluationSection.findUniqueOrThrow({ where: { id: submission.sectionId } });
     if (section.status !== 'SUBMITTED') throw workflowError('این ارسال دیگر آماده تصمیم نیست.', 'PERFORMANCE_SUBMISSION_STALE', 409);
+    await admitSectionWrite(tx, section.evaluationId, 'DECIDE_HR_REVIEW');
     const latest = await tx.performanceSubmission.findFirst({ where: { sectionId: section.id }, orderBy: { version: 'desc' } });
     if (latest?.id !== submission.id) throw workflowError('نسخه تازه‌تری برای این بخش وجود دارد.', 'PERFORMANCE_SUBMISSION_STALE', 409);
     const reviewer = await tx.user.findUniqueOrThrow({ where: { id: input.reviewerUserId }, select: { personnelId: true } });
@@ -655,6 +666,7 @@ export const markPerformanceSectionNotEvaluable = async (client: PrismaClient, i
     if (!['DRAFT', 'REJECTED'].includes(section.status)) {
       throw workflowError('این بخش از مسیر ارسال موجود باید تعیین تکلیف شود.', 'PERFORMANCE_SECTION_NOT_RESOLVABLE', 409);
     }
+    await admitSectionWrite(tx, section.evaluationId, 'DECIDE_HR_REVIEW');
     const updated = await tx.performanceEvaluationSection.update({ where: { id: section.id }, data: { status: 'NOT_EVALUABLE' } });
     const auditId = randomUUID();
     const evidence = await persistPerformancePayload(tx, {
@@ -708,6 +720,10 @@ export const extendPerformanceSectionDeadline = async (client: PrismaClient, inp
     if (!section) throw workflowError('بخش ارزیابی پیدا نشد.', 'PERFORMANCE_SECTION_NOT_FOUND', 404);
     if (!['DRAFT', 'REJECTED'].includes(section.status)) throw workflowError('مهلت فقط پیش از ارسال یا پس از بازگشت برای اصلاح قابل تمدید است.', 'PERFORMANCE_EXTENSION_STATE_INVALID', 409);
     if (!section.submissionDueAt || input.dueAt <= section.submissionDueAt) throw workflowError('مهلت تازه باید پس از مهلت فعلی باشد.', 'PERFORMANCE_EXTENSION_INVALID', 422);
+    if (!(await activeHrActionPermissionsForUser(tx, input.actorUserId)).includes('MANAGE_PERFORMANCE_CYCLE')) {
+      throw workflowError('مجوز مدیریت نوبت عملکرد را ندارید.', 'PERFORMANCE_CYCLE_PERMISSION_REQUIRED', 403);
+    }
+    await admitSectionWrite(tx, section.evaluationId, 'MANAGE_PERFORMANCE_CYCLE');
     const updated = await tx.performanceEvaluationSection.update({ where: { id: section.id }, data: {
       submissionDueAt: input.dueAt, extensionCount: { increment: 1 }, windowClosedAt: null,
     } });
@@ -782,6 +798,12 @@ const terminateEvaluation = async (client: PrismaClient, input: {
     if (!evaluation) throw workflowError('پرونده ارزیابی پیدا نشد.', 'PERFORMANCE_EVALUATION_NOT_FOUND', 404);
     if (input.target === 'INVALIDATED' && !(await activeHrActionPermissionsForUser(tx, input.actorUserId, new Date())).includes('PAUSE_PERFORMANCE_EVALUATION')) {
       throw workflowError('مجوز مستقل تعلیق اثر ارزیابی را ندارید.', 'PERFORMANCE_INVALIDATION_PERMISSION_REVOKED', 403);
+    }
+    if (input.target === 'CANCELLED') {
+      if (!(await activeHrActionPermissionsForUser(tx, input.actorUserId)).includes('MANAGE_PERFORMANCE_CYCLE')) {
+        throw workflowError('مجوز مدیریت نوبت عملکرد را ندارید.', 'PERFORMANCE_CYCLE_PERMISSION_REQUIRED', 403);
+      }
+      await assertPersonnelPerformanceWriteAdmission(tx, 'MANAGE_PERFORMANCE_CYCLE', evaluation.subjectId);
     }
     if (input.target === 'CANCELLED' && evaluation.acceptedResultId) throw workflowError('نتیجه مصوب فقط از مسیر تعلیق اثر و اصلاح قابل تغییر است.', 'PERFORMANCE_ACCEPTED_CANCELLATION_FORBIDDEN', 409);
     if (input.target === 'CANCELLED' && !['DRAFT', 'SUBMITTED', 'REJECTED'].includes(evaluation.status)) throw workflowError('این پرونده در وضعیت قابل لغو نیست.', 'PERFORMANCE_CANCELLATION_STATE_INVALID', 409);

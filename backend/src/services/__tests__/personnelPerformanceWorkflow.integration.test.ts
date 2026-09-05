@@ -1,4 +1,4 @@
-import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
+import { enablePerformanceTestRelease, enrollPerformanceTestCohort } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { PerformanceReviewDecision } from '@prisma/client';
@@ -195,6 +195,8 @@ const main = async () => {
       runId: readiness.run.id, employmentAssignmentId: targetAssignment.id, status: 'APPLIED',
     } });
     const section = await first.performanceEvaluationSection.findUniqueOrThrow({ where: { id: targetRecord.sectionId! } });
+    const admittedEvaluation = await first.performanceEvaluation.findUniqueOrThrow({ where: { id: section.evaluationId } });
+    await enrollPerformanceTestCohort(first, firstReviewer.id, [admittedEvaluation.subjectId]);
     const reasonedNotEvaluableSection = await first.performanceEvaluationSection.findFirstOrThrow({ where: {
       evaluationId: section.evaluationId, id: { not: section.id },
     } });

@@ -1,4 +1,5 @@
 import { createPerformanceCorrection } from './personnelPerformanceDisclosureStore';
+import { isPerformanceTransactionConflict, normalizePerformanceWriteError } from './personnelPerformanceRolloutPolicy';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type PerformancePrivacyCase } from '@prisma/client';
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
@@ -12,7 +13,7 @@ const inTransaction = async <T>(client: Client, work: (tx: Prisma.TransactionCli
   if (!('$transaction' in client)) return work(client);
   for (let attempt = 0; ; attempt++) {
     try { return await client.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 }); }
-    catch (error) { if (attempt >= 2 || !(error && typeof error === 'object' && 'code' in error && error.code === 'P2034')) throw error; }
+    catch (error) { if (attempt >= 2 || !isPerformanceTransactionConflict(error)) throw normalizePerformanceWriteError(error); }
   }
 };
 const workingDeadline = (from: Date, days: number) => {

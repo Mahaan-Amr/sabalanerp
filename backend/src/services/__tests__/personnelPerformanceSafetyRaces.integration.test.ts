@@ -3,7 +3,8 @@ import path from 'node:path';
 import { Prisma } from '@prisma/client';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
-import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
+import { enablePerformanceTestRelease, enrollPerformanceTestCohort } from './personnelPerformanceTestRelease';
+import { assertPersonnelPerformanceWriteAdmission } from '../personnelPerformanceRolloutPolicy';
 import { createPerformancePolicyDraft, updatePerformancePolicyDraft } from '../personnelPerformancePolicyStore';
 import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
 import { disablePersonnelPerformanceBeforeFirstWrite, getPersonnelPerformanceOperationsState, pausePersonnelPerformance } from '../personnelPerformanceOperationsStore';
@@ -71,6 +72,16 @@ const main = async () => {
         'PERFORMANCE_RELEASE_DISABLED',
       );
       assert.equal((await getPersonnelPerformanceOperationsState(first)).firstCanonicalWriteAt, null);
+      const disabledPhase = await first.performanceFeaturePhaseVersion.findFirstOrThrow({ orderBy: { version: 'desc' } });
+      // Use the database clock so this phase is the effective version, independent of host clock skew.
+      const [phaseClock] = await first.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+      await first.performanceFeaturePhaseVersion.create({ data: {
+        version: disabledPhase.version + 1, predecessorId: disabledPhase.id, phase: 'SCHEMA_PROTECTION', releaseEnabled: true,
+        effectiveFrom: phaseClock.now, recordedByUserId: actor.id, reason: 'Effective capability boundary fixture',
+      } });
+      await assert.rejects(() => createPerformancePolicyDraft(first, { policyKind: 'RETENTION', content: PERFORMANCE_RETENTION_SCHEDULE_V1, createdByUserId: actor.id }),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_CAPABILITY_NOT_ACTIVE');
+      assert.equal((await getPersonnelPerformanceOperationsState(first)).firstCanonicalWriteAt, null);
       await enablePerformanceTestRelease(first, actor.id);
       await runOrderedRace(
         (tx) => createPerformancePolicyDraft(tx, { policyKind: 'RETENTION', content: PERFORMANCE_RETENTION_SCHEDULE_V1, createdByUserId: actor.id }),
@@ -78,6 +89,15 @@ const main = async () => {
         'PERFORMANCE_FIX_FORWARD_REQUIRED',
       );
       assert.equal((await getPersonnelPerformanceOperationsState(first)).rollbackMode, 'EVIDENCE_PRESERVING_FIX_FORWARD');
+      const personnel = await first.personnel.create({ data: { firstName: 'آزمون', lastName: 'عضویت' } });
+      const relationship = await first.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2000-01-01Z'), createdBy: actor.id } });
+      const subject = await first.performanceSubject.create({ data: { stableKey: database.runId, nonDisplayKey: database.runId, personnelId: personnel.id, employmentRelationshipId: relationship.id, createdByUserId: actor.id } });
+      const cohort = await enrollPerformanceTestCohort(first, actor.id, [subject.id]);
+      await runOrderedRace(
+        (tx) => tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'RETIRED' } }),
+        (tx) => assertPersonnelPerformanceWriteAdmission(tx, 'SAVE_SUPERVISOR_DRAFT', subject.id),
+        'PERFORMANCE_SUBJECT_OUTSIDE_COHORT',
+      );
       const draft = await first.performancePolicyVersion.findFirstOrThrow({ where: { policyKind: 'RETENTION' } });
       const phase = await first.performanceFeaturePhaseVersion.findFirstOrThrow({ orderBy: { version: 'desc' } });
       await runOrderedRace(
@@ -85,13 +105,13 @@ const main = async () => {
         (tx) => updatePerformancePolicyDraft(tx, { versionId: draft.id, content: PERFORMANCE_RETENTION_SCHEDULE_V1 }),
         'PERFORMANCE_SAFETY_PAUSED',
       );
-      if ((iteration + 1) % 10 === 0 || iteration + 1 === iterations) console.log(`Safety races: ${iteration + 1}/${iterations}; three deterministic orderings passed.`);
+      if ((iteration + 1) % 10 === 0 || iteration + 1 === iterations) console.log(`Safety races: ${iteration + 1}/${iterations}; four deterministic orderings passed.`);
     } finally {
       await Promise.allSettled([first.$disconnect(), second.$disconnect()]);
       await database.cleanup();
     }
   }
-  console.log(JSON.stringify({ schemaVersion: 1, suite: 'performance-control-fence-regressions', iterations, deterministicOrderings: 3, failures: 0,
+  console.log(JSON.stringify({ schemaVersion: 1, suite: 'performance-control-fence-regressions', iterations, deterministicOrderings: 4, failures: 0,
     completeTwelveRacePromotionEvidence: false }));
 };
 main().catch((error: unknown) => { console.error(error); process.exitCode = 1; });

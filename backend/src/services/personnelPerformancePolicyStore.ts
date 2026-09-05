@@ -1,4 +1,4 @@
-import { normalizePerformanceWriteError } from './personnelPerformanceRolloutPolicy';
+import { normalizePerformanceWriteError, isPerformanceTransactionConflict } from './personnelPerformanceRolloutPolicy';
 import { activePerformanceRestrictionIds } from './personnelPerformanceRestrictionQueries';
 import { isSupportedPerformanceRetentionPolicy } from './personnelPerformanceRetention';
 import { createHash, randomUUID } from 'node:crypto';
@@ -90,18 +90,27 @@ export const DEFAULT_SCORING_POLICY_CONTENT: ScoringPolicyContent = {
 };
 
 const asTx = async <T>(client: PrismaClient | Prisma.TransactionClient, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> => {
-  if (!('$transaction' in client)) return work(client).catch((error: unknown) => { throw normalizePerformanceWriteError(error); });
+  const fencedWork = async (tx: Prisma.TransactionClient) => {
+    const fence = await tx.$queryRaw<Array<{ revision: bigint }>>`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+    if (!fence.length) throw Object.assign(new Error('وضعیت انتشار عملکرد در دسترس نیست.'), { code: 'PERFORMANCE_OPERATIONS_FENCE_UNAVAILABLE', status: 409 });
+    return work(tx);
+  };
+  if (!('$transaction' in client)) return fencedWork(client).catch((error: unknown) => {
+    // The transaction owner must see the original conflict so it can retry the whole operation.
+    if (isPerformanceTransactionConflict(error)) throw error;
+    throw normalizePerformanceWriteError(error);
+  });
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      return await client.$transaction(work, {
+      return await client.$transaction(fencedWork, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
         timeout: 300_000,
         maxWait: 30_000,
       });
     } catch (error) {
       lastError = error;
-      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'P2034') || attempt === 3) throw normalizePerformanceWriteError(error);
+      if (!isPerformanceTransactionConflict(error) || attempt === 3) throw normalizePerformanceWriteError(error);
     }
   }
   throw lastError;

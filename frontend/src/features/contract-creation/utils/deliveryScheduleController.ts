@@ -91,7 +91,8 @@ export const isDeliveryItemForProduct = (
 
 export const reconcileDeliveryProductReferences = (
   products: ContractProduct[],
-  deliveries: DeliverySchedule[] = []
+  deliveries: DeliverySchedule[] = [],
+  previousProducts?: ContractProduct[]
 ): DeliveryProductReferenceReconciliation => {
   const conflicts: DeliveryProductReferenceConflict[] = [];
   const productIndexByRowId = new Map<string, number>();
@@ -102,7 +103,7 @@ export const reconcileDeliveryProductReferences = (
     productIndexByRowId.set(product.rowId, productIndex);
   });
 
-  const reconciledDeliveries = deliveries.map((delivery, deliveryIndex) => ({
+  let reconciledDeliveries = deliveries.map((delivery, deliveryIndex) => ({
     ...delivery,
     products: (delivery.products || []).map((item, productItemIndex) => {
       if (item.rowType === 'service') return item;
@@ -225,6 +226,79 @@ export const reconcileDeliveryProductReferences = (
       };
     })
   }));
+
+  if (previousProducts) {
+    const previousProductsByRowId = new Map(
+      previousProducts
+        .filter((product): product is ContractProduct & { rowId: string } => Boolean(product.rowId))
+        .map((product) => [product.rowId, product])
+    );
+    const amountsEqual = (left: number, right: number): boolean =>
+      Math.abs(left - right) <= 1e-9;
+
+    products.forEach((product) => {
+      if (!product.rowId) return;
+      const previousProduct = previousProductsByRowId.get(product.rowId);
+      if (!previousProduct || getDeliveryUnit(previousProduct) !== getDeliveryUnit(product)) return;
+
+      const previousTarget = getDeliveryTargetAmount(previousProduct);
+      const nextTarget = getDeliveryTargetAmount(product);
+      if (amountsEqual(previousTarget, nextTarget)) return;
+
+      const assignments = reconciledDeliveries.flatMap((delivery, deliveryIndex) =>
+        (delivery.products || []).flatMap((item, productItemIndex) =>
+          item.rowType !== 'service' && item.productRowId === product.rowId
+            ? [{ deliveryIndex, productItemIndex, amount: item.amount ?? item.quantity ?? 0 }]
+            : []
+        )
+      );
+      const assignedTotal = assignments.reduce((sum, assignment) => sum + assignment.amount, 0);
+      if (!assignments.length || !amountsEqual(assignedTotal, previousTarget)) return;
+
+      let remainingDelta = nextTarget - previousTarget;
+      if (remainingDelta > 0) {
+        const lastAssignment = assignments[assignments.length - 1];
+        reconciledDeliveries = reconciledDeliveries.map((delivery, deliveryIndex) =>
+          deliveryIndex !== lastAssignment.deliveryIndex
+            ? delivery
+            : {
+                ...delivery,
+                products: (delivery.products || []).map((item, productItemIndex) =>
+                  productItemIndex !== lastAssignment.productItemIndex
+                    ? item
+                    : {
+                        ...item,
+                        quantity: lastAssignment.amount + remainingDelta,
+                        amount: lastAssignment.amount + remainingDelta
+                      }
+                )
+              }
+        );
+        return;
+      }
+
+      remainingDelta = Math.abs(remainingDelta);
+      for (let assignmentIndex = assignments.length - 1; assignmentIndex >= 0 && remainingDelta > 0; assignmentIndex -= 1) {
+        const assignment = assignments[assignmentIndex];
+        const reduction = Math.min(assignment.amount, remainingDelta);
+        const nextAmount = assignment.amount - reduction;
+        remainingDelta -= reduction;
+        reconciledDeliveries = reconciledDeliveries.map((delivery, deliveryIndex) =>
+          deliveryIndex !== assignment.deliveryIndex
+            ? delivery
+            : {
+                ...delivery,
+                products: (delivery.products || []).flatMap((item, productItemIndex) => {
+                  if (productItemIndex !== assignment.productItemIndex) return [item];
+                  return nextAmount > 0
+                    ? [{ ...item, quantity: nextAmount, amount: nextAmount }]
+                    : [];
+                })
+              }
+        );
+      }
+    });
+  }
 
   return { deliveries: reconciledDeliveries, conflicts };
 };

@@ -51,7 +51,7 @@ const deliveryChannels = (notification: { type: string; policyVersion: { channel
     : notification.policyVersion ? jsonStringArray(notification.policyVersion.channels, ['IN_APP', 'REALTIME'])
       : ['IN_APP', 'REALTIME'];
 
-const latestPolicy = async (
+export const latestPolicy = async (
   database: NotificationDatabase,
   type: RegisteredNotificationEventType,
 ) => {

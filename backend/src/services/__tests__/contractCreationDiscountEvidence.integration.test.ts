@@ -310,8 +310,8 @@ const run = async () => {
     product => product.productRowId === preparedProductRowId,
   );
   assert.equal(preparedProjection?.baseAmountToman, '40000000');
-  const mixedProductSnapshots = new Map(
-    savedMixedData.products.map((product: any) => [product.rowId, product]),
+  const mixedProductSnapshots = new Map<string, Readonly<Record<string, unknown>>>(
+    savedMixedData.products.map((product: any) => [String(product.rowId), product as Record<string, unknown>] as const),
   );
   const expectedMixedBase = contractDiscountEligibleBase(
     mixedProductSnapshots,

@@ -96,6 +96,85 @@ const delivery = (productIndex: number, productId: string): DeliverySchedule => 
 }
 
 {
+  const previousProducts = [product('row-a', 'catalog-a', { quantity: 22 })];
+  const editedProducts = [product('row-a', 'catalog-a', { quantity: 21 })];
+  const fullyAssignedDelivery = delivery(0, 'catalog-a');
+  fullyAssignedDelivery.products[0] = {
+    ...fullyAssignedDelivery.products[0],
+    productRowId: 'row-a',
+    quantity: 22,
+    amount: 22
+  };
+
+  const result = reconcileDeliveryProductReferences(
+    editedProducts,
+    [fullyAssignedDelivery],
+    previousProducts
+  );
+
+  assert.equal(
+    result.deliveries[0].products[0].amount,
+    21,
+    'a fully assigned delivery follows the edited contract product count'
+  );
+}
+
+{
+  const previousProducts = [product('row-a', 'catalog-a', { quantity: 22 })];
+  const editedProducts = [product('row-a', 'catalog-a', { quantity: 21 })];
+  const firstDelivery = delivery(0, 'catalog-a');
+  firstDelivery.products[0] = {
+    ...firstDelivery.products[0],
+    productRowId: 'row-a',
+    quantity: 10,
+    amount: 10
+  };
+  const finalDelivery = delivery(0, 'catalog-a');
+  finalDelivery.products[0] = {
+    ...finalDelivery.products[0],
+    productRowId: 'row-a',
+    quantity: 12,
+    amount: 12
+  };
+
+  const result = reconcileDeliveryProductReferences(
+    editedProducts,
+    [firstDelivery, finalDelivery],
+    previousProducts
+  );
+
+  assert.deepEqual(
+    result.deliveries.map((scheduledDelivery) => scheduledDelivery.products[0].amount),
+    [10, 11],
+    'earlier delivery allocations stay stable and the final allocation absorbs the product edit'
+  );
+}
+
+{
+  const previousProducts = [product('row-a', 'catalog-a', { quantity: 22 })];
+  const editedProducts = [product('row-a', 'catalog-a', { quantity: 21 })];
+  const partiallyAssignedDelivery = delivery(0, 'catalog-a');
+  partiallyAssignedDelivery.products[0] = {
+    ...partiallyAssignedDelivery.products[0],
+    productRowId: 'row-a',
+    quantity: 10,
+    amount: 10
+  };
+
+  const result = reconcileDeliveryProductReferences(
+    editedProducts,
+    [partiallyAssignedDelivery],
+    previousProducts
+  );
+
+  assert.equal(
+    result.deliveries[0].products[0].amount,
+    10,
+    'an intentional partial allocation is not silently rewritten'
+  );
+}
+
+{
   const canonicalDelivery = delivery(0, 'catalog-a');
   canonicalDelivery.products[0].productRowId = 'deleted-row';
   const result = reconcileDeliveryProductReferences([product('row-a', 'catalog-a')], [canonicalDelivery]);

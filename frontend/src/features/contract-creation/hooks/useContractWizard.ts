@@ -183,7 +183,11 @@ export const useContractWizard = () => {
       const products = identityNormalization?.products ?? prev.products;
       const deliveryInput = updates.deliveries ?? prev.deliveries;
       const deliveries = (updates.products || updates.deliveries)
-        ? reconcileDeliveryProductReferences(products, deliveryInput).deliveries
+        ? reconcileDeliveryProductReferences(
+            products,
+            deliveryInput,
+            updates.products ? prev.products : undefined
+          ).deliveries
         : prev.deliveries;
 
       return {

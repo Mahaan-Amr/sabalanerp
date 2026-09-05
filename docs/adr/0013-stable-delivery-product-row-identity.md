@@ -22,6 +22,8 @@ The conflict UI shows the invalid assignment and its quantity. The operator may 
 
 Dependent stair-layer rows are not independent delivery targets; their physical identity and delivery balance remain nested under the exact parent stair row.
 
+When a product edit changes the row's delivery target and the saved delivery plan exactly allocated the previous target, the plan follows the commercial edit automatically. Earlier delivery allocations remain stable and the latest allocations absorb the increase or decrease, removing an allocation only when its amount reaches zero. A partial plan is intentional unfinished distribution and is never silently expanded or reduced.
+
 ## Consequences
 
 - Product insertion, deletion, and stair-layer recalculation cannot silently transfer a delivery quantity.
@@ -31,4 +33,5 @@ Dependent stair-layer rows are not independent delivery targets; their physical 
 - Independent identity collisions can be repaired without changing quantities, geometry, prices, or totals.
 - Parent/source identity collisions remain blocked rather than silently moving a child relationship.
 - Delivery UI, validation, submission, saved contract snapshots, and printed output resolve the same stable row identity.
+- A fully allocated delivery plan cannot retain a stale pre-edit product total, while partial allocations keep their operator-entered amounts.
 - `productIndex` remains only a refreshed compatibility snapshot for older consumers.

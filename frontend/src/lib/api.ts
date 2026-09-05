@@ -1487,4 +1487,45 @@ export const servicesAPI = {
   applyCatalogImport: (catalog: string, importId: string) => api.post(`/catalog-excel/${catalog}/import/apply`, { importId })
 };
 
+export const personnelPerformanceAPI = {
+  capabilities: () => api.get('/hr/personnel-performance/capabilities'),
+  rollout: () => api.get('/hr/personnel-performance/rollout'),
+  criteria: () => api.get('/hr/personnel-performance/criteria'),
+  createCriterion: (content: unknown) => api.post('/hr/personnel-performance/criteria', content),
+  updateCriterion: (versionId: string, content: unknown) => api.put(`/hr/personnel-performance/criteria/${versionId}`, content),
+  scheduleCriterion: (versionId: string, input: { effectiveFrom: string; reason: string }) => (
+    api.post(`/hr/personnel-performance/criteria/${versionId}/schedule`, input)
+  ),
+  templates: () => api.get('/hr/personnel-performance/templates'),
+  createTemplate: (input: unknown) => api.post('/hr/personnel-performance/templates', input),
+  updateTemplate: (versionId: string, content: unknown) => api.put(`/hr/personnel-performance/templates/${versionId}`, content),
+  scheduleTemplate: (versionId: string, input: { effectiveFrom: string; reason: string }) => (
+    api.post(`/hr/personnel-performance/templates/${versionId}/schedule`, input)
+  ),
+  policies: () => api.get('/hr/personnel-performance/policies'),
+  createPolicy: (input: unknown) => api.post('/hr/personnel-performance/policies', input),
+  updatePolicy: (versionId: string, content: unknown) => api.put(`/hr/personnel-performance/policies/${versionId}`, content),
+  previewPolicy: (versionId: string, effectiveFrom: string) => api.post(`/hr/personnel-performance/policies/${versionId}/preview`, { effectiveFrom }),
+  schedulePolicy: (versionId: string, input: { effectiveFrom: string; reason: string; confirmedPreviewHash: string; confirmedPopulationHash: string }) => (
+    api.post(`/hr/personnel-performance/policies/${versionId}/schedule`, input)
+  ),
+  cancelVersion: (artifactType: 'criteria' | 'templates' | 'policies', versionId: string, reason: string) => (
+    api.post(`/hr/personnel-performance/${artifactType}/${versionId}/cancel`, { reason })
+  ),
+  retireVersion: (artifactType: 'criteria' | 'templates', versionId: string, reason: string) => (
+    api.post(`/hr/personnel-performance/${artifactType}/${versionId}/retire`, { reason })
+  ),
+  activateDuePolicies: (idempotencyKey: string) => api.post(
+    '/hr/personnel-performance/activation/run-due-policies',
+    undefined,
+    { headers: { 'x-idempotency-key': idempotencyKey } },
+  ),
+  activateDueArtifacts: (idempotencyKey: string) => api.post(
+    '/hr/personnel-performance/activation/run-due-artifacts',
+    undefined,
+    { headers: { 'x-idempotency-key': idempotencyKey } },
+  ),
+  trace: (traceId: string) => api.get(`/hr/personnel-performance/traces/${encodeURIComponent(traceId)}`),
+};
+
 export default api;

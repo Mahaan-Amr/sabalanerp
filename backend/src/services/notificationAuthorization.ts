@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { FEATURES, getUserFeatures } from '../middleware/feature';
 import { getUserWorkspaces } from '../middleware/workspace';
 import { canAccessTicket } from './supportTicketPolicy';
@@ -62,6 +62,9 @@ const PERFORMANCE_NOTIFICATION_TYPES = new Set([
   'PERFORMANCE_REMINDER',
   'PERFORMANCE_CONSEQUENCE_REVIEW_REQUIRED',
   'PERFORMANCE_SUMMARY_UPDATED',
+  'PERFORMANCE_PRIVACY_NOTICE',
+  'PERFORMANCE_PRIVACY_DEADLINE',
+  'PERFORMANCE_LEGAL_HOLD_NOTICE',
 ]);
 type PerformanceNotificationContext = {
   personnelId: string | null;
@@ -69,7 +72,7 @@ type PerformanceNotificationContext = {
 };
 
 const canAccessPerformanceNotification = async (
-  database: PrismaClient,
+  database: PrismaClient | Prisma.TransactionClient,
   userId: string,
   row: NotificationWithAuthorizationEvent,
   contextPromise: Promise<PerformanceNotificationContext | null>,
@@ -79,6 +82,43 @@ const canAccessPerformanceNotification = async (
   if (!context) return false;
   const { personnelId, permissions } = context;
   const { resourceType, resourceId } = row.event;
+  if (row.type === 'PERFORMANCE_PRIVACY_NOTICE' || row.type === 'PERFORMANCE_PRIVACY_DEADLINE') {
+    if (resourceType !== 'PERFORMANCE_PRIVACY_CASE' || !resourceId) return false;
+    const privacyCase = await database.performancePrivacyCase.findUnique({
+      where: { id: resourceId }, select: { subjectId: true },
+    });
+    if (!privacyCase) return false;
+    if (row.type === 'PERFORMANCE_PRIVACY_DEADLINE') return permissions.has('VIEW_PERFORMANCE_PRIVACY_CASE');
+    if (!personnelId) return false;
+    const subject = await database.performanceSubject.findUnique({
+      where: { id: privacyCase.subjectId }, select: { personnelId: true },
+    });
+    return subject?.personnelId === personnelId;
+  }
+  if (row.type === 'PERFORMANCE_LEGAL_HOLD_NOTICE') {
+    if (resourceType !== 'PERFORMANCE_LEGAL_HOLD' || !resourceId || !personnelId) return false;
+    const hold = await database.performanceLegalHold.findUnique({
+      where: { id: resourceId }, select: { aggregateType: true, aggregateId: true },
+    });
+    if (!hold) return false;
+    const evaluationId = hold.aggregateType === 'EVALUATION' ? hold.aggregateId
+      : hold.aggregateType === 'EVALUATION_SECTION'
+        ? (await database.performanceEvaluationSection.findUnique({
+            where: { id: hold.aggregateId }, select: { evaluationId: true },
+          }))?.evaluationId
+        : null;
+    const subjectId = hold.aggregateType === 'PERFORMANCE_SUBJECT' ? hold.aggregateId
+      : evaluationId
+        ? (await database.performanceEvaluation.findUnique({
+            where: { id: evaluationId }, select: { subjectId: true },
+          }))?.subjectId
+        : null;
+    if (!subjectId) return false;
+    const subject = await database.performanceSubject.findUnique({
+      where: { id: subjectId }, select: { personnelId: true },
+    });
+    return subject?.personnelId === personnelId;
+  }
   if (row.type === 'PERFORMANCE_REVIEW_READY') {
     return permissions.has('REVIEW_PERFORMANCE_EVALUATION');
   }
@@ -96,9 +136,19 @@ const canAccessPerformanceNotification = async (
     if (handoff.createdByUserId === userId && permissions.has('CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF')) return true;
     if (!handoff.packageId || !permissions.has('VIEW_ASSIGNED_PERFORMANCE_CONSEQUENCE_HANDOFF')) return false;
     const packageRecord = await database.performanceConsequencePackage.findUnique({
-      where: { id: handoff.packageId }, select: { assignedDestinationUserId: true },
+      where: { id: handoff.packageId }, select: { assignedDestinationUserId: true, destinationResponsibilityId: true },
     });
-    return packageRecord?.assignedDestinationUserId === userId;
+    if (packageRecord?.assignedDestinationUserId !== userId) return false;
+    const responsibility = await database.hrNamedResponsibility.findFirst({
+      where: {
+        id: packageRecord.destinationResponsibilityId,
+        assignedUserId: userId,
+        effectiveFrom: { lte: new Date() },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }],
+        responsibilityType: { isActive: true },
+      }, select: { id: true },
+    });
+    return Boolean(responsibility);
   }
   if (resourceType === 'PERFORMANCE_SUBMISSION' && resourceId) {
     const submission = await database.performanceSubmission.findUnique({
@@ -121,7 +171,7 @@ const canAccessPerformanceNotification = async (
 export const filterCurrentlyAuthorizedNotifications = async <
   T extends NotificationWithAuthorizationEvent,
 >(
-  database: PrismaClient,
+  database: PrismaClient | Prisma.TransactionClient,
   user: NotificationAuthorizationUser,
   rows: T[],
 ) => {

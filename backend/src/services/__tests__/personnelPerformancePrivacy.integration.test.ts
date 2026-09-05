@@ -11,6 +11,7 @@ import { persistPerformancePayload, performanceVaultKeyFromEnvironment } from '.
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
 import { prisma } from '../../lib/prisma';
 import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue, runPerformancePrivacyDeadlineNotifications } from '../personnelPerformancePrivacyStore';
+import { filterCurrentlyAuthorizedNotifications } from '../notificationAuthorization';
 
 const rollback = Symbol('privacy-test');
 const main = async () => {
@@ -28,6 +29,13 @@ const main = async () => {
       assert.equal(request.status, 'RECEIVED');
       assert.ok(await tx.notificationEvent.findUnique({ where: { deduplicationKey: `performance-privacy-request:${request.id}` } }),
         'privacy intake must notify the subject through the durable outbox');
+      const privacyNotice = await tx.notification.findFirstOrThrow({
+        where: { userId: actor.id, type: 'PERFORMANCE_PRIVACY_NOTICE' }, include: { event: true },
+      });
+      assert.equal((await filterCurrentlyAuthorizedNotifications(tx, actor, [privacyNotice])).length, 1,
+        'the current subject owner may see their direct privacy notice');
+      assert.equal((await filterCurrentlyAuthorizedNotifications(tx, other, [privacyNotice])).length, 0,
+        'a non-owner must not learn that a privacy case exists');
       const own = await getPerformancePrivacyCase(tx, actor.id, request.id);
       assert.equal(own.requestKind, 'ACCESS');
       assert.equal(own.response, null);
@@ -46,6 +54,10 @@ const main = async () => {
       const deadlineNotices = await runPerformancePrivacyDeadlineNotifications(tx, new Date('2026-09-08T08:00:00Z'));
       assert.equal(deadlineNotices.cases, 1);
       assert.ok(deadlineNotices.notifications >= 1);
+      const deadlineNotice = await tx.notification.findFirstOrThrow({
+        where: { userId: other.id, type: 'PERFORMANCE_PRIVACY_DEADLINE' }, include: { event: true },
+      });
+      assert.equal((await filterCurrentlyAuthorizedNotifications(tx, other, [deadlineNotice])).length, 1);
       await assert.rejects(() => requestPerformancePrivacy(tx, { actorUserId: other.id, subjectId: subject.id, requestKind: 'ACCESS', evaluationIds: [], reason: 'درخواست بدون اختیار ثبت' }));
       const acknowledged = await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: request.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' });
       assert.equal(acknowledged.status, 'ACKNOWLEDGED');
@@ -75,6 +87,12 @@ const main = async () => {
       await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: correctionRequest.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' });
       await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: correctionRequest.id, expectedVersion: 2, action: 'VERIFY', reasonCode: 'IDENTITY_AND_SCOPE_VERIFIED' });
       assert.equal((await listPerformancePrivacyQueue(tx, { actorUserId: other.id })).items.find(({ id }) => id === correctionRequest.id)?.nextAction, 'OPEN_CORRECTION');
+      await tx.hrFeatureAccessGrant.update({
+        where: { stableKey: `${suffix}:VIEW_PERFORMANCE_PRIVACY_CASE` },
+        data: { status: 'REVOKED', revokedAt: new Date(), revokedByUserId: actor.id },
+      });
+      assert.equal((await filterCurrentlyAuthorizedNotifications(tx, other, [deadlineNotice])).length, 0,
+        'revoking privacy-case authority must immediately remove deadline notices from the inbox');
 
       await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:destination-reader`, userId: other.id, featureCode: 'VIEW_ASSIGNED_PERFORMANCE_CONSEQUENCE_HANDOFF', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated package restriction test' } });
       const responsibilityType = await tx.hrResponsibilityTypeCatalog.create({ data: { code: `TEST-${suffix}`, displayName: 'آزمون مقصد' } });
@@ -100,6 +118,12 @@ const main = async () => {
       const hold = await placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION', aggregateId: evaluation.id, reasonCode: 'OPEN_LEGAL_PROCEEDING' });
       assert.ok(await tx.notificationEvent.findUnique({ where: { deduplicationKey: `performance-legal-hold:${hold.id}:placed` } }),
         'the subject is notified of a scoped hold without confidential reasons');
+      const holdNotice = await tx.notification.findFirstOrThrow({
+        where: { userId: actor.id, type: 'PERFORMANCE_LEGAL_HOLD_NOTICE' }, include: { event: true },
+      });
+      assert.equal((await filterCurrentlyAuthorizedNotifications(tx, actor, [holdNotice])).length, 1);
+      assert.equal((await filterCurrentlyAuthorizedNotifications(tx, other, [holdNotice])).length, 0,
+        'legal-hold notices remain bound to current subject ownership');
       assert.equal((await assessPerformanceEvaluationRetention(tx, { actorUserId: other.id, evaluationId: evaluation.id })).status, 'LEGAL_HOLD');
       const pendingRelease = await decidePerformanceLegalHold(tx, { actorUserId: actor.id, holdId: hold.id, action: 'APPROVE_RELEASE', reasonCode: 'LEGAL_PROCEEDING_CLOSED' });
       assert.equal(pendingRelease.status, 'ACTIVE');
@@ -134,7 +158,7 @@ const main = async () => {
       await assert.rejects(() => claimPerformanceExportDownload(tx, { exportId: exportIds[1], actorUserId: other.id, token: exportIds[1] }),
         (error: { code?: string }) => error.code === 'PERFORMANCE_EXPORT_EVIDENCE_CHANGED');
       throw rollback;
-    });
+    }, { timeout: 30_000 });
   } catch (error) { if (error !== rollback) throw error; } finally { await rm(directory, { recursive: true, force: true }); }
 };
 main().finally(() => prisma.$disconnect());

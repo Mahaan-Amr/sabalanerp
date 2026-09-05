@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { recoveryEngineInternals, validateLiveStoredFileReferences } from '../systemRecoveryEngine';
+import { encryptPerformanceExportArtifact, performanceExportKeyFromEnvironment } from '../personnelPerformanceDisclosureStore';
 
 const applicationRoot = path.join(path.sep, 'srv', 'sabalanerp');
 const recoveryRoot = path.join(applicationRoot, 'storage', 'recovery');
@@ -108,14 +110,23 @@ const main = async () => {
   const artifactPath = path.join(recoveryEngineInternals.performanceExportStorageDirectory, 'ready-export.enc');
   const packagedArtifact = recoveryEngineInternals.performanceExportBackupPath(payloadRoot, artifactPath);
   await fs.promises.mkdir(path.dirname(packagedArtifact), { recursive: true });
-  await fs.promises.writeFile(packagedArtifact, 'encrypted-export-bytes');
+  const plaintext = Buffer.from('encrypted-export-plaintext');
+  const exportKey = performanceExportKeyFromEnvironment();
+  await fs.promises.writeFile(packagedArtifact, encryptPerformanceExportArtifact(plaintext, exportKey.key));
   const packageClient = {
     $queryRawUnsafe: async () => [],
-    performanceExportReceipt: { findMany: async () => [{ id: 'ready-export', artifactPath }] },
+    performanceExportReceipt: { findMany: async () => [{ id: 'ready-export', artifactPath, artifactHash: createHash('sha256').update(plaintext).digest('hex'), artifactSize: plaintext.length, artifactKeyId: exportKey.keyId }] },
     dispatchDocumentArtifact: { findMany: async () => [] },
   } as any;
   try {
     await recoveryEngineInternals.validateStoredFileReferences(packageClient, payloadRoot);
+    await fs.promises.writeFile(packagedArtifact, Buffer.from('corrupt-export-bytes'));
+    await assert.rejects(
+      () => recoveryEngineInternals.validateStoredFileReferences(packageClient, payloadRoot),
+      (error: any) => error?.code === 'RECOVERY_PERFORMANCE_EXPORT_MISSING',
+      'restore validation must reject corrupt or mismatched performance-export bytes',
+    );
+    await fs.promises.writeFile(packagedArtifact, encryptPerformanceExportArtifact(plaintext, exportKey.key));
     await fs.promises.rm(packagedArtifact);
     await assert.rejects(
       () => recoveryEngineInternals.validateStoredFileReferences(packageClient, payloadRoot),

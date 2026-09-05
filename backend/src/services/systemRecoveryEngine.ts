@@ -10,6 +10,7 @@ import { decryptRecoveryArchive, encryptRecoveryArchive, encryptRecoveryArchiveF
 import { RECOVERY_FORMAT_VERSION, recoveryCompatibility, RecoveryPackageType } from './systemRecoveryPolicy';
 import { RECOVERY_COORDINATION_DIR, RECOVERY_ROOT } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
+import { decryptPerformanceExportArtifact, encryptPerformanceExportArtifact, performanceExportKeyFromEnvironment, performanceExportStorageDirectory } from './personnelPerformanceDisclosureStore';
 
 const execFileAsync = promisify(execFile);
 const PACKAGES_DIR = path.join(RECOVERY_ROOT, 'packages');
@@ -17,7 +18,7 @@ const UPLOADS_DIR = path.join(RECOVERY_ROOT, 'uploads');
 const WORK_DIR = path.join(RECOVERY_ROOT, 'work');
 const INQUIRY_SOURCE_DIR = process.env.INQUIRY_RECOVERY_SOURCE_DIR || path.join(process.cwd(), 'recovery-sources', 'inquiry');
 const DISPATCH_DOCUMENT_STORAGE_DIR = path.join(process.cwd(), 'storage', 'dispatch-documents');
-const PERFORMANCE_EXPORT_STORAGE_DIR = path.join(process.cwd(), 'storage', 'performance-exports');
+const PERFORMANCE_EXPORT_STORAGE_DIR = performanceExportStorageDirectory();
 
 const FILE_RECOVERY_MAPPINGS = [
   { payloadPath: 'files/contracts', livePath: path.join(process.cwd(), 'storage', 'contracts'), safetyName: 'contracts' },
@@ -57,6 +58,23 @@ const performanceExportRelativePath = (artifactPath: string, storageRoot = PERFO
 
 const performanceExportBackupPath = (payloadRoot: string, artifactPath: string, storageRoot = PERFORMANCE_EXPORT_STORAGE_DIR) =>
   path.join(payloadRoot, 'files', 'performance-exports', performanceExportRelativePath(artifactPath, storageRoot));
+
+const hasValidPerformanceExportArtifact = async (artifactPath: string, receipt: {
+  artifactHash: string | null;
+  artifactSize: number | null;
+  artifactKeyId: string | null;
+}) => {
+  if (!receipt.artifactHash || receipt.artifactSize === null || !receipt.artifactKeyId) return false;
+  try {
+    const exportKey = performanceExportKeyFromEnvironment();
+    if (exportKey.keyId !== receipt.artifactKeyId) return false;
+    const plaintext = decryptPerformanceExportArtifact(await fs.promises.readFile(artifactPath), exportKey.key);
+    return plaintext.length === receipt.artifactSize
+      && crypto.createHash('sha256').update(plaintext).digest('hex') === receipt.artifactHash;
+  } catch {
+    return false;
+  }
+};
 
 export type RecoveryManifest = {
   format: 'sabalan-recovery';
@@ -168,6 +186,8 @@ export const sanitizedDispatchArtifactMetadata = (storageKey: string) => {
 
 const sanitizeDatabase = async (databaseUrl: string) => {
   const disabledPassword = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+  const sanitizedExportKey = performanceExportKeyFromEnvironment();
+  const sanitizedExportHash = crypto.createHash('sha256').update(sanitizedText).digest('hex');
   const sql = `
     DELETE FROM "auth_sessions";
     DELETE FROM "recognized_browser_profiles";
@@ -222,6 +242,9 @@ const sanitizeDatabase = async (databaseUrl: string) => {
         WHEN lower("storageKey") ~ '\\.(png|jpg|jpeg|webp)$' THEN '${sanitizedDispatchArtifactMetadata('artifact.png').sha256}'
         ELSE '${sanitizedDispatchArtifactMetadata('artifact.bin').sha256}'
       END;
+    UPDATE "performance_export_receipts"
+      SET "artifactHash" = '${sanitizedExportHash}', "artifactSize" = ${sanitizedText.length}, "artifactKeyId" = '${sanitizedExportKey.keyId}'
+      WHERE "status" IN ('READY', 'DOWNLOADED');
     DO $sanitization$
     DECLARE sensitive RECORD;
     BEGIN
@@ -271,6 +294,7 @@ const copyComponent = async (
   destination: string,
   sanitized: boolean,
   exclude?: (relativePath: string) => boolean,
+  sanitizedTransform?: (relativePath: string) => Buffer,
 ) => {
   if (!fs.existsSync(source)) {
     await fs.promises.mkdir(destination, { recursive: true });
@@ -293,7 +317,7 @@ const copyComponent = async (
     if (exclude?.(relative)) continue;
     const target = path.join(destination, relative);
     await fs.promises.mkdir(path.dirname(target), { recursive: true });
-    await fs.promises.writeFile(target, sanitizedPlaceholder(relative), { mode: 0o600 });
+    await fs.promises.writeFile(target, sanitizedTransform?.(relative) ?? sanitizedPlaceholder(relative), { mode: 0o600 });
   }
 };
 
@@ -396,9 +420,15 @@ export const createRecoveryPackage = async (input: {
       ...FILE_RECOVERY_MAPPINGS.map((mapping) => copyComponent(
         mapping.livePath,
         path.join(payloadRoot, mapping.payloadPath),
-        sanitized,
+        // Export envelopes remain encrypted in sanitized packages so their
+        // database-to-file integrity metadata remains verifiable; the key is
+        // never included in the recovery package.
+        sanitized && mapping.safetyName !== 'performance-exports',
         mapping.safetyName === 'support-tickets'
           ? (relative) => shouldExcludeSupportTicketCheckpointFile(relative, referencedSupportTicketStorageNames)
+          : undefined,
+        mapping.safetyName === 'performance-exports'
+          ? () => encryptPerformanceExportArtifact(sanitizedText, performanceExportKeyFromEnvironment().key)
           : undefined,
       )),
       backupInquiry(path.join(payloadRoot, 'inquiry'), sanitized),
@@ -695,9 +725,9 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
       details: missing,
     });
   }
-  const readyPerformanceExports = await client.performanceExportReceipt.findMany({
-    where: { status: 'READY' },
-    select: { id: true, artifactPath: true },
+    const readyPerformanceExports = await client.performanceExportReceipt.findMany({
+      where: { status: 'READY' },
+      select: { id: true, artifactPath: true, artifactHash: true, artifactSize: true, artifactKeyId: true },
   });
   const missingPerformanceExports: Array<{ id: string; artifactPath: string | null }> = [];
   for (const receipt of readyPerformanceExports) {
@@ -706,8 +736,8 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
       continue;
     }
     const candidate = performanceExportBackupPath(payloadRoot, receipt.artifactPath);
-    const stat = await fs.promises.stat(candidate).catch(() => null);
-    if (!stat?.isFile()) missingPerformanceExports.push(receipt);
+      const stat = await fs.promises.stat(candidate).catch(() => null);
+      if (!stat?.isFile() || !await hasValidPerformanceExportArtifact(candidate, receipt)) missingPerformanceExports.push(receipt);
   }
   if (missingPerformanceExports.length) {
     throw Object.assign(new Error(`Recovery package has missing performance-export artifacts (${missingPerformanceExports.length}).`), {
@@ -782,7 +812,7 @@ export const validateLiveStoredFileReferences = async (client: PrismaClient) => 
   }
   const readyPerformanceExports = await client.performanceExportReceipt.findMany({
     where: { status: 'READY' },
-    select: { id: true, artifactPath: true },
+    select: { id: true, artifactPath: true, artifactHash: true, artifactSize: true, artifactKeyId: true },
   });
   const missingPerformanceExports: Array<{ id: string; artifactPath: string | null }> = [];
   for (const receipt of readyPerformanceExports) {
@@ -792,7 +822,7 @@ export const validateLiveStoredFileReferences = async (client: PrismaClient) => 
     }
     const candidate = path.join(PERFORMANCE_EXPORT_STORAGE_DIR, performanceExportRelativePath(receipt.artifactPath));
     const stat = await fs.promises.stat(candidate).catch(() => null);
-    if (!stat?.isFile()) missingPerformanceExports.push(receipt);
+    if (!stat?.isFile() || !await hasValidPerformanceExportArtifact(candidate, receipt)) missingPerformanceExports.push(receipt);
   }
   if (missingPerformanceExports.length) {
     throw Object.assign(new Error(`Live storage has missing performance-export artifacts (${missingPerformanceExports.length}).`), {

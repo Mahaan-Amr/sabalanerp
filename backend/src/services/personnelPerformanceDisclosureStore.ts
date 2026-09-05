@@ -57,7 +57,8 @@ const consequenceRule = (policy: ConsequencePolicyContent, consequenceType: stri
   }
   return rule;
 };
-const exportRoot = () => path.resolve(process.env.PERSONNEL_PERFORMANCE_EXPORT_DIR || path.join(process.cwd(), 'storage', 'performance-exports'));
+export const performanceExportStorageDirectory = () => path.resolve(process.env.PERSONNEL_PERFORMANCE_EXPORT_DIR || path.join(process.cwd(), 'storage', 'performance-exports'));
+const exportRoot = performanceExportStorageDirectory;
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const DEVELOPMENT_EXPORT_KEY = createHash('sha256').update('sabalan-local-performance-export-key').digest();
 
@@ -73,7 +74,7 @@ export const validatePerformanceExportKeyEnvironment = (environment: NodeJS.Proc
   throw disclosureError('کلید مستقل خروجی عملکرد پیکربندی نشده است.', 'PERFORMANCE_EXPORT_ENCRYPTION_CONFIGURATION_MISSING', 500);
 };
 
-const performanceExportKeyFromEnvironment = () => {
+export const performanceExportKeyFromEnvironment = () => {
   if (process.env.PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64 && process.env.PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID) {
     if (process.env.NODE_ENV === 'production') return validatePerformanceExportKeyEnvironment();
     const key = Buffer.from(process.env.PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64, 'base64');

@@ -1,9 +1,11 @@
 # Partner release evidence — issue #336
 
 This directory is the immutable handoff surface for the Partner release decision.
-It records readiness for the exact application candidate accepted by #335; it does
-not deploy production, enable real SMS, activate a Partner profile, enroll a
-cohort, resume Partner mutations, or open traffic.
+It records the current candidate evaluated after the #335 baseline. Issue #335
+accepted only application candidate `3d4a487e1bd125b2fd4e0b3e3779f4bbc69b1d3a`;
+the later candidate recorded here remains subject to separate candidate-bound
+acceptance. This evidence does not deploy production, enable real SMS, activate a
+Partner profile, enroll a cohort, resume Partner mutations, or open traffic.
 
 ## Current adjudication
 

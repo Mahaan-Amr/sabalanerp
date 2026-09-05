@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, use } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   FaFilePdf,
@@ -46,11 +46,12 @@ const sessionLabel: Record<string, string> = {
   FORCE_CLOSED: "بسته‌شده توسط مدیر",
 };
 
-export default function PersonnelReportHistoryPage({
-  params: routeParams,
-}: {
-  params: { personnelId: string };
-}) {
+export default function PersonnelReportHistoryPage(
+  props: {
+    params: Promise<{ personnelId: string }>;
+  }
+) {
+  const routeParams = use(props.params);
   const router = useRouter();
   const pathname = usePathname();
   const personnelId = routeParams.personnelId;

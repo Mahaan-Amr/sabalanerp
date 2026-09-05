@@ -6,7 +6,8 @@ const views = new Set<BiView>([
   'reconciliation', 'sellers', 'commercial-mix',
 ]);
 
-export default function BusinessIntelligenceViewPage({ params }: { params: { view: string } }) {
+export default async function BusinessIntelligenceViewPage(props: { params: Promise<{ view: string }> }) {
+  const params = await props.params;
   if (!views.has(params.view as BiView)) notFound();
   return <BiWorkspace view={params.view as BiView} />;
 }

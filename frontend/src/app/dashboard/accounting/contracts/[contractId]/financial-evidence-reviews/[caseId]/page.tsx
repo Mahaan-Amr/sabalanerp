@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, use } from 'react';
 import { FaArrowLeft, FaCheckCircle, FaExclamationTriangle } from 'react-icons/fa';
 import {
   ErpBadge,
@@ -56,11 +56,12 @@ const auditDateFa = (value?: string | null) => {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('fa-IR');
 };
 
-export default function FinancialEvidenceReviewPage({
-  params,
-}: {
-  params: { contractId: string; caseId: string };
-}) {
+export default function FinancialEvidenceReviewPage(
+  props: {
+    params: Promise<{ contractId: string; caseId: string }>;
+  }
+) {
+  const params = use(props.params);
   const [reviewCase, setReviewCase] = useState<ReviewCase | null>(null);
   const [contractNumber, setContractNumber] = useState('');
   const [loading, setLoading] = useState(true);

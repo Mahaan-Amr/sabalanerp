@@ -1,6 +1,6 @@
 'use client';
 import { ErpInput, ErpSelect } from '@/components/erp';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, use } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaBalanceScale,
@@ -119,7 +119,8 @@ const formatLifecycleBlockers = (blockers: any[]) => blockers.map((item) => {
   return `${item.label} (${item.count})${dependencies.length ? `: ${dependencies.join('، ')}` : ''}`;
 }).join('؛ ');
 
-export default function AccountingContractDetailPage({ params }: { params: { contractId: string } }) {
+export default function AccountingContractDetailPage(props: { params: Promise<{ contractId: string }> }) {
+  const params = use(props.params);
   const router = useRouter();
   const searchParams = useSearchParams();
   const focusKind = searchParams.get('focus') === 'receivable' || searchParams.get('focus') === 'check'

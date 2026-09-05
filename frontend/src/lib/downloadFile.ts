@@ -1,5 +1,11 @@
 import type { AxiosResponse } from 'axios';
 
+const firstStringHeader = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.find((item): item is string => typeof item === 'string');
+  return undefined;
+};
+
 const getFilenameFromDisposition = (disposition?: string): string | null => {
   if (!disposition) return null;
 
@@ -12,11 +18,11 @@ const getFilenameFromDisposition = (disposition?: string): string | null => {
 
 export const downloadBlobResponse = (response: AxiosResponse<Blob>, fallbackFilename: string) => {
   const filename =
-    getFilenameFromDisposition(response.headers?.['content-disposition']) ||
+    getFilenameFromDisposition(firstStringHeader(response.headers?.['content-disposition'])) ||
     fallbackFilename;
   const blob = response.data instanceof Blob
     ? response.data
-    : new Blob([response.data], { type: response.headers?.['content-type'] || 'application/pdf' });
+    : new Blob([response.data], { type: firstStringHeader(response.headers?.['content-type']) || 'application/pdf' });
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

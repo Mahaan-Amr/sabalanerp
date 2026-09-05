@@ -34,6 +34,7 @@ jobs:
       - run: npm ci --prefix backend
       - run: npm run lint:backend
       - run: npm run build:backend
+      - run: npm run test:personnel-performance-operations
       - run: npm run test:deployment-control --prefix backend
       - run: npm run test:system-recovery --prefix backend
       - run: npm run test:notifications --prefix backend

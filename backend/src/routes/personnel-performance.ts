@@ -1,3 +1,4 @@
+import { findApplicablePerformancePause } from '../services/personnelPerformanceRolloutPolicy';
 import express from 'express';
 import { publishCompensationAgreement } from '../services/hrCompensationAgreementStore';
 import { prisma } from '../lib/prisma';
@@ -104,14 +105,10 @@ router.get('/rollout', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_
         effectiveFrom: true,
       },
     });
-    const pause = phase ? await prisma.performanceSafetyPause.findFirst({
-      where: {
-        phaseVersionId: phase.id,
-        status: 'ACTIVE',
-      },
-      select: { scope: true, startedAt: true, reasonCode: true },
-      orderBy: { startedAt: 'desc' },
-    }) : null;
+    const activePause = await findApplicablePerformancePause(prisma);
+    const pause = activePause ? {
+      scope: activePause.scope, startedAt: activePause.startedAt, reasonCode: activePause.reasonCode,
+    } : null;
     if (!phase) return res.json({ success: true, rollout: null });
     const { id: _phaseId, ...publicPhase } = phase;
     return res.json({ success: true, rollout: { ...publicPhase, paused: Boolean(pause), pause } });

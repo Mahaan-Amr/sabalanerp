@@ -296,28 +296,28 @@ await runRolledBack(async (tx) => {
 
 await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
-    email: 'performance-policy-retroactive@example.invalid', username: 'performance_policy_retroactive_test', password: 'not-used', firstName: 'عامل', lastName: 'اثر سیاست',
+    email: 'performance-policy-premature@example.invalid', username: 'performance_policy_premature_test', password: 'not-used', firstName: 'عامل', lastName: 'اثر سیاست',
   } });
   await tx.$executeRawUnsafe(
     `INSERT INTO "performance_policy_versions" ("id","policyKind","version","contentHash","createdByUserId") VALUES ($1,'LEVEL_CLASSIFICATION',1,$2,$3)`,
-    'retroactive-policy-v1', 'retroactive-content-hash', actor.id,
+    'premature-policy-v1', 'premature-content-hash', actor.id,
   );
   await tx.$executeRawUnsafe(
     `INSERT INTO "performance_encrypted_payloads" ("id","aggregateType","aggregateId","payloadKind","schemaVersion","format","formatVersion","cipher","keyId","iv","authTag","ciphertext","plaintextHash","aadHash") VALUES ($1,'POLICY_ACTIVATION_PREVIEW',$2,'POLICY_ACTIVATION_PREVIEW_RESULT',1,$3,1,$4,$5,$6,$7,$8,$9,$10)`,
-    'retroactive-policy-preview-payload', 'retroactive-policy-preview-v1', 'sabalan-personnel-performance', 'aes-256-gcm', 'key-v1', Buffer.alloc(12), Buffer.alloc(16), Buffer.from('ciphertext'), aggregateHash('retroactive-policy-preview-result'), aggregateHash('retroactive-policy-preview-aad'),
+    'premature-policy-preview-payload', 'premature-policy-preview-v1', 'sabalan-personnel-performance', 'aes-256-gcm', 'key-v1', Buffer.alloc(12), Buffer.alloc(16), Buffer.from('ciphertext'), aggregateHash('premature-policy-preview-result'), aggregateHash('premature-policy-preview-aad'),
   );
   await tx.$executeRawUnsafe(
     `INSERT INTO "performance_policy_activation_previews" ("id","policyVersionId","policyContentHash","populationHash","encryptedPayloadId","eligibleSubjectCount","evaluatedSubjectCount","increasedCount","decreasedCount","unchangedCount","expiredCount","needsNewEvaluationCount","errorCount","resultHash","generatedAt","confirmedAt","confirmedByUserId") VALUES ($1,$2,$3,$4,$5,10,10,2,2,4,1,1,0,$6,CURRENT_TIMESTAMP - INTERVAL '2 minutes',CURRENT_TIMESTAMP - INTERVAL '2 minutes',$7)`,
-    'retroactive-policy-preview-v1', 'retroactive-policy-v1', 'retroactive-content-hash', 'population-hash', 'retroactive-policy-preview-payload', aggregateHash('retroactive-policy-preview-result'), actor.id,
+    'premature-policy-preview-v1', 'premature-policy-v1', 'premature-content-hash', 'population-hash', 'premature-policy-preview-payload', aggregateHash('premature-policy-preview-result'), actor.id,
   );
   await tx.$executeRawUnsafe(
-    `UPDATE "performance_policy_versions" SET "lifecycle" = 'SCHEDULED', "effectiveFrom" = CURRENT_TIMESTAMP - INTERVAL '2 minutes', "publicationReason" = $1, "publishedByUserId" = $2, "publishedAt" = CURRENT_TIMESTAMP - INTERVAL '2 minutes', "activationPreviewId" = $3, "activationPreviewHash" = $4, "activationConfirmedAt" = CURRENT_TIMESTAMP - INTERVAL '2 minutes' WHERE "id" = $5`,
-    'آزمون اثر عقب‌گرد', actor.id, 'retroactive-policy-preview-v1', aggregateHash('retroactive-policy-preview-result'), 'retroactive-policy-v1',
+    `UPDATE "performance_policy_versions" SET "lifecycle" = 'SCHEDULED', "effectiveFrom" = CURRENT_TIMESTAMP + INTERVAL '2 minutes', "publicationReason" = $1, "publishedByUserId" = $2, "publishedAt" = CURRENT_TIMESTAMP - INTERVAL '2 minutes', "activationPreviewId" = $3, "activationPreviewHash" = $4, "activationConfirmedAt" = CURRENT_TIMESTAMP - INTERVAL '2 minutes' WHERE "id" = $5`,
+    'آزمون اثر عقب‌گرد', actor.id, 'premature-policy-preview-v1', aggregateHash('premature-policy-preview-result'), 'premature-policy-v1',
   );
   await assert.rejects(
-    tx.$executeRawUnsafe(`UPDATE "performance_policy_versions" SET "lifecycle" = 'ACTIVE' WHERE "id" = $1`, 'retroactive-policy-v1'),
-    /activation cannot be retroactive/i,
-    'a policy cannot activate after its bounded effective-time tolerance has passed',
+    tx.$executeRawUnsafe(`UPDATE "performance_policy_versions" SET "lifecycle" = 'ACTIVE' WHERE "id" = $1`, 'premature-policy-v1'),
+    /cannot activate before its effective time/i,
+    'a scheduled policy cannot activate before its confirmed future effective time',
   );
 });
 

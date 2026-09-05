@@ -1,3 +1,5 @@
+import type { Prisma, PrismaClient } from '@prisma/client';
+
 export const PERSONNEL_PERFORMANCE_PHASES = [
   'SCHEMA_PROTECTION',
   'POLICY_DARK_LAUNCH',
@@ -83,7 +85,7 @@ export const evaluatePersonnelPerformanceWriteGate = (
 };
 
 export const resolvePersonnelPerformanceWriteGate = async (
-  client: PrismaClient,
+  client: PrismaClient | Prisma.TransactionClient,
   action: PersonnelPerformanceWriteAction,
   now = new Date(),
   subjectId?: string,
@@ -98,17 +100,14 @@ export const resolvePersonnelPerformanceWriteGate = async (
   const membership = cohort && subjectId ? await client.performanceCohortMember.findUnique({
     where: { cohortVersionId_subjectId: { cohortVersionId: cohort.id, subjectId } }, select: { id: true },
   }) : null;
-  const pause = phase ? await client.performanceSafetyPause.findFirst({
-    where: { phaseVersionId: phase.id, status: 'ACTIVE' },
-    orderBy: { startedAt: 'desc' },
-  }) : null;
+  const pause = await findApplicablePerformancePause(client, subjectId);
   return evaluatePersonnelPerformanceWriteGate({
     releaseEnabled: phase?.releaseEnabled ?? false,
     phase: phase?.phase ?? 'SCHEMA_PROTECTION',
     phaseVersion: phase?.version ?? 0,
     cohortVersion: cohort?.version ?? 0,
     subjectInCohort: Boolean(membership),
-    safetyPause: pause && (pause.scope !== 'COHORT' || pause.cohortVersionId === cohort?.id)
+    safetyPause: pause
       ? { id: pause.id, scope: pause.scope === 'COHORT' ? 'COHORT' : 'ALL' }
       : null,
   }, action);
@@ -117,4 +116,23 @@ export const resolvePersonnelPerformanceWriteGate = async (
 export const personnelPerformanceRollbackMode = (hasCanonicalWrite: boolean) => (
   hasCanonicalWrite ? 'EVIDENCE_PRESERVING_FIX_FORWARD' : 'COMPATIBLE_RELEASE_DISABLE'
 );
-import type { PrismaClient } from '@prisma/client';
+
+export const findApplicablePerformancePause = async (
+  client: PrismaClient | Prisma.TransactionClient,
+  subjectId?: string,
+) => {
+  // A pause survives phase and membership version changes until explicitly resumed.
+  const memberships = subjectId ? await client.performanceCohortMember.findMany({
+    where: { subjectId }, select: { cohortVersionId: true },
+  }) : [];
+  return client.performanceSafetyPause.findFirst({
+    where: {
+      status: 'ACTIVE',
+      ...(subjectId ? { OR: [
+        { scope: 'ALL' },
+        { scope: 'COHORT', cohortVersionId: { in: memberships.map(({ cohortVersionId }) => cohortVersionId) } },
+      ] } : {}),
+    },
+    orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+  });
+};

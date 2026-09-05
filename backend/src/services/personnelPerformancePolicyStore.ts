@@ -1,3 +1,4 @@
+import { isSupportedPerformanceRetentionPolicy } from './personnelPerformanceRetention';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   PerformanceArtifactLifecycle,
@@ -157,6 +158,8 @@ const validateTemplateContent = (content: PerformanceTemplatePolicyContent) => {
 };
 
 const validatePolicyContent = (kind: PerformancePolicyKind, content: PerformancePolicyContent) => {
+  if (kind === PerformancePolicyKind.RETENTION) return isSupportedPerformanceRetentionPolicy(content)
+    ? [] : ['برنامه نگهداری با نسخه مصوب سازمان سازگار نیست. پیش از انتشار، همه طبقات و مبدأهای نگهداری را تکمیل کنید.'];
   if (kind === PerformancePolicyKind.LEVEL_CLASSIFICATION) return validateLevelPolicyContent(content as LevelPolicyContent);
   if (kind === PerformancePolicyKind.CURRENT_LEVEL) {
     const policy = content as CurrentLevelPolicyContent;
@@ -1120,6 +1123,7 @@ export const activateDuePerformancePolicies = async (client: PrismaClient, input
         where: { id: policy.activationPreviewId },
       });
       const content = await readPerformancePayload<PerformancePolicyContent>(tx, policy.encryptedPayloadId, keyring);
+      ensureNoErrors(validatePolicyContent(policy.policyKind, content));
       const currentPopulation = await calculatePopulation(tx, {
         now: policy.effectiveFrom,
         keyring,

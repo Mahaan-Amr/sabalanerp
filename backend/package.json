@@ -43,6 +43,8 @@
     "test:hr-redesign-migration": "tsx src/services/__tests__/hrRedesignDataMigration.integration.test.ts",
     "test:hr-record-retention": "tsx src/services/__tests__/hrRecordRetentionPolicy.test.ts && tsx src/services/__tests__/hrDeletionFileTransaction.test.ts && tsx src/services/__tests__/hrPersonnelErasureGraph.test.ts && tsx src/services/__tests__/hrPersonnelErasureRecovery.test.ts && tsx src/services/__tests__/hrApplicationDecisionVersions.test.ts && tsx src/services/__tests__/hrHiringAuthorityPolicy.test.ts",
     "test:hr-record-retention:db": "tsx --test src/services/__tests__/hrCandidatePersonnelIdentityConflict.integration.test.ts",
+    "test:personnel-performance-operations": "tsx src/services/__tests__/personnelPerformanceRetention.test.ts",
+    "test:personnel-performance-operations:db": "tsx src/services/__tests__/personnelPerformanceOperations.integration.test.ts",
     "test:personnel-performance-foundation": "tsx src/services/__tests__/hrActionPermissionCatalog.test.ts && tsx src/services/__tests__/hrAuthorizationPolicy.test.ts && tsx src/services/__tests__/personnelPerformanceVault.test.ts && tsx src/services/__tests__/personnelPerformanceRolloutPolicy.test.ts && tsx src/routes/__tests__/personnelPerformanceRoutes.test.ts",
     "test:personnel-performance-foundation:db": "tsx src/services/__tests__/personnelPerformanceFoundation.integration.test.ts",
     "test:personnel-performance-policy": "tsx src/services/__tests__/personnelPerformanceCalculation.test.ts && tsx src/services/__tests__/personnelPerformancePolicy.test.ts && tsx src/routes/__tests__/personnelPerformanceRoutes.test.ts",

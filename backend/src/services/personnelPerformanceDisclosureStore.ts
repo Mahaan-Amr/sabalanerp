@@ -1,3 +1,4 @@
+import { readPerformanceRetentionPolicy } from './personnelPerformanceRetentionStore';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -839,11 +840,10 @@ const redactPerformanceExportPayload = async (client: PrismaClient | Prisma.Tran
   const work = async (tx: Prisma.TransactionClient) => {
     await tx.performanceExportReceipt.update({ where: { id: receipt.id }, data: { status: PerformanceExportStatus.DELETED, deletedAt, artifactPath: null, encryptedPayloadId: null } });
     if (receipt.encryptedPayloadId) {
-      const [payload, retentionPolicy] = await Promise.all([
+      const [payload, { policy: retentionPolicy }] = await Promise.all([
         tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: receipt.encryptedPayloadId } }),
-        tx.performancePolicyVersion.findFirst({ where: { policyKind: 'RETENTION', lifecycle: 'ACTIVE', effectiveFrom: { lte: deletedAt } }, orderBy: { version: 'desc' } }),
+        readPerformanceRetentionPolicy(tx, deletedAt),
       ]);
-      if (!retentionPolicy) throw disclosureError('سیاست نگهداری فعال برای پاک‌سازی خروجی وجود ندارد.', 'PERFORMANCE_RETENTION_POLICY_MISSING', 409);
       await tx.performanceDeletionReceipt.create({ data: {
         deletedTableName: 'performance_encrypted_payloads', deletedRecordId: payload.id, deletedPayloadId: payload.id,
         aggregateType: payload.aggregateType, aggregateIdHash: createHash('sha256').update(payload.aggregateId).digest('hex'),
@@ -859,39 +859,59 @@ const redactPerformanceExportPayload = async (client: PrismaClient | Prisma.Tran
   return work(client);
 };
 
-const requirePerformanceExportRetentionPolicy = async (client: PrismaClient | Prisma.TransactionClient, at: Date) => {
-  const policy = await client.performancePolicyVersion.findFirst({
-    where: { policyKind: 'RETENTION', lifecycle: 'ACTIVE', effectiveFrom: { lte: at } }, select: { id: true }, orderBy: { version: 'desc' },
-  });
-  if (!policy) throw disclosureError('سیاست نگهداری فعال برای پاک‌سازی خروجی وجود ندارد.', 'PERFORMANCE_RETENTION_POLICY_MISSING', 409);
+
+const cleanupPerformanceExport = async (
+  client: PrismaClient | Prisma.TransactionClient, exportId: string, now: Date, actorUserId: string | null,
+) => {
+  const work = async (tx: Prisma.TransactionClient) => {
+    // The hold is re-read after the scope lock. An older repeatable snapshot cannot authorize filesystem deletion.
+    const isolation = await tx.$queryRaw<Array<{ transaction_isolation: string }>>`SHOW transaction_isolation`;
+    if (isolation[0]?.transaction_isolation !== 'read committed') {
+      throw disclosureError('پاک‌سازی خروجی باید در تراکنش مستقل نگهداری انجام شود.', 'PERFORMANCE_CLEANUP_TRANSACTION_REQUIRED', 409);
+    }
+    const scopeHash = createHash('sha256').update(exportId).digest('hex');
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'PERFORMANCE_EXPORT:' + scopeHash}, 0))`;
+    const receipt = await tx.performanceExportReceipt.findUnique({ where: { id: exportId } });
+    if (!receipt || receipt.status === PerformanceExportStatus.DELETED) return false;
+    if (!receipt.downloadedAt && (!receipt.expiresAt || receipt.expiresAt > now)) return false;
+    const payload = receipt.encryptedPayloadId
+      ? await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: receipt.encryptedPayloadId } }) : null;
+    const scopes = [{ aggregateType: 'PERFORMANCE_EXPORT', aggregateIdHash: scopeHash }];
+    if (payload) {
+      const aggregateIdHash = createHash('sha256').update(payload.aggregateId).digest('hex');
+      const lockKey = `${payload.aggregateType}:${aggregateIdHash}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+      scopes.push({ aggregateType: payload.aggregateType, aggregateIdHash });
+    }
+    if (await tx.performanceLegalHold.findFirst({ where: { status: 'ACTIVE', OR: scopes }, select: { id: true } })) {
+      throw disclosureError('این خروجی مشمول توقف نگهداری است و پاک‌سازی آن تا رفع توقف ممکن نیست.', 'PERFORMANCE_EXPORT_LEGAL_HOLD', 409);
+    }
+    await readPerformanceRetentionPolicy(tx, now);
+    if (receipt.artifactPath) await unlink(receipt.artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+    await redactPerformanceExportPayload(tx, receipt, now, actorUserId);
+    await auditDisclosure(tx, {
+      aggregateType: 'PERFORMANCE_EXPORT', aggregateId: receipt.id, eventType: 'PERFORMANCE_EXPORT_CLEANED_UP',
+      actorUserId, authorityCodes: actorUserId ? ['REQUEST_PERFORMANCE_EXPORT'] : ['SYSTEM_EXPORT_RETENTION'],
+      evidenceHash: receipt.artifactHash ?? undefined,
+    });
+    return true;
+  };
+  return '$transaction' in client
+    ? client.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }) : work(client);
 };
 
 const deleteDownloadedPerformanceExport = async (client: PrismaClient, exportId: string, actorUserId: string | null) => {
-  const receipt = await client.performanceExportReceipt.findUnique({ where: { id: exportId } });
-  if (!receipt?.artifactPath) return;
-  await requirePerformanceExportRetentionPolicy(client, new Date());
-  await unlink(receipt.artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
-  await redactPerformanceExportPayload(client, receipt, new Date(), actorUserId);
-  await auditDisclosure(client, {
-    aggregateType: 'PERFORMANCE_EXPORT', aggregateId: receipt.id, eventType: 'PERFORMANCE_EXPORT_CLEANED_UP',
-    actorUserId, authorityCodes: ['REQUEST_PERFORMANCE_EXPORT'], evidenceHash: receipt.artifactHash ?? undefined,
-  });
+  await cleanupPerformanceExport(client, exportId, new Date(), actorUserId);
 };
 
 export const cleanupExpiredPerformanceExports = async (client: PrismaClient | Prisma.TransactionClient, now = new Date()) => {
   const expired = await client.performanceExportReceipt.findMany({
     where: { status: { not: PerformanceExportStatus.DELETED }, expiresAt: { lte: now } },
+    select: { id: true },
   });
-  for (const receipt of expired) {
-    await requirePerformanceExportRetentionPolicy(client, now);
-    if (receipt.artifactPath) await unlink(receipt.artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
-    await redactPerformanceExportPayload(client, receipt, now, null);
-    await auditDisclosure(client, {
-      aggregateType: 'PERFORMANCE_EXPORT', aggregateId: receipt.id, eventType: 'PERFORMANCE_EXPORT_CLEANED_UP',
-      actorUserId: null, authorityCodes: ['SYSTEM_EXPORT_RETENTION'], evidenceHash: receipt.artifactHash ?? undefined,
-    });
-  }
-  return expired.length;
+  let count = 0;
+  for (const receipt of expired) if (await cleanupPerformanceExport(client, receipt.id, now, null)) count += 1;
+  return count;
 };
 
 export const createPerformanceConsequenceHandoff = async (client: PrismaClient, input: {

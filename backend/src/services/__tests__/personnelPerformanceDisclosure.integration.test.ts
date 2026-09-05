@@ -1,4 +1,8 @@
+import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
+import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
+import { persistPerformancePayload, performanceVaultKeyFromEnvironment } from '../personnelPerformancePayloadStore';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -146,9 +150,14 @@ const main = async () => {
         const previewPayloadId = `retention-preview-payload-${exportSuffix}`;
         const resultHash = 'e'.repeat(64);
         const latestRetention = await tx.performancePolicyVersion.findFirst({ where: { policyKind: 'RETENTION' }, orderBy: { version: 'desc' } });
+        const policyPayload = await persistPerformancePayload(tx, {
+          aggregateType: 'POLICY_VERSION', aggregateId: policyId, payloadKind: 'POLICY_CONTENT_REVISION_1', schemaVersion: 1,
+          payload: PERFORMANCE_RETENTION_SCHEDULE_V1, keyring: performanceVaultKeyFromEnvironment(),
+        });
         await tx.performancePolicyVersion.create({ data: {
+          encryptedPayloadId: policyPayload.id,
           id: policyId, policyKind: 'RETENTION', version: (latestRetention?.version ?? 0) + 1,
-          predecessorId: latestRetention?.id, contentHash: 'retention-policy-v1', createdByUserId: exportUser.id,
+          predecessorId: latestRetention?.id, contentHash: canonicalPerformanceHash(PERFORMANCE_RETENTION_SCHEDULE_V1), createdByUserId: exportUser.id,
         } });
         await tx.performanceEncryptedPayload.create({ data: {
           id: previewPayloadId, aggregateType: 'POLICY_ACTIVATION_PREVIEW', aggregateId: previewId, payloadKind: 'POPULATION_RESULT', schemaVersion: 1,
@@ -156,7 +165,7 @@ const main = async () => {
           iv: Buffer.alloc(12), authTag: Buffer.alloc(16), ciphertext: Buffer.from('encrypted'), plaintextHash: resultHash, aadHash: 'f'.repeat(64),
         } });
         await tx.performancePolicyActivationPreview.create({ data: {
-          id: previewId, policyVersionId: policyId, policyContentHash: 'retention-policy-v1', populationHash: resultHash,
+          id: previewId, policyVersionId: policyId, policyContentHash: canonicalPerformanceHash(PERFORMANCE_RETENTION_SCHEDULE_V1), populationHash: resultHash,
           encryptedPayloadId: previewPayloadId, eligibleSubjectCount: 0, evaluatedSubjectCount: 0, increasedCount: 0,
           decreasedCount: 0, unchangedCount: 0, expiredCount: 0, needsNewEvaluationCount: 0, errorCount: 0,
           resultHash, generatedAt: policyAt, confirmedAt: policyAt, confirmedByUserId: exportUser.id,
@@ -178,6 +187,15 @@ const main = async () => {
         id: exportId, requestedByUserId: exportUser.id, exportKind: 'XLSX', scopeHash: 'scope', permissionHash: 'permission',
         status: 'QUEUED', encryptedPayloadId: payloadId, artifactPath, artifactHash: 'artifact-hash', expiresAt: new Date('2000-01-01T00:00:00.000Z'),
       } });
+      await tx.$executeRawUnsafe('SAVEPOINT held_export');
+      await tx.performanceLegalHold.create({ data: {
+        aggregateType: 'PERFORMANCE_EXPORT', aggregateId: exportId,
+        aggregateIdHash: createHash('sha256').update(exportId).digest('hex'), version: 1,
+        reason: 'Preserve held export in the isolated retention test', placedByUserId: exportUser.id,
+      } });
+      await assert.rejects(() => cleanupExpiredPerformanceExports(tx, cleanupAt));
+      await access(artifactPath);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT held_export');
       assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 1);
       await assert.rejects(() => access(artifactPath));
       const cleaned = await tx.performanceExportReceipt.findUniqueOrThrow({ where: { id: exportId } });

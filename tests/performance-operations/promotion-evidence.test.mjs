@@ -128,3 +128,28 @@ test('retirement accepts complete measurements but rejects 29 healthy days or an
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test('rehearsal requires real hash values before comparing repeated dry-runs', async () => {
+  const { createHash } = await import('node:crypto');
+  const { execFileSync } = await import('node:child_process');
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-rehearsal-'));
+  try {
+    const release = { commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), sourceHash: await performanceSourceHash(),
+      schemaHash: 'a'.repeat(64), policyHash: 'b'.repeat(64), infrastructureHash: 'c'.repeat(64),
+      images: { backend: `sha256:${'d'.repeat(64)}`, frontend: `sha256:${'e'.repeat(64)}`, inquiry: `sha256:${'f'.repeat(64)}` } };
+    const measurements = { fullEncryptedCheckpointRestored: true, rpoAcknowledgedWritesLost: 0,
+      correctnessRehearsalPassed: true, timedDressRehearsalPassed: true, operatorId: 'operator', runbookHash: true,
+      dryRuns: [{ count: 1 }, { count: 1 }], idempotentApplyReconciliations: 3, driftInjected: true, concurrentHrWriteRetried: true };
+    for (const [index, values, expected] of [[0, measurements, 'BLOCKED'], [1, { ...measurements, runbookHash: 'a'.repeat(64),
+      dryRuns: [{ count: 1, hash: 'b'.repeat(64) }, { count: 1, hash: 'b'.repeat(64) }] }, 'PASS']]) {
+      const bytes = JSON.stringify({ schemaVersion: 1, release, check: 'runbook-rehearsal', status: 'PASS', durationMs: 1,
+        observedAt: new Date().toISOString(), command: 'rehearsal', measurements: values });
+      await writeFile(path.join(directory, 'artifact.json'), bytes);
+      await writeFile(path.join(directory, 'input.json'), JSON.stringify({ schemaVersion: 1, release, checks: [{ name: 'runbook-rehearsal', path: 'artifact.json', sha256: createHash('sha256').update(bytes).digest('hex') }] }));
+      const output = path.join(directory, `${index}.json`);
+      spawnSync(process.execPath, [command, '--input', path.join(directory, 'input.json'), '--output', output]);
+      const report = JSON.parse(await readFile(output, 'utf8'));
+      assert.equal(report.gates[3].checks.find(({ name }) => name === 'runbook-rehearsal').status, expected);
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

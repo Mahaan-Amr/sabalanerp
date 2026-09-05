@@ -193,8 +193,16 @@ const main = async () => {
         aggregateIdHash: createHash('sha256').update(exportId).digest('hex'), version: 1,
         reason: 'Preserve held export in the isolated retention test', placedByUserId: exportUser.id,
       } });
-      await assert.rejects(() => cleanupExpiredPerformanceExports(tx, cleanupAt));
+      const unrelatedArtifactPath = path.join(temporaryDirectory, 'unrelated-artifact.enc');
+      await writeFile(unrelatedArtifactPath, Buffer.from('unrelated-encrypted-artifact'));
+      await tx.performanceExportReceipt.create({ data: {
+        id: `${exportId}-unrelated`, requestedByUserId: exportUser.id, exportKind: 'XLSX', scopeHash: 'unrelated-scope',
+        permissionHash: 'permission', status: 'QUEUED', artifactPath: unrelatedArtifactPath,
+        artifactHash: 'unrelated-artifact-hash', expiresAt: new Date('2000-01-01Z'),
+      } });
+      assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 1, 'a scoped hold must not block unrelated cleanup');
       await access(artifactPath);
+      await assert.rejects(() => access(unrelatedArtifactPath));
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT held_export');
       assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 1);
       await assert.rejects(() => access(artifactPath));

@@ -884,7 +884,7 @@ const cleanupPerformanceExport = async (
       scopes.push({ aggregateType: payload.aggregateType, aggregateIdHash });
     }
     if (await tx.performanceLegalHold.findFirst({ where: { status: 'ACTIVE', OR: scopes }, select: { id: true } })) {
-      throw disclosureError('این خروجی مشمول توقف نگهداری است و پاک‌سازی آن تا رفع توقف ممکن نیست.', 'PERFORMANCE_EXPORT_LEGAL_HOLD', 409);
+      return false;
     }
     await readPerformanceRetentionPolicy(tx, now);
     if (receipt.artifactPath) await unlink(receipt.artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });

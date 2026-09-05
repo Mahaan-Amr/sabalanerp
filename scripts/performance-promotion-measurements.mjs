@@ -11,6 +11,7 @@ const budgets = {
 };
 const finite = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
 const positive = (n) => finite(n) && n > 0;
+const digest = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const uniqueStrings = (items, minimum) => Array.isArray(items) && items.every((item) => typeof item === 'string' && item.trim()) && new Set(items).size >= minimum;
 const complete = (items, names, predicate) => Array.isArray(items) && names.every((name) => {
   const matches = items.filter((item) => item?.name === name);
@@ -106,9 +107,9 @@ const validators = {
     }),
   'runbook-rehearsal': (result) => result.fullEncryptedCheckpointRestored === true && result.rpoAcknowledgedWritesLost === 0
     && result.correctnessRehearsalPassed === true && result.timedDressRehearsalPassed === true
-    && typeof result.operatorId === 'string' && Boolean(result.operatorId.trim()) && Boolean(result.runbookHash)
+    && typeof result.operatorId === 'string' && Boolean(result.operatorId.trim()) && digest(result.runbookHash)
     && Array.isArray(result.dryRuns) && result.dryRuns.length >= 2
-    && result.dryRuns.every((run) => positive(run.count) && run.hash === result.dryRuns[0].hash && run.count === result.dryRuns[0].count)
+    && result.dryRuns.every((run) => Number.isInteger(run.count) && positive(run.count) && digest(run.hash) && run.hash === result.dryRuns[0].hash && run.count === result.dryRuns[0].count)
     && Number.isInteger(result.idempotentApplyReconciliations) && result.idempotentApplyReconciliations >= 3 && result.driftInjected === true && result.concurrentHrWriteRetried === true,
 };
 

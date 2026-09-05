@@ -255,6 +255,7 @@ export const verifyFileBackedCutoverEvidence = async (
   evidence: CutoverEvidence,
   recaptureLegacyCohort: () => Promise<LegacyPricingCohortSnapshot>,
   cohortApprovalVerifier?: { keyId: string; signingKey: string },
+  expectedSourceCommit?: string,
 ): Promise<CutoverEvidence> => {
   const verified = structuredClone(evidence);
 
@@ -299,6 +300,7 @@ export const verifyFileBackedCutoverEvidence = async (
   verified.acceptance = await Promise.all(verified.acceptance.map(async claim => {
     const artifact = await readArtifact(claim.artifactPath, `Acceptance ${claim.command}`);
     exact(artifact.value.command, claim.command, `Acceptance command ${claim.command}`);
+    if (expectedSourceCommit) exact(artifact.value.sourceCommit, expectedSourceCommit, `Acceptance source commit ${claim.command}`);
     const outputPath = requiredArtifactPath(artifact.value.outputPath, `Acceptance output ${claim.command}`);
     const output = await readFile(outputPath).catch(() => {
       throw new Error(`Acceptance output artifact could not be read: ${outputPath}`);
@@ -338,6 +340,7 @@ export const verifyFileBackedCutoverEvidence = async (
   exact(cohort.value.schemaVersion, 1, 'Legacy release cohort schema version');
   exact(cohort.value.sourceManifestHash, current.manifestHash, 'Legacy release cohort source manifest hash');
   if (!Array.isArray(cohort.value.entries)) throw new Error('Legacy release cohort artifact must contain an entries array.');
+  let cohortApprovedBy = '';
   if (cohort.value.entries.length > 0) {
     if (!cohortApprovalVerifier || cohortApprovalVerifier.signingKey.length < 32) {
       throw new Error('A trusted legacy release cohort approval verifier is required.');
@@ -347,6 +350,7 @@ export const verifyFileBackedCutoverEvidence = async (
     if (typeof cohortApproval.value.approvedBy !== 'string' || !cohortApproval.value.approvedBy.trim()) {
       throw new Error('Legacy release cohort approval is missing its approver identity.');
     }
+    cohortApprovedBy = cohortApproval.value.approvedBy.trim();
     const approvalPayload = JSON.stringify({ algorithm: 'HMAC-SHA256', keyId: cohortApprovalVerifier.keyId,
       approvedBy: cohortApproval.value.approvedBy.trim(), cohortSha256: hashBytes(cohort.bytes) });
     const expectedSignature = Buffer.from(createHmac('sha256', cohortApprovalVerifier.signingKey).update(approvalPayload).digest('hex'), 'hex');
@@ -369,6 +373,7 @@ export const verifyFileBackedCutoverEvidence = async (
       || typeof disposition.reviewedAt !== 'string' || Number.isNaN(Date.parse(disposition.reviewedAt))) {
       throw new Error(`Legacy release cohort disposition ${index} has incomplete review evidence.`);
     }
+    exact(disposition.reviewedBy, cohortApprovedBy, `Legacy release cohort disposition ${index} reviewer`);
     dispositions.set(identity, disposition);
   }
   const included: LegacyPricingCohortSnapshot['entries'] = [];
@@ -604,7 +609,8 @@ export type ShipmentStatementCutoverState = {
 
 export type ShipmentStatementCutoverRepository = {
   loadState(): Promise<ShipmentStatementCutoverState>;
-  activate(input: { expectedDisabled: true; migrationManifestId: string; integrityHash: string; activatedBy: string; expiresAt: Date }): Promise<ShipmentStatementCutoverState & { activatedAt: Date; activatedBy: string }>;
+  activate(input: { expectedDisabled: true; migrationManifestId: string; integrityHash: string; activatedBy: string; expiresAt: Date;
+    productionBoundary?: { deploymentId: string; leaseToken: string; releaseId: string; targetCommit: string } }): Promise<ShipmentStatementCutoverState & { activatedAt: Date; activatedBy: string }>;
 };
 
 export const activateShipmentStatementCutover = async (input: {
@@ -626,7 +632,13 @@ export const activateShipmentStatementCutover = async (input: {
   }
   const state = await input.repository.loadState();
   if (state.enabled) throw new Error('Customer Shipment Statements are already activated; cutover is one-way.');
+  const productionBoundary = input.environment.NODE_ENV === 'production' ? {
+    deploymentId: String(input.environment.DEPLOYMENT_ID || '').trim(),
+    leaseToken: String(input.environment.DEPLOYMENT_LEASE_TOKEN || '').trim(),
+    releaseId: input.manifest.releaseId,
+    targetCommit: input.manifest.sourceCommit,
+  } : undefined;
   return input.repository.activate({ expectedDisabled: true, migrationManifestId: input.manifest.migrationManifestId,
     integrityHash: input.manifest.integrityHash, activatedBy: input.activatedBy,
-    expiresAt: new Date(input.manifest.expiresAt) });
+    expiresAt: new Date(input.manifest.expiresAt), productionBoundary });
 };

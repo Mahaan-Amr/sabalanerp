@@ -9,7 +9,9 @@ const run = async () => {
   assert.match(runId, /^[a-f0-9]{16}$/);
   const prisma = new PrismaClient();
   try {
-    const fixture = await authorConcurrentPricingFixture(prisma, runId);
+    const fixture = await authorConcurrentPricingFixture(prisma, runId, {
+      activateCutover: process.env.ISSUE260_ACTIVATE_CUTOVER !== 'false',
+    });
     console.log(JSON.stringify({ kind: 'issue260-production-pricing-fixture', schemaVersion: 1, parentRunId: runId,
       databaseName: new URL(databaseUrl).pathname.slice(1), actorId: fixture.actorId,
       effectiveAuthority: fixture.effectiveAuthority, loadingIds: fixture.loadings.map(loading => loading.id),

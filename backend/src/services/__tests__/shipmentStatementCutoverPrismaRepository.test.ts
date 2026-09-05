@@ -10,7 +10,7 @@ const main = async () => {
   const tx = {
     $executeRawUnsafe: async () => { order.push('operations-lock'); },
     $queryRaw: async (parts: TemplateStringsArray) => {
-      if (parts.join('').includes('transaction_timestamp')) return [{ now: new Date('2026-09-05T08:00:00.000Z') }];
+      if (parts.join('').includes('clock_timestamp')) return [{ now: new Date('2026-09-05T08:00:00.000Z') }];
       order.push('cutover-update');
       return [{ enabled: true, cutoverAt: new Date('2026-09-05T08:00:00.000Z'), activatedAt: new Date('2026-09-05T08:00:00.000Z'),
         activatedBy: 'release-owner', manifestId: 'manifest-1', integrityHash: 'a'.repeat(64) }];

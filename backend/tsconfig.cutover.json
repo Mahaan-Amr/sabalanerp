@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist-cutover",
+    "rootDir": ".",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "scripts/shipment-statement-cutover.ts",
+    "src/**/*"
+  ],
+  "exclude": ["node_modules", "dist", "dist-cutover", "src/**/__tests__/**"]
+}

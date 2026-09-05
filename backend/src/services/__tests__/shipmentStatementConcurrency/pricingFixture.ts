@@ -8,18 +8,24 @@ import { createProductionApprovedPricingFixture } from './productionApprovedPric
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 
-export const authorConcurrentPricingFixture = async (client: PrismaClient, runId: string) => {
+export const authorConcurrentPricingFixture = async (
+  client: PrismaClient,
+  runId: string,
+  options: { activateCutover?: boolean } = {},
+) => {
   const approved = await createProductionApprovedPricingFixture(client, { runId, quantity: '2', amount: '100' });
   const logistics = await createAuthorizedActorFixture(client, { runId, workspace: 'logistics',
     feature: 'logistics_loadings_finalize' });
   const manifest = await client.shipmentStatementMigrationManifest.create({ data: { id: `concurrency-manifest-${runId}`,
     migrationName: `concurrency-${runId}`, schemaVersion: 1, sourceSchemaHash: 'e'.repeat(64), createdBy: logistics.actor.id } });
-  await client.shipmentStatementCutover.update({ where: { id: 'customer-shipment-statements' }, data: {
-    enabled: true, cutoverAt: new Date('2000-01-01T00:00:00.000Z'), activatedAt: new Date('2000-01-01T00:00:01.000Z'),
-    activatedBy: logistics.actor.id, manifestId: manifest.id, integrityHash: 'f'.repeat(64) } });
-  await client.shipmentStatementOperationsControl.update({
-    where: { id: 'customer-shipment-statements' }, data: { paused: false, incident: false },
-  });
+  if (options.activateCutover !== false) {
+    await client.shipmentStatementCutover.update({ where: { id: 'customer-shipment-statements' }, data: {
+      enabled: true, cutoverAt: new Date('2000-01-01T00:00:00.000Z'), activatedAt: new Date('2000-01-01T00:00:01.000Z'),
+      activatedBy: logistics.actor.id, manifestId: manifest.id, integrityHash: 'f'.repeat(64) } });
+    await client.shipmentStatementOperationsControl.update({
+      where: { id: 'customer-shipment-statements' }, data: { paused: false, incident: false },
+    });
+  }
   const expiresAt = new Date(Date.now() + 86_400_000 * 365);
   const loadings: LogisticsLoading[] = [];
   for (let index = 0; index < 2; index += 1) {
@@ -64,11 +70,13 @@ export const authorConcurrentPricingFixture = async (client: PrismaClient, runId
     readinessEvidenceHash: approved.readiness.evidenceHash };
 };
 
-export const createConcurrentPricingFixture = async (client: PrismaClient, runId: string, databaseUrl: string) => {
+export const createConcurrentPricingFixture = async (client: PrismaClient, runId: string, databaseUrl: string,
+  options: { activateCutover?: boolean } = {}) => {
   const child = spawnSync(process.execPath, [path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
     path.resolve(process.cwd(), 'src', 'services', '__tests__', 'shipmentStatementConcurrency',
       'pricingFixtureSetup.test.ts')], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000,
-    env: { ...process.env, DATABASE_URL: databaseUrl, ISSUE260_PARENT_RUN_ID: runId } });
+    env: { ...process.env, DATABASE_URL: databaseUrl, ISSUE260_PARENT_RUN_ID: runId,
+      ISSUE260_ACTIVATE_CUTOVER: options.activateCutover === false ? 'false' : 'true' } });
   assert.equal(child.error, undefined, `production pricing fixture subprocess failed: ${child.error?.message || ''}`);
   assert.equal(child.signal, null, `production pricing fixture subprocess timed out: ${child.signal || ''}`);
   assert.equal(child.status, 0, `production pricing fixture subprocess failed\n${child.stdout}\n${child.stderr}`);

@@ -173,7 +173,9 @@ test('file-backed verification recomputes hashes and binds legacy evidence to th
     const output = `passed: ${command}`;
     await writeFile(outputPath, output);
     const semanticDigest = acceptanceSemanticDigest(output);
-    return { command, artifactPath: await writeJson(`acceptance-${index}.json`, { command, exitCode: 0, semanticDigest, outputPath }),
+    return { command, artifactPath: await writeJson(`acceptance-${index}.json`, {
+      command, exitCode: 0, semanticDigest, outputPath, sourceCommit: 'commit-1',
+    }),
       artifactSha256: sha, semanticDigest: sha, exitCode: 99, outputSha256: sha };
   }));
   const current = { manifestHash: 'b'.repeat(64), sourceContractCount: '2', sourceApprovalRecordCount: '2', sourceRowCount: '4',
@@ -204,12 +206,18 @@ test('file-backed verification recomputes hashes and binds legacy evidence to th
     sourceComparison: { matched: true }, outcomeCounts: { SEALED: 0, REPLAYED: 2 } });
 
   const verified = await verifyFileBackedCutoverEvidence(evidence, async () => current,
-    { keyId: 'cohort-key-1', signingKey: cohortApprovalKey });
+    { keyId: 'cohort-key-1', signingKey: cohortApprovalKey }, 'commit-1');
   assert.equal(verified.acceptance[0].exitCode, 0);
   assert.notEqual(verified.acceptance[0].outputSha256, sha);
   assert.equal(verified.recovery.backupSha256, createHash('sha256').update('real backup bytes').digest('hex'));
   assert.equal(verified.legacy.manifestHash, current.manifestHash);
   assert.deepEqual(evaluateCutoverEvidence(verified), { decision: 'GO', failures: [] });
+
+  await assert.rejects(
+    () => verifyFileBackedCutoverEvidence(evidence, async () => current,
+      { keyId: 'cohort-key-1', signingKey: cohortApprovalKey }, 'different-commit'),
+    /Acceptance source commit/,
+  );
 
   await assert.rejects(
     () => verifyFileBackedCutoverEvidence(evidence, async () => ({ ...current, manifestHash: 'c'.repeat(64) })),

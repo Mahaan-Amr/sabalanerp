@@ -25,12 +25,45 @@ live, and its release ID and target commit match. Keep that boundary through act
 gates; never collect the authoritative cohort while public contract writes are open. A newly created contract is not
 ignored: it either appears in the locked recapture with an exact reviewed disposition or the run returns `NO_GO`.
 
+Production operators must set `SHIPMENT_STATEMENT_CUTOVER_REQUIRED=true` only for the one-way activation release and
+set the target release gate `CUSTOMER_SHIPMENT_STATEMENTS_ENABLED=true`. Place the prepared caller evidence at
+`<DEPLOYMENT_REPORT_DIR_HOST>/shipment-statement-cutover/pending/evidence.json` and its referenced recovery,
+integrity, concurrency, and acceptance inputs under the adjacent `artifacts/` directory. Optional legacy pricing
+reviews belong in `pending/legacy-pricing-reviews.json`. The deployment runner keeps the command-local environment gate false,
+runs legacy dry-run/apply/repeat, manifest, and activation synchronously after `MIGRATIONS_APPLIED`, renews the deployment lease while they run,
+and does not start the release until they finish. A missing/stale artifact, changed live cohort, `NO_GO`, expired lease,
+or timeout triggers the existing journaled rollback; there is no phase race or manual bypass.
+Every pre-captured acceptance receipt must name the exact target commit. Production recomputes the receipt/output
+hashes, checks that commit binding, re-reads the migration evidence, and recaptures the complete live legacy cohort
+while writers remain drained. It does not attempt to run the local Docker or browser matrix inside the minimal
+production backend image.
+
+After writers drain, the runner first creates fresh legacy dry-run/apply/repeat artifacts from the exact current
+database state. It then creates `<deployment-id>/artifacts/live-cohort.json` and keeps the
+lease alive while it waits (within the existing 15-minute post-mutation limit) for independent approval. The reviewer
+must inspect that file and sign its exact bytes from a separate trusted terminal:
+
+```sh
+node deploy/scripts/approve-shipment-statement-cohort.mjs \
+  <report-dir>/shipment-statement-cutover/<deployment-id>/artifacts/live-cohort.json \
+  <report-dir>/shipment-statement-cutover/<deployment-id>/artifacts/live-cohort-approval.json \
+  <secret-dir>/shipment-statement-cohort-approval-key \
+  <approval-key-id> <reviewer-id>
+```
+
+The runner writes a deployment-specific evidence copy that binds all three fresh legacy artifacts and these two
+cohort paths. The approval helper fsyncs a mode-0600 temporary file and publishes it atomically; it never prints the
+secret. A deployment ID with existing cutover output is rejected, so no stale artifact can be reused. A contract
+created up to the drain boundary is therefore included in the fresh legacy run and snapshot rather than depending on
+an earlier count.
+
 Create a recovery-capable backup and restore it in the controlled `sabalanerp-local` restore drill. Record the backup
 SHA-256 and compare the restored counts, identifiers, scale-three quantities, scale-twelve amounts, and evidence hash
 with the source. A successful backup command without a successful restore is not evidence.
 
 Run `verify:shipment-statement-migration` twice. Each immutable run must contain all preservation scopes with no
-difference. Run legacy pricing preflight in dry-run, apply, and repeat modes. The repeated apply must create zero new
+difference. The production runner performs legacy pricing preflight in dry-run, apply, and repeat modes after drain.
+The repeated apply must create zero new
 records. Every release-cohort row must have an explicit reviewed disposition; unresolved, quarantined, and unreviewed
 counts must all be zero. `REPAIR_REQUIRED` records may remain outside the release cohort only with their explicit
 blocked disposition—they are never guessed, zero-filled, or silently converted to `READY`.
@@ -77,20 +110,29 @@ incident contacts, and the post-cutover monitoring checklist.
 
 ## 3. Create the immutable go/no-go manifest
 
-Set these values through the release secret manager; do not put the signing key in a file or command history:
+Set the non-secret identities through the release configuration:
 
-- `SHIPMENT_STATEMENT_CUTOVER_SIGNING_KEY` (at least 32 characters)
 - `SHIPMENT_STATEMENT_CUTOVER_KEY_ID`
-- `SHIPMENT_STATEMENT_COHORT_APPROVAL_KEY` (at least 32 characters and different from the cutover signing key)
 - `SHIPMENT_STATEMENT_COHORT_APPROVAL_KEY_ID`
 - `SHIPMENT_STATEMENT_CUTOVER_ACTOR_ID`
 - `SHIPMENT_STATEMENT_RELEASE_ID`
+
+For a non-production rehearsal only, the signing values may be supplied as
+`SHIPMENT_STATEMENT_CUTOVER_SIGNING_KEY` and `SHIPMENT_STATEMENT_COHORT_APPROVAL_KEY`; each must contain at least
+32 characters and they must differ. Never put either value in command history or a committed file.
+
+In production the two key values must not be environment variables. The secret manager must mount them as mode-0600
+`shipment-statement-cutover-signing-key` and `shipment-statement-cohort-approval-key` files beneath
+`DEPLOYMENT_SECRET_DIR`; only the ephemeral deployment service receives that read-only mount.
 
 Then run:
 
 ```powershell
 npm --prefix backend run shipment-statement:cutover:manifest -- --evidence <evidence.json> --artifacts <gate-artifact-dir> --out <new-manifest.json>
 ```
+
+That direct command is for rehearsal and non-production preparation only. In production, `deploy.sh` owns this command
+and writes the immutable manifest beneath `shipment-statement-cutover/<deployment-id>/manifest.json`.
 
 The command reloads the disabled database gate and the two latest immutable migration runs rather than trusting those
 fields from the supplied JSON. The output file is created with exclusive write semantics and cannot overwrite an
@@ -105,6 +147,10 @@ Do not run this step for a `NO_GO` manifest. Keep the environment flag false whi
 ```powershell
 npm --prefix backend run shipment-statement:cutover:activate -- --manifest <go-manifest.json> --receipt <new-receipt.json>
 ```
+
+That direct command is likewise non-production. Production activation is performed only by the deployment runner;
+the transaction re-locks and revalidates the exact deployment ID, secret lease token, release ID, commit, phase, and
+database clock immediately before changing the cutover row. Its receipt is retained beside the production manifest.
 
 The command verifies the manifest hash and HMAC, rejects any changed evidence, and performs one conditional database
 update. PostgreSQL transaction time becomes the exact compatibility boundary. The database trigger prevents a second

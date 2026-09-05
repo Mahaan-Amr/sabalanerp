@@ -9,6 +9,7 @@ yarn-error.log*
 .next-*/
 out/
 dist/
+dist-cutover/
 build/
 
 # Environment variables

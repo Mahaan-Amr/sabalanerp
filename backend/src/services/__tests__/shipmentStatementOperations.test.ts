@@ -73,21 +73,22 @@ const main = async () => {
   assert.equal(order[0], 'lock');
   assert.equal(runtime?.operationalPaused, false);
 
+  let boundaryQuery = 0;
   const boundaryClient = {
-    deploymentOperation: { findUnique: async () => ({
+    $queryRaw: async () => (++boundaryQuery % 2 === 1 ? [{
       id: 'deploy-1', activeKey: 'production', phase: 'MIGRATIONS_APPLIED',
-      releaseId: 'release-1', targetCommit: 'commit-1', leaseExpiresAt: new Date('2026-09-05T08:10:00.000Z'),
-    }) },
-    $queryRaw: async () => [{ now: new Date('2026-09-05T08:00:00.000Z') }],
+      leaseToken: 'lease-1', releaseId: 'release-1', targetCommit: 'commit-1',
+      leaseExpiresAt: new Date('2026-09-05T08:10:00.000Z'),
+    }] : [{ now: new Date('2026-09-05T08:00:00.000Z') }]),
   } as any;
   assert.equal((await assertProtectedProductionCutoverBoundary(boundaryClient, {
     sourceCommit: 'commit-1', releaseId: 'release-1',
-    environment: { NODE_ENV: 'production', DEPLOYMENT_ID: 'deploy-1' },
+    environment: { NODE_ENV: 'production', DEPLOYMENT_ID: 'deploy-1', DEPLOYMENT_LEASE_TOKEN: 'lease-1' },
   })).protectedBoundaryRequired, true);
   await assert.rejects(
     () => assertProtectedProductionCutoverBoundary(boundaryClient, {
       sourceCommit: 'different-commit', releaseId: 'release-1',
-      environment: { NODE_ENV: 'production', DEPLOYMENT_ID: 'deploy-1' },
+      environment: { NODE_ENV: 'production', DEPLOYMENT_ID: 'deploy-1', DEPLOYMENT_LEASE_TOKEN: 'lease-1' },
     }),
     /live deployment lease/,
   );

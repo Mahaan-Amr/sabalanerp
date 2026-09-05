@@ -58,6 +58,7 @@ export const createTemporaryConcurrencyDatabase = async (input: {
   repositoryRoot: string;
   sourceDatabaseUrl: string;
   runId?: string;
+  migrateEmptySchema?: boolean;
 }): Promise<TemporaryConcurrencyDatabase> => {
   const runId = input.runId ?? randomBytes(8).toString('hex');
   if (!/^[a-f0-9]{16}$/.test(runId)) throw new Error('Concurrency runId must be exactly 16 lowercase hexadecimal characters.');
@@ -67,7 +68,18 @@ export const createTemporaryConcurrencyDatabase = async (input: {
   verifyComposeTarget(input.repositoryRoot);
   compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'CREATE DATABASE ${quoted}'`);
   try {
-    compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+    if (input.migrateEmptySchema) {
+      const prismaExecutable = path.join(input.repositoryRoot, 'backend', 'node_modules', 'prisma', 'build', 'index.js');
+      execFileSync(process.execPath, [prismaExecutable, 'migrate', 'deploy', '--schema', path.join(input.repositoryRoot, 'backend', 'prisma', 'schema.prisma')], {
+        cwd: input.repositoryRoot,
+        env: { ...process.env, DATABASE_URL: databaseUrl },
+        stdio: 'pipe',
+        encoding: 'utf8',
+        timeout: 240_000,
+      });
+    } else {
+      compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+    }
   } catch (error) {
     compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
     throw error;

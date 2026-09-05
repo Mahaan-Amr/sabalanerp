@@ -580,7 +580,9 @@ const ordinaryDraftLine = (line: Prisma.LogisticsAllocationDraftLineGetPayload<o
       line.partnerDeliveryId !== null || line.partnerLineageId !== null) {
     throw new DispatchAllocationConflictError('An ordinary loading cannot contain Partner allocation rows.');
   }
-  return { ...line, sourceContractId: line.sourceContractId, sourceContractItemId: line.sourceContractItemId, productId: line.productId };
+  return { sourceContractId: line.sourceContractId, sourceContractItemId: line.sourceContractItemId,
+    productRowId: line.productRowId, productId: line.productId, quantity: line.quantity,
+    unit: line.unit, snapshot: line.snapshot };
 };
 
 const finalizePartnerLoadingAllocations = async (tx: Tx, input: {

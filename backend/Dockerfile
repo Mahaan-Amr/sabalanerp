@@ -46,6 +46,8 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY backend/prisma ./prisma
 COPY backend/tsconfig.json ./
+COPY backend/tsconfig.cutover.json ./
+COPY backend/scripts/shipment-statement-cutover.ts ./scripts/shipment-statement-cutover.ts
 COPY backend/src ./src
 
 RUN npx prisma generate
@@ -98,6 +100,7 @@ COPY --from=builder /packages/contract-product-graph /packages/contract-product-
 COPY --from=builder /packages/partner-sales-contracts /packages/partner-sales-contracts
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/dist-cutover ./dist-cutover
 COPY backend/public ./public
 COPY backend/scripts ./scripts
 COPY backend/src/documents/dispatch/__fixtures__/baselines ./dispatch-document-baselines

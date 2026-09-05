@@ -217,5 +217,8 @@ export const transitionShipmentStatementOperations = async (
       environmentEnabled: isCustomerShipmentStatementsEnabled(environment),
     });
     return persistTransitionUnderLock(tx, input, control, target, previousEvent?.integrityHash ?? null);
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  // The advisory transaction lock is the serialization boundary. READ COMMITTED ensures a waiter
+  // takes its database snapshot after the in-flight finalization releases that lock; SERIALIZABLE
+  // can snapshot before waiting and abort the operation it is meant to drain as a false conflict.
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 };

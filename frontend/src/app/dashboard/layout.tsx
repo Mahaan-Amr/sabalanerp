@@ -48,6 +48,7 @@ import { PersonalPerformanceBadge } from '@/features/hr/performance-badge/Perfor
 
 interface User {
   id: string;
+  personnelId?: string | null;
   firstName: string;
   lastName: string;
   username: string;
@@ -662,7 +663,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
-              <PersonalPerformanceBadge />
+              {user.personnelId && <PersonalPerformanceBadge />}
               <NotificationCenter />
               <div className="relative profile-dropdown-container">
                 <ErpPressable

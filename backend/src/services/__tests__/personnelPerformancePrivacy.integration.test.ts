@@ -10,7 +10,7 @@ import { claimPerformanceExportDownload, encryptPerformanceExportArtifact, getPe
 import { persistPerformancePayload, performanceVaultKeyFromEnvironment } from '../personnelPerformancePayloadStore';
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
 import { prisma } from '../../lib/prisma';
-import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue } from '../personnelPerformancePrivacyStore';
+import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue, runPerformancePrivacyDeadlineNotifications } from '../personnelPerformancePrivacyStore';
 
 const rollback = Symbol('privacy-test');
 const main = async () => {
@@ -26,6 +26,8 @@ const main = async () => {
       const subject = await tx.performanceSubject.create({ data: { stableKey: suffix, nonDisplayKey: suffix, personnelId: person.id, employmentRelationshipId: relationship.id, createdByUserId: actor.id } });
       const request = await requestPerformancePrivacy(tx, { actorUserId: actor.id, subjectId: subject.id, requestKind: 'ACCESS', evaluationIds: [], reason: 'درخواست دسترسی به سابقه شخصی', now: new Date('2026-09-05T08:00:00Z') });
       assert.equal(request.status, 'RECEIVED');
+      assert.ok(await tx.notificationEvent.findUnique({ where: { deduplicationKey: `performance-privacy-request:${request.id}` } }),
+        'privacy intake must notify the subject through the durable outbox');
       const own = await getPerformancePrivacyCase(tx, actor.id, request.id);
       assert.equal(own.requestKind, 'ACCESS');
       assert.equal(own.response, null);
@@ -41,6 +43,9 @@ const main = async () => {
       assert.ok(queue.items.some((item) => item.id === request.id && item.nextAction === 'ACKNOWLEDGE'));
       assert.equal('request' in queue.items[0], false, 'queue does not duplicate confidential request payloads');
       assert.equal(typeof queue.disclosureReceiptId, 'string');
+      const deadlineNotices = await runPerformancePrivacyDeadlineNotifications(tx, new Date('2026-09-08T08:00:00Z'));
+      assert.equal(deadlineNotices.cases, 1);
+      assert.ok(deadlineNotices.notifications >= 1);
       await assert.rejects(() => requestPerformancePrivacy(tx, { actorUserId: other.id, subjectId: subject.id, requestKind: 'ACCESS', evaluationIds: [], reason: 'درخواست بدون اختیار ثبت' }));
       const acknowledged = await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: request.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' });
       assert.equal(acknowledged.status, 'ACKNOWLEDGED');
@@ -93,6 +98,8 @@ const main = async () => {
         stableKey: `${suffix}:${userId}:${featureCode}`, userId, featureCode, level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated hold test',
       } });
       const hold = await placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION', aggregateId: evaluation.id, reasonCode: 'OPEN_LEGAL_PROCEEDING' });
+      assert.ok(await tx.notificationEvent.findUnique({ where: { deduplicationKey: `performance-legal-hold:${hold.id}:placed` } }),
+        'the subject is notified of a scoped hold without confidential reasons');
       assert.equal((await assessPerformanceEvaluationRetention(tx, { actorUserId: other.id, evaluationId: evaluation.id })).status, 'LEGAL_HOLD');
       const pendingRelease = await decidePerformanceLegalHold(tx, { actorUserId: actor.id, holdId: hold.id, action: 'APPROVE_RELEASE', reasonCode: 'LEGAL_PROCEEDING_CLOSED' });
       assert.equal(pendingRelease.status, 'ACTIVE');

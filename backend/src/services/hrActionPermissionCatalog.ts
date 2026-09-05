@@ -37,6 +37,14 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'MANAGE_COMPENSATION_AGREEMENTS', labelFa: 'انتشار توافق جبران خدمت', level: 'ADMIN', prerequisites: [] },
   { code: 'MANAGE_PERFORMANCE_ROLLOUT', labelFa: 'مدیریت مرحله و جامعه فعال‌سازی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'PAUSE_PERFORMANCE_EVALUATION', labelFa: 'توقف ایمن ارزیابی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'RECORD_PERFORMANCE_TRAINING', labelFa: 'ثبت شاهد آموزش فعال‌سازی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'APPROVE_PERFORMANCE_COHORT_HR', labelFa: 'تصویب منابع انسانی جامعه عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'APPROVE_PERFORMANCE_COHORT_SECURITY', labelFa: 'تصویب امنیت و حریم خصوصی جامعه عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'APPROVE_PERFORMANCE_COHORT_SYSTEM', labelFa: 'تصویب مالک سامانه جامعه عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'TECHNICALLY_ACTIVATE_PERFORMANCE_COHORT', labelFa: 'فعال‌سازی فنی جامعه عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'APPROVE_PERFORMANCE_RESUME_HR', labelFa: 'تصویب منابع انسانی رفع توقف عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'APPROVE_PERFORMANCE_RESUME_SECURITY', labelFa: 'تصویب امنیت و حریم خصوصی رفع توقف عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'APPROVE_PERFORMANCE_RESUME_SYSTEM', labelFa: 'تصویب مالک سامانه رفع توقف عملکرد', level: 'ADMIN', prerequisites: [] },
 ] as const;
 
 export const PERFORMANCE_ACTION_PERMISSION_CODES = PERFORMANCE_ACTION_PERMISSIONS.map(({ code }) => code);

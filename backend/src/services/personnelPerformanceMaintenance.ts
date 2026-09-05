@@ -7,6 +7,8 @@ import {
 import { expirePerformanceResults } from './personnelPerformanceResultStore';
 import { resolvePersonnelPerformanceWriteGate } from './personnelPerformanceRolloutPolicy';
 import { cleanupExpiredPerformanceExports, processQueuedPerformanceExports } from './personnelPerformanceDisclosureStore';
+import { activateDuePerformanceCohorts } from './personnelPerformanceRolloutStore';
+import { runPerformancePrivacyDeadlineNotifications } from './personnelPerformancePrivacyStore';
 
 const SYSTEM_ACTOR = null;
 
@@ -47,7 +49,9 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
   ));
   const exportCleanup = await isolate('export cleanup', () => cleanupExpiredPerformanceExports(client, now));
   const exportQueue = await isolate('export queue', () => processQueuedPerformanceExports(client));
-  return { policyGate, policies, artifacts, expiry, relationshipReconciliation, exportCleanup, exportQueue };
+  const cohorts = await isolate('cohort activation', () => activateDuePerformanceCohorts(client, now));
+  const privacyDeadlines = await isolate('privacy deadlines', () => runPerformancePrivacyDeadlineNotifications(client, now));
+  return { policyGate, policies, artifacts, cohorts, privacyDeadlines, expiry, relationshipReconciliation, exportCleanup, exportQueue };
 };
 
 export const startPersonnelPerformanceMaintenance = (client: PrismaClient) => {

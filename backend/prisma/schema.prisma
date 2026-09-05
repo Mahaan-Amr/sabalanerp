@@ -7433,6 +7433,963 @@ model HrCutoverBlockerProjection {
   @@map("hr_cutover_blocker_projections")
 }
 
+enum PerformanceArtifactLifecycle {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  RETIRED
+  CANCELLED
+}
+
+enum PerformanceEvaluationStatus {
+  DRAFT
+  READY_FOR_SUBMISSION
+  UNDER_REVIEW
+  ACCEPTED
+  NOT_EVALUABLE
+  INVALIDATED
+  CANCELLED
+}
+
+enum PerformanceSectionStatus {
+  DRAFT
+  SUBMITTED
+  REJECTED
+  ACCEPTED
+  NOT_EVALUABLE
+  INVALIDATED
+  CANCELLED
+}
+
+enum PerformanceReviewDecision {
+  ACCEPTED
+  REJECTED
+  NOT_EVALUABLE
+}
+
+enum PerformanceResultStatus {
+  EFFECTIVE
+  SUSPENDED
+  SUPERSEDED
+  EXPIRED
+}
+
+enum PerformanceProjectionState {
+  UNEVALUATED
+  NEEDS_NEW_EVALUATION
+  LEVEL
+  TEMPORARILY_UNAVAILABLE
+}
+
+enum PerformanceCorrectionStatus {
+  OPEN
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum PerformanceExportStatus {
+  QUEUED
+  RUNNING
+  READY
+  DELIVERING
+  DOWNLOADED
+  FAILED
+  EXPIRED
+  DELETED
+}
+
+enum PerformanceRolloutPhase {
+  SCHEMA_PROTECTION
+  POLICY_DARK_LAUNCH
+  READINESS
+  SUPERVISOR_HR_PILOT
+  RESULT_LEVEL_BADGE
+  ANALYTICS_RANKING_CALIBRATION
+  PDF_EXCEL_EXPORT
+  CONSEQUENCE_HANDOFF
+  EXPANSION_RETIREMENT
+}
+
+enum PerformanceTemplateKind {
+  JOB_TEMPLATE
+  POSITION_ADDENDUM
+}
+
+enum PerformancePolicyKind {
+  EVALUATION_PLAN
+  SCORING
+  CURRENT_LEVEL
+  LEVEL_CLASSIFICATION
+  RETENTION
+  ROLLOUT
+}
+
+enum PerformanceCycleStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+enum PerformanceDraftStatus {
+  OPEN
+  SUBMITTED
+  DISCARDED
+}
+
+model PerformanceEncryptedPayload {
+  id            String   @id @default(cuid())
+  aggregateType String
+  aggregateId   String
+  payloadKind   String
+  schemaVersion Int
+  format        String
+  formatVersion Int      @default(1)
+  cipher        String
+  keyId         String
+  iv            Bytes
+  authTag       Bytes
+  ciphertext    Bytes
+  plaintextHash String
+  aadHash       String
+  createdAt     DateTime @default(now())
+
+  @@unique([aggregateType, aggregateId, payloadKind, schemaVersion])
+  @@index([keyId, createdAt])
+  @@map("performance_encrypted_payloads")
+}
+
+model PerformanceSubject {
+  id                          String    @id @default(cuid())
+  stableKey                   String    @unique
+  nonDisplayKey               String    @unique
+  personnelId                 String?
+  employmentRelationshipId    String?
+  identityDetachedAt          DateTime?
+  identityDetachedByUserId    String?
+  identityDetachmentReceiptId String?   @unique
+  createdByUserId             String
+  createdAt                   DateTime  @default(now())
+
+  @@unique([personnelId, employmentRelationshipId])
+  @@index([employmentRelationshipId, createdAt])
+  @@map("performance_subjects")
+}
+
+model PerformancePolicyVersion {
+  id                    String                       @id @default(cuid())
+  policyKind            PerformancePolicyKind
+  version               Int
+  lifecycle             PerformanceArtifactLifecycle @default(DRAFT)
+  predecessorId         String?
+  effectiveFrom         DateTime?
+  retiredAt             DateTime?
+  contentHash           String
+  encryptedPayloadId    String?                      @unique
+  publicationReason     String?
+  publishedByUserId     String?
+  publishedAt           DateTime?
+  activationPreviewId   String?                      @unique
+  activationPreviewHash String?
+  activationConfirmedAt DateTime?
+  createdByUserId       String
+  createdAt             DateTime                     @default(now())
+
+  @@unique([policyKind, version])
+  @@index([policyKind, lifecycle, effectiveFrom])
+  @@map("performance_policy_versions")
+}
+
+model PerformancePolicyActivationPreview {
+  id                      String   @id @default(cuid())
+  policyVersionId         String   @unique
+  policyContentHash       String
+  populationHash          String
+  encryptedPayloadId      String   @unique
+  eligibleSubjectCount    Int
+  evaluatedSubjectCount   Int
+  increasedCount          Int
+  decreasedCount          Int
+  unchangedCount          Int
+  expiredCount            Int
+  needsNewEvaluationCount Int
+  errorCount              Int
+  resultHash              String
+  generatedAt             DateTime @default(now())
+  confirmedAt             DateTime
+  confirmedByUserId       String
+
+  @@index([confirmedByUserId, confirmedAt])
+  @@map("performance_policy_activation_previews")
+}
+
+model PerformanceOperationReceipt {
+  id                 String   @id @default(cuid())
+  idempotencyKeyHash String   @unique
+  operationKind      String
+  policyVersionId    String?
+  intentHash         String
+  encryptedPayloadId String   @unique
+  completedAt        DateTime @default(now())
+
+  @@index([operationKind, completedAt])
+  @@map("performance_operation_receipts")
+}
+
+model PerformanceCriterionIdentity {
+  id              String   @id @default(cuid())
+  stableKey       String   @unique
+  conceptCode     String   @unique
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  @@map("performance_criterion_identities")
+}
+
+model PerformanceCriterionVersion {
+  id                  String                       @id @default(cuid())
+  criterionIdentityId String
+  version             Int
+  lifecycle           PerformanceArtifactLifecycle @default(DRAFT)
+  predecessorId       String?
+  effectiveFrom       DateTime?
+  retiredAt           DateTime?
+  contentHash         String
+  encryptedPayloadId  String?                      @unique
+  publicationReason   String?
+  publishedByUserId   String?
+  publishedAt         DateTime?
+  createdByUserId     String
+  createdAt           DateTime                     @default(now())
+
+  @@unique([criterionIdentityId, version])
+  @@index([lifecycle, effectiveFrom])
+  @@map("performance_criterion_versions")
+}
+
+model PerformanceTemplateVersion {
+  id                 String                       @id @default(cuid())
+  templateKind       PerformanceTemplateKind
+  ownerType          String
+  ownerId            String
+  version            Int
+  lifecycle          PerformanceArtifactLifecycle @default(DRAFT)
+  predecessorId      String?
+  effectiveFrom      DateTime?
+  retiredAt          DateTime?
+  contentHash        String
+  encryptedPayloadId String?                      @unique
+  publicationReason  String?
+  publishedByUserId  String?
+  publishedAt        DateTime?
+  createdByUserId    String
+  createdAt          DateTime                     @default(now())
+
+  @@unique([templateKind, ownerType, ownerId, version])
+  @@index([lifecycle, effectiveFrom])
+  @@map("performance_template_versions")
+}
+
+model PerformanceCohortVersion {
+  id                String                       @id @default(cuid())
+  cohortKey         String
+  version           Int
+  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
+  predecessorId     String?
+  membershipHash    String
+  stage             String?
+  targetPercent     Int?
+  readinessHash     String?
+  effectiveFrom     DateTime?
+  activationReason  String?
+  activatedByUserId String?
+  createdByUserId   String
+  createdAt         DateTime                     @default(now())
+
+  @@unique([cohortKey, version])
+  @@index([lifecycle, effectiveFrom])
+  @@map("performance_cohort_versions")
+}
+
+model PerformanceTrainingEvidence {
+  id               String   @id @default(cuid())
+  subjectId        String
+  curriculumHash   String
+  evidenceHash     String
+  completedAt      DateTime
+  validUntil       DateTime
+  recordedByUserId String
+  createdAt        DateTime @default(now())
+
+  @@index([subjectId, validUntil])
+  @@map("performance_training_evidence")
+}
+
+model PerformanceRolloutDecision {
+  id            String   @id @default(cuid())
+  scopeType     String
+  scopeId       String
+  ownerType     String
+  action        String
+  version       Int
+  actorUserId   String
+  reasonCode    String
+  authorityHash String
+  evidenceHash  String
+  decidedAt     DateTime @default(now())
+
+  @@unique([scopeType, scopeId, ownerType, version])
+  @@index([scopeType, scopeId, action, decidedAt])
+  @@map("performance_rollout_decisions")
+}
+
+model PerformanceCohortMember {
+  id              String   @id @default(cuid())
+  cohortVersionId String
+  subjectId       String
+  eligibilityHash String
+  createdAt       DateTime @default(now())
+
+  @@unique([cohortVersionId, subjectId])
+  @@index([subjectId, cohortVersionId])
+  @@map("performance_cohort_members")
+}
+
+model PerformanceFeaturePhaseVersion {
+  id               String                  @id @default(cuid())
+  version          Int                     @unique
+  phase            PerformanceRolloutPhase
+  releaseEnabled   Boolean                 @default(false)
+  cohortVersionId  String?
+  predecessorId    String?
+  reason           String
+  effectiveFrom    DateTime
+  recordedByUserId String
+  createdAt        DateTime                @default(now())
+
+  @@index([effectiveFrom, version])
+  @@map("performance_feature_phase_versions")
+}
+
+model PerformanceSafetyPause {
+  id              String    @id @default(cuid())
+  phaseVersionId  String
+  cohortVersionId String?
+  scope           String
+  status          String    @default("ACTIVE")
+  reasonCode      String
+  reason          String
+  startedByUserId String
+  startedAt       DateTime  @default(now())
+  resumedByUserId String?
+  resumedAt       DateTime?
+  resumeReason    String?
+
+  @@index([status, startedAt])
+  @@index([cohortVersionId, status])
+  @@map("performance_safety_pauses")
+}
+
+model PerformanceCycle {
+  id                  String                 @id @default(cuid())
+  stableKey           String                 @unique
+  planPolicyVersionId String?
+  cohortVersionId     String?
+  labelFa             String
+  measurementFrom     DateTime
+  measurementTo       DateTime
+  status              PerformanceCycleStatus @default(DRAFT)
+  createdByUserId     String
+  createdAt           DateTime               @default(now())
+
+  @@index([measurementFrom, measurementTo])
+  @@map("performance_cycles")
+}
+
+model PerformanceReadinessRun {
+  id                 String                       @id @default(cuid())
+  stableKey          String                       @unique
+  measurementFrom    DateTime
+  measurementTo      DateTime
+  sourceCount        Int
+  sourceHash         String
+  status             String                       @default("RUNNING")
+  cursorAssignmentId String?
+  appliedCount       Int                          @default(0)
+  blockedCount       Int                          @default(0)
+  failedCount        Int                          @default(0)
+  driftDetected      Boolean                      @default(false)
+  requestedByUserId  String
+  startedAt          DateTime                     @default(now())
+  completedAt        DateTime?
+  updatedAt          DateTime                     @updatedAt
+  records            PerformanceReadinessRecord[]
+
+  @@index([status, startedAt])
+  @@map("performance_readiness_runs")
+}
+
+model PerformanceReadinessRecord {
+  id                     String                  @id @default(cuid())
+  runId                  String
+  employmentAssignmentId String
+  sourceHash             String
+  status                 String
+  blockerCode            String?
+  attemptCount           Int                     @default(1)
+  lastErrorCode          String?
+  evaluationId           String?
+  sectionId              String?
+  processedAt            DateTime                @default(now())
+  run                    PerformanceReadinessRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, employmentAssignmentId])
+  @@index([status, processedAt])
+  @@map("performance_readiness_records")
+}
+
+model PerformanceEvaluation {
+  id                String                      @id @default(cuid())
+  stableKey         String                      @unique
+  subjectId         String
+  cycleId           String?
+  measurementFrom   DateTime
+  measurementTo     DateTime
+  status            PerformanceEvaluationStatus @default(DRAFT)
+  contextSnapshotId String?                     @unique
+  acceptedResultId  String?                     @unique
+  writerVersion     Int                         @default(1)
+  createdByUserId   String
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+
+  @@index([subjectId, measurementFrom, measurementTo])
+  @@index([status, createdAt])
+  @@map("performance_evaluations")
+}
+
+model PerformanceEvaluationSection {
+  id                               String                   @id @default(cuid())
+  evaluationId                     String
+  employmentAssignmentId           String
+  responsibleSupervisorPersonnelId String
+  effectiveFrom                    DateTime
+  effectiveTo                      DateTime
+  allocationPercent                Decimal                  @db.Decimal(5, 2)
+  status                           PerformanceSectionStatus @default(DRAFT)
+  templateSnapshotId               String?                  @unique
+  originalSubmissionDueAt          DateTime?
+  submissionDueAt                  DateTime?
+  reviewDueAt                      DateTime?
+  windowClosedAt                   DateTime?
+  extensionCount                   Int                      @default(0)
+  createdAt                        DateTime                 @default(now())
+  updatedAt                        DateTime                 @updatedAt
+
+  @@unique([evaluationId, employmentAssignmentId, effectiveFrom])
+  @@index([responsibleSupervisorPersonnelId, status])
+  @@map("performance_evaluation_sections")
+}
+
+model PerformanceSnapshot {
+  id                 String   @id @default(cuid())
+  evaluationId       String
+  sectionId          String?
+  snapshotKind       String
+  version            Int
+  contentHash        String
+  encryptedPayloadId String   @unique
+  capturedAt         DateTime @default(now())
+
+  @@unique([evaluationId, sectionId, snapshotKind, version])
+  @@index([evaluationId, capturedAt])
+  @@map("performance_snapshots")
+}
+
+model PerformanceArtifactSnapshotBinding {
+  id                 String   @id @default(cuid())
+  snapshotId         String
+  artifactType       String
+  policyVersionId    String?
+  criterionVersionId String?
+  templateVersionId  String?
+  contentHash        String
+  createdAt          DateTime @default(now())
+
+  @@index([snapshotId, artifactType])
+  @@index([policyVersionId])
+  @@index([criterionVersionId])
+  @@index([templateVersionId])
+  @@map("performance_artifact_snapshot_bindings")
+}
+
+model PerformanceDraft {
+  id                    String                 @id @default(cuid())
+  sectionId             String
+  supervisorUserId      String
+  supervisorPersonnelId String
+  revision              Int
+  status                PerformanceDraftStatus @default(OPEN)
+  encryptedPayloadId    String                 @unique
+  contentHash           String
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  @@unique([sectionId, supervisorUserId, revision])
+  @@index([sectionId, status])
+  @@map("performance_drafts")
+}
+
+model PerformanceSubmission {
+  id                    String   @id @default(cuid())
+  sectionId             String
+  draftId               String?
+  supervisorUserId      String
+  supervisorPersonnelId String
+  version               Int
+  encryptedPayloadId    String   @unique
+  contentHash           String
+  submittedAt           DateTime @default(now())
+
+  @@unique([sectionId, version])
+  @@index([supervisorUserId, submittedAt])
+  @@map("performance_submissions")
+}
+
+model PerformanceReview {
+  id                 String                    @id @default(cuid())
+  submissionId       String                    @unique
+  version            Int
+  reviewerUserId     String
+  decision           PerformanceReviewDecision
+  encryptedPayloadId String?                   @unique
+  selfReview         Boolean                   @default(false)
+  decidedAt          DateTime                  @default(now())
+
+  @@index([reviewerUserId, decidedAt])
+  @@map("performance_reviews")
+}
+
+model PerformanceReviewClaim {
+  id             String    @id @default(cuid())
+  submissionId   String
+  reviewerUserId String
+  claimedAt      DateTime  @default(now())
+  expiresAt      DateTime
+  releasedAt     DateTime?
+  releaseReason  String?
+
+  @@index([reviewerUserId, expiresAt])
+  @@index([submissionId, expiresAt])
+  @@map("performance_review_claims")
+}
+
+model PerformanceCalculationTrace {
+  id                 String   @id @default(cuid())
+  evaluationId       String
+  traceVersion       Int
+  contentHash        String
+  encryptedPayloadId String   @unique
+  createdAt          DateTime @default(now())
+
+  @@unique([evaluationId, traceVersion])
+  @@map("performance_calculation_traces")
+}
+
+model PerformanceAcceptedResult {
+  id                   String                  @id @default(cuid())
+  evaluationId         String
+  version              Int
+  status               PerformanceResultStatus @default(EFFECTIVE)
+  calculationTraceId   String                  @unique
+  encryptedPayloadId   String                  @unique
+  exactScoreHash       String
+  levelCode            String
+  levelPolicyVersionId String
+  supersedesResultId   String?
+  acceptedByUserId     String
+  acceptedAt           DateTime                @default(now())
+  expiresAt            DateTime
+
+  @@unique([evaluationId, version])
+  @@index([status, expiresAt])
+  @@map("performance_accepted_results")
+}
+
+model PerformanceCurrentLevelProjection {
+  id                   String                     @id @default(cuid())
+  subjectId            String                     @unique
+  state                PerformanceProjectionState
+  levelCode            String?
+  levelPolicyVersionId String?
+  sourceResultsHash    String
+  newestMeasurementTo  DateTime?
+  nextReviewAt         DateTime?
+  version              Int
+  projectedAt          DateTime                   @default(now())
+
+  @@index([state, projectedAt])
+  @@map("performance_current_level_projections")
+}
+
+model PerformanceCorrection {
+  id                 String                      @id @default(cuid())
+  evaluationId       String
+  targetResultId     String?
+  version            Int
+  status             PerformanceCorrectionStatus @default(OPEN)
+  correctionKind     String
+  reason             String
+  encryptedPayloadId String?                     @unique
+  requestedByUserId  String
+  requestedAt        DateTime                    @default(now())
+  decidedByUserId    String?
+  decidedAt          DateTime?
+
+  @@unique([evaluationId, version])
+  @@index([status, requestedAt])
+  @@map("performance_corrections")
+}
+
+model PerformanceAuditEvent {
+  id                 String   @id @default(cuid())
+  aggregateType      String
+  aggregateId        String
+  eventType          String
+  actorUserId        String?
+  authorityHash      String?
+  reason             String?
+  encryptedPayloadId String?  @unique
+  previousEventHash  String?
+  eventHash          String   @unique
+  occurredAt         DateTime @default(now())
+
+  @@index([aggregateType, aggregateId, occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@map("performance_audit_events")
+}
+
+model PerformanceRetentionState {
+  id              String    @id @default(cuid())
+  aggregateType   String
+  aggregateId     String
+  classification  String
+  status          String
+  restrictAt      DateTime?
+  deleteAfter     DateTime?
+  legalHoldCount  Int       @default(0)
+  policyVersionId String
+  version         Int
+  recordedAt      DateTime  @default(now())
+
+  @@unique([aggregateType, aggregateId, version])
+  @@index([status, deleteAfter])
+  @@map("performance_retention_states")
+}
+
+model PerformanceLegalHold {
+  id               String    @id @default(cuid())
+  aggregateType    String
+  aggregateId      String
+  aggregateIdHash  String
+  version          Int
+  status           String    @default("ACTIVE")
+  reason           String
+  placedByUserId   String
+  placedAt         DateTime  @default(now())
+  releasedByUserId String?
+  releasedAt       DateTime?
+  releaseReason    String?
+
+  @@unique([aggregateType, aggregateId, version])
+  @@index([status, placedAt])
+  @@index([aggregateType, aggregateIdHash, status])
+  @@map("performance_legal_holds")
+}
+
+model PerformanceExportReceipt {
+  id                     String                  @id @default(cuid())
+  requestedByUserId      String
+  exportKind             String
+  scopeHash              String
+  permissionHash         String
+  status                 PerformanceExportStatus @default(QUEUED)
+  encryptedPayloadId     String?                 @unique
+  artifactHash           String?
+  requestedAt            DateTime                @default(now())
+  readyAt                DateTime?
+  expiresAt              DateTime?
+  downloadedAt           DateTime?
+  deletedAt              DateTime?
+  downloadTokenHash      String?                 @unique
+  downloadTokenExpiresAt DateTime?
+  artifactPath           String?
+  artifactMimeType       String?
+  artifactSize           Int?
+  artifactKeyId          String?
+  startedAt              DateTime?
+  attemptCount           Int                     @default(0)
+  failureCode            String?
+
+  @@index([requestedByUserId, requestedAt])
+  @@index([status, expiresAt])
+  @@index([status, startedAt])
+  @@map("performance_export_receipts")
+}
+
+model PerformancePeerFamilyVersion {
+  id                String                       @id @default(cuid())
+  familyKey         String
+  version           Int
+  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
+  effectiveFrom     DateTime?
+  reason            String
+  createdByUserId   String
+  publishedByUserId String?
+  membershipHash    String
+  createdAt         DateTime                     @default(now())
+
+  @@unique([familyKey, version])
+  @@index([lifecycle, effectiveFrom])
+  @@map("performance_peer_family_versions")
+}
+
+model PerformancePeerFamilyJob {
+  id              String   @id @default(cuid())
+  familyVersionId String
+  jobId           String
+  createdAt       DateTime @default(now())
+
+  @@unique([familyVersionId, jobId])
+  @@index([jobId, familyVersionId])
+  @@map("performance_peer_family_jobs")
+}
+
+model PerformanceConsequenceHandoff {
+  id                       String    @id @default(cuid())
+  subjectId                String
+  personnelId              String
+  employmentRelationshipId String
+  consequenceType          String
+  policyCycleKey           String
+  status                   String    @default("SENT")
+  reasonCategory           String?
+  reason                   String?
+  encryptedPayloadId       String?   @unique
+  packageId                String?   @unique
+  snapshotHash             String
+  createdByUserId          String
+  createdAt                DateTime  @default(now())
+  suspendedAt              DateTime?
+  closedAt                 DateTime?
+  supersedesHandoffId      String?
+
+  @@index([subjectId, consequenceType, status])
+  @@index([employmentRelationshipId, createdAt])
+  @@map("performance_consequence_handoffs")
+}
+
+model PerformanceConsequencePackage {
+  id                          String   @id @default(cuid())
+  encryptedPayloadId          String   @unique
+  snapshotHash                String
+  destinationResponsibilityId String
+  destinationWorkspaceCode    String
+  destinationFeatureCode      String?
+  destinationQueueCode        String
+  destinationVersion          Int
+  assignedDestinationUserId   String
+  createdAt                   DateTime @default(now())
+
+  @@index([assignedDestinationUserId, createdAt])
+  @@map("performance_consequence_packages")
+}
+
+model PerformanceConsequencePolicyVersion {
+  id                String                       @id @default(cuid())
+  version           Int                          @unique
+  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
+  effectiveFrom     DateTime?
+  retiredAt         DateTime?
+  content           Json
+  contentHash       String
+  publicationReason String?
+  publishedByUserId String?
+  publishedAt       DateTime?
+  createdByUserId   String?
+  createdAt         DateTime                     @default(now())
+
+  @@index([lifecycle, effectiveFrom])
+  @@map("performance_consequence_policy_versions")
+}
+
+model HrCompensationAgreement {
+  id                       String    @id @default(cuid())
+  employmentRelationshipId String
+  version                  Int
+  status                   String    @default("DRAFT")
+  effectiveFrom            DateTime
+  effectiveTo              DateTime?
+  currency                 String    @default("IRR")
+  componentsJson           Json
+  totalRials               Decimal   @db.Decimal(18, 0)
+  payRangeMinimumRials     Decimal   @db.Decimal(18, 0)
+  payRangeMaximumRials     Decimal   @db.Decimal(18, 0)
+  budgetCode               String
+  budgetAvailableRials     Decimal   @db.Decimal(18, 0)
+  legalControlStatus       String
+  contentHash              String
+  approvedByUserId         String?
+  approvedAt               DateTime?
+  createdByUserId          String
+  createdAt                DateTime  @default(now())
+
+  @@unique([employmentRelationshipId, version])
+  @@index([employmentRelationshipId, status, effectiveFrom, effectiveTo])
+  @@map("hr_compensation_agreements")
+}
+
+model PerformanceDeletionReceipt {
+  id                   String   @id @default(cuid())
+  deletedTableName     String
+  deletedRecordId      String
+  deletedPayloadId     String?  @unique
+  aggregateType        String
+  aggregateIdHash      String
+  scopeHash            String
+  policyVersionId      String
+  reasonCode           String
+  reason               String
+  recordCount          Int
+  dependencyEffectHash String
+  actorUserId          String?
+  authorityHash        String
+  executedAt           DateTime @default(now())
+
+  @@unique([deletedTableName, deletedRecordId])
+  @@index([aggregateType, executedAt])
+  @@map("performance_deletion_receipts")
+}
+
+model PerformancePrivacyCase {
+  id                  String    @id @default(cuid())
+  subjectId           String
+  requestKind         String
+  status              String    @default("RECEIVED")
+  requestedByUserId   String
+  requestedAt         DateTime  @default(now())
+  acknowledgeBy       DateTime
+  verifyBy            DateTime
+  respondBy           DateTime
+  extensionCount      Int       @default(0)
+  identityVerifiedAt  DateTime?
+  verifiedByUserId    String?
+  scopeHash           String
+  encryptedRequestId  String    @unique
+  encryptedResponseId String?   @unique
+  closedAt            DateTime?
+  version             Int       @default(1)
+
+  @@index([subjectId, status])
+  @@index([status, respondBy])
+  @@map("performance_privacy_cases")
+}
+
+model PerformancePrivacyScope {
+  id           String @id @default(cuid())
+  caseId       String
+  evaluationId String
+
+  @@unique([caseId, evaluationId])
+  @@index([evaluationId])
+  @@map("performance_privacy_scopes")
+}
+
+model PerformancePrivacyDecision {
+  id            String   @id @default(cuid())
+  caseId        String
+  version       Int
+  action        String
+  actorUserId   String
+  authorityHash String
+  reasonCode    String
+  contentHash   String
+  occurredAt    DateTime @default(now())
+
+  @@unique([caseId, version])
+  @@map("performance_privacy_decisions")
+}
+
+model PerformanceEvidenceRestriction {
+  id               String    @id @default(cuid())
+  evaluationId     String
+  privacyCaseId    String?
+  status           String    @default("ACTIVE")
+  reasonCode       String
+  createdByUserId  String
+  createdAt        DateTime  @default(now())
+  releasedByUserId String?
+  releasedAt       DateTime?
+  releaseReason    String?
+
+  @@index([evaluationId, status])
+  @@index([privacyCaseId])
+  @@map("performance_evidence_restrictions")
+}
+
+model PerformanceLegalHoldDecision {
+  id            String   @id @default(cuid())
+  holdId        String
+  action        String
+  actorUserId   String
+  reasonCode    String
+  authorityHash String
+  decidedAt     DateTime @default(now())
+
+  @@index([holdId, action, decidedAt])
+  @@map("performance_legal_hold_decisions")
+}
+
+model PerformanceExportCleanupAttempt {
+  id              String    @id @default(cuid())
+  exportId        String    @unique
+  policyVersionId String
+  artifactHash    String?
+  scopeHash       String
+  status          String    @default("PENDING")
+  attemptCount    Int       @default(0)
+  lastFailureCode String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  liveDeletedAt   DateTime?
+
+  @@index([status, updatedAt])
+  @@map("performance_export_cleanup_attempts")
+}
+
+model PerformanceExportArtifact {
+  id           String   @id @default(cuid())
+  exportId     String
+  attemptCount Int
+  artifactPath String   @unique
+  createdAt    DateTime @default(now())
+
+  @@unique([exportId, attemptCount])
+  @@map("performance_export_artifacts")
+}
+
+model PerformancePrivacyCorrection {
+  id           String @id @default(cuid())
+  caseId       String
+  evaluationId String
+  correctionId String
+
+  @@unique([caseId, evaluationId])
+  @@map("performance_privacy_corrections")
+}
+
 // Partner schema/v1 (#315). Evidence is append-only in SQL. No legacy conversion.
 enum PartnerProfileState {
   PENDING
@@ -8404,926 +9361,4 @@ model PartnerOperationsIncident {
 
   @@index([lastSeenAt])
   @@map("partner_operations_incidents")
-}
-
-enum PerformanceArtifactLifecycle {
-  DRAFT
-  SCHEDULED
-  ACTIVE
-  RETIRED
-  CANCELLED
-}
-
-enum PerformanceEvaluationStatus {
-  DRAFT
-  READY_FOR_SUBMISSION
-  UNDER_REVIEW
-  ACCEPTED
-  NOT_EVALUABLE
-  INVALIDATED
-  CANCELLED
-}
-
-enum PerformanceSectionStatus {
-  DRAFT
-  SUBMITTED
-  REJECTED
-  ACCEPTED
-  NOT_EVALUABLE
-  INVALIDATED
-  CANCELLED
-}
-
-enum PerformanceReviewDecision {
-  ACCEPTED
-  REJECTED
-  NOT_EVALUABLE
-}
-
-enum PerformanceResultStatus {
-  EFFECTIVE
-  SUSPENDED
-  SUPERSEDED
-  EXPIRED
-}
-
-enum PerformanceProjectionState {
-  UNEVALUATED
-  NEEDS_NEW_EVALUATION
-  LEVEL
-  TEMPORARILY_UNAVAILABLE
-}
-
-enum PerformanceCorrectionStatus {
-  OPEN
-  ACCEPTED
-  REJECTED
-  CANCELLED
-}
-
-enum PerformanceExportStatus {
-  QUEUED
-  RUNNING
-  READY
-  DELIVERING
-  DOWNLOADED
-  FAILED
-  EXPIRED
-  DELETED
-}
-
-enum PerformanceRolloutPhase {
-  SCHEMA_PROTECTION
-  POLICY_DARK_LAUNCH
-  READINESS
-  SUPERVISOR_HR_PILOT
-  RESULT_LEVEL_BADGE
-  ANALYTICS_RANKING_CALIBRATION
-  PDF_EXCEL_EXPORT
-  CONSEQUENCE_HANDOFF
-  EXPANSION_RETIREMENT
-}
-
-enum PerformanceTemplateKind {
-  JOB_TEMPLATE
-  POSITION_ADDENDUM
-}
-
-enum PerformancePolicyKind {
-  EVALUATION_PLAN
-  SCORING
-  CURRENT_LEVEL
-  LEVEL_CLASSIFICATION
-  RETENTION
-  ROLLOUT
-}
-
-enum PerformanceCycleStatus {
-  DRAFT
-  SCHEDULED
-  ACTIVE
-  CLOSED
-  CANCELLED
-}
-
-enum PerformanceDraftStatus {
-  OPEN
-  SUBMITTED
-  DISCARDED
-}
-
-model PerformanceEncryptedPayload {
-  id            String   @id @default(cuid())
-  aggregateType String
-  aggregateId   String
-  payloadKind   String
-  schemaVersion Int
-  format        String
-  formatVersion Int      @default(1)
-  cipher        String
-  keyId         String
-  iv            Bytes
-  authTag       Bytes
-  ciphertext    Bytes
-  plaintextHash String
-  aadHash       String
-  createdAt     DateTime @default(now())
-
-  @@unique([aggregateType, aggregateId, payloadKind, schemaVersion])
-  @@index([keyId, createdAt])
-  @@map("performance_encrypted_payloads")
-}
-
-model PerformanceSubject {
-  id                          String    @id @default(cuid())
-  stableKey                   String    @unique
-  nonDisplayKey               String    @unique
-  personnelId                 String?
-  employmentRelationshipId    String?
-  identityDetachedAt          DateTime?
-  identityDetachedByUserId    String?
-  identityDetachmentReceiptId String?   @unique
-  createdByUserId             String
-  createdAt                   DateTime  @default(now())
-
-  @@unique([personnelId, employmentRelationshipId])
-  @@index([employmentRelationshipId, createdAt])
-  @@map("performance_subjects")
-}
-
-model PerformancePolicyVersion {
-  id                    String                       @id @default(cuid())
-  policyKind            PerformancePolicyKind
-  version               Int
-  lifecycle             PerformanceArtifactLifecycle @default(DRAFT)
-  predecessorId         String?
-  effectiveFrom         DateTime?
-  retiredAt             DateTime?
-  contentHash           String
-  encryptedPayloadId    String?                      @unique
-  publicationReason     String?
-  publishedByUserId     String?
-  publishedAt           DateTime?
-  activationPreviewId   String?                      @unique
-  activationPreviewHash String?
-  activationConfirmedAt DateTime?
-  createdByUserId       String
-  createdAt             DateTime                     @default(now())
-
-  @@unique([policyKind, version])
-  @@index([policyKind, lifecycle, effectiveFrom])
-  @@map("performance_policy_versions")
-}
-
-model PerformancePolicyActivationPreview {
-  id                      String   @id @default(cuid())
-  policyVersionId         String   @unique
-  policyContentHash       String
-  populationHash          String
-  encryptedPayloadId      String   @unique
-  eligibleSubjectCount    Int
-  evaluatedSubjectCount   Int
-  increasedCount          Int
-  decreasedCount          Int
-  unchangedCount          Int
-  expiredCount            Int
-  needsNewEvaluationCount Int
-  errorCount              Int
-  resultHash              String
-  generatedAt             DateTime @default(now())
-  confirmedAt             DateTime
-  confirmedByUserId       String
-
-  @@index([confirmedByUserId, confirmedAt])
-  @@map("performance_policy_activation_previews")
-}
-
-model PerformanceOperationReceipt {
-  id                 String   @id @default(cuid())
-  idempotencyKeyHash String   @unique
-  operationKind      String
-  policyVersionId    String?
-  intentHash         String
-  encryptedPayloadId String   @unique
-  completedAt        DateTime @default(now())
-
-  @@index([operationKind, completedAt])
-  @@map("performance_operation_receipts")
-}
-
-model PerformanceCriterionIdentity {
-  id              String   @id @default(cuid())
-  stableKey       String   @unique
-  conceptCode     String   @unique
-  createdByUserId String
-  createdAt       DateTime @default(now())
-
-  @@map("performance_criterion_identities")
-}
-
-model PerformanceCriterionVersion {
-  id                  String                       @id @default(cuid())
-  criterionIdentityId String
-  version             Int
-  lifecycle           PerformanceArtifactLifecycle @default(DRAFT)
-  predecessorId       String?
-  effectiveFrom       DateTime?
-  retiredAt           DateTime?
-  contentHash         String
-  encryptedPayloadId  String?                      @unique
-  publicationReason   String?
-  publishedByUserId   String?
-  publishedAt         DateTime?
-  createdByUserId     String
-  createdAt           DateTime                     @default(now())
-
-  @@unique([criterionIdentityId, version])
-  @@index([lifecycle, effectiveFrom])
-  @@map("performance_criterion_versions")
-}
-
-model PerformanceTemplateVersion {
-  id                 String                       @id @default(cuid())
-  templateKind       PerformanceTemplateKind
-  ownerType          String
-  ownerId            String
-  version            Int
-  lifecycle          PerformanceArtifactLifecycle @default(DRAFT)
-  predecessorId      String?
-  effectiveFrom      DateTime?
-  retiredAt          DateTime?
-  contentHash        String
-  encryptedPayloadId String?                      @unique
-  publicationReason  String?
-  publishedByUserId  String?
-  publishedAt        DateTime?
-  createdByUserId    String
-  createdAt          DateTime                     @default(now())
-
-  @@unique([templateKind, ownerType, ownerId, version])
-  @@index([lifecycle, effectiveFrom])
-  @@map("performance_template_versions")
-}
-
-model PerformanceCohortVersion {
-  id                String                       @id @default(cuid())
-  cohortKey         String
-  version           Int
-  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
-  predecessorId     String?
-  membershipHash    String
-  effectiveFrom     DateTime?
-  activationReason  String?
-  activatedByUserId String?
-  createdByUserId   String
-  createdAt         DateTime                     @default(now())
-
-  @@unique([cohortKey, version])
-  @@index([lifecycle, effectiveFrom])
-  @@map("performance_cohort_versions")
-}
-
-model PerformanceCohortMember {
-  id              String   @id @default(cuid())
-  cohortVersionId String
-  subjectId       String
-  eligibilityHash String
-  createdAt       DateTime @default(now())
-
-  @@unique([cohortVersionId, subjectId])
-  @@index([subjectId, cohortVersionId])
-  @@map("performance_cohort_members")
-}
-
-model PerformanceFeaturePhaseVersion {
-  id               String                  @id @default(cuid())
-  version          Int                     @unique
-  phase            PerformanceRolloutPhase
-  releaseEnabled   Boolean                 @default(false)
-  cohortVersionId  String?
-  predecessorId    String?
-  reason           String
-  effectiveFrom    DateTime
-  recordedByUserId String
-  createdAt        DateTime                @default(now())
-
-  @@index([effectiveFrom, version])
-  @@map("performance_feature_phase_versions")
-}
-
-model PerformanceSafetyPause {
-  id              String    @id @default(cuid())
-  phaseVersionId  String
-  cohortVersionId String?
-  scope           String
-  status          String    @default("ACTIVE")
-  reasonCode      String
-  reason          String
-  startedByUserId String
-  startedAt       DateTime  @default(now())
-  resumedByUserId String?
-  resumedAt       DateTime?
-  resumeReason    String?
-
-  @@index([status, startedAt])
-  @@index([cohortVersionId, status])
-  @@map("performance_safety_pauses")
-}
-
-model PerformanceCycle {
-  id                  String                 @id @default(cuid())
-  stableKey           String                 @unique
-  planPolicyVersionId String?
-  cohortVersionId     String?
-  labelFa             String
-  measurementFrom     DateTime
-  measurementTo       DateTime
-  status              PerformanceCycleStatus @default(DRAFT)
-  createdByUserId     String
-  createdAt           DateTime               @default(now())
-
-  @@index([measurementFrom, measurementTo])
-  @@map("performance_cycles")
-}
-
-model PerformanceReadinessRun {
-  id                 String                       @id @default(cuid())
-  stableKey          String                       @unique
-  measurementFrom    DateTime
-  measurementTo      DateTime
-  sourceCount        Int
-  sourceHash         String
-  status             String                       @default("RUNNING")
-  cursorAssignmentId String?
-  appliedCount       Int                          @default(0)
-  blockedCount       Int                          @default(0)
-  failedCount        Int                          @default(0)
-  driftDetected      Boolean                      @default(false)
-  requestedByUserId  String
-  startedAt          DateTime                     @default(now())
-  completedAt        DateTime?
-  updatedAt          DateTime                     @updatedAt
-  records            PerformanceReadinessRecord[]
-
-  @@index([status, startedAt])
-  @@map("performance_readiness_runs")
-}
-
-model PerformanceReadinessRecord {
-  id                     String                  @id @default(cuid())
-  runId                  String
-  employmentAssignmentId String
-  sourceHash             String
-  status                 String
-  blockerCode            String?
-  attemptCount           Int                     @default(1)
-  lastErrorCode          String?
-  evaluationId           String?
-  sectionId              String?
-  processedAt            DateTime                @default(now())
-  run                    PerformanceReadinessRun @relation(fields: [runId], references: [id], onDelete: Restrict)
-
-  @@unique([runId, employmentAssignmentId])
-  @@index([status, processedAt])
-  @@map("performance_readiness_records")
-}
-
-model PerformanceEvaluation {
-  id                String                      @id @default(cuid())
-  stableKey         String                      @unique
-  subjectId         String
-  cycleId           String?
-  measurementFrom   DateTime
-  measurementTo     DateTime
-  status            PerformanceEvaluationStatus @default(DRAFT)
-  contextSnapshotId String?                     @unique
-  acceptedResultId  String?                     @unique
-  writerVersion     Int                         @default(1)
-  createdByUserId   String
-  createdAt         DateTime                    @default(now())
-  updatedAt         DateTime                    @updatedAt
-
-  @@index([subjectId, measurementFrom, measurementTo])
-  @@index([status, createdAt])
-  @@map("performance_evaluations")
-}
-
-model PerformanceEvaluationSection {
-  id                               String                   @id @default(cuid())
-  evaluationId                     String
-  employmentAssignmentId           String
-  responsibleSupervisorPersonnelId String
-  effectiveFrom                    DateTime
-  effectiveTo                      DateTime
-  allocationPercent                Decimal                  @db.Decimal(5, 2)
-  status                           PerformanceSectionStatus @default(DRAFT)
-  templateSnapshotId               String?                  @unique
-  originalSubmissionDueAt          DateTime?
-  submissionDueAt                  DateTime?
-  reviewDueAt                      DateTime?
-  windowClosedAt                   DateTime?
-  extensionCount                   Int                      @default(0)
-  createdAt                        DateTime                 @default(now())
-  updatedAt                        DateTime                 @updatedAt
-
-  @@unique([evaluationId, employmentAssignmentId, effectiveFrom])
-  @@index([responsibleSupervisorPersonnelId, status])
-  @@map("performance_evaluation_sections")
-}
-
-model PerformanceSnapshot {
-  id                 String   @id @default(cuid())
-  evaluationId       String
-  sectionId          String?
-  snapshotKind       String
-  version            Int
-  contentHash        String
-  encryptedPayloadId String   @unique
-  capturedAt         DateTime @default(now())
-
-  @@unique([evaluationId, sectionId, snapshotKind, version])
-  @@index([evaluationId, capturedAt])
-  @@map("performance_snapshots")
-}
-
-model PerformanceArtifactSnapshotBinding {
-  id                 String   @id @default(cuid())
-  snapshotId         String
-  artifactType       String
-  policyVersionId    String?
-  criterionVersionId String?
-  templateVersionId  String?
-  contentHash        String
-  createdAt          DateTime @default(now())
-
-  @@index([snapshotId, artifactType])
-  @@index([policyVersionId])
-  @@index([criterionVersionId])
-  @@index([templateVersionId])
-  @@map("performance_artifact_snapshot_bindings")
-}
-
-model PerformanceDraft {
-  id                    String                 @id @default(cuid())
-  sectionId             String
-  supervisorUserId      String
-  supervisorPersonnelId String
-  revision              Int
-  status                PerformanceDraftStatus @default(OPEN)
-  encryptedPayloadId    String                 @unique
-  contentHash           String
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-
-  @@unique([sectionId, supervisorUserId, revision])
-  @@index([sectionId, status])
-  @@map("performance_drafts")
-}
-
-model PerformanceSubmission {
-  id                    String   @id @default(cuid())
-  sectionId             String
-  draftId               String?
-  supervisorUserId      String
-  supervisorPersonnelId String
-  version               Int
-  encryptedPayloadId    String   @unique
-  contentHash           String
-  submittedAt           DateTime @default(now())
-
-  @@unique([sectionId, version])
-  @@index([supervisorUserId, submittedAt])
-  @@map("performance_submissions")
-}
-
-model PerformanceReview {
-  id                 String                    @id @default(cuid())
-  submissionId       String                    @unique
-  version            Int
-  reviewerUserId     String
-  decision           PerformanceReviewDecision
-  encryptedPayloadId String?                   @unique
-  selfReview         Boolean                   @default(false)
-  decidedAt          DateTime                  @default(now())
-
-  @@index([reviewerUserId, decidedAt])
-  @@map("performance_reviews")
-}
-
-model PerformanceReviewClaim {
-  id             String    @id @default(cuid())
-  submissionId   String
-  reviewerUserId String
-  claimedAt      DateTime  @default(now())
-  expiresAt      DateTime
-  releasedAt     DateTime?
-  releaseReason  String?
-
-  @@index([reviewerUserId, expiresAt])
-  @@index([submissionId, expiresAt])
-  @@map("performance_review_claims")
-}
-
-model PerformanceCalculationTrace {
-  id                 String   @id @default(cuid())
-  evaluationId       String
-  traceVersion       Int
-  contentHash        String
-  encryptedPayloadId String   @unique
-  createdAt          DateTime @default(now())
-
-  @@unique([evaluationId, traceVersion])
-  @@map("performance_calculation_traces")
-}
-
-model PerformanceAcceptedResult {
-  id                   String                  @id @default(cuid())
-  evaluationId         String
-  version              Int
-  status               PerformanceResultStatus @default(EFFECTIVE)
-  calculationTraceId   String                  @unique
-  encryptedPayloadId   String                  @unique
-  exactScoreHash       String
-  levelCode            String
-  levelPolicyVersionId String
-  supersedesResultId   String?
-  acceptedByUserId     String
-  acceptedAt           DateTime                @default(now())
-  expiresAt            DateTime
-
-  @@unique([evaluationId, version])
-  @@index([status, expiresAt])
-  @@map("performance_accepted_results")
-}
-
-model PerformanceCurrentLevelProjection {
-  id                   String                     @id @default(cuid())
-  subjectId            String                     @unique
-  state                PerformanceProjectionState
-  levelCode            String?
-  levelPolicyVersionId String?
-  sourceResultsHash    String
-  newestMeasurementTo  DateTime?
-  nextReviewAt         DateTime?
-  version              Int
-  projectedAt          DateTime                   @default(now())
-
-  @@index([state, projectedAt])
-  @@map("performance_current_level_projections")
-}
-
-model PerformanceCorrection {
-  id                 String                      @id @default(cuid())
-  evaluationId       String
-  targetResultId     String?
-  version            Int
-  status             PerformanceCorrectionStatus @default(OPEN)
-  correctionKind     String
-  reason             String
-  encryptedPayloadId String?                     @unique
-  requestedByUserId  String
-  requestedAt        DateTime                    @default(now())
-  decidedByUserId    String?
-  decidedAt          DateTime?
-
-  @@unique([evaluationId, version])
-  @@index([status, requestedAt])
-  @@map("performance_corrections")
-}
-
-model PerformanceAuditEvent {
-  id                 String   @id @default(cuid())
-  aggregateType      String
-  aggregateId        String
-  eventType          String
-  actorUserId        String?
-  authorityHash      String?
-  reason             String?
-  encryptedPayloadId String?  @unique
-  previousEventHash  String?
-  eventHash          String   @unique
-  occurredAt         DateTime @default(now())
-
-  @@index([aggregateType, aggregateId, occurredAt])
-  @@index([actorUserId, occurredAt])
-  @@map("performance_audit_events")
-}
-
-model PerformanceRetentionState {
-  id              String    @id @default(cuid())
-  aggregateType   String
-  aggregateId     String
-  classification  String
-  status          String
-  restrictAt      DateTime?
-  deleteAfter     DateTime?
-  legalHoldCount  Int       @default(0)
-  policyVersionId String
-  version         Int
-  recordedAt      DateTime  @default(now())
-
-  @@unique([aggregateType, aggregateId, version])
-  @@index([status, deleteAfter])
-  @@map("performance_retention_states")
-}
-
-model PerformanceLegalHold {
-  id               String    @id @default(cuid())
-  aggregateType    String
-  aggregateId      String
-  aggregateIdHash  String
-  version          Int
-  status           String    @default("ACTIVE")
-  reason           String
-  placedByUserId   String
-  placedAt         DateTime  @default(now())
-  releasedByUserId String?
-  releasedAt       DateTime?
-  releaseReason    String?
-
-  @@unique([aggregateType, aggregateId, version])
-  @@index([status, placedAt])
-  @@index([aggregateType, aggregateIdHash, status])
-  @@map("performance_legal_holds")
-}
-
-model PerformanceExportReceipt {
-  id                     String                  @id @default(cuid())
-  requestedByUserId      String
-  exportKind             String
-  scopeHash              String
-  permissionHash         String
-  status                 PerformanceExportStatus @default(QUEUED)
-  encryptedPayloadId     String?                 @unique
-  artifactHash           String?
-  requestedAt            DateTime                @default(now())
-  readyAt                DateTime?
-  expiresAt              DateTime?
-  downloadedAt           DateTime?
-  deletedAt              DateTime?
-  downloadTokenHash      String?                 @unique
-  downloadTokenExpiresAt DateTime?
-  artifactPath           String?
-  artifactMimeType       String?
-  artifactSize           Int?
-  artifactKeyId          String?
-  startedAt              DateTime?
-  attemptCount           Int                     @default(0)
-  failureCode            String?
-
-  @@index([requestedByUserId, requestedAt])
-  @@index([status, expiresAt])
-  @@index([status, startedAt])
-  @@map("performance_export_receipts")
-}
-
-model PerformancePeerFamilyVersion {
-  id                String                       @id @default(cuid())
-  familyKey         String
-  version           Int
-  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
-  effectiveFrom     DateTime?
-  reason            String
-  createdByUserId   String
-  publishedByUserId String?
-  membershipHash    String
-  createdAt         DateTime                     @default(now())
-
-  @@unique([familyKey, version])
-  @@index([lifecycle, effectiveFrom])
-  @@map("performance_peer_family_versions")
-}
-
-model PerformancePeerFamilyJob {
-  id              String   @id @default(cuid())
-  familyVersionId String
-  jobId           String
-  createdAt       DateTime @default(now())
-
-  @@unique([familyVersionId, jobId])
-  @@index([jobId, familyVersionId])
-  @@map("performance_peer_family_jobs")
-}
-
-model PerformanceConsequenceHandoff {
-  id                       String    @id @default(cuid())
-  subjectId                String
-  personnelId              String
-  employmentRelationshipId String
-  consequenceType          String
-  policyCycleKey           String
-  status                   String    @default("SENT")
-  reasonCategory           String?
-  reason                   String?
-  encryptedPayloadId       String?   @unique
-  packageId                String?   @unique
-  snapshotHash             String
-  createdByUserId          String
-  createdAt                DateTime  @default(now())
-  suspendedAt              DateTime?
-  closedAt                 DateTime?
-  supersedesHandoffId      String?
-
-  @@index([subjectId, consequenceType, status])
-  @@index([employmentRelationshipId, createdAt])
-  @@map("performance_consequence_handoffs")
-}
-
-model PerformanceConsequencePackage {
-  id                          String   @id @default(cuid())
-  encryptedPayloadId          String   @unique
-  snapshotHash                String
-  destinationResponsibilityId String
-  destinationWorkspaceCode    String
-  destinationFeatureCode      String?
-  destinationQueueCode        String
-  destinationVersion          Int
-  assignedDestinationUserId   String
-  createdAt                   DateTime @default(now())
-
-  @@index([assignedDestinationUserId, createdAt])
-  @@map("performance_consequence_packages")
-}
-
-model PerformanceConsequencePolicyVersion {
-  id                String                       @id @default(cuid())
-  version           Int                          @unique
-  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
-  effectiveFrom     DateTime?
-  retiredAt         DateTime?
-  content           Json
-  contentHash       String
-  publicationReason String?
-  publishedByUserId String?
-  publishedAt       DateTime?
-  createdByUserId   String?
-  createdAt         DateTime                     @default(now())
-
-  @@index([lifecycle, effectiveFrom])
-  @@map("performance_consequence_policy_versions")
-}
-
-model HrCompensationAgreement {
-  id                       String    @id @default(cuid())
-  employmentRelationshipId String
-  version                  Int
-  status                   String    @default("DRAFT")
-  effectiveFrom            DateTime
-  effectiveTo              DateTime?
-  currency                 String    @default("IRR")
-  componentsJson           Json
-  totalRials               Decimal   @db.Decimal(18, 0)
-  payRangeMinimumRials     Decimal   @db.Decimal(18, 0)
-  payRangeMaximumRials     Decimal   @db.Decimal(18, 0)
-  budgetCode               String
-  budgetAvailableRials     Decimal   @db.Decimal(18, 0)
-  legalControlStatus       String
-  contentHash              String
-  approvedByUserId         String?
-  approvedAt               DateTime?
-  createdByUserId          String
-  createdAt                DateTime  @default(now())
-
-  @@unique([employmentRelationshipId, version])
-  @@index([employmentRelationshipId, status, effectiveFrom, effectiveTo])
-  @@map("hr_compensation_agreements")
-}
-
-model PerformanceDeletionReceipt {
-  id                   String   @id @default(cuid())
-  deletedTableName     String
-  deletedRecordId      String
-  deletedPayloadId     String?  @unique
-  aggregateType        String
-  aggregateIdHash      String
-  scopeHash            String
-  policyVersionId      String
-  reasonCode           String
-  reason               String
-  recordCount          Int
-  dependencyEffectHash String
-  actorUserId          String?
-  authorityHash        String
-  executedAt           DateTime @default(now())
-
-  @@unique([deletedTableName, deletedRecordId])
-  @@index([aggregateType, executedAt])
-  @@map("performance_deletion_receipts")
-}
-
-model PerformancePrivacyCase {
-  id                  String    @id @default(cuid())
-  subjectId           String
-  requestKind         String
-  status              String    @default("RECEIVED")
-  requestedByUserId   String
-  requestedAt         DateTime  @default(now())
-  acknowledgeBy       DateTime
-  verifyBy            DateTime
-  respondBy           DateTime
-  extensionCount      Int       @default(0)
-  identityVerifiedAt  DateTime?
-  verifiedByUserId    String?
-  scopeHash           String
-  encryptedRequestId  String    @unique
-  encryptedResponseId String?   @unique
-  closedAt            DateTime?
-  version             Int       @default(1)
-
-  @@index([subjectId, status])
-  @@index([status, respondBy])
-  @@map("performance_privacy_cases")
-}
-
-model PerformancePrivacyScope {
-  id           String @id @default(cuid())
-  caseId       String
-  evaluationId String
-
-  @@unique([caseId, evaluationId])
-  @@index([evaluationId])
-  @@map("performance_privacy_scopes")
-}
-
-model PerformancePrivacyDecision {
-  id            String   @id @default(cuid())
-  caseId        String
-  version       Int
-  action        String
-  actorUserId   String
-  authorityHash String
-  reasonCode    String
-  contentHash   String
-  occurredAt    DateTime @default(now())
-
-  @@unique([caseId, version])
-  @@map("performance_privacy_decisions")
-}
-
-model PerformanceEvidenceRestriction {
-  id               String    @id @default(cuid())
-  evaluationId     String
-  privacyCaseId    String?
-  status           String    @default("ACTIVE")
-  reasonCode       String
-  createdByUserId  String
-  createdAt        DateTime  @default(now())
-  releasedByUserId String?
-  releasedAt       DateTime?
-  releaseReason    String?
-
-  @@index([evaluationId, status])
-  @@index([privacyCaseId])
-  @@map("performance_evidence_restrictions")
-}
-
-model PerformanceLegalHoldDecision {
-  id            String   @id @default(cuid())
-  holdId        String
-  action        String
-  actorUserId   String
-  reasonCode    String
-  authorityHash String
-  decidedAt     DateTime @default(now())
-
-  @@index([holdId, action, decidedAt])
-  @@map("performance_legal_hold_decisions")
-}
-
-model PerformanceExportCleanupAttempt {
-  id              String    @id @default(cuid())
-  exportId        String    @unique
-  policyVersionId String
-  artifactHash    String?
-  scopeHash       String
-  status          String    @default("PENDING")
-  attemptCount    Int       @default(0)
-  lastFailureCode String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  liveDeletedAt   DateTime?
-
-  @@index([status, updatedAt])
-  @@map("performance_export_cleanup_attempts")
-}
-
-model PerformanceExportArtifact {
-  id           String   @id @default(cuid())
-  exportId     String
-  attemptCount Int
-  artifactPath String   @unique
-  createdAt    DateTime @default(now())
-
-  @@unique([exportId, attemptCount])
-  @@map("performance_export_artifacts")
-}
-
-model PerformancePrivacyCorrection {
-  id           String @id @default(cuid())
-  caseId       String
-  evaluationId String
-  correctionId String
-
-  @@unique([caseId, evaluationId])
-  @@map("performance_privacy_corrections")
 }

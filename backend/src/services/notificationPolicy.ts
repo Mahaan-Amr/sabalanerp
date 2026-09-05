@@ -33,7 +33,6 @@ export interface NotificationPolicyDraft {
 }
 
 const REGISTERED_NOTIFICATION_EVENTS = {
-  ...PARTNER_NOTIFICATION_EVENTS,
   PERFORMANCE_SUPERVISOR_TASK: {
     type: 'PERFORMANCE_SUPERVISOR_TASK', mandatory: true,
     titleTemplate: 'ارزیابی عملکرد جدید', messageTemplate: 'یک بخش ارزیابی عملکرد برای تکمیل آماده است.',
@@ -62,6 +61,28 @@ const REGISTERED_NOTIFICATION_EVENTS = {
     allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
     allowedRecipientResolvers: ['DIRECT_USER'],
   },
+  PERFORMANCE_PRIVACY_NOTICE: {
+    type: 'PERFORMANCE_PRIVACY_NOTICE', mandatory: true,
+    titleTemplate: 'به‌روزرسانی درخواست حریم خصوصی عملکرد', messageTemplate: 'وضعیت یکی از درخواست‌های حریم خصوصی عملکرد شما به‌روزرسانی شد.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  PERFORMANCE_PRIVACY_DEADLINE: {
+    type: 'PERFORMANCE_PRIVACY_DEADLINE', mandatory: true,
+    titleTemplate: 'مهلت درخواست حریم خصوصی عملکرد', messageTemplate: 'یک درخواست حریم خصوصی عملکرد به اقدام فوری نیاز دارد.',
+    priority: 'URGENT', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  PERFORMANCE_LEGAL_HOLD_NOTICE: {
+    type: 'PERFORMANCE_LEGAL_HOLD_NOTICE', mandatory: true,
+    titleTemplate: 'توقف نگهداری سابقه عملکرد', messageTemplate: 'برای بخشی از سابقه عملکرد شما توقف نگهداری ثبت یا بازبینی شد.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  ...PARTNER_NOTIFICATION_EVENTS,
   HR_DUTY_ASSIGNED: {
     type: 'HR_DUTY_ASSIGNED', mandatory: true,
     titleTemplate: 'وظیفه جدید', messageTemplate: 'یک وظیفه جدید در فضای کاری شما آماده رسیدگی است.',

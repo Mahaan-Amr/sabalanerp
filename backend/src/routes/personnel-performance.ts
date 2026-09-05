@@ -1,4 +1,11 @@
 import { assessPerformanceEvaluationRetention } from '../services/personnelPerformanceRetentionStore';
+import {
+  activatePerformanceCohort,
+  decidePerformanceRollout,
+  proposePerformanceCohort,
+  recordPerformanceTrainingEvidence,
+  resumePersonnelPerformance,
+} from '../services/personnelPerformanceRolloutStore';
 import { placePerformanceLegalHold, decidePerformanceLegalHold, listPerformanceLegalHolds } from '../services/personnelPerformanceLegalHoldStore';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../services/personnelPerformanceOperationsStore';
 import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue } from '../services/personnelPerformancePrivacyStore';
@@ -648,6 +655,41 @@ router.post('/operations/pause', requireHrAuthorization({ actionPermissionCodes:
 router.post('/operations/disable', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, phase: await disablePersonnelPerformanceBeforeFirstWrite(prisma, { actorUserId: req.user!.id, reason: req.body.reason }) }); }
   catch (error) { return next(error); }
+});
+router.post('/operations/training-evidence', async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evidence: await recordPerformanceTrainingEvidence(prisma, {
+    actorUserId: req.user!.id, subjectId: req.body.subjectId, curriculumHash: req.body.curriculumHash,
+    evidenceHash: req.body.evidenceHash, completedAt: new Date(req.body.completedAt), validUntil: new Date(req.body.validUntil),
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/cohorts', async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, cohort: await proposePerformanceCohort(prisma, {
+    actorUserId: req.user!.id, cohortKey: req.body.cohortKey, stage: req.body.stage, subjectIds: req.body.subjectIds,
+    readinessHash: req.body.readinessHash, reason: req.body.reason,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/cohorts/:cohortVersionId/decisions', async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, decision: await decidePerformanceRollout(prisma, {
+    actorUserId: req.user!.id, scopeType: 'COHORT', scopeId: req.params.cohortVersionId, ownerType: req.body.ownerType,
+    action: req.body.action, reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/cohorts/:cohortVersionId/activate', async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, cohort: await activatePerformanceCohort(prisma, {
+    actorUserId: req.user!.id, cohortVersionId: req.params.cohortVersionId,
+    effectiveFrom: new Date(req.body.effectiveFrom), reason: req.body.reason,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/pauses/:pauseId/decisions', async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, decision: await decidePerformanceRollout(prisma, {
+    actorUserId: req.user!.id, scopeType: 'SAFETY_PAUSE', scopeId: req.params.pauseId, ownerType: req.body.ownerType,
+    action: 'APPROVE_RESUME', reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/pauses/:pauseId/resume', async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, pause: await resumePersonnelPerformance(prisma, {
+    actorUserId: req.user!.id, pauseId: req.params.pauseId, reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash,
+  }) }); } catch (error) { return next(error); }
 });
 
 router.post('/retention/evaluations/:evaluationId/assess', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {

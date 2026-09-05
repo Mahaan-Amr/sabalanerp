@@ -64,7 +64,10 @@ export const latestPolicy = async (
 
   return database.notificationPolicyVersion.upsert({
     where: {
-      eventType_version: { eventType: type, version: 1 },
+      eventType_version: {
+        eventType: type,
+        version: 1,
+      },
     },
     update: {},
     create: {

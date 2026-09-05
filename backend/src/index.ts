@@ -486,8 +486,8 @@ initializeSystemRecovery(prisma).then(async () => {
     startSupportTicketMaintenance(prisma);
     startDispatchBuyerSmsDelivery(prisma);
     startCrossWorkspaceDutyDeadlineMaintenance(prisma);
-    startPartnerInquiryNotificationDelivery(prisma);
     startPersonnelPerformanceMaintenance(prisma);
+    startPartnerInquiryNotificationDelivery(prisma);
   }
   server.listen(PORT, () => {
     console.log(`? Server running on port ${PORT}`);

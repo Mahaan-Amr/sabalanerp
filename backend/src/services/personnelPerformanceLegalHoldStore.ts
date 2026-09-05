@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
 import { canonicalPerformanceHash } from './personnelPerformancePolicy';
+import { publishNotificationEvent } from './notificationService';
 
 type Client = PrismaClient | Prisma.TransactionClient;
 const scopes: Record<string, string> = {
@@ -20,6 +21,15 @@ const authorize = async (tx: Prisma.TransactionClient, actorUserId: string, perm
   const permissions = await activeHrActionPermissionsForUser(tx, actorUserId);
   if (!permissions.includes(permission) || typeof reasonCode !== 'string' || !/^[A-Z][A-Z0-9_]{2,79}$/.test(reasonCode)) throw unavailable();
   return canonicalPerformanceHash({ actorUserId, permission, effectivePermissions: permissions.sort(), resolvedAt: new Date().toISOString() });
+};
+const subjectUserForHold = async (tx: Prisma.TransactionClient, aggregateType: string, aggregateId: string) => {
+  const evaluationId = aggregateType === 'EVALUATION' ? aggregateId
+    : aggregateType === 'EVALUATION_SECTION' ? (await tx.performanceEvaluationSection.findUnique({ where: { id: aggregateId }, select: { evaluationId: true } }))?.evaluationId
+      : null;
+  const subjectId = aggregateType === 'PERFORMANCE_SUBJECT' ? aggregateId
+    : evaluationId ? (await tx.performanceEvaluation.findUnique({ where: { id: evaluationId }, select: { subjectId: true } }))?.subjectId : null;
+  const personnelId = subjectId ? (await tx.performanceSubject.findUnique({ where: { id: subjectId }, select: { personnelId: true } }))?.personnelId : null;
+  return personnelId ? tx.user.findFirst({ where: { personnelId, isActive: true }, select: { id: true } }) : null;
 };
 export const placePerformanceLegalHold = async (client: Client, input: {
   actorUserId: string; aggregateType: string; aggregateId: string; reasonCode: string;
@@ -41,6 +51,11 @@ export const placePerformanceLegalHold = async (client: Client, input: {
     eventType: 'LEGAL_HOLD_PLACED', actorUserId: input.actorUserId, reason: input.reasonCode, authorityHash,
     eventHash: canonicalPerformanceHash({ id, holdId: hold.id, version: hold.version, scopeHash: hold.aggregateIdHash }),
   } });
+  const subjectUser = await subjectUserForHold(tx, input.aggregateType, input.aggregateId);
+  if (subjectUser) await publishNotificationEvent(tx, { type: 'PERFORMANCE_LEGAL_HOLD_NOTICE',
+    deduplicationKey: `performance-legal-hold:${hold.id}:placed`, recipientIds: [subjectUser.id], recipientGroups: { DIRECT_USER: [subjectUser.id] },
+    resourceType: 'PERFORMANCE_LEGAL_HOLD', resourceId: hold.id,
+    actionUrl: '/dashboard/hr/personnel/performance', payload: {} });
   return hold;
 });
 
@@ -62,7 +77,13 @@ export const decidePerformanceLegalHold = async (client: Client, input: {
     const approvals = await tx.performanceLegalHoldDecision.findMany({ where: { holdId: hold.id, action: 'APPROVE_RELEASE', reasonCode: input.reasonCode, decidedAt: { gte: new Date(Date.now() - 86_400_000) } } });
     const stillAuthorized = await Promise.all(approvals.map(async (approval) => (await activeHrActionPermissionsForUser(tx, approval.actorUserId)).includes(permission)));
     if (new Set(approvals.filter((_approval, index) => stillAuthorized[index]).map(({ actorUserId }) => actorUserId)).size >= 2) {
-      return tx.performanceLegalHold.update({ where: { id: hold.id }, data: { status: 'RELEASED', releasedByUserId: input.actorUserId, releasedAt: new Date(), releaseReason: input.reasonCode } });
+      const released = await tx.performanceLegalHold.update({ where: { id: hold.id }, data: { status: 'RELEASED', releasedByUserId: input.actorUserId, releasedAt: new Date(), releaseReason: input.reasonCode } });
+      const subjectUser = await subjectUserForHold(tx, hold.aggregateType, hold.aggregateId);
+      if (subjectUser) await publishNotificationEvent(tx, { type: 'PERFORMANCE_LEGAL_HOLD_NOTICE',
+        deduplicationKey: `performance-legal-hold:${hold.id}:released`, recipientIds: [subjectUser.id], recipientGroups: { DIRECT_USER: [subjectUser.id] },
+        resourceType: 'PERFORMANCE_LEGAL_HOLD', resourceId: hold.id,
+        actionUrl: '/dashboard/hr/personnel/performance', payload: {} });
+      return released;
     }
   }
   return hold;

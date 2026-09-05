@@ -9,10 +9,11 @@ Partner profile, enroll a cohort, resume Partner mutations, or open traffic.
 
 ## Current adjudication
 
-Candidate `377872469f9049c66b72e17ba49412816e56a5ae` is **NO_GO**. The candidate
+Candidate `8631dcc9a8060300b279dbebc996cd2cc40568eb` is **NO_GO**. The candidate
 identity and every readiness/approval slot are recorded in
-`candidate-37787246.json`. The earlier `candidate-3d4a487e.json` adjudication is
-retained unchanged as history. Activation remains closed because:
+`candidate-8631dcc9.json`. The earlier `candidate-3d4a487e.json` and
+`candidate-37787246.json` adjudications are retained unchanged as history.
+Activation remains closed because:
 
 - the candidate contains 224 migrations while the local runtime used for current
   verification reports 245 applied migrations, so its database evidence is not
@@ -30,7 +31,7 @@ retained unchanged as history. Activation remains closed because:
 
 Issue #364 is closed with zero production audit findings and candidate-bound
 dependency compatibility evidence. Proportionate Partner regression evidence is
-recorded in `verification-2026-09-05-candidate-37787246.md`; it does not replace
+recorded in `verification-2026-09-05-candidate-8631dcc9.md`; it does not replace
 the missing independent release claims. A different application
 commit, tree, interface version, schema identity, or migration set is a new
 candidate and requires impact analysis plus proportionate retest before sign-off.
@@ -47,9 +48,9 @@ Run the validator against independently supplied expected identity values:
 
 ```powershell
 node docs/qa/partner-sales/release/release-package.mjs `
-  docs/qa/partner-sales/release/candidate-37787246.json `
-  --expected-commit=377872469f9049c66b72e17ba49412816e56a5ae `
-  --expected-tree=61ec7de69e57f7b93b70f6019a1c3df03dc64f50 `
+  docs/qa/partner-sales/release/candidate-8631dcc9.json `
+  --expected-commit=8631dcc9a8060300b279dbebc996cd2cc40568eb `
+  --expected-tree=199ce8ee065cd2a037e21ce9859f2d21d07419c2 `
   --expected-schema=partner-schema-v1 `
   --trusted-claims=<outside-repository-trusted-claims.json> `
   --now=<trusted-current-ISO-time>

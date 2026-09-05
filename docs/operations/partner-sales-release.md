@@ -29,8 +29,8 @@ that publishes this runbook. Record all of the following before rehearsal:
 - release-specific deployment/checkpoint format versions.
 
 The current adjudication freezes application commit
-`377872469f9049c66b72e17ba49412816e56a5ae`, tree
-`61ec7de69e57f7b93b70f6019a1c3df03dc64f50`, contract `1.9.0`, wire schema `1`,
+`8631dcc9a8060300b279dbebc996cd2cc40568eb`, tree
+`199ce8ee065cd2a037e21ce9859f2d21d07419c2`, contract `1.9.0`, wire schema `1`,
 schema `partner-schema-v1`, and 224 migrations with the reproducible
 `sabalan-prisma-migration-set/v1` SHA-256
 `9c485fda637a76ed9a587e9f3719384989e6bbf721ac9799728b3fe1bd428f40`.

@@ -1,0 +1,230 @@
+{
+  "format": "sabalan-partner-release-package",
+  "version": 1,
+  "candidate": {
+    "releaseId": "partner-release-8631dcc9",
+    "commit": "8631dcc9a8060300b279dbebc996cd2cc40568eb",
+    "tree": "199ce8ee065cd2a037e21ce9859f2d21d07419c2",
+    "qaIssue": 336,
+    "qaRunId": "partner-qa-c015f20b-992c-4f5a-bb37-6dca14fea2ad",
+    "interfacePackage": "@sabalanerp/partner-sales-contracts",
+    "interfaceVersion": "1.9.0",
+    "wireSchemaVersion": 1,
+    "schemaId": "partner-schema-v1",
+    "migrationCount": 224,
+    "migrationSetSha256": "9c485fda637a76ed9a587e9f3719384989e6bbf721ac9799728b3fe1bd428f40",
+    "releaseSet": {
+      "backend": null,
+      "frontend": null,
+      "inquiry": null,
+      "nginx": null,
+      "supporting": []
+    },
+    "deploymentFormat": {
+      "name": "sabalan-deployment-report",
+      "version": 1
+    },
+    "checkpointFormat": {
+      "name": "sabalan-checkpoint-manifest",
+      "version": 1
+    }
+  },
+  "evaluatedAt": "2026-09-05T09:45:06.991Z",
+  "expiresAt": "2026-09-05T10:00:06.991Z",
+  "schemaVerification": {
+    "status": "MISMATCH",
+    "repositoryMigrationCount": 224,
+    "runtimeAppliedMigrationCount": 245,
+    "repositoryMigrationSetSha256": "9c485fda637a76ed9a587e9f3719384989e6bbf721ac9799728b3fe1bd428f40",
+    "runtimeMigrationSetSha256": "6335c77e57a0f7036222ae96c627c9c5114131c7c1e40f0af7767c7da0be02f1",
+    "runtimeMigrationHash": "5ab4525575b447c9b13331a8a4ed3c71",
+    "evidence": [
+      "test-results/partner-sales/partner-qa-c015f20b-992c-4f5a-bb37-6dca14fea2ad/manifest.json",
+      "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+    ]
+  },
+  "remoteCheckpoint": {
+    "status": "MISSING"
+  },
+  "attestations": {
+    "docs/qa/dependency-advisories-364.md#verification-and-residual-risk": {
+      "source": "HASH_VERIFIED_ARTIFACT",
+      "reference": "docs/qa/dependency-advisories-364.md",
+      "digestSha256": "fe17ed357e1b6a931e88d943be0583a702f2a627258472df013bc88cd2a5187a",
+      "candidateCommit": "8631dcc9a8060300b279dbebc996cd2cc40568eb",
+      "candidateTree": "199ce8ee065cd2a037e21ce9859f2d21d07419c2",
+      "schemaId": "partner-schema-v1",
+      "checkedAt": "2026-09-05T09:45:06.991Z",
+      "expiresAt": "2026-09-05T10:00:06.991Z"
+    }
+  },
+  "gates": {
+    "exactPairConstraints": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "immutableIdentity": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "stableRowIdentity": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "centralAuthorization": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "profileActivation": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "inquiry": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "atomicCase": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "oneTimeCommitment": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "allowlistedCustomerOutput": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "partnerOnlyAccounting": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "deliveryLineage": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "retailCollections": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "correctionAndVoiding": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "reporting": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "internalSalesPreserved": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "integrationAccepted": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "combinedQaAccepted": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
+      ]
+    },
+    "recoveryDrill": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/operations/zero-data-loss-recovery-drills.md"
+      ]
+    },
+    "telemetryConnected": {
+      "status": "BLOCKED",
+      "evidence": [
+        "docs/operations/partner-sales-readiness.md#telemetry-and-detection"
+      ]
+    },
+    "noOpenReleaseDefects": {
+      "status": "PASS",
+      "evidence": [
+        "docs/qa/dependency-advisories-364.md#verification-and-residual-risk"
+      ]
+    }
+  },
+  "approvals": {
+    "RELEASE_OWNER": {
+      "status": "PENDING",
+      "actor": null,
+      "evidence": null
+    },
+    "SALES": {
+      "status": "PENDING",
+      "actor": null,
+      "evidence": null
+    },
+    "ACCOUNTING": {
+      "status": "PENDING",
+      "actor": null,
+      "evidence": null
+    },
+    "TECH_SECURITY": {
+      "status": "PENDING",
+      "actor": null,
+      "evidence": null
+    },
+    "HR": {
+      "status": "PENDING",
+      "actor": null,
+      "evidence": null
+    },
+    "LOGISTICS": {
+      "status": "PENDING",
+      "actor": null,
+      "evidence": null
+    }
+  },
+  "activation": {
+    "requested": false,
+    "trafficOpened": false,
+    "realSmsEnabled": false
+  },
+  "decision": "NO_GO",
+  "blockers": [
+    "Immutable backend, frontend, Inquiry, Nginx and supporting image digests are not recorded for the candidate release set.",
+    "The candidate contains 224 migrations while the existing local runtime reports 245 applied migrations.",
+    "Fresh independent claim-specific attestations have not been supplied for the candidate's functional readiness gates.",
+    "The exact-candidate local browser image rebuild is blocked by Docker Desktop's unavailable 127.0.0.1:1080 proxy.",
+    "No remotely read-back verified checkpoint, candidate-bound isolated recovery drill or quarterly rehearsal evidence is recorded.",
+    "Connected production telemetry has not been proven for this candidate.",
+    "All six accountable approval references are pending."
+  ]
+}

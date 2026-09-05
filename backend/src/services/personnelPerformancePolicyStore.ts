@@ -31,6 +31,7 @@ import {
   readPerformancePayload,
   type PerformanceVaultKey,
 } from './personnelPerformancePayloadStore';
+import { publishNotificationEvent } from './notificationService';
 
 export type CurrentLevelPolicyContent = {
   schemaVersion: 1;
@@ -1067,15 +1068,15 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
     } });
     if (subject.personnelId && (!previous || previous.sourceResultsHash !== sourceResultsHash)) {
       const user = await tx.user.findUnique({ where: { personnelId: subject.personnelId }, select: { id: true } });
-      if (user) await tx.notification.create({ data: {
-        userId: user.id,
+      if (user) await publishNotificationEvent(tx, {
         type: 'PERFORMANCE_SUMMARY_UPDATED',
-        title: 'خلاصه عملکرد به‌روزرسانی شد',
-        message: 'خلاصه مصوب عملکرد شما به‌روزرسانی شده و سطح جاری در سربرگ قابل مشاهده است.',
-        priority: 'NORMAL',
+        deduplicationKey: `performance-summary-updated:${subject.id}:v${projection.version}`,
+        recipientIds: [user.id], recipientGroups: { DIRECT_USER: [user.id] },
+        actorId: input.actorUserId, resourceType: 'PERFORMANCE_SUBJECT', resourceId: subject.id,
         actionUrl: '/dashboard/hr/personnel/performance',
         referenceId: `performance-projection:${subject.id}:v${projection.version}`,
-      } });
+        payload: {},
+      });
     }
   }
   return { subjectCount: subjects.length, resultHash: population.preview.resultHash };

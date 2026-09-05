@@ -17,6 +17,17 @@ const UPLOADS_DIR = path.join(RECOVERY_ROOT, 'uploads');
 const WORK_DIR = path.join(RECOVERY_ROOT, 'work');
 const INQUIRY_SOURCE_DIR = process.env.INQUIRY_RECOVERY_SOURCE_DIR || path.join(process.cwd(), 'recovery-sources', 'inquiry');
 const DISPATCH_DOCUMENT_STORAGE_DIR = path.join(process.cwd(), 'storage', 'dispatch-documents');
+const PERFORMANCE_EXPORT_STORAGE_DIR = path.join(process.cwd(), 'storage', 'performance-exports');
+
+const FILE_RECOVERY_MAPPINGS = [
+  { payloadPath: 'files/contracts', livePath: path.join(process.cwd(), 'storage', 'contracts'), safetyName: 'contracts' },
+  { payloadPath: 'files/hr-hiring', livePath: path.join(process.cwd(), 'storage', 'hr-hiring'), safetyName: 'hr-hiring' },
+  { payloadPath: 'files/accounting-contracts', livePath: path.join(process.cwd(), 'storage', 'accounting-contracts'), safetyName: 'accounting-contracts' },
+  { payloadPath: 'files/dispatch-documents', livePath: DISPATCH_DOCUMENT_STORAGE_DIR, safetyName: 'dispatch-documents' },
+  { payloadPath: 'files/support-tickets', livePath: path.join(process.cwd(), 'storage', 'support-tickets'), safetyName: 'support-tickets' },
+  { payloadPath: 'files/performance-exports', livePath: PERFORMANCE_EXPORT_STORAGE_DIR, safetyName: 'performance-exports' },
+  { payloadPath: 'files/uploads', livePath: path.join(process.cwd(), 'uploads'), safetyName: 'uploads' },
+] as const;
 
 const dispatchArtifactBackupPath = (payloadRoot: string, storageKey: string) => {
   const normalized = storageKey.replace(/\\/g, '/');
@@ -28,6 +39,24 @@ const dispatchArtifactBackupPath = (payloadRoot: string, storageKey: string) => 
   if (!candidate.startsWith(`${root}${path.sep}`)) throw Object.assign(new Error('Dispatch artifact storage key is unsafe.'), { code: 'UNSAFE_RECOVERY_PATH' });
   return candidate;
 };
+
+const performanceExportRelativePath = (artifactPath: string, storageRoot = PERFORMANCE_EXPORT_STORAGE_DIR) => {
+  const root = path.resolve(storageRoot);
+  const resolved = path.resolve(artifactPath);
+  if (!resolved.startsWith(`${root}${path.sep}`)) {
+    throw Object.assign(new Error('Performance export artifact path is outside protected storage.'), {
+      code: 'UNSAFE_RECOVERY_PATH',
+    });
+  }
+  const relative = path.relative(root, resolved);
+  if (!relative || relative.split(path.sep).includes('..')) {
+    throw Object.assign(new Error('Performance export artifact path is unsafe.'), { code: 'UNSAFE_RECOVERY_PATH' });
+  }
+  return relative;
+};
+
+const performanceExportBackupPath = (payloadRoot: string, artifactPath: string, storageRoot = PERFORMANCE_EXPORT_STORAGE_DIR) =>
+  path.join(payloadRoot, 'files', 'performance-exports', performanceExportRelativePath(artifactPath, storageRoot));
 
 export type RecoveryManifest = {
   format: 'sabalan-recovery';
@@ -364,17 +393,14 @@ export const createRecoveryPackage = async (input: {
         .filter(Boolean),
     );
     await Promise.all([
-      copyComponent(path.join(process.cwd(), 'storage', 'contracts'), path.join(payloadRoot, 'files', 'contracts'), sanitized),
-      copyComponent(path.join(process.cwd(), 'storage', 'hr-hiring'), path.join(payloadRoot, 'files', 'hr-hiring'), sanitized),
-      copyComponent(path.join(process.cwd(), 'storage', 'accounting-contracts'), path.join(payloadRoot, 'files', 'accounting-contracts'), sanitized),
-      copyComponent(DISPATCH_DOCUMENT_STORAGE_DIR, path.join(payloadRoot, 'files', 'dispatch-documents'), sanitized),
-      copyComponent(
-        path.join(process.cwd(), 'storage', 'support-tickets'),
-        path.join(payloadRoot, 'files', 'support-tickets'),
+      ...FILE_RECOVERY_MAPPINGS.map((mapping) => copyComponent(
+        mapping.livePath,
+        path.join(payloadRoot, mapping.payloadPath),
         sanitized,
-        (relative) => shouldExcludeSupportTicketCheckpointFile(relative, referencedSupportTicketStorageNames),
-      ),
-      copyComponent(path.join(process.cwd(), 'uploads'), path.join(payloadRoot, 'files', 'uploads'), sanitized),
+        mapping.safetyName === 'support-tickets'
+          ? (relative) => shouldExcludeSupportTicketCheckpointFile(relative, referencedSupportTicketStorageNames)
+          : undefined,
+      )),
       backupInquiry(path.join(payloadRoot, 'inquiry'), sanitized),
       copyComponent(
         RECOVERY_COORDINATION_DIR,
@@ -669,6 +695,26 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
       details: missing,
     });
   }
+  const readyPerformanceExports = await client.performanceExportReceipt.findMany({
+    where: { status: 'READY' },
+    select: { id: true, artifactPath: true },
+  });
+  const missingPerformanceExports: Array<{ id: string; artifactPath: string | null }> = [];
+  for (const receipt of readyPerformanceExports) {
+    if (!receipt.artifactPath) {
+      missingPerformanceExports.push(receipt);
+      continue;
+    }
+    const candidate = performanceExportBackupPath(payloadRoot, receipt.artifactPath);
+    const stat = await fs.promises.stat(candidate).catch(() => null);
+    if (!stat?.isFile()) missingPerformanceExports.push(receipt);
+  }
+  if (missingPerformanceExports.length) {
+    throw Object.assign(new Error(`Recovery package has missing performance-export artifacts (${missingPerformanceExports.length}).`), {
+      code: 'RECOVERY_PERFORMANCE_EXPORT_MISSING',
+      details: missingPerformanceExports.slice(0, 25),
+    });
+  }
   const dispatchArtifacts = await client.dispatchDocumentArtifact.findMany({ select: { id: true, storageKey: true, byteLength: true, sha256: true } });
   const missingDispatchArtifacts = dispatchArtifacts.filter(artifact => !fs.existsSync(dispatchArtifactBackupPath(payloadRoot, artifact.storageKey)));
   if (missingDispatchArtifacts.length) {
@@ -734,7 +780,27 @@ export const validateLiveStoredFileReferences = async (client: PrismaClient) => 
       details: missing,
     });
   }
-  return { checkedColumns: columns.length };
+  const readyPerformanceExports = await client.performanceExportReceipt.findMany({
+    where: { status: 'READY' },
+    select: { id: true, artifactPath: true },
+  });
+  const missingPerformanceExports: Array<{ id: string; artifactPath: string | null }> = [];
+  for (const receipt of readyPerformanceExports) {
+    if (!receipt.artifactPath) {
+      missingPerformanceExports.push(receipt);
+      continue;
+    }
+    const candidate = path.join(PERFORMANCE_EXPORT_STORAGE_DIR, performanceExportRelativePath(receipt.artifactPath));
+    const stat = await fs.promises.stat(candidate).catch(() => null);
+    if (!stat?.isFile()) missingPerformanceExports.push(receipt);
+  }
+  if (missingPerformanceExports.length) {
+    throw Object.assign(new Error(`Live storage has missing performance-export artifacts (${missingPerformanceExports.length}).`), {
+      code: 'DEPLOYMENT_PERFORMANCE_EXPORT_MISSING',
+      details: missingPerformanceExports.slice(0, 25),
+    });
+  }
+  return { checkedColumns: columns.length, readyPerformanceExports: readyPerformanceExports.length };
 };
 
 export const stageAndPromoteRecovery = async (input: {
@@ -814,12 +880,7 @@ export const stageAndPromoteRecovery = async (input: {
     await input.onProgress(50);
     await pauseInquiryForRecovery(input.operationId);
     const mappings = [
-      ['files/contracts', path.join(process.cwd(), 'storage', 'contracts'), 'contracts'],
-      ['files/hr-hiring', path.join(process.cwd(), 'storage', 'hr-hiring'), 'hr-hiring'],
-      ['files/accounting-contracts', path.join(process.cwd(), 'storage', 'accounting-contracts'), 'accounting-contracts'],
-      ['files/dispatch-documents', DISPATCH_DOCUMENT_STORAGE_DIR, 'dispatch-documents'],
-      ['files/support-tickets', path.join(process.cwd(), 'storage', 'support-tickets'), 'support-tickets'],
-      ['files/uploads', path.join(process.cwd(), 'uploads'), 'uploads'],
+      ...FILE_RECOVERY_MAPPINGS.map(({ payloadPath, livePath, safetyName }) => [payloadPath, livePath, safetyName] as const),
       ['inquiry', INQUIRY_SOURCE_DIR, 'inquiry'],
     ] as const;
     for (const [relativeSource, destination, safetyName] of mappings) {
@@ -863,12 +924,7 @@ export const stageAndPromoteRecovery = async (input: {
     }
     if (fs.existsSync(safetyFilesRoot)) {
       const mappings = [
-        ['contracts', path.join(process.cwd(), 'storage', 'contracts')],
-        ['hr-hiring', path.join(process.cwd(), 'storage', 'hr-hiring')],
-        ['accounting-contracts', path.join(process.cwd(), 'storage', 'accounting-contracts')],
-        ['dispatch-documents', DISPATCH_DOCUMENT_STORAGE_DIR],
-        ['support-tickets', path.join(process.cwd(), 'storage', 'support-tickets')],
-        ['uploads', path.join(process.cwd(), 'uploads')],
+        ...FILE_RECOVERY_MAPPINGS.map(({ safetyName, livePath }) => [safetyName, livePath] as const),
         ['inquiry', INQUIRY_SOURCE_DIR],
       ] as const;
       for (const [safetyName, destination] of mappings) {
@@ -970,12 +1026,7 @@ export const isSanitizedRecoveryEnvironment = () => fs.existsSync(SANITIZED_MARK
 
 export const rollbackInterruptedRecovery = async (journal: RestoreJournal) => {
   const mappings = [
-    ['contracts', path.join(process.cwd(), 'storage', 'contracts')],
-    ['hr-hiring', path.join(process.cwd(), 'storage', 'hr-hiring')],
-    ['accounting-contracts', path.join(process.cwd(), 'storage', 'accounting-contracts')],
-    ['dispatch-documents', DISPATCH_DOCUMENT_STORAGE_DIR],
-    ['support-tickets', path.join(process.cwd(), 'storage', 'support-tickets')],
-    ['uploads', path.join(process.cwd(), 'uploads')],
+    ...FILE_RECOVERY_MAPPINGS.map(({ safetyName, livePath }) => [safetyName, livePath] as const),
     ['inquiry', INQUIRY_SOURCE_DIR],
   ] as const;
   for (const [safetyName, destination] of mappings) {
@@ -997,6 +1048,9 @@ export const recoveryEngineInternals = {
   safeDatabaseName,
   dispatchArtifactBackupPath,
   dispatchDocumentStorageDirectory: DISPATCH_DOCUMENT_STORAGE_DIR,
+  performanceExportBackupPath,
+  performanceExportStorageDirectory: PERFORMANCE_EXPORT_STORAGE_DIR,
+  fileRecoveryMappings: FILE_RECOVERY_MAPPINGS,
   validateStoredFileReferences,
   liveStoredFileReferenceCandidates,
   shouldExcludeSupportTicketCheckpointFile,

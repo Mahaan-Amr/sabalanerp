@@ -5,9 +5,16 @@ test('anonymous Sales deep-link returns to a usable Persian login @internal-entr
   const unexpected: string[] = [];
   const knownLegacy: string[] = [];
   const expectedAnonymousRejections = ['/api/auth/me', '/api/dashboard/profile', '/api/dashboard/route-availability'];
+  const nextDevelopmentStackFramePath = '/__nextjs_original-stack-frames';
+  const nextDevelopmentFontPath = '/__nextjs_font/geist-latin.woff2';
   await context.route('**/*', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.origin === 'http://127.0.0.1:3000'
+      && request.method() === 'POST'
+      && url.pathname === nextDevelopmentStackFramePath) {
+      return route.continue();
+    }
     if (url.origin !== 'http://127.0.0.1:3000' || !['GET', 'HEAD'].includes(request.method())) {
       unexpected.push(`${request.method()} ${url.origin}${url.pathname}`);
       return route.abort('blockedbyclient');
@@ -17,6 +24,11 @@ test('anonymous Sales deep-link returns to a usable Persian login @internal-entr
   page.on('pageerror', () => unexpected.push('uncaught page error'));
   page.on('requestfailed', (request) => {
     const pathname = new URL(request.url()).pathname;
+    if (pathname === nextDevelopmentStackFramePath) return;
+    if (pathname === nextDevelopmentFontPath) {
+      knownLegacy.push('Next.js development font request was cancelled during the initial redirect');
+      return;
+    }
     if (pathname === '/brand/logo-project.png' && request.failure()?.errorText === 'net::ERR_ABORTED') return;
     if (request.isNavigationRequest() && pathname === '/dashboard/sales/contracts/create' && request.failure()?.errorText === 'net::ERR_ABORTED') return;
     if (pathname === '/login' && request.failure()?.errorText === 'net::ERR_ABORTED'
@@ -30,6 +42,7 @@ test('anonymous Sales deep-link returns to a usable Persian login @internal-entr
     if (message.type() !== 'error') return;
     const location = message.location().url;
     const pathname = location ? new URL(location).pathname : '(unknown)';
+    if (pathname === nextDevelopmentStackFramePath) return;
     if (expectedAnonymousRejections.includes(pathname) && /status of 401/.test(message.text())) return;
     if (message.text().startsWith('Auth check error: AxiosError: Request failed with status code 401')) return;
     if (message.text().startsWith('Failed to fetch RSC payload for http://127.0.0.1:3000/login. Falling back to browser navigation.')) {
@@ -40,8 +53,10 @@ test('anonymous Sales deep-link returns to a usable Persian login @internal-entr
     unexpected.push(`console error ${pathname}`);
   });
   page.on('response', (response) => {
-    if (response.status() >= 400 && !(response.status() === 401 && expectedAnonymousRejections.includes(new URL(response.url()).pathname))) {
-      unexpected.push(`HTTP ${response.status()} ${new URL(response.url()).pathname}`);
+    const pathname = new URL(response.url()).pathname;
+    if (pathname === nextDevelopmentStackFramePath) return;
+    if (response.status() >= 400 && !(response.status() === 401 && expectedAnonymousRejections.includes(pathname))) {
+      unexpected.push(`HTTP ${response.status()} ${pathname}`);
     }
   });
   await page.addInitScript((theme) => localStorage.setItem('theme', theme), testInfo.project.use.colorScheme || 'light');

@@ -29,6 +29,7 @@ import {
   type PerformanceVaultKey,
 } from './personnelPerformancePayloadStore';
 import { runPerformanceSerializableTransaction } from './personnelPerformancePolicyStore';
+import { publishNotificationEvent } from './notificationService';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 
 const disclosureError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
@@ -1182,14 +1183,15 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
       aggregateType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', aggregateId: handoff.id, eventType: 'CONSEQUENCE_HANDOFF_CREATED',
       actorUserId: input.actorUserId, authorityCodes: ['CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF'], evidenceHash: encrypted.contentHash,
     });
-    await tx.notification.create({ data: {
-      userId: destination.assignedUserId,
+    await publishNotificationEvent(tx, {
       type: 'PERFORMANCE_CONSEQUENCE_REVIEW_REQUIRED',
-      title: 'ارجاع عملکرد نیازمند بازبینی است',
-      message: 'یک بسته محرمانه عملکرد در صف مسئولیت شما نیازمند بازبینی مستقل است.',
-      priority: 'HIGH', actionUrl: `/dashboard/hr/personnel/performance/insights?handoffId=${encodeURIComponent(handoff.id)}`,
+      deduplicationKey: `performance-consequence-review-required:${handoff.id}:sent`,
+      recipientIds: [destination.assignedUserId], recipientGroups: { DIRECT_USER: [destination.assignedUserId] },
+      actorId: input.actorUserId, resourceType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', resourceId: handoff.id,
+      actionUrl: `/dashboard/hr/personnel/performance/insights?handoffId=${encodeURIComponent(handoff.id)}`,
       referenceId: `performance-consequence:${handoff.id}`,
-    } });
+      payload: { statusMessage: 'یک بسته محرمانه عملکرد در صف مسئولیت شما نیازمند بازبینی مستقل است.' },
+    });
     const { encryptedPayloadId: _payloadId, ...publicHandoff } = handoff;
     return publicHandoff;
   });
@@ -1306,11 +1308,15 @@ export const suspendPerformanceHandoffsForResult = async (tx: Prisma.Transaction
       evidenceHash: canonicalPerformanceHash({ resultId: input.resultId, reasonCode: input.reasonCode }),
     });
     const recipientIds = [...new Set([handoff.createdByUserId, packageRecord?.assignedDestinationUserId].filter((id): id is string => Boolean(id)))];
-    for (const userId of recipientIds) await tx.notification.create({ data: {
-      userId, type: 'PERFORMANCE_CONSEQUENCE_REVIEW_REQUIRED', title: 'ارجاع عملکرد معلق شد',
-      message: 'اعتبار یکی از نتیجه‌های مبنا تغییر کرده و ارجاع برای بازبینی مستقل معلق شده است.', priority: 'HIGH',
-      actionUrl: '/dashboard/hr/personnel/performance/insights', referenceId: `performance-consequence-review:${handoff.id}:${input.resultId}`,
-    } });
+    await publishNotificationEvent(tx, {
+      type: 'PERFORMANCE_CONSEQUENCE_REVIEW_REQUIRED',
+      deduplicationKey: `performance-consequence-review-required:${handoff.id}:suspended:${input.resultId}`,
+      recipientIds, recipientGroups: { DIRECT_USER: recipientIds }, actorId: input.actorUserId,
+      resourceType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', resourceId: handoff.id,
+      actionUrl: '/dashboard/hr/personnel/performance/insights',
+      referenceId: `performance-consequence-review:${handoff.id}:${input.resultId}`,
+      payload: { statusMessage: 'اعتبار یکی از نتیجه‌های مبنا تغییر کرده و ارجاع برای بازبینی مستقل معلق شده است.' },
+    });
   }
   return suspended;
 };

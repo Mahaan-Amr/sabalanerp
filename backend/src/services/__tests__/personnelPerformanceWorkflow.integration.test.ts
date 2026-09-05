@@ -4,6 +4,7 @@ import path from 'node:path';
 import { PerformanceReviewDecision } from '@prisma/client';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 import { reconstructPerformanceReadiness, retryFailedPerformanceReadinessRecords } from '../personnelPerformanceReadinessStore';
+import { filterCurrentlyAuthorizedNotifications } from '../notificationAuthorization';
 import { DEFAULT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicy';
 import {
   activateDuePerformanceArtifacts,
@@ -46,10 +47,14 @@ const main = async () => {
       first.personnel.create({ data: { firstName: 'بررسی‌کننده', lastName: `یک ${suffix}` } }),
       first.personnel.create({ data: { firstName: 'بررسی‌کننده', lastName: `دو ${suffix}` } }),
     ]);
-    const [supervisorUser, firstReviewer, secondReviewer] = await Promise.all([
+    const [supervisorUser, targetUser, firstReviewer, secondReviewer] = await Promise.all([
       first.user.create({ data: {
         email: `performance-supervisor-${suffix}@example.invalid`, username: `performance_supervisor_${suffix}`,
         password: 'not-used', firstName: 'سرپرست', lastName: 'آزمون', personnelId: supervisorPersonnel.id,
+      } }),
+      first.user.create({ data: {
+        email: `performance-target-${suffix}@example.invalid`, username: `performance_target_${suffix}`,
+        password: 'not-used', firstName: 'پرسنل', lastName: 'آزمون', personnelId: targetPersonnel.id,
       } }),
       first.user.create({ data: {
         email: `performance-reviewer-a-${suffix}@example.invalid`, username: `performance_reviewer_a_${suffix}`,
@@ -220,6 +225,16 @@ const main = async () => {
       sectionId: section.id, userId: supervisorUser.id, idempotencyKey: `submit-${suffix}`, keyring,
     });
     const submissionId = String((submitted.submission as { id: unknown }).id);
+    const reviewNotification = await first.notification.findFirstOrThrow({
+      where: { userId: firstReviewer.id, type: 'PERFORMANCE_REVIEW_READY' },
+      include: { event: true },
+    });
+    assert.equal(firstReviewer.role, 'USER');
+    assert.equal(
+      (await filterCurrentlyAuthorizedNotifications(first, firstReviewer, [reviewNotification])).length,
+      1,
+      'an independently authorized non-admin reviewer must see the direct task without a broad HR workspace grant',
+    );
     const replayedSubmission = await submitSupervisorPerformanceSection(first, {
       sectionId: section.id, userId: supervisorUser.id, idempotencyKey: `submit-${suffix}`, keyring,
     });
@@ -299,7 +314,16 @@ const main = async () => {
     const acceptedResult = await first.performanceAcceptedResult.findUniqueOrThrow({ where: { id: acceptedEvaluation.acceptedResultId! } });
     assert.equal((await first.performanceEvaluationSection.findUniqueOrThrow({ where: { id: reasonedNotEvaluableSection.id } })).status, 'NOT_EVALUABLE');
     assert.ok(await first.performanceCalculationTrace.findUnique({ where: { id: acceptedResult.calculationTraceId } }));
-    assert.ok(await first.performanceCurrentLevelProjection.findUnique({ where: { subjectId: acceptedEvaluation.subjectId } }));
+    const currentProjection = await first.performanceCurrentLevelProjection.findUniqueOrThrow({
+      where: { subjectId: acceptedEvaluation.subjectId },
+    });
+    const summaryEvent = await first.notificationEvent.findUnique({
+      where: { deduplicationKey: `performance-summary-updated:${acceptedEvaluation.subjectId}:v${currentProjection.version}` },
+      include: { outbox: true, notifications: true },
+    });
+    assert.ok(summaryEvent, 'summary changes must create a canonical notification event');
+    assert.ok(summaryEvent.outbox, 'summary changes must enter the delivery outbox');
+    assert.ok(summaryEvent.notifications.some((notification) => notification.userId === targetUser.id));
 
     assert.equal((await listPerformanceLifecycleSections(first, { actorUserId: secondReviewer.id })).length, 0, 'review-only access must not discover accepted or unsubmitted lifecycle rows');
     const pausableRows = await listPerformanceLifecycleSections(first, { actorUserId: firstReviewer.id });

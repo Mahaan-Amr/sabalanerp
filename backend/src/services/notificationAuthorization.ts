@@ -3,6 +3,7 @@ import { FEATURES, getUserFeatures } from '../middleware/feature';
 import { getUserWorkspaces } from '../middleware/workspace';
 import { canAccessTicket } from './supportTicketPolicy';
 import { canReadPartnerNotification, PARTNER_NOTIFICATION_RESOURCE } from './partnerSales/notifications/access';
+import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
 
 export type NotificationAuthorizationUser = {
   id: string;
@@ -54,6 +55,69 @@ type AuthorizedSupportTicket = {
   participants: Array<{ userId: string; role: string }>;
 };
 
+const PERFORMANCE_NOTIFICATION_TYPES = new Set([
+  'PERFORMANCE_SUPERVISOR_TASK',
+  'PERFORMANCE_REVIEW_READY',
+  'PERFORMANCE_SUBMISSION_DECIDED',
+  'PERFORMANCE_REMINDER',
+  'PERFORMANCE_CONSEQUENCE_REVIEW_REQUIRED',
+  'PERFORMANCE_SUMMARY_UPDATED',
+]);
+type PerformanceNotificationContext = {
+  personnelId: string | null;
+  permissions: Set<string>;
+};
+
+const canAccessPerformanceNotification = async (
+  database: PrismaClient,
+  userId: string,
+  row: NotificationWithAuthorizationEvent,
+  contextPromise: Promise<PerformanceNotificationContext | null>,
+) => {
+  if (!row.type || !PERFORMANCE_NOTIFICATION_TYPES.has(row.type) || !row.event) return null;
+  const context = await contextPromise;
+  if (!context) return false;
+  const { personnelId, permissions } = context;
+  const { resourceType, resourceId } = row.event;
+  if (row.type === 'PERFORMANCE_REVIEW_READY') {
+    return permissions.has('REVIEW_PERFORMANCE_EVALUATION');
+  }
+  if (row.type === 'PERFORMANCE_SUMMARY_UPDATED') {
+    if (resourceType !== 'PERFORMANCE_SUBJECT' || !resourceId || !personnelId) return false;
+    const subject = await database.performanceSubject.findUnique({ where: { id: resourceId }, select: { personnelId: true } });
+    return subject?.personnelId === personnelId;
+  }
+  if (row.type === 'PERFORMANCE_CONSEQUENCE_REVIEW_REQUIRED') {
+    if (resourceType !== 'PERFORMANCE_CONSEQUENCE_HANDOFF' || !resourceId) return false;
+    const handoff = await database.performanceConsequenceHandoff.findUnique({
+      where: { id: resourceId }, select: { createdByUserId: true, packageId: true },
+    });
+    if (!handoff) return false;
+    if (handoff.createdByUserId === userId && permissions.has('CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF')) return true;
+    if (!handoff.packageId || !permissions.has('VIEW_ASSIGNED_PERFORMANCE_CONSEQUENCE_HANDOFF')) return false;
+    const packageRecord = await database.performanceConsequencePackage.findUnique({
+      where: { id: handoff.packageId }, select: { assignedDestinationUserId: true },
+    });
+    return packageRecord?.assignedDestinationUserId === userId;
+  }
+  if (resourceType === 'PERFORMANCE_SUBMISSION' && resourceId) {
+    const submission = await database.performanceSubmission.findUnique({
+      where: { id: resourceId }, select: { supervisorUserId: true },
+    });
+    if (row.type === 'PERFORMANCE_SUBMISSION_DECIDED') return submission?.supervisorUserId === userId;
+    return permissions.has('REVIEW_PERFORMANCE_EVALUATION');
+  }
+  if (resourceType === 'PERFORMANCE_EVALUATION_SECTION' && resourceId) {
+    const section = await database.performanceEvaluationSection.findUnique({
+      where: { id: resourceId }, select: { responsibleSupervisorPersonnelId: true },
+    });
+    const ownsSection = Boolean(personnelId && section?.responsibleSupervisorPersonnelId === personnelId);
+    if (row.type === 'PERFORMANCE_SUPERVISOR_TASK' || row.type === 'PERFORMANCE_SUBMISSION_DECIDED') return ownsSection;
+    return ownsSection || permissions.has('REVIEW_PERFORMANCE_EVALUATION') || permissions.has('MANAGE_PERFORMANCE_CYCLE');
+  }
+  return row.type === 'PERFORMANCE_REMINDER' && permissions.has('MANAGE_PERFORMANCE_CYCLE');
+};
+
 export const filterCurrentlyAuthorizedNotifications = async <
   T extends NotificationWithAuthorizationEvent,
 >(
@@ -89,6 +153,20 @@ export const filterCurrentlyAuthorizedNotifications = async <
   const crossWorkspaceDutyIds = [...new Set(rows
     .filter((row) => row.event?.resourceType === 'HR_DUTY' && row.event.resourceId)
     .map((row) => row.event!.resourceId!))];
+  const hasPerformanceNotifications = rows.some((row) => row.type && PERFORMANCE_NOTIFICATION_TYPES.has(row.type));
+  const performanceContext: Promise<PerformanceNotificationContext | null> = hasPerformanceNotifications
+    ? Promise.all([
+        database.user.findUnique({ where: { id: user.id }, select: { personnelId: true } }),
+        activeHrActionPermissionsForUser(database, user.id),
+      ]).then(([currentUser, permissions]) => currentUser
+        ? { personnelId: currentUser.personnelId, permissions: new Set(permissions) }
+        : null)
+    : Promise.resolve(null);
+  const performanceAccess = new Map<string, boolean>();
+  await Promise.all(rows.map(async (row) => {
+    const allowed = await canAccessPerformanceNotification(database, user.id, row, performanceContext);
+    if (allowed !== null) performanceAccess.set(row.id, allowed);
+  }));
   const [tickets, designatedIncidentHandler, hrDuties] = await Promise.all([
     supportTicketIds.length
       ? database.supportTicket.findMany({
@@ -143,6 +221,7 @@ export const filterCurrentlyAuthorizedNotifications = async <
   return rows.filter((row) => {
     const event = row.event;
     if (event?.resourceType === PARTNER_NOTIFICATION_RESOURCE) return partnerAllowed.has(row.id);
+    if (performanceAccess.has(row.id)) return performanceAccess.get(row.id) === true;
     if (!event) return true;
     if (event.resourceType === 'support-ticket' && event.resourceId) {
       const ticket = ticketById.get(event.resourceId);

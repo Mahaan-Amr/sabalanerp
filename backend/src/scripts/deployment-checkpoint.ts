@@ -62,6 +62,7 @@ const main = async () => {
     directorySize(path.join(process.cwd(), 'storage', 'hr-hiring')),
     directorySize(path.join(process.cwd(), 'storage', 'accounting-contracts')),
     directorySize(path.join(process.cwd(), 'storage', 'support-tickets')),
+    directorySize(path.join(process.cwd(), 'storage', 'performance-exports')),
     directorySize(path.join(process.cwd(), 'uploads')),
     directorySize(process.env.INQUIRY_RECOVERY_SOURCE_DIR || path.join(process.cwd(), 'recovery-sources', 'inquiry')),
     directorySize(RECOVERY_COORDINATION_DIR),

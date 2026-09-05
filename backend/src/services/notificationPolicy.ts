@@ -82,6 +82,21 @@ const REGISTERED_NOTIFICATION_EVENTS = {
     allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
     allowedRecipientResolvers: ['DIRECT_USER'],
   },
+  PERFORMANCE_CONSEQUENCE_REVIEW_REQUIRED: {
+    type: 'PERFORMANCE_CONSEQUENCE_REVIEW_REQUIRED', mandatory: true,
+    titleTemplate: 'ارجاع عملکرد نیازمند بازبینی است', messageTemplate: '{{statusMessage}}',
+    priority: 'HIGH', allowedVariables: ['statusMessage'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  PERFORMANCE_SUMMARY_UPDATED: {
+    type: 'PERFORMANCE_SUMMARY_UPDATED', mandatory: true,
+    titleTemplate: 'خلاصه عملکرد به‌روزرسانی شد',
+    messageTemplate: 'خلاصه مصوب عملکرد شما به‌روزرسانی شده و سطح جاری در سربرگ قابل مشاهده است.',
+    priority: 'NORMAL', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
   ...PARTNER_NOTIFICATION_EVENTS,
   HR_DUTY_ASSIGNED: {
     type: 'HR_DUTY_ASSIGNED', mandatory: true,

@@ -113,6 +113,7 @@ services:
       HR_REDESIGN_CUTOVER_ENABLED: ${HR_REDESIGN_CUTOVER_ENABLED:-false}
       HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH: ${HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH:-}
       HR_REDESIGN_CUTOVER_REVISION: ${HR_REDESIGN_CUTOVER_REVISION:-}
+      CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: ${CUSTOMER_SHIPMENT_STATEMENTS_ENABLED:-false}
     volumes:
       - backend_storage_contracts:/app/storage/contracts
       - backend_storage_hr_hiring:/app/storage/hr-hiring

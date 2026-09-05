@@ -16,6 +16,7 @@ import {
   type CutoverEvidence,
 } from '../src/services/shipmentStatementCutover';
 import { PrismaShipmentStatementCutoverRepository } from '../src/services/shipmentStatementCutover/prismaRepository';
+import { assertProtectedProductionCutoverBoundary } from '../src/services/shipmentStatementCutover/productionBoundary';
 import { buildLegacyPricingManifest, loadLegacyPricingCandidates } from '../src/services/legacyApprovedPricing';
 
 const usage = 'Usage: shipment-statement-cutover.ts manifest --evidence <json> --artifacts <dir> --out <json> | activate --manifest <json> --receipt <json>';
@@ -92,6 +93,13 @@ const writeReceipt = async (destination: string, receipt: Record<string, unknown
 };
 
 const run = async () => {
+  const sourceCommit = process.env.NODE_ENV === 'production'
+    ? requiredEnvironment('DEPLOYMENT_TARGET_COMMIT')
+    : execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  await assertProtectedProductionCutoverBoundary(prisma, {
+    sourceCommit,
+    releaseId: requiredEnvironment('SHIPMENT_STATEMENT_RELEASE_ID'),
+  });
   if (command === 'manifest') {
     const callerEvidence = JSON.parse(await readFile(requiredOption('--evidence'), 'utf8')) as CutoverEvidence;
     const currentLegacy = await recaptureLegacyCohort();
@@ -112,7 +120,7 @@ const run = async () => {
         unresolvedCount: unresolvedLegacy, quarantinedCount: unresolvedLegacy, unreviewedCohortCount: unreviewedLegacy };
     } else {
       const captured = await captureAuthoritativeCutoverGates(callerEvidence, {
-        artifactDirectory: requiredOption('--artifacts'), sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+        artifactDirectory: requiredOption('--artifacts'), sourceCommit,
         incidentContacts: requiredEnvironmentList('SHIPMENT_STATEMENT_INCIDENT_CONTACTS'),
         monitoringChecks: requiredEnvironmentList('SHIPMENT_STATEMENT_MONITORING_CHECKS'), run: runCommand,
       });
@@ -137,7 +145,6 @@ const run = async () => {
       beforeAmountScale12: item.beforeAmountTotal?.toFixed(12) ?? null,
       afterAmountScale12: item.afterAmountTotal?.toFixed(12) ?? null,
       beforeEvidenceHash: item.beforeEvidenceHash, afterEvidenceHash: item.afterEvidenceHash }));
-    const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const manifest = buildCutoverManifest({ releaseId: requiredEnvironment('SHIPMENT_STATEMENT_RELEASE_ID'),
       migrationManifestId: migration.id, createdAt: new Date().toISOString(),
       createdBy: requiredEnvironment('SHIPMENT_STATEMENT_CUTOVER_ACTOR_ID'), sourceCommit, evidence,
@@ -154,7 +161,6 @@ const run = async () => {
     if (JSON.stringify(currentFileEvidence) !== JSON.stringify(manifest.evidence)) {
       throw new Error('File-backed cutover evidence changed after the manifest was signed; rerun every gate.');
     }
-    const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     if (sourceCommit !== manifest.sourceCommit) throw new Error('The signed cutover manifest belongs to a different source commit.');
     const currentMigration = await prisma.shipmentStatementMigrationManifest.findUnique({ where: { id: manifest.migrationManifestId },
       include: { runs: { orderBy: { runNumber: 'desc' }, take: 2, include: { evidence: true } } } });

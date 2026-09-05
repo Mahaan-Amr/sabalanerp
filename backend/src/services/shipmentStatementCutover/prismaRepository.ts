@@ -1,5 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { ShipmentStatementCutoverRepository } from '.';
+import { SHIPMENT_STATEMENT_OPERATIONS_LOCK } from '../dispatchDocuments/featureGate';
+import { startShipmentStatementOperationsForSignedCutoverUnderLock } from '../shipmentStatementOperations';
 
 const CUTOVER_ID = 'customer-shipment-statements';
 
@@ -14,6 +16,7 @@ export class PrismaShipmentStatementCutoverRepository implements ShipmentStateme
 
   async activate(input: { expectedDisabled: true; migrationManifestId: string; integrityHash: string; activatedBy: string; expiresAt: Date }) {
     return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', SHIPMENT_STATEMENT_OPERATIONS_LOCK);
       const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT transaction_timestamp() AS "now"`;
       if (!clock) throw new Error('Database cutover clock is unavailable.');
       if (clock.now.getTime() > input.expiresAt.getTime()) {
@@ -38,6 +41,9 @@ export class PrismaShipmentStatementCutoverRepository implements ShipmentStateme
         RETURNING "enabled", "cutoverAt", "activatedAt", "activatedBy", "manifestId", "integrityHash"
       `;
       if (!updated[0]) throw new Error('Customer Shipment Statements are already activated; cutover is one-way.');
+      await startShipmentStatementOperationsForSignedCutoverUnderLock(tx, {
+        actorId: input.activatedBy, cutoverIntegrityHash: input.integrityHash,
+      });
       return updated[0];
     });
   }

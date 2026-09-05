@@ -18,6 +18,13 @@ npm run docker:local:ps
 
 ## 2. Produce evidence
 
+On production, steps 2 through 4 must run while the existing zero-data-loss deployment owns the live lease, Nginx is
+serving maintenance, writers are drained, and the verified local/off-server checkpoint is complete. The cutover
+command refuses production execution unless the durable deployment operation is at `MIGRATIONS_APPLIED`, its lease is
+live, and its release ID and target commit match. Keep that boundary through activation and the final deployment
+gates; never collect the authoritative cohort while public contract writes are open. A newly created contract is not
+ignored: it either appears in the locked recapture with an exact reviewed disposition or the run returns `NO_GO`.
+
 Create a recovery-capable backup and restore it in the controlled `sabalanerp-local` restore drill. Record the backup
 SHA-256 and compare the restored counts, identifiers, scale-three quantities, scale-twelve amounts, and evidence hash
 with the source. A successful backup command without a successful restore is not evidence.
@@ -104,17 +111,32 @@ update. PostgreSQL transaction time becomes the exact compatibility boundary. Th
 activation or later rewriting. The signed receipt records the exact boundary and actor.
 
 Only after the receipt is archived and independently compared with the database row may deployment set
-`CUSTOMER_SHIPMENT_STATEMENTS_ENABLED=true`. Drafts finalized from that boundary onward revalidate under the new
-rules; revisions finalized before it remain waybill-only and can never receive a Customer Shipment Statement.
+`CUSTOMER_SHIPMENT_STATEMENTS_ENABLED=true`. Signed database activation atomically changes the operations control from
+its initial safe pause to running and appends the first hash-chained audit event. The target release must carry the
+enabled environment gate and prove the effective runtime state before `TRAFFIC_OPENED`; initial activation never
+depends on reaching the web panel through maintenance. Drafts finalized from the database boundary onward revalidate
+under the new rules; revisions finalized before it remain waybill-only and can never receive a Customer Shipment
+Statement.
+
+The release-mode `deployment-gates` command enforces that proof: before traffic can open, an activated cutover requires
+the environment gate enabled and the operations control running with no incident. A pre-cutover release rejects an
+environment gate that was enabled early.
 
 ## 5. Pause and rollback
 
 Before activation, rollback means leaving or setting the environment flag to false. Never delete migration evidence,
-sealed pricing, artifacts, manifests, or the disabled cutover row.
+sealed pricing, artifacts, manifests, the paused operations-control row, or the disabled cutover row.
 
-After activation, an incident pauses new statement work by setting the environment flag false. Existing evidence and
-the immutable database boundary remain. Reconcile the incident, restore only verified original artifact bytes through
-the recovery flow, and fix forward. Re-enable only after the complete gate matrix and monitoring checks pass again.
+After activation, use **توقف موقت** for a planned short pause. Use **توقف اضطراری** when correctness or integrity is
+in doubt. Both controls are durable, require administrator
+re-authentication and a reason, increment a compare-and-swap revision, and append a hash-chained immutable audit event.
+The environment flag remains an independent deployment gate, not the routine pause control.
+
+While either database pause or environment gate is inactive, a post-cutover finalization fails closed. It must never
+fall back to the legacy waybill-only path. Existing evidence and the immutable database boundary remain. Reconcile an
+incident, restore only verified original artifact bytes through the recovery flow, and fix forward. Resume an emergency
+pause only after the incident cause is corrected and the administrator records the recovery reason; use a full
+controlled release whenever code, schema, or release evidence changed.
 
 Monitor at minimum: issuance failures, incomplete primary bundles, orphan/corrupt artifacts, audit gaps, stale pricing
 bindings, failed print handoffs, adjustment sequence conflicts, Guard exits without a valid bundle, and concurrency

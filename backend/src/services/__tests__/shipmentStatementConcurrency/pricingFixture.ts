@@ -17,6 +17,9 @@ export const authorConcurrentPricingFixture = async (client: PrismaClient, runId
   await client.shipmentStatementCutover.update({ where: { id: 'customer-shipment-statements' }, data: {
     enabled: true, cutoverAt: new Date('2000-01-01T00:00:00.000Z'), activatedAt: new Date('2000-01-01T00:00:01.000Z'),
     activatedBy: logistics.actor.id, manifestId: manifest.id, integrityHash: 'f'.repeat(64) } });
+  await client.shipmentStatementOperationsControl.update({
+    where: { id: 'customer-shipment-statements' }, data: { paused: false, incident: false },
+  });
   const expiresAt = new Date(Date.now() + 86_400_000 * 365);
   const loadings: LogisticsLoading[] = [];
   for (let index = 0; index < 2; index += 1) {

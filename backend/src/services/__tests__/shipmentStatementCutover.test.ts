@@ -85,6 +85,7 @@ test('file-backed verification rejects hash-shaped caller claims without their a
       sourceApprovalRecordCount: 0,
       sourceRowCount: 0,
       counts: { SEALED: 0, LEGACY_REVIEW_REQUIRED: 0, REPAIR_REQUIRED: 0, EVIDENCE_CONFLICT: 0 },
+      entries: [],
     })),
     /artifact path/i,
   );

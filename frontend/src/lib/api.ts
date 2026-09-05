@@ -300,6 +300,16 @@ export const systemRecoveryAPI = {
   }) => api.post(`/system-recovery/${id}/restore`, data),
 };
 
+export const shipmentStatementOperationsAPI = {
+  getState: () => api.get('/shipment-statement-operations'),
+  transition: (data: {
+    action: 'PAUSE_PLANNED' | 'PAUSE_INCIDENT' | 'RESUME';
+    reason: string;
+    adminPassword: string;
+    expectedRevision: number;
+  }) => api.post('/shipment-statement-operations/transitions', data),
+};
+
 // Users API
 export const usersAPI = {
   getUsers: (page = 1, limit = 10, filters: { search?: string; departmentId?: string; role?: string; status?: string } = {}) => {

@@ -23,6 +23,7 @@ const tx = {
   },
   accountingDispatchWorkItem: { update: async () => { writes.push('work-item:COMPLETED'); return {}; } },
   shipmentStatementCutover: { findUnique: async () => ({ enabled: true, cutoverAt: new Date('2026-08-09T00:00:00.000Z') }) },
+  shipmentStatementOperationsControl: { findUnique: async () => ({ paused: false }) },
   logisticsAllocationRevision: { findUnique: async () => ({ finalizedAt: new Date('2026-08-10T00:00:00.000Z') }) },
   logisticsAllocationRevisionPricing: { findMany: async () => [{ contractId: 'contract-b' }, { contractId: 'contract-a' }] },
   accountingDispatchWaybill: {

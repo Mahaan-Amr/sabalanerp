@@ -53,6 +53,7 @@
     "test:support-tickets": "tsx src/services/__tests__/supportTicketPolicy.test.ts",
     "test:biometric-connector": "tsx src/services/__tests__/biometricConnector.test.ts",
     "test:shipment-quantities": "tsx src/services/__tests__/shipmentQuantityProjection.test.ts && tsx src/services/__tests__/shipmentContractQuantityVersion.test.ts && tsx src/routes/__tests__/shipmentQuantityApi.test.ts",
+    "test:shipment-statement-operations": "tsx src/services/__tests__/shipmentStatementOperations.test.ts && tsx src/services/__tests__/shipmentStatementCutoverPrismaRepository.test.ts && tsx src/services/__tests__/allocationPricingBinding.test.ts && tsx src/services/__tests__/dispatchDocumentContracts.test.ts",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "db:migrate": "prisma migrate dev",

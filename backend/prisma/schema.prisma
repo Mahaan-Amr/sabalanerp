@@ -3434,6 +3434,41 @@ model ShipmentStatementCutover {
   @@map("shipment_statement_cutovers")
 }
 
+enum ShipmentStatementOperationsAction {
+  PAUSE_PLANNED
+  PAUSE_INCIDENT
+  RESUME
+}
+
+model ShipmentStatementOperationsControl {
+  id          String   @id
+  paused      Boolean  @default(true)
+  incident    Boolean  @default(false)
+  revision    Int      @default(0)
+  changedAt   DateTime @default(now())
+  changedBy   String?
+  reason      String
+  createdAt   DateTime @default(now())
+
+  @@map("shipment_statement_operations_controls")
+}
+
+model ShipmentStatementOperationsEvent {
+  id            String                            @id @default(cuid())
+  revision      Int                               @unique
+  action        ShipmentStatementOperationsAction
+  paused        Boolean
+  incident      Boolean
+  actorId       String
+  reason        String
+  previousIntegrityHash String?
+  integrityHash String                            @unique
+  createdAt     DateTime                          @default(now())
+
+  @@index([createdAt])
+  @@map("shipment_statement_operations_events")
+}
+
 model ShipmentStatementMigrationManifest {
   id               String                          @id @default(cuid())
   migrationName    String                          @unique

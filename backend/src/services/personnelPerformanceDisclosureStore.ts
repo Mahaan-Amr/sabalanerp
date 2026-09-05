@@ -15,6 +15,10 @@ import {
   type PerformanceAnalyticsMember,
   type PerformanceConsequenceRule,
   PERFORMANCE_LEVELS,
+  performanceReportingQuarter,
+  performanceReportingMonths,
+  performancePeerFamilyKey,
+  latestPerformancePeerFamilies,
 } from './personnelPerformanceDisclosure';
 import {
   performanceVaultKeyFromEnvironment,
@@ -299,19 +303,16 @@ const analyticsPopulation = async (client: PrismaClient, keyring: PerformanceVau
     where: { employmentRelationshipId: { in: relationships.map(({ id }) => id) }, type: 'PRIMARY', effectiveTo: null },
     include: { position: { select: { jobId: true } } },
   });
-  const activeFamilies = await client.performancePeerFamilyVersion.findMany({
+  const activeFamilies = latestPerformancePeerFamilies(await client.performancePeerFamilyVersion.findMany({
     where: { lifecycle: 'ACTIVE', effectiveFrom: { lte: new Date() } },
     orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
-  });
+  }));
   const familyJobs = activeFamilies.length ? await client.performancePeerFamilyJob.findMany({
     where: { familyVersionId: { in: activeFamilies.map(({ id }) => id) } },
   }) : [];
-  const currentFamilyByJob = new Map<string, string>();
-  for (const family of activeFamilies) {
-    for (const member of familyJobs.filter(({ familyVersionId }) => familyVersionId === family.id)) {
-      if (!currentFamilyByJob.has(member.jobId)) currentFamilyByJob.set(member.jobId, `${family.familyKey}:v${family.version}`);
-    }
-  }
+  const currentFamilyByJob = new Map([...new Set(familyJobs.map(({ jobId }) => jobId))].map((jobId) => [jobId,
+    performancePeerFamilyKey(jobId, activeFamilies.filter((family) => familyJobs.some((member) => member.jobId === jobId && member.familyVersionId === family.id))),
+  ]));
   const results = await client.performanceAcceptedResult.findMany({
     where: { status: PerformanceResultStatus.EFFECTIVE, expiresAt: { gt: new Date() } },
     orderBy: [{ acceptedAt: 'desc' }, { version: 'desc' }],
@@ -338,6 +339,7 @@ const analyticsPopulation = async (client: PrismaClient, keyring: PerformanceVau
     const projection = projectionBySubject.get(subject.id);
     if (!relationship || !projection?.levelCode) return [];
     const jobId = assignmentByRelationship.get(relationship.id)?.position?.jobId ?? 'unclassified';
+    if (jobId === 'unclassified' || currentFamilyByJob.get(jobId) === null) return [];
     const score = resultBySubject.get(subject.id);
     if (!score) return [];
     return [{
@@ -408,12 +410,16 @@ const historicalAnalyticsPopulation = async (
     for (const assignment of assignments) {
       const jobId = assignment.position?.jobId;
       if (!jobId) continue;
-      const memberships = await client.performancePeerFamilyJob.findMany({ where: { jobId } });
-      const family = await client.performancePeerFamilyVersion.findFirst({ where: {
-        id: { in: memberships.map(({ familyVersionId }) => familyVersionId) }, lifecycle: { in: ['ACTIVE', 'RETIRED'] },
+      // Resolve the version before membership: a newer version may remove this Job.
+      const effectiveFamilies = latestPerformancePeerFamilies(await client.performancePeerFamilyVersion.findMany({ where: {
+        lifecycle: { in: ['ACTIVE', 'RETIRED'] },
         effectiveFrom: { lte: evaluation.measurementTo },
-      }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] });
-      peerKeys.add(family ? `${family.familyKey}:v${family.version}` : `job:${jobId}`);
+      }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] }));
+      const memberships = await client.performancePeerFamilyJob.findMany({ where: { jobId, familyVersionId: { in: effectiveFamilies.map(({ id }) => id) } } });
+      const families = effectiveFamilies.filter((family) => memberships.some(({ familyVersionId }) => familyVersionId === family.id));
+      const peerKey = performancePeerFamilyKey(jobId, families);
+      if (!peerKey) { peerKeys.add('ambiguous'); peerKeys.add(`job:${jobId}`); }
+      else peerKeys.add(peerKey);
     }
     if (namedRanking && (peerKeys.size !== 1 || assignments.length !== sections.length || !sections.length)) continue;
     members.push({
@@ -428,11 +434,11 @@ const historicalAnalyticsPopulation = async (
   return members;
 };
 
-const fixedCohortPerformanceTrend = async (
-  client: PrismaClient,
+export const fixedCohortPerformanceTrend = async (
+  client: PrismaClient | Prisma.TransactionClient,
   authorizedSubjectIds: readonly string[],
-  reportingFrom?: Date,
-  reportingTo?: Date,
+  reportingFrom: Date,
+  reportingTo: Date,
 ) => {
   if (!authorizedSubjectIds.length) return { suppressed: true as const, reasonCode: 'TREND_REPORTING_DISABLED' };
   const evaluations = await client.performanceEvaluation.findMany({
@@ -442,7 +448,7 @@ const fixedCohortPerformanceTrend = async (
     }, orderBy: [{ measurementTo: 'desc' }, { id: 'desc' }],
     select: { id: true, subjectId: true, measurementFrom: true, measurementTo: true },
   });
-  const periodKeys = [...new Set(evaluations.map(({ measurementTo }) => `${measurementTo.getUTCFullYear()}-${String(measurementTo.getUTCMonth() + 1).padStart(2, '0')}`))].slice(0, 4);
+  const periodKeys = performanceReportingMonths(reportingFrom, reportingTo);
   if (periodKeys.length < 2) return { suppressed: true as const, reasonCode: 'TREND_PERIODS_INSUFFICIENT' };
   const relevant = evaluations.filter(({ measurementTo }) => periodKeys.includes(`${measurementTo.getUTCFullYear()}-${String(measurementTo.getUTCMonth() + 1).padStart(2, '0')}`));
   const results = await client.performanceAcceptedResult.findMany({
@@ -495,7 +501,7 @@ const fixedCohortPerformanceTrend = async (
     };
   });
   const exposesSmallDifference = populationPeriods.some((period) => [period.missingResultCount, period.entriesSincePrevious, period.exitsSincePrevious]
-    .some((count) => count > 0 && count < 10) || period.resultPopulationCount < 10);
+    .some((count) => count > 0 && count < 10) || period.eligiblePopulationCount < 10 || (period.resultPopulationCount > 0 && period.resultPopulationCount < 10));
   const fixedPeriods = periodKeys.map((periodKey) => ({
     periodKey,
     levelDistribution: PERFORMANCE_LEVELS.map((level) => ({
@@ -528,40 +534,23 @@ export const getPerformanceAnalytics = async (client: PrismaClient, input: {
   keyring?: PerformanceVaultKey;
 }) => {
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
-  if (Boolean(input.reportingFrom) !== Boolean(input.reportingTo)
-    || (input.reportingFrom && Number.isNaN(input.reportingFrom.getTime())) || (input.reportingTo && Number.isNaN(input.reportingTo.getTime()))
-    || (input.reportingFrom && input.reportingTo && (input.reportingFrom > input.reportingTo
-      || input.reportingTo.getTime() - input.reportingFrom.getTime() > 366 * 24 * 60 * 60_000))) {
-    throw disclosureError('بازه گزارش معتبر نیست یا از یک سال بیشتر است.', 'PERFORMANCE_ANALYTICS_WINDOW_INVALID', 422);
-  }
-  // Complete calendar months form stable disclosure buckets; arbitrary day shifts
-  // would let repeated queries isolate an individual's result.
-  for (const boundary of [input.reportingFrom, input.reportingTo]) {
-    if (boundary && (boundary.getUTCDate() !== 1 || boundary.getUTCHours() || boundary.getUTCMinutes() || boundary.getUTCSeconds() || boundary.getUTCMilliseconds())) {
-      throw disclosureError('بازه گزارش باید از ابتدای ماه تا ابتدای ماه بعد باشد.', 'PERFORMANCE_ANALYTICS_STABLE_PERIOD_REQUIRED', 422);
-    }
-  }
-  const population = input.reportingFrom && input.reportingTo
-    ? await historicalAnalyticsPopulation(client, keyring, input.reportingFrom, input.reportingTo, input.mode === 'NAMED_RANKING')
-    : await analyticsPopulation(client, keyring);
+  const quarter = performanceReportingQuarter(input.reportingFrom, input.reportingTo);
+  const population = await historicalAnalyticsPopulation(client, keyring, quarter.from, quarter.to, input.mode === 'NAMED_RANKING');
   if (input.personnelIds?.length) throw disclosureError('فیلتر دلخواه افراد برای این گزارش محرمانه مجاز نیست.', 'PERFORMANCE_ANALYTICS_ARBITRARY_SCOPE_FORBIDDEN', 422);
   const selected = population;
   const baseResult = buildPerformanceAnalytics({ population, selected, mode: input.mode });
-  const baseSuppressed = 'suppressed' in baseResult && baseResult.suppressed;
-  const authorizedSubjectIds = input.reportingFrom && input.reportingTo
-    ? await analyticsAuthorizedSubjectIds(client)
-    : population.map(({ subjectId }) => subjectId);
-  const trend = input.mode === 'NAMED_RANKING' || baseSuppressed
+  const authorizedSubjectIds = await analyticsAuthorizedSubjectIds(client);
+  const trend = input.mode === 'NAMED_RANKING'
     ? undefined
-    : await fixedCohortPerformanceTrend(client, authorizedSubjectIds, input.reportingFrom, input.reportingTo);
+    : await fixedCohortPerformanceTrend(client, authorizedSubjectIds, quarter.from, quarter.to);
   const result = trend ? { ...baseResult, trend: trend.suppressed ? trend : { ...trend, reconstruction: undefined } } : baseResult;
   const reconstructionId = randomUUID();
   await client.$transaction(async (tx) => {
     const snapshot = await persistPerformancePayload(tx, {
       aggregateType: 'PERFORMANCE_ANALYTICS_RECONSTRUCTION', aggregateId: reconstructionId, payloadKind: 'REPORTING_WINDOW', schemaVersion: 1,
       payload: {
-        asOf: new Date().toISOString(), windowKind: input.reportingFrom || input.reportingTo ? 'CALLER_SELECTED' : 'LATEST_FOUR_PERIODS',
-        reportingFrom: input.reportingFrom?.toISOString() ?? null, reportingTo: input.reportingTo?.toISOString() ?? null,
+        asOf: new Date().toISOString(), windowKind: 'CANONICAL_QUARTER',
+        reportingFrom: quarter.from.toISOString(), reportingTo: quarter.to.toISOString(),
         mode: input.mode ?? 'AGGREGATE',
         population: population.map(({ subjectId, employmentRelationshipId, levelCode, comparabilitySignature, peerGroupKey, measurementTo }) => ({ subjectId, employmentRelationshipId, levelCode, comparabilitySignature, peerGroupKey, measurementTo })),
         suppressionOrResult: result,
@@ -622,8 +611,8 @@ export const listPerformanceEvaluators = async (client: PrismaClient) => {
 
 const exportRows = (report: unknown) => {
   const object = report && typeof report === 'object' ? report as Record<string, unknown> : { value: report };
-  const rows = Array.isArray(object.groups)
-    ? (object.groups as Array<Record<string, unknown>>).flatMap((group) => (group.members as Array<Record<string, unknown>> ?? []).map((member) => ({ level: group.labelFa, ...member })))
+  const rows = Array.isArray(object.peerGroups)
+    ? (object.peerGroups as Array<{ peerGroupKey: string; groups: Array<{ labelFa: string; members: Array<Record<string, unknown>> }> }>).flatMap((peer) => peer.groups.flatMap((group) => group.members.map((member) => ({ peerGroupKey: peer.peerGroupKey, level: group.labelFa, ...member }))))
     : Array.isArray(object.levelDistribution) ? object.levelDistribution as Array<Record<string, unknown>> : [object];
   return rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, escapePerformanceSpreadsheetCell(value)])));
 };

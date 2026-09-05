@@ -22,11 +22,12 @@ export const publishCompensationAgreement = async (client: PrismaClient | Prisma
     if (typeof value !== 'string' || !/^\d{1,18}$/.test(value)) throw fail('مبلغ ریالی باید عدد صحیح نامنفی باشد.');
     return new Prisma.Decimal(value);
   };
-  if (!Array.isArray(input.components) || !input.components.length || !input.budgetCode?.trim() || input.approvalReason?.trim().length < 20) {
+  if (!Array.isArray(input.components) || !input.components.length || typeof input.budgetCode !== 'string' || !input.budgetCode.trim()
+    || typeof input.approvalReason !== 'string' || input.approvalReason.trim().length < 20) {
     throw fail('اجزای توافق، مرجع بودجه و دلیل تأیید الزامی است.');
   }
   const components = input.components.map((component) => {
-    if (!component.title?.trim()) throw fail('عنوان جزء جبران خدمت الزامی است.');
+    if (!component || typeof component.title !== 'string' || !component.title.trim()) throw fail('عنوان جزء جبران خدمت الزامی است.');
     return { title: component.title.trim(), amountRials: amount(component.amountRials).toFixed(0) };
   });
   const total = components.reduce((sum, component) => sum.add(component.amountRials), new Prisma.Decimal(0));

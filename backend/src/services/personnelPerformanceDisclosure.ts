@@ -49,6 +49,42 @@ export type PerformanceAnalyticsMember = {
   exactScore?: number;
 };
 
+// A single calendar quarter is the release unit. Overlapping unions of months
+// would disclose small differences even when each individual report is safe.
+export const performanceReportingQuarter = (from?: Date, to?: Date, now = new Date()) => {
+  const currentQuarter = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3, 1));
+  const start = from ?? new Date(Date.UTC(currentQuarter.getUTCFullYear(), currentQuarter.getUTCMonth() - 3, 1));
+  const end = to ?? currentQuarter;
+  if (Boolean(from) !== Boolean(to) || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())
+    || start.getUTCMonth() % 3 !== 0 || start.getUTCDate() !== 1 || start.getUTCHours() || start.getUTCMinutes() || start.getUTCSeconds() || start.getUTCMilliseconds()
+    || end.getTime() !== Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 3, 1)) {
+    throw Object.assign(new Error('گزارش فقط برای یک فصل تقویمی کامل قابل نمایش است.'), { status: 422, code: 'PERFORMANCE_ANALYTICS_STABLE_PERIOD_REQUIRED' });
+  }
+  return { from: start, to: end };
+};
+
+export const performanceReportingMonths = (from: Date, to: Date) => {
+  const keys: string[] = [];
+  for (let month = new Date(from); month < to; month = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1))) {
+    keys.unshift(month.toISOString().slice(0, 7));
+  }
+  return keys;
+};
+
+export const latestPerformancePeerFamilies = <T extends { familyKey: string; version: number }>(families: readonly T[]) => {
+  const latest = new Map<string, T>();
+  for (const family of families) if ((latest.get(family.familyKey)?.version ?? 0) < family.version) latest.set(family.familyKey, family);
+  return [...latest.values()];
+};
+
+export const performancePeerFamilyKey = (jobId: string, families: readonly { familyKey: string; version: number }[]) => {
+  const latest = new Map<string, number>();
+  for (const family of families) latest.set(family.familyKey, Math.max(latest.get(family.familyKey) ?? 0, family.version));
+  if (latest.size > 1) return null;
+  const family = [...latest][0];
+  return family ? `${family[0]}:v${family[1]}` : `job:${jobId}`;
+};
+
 const suppressed = (reasonCode: string, messageFa = 'برای نمایش این گزارش، جمعیت واجد شرایط کافی نیست.') => ({
   suppressed: true as const,
   reasonCode,
@@ -66,11 +102,11 @@ export type PerformanceAnalyticsResult =
   | {
       suppressed: false;
       eligibleCount: number;
-      groups: Array<{
+      peerGroups: Array<{ peerGroupKey: string; groups: Array<{
         levelCode: string;
         labelFa: string;
         members: Array<{ personnelId: string; displayName: string; employmentRelationshipId: string; measurementTo: string }>;
-      }>;
+      }> }>;
     };
 
 export const buildPerformanceAnalytics = (input: {
@@ -92,10 +128,10 @@ export const buildPerformanceAnalytics = (input: {
     return {
       suppressed: false as const,
       eligibleCount: input.selected.length,
-      groups: PERFORMANCE_LEVELS.map((level) => ({
+      peerGroups: [...peerGroups].map(([peerGroupKey, members]) => ({ peerGroupKey, groups: PERFORMANCE_LEVELS.map((level) => ({
         levelCode: level.code,
         labelFa: level.labelFa,
-        members: input.selected
+        members: members
           .filter(({ levelCode }) => levelCode === level.code)
           .map(({ personnelId, displayName, employmentRelationshipId, measurementTo }) => ({
             personnelId,
@@ -103,7 +139,7 @@ export const buildPerformanceAnalytics = (input: {
             employmentRelationshipId,
             measurementTo: measurementTo.toISOString(),
           })),
-      })),
+      })) })),
     };
   }
   if (PERFORMANCE_LEVELS.some((level) => {

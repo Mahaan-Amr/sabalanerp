@@ -3,11 +3,11 @@ import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { prisma } from '../../lib/prisma';
-import { cleanupExpiredPerformanceExports, listEligibleConsequenceResults } from '../personnelPerformanceDisclosureStore';
+import { cleanupExpiredPerformanceExports, listEligibleConsequenceResults, fixedCohortPerformanceTrend } from '../personnelPerformanceDisclosureStore';
 import { publishCompensationAgreement } from '../hrCompensationAgreementStore';
 
 const seed = async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], marker: string) => {
-      const suffix = Date.now().toString(36);
+      const suffix = `${Date.now().toString(36)}-${marker}`;
       const actor = await tx.user.create({ data: {
         email: `performance-disclosure-${suffix}@example.invalid`,
         username: `performance_disclosure_${suffix}`,
@@ -38,12 +38,28 @@ const seed = async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
 
 const main = async () => {
   await assert.rejects(prisma.$transaction(async (tx) => {
+    const subjectIds: string[] = [];
+    for (let index = 0; index < 10; index++) subjectIds.push((await seed(tx, `empty-month-${index}`)).subject.id);
+    const trend = await fixedCohortPerformanceTrend(tx, subjectIds, new Date('2026-01-01Z'), new Date('2026-04-01Z'));
+    assert.equal(trend.suppressed, false);
+    if (trend.suppressed) throw new Error('Empty calendar population unexpectedly suppressed');
+    assert.equal(trend.fixedCohortSuppressed, true);
+    assert.equal(trend.populationComposition.suppressed, false);
+    if (!trend.populationComposition.suppressed) {
+      assert.deepEqual(trend.populationComposition.periods.map(({ periodKey, missingResultCount, resultPopulationCount }) => [periodKey, missingResultCount, resultPopulationCount]),
+        [['2026-03', 10, 0], ['2026-02', 10, 0], ['2026-01', 10, 0]]);
+    }
+    throw new Error('ROLLBACK_EMPTY_MONTH_TREND');
+  }, { timeout: 30_000 }), /ROLLBACK_EMPTY_MONTH_TREND/);
+  await assert.rejects(prisma.$transaction(async (tx) => {
     const { actor, relationship, suffix } = await seed(tx, 'publish-agreement');
     const input = {
       actorUserId: actor.id, employmentRelationshipId: relationship.id,
       components: [{ title: 'حقوق پایه', amountRials: '100' }], payRangeMinimumRials: '50', payRangeMaximumRials: '200',
       budgetCode: 'TEST', budgetAvailableRials: '1000', approvalReason: 'انتشار توافق با تأیید مستقل و بودجه معتبر آزمون',
     };
+    await assert.rejects(() => publishCompensationAgreement(tx, { ...input, approvalReason: undefined as any }), (error: any) => error.status === 422);
+    await assert.rejects(() => publishCompensationAgreement(tx, { ...input, approvalReason: 42 as any }), (error: any) => error.status === 422);
     await assert.rejects(() => publishCompensationAgreement(tx, input), (error: any) => error.status === 403);
     await tx.hrFeatureAccessGrant.create({ data: {
       stableKey: `${suffix}:agreement-publisher`, userId: actor.id, featureCode: 'MANAGE_COMPENSATION_AGREEMENTS',

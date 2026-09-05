@@ -309,7 +309,11 @@ router.post('/analytics', viewAnalytics, async (req: AuthRequest, res, next) => 
 });
 
 router.post('/ranking', viewNamedRanking, async (req: AuthRequest, res, next) => {
-  try { return res.json({ success: true, ranking: await getPerformanceAnalytics(prisma, { actorUserId: req.user!.id, personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : undefined, mode: 'NAMED_RANKING' }) }); }
+  try { return res.json({ success: true, ranking: await getPerformanceAnalytics(prisma, {
+    actorUserId: req.user!.id, personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : undefined, mode: 'NAMED_RANKING',
+    reportingFrom: req.body.reportingFrom ? new Date(String(req.body.reportingFrom)) : undefined,
+    reportingTo: req.body.reportingTo ? new Date(String(req.body.reportingTo)) : undefined,
+  }) }); }
   catch (error) { return next(error); }
 });
 

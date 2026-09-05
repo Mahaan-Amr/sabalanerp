@@ -6,6 +6,10 @@ import {
   escapePerformanceSpreadsheetCell,
   escapePerformanceExportHtml,
   validateConsequenceHandoff,
+  performanceReportingQuarter,
+  performanceReportingMonths,
+  performancePeerFamilyKey,
+  latestPerformancePeerFamilies,
 } from '../personnelPerformanceDisclosure';
 import {
   decryptPerformanceExportArtifact,
@@ -90,10 +94,23 @@ assert.deepEqual(differencingAttempt, {
 
 const named = buildPerformanceAnalytics({ population: people, selected: people.slice(0, 5), mode: 'NAMED_RANKING' });
 assert.equal(named.suppressed, false);
-assert.ok('groups' in named);
-if (!('groups' in named)) throw new Error('named ranking missing');
-assert.deepEqual(named.groups.map((group) => group.members.length), [1, 1, 1, 1, 1]);
-assert.ok(named.groups.every((group) => group.members.every((member) => !('exactScore' in member))));
+assert.ok('peerGroups' in named);
+if (!('peerGroups' in named)) throw new Error('named ranking missing');
+assert.deepEqual(named.peerGroups[0].groups.map((group) => group.members.length), [1, 1, 1, 1, 1]);
+assert.ok(named.peerGroups[0].groups.every((group) => group.members.every((member) => !('exactScore' in member))));
+const unrelated = buildPerformanceAnalytics({ population: people, selected: people, mode: 'NAMED_RANKING' });
+assert.ok('peerGroups' in unrelated);
+if ('peerGroups' in unrelated) assert.deepEqual(unrelated.peerGroups.map(({ peerGroupKey, groups }) => [peerGroupKey, groups.flatMap(({ members }) => members).length]), [['job-family-a', 10], ['job-family-b', 10]]);
+const quarter = performanceReportingQuarter(new Date('2026-01-01Z'), new Date('2026-04-01Z'));
+assert.deepEqual(performanceReportingMonths(quarter.from, quarter.to), ['2026-03', '2026-02', '2026-01'], 'empty months must exist without evaluation data');
+assert.throws(() => performanceReportingQuarter(new Date('2026-02-01Z'), new Date('2026-04-01Z')));
+assert.throws(() => performanceReportingQuarter(new Date('2026-01-01Z'), new Date('2026-07-01Z')));
+assert.throws(() => performanceReportingQuarter(new Date('2026-01-01Z'), new Date('2026-01-01Z')));
+assert.equal(performancePeerFamilyKey('job', []), 'job:job');
+assert.equal(performancePeerFamilyKey('job', [{ familyKey: 'a', version: 1 }, { familyKey: 'a', version: 2 }]), 'a:v2');
+assert.equal(performancePeerFamilyKey('job', [{ familyKey: 'a', version: 1 }, { familyKey: 'b', version: 1 }]), null);
+const effectiveFamilies = latestPerformancePeerFamilies([{ familyKey: 'a', version: 1, jobs: ['job'] }, { familyKey: 'a', version: 2, jobs: [] }]);
+assert.equal(performancePeerFamilyKey('job', effectiveFamilies.filter(({ jobs }) => jobs.includes('job'))), 'job:job', 'membership removed by a new version must not survive');
 assert.equal(buildPerformanceAnalytics({ population: people, selected: people.slice(0, 4), mode: 'NAMED_RANKING' }).suppressed, true);
 
 assert.deepEqual(buildPerformanceCalibration(Array.from({ length: 10 }, (_, index) => ({

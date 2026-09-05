@@ -49,7 +49,7 @@ export function createPrismaPartnerInquiryService(input: Omit<PartnerInquiryDepe
   return createPartnerInquiryService({ ...input, transaction: run => input.database.$transaction(async tx => {
     await lockPartnerOperationsControl(tx);
     return run(tx);
-  }) });
+  }, { timeout: 30_000 }) });
 }
 
 function decodeReceipt(value: unknown): { commandId: string; eventIds: string[] } | undefined {

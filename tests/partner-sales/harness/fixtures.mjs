@@ -40,8 +40,8 @@ export function fixtureCleanupSql(namespace, { transaction = true } = {}) {
         SELECT 1 FROM pg_constraint c
         WHERE c.contype = 'f' AND c.confrelid IN
           ('public.users'::regclass, 'public.auth_sessions'::regclass, 'public.feature_permissions'::regclass, 'public.workspace_permissions'::regclass)
-        AND (cardinality(c.conkey) <> 1 OR cardinality(c.confkey) <> 1 OR NOT EXISTS (
-          SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.confrelid AND a.attnum = c.confkey[1] AND a.attname = 'id'
+        AND (cardinality(c.conkey) <> cardinality(c.confkey) OR NOT EXISTS (
+          SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.confrelid AND a.attnum = ANY(c.confkey) AND a.attname = 'id'
         ))
       ) THEN RAISE EXCEPTION 'Unsupported foreign-key shape; cleanup requires owner review'; END IF;
       IF EXISTS (SELECT 1 FROM users WHERE id = '${namespace}' AND

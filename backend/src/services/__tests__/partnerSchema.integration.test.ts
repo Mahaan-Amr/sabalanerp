@@ -30,13 +30,16 @@ test('new Partner profiles and rollout cohorts default closed', () => transactio
 
 test('approved inquiry evidence gets an exact database-clock 48-hour window', () => transaction(async (db, id) => {
   await seedProfile(db, id);
+  const responderId = `${id}-responder`;
+  await db.query(`INSERT INTO users (id,email,username,password,"firstName","lastName",role,"updatedAt")
+    VALUES ($1,$2,$1,'!disabled','Schema','Responder','USER',now())`, [responderId, `${responderId}@example.invalid`]);
   await db.query('INSERT INTO partner_inquiries (id,"profileId") VALUES ($1,$1)', [id]);
   await db.query(`INSERT INTO partner_inquiry_assignments (id,"inquiryId",revision,"responderId","actorId",reason,"eligibilityEvidence")
-    VALUES ($1,$1,1,$1,$1,'انتساب آزمون','{}')`, [id]);
+    VALUES ($1,$1,1,$2,$2,'انتساب آزمون','{}')`, [id, responderId]);
   await db.query(`INSERT INTO partner_inquiry_rows (id,"inquiryId",version,"configurationHash",definition)
     VALUES ($1,$1,1,$2,'{}')`, [id, hash]);
   await db.query(`INSERT INTO partner_inquiry_approvals (id,"rowId","assignmentId","actorId","commandId","authorizationEvidenceId",
-    "wholesaleUnitPrice",currency,"evidenceHash") VALUES ($1,$1,$1,$1,$1,$1,100,'IRT',$2)`, [id, hash]);
+    "wholesaleUnitPrice",currency,"evidenceHash") VALUES ($1,$1,$1,$2,$1,$1,100,'IRT',$3)`, [id, responderId, hash]);
   const clock = (await db.query(`SELECT "approvedAt" = transaction_timestamp()::timestamptz(3) AS server,
     "expiresAt" - "approvedAt" = interval '48 hours' AS exact FROM partner_inquiry_approvals WHERE id=$1`, [id])).rows[0];
   assert.deepEqual(clock, { server: true, exact: true });

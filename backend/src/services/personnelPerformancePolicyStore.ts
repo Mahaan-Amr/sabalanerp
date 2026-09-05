@@ -1,3 +1,4 @@
+import { activePerformanceRestrictionIds } from './personnelPerformanceRestrictionQueries';
 import { isSupportedPerformanceRetentionPolicy } from './personnelPerformanceRetention';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -87,7 +88,8 @@ export const DEFAULT_SCORING_POLICY_CONTENT: ScoringPolicyContent = {
   precisionScale: 6,
 };
 
-const asTx = async <T>(client: PrismaClient, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> => {
+const asTx = async <T>(client: PrismaClient | Prisma.TransactionClient, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> => {
+  if (!('$transaction' in client)) return work(client);
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
@@ -312,7 +314,7 @@ export const updatePerformanceTemplateDraft = async (client: PrismaClient, input
   });
 };
 
-export const createPerformancePolicyDraft = async (client: PrismaClient, input: {
+export const createPerformancePolicyDraft = async (client: PrismaClient | Prisma.TransactionClient, input: {
   policyKind: PerformancePolicyKind;
   content: PerformancePolicyContent;
   createdByUserId: string;
@@ -347,7 +349,7 @@ export const createPerformancePolicyDraft = async (client: PrismaClient, input: 
   });
 };
 
-export const updatePerformancePolicyDraft = async (client: PrismaClient, input: {
+export const updatePerformancePolicyDraft = async (client: PrismaClient | Prisma.TransactionClient, input: {
   versionId: string;
   content: PerformancePolicyContent;
   keyring?: PerformanceVaultKey;
@@ -427,6 +429,7 @@ const calculatePopulation = async (
     select: { id: true, subjectId: true, measurementTo: true },
   });
   const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
+  const restrictedIds = new Set(await activePerformanceRestrictionIds(tx, evaluations.map(({ id }) => id)));
   const results = evaluations.length === 0 ? [] : await tx.performanceAcceptedResult.findMany({
     where: { evaluationId: { in: evaluations.map((evaluation) => evaluation.id) } },
     orderBy: [{ evaluationId: 'asc' }, { version: 'desc' }],
@@ -452,7 +455,7 @@ const calculatePopulation = async (
         exactScore: payload.exactScore,
         measurementTo: (payload.measurementTo ? new Date(payload.measurementTo) : evaluation.measurementTo).toISOString(),
         expiresAt: result.expiresAt.toISOString(),
-        status: result.status,
+        status: restrictedIds.has(result.evaluationId) ? 'SUSPENDED' : result.status,
       });
       decodedBySubject.set(evaluation.subjectId, list);
     } catch (error) {
@@ -481,12 +484,13 @@ const calculatePopulation = async (
     return {
       subjectId: subject.id,
       before: beforeProjection ? { state: beforeProjection.state, levelCode: beforeProjection.levelCode } : null,
-      after: { state: after.state, levelCode: after.levelCode },
+      after: { state: after.state === 'UNEVALUATED' && evaluations.some((evaluation) => evaluation.subjectId === subject.id && restrictedIds.has(evaluation.id)) ? 'TEMPORARILY_UNAVAILABLE' : after.state, levelCode: after.levelCode },
     };
   });
   return {
     preview: buildDeterministicPolicyPreview(population),
     sourcePopulationHash: canonicalPerformanceHash({
+      restrictedEvaluationIds: [...restrictedIds].sort(),
       subjects: subjects.map(({ id }) => id),
       projections: projections.map(({ subjectId, state, levelCode, sourceResultsHash }) => ({
         subjectId, state, levelCode, sourceResultsHash,
@@ -969,6 +973,7 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
     where: { subjectId: { in: subjects.map(({ id }) => id) } }, select: { id: true, subjectId: true, measurementTo: true },
   });
   const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
+  const restrictedIds = new Set(await activePerformanceRestrictionIds(tx, evaluations.map(({ id }) => id)));
   const results = evaluations.length === 0 ? [] : await tx.performanceAcceptedResult.findMany({
     where: { evaluationId: { in: evaluations.map(({ id }) => id) } },
   });
@@ -983,7 +988,7 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
       exactScore: payload.exactScore,
       measurementTo: (payload.measurementTo ? new Date(payload.measurementTo) : evaluation.measurementTo).toISOString(),
       expiresAt: result.expiresAt.toISOString(),
-      status: result.status,
+      status: restrictedIds.has(result.evaluationId) ? 'SUSPENDED' : result.status,
     });
     resultsBySubject.set(evaluation.subjectId, items);
   }
@@ -1000,12 +1005,13 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
       nextPolicyEffectiveAt: nextScheduledPolicy?.effectiveFrom ?? null,
       results: resultsBySubject.get(subject.id) ?? [],
     });
+    const projectionState = next.state === 'UNEVALUATED' && evaluations.some((evaluation) => evaluation.subjectId === subject.id && restrictedIds.has(evaluation.id)) ? 'TEMPORARILY_UNAVAILABLE' : next.state;
     const sourceResultsHash = canonicalPerformanceHash(next.sourceResultsHashInput);
     const projection = await tx.performanceCurrentLevelProjection.upsert({
       where: { subjectId: subject.id },
       create: {
         subjectId: subject.id,
-        state: next.state,
+        state: projectionState,
         levelCode: next.levelCode,
         levelPolicyVersionId: next.state === 'LEVEL' ? levelPolicy.id : null,
         sourceResultsHash,
@@ -1015,7 +1021,7 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
         projectedAt: input.now,
       },
       update: {
-        state: next.state,
+        state: projectionState,
         levelCode: next.levelCode,
         levelPolicyVersionId: next.state === 'LEVEL' ? levelPolicy.id : null,
         sourceResultsHash,

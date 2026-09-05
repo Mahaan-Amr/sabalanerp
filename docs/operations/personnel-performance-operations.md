@@ -12,7 +12,7 @@ The evaluator distinguishes accepted evidence (seven years after the latest end 
 
 Unknown dates or versions block eligibility. An active hold, open scoped dependency, or reconstruction dependency preserves the record. A closed request continues preservation for 90 days. Re-employment never resets the old relationship's clock. The evaluator is not an erasure authorization: classification, publication approval, dependency discovery, first-run impact approval, bulk thresholds, complete copy inventory, and recoverable backup expiry still require the production retention workflow.
 
-Export cleanup takes the same aggregate-scope advisory lock as the database legal-hold trigger and rechecks the hold before filesystem deletion. It requires a Read Committed cleanup transaction so an older snapshot cannot overlook a committed hold. Cleanup never marks a database receipt complete when the database mutation fails. Cross-storage recovery after a filesystem deletion followed by a database failure still needs the durable cleanup journal; this is an unresolved gate, not a successful erasure receipt.
+Export cleanup takes the same aggregate-scope advisory lock as the database legal-hold trigger and rechecks the hold before filesystem deletion. It requires a Read Committed cleanup transaction so an older snapshot cannot overlook a committed hold. The runtime commits an export cleanup intent before filesystem deletion. A failed database mutation preserves its stable retry identifier and never commits a deletion receipt. Successful live cleanup is explicitly `LIVE_DELETED_PENDING_BACKUP`; it does not attest backup expiry. The worker scans bounded pages and continues past held or failed records. A full process-crash/storage-failure recovery rehearsal remains required.
 
 Live deletion is not proof of backup expiry. Until every recoverable copy has been independently accounted for, a deletion must be reported as **live deletion; awaiting backup expiry**. Preserve the ten latest releases and twelve monthly points under ADR-0039. Replay authorized erasures before reopening a restored service. Never prune protected checkpoints to satisfy performance retention or reset the database to discard post-cutover writes.
 
@@ -20,7 +20,17 @@ Live deletion is not proof of backup expiry. Until every recoverable copy has be
 
 An unresolved pause survives changes to feature phase. For a subject action, a pause on any cohort version containing that subject continues to apply until explicitly resumed. An operation without an individual subject conservatively observes all active pauses. The rollout status API uses the same lookup. Audit and reconciliation retain their existing pause-safe behavior.
 
-This read-side check does not prove the commit-time pause/write race. The transactional pause control plane, activation approvals, durable first-write boundary, and resumption/reconciliation workflow remain required before activation. Never treat the middleware check as a substitute for those controls.
+Database guards now serialize canonical inserts and relevant updates with pause and disablement. They recheck effective release enablement, default to disabled, and preserve a durable first-write marker. Disablement and phase downgrade are forbidden after that marker. Protective invalidation, result suspension/expiry, privacy intake, audit and reconciliation remain available. `POST /api/hr/performance/operations/pause` requires independent pause authority; `/operations/disable` requires rollout authority and a still-empty first-write boundary. Cohort activation approvals and the evidence-backed resumption workflow remain required; the implemented fence alone is not a promotion decision.
+
+## Privacy and restriction interfaces
+
+The `/api/hr/performance/privacy/requests` intake requires an Idempotency-Key and freezes the subject/evaluation scope. Own-subject access differs from independent staff view and request permissions. The case records three/five/fifteen working-day deadlines and one reasoned fifteen-working-day extension. Reviewer reads include the protected request and scope; formal ACCESS responses include approved historical levels, dates, correction status, purpose and recipient categories while withholding narrative, criterion scores and third-party data.
+
+Acknowledgement, independent identity verification, response and closure are version-checked transitions with immutable decisions. `open-correction` requires correction-decision and independent correction-registration authority, links the canonical correction, and cannot create an untracked correction on retry. A case with unresolved corrections or outstanding erasure cannot be marked answered. Nonempty erasure cases currently remain pending the full retention/erasure workflow below.
+
+Restrictions exclude their evaluations from current-level recomputation, analytics, ranking, calibration and new consequence packages. Existing packages are suspended when selected, trend or projection dependencies match. Releasing a restriction recomputes the level without automatically resuming a suspended handoff. Export snapshots carry a database evidence revision; generation and download revalidate it and effective permissions. A changed result, restriction, policy, pause, legal hold or grant invalidates queued snapshots.
+
+Legal-hold creation and release have independent permissions. Two distinct, currently authorized release decisions with matching reasons within twenty-four hours are required; duplicate decisions do not count twice. Active holds expose their ninety-day review deadline through `/legal-holds`. Hold propagation to every dependent storage class, subject notifications and automatic review escalation are still required.
 
 ## Evidence verifier
 
@@ -56,7 +66,7 @@ Do not retire prototype/compatibility components before 30 continuously healthy 
 
 ## Outstanding implementation and evidence
 
-- Persisted retention classification for every record/artifact class, scoped restriction propagation, privacy-case APIs and independent permissions, dual approvals, daily erasure, bulk thresholds, durable cleanup/recovery journal, and backup-expiry deletion receipts.
-- Transactional versioned cohort activation, first-write disablement protection, commit-time safe pause/resume, measured alert routing, observability and hypercare ownership.
+- Persisted retention classification and complete hold/privacy-dependency discovery for every record/artifact class, daily erasure, first-run/bulk approval thresholds, backup-copy inventory and expiry attestation, process-crash cleanup rehearsal, privacy/hold notifications and escalation, and formal erasure responses.
+- Transactional versioned cohort activation and evidence-backed resume approvals, complete deterministic races for the implemented write fences, measured alert routing, observability and hypercare ownership.
 - Trusted evidence collection/orchestration, complete twelve-race harness with 100 iterations each, full failure injection, measured Baseline/Growth/Stress, migration and real restore rehearsals.
 - Measured post-activation compatibility and retirement evidence, followed by independent #357 acceptance. No production activation is authorized by this work.

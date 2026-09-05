@@ -1,3 +1,4 @@
+import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
 import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
 import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
 import { persistPerformancePayload, performanceVaultKeyFromEnvironment } from '../personnelPerformancePayloadStore';
@@ -17,6 +18,7 @@ const seed = async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
         username: `performance_disclosure_${suffix}`,
         password: 'not-used', firstName: 'عامل', lastName: 'افشا',
       } });
+  await enablePerformanceTestRelease(tx, actor.id);
       const personnel = await tx.personnel.create({ data: { firstName: 'پرسنل', lastName: 'ارجاع' } });
       const relationship = await tx.hrEmploymentRelationship.create({ data: {
         personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
@@ -113,6 +115,7 @@ const main = async () => {
   await assert.rejects(prisma.$transaction(async (tx) => {
     const suffix = `${Date.now().toString(36)}-scope`;
     const actor = await tx.user.create({ data: { email: `${suffix}@example.invalid`, username: suffix, password: 'not-used', firstName: 'عامل', lastName: 'محدوده' } });
+  await enablePerformanceTestRelease(tx, actor.id);
     const personnelA = await tx.personnel.create({ data: { firstName: 'الف', lastName: 'محدوده' } });
     const personnelB = await tx.personnel.create({ data: { firstName: 'ب', lastName: 'محدوده' } });
     await tx.hrNamedResponsibility.create({ data: {
@@ -139,6 +142,7 @@ const main = async () => {
   try {
     await assert.rejects(prisma.$transaction(async (tx) => {
       const exportUser = await tx.user.create({ data: { email: `${exportSuffix}@example.invalid`, username: exportSuffix, password: 'not-used', firstName: 'عامل', lastName: 'خروجی' } });
+  await enablePerformanceTestRelease(tx, exportUser.id);
       const cleanupAt = new Date();
       let retentionPolicy = await tx.performancePolicyVersion.findFirst({
         where: { policyKind: 'RETENTION', lifecycle: 'ACTIVE', effectiveFrom: { lte: cleanupAt } },

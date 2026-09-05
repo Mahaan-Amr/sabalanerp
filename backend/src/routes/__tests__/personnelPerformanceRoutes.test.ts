@@ -64,6 +64,17 @@ assert.deepEqual(registeredRoutes, [
   'POST /activation/run-due-policies',
   'POST /activation/run-due-artifacts',
   'GET /traces/:traceId',
+  'POST /privacy/requests',
+  'GET /privacy/requests/:caseId',
+  'POST /privacy/requests/:caseId/:action',
+  'POST /restrictions',
+  'POST /restrictions/:restrictionId/release',
+  'GET /operations',
+  'POST /operations/pause',
+  'POST /operations/disable',
+  'GET /legal-holds',
+  'POST /legal-holds',
+  'POST /legal-holds/:holdId/decisions',
 ]);
 
 const rolloutLayer = (router as unknown as {

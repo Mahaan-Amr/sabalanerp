@@ -1,3 +1,7 @@
+import { placePerformanceLegalHold, decidePerformanceLegalHold, listPerformanceLegalHolds } from '../services/personnelPerformanceLegalHoldStore';
+import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../services/personnelPerformanceOperationsStore';
+import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase } from '../services/personnelPerformancePrivacyStore';
+import { restrictPerformanceEvidence } from '../services/personnelPerformanceRestrictions';
 import { findApplicablePerformancePause } from '../services/personnelPerformanceRolloutPolicy';
 import express from 'express';
 import { publishCompensationAgreement } from '../services/hrCompensationAgreementStore';
@@ -66,6 +70,7 @@ import {
 } from '../services/personnelPerformanceDisclosureStore';
 
 const router = express.Router();
+router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
 router.post('/compensation-agreements', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_COMPENSATION_AGREEMENTS'] }), async (req: AuthRequest, res, next) => {
   try {
     const agreement = await publishCompensationAgreement(prisma, { ...req.body, actorUserId: req.user!.id });
@@ -586,6 +591,86 @@ router.get('/traces/:traceId', requireHrAuthorization({ actionPermissionCodes: [
   try {
     return res.json({ success: true, explanation: await reproduceAcceptedPerformanceResult(prisma, { traceId: req.params.traceId }) });
   } catch (error) { return next(error); }
+});
+
+router.post('/privacy/requests', async (req: AuthRequest, res, next) => {
+  try {
+    const requestId = req.get('Idempotency-Key');
+    if (!requestId || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(requestId)
+      || typeof req.body.subjectId !== 'string') return res.status(422).json({ success: false, message: 'شناسه درخواست و موضوع معتبر را ثبت کنید.' });
+    const privacyCase = await requestPerformancePrivacy(prisma, {
+      requestId, actorUserId: req.user!.id, subjectId: req.body.subjectId,
+      requestKind: req.body.requestKind, evaluationIds: req.body.evaluationIds ?? [], reason: req.body.reason,
+    });
+    return res.status(201).json({ success: true, privacyCase });
+  } catch (error) { return next(error); }
+});
+router.get('/privacy/requests/:caseId', async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, privacyCase: await getPerformancePrivacyCase(prisma, req.user!.id, req.params.caseId) }); }
+  catch (error) { return next(error); }
+});
+router.post('/privacy/requests/:caseId/:action', async (req: AuthRequest, res, next) => {
+  try {
+    const actions = { acknowledge: 'ACKNOWLEDGE', verify: 'VERIFY', extend: 'EXTEND', 'open-correction': 'OPEN_CORRECTION', respond: 'RESPOND', close: 'CLOSE' } as const;
+    const action = actions[req.params.action as keyof typeof actions];
+    if (!action) return res.status(422).json({ success: false, message: 'اقدام معتبر را انتخاب کنید.' });
+    return res.json({ success: true, privacyCase: await actOnPerformancePrivacyCase(prisma, {
+      actorUserId: req.user!.id, caseId: req.params.caseId, action, expectedVersion: req.body.expectedVersion, reasonCode: req.body.reasonCode,
+    }) });
+  } catch (error) { return next(error); }
+});
+router.post('/restrictions', requireHrAuthorization({ actionPermissionCodes: ['RESTRICT_PERFORMANCE_EVIDENCE'] }), async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, restriction: await restrictPerformanceEvidence(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.body.evaluationId, privacyCaseId: req.body.privacyCaseId, reasonCode: req.body.reasonCode,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/restrictions/:restrictionId/release', requireHrAuthorization({ actionPermissionCodes: ['RELEASE_PERFORMANCE_RESTRICTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, restriction: await restrictPerformanceEvidence(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.body.evaluationId, reasonCode: req.body.reasonCode, releaseId: req.params.restrictionId,
+  }) }); } catch (error) { return next(error); }
+});
+
+router.get('/operations', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (_req, res, next) => {
+  try { return res.json({ success: true, operations: await getPersonnelPerformanceOperationsState(prisma) }); } catch (error) { return next(error); }
+});
+router.post('/operations/pause', requireHrAuthorization({ actionPermissionCodes: ['PAUSE_PERFORMANCE_EVALUATION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, pause: await pausePersonnelPerformance(prisma, {
+    actorUserId: req.user!.id, phaseVersionId: req.body.phaseVersionId, scope: req.body.scope, cohortVersionId: req.body.cohortVersionId,
+    reasonCode: req.body.reasonCode, reason: req.body.reason,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/disable', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, phase: await disablePersonnelPerformanceBeforeFirstWrite(prisma, { actorUserId: req.user!.id, reason: req.body.reason }) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/legal-holds', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, holds: await listPerformanceLegalHolds(prisma, req.user!.id) }); } catch (error) { return next(error); }
+});
+router.post('/legal-holds', requireHrAuthorization({ actionPermissionCodes: ['PLACE_PERFORMANCE_LEGAL_HOLD'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, hold: await placePerformanceLegalHold(prisma, { actorUserId: req.user!.id,
+    aggregateType: req.body.aggregateType, aggregateId: req.body.aggregateId, reasonCode: req.body.reasonCode,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/legal-holds/:holdId/decisions', async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, hold: await decidePerformanceLegalHold(prisma, { actorUserId: req.user!.id,
+    holdId: req.params.holdId, action: req.body.action, reasonCode: req.body.reasonCode,
+  }) }); } catch (error) { return next(error); }
+});
+
+router.use((error: unknown, _req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+  if (res.headersSent) return next(error);
+  const detail = error && typeof error === 'object' ? error as { code?: unknown; status?: unknown; statusCode?: unknown; message?: unknown } : {};
+  const message = typeof detail.message === 'string' ? detail.message : '';
+  if (message.includes('PERFORMANCE_SAFETY_PAUSED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_SAFETY_PAUSED', message: 'عملیات به‌دلیل توقف ایمن موقتاً بسته است.' });
+  if (message.includes('PERFORMANCE_RELEASE_DISABLED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_RELEASE_DISABLED', message: 'انتشار ارزیابی عملکرد فعال نیست.' });
+  if (message.includes('PERFORMANCE_FIX_FORWARD_REQUIRED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_FIX_FORWARD_REQUIRED', message: 'پس از ثبت شواهد فقط توقف ایمن و اصلاح روبه‌جلو مجاز است.' });
+  const status = detail.status ?? detail.statusCode;
+  if (typeof detail.code === 'string' && /^(PERFORMANCE|HR)_[A-Z0-9_]+$/.test(detail.code)
+    && typeof status === 'number' && [400,403,404,409,410,422,429,503].includes(status)) {
+    return res.status(status).json({ success: false, code: detail.code, message });
+  }
+  return res.status(500).json({ success: false, code: 'PERFORMANCE_REQUEST_FAILED', message: 'انجام درخواست ممکن نشد. برای بررسی با مسئول سامانه تماس بگیرید.' });
 });
 
 export default router;

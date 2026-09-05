@@ -1,3 +1,4 @@
+import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { prisma } from '../../lib/prisma';
@@ -27,6 +28,7 @@ await runRolledBack(async (tx) => {
       lastName: 'آزمون',
     },
   });
+  await enablePerformanceTestRelease(tx, actor.id);
   const personnel = await tx.personnel.create({ data: { firstName: 'آزمون', lastName: 'بنیاد عملکرد' } });
   const relationship = await tx.hrEmploymentRelationship.create({
     data: {
@@ -56,6 +58,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-identity@example.invalid', username: 'performance_identity_test', password: 'not-used', firstName: 'عامل', lastName: 'هویت',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   const first = await tx.personnel.create({ data: { firstName: 'موضوع', lastName: 'نخست' } });
   const second = await tx.personnel.create({ data: { firstName: 'موضوع', lastName: 'دوم' } });
   const secondRelationship = await tx.hrEmploymentRelationship.create({ data: {
@@ -71,6 +74,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-detach@example.invalid', username: 'performance_detach_test', password: 'not-used', firstName: 'عامل', lastName: 'جداسازی',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   const personnel = await tx.personnel.create({ data: { firstName: 'موضوع', lastName: 'قابل جداسازی' } });
   const relationship = await tx.hrEmploymentRelationship.create({ data: {
     personnelId: personnel.id, status: 'ENDED', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), effectiveTo: new Date('2025-12-31T00:00:00.000Z'), createdBy: actor.id,
@@ -101,6 +105,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-retention@example.invalid', username: 'performance_retention_test', password: 'not-used', firstName: 'عامل', lastName: 'نگهداری',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   const payloadValues = [
     'payload-retention-1', 'SUBMISSION', 'submission-retention-1', 'SUPERVISOR_JUDGMENT', 1,
     'sabalan-personnel-performance', 1, 'aes-256-gcm', 'key-v1', Buffer.alloc(12), Buffer.alloc(16), Buffer.from('ciphertext'), 'a'.repeat(64), 'b'.repeat(64),
@@ -138,6 +143,7 @@ await assert.rejects(
     const actor = await tx.user.create({ data: {
       email: 'performance-stale-receipt@example.invalid', username: 'performance_stale_receipt_test', password: 'not-used', firstName: 'عامل', lastName: 'رسید ناتمام',
     } });
+  await enablePerformanceTestRelease(tx, actor.id);
     await tx.$executeRawUnsafe(
       `INSERT INTO "performance_policy_versions" ("id","policyKind","version","contentHash","createdByUserId") VALUES ($1,$2::"PerformancePolicyKind",$3,$4,$5)`,
       'stale-receipt-policy-v1', 'RETENTION', 1, 'stale-receipt-policy-hash', actor.id,
@@ -161,6 +167,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-overlap@example.invalid', username: 'performance_overlap_test', password: 'not-used', firstName: 'عامل', lastName: 'همپوشانی',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   const personnel = await tx.personnel.create({ data: { firstName: 'موضوع', lastName: 'بازه' } });
   const relationship = await tx.hrEmploymentRelationship.create({ data: {
     personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
@@ -187,6 +194,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-lifecycle@example.invalid', username: 'performance_lifecycle_test', password: 'not-used', firstName: 'عامل', lastName: 'چرخه',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   const personnel = await tx.personnel.create({ data: { firstName: 'موضوع', lastName: 'چرخه' } });
   const relationship = await tx.hrEmploymentRelationship.create({ data: {
     personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
@@ -210,6 +218,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-result-lock@example.invalid', username: 'performance_result_lock_test', password: 'not-used', firstName: 'عامل', lastName: 'نتیجه',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   const personnel = await tx.personnel.create({ data: { firstName: 'موضوع', lastName: 'نتیجه' } });
   const relationship = await tx.hrEmploymentRelationship.create({ data: {
     personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
@@ -254,6 +263,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-policy-lock@example.invalid', username: 'performance_policy_lock_test', password: 'not-used', firstName: 'عامل', lastName: 'سیاست',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   await tx.$executeRawUnsafe(
     `INSERT INTO "performance_policy_versions" ("id","policyKind","version","contentHash","createdByUserId") VALUES ($1,$2::"PerformancePolicyKind",$3,$4,$5)`,
     'locked-policy-v1', 'SCORING', 1, 'content-hash-v1', actor.id,
@@ -284,6 +294,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-policy-path@example.invalid', username: 'performance_policy_path_test', password: 'not-used', firstName: 'عامل', lastName: 'انتشار',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   await assert.rejects(
     tx.$executeRawUnsafe(
       `INSERT INTO "performance_policy_versions" ("id","policyKind","version","lifecycle","effectiveFrom","contentHash","publicationReason","publishedByUserId","publishedAt","activationPreviewHash","activationConfirmedAt","createdByUserId") VALUES ($1,'SCORING',1,'ACTIVE',$2,$3,$4,$5,$2,$6,$2,$5)`,
@@ -298,6 +309,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-policy-premature@example.invalid', username: 'performance_policy_premature_test', password: 'not-used', firstName: 'عامل', lastName: 'اثر سیاست',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   await tx.$executeRawUnsafe(
     `INSERT INTO "performance_policy_versions" ("id","policyKind","version","contentHash","createdByUserId") VALUES ($1,'LEVEL_CLASSIFICATION',1,$2,$3)`,
     'premature-policy-v1', 'premature-content-hash', actor.id,
@@ -325,6 +337,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-positive-version@example.invalid', username: 'performance_positive_version_test', password: 'not-used', firstName: 'عامل', lastName: 'نسخه',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   await assert.rejects(
     tx.$executeRawUnsafe(
       `INSERT INTO "performance_policy_versions" ("id","policyKind","version","contentHash","createdByUserId") VALUES ($1,'SCORING',0,$2,$3)`,
@@ -339,6 +352,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-lineage@example.invalid', username: 'performance_lineage_test', password: 'not-used', firstName: 'عامل', lastName: 'تبار',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   await tx.$executeRawUnsafe(
     `INSERT INTO "performance_policy_versions" ("id","policyKind","version","contentHash","createdByUserId") VALUES ($1,$2::"PerformancePolicyKind",$3,$4,$5)`,
     'lineage-policy-v1', 'SCORING', 1, 'lineage-content-v1', actor.id,
@@ -357,6 +371,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-legal-hold@example.invalid', username: 'performance_legal_hold_test', password: 'not-used', firstName: 'عامل', lastName: 'توقف حقوقی',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   await tx.$executeRawUnsafe(
     `INSERT INTO "performance_policy_versions" ("id","policyKind","version","contentHash","createdByUserId") VALUES ($1,$2::"PerformancePolicyKind",$3,$4,$5)`,
     'retention-policy-v1', 'RETENTION', 1, 'retention-content-hash', actor.id,
@@ -375,6 +390,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-late-hold@example.invalid', username: 'performance_late_hold_test', password: 'not-used', firstName: 'عامل', lastName: 'توقف مؤخر',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   const aggregateId = 'submission-late-hold';
   const hash = aggregateHash(aggregateId);
   await tx.$executeRawUnsafe(
@@ -405,6 +421,7 @@ await runRolledBack(async (tx) => {
   const actor = await tx.user.create({ data: {
     email: 'performance-hold-scope@example.invalid', username: 'performance_hold_scope_test', password: 'not-used', firstName: 'عامل', lastName: 'دامنه توقف',
   } });
+  await enablePerformanceTestRelease(tx, actor.id);
   await tx.$executeRawUnsafe(
     `INSERT INTO "performance_legal_holds" ("id","aggregateType","aggregateId","aggregateIdHash","version","reason","placedByUserId") VALUES ($1,$2,$3,$4,$5,$6,$7)`,
     'immutable-hold-scope', 'SUBMISSION', 'submission-protected', aggregateHash('submission-protected'), 1, 'توقف دامنه‌دار', actor.id,

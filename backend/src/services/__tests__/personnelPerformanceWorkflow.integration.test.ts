@@ -1,3 +1,4 @@
+import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { PerformanceReviewDecision } from '@prisma/client';
@@ -59,6 +60,7 @@ const main = async () => {
         password: 'not-used', firstName: 'بررسی‌کننده', lastName: 'دو', personnelId: secondReviewerPersonnel.id,
       } }),
     ]);
+    await enablePerformanceTestRelease(first, firstReviewer.id);
     await first.hrFeatureAccessGrant.createMany({ data: [
       { stableKey: `performance-submit-${suffix}`, userId: supervisorUser.id, featureCode: 'SUBMIT_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
       { stableKey: `performance-review-a-${suffix}`, userId: firstReviewer.id, featureCode: 'REVIEW_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },

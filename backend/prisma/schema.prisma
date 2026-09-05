@@ -7979,3 +7979,109 @@ model PerformanceDeletionReceipt {
   @@index([aggregateType, executedAt])
   @@map("performance_deletion_receipts")
 }
+
+model PerformancePrivacyCase {
+  id                   String   @id @default(cuid())
+  subjectId            String
+  requestKind          String
+  status               String   @default("RECEIVED")
+  requestedByUserId    String
+  requestedAt          DateTime @default(now())
+  acknowledgeBy        DateTime
+  verifyBy             DateTime
+  respondBy            DateTime
+  extensionCount       Int      @default(0)
+  identityVerifiedAt   DateTime?
+  verifiedByUserId     String?
+  scopeHash            String
+  encryptedRequestId  String   @unique
+  encryptedResponseId String?  @unique
+  closedAt             DateTime?
+  version              Int      @default(1)
+
+  @@index([subjectId, status])
+  @@index([status, respondBy])
+  @@map("performance_privacy_cases")
+}
+
+model PerformancePrivacyScope {
+  id           String @id @default(cuid())
+  caseId       String
+  evaluationId String
+
+  @@unique([caseId, evaluationId])
+  @@index([evaluationId])
+  @@map("performance_privacy_scopes")
+}
+
+model PerformancePrivacyDecision {
+  id            String   @id @default(cuid())
+  caseId        String
+  version       Int
+  action        String
+  actorUserId   String
+  authorityHash String
+  reasonCode    String
+  contentHash   String
+  occurredAt    DateTime @default(now())
+
+  @@unique([caseId, version])
+  @@map("performance_privacy_decisions")
+}
+
+model PerformanceEvidenceRestriction {
+  id               String   @id @default(cuid())
+  evaluationId     String
+  privacyCaseId    String?
+  status           String   @default("ACTIVE")
+  reasonCode       String
+  createdByUserId  String
+  createdAt        DateTime @default(now())
+  releasedByUserId String?
+  releasedAt       DateTime?
+  releaseReason    String?
+
+  @@index([evaluationId, status])
+  @@index([privacyCaseId])
+  @@map("performance_evidence_restrictions")
+}
+
+model PerformanceLegalHoldDecision {
+  id            String   @id @default(cuid())
+  holdId        String
+  action        String
+  actorUserId   String
+  reasonCode    String
+  authorityHash String
+  decidedAt     DateTime @default(now())
+
+  @@index([holdId, action, decidedAt])
+  @@map("performance_legal_hold_decisions")
+}
+
+model PerformanceExportCleanupAttempt {
+  id              String   @id @default(cuid())
+  exportId        String   @unique
+  policyVersionId String
+  artifactHash    String?
+  scopeHash       String
+  status          String   @default("PENDING")
+  attemptCount    Int      @default(0)
+  lastFailureCode String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  liveDeletedAt   DateTime?
+
+  @@index([status, updatedAt])
+  @@map("performance_export_cleanup_attempts")
+}
+
+model PerformancePrivacyCorrection {
+  id           String @id @default(cuid())
+  caseId       String
+  evaluationId String
+  correctionId String
+
+  @@unique([caseId, evaluationId])
+  @@map("performance_privacy_corrections")
+}

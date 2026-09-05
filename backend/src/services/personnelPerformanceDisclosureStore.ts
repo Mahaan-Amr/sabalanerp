@@ -1,3 +1,4 @@
+import { activePerformanceRestrictionIds } from './personnelPerformanceRestrictionQueries';
 import { readPerformanceRetentionPolicy } from './personnelPerformanceRetentionStore';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
@@ -315,7 +316,7 @@ const analyticsPopulation = async (client: PrismaClient, keyring: PerformanceVau
     performancePeerFamilyKey(jobId, activeFamilies.filter((family) => familyJobs.some((member) => member.jobId === jobId && member.familyVersionId === family.id))),
   ]));
   const results = await client.performanceAcceptedResult.findMany({
-    where: { status: PerformanceResultStatus.EFFECTIVE, expiresAt: { gt: new Date() } },
+    where: { AND: [{ evaluationId: { notIn: await activePerformanceRestrictionIds(client) } }], status: PerformanceResultStatus.EFFECTIVE, expiresAt: { gt: new Date() } },
     orderBy: [{ acceptedAt: 'desc' }, { version: 'desc' }],
   });
   const resultBySubject = new Map<string, { exactScore?: number; signature: string }>();
@@ -376,7 +377,7 @@ const historicalAnalyticsPopulation = async (
     status: 'ACCEPTED', subjectId: { in: authorizedSubjectIds }, measurementTo: { gte: reportingFrom, lt: reportingTo },
   } });
   const results = evaluations.length ? await client.performanceAcceptedResult.findMany({
-    where: { evaluationId: { in: evaluations.map(({ id }) => id) }, status: namedRanking ? PerformanceResultStatus.EFFECTIVE : { in: [PerformanceResultStatus.EFFECTIVE, PerformanceResultStatus.EXPIRED] },
+    where: { AND: [{ evaluationId: { notIn: await activePerformanceRestrictionIds(client) } }], evaluationId: { in: evaluations.map(({ id }) => id) }, status: namedRanking ? PerformanceResultStatus.EFFECTIVE : { in: [PerformanceResultStatus.EFFECTIVE, PerformanceResultStatus.EXPIRED] },
       ...(namedRanking ? { expiresAt: { gt: new Date() } } : {}) },
     orderBy: [{ acceptedAt: 'desc' }, { version: 'desc' }],
   }) : [];
@@ -454,7 +455,7 @@ export const fixedCohortPerformanceTrend = async (
   if (periodKeys.length < 2) return { suppressed: true as const, reasonCode: 'TREND_PERIODS_INSUFFICIENT' };
   const relevant = evaluations.filter(({ measurementTo }) => periodKeys.includes(`${measurementTo.getUTCFullYear()}-${String(measurementTo.getUTCMonth() + 1).padStart(2, '0')}`));
   const results = await client.performanceAcceptedResult.findMany({
-    where: { evaluationId: { in: relevant.map(({ id }) => id) }, status: { in: [PerformanceResultStatus.EFFECTIVE, PerformanceResultStatus.EXPIRED] } },
+    where: { AND: [{ evaluationId: { notIn: await activePerformanceRestrictionIds(client) } }], evaluationId: { in: relevant.map(({ id }) => id) }, status: { in: [PerformanceResultStatus.EFFECTIVE, PerformanceResultStatus.EXPIRED] } },
     orderBy: [{ acceptedAt: 'desc' }, { version: 'desc' }],
   });
   const evaluationById = new Map(relevant.map((evaluation) => [evaluation.id, evaluation]));
@@ -575,7 +576,7 @@ export const getEvaluatorCalibration = async (client: PrismaClient, input: { act
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
   const submissions = await client.performanceSubmission.findMany({ where: { supervisorPersonnelId: input.evaluatorPersonnelId } });
   const sections = submissions.length ? await client.performanceEvaluationSection.findMany({ where: { id: { in: submissions.map(({ sectionId }) => sectionId) }, status: 'ACCEPTED' } }) : [];
-  const evaluations = sections.length ? await client.performanceEvaluation.findMany({ where: { id: { in: sections.map(({ evaluationId }) => evaluationId) } } }) : [];
+  const evaluations = sections.length ? await client.performanceEvaluation.findMany({ where: { id: { in: sections.map(({ evaluationId }) => evaluationId), notIn: await activePerformanceRestrictionIds(client) } } }) : [];
   const subjectByEvaluation = new Map(evaluations.map(({ id, subjectId, measurementTo }) => [id, { subjectId, measurementTo }]));
   const sectionById = new Map(sections.map((section) => [section.id, section]));
   const samples: Array<{ evaluatorPersonnelId: string; subjectId: string; periodKey: string; comparabilitySignature: string; grade: number }> = [];
@@ -635,6 +636,14 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'performance-export-queue'}, 0))`;
     const queued = await tx.performanceExportReceipt.findUnique({ where: { id: exportId } });
     if (!queued || queued.status !== PerformanceExportStatus.QUEUED) return null;
+    const revision = await evidenceRevision(tx, true);
+    const payload = queued.encryptedPayloadId ? await readPerformancePayload<{ scope?: { evidenceRevision?: string; reportKind?: string } }>(tx, queued.encryptedPayloadId, keyring) : null;
+    const permissions = await activeHrActionPermissionsForUser(tx, queued.requestedByUserId);
+    const requiredView = payload?.scope?.reportKind === 'NAMED_RANKING' ? 'VIEW_NAMED_PERFORMANCE_RANKING' : 'VIEW_PERFORMANCE_ANALYTICS';
+    if (!payload?.scope || payload.scope.evidenceRevision !== revision || !permissions.includes('REQUEST_PERFORMANCE_EXPORT') || !permissions.includes(requiredView)) {
+      await tx.performanceExportReceipt.update({ where: { id: queued.id }, data: { status: 'FAILED', failureCode: 'PERFORMANCE_EXPORT_AUTHORIZATION_CHANGED' } });
+      return null;
+    }
     const limit = queued.exportKind === 'PDF' ? 2 : 5;
     const running = await tx.performanceExportReceipt.count({ where: { exportKind: queued.exportKind, status: PerformanceExportStatus.RUNNING } });
     if (running >= limit) return null;
@@ -644,7 +653,7 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
   });
   if (!receipt?.encryptedPayloadId) return null;
   try {
-    const payload = await readPerformancePayload<{ report: unknown }>(client, receipt.encryptedPayloadId, keyring);
+    const payload = await readPerformancePayload<{ report: unknown; scope: { evidenceRevision: string } }>(client, receipt.encryptedPayloadId, keyring);
     const rows = exportRows(payload.report);
     if ((receipt.exportKind === 'XLSX' && rows.length > 100_000) || (receipt.exportKind === 'PDF' && rows.length > 12_500)) {
       throw disclosureError('دامنه خروجی از سقف مجاز بیشتر است.', 'PERFORMANCE_EXPORT_SCOPE_TOO_LARGE', 422);
@@ -660,6 +669,7 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
     const exportKey = performanceExportKeyFromEnvironment();
     await writeFile(artifactPath, encryptPerformanceExportArtifact(rendered.bytes, exportKey.key), { mode: 0o600 });
     const promoted = await runPerformanceSerializableTransaction(client, async (tx) => {
+      if (await evidenceRevision(tx, true) !== payload.scope.evidenceRevision) throw disclosureError('شواهد خروجی تغییر کرده است.', 'PERFORMANCE_EXPORT_EVIDENCE_CHANGED', 409);
       const updated = await tx.performanceExportReceipt.updateMany({ where: {
         id: receipt.id, status: PerformanceExportStatus.RUNNING, attemptCount: receipt.attemptCount,
       }, data: {
@@ -699,6 +709,14 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
   }
 };
 
+const evidenceRevision = async (client: PrismaClient | Prisma.TransactionClient, lock = false) => {
+  const rows = lock
+    ? await client.$queryRaw<Array<{ revision: bigint }>>`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`
+    : await client.$queryRaw<Array<{ revision: bigint }>>`SELECT revision FROM performance_disclosure_revision WHERE id = 1`;
+  if (rows.length !== 1) throw disclosureError('وضعیت حفاظت شواهد در دسترس نیست.', 'PERFORMANCE_DISCLOSURE_FENCE_UNAVAILABLE', 409);
+  return String(rows[0].revision);
+};
+
 export const requestPerformanceExport = async (client: PrismaClient, input: {
   actorUserId: string;
   exportKind: 'PDF' | 'XLSX';
@@ -716,6 +734,7 @@ export const requestPerformanceExport = async (client: PrismaClient, input: {
   const permissionCodes = await activeHrActionPermissionsForUser(client, input.actorUserId);
   const requiredView = input.reportKind === 'NAMED_RANKING' ? 'VIEW_NAMED_PERFORMANCE_RANKING' : 'VIEW_PERFORMANCE_ANALYTICS';
   if (!permissionCodes.includes(requiredView)) throw disclosureError('مجوز مشاهده محتوای این خروجی معتبر نیست.', 'PERFORMANCE_EXPORT_VIEW_PERMISSION_REQUIRED', 403);
+  const revision = await evidenceRevision(client);
   const report = await getPerformanceAnalytics(client, {
     actorUserId: input.actorUserId,
     personnelIds: input.personnelIds,
@@ -727,8 +746,9 @@ export const requestPerformanceExport = async (client: PrismaClient, input: {
   const token = randomBytes(32).toString('base64url');
   const now = new Date();
   const id = randomUUID();
-  const scope = { reportKind: input.reportKind, personnelIds: [...(input.personnelIds ?? [])].sort(), purpose: input.purpose.trim(), generatedFromHash: canonicalPerformanceHash(report) };
+  const scope = { evidenceRevision: revision, reportKind: input.reportKind, personnelIds: [...(input.personnelIds ?? [])].sort(), purpose: input.purpose.trim(), generatedFromHash: canonicalPerformanceHash(report) };
   const receipt = await client.$transaction(async (tx) => {
+    if (await evidenceRevision(tx, true) !== revision) throw disclosureError('شواهد گزارش تغییر کرده است؛ خروجی تازه درخواست کنید.', 'PERFORMANCE_EXPORT_EVIDENCE_CHANGED', 409);
     const encrypted = await persistPerformancePayload(tx, {
       aggregateType: 'PERFORMANCE_EXPORT', aggregateId: id, payloadKind: 'SCOPE_SNAPSHOT', schemaVersion: 1,
       payload: { scope, report }, keyring,
@@ -785,15 +805,18 @@ export const getPerformanceExport = async (client: PrismaClient, input: { export
   };
 };
 
-export const claimPerformanceExportDownload = async (client: PrismaClient, input: { exportId: string; actorUserId: string; token: string }) => {
+export const claimPerformanceExportDownload = async (client: PrismaClient | Prisma.TransactionClient, input: { exportId: string; actorUserId: string; token: string }) => {
+  const work = async (tx: Prisma.TransactionClient) => {
+  const revision = await evidenceRevision(tx, true);
   const now = new Date();
-  const permissions = await activeHrActionPermissionsForUser(client, input.actorUserId);
+  const permissions = await activeHrActionPermissionsForUser(tx, input.actorUserId);
   if (!permissions.includes('REQUEST_PERFORMANCE_EXPORT')) throw disclosureError('مجوز دانلود این خروجی دیگر معتبر نیست.', 'PERFORMANCE_EXPORT_PERMISSION_REVOKED', 403);
-  const receipt = await client.performanceExportReceipt.findUnique({ where: { id: input.exportId } });
+  const receipt = await tx.performanceExportReceipt.findUnique({ where: { id: input.exportId } });
   if (!receipt || receipt.requestedByUserId !== input.actorUserId || receipt.downloadTokenHash !== tokenHash(input.token)) {
     throw disclosureError('خروجی پیدا نشد.', 'PERFORMANCE_EXPORT_NOT_FOUND', 404);
   }
-  const scope = receipt.encryptedPayloadId ? await readPerformancePayload<{ scope?: { reportKind?: string } }>(client, receipt.encryptedPayloadId, performanceVaultKeyFromEnvironment()) : null;
+  const scope = receipt.encryptedPayloadId ? await readPerformancePayload<{ scope?: { reportKind?: string; evidenceRevision?: string } }>(tx, receipt.encryptedPayloadId, performanceVaultKeyFromEnvironment()) : null;
+  if (!scope?.scope?.evidenceRevision || scope.scope.evidenceRevision !== revision) throw disclosureError('شواهد گزارش تغییر کرده است؛ خروجی تازه درخواست کنید.', 'PERFORMANCE_EXPORT_EVIDENCE_CHANGED', 409);
   const requiredView = scope?.scope?.reportKind === 'NAMED_RANKING' ? 'VIEW_NAMED_PERFORMANCE_RANKING' : 'VIEW_PERFORMANCE_ANALYTICS';
   if (!permissions.includes(requiredView)) throw disclosureError('مجوز مشاهده محتوای این خروجی دیگر معتبر نیست.', 'PERFORMANCE_EXPORT_PERMISSION_REVOKED', 403);
   if (receipt.status !== PerformanceExportStatus.READY || !receipt.artifactPath || !receipt.downloadTokenExpiresAt || receipt.downloadTokenExpiresAt <= now || !receipt.expiresAt || receipt.expiresAt <= now) {
@@ -803,12 +826,14 @@ export const claimPerformanceExportDownload = async (client: PrismaClient, input
   if (receipt.artifactKeyId !== exportKey.keyId) throw disclosureError('کلید فایل خروجی در دسترس نیست.', 'PERFORMANCE_EXPORT_KEY_UNAVAILABLE', 410);
   const bytes = decryptPerformanceExportArtifact(await readFile(receipt.artifactPath), exportKey.key);
   if (createHash('sha256').update(bytes).digest('hex') !== receipt.artifactHash) throw disclosureError('تمامیت فایل خروجی تأیید نشد.', 'PERFORMANCE_EXPORT_INTEGRITY_FAILED', 500);
-  const claimed = await client.performanceExportReceipt.updateMany({
+  const claimed = await tx.performanceExportReceipt.updateMany({
     where: { id: receipt.id, status: PerformanceExportStatus.READY, downloadedAt: null },
     data: { status: PerformanceExportStatus.DELIVERING },
   });
   if (claimed.count !== 1) throw disclosureError('پیوند دانلود قبلاً استفاده شده است.', 'PERFORMANCE_EXPORT_ALREADY_DOWNLOADED', 409);
   return { bytes, mimeType: receipt.artifactMimeType ?? 'application/octet-stream', filename: `performance-${receipt.id}.${receipt.exportKind === 'PDF' ? 'pdf' : 'xlsx'}` };
+  };
+  return '$transaction' in client ? client.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000 }) : work(client);
 };
 
 export const completePerformanceExportDownload = async (client: PrismaClient, input: { exportId: string; actorUserId: string; delivered: boolean }) => {
@@ -863,6 +888,15 @@ const redactPerformanceExportPayload = async (client: PrismaClient | Prisma.Tran
 const cleanupPerformanceExport = async (
   client: PrismaClient | Prisma.TransactionClient, exportId: string, now: Date, actorUserId: string | null,
 ) => {
+  const candidate = await client.performanceExportReceipt.findUnique({ where: { id: exportId } });
+  if (!candidate || candidate.status === PerformanceExportStatus.DELETED
+    || (!candidate.downloadedAt && (!candidate.expiresAt || candidate.expiresAt > now))) return false;
+  const { policy } = await readPerformanceRetentionPolicy(client, now);
+  // With the runtime PrismaClient this intent commits before any filesystem mutation. A failed cleanup retains the same retry id.
+  const attempt = await client.performanceExportCleanupAttempt.upsert({ where: { exportId }, update: {}, create: {
+    exportId, policyVersionId: policy.id, artifactHash: candidate.artifactHash, scopeHash: candidate.scopeHash,
+  } });
+  if (attempt.status === 'LIVE_DELETED_PENDING_BACKUP') return false;
   const work = async (tx: Prisma.TransactionClient) => {
     // The hold is re-read after the scope lock. An older repeatable snapshot cannot authorize filesystem deletion.
     const isolation = await tx.$queryRaw<Array<{ transaction_isolation: string }>>`SHOW transaction_isolation`;
@@ -884,11 +918,13 @@ const cleanupPerformanceExport = async (
       scopes.push({ aggregateType: payload.aggregateType, aggregateIdHash });
     }
     if (await tx.performanceLegalHold.findFirst({ where: { status: 'ACTIVE', OR: scopes }, select: { id: true } })) {
+      await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'HELD', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_LEGAL_HOLD_ACTIVE' } });
       return false;
     }
     await readPerformanceRetentionPolicy(tx, now);
     if (receipt.artifactPath) await unlink(receipt.artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
     await redactPerformanceExportPayload(tx, receipt, now, actorUserId);
+    await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'LIVE_DELETED_PENDING_BACKUP', liveDeletedAt: now, attemptCount: { increment: 1 }, lastFailureCode: null } });
     await auditDisclosure(tx, {
       aggregateType: 'PERFORMANCE_EXPORT', aggregateId: receipt.id, eventType: 'PERFORMANCE_EXPORT_CLEANED_UP',
       actorUserId, authorityCodes: actorUserId ? ['REQUEST_PERFORMANCE_EXPORT'] : ['SYSTEM_EXPORT_RETENTION'],
@@ -896,8 +932,19 @@ const cleanupPerformanceExport = async (
     });
     return true;
   };
-  return '$transaction' in client
-    ? client.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }) : work(client);
+  try {
+    return '$transaction' in client
+      ? await client.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }) : await work(client);
+  } catch (error) {
+    if ('$transaction' in client) {
+      const persisted = await client.performanceExportCleanupAttempt.findUnique({ where: { id: attempt.id } }).catch(() => null);
+      if (persisted?.status === 'LIVE_DELETED_PENDING_BACKUP') return true;
+      await client.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: {
+        status: 'RETRY_REQUIRED', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_CLEANUP_STORAGE_OR_DATABASE_FAILURE',
+      } }).catch(() => undefined);
+    }
+    throw error;
+  }
 };
 
 const deleteDownloadedPerformanceExport = async (client: PrismaClient, exportId: string, actorUserId: string | null) => {
@@ -905,12 +952,21 @@ const deleteDownloadedPerformanceExport = async (client: PrismaClient, exportId:
 };
 
 export const cleanupExpiredPerformanceExports = async (client: PrismaClient | Prisma.TransactionClient, now = new Date()) => {
-  const expired = await client.performanceExportReceipt.findMany({
-    where: { status: { not: PerformanceExportStatus.DELETED }, expiresAt: { lte: now } },
-    select: { id: true },
-  });
   let count = 0;
-  for (const receipt of expired) if (await cleanupPerformanceExport(client, receipt.id, now, null)) count += 1;
+  let failed = 0;
+  let cursor: string | undefined;
+  while (true) {
+    const expired: Array<{ id: string }> = await client.performanceExportReceipt.findMany({
+      where: { status: { not: PerformanceExportStatus.DELETED }, OR: [{ expiresAt: { lte: now } }, { downloadedAt: { not: null } }] },
+      orderBy: { id: 'asc' }, take: 100, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), select: { id: true },
+    });
+    if (!expired.length) break;
+    for (const receipt of expired) {
+      try { if (await cleanupPerformanceExport(client, receipt.id, now, null)) count += 1; } catch { failed += 1; }
+    }
+    cursor = expired[expired.length - 1].id;
+  }
+  if (failed) throw disclosureError('بخشی از پاک‌سازی تکمیل نشد و برای تلاش دوباره حفظ شد.', 'PERFORMANCE_CLEANUP_RETRY_REQUIRED', 503);
   return count;
 };
 
@@ -946,7 +1002,7 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
       throw disclosureError('تعداد نتیجه‌های انتخاب‌شده با سیاست فعال این نوع پیامد سازگار نیست.', 'PERFORMANCE_HANDOFF_MINIMUM_RESULTS_REQUIRED', 409);
     }
     const earliestAcceptedAt = new Date(Date.now() - rule.maximumAgeDays * 24 * 60 * 60_000);
-    const results = await tx.performanceAcceptedResult.findMany({ where: {
+    const results = await tx.performanceAcceptedResult.findMany({ where: { AND: [{ evaluationId: { notIn: await activePerformanceRestrictionIds(tx) } }],
       id: { in: [...input.resultIds] },
       status: PerformanceResultStatus.EFFECTIVE,
       expiresAt: { gt: new Date() },
@@ -987,8 +1043,17 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
     } });
     if (active) throw disclosureError('برای این نوع پیامد در این چرخه یک ارجاع فعال وجود دارد.', 'PERFORMANCE_HANDOFF_ALREADY_ACTIVE', 409);
     const projection = await tx.performanceCurrentLevelProjection.findUnique({ where: { subjectId: subject.id } });
+    let projectionResultIds: string[] = [];
+    if (projection?.state === 'LEVEL') {
+      const event = await tx.performanceAuditEvent.findFirst({ where: { aggregateType: 'CURRENT_LEVEL_PROJECTION', aggregateId: subject.id, eventType: 'RECOMPUTED' }, orderBy: { occurredAt: 'desc' } });
+      const evidence = event?.encryptedPayloadId ? await readPerformancePayload<{ next: { sourceResultsHashInput: string; trace: { inputs: Array<{ resultId: string }> } } }>(tx, event.encryptedPayloadId, keyring) : null;
+      if (!evidence?.next || canonicalPerformanceHash(evidence.next.sourceResultsHashInput) !== projection.sourceResultsHash) {
+        throw disclosureError('وابستگی‌های سطح جاری قابل بازسازی نیست.', 'PERFORMANCE_HANDOFF_PROJECTION_UNVERIFIED', 409);
+      }
+      projectionResultIds = evidence.next.trace.inputs.map(({ resultId }) => resultId);
+    }
     const trendCandidates = await tx.performanceAcceptedResult.findMany({
-      where: { evaluationId: { in: (await tx.performanceEvaluation.findMany({ where: { subjectId: subject.id }, select: { id: true } })).map(({ id }) => id) }, status: { in: [PerformanceResultStatus.EFFECTIVE, PerformanceResultStatus.EXPIRED] } },
+      where: { AND: [{ evaluationId: { notIn: await activePerformanceRestrictionIds(tx) } }], evaluationId: { in: (await tx.performanceEvaluation.findMany({ where: { subjectId: subject.id }, select: { id: true } })).map(({ id }) => id) }, status: { in: [PerformanceResultStatus.EFFECTIVE, PerformanceResultStatus.EXPIRED] } },
       orderBy: [{ acceptedAt: 'desc' }, { version: 'desc' }], take: 12,
     });
     const recentResults = trendCandidates.filter((result, index, all) => all.findIndex(({ evaluationId }) => evaluationId === result.evaluationId) === index).slice(0, 4);
@@ -1038,6 +1103,7 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
         measurementTo: evaluations.find(({ id }) => id === result.evaluationId)?.measurementTo,
         contextSnapshotId: evaluations.find(({ id }) => id === result.evaluationId)?.contextSnapshotId,
       })),
+      projectionResultIds,
       currentProjection: projection ? { state: projection.state, levelCode: projection.levelCode, levelPolicyVersionId: projection.levelPolicyVersionId, version: projection.version, sourceResultsHash: projection.sourceResultsHash } : null,
       recentTrend: recentResults.map((result) => ({
         resultId: result.id, version: result.version, levelCode: result.levelCode, levelPolicyVersionId: result.levelPolicyVersionId,
@@ -1126,7 +1192,7 @@ export const listEligibleConsequenceResults = async (client: PrismaClient, input
   });
   const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
   const results = evaluations.length ? await client.performanceAcceptedResult.findMany({
-    where: {
+    where: { AND: [{ evaluationId: { notIn: await activePerformanceRestrictionIds(client) } }],
       evaluationId: { in: evaluations.map(({ id }) => id) }, status: PerformanceResultStatus.EFFECTIVE,
       expiresAt: { gt: new Date() }, acceptedAt: { gte: new Date(Date.now() - rule.maximumAgeDays * 24 * 60 * 60_000) },
     },
@@ -1144,9 +1210,10 @@ export const listEligibleConsequenceResults = async (client: PrismaClient, input
   }));
 };
 
-export const getPerformanceConsequenceHandoff = async (client: PrismaClient, input: { handoffId: string; actorUserId: string; keyring?: PerformanceVaultKey }) => {
+export const getPerformanceConsequenceHandoff = async (client: PrismaClient | Prisma.TransactionClient, input: { handoffId: string; actorUserId: string; keyring?: PerformanceVaultKey }) => {
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
   return runPerformanceSerializableTransaction(client, async (tx) => {
+    await tx.$executeRaw`UPDATE performance_disclosure_revision SET revision = revision WHERE id = 1`;
     const handoff = await tx.performanceConsequenceHandoff.findUnique({ where: { id: input.handoffId } });
     if (!handoff) throw disclosureError('ارجاع پیامد پیدا نشد.', 'PERFORMANCE_HANDOFF_NOT_FOUND', 404);
     const packageRecord = handoff.packageId ? await tx.performanceConsequencePackage.findUnique({ where: { id: handoff.packageId } }) : null;
@@ -1227,9 +1294,11 @@ export const suspendPerformanceHandoffsForResult = async (tx: Prisma.Transaction
   return suspended;
 };
 
-export const createPerformanceCorrection = async (client: PrismaClient, input: { evaluationId: string; actorUserId: string; correctionKind: string; reason: string }) => {
+export const createPerformanceCorrection = async (client: PrismaClient | Prisma.TransactionClient, input: { evaluationId: string; actorUserId: string; correctionKind: string; reason: string }) => {
   if (input.reason.trim().length < 8) throw disclosureError('دلیل اصلاح الزامی است.', 'PERFORMANCE_CORRECTION_REASON_REQUIRED', 422);
   return runPerformanceSerializableTransaction(client, async (tx) => {
+    await tx.$executeRaw`UPDATE performance_disclosure_revision SET revision = revision WHERE id = 1`;
+    if (!(await activeHrActionPermissionsForUser(tx, input.actorUserId)).includes('REGISTER_PERFORMANCE_CORRECTION')) throw disclosureError('اختیار مستقل ثبت اصلاح معتبر نیست.', 'PERFORMANCE_CORRECTION_PERMISSION_REQUIRED', 403);
     const evaluation = await tx.performanceEvaluation.findUnique({ where: { id: input.evaluationId } });
     if (!evaluation) throw disclosureError('پرونده ارزیابی پیدا نشد.', 'PERFORMANCE_EVALUATION_NOT_FOUND', 404);
     const target = await tx.performanceAcceptedResult.findFirst({ where: { evaluationId: evaluation.id }, orderBy: { version: 'desc' } });

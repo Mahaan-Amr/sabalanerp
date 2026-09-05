@@ -12,9 +12,13 @@ The evaluator distinguishes accepted evidence (seven years after the latest end 
 
 Unknown dates or versions block eligibility. An active hold, open scoped dependency, or reconstruction dependency preserves the record. A closed request continues preservation for 90 days. Re-employment never resets the old relationship's clock. The evaluator is not an erasure authorization: classification, publication approval, dependency discovery, first-run impact approval, bulk thresholds, complete copy inventory, and recoverable backup expiry still require the production retention workflow.
 
+Dependencies must identify their kind. Closed disputes, corrections and consequence cases can move the governing evidence anchor; a closed privacy access or erasure request adds only its scoped 90-day preservation period.
+
 Export cleanup takes the same aggregate-scope advisory lock as the database legal-hold trigger and rechecks the hold before filesystem deletion. It requires a Read Committed cleanup transaction so an older snapshot cannot overlook a committed hold. The runtime commits an export cleanup intent before filesystem deletion. A failed database mutation preserves its stable retry identifier and never commits a deletion receipt. Successful live cleanup is explicitly `LIVE_DELETED_PENDING_BACKUP`; it does not attest backup expiry. The worker scans bounded pages and continues past held or failed records. A full process-crash/storage-failure recovery rehearsal remains required.
 
 Live deletion is not proof of backup expiry. Until every recoverable copy has been independently accounted for, a deletion must be reported as **live deletion; awaiting backup expiry**. Preserve the ten latest releases and twelve monthly points under ADR-0039. Replay authorized erasures before reopening a restored service. Never prune protected checkpoints to satisfy performance retention or reset the database to discard post-cutover writes.
+
+Each export generation attempt commits an immutable artifact-path inventory entry before writing bytes. Failed, interrupted and superseded attempts remain inventoried for hold-aware cleanup instead of being unlinked by worker error handlers. Publication and cleanup serialize their file operations; a delayed renderer rechecks status, attempt and expiry before writing. The cleanup regression covers a held failed attempt and its eventual live deletion. Previously orphaned files whose paths were already discarded require separate storage reconciliation; migration can inventory only paths still recorded in the database.
 
 ## Safety pause boundary
 
@@ -25,6 +29,8 @@ Database guards now serialize canonical inserts and relevant updates with pause 
 ## Privacy and restriction interfaces
 
 The `/api/hr/performance/privacy/requests` intake requires an Idempotency-Key and freezes the subject/evaluation scope. Own-subject access differs from independent staff view and request permissions. The case records three/five/fifteen working-day deadlines and one reasoned fifteen-working-day extension. Reviewer reads include the protected request and scope; formal ACCESS responses include approved historical levels, dates, correction status, purpose and recipient categories while withholding narrative, criterion scores and third-party data.
+
+Authorized case reads commit an immutable audit event and return its disclosure receipt id. Permission resolution, decryption and the receipt share a transaction. Personnel reassignment invalidates the disclosure revision along with account disablement and grant changes.
 
 Acknowledgement, independent identity verification, response and closure are version-checked transitions with immutable decisions. `open-correction` requires correction-decision and independent correction-registration authority, links the canonical correction, and cannot create an untracked correction on retry. A case with unresolved corrections or outstanding erasure cannot be marked answered. Nonempty erasure cases currently remain pending the full retention/erasure workflow below.
 
@@ -49,6 +55,8 @@ Each check has a unique `name`, a relative `path` to a JSON artifact inside the 
 The required names and field contracts are versioned in `scripts/performance-promotion-evidence.mjs` and `scripts/performance-promotion-measurements.mjs`. They cover all nine gate categories from #355. A label saying PASS is insufficient for capacity, the twelve 100-iteration PostgreSQL races, export capacity, rehearsal, browser acceptance, failure injection, cohort promotion or compatibility retirement. Test fixtures exercising the verifier are not promotion evidence.
 
 The verifier consumes artifacts; it does not run or attest the underlying capacity, security, browser, migration or recovery exercises. Trusted collection and durable seven-year promotion-artifact storage remain necessary. Retain failed CI evidence for at least 30 days. Regenerate dependent evidence whenever code, schema, policy, or infrastructure changes.
+
+`npm --prefix backend run test:personnel-performance-safety-races:db` exercises three control orderings at 100 iterations each by default: disablement wins before the first canonical write, the first canonical write wins before disablement, and pause wins before an existing policy update. Each ordering waits for actual PostgreSQL lock contention. The harness uses schema-only temporary databases on the existing local PostgreSQL service and removes them afterward. All 300 checks passed locally on 2026-09-05. These three orderings are regression evidence, not the twelve-race promotion gate; the output explicitly records that limitation. A shorter `PERFORMANCE_RACE_ITERATIONS` run is only a diagnostic run.
 
 ## Operator ownership and acceptance plan
 

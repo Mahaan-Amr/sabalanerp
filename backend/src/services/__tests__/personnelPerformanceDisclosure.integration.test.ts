@@ -191,6 +191,9 @@ const main = async () => {
         id: exportId, requestedByUserId: exportUser.id, exportKind: 'XLSX', scopeHash: 'scope', permissionHash: 'permission',
         status: 'QUEUED', encryptedPayloadId: payloadId, artifactPath, artifactHash: 'artifact-hash', expiresAt: new Date('2000-01-01T00:00:00.000Z'),
       } });
+      const failedAttemptPath = path.join(temporaryDirectory, 'failed-attempt.enc');
+      await writeFile(failedAttemptPath, Buffer.from('failed-attempt-encrypted-artifact'));
+      await tx.performanceExportArtifact.create({ data: { exportId, attemptCount: 1, artifactPath: failedAttemptPath } });
       await tx.$executeRawUnsafe('SAVEPOINT held_export');
       await tx.performanceLegalHold.create({ data: {
         aggregateType: 'PERFORMANCE_EXPORT', aggregateId: exportId,
@@ -206,10 +209,12 @@ const main = async () => {
       } });
       assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 1, 'a scoped hold must not block unrelated cleanup');
       await access(artifactPath);
+      await access(failedAttemptPath);
       await assert.rejects(() => access(unrelatedArtifactPath));
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT held_export');
       assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 1);
       await assert.rejects(() => access(artifactPath));
+      await assert.rejects(() => access(failedAttemptPath), 'cleanup must remove every failed attempt only after the hold is released');
       const cleaned = await tx.performanceExportReceipt.findUniqueOrThrow({ where: { id: exportId } });
       assert.equal(cleaned.status, 'DELETED');
       assert.equal(cleaned.encryptedPayloadId, null, 'full report payload must be redacted at cleanup');

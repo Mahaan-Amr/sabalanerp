@@ -93,17 +93,25 @@ export const requestPerformancePrivacy = async (client: Client, input: {
   return publicCase(record);
 });
 
-export const getPerformancePrivacyCase = async (client: Client, actorUserId: string, caseId: string) => {
-  const record = await client.performancePrivacyCase.findUnique({ where: { id: caseId } });
+export const getPerformancePrivacyCase = async (client: Client, actorUserId: string, caseId: string) => inTransaction(client, async (tx) => {
+  await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+  const record = await tx.performancePrivacyCase.findUnique({ where: { id: caseId } });
   if (!record) throw unavailable();
-  await mayRead(client, actorUserId, record.subjectId);
+  const authority = await mayRead(tx, actorUserId, record.subjectId);
   const response = record.encryptedResponseId
-    ? await readPerformancePayload<unknown>(client, record.encryptedResponseId, performanceVaultKeyFromEnvironment()) : null;
-  const reviewer = (await activeHrActionPermissionsForUser(client, actorUserId)).includes('VIEW_PERFORMANCE_PRIVACY_CASE');
-  const request = reviewer ? await readPerformancePayload<unknown>(client, record.encryptedRequestId, performanceVaultKeyFromEnvironment()) : undefined;
-  const scope = reviewer ? await client.performancePrivacyScope.findMany({ where: { caseId }, select: { evaluationId: true } }) : undefined;
-  return { ...publicCase(record), response, ...(reviewer ? { request, scope, subjectId: record.subjectId, requestedByUserId: record.requestedByUserId } : {}) };
-};
+    ? await readPerformancePayload<unknown>(tx, record.encryptedResponseId, performanceVaultKeyFromEnvironment()) : null;
+  const reviewer = (await activeHrActionPermissionsForUser(tx, actorUserId)).includes('VIEW_PERFORMANCE_PRIVACY_CASE');
+  const request = reviewer ? await readPerformancePayload<unknown>(tx, record.encryptedRequestId, performanceVaultKeyFromEnvironment()) : undefined;
+  const scope = reviewer ? await tx.performancePrivacyScope.findMany({ where: { caseId }, select: { evaluationId: true } }) : undefined;
+  const disclosureReceiptId = randomUUID();
+  await tx.performanceAuditEvent.create({ data: { id: disclosureReceiptId, aggregateType: 'PERFORMANCE_PRIVACY_CASE', aggregateId: caseId,
+    eventType: 'PERFORMANCE_PRIVACY_CASE_DISCLOSED', actorUserId, authorityHash: canonicalPerformanceHash({ authority, reviewer }),
+    reason: reviewer ? 'AUTHORIZED_CASE_REVIEW' : 'SUBJECT_CASE_ACCESS',
+    eventHash: canonicalPerformanceHash({ id: disclosureReceiptId, caseId, version: record.version,
+      requestId: reviewer ? record.encryptedRequestId : null, responseId: record.encryptedResponseId, scopeHash: record.scopeHash }),
+  } });
+  return { ...publicCase(record), response, disclosureReceiptId, ...(reviewer ? { request, scope, subjectId: record.subjectId, requestedByUserId: record.requestedByUserId } : {}) };
+});
 
 const responsePermission = (kind: string) => ({
   ACCESS: 'DECIDE_PERFORMANCE_PRIVACY_ACCESS', CORRECTION: 'DECIDE_PERFORMANCE_PRIVACY_CORRECTION', ERASURE: 'DECIDE_PERFORMANCE_ERASURE',

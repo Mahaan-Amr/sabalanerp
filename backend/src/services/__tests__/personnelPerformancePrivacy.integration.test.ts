@@ -28,6 +28,7 @@ const main = async () => {
       const own = await getPerformancePrivacyCase(tx, actor.id, request.id);
       assert.equal(own.requestKind, 'ACCESS');
       assert.equal(own.response, null);
+      assert.equal(typeof own.disclosureReceiptId, 'string', 'authorized case reads return their audit receipt');
       await assert.rejects(() => getPerformancePrivacyCase(tx, other.id, request.id), (error: { code?: string }) => error.code === 'PERFORMANCE_PRIVACY_UNAVAILABLE');
       await assert.rejects(() => actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: request.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' }));
       for (const featureCode of ['ACKNOWLEDGE_PERFORMANCE_PRIVACY_CASE','VERIFY_PERFORMANCE_PRIVACY_IDENTITY','DECIDE_PERFORMANCE_PRIVACY_ACCESS','RESTRICT_PERFORMANCE_EVIDENCE','VIEW_PERFORMANCE_PRIVACY_CASE']) {

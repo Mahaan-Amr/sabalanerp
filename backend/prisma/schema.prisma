@@ -8076,6 +8076,17 @@ model PerformanceExportCleanupAttempt {
   @@map("performance_export_cleanup_attempts")
 }
 
+model PerformanceExportArtifact {
+  id           String   @id @default(cuid())
+  exportId     String
+  attemptCount Int
+  artifactPath String   @unique
+  createdAt    DateTime @default(now())
+
+  @@unique([exportId, attemptCount])
+  @@map("performance_export_artifacts")
+}
+
 model PerformancePrivacyCorrection {
   id           String @id @default(cuid())
   caseId       String

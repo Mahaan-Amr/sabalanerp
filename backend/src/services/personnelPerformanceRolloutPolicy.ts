@@ -136,3 +136,10 @@ export const findApplicablePerformancePause = async (
     orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
   });
 };
+
+export const normalizePerformanceWriteError = (error: unknown): unknown => {
+  const message = error instanceof Error ? error.message : '';
+  const codes = ['PERFORMANCE_SAFETY_PAUSED', 'PERFORMANCE_RELEASE_DISABLED', 'PERFORMANCE_FIX_FORWARD_REQUIRED'] as const;
+  const code = codes.find((candidate) => message.includes(candidate));
+  return code ? Object.assign(new Error('عملیات با وضعیت فعلی انتشار عملکرد مجاز نیست.'), { code, status: 409 }) : error;
+};

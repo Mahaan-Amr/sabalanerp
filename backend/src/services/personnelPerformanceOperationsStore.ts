@@ -54,9 +54,10 @@ export const disablePersonnelPerformanceBeforeFirstWrite = async (client: Client
   if (typeof input.reason !== 'string' || input.reason.trim().length < 8 || input.reason.length > 2000) throw operationsError('PERFORMANCE_ROLLOUT_REASON_REQUIRED', 422);
   if ((await getPersonnelPerformanceOperationsState(tx)).firstCanonicalWriteAt) throw operationsError('PERFORMANCE_FIX_FORWARD_REQUIRED');
   const previous = await tx.performanceFeaturePhaseVersion.findFirst({ orderBy: { version: 'desc' } });
+  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
   return tx.performanceFeaturePhaseVersion.create({ data: {
     version: (previous?.version ?? 0) + 1, predecessorId: previous?.id, phase: previous?.phase ?? 'SCHEMA_PROTECTION',
-    releaseEnabled: false, cohortVersionId: previous?.cohortVersionId, effectiveFrom: new Date(),
+    releaseEnabled: false, cohortVersionId: previous?.cohortVersionId, effectiveFrom: clock.now,
     recordedByUserId: input.actorUserId, reason: input.reason.trim(),
   } });
 });

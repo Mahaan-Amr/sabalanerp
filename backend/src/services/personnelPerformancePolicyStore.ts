@@ -1,3 +1,4 @@
+import { normalizePerformanceWriteError } from './personnelPerformanceRolloutPolicy';
 import { activePerformanceRestrictionIds } from './personnelPerformanceRestrictionQueries';
 import { isSupportedPerformanceRetentionPolicy } from './personnelPerformanceRetention';
 import { createHash, randomUUID } from 'node:crypto';
@@ -89,7 +90,7 @@ export const DEFAULT_SCORING_POLICY_CONTENT: ScoringPolicyContent = {
 };
 
 const asTx = async <T>(client: PrismaClient | Prisma.TransactionClient, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> => {
-  if (!('$transaction' in client)) return work(client);
+  if (!('$transaction' in client)) return work(client).catch((error: unknown) => { throw normalizePerformanceWriteError(error); });
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
@@ -100,7 +101,7 @@ const asTx = async <T>(client: PrismaClient | Prisma.TransactionClient, work: (t
       });
     } catch (error) {
       lastError = error;
-      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'P2034') || attempt === 3) throw error;
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'P2034') || attempt === 3) throw normalizePerformanceWriteError(error);
     }
   }
   throw lastError;

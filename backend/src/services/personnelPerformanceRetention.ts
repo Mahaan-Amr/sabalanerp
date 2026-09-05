@@ -39,7 +39,7 @@ type RetentionInput = {
   downloadedAt?: Date | null;
   now: Date;
   /** Only dependencies within this record's scope; re-employment is never a dependency. */
-  dependencies: Array<{ closedAt: Date | null }>;
+  dependencies: Array<{ closedAt: Date | null; kind: 'DISPUTE' | 'CORRECTION' | 'CONSEQUENCE' | 'PRIVACY_ACCESS' | 'PRIVACY_ERASURE' }>;
   legalHold: boolean;
   requiredForReconstruction?: boolean;
   anonymityVerified?: boolean;
@@ -70,6 +70,7 @@ export const evaluatePerformanceRetention = (input: RetentionInput): RetentionDe
   if (input.legalHold) return { state: 'LEGAL_HOLD', deleteAfter: null };
   if (input.dependencies.some(({ closedAt }) => closedAt === null)) return { state: 'DEPENDENCY_OPEN', deleteAfter: null };
   if (input.dependencies.some(({ closedAt }) => !validDate(closedAt))) return unknownDecision;
+  if (input.dependencies.some(({ kind }) => !['DISPUTE', 'CORRECTION', 'CONSEQUENCE', 'PRIVACY_ACCESS', 'PRIVACY_ERASURE'].includes(kind))) return unknownDecision;
   if (input.requiredForReconstruction) return { state: 'RECONSTRUCTION_DEPENDENCY', deleteAfter: null };
   const rule = PERFORMANCE_RETENTION_SCHEDULE_V1.classes[input.classification as keyof typeof PERFORMANCE_RETENTION_SCHEDULE_V1.classes];
   if (rule.anchor === 'PERMANENT') return { state: 'PERMANENT_POLICY_TEXT', deleteAfter: null };
@@ -82,7 +83,9 @@ export const evaluatePerformanceRetention = (input: RetentionInput): RetentionDe
   const dependencyDates = input.dependencies.map(({ closedAt }) => closedAt!);
   if (dependencyDates.some((date) => date > input.now)) return unknownDecision;
   const governingAnchor = rule.anchor === 'RELATIONSHIP_AND_DEPENDENCIES'
-    ? new Date(Math.max(anchor.getTime(), ...dependencyDates.map((date) => date.getTime()))) : anchor;
+    ? new Date(Math.max(anchor.getTime(), ...input.dependencies
+      .filter(({ kind }) => ['DISPUTE', 'CORRECTION', 'CONSEQUENCE'].includes(kind))
+      .map(({ closedAt }) => closedAt!.getTime()))) : anchor;
   let deleteAfter = 'years' in rule ? addYears(governingAnchor, rule.years)
     : new Date(governingAnchor.getTime() + ('days' in rule ? rule.days * 86_400_000 : 'hours' in rule ? rule.hours * 3_600_000 : 0));
   if (rule.anchor === 'CREATED_OR_FIRST_DOWNLOAD' && input.downloadedAt != null) {

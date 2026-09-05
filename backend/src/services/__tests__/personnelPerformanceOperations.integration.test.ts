@@ -40,9 +40,9 @@ const main = async () => {
       assert.deepEqual(await resolvePersonnelPerformanceWriteGate(tx, 'MANAGE_POLICY', new Date('2099-01-03Z')),
         { allowed: false, reason: 'SAFETY_PAUSED' }, 'a new phase must not hide an unresolved global safety pause');
       await tx.$executeRawUnsafe('SAVEPOINT paused_write');
-      await assert.rejects(() => createPerformancePolicyDraft(tx, { policyKind: 'RETENTION', content: PERFORMANCE_RETENTION_SCHEDULE_V1, createdByUserId: actor.id }), /PERFORMANCE_SAFETY_PAUSED/);
+      await assert.rejects(() => createPerformancePolicyDraft(tx, { policyKind: 'RETENTION', content: PERFORMANCE_RETENTION_SCHEDULE_V1, createdByUserId: actor.id }), (error: { code?: string }) => error.code === 'PERFORMANCE_SAFETY_PAUSED');
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT paused_write');
-      await assert.rejects(() => updatePerformancePolicyDraft(tx, { versionId: draft.id, content: DEFAULT_CURRENT_LEVEL_POLICY_CONTENT }), /PERFORMANCE_SAFETY_PAUSED/);
+      await assert.rejects(() => updatePerformancePolicyDraft(tx, { versionId: draft.id, content: DEFAULT_CURRENT_LEVEL_POLICY_CONTENT }), (error: { code?: string }) => error.code === 'PERFORMANCE_SAFETY_PAUSED');
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT paused_write');
       throw rollback;
     });

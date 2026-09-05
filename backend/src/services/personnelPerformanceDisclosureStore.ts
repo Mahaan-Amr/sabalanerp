@@ -649,6 +649,8 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
     if (running >= limit) return null;
     const attemptCount = queued.attemptCount + 1;
     const artifactPath = path.join(exportRoot(), `${queued.id}-${attemptCount}.${queued.exportKind === 'PDF' ? 'pdf' : 'xlsx'}.enc`);
+    // Commit the path before writing any bytes so interrupted and superseded attempts remain discoverable.
+    await tx.performanceExportArtifact.create({ data: { exportId: queued.id, attemptCount, artifactPath } });
     return tx.performanceExportReceipt.update({ where: { id: queued.id }, data: { status: PerformanceExportStatus.RUNNING, startedAt: new Date(), attemptCount, artifactPath, failureCode: null } });
   });
   if (!receipt?.encryptedPayloadId) return null;
@@ -667,9 +669,15 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
       throw disclosureError('حجم فایل خروجی از سقف مجاز بیشتر است.', 'PERFORMANCE_EXPORT_FILE_TOO_LARGE', 422);
     }
     const exportKey = performanceExportKeyFromEnvironment();
-    await writeFile(artifactPath, encryptPerformanceExportArtifact(rendered.bytes, exportKey.key), { mode: 0o600 });
-    const promoted = await runPerformanceSerializableTransaction(client, async (tx) => {
+    const promoted = await client.$transaction(async (tx) => {
       if (await evidenceRevision(tx, true) !== payload.scope.evidenceRevision) throw disclosureError('شواهد خروجی تغییر کرده است.', 'PERFORMANCE_EXPORT_EVIDENCE_CHANGED', 409);
+      const scopeHash = createHash('sha256').update(receipt.id).digest('hex');
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'PERFORMANCE_EXPORT:' + scopeHash}, 0))`;
+      const current = await tx.performanceExportReceipt.findUniqueOrThrow({ where: { id: receipt.id } });
+      if (current.status !== PerformanceExportStatus.RUNNING || current.attemptCount !== receipt.attemptCount
+        || !current.expiresAt || current.expiresAt <= new Date()) return 0;
+      // Serialize storage publication with cleanup; a delayed renderer must never recreate a deleted file.
+      await writeFile(artifactPath, encryptPerformanceExportArtifact(rendered.bytes, exportKey.key), { mode: 0o600 });
       const updated = await tx.performanceExportReceipt.updateMany({ where: {
         id: receipt.id, status: PerformanceExportStatus.RUNNING, attemptCount: receipt.attemptCount,
       }, data: {
@@ -687,9 +695,8 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
         actorUserId: receipt.requestedByUserId, authorityCodes: ['REQUEST_PERFORMANCE_EXPORT'], evidenceHash: artifactHash,
       });
       return updated.count;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000 });
     if (promoted !== 1) {
-      await unlink(artifactPath).catch(() => undefined);
       return null;
     }
     const ready = await client.performanceExportReceipt.findUniqueOrThrow({ where: { id: receipt.id } });
@@ -698,8 +705,7 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
     const current = await client.performanceExportReceipt.findUnique({ where: { id: receipt.id } });
     if (current?.status === PerformanceExportStatus.READY) return current;
     const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : 'PERFORMANCE_EXPORT_GENERATION_FAILED';
-    const artifactPath = receipt.artifactPath!;
-    await unlink(artifactPath).catch((unlinkError: NodeJS.ErrnoException) => { if (unlinkError.code !== 'ENOENT') throw unlinkError; });
+    // Failed files remain in the committed inventory until policy- and hold-aware cleanup.
     const retryable = ['PERFORMANCE_EXPORT_GENERATION_FAILED', 'PERFORMANCE_EXPORT_GENERATION_TIMEOUT'].includes(code) && receipt.attemptCount < 3;
     await client.performanceExportReceipt.updateMany({
       where: { id: receipt.id, status: PerformanceExportStatus.RUNNING, attemptCount: receipt.attemptCount },
@@ -772,7 +778,7 @@ export const processQueuedPerformanceExports = async (client: PrismaClient, keyr
   const staleBefore = new Date(Date.now() - 6 * 60_000);
   const stale = await client.performanceExportReceipt.findMany({ where: { status: PerformanceExportStatus.RUNNING, startedAt: { lte: staleBefore } } });
   for (const receipt of stale) {
-    const recovered = await client.performanceExportReceipt.updateMany({
+    await client.performanceExportReceipt.updateMany({
       where: { id: receipt.id, status: PerformanceExportStatus.RUNNING, attemptCount: receipt.attemptCount },
       data: {
         status: receipt.attemptCount < 3 ? PerformanceExportStatus.QUEUED : PerformanceExportStatus.FAILED,
@@ -780,7 +786,6 @@ export const processQueuedPerformanceExports = async (client: PrismaClient, keyr
         artifactPath: null,
       },
     });
-    if (recovered.count === 1 && receipt.artifactPath) await unlink(receipt.artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
   }
   const queued = await client.performanceExportReceipt.findMany({
     where: { status: PerformanceExportStatus.QUEUED }, orderBy: { requestedAt: 'asc' }, take: 7, select: { id: true },
@@ -903,6 +908,7 @@ const cleanupPerformanceExport = async (
     if (isolation[0]?.transaction_isolation !== 'read committed') {
       throw disclosureError('پاک‌سازی خروجی باید در تراکنش مستقل نگهداری انجام شود.', 'PERFORMANCE_CLEANUP_TRANSACTION_REQUIRED', 409);
     }
+    await evidenceRevision(tx, true);
     const scopeHash = createHash('sha256').update(exportId).digest('hex');
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'PERFORMANCE_EXPORT:' + scopeHash}, 0))`;
     const receipt = await tx.performanceExportReceipt.findUnique({ where: { id: exportId } });
@@ -922,7 +928,12 @@ const cleanupPerformanceExport = async (
       return false;
     }
     await readPerformanceRetentionPolicy(tx, now);
-    if (receipt.artifactPath) await unlink(receipt.artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+    const artifacts = await tx.performanceExportArtifact.findMany({ where: { exportId }, select: { artifactPath: true } });
+    const artifactPaths = new Set(artifacts.map((artifact) => artifact.artifactPath));
+    if (receipt.artifactPath) artifactPaths.add(receipt.artifactPath);
+    for (const artifactPath of artifactPaths) {
+      await unlink(artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+    }
     await redactPerformanceExportPayload(tx, receipt, now, actorUserId);
     await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'LIVE_DELETED_PENDING_BACKUP', liveDeletedAt: now, attemptCount: { increment: 1 }, lastFailureCode: null } });
     await auditDisclosure(tx, {

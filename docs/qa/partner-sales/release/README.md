@@ -7,26 +7,37 @@ cohort, resume Partner mutations, or open traffic.
 
 ## Current adjudication
 
-Candidate `3d4a487e5a629741a8159458e2cfef059e4c55c0` is **NO_GO**. The candidate
+Candidate `377872469f9049c66b72e17ba49412816e56a5ae` is **NO_GO**. The candidate
 identity and every readiness/approval slot are recorded in
-`candidate-3d4a487e.json`. Activation remains closed because:
+`candidate-37787246.json`. The earlier `candidate-3d4a487e.json` adjudication is
+retained unchanged as history. Activation remains closed because:
 
-- the candidate contains 223 migrations while the local runtime used for current
-  verification reports 244 applied migrations, so its database evidence is not
+- the candidate contains 224 migrations while the local runtime used for current
+  verification reports 245 applied migrations, so its database evidence is not
   candidate-bound;
 - immutable backend, frontend, Inquiry, Nginx and supporting image digests have
   not been supplied;
 - a remotely read-back verified checkpoint, candidate-bound isolated recovery
   drill and quarterly deployment/rollback rehearsal have not been supplied;
 - connected production telemetry has not been proven for this candidate;
-- production dependency advisories remain open in #364; and
+- fresh independent claim-specific gate attestations have not been supplied;
+- Docker Desktop's configured `127.0.0.1:1080` build proxy is unavailable, so the
+  exact-candidate browser image rebuild could not be repeated locally; and
 - the release owner, Sales, Accounting, technical/security, HR, and Logistics
   approval references are pending.
 
-The accepted functional QA is not repeated or weakened here. It remains bound to
-the #335 run and application tree named in the manifest. A different application
+Issue #364 is closed with zero production audit findings and candidate-bound
+dependency compatibility evidence. Proportionate Partner regression evidence is
+recorded in `verification-2026-09-05-candidate-37787246.md`; it does not replace
+the missing independent release claims. A different application
 commit, tree, interface version, schema identity, or migration set is a new
 candidate and requires impact analysis plus proportionate retest before sign-off.
+
+Compute the ordered repository migration identity with:
+
+```powershell
+node docs/qa/partner-sales/release/migration-set.mjs
+```
 
 ## Fail-closed verifier
 
@@ -34,12 +45,12 @@ Run the validator against independently supplied expected identity values:
 
 ```powershell
 node docs/qa/partner-sales/release/release-package.mjs `
-  docs/qa/partner-sales/release/candidate-3d4a487e.json `
-  --expected-commit=3d4a487e5a629741a8159458e2cfef059e4c55c0 `
-  --expected-tree=e8a21e56dbe58a8ec04543d88f338d61db6522e6 `
+  docs/qa/partner-sales/release/candidate-37787246.json `
+  --expected-commit=377872469f9049c66b72e17ba49412816e56a5ae `
+  --expected-tree=61ec7de69e57f7b93b70f6019a1c3df03dc64f50 `
   --expected-schema=partner-schema-v1 `
   --trusted-claims=<outside-repository-trusted-claims.json> `
-  --now=2026-09-05T06:20:00.000Z
+  --now=<trusted-current-ISO-time>
 ```
 
 Exit `0` means `GO`; exit `2` means `NO_GO`; exit `1` means the package could not
@@ -59,6 +70,7 @@ Tests use only the public file/CLI boundary and do not mutate a database:
 
 ```powershell
 node --test docs/qa/partner-sales/release/release-package.test.mjs
+node --test docs/qa/partner-sales/release/migration-set.test.mjs
 ```
 
 The operational sequence, rehearsal rules, approval requirements, cohort

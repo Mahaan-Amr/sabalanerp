@@ -29,11 +29,18 @@ that publishes this runbook. Record all of the following before rehearsal:
 - release-specific deployment/checkpoint format versions.
 
 The current adjudication freezes application commit
-`3d4a487e5a629741a8159458e2cfef059e4c55c0`, tree
-`e8a21e56dbe58a8ec04543d88f338d61db6522e6`, contract `1.9.0`, wire schema `1`,
-schema `partner-schema-v1`, and 223 migrations with SHA-256
-`8d3232f9323d89bd5abbbb00a838176cd1dca6b2a56ef86f9cd44ddf5e9b902a`.
+`377872469f9049c66b72e17ba49412816e56a5ae`, tree
+`61ec7de69e57f7b93b70f6019a1c3df03dc64f50`, contract `1.9.0`, wire schema `1`,
+schema `partner-schema-v1`, and 224 migrations with the reproducible
+`sabalan-prisma-migration-set/v1` SHA-256
+`9c485fda637a76ed9a587e9f3719384989e6bbf721ac9799728b3fe1bd428f40`.
 Any drift invalidates the package; do not silently transplant older evidence.
+
+Recompute that repository identity from the candidate checkout with:
+
+```powershell
+node docs/qa/partner-sales/release/migration-set.mjs
+```
 
 ## 2. Prove readiness without mutation
 
@@ -64,8 +71,8 @@ npm run build:frontend
 The schema audit must report the expected migration identity, validated Partner
 constraints/triggers, `pairViolations: 0`, and `activationOpen: false`. A failed,
 timed-out, skipped, stale, or candidate-mismatched command is a failed gate.
-The current local verification found 244 applied migrations against a candidate
-containing 223 migration directories. Its functional results may diagnose the
+The current local verification found 245 applied migrations against a candidate
+containing 224 migration directories. Its functional results may diagnose the
 candidate, but its database results cannot authorize release until a candidate-
 identical schema is verified using the approved environment and safely owned data.
 

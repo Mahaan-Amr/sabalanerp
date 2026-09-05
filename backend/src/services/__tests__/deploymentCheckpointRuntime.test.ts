@@ -18,6 +18,11 @@ assert.match(
 );
 assert.match(
   deployScript,
+  /\[ "\$\{checkpoint_timeout\}" -ge 600 \] && \[ "\$\{checkpoint_timeout\}" -le 14400 \]/,
+  'the pre-mutation checkpoint window must allow a slow independent store without changing post-mutation deadlines',
+);
+assert.match(
+  deployScript,
   /run_backend_timed "\$\{remaining\}" node dist\/scripts\/audit-hr-onboarding-task-retirement\.js --output=\/app\/deployment-reports\/\$\{onboarding_audit_name\}/,
   'release promotion must fail closed on the read-only onboarding retirement audit',
 );

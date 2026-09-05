@@ -1,0 +1,186 @@
+
+Running 4 tests using 1 worker
+
+  x  1 [desktop-light] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry (15.9s)
+  x  2 [narrow-light] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry (5.1s)
+  x  3 [desktop-dark] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry (6.0s)
+  x  4 [narrow-dark] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry (5.2s)
+
+
+  1) [desktop-light] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry 
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 12
+
+    - Array []
+    + Array [
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    + ]
+
+      45 |   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      46 |   await page.screenshot({ path: testInfo.outputPath('login.png'), fullPage: true });
+    > 47 |   expect(unexpected).toEqual([]);
+         |                      ^
+      48 | });
+      49 |
+        at D:\sabalanerp\tests\partner-sales\browser\entry.spec.ts:47:22
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-light\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-light\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-light\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-light\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [narrow-light] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry 
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 12
+
+    - Array []
+    + Array [
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    + ]
+
+      45 |   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      46 |   await page.screenshot({ path: testInfo.outputPath('login.png'), fullPage: true });
+    > 47 |   expect(unexpected).toEqual([]);
+         |                      ^
+      48 | });
+      49 |
+        at D:\sabalanerp\tests\partner-sales\browser\entry.spec.ts:47:22
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-light\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-light\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-light\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-light\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [desktop-dark] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry 
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 12
+
+    - Array []
+    + Array [
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    + ]
+
+      45 |   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      46 |   await page.screenshot({ path: testInfo.outputPath('login.png'), fullPage: true });
+    > 47 |   expect(unexpected).toEqual([]);
+         |                      ^
+      48 | });
+      49 |
+        at D:\sabalanerp\tests\partner-sales\browser\entry.spec.ts:47:22
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-dark\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-dark\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-dark\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-dark\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) [narrow-dark] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry 
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 12
+
+    - Array []
+    + Array [
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "network failure GET /login",
+    +   "console error /(app-pages-browser)/node_modules/next/dist/client/app-index.js",
+    + ]
+
+      45 |   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      46 |   await page.screenshot({ path: testInfo.outputPath('login.png'), fullPage: true });
+    > 47 |   expect(unexpected).toEqual([]);
+         |                      ^
+      48 | });
+      49 |
+        at D:\sabalanerp\tests\partner-sales\browser\entry.spec.ts:47:22
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-dark\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-dark\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-dark\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\partner-sales\partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a\browser\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-dark\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4 failed
+    [desktop-light] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry 
+    [narrow-light] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry 
+    [desktop-dark] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry 
+    [narrow-dark] › tests\partner-sales\browser\entry.spec.ts:3:5 › anonymous Sales deep-link returns to a usable Persian login @internal-entry 

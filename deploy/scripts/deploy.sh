@@ -613,8 +613,8 @@ checkpoint_timeout="${checkpoint_timeout:-3600}"
 case "${checkpoint_timeout}" in
   *[!0-9]*|'') echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be an integer." >&2; exit 1 ;;
 esac
-[ "${checkpoint_timeout}" -ge 600 ] && [ "${checkpoint_timeout}" -le 7200 ] || {
-  echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be between 600 and 7200 seconds." >&2
+[ "${checkpoint_timeout}" -ge 600 ] && [ "${checkpoint_timeout}" -le 14400 ] || {
+  echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be between 600 and 14400 seconds." >&2
   exit 1
 }
 run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js

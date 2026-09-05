@@ -41,6 +41,11 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
+  contractHardDeleteEligibility({ status: 'CANCELLED', numberedPartnerCase: true, dependencies: noDeleteDependencies }),
+  { eligible: false, blockers: [{ code: 'PARTNER_CASE_RETAINED', count: 1, label: 'پرونده شماره‌دار فروش همکار' }] },
+);
+
+assert.deepEqual(
   contractDeactivationEligibility({
     alreadyInactive: false,
     openOperations: { deliveries: 1, loadings: 0, financialWorkflows: 1 },

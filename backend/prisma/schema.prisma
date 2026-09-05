@@ -8,7 +8,79 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model EffectiveAuthorizationState {
+  id Int @id
+  revision Int
+  @@map("effective_authorization_state")
+}
+
+model EffectiveAuthorizationAudit {
+  id String @id
+  domain String
+  actorId String
+  action String
+  rootKind String
+  rootId String
+  purpose String
+  channel String
+  allowed Boolean
+  isAdmin Boolean
+  code String
+  scope String?
+  reason String?
+  correlationId String
+  authorizationRevision Int?
+  lifecycleRevision Int?
+  assignmentId String?
+  assignmentRevision Int?
+  evaluatedAt DateTime
+  evaluatedGrantIds Json
+  recordedAt DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamp(6)
+  @@index([domain, rootKind, rootId, recordedAt], map: "effective_authorization_audit_root_idx")
+  @@map("effective_authorization_audit")
+}
+
+model EffectiveActionGrant {
+  id String @id
+  principalKind String
+  principalId String
+  subjectUserId String?
+  domain String
+  action String
+  rootKind String
+  purpose String
+  scope String
+  effect String
+  boundRootId String?
+  effectiveFrom DateTime @default(now())
+  expiresAt DateTime?
+  grantedBy String
+  reason String
+  correlationId String
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  revokedBy String?
+  revocationReason String?
+  revocationCorrelationId String?
+  subject User? @relation("ScopedGrantSubject", fields: [subjectUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  issuer User @relation("ScopedGrantIssuer", fields: [grantedBy], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  revoker User? @relation("ScopedGrantRevoker", fields: [revokedBy], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([principalKind, principalId, domain], map: "effective_action_grants_principal_idx")
+  @@map("effective_action_grants")
+}
+
 model User {
+  scopedActionGrants EffectiveActionGrant[] @relation("ScopedGrantSubject")
+  issuedScopedActionGrants EffectiveActionGrant[] @relation("ScopedGrantIssuer")
+  revokedScopedActionGrants EffectiveActionGrant[] @relation("ScopedGrantRevoker")
+  partnerProfile PartnerProfile?
+  partnerIdentityEvidence PartnerIdentityEvidence[] @relation("PartnerIdentityEvidenceSubject")
+  issuedPartnerIdentityEvidence PartnerIdentityEvidence[] @relation("PartnerIdentityEvidenceIssuer")
+  issuedPartnerTermsPolicies PartnerTermsPolicy[] @relation("PartnerTermsPolicyIssuer")
+  requestedPartnerCustomerTransfers PartnerCustomerTransfer[] @relation("PartnerCustomerTransferRequester")
+  decidedPartnerCustomerTransfers PartnerCustomerTransfer[] @relation("PartnerCustomerTransferDecider")
+  ownedPartnerCustomerTransfers PartnerCustomerTransfer[] @relation("PartnerCustomerTransferFromOwner")
+  partnerCustomerTransferEvents PartnerCustomerTransferEvent[] @relation("PartnerCustomerTransferEventActor")
   id                                         String                               @id @default(cuid())
   email                                      String                               @unique
   username                                   String                               @unique
@@ -1735,6 +1807,13 @@ model RoleFeaturePermission {
 }
 
 model SalesContract {
+  // NULL preserves existing Standard/Collaboration meaning without classification/backfill.
+  partnerKind          String?
+  partnerCaseId        String? @unique
+  partnerRevision      Int?
+  partnerIntegrityHash String?
+  partnerCase          PartnerSaleCase? @relation("PartnerCustomerOwner", fields: [partnerCaseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  partnerCaseLink      PartnerSaleCase? @relation("PartnerCustomerLink")
   id                                String                             @id @default(cuid())
   contractNumber                    String                             @unique
   creatorSequenceNumber             Int?
@@ -1848,6 +1927,7 @@ model SalesContractEditSession {
   draftId          String    @unique
   contractId       String?
   ownerUserId      String
+  purpose          String    @default("STANDARD")
   browserSessionId String
   leaseToken       String    @unique
   schemaVersion    Int
@@ -1935,6 +2015,12 @@ model SalesReportPreset {
 }
 
 model CrmCustomer {
+  partnerSaleCases         PartnerSaleCase[]
+  partnerOwnerProfileId    String?
+  partnerOwnerProfile      PartnerProfile? @relation(fields: [partnerOwnerProfileId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  partnerRevision          Int?
+  partnerDuplicateMatches  PartnerDuplicateCustomerMatch[]
+  partnerTransferRequests  PartnerCustomerTransfer[]
   id                       String                    @id @default(cuid())
   ownerUserId              String?
   createdBy                String?
@@ -1986,6 +2072,7 @@ model CrmCustomer {
   securityVehicleMovements SecurityVehicleMovement[]
 
   @@index([ownerUserId])
+  @@index([partnerOwnerProfileId])
   @@index([createdBy])
   @@map("crm_customers")
 }
@@ -2108,6 +2195,8 @@ model CrmPotentialProject {
   revisitDate         DateTime?
   wonSalesContractId  String?             @unique
   isActive            Boolean             @default(true)
+  partnerRevision     Int?
+  customerTransferSnapshot Json?
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
   customer            CrmCustomer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -2164,6 +2253,7 @@ model CrmNextAction {
   dueAt              DateTime
   instructions       String
   status             String               @default("باز")
+  partnerRevision    Int?
   completedAt        DateTime?
   completedBy        String?
   createdAt          DateTime             @default(now())
@@ -8130,4 +8220,804 @@ model PerformancePrivacyCorrection {
 
   @@unique([caseId, evaluationId])
   @@map("performance_privacy_corrections")
+}
+
+// Partner schema/v1 (#315). Evidence is append-only in SQL. No legacy conversion.
+enum PartnerProfileState {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum PartnerIdentityPersonType {
+  NATURAL
+  LEGAL
+}
+
+enum PartnerTermsPurpose {
+  PARTNER_TECHNICAL_PRICING
+  PARTNER_CREDIT_TERMS
+}
+
+model PartnerIdentityEvidence {
+  id            String @id
+  userId        String
+  legalName     String
+  tradeName     String?
+  personType    PartnerIdentityPersonType
+  identifiers   Json
+  phone         String
+  address       String
+  integrityHash String
+  issuedBy      String
+  issuedAt      DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt     DateTime? @db.Timestamptz(3)
+  revokedAt     DateTime? @db.Timestamptz(3)
+  subject       User @relation("PartnerIdentityEvidenceSubject", fields: [userId], references: [id], onDelete: Restrict)
+  issuer        User @relation("PartnerIdentityEvidenceIssuer", fields: [issuedBy], references: [id], onDelete: Restrict)
+  @@index([userId, issuedAt])
+  @@map("partner_identity_evidence")
+}
+
+model PartnerTermsPolicy {
+  id            String @id
+  purpose       PartnerTermsPurpose
+  label         String
+  effectiveDate DateTime @db.Date
+  expiresAt     DateTime? @db.Timestamptz(3)
+  terms         Json
+  integrityHash String
+  issuedBy      String
+  issuedAt      DateTime @default(now()) @db.Timestamptz(3)
+  revokedAt     DateTime? @db.Timestamptz(3)
+  issuer        User @relation("PartnerTermsPolicyIssuer", fields: [issuedBy], references: [id], onDelete: Restrict)
+  @@index([purpose, effectiveDate])
+  @@map("partner_terms_policies")
+}
+
+model PartnerProfile {
+  id                  String @id @default(cuid())
+  userId              String @unique
+  state               PartnerProfileState @default(PENDING)
+  revision            Int @default(1)
+  firstActivatedAt    DateTime? @db.Timestamptz(3)
+  irreversibleAt      DateTime? @db.Timestamptz(3)
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+  user                User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  commercialAccount   PartnerCommercialAccount?
+  cohortMemberships   PartnerCohortMembership[]
+  conversionDispositions PartnerConversionDisposition[]
+  events              PartnerProfileEvent[]
+  inquiries           PartnerInquiry[]
+  responderAssignments PartnerProfileResponderAssignment[]
+  saleCases           PartnerSaleCase[]
+  customers           CrmCustomer[]
+  duplicateCustomerMatches PartnerDuplicateCustomerMatch[]
+  outgoingCustomerTransfers PartnerCustomerTransfer[] @relation("PartnerCustomerTransferFromProfile")
+  incomingCustomerTransfers PartnerCustomerTransfer[] @relation("PartnerCustomerTransferToProfile")
+  @@map("partner_profiles")
+}
+
+enum PartnerCustomerTransferStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PartnerCustomerTransferEventType {
+  REQUESTED
+  APPROVED
+  REJECTED
+}
+
+model PartnerDuplicateCustomerMatch {
+  id                 String                   @id
+  requesterProfileId String
+  customerId         String
+  snapshot           Json
+  witnessHash        String
+  issuedAt           DateTime                 @default(now()) @db.Timestamptz(3)
+  expiresAt          DateTime                 @db.Timestamptz(3)
+  requesterProfile   PartnerProfile           @relation(fields: [requesterProfileId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer           CrmCustomer              @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  transfer           PartnerCustomerTransfer?
+
+  @@index([requesterProfileId, expiresAt])
+  @@index([customerId, expiresAt])
+  @@map("partner_duplicate_customer_matches")
+}
+
+model PartnerCustomerTransfer {
+  id                String                         @id
+  revision          Int                            @default(1)
+  customerId        String
+  matchId           String                         @unique
+  fromOwnerUserId   String
+  fromProfileId     String?
+  toProfileId       String
+  status            PartnerCustomerTransferStatus  @default(PENDING)
+  requestedBy       String
+  requestReason     String
+  requestedAt       DateTime                       @default(now()) @db.Timestamptz(3)
+  decidedBy         String?
+  decisionReason    String?
+  decidedAt         DateTime?                      @db.Timestamptz(3)
+  decisionCommandId String?                        @unique
+  correlationId     String
+  customer          CrmCustomer                    @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  match             PartnerDuplicateCustomerMatch  @relation(fields: [matchId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fromOwner         User                           @relation("PartnerCustomerTransferFromOwner", fields: [fromOwnerUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fromProfile       PartnerProfile?                @relation("PartnerCustomerTransferFromProfile", fields: [fromProfileId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  toProfile         PartnerProfile                 @relation("PartnerCustomerTransferToProfile", fields: [toProfileId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  requester         User                           @relation("PartnerCustomerTransferRequester", fields: [requestedBy], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  decider           User?                          @relation("PartnerCustomerTransferDecider", fields: [decidedBy], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  events            PartnerCustomerTransferEvent[]
+
+  @@index([fromOwnerUserId, status, requestedAt])
+  @@index([toProfileId, status, requestedAt])
+  @@index([customerId, status])
+  @@map("partner_customer_transfers")
+}
+
+model PartnerCustomerTransferEvent {
+  id            String                           @id
+  transferId    String
+  revision      Int
+  type          PartnerCustomerTransferEventType
+  actorId       String
+  reason        String
+  commandId     String                           @unique
+  correlationId String
+  evidence      Json
+  recordedAt    DateTime                         @default(now()) @db.Timestamptz(3)
+  transfer      PartnerCustomerTransfer          @relation(fields: [transferId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  actor         User                             @relation("PartnerCustomerTransferEventActor", fields: [actorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([transferId, revision])
+  @@map("partner_customer_transfer_events")
+}
+
+model PartnerProfileResponderAssignment {
+  id                  String @id @default(cuid())
+  profileId           String
+  revision            Int
+  responderId         String
+  actorId             String
+  reason              String
+  eligibilityEvidence Json
+  assignedAt          DateTime @default(now()) @db.Timestamptz(3)
+  profile             PartnerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  @@unique([profileId, revision])
+  @@index([responderId, assignedAt])
+  @@map("partner_profile_responder_assignments")
+}
+
+model PartnerCommercialAccount {
+  id         String @id @default(cuid())
+  profileId  String @unique
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  profile    PartnerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  identities PartnerCommercialIdentity[]
+  terms      PartnerCommercialTerms[]
+  saleRecords SabalanToPartnerSaleRecord[]
+  @@map("partner_commercial_accounts")
+}
+
+model PartnerCommercialIdentity {
+  id           String @id @default(cuid())
+  accountId    String
+  version      Int
+  legalName    String
+  tradeName    String?
+  identifiers  Json
+  phone        String
+  address      String
+  integrityHash String
+  actorId      String
+  recordedAt   DateTime @default(now()) @db.Timestamptz(3)
+  account      PartnerCommercialAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  @@unique([accountId, version])
+  @@map("partner_commercial_identities")
+}
+
+model PartnerCommercialTerms {
+  id            String @id @default(cuid())
+  accountId     String
+  version       Int
+  effectiveDate DateTime @db.Date
+  terms         Json
+  integrityHash String
+  actorId       String
+  reason        String
+  recordedAt    DateTime @default(now()) @db.Timestamptz(3)
+  account       PartnerCommercialAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  @@unique([accountId, version])
+  @@map("partner_commercial_terms")
+}
+
+model PartnerReleaseCohort {
+  id                String @id @default(cuid())
+  name              String @unique
+  revision          Int @default(1)
+  activationEnabled Boolean @default(false)
+  enrollmentPaused  Boolean @default(true)
+  operationalPaused Boolean @default(true)
+  readinessEvidence Json?
+  memberships       PartnerCohortMembership[]
+  events            PartnerCohortEvent[]
+  @@map("partner_release_cohorts")
+}
+
+model PartnerCohortMembership {
+  id           String @id @default(cuid())
+  profileId    String
+  cohortId     String
+  actorId      String
+  eligibilityEvidence Json
+  enrolledAt   DateTime @default(now()) @db.Timestamptz(3)
+  profile      PartnerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  cohort       PartnerReleaseCohort @relation(fields: [cohortId], references: [id], onDelete: Restrict)
+  @@unique([profileId, cohortId])
+  @@map("partner_cohort_memberships")
+}
+
+model PartnerConversionDisposition {
+  id           String @id @default(cuid())
+  profileId    String
+  sourceType   String
+  sourceId     String
+  disposition  String
+  actorId      String
+  successorId  String?
+  evidence     Json
+  recordedAt   DateTime @default(now()) @db.Timestamptz(3)
+  profile      PartnerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  @@index([profileId, sourceType, sourceId])
+  @@map("partner_conversion_dispositions")
+}
+
+model PartnerProfileEvent {
+  id          String @id @default(cuid())
+  profileId   String
+  revision    Int
+  fromState   PartnerProfileState?
+  toState     PartnerProfileState
+  actorId     String
+  reason      String
+  commandId   String @unique
+  evidence    Json
+  recordedAt  DateTime @default(now()) @db.Timestamptz(3)
+  profile     PartnerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  @@unique([profileId, revision])
+  @@map("partner_profile_events")
+}
+
+model PartnerCohortEvent {
+  id          String @id @default(cuid())
+  cohortId    String
+  revision    Int
+  actorId     String
+  reason      String
+  commandId   String @unique
+  evidence    Json
+  recordedAt  DateTime @default(now()) @db.Timestamptz(3)
+  cohort      PartnerReleaseCohort @relation(fields: [cohortId], references: [id], onDelete: Restrict)
+  @@unique([cohortId, revision])
+  @@map("partner_cohort_events")
+}
+
+enum PartnerInquiryOutcome {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model PartnerCommandOutcome {
+  id          String @id
+  actorId     String
+  operation   String
+  targetScope String
+  key         String
+  payloadHash String
+  outcome     Json
+  recordedAt  DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([actorId, operation, targetScope, key])
+  @@map("partner_command_outcomes")
+}
+
+model PartnerInquiry {
+  id           String @id @default(cuid())
+  profileId    String
+  revision     Int @default(1)
+  submittedAt  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  profile      PartnerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  assignments  PartnerInquiryAssignment[]
+  rows         PartnerInquiryRow[]
+  events       PartnerInquiryEvent[]
+  @@index([profileId, createdAt])
+  @@map("partner_inquiries")
+}
+
+model PartnerInquiryAssignment {
+  id           String @id @default(cuid())
+  inquiryId    String
+  revision     Int
+  responderId  String
+  actorId      String
+  reason       String
+  eligibilityEvidence Json
+  assignedAt   DateTime @default(now()) @db.Timestamptz(3)
+  inquiry      PartnerInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
+  approvals    PartnerInquiryApproval[]
+  @@unique([inquiryId, revision])
+  @@map("partner_inquiry_assignments")
+}
+
+model PartnerInquiryRow {
+  id            String @id @default(cuid())
+  inquiryId     String
+  version       Int
+  revision      Int @default(1)
+  predecessorId String? @unique
+  outcome       PartnerInquiryOutcome @default(PENDING)
+  configurationHash String
+  definition    Json
+  submittedAt   DateTime @default(now()) @db.Timestamptz(3)
+  inquiry       PartnerInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
+  predecessor   PartnerInquiryRow? @relation("PartnerInquiryLineage", fields: [predecessorId], references: [id], onDelete: Restrict)
+  successor     PartnerInquiryRow? @relation("PartnerInquiryLineage")
+  approval      PartnerInquiryApproval?
+  events        PartnerInquiryEvent[]
+  @@index([inquiryId, outcome])
+  @@map("partner_inquiry_rows")
+}
+
+model PartnerInquiryApproval {
+  id            String @id @default(cuid())
+  rowId         String @unique
+  assignmentId  String
+  actorId       String
+  commandId     String @unique
+  authorizationEvidenceId String
+  wholesaleUnitPrice Decimal @db.Decimal
+  currency      String
+  evidenceHash  String
+  note          String?
+  supersessionReason String?
+  approvedAt    DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt     DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + '48:00:00'::interval)")) @db.Timestamptz(3)
+  row           PartnerInquiryRow @relation(fields: [rowId], references: [id], onDelete: Restrict)
+  assignment    PartnerInquiryAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  usages        PartnerInquiryUsage[]
+  @@map("partner_inquiry_approvals")
+}
+
+model PartnerInquiryEvent {
+  id            String @id @default(cuid())
+  inquiryId     String
+  rowId         String?
+  revision      Int
+  actorId       String
+  commandId     String
+  correlationId String
+  type          String
+  reason        String?
+  evidence      Json
+  recordedAt    DateTime @default(now()) @db.Timestamptz(3)
+  notificationDelivery PartnerInquiryNotificationDelivery?
+  inquiry       PartnerInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
+  row           PartnerInquiryRow? @relation(fields: [rowId], references: [id], onDelete: Restrict)
+  @@unique([inquiryId, revision])
+  @@index([commandId])
+  @@map("partner_inquiry_events")
+}
+
+model PartnerInquiryNotificationDelivery {
+  eventId       String @id
+  attempts      Int @default(0)
+  lastAttemptAt DateTime? @db.Timestamptz(3)
+  handledAt     DateTime? @db.Timestamptz(3)
+  status        String?
+  event         PartnerInquiryEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  @@index([handledAt, lastAttemptAt])
+  @@map("partner_inquiry_notification_deliveries")
+}
+
+enum PartnerCaseState {
+  DRAFT
+  AWAITING_CUSTOMER_CONFIRMATION
+  CUSTOMER_APPROVED
+  COMMITTED
+  CANCELLED
+  VOIDED
+}
+
+model PartnerSaleCase {
+  id                 String @id
+  caseNumber         String @unique
+  profileId          String
+  customerId         String
+  internalRecordId   String @unique
+  customerContractId String @unique
+  headRevision       Int
+  integrityHash      String
+  state              PartnerCaseState @default(DRAFT)
+  stateRevision      Int @default(1)
+  committedAt        DateTime? @db.Timestamptz(3)
+  commitmentTrigger  String?
+  committedRevision  Int?
+  commitmentEventId  String? @unique
+  commitmentEvent    PartnerCaseEvent? @relation("PartnerCommitmentEvent", fields: [commitmentEventId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "partner_commitment_event")
+  commitmentRevision PartnerCaseRevision? @relation("PartnerCommittedRevision", fields: [id, committedRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_committed_revision")
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  profile            PartnerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  customer           CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  internalRecord     SabalanToPartnerSaleRecord @relation("PartnerInternalLink", fields: [internalRecordId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customerContract   SalesContract @relation("PartnerCustomerLink", fields: [customerContractId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  internalOwner      SabalanToPartnerSaleRecord? @relation("PartnerInternalOwner")
+  customerOwner      SalesContract? @relation("PartnerCustomerOwner")
+  head               PartnerCaseRevision @relation("PartnerCaseHead", fields: [id, headRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction)
+  revisions          PartnerCaseRevision[] @relation("PartnerCaseHistory")
+  productRows        PartnerProductRow[]
+  numbers            PartnerCommercialNumber[]
+  paymentPlans       PartnerPaymentPlan[]
+  events             PartnerCaseEvent[]
+  outputs            PartnerCustomerOutputSnapshot[]
+  corrections        PartnerCorrectionOpportunity[]
+  @@index([profileId, state])
+  @@map("partner_sale_cases")
+}
+
+model SabalanToPartnerSaleRecord {
+  id                String @id
+  recordNumber      String @unique
+  caseId            String @unique
+  kind              String @default("SABALAN_TO_PARTNER")
+  commercialAccountId String
+  expectedRevision  Int
+  integrityHash     String
+  case              PartnerSaleCase @relation("PartnerInternalOwner", fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  caseLink          PartnerSaleCase? @relation("PartnerInternalLink")
+  commercialAccount PartnerCommercialAccount @relation(fields: [commercialAccountId], references: [id], onDelete: Restrict)
+  @@map("sabalan_to_partner_sale_records")
+}
+
+model PartnerCommercialNumber {
+  number  String @id
+  caseId  String
+  purpose String
+  case    PartnerSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([caseId, purpose])
+  @@map("partner_commercial_numbers")
+}
+
+model PartnerCaseRevision {
+  caseId          String
+  revision        Int
+  predecessorRevision Int?
+  schemaVersion   Int @default(1)
+  integrityHash   String
+  graphHash       String
+  graph           Json
+  partySnapshots  Json
+  wholesaleEnvelope Json
+  retailEnvelope  Json
+  paymentEvidence Json
+  customerContent Json
+  internalProjection Json
+  customerProjection Json
+  actorId         String
+  commandId       String @unique
+  recordedAt      DateTime @default(now()) @db.Timestamptz(3)
+  assemblyTransaction BigInt @default(dbgenerated("txid_current()"))
+  case            PartnerSaleCase @relation("PartnerCaseHistory", fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  headOf          PartnerSaleCase[] @relation("PartnerCaseHead")
+  committedBy     PartnerSaleCase[] @relation("PartnerCommittedRevision")
+  predecessor     PartnerCaseRevision? @relation("PartnerRevisionLineage", fields: [caseId, predecessorRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_revision_predecessor")
+  successors      PartnerCaseRevision[] @relation("PartnerRevisionLineage")
+  events          PartnerCaseEvent[]
+  paymentPlans    PartnerPaymentPlan[]
+  outputs         PartnerCustomerOutputSnapshot[]
+  correctionOpportunities PartnerCorrectionOpportunity[]
+  correctionSaves PartnerCorrectionSave[]
+  adjustments     PartnerFinancialAdjustment[]
+  rowBindings     PartnerCaseRowBinding[]
+  deliveries      PartnerCaseDelivery[]
+  @@id([caseId, revision])
+  @@map("partner_case_revisions")
+}
+
+model PartnerProductRow {
+  id       String @id
+  caseId   String
+  case     PartnerSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  bindings PartnerCaseRowBinding[]
+  @@unique([caseId, id])
+  @@map("partner_product_rows")
+}
+
+model PartnerCaseRowBinding {
+  caseId       String
+  revision     Int
+  productRowId String
+  configurationHash String
+  quantity     Decimal @db.Decimal
+  unit         String
+  precisionPolicyVersion String
+  caseRevision PartnerCaseRevision @relation(fields: [caseId, revision], references: [caseId, revision], onDelete: Restrict, onUpdate: NoAction)
+  productRow   PartnerProductRow @relation(fields: [caseId, productRowId], references: [caseId, id], onDelete: Restrict, onUpdate: NoAction)
+  inquiryUsages PartnerInquiryUsage[]
+  deliveryItems PartnerCaseDeliveryItem[]
+  @@id([caseId, revision, productRowId])
+  @@map("partner_case_row_bindings")
+}
+
+model PartnerInquiryUsage {
+  id           String @id
+  caseId       String
+  caseRevision Int
+  productRowId String
+  approvalId   String
+  approvalSnapshot Json
+  evidenceHash String
+  usedAt       DateTime @default(now()) @db.Timestamptz(3)
+  binding      PartnerCaseRowBinding @relation(fields: [caseId, caseRevision, productRowId], references: [caseId, revision, productRowId], onDelete: Restrict, onUpdate: NoAction)
+  approval     PartnerInquiryApproval @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+  @@unique([caseId, caseRevision, productRowId])
+  @@map("partner_inquiry_usages")
+}
+
+model PartnerCaseDelivery {
+  id           String
+  caseId       String
+  revision     Int
+  date         DateTime @db.Date
+  destination  String
+  caseRevision PartnerCaseRevision @relation(fields: [caseId, revision], references: [caseId, revision], onDelete: Restrict, onUpdate: NoAction)
+  items        PartnerCaseDeliveryItem[]
+  @@id([caseId, revision, id])
+  @@map("partner_case_deliveries")
+}
+
+model PartnerCaseDeliveryItem {
+  caseId       String
+  revision     Int
+  deliveryId   String
+  productRowId String
+  quantity     Decimal @db.Decimal
+  delivery     PartnerCaseDelivery @relation(fields: [caseId, revision, deliveryId], references: [caseId, revision, id], onDelete: Restrict, onUpdate: NoAction)
+  binding      PartnerCaseRowBinding @relation(fields: [caseId, revision, productRowId], references: [caseId, revision, productRowId], onDelete: Restrict, onUpdate: NoAction)
+  @@id([caseId, revision, deliveryId, productRowId])
+  @@map("partner_case_delivery_items")
+}
+
+enum PartnerPaymentPurpose {
+  RETAIL
+  SABALAN
+}
+
+model PartnerPaymentPlan {
+  id            String @id
+  caseId        String
+  caseRevision  Int
+  purpose       PartnerPaymentPurpose
+  version       Int
+  predecessorId String? @unique
+  effectiveDate DateTime @db.Date
+  evidence      Json
+  integrityHash String
+  case          PartnerSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  revision      PartnerCaseRevision @relation(fields: [caseId, caseRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_plan_revision")
+  predecessor   PartnerPaymentPlan? @relation("PartnerPlanSuccessor", fields: [predecessorId], references: [id], onDelete: Restrict)
+  successor     PartnerPaymentPlan? @relation("PartnerPlanSuccessor")
+  installments  PartnerPaymentInstallment[]
+  receipts      PartnerRetailReceipt[]
+  @@unique([caseId, purpose, version])
+  @@unique([caseId, id])
+  @@map("partner_payment_plans")
+}
+
+model PartnerPaymentInstallment {
+  id       String @id
+  planId   String
+  dueDate  DateTime @db.Date
+  amount   Decimal @db.Decimal
+  currency String
+  method   String
+  evidence Json
+  plan     PartnerPaymentPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  allocations PartnerRetailReceiptAllocation[]
+  @@unique([planId, id])
+  @@map("partner_payment_installments")
+}
+
+model PartnerRetailReceipt {
+  id                String @id
+  caseId            String
+  planId            String
+  kind              String
+  originalReceiptId String?
+  amount            Decimal @db.Decimal
+  currency          String
+  effectiveDate     DateTime @db.Date
+  actorId           String
+  commandId         String @unique
+  reason            String?
+  evidence          Json
+  recordedAt        DateTime @default(now()) @db.Timestamptz(3)
+  plan              PartnerPaymentPlan @relation(fields: [caseId, planId], references: [caseId, id], onDelete: Restrict)
+  original          PartnerRetailReceipt? @relation("PartnerReceiptReversal", fields: [originalReceiptId], references: [id], onDelete: Restrict)
+  reversals         PartnerRetailReceipt[] @relation("PartnerReceiptReversal")
+  allocations       PartnerRetailReceiptAllocation[]
+  @@unique([planId, id])
+  @@map("partner_retail_receipts")
+}
+
+model PartnerRetailReceiptAllocation {
+  receiptId     String
+  planId        String
+  installmentId String
+  amount        Decimal @db.Decimal
+  receipt       PartnerRetailReceipt @relation(fields: [planId, receiptId], references: [planId, id], onDelete: Restrict)
+  installment   PartnerPaymentInstallment @relation(fields: [planId, installmentId], references: [planId, id], onDelete: Restrict)
+  @@id([receiptId, installmentId])
+  @@map("partner_retail_receipt_allocations")
+}
+
+model PartnerCaseEvent {
+  id           String @id
+  caseId       String
+  caseRevision Int
+  integrityHash String
+  sequence     Int
+  stateRevision Int?
+  type         String
+  fromState    PartnerCaseState?
+  toState      PartnerCaseState?
+  actorId      String
+  commandId    String
+  correlationId String
+  effectiveDate DateTime @db.Date
+  reason       String?
+  evidence     Json
+  recordedAt   DateTime @default(now()) @db.Timestamptz(3)
+  case         PartnerSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  revision     PartnerCaseRevision @relation(fields: [caseId, caseRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_event_revision")
+  committedCase PartnerSaleCase? @relation("PartnerCommitmentEvent")
+  originalAdjustments PartnerFinancialAdjustment[]
+  outbox       PartnerOutboxMessage[]
+  @@unique([caseId, sequence])
+  @@unique([caseId, stateRevision])
+  @@unique([commandId, type, caseId])
+  @@map("partner_case_events")
+}
+
+model PartnerCustomerOutputSnapshot {
+  id           String @id
+  caseId       String
+  caseRevision Int
+  schemaVersion Int @default(1)
+  integrityHash String
+  contentHash  String
+  contractNumber String
+  recipient    String
+  expiresAt    DateTime @db.Timestamptz(3)
+  content      Json
+  commandId    String @unique
+  recordedAt   DateTime @default(now()) @db.Timestamptz(3)
+  case         PartnerSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  revision     PartnerCaseRevision @relation(fields: [caseId, caseRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_output_revision")
+  @@unique([caseId, caseRevision, recipient])
+  @@map("partner_customer_output_snapshots")
+}
+
+model PartnerCorrectionOpportunity {
+  id           String @id
+  caseId       String
+  predecessorRevision Int
+  scope        String
+  scopeHash    String
+  requesterId  String
+  approvedBy   String
+  approvedAt   DateTime @db.Timestamptz(3)
+  expiresAt    DateTime @db.Timestamptz(3)
+  calendarVersion String
+  workingDays  Int @default(3)
+  successfulSavesAllowed Int @default(1)
+  evidence     Json
+  case         PartnerSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  predecessor  PartnerCaseRevision @relation(fields: [caseId, predecessorRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_correction_predecessor")
+  save         PartnerCorrectionSave?
+  gates        PartnerCorrectionGate[]
+  dependencies PartnerCorrectionDependency[]
+  adjustments  PartnerFinancialAdjustment[]
+  @@index([caseId, predecessorRevision])
+  @@map("partner_correction_opportunities")
+}
+
+model PartnerCorrectionSave {
+  opportunityId String @id
+  caseId        String
+  successorRevision Int
+  actorId       String
+  commandId     String @unique
+  savedAt       DateTime @default(now()) @db.Timestamptz(3)
+  opportunity   PartnerCorrectionOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  successor     PartnerCaseRevision @relation(fields: [caseId, successorRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_correction_successor")
+  @@unique([caseId, successorRevision])
+  @@map("partner_correction_saves")
+}
+
+model PartnerCorrectionGate {
+  id            String @id
+  opportunityId String
+  kind          String
+  outcome       String
+  actorId       String
+  commandId     String @unique
+  evidence      Json
+  recordedAt    DateTime @default(now()) @db.Timestamptz(3)
+  opportunity   PartnerCorrectionOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  @@index([opportunityId, kind])
+  @@map("partner_correction_gates")
+}
+
+model PartnerCorrectionDependency {
+  id            String @id
+  opportunityId String
+  domain        String
+  sourceId      String
+  sourceVersion String
+  disposition   String
+  actorId       String
+  evidence      Json
+  recordedAt    DateTime @default(now()) @db.Timestamptz(3)
+  opportunity   PartnerCorrectionOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  @@index([opportunityId, domain, sourceId])
+  @@map("partner_correction_dependencies")
+}
+
+model PartnerFinancialAdjustment {
+  id            String @id
+  caseId        String
+  caseRevision  Int
+  correctionId  String
+  originalRealizationEventId String
+  effectiveDate DateTime @db.Date
+  delta         Decimal @db.Decimal
+  currency      String
+  commandId     String @unique
+  evidence      Json
+  recordedAt    DateTime @default(now()) @db.Timestamptz(3)
+  correction    PartnerCorrectionOpportunity @relation(fields: [correctionId], references: [id], onDelete: Restrict)
+  original      PartnerCaseEvent @relation(fields: [originalRealizationEventId], references: [id], onDelete: Restrict)
+  revision      PartnerCaseRevision @relation(fields: [caseId, caseRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_adjustment_revision")
+  @@map("partner_financial_adjustments")
+}
+
+model PartnerOutboxMessage {
+  id             String @id
+  eventId        String
+  purpose        String
+  deduplicationKey String @unique
+  safePayload    Json
+  recordedAt     DateTime @default(now()) @db.Timestamptz(3)
+  event          PartnerCaseEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  attempts       PartnerOutboxAttempt[]
+  @@map("partner_outbox_messages")
+}
+
+model PartnerOutboxAttempt {
+  id          String @id
+  messageId   String
+  attempt     Int
+  outcome     String
+  safeErrorCode String?
+  recordedAt  DateTime @default(now()) @db.Timestamptz(3)
+  message     PartnerOutboxMessage @relation(fields: [messageId], references: [id], onDelete: Restrict)
+  @@unique([messageId, attempt])
+  @@map("partner_outbox_attempts")
 }

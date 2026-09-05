@@ -1,3 +1,14 @@
+export { calculateLongitudinalTechnical } from './longitudinalTechnical';
+export type { LongitudinalTechnicalInput, LongitudinalTechnicalResult, LongitudinalTechnicalCalculation } from './longitudinalTechnical';
+export type { TechnicalPackingPlan } from './technicalPacking';
+
+export { calculateProductOperationsTechnical } from './operationsTechnical';
+export type {
+  ProductOperationsTechnicalInput, ProductOperationsTechnicalResult,
+  ProductOperationsTechnicalCalculation, TechnicalToolSelection, TechnicalFinishingSelection,
+  TechnicalToolSelectionResult, TechnicalFinishingSelectionResult,
+} from './operationsTechnical';
+
 export {
   parseCanonicalDecimal,
   type CanonicalDecimal
@@ -181,6 +192,8 @@ export {
 } from './operationIdentityRepair';
 export {
   projectCanonicalGraphToLegacyProducts,
+  projectCanonicalRemainderConsumption,
+  type CanonicalProjectedRemainderConsumption,
   projectCanonicalProductGraph,
   type CanonicalContractProjection,
   type CanonicalProjectedOperation,
@@ -231,3 +244,19 @@ export {
   type SourceBatchId,
   type ToolSelectionId
 } from './productGraph';
+export { calculateSlabTechnical } from './slabTechnical';
+export type { SlabTechnicalInput, SlabTechnicalResult, SlabTechnicalCalculation } from './slabTechnical';
+export { calculateStairPartTechnical } from './stairTechnical';
+export type { StairPartTechnicalInput, StairPartTechnicalResult, StairPartTechnicalCalculation } from './stairTechnical';
+export { calculateStairLayerTechnical, replayStairLayerTechnical } from './stairLayerTechnical';
+export { calculateLayerSideOperations } from './layerSideOperations';
+export type { LayerSideResult } from './layerSideOperations';
+export { compareProductDependentOrder } from './dependentOrder';
+export type { ProductDependentOrder } from './dependentOrder';
+export type { StairLayerTechnicalInput, StairLayerTechnicalResult, StairLayerTechnicalCalculation,
+  StairLayerTechnicalSource, StairLayerTechnicalSideOperations } from './stairLayerTechnical';
+export { replayRemainderTechnical } from './remainderTechnical';
+export type { RemainderTechnicalInput, RemainderTechnicalIntent, RemainderTechnicalResult,
+  RemainderTechnicalReplay, RemainderTechnicalAllocation } from './remainderTechnical';
+export { calculatePreparedTechnical } from './preparedTechnical';
+export type { PreparedKind, PreparedUnit, PreparedTechnicalInput, PreparedTechnicalResult, PreparedTechnicalCalculation } from './preparedTechnical';

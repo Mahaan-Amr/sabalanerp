@@ -7,6 +7,7 @@ import {
   privacySafeWebPushPayload,
   validateNotificationPolicyDraft,
 } from '../notificationPolicy';
+import { publishNotificationEvent } from '../notificationService';
 
 const newBrowser = notificationEventDefinition('NEW_BROWSER_LOGIN');
 assert.equal(newBrowser.mandatory, true);
@@ -96,6 +97,35 @@ assert.deepEqual(privacySafeWebPushPayload('/dashboard/support/tickets/ticket-1'
 });
 assert.equal(JSON.stringify(privacySafeWebPushPayload('/dashboard')).includes('ticket-1'), false);
 
+const assertConcurrentDefaultPolicyCreation = async () => {
+  let storedDefaultPolicy: Record<string, unknown> | null = null;
+  const concurrentPolicyDatabase = {
+    notificationPolicyVersion: {
+      findFirst: async () => {
+        await new Promise((resolve) => setImmediate(resolve));
+        return storedDefaultPolicy;
+      },
+      upsert: async ({ create }: { create: Record<string, unknown> }) => {
+        storedDefaultPolicy ??= { id: 'policy-1', ...create };
+        return storedDefaultPolicy;
+      },
+    },
+  } as any;
+
+  await Promise.all(Array.from({ length: 3 }, (_, index) => publishNotificationEvent(
+    concurrentPolicyDatabase,
+    {
+      type: 'ACCOUNTING_CONTRACT_CORRECTION_EDITED',
+      deduplicationKey: `correction-edited-${index}`,
+      recipientIds: [],
+      payload: { contractNumber: '100333' },
+    },
+  )));
+  const persistedPolicy = storedDefaultPolicy as Record<string, unknown> | null;
+  assert.equal(persistedPolicy?.eventType, 'ACCOUNTING_CONTRACT_CORRECTION_EDITED');
+  assert.equal(persistedPolicy?.version, 1);
+};
+
 assert.deepEqual(registeredNotificationEventTypes(), [
   'ACCOUNTING_CONTRACT_CORRECTION_EDITED',
   'ACCOUNTING_CORRECTION_REQUIRED',
@@ -116,6 +146,14 @@ assert.deepEqual(registeredNotificationEventTypes(), [
   'HR_DUTY_RESULT',
   'HR_DUTY_UNASSIGNED_TRIAGE',
   'NEW_BROWSER_LOGIN',
+  'PARTNER_CUSTOMER_TRANSFER_DECIDED',
+  'PARTNER_CUSTOMER_TRANSFER_REQUESTED',
+  'PARTNER_INQUIRY_CANCELLED',
+  'PARTNER_INQUIRY_EXPIRED',
+  'PARTNER_INQUIRY_EXPIRING',
+  'PARTNER_INQUIRY_PARTIAL_RESPONSE',
+  'PARTNER_INQUIRY_REASSIGNED',
+  'PARTNER_INQUIRY_SUBMITTED',
   'PERFORMANCE_LEGAL_HOLD_NOTICE',
   'PERFORMANCE_PRIVACY_DEADLINE',
   'PERFORMANCE_PRIVACY_NOTICE',
@@ -135,4 +173,9 @@ assert.deepEqual(registeredNotificationEventTypes(), [
   'SYSTEM_RECOVERY_STARTED',
 ]);
 
-console.log('notification policy tests passed');
+void assertConcurrentDefaultPolicyCreation()
+  .then(() => console.log('notification policy tests passed'))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

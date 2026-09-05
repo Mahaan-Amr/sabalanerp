@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpPressable, ErpInput, ErpSelect } from '@/components/erp';
 import {
   calculateProductOperations,
@@ -11,6 +12,9 @@ import {
   type OperationEdge,
   type OperationGroupDraft,
   type ProductOperationsInput,
+  type ProductOperationsTechnicalInput,
+  type OperationQuantityOverride,
+  type CanonicalDecimal,
   type ToolSelectionDraft
 } from '@sabalanerp/contract-product-graph';
 import {
@@ -21,6 +25,7 @@ import {
 import { formatPrice } from '@/lib/numberFormat';
 import {
   buildOperationCollectionPresentation,
+  buildTechnicalOperationCollectionPresentation,
   getPersianOperationEdgeLabel
 } from '../../services/operationCollectionPresentation';
 
@@ -45,12 +50,29 @@ const draftIdentity = (prefix: string) => {
 const operationUnitLabel = (unit: 'meter' | 'squareMeter') =>
   unit === 'meter' ? 'm' : 'm²';
 
-const wholeScope = (input: ProductOperationsInput) =>
+const resolveDisplayedOverride = (
+  override: OperationQuantityOverride | undefined,
+  automaticQuantity: CanonicalDecimal | undefined,
+  resolution: 'keep' | 'use-calculation',
+  technical: boolean
+): OperationQuantityOverride | undefined => {
+  if (!override) return undefined;
+  if (!technical) return { ...override, resolution };
+  if (resolution === 'use-calculation') return undefined;
+  // The choice applies to the displayed canonical quantity, not every future
+  // geometry change. Never retain a standing 'keep' instruction in the draft.
+  return automaticQuantity === undefined ? override
+    : { value: override.value, automaticQuantitySnapshot: automaticQuantity };
+};
+
+type OperationsInput = ProductOperationsInput | ProductOperationsTechnicalInput;
+
+const wholeScope = (input: OperationsInput) =>
   parseCanonicalDecimal(input.quantity === undefined
     ? input.lengthMeters
     : String(input.quantity));
 
-const ensureWholeProductGroup = (input: ProductOperationsInput) => {
+const ensureWholeProductGroup = (input: OperationsInput) => {
   if (input.groups.length > 0) {
     return {
       groups: input.groups,
@@ -72,11 +94,13 @@ function CatalogResults({
   kind,
   items,
   onSelect,
+  showPricing,
   focusOnMount = false
 }: {
   kind: 'tool' | 'finishing';
   items: readonly OperationCatalogItem[];
   onSelect: (item: OperationCatalogItem) => void;
+  showPricing: boolean;
   focusOnMount?: boolean;
 }) {
   const [query, setQuery] = React.useState('');
@@ -118,11 +142,11 @@ function CatalogResults({
             className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-start text-xs hover:bg-[var(--sds-surface-subtle)]"
           >
             <span className="font-semibold">{item.name}</span>
-            <span className="text-[var(--sds-text-muted)]">
+            {showPricing && <span className="text-[var(--sds-text-muted)]">
               {item.rateToman === undefined || item.rateToman === null
                 ? 'نرخ ثبت نشده'
                 : `${formatPrice(item.rateToman)} / ${operationUnitLabel(item.unit)}`}
-            </span>
+            </span>}
           </ErpPressable>
         ))}
       </div>
@@ -130,7 +154,7 @@ function CatalogResults({
   );
 }
 
-export function OperationCollectionsSection({
+export function OperationCollectionsSection<Input extends OperationsInput>({
   input,
   onChange,
   loadTools,
@@ -138,13 +162,15 @@ export function OperationCollectionsSection({
   toolCacheKey = 'contract-product-tools',
   finishingCacheKey = 'contract-product-finishings'
 }: {
-  input: ProductOperationsInput;
-  onChange: (input: ProductOperationsInput) => void;
+  input: Input;
+  onChange: (input: Input) => void;
   loadTools: () => Promise<readonly OperationCatalogItem[]>;
   loadFinishings: () => Promise<readonly OperationCatalogItem[]>;
   toolCacheKey?: string;
   finishingCacheKey?: string;
 }) {
+  const pricingVisible = useProductPricingVisibility();
+  const showPricing = pricingVisible && !('inputRevision' in input);
   const [addingTool, setAddingTool] = React.useState(false);
   const [addingFinishing, setAddingFinishing] = React.useState(false);
   const [overrideEditing, setOverrideEditing] = React.useState<string | null>(null);
@@ -165,20 +191,21 @@ export function OperationCollectionsSection({
     loadFinishings,
     addingFinishing
   );
-  const calculation = React.useMemo(
-    () => calculateProductOperations(input),
-    [input]
-  );
   const presentation = React.useMemo(
-    () => buildOperationCollectionPresentation(input),
+    () => 'inputRevision' in input
+      ? buildTechnicalOperationCollectionPresentation(input)
+      : { ...buildOperationCollectionPresentation(input), calculation: calculateProductOperations(input) },
     [input]
   );
+  const calculation = presentation.calculation;
   const calculatedTool = (id: string) =>
     presentation.toolsById.get(id);
   const calculatedFinishing = (id: string) =>
     presentation.finishingsById.get(id);
-  const conflictFor = (id: string) =>
-    presentation.conflictByEntityId.get(id);
+  const conflictFor = (id: string) => {
+    const conflict = presentation.conflictByEntityId.get(id);
+    return !showPricing && conflict?.code === 'inventory-rate-missing' ? undefined : conflict;
+  };
   const conflictMessage = (
     conflict: ReturnType<typeof conflictFor>
   ) => {
@@ -231,7 +258,7 @@ export function OperationCollectionsSection({
       catalogSnapshotVersion: item.catalogSnapshotVersion,
       name: item.name,
       unit: item.unit,
-      ...(item.rateToman === undefined || item.rateToman === null
+      ...(!showPricing || item.rateToman === undefined || item.rateToman === null
         ? {}
         : { rateToman: parseCanonicalDecimal(item.rateToman) }),
       ...(item.unit === 'meter' ? { edges: [] } : {})
@@ -256,7 +283,7 @@ export function OperationCollectionsSection({
       catalogSnapshotVersion: item.catalogSnapshotVersion,
       name: item.name,
       unit: item.unit,
-      ...(item.rateToman === undefined || item.rateToman === null
+      ...(!showPricing || item.rateToman === undefined || item.rateToman === null
         ? {}
         : { rateToman: parseCanonicalDecimal(item.rateToman) }),
       incompatibleCatalogItemIds: item.incompatibleCatalogItemIds ?? []
@@ -368,6 +395,7 @@ export function OperationCollectionsSection({
               ? <div className="min-h-9 py-2 text-xs text-[var(--sds-danger)]">دریافت ابزار انجام نشد</div>
               : (
                   <CatalogResults
+                    showPricing={showPricing}
                     kind="tool"
                     items={toolCatalog.data ?? []}
                     onSelect={addTool}
@@ -406,8 +434,8 @@ export function OperationCollectionsSection({
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(tool.unit)}</span>
-                <span>{tool.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(tool.rateToman)}</span>
-                <span className="font-semibold">{calculated ? formatPrice(calculated.amountToman) : '—'}</span>
+                {showPricing && <span>{!('rateToman' in tool) || tool.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(tool.rateToman)}</span>}
+                {showPricing && <span className="font-semibold">{calculated && 'amountToman' in calculated && typeof calculated.amountToman === 'string' ? formatPrice(calculated.amountToman) : '—'}</span>}
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی
@@ -516,6 +544,7 @@ export function OperationCollectionsSection({
               {overrideEditing === tool.toolSelectionId && calculated && (
                 <div className="mt-2 flex items-center gap-2">
                   <ErpInput
+                    aria-label={`مقدار ${tool.name}`}
                     defaultValue={tool.quantityOverride?.value ?? calculated.finalQuantity}
                     inputMode="decimal"
                     onBlur={event => {
@@ -542,8 +571,9 @@ export function OperationCollectionsSection({
               {splitDraft?.kind === 'tool' &&
                 splitDraft.selectionId === tool.toolSelectionId && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <ErpInput
-                      value={splitDraft.scope}
+                  <ErpInput
+                    aria-label={`بخش گروه ${tool.name}`}
+                    value={splitDraft.scope}
                       onChange={event => setSplitDraft({
                         ...splitDraft,
                         scope: event.target.value,
@@ -567,26 +597,21 @@ export function OperationCollectionsSection({
                     <span className="ms-2 inline-flex gap-2">
                       <ErpPressable
                         type="button"
-                        onClick={() => updateTool(tool.toolSelectionId, current => ({
+                        onClick={() => { setOverrideEditing(null); updateTool(tool.toolSelectionId, current => ({
                           ...current,
-                          quantityOverride: current.quantityOverride
-                            ? { ...current.quantityOverride, resolution: 'keep' }
-                            : undefined
-                        }))}
+                          quantityOverride: resolveDisplayedOverride(current.quantityOverride,
+                            calculated?.automaticQuantity, 'keep', 'inputRevision' in input)
+                        })); }}
                       >
                         حفظ مقدار دستی
                       </ErpPressable>
                       <ErpPressable
                         type="button"
-                        onClick={() => updateTool(tool.toolSelectionId, current => ({
+                        onClick={() => { setOverrideEditing(null); updateTool(tool.toolSelectionId, current => ({
                           ...current,
-                          quantityOverride: current.quantityOverride
-                            ? {
-                                ...current.quantityOverride,
-                                resolution: 'use-calculation'
-                              }
-                            : undefined
-                        }))}
+                          quantityOverride: resolveDisplayedOverride(current.quantityOverride,
+                            calculated?.automaticQuantity, 'use-calculation', 'inputRevision' in input)
+                        })); }}
                       >
                         استفاده از محاسبه
                       </ErpPressable>
@@ -612,6 +637,7 @@ export function OperationCollectionsSection({
               ? <div className="min-h-9 py-2 text-xs text-[var(--sds-danger)]">دریافت پرداخت انجام نشد</div>
               : (
                   <CatalogResults
+                    showPricing={showPricing}
                     kind="finishing"
                     items={finishingCatalog.data ?? []}
                     onSelect={addFinishing}
@@ -640,8 +666,8 @@ export function OperationCollectionsSection({
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(finishing.unit)}</span>
-                <span>{finishing.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(finishing.rateToman)}</span>
-                <span className="font-semibold">{calculated ? formatPrice(calculated.amountToman) : '—'}</span>
+                {showPricing && <span>{!('rateToman' in finishing) || finishing.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(finishing.rateToman)}</span>}
+                {showPricing && <span className="font-semibold">{calculated && 'amountToman' in calculated && typeof calculated.amountToman === 'string' ? formatPrice(calculated.amountToman) : '—'}</span>}
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی
@@ -708,6 +734,7 @@ export function OperationCollectionsSection({
               {overrideEditing === finishing.finishingSelectionId && calculated && (
                 <div className="mt-2 flex items-center gap-2">
                   <ErpInput
+                    aria-label={`مقدار ${finishing.name}`}
                     defaultValue={
                       finishing.quantityOverride?.value ?? calculated.finalQuantity
                     }
@@ -740,8 +767,9 @@ export function OperationCollectionsSection({
               {splitDraft?.kind === 'finishing' &&
                 splitDraft.selectionId === finishing.finishingSelectionId && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <ErpInput
-                      value={splitDraft.scope}
+                  <ErpInput
+                    aria-label={`بخش گروه ${finishing.name}`}
+                    value={splitDraft.scope}
                       onChange={event => setSplitDraft({
                         ...splitDraft,
                         scope: event.target.value,
@@ -765,32 +793,27 @@ export function OperationCollectionsSection({
                     <span className="ms-2 inline-flex gap-2">
                       <ErpPressable
                         type="button"
-                        onClick={() => updateFinishing(
+                        onClick={() => { setOverrideEditing(null); updateFinishing(
                           finishing.finishingSelectionId,
                           current => ({
                             ...current,
-                            quantityOverride: current.quantityOverride
-                              ? { ...current.quantityOverride, resolution: 'keep' }
-                              : undefined
+                            quantityOverride: resolveDisplayedOverride(current.quantityOverride,
+                              calculated?.automaticQuantity, 'keep', 'inputRevision' in input)
                           })
-                        )}
+                        ); }}
                       >
                         حفظ مقدار دستی
                       </ErpPressable>
                       <ErpPressable
                         type="button"
-                        onClick={() => updateFinishing(
+                        onClick={() => { setOverrideEditing(null); updateFinishing(
                           finishing.finishingSelectionId,
                           current => ({
                             ...current,
-                            quantityOverride: current.quantityOverride
-                              ? {
-                                  ...current.quantityOverride,
-                                  resolution: 'use-calculation'
-                                }
-                              : undefined
+                            quantityOverride: resolveDisplayedOverride(current.quantityOverride,
+                              calculated?.automaticQuantity, 'use-calculation', 'inputRevision' in input)
                           })
-                        )}
+                        ); }}
                       >
                         استفاده از محاسبه
                       </ErpPressable>
@@ -803,7 +826,7 @@ export function OperationCollectionsSection({
         })}
       </InlineCollectionSection>
 
-      {!presentation.complete && (
+      {!calculation.ok && calculation.conflicts.some(conflict => showPricing || conflict.code !== 'inventory-rate-missing') && (
         <div
           data-operation-total-incomplete
           className="border-t border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-2 py-2 text-xs font-semibold text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]"

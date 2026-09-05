@@ -11,6 +11,10 @@ import {
   optimizerQuantityPolicyProvenanceFromAudit,
 } from '../optimizerDerivedQuantityEvidence';
 import { sanitizeContractDataCustomerSnapshot } from '../contractSnapshotBoundary';
+import {
+  hasConflictingDiscountOrNonProductAdjustmentEvidence,
+  isExplicitZeroDiscountInput,
+} from '../contractDiscountEvidence';
 import type {
   ApprovalLeaf,
   ApprovedPricingPersistenceContext,
@@ -440,6 +444,102 @@ export const reconstructLegacyV1Pricing = (input: {
   };
 };
 
+type ProjectedLegacyV1Pricing = {
+  baseAmountToman: string | null;
+  totalAmountToman: string;
+  pricingComponents: ReadonlyArray<{ id: string; kind: string; amountToman: string }>;
+};
+
+type CanonicalWriterV2MoneyProvenance = {
+  graphSchemaVersion: 1;
+  roundingPolicy: 'rounding-v2';
+  producer: 'CANONICAL_WIZARD_SAVE';
+  producerVersion: 0 | 1;
+  graphAuditCommandId: string;
+};
+
+export const resolveCanonicalWriterV2MoneyProvenance = (input: {
+  graphSchemaVersion: number;
+  roundingPolicy: string;
+  mode: string;
+  contractData: unknown;
+  writerProvenance: {
+    producer: 'LEGACY_MIGRATION' | 'CANONICAL_WIZARD_SAVE';
+    producerVersion: 0 | 1;
+    graphAuditCommandId: string;
+  } | null;
+}): CanonicalWriterV2MoneyProvenance | null => {
+  if (input.graphSchemaVersion !== 1 || input.roundingPolicy !== 'rounding-v2' ||
+    input.mode !== 'FROM_CONTRACT_TOTAL' || input.writerProvenance?.producer !== 'CANONICAL_WIZARD_SAVE') {
+    return null;
+  }
+  const contractData = optionalRecord(input.contractData);
+  if (!contractData) return null;
+  const hasDiscountField = Object.prototype.hasOwnProperty.call(contractData, 'discount');
+  const hasNoDiscountEvidence = hasDiscountField &&
+    (contractData.discount === null || isExplicitZeroDiscountInput(contractData.discount)) &&
+    !hasConflictingDiscountOrNonProductAdjustmentEvidence(contractData);
+  if (!hasNoDiscountEvidence) return null;
+  return {
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: input.writerProvenance.producerVersion,
+    graphAuditCommandId: input.writerProvenance.graphAuditCommandId,
+  };
+};
+
+export const resolveLegacyV1PricingProjection = (input: {
+  canReconstructLegacyV1: boolean;
+  canonicalWriterV2MoneyProvenance?: CanonicalWriterV2MoneyProvenance | null;
+  productRowId: string;
+  productSnapshot: Record<string, any> | null;
+  pricing: ProjectedLegacyV1Pricing;
+}) => {
+  const projectedTotal = new Prisma.Decimal(input.pricing.totalAmountToman ?? 0);
+  const requiresPricingReconstruction = input.pricing.baseAmountToman == null || !projectedTotal.isInteger();
+  let snapshotRawTotal: Prisma.Decimal | null = null;
+  if (input.productSnapshot?.totalPrice != null && input.productSnapshot.totalPrice !== '') {
+    try {
+      const candidate = new Prisma.Decimal(String(input.productSnapshot.totalPrice));
+      if (candidate.isFinite() && candidate.gte(0) && !candidate.eq(projectedTotal) &&
+        candidate.toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP).eq(projectedTotal)) {
+        snapshotRawTotal = candidate;
+      }
+    } catch {
+      snapshotRawTotal = null;
+    }
+  }
+  const canReconstructPricing = input.canReconstructLegacyV1 && requiresPricingReconstruction;
+  const canNormalizeStoredResidue = snapshotRawTotal != null &&
+    (input.canReconstructLegacyV1 || input.canonicalWriterV2MoneyProvenance != null);
+  if (!canReconstructPricing && !canNormalizeStoredResidue) {
+    return { pricing: input.pricing, normalization: null };
+  }
+  if (!input.productSnapshot) {
+    throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} legacy pricing snapshot is missing`);
+  }
+  const reconstructed = reconstructLegacyV1Pricing({
+    productRowId: input.productRowId,
+    productSnapshot: input.productSnapshot,
+    rawTotalAmountToman: snapshotRawTotal?.toString() ?? String(input.pricing.totalAmountToman ?? ''),
+  });
+  if (snapshotRawTotal != null && !requiresPricingReconstruction) {
+    if (!new Prisma.Decimal(reconstructed.baseAmountToman).eq(input.pricing.baseAmountToman!)) {
+      throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} legacy material amount conflicts with canonical pricing`);
+    }
+    const normalization = input.canonicalWriterV2MoneyProvenance
+      ? {
+          ...reconstructed.normalization,
+          rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL' as const,
+          ...input.canonicalWriterV2MoneyProvenance,
+        }
+      : reconstructed.normalization;
+    return { pricing: input.pricing, normalization };
+  }
+  return { pricing: reconstructed, normalization: reconstructed.normalization };
+};
+
 export const reconstructLegacyV1Quantity = (input: {
   productRowId: string;
   productType: string;
@@ -655,6 +755,13 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
               graphAuditCommand: migrationAudit.command,
             })
           : null;
+      const canonicalWriterV2MoneyProvenance = resolveCanonicalWriterV2MoneyProvenance({
+        graphSchemaVersion: graph.schemaVersion,
+        roundingPolicy: graph.calculationPolicy.rounding,
+        mode: String(optionalRecord(leaf.metadata)?.mode ?? ''),
+        contractData: snapshot.contractData,
+        writerProvenance: quantityPolicyProvenance,
+      });
       let compatibility: NonNullable<ApprovedPricingSource['contract']['productGraph']>['compatibility'] =
         resolvedGraph.compatibility ?? undefined;
       if (frozenIdentityBinding.rebindings.length > 0) {
@@ -681,19 +788,16 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
           totalAmountToman: row.totalAmountToman ?? null,
           pricingComponents: row.pricingComponents,
         };
-        let legacyRawTotalAmountToman: string | null = null;
-        if (canReconstructLegacyV1 &&
-          (pricing.baseAmountToman == null || !new Prisma.Decimal(pricing.totalAmountToman ?? 0).isInteger())) {
-          if (!productSnapshot) throw new ApprovedPricingEvidenceError(`Product ${row.productRowId} legacy pricing snapshot is missing`);
-          const reconstructed = reconstructLegacyV1Pricing({
-            productRowId: row.productRowId,
-            productSnapshot,
-            rawTotalAmountToman: String(pricing.totalAmountToman ?? ''),
-          });
-          pricing = reconstructed;
-          legacyRawTotalAmountToman = reconstructed.normalization.rawTotalAmountToman;
-          monetaryNormalizations.push(reconstructed.normalization);
-        }
+        const resolvedPricing = resolveLegacyV1PricingProjection({
+          canReconstructLegacyV1,
+          canonicalWriterV2MoneyProvenance,
+          productRowId: row.productRowId,
+          productSnapshot,
+          pricing,
+        });
+        pricing = resolvedPricing.pricing;
+        const legacyRawTotalAmountToman = resolvedPricing.normalization?.rawTotalAmountToman ?? null;
+        if (resolvedPricing.normalization) monetaryNormalizations.push(resolvedPricing.normalization);
         let requestedQuantity = row.quantity ?? null;
         let requestedLengthMeters = canonicalOptimizerDerivedLengthWitness(canonicalRow, row.lengthMeters) ?? null;
         let requestedAreaSquareMeters = row.areaSquareMeters ?? null;
@@ -888,7 +992,9 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
       }
       if (!compatibility && (monetaryNormalizations.length > 0 || legacyQuantityNormalizations.length > 0)) {
         compatibility = {
-          evidenceOrigin: 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION',
+          evidenceOrigin: canonicalWriterV2MoneyProvenance && monetaryNormalizations.length > 0
+            ? 'CANONICAL_WRITER_V2_MONEY_RESIDUE_NORMALIZATION'
+            : 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION',
           snapshotOriginallyMissing: false,
         };
       }

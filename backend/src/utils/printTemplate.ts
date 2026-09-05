@@ -1,5 +1,8 @@
 import fs from 'fs';
 import path from 'path';
+import type { CustomerContractOutput } from '../../../packages/partner-sales-contracts';
+import { parseCanonicalProductGraph, projectCanonicalRemainderConsumption,
+  type CanonicalProjectedRemainderConsumption } from '@sabalanerp/contract-product-graph';
 
 interface RenderableContract {
   id?: string;
@@ -15,6 +18,7 @@ interface RenderableContract {
   signedAt?: Date | string | null;
   printedAt?: Date | string | null;
   contractData?: any;
+  productGraphState?: { graph: unknown } | null;
   signatures?: any;
   customer?: any;
   department?: any;
@@ -688,7 +692,18 @@ const buildPhysicalProductionNote = (product: any): string => {
   return `${derivedLabel}خروجی فیزیکی تولید: ${breakdown}`;
 };
 
-const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
+const buildSourceMaterialRows = (
+  product: any,
+  consumption: readonly CanonicalProjectedRemainderConsumption[] = []
+): NormalizedSourceMaterial[] => {
+  if (consumption.length > 0) {
+    return consumption.map(source => ({
+      description: product?.stoneName || EMPTY,
+      dimensionsOrAmount: `عرض ${toFaNumber(Number(source.widthMeters) * 100, 4)}cm × طول ${toFaNumber(source.lengthMeters, 4)}m`,
+      quantityOrArea: `${toFaNumber(source.quantity, 0)} عدد، جمع ${toFaNumber(source.areaSquareMeters, 4)} متر مربع`,
+      presentsMaterialCharge: true
+    }));
+  }
   const layerSourcePlan = product?.meta?.layerSourcePlan;
   if (product?.meta?.isLayer && layerSourcePlan) {
     const rows: NormalizedSourceMaterial[] = [];
@@ -797,14 +812,24 @@ const normalizeProducts = (
 ): NormalizedProduct[] => {
   const contractDataProducts = Array.isArray(contract.contractData?.products) ? contract.contractData.products : [];
   const relationItems = Array.isArray(contract.items) ? contract.items : [];
+  const consumption = contract.productGraphState
+    ? projectCanonicalRemainderConsumption(parseCanonicalProductGraph(contract.productGraphState.graph)) : [];
 
   if (contractDataProducts.length > 0) {
     return contractDataProducts.map((savedProduct: any, index: number) => {
       const product = restoreLongitudinalCustomerRequest(savedProduct);
-      const relationItem = relationItems.find((item: any) =>
+      const rowId = product?.productRowId || product?.rowId;
+      const identityMatches = rowId ? relationItems.filter((item: any) =>
+        (item?.productRowId || item?.rowId) === rowId) : [];
+      const catalogMatches = relationItems.filter((item: any) =>
+        !item?.productRowId && !item?.rowId && item?.productId === product?.productId &&
+        (item?.stairPartType || null) === (product?.stairPartType || null));
+      const sameCatalogProducts = contractDataProducts.filter((item: any) =>
         item?.productId === product?.productId &&
-        (item?.stairPartType || null) === (product?.stairPartType || null)
-      ) || relationItems[index];
+        (item?.stairPartType || null) === (product?.stairPartType || null));
+      const relationItem = identityMatches.length === 1 ? identityMatches[0]
+        : identityMatches.length === 0 && catalogMatches.length === 1 && sameCatalogProducts.length === 1
+          ? catalogMatches[0] : undefined;
 
       const mandatoryCuttingPolicy = (
         Boolean(product?.isMandatory) && toNumber(product?.mandatoryPercentage) > 0
@@ -966,8 +991,9 @@ const normalizeProducts = (
 
       const remainingCount = Array.isArray(product?.remainingStones) ? product.remainingStones.length : 0;
       const usedRemainingCount = Array.isArray(product?.usedRemainingStones) ? product.usedRemainingStones.length : 0;
-      const sourceMaterials = buildSourceMaterialRows(product);
-      const isFromRemainingStone = Boolean(product?.meta?.remainingSource);
+      const rowConsumption = consumption.filter(source => source.productRowId === rowId);
+      const sourceMaterials = buildSourceMaterialRows(product, rowConsumption);
+      const isFromRemainingStone = rowConsumption.length > 0 || Boolean(product?.meta?.remainingSource);
       const sourceMaterialSummary = sourceMaterials.length > 0
         ? `${sourceMaterials[0].dimensionsOrAmount}، ${sourceMaterials[0].quantityOrArea}`
         : EMPTY;
@@ -986,7 +1012,7 @@ const normalizeProducts = (
         ? `لایه وابسته به ${stairPartLabel(layerInfo?.parentPartType || product?.stairPartType)}: ${toFaNumber(layerInfo?.layerSetQuantity || product?.quantity, 4)} ست (${layerEdgeLabels.join(' + ') || EMPTY})، ${toFaNumber(layerInfo?.physicalPieceQuantity || 0, 0)} نوار فیزیکی`
         : '';
       const description = [
-        product?.description || relationItem?.description || '',
+        typeof product?.description === 'string' ? product.description : relationItem?.description || '',
         layerProductionNote,
         product?.sawKerfEnabled ? 'خوراک اره لحاظ شده' : '',
         physicalProductionNote
@@ -2029,9 +2055,10 @@ const renderCompactMetadataSection = (
   `;
 };
 
-export function renderContractPdfHeaderTemplate(contract: RenderableContract): string {
+export function renderContractPdfHeaderTemplate(contract: RenderableContract, customerOutput?: CustomerContractOutput): string {
+  if (customerOutput) contract = { contractNumber: customerOutput.contractNumber, status: customerOutput.status, createdAt: customerOutput.contractDate };
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
-  const logoMarkup = logoUrl
+  const logoMarkup = customerOutput ? `<div style="direction:rtl"><strong>${escapeHtml(customerOutput.seller.displayName)}</strong><div style="font-size:8px">تأمین و تحویل توسط سبلان</div></div>` : logoUrl
     ? `<img src="${escapeHtml(logoUrl, { localizeDigits: false })}" style="width:290px;height:66px;object-fit:contain;display:block;" />`
     : '';
 
@@ -2078,7 +2105,59 @@ export function renderReportPdfHeaderTemplate(meta: {
   `;
 }
 
+const customerMoney = (amount: string, output: CustomerContractOutput) =>
+  `${escapeHtml(amount)} ${output.totals.currency === 'IRR' ? 'ریال' : 'تومان'}`;
+
+function renderCustomerProductRows(output: CustomerContractOutput, columns: Array<{ key: ContractPrintColumnKey }>): string {
+  const rows = output.products.map((row, index) => {
+    // v1 has a customer-readable configuration, not separate dimensional or
+    // piece-count evidence. Retain the ordinary columns without guessing facts.
+    const cells: Partial<Record<ContractPrintColumnKey, string>> = {
+      index: escapeHtml(String(index + 1)),
+      description: `${escapeHtml(row.description)}<div>مقدار قراردادی: ${escapeHtml(row.quantity)} ${escapeHtml(row.unit)}</div>`,
+      rate: customerMoney(row.retailUnitPrice, output),
+    };
+    return `<tr>${columns.map(column => `<td>${cells[column.key] || EMPTY}</td>`).join('')}</tr>`;
+  });
+  const totals = [['جمع خالص', output.totals.net], ['تخفیف', output.totals.discount],
+    ['مالیات', output.totals.tax], ['هزینه‌ها', output.totals.charges], ['مبلغ نهایی قرارداد', output.totals.payable]];
+  return rows.join('') + totals.map(([label, amount]) => `<tr><td colspan="${columns.length - 1}">${label}</td><td>${customerMoney(amount, output)}</td></tr>`).join('');
+}
+
+function renderCustomerDeliveryRows(output: CustomerContractOutput): string {
+  const products = new Map(output.products.map(row => [row.productRowId, row]));
+  return output.deliveries.flatMap((delivery, index) => delivery.items.map(item => `<tr>
+    <td>${escapeHtml(String(index + 1))}</td>
+    <td>${escapeHtml(products.get(item.productRowId)?.description || '')}</td>
+    <td>${escapeHtml(item.quantity)} ${escapeHtml(products.get(item.productRowId)?.unit || '')}</td>
+    <td>${escapeHtml(formatDate(delivery.date))}</td><td>${escapeHtml(output.customer.displayName)}</td><td>${escapeHtml(delivery.destination)}</td>
+  </tr>`)).join('');
+}
+
+function renderCustomerPaymentRows(output: CustomerContractOutput): string {
+  const methods: Record<string, string> = { CASH: 'نقد', BANK_TRANSFER: 'انتقال بانکی', CHECK: 'چک', CREDIT: 'اعتباری' };
+  return output.customerPaymentPlan.installments.map((payment, index) => `<tr>
+    <td>${escapeHtml(String(index + 1))}</td><td>${escapeHtml(methods[payment.method] || payment.method)}${payment.subtype ? ` - ${escapeHtml(payment.subtype)}` : ''}</td>
+    <td>${customerMoney(payment.amount.amount, output)}</td><td>برنامه پرداخت</td>
+    <td>${escapeHtml(formatDate(payment.dueDate))}</td><td>${escapeHtml(payment.check?.number || EMPTY)}</td><td>—</td><td>${payment.check ? escapeHtml(formatDate(payment.check.dueDate)) : EMPTY}</td><td>${escapeHtml([payment.check?.bank, payment.notes].filter(Boolean).join(' - ') || EMPTY)}</td>
+  </tr>`).join('');
+}
+
+/** Called only after the customer-output boundary validates schema and hash.
+ * Both PDF and browser print consume this same existing contract template. */
+export function renderCustomerContractPrint(output: CustomerContractOutput) {
+  const contract: RenderableContract = {
+    contractNumber: output.contractNumber, status: output.status, createdAt: output.contractDate,
+  };
+  return {
+    htmlContent: renderContractHtml(contract, { customerOutput: output, reservePdfHeaderSpace: true }),
+    headerTemplate: renderContractPdfHeaderTemplate(contract, output),
+  };
+}
+
 type RenderContractHtmlOptions = {
+  /** Internal typed adapter only; validate/hash-check at the output boundary. */
+  customerOutput?: CustomerContractOutput;
   reservePdfHeaderSpace?: boolean;
   variant?: ContractPrintVariant;
   customPrint?: ContractCustomPrintOptions;
@@ -2092,6 +2171,9 @@ type RenderContractHtmlOptions = {
 };
 
 export function renderContractHtml(contract: RenderableContract, options: RenderContractHtmlOptions = {}): string {
+  const output = options.customerOutput;
+  // A mixed caller cannot carry legacy entity facts into the customer path.
+  if (output) contract = { contractNumber: output.contractNumber, status: output.status, createdAt: output.contractDate };
   const variant = options.variant || 'original';
   const isAccountingVariant = variant === 'accounting';
   const isWorkshopVariant = variant === 'workshop';
@@ -2128,13 +2210,13 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const financials = normalizeFinancials(contract, normalizedProducts, normalizedStandaloneServices);
 
   const { contractNumber } = getContractHeaderMeta(contract);
-  const sellerName = getUserName(contract.createdByUser);
-  const sellerPhone = getSellerPhone(contract.createdByUser);
+  const sellerName = output?.seller.displayName || getUserName(contract.createdByUser);
+  const sellerPhone = output?.seller.phone || getSellerPhone(contract.createdByUser);
 
-  const customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || customer.companyName || EMPTY;
-  const customerPhone = getCustomerPhone(customer, contractData);
+  const customerName = output?.customer.displayName || `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || customer.companyName || EMPTY;
+  const customerPhone = output?.customer.phone || getCustomerPhone(customer, contractData);
   const customerNationalCode = customer.nationalCode || contractData.customer?.nationalCode || EMPTY;
-  const customerAddress = project.address || customer.workAddress || customer.homeAddress || customer.address || EMPTY;
+  const customerAddress = output?.customer.address || project.address || customer.workAddress || customer.homeAddress || customer.address || EMPTY;
   const projectName = project.projectName || EMPTY;
   const projectManagerName = project.projectManagerName || customer.projectManagerName || EMPTY;
   const projectManagerNumber = project.projectManagerNumber || customer.projectManagerNumber || EMPTY;
@@ -2167,21 +2249,21 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     { key: 'count', className: 'main-area-col', label: 'تعداد' },
     { key: 'linearMeasurement', className: 'main-linear-col', label: 'متر طول' },
     { key: 'squareMeasurement', className: 'main-square-col', label: 'متر مربع' },
-    { key: 'rate', className: 'main-rate-col', label: `نرخ - ${isAccountingVariant ? 'ریال' : 'تومان'}` },
-    { key: 'total', className: 'main-total-col', label: `مبلغ کل - ${isAccountingVariant ? 'ریال' : 'تومان'}` }
+    { key: 'rate', className: 'main-rate-col', label: `نرخ - ${output ? (output.totals.currency === 'IRR' ? 'ریال' : 'تومان') : isAccountingVariant ? 'ریال' : 'تومان'}` },
+    { key: 'total', className: 'main-total-col', label: `مبلغ کل - ${output ? (output.totals.currency === 'IRR' ? 'ریال' : 'تومان') : isAccountingVariant ? 'ریال' : 'تومان'}` }
   ];
   const visibleProductColumnDefinitions = productColumnDefinitions.filter((column) => productColumns[column.key]);
 
   return `
-  <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''}">
+  <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''} ${output ? 'customer-output' : ''}">
     ${renderCompactMetadataSection(contract, { variant, customerName, customerAddress })}
 
     ${showFormalSection ? `<section class="section">
       <h2>قرارداد رسمی فروش و اجرای خدمات سنگ</h2>
       <div class="grid two-col balanced-info">
-        <div><strong>آدرس مجموعه:</strong> ${escapeHtml(SELLER_ADDRESS)}</div>
-        <div><strong>شماره تماس مجموعه:</strong> <span class="ltr-value">${escapeHtml(COMPANY_PHONE)}</span></div>
-        <div><strong>ایجاد کننده:</strong> ${escapeHtml(sellerName)}</div>
+        <div><strong>آدرس مجموعه:</strong> ${escapeHtml(output?.seller.address || SELLER_ADDRESS)}</div>
+        <div><strong>شماره تماس مجموعه:</strong> <span class="ltr-value">${escapeHtml(output?.seller.phone || COMPANY_PHONE)}</span></div>
+        <div><strong>${output ? 'فروشنده:' : 'ایجاد کننده:'}</strong> ${escapeHtml(sellerName)}</div>
         <div><strong>شماره تماس فروشنده:</strong> <span class="ltr-value">${escapeHtml(sellerPhone)}</span></div>
       </div>
     </section>` : ''}
@@ -2190,7 +2272,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
       <h2>مشخصات مشتری و پروژه</h2>
       <div class="grid two-col balanced-info">
         <div><strong>نام مشتری:</strong> ${escapeHtml(customerName)}</div>
-        <div><strong>کد ملی:</strong> ${escapeHtml(customerNationalCode)}</div>
+        ${output ? '' : `<div><strong>کد ملی:</strong> ${escapeHtml(customerNationalCode)}</div>`}
         <div><strong>شماره تماس:</strong> ${escapeHtml(customerPhone)}</div>
         <div><strong>نام برند/شرکت:</strong> ${escapeHtml(customer.companyName || customer.brandName || EMPTY)}</div>
         <div><strong>نام پروژه:</strong> ${escapeHtml(projectName)}</div>
@@ -2212,7 +2294,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, {
+          ${output ? renderCustomerProductRows(output, visibleProductColumnDefinitions) : renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, {
             hidePrices: !showPriceColumns,
             productRowsMode: customPrint.productRowsMode || (customPrint.preset === 'summarized' ? 'summarized' : 'detailed'),
             showExplanatoryRows: customPrint.showExplanatoryRows,
@@ -2249,10 +2331,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${renderDeliveryRows(normalizedDeliveries, { hideReceiver: isWorkshopVariant })}
+          ${output ? renderCustomerDeliveryRows(output) : renderDeliveryRows(normalizedDeliveries, { hideReceiver: isWorkshopVariant })}
         </tbody>
       </table>
-      <p class="section-note">${escapeHtml(DELIVERY_NOTE)}</p>
+      ${output ? '' : `<p class="section-note">${escapeHtml(DELIVERY_NOTE)}</p>`}
     </section>` : ''}
 
     ${showPaymentSection ? `<section class="section">
@@ -2272,16 +2354,16 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${renderPaymentRows(normalizedPayments, financials, priceFormatOptions)}
+          ${output ? renderCustomerPaymentRows(output) : renderPaymentRows(normalizedPayments, financials, priceFormatOptions)}
         </tbody>
       </table>
-      <p class="section-note">${escapeHtml(PAYMENT_NOTE)}</p>
+      ${output ? '' : `<p class="section-note">${escapeHtml(PAYMENT_NOTE)}</p>`}
     </section>` : ''}
 
     ${showDigitalConfirmation ? `<section class="section">
       <h2>وضعیت تایید دیجیتال</h2>
       <div class="grid two-col">
-        <div><strong>وضعیت:</strong> ${escapeHtml(digitalConfirmation?.status || EMPTY)}</div>
+        <div><strong>وضعیت:</strong> ${escapeHtml(output ? ({ NOT_SENT: 'ارسال نشده', PENDING: 'در انتظار تأیید', VERIFIED: 'تأیید شده', INVALIDATED: 'باطل شده' }[output.confirmation]) : digitalConfirmation?.status || EMPTY)}</div>
         <div><strong>شماره تایید:</strong> ${escapeHtml(digitalConfirmation?.phoneNumber || EMPTY)}</div>
         <div><strong>زمان ارسال:</strong> ${escapeHtml(formatDateTime(digitalConfirmation?.sentAt))}</div>
         <div><strong>زمان تایید:</strong> ${escapeHtml(formatDateTime(digitalConfirmation?.verifiedAt))}</div>
@@ -2291,7 +2373,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     ${showLegalNotes ? `<section class="section">
       <h2>توضیحات</h2>
       ${contract.notes ? `<p class="notes">${escapeHtml(contract.notes)}</p>` : ''}
-      <ol class="legal-list">
+      ${output ? `<p class="notes">${escapeHtml(output.legalText)}</p>` : `<ol class="legal-list">
         <li>خریدار با امضای این قرارداد، نوع سنگ، ابعاد، ضخامت، متراژ، تعداد، کیفیت، فرآوری، قیمت و سایر مشخصات مندرج در قرارداد را تأیید می‌نماید.</li>
         <li>با توجه به ماهیت طبیعی سنگ، تفاوت‌های متعارف در رنگ، طرح، رگه، بافت، خلل و فرج و سایر ویژگی‌های طبیعی، مغایرت یا عیب محسوب نمی‌شود.</li>
         <li>خریدار موظف است کالا را هنگام تحویل از نظر نوع، تعداد، متراژ، سلامت ظاهری و انطباق با سفارش بررسی نماید. هرگونه ادعای مغایرت یا کسری باید حداکثر ظرف ۲۴ ساعت اعلام گردد؛ در غیر این صورت کالا مورد تأیید خریدار تلقی خواهد شد.</li>
@@ -2301,7 +2383,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
         <li>در صورت عدم پرداخت هر یک از تعهدات مالی در سررسید مقرر، فروشنده حق توقف تحویل سفارش، مطالبه کلیه مطالبات، خسارات قانونی، هزینه‌های دادرسی و حق‌الوکاله را خواهد داشت.</li>
         <li>اعتبار این قرارداد منوط به تسویه کامل و به‌موقع کلیه تعهدات مالی خریدار در مواعد مقرر می‌باشد و عدم پرداخت، موجب سلب حقوق قانونی فروشنده در مطالبه مطالبات و خسارات نخواهد بود.</li>
         <li>امضای این قرارداد به منزله مطالعه، پذیرش و تأیید کامل مفاد آن توسط خریدار می‌باشد.</li>
-      </ol>
+      </ol>`}
     </section>` : ''}
 
     ${showSignatures ? `<section class="section signatures">
@@ -2309,9 +2391,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
       <div class="sign-box"><strong>امضا و اثر انگشت خریدار</strong></div>
       <div class="sign-box"><strong>تایید نهایی اجرا</strong></div>
     </section>` : ''}
+    ${output ? output.signatures.map(signature => `<p>${escapeHtml(signature.name)} - ${escapeHtml(signature.signedAt)}</p>`).join('') : ''}
 
     <footer class="footer">
-      <span>نسخه چاپی قرارداد - سامانه سبلان</span>
+      <span>${output ? 'تأمین و تحویل توسط سبلان' : 'نسخه چاپی قرارداد - سامانه سبلان'}</span>
       <span>تاریخ چاپ: ${escapeHtml(formatDateTime(new Date()))}</span>
       <span>شماره قرارداد: ${escapeHtml(contractNumber)}</span>
     </footer>
@@ -2319,6 +2402,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
   <style>
     ${renderYekanFontFaces()}
+
+    .customer-output tr { break-inside: avoid; page-break-inside: avoid; }
+    .customer-output .section h2 { break-after: avoid; page-break-after: avoid; }
+    .customer-output .section:has(> .grid) { break-inside: avoid; page-break-inside: avoid; }
 
     @page {
       size: A4 portrait;

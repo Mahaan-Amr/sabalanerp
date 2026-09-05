@@ -1,9 +1,9 @@
+import { calculateSlabGeometry } from './slabTechnical';
 import Decimal from 'decimal.js';
 import { hashCanonicalValue } from './canonicalHash';
 import { normalizeLegacyJson } from './canonicalJson';
 import { parseCanonicalDecimal, type CanonicalDecimal } from './canonicalDecimal';
 import {
-  calculatePackingPlan,
   calculatePricing,
   type PackingPlan,
   type PricedLine
@@ -252,83 +252,8 @@ export const parseSlabPolicyInput = (value: unknown): SlabPolicyInput => {
   };
 };
 
-const resolveGeometry = (
-  input: SlabPolicyInput
-):
-  | {
-      readonly lengthMeters: CanonicalDecimal;
-      readonly widthMeters: CanonicalDecimal;
-      readonly areaSquareMeters: CanonicalDecimal;
-      readonly quantity: number;
-    }
-  | null => {
-  if (!Number.isSafeInteger(input.quantity) || Number(input.quantity) <= 0) {
-    return null;
-  }
-  const quantity = Number(input.quantity);
-  const length = positive(input.lengthMeters) ? d(input.lengthMeters!) : undefined;
-  const width = positive(input.widthMeters) ? d(input.widthMeters!) : undefined;
-  const totalArea = positive(input.areaSquareMeters)
-    ? d(input.areaSquareMeters!)
-    : undefined;
-  if (length && width) {
-    const area = length.times(width).times(quantity);
-    if (input.lastManualField === 'area' && totalArea) {
-      if (input.lastManualDimension === 'length') {
-        return {
-          lengthMeters: canonical(length),
-          widthMeters: canonical(totalArea.div(length.times(quantity))),
-          areaSquareMeters: canonical(totalArea),
-          quantity
-        };
-      }
-      return {
-        lengthMeters: canonical(totalArea.div(width.times(quantity))),
-        widthMeters: canonical(width),
-        areaSquareMeters: canonical(totalArea),
-        quantity
-      };
-    }
-    return {
-      lengthMeters: canonical(length),
-      widthMeters: canonical(width),
-      areaSquareMeters: canonical(area),
-      quantity
-    };
-  }
-  if (length && totalArea) {
-    return {
-      lengthMeters: canonical(length),
-      widthMeters: canonical(totalArea.div(length.times(quantity))),
-      areaSquareMeters: canonical(totalArea),
-      quantity
-    };
-  }
-  if (width && totalArea) {
-    return {
-      lengthMeters: canonical(totalArea.div(width.times(quantity))),
-      widthMeters: canonical(width),
-      areaSquareMeters: canonical(totalArea),
-      quantity
-    };
-  }
-  return null;
-};
-
 export const calculateSlab = (input: SlabPolicyInput): SlabCalculation => {
   try {
-    parseStableIdentity('source-batch', input.sourceBatchId);
-    const geometry = resolveGeometry(input);
-    if (!geometry) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'slab-geometry-incomplete',
-          field: 'geometry',
-          message: 'Slab dimensions and quantity are incomplete.'
-        }]
-      };
-    }
     if (!positive(input.baseMaterialRateToman)) {
       return {
         ok: false,
@@ -339,86 +264,12 @@ export const calculateSlab = (input: SlabPolicyInput): SlabCalculation => {
         }]
       };
     }
-    if (d(input.kerfMeters).lt(0)) {
-      throw new TypeError('Slab kerf cannot be negative.');
-    }
-    if (input.sourceRows.length === 0) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'slab-source-required',
-          field: 'sourceRows',
-          message: 'At least one manual slab source is required.'
-        }]
-      };
-    }
-    const sourceIds = new Set<string>();
-    const sourceByBatch = new Map<string, SlabSourceRowInput>();
-    for (const [index, source] of input.sourceRows.entries()) {
-      parseStableIdentity('slab-source-row', source.sourceRowId);
-      if (sourceIds.has(source.sourceRowId)) {
-        return {
-          ok: false,
-          conflicts: [{
-            code: 'duplicate-slab-source',
-            field: 'sourceRows',
-            entityId: source.sourceRowId,
-            message: 'Each manual slab source row must have a stable unique identity.'
-          }]
-        };
-      }
-      sourceIds.add(source.sourceRowId);
-      if (
-        d(source.lengthMeters).lte(0) ||
-        d(source.widthMeters).lte(0) ||
-        !Number.isSafeInteger(source.quantity) ||
-        source.quantity <= 0
-      ) {
-        return {
-          ok: false,
-          conflicts: [{
-            code: 'invalid-slab-input',
-            field: 'sourceRows',
-            entityId: source.sourceRowId,
-            message: `Manual slab source ${index + 1} requires positive dimensions and quantity.`
-          }]
-        };
-      }
-    }
-    const packingSources = input.sourceRows.map(source => {
-      const sourceBatchId = parseStableIdentity(
-        'source-batch',
-        `${input.sourceBatchId}:${source.sourceRowId}`
-      );
-      sourceByBatch.set(sourceBatchId, source);
-      return {
-        sourceBatchId,
-        lengthMeters: source.lengthMeters,
-        widthMeters: source.widthMeters,
-        quantity: source.quantity
-      };
-    });
-    const packing = calculatePackingPlan({
-      policyVersion: input.packingPolicyVersion,
-      kerfMeters: input.kerfMeters,
-      sources: packingSources,
-      demands: [{
-        demandId: `${input.sourceBatchId}:finished-slab`,
-        lengthMeters: geometry.lengthMeters,
-        widthMeters: geometry.widthMeters,
-        quantity: geometry.quantity
-      }]
-    });
-    if (!packing.ok) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'slab-source-insufficient',
-          field: 'sourceRows',
-          message: packing.conflict.message
-        }]
-      };
-    }
+    const technical = calculateSlabGeometry(input, input.packingPolicyVersion);
+    if (!technical.ok) return technical;
+    const facts = technical.result;
+    const geometry = { lengthMeters: facts.lengthMeters, widthMeters: facts.widthMeters,
+      quantity: facts.quantity, areaSquareMeters: facts.finishedAreaSquareMeters };
+    const packing = { plan: facts.packingPlan };
     const missingRates: SlabConflict[] = [];
     if (input.cuttingPricingMethod === 'lineBased') {
       if (
@@ -460,34 +311,8 @@ export const calculateSlab = (input: SlabPolicyInput): SlabCalculation => {
     }
     if (missingRates.length > 0) return { ok: false, conflicts: missingRates };
 
-    const consumedCount = new Map<string, number>();
-    packing.plan.consumedSources.forEach(source => {
-      consumedCount.set(
-        source.sourceBatchId,
-        (consumedCount.get(source.sourceBatchId) ?? 0) + 1
-      );
-    });
-    const materialArea = canonical([...consumedCount].reduce(
-      (sum, [sourceBatchId, count]) => {
-        const source = sourceByBatch.get(sourceBatchId)!;
-        return sum.plus(
-          d(source.lengthMeters).times(source.widthMeters).times(count)
-        );
-      },
-      d(0)
-    ));
-    const verticalMeters = canonical([...consumedCount].reduce(
-      (sum, [sourceBatchId, count]) => {
-        const source = sourceByBatch.get(sourceBatchId)!;
-        return sum.plus(input.verticalCutSides.reduce((edgeSum, edge) =>
-          edgeSum.plus(
-            edge === 'top' || edge === 'bottom'
-              ? d(source.widthMeters).times(count)
-              : d(source.lengthMeters).times(count)
-          ), d(0)));
-      },
-      d(0)
-    ));
+    const materialArea = facts.materialAreaSquareMeters;
+    const verticalMeters = facts.verticalCutMeters;
     const pricing = calculatePricing({
       policyVersion: input.pricingPolicyVersion,
       roundingPolicyVersion: input.roundingPolicyVersion,

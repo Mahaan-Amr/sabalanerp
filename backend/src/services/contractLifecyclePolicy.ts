@@ -7,11 +7,17 @@ export type ContractLifecycleBlocker = {
   details?: Array<{ id: string; kind: string; status?: string | null; reference?: string | null }>;
 };
 
+export const PARTNER_CASE_RETENTION_BLOCKER: ContractLifecycleBlocker = {
+  code: 'PARTNER_CASE_RETAINED', count: 1, label: 'پرونده شماره‌دار فروش همکار',
+};
+
 export const contractHardDeleteEligibility = ({
   status,
+  numberedPartnerCase = false,
   dependencies,
 }: {
   status: string;
+  numberedPartnerCase?: boolean;
   dependencies: {
     financialDocuments: number;
     conclusivePhysicalOperations: number;
@@ -21,6 +27,9 @@ export const contractHardDeleteEligibility = ({
   };
 }) => {
   const blockers: ContractLifecycleBlocker[] = [];
+  if (numberedPartnerCase) {
+    blockers.push(PARTNER_CASE_RETENTION_BLOCKER);
+  }
   if (status !== 'DRAFT' && status !== 'CANCELLED') {
     blockers.push({ code: 'STATUS_NOT_DELETABLE', count: 1, label: 'وضعیت غیرقابل حذف' });
   }

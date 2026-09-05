@@ -1,3 +1,5 @@
+import { PARTNER_NOTIFICATION_EVENTS } from './partnerSales/notifications/definitions';
+
 export type NotificationPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
 export type NotificationChannel = 'IN_APP' | 'REALTIME' | 'WEB_PUSH';
 export type NotificationRecipientResolver =
@@ -80,6 +82,7 @@ const REGISTERED_NOTIFICATION_EVENTS = {
     allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
     allowedRecipientResolvers: ['DIRECT_USER'],
   },
+  ...PARTNER_NOTIFICATION_EVENTS,
   HR_DUTY_ASSIGNED: {
     type: 'HR_DUTY_ASSIGNED', mandatory: true,
     titleTemplate: 'وظیفه جدید', messageTemplate: 'یک وظیفه جدید در فضای کاری شما آماده رسیدگی است.',

@@ -1,8 +1,8 @@
+import { calculateLongitudinalGeometry, parseLongitudinalDecimal } from './longitudinalTechnical';
 import Decimal from 'decimal.js';
 import { parseCanonicalDecimal, type CanonicalDecimal } from './canonicalDecimal';
 import { hashCanonicalValue } from './canonicalHash';
 import {
-  calculatePackingPlan,
   calculatePricing,
   type PackedRemainder,
   type PackingPlan,
@@ -163,39 +163,6 @@ const canonical = (value: Decimal): CanonicalDecimal =>
 const positive = (value: CanonicalDecimal | undefined) =>
   value !== undefined && d(value).gt(0);
 
-const parseInputDecimal = (
-  value: CanonicalDecimal | undefined,
-  field: LongitudinalConflict['field'],
-  conflicts: LongitudinalConflict[],
-  required = false
-) => {
-  if (value === undefined) {
-    if (required) {
-      conflicts.push({
-        code: field === 'motherWidthMeters' ? 'mother-width-missing' : 'geometry-required',
-        field,
-        message: field === 'motherWidthMeters'
-          ? 'Mother width is not registered in inventory.'
-          : 'Enter length or square meters.'
-      });
-    }
-    return undefined;
-  }
-  try {
-    if (parseCanonicalDecimal(value) !== value) throw new TypeError();
-    return d(value);
-  } catch {
-    conflicts.push({
-      code: 'invalid-decimal',
-      field,
-      message: 'The value must be an exact normalized decimal.'
-    });
-    return undefined;
-  }
-};
-
-const emDash = '—';
-const display = (value: CanonicalDecimal) => value;
 const withoutUndefined = <Value>(value: Value): Value =>
   JSON.parse(JSON.stringify(value)) as Value;
 
@@ -302,57 +269,11 @@ export const calculateLongitudinalProduct = (
   input: LongitudinalProductInput
 ): LongitudinalProductCalculation => {
   const conflicts: LongitudinalConflict[] = [];
-  const motherWidth = parseInputDecimal(
-    input.motherWidthMeters,
-    'motherWidthMeters',
-    conflicts,
-    true
-  );
-  const suppliedLength = parseInputDecimal(input.lengthMeters, 'dimensions', conflicts);
-  const suppliedWidth = parseInputDecimal(input.widthMeters, 'widthMeters', conflicts);
-  const suppliedArea = parseInputDecimal(
-    input.requestedAreaSquareMeters,
-    'dimensions',
-    conflicts
-  );
-  const baseRate = parseInputDecimal(input.baseRateToman, 'baseRateToman', conflicts);
-  const mandatoryPercentage = parseInputDecimal(
-    input.mandatoryPercentage,
-    'mandatoryPercentage',
-    conflicts
-  );
-  parseInputDecimal(
-    input.rememberedMandatoryPercentage,
-    'mandatoryPercentage',
-    conflicts
-  );
-  const kerf = parseInputDecimal(input.sawKerfMeters, 'dimensions', conflicts);
-  const longitudinalCutRate = parseInputDecimal(
-    input.longitudinalCutRateToman,
-    'summary',
-    conflicts
-  );
-  const calibrationCutRate = parseInputDecimal(
-    input.calibrationCutRateToman,
-    'calibration',
-    conflicts
-  );
-
-  if (!motherWidth || motherWidth.lte(0)) {
-    conflicts.push({
-      code: 'mother-width-missing',
-      field: 'motherWidthMeters',
-      message: 'Mother width is not registered in inventory.'
-    });
-  }
-  if (input.quantity !== undefined &&
-      (!Number.isSafeInteger(input.quantity) || input.quantity < 0)) {
-    conflicts.push({
-      code: 'invalid-quantity',
-      field: 'quantity',
-      message: 'Quantity must be a non-negative integer or blank.'
-    });
-  }
+  const baseRate = parseLongitudinalDecimal(input.baseRateToman, 'baseRateToman', conflicts);
+  const mandatoryPercentage = parseLongitudinalDecimal(input.mandatoryPercentage, 'mandatoryPercentage', conflicts);
+  parseLongitudinalDecimal(input.rememberedMandatoryPercentage, 'mandatoryPercentage', conflicts);
+  const longitudinalCutRate = parseLongitudinalDecimal(input.longitudinalCutRateToman, 'summary', conflicts);
+  const calibrationCutRate = parseLongitudinalDecimal(input.calibrationCutRateToman, 'calibration', conflicts);
   const paidSourceMaterial = input.baseMaterialPricing === 'paid-source-zero';
   if (
     (!paidSourceMaterial && (!baseRate || baseRate.lte(0))) ||
@@ -374,129 +295,13 @@ export const calculateLongitudinalProduct = (
       message: 'Mandatory percentage must be positive.'
     });
   }
-  if (kerf?.lt(0)) {
-    conflicts.push({
-      code: 'invalid-decimal',
-      field: 'dimensions',
-      message: 'Saw kerf cannot be negative.'
-    });
-  }
-  if (conflicts.some(conflict =>
-    conflict.code === 'invalid-decimal' ||
-    conflict.code === 'mother-width-missing' ||
-    conflict.code === 'invalid-quantity'
-  )) {
-    return { ok: false, conflicts };
-  }
 
-  const width = suppliedWidth ?? motherWidth;
-  if (!width || !motherWidth) return { ok: false, conflicts };
-  if (width.lte(0)) {
-    return {
-      ok: false,
-      conflicts: [{
-        code: 'geometry-required',
-        field: 'widthMeters',
-        message: 'Width must be positive.'
-      }]
-    };
-  }
-  if (width.gt(motherWidth)) {
-    return {
-      ok: false,
-      conflicts: [{
-        code: 'maximum-mother-width-exceeded',
-        field: 'widthMeters',
-        message: `Maximum width is ${motherWidth.toFixed()}m.`
-      }]
-    };
-  }
-  const totalLinearMetersMode = input.quantity === undefined || input.quantity === 0;
-  const multiplier = new Decimal(totalLinearMetersMode ? 1 : input.quantity);
-  let length = suppliedLength;
-  let area = suppliedArea;
-
-  if (input.lastManualField === 'area' && area?.gt(0)) {
-    length = area.div(width.times(multiplier));
-  } else if (length?.gt(0)) {
-    area = length.times(width).times(multiplier);
-  } else if (area?.gt(0)) {
-    length = area.div(width.times(multiplier));
-  }
-
-  if (!length?.gt(0) || !area?.gt(0)) {
-    return {
-      ok: false,
-      conflicts: [{
-        code: 'geometry-required',
-        field: 'dimensions',
-        message: 'Enter length or square meters.'
-      }]
-    };
-  }
-  if (!mandatoryPercentage || !kerf) {
-    return { ok: false, conflicts };
-  }
-
-  const packingKerf = input.sawKerfEnabled ? kerf : new Decimal(0);
-  const piecesAcross = Decimal.floor(
-    motherWidth.plus(packingKerf).div(width.plus(packingKerf))
-  ).toNumber();
-  const packingQuantity = totalLinearMetersMode
-    ? Math.max(1, piecesAcross)
-    : input.quantity;
-  const packingLength = totalLinearMetersMode
-    ? length.div(packingQuantity)
-    : length;
-  const requiredSourcePieces = totalLinearMetersMode
-    ? 1
-    : Math.ceil(input.quantity / Math.max(1, piecesAcross));
-  const packing = calculatePackingPlan({
-    policyVersion: input.packingPolicyVersion,
-    kerfMeters: canonical(packingKerf),
-    calibrationEnabled: false,
-    sources: [{
-      sourceBatchId: input.sourceBatchId,
-      lengthMeters: canonical(packingLength),
-      widthMeters: canonical(motherWidth),
-      quantity: requiredSourcePieces
-    }],
-    demands: [{
-      demandId: 'finished-longitudinal-piece',
-      lengthMeters: canonical(packingLength),
-      widthMeters: canonical(width),
-      quantity: packingQuantity
-    }]
-  });
-  if (!packing.ok) {
-    return {
-      ok: false,
-      conflicts: [{
-        code: 'packing-failed',
-        field: 'summary',
-        message: packing.conflict.message
-      }]
-    };
-  }
-
-  const billableLongitudinalCutMeters = totalLinearMetersMode
-    ? canonical(length.times(packing.plan.cuts.length).div(packingQuantity))
-    : packing.plan.longitudinalCutMeters;
-  const hasLongitudinalCut = d(packing.plan.longitudinalCutMeters).gt(0);
-  const hasWidthRemainder = packing.plan.remainders.some(remainder =>
-    d(remainder.widthMeters).gt(0)
-  );
-  const automaticCalibration =
-    width.lt(motherWidth) && hasLongitudinalCut && !hasWidthRemainder;
-  const calibrationEnabled = !hasLongitudinalCut || width.eq(motherWidth)
-    ? false
-    : input.calibrationSelection === 'manual'
-      ? input.calibrationEnabled
-      : automaticCalibration;
-  const calibrationMeters = calibrationEnabled
-    ? canonical(packingLength.times(packing.plan.consumedSources.length))
-    : canonical(new Decimal(0));
-
+  const geometry = calculateLongitudinalGeometry(input, input.packingPolicyVersion);
+  if (!geometry.ok) return { ok: false, conflicts: [...conflicts, ...geometry.conflicts] };
+  const facts = geometry.result;
+  const hasLongitudinalCut = d(facts.packingPlan.longitudinalCutMeters).gt(0);
+  const calibrationMeters = facts.packingPlan.calibrationMeters;
+  const billableLongitudinalCutMeters = facts.longitudinalCutMeters;
   const operationConflicts = [...conflicts];
   if (hasLongitudinalCut && longitudinalCutRate === undefined) {
     operationConflicts.push({
@@ -516,10 +321,9 @@ export const calculateLongitudinalProduct = (
     return { ok: false, conflicts: operationConflicts };
   }
 
-  const consumedMaterialArea = packing.plan.consumedSources.reduce(
-    total => total.plus(packingLength.times(motherWidth)),
-    new Decimal(0)
-  );
+
+  if (!mandatoryPercentage) return { ok: false, conflicts };
+  const consumedMaterialArea = d(facts.consumedMaterialAreaSquareMeters);
   const pricingLines = [
     {
       lineId: 'base-material',
@@ -556,84 +360,32 @@ export const calculateLongitudinalProduct = (
   const amountFor = (lineId: string) =>
     pricing.lines.find(line => line.lineId === lineId)?.amountToman ??
     canonical(new Decimal(0));
-  const resultWithoutHash = {
+
+  const resultWithoutHash: Omit<LongitudinalProductResult, 'resultHash'> = {
     calculationPolicyVersion: input.calculationPolicyVersion,
     inputHash: hashCanonicalValue(withoutUndefined(input)),
-    quantityMode: totalLinearMetersMode
-      ? 'total-linear-meters' as const
-      : 'piece-count' as const,
-    lengthMeters: canonical(length),
-    widthMeters: canonical(width),
-    requestedAreaSquareMeters: canonical(area),
+    quantityMode: facts.quantityMode,
+    lengthMeters: facts.lengthMeters, widthMeters: facts.widthMeters,
+    requestedAreaSquareMeters: facts.requestedAreaSquareMeters,
     ...(input.quantity === undefined ? {} : { quantity: input.quantity }),
-    lengthDisplayUnit: input.lengthDisplayUnit,
-    widthDisplayUnit: input.widthDisplayUnit,
+    lengthDisplayUnit: facts.lengthDisplayUnit, widthDisplayUnit: facts.widthDisplayUnit,
     baseMaterialPricing: input.baseMaterialPricing ?? 'manual-positive',
     mandatoryEnabled: input.mandatoryEnabled,
     mandatoryPercentage: input.mandatoryPercentage,
     rememberedMandatoryPercentage: input.rememberedMandatoryPercentage,
-    sawKerfEnabled: input.sawKerfEnabled,
-    sawKerfMeters: input.sawKerfMeters,
-    calibrationEnabled,
-    calibrationSelection: input.calibrationSelection,
-    sourcePiecesConsumed: packing.plan.consumedSources.length,
-    packingPlan: {
-      ...packing.plan,
-      calibrationMeters
-    },
-    remainders: packing.plan.remainders,
+    sawKerfEnabled: facts.sawKerfEnabled, sawKerfMeters: facts.sawKerfMeters,
+    calibrationEnabled: facts.calibrationEnabled, calibrationSelection: facts.calibrationSelection,
+    sourcePiecesConsumed: facts.sourcePiecesConsumed,
+    packingPlan: facts.packingPlan, remainders: facts.remainders,
     baseAmountToman: amountFor('base-material'),
     mandatoryAmountToman: amountFor('mandatory'),
     billableLongitudinalCutMeters,
     longitudinalCutAmountToman: amountFor('longitudinal-cut'),
     calibrationCutAmountToman: amountFor('calibration-cut'),
-    totalAmountToman: pricing.totalAmountToman,
-    pricingLines: pricing.lines,
-    summary: [
-      {
-        key: 'layout' as const,
-        label: 'چیدمان',
-        value: totalLinearMetersMode
-          ? `${display(canonical(length))}m × ${display(canonical(width.times(100)))}cm`
-          : `${input.quantity} × ${display(canonical(length))}m × ${display(canonical(width.times(100)))}cm`
-      },
-      {
-        key: 'stone' as const,
-        label: 'سنگ',
-        value: `درخواست ${display(canonical(area))}m² · مصرف ${display(canonical(
-          packing.plan.consumedSources.reduce(
-            total => total.plus(packingLength.times(motherWidth)),
-            new Decimal(0)
-          )
-        ))}m²`
-      },
-      { key: 'longitudinal-tools' as const, label: 'ابزار طولی', value: emDash },
-      { key: 'cross-tools' as const, label: 'ابزار عرضی', value: emDash },
-      {
-        key: 'cutting' as const,
-        label: 'برش',
-        value: hasLongitudinalCut
-          ? `عادی ${billableLongitudinalCutMeters}m · کالیبر ${calibrationMeters}m`
-          : emDash
-      },
-      {
-        key: 'remainder' as const,
-        label: 'باقی‌مانده',
-        value: packing.plan.remainders.length > 0
-          ? packing.plan.remainders
-              .map(remainder => `${remainder.widthMeters}m × ${remainder.lengthMeters}m`)
-              .join(' · ')
-          : emDash
-      }
-    ]
+    totalAmountToman: pricing.totalAmountToman, pricingLines: pricing.lines,
+    summary: facts.summary,
   };
-  return {
-    ok: true,
-    result: {
-      ...resultWithoutHash,
-      resultHash: hashCanonicalValue(resultWithoutHash)
-    }
-  };
+  return { ok: true, result: { ...resultWithoutHash, resultHash: hashCanonicalValue(resultWithoutHash) } };
 };
 
 export const transitionLongitudinalQuantity = ({

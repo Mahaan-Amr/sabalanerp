@@ -89,7 +89,7 @@ export interface ShipmentQuantityProjection {
 
 const SCALE = 1_000n;
 
-const parseFixed = (value: string): bigint => {
+export const parseShipmentQuantityToScaledInteger = (value: string): bigint => {
   const normalized = String(value).trim();
   const match = /^(-?)(\d+)(?:\.(\d{1,3}))?$/.exec(normalized);
   if (!match) throw new Error(`Shipment quantity must have at most three decimal places: ${value}`);
@@ -97,7 +97,7 @@ const parseFixed = (value: string): bigint => {
   return sign * (BigInt(match[2]) * SCALE + BigInt((match[3] || '').padEnd(3, '0')));
 };
 
-const formatFixed = (value: bigint): string => {
+export const formatShipmentQuantity = (value: bigint): string => {
   const sign = value < 0n ? '-' : '';
   const absolute = value < 0n ? -value : value;
   return `${sign}${absolute / SCALE}.${String(absolute % SCALE).padStart(3, '0')}`;
@@ -148,7 +148,7 @@ export const projectShipmentQuantities = (
     let unresolvedLegacy = 0n;
     const verifiedReturns = new Map(events
       .filter((item) => item.kind === 'GUARD_RETURN_VERIFIED' && item.guardReturnValidated)
-      .map((item) => [item.id, parseFixed(item.quantity)]));
+      .map((item) => [item.id, parseShipmentQuantityToScaledInteger(item.quantity)]));
     const awaitingReturnAccounting = new Set(verifiedReturns.keys());
     const usedReturnCorrections = new Set<string>();
     let health: ShipmentProjectionHealth = 'CURRENT';
@@ -160,7 +160,7 @@ export const projectShipmentQuantities = (
     };
 
     for (const item of events) {
-      const quantity = parseFixed(item.quantity);
+      const quantity = parseShipmentQuantityToScaledInteger(item.quantity);
       switch (item.kind) {
         case 'CONTRACTED_SET': contracted = quantity; break;
         case 'ALLOCATION_FINALIZED': reserved += quantity; break;
@@ -222,10 +222,10 @@ export const projectShipmentQuantities = (
     const finalHealth = health as ShipmentProjectionHealth;
     const verified = lastVerified.get(key);
     const computed = contracted === null ? null : {
-      contracted: formatFixed(contracted),
-      finalizedReserved: formatFixed(reserved),
-      physicallyDispatched: formatFixed(dispatched),
-      availableToLoad: formatFixed(contracted - reserved - dispatched),
+      contracted: formatShipmentQuantity(contracted),
+      finalizedReserved: formatShipmentQuantity(reserved),
+      physicallyDispatched: formatShipmentQuantity(dispatched),
+      availableToLoad: formatShipmentQuantity(contracted - reserved - dispatched),
     };
     const quantities = finalHealth !== 'CURRENT' && verified ? verified.quantities : computed;
 
@@ -237,8 +237,8 @@ export const projectShipmentQuantities = (
       quantities,
       health: finalHealth,
       healthReasons,
-      hasNegativeAvailability: quantities ? parseFixed(quantities.availableToLoad) < 0n : false,
-      canAuthorizeLoading: finalHealth === 'CURRENT' && quantities !== null && parseFixed(quantities.availableToLoad) >= 0n,
+      hasNegativeAvailability: quantities ? parseShipmentQuantityToScaledInteger(quantities.availableToLoad) < 0n : false,
+      canAuthorizeLoading: finalHealth === 'CURRENT' && quantities !== null && parseShipmentQuantityToScaledInteger(quantities.availableToLoad) >= 0n,
       cutoff,
       lastVerifiedAt: finalHealth !== 'CURRENT' && verified ? verified.verifiedAt : finalHealth === 'CURRENT' ? cutoff : null,
       sourceEvidenceIds: events.map((item) => item.id),
@@ -253,10 +253,10 @@ export const projectShipmentQuantities = (
       aggregate.complete = false;
     } else {
       aggregate.known += 1;
-      aggregate.contracted += parseFixed(row.quantities.contracted);
-      aggregate.reserved += parseFixed(row.quantities.finalizedReserved);
-      aggregate.dispatched += parseFixed(row.quantities.physicallyDispatched);
-      aggregate.available += parseFixed(row.quantities.availableToLoad);
+      aggregate.contracted += parseShipmentQuantityToScaledInteger(row.quantities.contracted);
+      aggregate.reserved += parseShipmentQuantityToScaledInteger(row.quantities.finalizedReserved);
+      aggregate.dispatched += parseShipmentQuantityToScaledInteger(row.quantities.physicallyDispatched);
+      aggregate.available += parseShipmentQuantityToScaledInteger(row.quantities.availableToLoad);
       if (row.health !== 'CURRENT') {
         aggregate.affected += 1;
         aggregate.complete = false;
@@ -271,10 +271,10 @@ export const projectShipmentQuantities = (
     rows,
     totalsByUnit: [...byUnit.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([unit, value]) => ({
       unit,
-      contracted: value.known ? formatFixed(value.contracted) : null,
-      finalizedReserved: value.known ? formatFixed(value.reserved) : null,
-      physicallyDispatched: value.known ? formatFixed(value.dispatched) : null,
-      availableToLoad: value.known ? formatFixed(value.available) : null,
+      contracted: value.known ? formatShipmentQuantity(value.contracted) : null,
+      finalizedReserved: value.known ? formatShipmentQuantity(value.reserved) : null,
+      physicallyDispatched: value.known ? formatShipmentQuantity(value.dispatched) : null,
+      availableToLoad: value.known ? formatShipmentQuantity(value.available) : null,
       affectedRowCount: value.affected,
       isComplete: value.complete,
     })),

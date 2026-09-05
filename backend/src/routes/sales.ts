@@ -1030,11 +1030,15 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     if (error instanceof ContractProductGraphValidationError) {
       return res.status(422).json({
         success: false,
+        trackingId: error.trackingId,
         code: error.code,
         error: 'اطلاعات محصولات قرارداد نیاز به بازبینی دارد',
         details: error.issues.map(issue => ({
           code: issue.code,
           causeCode: issue.causeCode,
+          sourceProductRowId: issue.sourceProductRowId,
+          relatedProductRowIds: issue.relatedProductRowIds,
+          rebuildProductRowIds: issue.rebuildProductRowIds,
           path: issue.path[0],
           message: issue.message,
           productRowId: issue.productRowId
@@ -1218,10 +1222,15 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
     if (error instanceof ContractProductGraphValidationError) {
       return res.status(422).json({
         success: false,
+        trackingId: error.trackingId,
         code: error.code,
         error: 'اطلاعات محصولات قرارداد نیاز به بازبینی دارد',
         details: error.issues.map(issue => ({
           code: issue.code,
+          causeCode: issue.causeCode,
+          sourceProductRowId: issue.sourceProductRowId,
+          relatedProductRowIds: issue.relatedProductRowIds,
+          rebuildProductRowIds: issue.rebuildProductRowIds,
           path: issue.path[0],
           message: issue.message,
           productRowId: issue.productRowId

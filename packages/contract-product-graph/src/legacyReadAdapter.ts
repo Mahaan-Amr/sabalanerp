@@ -3,6 +3,7 @@ import {
   type CanonicalJsonObject
 } from './canonicalJson';
 import Decimal from 'decimal.js';
+import { recoverLegacyRemainingChildren } from './legacyRemainingRecovery';
 import type {
   CalculationPolicySnapshot,
   CanonicalProductGraph,
@@ -45,6 +46,7 @@ import {
 } from './stairLayerPolicy';
 
 export interface LegacyProductGraphInput {
+  readonly recoverRemainingChildrenOnWrite?: boolean;
   readonly contractId: string;
   readonly revision: number;
   readonly calculationPolicy: CalculationPolicySnapshot;
@@ -53,6 +55,7 @@ export interface LegacyProductGraphInput {
 
 export interface LegacyProductGraphConflict {
   readonly code:
+    | 'legacy-remaining-recovery-required'
     | 'legacy-catalog-product-id-missing'
     | 'legacy-canonical-input-invalid'
     | 'legacy-layer-operation-ambiguous'
@@ -189,6 +192,7 @@ export const readLegacyProductGraph = ({
   contractId,
   revision,
   calculationPolicy,
+  recoverRemainingChildrenOnWrite,
   products
 }: LegacyProductGraphInput): LegacyProductGraphRead => {
   const legacyView = products.map(product => cloneLegacyValue(product));
@@ -748,7 +752,7 @@ export const readLegacyProductGraph = ({
     };
   });
 
-  const graph = {
+  let graph: CanonicalProductGraph = {
     schemaVersion: 1 as const,
     revision,
     calculationPolicy: { ...calculationPolicy },
@@ -763,6 +767,12 @@ export const readLegacyProductGraph = ({
     toolSelections,
     finishingSelections
   };
+  if (recoverRemainingChildrenOnWrite) {
+    const recovery = recoverLegacyRemainingChildren(graph, products);
+    if (!recovery.ok) return { ok: false, source: 'legacy-read', contractId, revision,
+      migrationRequired: true, legacyView, conflicts: recovery.conflicts };
+    graph = recovery.graph;
+  }
   const integrityConflicts = findGraphIntegrityConflicts(
     graph as CanonicalProductGraph
   );

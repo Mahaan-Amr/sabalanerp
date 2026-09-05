@@ -1,0 +1,125 @@
+{
+  "interfaceVersion": "partner-qa-harness/v1",
+  "foundationInterface": null,
+  "runId": "partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a",
+  "mode": "browser",
+  "startedAt": "2026-08-27T07:25:24.368Z",
+  "head": "c3d8a9922b99201d094e5e2bbd0562903a786442",
+  "reviewBase": "9fcf2edb4f5f580f0e2e71347cd60fd374f8b3aa",
+  "workspaceStatus": "D .scratch/hr-dashboard-design-system/screenshots/desktop-dark-1920x1080.png\n D .scratch/hr-dashboard-design-system/screenshots/desktop-light-1920x1080.png\n D .scratch/hr-dashboard-design-system/screenshots/mobile-dark-390x844.png\n D .scratch/hr-dashboard-design-system/screenshots/mobile-light-390x844.png\n M CONTEXT.md\n M backend/package.json\n M frontend/package.json\n M frontend/tsconfig.tsbuildinfo\n M package.json\n?? .github/workflows/partner-sales.yml\n?? docs/adr/0046-own-partner-sale-pair-in-one-atomic-case.md\n?? docs/implementation/\n?? docs/qa/partner-sales/\n?? packages/partner-sales-contracts/\n?? playwright.partner-sales.config.ts\n?? scripts/run-partner-sales-tests.mjs\n?? tests/partner-sales/\n?? tmp/partner-management-prototype/\n?? tmp/pdfs/github-change-report/\n?? tmp/pdfs/mordad-1405-attendance/\n?? tmp/pdfs/mordad-1405-font-update/\n?? tmp/pdfs/mordad-1405-raw-times/\n?? tmp/pdfs/sample/\n?? tmp/qa/\n?? tmp/wayfinder-partner-release-decision/",
+  "checks": [
+    {
+      "name": "anonymous browser baseline",
+      "command": "node node_modules/@playwright/test/cli.js test --config=playwright.partner-sales.config.ts",
+      "logFile": "0-anonymous-browser-baseline.log",
+      "status": "fail",
+      "exitCode": 1
+    }
+  ],
+  "status": "fail",
+  "limitations": [
+    "Module baseline only; not Partner E2E or release acceptance.",
+    "Runtime container identity is recorded separately from checkout HEAD.",
+    "Partner DTO, test-clock and SMS/OTP adapter await the approved #313 contract."
+  ],
+  "sourceFiles": [
+    {
+      "path": "playwright.partner-sales.config.ts",
+      "sha256": "e74fe79a255d6137727f384e29b94f1ce6bc0db66cae7bb7e70bf7b693a1b20e"
+    },
+    {
+      "path": "scripts/run-partner-sales-tests.mjs",
+      "sha256": "b15b192343dc23124c757a62d23ff108a53425fa6d2a4ff6e8a54d57f4047dad"
+    },
+    {
+      "path": "tests/partner-sales/api.integration.test.mjs",
+      "sha256": "360c43025cbd554d9e9ce1a7bf7e29801d8378cf91c064aa852b2c0f6e684657"
+    },
+    {
+      "path": "tests/partner-sales/browser/entry.spec.ts",
+      "sha256": "dc34d5f89265efb5c996e72fc32c23b0ad3e18c8f36843059e66225f705233c7"
+    },
+    {
+      "path": "tests/partner-sales/browser/global-setup.ts",
+      "sha256": "362ef5b03e8651cd314205b466a953c5d13570cc3a460fc60026def94a4726e9"
+    },
+    {
+      "path": "tests/partner-sales/fixtures.integration.test.mjs",
+      "sha256": "2d688241bfb49c192ea6c8fadab74d0530a37b9a05f10dd64634dd3aac722b6c"
+    },
+    {
+      "path": "tests/partner-sales/harness/fixtures.mjs",
+      "sha256": "4fbc7aaf54093d986155e17f568fc574283fc72419a84a11a9089eb1535b75e3"
+    },
+    {
+      "path": "tests/partner-sales/harness/inventory.mjs",
+      "sha256": "d74b923db8d2f957140814e1cc8d40b0a4dde805130325da0dbcbefa49078832"
+    },
+    {
+      "path": "tests/partner-sales/harness/safety.mjs",
+      "sha256": "29682804eae9c4b6d84c82bb4080514588a26515e2ea1500ea911f5ed50e7389"
+    },
+    {
+      "path": "tests/partner-sales/inventory.test.mjs",
+      "sha256": "dda966da914eaab47ddbe44412436cc6096ca2feb038ba1f8b6543b2cfa152eb"
+    },
+    {
+      "path": "tests/partner-sales/runner.test.mjs",
+      "sha256": "335ee403eb9cc5b7cf9328a264b128fc46eaee3364105e37043024bba331859a"
+    },
+    {
+      "path": "tests/partner-sales/safety.test.mjs",
+      "sha256": "56613cf4b710c6e812be83f38aec55c84d4da2fe203e5822c8823471dc6cad69"
+    },
+    {
+      "path": "tests/partner-sales/tsconfig.json",
+      "sha256": "83fc9a96cddd86ad7c83ec8c865a1e8b397ca55332029230289577dea121da4f"
+    }
+  ],
+  "sourceHash": "b32c2c4a56e12593838ddb386c970dd17297feef40942884cc249f8e2c50c4a3",
+  "inventoryHash": "762316227ba2133fae0102d8f91477892883ebdff0ded2d395734d81c7c5b77d",
+  "runtime": {
+    "target": {
+      "frontend": "http://127.0.0.1:3000",
+      "backend": "http://127.0.0.1:5000",
+      "database": "sabalanerp"
+    },
+    "runtime": {
+      "project": "sabalanerp-local",
+      "nodeEnv": "development",
+      "databaseHost": "postgres",
+      "databaseName": "sabalanerp",
+      "smsEnvironment": "sandbox",
+      "smsCredentialsPresent": false
+    },
+    "services": [
+      {
+        "service": "backend",
+        "container": "c3c55249485a",
+        "image": "sabalanerp-local-backend"
+      },
+      {
+        "service": "frontend",
+        "container": "f8be8d59b108",
+        "image": "sabalanerp-local-frontend"
+      },
+      {
+        "service": "inquiry",
+        "container": "80308df38982",
+        "image": "sabalanerp-local-inquiry"
+      },
+      {
+        "service": "postgres",
+        "container": "64e0861aaab5",
+        "image": "postgres:15-alpine"
+      },
+      {
+        "service": "redis",
+        "container": "633f3b143976",
+        "image": "redis:7-alpine"
+      }
+    ]
+  },
+  "error": "anonymous browser baseline failed; see test output.",
+  "finishedAt": "2026-08-27T07:26:09.418Z"
+}

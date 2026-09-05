@@ -1,6 +1,8 @@
 import { prisma } from '../lib/prisma';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { isProtectedContractRecovery, publicContractRecovery } from './contractRecoveryProtection';
 
 export const CONTRACT_EDIT_LEASE_TTL_MS = 75_000;
 export const CONTRACT_CREATION_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -9,6 +11,7 @@ export interface ContractEditSessionRecord {
   readonly draftId: string;
   readonly contractId: string | null;
   readonly ownerUserId: string;
+  readonly purpose: 'STANDARD' | 'PARTNER_TECHNICAL';
   readonly browserSessionId: string;
   readonly leaseToken: string;
   readonly schemaVersion: number;
@@ -22,13 +25,15 @@ export interface ContractEditSessionRecord {
 export interface ContractEditSessionStore {
   load(draftId: string): Promise<ContractEditSessionRecord | null>;
   create(record: ContractEditSessionRecord): Promise<ContractEditSessionRecord>;
-  replace(
-    expectedToken: string,
+  /** Atomically replace exactly the persisted snapshot that was read. Token-only
+   * checks cannot protect two writes from the same live browser. */
+  compareAndReplace(
+    expected: ContractEditSessionRecord,
     record: ContractEditSessionRecord
   ): Promise<ContractEditSessionRecord | null>;
   remove(draftId: string, leaseToken: string): Promise<boolean>;
   listCreationDrafts(ownerUserId: string): Promise<ContractEditSessionRecord[]>;
-  purge(draftId: string): Promise<boolean>;
+  purgeIfUnchanged(expected: ContractEditSessionRecord): Promise<boolean>;
   discardCreationDraft(draftId: string, ownerUserId: string, discardedAt: Date): Promise<boolean>;
 }
 
@@ -36,6 +41,7 @@ interface AcquireContractEditSessionInput {
   readonly draftId: string;
   readonly contractId: string | null;
   readonly userId: string;
+  readonly purpose?: 'STANDARD' | 'PARTNER_TECHNICAL';
   readonly browserSessionId: string;
   readonly schemaVersion: number;
   readonly baseRevision: number;
@@ -121,7 +127,17 @@ const isOwner = (
   session.browserSessionId === browserSessionId &&
   (leaseToken === undefined || session.leaseToken === leaseToken);
 
-export const acquireContractEditSession = async (
+const protectedBindingConflict = (session: ContractEditSessionRecord, input: AcquireContractEditSessionInput):
+  Extract<AcquireContractEditSessionResult, { ok: false }> | null => {
+  if (!isProtectedContractRecovery(session.recovery) ||
+      (session.baseRevision === input.baseRevision && session.schemaVersion === input.schemaVersion &&
+       session.contractId === input.contractId)) return null;
+  return { ok: false, code: 'revision-conflict', recovery: null,
+    ownerUserId: session.ownerUserId, updatedAt: session.updatedAt,
+    currentBaseRevision: session.baseRevision };
+};
+
+const acquireContractEditSessionInternal = async (
   store: ContractEditSessionStore,
   input: AcquireContractEditSessionInput
 ): Promise<AcquireContractEditSessionResult> => {
@@ -133,6 +149,7 @@ export const acquireContractEditSession = async (
         draftId: input.draftId,
         contractId: input.contractId,
         ownerUserId: input.userId,
+        purpose: input.purpose ?? 'STANDARD',
         browserSessionId: input.browserSessionId,
         leaseToken: (input.createToken ?? randomUUID)(),
         schemaVersion: input.schemaVersion,
@@ -151,6 +168,12 @@ export const acquireContractEditSession = async (
     }
   }
 
+  if (existing.purpose !== (input.purpose ?? 'STANDARD')) {
+    return { ok: false, code: 'revision-conflict', recovery: null,
+      ownerUserId: existing.ownerUserId, updatedAt: existing.updatedAt,
+      currentBaseRevision: existing.baseRevision };
+  }
+
   if (existing.contractId === null && existing.ownerUserId !== input.userId) {
     return {
       ok: false,
@@ -161,11 +184,15 @@ export const acquireContractEditSession = async (
     };
   }
 
+  const bindingConflict = protectedBindingConflict(existing, input);
+  if (bindingConflict) return bindingConflict;
+
   if (existing.baseRevision < input.baseRevision) {
     const replacement: ContractEditSessionRecord = {
       draftId: existing.draftId,
       contractId: input.contractId ?? existing.contractId,
       ownerUserId: input.userId,
+      purpose: existing.purpose,
       browserSessionId: input.browserSessionId,
       leaseToken: (input.createToken ?? randomUUID)(),
       schemaVersion: input.schemaVersion,
@@ -175,7 +202,7 @@ export const acquireContractEditSession = async (
       updatedAt: now,
       takenOverAt: null
     };
-    const replaced = await store.replace(existing.leaseToken, replacement);
+    const replaced = await store.compareAndReplace(existing, replacement);
     if (replaced) {
       return {
         ok: true,
@@ -219,7 +246,7 @@ export const acquireContractEditSession = async (
       updatedAt: now,
       takenOverAt: null
     };
-    const replaced = await store.replace(existing.leaseToken, replacement);
+    const replaced = await store.compareAndReplace(existing, replacement);
     if (replaced) {
       return {
         ok: true,
@@ -229,6 +256,8 @@ export const acquireContractEditSession = async (
       };
     }
     existing = await store.load(input.draftId) ?? existing;
+    const currentBindingConflict = protectedBindingConflict(existing, input);
+    if (currentBindingConflict) return currentBindingConflict;
   }
 
   if (isOwner(existing, input.userId, input.browserSessionId)) {
@@ -255,7 +284,7 @@ export const acquireContractEditSession = async (
     updatedAt: now,
     takenOverAt: now
   };
-  const replaced = await store.replace(existing.leaseToken, replacement);
+  const replaced = await store.compareAndReplace(existing, replacement);
   if (!replaced) {
     const current = await store.load(input.draftId);
     return {
@@ -274,13 +303,16 @@ export const acquireContractEditSession = async (
   };
 };
 
-export const assertContractEditOwnership = async (
+const assertContractEditOwnershipInternal = async (
   store: ContractEditSessionStore,
   input: AssertContractEditOwnershipInput
 ): Promise<ContractEditOwnershipResult> => {
   const session = await store.load(input.draftId);
   if (!session) {
     return { ok: false, code: 'edit-session-missing', recovery: null };
+  }
+  if (session.ownerUserId !== input.userId) {
+    return { ok: false, code: 'edit-session-owned-elsewhere', recovery: null };
   }
   const now = input.now ?? new Date();
   if (now.getTime() - session.updatedAt.getTime() > CONTRACT_EDIT_LEASE_TTL_MS) {
@@ -304,36 +336,49 @@ export const assertContractEditOwnership = async (
   return { ok: true, session };
 };
 
-export const checkpointContractRecovery = async (
+const checkpointContractRecoveryInternal = async (
   store: ContractEditSessionStore,
   input: CheckpointContractRecoveryInput
 ): Promise<ContractEditOwnershipResult> => {
-  const ownership = await assertContractEditOwnership(store, input);
+  let ownership = await assertContractEditOwnershipInternal(store, input);
   if (!ownership.ok) return ownership;
-  const next: ContractEditSessionRecord = {
-    ...ownership.session,
-    schemaVersion: input.schemaVersion,
-    recovery: input.recovery,
-    updatedAt: input.now ?? new Date()
-  };
-  const replaced = await store.replace(input.leaseToken, next);
-  if (!replaced) {
-    return {
-      ok: false,
-      code: 'edit-session-owned-elsewhere',
-      recovery: (await store.load(input.draftId))?.recovery ?? null
-    };
+  if (isProtectedContractRecovery(input.recovery) || isProtectedContractRecovery(ownership.session.recovery)) {
+    return { ok: false, code: 'revision-conflict', recovery: null,
+      currentBaseRevision: ownership.session.baseRevision };
   }
-  return { ok: true, session: replaced };
+  const initial = ownership.session;
+  // Heartbeats change presence, not recovery. Retry only that benign conflict;
+  // a different recovery checkpoint must never be overwritten automatically.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const next: ContractEditSessionRecord = {
+      ...ownership.session,
+      schemaVersion: input.schemaVersion,
+      recovery: input.recovery,
+      updatedAt: input.now ?? new Date()
+    };
+    const replaced = await store.compareAndReplace(ownership.session, next);
+    if (replaced) return { ok: true, session: replaced };
+    ownership = await assertContractEditOwnershipInternal(store, input);
+    if (!ownership.ok) return ownership;
+    if (ownership.session.schemaVersion !== initial.schemaVersion ||
+        !isDeepStrictEqual(ownership.session.recovery, initial.recovery)) {
+      break;
+    }
+  }
+  return { ok: false, code: 'revision-conflict', recovery: ownership.session.recovery,
+    currentBaseRevision: ownership.session.baseRevision };
 };
 
-export const heartbeatContractEditSession = async (
+const heartbeatContractEditSessionInternal = async (
   store: ContractEditSessionStore,
   input: HeartbeatContractEditSessionInput
 ): Promise<ContractEditOwnershipResult> => {
   const now = input.now ?? new Date();
   const session = await store.load(input.draftId);
   if (!session) return { ok: false, code: 'edit-session-missing', recovery: null };
+  if (session.ownerUserId !== input.userId) {
+    return { ok: false, code: 'edit-session-owned-elsewhere', recovery: null };
+  }
   if (now.getTime() - session.updatedAt.getTime() > CONTRACT_EDIT_LEASE_TTL_MS) {
     return { ok: false, code: 'edit-session-owned-elsewhere', recovery: session.recovery };
   }
@@ -350,13 +395,11 @@ export const heartbeatContractEditSession = async (
         }
       : { ok: false, code: 'edit-session-owned-elsewhere', recovery: session.recovery };
   }
-  const renewed = await store.replace(input.leaseToken, { ...session, updatedAt: now });
+  const renewed = await store.compareAndReplace(session, { ...session, updatedAt: now });
   if (!renewed) {
-    return {
-      ok: false,
-      code: 'edit-session-owned-elsewhere',
-      recovery: (await store.load(input.draftId))?.recovery ?? null
-    };
+    // A concurrent checkpoint/heartbeat may already have renewed this lease.
+    // Revalidate the current owner; never retry the stale recovery snapshot.
+    return assertContractEditOwnershipInternal(store, input);
   }
   return { ok: true, session: renewed };
 };
@@ -378,11 +421,14 @@ export const discoverRecoverableContractCreationDraft = async (
     .sort((left, right) => (right.recoveryUpdatedAt ?? 0) - (left.recoveryUpdatedAt ?? 0));
 
   for (const candidate of candidates) {
+    // A Partner producer reads its own safe projection. Never feed its private
+    // record into the ordinary priced wizard or purge it during that discovery.
+    if (isProtectedContractRecovery(candidate.record.recovery)) continue;
     if (
       candidate.recoveryUpdatedAt === null ||
       now.getTime() - candidate.recoveryUpdatedAt > CONTRACT_CREATION_DRAFT_TTL_MS
     ) {
-      await store.purge(candidate.record.draftId);
+      await store.purgeIfUnchanged(candidate.record);
       continue;
     }
     const leaseActive = now.getTime() - candidate.record.updatedAt.getTime() <= CONTRACT_EDIT_LEASE_TTL_MS;
@@ -401,11 +447,11 @@ export const discardContractCreationDraft = (
   input: DiscardContractCreationDraftInput
 ) => store.discardCreationDraft(input.draftId, input.userId, input.now ?? new Date());
 
-export const releaseContractEditSession = async (
+const releaseContractEditSessionInternal = async (
   store: ContractEditSessionStore,
   input: AssertContractEditOwnershipInput
 ): Promise<ContractEditOwnershipResult | { readonly ok: true; readonly alreadyReleased: true }> => {
-  const ownership = await assertContractEditOwnership(store, input);
+  const ownership = await assertContractEditOwnershipInternal(store, input);
   if (!ownership.ok && ownership.code === 'edit-session-missing') {
     return { ok: true, alreadyReleased: true };
   }
@@ -421,13 +467,55 @@ export const releaseContractEditSession = async (
   return ownership;
 };
 
+type SessionResult = AcquireContractEditSessionResult | ContractEditOwnershipResult |
+  { readonly ok: true; readonly alreadyReleased: true };
+
+/** One projection for every public success/error path, including the nested
+ * session returned by acquire/checkpoint/release. Internal CAS keeps raw JSON. */
+function publicSessionResult<T extends SessionResult>(result: T): T {
+  return { ...result,
+    ...('recovery' in result ? { recovery: publicContractRecovery(result.recovery) } : {}),
+    ...('session' in result ? { session: { ...result.session,
+      recovery: publicContractRecovery(result.session.recovery) } } : {}),
+  };
+}
+
+export const acquireContractEditSession = async (store: ContractEditSessionStore, input: AcquireContractEditSessionInput) =>
+  publicSessionResult(await acquireContractEditSessionInternal(store, input));
+/** Trusted Partner transport calls this only after current Profile authorization.
+ * The purpose is server-owned and never accepted from the generic Sales route. */
+export const acquirePartnerTechnicalContractEditSession = async (
+  store: ContractEditSessionStore,
+  input: Omit<AcquireContractEditSessionInput, 'purpose' | 'contractId'>,
+) => publicSessionResult(await acquireContractEditSessionInternal(store, {
+  ...input, contractId: null, purpose: 'PARTNER_TECHNICAL',
+}));
+export const assertContractEditOwnership = async (store: ContractEditSessionStore, input: AssertContractEditOwnershipInput) =>
+  publicSessionResult(await assertContractEditOwnershipInternal(store, input));
+export const checkpointContractRecovery = async (store: ContractEditSessionStore, input: CheckpointContractRecoveryInput) =>
+  publicSessionResult(await checkpointContractRecoveryInternal(store, input));
+export const heartbeatContractEditSession = async (store: ContractEditSessionStore, input: HeartbeatContractEditSessionInput) =>
+  publicSessionResult(await heartbeatContractEditSessionInternal(store, input));
+export const releaseContractEditSession = async (store: ContractEditSessionStore, input: AssertContractEditOwnershipInput) =>
+  publicSessionResult(await releaseContractEditSessionInternal(store, input));
+
 const toJson = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+
+const snapshotWhere = (expected: ContractEditSessionRecord): Prisma.SalesContractEditSessionWhereInput => ({
+  draftId: expected.draftId, leaseToken: expected.leaseToken, ownerUserId: expected.ownerUserId,
+  browserSessionId: expected.browserSessionId, contractId: expected.contractId, purpose: expected.purpose,
+  baseRevision: expected.baseRevision, schemaVersion: expected.schemaVersion,
+  createdAt: expected.createdAt, updatedAt: expected.updatedAt, takenOverAt: expected.takenOverAt,
+  // JSON equality matters even when both updates share a millisecond.
+  recovery: { equals: expected.recovery === null ? Prisma.AnyNull : toJson(expected.recovery) },
+});
 
 const fromPrismaRecord = (record: {
   draftId: string;
   contractId: string | null;
   ownerUserId: string;
+  purpose: string;
   browserSessionId: string;
   leaseToken: string;
   schemaVersion: number;
@@ -438,11 +526,18 @@ const fromPrismaRecord = (record: {
   takenOverAt: Date | null;
 }): ContractEditSessionRecord => ({
   ...record,
+  purpose: record.purpose === 'PARTNER_TECHNICAL' ? 'PARTNER_TECHNICAL' : 'STANDARD',
   recovery: record.recovery
 });
 
 export class PrismaContractEditSessionStore implements ContractEditSessionStore {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(private readonly prisma: PrismaClient | Prisma.TransactionClient) {}
+
+  private transaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return '$transaction' in this.prisma
+      ? (this.prisma as PrismaClient).$transaction(work)
+      : work(this.prisma as Prisma.TransactionClient);
+  }
 
   async load(draftId: string): Promise<ContractEditSessionRecord | null> {
     const record = await this.prisma.salesContractEditSession.findUnique({ where: { draftId } });
@@ -455,6 +550,7 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
         draftId: record.draftId,
         contractId: record.contractId,
         ownerUserId: record.ownerUserId,
+        purpose: record.purpose,
         browserSessionId: record.browserSessionId,
         leaseToken: record.leaseToken,
         schemaVersion: record.schemaVersion,
@@ -468,29 +564,34 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
     return fromPrismaRecord(created);
   }
 
-  async replace(
-    expectedToken: string,
+  async compareAndReplace(
+    expected: ContractEditSessionRecord,
     record: ContractEditSessionRecord
   ): Promise<ContractEditSessionRecord | null> {
-    const updated = await this.prisma.salesContractEditSession.updateMany({
-      where: {
-        draftId: record.draftId,
-        leaseToken: expectedToken
-      },
-      data: {
-        contractId: record.contractId,
-        ownerUserId: record.ownerUserId,
-        browserSessionId: record.browserSessionId,
-        leaseToken: record.leaseToken,
-        schemaVersion: record.schemaVersion,
-        baseRevision: record.baseRevision,
-        recovery: record.recovery === null ? Prisma.JsonNull : toJson(record.recovery),
-        updatedAt: record.updatedAt,
-        takenOverAt: record.takenOverAt
-      }
+    if (expected.draftId !== record.draftId) return null;
+    return this.transaction(async tx => {
+      const updated = await tx.salesContractEditSession.updateMany({
+        where: snapshotWhere(expected),
+        data: {
+          contractId: record.contractId,
+          ownerUserId: record.ownerUserId,
+          purpose: record.purpose,
+          browserSessionId: record.browserSessionId,
+          leaseToken: record.leaseToken,
+          schemaVersion: record.schemaVersion,
+          baseRevision: record.baseRevision,
+          recovery: record.recovery === null ? Prisma.JsonNull : toJson(record.recovery),
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          takenOverAt: record.takenOverAt
+        }
+      });
+      if (updated.count !== 1) return null;
+      // Read under the write lock so the acknowledgement belongs to this write,
+      // not a later checkpoint or takeover that wins between two DB requests.
+      const current = await tx.salesContractEditSession.findUnique({ where: { draftId: record.draftId } });
+      return current ? fromPrismaRecord(current) : null;
     });
-    if (updated.count !== 1) return null;
-    return this.load(record.draftId);
   }
 
   async remove(draftId: string, leaseToken: string): Promise<boolean> {
@@ -508,13 +609,13 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
     return records.map(fromPrismaRecord);
   }
 
-  async purge(draftId: string): Promise<boolean> {
-    const removed = await this.prisma.salesContractEditSession.deleteMany({ where: { draftId } });
+  async purgeIfUnchanged(expected: ContractEditSessionRecord): Promise<boolean> {
+    const removed = await this.prisma.salesContractEditSession.deleteMany({ where: snapshotWhere(expected) });
     return removed.count === 1;
   }
 
   async discardCreationDraft(draftId: string, ownerUserId: string, discardedAt: Date): Promise<boolean> {
-    return this.prisma.$transaction(async tx => {
+    return this.transaction(async tx => {
       const removed = await tx.salesContractEditSession.deleteMany({
         where: { draftId, ownerUserId, contractId: null }
       });
@@ -532,6 +633,10 @@ const prismaStore = new PrismaContractEditSessionStore(prisma);
 export const acquireSalesContractEditSession = (
   input: AcquireContractEditSessionInput
 ) => acquireContractEditSession(prismaStore, input);
+
+export const acquirePartnerTechnicalSalesContractEditSession = (
+  input: Omit<AcquireContractEditSessionInput, 'purpose' | 'contractId'>,
+) => acquirePartnerTechnicalContractEditSession(prismaStore, input);
 
 export const checkpointSalesContractRecovery = (
   input: CheckpointContractRecoveryInput

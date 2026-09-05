@@ -1,0 +1,94 @@
+{
+  "interfaceVersion": "partner-qa-harness/v1",
+  "foundationInterface": null,
+  "runId": "partner-qa-80022cd7-a049-42b7-8c42-c5a377c12598",
+  "mode": "all",
+  "startedAt": "2026-08-27T07:23:06.032Z",
+  "head": "c3d8a9922b99201d094e5e2bbd0562903a786442",
+  "reviewBase": "9fcf2edb4f5f580f0e2e71347cd60fd374f8b3aa",
+  "workspaceStatus": "D .scratch/hr-dashboard-design-system/screenshots/desktop-dark-1920x1080.png\n D .scratch/hr-dashboard-design-system/screenshots/desktop-light-1920x1080.png\n D .scratch/hr-dashboard-design-system/screenshots/mobile-dark-390x844.png\n D .scratch/hr-dashboard-design-system/screenshots/mobile-light-390x844.png\n M CONTEXT.md\n M backend/package.json\n M frontend/package.json\n M frontend/tsconfig.tsbuildinfo\n M package.json\n?? .github/workflows/partner-sales.yml\n?? docs/adr/0046-own-partner-sale-pair-in-one-atomic-case.md\n?? docs/qa/partner-sales/\n?? packages/partner-sales-contracts/\n?? playwright.partner-sales.config.ts\n?? scripts/run-partner-sales-tests.mjs\n?? tests/partner-sales/\n?? tmp/partner-management-prototype/\n?? tmp/pdfs/github-change-report/\n?? tmp/pdfs/mordad-1405-attendance/\n?? tmp/pdfs/mordad-1405-font-update/\n?? tmp/pdfs/mordad-1405-raw-times/\n?? tmp/pdfs/sample/\n?? tmp/qa/\n?? tmp/wayfinder-partner-release-decision/",
+  "checks": [
+    {
+      "name": "inventory freshness",
+      "status": "pass"
+    },
+    {
+      "name": "harness contracts",
+      "command": "node --test tests/partner-sales/safety.test.mjs tests/partner-sales/inventory.test.mjs tests/partner-sales/runner.test.mjs",
+      "logFile": "1-harness-contracts.log",
+      "status": "pass",
+      "exitCode": 0
+    },
+    {
+      "name": "typecheck",
+      "command": "node frontend/node_modules/typescript/bin/tsc -p tests/partner-sales/tsconfig.json",
+      "logFile": "2-typecheck.log",
+      "status": "pass",
+      "exitCode": 0
+    }
+  ],
+  "status": "fail",
+  "limitations": [
+    "Module baseline only; not Partner E2E or release acceptance.",
+    "Runtime container identity is recorded separately from checkout HEAD.",
+    "Partner DTO, test-clock and SMS/OTP adapter await the approved #313 contract."
+  ],
+  "sourceFiles": [
+    {
+      "path": "playwright.partner-sales.config.ts",
+      "sha256": "e74fe79a255d6137727f384e29b94f1ce6bc0db66cae7bb7e70bf7b693a1b20e"
+    },
+    {
+      "path": "scripts/run-partner-sales-tests.mjs",
+      "sha256": "b15b192343dc23124c757a62d23ff108a53425fa6d2a4ff6e8a54d57f4047dad"
+    },
+    {
+      "path": "tests/partner-sales/api.integration.test.mjs",
+      "sha256": "360c43025cbd554d9e9ce1a7bf7e29801d8378cf91c064aa852b2c0f6e684657"
+    },
+    {
+      "path": "tests/partner-sales/browser/entry.spec.ts",
+      "sha256": "a042008bfedcf3aa7ef9b06c49e1a1a53654b921cbfd2fa71b8c93e25230e855"
+    },
+    {
+      "path": "tests/partner-sales/browser/global-setup.ts",
+      "sha256": "362ef5b03e8651cd314205b466a953c5d13570cc3a460fc60026def94a4726e9"
+    },
+    {
+      "path": "tests/partner-sales/fixtures.integration.test.mjs",
+      "sha256": "8a12214e093ea28e09e47388fd22ed278cdd3c70be2a5d31576028c31e5bceb2"
+    },
+    {
+      "path": "tests/partner-sales/harness/fixtures.mjs",
+      "sha256": "1bb0df56ba75226f2f710bf1e27cd92e1615dbd1d0aceef2700cec0ef7e5d898"
+    },
+    {
+      "path": "tests/partner-sales/harness/inventory.mjs",
+      "sha256": "426cf566767518064a9136e2c43966135b4ca7e12ffc777261ead82dabe1560e"
+    },
+    {
+      "path": "tests/partner-sales/harness/safety.mjs",
+      "sha256": "29682804eae9c4b6d84c82bb4080514588a26515e2ea1500ea911f5ed50e7389"
+    },
+    {
+      "path": "tests/partner-sales/inventory.test.mjs",
+      "sha256": "bf9752d6b6d5740eceeba34cd28d87c7ad899ecc727f68c2fb46684d81ccc3e2"
+    },
+    {
+      "path": "tests/partner-sales/runner.test.mjs",
+      "sha256": "335ee403eb9cc5b7cf9328a264b128fc46eaee3364105e37043024bba331859a"
+    },
+    {
+      "path": "tests/partner-sales/safety.test.mjs",
+      "sha256": "56613cf4b710c6e812be83f38aec55c84d4da2fe203e5822c8823471dc6cad69"
+    },
+    {
+      "path": "tests/partner-sales/tsconfig.json",
+      "sha256": "83fc9a96cddd86ad7c83ec8c865a1e8b397ca55332029230289577dea121da4f"
+    }
+  ],
+  "sourceHash": "03fb5305e1e5357069c97b9644be5169b72c9e46d0be4bfe173a412dfdb3c600",
+  "inventoryHash": "b38e94e80d5833050fff6991a05ae259b1c05c182b00c23c61cf9c4392fdd53d",
+  "error": "Partner QA requires healthy sabalanerp-local frontend on its fixed loopback port.",
+  "finishedAt": "2026-08-27T07:23:10.100Z"
+}

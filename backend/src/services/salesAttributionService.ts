@@ -123,11 +123,29 @@ export const reassignContractSeller = async (
 ) => prisma.$transaction(async (tx) => {
   const contract = await tx.salesContract.findUnique({ where: { id: params.contractId } });
   if (!contract) throw new Error('Contract not found');
+
+  // Partner activation locks the profile before it evaluates ordinary Sales
+  // responsibility. Take the same lock first so an assignment can neither
+  // slip past that evaluation nor deadlock by acquiring the User first.
+  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id
+    FROM partner_profiles
+    WHERE "userId" = ${params.nextSellerId}
+    FOR UPDATE
+  `);
   const nextSeller = await tx.user.findUnique({
     where: { id: params.nextSellerId },
-    select: { id: true, isActive: true, departmentId: true }
+    select: {
+      id: true,
+      isActive: true,
+      departmentId: true,
+      partnerProfile: { select: { irreversibleAt: true } }
+    }
   });
   if (!nextSeller?.isActive) throw new Error('Responsible seller not found or inactive');
+  if (nextSeller.partnerProfile?.irreversibleAt && contract.partnerKind !== 'PARTNER_CUSTOMER') {
+    throw new Error('Irreversible Partner persona cannot own an ordinary Sales contract');
+  }
   if (nextSeller.departmentId !== contract.departmentId) throw new Error('Responsible seller must belong to the contract department');
   if (contract.responsibleSellerId === nextSeller.id) return contract;
 

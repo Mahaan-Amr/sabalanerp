@@ -1,10 +1,35 @@
 import {
   calculateProductOperations,
+  calculateProductOperationsTechnical,
+  type ProductOperationsTechnicalInput,
+  type ProductOperationsConflict,
+  type TechnicalToolSelectionResult,
+  type TechnicalFinishingSelectionResult,
   type CalculatedFinishingSelection,
   type CalculatedToolSelection,
   type OperationEdge,
   type ProductOperationsInput
 } from '@sabalanerp/contract-product-graph';
+
+/** Technical previews retain usable sibling facts even while another selection
+ * needs correction. They never acquire synthetic amounts or policy identities. */
+export const buildTechnicalOperationCollectionPresentation = (
+  input: ProductOperationsTechnicalInput
+) => {
+  const calculation = calculateProductOperationsTechnical(input);
+  const result = calculation.result;
+  const conflictByEntityId = new Map<string, ProductOperationsConflict>();
+  if (!calculation.ok) calculation.conflicts.forEach(conflict => {
+    if (conflict.entityId) conflictByEntityId.set(conflict.entityId, conflict);
+  });
+  return {
+    calculation,
+    complete: calculation.ok,
+    toolsById: new Map<string, TechnicalToolSelectionResult>(result?.tools.map(tool => [tool.toolSelectionId, tool])),
+    finishingsById: new Map<string, TechnicalFinishingSelectionResult>(result?.finishings.map(finishing => [finishing.finishingSelectionId, finishing])),
+    conflictByEntityId,
+  };
+};
 
 type OperationCalculation = ReturnType<
   typeof calculateProductOperations

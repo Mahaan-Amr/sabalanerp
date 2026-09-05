@@ -183,7 +183,6 @@ export const filterCurrentlyAuthorizedNotifications = async <
     await canReadPartnerNotification(database, user.id, row.id) ? row.id : null,
   ))).filter((id): id is string => id !== null));
   rows = rows.filter(row => row.event?.resourceType !== PARTNER_NOTIFICATION_RESOURCE || partnerAllowed.has(row.id));
-  if (user.role === 'ADMIN') return rows;
   if (rows.every(row => row.event?.resourceType === PARTNER_NOTIFICATION_RESOURCE)) return rows;
   const [workspaceRows, featureRows] = await Promise.all([
     getUserWorkspaces(user.id, user.role),
@@ -272,6 +271,9 @@ export const filterCurrentlyAuthorizedNotifications = async <
     const event = row.event;
     if (event?.resourceType === PARTNER_NOTIFICATION_RESOURCE) return partnerAllowed.has(row.id);
     if (performanceAccess.has(row.id)) return performanceAccess.get(row.id) === true;
+    // Performance notifications are protected by their resource-specific checks above.
+    // ADMIN bypass applies only to ordinary workspace/feature notifications.
+    if (user.role === 'ADMIN') return true;
     if (!event) return true;
     if (event.resourceType === 'support-ticket' && event.resourceId) {
       const ticket = ticketById.get(event.resourceId);

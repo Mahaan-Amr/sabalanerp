@@ -23,6 +23,7 @@ const main = async () => {
       const actor = await tx.user.create({ data: { email: `${suffix}@example.invalid`, username: suffix, password: 'not-used', firstName: 'آزمون', lastName: 'درخواست', personnelId: person.id } });
   await enablePerformanceTestRelease(tx, actor.id);
       const other = await tx.user.create({ data: { email: `${suffix}-other@example.invalid`, username: `${suffix}-other`, password: 'not-used', firstName: 'عامل', lastName: 'دیگر' } });
+      const admin = await tx.user.create({ data: { email: `${suffix}-admin@example.invalid`, username: `${suffix}-admin`, password: 'not-used', firstName: 'مدیر', lastName: 'آزمون', role: 'ADMIN' } });
       const relationship = await tx.hrEmploymentRelationship.create({ data: { personnelId: person.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01Z'), createdBy: actor.id } });
       const subject = await tx.performanceSubject.create({ data: { stableKey: suffix, nonDisplayKey: suffix, personnelId: person.id, employmentRelationshipId: relationship.id, createdByUserId: actor.id } });
       const request = await requestPerformancePrivacy(tx, { actorUserId: actor.id, subjectId: subject.id, requestKind: 'ACCESS', evaluationIds: [], reason: 'درخواست دسترسی به سابقه شخصی', now: new Date('2026-09-05T08:00:00Z') });
@@ -36,6 +37,8 @@ const main = async () => {
         'the current subject owner may see their direct privacy notice');
       assert.equal((await filterCurrentlyAuthorizedNotifications(tx, other, [privacyNotice])).length, 0,
         'a non-owner must not learn that a privacy case exists');
+      assert.equal((await filterCurrentlyAuthorizedNotifications(tx, admin, [privacyNotice])).length, 0,
+        'ADMIN must not bypass subject ownership for privacy notices');
       const own = await getPerformancePrivacyCase(tx, actor.id, request.id);
       assert.equal(own.requestKind, 'ACCESS');
       assert.equal(own.response, null);
@@ -58,6 +61,8 @@ const main = async () => {
         where: { userId: other.id, type: 'PERFORMANCE_PRIVACY_DEADLINE' }, include: { event: true },
       });
       assert.equal((await filterCurrentlyAuthorizedNotifications(tx, other, [deadlineNotice])).length, 1);
+      assert.equal((await filterCurrentlyAuthorizedNotifications(tx, admin, [deadlineNotice])).length, 0,
+        'ADMIN must not bypass current privacy-case authority for deadlines');
       await assert.rejects(() => requestPerformancePrivacy(tx, { actorUserId: other.id, subjectId: subject.id, requestKind: 'ACCESS', evaluationIds: [], reason: 'درخواست بدون اختیار ثبت' }));
       const acknowledged = await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: request.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' });
       assert.equal(acknowledged.status, 'ACKNOWLEDGED');

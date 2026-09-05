@@ -1,6 +1,6 @@
 # Personnel performance operations and evidence
 
-Status: implementation in progress for #362. Production activation and compatibility retirement remain prohibited. A successful software test run is not the nine-gate promotion decision.
+Status: integrated implementation remains incomplete under #356 despite closure of #358–#362. Production activation and compatibility retirement remain prohibited. A successful software test run is not the nine-gate promotion decision.
 
 ## Retention boundary
 
@@ -41,6 +41,16 @@ Restrictions exclude their evaluations from current-level recomputation, analyti
 Legal-hold creation and release have independent permissions. Two distinct, currently authorized release decisions with matching reasons within twenty-four hours are required; duplicate decisions do not count twice. Active holds expose their ninety-day review deadline through `/legal-holds`. Hold propagation to every dependent storage class, subject notifications and automatic review escalation are still required.
 
 ## Evidence verifier
+
+### Local regression collection
+
+`npm run performance:verify:local -- all` runs the combined foundation/security, policy, workflow, disclosure and operations suites, backend/frontend builds, lint, architecture and design-system checks (including foundation/adoption tests), then the existing PostgreSQL integration suites and four safety-race orderings at 100 iterations each. Use `unit` or `database` for a narrower run. Database runs require the default local credentials and healthy existing `sabalanerp-local` services; they never start a stack. Integration tests use the existing transaction/temporary-database harnesses and own cleanup.
+
+Each run creates a private directory under `test-results/personnel-performance/` with command logs and `report.json`. It records exit codes, durations and log hashes, plus checkout commit/source identity before and after. Database runs additionally record actual running image IDs, the applied-migration metadata hash, policy metadata hash and Compose source hash. A changed or unavailable final identity blocks the report. Failed commands remain recorded and independent checks continue. Timeouts and handled interruptions terminate the owned process group before hashing logs and produce a non-PASS outcome. An abrupt exit or unconfirmed shutdown leaves the report `RUNNING`, which is not PASS evidence. Logs can contain test diagnostics and must remain restricted.
+
+These are **local software regression results**. `promotionDecision` remains `NOT_EVALUATED` even when the local status is `PASS`. The collector does not attest that running images contain the checkout, that applied migrations equal the checkout schema, or that policy metadata supplies an approved active policy. It does not substitute for browser acceptance, complete twelve-race measurements, failure injection, recovery/capacity exercises, approved owner decisions, or durable promotion-artifact storage. It cannot generate an `EVIDENCE_COMPLETE` promotion decision.
+
+The combined performance suite now includes the foundation authorization, vault, rollout and route regressions. Cohort scheduling rechecks current eligibility and eligibility at the requested effective time before persisting the future transition. Population evidence requires integer ready/member counts at every stage, complete coverage at ALL, and the rounded-up percentage count at each percentage stage.
 
 Run:
 
@@ -85,6 +95,20 @@ Use only the existing `sabalanerp-local` project for runtime checks and inspect 
 Do not retire prototype/compatibility components before 30 continuously healthy days after public activation, all cohort transfers, two successful deployments and restores, zero legacy consumers/writers, clean reconciliation, and three-owner approval. The user deferred post-activation 30-day acceptance for #362 on 2026-09-05. That deferral permits software work to proceed without waiting for production activation; it does not declare compatibility retirement safe, waive other acceptance evidence, or authorize activation. #357 still owns independent real-browser acceptance, and #356 remains open until its own acceptance conditions pass.
 
 ## Outstanding implementation and evidence
+
+The integration review of `57b02bac` found two specific release blockers beyond the approved operational-input deferrals: cohort scheduling/activation accepts owner evidence hashes without verifying measured, release-bound promotion evidence; export cleanup checks export/payload holds without complete subject/evaluation-to-export dependency propagation. Neither is made safe by a passing local test command. The missing scheduling eligibility check and population measurement validation are corrected by the #356 follow-up; the larger blockers require their own implementation and regression evidence.
+
+The remaining work is tracked as native children and blocking dependencies of #356:
+
+| Child | Canonical ownership |
+| --- | --- |
+| [#365](https://github.com/Mahaan-Amr/sabalanerp/issues/365) | Export reconstruction lineage and dependent legal-hold preservation |
+| [#366](https://github.com/Mahaan-Amr/sabalanerp/issues/366) | Retention classification, daily erasure and recoverable-copy accounting; depends on #365 |
+| [#367](https://github.com/Mahaan-Amr/sabalanerp/issues/367) | Runtime verification of promotion evidence and rollout admission |
+| [#368](https://github.com/Mahaan-Amr/sabalanerp/issues/368) | Operational monitoring, routed alerts and threshold enforcement |
+| [#369](https://github.com/Mahaan-Amr/sabalanerp/issues/369) | Complete acceptance harness and immutable candidate handoff; depends on #365–#368 |
+
+Each child records its shared schema/service/maintenance boundaries. The approved operational-input deferrals remain separate from these implementation gaps. #356 stays open until actual integration and acceptance, and #357 retains independent final QA.
 
 - Complete retention classification and dependency/copy discovery for every record/artifact class, daily physical erasure, first-run/bulk approval thresholds, backup-copy inventory and expiry attestation, process-crash cleanup rehearsal, and privacy/hold notifications and escalation. Evaluation assessment and formal policy-based preservation responses are implemented; these do not certify physical erasure.
 - Complete deterministic races for the implemented write fences, measured alert routing, observability and hypercare ownership. Transactional versioned cohort scheduling/activation and evidence-backed resume approvals are implemented; live activation and owner assignment remain prohibited/deferred as stated above.

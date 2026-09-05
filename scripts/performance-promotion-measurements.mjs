@@ -67,7 +67,10 @@ const capacityMeasured = (result) => {
 const cohortMeasured = (result) => {
   const stages = { PILOT: [5, 10, 5], TEN_PERCENT: [5, 25, 10], TWENTY_FIVE_PERCENT: [7, 50, 25], FIFTY_PERCENT: [7, 100, 50], ALL: [10, 200, 100] };
   const required = stages[result.stage];
-  return Boolean(required) && zeroCritical(result) && result.reconciliationMismatches === 0
+  const percent = { TEN_PERCENT: 10, TWENTY_FIVE_PERCENT: 25, FIFTY_PERCENT: 50, ALL: 100 };
+  const measuredPopulation = Number.isSafeInteger(result.readyPopulation) && result.readyPopulation > 0
+    && Number.isSafeInteger(result.members) && result.members > 0 && result.members <= result.readyPopulation;
+  return Boolean(required) && measuredPopulation && zeroCritical(result) && result.reconciliationMismatches === 0
     && result.sloPassed === true && result.hypercareAlertHeartbeatHealthy === true
     && finite(result.poolUtilization) && result.poolUtilization < 0.85
     && positive(result.healthyWorkingDays) && result.healthyWorkingDays >= required[0]
@@ -77,8 +80,9 @@ const cohortMeasured = (result) => {
     && positive(result.acceptedResults) && result.acceptedResults >= Math.min(required[2], result.availableAcceptedResults)
     && result.acceptedResults <= result.availableAcceptedResults
     && result.realPilotEvidence === true && approvalsValid(result.approvals)
-    && (result.stage !== 'PILOT' || (positive(result.readyPopulation) && result.members >= Math.min(10, result.readyPopulation)
-      && result.members <= Math.min(25, result.readyPopulation)));
+    && (result.stage === 'PILOT' ? (result.members >= Math.min(10, result.readyPopulation)
+      && result.members <= Math.min(25, result.readyPopulation))
+      : result.members === Math.ceil(result.readyPopulation * percent[result.stage] / 100));
 };
 
 const validators = {

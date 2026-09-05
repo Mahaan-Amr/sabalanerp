@@ -5,6 +5,29 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { validatePromotionMeasurements } from '../../scripts/performance-promotion-measurements.mjs';
+
+test('cohort evidence requires whole-person population counts for every rollout stage', () => {
+  const measured = { stage: 'ALL', openP0: 0, openP1: 0, reconciliationMismatches: 0,
+    sloPassed: true, hypercareAlertHeartbeatHealthy: true, poolUtilization: 0.5,
+    healthyWorkingDays: 10, availableSections: 200, availableAcceptedResults: 100,
+    completedSections: 200, acceptedResults: 100, realPilotEvidence: true,
+    approvals: ['HUMAN_RESOURCES', 'SECURITY_PRIVACY', 'SYSTEM_OWNER'].map((name) => ({
+      name, actorId: `actor-${name}`, decision: 'APPROVE', receiptHash: 'a'.repeat(64),
+    })),
+  };
+  const valid = (changes) => validatePromotionMeasurements('cohort-promotion', { ...measured, ...changes }, new Date().toISOString());
+  assert.equal(valid({}), false, 'ALL cannot pass without measured population');
+  assert.equal(valid({ readyPopulation: 100, members: 99 }), false, 'ALL must cover the ready population');
+  assert.equal(valid({ readyPopulation: 100, members: 100 }), true);
+  for (const [stage, members] of [['TEN_PERCENT', 10], ['TWENTY_FIVE_PERCENT', 25], ['FIFTY_PERCENT', 50]]) {
+    assert.equal(valid({ stage, readyPopulation: 100, members }), true);
+    assert.equal(valid({ stage, readyPopulation: 100, members: members - 1 }), false);
+    assert.equal(valid({ stage, readyPopulation: 100, members: 101 }), false);
+  }
+  assert.equal(valid({ stage: 'PILOT', readyPopulation: 20, members: 10.5 }), false);
+  assert.equal(valid({ readyPopulation: 100.5, members: 100.5 }), false);
+});
 
 const command = path.resolve('scripts/performance-promotion-evidence.mjs');
 test('promotion evidence command rejects absent evidence and writes a blocked report', async () => {

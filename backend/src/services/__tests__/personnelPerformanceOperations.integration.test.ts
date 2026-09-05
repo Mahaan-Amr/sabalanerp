@@ -11,6 +11,7 @@ import { restrictPerformanceEvidence } from '../personnelPerformanceRestrictions
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
 import {
   activatePerformanceCohort,
+  activateDuePerformanceCohorts,
   decidePerformanceRollout,
   proposePerformanceCohort,
   recordPerformanceTrainingEvidence,
@@ -106,10 +107,21 @@ const main = async () => {
         await decidePerformanceRollout(tx, { actorUserId: owner.id, scopeType: 'COHORT', scopeId: proposal.id, ownerType,
           action: 'APPROVE', reasonCode: 'READINESS_VERIFIED', evidenceHash });
       }
+      const [activationClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+      const effectiveFrom = new Date(activationClock.now.getTime() + 1_000);
       const scheduled = await activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
-        effectiveFrom: new Date('2099-01-01Z'), reason: 'Three independently approved owners' });
+        effectiveFrom, reason: 'Three independently approved owners' });
       assert.equal(scheduled.lifecycle, 'SCHEDULED');
       assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: proposal.id, eventType: 'PERFORMANCE_COHORT_SCHEDULED' } }));
+      const securityOwner = owners.find(({ ownerType }) => ownerType === 'SECURITY_PRIVACY')!;
+      await decidePerformanceRollout(tx, { actorUserId: securityOwner.owner.id, scopeType: 'COHORT', scopeId: proposal.id,
+        ownerType: securityOwner.ownerType, action: 'VETO', reasonCode: 'LATE_SECURITY_VETO', evidenceHash });
+      await assert.rejects(() => activateDuePerformanceCohorts(tx, new Date(effectiveFrom.getTime() + 1)),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_ROLLOUT_APPROVALS_INCOMPLETE', 'a late veto blocks due activation');
+      await decidePerformanceRollout(tx, { actorUserId: securityOwner.owner.id, scopeType: 'COHORT', scopeId: proposal.id,
+        ownerType: securityOwner.ownerType, action: 'APPROVE', reasonCode: 'SECURITY_VETO_RESOLVED', evidenceHash });
+      await assert.rejects(() => activateDuePerformanceCohorts(tx, new Date('2100-01-01Z')),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED', 'expired training blocks due activation');
       const cohort = await enrollPerformanceTestCohort(tx, actor.id, [subject.id]);
       assert.equal((await assertPersonnelPerformanceWriteAdmission(tx, 'SAVE_SUPERVISOR_DRAFT', subject.id)).allowed, true);
       await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'RETIRED' } });

@@ -123,7 +123,9 @@ export const decidePerformanceRollout = async (client: Client, input: {
 
 const currentApprovals = async (tx: Prisma.TransactionClient, scopeType: 'COHORT' | 'SAFETY_PAUSE', scopeId: string) => {
   const decisions = await tx.performanceRolloutDecision.findMany({ where: { scopeType, scopeId }, orderBy: [{ ownerType: 'asc' }, { version: 'desc' }] });
-  const latest = [...new Map(decisions.map((row) => [row.ownerType, row])).values()];
+  const latestByOwner = new Map<string, typeof decisions[number]>();
+  for (const row of decisions) if (!latestByOwner.has(row.ownerType)) latestByOwner.set(row.ownerType, row);
+  const latest = [...latestByOwner.values()];
   const action = scopeType === 'COHORT' ? 'APPROVE' : 'APPROVE_RESUME';
   if (latest.length !== 3 || latest.some((row) => row.action !== action) || new Set(latest.map(({ actorUserId }) => actorUserId)).size !== 3) {
     throw rolloutError('PERFORMANCE_ROLLOUT_APPROVALS_INCOMPLETE');
@@ -133,6 +135,38 @@ const currentApprovals = async (tx: Prisma.TransactionClient, scopeType: 'COHORT
     if (!(await activeHrActionPermissionsForUser(tx, row.actorUserId)).includes(permission)) throw rolloutError('PERFORMANCE_ROLLOUT_APPROVAL_EXPIRED');
   }
   return latest;
+};
+
+const assertCohortEligibility = async (tx: Prisma.TransactionClient, cohort: {
+  id: string; membershipHash: string; readinessHash: string | null;
+}, now: Date) => {
+  const members = await tx.performanceCohortMember.findMany({ where: { cohortVersionId: cohort.id }, select: { subjectId: true } });
+  const subjectIds = members.map(({ subjectId }) => subjectId).sort();
+  if (!subjectIds.length || canonicalPerformanceHash(subjectIds) !== cohort.membershipHash || !cohort.readinessHash) {
+    throw rolloutError('PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED');
+  }
+  const subjects = await tx.performanceSubject.findMany({ where: { id: { in: subjectIds }, identityDetachedAt: null,
+    employmentRelationshipId: { not: null } }, select: { id: true, employmentRelationshipId: true } });
+  if (subjects.length !== subjectIds.length) throw rolloutError('PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED');
+  const relationships = await tx.hrEmploymentRelationship.findMany({ where: {
+    id: { in: subjects.map(({ employmentRelationshipId }) => employmentRelationshipId!) }, status: { in: ['ACTIVE', 'SUSPENDED'] },
+    effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+  }, select: { id: true } });
+  if (relationships.length !== subjectIds.length) throw rolloutError('PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED');
+  const training = await tx.performanceTrainingEvidence.findMany({ where: { subjectId: { in: subjectIds }, completedAt: { lte: now }, validUntil: { gt: now } },
+    select: { subjectId: true } });
+  if (new Set(training.map(({ subjectId }) => subjectId)).size !== subjectIds.length) throw rolloutError('PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED');
+  const evaluations = await tx.performanceEvaluation.findMany({ where: { subjectId: { in: subjectIds } }, select: { id: true, subjectId: true } });
+  const readiness = await tx.performanceReadinessRecord.findMany({ where: { evaluationId: { in: evaluations.map(({ id }) => id) }, status: 'APPLIED' },
+    select: { evaluationId: true, runId: true } });
+  const runs = await tx.performanceReadinessRun.findMany({ where: { id: { in: readiness.map(({ runId }) => runId) }, status: 'COMPLETED', driftDetected: false },
+    select: { id: true, sourceHash: true } });
+  const runIds = new Set(runs.map(({ id }) => id));
+  const readyEvaluations = new Set(readiness.filter(({ runId }) => runIds.has(runId)).map(({ evaluationId }) => evaluationId));
+  if (new Set(evaluations.filter(({ id }) => readyEvaluations.has(id)).map(({ subjectId }) => subjectId)).size !== subjectIds.length
+    || canonicalPerformanceHash(runs.map(({ sourceHash }) => sourceHash).sort()) !== cohort.readinessHash) {
+    throw rolloutError('PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED');
+  }
 };
 
 export const activatePerformanceCohort = async (client: Client, input: {
@@ -166,6 +200,9 @@ export const activateDuePerformanceCohorts = async (client: Client, now = new Da
   const activated: Array<typeof due[number]> = [];
   for (const cohort of due) {
     const approvals = await currentApprovals(tx, 'COHORT', cohort.id);
+    await assertCohortEligibility(tx, cohort, now);
+    await tx.performanceCohortVersion.updateMany({ where: { cohortKey: cohort.cohortKey, lifecycle: 'ACTIVE', id: { not: cohort.id } },
+      data: { lifecycle: 'RETIRED' } });
     const active = await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'ACTIVE' } });
     await appendRolloutAudit(tx, { aggregateType: 'PERFORMANCE_COHORT_VERSION', aggregateId: cohort.id,
       eventType: 'PERFORMANCE_COHORT_ACTIVATED', actorUserId: null, reason: 'SCHEDULED_ACTIVATION',

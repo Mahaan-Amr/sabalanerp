@@ -55,7 +55,7 @@ export const placePerformanceLegalHold = async (client: Client, input: {
   if (subjectUser) await publishNotificationEvent(tx, { type: 'PERFORMANCE_LEGAL_HOLD_NOTICE',
     deduplicationKey: `performance-legal-hold:${hold.id}:placed`, recipientIds: [subjectUser.id], recipientGroups: { DIRECT_USER: [subjectUser.id] },
     resourceType: 'PERFORMANCE_LEGAL_HOLD', resourceId: hold.id,
-    actionUrl: '/dashboard/hr/personnel/performance/privacy', payload: {} });
+    actionUrl: '/dashboard/hr/personnel/performance', payload: {} });
   return hold;
 });
 
@@ -82,7 +82,7 @@ export const decidePerformanceLegalHold = async (client: Client, input: {
       if (subjectUser) await publishNotificationEvent(tx, { type: 'PERFORMANCE_LEGAL_HOLD_NOTICE',
         deduplicationKey: `performance-legal-hold:${hold.id}:released`, recipientIds: [subjectUser.id], recipientGroups: { DIRECT_USER: [subjectUser.id] },
         resourceType: 'PERFORMANCE_LEGAL_HOLD', resourceId: hold.id,
-        actionUrl: '/dashboard/hr/personnel/performance/privacy', payload: {} });
+        actionUrl: '/dashboard/hr/personnel/performance', payload: {} });
       return released;
     }
   }

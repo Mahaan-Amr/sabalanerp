@@ -93,12 +93,13 @@ export const requestPerformancePrivacy = async (client: Client, input: {
   } });
   if (ids.length) await tx.performancePrivacyScope.createMany({ data: ids.map((evaluationId) => ({ caseId: id, evaluationId })) });
   await appendDecision(tx, record, input.actorUserId, 'REQUEST', 'SUBJECT_REQUEST', canonicalPerformanceHash(request), authority);
-  const subjectUser = await tx.user.findFirst({ where: { personnelId: (await tx.performanceSubject.findUniqueOrThrow({ where: { id: input.subjectId } })).personnelId,
-    isActive: true }, select: { id: true } });
+  const subjectPersonnelId = (await tx.performanceSubject.findUniqueOrThrow({ where: { id: input.subjectId } })).personnelId;
+  const subjectUser = subjectPersonnelId ? await tx.user.findFirst({ where: { personnelId: subjectPersonnelId,
+    isActive: true }, select: { id: true } }) : null;
   if (subjectUser) await publishNotificationEvent(tx, { type: 'PERFORMANCE_PRIVACY_NOTICE',
     deduplicationKey: `performance-privacy-request:${record.id}`, recipientIds: [subjectUser.id],
     recipientGroups: { DIRECT_USER: [subjectUser.id] }, resourceType: 'PERFORMANCE_PRIVACY_CASE', resourceId: record.id,
-    actionUrl: `/dashboard/hr/personnel/performance/privacy/${record.id}`, payload: {} });
+    actionUrl: '/dashboard/hr/personnel/performance', payload: {} });
   return publicCase(record);
 });
 
@@ -119,7 +120,7 @@ export const runPerformancePrivacyDeadlineNotifications = async (client: Client,
     await publishNotificationEvent(client, { type: 'PERFORMANCE_PRIVACY_DEADLINE',
       deduplicationKey: `performance-privacy-deadline:${record.id}:${record.version}:${now.toISOString().slice(0, 10)}`,
       recipientIds: reviewers, recipientGroups: { DIRECT_USER: reviewers }, resourceType: 'PERFORMANCE_PRIVACY_CASE', resourceId: record.id,
-      actionUrl: `/dashboard/hr/personnel/performance/privacy/${record.id}`, payload: {} });
+      actionUrl: '/dashboard/hr/personnel/performance', payload: {} });
     notifications += reviewers.length;
   }
   return { cases: cases.length, notifications };

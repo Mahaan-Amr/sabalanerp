@@ -2,12 +2,20 @@ import { enablePerformanceTestRelease, enrollPerformanceTestCohort, publishPerfo
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
+import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
 import { createPerformancePolicyDraft, updatePerformancePolicyDraft, DEFAULT_CURRENT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicyStore';
 import { prisma } from '../../lib/prisma';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../personnelPerformanceOperationsStore';
 import { resolvePersonnelPerformanceWriteGate, assertPersonnelPerformanceWriteAdmission } from '../personnelPerformanceRolloutPolicy';
 import { restrictPerformanceEvidence } from '../personnelPerformanceRestrictions';
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
+import {
+  activatePerformanceCohort,
+  decidePerformanceRollout,
+  proposePerformanceCohort,
+  recordPerformanceTrainingEvidence,
+  resumePersonnelPerformance,
+} from '../personnelPerformanceRolloutStore';
 
 const rollback = Symbol('rollback-performance-operations');
 const main = async () => {
@@ -52,6 +60,56 @@ const main = async () => {
       const releasedAssessment = await assessPerformanceEvaluationRetention(tx, { actorUserId: actor.id, evaluationId: evaluation.id });
       assert.equal(releasedAssessment.status, 'REQUIRES_RETENTION_DECISION');
       assert.equal(releasedAssessment.version, restrictedAssessment.version + 1);
+      const assignment = await tx.hrEmploymentAssignment.create({ data: { employmentRelationshipId: relationship.id,
+        type: 'PRIMARY', effectiveFrom: new Date('2020-01-01Z'), performanceAllocationPercent: 100, createdBy: actor.id } });
+      const readinessSourceHash = canonicalPerformanceHash({ fixture: suffix });
+      const readinessRun = await tx.performanceReadinessRun.create({ data: { stableKey: `${suffix}:rollout-readiness`,
+        measurementFrom: evaluation.measurementFrom, measurementTo: evaluation.measurementTo, sourceCount: 1,
+        sourceHash: readinessSourceHash, status: 'COMPLETED', appliedCount: 1, requestedByUserId: actor.id, completedAt: new Date() } });
+      await tx.performanceReadinessRecord.create({ data: { runId: readinessRun.id, employmentAssignmentId: assignment.id,
+        sourceHash: readinessSourceHash, status: 'APPLIED', evaluationId: evaluation.id } });
+      const trainingHash = canonicalPerformanceHash({ curriculum: 'performance-rollout-v1' });
+      const evidenceHash = canonicalPerformanceHash({ subjectId: subject.id, completion: suffix });
+      await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:training`, userId: actor.id,
+        featureCode: 'RECORD_PERFORMANCE_TRAINING', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'),
+        grantedByUserId: actor.id, reason: 'Isolated rollout governance' } });
+      await recordPerformanceTrainingEvidence(tx, { actorUserId: actor.id, subjectId: subject.id,
+        curriculumHash: trainingHash, evidenceHash, completedAt: new Date('2026-01-01Z'), validUntil: new Date('2099-01-01Z') });
+      await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:rollout-proposal`, userId: actor.id,
+        featureCode: 'MANAGE_PERFORMANCE_ROLLOUT', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'),
+        grantedByUserId: actor.id, reason: 'Isolated rollout governance' } });
+      await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:rollout-activation`, userId: actor.id,
+        featureCode: 'TECHNICALLY_ACTIVATE_PERFORMANCE_COHORT', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'),
+        grantedByUserId: actor.id, reason: 'Isolated rollout governance' } });
+      const proposal = await proposePerformanceCohort(tx, { actorUserId: actor.id, cohortKey: `${suffix}:governed`, stage: 'PILOT',
+        subjectIds: [subject.id], readinessHash: canonicalPerformanceHash([readinessSourceHash]), reason: 'Isolated governed cohort proposal' });
+      assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: proposal.id, eventType: 'PERFORMANCE_COHORT_PROPOSED' } }));
+      await assert.rejects(() => decidePerformanceRollout(tx, { actorUserId: actor.id, scopeType: 'COHORT', scopeId: proposal.id,
+        ownerType: 'UNSUPPORTED_OWNER' as 'HUMAN_RESOURCES', action: 'APPROVE', reasonCode: 'READINESS_VERIFIED', evidenceHash }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_ROLLOUT_DECISION_INVALID');
+      await assert.rejects(() => activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
+        effectiveFrom: new Date('2099-01-01Z'), reason: 'Missing approvals must fail' }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_ROLLOUT_APPROVALS_INCOMPLETE');
+      const ownerDefinitions = [
+        ['HUMAN_RESOURCES', 'APPROVE_PERFORMANCE_COHORT_HR', 'APPROVE_PERFORMANCE_RESUME_HR'],
+        ['SECURITY_PRIVACY', 'APPROVE_PERFORMANCE_COHORT_SECURITY', 'APPROVE_PERFORMANCE_RESUME_SECURITY'],
+        ['SYSTEM_OWNER', 'APPROVE_PERFORMANCE_COHORT_SYSTEM', 'APPROVE_PERFORMANCE_RESUME_SYSTEM'],
+      ] as const;
+      const owners: Array<{ owner: { id: string }; ownerType: typeof ownerDefinitions[number][0] }> = [];
+      for (const [ownerType, cohortPermission, resumePermission] of ownerDefinitions) {
+        const owner = await tx.user.create({ data: { email: `${suffix}-${ownerType}@example.invalid`, username: `${suffix}-${ownerType}`,
+          password: 'not-used', firstName: 'مالک', lastName: ownerType } });
+        owners.push({ owner, ownerType });
+        for (const featureCode of [cohortPermission, resumePermission]) await tx.hrFeatureAccessGrant.create({ data: {
+          stableKey: `${suffix}:${ownerType}:${featureCode}`, userId: owner.id, featureCode, level: 'ADMIN',
+          effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated rollout owner' } });
+        await decidePerformanceRollout(tx, { actorUserId: owner.id, scopeType: 'COHORT', scopeId: proposal.id, ownerType,
+          action: 'APPROVE', reasonCode: 'READINESS_VERIFIED', evidenceHash });
+      }
+      const scheduled = await activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
+        effectiveFrom: new Date('2099-01-01Z'), reason: 'Three independently approved owners' });
+      assert.equal(scheduled.lifecycle, 'SCHEDULED');
+      assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: proposal.id, eventType: 'PERFORMANCE_COHORT_SCHEDULED' } }));
       const cohort = await enrollPerformanceTestCohort(tx, actor.id, [subject.id]);
       assert.equal((await assertPersonnelPerformanceWriteAdmission(tx, 'SAVE_SUPERVISOR_DRAFT', subject.id)).allowed, true);
       await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'RETIRED' } });
@@ -81,6 +139,14 @@ const main = async () => {
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT paused_write');
       await assert.rejects(() => updatePerformancePolicyDraft(tx, { versionId: draft.id, content: DEFAULT_CURRENT_LEVEL_POLICY_CONTENT }), (error: { code?: string }) => error.code === 'PERFORMANCE_SAFETY_PAUSED');
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT paused_write');
+      const resumeEvidenceHash = canonicalPerformanceHash({ pauseId: pause.id, reconciliation: 'clean', repeatedTests: true });
+      for (const { owner, ownerType } of owners) await decidePerformanceRollout(tx, { actorUserId: owner.id,
+        scopeType: 'SAFETY_PAUSE', scopeId: pause.id, ownerType, action: 'APPROVE_RESUME',
+        reasonCode: 'ROOT_CAUSE_RESOLVED', evidenceHash: resumeEvidenceHash });
+      const resumed = await resumePersonnelPerformance(tx, { actorUserId: actor.id, pauseId: pause.id,
+        reasonCode: 'ROOT_CAUSE_RESOLVED', evidenceHash: resumeEvidenceHash });
+      assert.equal(resumed.status, 'RESUMED');
+      assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: pause.id, eventType: 'PERFORMANCE_SAFETY_PAUSE_RESUMED' } }));
       throw rollback;
     });
   } catch (error) {

@@ -6,6 +6,7 @@ import { Prisma, type PrismaClient, type PerformancePrivacyCase } from '@prisma/
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
 import { canonicalPerformanceHash } from './personnelPerformancePolicy';
 import { performanceVaultKeyFromEnvironment, persistPerformancePayload, readPerformancePayload } from './personnelPerformancePayloadStore';
+import { publishNotificationEvent } from './notificationService';
 
 type Client = PrismaClient | Prisma.TransactionClient;
 const privacyError = (message: string, code = 'PERFORMANCE_PRIVACY_UNAVAILABLE', status = 404) => Object.assign(new Error(message), { code, status });
@@ -92,8 +93,37 @@ export const requestPerformancePrivacy = async (client: Client, input: {
   } });
   if (ids.length) await tx.performancePrivacyScope.createMany({ data: ids.map((evaluationId) => ({ caseId: id, evaluationId })) });
   await appendDecision(tx, record, input.actorUserId, 'REQUEST', 'SUBJECT_REQUEST', canonicalPerformanceHash(request), authority);
+  const subjectUser = await tx.user.findFirst({ where: { personnelId: (await tx.performanceSubject.findUniqueOrThrow({ where: { id: input.subjectId } })).personnelId,
+    isActive: true }, select: { id: true } });
+  if (subjectUser) await publishNotificationEvent(tx, { type: 'PERFORMANCE_PRIVACY_NOTICE',
+    deduplicationKey: `performance-privacy-request:${record.id}`, recipientIds: [subjectUser.id],
+    recipientGroups: { DIRECT_USER: [subjectUser.id] }, resourceType: 'PERFORMANCE_PRIVACY_CASE', resourceId: record.id,
+    actionUrl: `/dashboard/hr/personnel/performance/privacy/${record.id}`, payload: {} });
   return publicCase(record);
 });
+
+export const runPerformancePrivacyDeadlineNotifications = async (client: Client, now = new Date()) => {
+  const warningAt = new Date(now.getTime() + 86_400_000);
+  const cases = await client.performancePrivacyCase.findMany({ where: { OR: [
+    { status: 'RECEIVED', acknowledgeBy: { lte: warningAt } },
+    { status: 'ACKNOWLEDGED', verifyBy: { lte: warningAt } },
+    { status: 'VERIFIED', respondBy: { lte: warningAt } },
+  ] }, orderBy: { requestedAt: 'asc' }, take: 500 });
+  if (!cases.length) return { cases: 0, notifications: 0 };
+  const users = await client.user.findMany({ where: { isActive: true }, select: { id: true } });
+  const reviewers: string[] = [];
+  for (const user of users) if ((await activeHrActionPermissionsForUser(client, user.id, now)).includes('VIEW_PERFORMANCE_PRIVACY_CASE')) reviewers.push(user.id);
+  let notifications = 0;
+  for (const record of cases) {
+    if (!reviewers.length) break;
+    await publishNotificationEvent(client, { type: 'PERFORMANCE_PRIVACY_DEADLINE',
+      deduplicationKey: `performance-privacy-deadline:${record.id}:${record.version}:${now.toISOString().slice(0, 10)}`,
+      recipientIds: reviewers, recipientGroups: { DIRECT_USER: reviewers }, resourceType: 'PERFORMANCE_PRIVACY_CASE', resourceId: record.id,
+      actionUrl: `/dashboard/hr/personnel/performance/privacy/${record.id}`, payload: {} });
+    notifications += reviewers.length;
+  }
+  return { cases: cases.length, notifications };
+};
 
 export const listPerformancePrivacyQueue = async (client: Client, input: { actorUserId: string; afterId?: string }) => inTransaction(client, async (tx) => {
   await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;

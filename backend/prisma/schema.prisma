@@ -7441,6 +7441,9 @@ model PerformanceCohortVersion {
   lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
   predecessorId     String?
   membershipHash    String
+  stage             String?
+  targetPercent     Int?
+  readinessHash     String?
   effectiveFrom     DateTime?
   activationReason  String?
   activatedByUserId String?
@@ -7450,6 +7453,38 @@ model PerformanceCohortVersion {
   @@unique([cohortKey, version])
   @@index([lifecycle, effectiveFrom])
   @@map("performance_cohort_versions")
+}
+
+model PerformanceTrainingEvidence {
+  id               String   @id @default(cuid())
+  subjectId        String
+  curriculumHash   String
+  evidenceHash     String
+  completedAt      DateTime
+  validUntil       DateTime
+  recordedByUserId String
+  createdAt        DateTime @default(now())
+
+  @@index([subjectId, validUntil])
+  @@map("performance_training_evidence")
+}
+
+model PerformanceRolloutDecision {
+  id            String   @id @default(cuid())
+  scopeType     String
+  scopeId       String
+  ownerType     String
+  action        String
+  version       Int
+  actorUserId   String
+  reasonCode    String
+  authorityHash String
+  evidenceHash  String
+  decidedAt     DateTime @default(now())
+
+  @@unique([scopeType, scopeId, ownerType, version])
+  @@index([scopeType, scopeId, action, decidedAt])
+  @@map("performance_rollout_decisions")
 }
 
 model PerformanceCohortMember {

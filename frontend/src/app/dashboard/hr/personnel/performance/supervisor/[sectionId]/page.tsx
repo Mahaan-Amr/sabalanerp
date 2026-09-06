@@ -1,5 +1,6 @@
 import PerformanceWorkflow from "@/features/hr/performance-workflow/PerformanceWorkflow";
 
-export default function SupervisorPerformanceSectionPage({ params }: { params: { sectionId: string } }) {
-  return <PerformanceWorkflow initialSectionId={params.sectionId} />;
+export default async function SupervisorPerformanceSectionPage({ params }: { params: Promise<{ sectionId: string }> }) {
+  const { sectionId } = await params;
+  return <PerformanceWorkflow initialSectionId={sectionId} />;
 }

@@ -35,16 +35,24 @@ const writableDirectoryGate = (directory: string) => async () => {
 const performanceExportStorageGate = async () => {
   const directory = '/app/storage/performance-exports';
   await writableDirectoryGate(directory)();
-  const ready = await prisma.performanceExportReceipt.findMany({
-    where: { status: 'READY' }, select: { id: true, artifactPath: true },
-  });
-  for (const receipt of ready) {
-    if (!receipt.artifactPath) throw new Error(`READY performance export ${receipt.id} has no artifact path.`);
-    const resolved = path.resolve(receipt.artifactPath);
-    if (!resolved.startsWith(`${directory}${path.sep}`)) throw new Error(`Performance export ${receipt.id} is outside protected storage.`);
-    await fs.promises.access(resolved, fs.constants.R_OK);
+  try {
+    const ready = await prisma.performanceExportReceipt.findMany({
+      where: { status: 'READY' }, select: { id: true, artifactPath: true },
+    });
+    for (const receipt of ready) {
+      if (!receipt.artifactPath) throw new Error(`READY performance export ${receipt.id} has no artifact path.`);
+      const resolved = path.resolve(receipt.artifactPath);
+      if (!resolved.startsWith(`${directory}${path.sep}`)) throw new Error(`Performance export ${receipt.id} is outside protected storage.`);
+      await fs.promises.access(resolved, fs.constants.R_OK);
+    }
+    return { directory, readyArtifacts: ready.length };
+  } catch (error: any) {
+    if (error?.code === 'P2021' && process.env.DEPLOYMENT_ALLOW_MISSING_PERFORMANCE_EXPORT_TABLE === 'true') {
+      console.warn('Performance export table is not present yet; allowing pre-migration gate to continue.');
+      return { directory, readyArtifacts: 0, tablePendingMigration: true };
+    }
+    throw error;
   }
-  return { directory, readyArtifacts: ready.length };
 };
 
 const main = async () => {

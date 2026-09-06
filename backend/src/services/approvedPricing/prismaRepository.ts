@@ -907,10 +907,17 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
           !new Prisma.Decimal(String(graphState.totalAmountToman ?? '')).eq(sealedContractTotal)) {
           throw new ApprovedPricingEvidenceError('Frozen graph row totals do not seal to the frozen contract total');
         }
-        if (!new Prisma.Decimal(effectiveLeaf.amount).eq(0)) {
-          throw new ApprovedPricingEvidenceError('Missing accounting rows may only recover a zero-sentinel invoice amount');
-        }
         const recoveredInvoiceAmount = sealedContractTotal.mul(currencyFactor);
+        const existingInvoiceAmount = new Prisma.Decimal(effectiveLeaf.amount);
+        // Legacy FROM_CONTRACT_TOTAL records can already contain the exact
+        // sealed amount while their normalized accounting rows are missing.
+        // Accept that deterministic case; never overwrite a populated amount
+        // that differs from the frozen contract total.
+        if (!existingInvoiceAmount.eq(0) && !existingInvoiceAmount.eq(recoveredInvoiceAmount)) {
+          throw new ApprovedPricingEvidenceError(
+            'Missing accounting rows may only recover a zero-sentinel or exact frozen invoice amount',
+          );
+        }
         effectiveSnapshotItems = recoveredRows.map(row => row.contractItem);
         effectiveCurrentItems = recoveredRows.map(row => row.contractItem);
         effectiveLeaf = {
@@ -933,11 +940,13 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
           }),
           recoveredAccountingRows: recoveredRows.map(row => row.audit),
           recoveredInvoiceAmount: {
-            rawFinancialRecordAmount: '0',
+            rawFinancialRecordAmount: existingInvoiceAmount.toString(),
             sealedContractTotal: sealedContractTotal.toString(),
             recoveredInvoiceAmount: recoveredInvoiceAmount.toString(),
             currencyFactor: currencyFactor.toString(),
-            rule: 'ZERO_SENTINEL_FROM_FROZEN_CONTRACT_TOTAL_V1' as const,
+            rule: existingInvoiceAmount.eq(0)
+              ? 'ZERO_SENTINEL_FROM_FROZEN_CONTRACT_TOTAL_V1' as const
+              : 'EXACT_AMOUNT_FROM_FROZEN_CONTRACT_TOTAL_V1' as const,
           },
         };
         recoveredMissingAccountingRows = true;

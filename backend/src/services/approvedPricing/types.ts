@@ -150,7 +150,7 @@ export type ApprovedPricingSource = {
           sealedContractTotal: string;
           recoveredInvoiceAmount: string;
           currencyFactor: string;
-          rule: 'ZERO_SENTINEL_FROM_FROZEN_CONTRACT_TOTAL_V1';
+          rule: 'ZERO_SENTINEL_FROM_FROZEN_CONTRACT_TOTAL_V1' | 'EXACT_AMOUNT_FROM_FROZEN_CONTRACT_TOTAL_V1';
         };
         liveContractItemRebindings?: readonly {
           sourceContractItemId: string;

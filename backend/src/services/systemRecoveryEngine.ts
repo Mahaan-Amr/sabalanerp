@@ -635,6 +635,24 @@ const migrateDatabase = async (databaseUrl: string) => {
   });
 };
 
+const findReadyPerformanceExports = async (client: PrismaClient) => {
+  try {
+    return await client.performanceExportReceipt.findMany({
+      where: { status: 'READY' },
+      select: { id: true, artifactPath: true, artifactHash: true, artifactSize: true, artifactKeyId: true },
+    });
+  } catch (error: any) {
+    // A production database can legitimately be one migration behind while the
+    // deployment checkpoint is being created. Keep the exception narrow and
+    // opt-in: ordinary schema drift must still fail closed.
+    if (process.env.DEPLOYMENT_ALLOW_MISSING_PERFORMANCE_EXPORT_TABLE === 'true' && error?.code === 'P2021') {
+      console.warn('Performance export table is not present yet; checkpointing with zero ready exports before migration.');
+      return [];
+    }
+    throw error;
+  }
+};
+
 const createSanitizedBootstrapAdmin = async (databaseUrl: string, password: string) => {
   const client = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
   try {
@@ -725,10 +743,7 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
       details: missing,
     });
   }
-    const readyPerformanceExports = await client.performanceExportReceipt.findMany({
-      where: { status: 'READY' },
-      select: { id: true, artifactPath: true, artifactHash: true, artifactSize: true, artifactKeyId: true },
-  });
+  const readyPerformanceExports = await findReadyPerformanceExports(client);
   const missingPerformanceExports: Array<{ id: string; artifactPath: string | null }> = [];
   for (const receipt of readyPerformanceExports) {
     if (!receipt.artifactPath) {
@@ -810,10 +825,7 @@ export const validateLiveStoredFileReferences = async (client: PrismaClient) => 
       details: missing,
     });
   }
-  const readyPerformanceExports = await client.performanceExportReceipt.findMany({
-    where: { status: 'READY' },
-    select: { id: true, artifactPath: true, artifactHash: true, artifactSize: true, artifactKeyId: true },
-  });
+  const readyPerformanceExports = await findReadyPerformanceExports(client);
   const missingPerformanceExports: Array<{ id: string; artifactPath: string | null }> = [];
   for (const receipt of readyPerformanceExports) {
     if (!receipt.artifactPath) {

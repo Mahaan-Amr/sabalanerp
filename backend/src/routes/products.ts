@@ -10,6 +10,8 @@ import XLSX from 'xlsx';
 import path from 'path';
 import fs from 'fs';
 import { applyCatalogPlan, buildCatalogPlan, buildExportWorkbook, buildTemplateWorkbook, canonicalizeProductData } from '../services/catalogExcelSync';
+import { randomUUID } from 'node:crypto';
+import { unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
 
 const router = express.Router();
 const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
@@ -207,25 +209,25 @@ router.post('/import/apply', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
 // @route   GET /api/products
 // @access  Private/Sales Workspace
 router.get('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_VIEW, FEATURE_PERMISSIONS.VIEW), [
-  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-  query('limit').optional().isInt({ min: 1, max: 1000 }).withMessage('Limit must be between 1 and 1000'),
-  query('search').optional().isString().withMessage('Search must be a string'),
-  query('stoneType').optional().isInt().withMessage('Stone type must be an integer'),
-  query('color').optional().isInt().withMessage('Color must be an integer'),
-  query('finish').optional().isInt().withMessage('Finish must be an integer'),
-  query('mine').optional().isString().withMessage('Mine must be a string'),
-  query('quality').optional().isInt().withMessage('Quality must be an integer'),
-  query('isAvailable').optional().isBoolean().withMessage('isAvailable must be a boolean'),
-  query('isActive').optional().isBoolean().withMessage('isActive must be a boolean'),
-  query('includeDeleted').optional().isBoolean().withMessage('includeDeleted must be a boolean'),
-  query('contractType').optional().isIn(['longitudinal', 'stair', 'slab', 'volumetric']).withMessage('contractType must be one of longitudinal, stair, slab, volumetric'),
+  query('page').optional().isInt({ min: 1 }).withMessage('شماره صفحه معتبر نیست؛ فهرست را از صفحه اول باز کنید.'),
+  query('limit').optional().isInt({ min: 1, max: 1000 }).withMessage('تعداد محصولات هر صفحه باید بین ۱ تا ۱۰۰۰ باشد؛ تعداد را اصلاح کنید.'),
+  query('search').optional().isString().withMessage('عبارت جست‌وجو معتبر نیست؛ آن را پاک و دوباره وارد کنید.'),
+  query('stoneType').optional().isInt().withMessage('نوع سنگ انتخاب‌شده معتبر نیست؛ فیلتر نوع سنگ را دوباره انتخاب کنید.'),
+  query('color').optional().isInt().withMessage('رنگ انتخاب‌شده معتبر نیست؛ فیلتر رنگ را دوباره انتخاب کنید.'),
+  query('finish').optional().isInt().withMessage('نوع پرداخت انتخاب‌شده معتبر نیست؛ فیلتر پرداخت را دوباره انتخاب کنید.'),
+  query('mine').optional().isString().withMessage('معدن انتخاب‌شده معتبر نیست؛ فیلتر معدن را دوباره انتخاب کنید.'),
+  query('quality').optional().isInt().withMessage('کیفیت انتخاب‌شده معتبر نیست؛ فیلتر کیفیت را دوباره انتخاب کنید.'),
+  query('isAvailable').optional().isBoolean().withMessage('فیلتر موجودی معتبر نیست؛ وضعیت موجودی را دوباره انتخاب کنید.'),
+  query('isActive').optional().isBoolean().withMessage('فیلتر وضعیت محصول معتبر نیست؛ وضعیت را دوباره انتخاب کنید.'),
+  query('includeDeleted').optional().isBoolean().withMessage('فیلتر محصولات حذف‌شده معتبر نیست؛ آن را دوباره انتخاب کنید.'),
+  query('contractType').optional().isIn(['longitudinal', 'stair', 'slab', 'volumetric']).withMessage('نوع قرارداد انتخاب‌شده معتبر نیست؛ نوع قرارداد را دوباره انتخاب کنید.'),
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'فیلترهای فهرست محصولات معتبر نیستند؛ موارد مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -346,11 +348,13 @@ router.get('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERM
       }
     });
   } catch (error) {
-    console.error('Get products error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
+    const trackingId = randomUUID();
+    console.error('Get products error:', { trackingId, error });
+    return res.status(500).json(unexpectedSalesErrorResponse({
+      code: 'SALES_PRODUCTS_LIST_UNEXPECTED',
+      failedAction: 'دریافت فهرست محصولات',
+      trackingId
+    }));
   }
 });
 
@@ -578,7 +582,7 @@ router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
     if (!product) {
       return res.status(404).json({
         success: false,
-        error: 'Product not found'
+        error: 'محصول پیدا نشد؛ به فهرست محصولات برگردید و محصول دیگری را انتخاب کنید.'
       });
     }
 
@@ -587,11 +591,13 @@ router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
       data: product
     });
   } catch (error) {
-    console.error('Get product error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
+    const trackingId = randomUUID();
+    console.error('Get product error:', { trackingId, error });
+    return res.status(500).json(unexpectedSalesErrorResponse({
+      code: 'SALES_PRODUCT_READ_UNEXPECTED',
+      failedAction: 'دریافت اطلاعات محصول',
+      trackingId
+    }));
   }
 });
 
@@ -607,7 +613,7 @@ router.get('/code/:code', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
     if (!product) {
       return res.status(404).json({
         success: false,
-        error: 'Product not found'
+        error: 'محصولی با این کد پیدا نشد؛ کد محصول را بررسی کنید.'
       });
     }
 
@@ -616,11 +622,13 @@ router.get('/code/:code', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
       data: product
     });
   } catch (error) {
-    console.error('Get product by code error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
+    const trackingId = randomUUID();
+    console.error('Get product by code error:', { trackingId, error });
+    return res.status(500).json(unexpectedSalesErrorResponse({
+      code: 'SALES_PRODUCT_CODE_READ_UNEXPECTED',
+      failedAction: 'دریافت محصول با کد انتخاب‌شده',
+      trackingId
+    }));
   }
 });
 
@@ -628,45 +636,45 @@ router.get('/code/:code', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
 // @route   POST /api/products
 // @access  Private/Sales Workspace
 router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PRODUCTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
-  body('code').notEmpty().withMessage('Product code is required'),
-  body('name').notEmpty().withMessage('Product name is required'),
-  body('namePersian').notEmpty().withMessage('Product Persian name is required'),
-  body('cuttingDimensionCode').notEmpty().withMessage('Cutting dimension code is required'),
-  body('cuttingDimensionName').notEmpty().withMessage('Cutting dimension name is required'),
-  body('cuttingDimensionNamePersian').notEmpty().withMessage('Cutting dimension Persian name is required'),
-  body('stoneTypeCode').notEmpty().withMessage('Stone type code is required'),
-  body('stoneTypeName').notEmpty().withMessage('Stone type name is required'),
-  body('stoneTypeNamePersian').notEmpty().withMessage('Stone type Persian name is required'),
-  body('widthCode').notEmpty().withMessage('Width code is required'),
-  body('widthValue').isNumeric().withMessage('Width value must be a number'),
-  body('widthName').notEmpty().withMessage('Width name is required'),
-  body('motherLengthValue').optional({ nullable: true }).isFloat({ gt: 0 }).withMessage('Mother length must be greater than zero'),
-  body('thicknessCode').notEmpty().withMessage('Thickness code is required'),
-  body('thicknessValue').isNumeric().withMessage('Thickness value must be a number'),
-  body('thicknessName').notEmpty().withMessage('Thickness name is required'),
-  body('mineCode').notEmpty().withMessage('Mine code is required'),
-  body('mineName').notEmpty().withMessage('Mine name is required'),
-  body('mineNamePersian').notEmpty().withMessage('Mine Persian name is required'),
-  body('finishCode').notEmpty().withMessage('Finish code is required'),
-  body('finishName').notEmpty().withMessage('Finish name is required'),
-  body('finishNamePersian').notEmpty().withMessage('Finish Persian name is required'),
-  body('colorCode').notEmpty().withMessage('Color code is required'),
-  body('colorName').notEmpty().withMessage('Color name is required'),
-  body('colorNamePersian').notEmpty().withMessage('Color Persian name is required'),
-  body('qualityCode').notEmpty().withMessage('Quality code is required'),
-  body('qualityName').notEmpty().withMessage('Quality name is required'),
-  body('qualityNamePersian').notEmpty().withMessage('Quality Persian name is required'),
-  body('basePrice').optional({ nullable: true }).isNumeric().withMessage('Base price must be a number'),
-  body('currency').optional().isString().withMessage('Currency must be a string'),
-  body('isAvailable').optional().isBoolean().withMessage('isAvailable must be a boolean'),
-  body('leadTime').optional({ nullable: true }).isInt({ min: 0 }).withMessage('Lead time must be a non-negative integer'),
-  body('description').optional().isString().withMessage('Description must be a string'),
-  body('images').optional().isArray().withMessage('Images must be an array'),
-  body('isActive').optional().isBoolean().withMessage('isActive must be a boolean'),
-  body('availableInLongitudinalContracts').optional().isBoolean().withMessage('availableInLongitudinalContracts must be a boolean').toBoolean(),
-  body('availableInStairContracts').optional().isBoolean().withMessage('availableInStairContracts must be a boolean').toBoolean(),
-  body('availableInSlabContracts').optional().isBoolean().withMessage('availableInSlabContracts must be a boolean').toBoolean(),
-  body('availableInVolumetricContracts').optional().isBoolean().withMessage('availableInVolumetricContracts must be a boolean').toBoolean(),
+  body('code').notEmpty().withMessage('کد محصول ساخته نشد؛ نوع برش و مشخصات محصول را دوباره انتخاب کنید.'),
+  body('name').notEmpty().withMessage('نام محصول ساخته نشد؛ مشخصات محصول را دوباره انتخاب کنید.'),
+  body('namePersian').notEmpty().withMessage('نام فارسی محصول ساخته نشد؛ مشخصات محصول را دوباره انتخاب کنید.'),
+  body('cuttingDimensionCode').notEmpty().withMessage('نوع برش مشخص نیست؛ یک نوع برش انتخاب کنید.'),
+  body('cuttingDimensionName').notEmpty().withMessage('نوع برش مشخص نیست؛ یک نوع برش انتخاب کنید.'),
+  body('cuttingDimensionNamePersian').notEmpty().withMessage('نوع برش مشخص نیست؛ یک نوع برش انتخاب کنید.'),
+  body('stoneTypeCode').notEmpty().withMessage('جنس سنگ مشخص نیست؛ یک جنس سنگ انتخاب کنید.'),
+  body('stoneTypeName').notEmpty().withMessage('جنس سنگ مشخص نیست؛ یک جنس سنگ انتخاب کنید.'),
+  body('stoneTypeNamePersian').notEmpty().withMessage('جنس سنگ مشخص نیست؛ یک جنس سنگ انتخاب کنید.'),
+  body('widthCode').notEmpty().withMessage('عرض برش مشخص نیست؛ یک عرض انتخاب کنید.'),
+  body('widthValue').isNumeric().withMessage('عرض برش باید عدد باشد؛ عرض را دوباره انتخاب کنید.'),
+  body('widthName').notEmpty().withMessage('عرض برش مشخص نیست؛ یک عرض انتخاب کنید.'),
+  body('motherLengthValue').optional({ nullable: true }).isFloat({ gt: 0 }).withMessage('طول مادر باید بیشتر از صفر باشد؛ طول را اصلاح کنید.'),
+  body('thicknessCode').notEmpty().withMessage('ضخامت مشخص نیست؛ یک ضخامت انتخاب کنید.'),
+  body('thicknessValue').isNumeric().withMessage('ضخامت باید عدد باشد؛ ضخامت را دوباره انتخاب کنید.'),
+  body('thicknessName').notEmpty().withMessage('ضخامت مشخص نیست؛ یک ضخامت انتخاب کنید.'),
+  body('mineCode').notEmpty().withMessage('معدن یا نام سنگ مشخص نیست؛ یک مورد انتخاب کنید.'),
+  body('mineName').notEmpty().withMessage('معدن یا نام سنگ مشخص نیست؛ یک مورد انتخاب کنید.'),
+  body('mineNamePersian').notEmpty().withMessage('معدن یا نام سنگ مشخص نیست؛ یک مورد انتخاب کنید.'),
+  body('finishCode').notEmpty().withMessage('نوع پرداخت سنگ مشخص نیست؛ یک نوع پرداخت انتخاب کنید.'),
+  body('finishName').notEmpty().withMessage('نوع پرداخت سنگ مشخص نیست؛ یک نوع پرداخت انتخاب کنید.'),
+  body('finishNamePersian').notEmpty().withMessage('نوع پرداخت سنگ مشخص نیست؛ یک نوع پرداخت انتخاب کنید.'),
+  body('colorCode').notEmpty().withMessage('رنگ یا خصوصیت محصول مشخص نیست؛ یک مورد انتخاب کنید.'),
+  body('colorName').notEmpty().withMessage('رنگ یا خصوصیت محصول مشخص نیست؛ یک مورد انتخاب کنید.'),
+  body('colorNamePersian').notEmpty().withMessage('رنگ یا خصوصیت محصول مشخص نیست؛ یک مورد انتخاب کنید.'),
+  body('qualityCode').notEmpty().withMessage('کیفیت محصول مشخص نیست؛ مشخصات محصول را دوباره انتخاب کنید.'),
+  body('qualityName').notEmpty().withMessage('کیفیت محصول مشخص نیست؛ مشخصات محصول را دوباره انتخاب کنید.'),
+  body('qualityNamePersian').notEmpty().withMessage('کیفیت محصول مشخص نیست؛ مشخصات محصول را دوباره انتخاب کنید.'),
+  body('basePrice').optional({ nullable: true }).isNumeric().withMessage('قیمت پایه باید عدد باشد؛ قیمت را اصلاح کنید.'),
+  body('currency').optional().isString().withMessage('واحد پول معتبر نیست؛ واحد پول را دوباره انتخاب کنید.'),
+  body('isAvailable').optional().isBoolean().withMessage('وضعیت موجودی معتبر نیست؛ وضعیت را دوباره انتخاب کنید.'),
+  body('leadTime').optional({ nullable: true }).isInt({ min: 0 }).withMessage('زمان آماده‌سازی باید صفر یا بیشتر باشد؛ مقدار را اصلاح کنید.'),
+  body('description').optional().isString().withMessage('توضیحات محصول معتبر نیست؛ متن را اصلاح کنید.'),
+  body('images').optional().isArray().withMessage('فهرست تصاویر محصول معتبر نیست؛ تصاویر را دوباره انتخاب کنید.'),
+  body('isActive').optional().isBoolean().withMessage('وضعیت فعالیت محصول معتبر نیست؛ وضعیت را دوباره انتخاب کنید.'),
+  body('availableInLongitudinalContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد طولی معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
+  body('availableInStairContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد پله معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
+  body('availableInSlabContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد اسلب معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
+  body('availableInVolumetricContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد حجمی معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
 ], async (req: any, res: Response) => {
   try {
     if (DEBUG_LOGS) {
@@ -678,7 +686,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
       console.log('Validation errors:', errors.array());
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'محصول ایجاد نشد؛ موارد مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -693,7 +701,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
     if (existingProduct) {
       return res.status(400).json({
         success: false,
-        error: 'Product with this code already exists'
+        error: 'محصولی با همین مشخصات و کد از قبل وجود دارد؛ محصول موجود را ویرایش کنید یا مشخصات متفاوتی انتخاب کنید.'
       });
     }
 
@@ -752,11 +760,14 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
       data: product
     });
   } catch (error) {
-    console.error('Create product error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
+    const trackingId = randomUUID();
+    console.error('Create product error:', { trackingId, error });
+    return res.status(500).json(unexpectedSalesErrorResponse({
+      code: 'SALES_PRODUCT_CREATE_UNEXPECTED',
+      failedAction: 'ایجاد محصول',
+      trackingId,
+      preserveInput: true
+    }));
   }
 });
 
@@ -764,17 +775,17 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
 // @route   PUT /api/products/:id
 // @access  Private/Sales Workspace Edit
 router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PRODUCTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
-  body('basePrice').optional().isNumeric().withMessage('Base price must be a number'),
-  body('motherLengthValue').optional({ nullable: true }).isFloat({ gt: 0 }).withMessage('Mother length must be greater than zero'),
-  body('isAvailable').optional().isBoolean().withMessage('isAvailable must be a boolean'),
-  body('isActive').optional().isBoolean().withMessage('isActive must be a boolean'),
-  body('leadTime').optional().isInt({ min: 0 }).withMessage('Lead time must be a non-negative integer'),
-  body('description').optional().isString().withMessage('Description must be a string'),
-  body('images').optional().isArray().withMessage('Images must be an array'),
-  body('availableInLongitudinalContracts').optional().isBoolean().withMessage('availableInLongitudinalContracts must be a boolean').toBoolean(),
-  body('availableInStairContracts').optional().isBoolean().withMessage('availableInStairContracts must be a boolean').toBoolean(),
-  body('availableInSlabContracts').optional().isBoolean().withMessage('availableInSlabContracts must be a boolean').toBoolean(),
-  body('availableInVolumetricContracts').optional().isBoolean().withMessage('availableInVolumetricContracts must be a boolean').toBoolean(),
+  body('basePrice').optional().isNumeric().withMessage('قیمت پایه باید عدد باشد؛ قیمت را اصلاح کنید.'),
+  body('motherLengthValue').optional({ nullable: true }).isFloat({ gt: 0 }).withMessage('طول مادر باید بیشتر از صفر باشد؛ طول را اصلاح کنید.'),
+  body('isAvailable').optional().isBoolean().withMessage('وضعیت موجودی معتبر نیست؛ وضعیت را دوباره انتخاب کنید.'),
+  body('isActive').optional().isBoolean().withMessage('وضعیت فعالیت محصول معتبر نیست؛ وضعیت را دوباره انتخاب کنید.'),
+  body('leadTime').optional().isInt({ min: 0 }).withMessage('زمان آماده‌سازی باید صفر یا بیشتر باشد؛ مقدار را اصلاح کنید.'),
+  body('description').optional().isString().withMessage('توضیحات محصول معتبر نیست؛ متن را اصلاح کنید.'),
+  body('images').optional().isArray().withMessage('فهرست تصاویر محصول معتبر نیست؛ تصاویر را دوباره انتخاب کنید.'),
+  body('availableInLongitudinalContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد طولی معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
+  body('availableInStairContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد پله معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
+  body('availableInSlabContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد اسلب معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
+  body('availableInVolumetricContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد حجمی معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
 ], async (req: any, res: Response) => {
   try {
     console.log('Product update request:', {
@@ -789,7 +800,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
       console.log('Validation errors:', errors.array());
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'تغییرات محصول ذخیره نشد؛ موارد مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -801,7 +812,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
     if (!product) {
       return res.status(404).json({
         success: false,
-        error: 'Product not found'
+        error: 'محصول پیدا نشد؛ به فهرست محصولات برگردید و محصول دیگری را انتخاب کنید.'
       });
     }
 
@@ -837,11 +848,14 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
       data: updatedProduct
     });
   } catch (error) {
-    console.error('Update product error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
+    const trackingId = randomUUID();
+    console.error('Update product error:', { trackingId, error });
+    return res.status(500).json(unexpectedSalesErrorResponse({
+      code: 'SALES_PRODUCT_UPDATE_UNEXPECTED',
+      failedAction: 'به‌روزرسانی محصول',
+      trackingId,
+      preserveInput: true
+    }));
   }
 });
 
@@ -931,7 +945,7 @@ router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPAC
     if (!product) {
       return res.status(404).json({
         success: false,
-        error: 'Product not found'
+        error: 'محصول پیدا نشد؛ به فهرست محصولات برگردید و محصول دیگری را انتخاب کنید.'
       });
     }
 
@@ -939,7 +953,7 @@ router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPAC
     if (product._count.contractItems > 0 || product._count.deliveryProducts > 0) {
       return res.status(400).json({
         success: false,
-        error: 'Cannot delete product that is used in contracts or deliveries. Consider deactivating it instead.'
+        error: 'این محصول در قرارداد یا برنامه تحویل استفاده شده است و قابل حذف نیست؛ آن را غیرفعال کنید.'
       });
     }
 
@@ -956,14 +970,16 @@ router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPAC
 
     return res.json({
       success: true,
-      message: 'Product deleted successfully'
+      message: 'محصول حذف شد.'
     });
   } catch (error) {
-    console.error('Delete product error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
+    const trackingId = randomUUID();
+    console.error('Delete product error:', { trackingId, error });
+    return res.status(500).json(unexpectedSalesErrorResponse({
+      code: 'SALES_PRODUCT_DELETE_UNEXPECTED',
+      failedAction: 'حذف محصول',
+      trackingId
+    }));
   }
 });
 

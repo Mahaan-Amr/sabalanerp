@@ -69,7 +69,7 @@ const failureMessage = (error: any) => {
   if (code.includes('ENVELOPE')) return 'نسخه وظیفه تغییر کرده است. فهرست را به‌روزرسانی کنید.';
   if (error?.response?.status === 403) return 'دسترسی شما به این وظیفه معتبر نیست.';
   if (error?.response?.status === 404) return 'این وظیفه در این فضای کاری در دسترس نیست.';
-  return 'ارتباط برقرار نشد. آخرین نمایش موفق حفظ شده است.';
+  return 'ارتباط با سامانه برقرار نشد و آخرین نمایش موفق حفظ شده است؛ اتصال را بررسی و وضعیت وظیفه را تازه‌سازی کنید.';
 };
 
 export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string; dutyId: string }) {

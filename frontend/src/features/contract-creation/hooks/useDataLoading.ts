@@ -4,6 +4,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { CrmCustomer, CuttingType, Product, SubService, StoneFinishing } from '../types/contract.types';
 import { crmAPI, salesAPI, servicesAPI, dashboardAPI } from '@/lib/api';
+import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface UseDataLoadingOptions {
   autoLoad?: boolean;
@@ -41,6 +42,12 @@ type PermissionLevel = 'view' | 'edit' | 'admin';
 type CustomerLoadParams = { limit?: number; search?: string };
 
 const permissionLevels: PermissionLevel[] = ['view', 'edit', 'admin'];
+
+const loadErrorMessage = (err: unknown, resource: string) =>
+  getSalesOperationalErrorMessage(err, {
+    failedAction: `دریافت ${resource}`,
+    nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
+  });
 
 export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   const { autoLoad = true, onError, onDataLoaded } = options;
@@ -156,7 +163,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         setCustomers([]);
         return [];
       }
-      const errorMsg = err.response?.data?.error || 'Error loading customers';
+      const errorMsg = loadErrorMessage(err, 'فهرست مشتریان');
       setError(errorMsg);
       if (onErrorRef.current) onErrorRef.current(errorMsg);
       return [];
@@ -172,7 +179,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       }
       return [];
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Error loading products';
+      const errorMsg = loadErrorMessage(err, 'فهرست محصولات');
       setError(errorMsg);
       if (onErrorRef.current) onErrorRef.current(errorMsg);
       return [];
@@ -188,7 +195,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       }
       return [];
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Error loading departments';
+      const errorMsg = loadErrorMessage(err, 'اطلاعات واحد فروش');
       setError(errorMsg);
       if (onErrorRef.current) onErrorRef.current(errorMsg);
       return [];
@@ -208,7 +215,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         setCuttingTypes([]);
         return [];
       }
-      const errorMsg = err.response?.data?.error || 'Error loading cutting types';
+      const errorMsg = loadErrorMessage(err, 'انواع برش');
       setError(errorMsg);
       if (onErrorRef.current) onErrorRef.current(errorMsg);
       return [];
@@ -228,7 +235,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         setSubServices([]);
         return [];
       }
-      const errorMsg = err.response?.data?.error || 'Error loading tools';
+      const errorMsg = loadErrorMessage(err, 'فهرست ابزارها');
       setError(errorMsg);
       if (onErrorRef.current) onErrorRef.current(errorMsg);
       return [];
@@ -253,7 +260,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         setStoneFinishingLoadState('forbidden');
         return [];
       }
-      const errorMsg = err.response?.data?.error || 'Error loading stone finishings';
+      const errorMsg = loadErrorMessage(err, 'روش‌های پرداخت سنگ');
       setError(errorMsg);
       setStoneFinishings([]);
       setStoneFinishingLoadState('error');
@@ -286,7 +293,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       }
       return null;
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Error loading user profile';
+      const errorMsg = loadErrorMessage(err, 'اطلاعات کاربر');
       setError(errorMsg);
       if (onErrorRef.current) onErrorRef.current(errorMsg);
       return null;
@@ -328,7 +335,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         onDataLoadedRef.current();
       }
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Error loading initial data';
+      const errorMsg = loadErrorMessage(err, 'اطلاعات اولیه قرارداد');
       setError(errorMsg);
       if (onErrorRef.current) onErrorRef.current(errorMsg);
     } finally {

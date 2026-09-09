@@ -13,6 +13,7 @@ import { PersianCalendar } from '@/lib/persian-calendar';
 import { biAPI, departmentsAPI, salesReportsAPI } from '@/lib/api';
 import { formatMoneyNumber, formatPrice } from '@/lib/numberFormat';
 import { resolveChartLabel, RtlHorizontalBarChart, RtlTrendChart } from './RtlCharts';
+import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 type Mode = 'sales' | 'bi';
 type Report = any;
@@ -175,7 +176,14 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
       const response = mode === 'bi' ? await biAPI.getSalesOverview(filters) : await salesReportsAPI.getOverview(filters);
       setReport(response.data.data);
       localStorage.setItem(storageKey, JSON.stringify({ range, customFrom, customTo, departmentId, sellerId }));
-    } catch (reason: any) { setError(reason?.response?.data?.error || 'خطا در دریافت گزارش'); }
+    } catch (reason: any) {
+      setError(mode === 'sales'
+        ? getSalesOperationalErrorMessage(reason, {
+          failedAction: 'دریافت گزارش فروش',
+          nextStep: 'بازه و فیلترها را بررسی کنید و دوباره تلاش کنید.'
+        })
+        : reason?.response?.data?.error || 'خطا در دریافت گزارش');
+    }
     finally { setLoading(false); }
   }, [mode, filters, storageKey, range, customFrom, customTo, departmentId, sellerId]);
 

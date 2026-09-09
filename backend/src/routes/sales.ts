@@ -68,6 +68,7 @@ import { resolveWorkspaceRecipientIds } from '../services/domainNotificationReci
 import { ContractPartyIdentityValidationError } from '../services/contractPartyIdentity';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
+import { unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
 
 const router = express.Router();
 const rejectContractGraphWritesWhenReadOnly = (_req: any, res: Response, next: () => void) => {
@@ -971,18 +972,18 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
 // @route   POST /api/sales/contracts
 // @access  Private/Sales Workspace
 router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_CONTRACTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
-  body('title').notEmpty().withMessage('Title is required'),
-  body('titlePersian').notEmpty().withMessage('Persian title is required'),
-  body('customerId').notEmpty().withMessage('Customer ID is required'),
-  body('departmentId').notEmpty().withMessage('Department ID is required'),
-  body('content').notEmpty().withMessage('Content is required'),
+  body('title').notEmpty().withMessage('عنوان قرارداد ساخته نشد؛ اطلاعات قرارداد را دوباره بررسی کنید.'),
+  body('titlePersian').notEmpty().withMessage('عنوان فارسی قرارداد ساخته نشد؛ اطلاعات قرارداد را دوباره بررسی کنید.'),
+  body('customerId').notEmpty().withMessage('مشتری قرارداد مشخص نیست؛ مشتری را دوباره انتخاب کنید.'),
+  body('departmentId').notEmpty().withMessage('واحد فروش قرارداد مشخص نیست؛ صفحه را تازه‌سازی و دوباره تلاش کنید.'),
+  body('content').notEmpty().withMessage('متن قرارداد ساخته نشد؛ اطلاعات مراحل قرارداد را بازبینی کنید.'),
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'قرارداد ثبت نشد؛ موارد مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -1013,7 +1014,7 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     if (req.user.role !== 'ADMIN' && req.user.departmentId && departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied to this department'
+        error: 'ثبت قرارداد برای این واحد فروش مجاز نیست؛ واحد فروش خود را انتخاب کنید.'
       });
     }
 
@@ -1089,11 +1090,12 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     }
     const trackingId = randomUUID();
     console.error('Unexpected create sales contract failure:', { trackingId, error });
-    res.status(500).json({
-      success: false,
-      error: `ثبت قرارداد انجام نشد؛ لطفاً با پشتیبانی تماس بگیرید. کد پیگیری: ${trackingId}`,
-      trackingId
-    });
+    res.status(500).json(unexpectedSalesErrorResponse({
+      code: 'SALES_CONTRACT_CREATE_UNEXPECTED',
+      failedAction: 'ثبت قرارداد',
+      trackingId,
+      preserveInput: true
+    }));
     return;
   }
 });
@@ -1224,16 +1226,16 @@ router.post(
 // @route   PUT /api/sales/contracts/:id
 // @access  Private/Sales Workspace
 router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
-  body('title').optional().notEmpty().withMessage('Title cannot be empty'),
-  body('titlePersian').optional().notEmpty().withMessage('Persian title cannot be empty'),
-  body('content').optional().notEmpty().withMessage('Content cannot be empty'),
+  body('title').optional().notEmpty().withMessage('عنوان قرارداد نمی‌تواند خالی باشد؛ عنوان را وارد کنید.'),
+  body('titlePersian').optional().notEmpty().withMessage('عنوان فارسی قرارداد نمی‌تواند خالی باشد؛ عنوان را وارد کنید.'),
+  body('content').optional().notEmpty().withMessage('متن قرارداد نمی‌تواند خالی باشد؛ مراحل قرارداد را بازبینی کنید.'),
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'تغییرات قرارداد ذخیره نشد؛ موارد مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -1294,11 +1296,12 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
     }
     const trackingId = randomUUID();
     console.error('Unexpected update sales contract failure:', { trackingId, error });
-    res.status(500).json({
-      success: false,
-      error: `ذخیره تغییرات قرارداد انجام نشد؛ لطفاً با پشتیبانی تماس بگیرید. کد پیگیری: ${trackingId}`,
-      trackingId
-    });
+    res.status(500).json(unexpectedSalesErrorResponse({
+      code: 'SALES_CONTRACT_UPDATE_UNEXPECTED',
+      failedAction: 'ذخیره تغییرات قرارداد',
+      trackingId,
+      preserveInput: true
+    }));
     return;
   }
 });

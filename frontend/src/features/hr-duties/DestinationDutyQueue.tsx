@@ -74,7 +74,7 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
       }
       dispatch({ type: 'success', data: { summary: resolvedSummary, duties: duties.data.data, view } });
     } catch {
-      dispatch({ type: 'failure', message: 'به‌روزرسانی وظایف انجام نشد.' });
+      dispatch({ type: 'failure', message: 'به‌روزرسانی وظایف انجام نشد چون ارتباط با سامانه برقرار نشد؛ اتصال را بررسی و دوباره تلاش کنید.' });
     }
   }, [view, workspace]);
 

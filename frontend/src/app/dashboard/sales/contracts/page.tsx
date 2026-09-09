@@ -34,6 +34,7 @@ import { downloadBlobResponse } from '@/lib/downloadFile';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 import { sourceStatusLabels, StatusBadge } from '@/features/accounting/accountingUi';
 import { parseContractStatusQuery } from '@/features/sales/contractListQuery';
+import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface Contract {
   id: string;
@@ -189,6 +190,7 @@ export default function ContractsPage() {
   });
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState('');
 
   useEffect(() => {
     loadCurrentUser();
@@ -213,6 +215,7 @@ export default function ContractsPage() {
         setLoadingMore(true);
       } else {
         setLoading(true);
+        setOperationError('');
       }
 
       const response = await salesAPI.getContracts({
@@ -228,9 +231,18 @@ export default function ContractsPage() {
         if (response.data.pagination) {
           setPagination(response.data.pagination);
         }
+      } else {
+        setOperationError(getSalesOperationalErrorMessage({ response }, {
+          failedAction: 'دریافت فهرست قراردادها',
+          nextStep: 'دوباره تلاش کنید.'
+        }));
       }
     } catch (error) {
       console.error('Error loading contracts:', error);
+      setOperationError(getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت فهرست قراردادها',
+        nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
+      }));
     } finally {
       if (append) {
         setLoadingMore(false);
@@ -253,6 +265,10 @@ export default function ContractsPage() {
       }
     } catch (error) {
       console.error('Error loading user profile:', error);
+      setOperationError(getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت دسترسی‌های فروش',
+        nextStep: 'صفحه را تازه‌سازی کنید و دوباره تلاش کنید.'
+      }));
     }
   };
 
@@ -349,6 +365,10 @@ export default function ContractsPage() {
       downloadBlobResponse(response, `sales_contract_${contractId}.pdf`);
     } catch (error) {
       console.error('Error downloading contract PDF:', error);
+      setOperationError(getSalesOperationalErrorMessage(error, {
+        failedAction: 'دانلود PDF قرارداد',
+        nextStep: 'دوباره روی «دانلود PDF» بزنید.'
+      }));
     } finally {
       setPdfActionLoading(null);
     }
@@ -385,10 +405,17 @@ export default function ContractsPage() {
         }
         await loadContracts(1, { append: false });
       } else {
-        console.error('Error:', response.data.error);
+        setOperationError(getSalesOperationalErrorMessage({ response }, {
+          failedAction: action === 'approve' ? 'تأیید قرارداد' : action === 'reject' ? 'رد قرارداد' : action === 'sign' ? 'امضای قرارداد' : 'پرینت قرارداد',
+          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+        }));
       }
     } catch (error: any) {
       console.error(`Error ${action}ing contract:`, error);
+      setOperationError(getSalesOperationalErrorMessage(error, {
+        failedAction: action === 'approve' ? 'تأیید قرارداد' : action === 'reject' ? 'رد قرارداد' : action === 'sign' ? 'امضای قرارداد' : 'پرینت قرارداد',
+        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+      }));
     } finally {
       setActionLoading(null);
     }
@@ -646,7 +673,15 @@ export default function ContractsPage() {
           action={{ label: 'ایجاد قرارداد جدید', href: '/dashboard/sales/contracts/create', icon: FaPlus, tone: 'primary', variant: 'solid' }}
         />
       }
-    />
+    >
+      {operationError && (
+        <ErpInlineState
+          kind="error"
+          title={operationError}
+          action={{ label: 'تازه‌سازی فهرست', onClick: () => loadContracts(1, { append: false }), tone: 'primary' }}
+        />
+      )}
+    </ErpListPage>
     </>
   );
 }

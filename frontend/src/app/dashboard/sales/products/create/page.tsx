@@ -18,6 +18,7 @@ import SuccessModal from '@/components/SuccessModal';
 import ErrorModal from '@/components/ErrorModal';
 import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
 import { SalesAuthoringPage, SalesAuthoringSection } from '@/features/sales/authoring/SalesAuthoringUi';
+import { getSalesOperationalErrorMessage, mapProductCreationValidationErrors } from '@/features/sales/salesOperationalError';
 
 // Stone type definitions
 const STONE_TYPES = [
@@ -87,6 +88,18 @@ const WIZARD_STEPS = [
     description: 'خصوصیات یا رنگ'
   }
 ];
+
+const PRODUCT_ERROR_STEPS: Record<string, number> = {
+  cutType: 1,
+  stoneMaterial: 2,
+  cutWidth: 3,
+  motherLengthValue: 3,
+  thickness: 4,
+  mine: 5,
+  finishType: 6,
+  color: 7,
+  contractVisibility: 7,
+};
 
 type ContractVisibilityOption = 'longitudinal' | 'stair' | 'slab' | 'volumetric';
 
@@ -281,6 +294,15 @@ export default function CreateStoneProductWizard() {
   const [loadError, setLoadError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    if (!Object.values(errors).some(Boolean)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const firstInvalidField = document.querySelector<HTMLElement>('[aria-invalid="true"]');
+      firstInvalidField?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [currentStep, errors]);
+
   // Master data state
   const [masterData, setMasterData] = useState({
     cutTypes: [] as MasterDataItem[],
@@ -369,7 +391,10 @@ export default function CreateStoneProductWizard() {
       });
     } catch (error) {
       console.error('Error loading master data:', error);
-      setLoadError('دریافت داده‌های پایه محصول ناموفق بود. دوباره تلاش کنید.');
+      setLoadError(getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت گزینه‌های ساخت محصول',
+        nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
+      }));
     } finally {
       setLoading(false);
     }
@@ -622,8 +647,12 @@ export default function CreateStoneProductWizard() {
           }
         }, 2000);
       } else {
-        setModalMessage('خطا در ایجاد محصول');
-        setModalDetails(response.data.error);
+        setModalMessage('ایجاد محصول انجام نشد');
+        setModalDetails(getSalesOperationalErrorMessage({ response }, {
+          failedAction: 'ایجاد محصول',
+          nextStep: 'مشخصات محصول را بررسی کنید و دوباره تلاش کنید.',
+          preserveInput: true
+        }));
         setShowErrorModal(true);
       }
     } catch (error: any) {
@@ -632,19 +661,21 @@ export default function CreateStoneProductWizard() {
       // Show detailed error message from backend
       if (error.response?.data?.details) {
         const errorDetails = error.response.data.details;
-        const errorMessages = errorDetails.map((detail: any) => detail.msg).join('\n');
-        setModalMessage('خطا در اعتبارسنجی');
-        setModalDetails(errorMessages);
-        setShowErrorModal(true);
-      } else if (error.response?.data?.error) {
-        setModalMessage('خطا در ایجاد محصول');
-        setModalDetails(error.response.data.error);
-        setShowErrorModal(true);
-      } else {
-        setModalMessage('خطا در ایجاد محصول');
-        setModalDetails('خطای غیرمنتظره رخ داده است');
-        setShowErrorModal(true);
+        const fieldErrors = mapProductCreationValidationErrors(errorDetails);
+        if (Object.keys(fieldErrors).length > 0) {
+          setErrors(fieldErrors);
+          const firstStep = Math.min(...Object.keys(fieldErrors).map((field) => PRODUCT_ERROR_STEPS[field] || 7));
+          setCurrentStep(firstStep);
+          return;
+        }
       }
+      setModalMessage('ایجاد محصول انجام نشد');
+      setModalDetails(getSalesOperationalErrorMessage(error, {
+        failedAction: 'ایجاد محصول',
+        nextStep: 'مشخصات محصول را بررسی کنید و دوباره تلاش کنید.',
+        preserveInput: true
+      }));
+      setShowErrorModal(true);
     } finally {
       setLoading(false);
     }
@@ -874,10 +905,10 @@ export default function CreateStoneProductWizard() {
       <ErrorModal
         isOpen={showErrorModal}
         onClose={() => setShowErrorModal(false)}
-        title="خطا در ایجاد محصول"
+        title="ایجاد محصول انجام نشد"
         message={modalMessage}
         details={modalDetails}
-        buttonText="باشه"
+        buttonText="بستن"
       />
     </SalesAuthoringPage>
   );

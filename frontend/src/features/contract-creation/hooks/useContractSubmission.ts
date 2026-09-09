@@ -35,6 +35,7 @@ import {
 } from '../utils/contractSubmissionDiagnostics';
 import { validateContractPartyIdentity } from '../services/contractPartyIdentity';
 import { finalizeSuccessfulContractCommit } from '../utils/contractCreationCompletion';
+import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -439,7 +440,15 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           )
         });
       } else {
-        setErrors({ general: response.data.error || 'خطا در ثبت قرارداد' });
+        setErrors({
+          general: getSalesOperationalErrorMessage({
+            response: { status: response.status, data: response.data }
+          }, {
+            failedAction: isEditMode ? 'ذخیره تغییرات قرارداد' : 'ثبت قرارداد',
+            nextStep: 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.',
+            preserveInput: true
+          })
+        });
       }
     } catch (error: any) {
       console.error('Error creating contract:', error);
@@ -449,9 +458,19 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       const initialMappedErrors = editSessionMessage
         ? { general: editSessionMessage }
         : mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد');
+      const operationalMappedErrors = !editSessionMessage && initialMappedErrors.general
+        ? {
+          ...initialMappedErrors,
+          general: getSalesOperationalErrorMessage(error, {
+            failedAction: isEditMode ? 'ذخیره تغییرات قرارداد' : 'ثبت قرارداد',
+            nextStep: 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.',
+            preserveInput: true
+          })
+        }
+        : initialMappedErrors;
       const mappedErrors = mapProductValidationFailure(
         error,
-        initialMappedErrors
+        operationalMappedErrors
       );
       setErrors(mappedErrors);
       storeContractSubmissionDiagnostic(error);

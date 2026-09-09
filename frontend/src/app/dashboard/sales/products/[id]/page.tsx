@@ -8,6 +8,7 @@ import { formatPrice } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
 import { SalesAuthoringPage, SalesAuthoringSection, hasSalesDraftChanged } from '@/features/sales/authoring/SalesAuthoringUi';
+import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 // Product name generation utilities
 const generateFullProductName = (product: Product): string => {
@@ -83,11 +84,17 @@ const ProductDetailPage: React.FC = () => {
         setProduct(null);
         setSavedFormSnapshot(null);
       } else {
-        setLoadError('دریافت اطلاعات محصول ناموفق بود. دوباره تلاش کنید.');
+        setLoadError(getSalesOperationalErrorMessage({ response }, {
+          failedAction: 'دریافت اطلاعات محصول',
+          nextStep: 'به فهرست محصولات برگردید یا دوباره تلاش کنید.'
+        }));
       }
     } catch (error) {
       console.error('Error fetching product:', error);
-      setLoadError('دریافت اطلاعات محصول ناموفق بود. دوباره تلاش کنید.');
+      setLoadError(getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت اطلاعات محصول',
+        nextStep: 'به فهرست محصولات برگردید یا دوباره تلاش کنید.'
+      }));
     } finally {
       setLoading(false);
     }
@@ -114,11 +121,25 @@ const ProductDetailPage: React.FC = () => {
         setEditing(false);
         setFeedback({ kind: 'success', title: 'محصول با موفقیت به‌روزرسانی شد.' });
       } else {
-        setFeedback({ kind: 'error', title: 'به‌روزرسانی محصول ناموفق بود.' });
+        setFeedback({
+          kind: 'error',
+          title: getSalesOperationalErrorMessage({ response }, {
+            failedAction: 'به‌روزرسانی محصول',
+            nextStep: 'مقادیر مشخص‌شده را بررسی کنید و دوباره ذخیره کنید.',
+            preserveInput: true
+          })
+        });
       }
     } catch (error) {
       console.error('Error updating product:', error);
-      setFeedback({ kind: 'error', title: 'به‌روزرسانی محصول ناموفق بود.' });
+      setFeedback({
+        kind: 'error',
+        title: getSalesOperationalErrorMessage(error, {
+          failedAction: 'به‌روزرسانی محصول',
+          nextStep: 'مقادیر مشخص‌شده را بررسی کنید و دوباره ذخیره کنید.',
+          preserveInput: true
+        })
+      });
     } finally {
       setSaving(false);
     }

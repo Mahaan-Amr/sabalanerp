@@ -10,6 +10,7 @@ import { openPartnerPdf, readPartnerAccount, readPartnerCases, sendPartnerConfir
 import type { PartnerAccountView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
+import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 export function PartnerCaseRuntime() {
   const [rows, setRows] = useState<PartnerCaseRuntimeRow[]>([]);
@@ -30,13 +31,23 @@ export function PartnerCaseRuntime() {
       setCollections(Object.fromEntries(supplementary.flatMap(item => item.collections ? [[item.caseId, item.collections]] : [])));
       setCorrections(Object.fromEntries(supplementary.flatMap(item => item.correction !== undefined
         ? [[item.caseId, item.correction]] : [])));
-    } catch { setError('دریافت پرونده‌های فروش همکار ممکن نشد.'); }
+    } catch (reason) {
+      setError(getSalesOperationalErrorMessage(reason, {
+        failedAction: 'دریافت پرونده‌های فروش همکار',
+        nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
+      }));
+    }
     finally { setBusy(false); }
   }, []);
-  const runAction = useCallback(async (action: () => Promise<unknown>) => {
+  const runAction = useCallback(async (name: string, action: () => Promise<unknown>) => {
     setError(undefined);
     try { await action(); await load(); }
-    catch { setError('انجام عملیات پرونده ممکن نشد. لطفاً دوباره تلاش کنید.'); }
+    catch (reason) {
+      setError(getSalesOperationalErrorMessage(reason, {
+        failedAction: name,
+        nextStep: 'وضعیت پرونده را تازه‌سازی و سپس دوباره بررسی کنید.'
+      }));
+    }
   }, [load]);
   useEffect(() => { void load(); }, [load]);
   if (busy) return <ErpLoading />;
@@ -46,13 +57,13 @@ export function PartnerCaseRuntime() {
     <div className="space-y-8">{rows.map((row, index) => <PartnerCaseWorkspace key={row.view.owner.caseId}
       view={row.view} account={index === 0 ? account : undefined}
       collections={collections[row.view.owner.caseId]} correction={corrections[row.view.owner.caseId]}
-      onRequestCorrection={scope => void runAction(() => requestPartnerCorrection(row.view, scope))}
+      onRequestCorrection={scope => void runAction('ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, scope))}
       actions={{ ...row.actions,
         onPreview: row.snapshotId ? () => void openPartnerPdf(row.view.owner.caseId, row.snapshotId!, 'PREVIEW') : undefined,
-        onIssue: row.snapshotId ? () => void runAction(() => openPartnerPdf(row.view.owner.caseId, row.snapshotId!, 'FINAL')) : undefined,
-        onSendConfirmation: () => void runAction(() => sendPartnerConfirmation(row.view.owner.caseId)),
-        onRequestCorrection: () => void runAction(() => requestPartnerCorrection(row.view, 'RETAIL_ONLY')),
-        onRequestVoid: () => void runAction(() => requestPartnerCorrection(row.view, 'VOID')),
+        onIssue: row.snapshotId ? () => void runAction('صدور سند فروش همکار', () => openPartnerPdf(row.view.owner.caseId, row.snapshotId!, 'FINAL')) : undefined,
+        onSendConfirmation: () => void runAction('ارسال تأییدیه فروش همکار', () => sendPartnerConfirmation(row.view.owner.caseId)),
+        onRequestCorrection: () => void runAction('ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, 'RETAIL_ONLY')),
+        onRequestVoid: () => void runAction('ثبت درخواست ابطال فروش همکار', () => requestPartnerCorrection(row.view, 'VOID')),
       }} />)}</div>
   </ErpWorkspacePage>;
 }

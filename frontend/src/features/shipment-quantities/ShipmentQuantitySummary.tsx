@@ -43,7 +43,7 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
   }, [contractId, customerId]);
 
   if (loading && !data) return <ErpLoading />;
-  if (!data && refreshError) return <ErpInlineState kind="error" title="اطلاعات ارسال در دسترس نیست" />;
+  if (!data && refreshError) return <ErpInlineState kind="error" title="اطلاعات ارسال دریافت نشد چون ارتباط با سامانه برقرار نشد؛ اتصال را بررسی و صفحه را تازه‌سازی کنید." />;
 
   return (
     <ErpSection title="مانده ارسال" description="مقادیر قرارداد، رزروشده، خارج‌شده و قابل بارگیری از شواهد ثبت‌شده محاسبه می‌شوند.">

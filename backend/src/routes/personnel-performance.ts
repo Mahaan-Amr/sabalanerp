@@ -1,5 +1,12 @@
 import { assessPerformanceEvaluationRetention } from '../services/personnelPerformanceRetentionStore';
 import {
+  approvePerformanceBulkErasure,
+  approvePerformanceErasureImpact,
+  executePerformanceErasureOperation,
+  listPerformanceErasureOperations,
+  recordPerformanceRecoverableCopy,
+} from '../services/personnelPerformanceErasureStore';
+import {
   activatePerformanceCohort,
   decidePerformanceRollout,
   proposePerformanceCohort,
@@ -735,6 +742,30 @@ router.post('/retention/evaluations/:evaluationId/assess', requireHrAuthorizatio
   try { return res.json({ success: true, assessment: await assessPerformanceEvaluationRetention(prisma, {
     actorUserId: req.user!.id, evaluationId: req.params.evaluationId,
   }) }); } catch (error) { return next(error); }
+});
+
+router.get('/retention/erasure', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await listPerformanceErasureOperations(prisma, req.user!.id)) }); } catch (error) { return next(error); }
+});
+router.post('/retention/erasure/policies/:policyVersionId/impact-approval', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, approval: await approvePerformanceErasureImpact(prisma, {
+    actorUserId: req.user!.id, policyVersionId: req.params.policyVersionId,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/retention/erasure/:operationId/bulk-approvals', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, approval: await approvePerformanceBulkErasure(prisma, {
+    actorUserId: req.user!.id, operationId: req.params.operationId, reasonCode: req.body.reasonCode,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/retention/erasure/:operationId/copies', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, copy: await recordPerformanceRecoverableCopy(prisma, {
+    actorUserId: req.user!.id, operationId: req.params.operationId, location: req.body.location,
+    copyKey: req.body.copyKey, status: req.body.status, recoverableUntil: req.body.recoverableUntil ? new Date(req.body.recoverableUntil) : undefined,
+    evidenceHash: req.body.evidenceHash,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/retention/erasure/:operationId/run', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, operation: await executePerformanceErasureOperation(prisma, req.params.operationId, new Date(), undefined, req.user!.id) }); } catch (error) { return next(error); }
 });
 
 router.get('/legal-holds', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {

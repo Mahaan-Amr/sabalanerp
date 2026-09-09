@@ -8396,6 +8396,78 @@ model PerformanceDeletionReceipt {
   @@map("performance_deletion_receipts")
 }
 
+model PerformanceErasureImpactApproval {
+  id                  String    @id @default(cuid())
+  policyVersionId     String    @unique
+  populationHash      String
+  eligibleScopeCount  Int
+  erasableRecordCount Int
+  approvedByUserId    String?
+  approvedAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  @@index([approvedAt, createdAt])
+  @@map("performance_erasure_impact_approvals")
+}
+
+model PerformanceErasureOperation {
+  id               String    @id @default(cuid())
+  operationKeyHash String    @unique
+  retentionStateId String    @unique
+  aggregateType    String
+  aggregateIdHash  String
+  policyVersionId  String
+  encryptedScopeId String    @unique
+  scopeHash        String
+  dependencyHash   String
+  status           String    @default("PENDING_IMPACT_APPROVAL")
+  recordCount      Int
+  bulkThreshold    Int
+  attemptCount     Int       @default(0)
+  lastFailureCode  String?
+  claimedAt        DateTime?
+  nextRetryAt      DateTime?
+  liveErasedAt     DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status, nextRetryAt, createdAt])
+  @@index([policyVersionId, status])
+  @@map("performance_erasure_operations")
+}
+
+model PerformanceErasureApproval {
+  id            String   @id @default(cuid())
+  operationId   String
+  actorUserId   String
+  reasonCode    String
+  authorityHash String
+  approvedAt    DateTime @default(now())
+
+  @@unique([operationId, actorUserId])
+  @@index([operationId, approvedAt])
+  @@map("performance_erasure_approvals")
+}
+
+model PerformanceRecoverableCopy {
+  id               String    @id @default(cuid())
+  operationId      String
+  location         String
+  copyKeyHash      String
+  status           String
+  version          Int       @default(1)
+  recoverableUntil DateTime?
+  evidenceHash     String
+  checkedByUserId  String?
+  checkedAt        DateTime  @default(now())
+
+  @@unique([operationId, location, copyKeyHash])
+  @@unique([operationId, location, version])
+  @@index([status, recoverableUntil])
+  @@map("performance_recoverable_copies")
+}
+
 model PerformancePrivacyCase {
   id                   String   @id @default(cuid())
   subjectId            String

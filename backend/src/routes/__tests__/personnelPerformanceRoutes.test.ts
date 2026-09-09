@@ -82,7 +82,13 @@ assert.deepEqual(registeredRoutes, [
   'POST /operations/cohorts/:cohortVersionId/activate',
   'POST /operations/pauses/:pauseId/decisions',
   'POST /operations/pauses/:pauseId/resume',
-  'POST /retention/evaluations/:evaluationId/assess', 'GET /legal-holds',
+  'POST /retention/evaluations/:evaluationId/assess',
+  'GET /retention/erasure',
+  'POST /retention/erasure/policies/:policyVersionId/impact-approval',
+  'POST /retention/erasure/:operationId/bulk-approvals',
+  'POST /retention/erasure/:operationId/copies',
+  'POST /retention/erasure/:operationId/run',
+  'GET /legal-holds',
   'POST /legal-holds',
   'POST /legal-holds/:holdId/decisions',
 ]);
@@ -99,6 +105,13 @@ for (const path of ['/readiness/reconstruct', '/readiness/:runId/retry', '/super
   assert.ok(writeLayer && writeLayer.route!.stack.length >= 3, `${path} writes require permission and server-side rollout middleware`);
 }
 
+for (const path of ['/retention/erasure/policies/:policyVersionId/impact-approval', '/retention/erasure/:operationId/bulk-approvals',
+  '/retention/erasure/:operationId/copies', '/retention/erasure/:operationId/run']) {
+  const erasureLayer = (router as unknown as {
+    stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
+  }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);
+  assert.ok(erasureLayer && erasureLayer.route!.stack.length >= 2, `${path} requires explicit retention-erasure authorization`);
+}
 assert.deepEqual(projectPersonnelPerformanceCapabilities([
   'PERSONNEL',
   'VIEW_PERFORMANCE_HISTORY',

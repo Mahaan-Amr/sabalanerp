@@ -25,12 +25,14 @@ export const readPerformanceRetentionPolicy = async (client: PrismaClient | Pris
 };
 
 export const assessPerformanceEvaluationRetention = async (client: PrismaClient | Prisma.TransactionClient, input: {
-  actorUserId: string; evaluationId: string;
+  actorUserId: string | null; evaluationId: string;
 }) => runPerformanceSerializableTransaction(client, async (tx) => {
-  const permissions = await activeHrActionPermissionsForUser(tx, input.actorUserId);
-  if (!permissions.includes('MANAGE_PERFORMANCE_RETENTION')) throw Object.assign(new Error('مجوز مستقل بررسی نگهداری عملکرد را ندارید.'), {
-    code: 'PERFORMANCE_RETENTION_PERMISSION_REQUIRED', status: 403,
-  });
+  if (input.actorUserId) {
+    const permissions = await activeHrActionPermissionsForUser(tx, input.actorUserId);
+    if (!permissions.includes('MANAGE_PERFORMANCE_RETENTION')) throw Object.assign(new Error('مجوز مستقل بررسی نگهداری عملکرد را ندارید.'), {
+      code: 'PERFORMANCE_RETENTION_PERMISSION_REQUIRED', status: 403,
+    });
+  }
   const evaluation = await tx.performanceEvaluation.findUnique({ where: { id: input.evaluationId } });
   if (!evaluation) throw Object.assign(new Error('پرونده عملکرد پیدا نشد.'), { code: 'PERFORMANCE_EVALUATION_NOT_FOUND', status: 404 });
   const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
@@ -123,7 +125,9 @@ export const assessPerformanceEvaluationRetention = async (client: PrismaClient 
   const id = randomUUID();
   await tx.performanceAuditEvent.create({ data: { id, aggregateType: 'PERFORMANCE_RETENTION_STATE', aggregateId: state.id,
     eventType: 'RETENTION_ASSESSED', actorUserId: input.actorUserId, encryptedPayloadId: payload.id,
-    authorityHash: canonicalPerformanceHash({ permission: 'MANAGE_PERFORMANCE_RETENTION', actorUserId: input.actorUserId }),
+    authorityHash: canonicalPerformanceHash(input.actorUserId
+      ? { permission: 'MANAGE_PERFORMANCE_RETENTION', actorUserId: input.actorUserId }
+      : { authority: 'SYSTEM_DAILY_RETENTION_ASSESSMENT' }),
     eventHash: canonicalPerformanceHash({ id, stateId: state.id, basisHash }) } });
   return state;
 });

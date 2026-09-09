@@ -10,6 +10,8 @@ import { cleanupExpiredPerformanceExports, processQueuedPerformanceExports } fro
 import { activateDuePerformanceCohorts } from './personnelPerformanceRolloutStore';
 import { runPerformancePrivacyDeadlineNotifications } from './personnelPerformancePrivacyStore';
 import { recordPerformanceIntegrityFailure, recordPerformanceMaintenanceFailure, runPerformanceOperationalMonitoring } from './personnelPerformanceMonitoringStore';
+import { runDailyPerformanceErasure } from './personnelPerformanceErasureStore';
+import { runPerformanceLegalHoldReviewNotifications } from './personnelPerformanceLegalHoldStore';
 
 const SYSTEM_ACTOR = null;
 
@@ -58,7 +60,9 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
   const operationalMonitoring = await isolate('operational monitoring', () => runPerformanceOperationalMonitoring(client, now));
   const cohorts = await isolate('cohort activation', () => activateDuePerformanceCohorts(client, now));
   const privacyDeadlines = await isolate('privacy deadlines', () => runPerformancePrivacyDeadlineNotifications(client, now));
-  return { policyGate, policies, artifacts, cohorts, privacyDeadlines, operationalMonitoring, expiry, relationshipReconciliation, exportCleanup, exportQueue };
+  const retentionErasure = await isolate('retention erasure', () => runDailyPerformanceErasure(client, now));
+  const legalHoldReviews = await isolate('legal hold reviews', () => runPerformanceLegalHoldReviewNotifications(client, now));
+  return { policyGate, policies, artifacts, cohorts, privacyDeadlines, operationalMonitoring, retentionErasure, legalHoldReviews, expiry, relationshipReconciliation, exportCleanup, exportQueue };
 };
 
 export const startPersonnelPerformanceMaintenance = (client: PrismaClient) => {

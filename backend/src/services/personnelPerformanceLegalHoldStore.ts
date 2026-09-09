@@ -97,3 +97,22 @@ export const listPerformanceLegalHolds = async (client: Client, actorUserId: str
     return { ...hold, reviewBy: new Date((review?.decidedAt ?? hold.placedAt).getTime() + 90 * 86_400_000) };
   }));
 };
+
+export const runPerformanceLegalHoldReviewNotifications = async (client: PrismaClient, now = new Date()) => {
+  const active = await client.performanceLegalHold.findMany({ where: { status: 'ACTIVE' }, orderBy: { placedAt: 'asc' } });
+  const users = await client.user.findMany({ where: { isActive: true, erasedAt: null }, select: { id: true } });
+  const reviewers: string[] = [];
+  for (const user of users) if ((await activeHrActionPermissionsForUser(client, user.id, now)).includes('PLACE_PERFORMANCE_LEGAL_HOLD')) reviewers.push(user.id);
+  let escalated = 0;
+  for (const hold of active) {
+    const review = await client.performanceLegalHoldDecision.findFirst({ where: { holdId: hold.id, action: 'REVIEW' }, orderBy: { decidedAt: 'desc' } });
+    const reviewBy = new Date((review?.decidedAt ?? hold.placedAt).getTime() + 90 * 86_400_000);
+    if (reviewBy > now || !reviewers.length) continue;
+    await publishNotificationEvent(client, { type: 'PERFORMANCE_LEGAL_HOLD_REVIEW_OVERDUE',
+      deduplicationKey: `performance-legal-hold-review:${hold.id}:${now.toISOString().slice(0, 10)}`,
+      recipientIds: reviewers, recipientGroups: { DIRECT_USER: reviewers }, resourceType: 'PERFORMANCE_LEGAL_HOLD', resourceId: hold.id,
+      actionUrl: '/dashboard/hr/personnel/performance', payload: { reviewBy: reviewBy.toISOString() } });
+    escalated += 1;
+  }
+  return { reviewed: active.length, escalated };
+};

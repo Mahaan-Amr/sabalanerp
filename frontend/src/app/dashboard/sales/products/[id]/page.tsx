@@ -331,10 +331,13 @@ const ProductDetailPage: React.FC = () => {
 
             <ErpCard className="p-5">
               {editing ? (
-                <CatalogImagePicker
-                  images={formData.images}
-                  onChange={(images) => setFormData({ ...formData, images })}
-                />
+                <div className="space-y-2">
+                  <CatalogImagePicker
+                    images={formData.images}
+                    onChange={(images) => setFormData({ ...formData, images })}
+                  />
+                  {fieldErrors.images && <ErpInlineState kind="error" title={fieldErrors.images} />}
+                </div>
               ) : (
                 <>
                   <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">تصاویر</h3>

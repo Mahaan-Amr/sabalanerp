@@ -505,10 +505,17 @@ export default function ContractDetailPage() {
         </ErpPage>
       );
     }
+    if (error) return (
+      <ErpInlineState
+        kind={errorKind}
+        title={error}
+        action={{ label: 'بازگشت به لیست قراردادها', href: '/dashboard/sales/contracts', tone: 'primary', variant: 'solid' }}
+      />
+    );
     return (
       <ErpEmptyState
         icon={FaFileContract}
-        title={error || 'قرارداد یافت نشد'}
+        title="قرارداد یافت نشد"
         description="برای ادامه می‌توانید به لیست قراردادهای فروش برگردید."
         action={{ label: 'بازگشت به لیست قراردادها', href: '/dashboard/sales/contracts', tone: 'primary', variant: 'solid' }}
       />

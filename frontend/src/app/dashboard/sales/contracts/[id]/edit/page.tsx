@@ -12,7 +12,7 @@ import {
   contractCorrectionCategoryLabel,
 } from '@/features/contract-creation/services/contractCorrectionPresentation';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 const CreateContractWizardClient = dynamic(
   () => import('@/features/contract-creation/CreateContractWizardClient'),
@@ -117,7 +117,7 @@ export default function SalesContractEditPage() {
           failedAction: 'دریافت اطلاعات ویرایش قرارداد',
           nextStep: 'به صفحه مشاهده قرارداد برگردید یا دوباره تلاش کنید.'
         }));
-        setErrorKind(err?.response?.status === 403 ? 'permission' : 'error');
+        setErrorKind(getSalesOperationalErrorKind(err));
       } finally {
         if (mounted) setLoading(false);
       }
@@ -162,7 +162,7 @@ export default function SalesContractEditPage() {
   }
 
   if (!contract.contractData) {
-    return <ErpCard className="py-8"><ErpInlineState kind="error" title="نسخهٔ قابل‌ویرایش این قرارداد موجود نیست. به صفحه مشاهده قرارداد برگردید."
+    return <ErpCard className="py-8"><ErpInlineState kind="stale" title="نسخهٔ قابل‌ویرایش این قرارداد موجود نیست. به صفحه مشاهده قرارداد برگردید."
       action={{ label: 'مشاهده قرارداد', href: `/dashboard/sales/contracts/${contractId}` }} /></ErpCard>;
   }
 

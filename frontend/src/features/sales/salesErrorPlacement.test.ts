@@ -9,6 +9,7 @@ test('product edit validation is attached to editable fields', () => {
   const page = source('src/app/dashboard/sales/products/[id]/page.tsx');
   assert.match(page, /error=\{fieldErrors\.basePrice\}/);
   assert.match(page, /error=\{fieldErrors\.motherLengthValue\}/);
+  assert.match(page, /fieldErrors\.images/);
   assert.match(page, /getSalesErrorSummary\(fieldErrors\)/);
 });
 
@@ -20,6 +21,6 @@ test('contract, product, and partner action failures are rendered beside their r
 
 test('contract detail renders permission and stale failures with their semantic kind', () => {
   const page = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
-  assert.match(page, /kind=\{errorKind\}/);
+  assert.match(page, /if \(error\) return \([\s\S]*kind=\{errorKind\}/);
   assert.match(page, /getSalesOperationalErrorKind/);
 });

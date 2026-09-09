@@ -1,4 +1,5 @@
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { canonicalPerformanceEvidence as canonical } from './performance-evidence-canonical.mjs';
 
 const acceptableKeyId = (value) => typeof value === 'string' && Boolean(value.trim())
@@ -7,11 +8,13 @@ const acceptableKeyId = (value) => typeof value === 'string' && Boolean(value.tr
 const privateKeyFromEnvironment = (environment, idName, keyName) => {
   const keyId = environment[idName]?.trim() ?? '';
   const encoded = environment[keyName]?.trim() ?? '';
-  if (!keyId || /^(change|replace|example|placeholder|local|test|fixture)/i.test(keyId) || !encoded) return null;
+  const file = environment[`${keyName}_FILE`]?.trim() ?? '';
+  if (!acceptableKeyId(keyId) || (!encoded && !file)) return null;
   try {
-    const der = Buffer.from(encoded, 'base64');
-    if (der.toString('base64') !== encoded.replace(/\s/g, '')) return null;
-    const privateKey = createPrivateKey({ key: der, format: 'der', type: 'pkcs8' });
+    const der = encoded ? Buffer.from(encoded, 'base64') : null;
+    if (der && der.toString('base64') !== encoded.replace(/\s/g, '')) return null;
+    const privateKey = der ? createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })
+      : createPrivateKey(readFileSync(file));
     return privateKey.asymmetricKeyType === 'ed25519' ? { keyId, privateKey } : null;
   } catch {
     return null;
@@ -21,11 +24,13 @@ const privateKeyFromEnvironment = (environment, idName, keyName) => {
 const publicKeyFromEnvironment = (environment, idName, keyName) => {
   const keyId = environment[idName]?.trim() ?? '';
   const encoded = environment[keyName]?.trim() ?? '';
-  if (!acceptableKeyId(keyId) || !encoded) return null;
+  const file = environment[`${keyName}_FILE`]?.trim() ?? '';
+  if (!acceptableKeyId(keyId) || (!encoded && !file)) return null;
   try {
-    const der = Buffer.from(encoded, 'base64');
-    if (der.toString('base64') !== encoded.replace(/\s/g, '')) return null;
-    const publicKey = createPublicKey({ key: der, format: 'der', type: 'spki' });
+    const der = encoded ? Buffer.from(encoded, 'base64') : null;
+    if (der && der.toString('base64') !== encoded.replace(/\s/g, '')) return null;
+    const publicKey = der ? createPublicKey({ key: der, format: 'der', type: 'spki' })
+      : createPublicKey(readFileSync(file));
     return publicKey.asymmetricKeyType === 'ed25519' ? { keyId, publicKey } : null;
   } catch {
     return null;

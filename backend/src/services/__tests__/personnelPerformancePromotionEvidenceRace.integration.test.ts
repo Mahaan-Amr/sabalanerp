@@ -34,7 +34,7 @@ const main = async () => {
     const [clock] = await first.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
     await first.performanceFeaturePhaseVersion.create({ data: { version: 1, phase: 'EXPANSION_RETIREMENT', releaseEnabled: false,
       effectiveFrom: clock.now, recordedByUserId: users[0].id, reason: 'Isolated promotion race phase' } });
-    const createScheduledFixture = async (suffix: string, approvalUserIds = users.slice(1).map(({ id }) => id)) => {
+    const createScheduledFixture = async (suffix: string, approvalUserIds = users.slice(1).map(({ id }) => id), authenticate = true) => {
       const [fixtureClock] = await first.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
       const personnel = await first.personnel.create({ data: { firstName: 'آزمون', lastName: suffix } });
       const relationship = await first.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status: 'ACTIVE',
@@ -65,11 +65,17 @@ const main = async () => {
         reasonCode: 'RACE_APPROVED', authorityHash: 'c'.repeat(64), evidenceHash: evidence.evidenceHash, promotionEvidenceId: evidence.id,
       })) });
       const effectiveFrom = new Date(fixtureClock.now.getTime() + 250);
-      await first.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'SCHEDULED', effectiveFrom,
-        activationReason: 'Isolated promotion evidence race', activatedByUserId: users[0].id, promotionEvidenceId: evidence.id } });
+      await first.$transaction(async (tx) => {
+        if (authenticate) await tx.$executeRaw`SELECT set_config('sabalan.performance_promotion_evidence_hash', ${evidence.evidenceHash}, true)`;
+        await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'SCHEDULED', effectiveFrom,
+          activationReason: 'Isolated promotion evidence race', activatedByUserId: users[0].id, promotionEvidenceId: evidence.id } });
+      });
       return { cohort, evidence, subject, effectiveFrom };
     };
 
+    await assert.rejects(() => createScheduledFixture('unverified', users.slice(1).map(({ id }) => id), false),
+      /promotion evidence was not authenticated in the current transaction/,
+      'PostgreSQL rejects even well-shaped indexed rows unless this transaction authenticated the encrypted report');
     await assert.rejects(() => createScheduledFixture('same-owner', [users[1].id, users[1].id, users[1].id]),
       /three distinct currently authorized owner approvals/,
       'PostgreSQL rejects three role labels when one actor supplied every approval');
@@ -88,6 +94,7 @@ const main = async () => {
     await revocationHolding.promise;
     const activating = second.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+      await tx.$executeRaw`SELECT set_config('sabalan.performance_promotion_evidence_hash', ${revoked.evidence.evidenceHash}, true)`;
       return tx.performanceCohortVersion.update({ where: { id: revoked.cohort.id }, data: { lifecycle: 'ACTIVE' } });
     });
     await delay(30);
@@ -116,6 +123,7 @@ const main = async () => {
     await changeHolding.promise;
     const activationAfterChangeRace = second.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+      await tx.$executeRaw`SELECT set_config('sabalan.performance_promotion_evidence_hash', ${changing.evidence.evidenceHash}, true)`;
       return tx.performanceCohortVersion.update({ where: { id: changing.cohort.id }, data: { lifecycle: 'ACTIVE' } });
     });
     await delay(30);

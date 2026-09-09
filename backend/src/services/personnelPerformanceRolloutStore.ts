@@ -291,6 +291,9 @@ const assertPerformancePromotionEvidence = async (
     || evidence.targetMemberCount !== currentPopulation.memberCount || evidence.validUntil <= clock.now) {
     throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_TAMPERED');
   }
+  // The database transition trigger accepts a cohort state change only after
+  // this transaction has decrypted and authenticated this exact evidence.
+  await tx.$executeRaw`SELECT set_config('sabalan.performance_promotion_evidence_hash', ${verified.evidenceHash}, true)`;
   return { ...evidence, evidenceHash: verified.evidenceHash };
 };
 

@@ -81,6 +81,7 @@ import {
   completePerformanceExportDownload,
   createPerformanceConsequenceHandoff,
   createPerformanceCorrection,
+  deliverPersonalPerformanceSummary,
   getEvaluatorCalibration,
   getPerformanceAnalytics,
   getPerformanceConsequenceHandoff,
@@ -347,6 +348,23 @@ router.get('/badge/me', async (req: AuthRequest, res, next) => {
 router.post('/badges', viewBadgeList, async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, badges: await getPersonnelPerformanceBadges(prisma, { actorUserId: req.user!.id, personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : [] }) }); }
   catch (error) { return next(error); }
+});
+
+router.post('/badge-deliveries', async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    const verification = req.body.identityVerification;
+    const delivery = await deliverPersonalPerformanceSummary(prisma, {
+      actorUserId: req.user.id,
+      personnelId: String(req.body.personnelId ?? ''),
+      identityVerification: verification && typeof verification === 'object' ? {
+        methodCode: verification.methodCode,
+        evidenceReference: verification.evidenceReference,
+        verifiedAt: new Date(verification.verifiedAt),
+      } : verification,
+    });
+    return res.status(201).json({ success: true, delivery });
+  } catch (error) { return next(error); }
 });
 
 router.get('/history/:personnelId', viewHistory, async (req: AuthRequest, res, next) => {

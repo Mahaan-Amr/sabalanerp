@@ -11,5 +11,8 @@ assert.deepEqual(performanceBadgePresentation({ state: 'LEVEL', levelCode: 'OUTS
 });
 assert.equal(performanceBadgePresentation({ state: 'UNEVALUATED', labelFa: 'ارزیابی‌نشده', meaningFa: 'معنا', version: 0 }).neutral, true);
 assert.equal(performanceBadgePresentation({ state: 'TEMPORARILY_UNAVAILABLE', labelFa: 'خلاصه عملکرد موقتاً در دسترس نیست', meaningFa: 'معنا', version: 3 }).tone, 'neutral');
+assert.equal(performanceBadgePresentation({ state: 'LEVEL', levelCode: 'MEETS', labelFa: 'مطابق انتظار', meaningFa: 'معنا', version: 3 }).tone, 'success');
+assert.equal(performanceBadgePresentation({ state: 'LEVEL', levelCode: 'EXCEEDS', labelFa: 'فراتر از انتظار', meaningFa: 'معنا', version: 3 }).lightAsset,
+  '/assets/performance-rank-badges-v2/light/ruby.png');
 
 console.log('Performance Badge presentation tests passed.');

@@ -37,6 +37,7 @@ assert.deepEqual(registeredRoutes, [
   'POST /reminders/run',
   'GET /badge/me',
   'POST /badges',
+  'POST /badge-deliveries',
   'GET /history/:personnelId',
   'POST /analytics',
   'POST /ranking',

@@ -23,8 +23,8 @@ type Surface = 'aggregate' | 'ranking' | 'calibration';
 type CapabilityMap = Record<string, boolean>;
 
 const levelTone: Record<string, 'danger' | 'warning' | 'success' | 'primary' | 'purple' | 'neutral'> = {
-  URGENT_IMPROVEMENT: 'danger', IMPROVEMENT_NEEDED: 'warning', MEETS_EXPECTATIONS: 'success',
-  EXCEEDS_EXPECTATIONS: 'primary', OUTSTANDING: 'purple',
+  URGENT_IMPROVEMENT: 'danger', IMPROVEMENT: 'warning', IMPROVEMENT_NEEDED: 'warning',
+  MEETS: 'success', MEETS_EXPECTATIONS: 'success', EXCEEDS: 'primary', EXCEEDS_EXPECTATIONS: 'primary', OUTSTANDING: 'purple',
 };
 
 export default function PerformanceInsights() {

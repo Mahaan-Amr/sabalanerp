@@ -25,6 +25,7 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'REVIEW_PERFORMANCE_EVALUATION', labelFa: 'بررسی ارزیابی عملکرد', level: 'EDIT', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_HISTORY', labelFa: 'مشاهده سابقه محرمانه عملکرد', level: 'VIEW', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_BADGE_LIST', labelFa: 'مشاهده سطح عملکرد در فهرست پرسنل', level: 'VIEW', prerequisites: [] },
+  { code: 'DELIVER_PERFORMANCE_PERSONAL_SUMMARY', labelFa: 'تحویل خلاصه شخصی عملکرد پس از احراز هویت', level: 'EDIT', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_ANALYTICS', labelFa: 'مشاهده تحلیل تجمیعی عملکرد', level: 'VIEW', prerequisites: [] },
   { code: 'VIEW_NAMED_PERFORMANCE_RANKING', labelFa: 'مشاهده تحلیل و رتبه‌بندی نام‌دار عملکرد', level: 'VIEW', prerequisites: [] },
   { code: 'VIEW_EVALUATOR_CALIBRATION', labelFa: 'مشاهده کالیبراسیون ارزیاب', level: 'VIEW', prerequisites: [] },

@@ -18,5 +18,8 @@ assert.deepEqual([
   'URGENT_IMPROVEMENT', 'IMPROVEMENT', 'MEETS', 'EXCEEDS', 'OUTSTANDING',
 ].map(performanceLevelTone), ['danger', 'warning', 'success', 'primary', 'purple']);
 assert.equal(performanceLevelTone('UNKNOWN_PRIVATE_LEVEL'), 'neutral');
+assert.equal(performanceBadgePresentation({
+  state: 'TEMPORARILY_UNAVAILABLE', levelCode: 'MEETS', labelFa: 'خلاصه عملکرد موقتاً در دسترس نیست', meaningFa: 'معنا', version: 3,
+}).tone, 'neutral', 'neutral states never manufacture a level tone from stale data');
 
 console.log('Performance Badge presentation tests passed.');

@@ -13,16 +13,16 @@ import {
   cleanupExpiredPerformanceExports,
   deliverPersonalPerformanceSummary,
   fixedCohortPerformanceTrend,
+  getPersonnelPerformanceBadges,
   listEligibleConsequenceResults,
   performanceExportPdfHtml,
   performanceExportRows,
   renderPerformanceExportArtifact,
 } from '../personnelPerformanceDisclosureStore';
-import { buildPerformanceAnalytics, PERFORMANCE_LEVELS } from '../personnelPerformanceDisclosure';
+import { buildPerformanceAnalytics } from '../personnelPerformanceDisclosure';
 import { publishCompensationAgreement } from '../hrCompensationAgreementStore';
 import { DEFAULT_CURRENT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicyStore';
 import { persistAcceptedPerformanceResult } from '../personnelPerformanceResultStore';
-import { getPersonnelPerformanceBadges } from '../personnelPerformanceDisclosureStore';
 import { PerformancePolicyKind } from '@prisma/client';
 
 const seed = async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], marker: string) => {
@@ -109,10 +109,27 @@ const main = async () => {
     } });
     await publishPolicyFixture(tx, actor.id, PerformancePolicyKind.LEVEL_CLASSIFICATION, DEFAULT_LEVEL_POLICY_CONTENT, suffix);
     await publishPolicyFixture(tx, actor.id, PerformancePolicyKind.CURRENT_LEVEL, DEFAULT_CURRENT_LEVEL_POLICY_CONTENT, suffix);
-    const expectedCodes = ['URGENT_IMPROVEMENT', 'IMPROVEMENT', 'MEETS', 'EXCEEDS', 'OUTSTANDING'] as const;
-    const subjects: Array<{ personnelId: string; subjectId: string }> = [];
+    type BoundaryScenario = {
+      exactScore: string;
+      expectedCode: 'URGENT_IMPROVEMENT' | 'IMPROVEMENT' | 'MEETS' | 'EXCEEDS' | 'OUTSTANDING';
+      parts: ReadonlyArray<readonly [string, 1 | 5]>;
+    };
+    const boundaryScenarios: readonly BoundaryScenario[] = [
+      { exactScore: '0.000000', expectedCode: 'URGENT_IMPROVEMENT', parts: [['100.000000', 1]] },
+      { exactScore: '19.999999', expectedCode: 'URGENT_IMPROVEMENT', parts: [['80.000001', 1], ['19.999999', 5]] },
+      { exactScore: '20.000000', expectedCode: 'IMPROVEMENT', parts: [['80.000000', 1], ['20.000000', 5]] },
+      { exactScore: '39.999999', expectedCode: 'IMPROVEMENT', parts: [['60.000001', 1], ['39.999999', 5]] },
+      { exactScore: '40.000000', expectedCode: 'MEETS', parts: [['60.000000', 1], ['40.000000', 5]] },
+      { exactScore: '59.999999', expectedCode: 'MEETS', parts: [['40.000001', 1], ['59.999999', 5]] },
+      { exactScore: '60.000000', expectedCode: 'EXCEEDS', parts: [['40.000000', 1], ['60.000000', 5]] },
+      { exactScore: '79.999999', expectedCode: 'EXCEEDS', parts: [['20.000001', 1], ['79.999999', 5]] },
+      { exactScore: '80.000000', expectedCode: 'OUTSTANDING', parts: [['20.000000', 1], ['80.000000', 5]] },
+      { exactScore: '100.000000', expectedCode: 'OUTSTANDING', parts: [['100.000000', 5]] },
+    ];
+    const subjects: Array<{ personnelId: string; subjectId: string; relationshipId: string }> = [];
     const immutableHashes: Array<{ resultId: string; exactScoreHash: string; payloadHash: string }> = [];
-    for (let index = 0; index < expectedCodes.length; index += 1) {
+    for (let index = 0; index < boundaryScenarios.length; index += 1) {
+      const scenario = boundaryScenarios[index];
       const personnel = await tx.personnel.create({ data: { firstName: 'سطح', lastName: String(index + 1) } });
       const relationship = await tx.hrEmploymentRelationship.create({ data: {
         personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01Z'), createdBy: actor.id,
@@ -128,24 +145,29 @@ const main = async () => {
       } });
       await tx.performanceEvaluation.update({ where: { id: evaluation.id }, data: { status: 'READY_FOR_SUBMISSION' } });
       await tx.performanceEvaluation.update({ where: { id: evaluation.id }, data: { status: 'UNDER_REVIEW' } });
-      const criterionId = `${suffix}-criterion-${index}`;
+      const criteria = scenario.parts.map(([_weight, grade], partIndex) => ({
+        criterionVersionId: `${suffix}-criterion-${index}-${partIndex}`, titleFa: `نتیجه مصوب ${partIndex + 1}`,
+        weightPercent: '100.00', kind: 'JUDGMENT' as const,
+        anchorsFa: ['یک', 'دو', 'سه', 'چهار', 'پنج'], applicability: null,
+        evidence: { minimumReliableCount: 1, allowedKinds: ['STRUCTURED_OBSERVATION' as const], required: true },
+        grade,
+      }));
       const calculationInput = {
         template: {
           schemaVersion: 1 as const, templateVersionId: `${suffix}-template-${index}`, scoringPolicyVersionId: 'scoring-v1',
           jobSharePercent: '100.00', addendumSharePercent: '0.00',
-          categories: [{ id: 'result', titleFa: 'نتیجه', weightPercent: '100.00', required: true, criteria: [{
-            criterionVersionId: criterionId, titleFa: 'نتیجه مصوب', weightPercent: '100.00', kind: 'JUDGMENT' as const,
-            anchorsFa: ['یک', 'دو', 'سه', 'چهار', 'پنج'], applicability: null,
-            evidence: { minimumReliableCount: 1, allowedKinds: ['STRUCTURED_OBSERVATION' as const], required: true },
-          }] }],
+          categories: criteria.map(({ grade: _grade, ...criterion }, partIndex) => ({
+            id: `result-${partIndex}`, titleFa: `نتیجه ${partIndex + 1}`,
+            weightPercent: scenario.parts[partIndex][0], required: true, criteria: [criterion],
+          })),
         },
         sections: [{
           sectionId: `${suffix}-section-${index}`, effectiveDays: 31, allocationPercent: '100.00',
           effectiveFrom: '2026-08-01T00:00:00.000Z', effectiveTo: '2026-08-31T20:29:59.999Z', snapshotFacts: {},
-          responses: [{ criterionVersionId: criterionId, grade: (index + 1) as 1 | 2 | 3 | 4 | 5, evidence: [{
+          responses: criteria.map(({ criterionVersionId, grade }, partIndex) => ({ criterionVersionId, grade, evidence: [{
             kind: 'STRUCTURED_OBSERVATION' as const, quality: 'RELIABLE' as const, occurredAt: '2026-08-15T00:00:00.000Z',
-            referenceId: `${suffix}-evidence-${index}`, sourceVersion: '1', contentHash: String(index + 1).repeat(64),
-          }] }],
+            referenceId: `${suffix}-evidence-${index}-${partIndex}`, sourceVersion: '1', contentHash: (index + 1).toString(16).repeat(64),
+          }] })),
         }],
       };
       const accepted = await persistAcceptedPerformanceResult(tx, {
@@ -154,25 +176,58 @@ const main = async () => {
       });
       assert.equal(accepted.idempotent, false);
       const acceptedOutput = accepted as { historicalLevel: { levelCode: string }; result: { id: string }; idempotent: false };
-      assert.equal(acceptedOutput.historicalLevel.levelCode, expectedCodes[index]);
+      assert.equal(acceptedOutput.historicalLevel.levelCode, scenario.expectedCode);
+      assert.equal((accepted as { calculation: { exactScore: string } }).calculation.exactScore, scenario.exactScore);
       const row = await tx.performanceAcceptedResult.findUniqueOrThrow({ where: { id: acceptedOutput.result.id } });
       const encrypted = await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: row.encryptedPayloadId } });
       immutableHashes.push({ resultId: row.id, exactScoreHash: row.exactScoreHash, payloadHash: encrypted.plaintextHash });
-      subjects.push({ personnelId: personnel.id, subjectId: subject.id });
+      subjects.push({ personnelId: personnel.id, subjectId: subject.id, relationshipId: relationship.id });
     }
     await enrollPerformanceTestCohort(tx, actor.id, subjects.map(({ subjectId }) => subjectId));
     const badges = await getPersonnelPerformanceBadges(tx as any, { actorUserId: actor.id, personnelIds: subjects.map(({ personnelId }) => personnelId) });
-    assert.deepEqual(badges.map(({ badge }) => badge?.levelCode), expectedCodes);
+    assert.deepEqual(badges.map(({ badge }) => badge?.levelCode), boundaryScenarios.map(({ expectedCode }) => expectedCode));
     const projections = await tx.performanceCurrentLevelProjection.findMany({ where: { subjectId: { in: subjects.map(({ subjectId }) => subjectId) } }, orderBy: { levelCode: 'asc' } });
-    assert.equal(projections.length, 5);
+    assert.equal(projections.length, boundaryScenarios.length);
+    const acceptedPopulation = badges.flatMap(({ badge }, index) => {
+      const levelCode = badge?.levelCode;
+      if (!levelCode) throw new Error('Persisted projection badge is unavailable');
+      return Array.from({ length: 5 }, (_, copyIndex) => ({
+        subjectId: `${subjects[index].subjectId}-${copyIndex}`, personnelId: `${subjects[index].personnelId}-${copyIndex}`,
+        displayName: `پرسنل ${index}-${copyIndex}`, employmentRelationshipId: `${subjects[index].relationshipId}-${copyIndex}`,
+        levelCode, comparabilitySignature: 'accepted-chain-v1', peerGroupKey: 'accepted-chain-peer',
+        measurementTo: new Date('2026-08-31T20:29:59.999Z'),
+      }));
+    });
+    const aggregateReport = buildPerformanceAnalytics({ population: acceptedPopulation, selected: acceptedPopulation });
+    const rankingReport = buildPerformanceAnalytics({ population: acceptedPopulation, selected: acceptedPopulation, mode: 'NAMED_RANKING' });
+    assert.equal(aggregateReport.suppressed, false);
+    assert.equal(rankingReport.suppressed, false);
+    if (aggregateReport.suppressed || !('levelDistribution' in aggregateReport)
+      || rankingReport.suppressed || !('peerGroups' in rankingReport)) throw new Error('Accepted-result analytics unexpectedly suppressed');
+    assert.deepEqual(aggregateReport.levelDistribution.map(({ levelCode, count }) => [levelCode, count]), [
+      ['URGENT_IMPROVEMENT', 10], ['IMPROVEMENT', 10], ['MEETS', 10], ['EXCEEDS', 10], ['OUTSTANDING', 10],
+    ]);
+    assert.deepEqual(rankingReport.peerGroups[0].groups.map(({ levelCode, members }) => [levelCode, members.length]), [
+      ['URGENT_IMPROVEMENT', 10], ['IMPROVEMENT', 10], ['MEETS', 10], ['EXCEEDS', 10], ['OUTSTANDING', 10],
+    ]);
+    const canonicalRows = performanceExportRows(aggregateReport);
+    const xlsxArtifact = await renderPerformanceExportArtifact('XLSX', canonicalRows, new AbortController().signal);
+    const renderedWorkbook = XLSX.read(xlsxArtifact.bytes);
+    const xlsxRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(renderedWorkbook.Sheets[renderedWorkbook.SheetNames[0]]);
+    assert.deepEqual(xlsxRows.map(({ levelCode, labelFa, count }) => [levelCode, labelFa, count]),
+      canonicalRows.map(({ levelCode, labelFa, count }) => [levelCode, labelFa, count]));
+    const pdfHtml = performanceExportPdfHtml(canonicalRows);
+    for (const { levelCode, labelFa } of canonicalRows) {
+      assert.ok(pdfHtml.includes(String(levelCode)) && pdfHtml.includes(String(labelFa)), 'PDF and Excel use the same accepted-result level rows');
+    }
     const delivered = await deliverPersonalPerformanceSummary(tx, {
-      actorUserId: actor.id, personnelId: subjects[2].personnelId,
+      actorUserId: actor.id, personnelId: subjects[4].personnelId,
       identityVerification: { methodCode: 'IN_PERSON_EMPLOYEE_RECORD', evidenceReference: `${suffix}-employee-record`, verifiedAt: new Date() },
     });
     assert.equal(delivered.summary.levelCode, 'MEETS');
     const receipt = await tx.performanceAuditEvent.findUniqueOrThrow({ where: { id: delivered.receipt.id } });
     const receiptPayload = await readPerformancePayload<any>(tx, receipt.encryptedPayloadId!, performanceVaultKeyFromEnvironment());
-    const deliveredProjection = await tx.performanceCurrentLevelProjection.findUniqueOrThrow({ where: { subjectId: subjects[2].subjectId } });
+    const deliveredProjection = await tx.performanceCurrentLevelProjection.findUniqueOrThrow({ where: { subjectId: subjects[4].subjectId } });
     assert.equal(receiptPayload.source.sourceResultsHash, deliveredProjection.sourceResultsHash);
     assert.equal(receiptPayload.source.levelPolicyVersionId, deliveredProjection.levelPolicyVersionId);
     assert.deepEqual(await Promise.all(immutableHashes.map(async ({ resultId }) => {
@@ -182,31 +237,6 @@ const main = async () => {
     })), immutableHashes, 'projection and presentation reads preserve immutable accepted-result hashes');
     throw new Error('ROLLBACK_ACCEPTED_LEVEL_CHAIN');
   }, { timeout: 120_000 }), /ROLLBACK_ACCEPTED_LEVEL_CHAIN/);
-
-  const exportPopulation = Array.from({ length: 50 }, (_, index) => ({
-    subjectId: `export-subject-${index}`, personnelId: `export-personnel-${index}`,
-    displayName: `پرسنل ${index}`, employmentRelationshipId: `export-relationship-${index}`,
-    levelCode: PERFORMANCE_LEVELS[Math.floor(index / 10)].code,
-    comparabilitySignature: 'export-compatible-v1', peerGroupKey: 'export-family',
-    measurementTo: new Date('2026-06-30T20:29:59.999Z'),
-  }));
-  const exportReport = buildPerformanceAnalytics({ population: exportPopulation, selected: exportPopulation });
-  assert.equal(exportReport.suppressed, false);
-  if (exportReport.suppressed) throw new Error('Export compatibility fixture unexpectedly suppressed');
-  const canonicalRows = performanceExportRows(exportReport);
-  assert.deepEqual(canonicalRows.map(({ levelCode, labelFa, count }) => [levelCode, labelFa, count]), [
-    ['URGENT_IMPROVEMENT', 'نیازمند بهبود فوری', '10'], ['IMPROVEMENT', 'نیازمند بهبود', '10'],
-    ['MEETS', 'مطابق انتظار', '10'], ['EXCEEDS', 'فراتر از انتظار', '10'], ['OUTSTANDING', 'عملکرد برجسته', '10'],
-  ]);
-  const xlsxArtifact = await renderPerformanceExportArtifact('XLSX', canonicalRows, new AbortController().signal);
-  const renderedWorkbook = XLSX.read(xlsxArtifact.bytes);
-  const xlsxRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(renderedWorkbook.Sheets[renderedWorkbook.SheetNames[0]]);
-  assert.deepEqual(xlsxRows.map(({ levelCode, labelFa, count }) => [levelCode, labelFa, count]),
-    canonicalRows.map(({ levelCode, labelFa, count }) => [levelCode, labelFa, count]));
-  const pdfHtml = performanceExportPdfHtml(canonicalRows);
-  for (const { levelCode, labelFa } of canonicalRows) {
-    assert.ok(pdfHtml.includes(String(levelCode)) && pdfHtml.includes(String(labelFa)), 'PDF input uses the same canonical level row as Excel');
-  }
 
   await assert.rejects(prisma.$transaction(async (tx) => {
     const suffix = `${Date.now().toString(36)}-personal-summary`;

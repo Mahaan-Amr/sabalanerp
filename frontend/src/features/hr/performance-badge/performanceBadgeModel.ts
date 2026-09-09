@@ -30,7 +30,7 @@ export const performanceBadgePresentation = (badge: PerformanceBadgeSummary) => 
   return {
     labelFa: badge.labelFa,
     meaningFa: badge.meaningFa,
-    tone: performanceLevelTone(badge.levelCode ?? ''),
+    tone: level?.tone ?? 'neutral',
     lightAsset: `/assets/performance-rank-badges-v2/light/${asset}.png`,
     darkAsset: `/assets/performance-rank-badges-v2/dark/${asset}.png`,
     neutral: !level,

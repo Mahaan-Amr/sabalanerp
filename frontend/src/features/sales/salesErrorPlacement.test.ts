@@ -53,6 +53,39 @@ test('catalog download failures normalize blob responses before building their m
   assert.match(modal, /kind=\{errorKind\}/);
 });
 
+test('every Sale blob PDF failure is normalized and partner preview reports its rejection', () => {
+  for (const path of [
+    'src/app/dashboard/sales/contracts/page.tsx',
+    'src/app/dashboard/sales/contracts/[id]/page.tsx',
+    'src/features/contract-creation/CreateContractWizardClient.tsx',
+    'src/features/partner-sales/cases/PartnerCaseRuntime.tsx',
+  ]) {
+    assert.match(source(path), /normalizeSalesBlobError/);
+  }
+  const partner = source('src/features/partner-sales/cases/PartnerCaseRuntime.tsx');
+  assert.match(partner, /const previewPdf = useCallback/);
+  assert.match(partner, /failedAction: 'پیش‌نمایش سند فروش همکار'/);
+});
+
+test('Sale load and mutation feedback retain HTTP semantic kinds', () => {
+  const products = source('src/app/dashboard/sales/products/page.tsx');
+  const detail = source('src/app/dashboard/sales/products/[id]/page.tsx');
+  const create = source('src/app/dashboard/sales/products/create/page.tsx');
+  const wizard = source('src/features/contract-creation/CreateContractWizardClient.tsx');
+  const shipment = source('src/features/shipment-quantities/ShipmentQuantitySummary.tsx');
+  assert.match(products, /kind=\{products\.length > 0 \? 'stale' : listErrorKind\}/);
+  assert.match(detail, /kind=\{loadErrorKind\}/);
+  assert.match(create, /kind: loadErrorKind/);
+  assert.match(create, /kind=\{modalErrorKind\}/);
+  assert.match(wizard, /kind=\{generalErrorKind\}/);
+  assert.match(shipment, /kind=\{refreshErrorKind\}/);
+});
+
+test('leaving product edit mode clears validation that can no longer be corrected', () => {
+  const detail = source('src/app/dashboard/sales/products/[id]/page.tsx');
+  assert.match(detail, /setEditing\(false\);\s*setFieldErrors\(\{\}\);\s*setFeedback\(undefined\)/);
+});
+
 test('contract detail renders permission and stale failures with their semantic kind', () => {
   const page = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
   assert.match(page, /if \(error\) return \([\s\S]*kind=\{errorKind\}/);

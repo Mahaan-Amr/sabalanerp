@@ -42,7 +42,7 @@ import { buildContractPaymentPresentation } from '@/features/sales/contractPayme
 import { PartnerAccountViewSchema, PartnerCaseViewSchema, type PartnerAccountView, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import { PartnerCaseWorkspace } from '@/features/partner-sales/cases/PartnerCaseWorkspace';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
-import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 
 interface Contract {
   id: string;
@@ -364,11 +364,12 @@ export default function ContractDetailPage() {
       const suffix = printVariant === 'summary' ? '_summary' : '';
       downloadBlobResponse(response, `sales_contract_${contract.contractNumber || contract.id}${suffix}.pdf`);
     } catch (error: any) {
-      setError(getSalesOperationalErrorMessage(error, {
+      const normalizedError = await normalizeSalesBlobError(error);
+      setError(getSalesOperationalErrorMessage(normalizedError, {
         failedAction: 'دانلود PDF قرارداد',
         nextStep: 'دوباره روی «دانلود PDF» بزنید.'
       }));
-      setErrorKind(getSalesOperationalErrorKind(error));
+      setErrorKind(getSalesOperationalErrorKind(normalizedError));
     } finally {
       setActionLoading(null);
     }

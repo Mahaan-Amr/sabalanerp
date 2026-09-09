@@ -36,13 +36,14 @@ import {
 } from '../utils/contractSubmissionDiagnostics';
 import { validateContractPartyIdentity } from '../services/contractPartyIdentity';
 import { finalizeSuccessfulContractCommit } from '../utils/contractCreationCompletion';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
   updateWizardData: (updates: Partial<ContractWizardData>) => void;
   setCurrentStep: (step: number) => void;
   setErrors: (errors: Record<string, string>) => void;
+  setGeneralErrorKind?: (kind: 'error' | 'permission' | 'stale') => void;
   setLoading: (loading: boolean) => void;
   validateCurrentStep: () => boolean;
   validateAllSteps?: () => boolean;
@@ -81,6 +82,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     updateWizardData,
     setCurrentStep,
     setErrors,
+    setGeneralErrorKind,
     setLoading,
     validateCurrentStep,
     validateAllSteps,
@@ -107,6 +109,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
   }, [router]);
 
   const handleCreateContract = useCallback(async () => {
+    setGeneralErrorKind?.('error');
     const isEditMode = mode === 'edit';
     const editContractId = contractId;
     if (isEditMode) {
@@ -442,10 +445,10 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         });
       } else {
         const recovery = getContractSubmissionRecovery(response.status, isEditMode);
+        const failure = { response: { status: response.status, data: response.data } };
+        setGeneralErrorKind?.(getSalesOperationalErrorKind(failure));
         setErrors({
-          general: getSalesOperationalErrorMessage({
-            response: { status: response.status, data: response.data }
-          }, {
+          general: getSalesOperationalErrorMessage(failure, {
             failedAction: isEditMode ? 'ذخیره تغییرات قرارداد' : 'ثبت قرارداد',
             nextStep: recovery.nextStep,
             preserveInput: true,
@@ -458,6 +461,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       console.error('Error response:', error.response?.data);
 
       const editSessionMessage = onEditSessionFailure?.(error);
+      setGeneralErrorKind?.(editSessionMessage ? 'stale' : getSalesOperationalErrorKind(error));
       const initialMappedErrors = editSessionMessage
         ? { general: editSessionMessage }
         : mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد');
@@ -491,6 +495,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     updateWizardData,
     setCurrentStep,
     setErrors,
+    setGeneralErrorKind,
     setLoading,
     validateCurrentStep,
     validateAllSteps,

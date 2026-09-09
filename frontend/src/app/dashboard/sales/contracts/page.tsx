@@ -34,7 +34,7 @@ import { downloadBlobResponse } from '@/lib/downloadFile';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 import { sourceStatusLabels, StatusBadge } from '@/features/accounting/accountingUi';
 import { parseContractStatusQuery } from '@/features/sales/contractListQuery';
-import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 
 interface Contract {
   id: string;
@@ -366,7 +366,8 @@ export default function ContractsPage() {
       downloadBlobResponse(response, `sales_contract_${contractId}.pdf`);
     } catch (error) {
       console.error('Error downloading contract PDF:', error);
-      setOperationError({ source: 'action', contractId, kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
+      const normalizedError = await normalizeSalesBlobError(error);
+      setOperationError({ source: 'action', contractId, kind: getSalesOperationalErrorKind(normalizedError), message: getSalesOperationalErrorMessage(normalizedError, {
         failedAction: 'دانلود PDF قرارداد',
         nextStep: 'دوباره روی «دانلود PDF» بزنید.'
       }) });

@@ -43,6 +43,7 @@ export default function ProductsPage() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [listError, setListError] = useState('');
+  const [listErrorKind, setListErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const [rowError, setRowError] = useState<{ productId: string; message: string; kind: 'error' | 'permission' | 'stale' } | null>(null);
   const [showImportExportModal, setShowImportExportModal] = useState(false);
 
@@ -69,6 +70,7 @@ export default function ProductsPage() {
     try {
       setLoading(true);
       setListError('');
+      setListErrorKind('error');
       const params: any = { page: currentPage, limit: itemsPerPage };
       if (showDeleted) params.includeDeleted = true;
       if (searchTerm) params.search = searchTerm;
@@ -84,13 +86,16 @@ export default function ProductsPage() {
         setTotalPages(pagination.pages || 1);
         setTotalProducts(pagination.total || 0);
       } else {
-        setListError(getSalesOperationalErrorMessage({ response }, {
+        const failure = { response };
+        setListErrorKind(getSalesOperationalErrorKind(failure));
+        setListError(getSalesOperationalErrorMessage(failure, {
           failedAction: 'دریافت فهرست محصولات',
           nextStep: 'دوباره تلاش کنید.'
         }));
       }
     } catch (error) {
       console.error('Error fetching products:', error);
+      setListErrorKind(getSalesOperationalErrorKind(error));
       setListError(getSalesOperationalErrorMessage(error, {
         failedAction: 'دریافت فهرست محصولات',
         nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
@@ -253,7 +258,7 @@ export default function ProductsPage() {
       >
         {listError && (
           <ErpInlineState
-            kind={products.length > 0 ? 'stale' : 'error'}
+            kind={products.length > 0 ? 'stale' : listErrorKind}
             title={listError}
             action={{ label: 'تلاش دوباره', onClick: fetchProducts, tone: 'primary' }}
           />

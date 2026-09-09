@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ErpBadge, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpSummaryGrid } from '@/components/erp';
 import { shipmentQuantityAPI } from '@/lib/api';
 import { formatShipmentQuantity, shipmentHealthPresentation, type ShipmentQuantityRow } from './shipmentQuantityPresentation';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface ProjectionResponse {
   cutoff: string;
@@ -26,6 +26,7 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
   const [data, setData] = useState<ProjectionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshError, setRefreshError] = useState('');
+  const [refreshErrorKind, setRefreshErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
 
   useEffect(() => {
     let active = true;
@@ -35,11 +36,15 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
       if (!active) return;
       setData(response.data.data);
       setRefreshError('');
+      setRefreshErrorKind('error');
     }).catch((error) => {
-      if (active) setRefreshError(getSalesOperationalErrorMessage(error, {
-        failedAction: 'دریافت اطلاعات ارسال',
-        nextStep: 'صفحه را تازه‌سازی و دوباره تلاش کنید.',
-      }));
+      if (active) {
+        setRefreshErrorKind(getSalesOperationalErrorKind(error));
+        setRefreshError(getSalesOperationalErrorMessage(error, {
+          failedAction: 'دریافت اطلاعات ارسال',
+          nextStep: 'صفحه را تازه‌سازی و دوباره تلاش کنید.',
+        }));
+      }
     }).finally(() => {
       if (active) setLoading(false);
     });
@@ -47,7 +52,7 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
   }, [contractId, customerId]);
 
   if (loading && !data) return <ErpLoading />;
-  if (!data && refreshError) return <ErpInlineState kind="error" title={refreshError} />;
+  if (!data && refreshError) return <ErpInlineState kind={refreshErrorKind} title={refreshError} />;
 
   return (
     <ErpSection title="مانده ارسال" description="مقادیر قرارداد، رزروشده، خارج‌شده و قابل بارگیری از شواهد ثبت‌شده محاسبه می‌شوند.">

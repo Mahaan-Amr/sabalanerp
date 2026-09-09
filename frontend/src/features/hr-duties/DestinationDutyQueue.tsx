@@ -19,7 +19,7 @@ import { initialDestinationDutyState, reduceDestinationDutyState } from './desti
 import { buildDutyQueueTabs, dutyQueueEmptyTitle } from '@/features/cross-workspace-duties/dutyQueuePresentation';
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
 import { destinationDutyHref } from '@/features/cross-workspace-duties/dutyDestination';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getOperationalErrorMessage } from '@/lib/operationalError';
 
 const statusLabel: Record<string, string> = {
   OPEN: 'باز', COMPLETED: 'تکمیل‌شده', WAIVED: 'جایگزین‌شده', CANCELLED: 'لغوشده',
@@ -75,7 +75,7 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
       }
       dispatch({ type: 'success', data: { summary: resolvedSummary, duties: duties.data.data, view } });
     } catch (error) {
-      dispatch({ type: 'failure', message: getSalesOperationalErrorMessage(error, {
+      dispatch({ type: 'failure', message: getOperationalErrorMessage(error, {
         failedAction: 'به‌روزرسانی وظایف',
         nextStep: 'صفحه را تازه‌سازی و دوباره تلاش کنید.',
       }) });

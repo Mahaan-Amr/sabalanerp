@@ -11,6 +11,7 @@ interface ErrorModalProps {
   showIcon?: boolean;
   details?: string;
   returnFocusElement?: HTMLElement | null;
+  kind?: 'error' | 'permission' | 'stale';
 }
 
 export default function ErrorModal({
@@ -21,7 +22,8 @@ export default function ErrorModal({
   buttonText = 'باشه',
   showIcon = true,
   details,
-  returnFocusElement
+  returnFocusElement,
+  kind = 'error'
 }: ErrorModalProps) {
   return (
     <ErpSheet
@@ -30,12 +32,12 @@ export default function ErrorModal({
       title={title}
       presentation="modal"
       returnFocusElement={returnFocusElement}
-      footer={<div className="flex justify-center"><ErpButton label={buttonText} onClick={onClose} tone="danger" variant="outline" /></div>}
+      footer={<div className="flex justify-center"><ErpButton label={buttonText} onClick={onClose} tone={kind === 'error' ? 'danger' : 'neutral'} variant="outline" /></div>}
     >
       <div className="space-y-4 text-center">
-        {showIcon ? <FaExclamationCircle className="mx-auto h-10 w-10 text-[var(--sds-danger)]" aria-hidden="true" /> : null}
+        {showIcon && kind === 'error' ? <FaExclamationCircle className="mx-auto h-10 w-10 text-[var(--sds-danger)]" aria-hidden="true" /> : null}
         <p className="sds-text-primary leading-7">{message}</p>
-        {details ? <ErpInlineState kind="error" title={details} /> : null}
+        {details ? <ErpInlineState kind={kind} title={details} /> : null}
       </div>
     </ErpSheet>
   );

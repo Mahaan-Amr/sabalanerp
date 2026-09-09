@@ -122,7 +122,7 @@ import {
 } from '@/features/contract-creation/services/contractCreationDraftPolicy';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
-import { getSalesErrorSummary, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesErrorSummary, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 
 // Import constants
 import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
@@ -741,6 +741,7 @@ export default function CreateContractWizard({
   // Use wizard state, but allow local overrides if needed
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [generalErrorKind, setGeneralErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
 
   useEffect(() => {
     if (!Object.values(errors).some(Boolean)) return;
@@ -852,7 +853,8 @@ export default function CreateContractWizard({
   });
 
   // Memoized error handler to prevent infinite loop
-  const handleDataLoadingError = useCallback((error: string) => {
+  const handleDataLoadingError = useCallback((error: string, kind: 'error' | 'permission' | 'stale') => {
+    setGeneralErrorKind(kind);
     setErrors({ general: error });
   }, []);
 
@@ -2698,6 +2700,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       ? (await editRecovery.release(), true)
       : await editRecovery.discard();
     if (!cleared) {
+      setGeneralErrorKind('error');
       setErrors({ general: 'کنار گذاشتن پیش‌نویس انجام نشد؛ دوباره تلاش کنید' });
       return;
     }
@@ -4270,6 +4273,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       wizardData
     });
     if (!persisted) {
+      setGeneralErrorKind('error');
       setErrors({ general: 'فضای ذخیرهٔ مرورگر پر است؛ پیش از خروج از قرارداد، همگام‌سازی را کامل کنید.' });
       return;
     }
@@ -4483,7 +4487,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       const response = await salesAPI.downloadContractPdf(signatureContractId, { fresh: false });
       downloadBlobResponse(response, `sales_contract_${signatureContractId}.pdf`);
     } catch (error: any) {
-      setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
+      const normalizedError = await normalizeSalesBlobError(error);
+      setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(normalizedError, {
         failedAction: 'دانلود PDF قرارداد',
         nextStep: 'دوباره روی «دانلود PDF» بزنید.'
       }) }));
@@ -6033,6 +6038,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     updateWizardData,
     setCurrentStep,
     setErrors,
+    setGeneralErrorKind,
     setLoading: setWizardLoading,
     validateCurrentStep,
     validateAllSteps,
@@ -6058,6 +6064,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     if (!editRecovery.ready || !editRecovery.leaseToken || editRecovery.blocked) {
+      setGeneralErrorKind('stale');
       setErrors({ general: editRecovery.blockReason
         ? getContractEditRecoveryMessage(editRecovery.blockReason)
         : 'اتصال ایمن ویرایش هنوز آماده نیست' });
@@ -6312,7 +6319,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           />
         )}
         {errors.general && (
-          <ErpInlineState kind="error" title={errors.general} />
+          <ErpInlineState kind={generalErrorKind} title={errors.general} />
         )}
 
         {/* Product Configuration Modal */}

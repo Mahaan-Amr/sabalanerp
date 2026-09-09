@@ -18,7 +18,7 @@ import SuccessModal from '@/components/SuccessModal';
 import ErrorModal from '@/components/ErrorModal';
 import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
 import { SalesAuthoringPage, SalesAuthoringSection } from '@/features/sales/authoring/SalesAuthoringUi';
-import { getSalesErrorSummary, getSalesOperationalErrorMessage, mapProductCreationValidationErrors } from '@/features/sales/salesOperationalError';
+import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductCreationValidationErrors } from '@/features/sales/salesOperationalError';
 
 // Stone type definitions
 const STONE_TYPES = [
@@ -292,6 +292,7 @@ export default function CreateStoneProductWizard() {
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [loadErrorKind, setLoadErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -330,6 +331,7 @@ export default function CreateStoneProductWizard() {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [modalDetails, setModalDetails] = useState('');
+  const [modalErrorKind, setModalErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
 
   // Wizard data
   const [wizardData, setWizardData] = useState<StoneProductWizardData>({
@@ -360,6 +362,7 @@ export default function CreateStoneProductWizard() {
     try {
       setLoading(true);
       setLoadError('');
+      setLoadErrorKind('error');
 
       // Load all master data in parallel
       const [
@@ -391,6 +394,7 @@ export default function CreateStoneProductWizard() {
       });
     } catch (error) {
       console.error('Error loading master data:', error);
+      setLoadErrorKind(getSalesOperationalErrorKind(error));
       setLoadError(getSalesOperationalErrorMessage(error, {
         failedAction: 'دریافت گزینه‌های ساخت محصول',
         nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
@@ -647,8 +651,10 @@ export default function CreateStoneProductWizard() {
           }
         }, 2000);
       } else {
+        const failure = { response };
         setModalMessage('ایجاد محصول انجام نشد');
-        setModalDetails(getSalesOperationalErrorMessage({ response }, {
+        setModalErrorKind(getSalesOperationalErrorKind(failure));
+        setModalDetails(getSalesOperationalErrorMessage(failure, {
           failedAction: 'ایجاد محصول',
           nextStep: 'مشخصات محصول را بررسی کنید و دوباره تلاش کنید.',
           preserveInput: true,
@@ -671,6 +677,7 @@ export default function CreateStoneProductWizard() {
         }
       }
       setModalMessage('ایجاد محصول انجام نشد');
+      setModalErrorKind(getSalesOperationalErrorKind(error));
       setModalDetails(getSalesOperationalErrorMessage(error, {
         failedAction: 'ایجاد محصول',
         nextStep: 'مشخصات محصول را بررسی کنید و دوباره تلاش کنید.',
@@ -864,7 +871,7 @@ export default function CreateStoneProductWizard() {
       actions={isReturningToContract ? [{ label: 'لغو و بازگشت به قرارداد', icon: FaTimes, tone: 'danger', variant: 'outline', onClick: returnToContract }] : []}
       progress={{ current: currentStep, total: WIZARD_STEPS.length, label: WIZARD_STEPS[currentStep - 1].title }}
       feedback={loadError
-        ? { kind: 'error', title: loadError, action: { label: 'تلاش دوباره', onClick: loadMasterData } }
+        ? { kind: loadErrorKind, title: loadError, action: { label: 'تلاش دوباره', onClick: loadMasterData } }
         : getSalesErrorSummary(errors)
           ? { kind: 'error', title: getSalesErrorSummary(errors) }
         : currentStep > 1 || Boolean(wizardData.cutTypeId)
@@ -912,6 +919,7 @@ export default function CreateStoneProductWizard() {
         title="ایجاد محصول انجام نشد"
         message={modalMessage}
         details={modalDetails}
+        kind={modalErrorKind}
         buttonText="بستن"
       />
     </SalesAuthoringPage>

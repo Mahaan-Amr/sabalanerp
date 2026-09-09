@@ -4,11 +4,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { CrmCustomer, CuttingType, Product, SubService, StoneFinishing } from '../types/contract.types';
 import { crmAPI, salesAPI, servicesAPI, dashboardAPI } from '@/lib/api';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface UseDataLoadingOptions {
   autoLoad?: boolean;
-  onError?: (error: string) => void;
+  onError?: (error: string, kind: 'error' | 'permission' | 'stale') => void;
   onDataLoaded?: () => void;
 }
 
@@ -159,13 +159,13 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       if (isForbiddenError(err)) {
         const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
         setError(message);
-        if (onErrorRef.current) onErrorRef.current(message);
+        if (onErrorRef.current) onErrorRef.current(message, 'permission');
         setCustomers([]);
         return [];
       }
       const errorMsg = loadErrorMessage(err, 'فهرست مشتریان');
       setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
   }, []);
@@ -181,7 +181,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'فهرست محصولات');
       setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
   }, []);
@@ -197,7 +197,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'اطلاعات واحد فروش');
       setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
   }, []);
@@ -217,7 +217,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       }
       const errorMsg = loadErrorMessage(err, 'انواع برش');
       setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
   }, []);
@@ -237,7 +237,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       }
       const errorMsg = loadErrorMessage(err, 'فهرست ابزارها');
       setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
   }, []);
@@ -264,7 +264,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       setError(errorMsg);
       setStoneFinishings([]);
       setStoneFinishingLoadState('error');
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
   }, []);
@@ -295,7 +295,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'اطلاعات کاربر');
       setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
       return null;
     }
   }, [buildCapabilities]);
@@ -318,7 +318,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
         setCustomers([]);
         setError(message);
-        if (onErrorRef.current) onErrorRef.current(message);
+        if (onErrorRef.current) onErrorRef.current(message, 'permission');
       }
       if (nextCapabilities.canLoadCuttingTypes) tasks.push(loadCuttingTypes());
       if (nextCapabilities.canLoadSubServices) tasks.push(loadSubServices(1000));
@@ -337,7 +337,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'اطلاعات اولیه قرارداد');
       setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
     } finally {
       setLoading(false);
     }

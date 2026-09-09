@@ -8,7 +8,7 @@ import { formatPrice } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
 import { SalesAuthoringPage, SalesAuthoringSection, hasSalesDraftChanged } from '@/features/sales/authoring/SalesAuthoringUi';
-import { getSalesErrorSummary, getSalesOperationalErrorMessage, mapProductEditValidationErrors } from '@/features/sales/salesOperationalError';
+import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductEditValidationErrors } from '@/features/sales/salesOperationalError';
 
 // Product name generation utilities
 const generateFullProductName = (product: Product): string => {
@@ -42,8 +42,9 @@ const ProductDetailPage: React.FC = () => {
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [loadErrorKind, setLoadErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; title: string }>();
+  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error' | 'permission' | 'stale'; title: string }>();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState(false);
   const [savedFormSnapshot, setSavedFormSnapshot] = useState<ProductEditValues | null>(null);
@@ -66,6 +67,7 @@ const ProductDetailPage: React.FC = () => {
     try {
       setLoading(true);
       setLoadError('');
+      setLoadErrorKind('error');
       const response = await salesAPI.getProduct(productId);
 
       if (response.data.success && response.data.data) {
@@ -85,13 +87,16 @@ const ProductDetailPage: React.FC = () => {
         setProduct(null);
         setSavedFormSnapshot(null);
       } else {
-        setLoadError(getSalesOperationalErrorMessage({ response }, {
+        const failure = { response };
+        setLoadErrorKind(getSalesOperationalErrorKind(failure));
+        setLoadError(getSalesOperationalErrorMessage(failure, {
           failedAction: 'دریافت اطلاعات محصول',
           nextStep: 'به فهرست محصولات برگردید یا دوباره تلاش کنید.'
         }));
       }
     } catch (error) {
       console.error('Error fetching product:', error);
+      setLoadErrorKind(getSalesOperationalErrorKind(error));
       setLoadError(getSalesOperationalErrorMessage(error, {
         failedAction: 'دریافت اطلاعات محصول',
         nextStep: 'به فهرست محصولات برگردید یا دوباره تلاش کنید.'
@@ -125,9 +130,10 @@ const ProductDetailPage: React.FC = () => {
       } else {
         const mapped = mapProductEditValidationErrors(response.data?.details || []);
         setFieldErrors(mapped);
+        const failure = { response };
         setFeedback({
-          kind: 'error',
-          title: getSalesOperationalErrorMessage({ response }, {
+          kind: getSalesOperationalErrorKind(failure),
+          title: getSalesOperationalErrorMessage(failure, {
             failedAction: 'به‌روزرسانی محصول',
             nextStep: 'مقادیر مشخص‌شده را بررسی کنید و دوباره ذخیره کنید.',
             preserveInput: true,
@@ -140,7 +146,7 @@ const ProductDetailPage: React.FC = () => {
       const mapped = mapProductEditValidationErrors((error as any)?.response?.data?.details || []);
       setFieldErrors(mapped);
       setFeedback({
-        kind: 'error',
+        kind: getSalesOperationalErrorKind(error),
         title: getSalesOperationalErrorMessage(error, {
           failedAction: 'به‌روزرسانی محصول',
           nextStep: 'مقادیر مشخص‌شده را بررسی کنید و دوباره ذخیره کنید.',
@@ -163,7 +169,7 @@ const ProductDetailPage: React.FC = () => {
   if (loadError) {
     return (
       <SalesAuthoringPage title="جزئیات محصول" backHref="/dashboard/sales/products">
-        <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: fetchProduct }} />
+        <ErpInlineState kind={loadErrorKind} title={loadError} action={{ label: 'تلاش دوباره', onClick: fetchProduct }} />
       </SalesAuthoringPage>
     );
   }
@@ -367,7 +373,11 @@ const ProductDetailPage: React.FC = () => {
                   {saving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}
                 </ErpPressable>
                 <ErpPressable type="button"
-                  onClick={() => setEditing(false)}
+                  onClick={() => {
+                    setEditing(false);
+                    setFieldErrors({});
+                    setFeedback(undefined);
+                  }}
                   variant="ghost"
                   className="flex-1 px-6 py-3"
                 >

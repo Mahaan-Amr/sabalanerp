@@ -57,8 +57,24 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
     }
     await page.emulateMedia({ reducedMotion: 'reduce' });
     expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'گردش ارزیابی عملکرد' })).toBeVisible();
+    const runningMotion = await page.evaluate(() => document.getAnimations()
+      .filter((animation) => animation.playState === 'running'
+        && Number(animation.effect?.getComputedTiming().duration || 0) > 1).length);
+    expect(runningMotion).toBe(0);
     await page.keyboard.press('Tab');
-    expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
+    const focusEvidence = await page.evaluate(() => {
+      const element = document.activeElement as HTMLElement | null;
+      if (!element || element === document.body) return { moved: false, visible: false };
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const focusPaint = (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0)
+        || style.boxShadow !== 'none';
+      return { moved: true, visible: rect.width > 0 && rect.height > 0
+        && style.visibility !== 'hidden' && style.display !== 'none' && focusPaint };
+    });
+    expect(focusEvidence).toEqual({ moved: true, visible: true });
     await page.evaluate(() => { document.documentElement.style.zoom = '2'; });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
     await page.evaluate(() => { document.documentElement.style.zoom = ''; });
@@ -130,12 +146,23 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
       const expectedStatus = role !== 'lifecycleManager' ? 403 : state.status === 'DRAFT' ? 200 : 409;
       expect(action.status(), `${role} cancel ${state.status}: ${JSON.stringify(actionBody)}`).toBe(expectedStatus);
       expect(action.headers()['cache-control']).toContain('no-store');
-      if (expectedStatus === 200) expect(actionBody.evaluation?.status).toBe('CANCELLED');
+      let persistedOutcome = expectedStatus === 200 ? actionBody.evaluation?.status : actionBody.code;
+      if (expectedStatus === 200) {
+        expect(actionBody.evaluation?.status).toBe('CANCELLED');
+        const persisted = await context.request.post(`/api/hr/personnel-performance/evaluations/${state.evaluationId}/cancel`, {
+          data: { reason: `بازخوانی مستقل ماندگاری لغو ${state.status}.` },
+        });
+        const persistedBody = await persisted.json();
+        expect(persisted.status()).toBe(409);
+        expect(persistedBody.code).toBe('PERFORMANCE_CANCELLATION_STATE_INVALID');
+        persistedOutcome = `${actionBody.evaluation.status}:${persistedBody.code}`;
+        await persisted.dispose();
+      }
       if (role === 'lifecycleManager' && state.status !== 'DRAFT') {
         expect(actionBody.code).toBe('PERFORMANCE_CANCELLATION_STATE_INVALID');
       }
       actionChecks.push({ action: 'cancel', lifecycleState: state.status, status: action.status(),
-        persistedOutcome: expectedStatus === 200 ? actionBody.evaluation?.status : actionBody.code });
+        persistedOutcome });
       await action.dispose();
     }
     if (role === 'noAccess') {

@@ -10,7 +10,7 @@ import { openPartnerPdf, readPartnerAccount, readPartnerCases, sendPartnerConfir
 import type { PartnerAccountView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
-import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 
 export function PartnerCaseRuntime() {
   const [rows, setRows] = useState<PartnerCaseRuntimeRow[]>([]);
@@ -43,13 +43,26 @@ export function PartnerCaseRuntime() {
     setError(undefined);
     try { await action(); await load(); }
     catch (reason) {
-      setError({ caseId, kind: getSalesOperationalErrorKind(reason), message: getSalesOperationalErrorMessage(reason, {
+      const normalizedReason = await normalizeSalesBlobError(reason);
+      setError({ caseId, kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
         failedAction: name,
         nextStep: 'وضعیت پرونده را تازه‌سازی و سپس دوباره بررسی کنید.',
         uncertainMutation: true,
       }) });
     }
   }, [load]);
+  const previewPdf = useCallback(async (caseId: string, snapshotId: string) => {
+    setError(undefined);
+    try {
+      await openPartnerPdf(caseId, snapshotId, 'PREVIEW');
+    } catch (reason) {
+      const normalizedReason = await normalizeSalesBlobError(reason);
+      setError({ caseId, kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
+        failedAction: 'پیش‌نمایش سند فروش همکار',
+        nextStep: 'دوباره روی «پیش‌نمایش» بزنید.',
+      }) });
+    }
+  }, []);
   useEffect(() => { void load(); }, [load]);
   if (busy) return <ErpLoading />;
   return <ErpWorkspacePage title="پرونده‌های فروش همکار" context="حقیقت جاری پرونده، وصول و حساب سبلان">
@@ -62,7 +75,7 @@ export function PartnerCaseRuntime() {
       collections={collections[row.view.owner.caseId]} correction={corrections[row.view.owner.caseId]}
       onRequestCorrection={scope => void runAction(row.view.owner.caseId, 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, scope))}
       actions={{ ...row.actions,
-        onPreview: row.snapshotId ? () => void openPartnerPdf(row.view.owner.caseId, row.snapshotId!, 'PREVIEW') : undefined,
+        onPreview: row.snapshotId ? () => void previewPdf(row.view.owner.caseId, row.snapshotId!) : undefined,
         onIssue: row.snapshotId ? () => void runAction(row.view.owner.caseId, 'صدور سند فروش همکار', () => openPartnerPdf(row.view.owner.caseId, row.snapshotId!, 'FINAL')) : undefined,
         onSendConfirmation: () => void runAction(row.view.owner.caseId, 'ارسال تأییدیه فروش همکار', () => sendPartnerConfirmation(row.view.owner.caseId)),
         onRequestCorrection: () => void runAction(row.view.owner.caseId, 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, 'RETAIL_ONLY')),

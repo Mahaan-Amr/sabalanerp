@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
 import { reconstructPerformanceReadiness } from '../personnelPerformanceReadinessStore';
+import { readPerformancePayload } from '../personnelPerformancePayloadStore';
 
 const repositoryRoot = path.resolve(process.cwd(), '..');
 const sourceDatabaseUrl = process.env.DATABASE_URL
@@ -98,6 +99,20 @@ const main = async () => {
     assert.deepEqual(result.coverage.acceptedResult, baseline.coverage.acceptedResult);
     assert.deepEqual(result.coverage.resultBadge, baseline.coverage.resultBadge);
     assert.equal(result.run.sourceCount - baseline.run.sourceCount, 8, 'every Personnel is represented while relationship and assignment leaves remain distinct');
+
+    const completionAudit = await client.performanceAuditEvent.findFirstOrThrow({
+      where: { aggregateType: 'READINESS_RUN', aggregateId: result.run.id, eventType: 'READINESS_COMPLETED' },
+      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+    });
+    const auditEvidence = await readPerformancePayload<{
+      inventory: typeof result.coverage.inventory;
+      inventoryClassifications: typeof result.coverage.inventoryClassifications;
+      periodEligibility: typeof result.coverage.periodEligibility;
+    }>(client, completionAudit.encryptedPayloadId!, keyring);
+    assert.deepEqual(auditEvidence.inventory, result.coverage.inventory);
+    assert.deepEqual(auditEvidence.inventoryClassifications, result.coverage.inventoryClassifications,
+      'immutable completion evidence preserves every canonical missing-link and ineligibility classification');
+    assert.deepEqual(auditEvidence.periodEligibility, result.coverage.periodEligibility);
 
     const records = await client.performanceReadinessRecord.findMany({ where: { runId: result.run.id } });
     const newAssignmentIds = new Set((await client.hrEmploymentAssignment.findMany({

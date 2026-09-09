@@ -284,10 +284,7 @@ const readinessCoverage = async (
     client.performanceCurrentLevelProjection.count({ where: { state: 'LEVEL', levelCode: { not: null } } }),
   ]);
   const count = (status: string) => statuses.find((item) => item.status === status)?._count ?? 0;
-  const inventoryClassifications = source.rows.filter((row): row is InventoryReadinessSourceRow => row.readinessKind !== 'ELIGIBLE_ASSIGNMENT')
-    .reduce<Record<string, number>>((totals, row) => ({
-      ...totals, [row.classification]: (totals[row.classification] ?? 0) + 1,
-    }), {});
+  const inventoryClassifications = inventoryClassificationCounts(source.rows);
   const inventoryBlockers = source.rows.filter((row) => row.readinessKind === 'STRUCTURAL_BLOCKER').length;
   const appliedAssignmentIds = new Set(appliedRecords.map(({ employmentAssignmentId }) => employmentAssignmentId));
   const readyRows = source.rows.filter((row): row is EligibleReadinessSourceRow => (
@@ -307,6 +304,12 @@ const readinessCoverage = async (
     resultBadge: { subjectCount: badgeSubjects },
   };
 };
+
+const inventoryClassificationCounts = (rows: ReadinessSourceRow[]) => rows
+  .filter((row): row is InventoryReadinessSourceRow => row.readinessKind !== 'ELIGIBLE_ASSIGNMENT')
+  .reduce<Record<string, number>>((totals, row) => ({
+    ...totals, [row.classification]: (totals[row.classification] ?? 0) + 1,
+  }), {});
 
 export const getPerformanceReadinessCoverage = async (client: PrismaClient, input: {
   runId: string;
@@ -687,7 +690,9 @@ export const reconstructPerformanceReadiness = async (client: PrismaClient, inpu
       evidence: {
         sourceCount: run!.sourceCount, sourceHash: run!.sourceHash, appliedCount: run!.appliedCount,
         blockedCount: run!.blockedCount, failedCount: run!.failedCount,
-        inventory: source.inventory, periodEligibility: source.periodEligibility,
+        inventory: source.inventory,
+        inventoryClassifications: inventoryClassificationCounts(rows),
+        periodEligibility: source.periodEligibility,
       },
       keyring,
     }));

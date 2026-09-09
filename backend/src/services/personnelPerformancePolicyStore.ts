@@ -20,9 +20,11 @@ import {
   canonicalPerformanceHash,
   validateCriterionPolicyContent,
   validateLevelPolicyContent,
+  validatePerformanceTemplateContent,
   validatePerformancePublication,
   type LevelPolicyContent,
   type PerformanceCriterionPolicyContent,
+  type PerformanceTemplatePolicyContent,
 } from './personnelPerformancePolicy';
 import {
   decryptPerformancePayloadRow,
@@ -58,23 +60,7 @@ export type ScoringPolicyContent = {
   precisionScale: 6;
 };
 
-export type PerformanceTemplatePolicyContent = {
-  schemaVersion: 1;
-  titleFa: string;
-  catalogSource?: {
-    importIdentity: string;
-    catalogVersion: string;
-    sourceAsOf: string;
-    reviewStatus: 'BUSINESS_REVIEW_PENDING' | 'APPROVED';
-  };
-  categories: Array<{
-    id: string;
-    titleFa: string;
-    weightPercent: string;
-    required: boolean;
-    criteria: Array<{ criterionVersionId: string; weightPercent: string }>;
-  }>;
-};
+export type { PerformanceTemplatePolicyContent } from './personnelPerformancePolicy';
 
 const catalogReviewStatus = (content: unknown) => {
   if (!content || typeof content !== 'object' || !('catalogSource' in content)) return null;
@@ -83,10 +69,26 @@ const catalogReviewStatus = (content: unknown) => {
   return (source as { reviewStatus?: unknown }).reviewStatus;
 };
 
+type CatalogSourceMetadata = NonNullable<PerformanceTemplatePolicyContent['catalogSource']>;
+
+const catalogSourceMetadata = (content: unknown): CatalogSourceMetadata | null => {
+  if (!content || typeof content !== 'object' || !('catalogSource' in content)) return null;
+  const source = (content as { catalogSource?: unknown }).catalogSource;
+  if (!source || typeof source !== 'object') return null;
+  return source as CatalogSourceMetadata;
+};
+
 const ensureCatalogContentApprovedForPublication = (content: unknown) => {
-  const reviewStatus = catalogReviewStatus(content);
-  if (reviewStatus !== null && reviewStatus !== 'APPROVED') {
+  const source = catalogSourceMetadata(content);
+  if (source && (source.reviewStatus !== 'APPROVED'
+    || typeof source.approvedAt !== 'string' || !Number.isFinite(new Date(source.approvedAt).getTime())
+    || typeof source.approvedByUserId !== 'string' || !source.approvedByUserId.trim()
+    || typeof source.approvalReason !== 'string' || source.approvalReason.trim().length < 8
+    || typeof source.manifestContentHash !== 'string' || !/^[a-f0-9]{64}$/.test(source.manifestContentHash))) {
     throw policyError('محتوای پیشنهادی کاتالوگ تا ثبت نسخه تأییدشده کسب‌وکاری قابل انتشار نیست.', 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED', 409);
+  }
+  if (!source && catalogReviewStatus(content) !== null) {
+    throw policyError('منشأ تأیید کاتالوگ ناقص است و انتشار متوقف شد.', 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED', 409);
   }
 };
 
@@ -170,29 +172,6 @@ const persistVersionContent = async (
     payload: input.content,
     keyring: input.keyring,
   });
-};
-
-const validateTemplateContent = (content: PerformanceTemplatePolicyContent) => {
-  const errors: string[] = [];
-  const twoDecimals = (value: string) => /^\d+(?:\.\d{1,2})?$/.test(value);
-  const sum = (values: string[]) => values.reduce((total, value) => total.add(value), new Prisma.Decimal(0));
-  if (content.schemaVersion !== 1 || !content.titleFa.trim()) errors.push('عنوان و نسخه ساختار الگوی ارزیابی الزامی است.');
-  if (content.categories.length === 0 || !sum(content.categories.map((category) => category.weightPercent)).eq(100)) {
-    errors.push('جمع وزن دسته‌های الگو باید دقیقاً ۱۰۰ درصد باشد.');
-  }
-  const seen = new Set<string>();
-  for (const category of content.categories) {
-    if (!twoDecimals(category.weightPercent) || new Prisma.Decimal(category.weightPercent).lte(0)) errors.push(`وزن دسته «${category.titleFa}» معتبر نیست.`);
-    if (category.criteria.length === 0 || !sum(category.criteria.map((criterion) => criterion.weightPercent)).eq(100)) {
-      errors.push(`جمع وزن معیارهای دسته «${category.titleFa}» باید دقیقاً ۱۰۰ درصد باشد.`);
-    }
-    for (const criterion of category.criteria) {
-      if (!twoDecimals(criterion.weightPercent) || new Prisma.Decimal(criterion.weightPercent).lt(0)) errors.push('وزن معیار باید نامنفی و حداکثر دو رقم اعشار داشته باشد.');
-      if (seen.has(criterion.criterionVersionId)) errors.push('هر نسخه معیار فقط یک‌بار و در یک دسته الگو مجاز است.');
-      seen.add(criterion.criterionVersionId);
-    }
-  }
-  return errors;
 };
 
 const validateTemplateOwner = async (tx: Prisma.TransactionClient, input: {
@@ -350,7 +329,7 @@ export const createPerformanceTemplateDraft = async (client: PrismaClient, input
   createdByUserId: string;
   keyring?: PerformanceVaultKey;
 }) => {
-  ensureNoErrors(validateTemplateContent(input.content));
+  ensureNoErrors(validatePerformanceTemplateContent(input.content));
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
   return asTx(client, async (tx) => {
     await validateTemplateOwner(tx, {
@@ -526,8 +505,14 @@ export const importPerformanceRoleCatalogDraft = async (client: PrismaClient, in
         catalogSource: {
           importIdentity: plan.importIdentity,
           catalogVersion: plan.manifest.catalog.versionCode,
+          manifestContentHash: plan.contentHash,
           sourceAsOf: plan.manifest.source.asOf,
-          reviewStatus: plan.manifest.review.status === 'APPROVED' ? 'APPROVED' : 'BUSINESS_REVIEW_PENDING',
+          sourceProvenanceCategory: plan.manifest.source.provenanceCategory,
+          manifestContentOrigin: plan.manifest.review.contentOrigin,
+          ...(plan.manifest.review.reviewerRole ? { manifestReviewerRole: plan.manifest.review.reviewerRole } : {}),
+          ...(plan.manifest.review.reviewedAt ? { manifestReviewedAt: plan.manifest.review.reviewedAt } : {}),
+          manifestReviewStatus: plan.manifest.review.status,
+          reviewStatus: 'BUSINESS_REVIEW_PENDING',
         },
         categories: template.categories.map((category) => ({
           id: category.id,
@@ -540,7 +525,7 @@ export const importPerformanceRoleCatalogDraft = async (client: PrismaClient, in
           })),
         })),
       };
-      ensureNoErrors(validateTemplateContent(content));
+      ensureNoErrors(validatePerformanceTemplateContent(content));
       if (content.categories.some((category) => category.criteria.some((criterion) => !criterion.criterionVersionId))) {
         throw policyError('مرجع نسخه معیار در الگوی کاتالوگ حل نشد.', 'PERFORMANCE_ROLE_CATALOG_REFERENCE_UNRESOLVED', 422);
       }
@@ -610,12 +595,113 @@ export const importPerformanceRoleCatalogDraft = async (client: PrismaClient, in
   });
 };
 
+export const approvePerformanceCatalogDraft = async (client: PrismaClient, input: {
+  artifactType: 'criterion' | 'template';
+  versionId: string;
+  reason: string;
+  approvedByUserId: string;
+  now?: Date;
+  keyring?: PerformanceVaultKey;
+}) => {
+  const reason = input.reason.trim();
+  if (reason.length < 8) {
+    throw policyError('دلیل تأیید کسب‌وکاری باید روشن و قابل حسابرسی باشد.', 'PERFORMANCE_CATALOG_APPROVAL_REASON_REQUIRED', 422);
+  }
+  const now = input.now ?? new Date();
+  const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
+  return asTx(client, async (tx) => {
+    await acquireVersionLock(tx, `performance-${input.artifactType}-version:${input.versionId}`);
+    const version = input.artifactType === 'criterion'
+      ? await tx.performanceCriterionVersion.findUnique({ where: { id: input.versionId } })
+      : await tx.performanceTemplateVersion.findUnique({ where: { id: input.versionId } });
+    if (!version || version.lifecycle !== PerformanceArtifactLifecycle.DRAFT || !version.encryptedPayloadId) {
+      throw policyError('فقط محتوای کاتالوگ در وضعیت پیش‌نویس قابل تأیید است.', 'PERFORMANCE_CATALOG_DRAFT_NOT_APPROVABLE', 409);
+    }
+    const content = await readPerformancePayload<Record<string, unknown>>(tx, version.encryptedPayloadId, keyring);
+    const source = catalogSourceMetadata(content);
+    if (!source) {
+      throw policyError('این نسخه از کاتالوگ درون‌ریزی نشده است.', 'PERFORMANCE_CATALOG_SOURCE_REQUIRED', 409);
+    }
+    if (source.reviewStatus === 'APPROVED') return version;
+    if (source.sourceProvenanceCategory === 'SYNTHETIC' || source.manifestContentOrigin === 'AI_PROPOSED') {
+      throw policyError('محتوای ساختگی یا تولیدشده با هوش مصنوعی قابل تأیید برای انتشار نیست.', 'PERFORMANCE_CATALOG_SOURCE_NOT_APPROVABLE', 409);
+    }
+    if (!/^[a-f0-9]{64}$/.test(source.manifestContentHash)
+      || !source.importIdentity?.trim() || !source.catalogVersion?.trim() || !source.sourceAsOf?.trim()) {
+      throw policyError('ردپای منشأ کاتالوگ ناقص است و تأیید متوقف شد.', 'PERFORMANCE_CATALOG_PROVENANCE_INVALID', 409);
+    }
+    const approvedContent = {
+      ...content,
+      catalogSource: {
+        ...source,
+        reviewStatus: 'APPROVED' as const,
+        approvedAt: now.toISOString(),
+        approvedByUserId: input.approvedByUserId,
+        approvalReason: reason,
+      },
+    };
+    if (input.artifactType === 'criterion') {
+      ensureNoErrors(validateCriterionPolicyContent(approvedContent as unknown as PerformanceCriterionPolicyContent));
+    } else {
+      ensureNoErrors(validatePerformanceTemplateContent(approvedContent as unknown as PerformanceTemplatePolicyContent));
+    }
+    const encrypted = await persistVersionContent(tx, {
+      aggregateType: `${input.artifactType.toUpperCase()}_VERSION`,
+      aggregateId: version.id,
+      payloadKindPrefix: input.artifactType === 'criterion' ? 'CRITERION' : 'TEMPLATE',
+      content: approvedContent,
+      keyring,
+    });
+    const approved = input.artifactType === 'criterion'
+      ? await tx.performanceCriterionVersion.update({
+        where: { id: version.id }, data: { contentHash: encrypted.contentHash, encryptedPayloadId: encrypted.id },
+      })
+      : await tx.performanceTemplateVersion.update({
+        where: { id: version.id }, data: { contentHash: encrypted.contentHash, encryptedPayloadId: encrypted.id },
+      });
+    const auditId = randomUUID();
+    const auditEvidence = await persistPerformancePayload(tx, {
+      aggregateType: `${input.artifactType.toUpperCase()}_VERSION`,
+      aggregateId: auditId,
+      payloadKind: 'CATALOG_BUSINESS_APPROVAL',
+      schemaVersion: 1,
+      payload: {
+        versionId: version.id,
+        manifestContentHash: source.manifestContentHash,
+        importIdentity: source.importIdentity,
+        beforeReviewStatus: source.reviewStatus,
+        afterReviewStatus: 'APPROVED',
+      },
+      keyring,
+    });
+    const aggregateType = `${input.artifactType.toUpperCase()}_VERSION`;
+    const previousEvent = await tx.performanceAuditEvent.findFirst({
+      where: { aggregateType, aggregateId: version.id }, orderBy: { occurredAt: 'desc' },
+    });
+    await tx.performanceAuditEvent.create({ data: {
+      id: auditId,
+      aggregateType,
+      aggregateId: version.id,
+      eventType: 'CATALOG_BUSINESS_APPROVED',
+      actorUserId: input.approvedByUserId,
+      reason,
+      encryptedPayloadId: auditEvidence.id,
+      previousEventHash: previousEvent?.eventHash,
+      eventHash: canonicalPerformanceHash({
+        auditId, versionId: version.id, manifestContentHash: source.manifestContentHash, evidenceHash: auditEvidence.contentHash,
+      }),
+      occurredAt: now,
+    } });
+    return approved;
+  });
+};
+
 export const updatePerformanceTemplateDraft = async (client: PrismaClient, input: {
   versionId: string;
   content: PerformanceTemplatePolicyContent;
   keyring?: PerformanceVaultKey;
 }) => {
-  ensureNoErrors(validateTemplateContent(input.content));
+  ensureNoErrors(validatePerformanceTemplateContent(input.content));
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
   return asTx(client, async (tx) => {
     await acquireVersionLock(tx, `performance-template-version:${input.versionId}`);
@@ -1116,7 +1202,7 @@ const scheduleArtifact = async (client: PrismaClient, input: {
     if (!version || version.lifecycle !== PerformanceArtifactLifecycle.DRAFT) throw policyError('فقط نسخه پیش‌نویس الگو قابل زمان‌بندی است.', 'PERFORMANCE_VERSION_NOT_SCHEDULABLE', 409);
     if (!version.encryptedPayloadId) throw policyError('محتوای الگو در دسترس نیست.', 'PERFORMANCE_VERSION_NOT_SCHEDULABLE', 409);
     const content = await readPerformancePayload<PerformanceTemplatePolicyContent>(tx, version.encryptedPayloadId, keyring);
-    ensureNoErrors(validateTemplateContent(content));
+    ensureNoErrors(validatePerformanceTemplateContent(content));
     ensureCatalogContentApprovedForPublication(content);
     await validateTemplateOwner(tx, {
       templateKind: version.templateKind,
@@ -1585,7 +1671,7 @@ export const activateDuePerformanceArtifacts = async (client: PrismaClient, inpu
       await acquireVersionLock(tx, `performance-template:${version.templateKind}:${version.ownerType}:${version.ownerId}`);
       if (!version.encryptedPayloadId) throw policyError('محتوای الگو در دسترس نیست.', 'PERFORMANCE_VERSION_NOT_SCHEDULABLE', 409);
       const content = await readPerformancePayload<PerformanceTemplatePolicyContent>(tx, version.encryptedPayloadId, keyring);
-      ensureNoErrors(validateTemplateContent(content));
+      ensureNoErrors(validatePerformanceTemplateContent(content));
       ensureCatalogContentApprovedForPublication(content);
       await validateTemplateOwner(tx, {
         templateKind: version.templateKind,

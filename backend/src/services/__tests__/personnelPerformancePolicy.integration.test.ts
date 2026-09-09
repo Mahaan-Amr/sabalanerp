@@ -6,6 +6,7 @@ import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTem
 import {
   activateDuePerformanceArtifacts,
   activateDuePerformancePolicies,
+  approvePerformanceCatalogDraft,
   cancelScheduledPerformanceVersion,
   createPerformanceCriterionDraft,
   createPerformancePolicyDraft,
@@ -20,7 +21,8 @@ import {
 } from '../personnelPerformancePolicyStore';
 import { DEFAULT_LEVEL_POLICY_CONTENT, nextTehranDayStart } from '../personnelPerformancePolicy';
 import { performanceRoleCatalogContentHash } from '../personnelPerformanceRoleCatalog';
-import { persistPerformancePayload } from '../personnelPerformancePayloadStore';
+import { persistPerformancePayload, readPerformancePayload } from '../personnelPerformancePayloadStore';
+import { calculatePerformanceEvaluation, type PerformanceTemplateSnapshot } from '../personnelPerformanceCalculation';
 
 const repositoryRoot = path.resolve(process.cwd(), '..');
 const sourceDatabaseUrl = process.env.DATABASE_URL
@@ -118,6 +120,10 @@ const main = async () => {
     },
     source: { provenanceCategory: 'LOCAL', asOf: new Date().toISOString(), references: ['integration-controlled-source'], extractedFacts: true },
     review: { contentOrigin: 'COMPANY_CONTROLLED_SOURCE', status: 'BUSINESS_REVIEW_PENDING' },
+    applicabilitySnapshotContract: {
+      schemaVersion: 1, container: '__applicability', snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
+      sourceVersions: 'REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION', effectiveAt: 'REQUIRED_ISO_TIMESTAMP', unknown: 'BLOCK',
+    },
     applicabilityDictionary: Object.entries({
       jobId: 'ID', positionId: 'ID', organizationalUnitId: 'ID', workplaceId: 'ID', shiftType: 'STRING',
       assignmentType: 'STRING', responsibilityCodes: 'STRING_LIST', effectiveDate: 'DATE', hasSafetyDuty: 'BOOLEAN',
@@ -170,6 +176,79 @@ const main = async () => {
     versionId: imported.templateVersionIds[0], effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
     reason: 'آزمون جلوگیری از انتشار الگوی پیشنهادی', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
   }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED');
+  const approvedCriterion = await approvePerformanceCatalogDraft(first, {
+    artifactType: 'criterion', versionId: imported.criterionVersionIds[0],
+    reason: 'بازبینی معیار در برابر منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  });
+  const approvedTemplate = await approvePerformanceCatalogDraft(first, {
+    artifactType: 'template', versionId: imported.templateVersionIds[0],
+    reason: 'بازبینی الگو و مالک آن در منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  });
+  const approvedAddendumCriterion = await approvePerformanceCatalogDraft(first, {
+    artifactType: 'criterion', versionId: imported.criterionVersionIds[1],
+    reason: 'بازبینی معیار افزوده در برابر منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  });
+  const approvedAddendumTemplate = await approvePerformanceCatalogDraft(first, {
+    artifactType: 'template', versionId: imported.templateVersionIds[1],
+    reason: 'بازبینی الگوی افزوده در منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  });
+  const approvedCriterionContent = await readPerformancePayload<any>(first, approvedCriterion.encryptedPayloadId!, keyring);
+  const approvedTemplateContent = await readPerformancePayload<any>(first, approvedTemplate.encryptedPayloadId!, keyring);
+  assert.equal(approvedCriterionContent.catalogSource.reviewStatus, 'APPROVED');
+  assert.equal(approvedCriterionContent.catalogSource.manifestContentHash, importManifest.catalog.contentHash);
+  assert.equal(approvedTemplateContent.catalogSource.approvedByUserId, actor.id);
+  assert.equal(await first.performanceAuditEvent.count({
+    where: { eventType: 'CATALOG_BUSINESS_APPROVED', aggregateId: { in: [approvedCriterion.id, approvedTemplate.id, approvedAddendumCriterion.id, approvedAddendumTemplate.id] } },
+  }), 4);
+  const addendumCriterionContent = await readPerformancePayload<any>(first, approvedAddendumCriterion.encryptedPayloadId!, keyring);
+  const addendumTemplateContent = await readPerformancePayload<any>(first, approvedAddendumTemplate.encryptedPayloadId!, keyring);
+  const frozenImportedSnapshot = Object.freeze({
+    schemaVersion: 1,
+    templateVersionId: approvedAddendumTemplate.id,
+    scoringPolicyVersionId: 'SCORING_CONTRACT_V1',
+    jobSharePercent: '80.00',
+    addendumSharePercent: '20.00',
+    categories: addendumTemplateContent.categories.map((category: any) => ({
+      ...category,
+      criteria: category.criteria.map((criterion: any) => ({
+        criterionVersionId: criterion.criterionVersionId,
+        titleFa: addendumCriterionContent.titleFa,
+        weightPercent: criterion.weightPercent,
+        kind: addendumCriterionContent.kind,
+        anchorsFa: addendumCriterionContent.anchorsFa,
+        applicability: addendumCriterionContent.applicability,
+        evidence: addendumCriterionContent.evidence,
+      })),
+    })),
+  }) as PerformanceTemplateSnapshot;
+  const importedCalculation = calculatePerformanceEvaluation({
+    template: frozenImportedSnapshot,
+    sections: [{
+      sectionId: 'imported-effective-section', effectiveDays: 1, allocationPercent: '100.00',
+      effectiveFrom: '2026-09-01T00:00:00.000Z', effectiveTo: '2026-09-30T23:59:59.999Z',
+      snapshotFacts: {
+        __applicability: {
+          schemaVersion: 1, snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
+          sourceVersions: { positionId: 'v1' }, effectiveAt: '2026-09-15T00:00:00.000Z',
+        },
+        positionId: importPosition.id,
+      },
+      responses: [{
+        criterionVersionId: approvedAddendumCriterion.id, grade: 4,
+        evidence: [{ kind: 'OPERATIONAL_REFERENCE', quality: 'RELIABLE', occurredAt: '2026-09-15', referenceId: 'controlled-record-1', sourceVersion: 'v1', contentHash: 'a'.repeat(64) }],
+      }],
+    }],
+  });
+  assert.equal(importedCalculation.status, 'SCORED');
+  assert.equal(importedCalculation.exactScore, '75.000000');
+  await schedulePerformanceCriterion(first, {
+    versionId: approvedCriterion.id, effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
+    reason: 'انتشار معیار پس از تأیید کسب‌وکاری ثبت‌شده', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  });
+  await schedulePerformanceTemplate(first, {
+    versionId: approvedTemplate.id, effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
+    reason: 'انتشار الگو پس از تأیید کسب‌وکاری ثبت‌شده', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  });
   const retriedImport = await importPerformanceRoleCatalogDraft(first, {
     manifest: importManifest, createdByUserId: actor.id, keyring,
   });

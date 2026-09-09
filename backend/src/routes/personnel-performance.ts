@@ -39,6 +39,7 @@ import { loadHrOperationalReference } from '../services/hrOperationalReferencePr
 import {
   activateDuePerformanceArtifacts,
   activateDuePerformancePolicies,
+  approvePerformanceCatalogDraft,
   cancelScheduledPerformanceVersion,
   createPerformanceCriterionDraft,
   createPerformancePolicyDraft,
@@ -590,6 +591,20 @@ router.post('/catalog-import/apply', managePolicy, policyWriteGate, async (req: 
       createdByUserId: req.user!.id,
     });
     return res.status(201).json({ success: true, result });
+  } catch (error) { return next(error); }
+});
+
+router.post('/catalog-import/:artifactType/:versionId/approve', managePolicy, policyWriteGate, async (req: AuthRequest, res, next) => {
+  try {
+    const artifactType = ({ criteria: 'criterion', templates: 'template' } as const)[req.params.artifactType as 'criteria' | 'templates'];
+    if (!artifactType) return res.status(404).json({ success: false, message: 'نوع نسخه کاتالوگ پیدا نشد.' });
+    const version = await approvePerformanceCatalogDraft(prisma, {
+      artifactType,
+      versionId: req.params.versionId,
+      reason: String(req.body.reason ?? ''),
+      approvedByUserId: req.user!.id,
+    });
+    return res.json({ success: true, version });
   } catch (error) { return next(error); }
 });
 

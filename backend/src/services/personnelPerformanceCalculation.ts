@@ -19,6 +19,8 @@ export const PERFORMANCE_APPLICABILITY_FACT_TYPES = {
   hasSafetyDuty: 'BOOLEAN',
 } as const;
 
+export const PERFORMANCE_APPLICABILITY_SNAPSHOT_VERSION = 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1' as const;
+
 export type PerformanceApplicabilityFact = keyof typeof PERFORMANCE_APPLICABILITY_FACT_TYPES;
 export type PerformanceApplicabilityFactType = typeof PERFORMANCE_APPLICABILITY_FACT_TYPES[PerformanceApplicabilityFact];
 export type LegacyPerformanceApplicabilityRule = {
@@ -249,7 +251,10 @@ export const validateTypedPerformanceApplicabilityRule = (
   const expectedType = PERFORMANCE_APPLICABILITY_FACT_TYPES[rule.fact];
   if (!expectedType) return ['واقعیت کنترل‌شده این قرارداد پشتیبانی نمی‌شود.'];
   if (rule.factType !== expectedType) errors.push(`نوع واقعیت «${rule.fact}» باید ${expectedType} باشد.`);
-  if (!rule.source?.trim() || !rule.sourceVersion?.trim()) errors.push(`منبع و نسخه منبع واقعیت «${rule.fact}» الزامی است.`);
+  if (typeof rule.source !== 'string' || !rule.source.trim()
+    || typeof rule.sourceVersion !== 'string' || !rule.sourceVersion.trim()) {
+    errors.push(`منبع و نسخه منبع واقعیت «${rule.fact}» الزامی است.`);
+  }
   if (rule.operator === 'EXISTS') {
     if (rule.values.length > 0) errors.push('عملگر وجود باید بدون مقدار ثبت شود.');
     return errors;
@@ -279,7 +284,7 @@ const typedSnapshotMetadata = (
   if (!metadata || typeof metadata !== 'object') return null;
   const candidate = metadata as Partial<PerformanceApplicabilitySnapshotMetadata>;
   if (candidate.schemaVersion !== 1
-    || typeof candidate.snapshotVersion !== 'string' || !candidate.snapshotVersion.trim()
+    || candidate.snapshotVersion !== PERFORMANCE_APPLICABILITY_SNAPSHOT_VERSION
     || typeof candidate.effectiveAt !== 'string' || !Number.isFinite(new Date(candidate.effectiveAt).getTime())
     || !candidate.sourceVersions || typeof candidate.sourceVersions !== 'object'
     || candidate.sourceVersions[rule.fact] !== rule.sourceVersion) return null;

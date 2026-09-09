@@ -1,0 +1,12 @@
+{
+  "provenanceCategories": [
+    "SYNTHETIC",
+    "PRODUCTION",
+    "LOCAL",
+    "SANITIZED_RECOVERY",
+    "SEED",
+    "FIXTURE",
+    "HISTORICAL_DOCUMENT"
+  ],
+  "snapshotVersion": "PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1"
+}

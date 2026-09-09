@@ -1557,6 +1557,9 @@ export const personnelPerformanceAPI = {
   ),
   previewCatalogImport: (manifest: unknown) => api.post('/hr/personnel-performance/catalog-import/preview', manifest),
   applyCatalogImport: (manifest: unknown) => api.post('/hr/personnel-performance/catalog-import/apply', manifest),
+  approveCatalogDraft: (artifactType: 'criteria' | 'templates', versionId: string, reason: string) => (
+    api.post(`/hr/personnel-performance/catalog-import/${artifactType}/${versionId}/approve`, { reason })
+  ),
   policies: () => api.get('/hr/personnel-performance/policies'),
   createPolicy: (input: unknown) => api.post('/hr/personnel-performance/policies', input),
   updatePolicy: (versionId: string, content: unknown) => api.put(`/hr/personnel-performance/policies/${versionId}`, content),

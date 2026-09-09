@@ -1,5 +1,12 @@
 import { Prisma } from '@prisma/client';
-import { canonicalPerformanceHash, type PerformanceCriterionPolicyContent } from './personnelPerformancePolicy';
+import roleCatalogContract from '../contracts/personnelPerformanceRoleCatalog.json';
+import {
+  canonicalPerformanceHash,
+  validateCriterionPolicyContent,
+  validatePerformanceTemplateContent,
+  type PerformanceCriterionPolicyContent,
+  type PerformanceTemplatePolicyContent,
+} from './personnelPerformancePolicy';
 import {
   PERFORMANCE_APPLICABILITY_FACT_TYPES,
   validateTypedPerformanceApplicabilityRule,
@@ -51,7 +58,7 @@ type EvidenceDictionaryEntry = {
   code: string;
   classification: 'CANONICAL_EVIDENCE' | 'CONTROLLED_DOCUMENT' | 'STRUCTURED_OBSERVATION' | 'MISSING_OR_FUTURE_INTEGRATION';
 };
-type CatalogProvenanceCategory = 'SYNTHETIC' | 'LOCAL' | 'PRODUCTION' | 'COMPANY_CONTROLLED_SOURCE';
+type CatalogProvenanceCategory = typeof roleCatalogContract.provenanceCategories[number];
 
 export type PerformanceRoleCatalogManifest = {
   schemaVersion: 1;
@@ -72,6 +79,16 @@ export type PerformanceRoleCatalogManifest = {
   review: {
     contentOrigin: string;
     status: 'BUSINESS_REVIEW_PENDING' | 'REJECTED' | 'APPROVED';
+    reviewerRole?: string;
+    reviewedAt?: string | null;
+  };
+  applicabilitySnapshotContract: {
+    schemaVersion: 1;
+    container: '__applicability';
+    snapshotVersion: string;
+    sourceVersions: 'REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION';
+    effectiveAt: 'REQUIRED_ISO_TIMESTAMP';
+    unknown: 'BLOCK';
   };
   applicabilityDictionary: ApplicabilityDictionaryEntry[];
   evidenceDictionary: EvidenceDictionaryEntry[];
@@ -87,7 +104,13 @@ export type PlannedPerformanceCatalogCriterion = {
       importIdentity: string;
       catalogVersion: string;
       sourceAsOf: string;
-      reviewStatus: PerformanceRoleCatalogManifest['review']['status'];
+      sourceProvenanceCategory: string;
+      manifestContentOrigin: string;
+      manifestReviewerRole?: string;
+      manifestReviewedAt?: string | null;
+      manifestContentHash: string;
+      manifestReviewStatus: PerformanceRoleCatalogManifest['review']['status'];
+      reviewStatus: 'BUSINESS_REVIEW_PENDING';
       sourceVersionCode: string;
     };
   };
@@ -145,7 +168,7 @@ const decimalSumIsHundred = (values: number[]) => values
   .reduce((sum, value) => sum.add(String(value)), new Prisma.Decimal(0)).eq(100);
 
 const hasCatalogManifestShape = (input: CatalogRecord) => {
-  if (!isRecord(input.catalog) || !isRecord(input.source) || !isRecord(input.review)
+  if (!isRecord(input.catalog) || !isRecord(input.source) || !isRecord(input.review) || !isRecord(input.applicabilitySnapshotContract)
     || !Array.isArray(input.applicabilityDictionary) || !Array.isArray(input.evidenceDictionary)
     || !Array.isArray(input.jobs) || !Array.isArray(input.positions)) return false;
   const validCriterion = (value: unknown) => isRecord(value)
@@ -153,19 +176,24 @@ const hasCatalogManifestShape = (input: CatalogRecord) => {
     && (value.applicability === null || Array.isArray(value.applicability.values))
     && Array.isArray(value.anchorsFa)
     && isRecord(value.evidencePolicy)
+    && typeof value.weight === 'number'
+    && typeof value.evidencePolicy.minimumReliableCount === 'number'
+    && typeof value.evidencePolicy.windowDays === 'number'
+    && typeof value.evidencePolicy.automaticGrade === 'boolean'
     && Array.isArray(value.evidencePolicy.dictionaryCodes)
     && Array.isArray(value.outsideControlFactors);
   const validRole = (value: unknown) => isRecord(value)
     && isRecord(value.reference)
     && Array.isArray(value.categories)
-    && value.categories.every(isRecord)
+    && value.categories.every((category) => isRecord(category) && typeof category.weight === 'number')
     && Array.isArray(value.criteria)
     && value.criteria.every(validCriterion);
   return input.applicabilityDictionary.every(isRecord)
     && input.applicabilityDictionary.every((entry) => Array.isArray(entry.operators))
     && input.evidenceDictionary.every(isRecord)
     && input.jobs.every(validRole)
-    && input.positions.every((position) => validRole(position) && isRecord(position.composition));
+    && input.positions.every((position) => validRole(position) && isRecord(position.composition)
+      && typeof position.composition.jobWeight === 'number' && typeof position.composition.addendumWeight === 'number');
 };
 
 export const performanceRoleCatalogContentHash = (input: unknown) => {
@@ -193,7 +221,8 @@ const resolveApplicability = (
     errors.push(`معیار ${criterion.conceptCode} از واقعیت کاربردپذیری تعریف‌نشده استفاده می‌کند.`);
     return null;
   }
-  if (definition.unknown !== 'BLOCK' || !definition.source.trim() || !definition.sourceVersion.trim()) {
+  if (definition.unknown !== 'BLOCK' || typeof definition.source !== 'string' || !definition.source.trim()
+    || typeof definition.sourceVersion !== 'string' || !definition.sourceVersion.trim()) {
     errors.push(`واقعیت ${definition.fact} باید منبع نسخه‌دار و رفتار BLOCK برای مقدار نامعلوم داشته باشد.`);
   }
   if (PERFORMANCE_APPLICABILITY_FACT_TYPES[definition.fact] !== definition.type) {
@@ -206,11 +235,12 @@ const resolveApplicability = (
     : definition.fact === 'positionId' ? ownerIds.positions : null;
   const values = criterion.applicability.values.map((value) => {
     if (!referenceMap) return value;
-    if (typeof value !== 'string' || !referenceMap.has(value) || !referenceMap.get(value)) {
+    const resolved = typeof value === 'string' ? referenceMap.get(value) : undefined;
+    if (typeof value !== 'string' || !referenceMap.has(value)) {
       errors.push(`مرجع ${definition.fact} در معیار ${criterion.conceptCode} حل نشده یا از نوع نادرست است.`);
       return value;
     }
-    return referenceMap.get(value)!;
+    return resolved ?? value;
   });
   const rule: TypedPerformanceApplicabilityRule = {
     schemaVersion: 1,
@@ -245,7 +275,7 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
     || !Array.isArray(manifest.source.references) || manifest.source.references.length === 0) {
     errors.push('منبع کاتالوگ باید تاریخ مبنا و ارجاع‌های قابل پیگیری داشته باشد.');
   }
-  if (!['SYNTHETIC', 'LOCAL', 'PRODUCTION', 'COMPANY_CONTROLLED_SOURCE'].includes(manifest.source?.provenanceCategory)) {
+  if (!roleCatalogContract.provenanceCategories.includes(manifest.source?.provenanceCategory)) {
     errors.push('رده منشأ کاتالوگ پشتیبانی نمی‌شود.');
   }
   if (!manifest.review || !['BUSINESS_REVIEW_PENDING', 'REJECTED', 'APPROVED'].includes(manifest.review.status)) {
@@ -254,6 +284,18 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
   if (manifest.review?.status === 'REJECTED') errors.push('کاتالوگ ردشده قابل درون‌ریزی نیست.');
   if ((manifest.source?.provenanceCategory === 'SYNTHETIC' || manifest.review?.contentOrigin === 'AI_PROPOSED')
     && manifest.review?.status === 'APPROVED') errors.push('محتوای ساختگی یا تولیدشده با هوش مصنوعی نمی‌تواند تأییدشده ثبت شود.');
+  if (manifest.review?.status === 'APPROVED'
+    && (!text(manifest.review.reviewerRole) || manifest.review.reviewerRole === 'UNASSIGNED'
+      || !text(manifest.review.reviewedAt) || !Number.isFinite(new Date(manifest.review.reviewedAt!).getTime()))) {
+    errors.push('کاتالوگ تأییدشده باید نقش بازبین و زمان تأیید معتبر داشته باشد.');
+  }
+  const snapshotContract = manifest.applicabilitySnapshotContract;
+  if (snapshotContract?.schemaVersion !== 1 || snapshotContract?.container !== '__applicability'
+    || snapshotContract?.snapshotVersion !== roleCatalogContract.snapshotVersion
+    || snapshotContract?.sourceVersions !== 'REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION'
+    || snapshotContract?.effectiveAt !== 'REQUIRED_ISO_TIMESTAMP' || snapshotContract?.unknown !== 'BLOCK') {
+    errors.push('قرارداد تصویر ثابت کاربردپذیری با تولیدکننده نسخه‌دار سامانه منطبق نیست.');
+  }
 
   const applicabilityEntries = Array.isArray(manifest.applicabilityDictionary) ? manifest.applicabilityDictionary : [];
   const applicabilityDictionary = new Map<string, ApplicabilityDictionaryEntry>(
@@ -327,6 +369,15 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
       if (criterion.kind !== 'JUDGMENT' || !Array.isArray(criterion.anchorsFa) || criterion.anchorsFa.length !== 5) {
         errors.push(`معیار ${criterion.conceptCode} باید JUDGMENT با پنج لنگر فارسی باشد.`);
       }
+      if (!Number.isInteger(criterion.evidencePolicy?.minimumReliableCount) || criterion.evidencePolicy.minimumReliableCount < 1
+        || !Number.isInteger(criterion.evidencePolicy?.windowDays) || criterion.evidencePolicy.windowDays < 1
+        || criterion.evidencePolicy?.automaticGrade !== false) {
+        errors.push(`سیاست شاهد معیار ${criterion.conceptCode} باید حداقل و بازه مثبت داشته باشد و درجه خودکار را غیرفعال کند.`);
+      }
+      if (!Array.isArray(criterion.outsideControlFactors) || criterion.outsideControlFactors.length === 0
+        || criterion.outsideControlFactors.some((factor) => !text(factor))) {
+        errors.push(`عوامل خارج از کنترل معیار ${criterion.conceptCode} باید روشن ثبت شوند.`);
+      }
       const allowedKinds = (criterion.evidencePolicy?.dictionaryCodes ?? []).map((code) => evidenceDictionary.get(code)).map((entry) => {
         if (!entry || entry.classification === 'MISSING_OR_FUTURE_INTEGRATION') {
           errors.push(`منبع شاهد معیار ${criterion.conceptCode} هنوز قابل اتکا نیست.`);
@@ -356,11 +407,19 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
             importIdentity: manifest.catalog?.importIdentity,
             catalogVersion: manifest.catalog?.versionCode,
             sourceAsOf: manifest.source?.asOf,
-            reviewStatus: manifest.review?.status,
+            sourceProvenanceCategory: manifest.source?.provenanceCategory,
+            manifestContentOrigin: manifest.review?.contentOrigin,
+            ...(manifest.review?.reviewerRole ? { manifestReviewerRole: manifest.review.reviewerRole } : {}),
+            ...(manifest.review?.reviewedAt ? { manifestReviewedAt: manifest.review.reviewedAt } : {}),
+            manifestContentHash: manifest.catalog?.contentHash,
+            manifestReviewStatus: manifest.review?.status,
+            reviewStatus: 'BUSINESS_REVIEW_PENDING',
             sourceVersionCode: criterion.versionCode,
           },
         },
       });
+      errors.push(...validateCriterionPolicyContent(criteria[criteria.length - 1].content)
+        .map((error) => `${criterion.conceptCode}: ${error}`));
     }
     for (const category of role.categories ?? []) {
       const categoryCriteria = plannedCriteria.filter((criterion) => criterion.categoryCode === category.code);
@@ -384,6 +443,18 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
           .map((criterion) => ({ conceptCode: criterion.conceptCode, weightPercent: percent(criterion.weight) })),
       })),
     });
+    const previewTemplate: PerformanceTemplatePolicyContent = {
+      schemaVersion: 1,
+      titleFa: role.titleFa,
+      categories: templates[templates.length - 1].categories.map((category) => ({
+        ...category,
+        criteria: category.criteria.map((criterion) => ({
+          criterionVersionId: criterion.conceptCode,
+          weightPercent: criterion.weightPercent,
+        })),
+      })),
+    };
+    errors.push(...validatePerformanceTemplateContent(previewTemplate).map((error) => `${role.reference.code}: ${error}`));
   };
   for (const job of jobs) planRole(job, 'JOB_TEMPLATE');
 

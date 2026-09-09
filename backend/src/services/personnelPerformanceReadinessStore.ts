@@ -14,6 +14,7 @@ import { projectFoundationAtEvent } from './hrFoundationGovernance';
 
 const readinessError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
 const DAY_MS = 86_400_000;
+type Client = PrismaClient | Prisma.TransactionClient;
 
 type EligibleReadinessSourceRow = PerformanceReadinessAssignment & {
   readinessKind: 'ELIGIBLE_ASSIGNMENT';
@@ -69,7 +70,7 @@ const earlierOptional = (...values: Array<Date | null>) => {
   return dates.length ? new Date(Math.min(...dates.map((value) => value.getTime()))) : null;
 };
 
-const loadReadinessSource = async (client: PrismaClient, period: { measurementFrom: Date; measurementTo: Date }) => {
+const loadReadinessSource = async (client: Client, period: { measurementFrom: Date; measurementTo: Date }) => {
   const personnelRows = await client.personnel.findMany({
     select: {
       id: true,
@@ -294,7 +295,7 @@ const loadReadinessSource = async (client: PrismaClient, period: { measurementFr
 };
 
 const readinessCoverage = async (
-  client: PrismaClient,
+  client: Client,
   source: Awaited<ReturnType<typeof loadReadinessSource>>,
   runId: string,
 ): Promise<PerformanceReadinessCoverage> => {
@@ -370,7 +371,7 @@ const readinessSourceSnapshot = (rows: ReadinessSourceRow[]) => ({
     .sort((left, right) => left.sourceKey.localeCompare(right.sourceKey))),
 });
 
-const promoteCompleteEvaluations = async (client: PrismaClient, runId: string, rows: ReadinessSourceRow[]) => {
+const promoteCompleteEvaluations = async (client: Client, runId: string, rows: ReadinessSourceRow[]) => {
   const records = await client.performanceReadinessRecord.findMany({
     where: { runId }, select: { employmentAssignmentId: true, status: true, evaluationId: true },
   });
@@ -454,7 +455,7 @@ const effectiveScoringPolicy = (tx: Prisma.TransactionClient, at: Date) => tx.pe
 });
 
 const processReadinessRow = async (
-  client: PrismaClient,
+  client: Client,
   input: {
     runId: string;
     cycleId: string;
@@ -651,7 +652,7 @@ const processReadinessRow = async (
   });
 });
 
-export const reconstructPerformanceReadiness = async (client: PrismaClient, input: {
+export const reconstructPerformanceReadiness = async (client: Client, input: {
   idempotencyKey: string;
   measurementFrom: Date;
   measurementTo: Date;
@@ -672,7 +673,8 @@ export const reconstructPerformanceReadiness = async (client: PrismaClient, inpu
     run = await client.performanceReadinessRun.update({
       where: { id: run.id }, data: { status: 'DRIFTED', driftDetected: true },
     });
-    return { run, processed: 0, hasMore: false, drift: true, coverage: await readinessCoverage(client, source, run.id) };
+    return { run, processed: 0, hasMore: false, drift: true, businessCode: 'PERFORMANCE_READINESS_DRIFT' as const,
+      coverage: await readinessCoverage(client, source, run.id) };
   }
   if (!run) {
     run = await client.performanceReadinessRun.create({ data: {
@@ -715,6 +717,16 @@ export const reconstructPerformanceReadiness = async (client: PrismaClient, inpu
   const count = (status: string) => counts.find((item) => item.status === status)?._count ?? 0;
   const inventoryBlockers = rows.filter((row) => row.readinessKind === 'STRUCTURAL_BLOCKER').length;
   if (!hasMore) {
+    const finalSource = await loadReadinessSource(client, input);
+    const finalSnapshot = readinessSourceSnapshot(finalSource.rows);
+    if (finalSnapshot.count !== snapshot.count || finalSnapshot.hash !== snapshot.hash) {
+      run = await client.performanceReadinessRun.update({
+        where: { id: run.id }, data: { status: 'DRIFTED', driftDetected: true, completedAt: null },
+      });
+      return { run, processed: candidates.length, hasMore: false, drift: true,
+        businessCode: 'PERFORMANCE_READINESS_DRIFT' as const,
+        coverage: await readinessCoverage(client, finalSource, run.id) };
+    }
     const failed = count('FAILED');
     if (!failed) {
       await promoteCompleteEvaluations(client, run.id, rows);

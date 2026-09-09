@@ -9,6 +9,7 @@ import {
   type PerformanceReadinessInventoryClassification,
 } from '../personnelPerformanceReadinessStore';
 import { readPerformancePayload } from '../personnelPerformancePayloadStore';
+import { raceEvidenceMarker, runOrderedPerformanceRace } from './performanceAcceptanceRaceHarness';
 
 const repositoryRoot = path.resolve(process.cwd(), '..');
 const sourceDatabaseUrl = process.env.DATABASE_URL
@@ -18,6 +19,7 @@ const keyring = { keyId: 'readiness-coverage-v1', key: Buffer.from('0123456789ab
 const main = async () => {
   const database = await createDispatchDocumentsTemporaryDatabase({ repositoryRoot, sourceDatabaseUrl });
   const client = database.client();
+  const second = database.client();
   try {
     const suffix = database.runId;
     const actor = await client.user.create({ data: {
@@ -146,6 +148,24 @@ const main = async () => {
     const evaluationsBeforeInventory = await client.performanceEvaluation.count({ where: { createdByUserId: actor.id } });
     assert.equal(evaluationsBeforeInventory, 0, 'inventory rows never create scoreable evaluations');
 
+    const changingAssignment = await client.hrEmploymentAssignment.findFirstOrThrow({ where: {
+      employmentRelationshipId: multiRelationship.id, type: 'PRIMARY',
+    } });
+    const reconstructionRace = await runOrderedPerformanceRace(client, client, second,
+      (tx) => tx.hrEmploymentAssignment.update({ where: { id: changingAssignment.id },
+        data: { performanceAllocationPercent: '55.00' } }),
+      (tx) => reconstructPerformanceReadiness(tx, {
+        idempotencyKey: `coverage-race-new-${suffix}`, measurementFrom, measurementTo,
+        actorUserId: actor.id, batchSize: 500, keyring,
+      }));
+    assert.equal(reconstructionRace.loser.status, 'fulfilled');
+    const driftResponse = reconstructionRace.loser.status === 'fulfilled'
+      ? reconstructionRace.loser.value as { drift: boolean; businessCode?: string; run: { status: string } } : null;
+    assert.equal(driftResponse?.drift, true);
+    assert.equal(driftResponse?.businessCode, 'PERFORMANCE_READINESS_DRIFT');
+    assert.equal(driftResponse?.run.status, 'DRIFTED',
+      'the stale reconstruction remains quarantined after the HR source write wins');
+
     const partial = await reconstructPerformanceReadiness(client, {
       idempotencyKey: `partial-${suffix}`, measurementFrom, measurementTo, actorUserId: actor.id, batchSize: 1, keyring,
     });
@@ -166,8 +186,14 @@ const main = async () => {
       'readiness reporting remains observational; only the explicit reconstruction command persists drift');
 
     console.log('Personnel performance readiness coverage integration tests passed.');
+    if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'reconstruction-hr-write') {
+      console.log(raceEvidenceMarker([{
+        name: 'reconstruction-hr-write', loserCode: driftResponse!.businessCode!, validTruths: 1,
+        duplicateEvents: 0, lostWrites: 0, additionalDisclosures: 0,
+      }]));
+    }
   } finally {
-    await client.$disconnect();
+    await Promise.allSettled([client.$disconnect(), second.$disconnect()]);
     await database.cleanup();
   }
 };

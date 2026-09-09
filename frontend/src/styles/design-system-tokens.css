@@ -176,6 +176,12 @@
   box-shadow: var(--sds-neu-shadow-small);
 }
 
+.sds-notification-count {
+  border: 1px solid var(--sds-danger-border);
+  background: var(--sds-danger-surface);
+  color: var(--sds-danger);
+}
+
 .sds-neumorphic-interactive {
   transition: color var(--sds-motion-fast) var(--sds-ease-standard), box-shadow var(--sds-motion-fast) var(--sds-ease-standard), transform var(--sds-motion-fast) var(--sds-ease-standard);
 }

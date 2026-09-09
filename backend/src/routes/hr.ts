@@ -54,6 +54,9 @@ const router = express.Router();
 
 router.use(protect);
 router.use('/authorization', hrAuthorizationRoutes);
+// Keep the public API path aligned with the frontend client. The shorter
+// legacy mount remains available for callers that have not migrated yet.
+router.use('/personnel-performance', personnelPerformanceRoutes);
 router.use('/performance', personnelPerformanceRoutes);
 
 export const featureForPath = (path: string) => {

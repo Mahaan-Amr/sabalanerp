@@ -4,6 +4,7 @@ import path from 'node:path';
 import { inspectLocalComposeProject } from './design-system-e2e-preflight.mjs';
 import { PERFORMANCE_ACCEPTANCE_RACES, buildPerformanceAcceptancePlan } from './performance-acceptance-contract.mjs';
 import { performanceMeasurementSignerFromEnvironment, signedPerformanceAcceptanceLane } from './performance-acceptance-artifact.mjs';
+import { validatePerformanceRaceMarker } from './performance-race-evidence.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const mode = process.argv[2];
@@ -20,10 +21,10 @@ const identity = JSON.parse(await readFile(path.resolve(identityPath), 'utf8'));
 const source = 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public&connection_limit=4&pool_timeout=10';
 const suites = [
   { name: 'workflow', scenarios: ['double-submit', 'double-hr-decision', 'submit-context-change',
-    'accept-cancel-invalidate-pause', 'unknown-response-after-commit'], file: 'personnelPerformanceWorkflow.integration.test.ts' },
-  { name: 'policy-activation', scenarios: ['accept-policy-activation'], file: 'personnelPerformancePolicy.integration.test.ts' },
-  { name: 'disclosure', scenarios: ['correction-expiry-recomputation'], file: 'personnelPerformanceDisclosure.integration.test.ts' },
-  { name: 'export-lineage', scenarios: ['export-revoke-correction-hold'], file: 'personnelPerformanceExportLineage.integration.test.ts' },
+    'accept-policy-activation', 'accept-cancel-invalidate-pause', 'unknown-response-after-commit'],
+    file: 'personnelPerformanceWorkflow.integration.test.ts' },
+  { name: 'export-lineage', scenarios: ['correction-expiry-recomputation', 'export-revoke-correction-hold'],
+    file: 'personnelPerformanceExportLineage.integration.test.ts' },
   { name: 'erasure', scenarios: ['deletion-legal-hold'], file: 'personnelPerformanceErasure.integration.test.ts' },
   { name: 'operations-fence', scenarios: ['cohort-pause-write'], file: 'personnelPerformanceSafetyRaces.integration.test.ts', environment: { PERFORMANCE_RACE_ITERATIONS: '1' } },
   { name: 'readiness', scenarios: ['reconstruction-hr-write'], file: 'personnelPerformanceReadinessCoverage.integration.test.ts' },
@@ -45,6 +46,7 @@ for (let iteration = 1; iteration <= plan.raceIterations; iteration += 1) {
         NODE_ENV: 'test',
         PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID: 'local-development-v1',
         PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64: 'cGVyZi1sb2NhbC0wMTIzNDU2Nzg5YWJjZGVmLXYxISE=',
+        PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS: suite.scenarios.join(','),
         ...suite.environment,
       },
     });
@@ -59,15 +61,11 @@ for (let iteration = 1; iteration <= plan.raceIterations; iteration += 1) {
     let marker;
     try { marker = JSON.parse(markerLine?.slice('PERFORMANCE_ACCEPTANCE_RACE:'.length) ?? 'null'); }
     catch { marker = null; }
-    if (!marker || marker.database !== 'PostgreSQL' || marker.deterministicBarrierObserved !== true
-      || marker.actors !== 2 || marker.validTruths !== 1 || marker.duplicateEvents !== 0
-      || marker.lostWrites !== 0 || marker.additionalDisclosures !== 0 || marker.loserBusinessResponse !== true
-      || !Array.isArray(marker.scenarios) || marker.scenarios.length !== suite.scenarios.length
-      || !suite.scenarios.every((scenario) => marker.scenarios.includes(scenario))) {
+    if (!validatePerformanceRaceMarker(marker, suite.scenarios)) {
       console.error(`Race acceptance evidence marker is missing or incomplete for ${suite.name}.`);
       process.exit(1);
     }
-    for (const scenario of suite.scenarios) scenarioRuns.get(scenario).push(marker);
+    for (const scenario of marker.scenarios) scenarioRuns.get(scenario.name).push(scenario);
   }
   console.error(`Performance acceptance races: ${iteration}/${plan.raceIterations}`);
 }

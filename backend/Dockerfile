@@ -59,11 +59,6 @@ FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 
-ARG PERFORMANCE_SOURCE_COMMIT=unattested
-ARG PERFORMANCE_SOURCE_HASH=unattested
-LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
-  io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
-
 ARG DEBIAN_MIRROR=http://deb.debian.org/debian
 ARG DEBIAN_SECURITY_MIRROR=http://security.debian.org/debian-security
 
@@ -115,6 +110,11 @@ COPY backend/excel ./excel
 RUN printf 'TCPSocket 3310\nTCPAddr clamav\n' > /etc/clamav/clamd-remote.conf \
   && chmod +x /app/scripts/hr-clamdscan.sh \
   && mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/storage/accounting-contracts /app/storage/recovery /app/uploads /app/recovery-sources/inquiry /app/recovery-coordination
+
+ARG PERFORMANCE_SOURCE_COMMIT=unattested
+ARG PERFORMANCE_SOURCE_HASH=unattested
+LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
+  io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
 
 EXPOSE 5000
 

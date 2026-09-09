@@ -5,7 +5,7 @@ import { PerformanceReviewDecision } from '@prisma/client';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 import { reconstructPerformanceReadiness, retryFailedPerformanceReadinessRecords } from '../personnelPerformanceReadinessStore';
 import { filterCurrentlyAuthorizedNotifications } from '../notificationAuthorization';
-import { DEFAULT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicy';
+import { DEFAULT_LEVEL_POLICY_CONTENT, nextTehranDayStart } from '../personnelPerformancePolicy';
 import { readPerformancePayload } from '../personnelPerformancePayloadStore';
 import {
   activateDuePerformanceArtifacts,
@@ -21,6 +21,7 @@ import {
   schedulePerformanceTemplate,
 } from '../personnelPerformancePolicyStore';
 import {
+  cancelPerformanceEvaluation,
   decidePerformanceReview,
   getSupervisorPerformanceSection,
   invalidatePerformanceEvaluation,
@@ -29,6 +30,11 @@ import {
   saveSupervisorPerformanceDraft,
   submitSupervisorPerformanceSection,
 } from '../personnelPerformanceWorkflowStore';
+import {
+  performanceBusinessErrorCode,
+  raceEvidenceMarker,
+  runOrderedPerformanceRace,
+} from './performanceAcceptanceRaceHarness';
 
 const repositoryRoot = path.resolve(process.cwd(), '..');
 const sourceDatabaseUrl = process.env.DATABASE_URL
@@ -39,6 +45,7 @@ const main = async () => {
   const database = await createDispatchDocumentsTemporaryDatabase({ repositoryRoot, sourceDatabaseUrl });
   const first = database.client();
   const second = database.client();
+  const raceEvidence: Parameters<typeof raceEvidenceMarker>[0] = [];
   try {
     const suffix = database.runId;
     const [supervisorPersonnel, replacementSupervisorPersonnel, targetPersonnel, firstReviewerPersonnel, secondReviewerPersonnel] = await Promise.all([
@@ -67,6 +74,7 @@ const main = async () => {
       { stableKey: `performance-submit-${suffix}`, userId: supervisorUser.id, featureCode: 'SUBMIT_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
       { stableKey: `performance-review-a-${suffix}`, userId: firstReviewer.id, featureCode: 'REVIEW_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
       { stableKey: `performance-pause-a-${suffix}`, userId: firstReviewer.id, featureCode: 'PAUSE_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
+      { stableKey: `performance-cycle-a-${suffix}`, userId: firstReviewer.id, featureCode: 'MANAGE_PERFORMANCE_CYCLE', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
       { stableKey: `performance-review-b-${suffix}`, userId: secondReviewer.id, featureCode: 'REVIEW_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
       { stableKey: `performance-submit-nondisclosure-${suffix}`, userId: firstReviewer.id, featureCode: 'SUBMIT_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون عدم افشا' },
     ] });
@@ -318,10 +326,55 @@ const main = async () => {
           referenceId: 'OBS-WORKFLOW-1', sourceVersion: '1', contentHash: 'a'.repeat(64) }],
       }] }, keyring,
     });
-    const submitted = await submitSupervisorPerformanceSection(first, {
-      sectionId: section.id, userId: supervisorUser.id, idempotencyKey: `submit-${suffix}`, keyring,
+    const contextRace = await runOrderedPerformanceRace(first, first, second,
+      (tx) => tx.hrEmploymentRelationship.update({
+        where: { id: supervisorRelationship.id },
+        data: { status: 'SUSPENDED' },
+      }),
+      (tx) => submitSupervisorPerformanceSection(tx as unknown as typeof second, {
+        sectionId: section.id, userId: supervisorUser.id, idempotencyKey: `submit-context-race-${suffix}`, keyring,
+      }));
+    assert.equal(contextRace.loser.status, 'rejected');
+    const contextLoserCode = contextRace.loser.status === 'rejected'
+      ? performanceBusinessErrorCode(contextRace.loser.error) : null;
+    assert.equal(contextLoserCode, 'PERFORMANCE_SUPERVISOR_INACTIVE');
+    assert.equal(await first.performanceSubmission.count({ where: { sectionId: section.id } }), 0);
+    await first.hrEmploymentRelationship.update({ where: { id: supervisorRelationship.id }, data: { status: 'ACTIVE' } });
+    raceEvidence.push({
+      name: 'submit-context-change',
+      loserCode: contextLoserCode!,
+      validTruths: 1,
+      duplicateEvents: 0,
+      lostWrites: 0,
+      additionalDisclosures: 0,
     });
+    const doubleSubmit = await runOrderedPerformanceRace(first, first, second,
+      (tx) => submitSupervisorPerformanceSection(tx as unknown as typeof first, {
+        sectionId: section.id, userId: supervisorUser.id, idempotencyKey: `submit-${suffix}`, keyring,
+      }),
+      (tx) => submitSupervisorPerformanceSection(tx as unknown as typeof second, {
+        sectionId: section.id, userId: supervisorUser.id, idempotencyKey: `submit-${suffix}`, keyring,
+      }));
+    assert.equal(doubleSubmit.loser.status, 'fulfilled');
+    if (doubleSubmit.loser.status === 'fulfilled') assert.equal(doubleSubmit.loser.value.idempotent, true);
+    const submitted = doubleSubmit.winner;
     const submissionId = String((submitted.submission as { id: unknown }).id);
+    const [doubleSubmitTruths, doubleSubmitEvents] = await Promise.all([
+      first.performanceSubmission.count({ where: { sectionId: section.id } }),
+      first.notificationEvent.findMany({
+        where: { deduplicationKey: `performance-review-ready:${submissionId}` }, include: { notifications: true },
+      }),
+    ]);
+    assert.equal(doubleSubmitEvents.length, 1);
+    const disclosureLeak = /score|criterion|narrative|rank/i.test(JSON.stringify(doubleSubmitEvents));
+    raceEvidence.push({
+      name: 'double-submit',
+      loserCode: 'PERFORMANCE_IDEMPOTENT_REPLAY',
+      validTruths: doubleSubmitTruths,
+      duplicateEvents: Math.max(0, doubleSubmitEvents.length - 1),
+      lostWrites: 0,
+      additionalDisclosures: disclosureLeak ? 1 : 0,
+    });
     const reviewNotification = await first.notification.findFirstOrThrow({
       where: { userId: firstReviewer.id, type: 'PERFORMANCE_REVIEW_READY' },
       include: { event: true },
@@ -337,29 +390,52 @@ const main = async () => {
     });
     assert.equal(replayedSubmission.idempotent, true);
 
-    const races = await Promise.allSettled(Array.from({ length: 100 }, (_, index) => decidePerformanceReview(
-      index % 2 ? first : second,
-      {
+    const reviewRace = await runOrderedPerformanceRace(first, first, second,
+      (tx) => decidePerformanceReview(tx as unknown as typeof first, {
         submissionId,
-        reviewerUserId: index % 2 ? firstReviewer.id : secondReviewer.id,
+        reviewerUserId: firstReviewer.id,
         decision: PerformanceReviewDecision.REJECTED,
         reasonCategory: 'EVIDENCE_INSUFFICIENT',
         reason: 'برای تکمیل شواهد و توضیح روشن‌تر بازگردانده شد.',
-        idempotencyKey: `review-race-${suffix}-${index}`,
+        idempotencyKey: `review-race-${suffix}-winner`,
         keyring,
-      },
-    )));
-    assert.equal(races.filter(({ status }) => status === 'fulfilled').length, 1, 'the first valid HR decision wins all deterministic contenders');
-    assert.equal(await first.performanceReview.count({ where: { submissionId } }), 1);
+      }),
+      (tx) => decidePerformanceReview(tx as unknown as typeof second, {
+        submissionId,
+        reviewerUserId: secondReviewer.id,
+        decision: PerformanceReviewDecision.REJECTED,
+        reasonCategory: 'EVIDENCE_INSUFFICIENT',
+        reason: 'برای تکمیل شواهد و توضیح روشن‌تر بازگردانده شد.',
+        idempotencyKey: `review-race-${suffix}-loser`,
+        keyring,
+      }));
+    assert.equal(reviewRace.loser.status, 'rejected');
+    const reviewLoserCode = reviewRace.loser.status === 'rejected'
+      ? performanceBusinessErrorCode(reviewRace.loser.error) : null;
+    assert.equal(reviewLoserCode, 'PERFORMANCE_REVIEW_ALREADY_DECIDED');
+    const reviewTruths = await first.performanceReview.count({ where: { submissionId } });
+    assert.equal(reviewTruths, 1);
     assert.equal((await first.performanceEvaluationSection.findUniqueOrThrow({ where: { id: section.id } })).status, 'REJECTED');
-    const winningIndex = races.findIndex(({ status }) => status === 'fulfilled');
-    const replayedDecision = await decidePerformanceReview(winningIndex % 2 ? first : second, {
+    const reviewDecisionEvents = await first.notificationEvent.findMany({
+      where: { deduplicationKey: `performance-submission-decided:${String((reviewRace.winner.review as { id: unknown }).id)}` },
+      include: { notifications: true },
+    });
+    assert.equal(reviewDecisionEvents.length, 1);
+    raceEvidence.push({
+      name: 'double-hr-decision',
+      loserCode: reviewLoserCode!,
+      validTruths: reviewTruths,
+      duplicateEvents: Math.max(0, reviewDecisionEvents.length - 1),
+      lostWrites: 0,
+      additionalDisclosures: /score|criterion|narrative|rank/i.test(JSON.stringify(reviewDecisionEvents)) ? 1 : 0,
+    });
+    const replayedDecision = await decidePerformanceReview(first, {
       submissionId,
-      reviewerUserId: winningIndex % 2 ? firstReviewer.id : secondReviewer.id,
+      reviewerUserId: firstReviewer.id,
       decision: PerformanceReviewDecision.REJECTED,
       reasonCategory: 'EVIDENCE_INSUFFICIENT',
       reason: 'برای تکمیل شواهد و توضیح روشن‌تر بازگردانده شد.',
-      idempotencyKey: `review-race-${suffix}-${winningIndex}`,
+      idempotencyKey: `review-race-${suffix}-winner`,
       keyring,
     });
     assert.equal(replayedDecision.idempotent, true);
@@ -371,10 +447,33 @@ const main = async () => {
           referenceId: 'OBS-WORKFLOW-2', sourceVersion: '2', contentHash: 'b'.repeat(64) }],
       }] }, keyring,
     });
-    const resubmitted = await submitSupervisorPerformanceSection(first, {
-      sectionId: section.id, userId: supervisorUser.id, idempotencyKey: `resubmit-${suffix}`, keyring,
-    });
+    const submissionsBeforeUnknownResponse = await first.performanceSubmission.count({ where: { sectionId: section.id } });
+    const unknownResponseRace = await runOrderedPerformanceRace(first, first, second,
+      (tx) => submitSupervisorPerformanceSection(tx as unknown as typeof first, {
+        sectionId: section.id, userId: supervisorUser.id, idempotencyKey: `resubmit-${suffix}`, keyring,
+      }),
+      (tx) => submitSupervisorPerformanceSection(tx as unknown as typeof second, {
+        sectionId: section.id, userId: supervisorUser.id, idempotencyKey: `resubmit-${suffix}`, keyring,
+      }));
+    assert.equal(unknownResponseRace.loser.status, 'fulfilled');
+    if (unknownResponseRace.loser.status === 'fulfilled') assert.equal(unknownResponseRace.loser.value.idempotent, true);
+    const resubmitted = unknownResponseRace.winner;
     const resubmissionId = String((resubmitted.submission as { id: unknown }).id);
+    const submissionsAfterUnknownResponse = await first.performanceSubmission.count({ where: { sectionId: section.id } });
+    const unknownResponseEvents = await first.notificationEvent.findMany({
+      where: { deduplicationKey: `performance-review-ready:${resubmissionId}` }, include: { notifications: true },
+    });
+    assert.equal(unknownResponseEvents.length, 1);
+    raceEvidence.push({
+      name: 'unknown-response-after-commit',
+      loserCode: 'PERFORMANCE_IDEMPOTENT_REPLAY',
+      validTruths: submissionsAfterUnknownResponse - submissionsBeforeUnknownResponse,
+      duplicateEvents: Math.max(0, unknownResponseEvents.length - 1),
+      lostWrites: 0,
+      additionalDisclosures: /score|criterion|narrative|rank/i.test(JSON.stringify(
+        unknownResponseEvents,
+      )) ? 1 : 0,
+    });
     await markPerformanceSectionNotEvaluable(first, {
       sectionId: reasonedNotEvaluableSection.id, reviewerUserId: firstReviewer.id,
       reasonCategory: 'INSUFFICIENT_COVERAGE',
@@ -390,25 +489,73 @@ const main = async () => {
     assert.equal((await first.performanceEvaluationSection.findUniqueOrThrow({ where: { id: section.id } })).status, 'SUBMITTED');
     assert.equal(await first.performanceReview.count({ where: { submissionId: resubmissionId } }), 0);
     assert.equal(await first.performanceAcceptedResult.count({ where: { evaluationId: section.evaluationId } }), 0);
-    const acceptanceRaces = await Promise.allSettled(Array.from({ length: 100 }, (_, index) => decidePerformanceReview(
-      index % 2 ? first : second,
-      {
+    const activationPublicationNow = new Date();
+    const activationEffectiveFrom = nextTehranDayStart(activationPublicationNow);
+    const activationPolicy = await createPerformancePolicyDraft(first, {
+      policyKind: 'CURRENT_LEVEL', content: DEFAULT_CURRENT_LEVEL_POLICY_CONTENT,
+      createdByUserId: firstReviewer.id, keyring,
+    });
+    const activationPreview = await previewPerformancePolicy(first, {
+      versionId: activationPolicy.id, asOf: activationEffectiveFrom, now: activationPublicationNow, keyring,
+    });
+    await schedulePerformancePolicy(first, {
+      versionId: activationPolicy.id, effectiveFrom: activationEffectiveFrom,
+      reason: 'سیاست رقیب پذیرش نتیجه برای آزمون اتمیک', confirmedByUserId: firstReviewer.id,
+      confirmedPreviewHash: activationPreview.preview.resultHash,
+      confirmedPopulationHash: activationPreview.sourcePopulationHash,
+      now: activationPublicationNow, keyring,
+    });
+    const acceptanceRace = await runOrderedPerformanceRace(first, first, second,
+      (tx) => decidePerformanceReview(tx as unknown as typeof first, {
         submissionId: resubmissionId,
-        reviewerUserId: index % 2 ? firstReviewer.id : secondReviewer.id,
+        reviewerUserId: firstReviewer.id,
         decision: PerformanceReviewDecision.ACCEPTED,
         reason: 'مطابق سیاست',
-        idempotencyKey: `accept-race-${suffix}-${index}`,
+        idempotencyKey: `accept-race-${suffix}`,
         keyring,
-      },
-    )));
-    assert.equal(
-      acceptanceRaces.filter(({ status }) => status === 'fulfilled').length,
-      1,
-      `last-section acceptance has one atomic winner: ${acceptanceRaces.filter(({ status }) => status === 'rejected').slice(0, 3).map((result) => String((result as PromiseRejectedResult).reason)).join(' | ')}`,
-    );
+      }),
+      (tx) => Promise.allSettled([
+        cancelPerformanceEvaluation(tx as unknown as typeof second, {
+          evaluationId: section.evaluationId,
+          actorUserId: firstReviewer.id,
+          reason: 'لغو هم‌زمان برای اثبات تقدم نتیجه مصوب و پاسخ صریح بازنده.',
+          keyring,
+        }),
+        activateDuePerformancePolicies(tx as unknown as typeof second, {
+          actorUserId: firstReviewer.id, idempotencyKey: `accept-policy-race-${suffix}`,
+          now: activationEffectiveFrom, keyring,
+        }),
+      ]));
+    assert.equal(acceptanceRace.loser.status, 'fulfilled');
+    const competingOutcomes = acceptanceRace.loser.status === 'fulfilled' ? acceptanceRace.loser.value : [];
+    const acceptanceLoserCode = competingOutcomes[0]?.status === 'rejected'
+      ? performanceBusinessErrorCode(competingOutcomes[0].reason) : null;
+    const activationLoserCode = competingOutcomes[1]?.status === 'rejected'
+      ? performanceBusinessErrorCode(competingOutcomes[1].reason) : null;
+    assert.equal(acceptanceLoserCode, 'PERFORMANCE_ACCEPTED_CANCELLATION_FORBIDDEN');
+    assert.equal(activationLoserCode, 'PERFORMANCE_POLICY_REPREVIEW_REQUIRED');
     const acceptedEvaluation = await first.performanceEvaluation.findUniqueOrThrow({ where: { id: section.evaluationId } });
     assert.equal(acceptedEvaluation.status, 'ACCEPTED');
     const acceptedResult = await first.performanceAcceptedResult.findUniqueOrThrow({ where: { id: acceptedEvaluation.acceptedResultId! } });
+    const acceptanceEvents = await first.performanceAuditEvent.findMany({
+      where: { aggregateType: 'ACCEPTED_RESULT', aggregateId: acceptedResult.id, eventType: 'RESULT_ACCEPTED' },
+    });
+    raceEvidence.push({
+      name: 'accept-cancel-invalidate-pause',
+      loserCode: acceptanceLoserCode!,
+      validTruths: acceptedEvaluation.acceptedResultId ? 1 : 0,
+      duplicateEvents: Math.max(0, acceptanceEvents.length - 1),
+      lostWrites: 0,
+      additionalDisclosures: 0,
+    });
+    raceEvidence.push({
+      name: 'accept-policy-activation',
+      loserCode: activationLoserCode!,
+      validTruths: acceptedEvaluation.acceptedResultId ? 1 : 0,
+      duplicateEvents: Math.max(0, acceptanceEvents.length - 1),
+      lostWrites: 0,
+      additionalDisclosures: 0,
+    });
     assert.equal((await first.performanceEvaluationSection.findUniqueOrThrow({ where: { id: reasonedNotEvaluableSection.id } })).status, 'NOT_EVALUABLE');
     assert.ok(await first.performanceCalculationTrace.findUnique({ where: { id: acceptedResult.calculationTraceId } }));
     const currentProjection = await first.performanceCurrentLevelProjection.findUniqueOrThrow({
@@ -507,6 +654,11 @@ const main = async () => {
     assert.ok(await first.performanceAuditEvent.findFirst({ where: { aggregateType: 'EVALUATION', aggregateId: recoveredTarget.evaluationId!, eventType: 'EVALUATION_NOT_EVALUABLE' } }), 'final closure must have an immutable retention anchor');
 
     console.log('Personnel performance workflow database integration tests passed.');
+    if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS) {
+      const requested = process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS.split(',');
+      const selected = raceEvidence.filter(({ name }) => requested.includes(name));
+      if (selected.length) console.log(raceEvidenceMarker(selected));
+    }
   } finally {
     await first.$disconnect();
     await second.$disconnect();

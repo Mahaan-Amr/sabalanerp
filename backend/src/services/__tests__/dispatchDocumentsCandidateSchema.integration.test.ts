@@ -44,6 +44,16 @@ const main = async () => {
       for (const migration of before.migrations) {
         assert.deepEqual(candidate.migrations.find(row => row.migration_name === migration.migration_name), migration);
       }
+      if (process.env.PERFORMANCE_ACCEPTANCE_INJECT_MIGRATION_FAILURE === '1') {
+        await assert.rejects(client.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe('CREATE TABLE performance_acceptance_failed_migration_probe(id text primary key)');
+          await tx.$executeRawUnsafe('INSERT INTO performance_acceptance_missing_migration_table(id) VALUES (\'fail\')');
+        }));
+        const [rollback] = await client.$queryRaw<Array<{ present: string | null }>>`
+          SELECT to_regclass('performance_acceptance_failed_migration_probe')::text AS present`;
+        assert.equal(rollback.present, null, 'an interrupted transactional migration must leave no partial schema');
+        console.log('PERFORMANCE_FAILURE_INJECTION:migration:PASS');
+      }
       console.log(JSON.stringify({ database: database.databaseName, sourceMigrations: before.migrations.length,
         candidateMigrations: candidate.migrations.length,
         candidateMigrationHash: createHash('sha256').update(JSON.stringify(candidate.migrations)).digest('hex'),

@@ -237,7 +237,7 @@ const main = async () => {
     }
     const delivered = await deliverPersonalPerformanceSummary(tx, {
       actorUserId: actor.id, personnelId: subjects[4].personnelId,
-      identityVerification: { methodCode: 'IN_PERSON_EMPLOYEE_RECORD', evidenceReference: `${suffix}-employee-record`, verifiedAt: new Date() },
+      identityVerification: { methodCode: 'IN_PERSON_EMPLOYEE_RECORD', evidenceReference: `${suffix}-employee-record`, verifiedAt: new Date(Date.now() - 1_000) },
     });
     assert.equal(delivered.summary.levelCode, 'MEETS');
     const receipt = await tx.performanceAuditEvent.findUniqueOrThrow({ where: { id: delivered.receipt.id } });
@@ -314,7 +314,7 @@ const main = async () => {
       identityVerification: {
         methodCode: 'IN_PERSON_GOVERNMENT_ID' as const,
         evidenceReference: `identity-record-${suffix}`,
-        verifiedAt: new Date(),
+        verifiedAt: new Date(Date.now() - 1_000),
       },
     };
     await assert.rejects(() => deliverPersonalPerformanceSummary(tx, { ...input, actorUserId: outsider.id }),

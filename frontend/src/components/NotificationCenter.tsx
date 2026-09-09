@@ -160,7 +160,7 @@ export function NotificationCenter() {
           <FaBell className="h-5 w-5" aria-hidden="true" />
         </ErpPressable>
         {unreadCount > 0 && (
-          <span data-dynamic="notification-count" className="pointer-events-none absolute -left-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[var(--sds-danger)] px-1 text-[10px] font-bold text-[var(--sds-text-inverse)]">
+          <span data-dynamic="notification-count" className="sds-notification-count pointer-events-none absolute -left-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold">
             {Math.min(unreadCount, 99).toLocaleString('fa-IR')}
           </span>
         )}

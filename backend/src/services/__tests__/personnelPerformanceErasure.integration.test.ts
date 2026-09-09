@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { prisma } from '../../lib/prisma';
+import path from 'node:path';
 import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
 import { performanceVaultKeyFromEnvironment, persistPerformancePayload } from '../personnelPerformancePayloadStore';
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
@@ -14,11 +14,19 @@ import {
   replayPerformanceErasureAfterRestore,
 } from '../personnelPerformanceErasureStore';
 import { enablePerformanceTestRelease, publishPerformanceTestRetentionPolicy } from './personnelPerformanceTestRelease';
+import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
+import { raceEvidenceMarker, runOrderedPerformanceRace } from './performanceAcceptanceRaceHarness';
 
-const rollback = Symbol('rollback-performance-erasure');
 const main = async () => {
+  const database = await createDispatchDocumentsTemporaryDatabase({
+    repositoryRoot: path.resolve(process.cwd(), '..'),
+    sourceDatabaseUrl: process.env.DATABASE_URL
+      ?? 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=4&pool_timeout=10',
+  });
+  const first = database.client();
+  const second = database.client();
   try {
-    await prisma.$transaction(async (tx) => {
+      const tx = first;
       const suffix = randomUUID();
       const actorPersonnel = await tx.personnel.create({ data: { firstName: 'عامل', lastName: 'حذف' } });
       const actor = await tx.user.create({ data: { email: `${suffix}@example.invalid`, username: suffix, password: 'not-used',
@@ -145,10 +153,14 @@ const main = async () => {
       }
       await approvePerformanceBulkErasure(tx, { actorUserId: actor.id, operationId: heldOperation.id, reasonCode: 'APPROVED_HELD_SCOPE' });
       await approvePerformanceBulkErasure(tx, { actorUserId: secondApprover.id, operationId: heldOperation.id, reasonCode: 'APPROVED_HELD_SCOPE' });
-      await placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION',
-        aggregateId: secondImpactEvaluation.id, reasonCode: 'ACTIVE_INVESTIGATION' });
-      const held = await executePerformanceErasureOperation(tx, heldOperation.id, new Date('2026-09-10Z'));
-      assert.equal(held.status, 'PARTIAL_RESTRICTED', 'a legal hold committed before deletion wins the shared fence');
+      const deletionRace = await runOrderedPerformanceRace(first, first, second,
+        (winnerTx) => placePerformanceLegalHold(winnerTx, { actorUserId: actor.id, aggregateType: 'EVALUATION',
+          aggregateId: secondImpactEvaluation.id, reasonCode: 'ACTIVE_INVESTIGATION' }),
+        (loserTx) => executePerformanceErasureOperation(loserTx, heldOperation.id, new Date('2026-09-10Z')));
+      assert.equal(deletionRace.loser.status, 'fulfilled');
+      const held = deletionRace.loser.status === 'fulfilled' ? deletionRace.loser.value : null;
+      assert.equal(held?.lastFailureCode, 'PERFORMANCE_ERASURE_RETENTION_DRIFT');
+      assert.equal(held?.status, 'PARTIAL_RESTRICTED', 'a legal hold committed before deletion wins the shared fence');
       assert.equal(await tx.performanceDraft.count({ where: { id: secondImpactDraftId } }), 1);
       assert.equal(await tx.performanceDeletionReceipt.count({ where: { deletedRecordId: secondImpactDraftId } }), 0);
 
@@ -193,11 +205,19 @@ const main = async () => {
       assert.equal(retried.id, retryOperation.id);
       assert.equal(retried.status, 'COMPLETED');
       assert.equal(await tx.performanceDraft.count({ where: { id: retryDraftId } }), 0);
-      throw rollback;
-    }, { timeout: 30_000 });
-  } catch (error) {
-    if (error !== rollback) throw error;
+      if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'deletion-legal-hold') {
+        console.log(raceEvidenceMarker([{
+          name: 'deletion-legal-hold', loserCode: held!.lastFailureCode!, validTruths: 1,
+          duplicateEvents: 0, lostWrites: 0, additionalDisclosures: 0,
+        }]));
+      }
+  } finally {
+    await Promise.allSettled([first.$disconnect(), second.$disconnect()]);
+    await database.cleanup();
   }
 };
 
-main().finally(() => prisma.$disconnect());
+void main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

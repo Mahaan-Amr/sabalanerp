@@ -52,7 +52,10 @@ const measurementsFor = (name) => ({
   'permission-nondisclosure': { scenarios: passItems(PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS),
     permissionBranchesCoveredPercent: 100, additionalDisclosures: 0, openP0: 0, openP1: 0 },
   'browser-matrix': { realBrowser: true, realPersistence: true, roleActionScopeMatrixComplete: true,
-    viewports: ['360', '390', '768', '1280', '1920'].map((viewport) => ({ name: viewport, rtl: true,
+    pageUsableP95Ms: 1000, pageUsableP99Ms: 1200,
+    roles: ['noAccess', 'supervisor', 'reviewer', 'lifecycleManager'].map((role) => ({ name: role, capabilities: [], realPersistence: true })),
+    lifecycleStates: ['DRAFT', 'REJECTED', 'SUBMITTED', 'ACCEPTED'],
+    viewports: ['360', '390', '768', '1280', '1920'].map((viewport) => ({ name: viewport, usableDurationMs: 1000, rtl: true,
       light: true, dark: true, keyboard: true, focus: true, reducedMotion: true, zoom200: true })) },
   'export-capacity': { requestP99Ms: 1000, queueP95Ms: 1000, formats: [
     { name: 'Excel', samples: 1, p95Ms: 1000, maximumDurationMs: 2000, concurrentJobs: 5, units: 100000, megabytes: 100, partialArtifacts: 0 },

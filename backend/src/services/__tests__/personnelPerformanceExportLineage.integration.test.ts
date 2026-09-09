@@ -7,9 +7,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Prisma, type PrismaClient, type User, type PerformanceSubject, type PerformanceEvaluation, type PerformanceEvaluationSection, type PerformanceAcceptedResult } from '@prisma/client';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 import { enablePerformanceTestRelease, enrollPerformanceTestCohort, publishPerformanceTestRetentionPolicy } from './personnelPerformanceTestRelease';
-import { requestPerformanceExport, cleanupExpiredPerformanceExports, processPerformanceExport } from '../personnelPerformanceDisclosureStore';
+import { requestPerformanceExport, cleanupExpiredPerformanceExports, processPerformanceExport, claimPerformanceExportDownload, createPerformanceCorrection } from '../personnelPerformanceDisclosureStore';
 import { placePerformanceLegalHold, decidePerformanceLegalHold } from '../personnelPerformanceLegalHoldStore';
 import { persistPerformancePayload, performanceVaultKeyFromEnvironment, readPerformancePayload } from '../personnelPerformancePayloadStore';
+import { performanceBusinessErrorCode, raceEvidenceMarker, runOrderedPerformanceRace } from './performanceAcceptanceRaceHarness';
+import { expirePerformanceResults } from '../personnelPerformanceResultStore';
 
 const hash = (id: string) => createHash('sha256').update(id).digest('hex');
 const from = new Date('2026-01-01Z');
@@ -22,13 +24,15 @@ const main = async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-lineage-'));
   const previousDirectory = process.env.PERSONNEL_PERFORMANCE_EXPORT_DIR;
   process.env.PERSONNEL_PERFORMANCE_EXPORT_DIR = directory;
+  const exportRequestDurations: number[] = [];
+  const exportQueueDurations: number[] = [];
   try {
     await client.$executeRaw`INSERT INTO performance_disclosure_revision(id,revision) VALUES (1,0)`;
     const users: User[] = [];
     for (let i = 0; i < 2; i++) users.push(await client.user.create({ data: { email: `${randomUUID()}@example.invalid`, username: randomUUID(), password: 'unused', firstName: 'آزمون', lastName: 'نگهداری' } }));
     const actor = users[0];
     await client.hrWorkspaceCatalog.create({ data: { code: 'HUMAN_RESOURCES', displayName: 'آزمون' } });
-    for (const featureCode of ['REQUEST_PERFORMANCE_EXPORT','VIEW_PERFORMANCE_ANALYTICS','VIEW_NAMED_PERFORMANCE_RANKING','PLACE_PERFORMANCE_LEGAL_HOLD','RELEASE_PERFORMANCE_LEGAL_HOLD']) {
+    for (const featureCode of ['REQUEST_PERFORMANCE_EXPORT','VIEW_PERFORMANCE_ANALYTICS','VIEW_NAMED_PERFORMANCE_RANKING','REGISTER_PERFORMANCE_CORRECTION','PLACE_PERFORMANCE_LEGAL_HOLD','RELEASE_PERFORMANCE_LEGAL_HOLD']) {
       await client.hrFeatureCatalog.create({ data: { code: featureCode, workspaceCode: 'HUMAN_RESOURCES', displayName: featureCode } });
       for (const user of users) await client.hrFeatureAccessGrant.create({ data: { stableKey: randomUUID(), userId: user.id, featureCode, level: 'ADMIN', effectiveFrom: new Date('2000-01-01Z'), reason: 'Isolated export lineage regression' } });
     }
@@ -70,10 +74,15 @@ const main = async () => {
       return { subjects, evaluations, sections, results };
     };
     const readyExport = async (reportKind: 'AGGREGATE' | 'NAMED_RANKING' = 'AGGREGATE') => {
+      const requestStarted = performance.now();
       const requested = await requestPerformanceExport(client, { actorUserId: actor.id, exportKind: 'XLSX', reportKind, purpose: 'Isolated source hold regression', reportingFrom: from, reportingTo: to });
+      exportRequestDurations.push(performance.now() - requestStarted);
       for (let i = 0; i < 1000; i++) {
         const receipt = await client.performanceExportReceipt.findUniqueOrThrow({ where: { id: requested.receipt.id } });
-        if (receipt.status === 'READY') return receipt;
+        if (receipt.status === 'READY') {
+          exportQueueDurations.push(receipt.readyAt!.getTime() - receipt.requestedAt.getTime());
+          return { ...receipt, token: requested.downloadToken };
+        }
         if (i === 50 && receipt.status === 'QUEUED') await processPerformanceExport(client, receipt.id);
         if (receipt.status === 'FAILED') throw new Error(`Export failed: ${receipt.failureCode}`);
         await delay(10);
@@ -85,6 +94,70 @@ const main = async () => {
     const source = await population(true);
     const aggregate = await readyExport();
     const named = await readyExport('NAMED_RANKING');
+    const requestGrant = await client.hrFeatureAccessGrant.findFirstOrThrow({ where: {
+      userId: actor.id, featureCode: 'REQUEST_PERFORMANCE_EXPORT', status: 'ACTIVE',
+    } });
+    const revokedExport = await readyExport();
+    const revokeRace = await runOrderedPerformanceRace(client, client, second,
+      (tx) => tx.hrFeatureAccessGrant.update({ where: { id: requestGrant.id }, data: { status: 'REVOKED', revokedAt: new Date() } }),
+      (tx) => claimPerformanceExportDownload(tx, { exportId: revokedExport.id, actorUserId: actor.id, token: revokedExport.token }));
+    assert.equal(revokeRace.loser.status, 'rejected');
+    assert.equal(revokeRace.loser.status === 'rejected' ? performanceBusinessErrorCode(revokeRace.loser.error) : null,
+      'PERFORMANCE_EXPORT_PERMISSION_REVOKED');
+    await client.hrFeatureAccessGrant.update({ where: { id: requestGrant.id }, data: { status: 'ACTIVE', revokedAt: null } });
+
+    const correctionExport = await readyExport();
+    const correctionRace = await runOrderedPerformanceRace(client, client, second,
+      (tx) => createPerformanceCorrection(tx, { evaluationId: source.evaluations[0].id, actorUserId: actor.id,
+        correctionKind: 'ACCEPTANCE_RACE', reason: 'اصلاح هم‌زمان برای ابطال خروجی منجمد' }),
+      (tx) => claimPerformanceExportDownload(tx, { exportId: correctionExport.id, actorUserId: actor.id, token: correctionExport.token }));
+    assert.equal(correctionRace.loser.status, 'rejected');
+    assert.equal(correctionRace.loser.status === 'rejected' ? performanceBusinessErrorCode(correctionRace.loser.error) : null,
+      'PERFORMANCE_EXPORT_EVIDENCE_CHANGED');
+
+    const holdExport = await readyExport();
+    const holdRace = await runOrderedPerformanceRace(client, client, second,
+      (tx) => placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION',
+        aggregateId: source.evaluations[1].id, reasonCode: 'EXPORT_DOWNLOAD_ACCEPTANCE_RACE' }),
+      (tx) => claimPerformanceExportDownload(tx, { exportId: holdExport.id, actorUserId: actor.id, token: holdExport.token }));
+    assert.equal(holdRace.loser.status, 'rejected');
+    assert.equal(holdRace.loser.status === 'rejected' ? performanceBusinessErrorCode(holdRace.loser.error) : null,
+      'PERFORMANCE_EXPORT_EVIDENCE_CHANGED');
+    await Promise.all(users.map((user) => decidePerformanceLegalHold(client, { actorUserId: user.id,
+      holdId: holdRace.winner.id, action: 'APPROVE_RELEASE', reasonCode: 'EXPORT_DOWNLOAD_RACE_COMPLETE' })));
+
+    const expiryEvaluation = source.evaluations[2];
+    const expiryTracePayload = await persistPerformancePayload(client, { aggregateType: 'CALCULATION_TRACE',
+      aggregateId: `${expiryEvaluation.id}:expiry-race`, payloadKind: 'TRACE', schemaVersion: 1,
+      payload: { fixture: 'expiry-race' }, keyring });
+    const expiryTrace = await client.performanceCalculationTrace.create({ data: { evaluationId: expiryEvaluation.id,
+      traceVersion: 2, encryptedPayloadId: expiryTracePayload.id, contentHash: expiryTracePayload.contentHash } });
+    const expiryResultPayload = await persistPerformancePayload(client, { aggregateType: 'ACCEPTED_RESULT',
+      aggregateId: `${expiryEvaluation.id}:expiry-race`, payloadKind: 'RESULT', schemaVersion: 1,
+      payload: { exactScore: '75.000000', measurementTo: expiryEvaluation.measurementTo.toISOString() }, keyring });
+    await client.performanceAcceptedResult.update({ where: { id: source.results[2].id }, data: { status: 'SUPERSEDED' } });
+    const expiryResult = await client.performanceAcceptedResult.create({ data: { evaluationId: expiryEvaluation.id,
+      version: 2, calculationTraceId: expiryTrace.id, encryptedPayloadId: expiryResultPayload.id,
+      exactScoreHash: hash('expiry-race-score'), levelCode: 'MEETS_EXPECTATIONS',
+      levelPolicyVersionId: policy.id, acceptedByUserId: actor.id, acceptedAt: new Date('2019-01-01Z'),
+      expiresAt: new Date('2020-01-01Z'), supersedesResultId: source.results[2].id } });
+    const correctionExpiryRace = await runOrderedPerformanceRace(client, client, second,
+      (tx) => createPerformanceCorrection(tx, { evaluationId: expiryEvaluation.id, actorUserId: actor.id,
+        correctionKind: 'EXPIRY_RACE', reason: 'اصلاح هم‌زمان با انقضا و بازمحاسبه' }),
+      (tx) => expirePerformanceResults(tx as unknown as PrismaClient, { actorUserId: actor.id,
+        now: new Date('2026-09-09Z'), keyring }));
+    assert.equal(correctionExpiryRace.loser.status, 'fulfilled');
+    const correctionExpiryCode = correctionExpiryRace.loser.status === 'fulfilled'
+      ? correctionExpiryRace.loser.value.businessCode : null;
+    assert.equal(correctionExpiryCode, 'PERFORMANCE_RESULTS_DEFERRED_FOR_CORRECTION');
+    assert.deepEqual(correctionExpiryRace.loser.status === 'fulfilled'
+      ? correctionExpiryRace.loser.value.deferredResultIds : [], [expiryResult.id]);
+    assert.equal((await client.performanceAcceptedResult.findUniqueOrThrow({ where: { id: expiryResult.id } })).status, 'EFFECTIVE');
+    assert.equal(await client.performanceCorrection.count({ where: { evaluationId: expiryEvaluation.id, status: 'OPEN' } }), 1);
+    await client.performanceExportReceipt.updateMany({
+      where: { id: { in: [revokedExport.id, correctionExport.id, holdExport.id] } },
+      data: { expiresAt: new Date(Date.now() + 4 * 86_400_000) },
+    });
     const lineage = await client.performanceExportLineage.findUniqueOrThrow({ where: { exportId: aggregate.id } });
     const reconstruction = await readPerformancePayload<{ sources: Array<{ aggregateType: string; id: string }>; reconstruction: { trendReconstruction: unknown } }>(client, lineage.reconstructionId, keyring);
     assert.ok(reconstruction.sources.some((row) => row.aggregateType === 'EVALUATION' && row.id === source.evaluations[0].id), 'earlier trend result is preserved although March supplies the displayed current result');
@@ -219,6 +292,23 @@ const main = async () => {
       }
     }
     console.log('Export lineage regression passed: named/aggregate/trend/denominator sources; immutable evidence; descendant holds; failed files; unrelated expiry; dual release; four deterministic cleanup/publication orderings.');
+    if (process.env.PERFORMANCE_ACCEPTANCE_EXPORT_TIMINGS === '1') {
+      console.log(`PERFORMANCE_EXPORT_REQUEST_TIMINGS:${JSON.stringify({
+        requestDurationsMs: exportRequestDurations, queueDurationsMs: exportQueueDurations,
+      })}`);
+    }
+    if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'correction-expiry-recomputation,export-revoke-correction-hold') {
+      const receipts = await client.performanceExportReceipt.findMany({ where: {
+        id: { in: [revokedExport.id, correctionExport.id, holdExport.id] },
+      }, select: { status: true } });
+      assert.equal(receipts.filter(({ status }) => status === 'READY').length, 3);
+      console.log(raceEvidenceMarker([
+        { name: 'correction-expiry-recomputation', loserCode: correctionExpiryCode!, loserAccepted: true, validTruths: 1,
+          duplicateEvents: 0, lostWrites: 0, additionalDisclosures: 0 },
+        { name: 'export-revoke-correction-hold', loserCode: 'PERFORMANCE_EXPORT_EVIDENCE_CHANGED',
+          validTruths: 1, duplicateEvents: 0, lostWrites: 0, additionalDisclosures: 0 },
+      ]));
+    }
   } finally {
     process.env.PERSONNEL_PERFORMANCE_EXPORT_DIR = previousDirectory;
     if (previousDirectory === undefined) delete process.env.PERSONNEL_PERFORMANCE_EXPORT_DIR;

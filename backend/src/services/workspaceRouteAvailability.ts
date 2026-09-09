@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { resolveNarrowFeatureAccess } from './narrowFeatureAccess';
 import { getEffectiveUserAccess } from './effectiveAccessService';
 import { readScopedActions } from './effectiveAccessService';
+import { PERFORMANCE_ACTION_PERMISSION_CODES } from './hrActionPermissionCatalog';
 
 type Rule = { pattern: RegExp; workspace: string; features: string[]; level?: 'view' | 'edit' | 'admin'; narrow?: boolean;
   partnerPurposes?: readonly string[] };
@@ -23,6 +24,7 @@ const rules: Rule[] = [
   { pattern: /^\/dashboard\/hr\/migration/, workspace: 'hr', features: ['DATA_MIGRATION_RECONCILIATION'] },
   { pattern: /^\/dashboard\/hr\/(?:tasks|duties)/, workspace: 'hr', features: ['HR_WORK_MANAGEMENT'] },
   { pattern: /^\/dashboard\/hr\/vehicle-operations/, workspace: 'hr', features: ['hr_internal_drivers_view', 'hr_vehicle_operations_view', 'hr_driver_biometric_audit_view'] },
+  { pattern: /^\/dashboard\/hr\/personnel\/performance(?:\/|$)/, workspace: 'hr', features: [...PERFORMANCE_ACTION_PERMISSION_CODES] },
   { pattern: /^\/dashboard\/hr\/personnel/, workspace: 'hr', features: ['PERSONNEL'] },
   { pattern: /^\/dashboard\/hr\/(?:hiring|interview-criteria)/, workspace: 'hr', features: ['RECRUITMENT_CASES'] },
   { pattern: /^\/dashboard\/hr\//, workspace: 'hr', features: ['ORGANIZATIONAL_STRUCTURE'] },

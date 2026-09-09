@@ -16,6 +16,7 @@ import {
   recordPerformanceOperationalHeartbeat,
   recordPerformanceOperationalWindow,
 } from '../personnelPerformanceMonitoringStore';
+import { raceEvidenceMarker, runOrderedPerformanceRace } from './performanceAcceptanceRaceHarness';
 
 const rollback = Symbol('rollback-performance-monitoring');
 
@@ -186,6 +187,25 @@ const pauseRace = async (first: PrismaClient, second: PrismaClient, runId: strin
     assert.equal(retriedDelivery.delivered, 1);
     assert.deepEqual(await first.notificationOutbox.findUnique({ where: { id: outbox.id }, select: { status: true, attempts: true } }),
       { status: 'PROCESSED', attempts: 2 }, 'the canonical alert outbox retries without duplicating the incident');
+    await first.notificationOutbox.update({ where: { id: outbox.id }, data: {
+      status: 'PENDING', availableAt: retryAt, processedAt: null, claimedAt: null,
+    } });
+    const attemptsBeforeRace = await first.notificationDeliveryAttempt.count({ where: { notification: { eventId: outbox.eventId } } });
+    const deliveryRace = await runOrderedPerformanceRace(first, first, second,
+      (tx) => deliverPendingNotificationOutbox(tx as unknown as PrismaClient, async () => undefined, retryAt),
+      (tx) => deliverPendingNotificationOutbox(tx as unknown as PrismaClient, async () => undefined, retryAt));
+    assert.equal(deliveryRace.winner.businessCode, 'PERFORMANCE_NOTIFICATION_OUTBOX_DELIVERY_COMPLETED');
+    assert.equal(deliveryRace.loser.status, 'fulfilled');
+    const losingDelivery = deliveryRace.loser.status === 'fulfilled' ? deliveryRace.loser.value : null;
+    assert.equal(losingDelivery?.businessCode, 'PERFORMANCE_NOTIFICATION_OUTBOX_ALREADY_CLAIMED');
+    assert.equal(await first.notificationDeliveryAttempt.count({ where: { notification: { eventId: outbox.eventId } } }), attemptsBeforeRace,
+      'concurrent retry cannot duplicate an already delivered notification');
+    if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'notification-export-retry') {
+      console.log(raceEvidenceMarker([{
+        name: 'notification-export-retry', loserCode: losingDelivery!.businessCode,
+        validTruths: 1, duplicateEvents: 0, lostWrites: 0, additionalDisclosures: 0,
+      }]));
+    }
 };
 
 const main = async () => {

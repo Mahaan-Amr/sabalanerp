@@ -182,7 +182,7 @@ export const deliverPendingNotificationOutbox = async (
   prisma: PrismaClient,
   publishRealtime: RealtimeNotificationPublisher,
   now = new Date(),
-): Promise<{ delivered: number; failed: number }> => {
+): Promise<{ delivered: number; failed: number; businessCode: string }> => {
   await prisma.notificationOutbox.updateMany({
     where: {
       status: 'PROCESSING',
@@ -199,13 +199,13 @@ export const deliverPendingNotificationOutbox = async (
     where: { status: 'PENDING', availableAt: { lte: now } },
     orderBy: { createdAt: 'asc' },
   });
-  if (!candidate) return { delivered: 0, failed: 0 };
+  if (!candidate) return { delivered: 0, failed: 0, businessCode: 'PERFORMANCE_NOTIFICATION_OUTBOX_EMPTY' };
 
   const claimed = await prisma.notificationOutbox.updateMany({
     where: { id: candidate.id, status: 'PENDING', availableAt: { lte: now } },
     data: { status: 'PROCESSING', claimedAt: now, attempts: { increment: 1 } },
   });
-  if (!claimed.count) return { delivered: 0, failed: 0 };
+  if (!claimed.count) return { delivered: 0, failed: 0, businessCode: 'PERFORMANCE_NOTIFICATION_OUTBOX_ALREADY_CLAIMED' };
 
   const notifications = await prisma.notification.findMany({
     where: { eventId: candidate.eventId },
@@ -326,7 +326,9 @@ export const deliverPendingNotificationOutbox = async (
       data: { status: 'PROCESSED', processedAt: now, claimedAt: null, lastError: null },
     });
   }
-  return { delivered, failed };
+  return { delivered, failed, businessCode: failed > 0
+    ? 'PERFORMANCE_NOTIFICATION_OUTBOX_DELIVERY_RETRY_SCHEDULED'
+    : 'PERFORMANCE_NOTIFICATION_OUTBOX_DELIVERY_COMPLETED' };
 };
 
 export const deliverDailyWebPushDigests = async (

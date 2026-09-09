@@ -63,6 +63,7 @@ const npmCheck = (name, script, prefix = null) => checks.push({ name, command: '
   env: mode === 'unit' ? {} : {
     DATABASE_URL: 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public&connection_limit=2&pool_timeout=10',
     NODE_ENV: 'test', PERFORMANCE_RACE_ITERATIONS: '100',
+    PERFORMANCE_ERASURE_BULK_THRESHOLD: '100',
     PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID: 'local-development-v1',
     PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64: 'cGVyZi1sb2NhbC0wMTIzNDU2Nzg5YWJjZGVmLXYxISE=',
   },

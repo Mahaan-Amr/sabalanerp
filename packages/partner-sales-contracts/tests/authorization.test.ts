@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { checkPartnerDomainRestrictions, publicError, partnerError, PermissionContextSchema } from '../src';
+import { checkPartnerDomainRestrictions, ERROR_CATALOG, publicError, partnerError, PermissionContextSchema } from '../src';
 
 test('central authorization receives all four non-bypassable Partner restrictions', () => {
   const context = PermissionContextSchema.parse({
@@ -27,13 +27,21 @@ test('public errors never forward a caller-supplied validator message', () => {
 
 test('missing active responder has one canonical actionable operational message', () => {
   assert.deepEqual(partnerError('RESPONDER_UNAVAILABLE'), { code: 'RESPONDER_UNAVAILABLE', status: 409,
-    message: 'برای حساب شما پاسخ‌دهنده قیمت فعال تعیین نشده است.' });
+    message: 'برای حساب شما پاسخ‌دهنده قیمت فعال تعیین نشده است؛ تا تعیین پاسخ‌دهنده، ثبت استعلام را متوقف کنید.' });
 });
 
 test('integrity conflict names a user action without deflecting to support', () => {
   const error = partnerError('INTEGRITY_CONFLICT');
   assert.match(error.message, /صفحه را تازه کنید و دوباره اقدام کنید/);
   assert.doesNotMatch(error.message, /پشتیبانی|تماس بگیرید/);
+});
+
+test('every public Partner error includes a next action without support deflection', () => {
+  const action = /برگردید|وارد شوید|انتخاب کنید|متوقف کنید|اصلاح|تازه کنید|فعال کنید|استعلام بگیرید|تعیین تکلیف کنید|تلاش کنید/;
+  for (const [, message] of Object.values(ERROR_CATALOG)) {
+    assert.match(message, action);
+    assert.doesNotMatch(message, /پشتیبانی|تماس بگیرید/);
+  }
 });
 
 test('non-Admin actors retain the same exceptions and hidden/expired authority fails closed', () => {

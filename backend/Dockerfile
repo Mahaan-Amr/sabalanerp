@@ -51,7 +51,8 @@ COPY backend/scripts/shipment-statement-cutover.ts ./scripts/shipment-statement-
 COPY backend/src ./src
 
 RUN npx prisma generate
-RUN npm run build
+# Bound compiler memory independently of the production runtime's default heap.
+RUN NODE_OPTIONS=--max-old-space-size=3072 npm run build
 RUN npm prune --omit=dev --no-audit --fund=false
 
 FROM node:22-bookworm-slim AS runner

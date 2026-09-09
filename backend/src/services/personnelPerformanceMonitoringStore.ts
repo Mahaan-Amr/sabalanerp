@@ -83,7 +83,7 @@ export const recordPerformanceOperationalHeartbeat = async (client: Client, inpu
 });
 
 export const recordPerformanceRequestObservation = async (client: Client, input: {
-  metricKey: string; durationMs: number; responseStatus: number; observedAt?: Date;
+  metricKey: string; durationMs: number; responseStatus: number; timedOut?: boolean; observedAt?: Date;
 }) => {
   const definition = definitions.get(input.metricKey);
   if (!definition?.p95Ms || !Number.isInteger(input.durationMs) || input.durationMs < 0
@@ -93,7 +93,7 @@ export const recordPerformanceRequestObservation = async (client: Client, input:
   return client.performanceOperationalRequestObservation.create({ data: { metricKey: input.metricKey,
     durationMs: input.durationMs, responseStatus: input.responseStatus,
     authorizationDecision: [401, 403].includes(input.responseStatus) ? 'DENIED' : 'ALLOWED',
-    timedOut: [408, 504].includes(input.responseStatus), observedAt: input.observedAt ?? new Date() } });
+    timedOut: input.timedOut ?? [408, 504].includes(input.responseStatus), observedAt: input.observedAt ?? new Date() } });
 };
 
 type WindowInput = {
@@ -229,6 +229,45 @@ export const recordPerformanceIntegrityIncident = async (client: Client, input: 
     observedAt: input.observedAt ?? new Date(), pause: true });
 });
 
+const integrityFailureCategories = new Map<string, Parameters<typeof recordPerformanceIntegrityIncident>[1]['category']>([
+  ['PERFORMANCE_OPERATIONAL_INTEGRITY_CONFIDENTIALITY', 'CONFIDENTIALITY'],
+  ['PERFORMANCE_OPERATIONAL_INTEGRITY_AUTHORITY', 'AUTHORITY'],
+  ['PERFORMANCE_OPERATIONAL_INTEGRITY_RESULT', 'RESULT_INTEGRITY'],
+  ['PERFORMANCE_POLICY_PREVIEW_HASH_MISMATCH', 'RESULT_INTEGRITY'],
+  ['PERFORMANCE_EXPORT_INTEGRITY_FAILED', 'RESULT_INTEGRITY'],
+  ['PERFORMANCE_OPERATIONAL_INTEGRITY_LINEAGE', 'LINEAGE'],
+  ['PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED', 'LINEAGE'],
+  ['PERFORMANCE_OPERATIONAL_INTEGRITY_AUDIT', 'AUDIT'],
+  ['PERFORMANCE_OPERATIONAL_INTEGRITY_RETENTION', 'RETENTION'],
+  ['PERFORMANCE_ERASURE_RETENTION_DRIFT', 'RETENTION'],
+  ['PERFORMANCE_RETENTION_DEPENDENCY_UNVERIFIED', 'RETENTION'],
+  ['PERFORMANCE_OPERATIONAL_INTEGRITY_EXPORT_SCOPE', 'EXPORT_SCOPE'],
+  ['PERFORMANCE_OPERATIONAL_INTEGRITY_POST_PAUSE_WRITE', 'POST_PAUSE_WRITE'],
+  ['PERFORMANCE_OPERATIONAL_INTEGRITY_COHORT_BYPASS', 'COHORT_BYPASS'],
+]);
+
+export const classifyPerformanceIntegrityFailure = (failure: unknown) => {
+  const detail = failure && typeof failure === 'object'
+    ? failure as { code?: unknown; message?: unknown; meta?: { message?: unknown } }
+    : {};
+  const candidates = [detail.code, detail.message, detail.meta?.message].filter((value): value is string => typeof value === 'string');
+  for (const [code, category] of integrityFailureCategories) {
+    if (candidates.some((candidate) => candidate === code || candidate.includes(code))) return category;
+  }
+  return null;
+};
+
+export const recordPerformanceIntegrityFailure = async (client: Client, failure: unknown, observedAt = new Date()) => {
+  const category = classifyPerformanceIntegrityFailure(failure);
+  if (!category) return null;
+  const cohortScoped = category === 'POST_PAUSE_WRITE' || category === 'COHORT_BYPASS';
+  const phase = cohortScoped ? await client.performanceFeaturePhaseVersion.findFirst({ where: {
+    effectiveFrom: { lte: observedAt }, releaseEnabled: true, cohortVersionId: { not: null },
+  }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }], select: { cohortVersionId: true } }) : null;
+  return recordPerformanceIntegrityIncident(client, { category,
+    scope: phase?.cohortVersionId ? 'COHORT' : 'ALL', cohortVersionId: phase?.cohortVersionId ?? undefined, observedAt });
+};
+
 export const recordPerformanceMaintenanceFailure = async (client: Client, input: { operationCode: string; observedAt?: Date }) =>
   transaction(client, async (tx) => {
     if (!/^[A-Z][A-Z0-9_]{2,79}$/.test(input.operationCode)) throw error('PERFORMANCE_MAINTENANCE_FAILURE_INVALID', 422);
@@ -330,6 +369,15 @@ export const escalateOverduePerformanceOperationalIncidents = async (client: Cli
   for (const incident of overdue) {
     const route = await tx.performanceOperationalRoute.findUnique({ where: { routeKey: incident.routeKey } });
     await tx.performanceOperationalIncident.update({ where: { id: incident.id }, data: { status: 'ESCALATED', escalatedAt: now } });
+    const evidenceHash = canonicalPerformanceHash({ system: 'PERSONNEL_PERFORMANCE_MONITOR', incidentId: incident.id,
+      reasonCode: 'AUTO_RESPONSE_DEADLINE_EXCEEDED', recordedAt: now });
+    await tx.performanceOperationalIncidentEvidence.create({ data: { incidentId: incident.id, action: 'ESCALATE', actorUserId: null,
+      reasonCode: 'AUTO_RESPONSE_DEADLINE_EXCEEDED', evidenceHash, recordedAt: now } });
+    const auditId = randomUUID();
+    await tx.performanceAuditEvent.create({ data: { id: auditId, aggregateType: 'PERFORMANCE_OPERATIONAL_INCIDENT', aggregateId: incident.id,
+      eventType: 'PERFORMANCE_OPERATIONAL_INCIDENT_ESCALATE', actorUserId: null, reason: 'AUTO_RESPONSE_DEADLINE_EXCEEDED',
+      authorityHash: canonicalPerformanceHash({ system: 'PERSONNEL_PERFORMANCE_MONITOR', routeKey: incident.routeKey }),
+      eventHash: canonicalPerformanceHash({ auditId, incidentId: incident.id, evidenceHash, at: now }) } });
     if (route) await publishNotificationEvent(tx, { type: 'PERFORMANCE_OPERATIONAL_ALERT',
       deduplicationKey: `performance-operational-overdue:${incident.id}`, recipientIds: [route.recipientUserId],
       workspace: 'hr', feature: 'PERSONNEL_PERFORMANCE', resourceType: 'PERFORMANCE_OPERATIONAL_INCIDENT',

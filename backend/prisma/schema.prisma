@@ -7885,7 +7885,7 @@ model PerformanceOperationalIncidentEvidence {
   id String @id @default(cuid())
   incidentId String
   action String
-  actorUserId String
+  actorUserId String?
   reasonCode String
   evidenceHash String
   recordedAt DateTime @default(now())

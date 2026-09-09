@@ -12,6 +12,7 @@ import {
   detectMissingPerformanceOperationalHeartbeats,
   escalateOverduePerformanceOperationalIncidents,
   getPerformanceOperationalDashboard,
+  recordPerformanceIntegrityFailure,
   recordPerformanceOperationalHeartbeat,
   recordPerformanceOperationalWindow,
 } from '../personnelPerformanceMonitoringStore';
@@ -124,6 +125,16 @@ const exerciseMonitoring = async (client: PrismaClient) => {
       assert.equal(heartbeatIncidents.incidents.length, 3, 'each missing hypercare heartbeat becomes durable incident evidence');
       const escalated = await escalateOverduePerformanceOperationalIncidents(tx, new Date(now.getTime() + 22 * 60_000));
       assert.ok(escalated.escalated >= 3, 'unacknowledged High incidents are escalated after their response deadline');
+      assert.equal(await tx.performanceOperationalIncidentEvidence.count({ where: { action: 'ESCALATE' } }), escalated.escalated,
+        'automatic deadline escalation persists incident evidence');
+      assert.equal(await tx.performanceAuditEvent.count({ where: { eventType: 'PERFORMANCE_OPERATIONAL_INCIDENT_ESCALATE' } }), escalated.escalated,
+        'automatic deadline escalation persists immutable audit evidence');
+
+      const integrityIncident = await recordPerformanceIntegrityFailure(tx, {
+        code: 'PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED',
+      }, new Date(now.getTime() + 23 * 60_000));
+      assert.equal(integrityIncident?.thresholdCode, 'INTEGRITY_LINEAGE');
+      assert.ok(integrityIncident?.safetyPauseId, 'a detected lineage failure creates an automatic global safety pause');
       throw rollback;
     });
   } catch (error) {
@@ -196,6 +207,9 @@ const main = async () => {
       SELECT 1 FROM pg_indexes WHERE indexname = 'performance_operational_incidents_safetyPauseId_key'
     ) AS present`;
     if (pauseIndex.present) applySql('20260909111000_performance_shared_operational_pause');
+    const [evidenceActor] = await first.$queryRaw<Array<{ nullable: string }>>`SELECT is_nullable AS nullable FROM information_schema.columns
+      WHERE table_name = 'performance_operational_incident_evidence' AND column_name = 'actorUserId'`;
+    if (evidenceActor.nullable === 'NO') applySql('20260909112000_performance_automatic_incident_evidence_actor');
     await exerciseMonitoring(first);
     await pauseRace(first, second, database.runId);
   } finally {

@@ -8,7 +8,7 @@ import {
 } from '../services/personnelPerformanceRolloutStore';
 import { placePerformanceLegalHold, decidePerformanceLegalHold, listPerformanceLegalHolds } from '../services/personnelPerformanceLegalHoldStore';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../services/personnelPerformanceOperationsStore';
-import { acknowledgePerformanceOperationalIncident, configurePerformanceOperationalRoute, getPerformanceOperationalDashboard, recordPerformanceRequestObservation } from '../services/personnelPerformanceMonitoringStore';
+import { acknowledgePerformanceOperationalIncident, configurePerformanceOperationalRoute, getPerformanceOperationalDashboard, recordPerformanceIntegrityFailure, recordPerformanceRequestObservation } from '../services/personnelPerformanceMonitoringStore';
 import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue } from '../services/personnelPerformancePrivacyStore';
 import { restrictPerformanceEvidence } from '../services/personnelPerformanceRestrictions';
 import { findApplicablePerformancePause } from '../services/personnelPerformanceRolloutPolicy';
@@ -89,14 +89,24 @@ export const classifyPerformanceRequestMetric = (method: string, path: string) =
   if (method === 'GET') return 'AUTHORIZED_READ_API_LATENCY';
   return null;
 };
+export const performanceRequestObservationOutcome = (responseStatus: number, completed: boolean) => ({
+  responseStatus: completed ? responseStatus : 499,
+  timedOut: !completed || [408, 504].includes(responseStatus),
+});
 router.use((req, res, next) => {
   const metricKey = classifyPerformanceRequestMetric(req.method, req.path);
   const startedAt = performance.now();
-  res.once('finish', () => {
+  let recorded = false;
+  const record = (completed: boolean) => {
+    if (recorded) return;
+    recorded = true;
     if (!metricKey) return;
-    void recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)), responseStatus: res.statusCode })
+    const outcome = performanceRequestObservationOutcome(res.statusCode, completed);
+    void recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)), ...outcome })
       .catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
-  });
+  };
+  res.once('finish', () => record(true));
+  res.once('close', () => record(false));
   next();
 });
 router.post('/compensation-agreements', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_COMPENSATION_AGREEMENTS'] }), async (req: AuthRequest, res, next) => {
@@ -741,7 +751,9 @@ router.post('/legal-holds/:holdId/decisions', async (req: AuthRequest, res, next
   }) }); } catch (error) { return next(error); }
 });
 
-router.use((error: unknown, _req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+router.use(async (error: unknown, _req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+  try { await recordPerformanceIntegrityFailure(prisma, error); }
+  catch { console.error('Personnel performance integrity incident routing failed closed: PERFORMANCE_OPERATIONAL_ALERT_FAILED'); }
   if (res.headersSent) return next(error);
   const detail = error && typeof error === 'object' ? error as { code?: unknown; status?: unknown; statusCode?: unknown; message?: unknown } : {};
   const message = typeof detail.message === 'string' ? detail.message : '';

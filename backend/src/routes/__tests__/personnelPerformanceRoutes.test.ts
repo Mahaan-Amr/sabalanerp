@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { RequestHandler } from 'express';
-import router, { classifyPerformanceRequestMetric, projectPersonnelPerformanceCapabilities } from '../personnel-performance';
+import router, { classifyPerformanceRequestMetric, performanceRequestObservationOutcome, projectPersonnelPerformanceCapabilities } from '../personnel-performance';
 
 const registeredRoutes = (router as unknown as {
   stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
@@ -115,5 +115,9 @@ assert.equal(classifyPerformanceRequestMetric('POST', '/reviews/one/decision'), 
 assert.equal(classifyPerformanceRequestMetric('POST', '/analytics'), 'ANALYTICS_API_LATENCY');
 assert.equal(classifyPerformanceRequestMetric('GET', '/traces/one'), 'RESULT_REPRODUCTION_LATENCY');
 assert.equal(classifyPerformanceRequestMetric('POST', '/exports'), null, 'asynchronous export generation is sampled by its queue metrics');
+assert.deepEqual(performanceRequestObservationOutcome(204, true), { responseStatus: 204, timedOut: false });
+assert.deepEqual(performanceRequestObservationOutcome(504, true), { responseStatus: 504, timedOut: true });
+assert.deepEqual(performanceRequestObservationOutcome(200, false), { responseStatus: 499, timedOut: true },
+  'aborted requests remain in the timeout denominator and numerator');
 
 console.log('Personnel performance route contract tests passed.');

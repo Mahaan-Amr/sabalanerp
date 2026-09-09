@@ -80,6 +80,7 @@ test('performance policy administration sheets are RTL, accessible, responsive, 
   await assertNoHorizontalOverflow(page);
   await page.keyboard.press('Escape');
   await expect(criterionDialog).toBeHidden();
+  await setViewportAndZoom(page, { width: 1440, height: 900 }, 1);
   await page.getByRole('button', { name: 'ثبت تأیید کسب‌وکاری' }).click();
   const approvalDialog = page.getByRole('dialog', { name: 'تأیید کسب‌وکاری محتوای کاتالوگ' });
   await approvalDialog.getByRole('textbox', { name: 'دلیل قابل حسابرسی' }).fill('بازبینی کسب‌وکاری معیار پیشنهادی');

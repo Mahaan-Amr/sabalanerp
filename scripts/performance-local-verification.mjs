@@ -4,7 +4,7 @@ import { open, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-async function runProcessGroup(check, logFd) {
+export async function runProcessGroup(check, logFd) {
   // This local harness supports macOS/Linux. Never run a weaker timeout on another platform.
   if (process.platform === 'win32') throw new Error('PROCESS_GROUP_UNAVAILABLE');
   const child = spawn(check.command, check.args, {

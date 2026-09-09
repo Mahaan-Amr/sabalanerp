@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mapAxiosFormErrors } from '../../../../lib/formErrors';
 import {
+  getContractSubmissionRecovery,
   isContractProductValidationFailure,
   mapProductValidationFailure
 } from '../../utils/contractSubmissionErrors';
@@ -34,6 +35,15 @@ const globalProductError = {
     }
   }
 };
+
+assert.deepEqual(getContractSubmissionRecovery(422, false), {
+  nextStep: 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.',
+  uncertainMutation: false
+});
+assert.deepEqual(getContractSubmissionRecovery(500, false), {
+  nextStep: 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
+  uncertainMutation: true
+});
 
 assert.equal(
   isContractProductValidationFailure(globalProductError, {

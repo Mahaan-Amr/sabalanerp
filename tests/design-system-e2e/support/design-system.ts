@@ -52,6 +52,9 @@ export const setTheme = async (page: Page, theme: 'light' | 'dark') => {
 export const setViewportAndZoom = async (page: Page, viewport: { width: number; height: number }, zoom = 1) => {
   await page.setViewportSize(viewport);
   await page.waitForLoadState('domcontentloaded');
+  await page.addStyleTag({
+    content: 'nextjs-portal { display: none !important; }'
+  });
   await page.evaluate((nextZoom) => {
     document.documentElement.style.zoom = nextZoom === 1 ? '' : String(nextZoom);
   }, zoom);

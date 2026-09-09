@@ -26,6 +26,7 @@ import {
 } from '../utils/productFinishingCollections';
 import { normalizeContractProductRowIdentities } from '../utils/contractProductIdentity';
 import {
+  getContractSubmissionRecovery,
   isContractProductValidationFailure,
   mapProductValidationFailure
 } from '../utils/contractSubmissionErrors';
@@ -440,16 +441,15 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           )
         });
       } else {
+        const recovery = getContractSubmissionRecovery(response.status, isEditMode);
         setErrors({
           general: getSalesOperationalErrorMessage({
             response: { status: response.status, data: response.data }
           }, {
             failedAction: isEditMode ? 'ذخیره تغییرات قرارداد' : 'ثبت قرارداد',
-            nextStep: isEditMode
-              ? 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.'
-              : 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
+            nextStep: recovery.nextStep,
             preserveInput: true,
-            uncertainMutation: true
+            uncertainMutation: recovery.uncertainMutation
           })
         });
       }
@@ -461,16 +461,15 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       const initialMappedErrors = editSessionMessage
         ? { general: editSessionMessage }
         : mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد');
+      const recovery = getContractSubmissionRecovery(error?.response?.status, isEditMode);
       const operationalMappedErrors = !editSessionMessage && initialMappedErrors.general
         ? {
           ...initialMappedErrors,
           general: getSalesOperationalErrorMessage(error, {
             failedAction: isEditMode ? 'ذخیره تغییرات قرارداد' : 'ثبت قرارداد',
-            nextStep: isEditMode
-              ? 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.'
-              : 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
+            nextStep: recovery.nextStep,
             preserveInput: true,
-            uncertainMutation: true
+            uncertainMutation: recovery.uncertainMutation
           })
         }
         : initialMappedErrors;

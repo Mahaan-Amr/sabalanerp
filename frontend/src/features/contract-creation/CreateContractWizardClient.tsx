@@ -4506,7 +4506,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       if (!printResponse.data?.success) {
         setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage({ response: printResponse }, {
           failedAction: 'آماده‌سازی پرینت قرارداد',
-          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
         }) }));
         return;
       }
@@ -4522,7 +4523,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     } catch (error: any) {
       setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
         failedAction: 'آماده‌سازی پرینت قرارداد',
-        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
       }) }));
     } finally {
       setPrintActionLoading(false);
@@ -4543,7 +4545,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       if (!response.data.success) {
         setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage({ response }, {
           failedAction: 'ارسال پیام تأیید قرارداد',
-          nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.'
+          nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
         }) }));
         return;
       }
@@ -4577,7 +4580,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     } catch (error: any) {
       setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
         failedAction: 'ارسال پیام تأیید قرارداد',
-        nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.'
+        nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
       }) }));
     } finally {
       digitalSignature.setSendingCode(false);
@@ -4594,7 +4598,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       if (!response.data.success) {
         setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage({ response }, {
           failedAction: 'ارسال دوباره کد تأیید',
-          nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.'
+          nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
         }) }));
         return;
       }
@@ -4602,7 +4607,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     } catch (error: any) {
       setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
         failedAction: 'ارسال دوباره کد تأیید',
-        nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.'
+        nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
       }) }));
     } finally {
       digitalSignature.setSendingCode(false);
@@ -4620,7 +4626,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       if (!response.data.success) {
         setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage({ response }, {
           failedAction: 'لغو قرارداد',
-          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
         }) }));
         return;
       }
@@ -4629,7 +4636,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     } catch (error: any) {
       setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
         failedAction: 'لغو قرارداد',
-        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
       }) }));
     } finally {
       digitalSignature.setSendingCode(false);

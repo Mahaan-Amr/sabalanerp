@@ -116,6 +116,16 @@ test('unknown mutation failure requires reconciliation before retry', () => {
   assert.equal(message, 'حذف محصول انجام نشد. وضعیت فعلی را بررسی کنید؛ فقط اگر عملیات انجام نشده بود دوباره تلاش کنید. کد پیگیری: REQUEST-77');
 });
 
+test('contract creation can use its more specific reconciliation step', () => {
+  const message = getSalesOperationalErrorMessage({ response: { status: 500, data: {} } }, {
+    failedAction: 'ثبت قرارداد',
+    nextStep: 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
+    preserveInput: true,
+    uncertainMutation: true,
+  });
+  assert.match(message, /ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود/);
+});
+
 test('permission and stale responses keep their non-error presentation semantics', () => {
   assert.equal(getSalesOperationalErrorKind({ response: { status: 403 } }), 'permission');
   assert.equal(getSalesOperationalErrorKind({ response: { status: 409 } }), 'stale');

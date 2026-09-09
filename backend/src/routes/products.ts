@@ -11,7 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import { applyCatalogPlan, buildCatalogPlan, buildExportWorkbook, buildTemplateWorkbook, canonicalizeProductData } from '../services/catalogExcelSync';
 import { randomUUID } from 'node:crypto';
-import { ensureSalesErrorTracking, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
+import { ensureSalesErrorTracking, knownProductCatalogApplyError, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
 
 const router = express.Router();
 router.use((req: any, res: Response, next) => {
@@ -228,7 +228,9 @@ router.post('/import/apply', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
     return res.json({ success: true, data: plan });
   } catch (error: any) {
     console.error('Product apply error:', error);
-    return res.status(400).json({ success: false, error: 'اعمال فایل Excel انجام نشد؛ خطاهای پیش‌نمایش را اصلاح و فایل را دوباره بررسی کنید.' });
+    const knownError = knownProductCatalogApplyError(error?.message);
+    if (knownError) return res.status(400).json({ success: false, error: knownError });
+    return sendUnexpectedProductFailure(res, error, 'اعمال فایل Excel محصولات', 'SALES_PRODUCT_IMPORT_APPLY_UNEXPECTED', true);
   }
 });
 

@@ -448,7 +448,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             nextStep: isEditMode
               ? 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.'
               : 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
-            preserveInput: true
+            preserveInput: true,
+            uncertainMutation: true
           })
         });
       }
@@ -468,7 +469,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             nextStep: isEditMode
               ? 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.'
               : 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
-            preserveInput: true
+            preserveInput: true,
+            uncertainMutation: true
           })
         }
         : initialMappedErrors;

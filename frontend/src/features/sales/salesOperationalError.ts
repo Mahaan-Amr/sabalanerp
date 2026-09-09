@@ -138,7 +138,7 @@ export const getSalesOperationalErrorMessage = (
   const preserve = options.preserveInput
     ? 'اطلاعات واردشده حفظ شده است.'
     : '';
-  const requestedNextStep = options.uncertainMutation && !businessMessage
+  const requestedNextStep = options.uncertainMutation && !businessMessage && !options.nextStep.includes('فقط اگر')
     ? 'وضعیت فعلی را بررسی کنید؛ فقط اگر عملیات انجام نشده بود دوباره تلاش کنید.'
     : options.nextStep;
   const nextStep = failure.includes(requestedNextStep.trim())

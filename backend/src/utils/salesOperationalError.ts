@@ -63,3 +63,13 @@ export const ensureSalesErrorTracking = (
     : '';
   return { ...body, trackingId: existing || requested || createTrackingId() };
 };
+
+export const knownProductCatalogApplyError = (message: unknown): string | undefined => {
+  if (message === 'پیش‌نمایش منقضی شده است. فایل را دوباره بارگذاری کنید') {
+    return 'پیش‌نمایش منقضی شده است؛ فایل را دوباره بارگذاری کنید.';
+  }
+  if (message === 'تا زمانی که خطاهای اعتبارسنجی وجود دارد، اعمال import ممکن نیست') {
+    return 'فایل هنوز خطای اعتبارسنجی دارد؛ خطاهای پیش‌نمایش را اصلاح کنید.';
+  }
+  return undefined;
+};

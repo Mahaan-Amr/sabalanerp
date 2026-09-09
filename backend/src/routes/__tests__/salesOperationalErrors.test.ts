@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ensureSalesErrorTracking, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../../utils/salesOperationalError';
+import { ensureSalesErrorTracking, knownProductCatalogApplyError, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../../utils/salesOperationalError';
 
 test('unexpected sales response keeps the technical reference without sending the user to support', () => {
   const response = unexpectedSalesErrorResponse({
@@ -28,6 +28,14 @@ test('every server failure gets a server-recordable correlation id', () => {
     ensureSalesErrorTracking({ success: false, error: 'خطا' }, 500, undefined, () => 'SERVER-1'),
     { success: false, error: 'خطا', trackingId: 'SERVER-1' },
   );
+});
+
+test('catalog apply exposes only expected correctable failures as client errors', () => {
+  assert.equal(
+    knownProductCatalogApplyError('پیش‌نمایش منقضی شده است. فایل را دوباره بارگذاری کنید'),
+    'پیش‌نمایش منقضی شده است؛ فایل را دوباره بارگذاری کنید.',
+  );
+  assert.equal(knownProductCatalogApplyError('database unavailable'), undefined);
 });
 
 test('known service failures become simple Persian causes with a recovery step', () => {

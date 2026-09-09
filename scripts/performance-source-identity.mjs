@@ -10,6 +10,9 @@ export const performanceSourceHash = async () => {
     'docs/operations', 'docs/adr', 'AGENTS.md', 'CONTEXT.md', '*package*.json', '*Dockerfile*', 'docker-compose*.yml',
   ], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).split('\0').filter(Boolean).sort();
   const hash = createHash('sha256');
+  const inquiryCommit = execFileSync('git', ['rev-parse', 'HEAD:apps/sabalan-inquiry'], { encoding: 'utf8' }).trim();
+  hash.update(JSON.stringify(['apps/sabalan-inquiry', 'GITLINK', inquiryCommit]));
+  hash.update('\0');
   for (const file of [...new Set(files)]) {
     try {
       const contentHash = createHash('sha256').update(await readFile(file)).digest('hex');

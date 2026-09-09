@@ -11,10 +11,37 @@ import path from 'path';
 import fs from 'fs';
 import { applyCatalogPlan, buildCatalogPlan, buildExportWorkbook, buildTemplateWorkbook, canonicalizeProductData } from '../services/catalogExcelSync';
 import { randomUUID } from 'node:crypto';
-import { unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
+import { ensureSalesErrorTracking, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
 
 const router = express.Router();
+router.use((req: any, res: Response, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = ((payload: unknown) => {
+    const tracked = ensureSalesErrorTracking(payload, res.statusCode, req.get('x-correlation-id'), randomUUID);
+    if (tracked !== payload) {
+      console.error('Sales product route failure reference:', {
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        trackingId: (tracked as { trackingId: string }).trackingId,
+      });
+    }
+    return originalJson(tracked);
+  }) as Response['json'];
+  next();
+});
 const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
+const sendUnexpectedProductFailure = (
+  res: Response,
+  error: unknown,
+  failedAction: string,
+  code: string,
+  preserveInput = false,
+) => {
+  const trackingId = randomUUID();
+  console.error('Unexpected sales product route failure:', { code, trackingId, error });
+  return res.status(500).json(unexpectedSalesErrorResponse({ code, failedAction, trackingId, preserveInput }));
+};
 
 // Log all requests to products router
 router.use((req: any, res: any, next: any) => {
@@ -150,7 +177,7 @@ router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSP
     return sendProductWorkbook(res, buildTemplateWorkbook('products'), 'product-import-template.xlsx');
   } catch (error) {
     console.error('Template generation error:', error);
-    return res.status(500).json({ success: false, error: 'خطا در تولید قالب Excel' });
+    return sendUnexpectedProductFailure(res, error, 'ساخت قالب Excel محصولات', 'SALES_PRODUCT_TEMPLATE_UNEXPECTED');
   }
 });
 
@@ -173,7 +200,7 @@ router.get('/export', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPAC
     return sendProductWorkbook(res, buffer, `products-export-${new Date().toISOString().slice(0, 10)}.xlsx`);
   } catch (error) {
     console.error('Export error:', error);
-    return res.status(500).json({ success: false, error: 'خطا در صادر کردن محصولات' });
+    return sendUnexpectedProductFailure(res, error, 'خروجی Excel محصولات', 'SALES_PRODUCT_EXPORT_UNEXPECTED');
   }
 });
 
@@ -191,7 +218,7 @@ router.post('/import/preview', protect, requireWorkspaceAccess(WORKSPACES.SALES,
       try { fs.unlinkSync(req.file.path); } catch {}
     }
     console.error('Product preview error:', error);
-    return res.status(500).json({ success: false, error: error.message || 'خطا در بررسی فایل Excel' });
+    return sendUnexpectedProductFailure(res, error, 'بررسی فایل Excel محصولات', 'SALES_PRODUCT_IMPORT_PREVIEW_UNEXPECTED', true);
   }
 });
 
@@ -201,7 +228,7 @@ router.post('/import/apply', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
     return res.json({ success: true, data: plan });
   } catch (error: any) {
     console.error('Product apply error:', error);
-    return res.status(400).json({ success: false, error: error.message || 'خطا در اعمال فایل Excel' });
+    return res.status(400).json({ success: false, error: 'اعمال فایل Excel انجام نشد؛ خطاهای پیش‌نمایش را اصلاح و فایل را دوباره بررسی کنید.' });
   }
 });
 
@@ -918,10 +945,7 @@ router.get('/attributes', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
     });
   } catch (error) {
     console.error('Get product attributes error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
+    return sendUnexpectedProductFailure(res, error, 'دریافت ویژگی‌های محصولات', 'SALES_PRODUCT_ATTRIBUTES_UNEXPECTED');
   }
 });
 
@@ -1014,10 +1038,7 @@ router.get('/stats', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE
     });
   } catch (error) {
     console.error('Get product stats error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
+    return sendUnexpectedProductFailure(res, error, 'دریافت آمار محصولات', 'SALES_PRODUCT_STATS_UNEXPECTED');
   }
 });
 
@@ -1243,7 +1264,7 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
         console.error(`Error importing row ${rowNumber}:`, error.message);
         results.errors.push({
           row: rowNumber,
-          error: error.message,
+          error: 'این ردیف پردازش نشد؛ مقادیر ردیف را با قالب نمونه تطبیق دهید.',
           data: row
         });
         results.failed++;
@@ -1261,10 +1282,7 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
 
   } catch (error) {
     console.error('Import error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'خطا در وارد کردن فایل Excel'
-    });
+    return sendUnexpectedProductFailure(res, error, 'وارد کردن فایل Excel محصولات', 'SALES_PRODUCT_IMPORT_UNEXPECTED', true);
   }
 });
 
@@ -1388,10 +1406,7 @@ router.get('/export', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPAC
 
   } catch (error) {
     console.error('Export error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'خطا در صادر کردن محصولات'
-    });
+    return sendUnexpectedProductFailure(res, error, 'خروجی Excel محصولات', 'SALES_PRODUCT_LEGACY_EXPORT_UNEXPECTED');
   }
 });
 

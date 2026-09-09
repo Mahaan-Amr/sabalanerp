@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ErpBadge, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpSummaryGrid } from '@/components/erp';
 import { shipmentQuantityAPI } from '@/lib/api';
 import { formatShipmentQuantity, shipmentHealthPresentation, type ShipmentQuantityRow } from './shipmentQuantityPresentation';
+import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface ProjectionResponse {
   cutoff: string;
@@ -24,7 +25,7 @@ const unitLabel = (unit: string) => ({ meter: 'متر طول', squareMeter: 'م�
 export function ShipmentQuantitySummary({ contractId, customerId }: { contractId?: string; customerId?: string }) {
   const [data, setData] = useState<ProjectionResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshError, setRefreshError] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -33,9 +34,12 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
     request.then((response) => {
       if (!active) return;
       setData(response.data.data);
-      setRefreshError(false);
-    }).catch(() => {
-      if (active) setRefreshError(true);
+      setRefreshError('');
+    }).catch((error) => {
+      if (active) setRefreshError(getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت اطلاعات ارسال',
+        nextStep: 'صفحه را تازه‌سازی و دوباره تلاش کنید.',
+      }));
     }).finally(() => {
       if (active) setLoading(false);
     });
@@ -43,7 +47,7 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
   }, [contractId, customerId]);
 
   if (loading && !data) return <ErpLoading />;
-  if (!data && refreshError) return <ErpInlineState kind="error" title="اطلاعات ارسال دریافت نشد چون ارتباط با سامانه برقرار نشد؛ اتصال را بررسی و صفحه را تازه‌سازی کنید." />;
+  if (!data && refreshError) return <ErpInlineState kind="error" title={refreshError} />;
 
   return (
     <ErpSection title="مانده ارسال" description="مقادیر قرارداد، رزروشده، خارج‌شده و قابل بارگیری از شواهد ثبت‌شده محاسبه می‌شوند.">

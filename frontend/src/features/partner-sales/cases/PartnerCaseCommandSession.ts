@@ -1,4 +1,5 @@
-import { canonicalHash, PartnerCommandSchema, partnerError, type PartnerCommand, type PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
+import { canonicalHash, PartnerCommandSchema, type PartnerCommand, type PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
+import { getPartnerSalesErrorMessage } from '../partnerSalesErrorMessage';
 
 type WithoutEnvelope<T> = T extends unknown ? Omit<T, 'schemaVersion' | 'commandId' | 'correlationId' | 'idempotency'> : never;
 type CaseIntent = WithoutEnvelope<Extract<PartnerCommand, { expected: unknown }>>;
@@ -28,7 +29,7 @@ export class PartnerCaseCommandSession {
   private async execute(command: PartnerCommand): Promise<CaseCommandFeedback> {
     try {
       const response = await this.port.execute(command);
-      if (!response.ok) { this.uncertain = null; return { kind: 'error', message: partnerError(response.error.code).message }; }
+      if (!response.ok) { this.uncertain = null; return { kind: 'error', message: getPartnerSalesErrorMessage(response.error) }; }
       this.uncertain = null;
       if (command.type === 'RETAIL_CORRECTION_SAVE') this.savedOpportunities.add(command.opportunityId);
       return { kind: 'success', replayed: response.value.replayed };

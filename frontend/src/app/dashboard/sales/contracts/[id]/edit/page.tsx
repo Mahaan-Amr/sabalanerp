@@ -54,6 +54,7 @@ export default function SalesContractEditPage() {
   const [contract, setContract] = useState<ContractForEdit | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
 
   useEffect(() => {
     let mounted = true;
@@ -69,6 +70,7 @@ export default function SalesContractEditPage() {
         if (!mounted) return;
         if (!contractResponse.data.success || !contractResponse.data.data) {
           setError('قرارداد پیدا نشد. به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.');
+          setErrorKind('stale');
           return;
         }
 
@@ -84,32 +86,38 @@ export default function SalesContractEditPage() {
 
         if (!permissions?.canEdit && nextContract.createdByUser?.id !== user?.id) {
           setError('ویرایش این قرارداد برای شما مجاز نیست. به صفحه مشاهده قرارداد برگردید.');
+          setErrorKind('permission');
           return;
         }
 
         if (nextContract.isInactive) {
           setError('این قرارداد غیرفعال و فقط‌خواندنی است. به صفحه مشاهده قرارداد برگردید.');
+          setErrorKind('stale');
           return;
         }
 
         if (nextContract.accountingEditLocked && !nextContract.canOpenCorrectionEdit) {
           setError('این قرارداد پس از تأیید مالی قابل‌ویرایش نیست. از صفحه قرارداد، مسیر درخواست اصلاح را بررسی کنید.');
+          setErrorKind('permission');
           return;
         }
 
         if (!nextContract.contractData) {
           setError('نسخهٔ قابل‌ویرایش این قرارداد موجود نیست. به صفحه مشاهده قرارداد برگردید.');
+          setErrorKind('stale');
           return;
         }
 
         setContract(nextContract);
         setError(null);
+        setErrorKind('error');
       } catch (err: any) {
         if (!mounted) return;
         setError(getSalesOperationalErrorMessage(err, {
           failedAction: 'دریافت اطلاعات ویرایش قرارداد',
           nextStep: 'به صفحه مشاهده قرارداد برگردید یا دوباره تلاش کنید.'
         }));
+        setErrorKind(err?.response?.status === 403 ? 'permission' : 'error');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -134,7 +142,7 @@ export default function SalesContractEditPage() {
     return (
       <div className="sds-workspace py-8" dir="rtl">
         <ErpInlineState
-          kind="error"
+          kind={errorKind}
           title={error || 'قرارداد پیدا نشد. به فهرست قراردادها برگردید.'}
           action={{
             label: 'مشاهده قرارداد',

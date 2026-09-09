@@ -6,7 +6,6 @@ import { dashboardAPI, salesAPI } from '@/lib/api';
 import { canCreateProducts, canDeleteProducts, canEditProducts, canExportProducts, canImportProducts, User as PermissionUser } from '@/lib/permissions';
 import { formatDimensions, formatPrice } from '@/lib/numberFormat';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
-import ErrorModal from '@/components/ErrorModal';
 import ProductImportExportModal from '@/components/ProductImportExportModal';
 import SuccessModal from '@/components/SuccessModal';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpLoading, ErpPagination, ErpToolbar } from '@/components/erp';
@@ -42,10 +41,9 @@ export default function ProductsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; product: Product | null }>({ show: false, product: null });
   const [deleting, setDeleting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [showErrorModal, setShowErrorModal] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
-  const [modalDetails, setModalDetails] = useState('');
   const [listError, setListError] = useState('');
+  const [rowError, setRowError] = useState<{ productId: string; message: string } | null>(null);
   const [showImportExportModal, setShowImportExportModal] = useState(false);
 
   const itemsPerPage = 20;
@@ -59,6 +57,7 @@ export default function ProductsPage() {
     try {
       const response = await dashboardAPI.getProfile();
       if (response.data.success) {
+        setRowError(null);
         setCurrentUser(response.data.data);
       }
     } catch (error) {
@@ -122,21 +121,19 @@ export default function ProductsPage() {
         setDeleteConfirm({ show: false, product: null });
         fetchProducts();
       } else {
-        setModalMessage('حذف محصول انجام نشد');
-        setModalDetails(getSalesOperationalErrorMessage({ response }, {
+        setRowError({ productId: deleteConfirm.product.id, message: getSalesOperationalErrorMessage({ response }, {
           failedAction: 'حذف محصول',
-          nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.'
-        }));
-        setShowErrorModal(true);
+          nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }) });
       }
     } catch (error: any) {
       console.error('Error deleting product:', error);
-      setModalMessage('حذف محصول انجام نشد');
-      setModalDetails(getSalesOperationalErrorMessage(error, {
+      setRowError({ productId: deleteConfirm.product.id, message: getSalesOperationalErrorMessage(error, {
         failedAction: 'حذف محصول',
-        nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.'
-      }));
-      setShowErrorModal(true);
+        nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }) });
     } finally {
       setDeleting(false);
     }
@@ -149,25 +146,24 @@ export default function ProductsPage() {
     try {
       const response = await salesAPI.updateProduct(product.id, { isActive: !product.isActive });
       if (response.data.success) {
+        setRowError(null);
         setModalMessage(`وضعیت ${product.namePersian} با موفقیت تغییر کرد`);
         setShowSuccessModal(true);
         fetchProducts();
       } else {
-        setModalMessage('تغییر وضعیت محصول انجام نشد');
-        setModalDetails(getSalesOperationalErrorMessage({ response }, {
+        setRowError({ productId: product.id, message: getSalesOperationalErrorMessage({ response }, {
           failedAction: 'تغییر وضعیت محصول',
-          nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.'
-        }));
-        setShowErrorModal(true);
+          nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }) });
       }
     } catch (error: any) {
       console.error('Error toggling status:', error);
-      setModalMessage('تغییر وضعیت محصول انجام نشد');
-      setModalDetails(getSalesOperationalErrorMessage(error, {
+      setRowError({ productId: product.id, message: getSalesOperationalErrorMessage(error, {
         failedAction: 'تغییر وضعیت محصول',
-        nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.'
-      }));
-      setShowErrorModal(true);
+        nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }) });
     } finally {
       setDeleting(false);
     }
@@ -208,6 +204,9 @@ export default function ProductsPage() {
               <div className="min-w-0">
                 <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{product.namePersian}</p>
                 <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{generateFullProductName(product)}</p>
+                {rowError?.productId === product.id && (
+                  <ErpInlineState kind="error" title={rowError.message} className="mt-2" />
+                )}
               </div>
             ),
           },
@@ -249,7 +248,7 @@ export default function ProductsPage() {
       >
         {listError && (
           <ErpInlineState
-            kind="error"
+            kind={products.length > 0 ? 'stale' : 'error'}
             title={listError}
             action={{ label: 'تلاش دوباره', onClick: fetchProducts, tone: 'primary' }}
           />
@@ -300,7 +299,6 @@ export default function ProductsPage() {
       )}
 
       <SuccessModal isOpen={showSuccessModal} onClose={() => setShowSuccessModal(false)} title="عملیات موفق" message={modalMessage} buttonText="باشه" autoClose autoCloseDelay={2000} />
-      <ErrorModal isOpen={showErrorModal} onClose={() => setShowErrorModal(false)} title="عملیات انجام نشد" message={modalMessage} details={modalDetails} buttonText="بستن" />
       <ProductImportExportModal
         isOpen={showImportExportModal}
         onClose={() => setShowImportExportModal(false)}
@@ -308,7 +306,6 @@ export default function ProductsPage() {
           fetchProducts();
           setShowSuccessModal(true);
           setModalMessage('محصولات با موفقیت همگام‌سازی شدند');
-          setModalDetails(`${results.summary.creates} ایجاد، ${results.summary.updates} به‌روزرسانی، ${results.summary.removals} حذف یا غیرفعال`);
         }}
         currentFilters={{
           search: searchTerm,

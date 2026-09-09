@@ -5,6 +5,7 @@ import type { PartnerCommand, PartnerQueryResults } from '@sabalanerp/partner-sa
 import { ErpButton, ErpInlineState, ErpSheet } from '@/components/erp';
 import { PartnerCommandSession, type CommandFeedback } from '../management/commandSession';
 import { CommandFeedbackView } from '../management/CommandFeedbackView';
+import { getPartnerSalesErrorMessage } from '../partnerSalesErrorMessage';
 import { ResponseRow } from './ResponseRow';
 import { ResponseReview } from './ResponseReview';
 import { responseDecisions, settleResponseDrafts, type ResponseDrafts } from './responseDraft';
@@ -54,7 +55,7 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
       setReview(null);
       if (outcome.kind === 'success' && outcome.batch) {
         setDrafts(previous => settleResponseDrafts(previous, outcome.batch!));
-        setErrors(Object.fromEntries(outcome.batch.outcomes.filter(row => !row.ok).map(row => [row.rowId, !row.ok ? row.error.message : ''])));
+        setErrors(Object.fromEntries(outcome.batch.outcomes.filter(row => !row.ok).map(row => [row.rowId, !row.ok ? getPartnerSalesErrorMessage(row.error) : ''])));
       }
       try { await refresh(); setNeedsRefresh(false); }
       catch { setNeedsRefresh(true); }

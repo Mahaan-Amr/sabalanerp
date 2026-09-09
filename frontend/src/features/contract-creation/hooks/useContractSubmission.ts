@@ -445,7 +445,9 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             response: { status: response.status, data: response.data }
           }, {
             failedAction: isEditMode ? 'ذخیره تغییرات قرارداد' : 'ثبت قرارداد',
-            nextStep: 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.',
+            nextStep: isEditMode
+              ? 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.'
+              : 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
             preserveInput: true
           })
         });
@@ -463,7 +465,9 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           ...initialMappedErrors,
           general: getSalesOperationalErrorMessage(error, {
             failedAction: isEditMode ? 'ذخیره تغییرات قرارداد' : 'ثبت قرارداد',
-            nextStep: 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.',
+            nextStep: isEditMode
+              ? 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.'
+              : 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
             preserveInput: true
           })
         }

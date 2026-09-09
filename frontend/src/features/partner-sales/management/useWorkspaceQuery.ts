@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Result } from '@sabalanerp/partner-sales-contracts';
-import { partnerError } from '@sabalanerp/partner-sales-contracts';
+import { getPartnerSalesErrorMessage } from '../partnerSalesErrorMessage';
 
 /** Shared read lifecycle for the two purpose-specific workspaces. No authorization fallback. */
 export function useWorkspaceQuery<T>(load: (cursor?: string) => Promise<Result<T>>) {
@@ -18,7 +18,7 @@ export function useWorkspaceQuery<T>(load: (cursor?: string) => Promise<Result<T
     try {
       const response = await load(cursor);
       if (request !== sequence.current) return;
-      if (!response.ok) { setView(null); setError(partnerError(response.error.code).message); throw new Error('Read denied'); }
+      if (!response.ok) { setView(null); setError(getPartnerSalesErrorMessage(response.error)); throw new Error('Read denied'); }
       setView(response.value); setError(null);
     } catch {
       if (request === sequence.current) setError(previous => previous || 'دریافت وضعیت انجام نشد؛ دوباره تلاش کنید.');

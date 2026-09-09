@@ -18,7 +18,7 @@ import SuccessModal from '@/components/SuccessModal';
 import ErrorModal from '@/components/ErrorModal';
 import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
 import { SalesAuthoringPage, SalesAuthoringSection } from '@/features/sales/authoring/SalesAuthoringUi';
-import { getSalesOperationalErrorMessage, mapProductCreationValidationErrors } from '@/features/sales/salesOperationalError';
+import { getSalesErrorSummary, getSalesOperationalErrorMessage, mapProductCreationValidationErrors } from '@/features/sales/salesOperationalError';
 
 // Stone type definitions
 const STONE_TYPES = [
@@ -651,7 +651,8 @@ export default function CreateStoneProductWizard() {
         setModalDetails(getSalesOperationalErrorMessage({ response }, {
           failedAction: 'ایجاد محصول',
           nextStep: 'مشخصات محصول را بررسی کنید و دوباره تلاش کنید.',
-          preserveInput: true
+          preserveInput: true,
+          uncertainMutation: true
         }));
         setShowErrorModal(true);
       }
@@ -673,7 +674,8 @@ export default function CreateStoneProductWizard() {
       setModalDetails(getSalesOperationalErrorMessage(error, {
         failedAction: 'ایجاد محصول',
         nextStep: 'مشخصات محصول را بررسی کنید و دوباره تلاش کنید.',
-        preserveInput: true
+        preserveInput: true,
+        uncertainMutation: true
       }));
       setShowErrorModal(true);
     } finally {
@@ -863,6 +865,8 @@ export default function CreateStoneProductWizard() {
       progress={{ current: currentStep, total: WIZARD_STEPS.length, label: WIZARD_STEPS[currentStep - 1].title }}
       feedback={loadError
         ? { kind: 'error', title: loadError, action: { label: 'تلاش دوباره', onClick: loadMasterData } }
+        : getSalesErrorSummary(errors)
+          ? { kind: 'error', title: getSalesErrorSummary(errors) }
         : currentStep > 1 || Boolean(wizardData.cutTypeId)
           ? { kind: 'stale', title: 'اطلاعات این محصول تا ثبت نهایی ذخیره نمی‌شوند.' }
           : undefined}

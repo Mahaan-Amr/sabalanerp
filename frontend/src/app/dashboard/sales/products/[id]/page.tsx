@@ -8,7 +8,7 @@ import { formatPrice } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
 import { SalesAuthoringPage, SalesAuthoringSection, hasSalesDraftChanged } from '@/features/sales/authoring/SalesAuthoringUi';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesErrorSummary, getSalesOperationalErrorMessage, mapProductEditValidationErrors } from '@/features/sales/salesOperationalError';
 
 // Product name generation utilities
 const generateFullProductName = (product: Product): string => {
@@ -44,6 +44,7 @@ const ProductDetailPage: React.FC = () => {
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; title: string }>();
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState(false);
   const [savedFormSnapshot, setSavedFormSnapshot] = useState<ProductEditValues | null>(null);
   const [formData, setFormData] = useState<ProductEditValues>({
@@ -104,6 +105,7 @@ const ProductDetailPage: React.FC = () => {
     try {
       setSaving(true);
       setFeedback(undefined);
+      setFieldErrors({});
       const response = await salesAPI.updateProduct(productId, {
         basePrice: formData.basePrice ? parseFloat(formData.basePrice) : null,
         motherLengthValue: formData.motherLengthValue
@@ -121,23 +123,29 @@ const ProductDetailPage: React.FC = () => {
         setEditing(false);
         setFeedback({ kind: 'success', title: 'محصول با موفقیت به‌روزرسانی شد.' });
       } else {
+        const mapped = mapProductEditValidationErrors(response.data?.details || []);
+        setFieldErrors(mapped);
         setFeedback({
           kind: 'error',
           title: getSalesOperationalErrorMessage({ response }, {
             failedAction: 'به‌روزرسانی محصول',
             nextStep: 'مقادیر مشخص‌شده را بررسی کنید و دوباره ذخیره کنید.',
-            preserveInput: true
+            preserveInput: true,
+            uncertainMutation: true
           })
         });
       }
     } catch (error) {
       console.error('Error updating product:', error);
+      const mapped = mapProductEditValidationErrors((error as any)?.response?.data?.details || []);
+      setFieldErrors(mapped);
       setFeedback({
         kind: 'error',
         title: getSalesOperationalErrorMessage(error, {
           failedAction: 'به‌روزرسانی محصول',
           nextStep: 'مقادیر مشخص‌شده را بررسی کنید و دوباره ذخیره کنید.',
-          preserveInput: true
+          preserveInput: true,
+          uncertainMutation: true
         })
       });
     } finally {
@@ -173,7 +181,9 @@ const ProductDetailPage: React.FC = () => {
       title="جزئیات محصول"
       description="مشاهده و ویرایش اطلاعات محصول"
       backHref="/dashboard/sales/products"
-      feedback={feedback ?? (editing && savedFormSnapshot && hasSalesDraftChanged(formData, savedFormSnapshot) ? { kind: 'stale', title: 'تغییرات این فرم تا زمان ذخیره نهایی نشده‌اند.' } : undefined)}
+      feedback={getSalesErrorSummary(fieldErrors)
+        ? { kind: 'error', title: getSalesErrorSummary(fieldErrors) }
+        : feedback ?? (editing && savedFormSnapshot && hasSalesDraftChanged(formData, savedFormSnapshot) ? { kind: 'stale', title: 'تغییرات این فرم تا زمان ذخیره نهایی نشده‌اند.' } : undefined)}
     >
       <SalesAuthoringSection title="مشخصات و قیمت‌گذاری محصول">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -212,7 +222,7 @@ const ProductDetailPage: React.FC = () => {
 
                 {/* Mine */}
                 {editing ? (
-                  <SalesAuthoringField label="طول مادر">
+                  <SalesAuthoringField label="طول مادر" error={fieldErrors.motherLengthValue}>
                     <ErpInput
                       value={formData.motherLengthValue}
                       onChange={(event) => setFormData({
@@ -253,7 +263,7 @@ const ProductDetailPage: React.FC = () => {
               <div className="space-y-4">
                 {/* Base Price */}
                 {editing ? (
-                  <SalesAuthoringField label="قیمت پایه (ریال)">
+                  <SalesAuthoringField label="قیمت پایه (ریال)" error={fieldErrors.basePrice}>
                     <FormattedNumberInput
                       value={formData.basePrice ? parseFloat(formData.basePrice) : 0}
                       onChange={(value) => setFormData({ ...formData, basePrice: value.toString() })}
@@ -268,7 +278,7 @@ const ProductDetailPage: React.FC = () => {
 
                 {/* Lead Time */}
                 {editing ? (
-                  <SalesAuthoringField label="زمان تحویل (روز)">
+                  <SalesAuthoringField label="زمان تحویل (روز)" error={fieldErrors.leadTime}>
                     <FormattedNumberInput
                       value={formData.leadTime ? parseFloat(formData.leadTime) : 0}
                       onChange={(value) => setFormData({ ...formData, leadTime: value.toString() })}
@@ -289,7 +299,7 @@ const ProductDetailPage: React.FC = () => {
               <div className="space-y-4">
                 {/* Availability */}
                 {editing ? (
-                  <SalesAuthoringField label="وضعیت موجودی">
+                  <SalesAuthoringField label="وضعیت موجودی" error={fieldErrors.isAvailable}>
                     <ErpSelect
                       value={formData.isAvailable.toString()}
                       onChange={(e) => setFormData({ ...formData, isAvailable: e.target.value === 'true' })}
@@ -308,7 +318,7 @@ const ProductDetailPage: React.FC = () => {
             {/* Description */}
             <ErpCard className="p-5">
               {editing ? (
-                <SalesAuthoringField label="توضیحات">
+                <SalesAuthoringField label="توضیحات" error={fieldErrors.description}>
                 <ErpTextarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}

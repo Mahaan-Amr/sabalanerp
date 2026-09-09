@@ -19,6 +19,7 @@ import { initialDestinationDutyState, reduceDestinationDutyState } from './desti
 import { buildDutyQueueTabs, dutyQueueEmptyTitle } from '@/features/cross-workspace-duties/dutyQueuePresentation';
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
 import { destinationDutyHref } from '@/features/cross-workspace-duties/dutyDestination';
+import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 const statusLabel: Record<string, string> = {
   OPEN: 'باز', COMPLETED: 'تکمیل‌شده', WAIVED: 'جایگزین‌شده', CANCELLED: 'لغوشده',
@@ -73,8 +74,11 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
         }
       }
       dispatch({ type: 'success', data: { summary: resolvedSummary, duties: duties.data.data, view } });
-    } catch {
-      dispatch({ type: 'failure', message: 'به‌روزرسانی وظایف انجام نشد چون ارتباط با سامانه برقرار نشد؛ اتصال را بررسی و دوباره تلاش کنید.' });
+    } catch (error) {
+      dispatch({ type: 'failure', message: getSalesOperationalErrorMessage(error, {
+        failedAction: 'به‌روزرسانی وظایف',
+        nextStep: 'صفحه را تازه‌سازی و دوباره تلاش کنید.',
+      }) });
     }
   }, [view, workspace]);
 

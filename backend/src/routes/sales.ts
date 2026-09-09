@@ -68,14 +68,42 @@ import { resolveWorkspaceRecipientIds } from '../services/domainNotificationReci
 import { ContractPartyIdentityValidationError } from '../services/contractPartyIdentity';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
-import { unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
+import { ensureSalesErrorTracking, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
+
+const sendUnexpectedSalesFailure = (
+  res: Response,
+  error: unknown,
+  failedAction: string,
+  code: string,
+  preserveInput = false,
+) => {
+  const trackingId = randomUUID();
+  console.error('Unexpected sales route failure:', { code, trackingId, error });
+  return res.status(500).json(unexpectedSalesErrorResponse({ code, failedAction, trackingId, preserveInput }));
+};
 
 const router = express.Router();
+router.use((req: any, res: Response, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = ((payload: unknown) => {
+    const tracked = ensureSalesErrorTracking(payload, res.statusCode, req.get('x-correlation-id'), randomUUID);
+    if (tracked !== payload) {
+      console.error('Sales route failure reference:', {
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        trackingId: (tracked as { trackingId: string }).trackingId,
+      });
+    }
+    return originalJson(tracked);
+  }) as Response['json'];
+  next();
+});
 const rejectContractGraphWritesWhenReadOnly = (_req: any, res: Response, next: () => void) => {
   if (String(process.env.CONTRACT_PRODUCT_GRAPH_READ_ONLY || '').toLowerCase() === 'true') {
     res.status(503).json({
       success: false,
-      error: 'Contract product editing is temporarily read-only.'
+      error: 'ویرایش محصولات قرارداد موقتاً فقط‌خواندنی است؛ تغییرات را نگه دارید و بعداً دوباره تلاش کنید.'
     });
     return;
   }
@@ -183,7 +211,7 @@ router.get('/discount-ranges', protect, async (req: any, res: Response) => {
   try {
     const activeOnly = req.query.activeOnly === 'true';
     if (!activeOnly && !await canManageDiscountRanges(req.user)) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+      return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
     }
 
     const ranges = await prisma.contractDiscountRange.findMany({
@@ -198,7 +226,7 @@ router.get('/discount-ranges', protect, async (req: any, res: Response) => {
     return;
   } catch (error) {
     console.error('Get discount ranges error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     return;
   }
 });
@@ -207,19 +235,19 @@ router.get('/discount-ranges', protect, async (req: any, res: Response) => {
 // @route   POST /api/sales/discount-ranges
 // @access  Private/Admin or Manager
 router.post('/discount-ranges', protect, [
-  body('minAmount').isFloat({ min: 0 }).withMessage('Minimum amount is required'),
-  body('maxAmount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Maximum amount must be a number'),
-  body('maxDiscountPercent').isFloat({ min: 0, max: 100 }).withMessage('Discount percent must be between 0 and 100'),
-  body('isActive').optional().isBoolean().withMessage('Active flag must be boolean')
+  body('minAmount').isFloat({ min: 0 }).withMessage('حداقل مبلغ را صفر یا بیشتر وارد کنید.'),
+  body('maxAmount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('حداکثر مبلغ را به‌صورت عدد وارد کنید.'),
+  body('maxDiscountPercent').isFloat({ min: 0, max: 100 }).withMessage('درصد تخفیف را بین صفر تا صد وارد کنید.'),
+  body('isActive').optional().isBoolean().withMessage('وضعیت فعال‌بودن را دوباره انتخاب کنید.')
 ], async (req: any, res: Response) => {
   try {
     if (!await canManageDiscountRanges(req.user)) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+      return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
     }
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+      return res.status(400).json({ success: false, error: 'اطلاعات واردشده کامل یا معتبر نیست؛ موارد مشخص‌شده را اصلاح کنید.', details: errors.array() });
     }
 
     const minAmount = Number(req.body.minAmount);
@@ -250,7 +278,7 @@ router.post('/discount-ranges', protect, [
     return;
   } catch (error) {
     console.error('Create discount range error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     return;
   }
 });
@@ -259,24 +287,24 @@ router.post('/discount-ranges', protect, [
 // @route   PUT /api/sales/discount-ranges/:id
 // @access  Private/Admin or Manager
 router.put('/discount-ranges/:id', protect, [
-  body('minAmount').optional().isFloat({ min: 0 }).withMessage('Minimum amount must be a number'),
-  body('maxAmount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Maximum amount must be a number'),
-  body('maxDiscountPercent').optional().isFloat({ min: 0, max: 100 }).withMessage('Discount percent must be between 0 and 100'),
-  body('isActive').optional().isBoolean().withMessage('Active flag must be boolean')
+  body('minAmount').optional().isFloat({ min: 0 }).withMessage('حداقل مبلغ را صفر یا بیشتر وارد کنید.'),
+  body('maxAmount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('حداکثر مبلغ را به‌صورت عدد وارد کنید.'),
+  body('maxDiscountPercent').optional().isFloat({ min: 0, max: 100 }).withMessage('درصد تخفیف را بین صفر تا صد وارد کنید.'),
+  body('isActive').optional().isBoolean().withMessage('وضعیت فعال‌بودن را دوباره انتخاب کنید.')
 ], async (req: any, res: Response) => {
   try {
     if (!await canManageDiscountRanges(req.user)) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+      return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
     }
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+      return res.status(400).json({ success: false, error: 'اطلاعات واردشده کامل یا معتبر نیست؛ موارد مشخص‌شده را اصلاح کنید.', details: errors.array() });
     }
 
     const existing = await prisma.contractDiscountRange.findUnique({ where: { id: req.params.id } });
     if (!existing) {
-      return res.status(404).json({ success: false, error: 'Discount range not found' });
+      return res.status(404).json({ success: false, error: 'بازه تخفیف پیدا نشد؛ فهرست بازه‌ها را تازه‌سازی کنید.' });
     }
 
     const minAmount = req.body.minAmount !== undefined ? Number(req.body.minAmount) : Number(existing.minAmount);
@@ -309,7 +337,7 @@ router.put('/discount-ranges/:id', protect, [
     return;
   } catch (error) {
     console.error('Update discount range error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     return;
   }
 });
@@ -320,7 +348,7 @@ router.put('/discount-ranges/:id', protect, [
 router.delete('/discount-ranges/:id', protect, async (req: any, res: Response) => {
   try {
     if (!await canManageDiscountRanges(req.user)) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+      return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
     }
 
     await prisma.contractDiscountRange.delete({ where: { id: req.params.id } });
@@ -329,9 +357,9 @@ router.delete('/discount-ranges/:id', protect, async (req: any, res: Response) =
   } catch (error: any) {
     console.error('Delete discount range error:', error);
     if (error?.code === 'P2025') {
-      return res.status(404).json({ success: false, error: 'Discount range not found' });
+      return res.status(404).json({ success: false, error: 'بازه تخفیف پیدا نشد؛ فهرست بازه‌ها را تازه‌سازی کنید.' });
     }
-    res.status(500).json({ success: false, error: 'Server error' });
+    res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     return;
   }
 });
@@ -353,7 +381,7 @@ router.get('/contracts/next-number', protect, requireWorkspaceAccess(WORKSPACES.
     console.error('Get next contract number error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
     return;
   }
@@ -380,7 +408,7 @@ router.get('/contracts/product-history', protect, requireWorkspaceAccess(WORKSPA
     return;
   } catch (error) {
     console.error('Get seller product history error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     return;
   }
 });
@@ -393,7 +421,7 @@ router.post(
     try {
       const browserSessionId = String(req.body.browserSessionId || '').trim();
       if (!browserSessionId) {
-        return res.status(400).json({ success: false, error: 'Invalid draft discovery request' });
+        return res.status(400).json({ success: false, error: 'اطلاعات پیش‌نویس معتبر نیست؛ صفحه قرارداد را تازه‌سازی کنید.' });
       }
       const draft = await discoverRecoverableSalesContractCreationDraft({
         userId: req.user.id,
@@ -402,7 +430,7 @@ router.post(
       return res.json({ success: true, data: draft });
     } catch (error) {
       console.error('Discover contract creation draft error:', error);
-      return res.status(500).json({ success: false, error: 'Server error' });
+      return res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     }
   }
 );
@@ -421,7 +449,7 @@ router.post(
         ? req.body.contractId.trim()
         : null;
       if (!draftId || !browserSessionId || !Number.isInteger(schemaVersion) || !Number.isInteger(requestedBaseRevision)) {
-        return res.status(400).json({ success: false, error: 'Invalid edit session request' });
+        return res.status(400).json({ success: false, error: 'نشست ویرایش معتبر نیست؛ آخرین نسخه قرارداد را بارگذاری کنید.' });
       }
       let baseRevision = requestedBaseRevision;
       if (contractId) {
@@ -434,13 +462,13 @@ router.post(
           }
         });
         if (!contract) {
-          return res.status(404).json({ success: false, error: 'Contract not found' });
+          return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.' });
         }
         if (!validateContractAccess(contract, req.user)) {
-          return res.status(403).json({ success: false, error: 'Access denied' });
+          return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
         }
         if (contract.isInactive) {
-          return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+          return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
         }
         baseRevision = contract.productGraphState?.revision ?? 0;
         if (requestedBaseRevision !== baseRevision) {
@@ -475,7 +503,7 @@ router.post(
       return res.json({ success: true, data: result });
     } catch (error) {
       console.error('Acquire contract edit session error:', error);
-      return res.status(500).json({ success: false, error: 'Server error' });
+      return res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     }
   }
 );
@@ -499,7 +527,7 @@ router.post(
       return res.json({ success: true });
     } catch (error) {
       console.error('Heartbeat contract edit session error:', error);
-      return res.status(500).json({ success: false, error: 'Server error' });
+      return res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     }
   }
 );
@@ -515,12 +543,12 @@ router.post(
         userId: req.user.id
       });
       if (!discarded) {
-        return res.status(404).json({ success: false, error: 'Contract creation draft not found' });
+        return res.status(404).json({ success: false, error: 'پیش‌نویس قرارداد پیدا نشد؛ یک قرارداد جدید باز کنید.' });
       }
       return res.json({ success: true });
     } catch (error) {
       console.error('Discard contract creation draft error:', error);
-      return res.status(500).json({ success: false, error: 'Server error' });
+      return res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     }
   }
 );
@@ -546,7 +574,7 @@ router.put(
       return res.json({ success: true, data: result });
     } catch (error) {
       console.error('Checkpoint contract recovery error:', error);
-      return res.status(500).json({ success: false, error: 'Server error' });
+      return res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     }
   }
 );
@@ -570,7 +598,7 @@ router.delete(
       return res.json({ success: true });
     } catch (error) {
       console.error('Release contract edit session error:', error);
-      return res.status(500).json({ success: false, error: 'Server error' });
+      return res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     }
   }
 );
@@ -739,7 +767,7 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     console.error('Get sales contracts error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -754,7 +782,7 @@ router.get('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
     if (!contract) {
       return res.status(404).json({
         success: false,
-        error: 'Contract not found'
+        error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
       });
     }
 
@@ -767,14 +795,14 @@ router.get('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'User not found'
+        error: 'کاربر مرتبط پیدا نشد؛ صفحه را تازه‌سازی کنید.'
       });
     }
 
     if (!validateContractAccess(contract, user)) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied'
+        error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
       });
     }
 
@@ -819,12 +847,12 @@ router.get('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
     if (error.message === 'Contract not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.')
       });
     }
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
     return;
   }
@@ -842,7 +870,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
     if (!contract) {
       return res.status(404).json({
         success: false,
-        error: 'Contract not found'
+        error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
       });
     }
 
@@ -854,14 +882,14 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'User not found'
+        error: 'کاربر مرتبط پیدا نشد؛ صفحه را تازه‌سازی کنید.'
       });
     }
 
     if (!validateContractAccess(contract, user)) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied'
+        error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
       });
     }
 
@@ -946,7 +974,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
     if (!url) {
       return res.status(500).json({
         success: false,
-        error: 'Failed to build PDF url'
+        error: 'نشانی فایل PDF ساخته نشد؛ دوباره روی دریافت PDF بزنید.'
       });
     }
 
@@ -963,7 +991,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
     console.error('Get sales contract PDF error:', error);
     return res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -1058,7 +1086,7 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     return;
   } catch (error: any) {
     if (error instanceof ContractPartyIdentityValidationError) {
-      return res.status(422).json({ success: false, code: error.code, error: error.message });
+      return res.status(422).json({ success: false, code: error.code, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
     }
     console.error('Create sales contract error:', error);
     if (error instanceof ContractProductGraphValidationError) {
@@ -1082,11 +1110,11 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     if (error.message === 'User not found' || error.message === 'CRM potential project not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'وضعیت قرارداد اجازه این تغییر را نمی‌دهد؛ وضعیت را بررسی کنید.')
       });
     }
     if (error.message === 'CRM potential project customer does not match contract customer' || error.message === 'CRM potential project is already linked to a sales contract') {
-      return res.status(400).json({ success: false, error: error.message });
+      return res.status(400).json({ success: false, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
     }
     const trackingId = randomUUID();
     console.error('Unexpected create sales contract failure:', { trackingId, error });
@@ -1113,10 +1141,10 @@ router.post(
         select: { id: true, departmentId: true }
       });
       if (!contract) {
-        return res.status(404).json({ success: false, error: 'Contract not found' });
+        return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.' });
       }
       if (!validateContractAccess(contract, req.user)) {
-        return res.status(403).json({ success: false, error: 'Access denied' });
+        return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
       }
       const editOwnership = await assertRequestContractEditOwnership(req, Number(req.body?.baseRevision));
       if (!editOwnership.ok) {
@@ -1154,16 +1182,16 @@ router.get(
         select: { id: true, departmentId: true }
       });
       if (!contract) {
-        return res.status(404).json({ success: false, error: 'Contract not found' });
+        return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.' });
       }
       if (!validateContractAccess(contract, req.user)) {
-        return res.status(403).json({ success: false, error: 'Access denied' });
+        return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
       }
       const state = await readContractProductGraphWithoutWriting(prisma, contract.id);
       return res.json({ success: true, data: state });
     } catch (error) {
       console.error('Load contract product graph error:', error);
-      return res.status(500).json({ success: false, error: 'Server error' });
+      return res.status(500).json({ success: false, error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.' });
     }
   }
 );
@@ -1180,9 +1208,9 @@ router.post(
         where: { id: req.params.id },
         select: { id: true, departmentId: true }
       });
-      if (!contract) return res.status(404).json({ success: false, error: 'Contract not found' });
+      if (!contract) return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.' });
       if (!validateContractAccess(contract, req.user)) {
-        return res.status(403).json({ success: false, error: 'Access denied' });
+        return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
       }
       const ownership = await assertRequestContractEditOwnership(req, 0);
       if (!ownership.ok) return res.status(409).json({ success: false, conflict: ownership });
@@ -1273,15 +1301,15 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
       });
     }
     if (error instanceof ContractPartyIdentityValidationError) {
-      return res.status(422).json({ success: false, code: error.code, error: error.message });
+      return res.status(422).json({ success: false, code: error.code, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
     }
     if (error instanceof ContractItemSynchronizationError) {
-      return res.status(error.status).json({ success: false, code: error.code, error: error.message });
+      return res.status(error.status).json({ success: false, code: error.code, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
     }
     if (error.message === 'Contract not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.')
       });
     }
     if (
@@ -1291,7 +1319,7 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
     ) {
       return res.status(400).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'وضعیت قرارداد اجازه تأیید را نمی‌دهد؛ وضعیت را بررسی کنید.')
       });
     }
     const trackingId = randomUUID();
@@ -1324,20 +1352,16 @@ router.put('/contracts/:id/approve', protect, requireFeatureAccess(FEATURES.SALE
     if (error.message === 'Contract not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
     if (error.message === 'Contract cannot be approved in current status') {
       return res.status(400).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
-    res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
-    return;
+    return sendUnexpectedSalesFailure(res, error, 'تأیید قرارداد', 'SALES_CONTRACT_APPROVE_UNEXPECTED');
   }
 });
 
@@ -1353,19 +1377,19 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
     if (!contract) {
       return res.status(404).json({
         success: false,
-        error: 'Contract not found'
+        error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
       });
     }
 
     if (contract.isInactive) {
-      return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+      return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
     }
 
     // Check if user has access to this contract
     if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied'
+        error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
       });
     }
 
@@ -1377,7 +1401,7 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
     if (!contractWithRelations) {
       return res.status(404).json({
         success: false,
-        error: 'Contract not found'
+        error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
       });
     }
 
@@ -1453,7 +1477,7 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
     console.error('Print sales contract error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
     return;
   }
@@ -1477,20 +1501,16 @@ router.put('/contracts/:id/reject', protect, requireFeatureAccess(FEATURES.SALES
     if (error.message === 'Contract not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.')
       });
     }
     if (error.message === 'Contract cannot be rejected in current status') {
       return res.status(400).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'وضعیت قرارداد اجازه رد را نمی‌دهد؛ وضعیت را بررسی کنید.')
       });
     }
-    res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
-    return;
+    return sendUnexpectedSalesFailure(res, error, 'رد قرارداد', 'SALES_CONTRACT_REJECT_UNEXPECTED');
   }
 });
 
@@ -1506,26 +1526,26 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
     if (!contract) {
       return res.status(404).json({
         success: false,
-        error: 'Contract not found'
+        error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
       });
     }
 
     if (contract.isInactive) {
-      return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+      return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
     }
 
     // Check if user has access to this contract
     if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied'
+        error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
       });
     }
 
     if (contract.status !== 'APPROVED') {
       return res.status(400).json({
         success: false,
-        error: 'Contract must be approved before signing'
+        error: 'قرارداد هنوز تأیید نشده است؛ ابتدا تأیید قرارداد را کامل کنید.'
       });
     }
 
@@ -1617,7 +1637,7 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
     }
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
     return;
   }
@@ -1633,13 +1653,13 @@ router.put(
   ],
   async (req: any, res: Response) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'اطلاعات واردشده کامل یا معتبر نیست؛ موارد مشخص‌شده را اصلاح کنید.', details: errors.array() });
     try {
       const contract = await prisma.salesContract.findUnique({ where: { id: req.params.id }, select: { departmentId: true, isInactive: true } });
-      if (!contract) return res.status(404).json({ success: false, error: 'Contract not found' });
-      if (contract.isInactive) return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+      if (!contract) return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.' });
+      if (contract.isInactive) return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
       if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
-        return res.status(403).json({ success: false, error: 'Access denied' });
+        return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
       }
       const updated = await reassignContractSeller(prisma, {
         contractId: req.params.id,
@@ -1649,7 +1669,7 @@ router.put(
       });
       return res.json({ success: true, data: updated });
     } catch (error: any) {
-      return res.status(400).json({ success: false, error: error.message });
+      return res.status(400).json({ success: false, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
     }
   }
 );
@@ -1664,13 +1684,13 @@ router.put(
   ],
   async (req: any, res: Response) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'اطلاعات واردشده کامل یا معتبر نیست؛ موارد مشخص‌شده را اصلاح کنید.', details: errors.array() });
     try {
       const contract = await prisma.salesContract.findUnique({ where: { id: req.params.id }, select: { departmentId: true, isInactive: true } });
-      if (!contract) return res.status(404).json({ success: false, error: 'Contract not found' });
-      if (contract.isInactive) return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+      if (!contract) return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.' });
+      if (contract.isInactive) return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
       if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
-        return res.status(403).json({ success: false, error: 'Access denied' });
+        return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.' });
       }
       const updated = await assignLegacyRealizedCredit(prisma, {
         contractId: req.params.id,
@@ -1680,7 +1700,7 @@ router.put(
       });
       return res.json({ success: true, data: updated });
     } catch (error: any) {
-      return res.status(400).json({ success: false, error: error.message });
+      return res.status(400).json({ success: false, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
     }
   }
 );
@@ -1768,7 +1788,7 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SALES,
     console.error('Get sales dashboard error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -1854,7 +1874,7 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     console.error('Get sales dashboard error:', error);
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -1878,18 +1898,18 @@ router.get('/contracts/:contractId/deliveries', protect, requireWorkspaceAccess(
     if (error.message === 'Contract not found' || error.message === 'User not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
     if (error.message === 'Access denied') {
       return res.status(403).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
     return res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -1898,16 +1918,16 @@ router.get('/contracts/:contractId/deliveries', protect, requireWorkspaceAccess(
 // @route   POST /api/sales/contracts/:contractId/deliveries
 // @access  Private/Sales Workspace
 router.post('/contracts/:contractId/deliveries', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_DELIVERIES_CREATE, FEATURE_PERMISSIONS.EDIT), [
-  body('deliveryDate').notEmpty().withMessage('Delivery date is required'),
-  body('deliveryAddress').notEmpty().withMessage('Delivery address is required'),
-  body('products').isArray().withMessage('Products array is required'),
+  body('deliveryDate').notEmpty().withMessage('تاریخ تحویل را انتخاب کنید.'),
+  body('deliveryAddress').notEmpty().withMessage('نشانی تحویل را وارد کنید.'),
+  body('products').isArray().withMessage('حداقل یک محصول برای تحویل انتخاب کنید.'),
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'اطلاعات واردشده کامل یا معتبر نیست؛ موارد مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -1933,13 +1953,13 @@ router.post('/contracts/:contractId/deliveries', protect, requireWorkspaceAccess
     if (error.message === 'Contract not found' || error.message === 'User not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
     if (error.message === 'Access denied') {
       return res.status(403).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
     if (error.message === 'Contract is inactive') {
@@ -1947,7 +1967,7 @@ router.post('/contracts/:contractId/deliveries', protect, requireWorkspaceAccess
     }
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
     return;
   }
@@ -1972,18 +1992,18 @@ router.get('/contracts/:contractId/payments', protect, requireWorkspaceAccess(WO
     if (error.message === 'Contract not found' || error.message === 'User not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
     if (error.message === 'Access denied') {
       return res.status(403).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
     return res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -1992,22 +2012,22 @@ router.get('/contracts/:contractId/payments', protect, requireWorkspaceAccess(WO
 // @route   POST /api/sales/contracts/:contractId/payments
 // @access  Private/Sales Workspace
 router.post('/contracts/:contractId/payments', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PAYMENTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
-  body('paymentMethod').isIn(['CASH', 'RECEIPT', 'CHECK']).withMessage('Valid payment method is required'),
-  body('totalAmount').isDecimal().withMessage('Total amount is required'),
-  body('paymentDate').optional().isISO8601().withMessage('Payment date must be a valid ISO date'),
-  body('checkNumber').optional().isString().withMessage('Check number must be a string'),
-  body('checkOwnerName').optional().isString().withMessage('Check owner name must be a string'),
-  body('handoverDate').optional().isISO8601().withMessage('Handover date must be a valid ISO date'),
-  body('cashType').optional().isString().withMessage('Cash type must be a string'),
-  body('status').optional().isIn(['PENDING', 'PARTIAL', 'COMPLETED', 'CANCELLED']).withMessage('Valid payment status is required'),
-  body('installments').optional().isArray().withMessage('Installments must be an array'),
+  body('paymentMethod').isIn(['CASH', 'RECEIPT', 'CHECK']).withMessage('روش پرداخت معتبر را انتخاب کنید.'),
+  body('totalAmount').isDecimal().withMessage('مبلغ کل پرداخت را به‌صورت عدد وارد کنید.'),
+  body('paymentDate').optional().isISO8601().withMessage('تاریخ پرداخت معتبر را انتخاب کنید.'),
+  body('checkNumber').optional().isString().withMessage('شماره چک را به‌صورت متن وارد کنید.'),
+  body('checkOwnerName').optional().isString().withMessage('نام صاحب چک را به‌صورت متن وارد کنید.'),
+  body('handoverDate').optional().isISO8601().withMessage('تاریخ تحویل معتبر را انتخاب کنید.'),
+  body('cashType').optional().isString().withMessage('نوع وجه نقد را انتخاب کنید.'),
+  body('status').optional().isIn(['PENDING', 'PARTIAL', 'COMPLETED', 'CANCELLED']).withMessage('وضعیت معتبر پرداخت را انتخاب کنید.'),
+  body('installments').optional().isArray().withMessage('فهرست اقساط را دوباره بررسی کنید.'),
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'اطلاعات پرداخت کامل یا معتبر نیست؛ موارد مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -2039,13 +2059,13 @@ router.post('/contracts/:contractId/payments', protect, requireWorkspaceAccess(W
     if (error.message === 'Contract not found' || error.message === 'User not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'قرارداد یا کاربر مرتبط پیدا نشد؛ صفحه را تازه‌سازی کنید.')
       });
     }
     if (error.message === 'Access denied') {
       return res.status(403).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'اجازه ثبت پرداخت را ندارید؛ به صفحه قرارداد برگردید.')
       });
     }
     if (error.message === 'Contract is inactive') {
@@ -2054,14 +2074,10 @@ router.post('/contracts/:contractId/payments', protect, requireWorkspaceAccess(W
     if (error.message === 'Check number is required for check payments' || error.message === 'Cash type is required for cash payments') {
       return res.status(400).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'اطلاعات پرداخت کامل نیست؛ فیلدهای مشخص‌شده را اصلاح کنید.')
       });
     }
-    res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
-    return;
+    return sendUnexpectedSalesFailure(res, error, 'ثبت پرداخت قرارداد', 'SALES_PAYMENT_CREATE_UNEXPECTED', true);
   }
 });
 
@@ -2083,18 +2099,18 @@ router.post(
       if (!contract) {
         return res.status(404).json({
           success: false,
-          error: 'Contract not found'
+          error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
         });
       }
 
       if (contract.isInactive) {
-        return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+        return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
       }
 
       if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({
           success: false,
-          error: 'Access denied'
+          error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
         });
       }
 
@@ -2121,7 +2137,7 @@ router.post(
       console.error('Send for confirmation error:', error);
       return res.status(500).json({
         success: false,
-        error: 'Server error'
+        error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
       });
     }
   }
@@ -2145,18 +2161,18 @@ router.post(
       if (!contract) {
         return res.status(404).json({
           success: false,
-          error: 'Contract not found'
+          error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
         });
       }
 
       if (contract.isInactive) {
-        return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+        return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
       }
 
       if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({
           success: false,
-          error: 'Access denied'
+          error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
         });
       }
 
@@ -2183,7 +2199,7 @@ router.post(
       console.error('Resend confirmation error:', error);
       return res.status(500).json({
         success: false,
-        error: 'Server error'
+        error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
       });
     }
   }
@@ -2207,14 +2223,14 @@ router.get(
       if (!contract) {
         return res.status(404).json({
           success: false,
-          error: 'Contract not found'
+          error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
         });
       }
 
       if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({
           success: false,
-          error: 'Access denied'
+          error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
         });
       }
 
@@ -2234,7 +2250,7 @@ router.get(
       console.error('Get confirmation status error:', error);
       return res.status(500).json({
         success: false,
-        error: 'Server error'
+        error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
       });
     }
   }
@@ -2258,18 +2274,18 @@ router.post(
       if (!contract) {
         return res.status(404).json({
           success: false,
-          error: 'Contract not found'
+          error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
         });
       }
 
       if (contract.isInactive) {
-        return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+        return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
       }
 
       if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({
           success: false,
-          error: 'Access denied'
+          error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
         });
       }
 
@@ -2297,7 +2313,7 @@ router.post(
       console.error('Cancel contract error:', error);
       return res.status(500).json({
         success: false,
-        error: 'Server error'
+        error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
       });
     }
   }
@@ -2307,17 +2323,17 @@ router.post(
 // @route   POST /api/sales/contracts/:contractId/items
 // @access  Private/Sales Workspace
 router.post('/contracts/:contractId/items', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_CONTRACT_ITEMS_CREATE, FEATURE_PERMISSIONS.EDIT), [
-  body('productId').notEmpty().withMessage('Product ID is required'),
-  body('quantity').isNumeric().withMessage('Quantity must be a number'),
-  body('unitPrice').isNumeric().withMessage('Unit price must be a number'),
-  body('totalPrice').isNumeric().withMessage('Total price must be a number'),
+  body('productId').notEmpty().withMessage('محصول را انتخاب کنید.'),
+  body('quantity').isNumeric().withMessage('مقدار محصول را به‌صورت عدد وارد کنید.'),
+  body('unitPrice').isNumeric().withMessage('قیمت واحد را به‌صورت عدد وارد کنید.'),
+  body('totalPrice').isNumeric().withMessage('مبلغ کل ردیف را به‌صورت عدد وارد کنید.'),
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'اطلاعات واردشده کامل یا معتبر نیست؛ موارد مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -2348,21 +2364,21 @@ router.post('/contracts/:contractId/items', protect, requireWorkspaceAccess(WORK
     if (error.message === 'Contract not found' || error.message === 'User not found') {
       return res.status(404).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
     if (error.message === 'Access denied') {
       return res.status(403).json({
         success: false,
-        error: error.message
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
     if (error.message === 'Contract is inactive') {
-      return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+      return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
     }
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
     });
     return;
   }

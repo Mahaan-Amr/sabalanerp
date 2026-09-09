@@ -42,7 +42,7 @@ import { buildContractPaymentPresentation } from '@/features/sales/contractPayme
 import { PartnerAccountViewSchema, PartnerCaseViewSchema, type PartnerAccountView, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import { PartnerCaseWorkspace } from '@/features/partner-sales/cases/PartnerCaseWorkspace';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface Contract {
   id: string;
@@ -195,6 +195,7 @@ export default function ContractDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const [printVariant, setPrintVariant] = useState<SalesContractPrintVariant>('original');
   const canManageSellers = currentUser?.role === 'ADMIN' || hasPermission(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN);
 
@@ -221,8 +222,10 @@ export default function ContractDetailPage() {
       if (response.data.success) {
         setContract(response.data.data);
         setError(null);
+        setErrorKind('error');
       } else {
         setError('قرارداد پیدا نشد. به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.');
+        setErrorKind('stale');
       }
     } catch (error: any) {
       console.error('Error loading contract:', error);
@@ -230,6 +233,7 @@ export default function ContractDetailPage() {
         failedAction: 'دریافت قرارداد',
         nextStep: 'به فهرست قراردادها برگردید یا دوباره تلاش کنید.'
       }));
+      setErrorKind(getSalesOperationalErrorKind(error));
     } finally {
       setLoading(false);
     }
@@ -274,15 +278,19 @@ export default function ContractDetailPage() {
       } else {
         setError(getSalesOperationalErrorMessage({ response }, {
           failedAction: actionName(action),
-          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
         }));
+        setErrorKind(getSalesOperationalErrorKind({ response }));
       }
     } catch (error: any) {
       console.error(`Error ${action}ing contract:`, error);
       setError(getSalesOperationalErrorMessage(error, {
         failedAction: actionName(action),
-        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
       }));
+      setErrorKind(getSalesOperationalErrorKind(error));
     } finally {
       setActionLoading(null);
     }
@@ -299,8 +307,10 @@ export default function ContractDetailPage() {
     } catch (reason: any) {
       setError(getSalesOperationalErrorMessage(reason, {
         failedAction: 'تغییر مسئول فروش قرارداد',
-        nextStep: 'فروشنده جدید و دلیل تغییر را بررسی کنید و دوباره تلاش کنید.'
+        nextStep: 'فروشنده جدید و دلیل تغییر را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
       }));
+      setErrorKind(getSalesOperationalErrorKind(reason));
     } finally {
       setChangingSeller(false);
     }
@@ -317,8 +327,10 @@ export default function ContractDetailPage() {
     } catch (reason: any) {
       setError(getSalesOperationalErrorMessage(reason, {
         failedAction: 'انتساب فروش قطعی قدیمی',
-        nextStep: 'فروشنده و دلیل انتساب را بررسی کنید و دوباره تلاش کنید.'
+        nextStep: 'فروشنده و دلیل انتساب را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
       }));
+      setErrorKind(getSalesOperationalErrorKind(reason));
     } finally {
       setChangingSeller(false);
     }
@@ -356,6 +368,7 @@ export default function ContractDetailPage() {
         failedAction: 'دانلود PDF قرارداد',
         nextStep: 'دوباره روی «دانلود PDF» بزنید.'
       }));
+      setErrorKind(getSalesOperationalErrorKind(error));
     } finally {
       setActionLoading(null);
     }
@@ -369,8 +382,10 @@ export default function ContractDetailPage() {
       if (!response.data?.success) {
         setError(getSalesOperationalErrorMessage({ response }, {
           failedAction: 'آماده‌سازی پرینت قرارداد',
-          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
         }));
+        setErrorKind(getSalesOperationalErrorKind({ response }));
         return;
       }
 
@@ -383,8 +398,10 @@ export default function ContractDetailPage() {
     } catch (error: any) {
       setError(getSalesOperationalErrorMessage(error, {
         failedAction: 'آماده‌سازی پرینت قرارداد',
-        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
+        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
       }));
+      setErrorKind(getSalesOperationalErrorKind(error));
     } finally {
       setActionLoading(null);
     }
@@ -402,12 +419,14 @@ export default function ContractDetailPage() {
           failedAction: 'آماده‌سازی خلاصه قرارداد',
           nextStep: 'دوباره روی «پرینت خلاصه» بزنید.'
         }));
+        setErrorKind(getSalesOperationalErrorKind({ response: pdfResponse }));
       }
     } catch (error: any) {
       setError(getSalesOperationalErrorMessage(error, {
         failedAction: 'آماده‌سازی خلاصه قرارداد',
         nextStep: 'دوباره روی «پرینت خلاصه» بزنید.'
       }));
+      setErrorKind(getSalesOperationalErrorKind(error));
     } finally {
       setActionLoading(null);
     }
@@ -420,17 +439,22 @@ export default function ContractDetailPage() {
       const response = await salesAPI.resendConfirmation(contract.id);
       if (response.data?.success) {
         setError(null);
+        setErrorKind('error');
       } else {
         setError(getSalesOperationalErrorMessage({ response }, {
           failedAction: 'ارسال دوباره کد تأیید',
-          nextStep: 'شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.'
+          nextStep: 'شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
         }));
+        setErrorKind(getSalesOperationalErrorKind({ response }));
       }
     } catch (error: any) {
       setError(getSalesOperationalErrorMessage(error, {
         failedAction: 'ارسال دوباره کد تأیید',
-        nextStep: 'شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.'
+        nextStep: 'شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
       }));
+      setErrorKind(getSalesOperationalErrorKind(error));
     } finally {
       setActionLoading(null);
     }
@@ -594,7 +618,7 @@ export default function ContractDetailPage() {
         />
       )}
       {error && (
-        <ErpInlineState kind="error" title={error} />
+        <ErpInlineState kind={errorKind} title={error} />
       )}
 
       <ErpSection title="خروجی چاپ قرارداد" description="نوع خروجی فروش را انتخاب کنید و سپس دانلود یا پرینت بگیرید.">

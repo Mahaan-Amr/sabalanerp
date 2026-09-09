@@ -13,6 +13,7 @@
     "build:partner-sales-contracts": "npm --prefix packages/partner-sales-contracts run build",
     "typecheck:partner-sales-contracts": "npm --prefix packages/partner-sales-contracts run typecheck",
     "test:partner-sales-contracts": "npm --prefix packages/partner-sales-contracts test",
+    "test:sales-operational-errors": "npm --prefix frontend run test:sales-operational-errors && npm --prefix backend run test:sales-operational-errors",
     "test:partner-sales": "node scripts/run-partner-sales-tests.mjs unit",
     "test:partner-sales:integration": "node scripts/run-partner-sales-tests.mjs integration",
     "test:partner-sales:local": "node scripts/run-partner-sales-tests.mjs all",

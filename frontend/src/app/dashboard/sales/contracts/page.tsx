@@ -190,7 +190,7 @@ export default function ContractsPage() {
   });
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
-  const [operationError, setOperationError] = useState('');
+  const [operationError, setOperationError] = useState<{ message: string; source: 'load' | 'action'; contractId?: string } | null>(null);
 
   useEffect(() => {
     loadCurrentUser();
@@ -215,7 +215,7 @@ export default function ContractsPage() {
         setLoadingMore(true);
       } else {
         setLoading(true);
-        setOperationError('');
+        setOperationError(null);
       }
 
       const response = await salesAPI.getContracts({
@@ -232,17 +232,17 @@ export default function ContractsPage() {
           setPagination(response.data.pagination);
         }
       } else {
-        setOperationError(getSalesOperationalErrorMessage({ response }, {
+        setOperationError({ source: 'load', message: getSalesOperationalErrorMessage({ response }, {
           failedAction: 'دریافت فهرست قراردادها',
           nextStep: 'دوباره تلاش کنید.'
-        }));
+        }) });
       }
     } catch (error) {
       console.error('Error loading contracts:', error);
-      setOperationError(getSalesOperationalErrorMessage(error, {
+      setOperationError({ source: 'load', message: getSalesOperationalErrorMessage(error, {
         failedAction: 'دریافت فهرست قراردادها',
         nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
-      }));
+      }) });
     } finally {
       if (append) {
         setLoadingMore(false);
@@ -265,10 +265,10 @@ export default function ContractsPage() {
       }
     } catch (error) {
       console.error('Error loading user profile:', error);
-      setOperationError(getSalesOperationalErrorMessage(error, {
+      setOperationError({ source: 'load', message: getSalesOperationalErrorMessage(error, {
         failedAction: 'دریافت دسترسی‌های فروش',
         nextStep: 'صفحه را تازه‌سازی کنید و دوباره تلاش کنید.'
-      }));
+      }) });
     }
   };
 
@@ -365,10 +365,10 @@ export default function ContractsPage() {
       downloadBlobResponse(response, `sales_contract_${contractId}.pdf`);
     } catch (error) {
       console.error('Error downloading contract PDF:', error);
-      setOperationError(getSalesOperationalErrorMessage(error, {
+      setOperationError({ source: 'action', contractId, message: getSalesOperationalErrorMessage(error, {
         failedAction: 'دانلود PDF قرارداد',
         nextStep: 'دوباره روی «دانلود PDF» بزنید.'
-      }));
+      }) });
     } finally {
       setPdfActionLoading(null);
     }
@@ -405,17 +405,19 @@ export default function ContractsPage() {
         }
         await loadContracts(1, { append: false });
       } else {
-        setOperationError(getSalesOperationalErrorMessage({ response }, {
+        setOperationError({ source: 'action', contractId, message: getSalesOperationalErrorMessage({ response }, {
           failedAction: action === 'approve' ? 'تأیید قرارداد' : action === 'reject' ? 'رد قرارداد' : action === 'sign' ? 'امضای قرارداد' : 'پرینت قرارداد',
-          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
-        }));
+          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }) });
       }
     } catch (error: any) {
       console.error(`Error ${action}ing contract:`, error);
-      setOperationError(getSalesOperationalErrorMessage(error, {
+      setOperationError({ source: 'action', contractId, message: getSalesOperationalErrorMessage(error, {
         failedAction: action === 'approve' ? 'تأیید قرارداد' : action === 'reject' ? 'رد قرارداد' : action === 'sign' ? 'امضای قرارداد' : 'پرینت قرارداد',
-        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.'
-      }));
+        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }) });
     } finally {
       setActionLoading(null);
     }
@@ -441,6 +443,9 @@ export default function ContractsPage() {
                 عمومی: {sanitizeUiText(contract.contractNumber, '—')}
                 {contract.creatorSequenceNumber != null ? ` | داخلی من: ${contract.creatorSequenceNumber}` : ''}
               </p>
+              {operationError?.contractId === contract.id && (
+                <ErpInlineState kind="error" title={operationError.message} className="mt-2" />
+              )}
             </div>
           </div>
         );
@@ -674,10 +679,10 @@ export default function ContractsPage() {
         />
       }
     >
-      {operationError && (
+      {operationError && !operationError.contractId && (
         <ErpInlineState
-          kind="error"
-          title={operationError}
+          kind={operationError.source === 'load' && contracts.length > 0 ? 'stale' : 'error'}
+          title={operationError.message}
           action={{ label: 'تازه‌سازی فهرست', onClick: () => loadContracts(1, { append: false }), tone: 'primary' }}
         />
       )}

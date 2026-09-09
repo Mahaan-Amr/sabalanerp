@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { PartnerSaleCaseSchema, checkExpectedRevision, partnerError } from '../src';
+import { PartnerSaleCaseSchema, checkExpectedRevision } from '../src';
 
 const hash = 'sha256-v1:' + 'a'.repeat(64);
 const ref = { caseId: 'case-313', revision: 1, integrityHash: hash };
@@ -23,8 +23,4 @@ test('Case owns an exact pair, graph and immutable Partner attribution', () => {
   ]) assert.equal(PartnerSaleCaseSchema.safeParse({ ...caseFixture, ...mutation }).success, false);
   assert.equal(checkExpectedRevision(ref, { ...ref, revision: 2 })?.code, 'ROW_STALE');
   assert.equal(checkExpectedRevision(ref, { ...ref, integrityHash: 'sha256-v1:' + 'b'.repeat(64) })?.code, 'INTEGRITY_CONFLICT');
-  const integrityMessage = partnerError('INTEGRITY_CONFLICT').message;
-  assert.match(integrityMessage, /هم‌خوان نیست/);
-  assert.match(integrityMessage, /تازه‌سازی کنید/);
-  assert.doesNotMatch(integrityMessage, /پشتیبانی|تماس بگیرید/);
 });

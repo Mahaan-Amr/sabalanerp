@@ -3,6 +3,7 @@
 import React from 'react';
 import { ErpInlineState } from '@/components/erp';
 import type { CommandFeedback } from './commandSession';
+import { getPartnerSalesErrorMessage } from '../partnerSalesErrorMessage';
 
 export function CommandFeedbackView({ feedback, pending, onRetry, onRefresh }: {
   feedback: CommandFeedback | null; pending: boolean; onRetry: () => void; onRefresh: () => void;
@@ -17,6 +18,6 @@ export function CommandFeedbackView({ feedback, pending, onRetry, onRefresh }: {
   if (feedback.kind === 'uncertain' || feedback.kind === 'blocked') return <ErpInlineState kind="stale" className="flex-col items-start"
     title={feedback.message} action={feedback.kind === 'uncertain' ? { label: 'بررسی همان درخواست', onClick: onRetry, disabled: pending } : undefined} />;
   return <ErpInlineState kind={feedback.error.status === 403 || feedback.error.status === 404 ? 'permission' : 'error'}
-    className="flex-col items-start" title={feedback.error.message}
+    className="flex-col items-start" title={getPartnerSalesErrorMessage(feedback.error)}
     action={{ label: 'دریافت وضعیت تازه', onClick: onRefresh, disabled: pending }} />;
 }

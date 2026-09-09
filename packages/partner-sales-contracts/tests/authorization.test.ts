@@ -27,7 +27,7 @@ test('public errors never forward a caller-supplied validator message', () => {
 
 test('missing active responder has one canonical actionable operational message', () => {
   assert.deepEqual(partnerError('RESPONDER_UNAVAILABLE'), { code: 'RESPONDER_UNAVAILABLE', status: 409,
-    message: 'برای این حساب پاسخ‌دهنده قیمت فعال تعیین نشده است؛ در مدیریت فروشندگان همکار یک پاسخ‌دهنده فعال انتخاب کنید.' });
+    message: 'برای حساب شما پاسخ‌دهنده قیمت فعال تعیین نشده است.' });
 });
 
 test('non-Admin actors retain the same exceptions and hidden/expired authority fails closed', () => {

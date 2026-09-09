@@ -122,7 +122,7 @@ import {
 } from '@/features/contract-creation/services/contractCreationDraftPolicy';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesErrorSummary, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 // Import constants
 import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
@@ -6294,6 +6294,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         />
 
         {/* Error Display */}
+        {getSalesErrorSummary(errors) && (
+          <ErpInlineState kind="error" title={getSalesErrorSummary(errors)} />
+        )}
         {editRecovery.checkpointError && (
           <ErpInlineState
             kind="stale"

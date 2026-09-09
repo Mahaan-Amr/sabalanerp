@@ -2,7 +2,9 @@ import { capturePerformanceExportSources, sealPerformanceExportLineage, resolveP
 import { activePerformanceRestrictionIds } from './personnelPerformanceRestrictionQueries';
 import { readPerformanceRetentionPolicy } from './personnelPerformanceRetentionStore';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import * as XLSX from 'xlsx';
 import { PerformanceExportStatus, PerformanceProjectionState, PerformanceResultStatus, Prisma, type PrismaClient } from '@prisma/client';
@@ -798,8 +800,39 @@ export const renderPerformanceExportArtifact = async (kind: 'XLSX' | 'PDF', rows
   return { bytes: await generatePdfBufferFromHtml({ htmlContent: performanceExportPdfHtml(rows), signal }), mimeType: 'application/pdf' };
 };
 
-export const performancePdfPageCount = (bytes: Buffer) =>
-  (bytes.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length;
+export const performancePdfPageCount = async (bytes: Buffer) => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'performance-pdf-page-tree-'));
+  const pdfPath = path.join(temporaryDirectory, 'artifact.pdf');
+  try {
+    await writeFile(pdfPath, bytes, { mode: 0o600, flag: 'wx' });
+    const pageCount = await new Promise<number>((resolve, reject) => {
+      const parser = spawn('pdfinfo', [pdfPath], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 });
+      const output: Buffer[] = [];
+      const errors: Buffer[] = [];
+      parser.stdout.on('data', (chunk: Buffer) => output.push(chunk));
+      parser.stderr.on('data', (chunk: Buffer) => errors.push(chunk));
+      parser.once('error', reject);
+      parser.once('close', (code) => {
+        const match = Buffer.concat(output).toString('utf8').match(/^Pages:\s+(\d+)$/m);
+        if (code !== 0 || !match) {
+          reject(Object.assign(new Error(`PDF page tree could not be parsed: ${Buffer.concat(errors).toString('utf8').trim()}`), {
+            code: 'PERFORMANCE_EXPORT_PDF_INVALID',
+          }));
+          return;
+        }
+        resolve(Number(match[1]));
+      });
+    });
+    if (!Number.isSafeInteger(pageCount) || pageCount < 1) {
+      throw Object.assign(new Error('PDF page tree contains an invalid page count.'), {
+        code: 'PERFORMANCE_EXPORT_PDF_INVALID',
+      });
+    }
+    return pageCount;
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+};
 
 export const processPerformanceExport = async (client: PrismaClient, exportId: string, keyring = performanceVaultKeyFromEnvironment()) => {
   const receipt = await runPerformanceSerializableTransaction(client, async (tx) => {
@@ -835,7 +868,7 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
     const rendered = await withinPerformanceExportDeadline((signal) => renderPerformanceExportArtifact(receipt.exportKind as 'XLSX' | 'PDF', rows, signal));
     const artifactHash = createHash('sha256').update(rendered.bytes).digest('hex');
     const maximumBytes = receipt.exportKind === 'PDF' ? 50 * 1024 * 1024 : 100 * 1024 * 1024;
-    if (receipt.exportKind === 'PDF' && performancePdfPageCount(rendered.bytes) > 500) {
+    if (receipt.exportKind === 'PDF' && await performancePdfPageCount(rendered.bytes) > 500) {
       throw disclosureError('تعداد صفحه‌های خروجی از سقف مجاز بیشتر است.', 'PERFORMANCE_EXPORT_SCOPE_TOO_LARGE', 422);
     }
     if (rendered.bytes.length > maximumBytes) {

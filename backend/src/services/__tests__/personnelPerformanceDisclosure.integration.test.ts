@@ -214,9 +214,16 @@ const main = async () => {
     const xlsxArtifact = await renderPerformanceExportArtifact('XLSX', canonicalRows, new AbortController().signal);
     const renderedWorkbook = XLSX.read(xlsxArtifact.bytes);
     const xlsxRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(renderedWorkbook.Sheets[renderedWorkbook.SheetNames[0]]);
+    const forbiddenAggregateFields = ['subjectId', 'personnelId', 'displayName', 'employmentRelationshipId', 'exactScore', 'narrative', 'criteria'];
+    assert.ok(canonicalRows.every((row) => forbiddenAggregateFields.every((key) => !(key in row)))
+      && xlsxRows.every((row) => forbiddenAggregateFields.every((key) => !(key in row))),
+    'aggregate Excel must not contain person-level, exact-score, narrative or criteria fields');
     assert.deepEqual(xlsxRows.map(({ levelCode, labelFa, count }) => [levelCode, labelFa, count]),
       canonicalRows.map(({ levelCode, labelFa, count }) => [levelCode, labelFa, count]));
     const pdfHtml = performanceExportPdfHtml(canonicalRows);
+    for (const secret of acceptedPopulation.flatMap(({ subjectId, personnelId, displayName }) => [subjectId, personnelId, displayName])) {
+      assert.equal(pdfHtml.includes(secret), false, 'aggregate PDF must not contain person-level identifiers or names');
+    }
     for (const { levelCode, labelFa } of canonicalRows) {
       assert.ok(pdfHtml.includes(String(levelCode)) && pdfHtml.includes(String(labelFa)), 'PDF and Excel use the same accepted-result level rows');
     }
@@ -560,6 +567,7 @@ const main = async () => {
       { name: 'identity-verified-summary-delivery', assertionIds: ['verified-recipient-time-type-receipt'] },
       { name: 'no-score-criteria-narrative-rank-leak', assertionIds: ['minimal-summary-negative-fields'] },
       { name: 'manual-consequence-boundary', assertionIds: ['independent-scope', 'immutable-manual-handoff'] },
+      { name: 'security-negative-matrix', assertionIds: ['pdf-excel-canonical-leakage'] },
     ], additionalDisclosures: 0 })}`);
   }
 };

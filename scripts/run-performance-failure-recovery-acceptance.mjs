@@ -30,10 +30,10 @@ const environment = {
 };
 const raw = [];
 const observations = [];
-const execute = (name, file, timeout = 15 * 60_000) => {
+const execute = (name, file, timeout = 15 * 60_000, environmentOverrides = {}) => {
   const started = performance.now();
   const result = spawnSync(process.execPath, ['--import', 'tsx', `src/services/__tests__/${file}`], {
-    cwd: backendRoot, env: environment, encoding: 'utf8', timeout, maxBuffer: 64 * 1024 * 1024,
+    cwd: backendRoot, env: { ...environment, ...environmentOverrides }, encoding: 'utf8', timeout, maxBuffer: 64 * 1024 * 1024,
   });
   raw.push(JSON.stringify({ name, exitCode: result.status, signal: result.signal,
     durationMs: performance.now() - started, stdout: result.stdout, stderr: result.stderr }));
@@ -60,6 +60,8 @@ try {
     throw new Error('ACCEPTANCE_OPERATOR_UNAVAILABLE');
   }
   const identity = JSON.parse(await readFile(await realpath(identityPath), 'utf8'));
+  const runbookHash = createHash('sha256').update(await readFile(path.join(repositoryRoot,
+    'docs/operations/personnel-performance-operations.md'))).digest('hex');
   const started = performance.now();
   const dryRunOutputs = [
     execute('migration-dry-run-1', 'dispatchDocumentsCandidateSchema.integration.test.ts'),
@@ -85,8 +87,14 @@ try {
     'personnelPerformanceReadinessCoverage.integration.test.ts');
   execute('transaction-storage-encryption', 'personnelPerformanceErasure.integration.test.ts');
   execute('queue-notification', 'personnelPerformanceMonitoring.integration.test.ts');
-  execute('restore-correctness', 'personnelPerformanceErasureRecovery.integration.test.ts', 30 * 60_000);
-  execute('restore-dress-rehearsal', 'personnelPerformanceErasureRecovery.integration.test.ts', 30 * 60_000);
+  execute('restore-correctness', 'personnelPerformanceErasureRecovery.integration.test.ts', 30 * 60_000, {
+    PERFORMANCE_ACCEPTANCE_RESTORE_REHEARSAL_MODE: 'correctness',
+    PERFORMANCE_ACCEPTANCE_OPERATOR_ID: operatorId,
+  });
+  execute('restore-dress-rehearsal', 'personnelPerformanceErasureRecovery.integration.test.ts', 30 * 60_000, {
+    PERFORMANCE_ACCEPTANCE_RESTORE_REHEARSAL_MODE: 'timed-dress',
+    PERFORMANCE_ACCEPTANCE_OPERATOR_ID: operatorId,
+  });
   const signer = performanceMeasurementSignerFromEnvironment();
   if (!signer) throw new Error('MEASUREMENT_SIGNER_UNAVAILABLE');
   const scenarioChecks = {
@@ -117,9 +125,19 @@ try {
     .map(({ marker }) => marker.rehearsal);
   if (readinessRehearsals.length !== 3 || readinessRehearsals.some((item) => item?.idempotentApplyReconciliations !== 1
     || item.driftInjected !== true || item.concurrentHrWriteRetried !== true)
-    || restoreRehearsals.length !== 2 || restoreRehearsals.some((item) => item?.fullEncryptedCheckpointRestored !== true
-      || item.rpoAcknowledgedWritesLost !== 0 || item.correctnessRehearsalPassed !== true
-      || item.timedDressRehearsalPassed !== true)) throw new Error('FAILURE_RECOVERY_REHEARSAL_EVIDENCE_INVALID');
+    || restoreRehearsals.length !== 2
+    || restoreRehearsals[0]?.rehearsalMode !== 'correctness'
+    || restoreRehearsals[0]?.correctnessRehearsalPassed !== true
+    || restoreRehearsals[0]?.timedDressRehearsalPassed !== false
+    || restoreRehearsals[1]?.rehearsalMode !== 'timed-dress'
+    || restoreRehearsals[1]?.correctnessRehearsalPassed !== false
+    || restoreRehearsals[1]?.timedDressRehearsalPassed !== true
+    || restoreRehearsals.some((item) => item?.fullEncryptedCheckpointRestored !== true
+      || item.encryptedCheckpointVerified !== true || item.independentCopy !== true
+      || item.rpoAcknowledgedWritesLost !== 0 || item.operatorId !== operatorId
+      || item.runbookHash !== runbookHash || !Number.isFinite(item.durationMs) || item.durationMs <= 0
+      || !/^[a-f0-9]{64}$/.test(item.checkpointChecksum)
+      || item.sourceDatabase === item.restoredDatabase)) throw new Error('FAILURE_RECOVERY_REHEARSAL_EVIDENCE_INVALID');
   const measurements = {
     failureInjection: {
       scenarios: scenarioEvidence,
@@ -130,8 +148,7 @@ try {
       correctnessRehearsalPassed: restoreRehearsals[0].correctnessRehearsalPassed,
       timedDressRehearsalPassed: restoreRehearsals[1].timedDressRehearsalPassed,
       operatorId,
-      runbookHash: createHash('sha256').update(await readFile(path.join(repositoryRoot,
-        'docs/operations/personnel-performance-operations.md'))).digest('hex'),
+      runbookHash,
       dryRuns,
       idempotentApplyReconciliations: readinessRehearsals.reduce((sum, item) => sum + item.idempotentApplyReconciliations, 0),
       driftInjected: readinessRehearsals.every((item) => item.driftInjected),

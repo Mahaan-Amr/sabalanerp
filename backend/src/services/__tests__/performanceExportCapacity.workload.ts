@@ -19,16 +19,16 @@ const run = async (kind: 'XLSX' | 'PDF', concurrentJobs: number, unitRows: numbe
     durations.push(performance.now() - started);
     return rendered;
   }));
-  const observed = results.map((result) => {
+  const observed = await Promise.all(results.map(async (result) => {
     assert.ok(result.bytes.length > 0);
     assert.equal(kind === 'PDF' ? result.bytes.subarray(0, 4).toString() : result.bytes.subarray(0, 2).toString(),
       kind === 'PDF' ? '%PDF' : 'PK');
-    if (kind === 'PDF') return { units: performancePdfPageCount(result.bytes),
+    if (kind === 'PDF') return { units: await performancePdfPageCount(result.bytes),
       bytes: result.bytes.length };
     const workbook = XLSX.read(result.bytes);
     const range = XLSX.utils.decode_range(workbook.Sheets[workbook.SheetNames[0]]['!ref']!);
     return { units: range.e.r - range.s.r, bytes: result.bytes.length };
-  });
+  }));
   return { durations, observed, partialArtifacts: 0 };
 };
 

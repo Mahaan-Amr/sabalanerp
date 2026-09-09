@@ -15,6 +15,7 @@ import {
 import {
   decryptPerformanceExportArtifact,
   encryptPerformanceExportArtifact,
+  performancePdfPageCount,
   validatePerformanceExportKeyEnvironment,
   withinPerformanceExportDeadline,
 } from '../personnelPerformanceDisclosureStore';
@@ -29,6 +30,11 @@ assert.deepEqual(decryptPerformanceExportArtifact(encryptedArtifact, exportKey),
 const tamperedArtifact = Buffer.from(encryptedArtifact);
 tamperedArtifact[tamperedArtifact.length - 1] ^= 1;
 assert.throws(() => decryptPerformanceExportArtifact(tamperedArtifact, exportKey));
+const rotatedExportKey = Buffer.alloc(32, 10);
+const rotatedArtifact = encryptPerformanceExportArtifact(confidentialArtifact, rotatedExportKey);
+assert.notDeepEqual(rotatedArtifact, encryptedArtifact, 'key rotation must create an independently authenticated artifact');
+assert.throws(() => decryptPerformanceExportArtifact(encryptedArtifact, rotatedExportKey),
+  'a rotated key must not silently decrypt an artifact from another key version');
 assert.throws(() => validatePerformanceExportKeyEnvironment({
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID: 'production-export-v1',
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64: Buffer.alloc(16).toString('base64'),
@@ -43,6 +49,11 @@ assert.throws(() => validatePerformanceExportKeyEnvironment({
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64: exportKey.toString('base64'),
 }), /مستقل/);
 let deadlineAborted = false;
+const invalidPdfCheck = assert.rejects(
+  () => performancePdfPageCount(Buffer.from('%PDF-1.4\n/Type /Page\n%%EOF')),
+  (error: { code?: string }) => error.code === 'PERFORMANCE_EXPORT_PDF_INVALID',
+  'raw page-like tokens are not valid PDF page-tree evidence',
+);
 const exportDeadlineCheck = assert.rejects(() => withinPerformanceExportDeadline((signal) => new Promise((_resolve) => {
   signal.addEventListener('abort', () => { deadlineAborted = true; }, { once: true });
 }), 5), /سقف مجاز/).then(() => assert.equal(deadlineAborted, true));
@@ -65,6 +76,9 @@ assert.deepEqual(projected, {
 });
 assert.equal('score' in projected, false, 'Badge disclosure must never include a score');
 assert.equal('trend' in projected, false, 'Badge disclosure must never include a trend');
+for (const forbidden of ['subjectId', 'personnelId', 'eligibleCount', 'search', 'placeholder', 'cacheKey']) {
+  assert.equal(forbidden in projected, false, `badge disclosure must not leak ${forbidden}`);
+}
 assert.equal(buildPerformanceBadgeSummary({ state: 'TEMPORARILY_UNAVAILABLE', version: 8 }).labelFa, 'خلاصه عملکرد موقتاً در دسترس نیست');
 
 const compatibleLevels = [
@@ -227,4 +241,17 @@ assert.ok(validateConsequenceHandoff({
   independentEvidenceReferences: [],
 }).length >= 2);
 
-void exportDeadlineCheck.then(() => console.log('Personnel performance disclosure policy tests passed.'));
+void Promise.all([exportDeadlineCheck, invalidPdfCheck]).then(() => {
+  console.log('Personnel performance disclosure policy tests passed.');
+  if (process.env.PERFORMANCE_ACCEPTANCE_PERMISSION_EVIDENCE === '1') {
+    console.log(`PERFORMANCE_PERMISSION_EVIDENCE:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_PERMISSION_EVIDENCE_V1', scenarios: [
+      { name: 'security-negative-matrix', assertionIds: [
+        'identifier-count-search-placeholder-cache-leakage',
+        'malicious-free-text-escaping',
+        'spreadsheet-formula-injection',
+        'encryption-key-rotation-boundary',
+        'differencing-reidentification-blocked',
+      ] },
+    ], additionalDisclosures: 0 })}`);
+  }
+});

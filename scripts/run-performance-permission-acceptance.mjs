@@ -28,6 +28,21 @@ const environment = {
 };
 const raw = [];
 const evidenceMarkers = [];
+const securityNegativeMatrixAssertions = [
+  'identifier-count-search-placeholder-cache-leakage',
+  'malicious-free-text-escaping',
+  'spreadsheet-formula-injection',
+  'pdf-excel-canonical-leakage',
+  'encryption-key-rotation-boundary',
+  'audit-disclosure-download',
+  'differencing-reidentification-blocked',
+  'independent-admin-no-bypass',
+  'idor',
+  'scope-revocation',
+  'single-use-download',
+  'hold-revocation',
+  'notification-redaction',
+];
 const execute = (name, command, commandArgs, cwd) => {
   const result = spawnSync(command, commandArgs, { cwd, env: environment, encoding: 'utf8',
     timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 });
@@ -62,6 +77,8 @@ try {
   if (openP0 || openP1) throw new Error('OPEN_CRITICAL_FINDINGS');
   const started = performance.now();
   execute('foundation-unit-routes', 'npm', ['--prefix', 'backend', 'run', 'test:personnel-performance-foundation'], repositoryRoot);
+  execute('personnelPerformanceDisclosure.test.ts', process.execPath,
+    ['--import', 'tsx', 'src/services/__tests__/personnelPerformanceDisclosure.test.ts'], path.join(repositoryRoot, 'backend'));
   for (const file of [
     'dispatchDocumentsCandidateSchema.integration.test.ts',
     'personnelPerformancePolicy.integration.test.ts',
@@ -70,11 +87,22 @@ try {
   ]) execute(file, process.execPath, ['--import', 'tsx', `src/services/__tests__/${file}`], path.join(repositoryRoot, 'backend'));
   const signer = performanceMeasurementSignerFromEnvironment();
   if (!signer) throw new Error('MEASUREMENT_SIGNER_UNAVAILABLE');
-  const observedScenarios = evidenceMarkers.flatMap(({ check, marker }) => marker.scenarios
+  const observedFragments = evidenceMarkers.flatMap(({ check, marker }) => marker.scenarios
     .map((scenario) => ({ ...scenario, evidenceCheck: check })));
-  if (observedScenarios.length !== PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS.length
-    || PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS.some((name) => observedScenarios
-      .filter((scenario) => scenario.name === name).length !== 1)) throw new Error('PERMISSION_SCENARIO_EVIDENCE_INCOMPLETE');
+  if (observedFragments.some(({ name }) => !PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS.includes(name))) {
+    throw new Error('PERMISSION_SCENARIO_EVIDENCE_UNEXPECTED');
+  }
+  const observedScenarios = PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS.map((name) => {
+    const fragments = observedFragments.filter((scenario) => scenario.name === name);
+    if (fragments.length === 0) throw new Error(`PERMISSION_SCENARIO_EVIDENCE_INCOMPLETE:${name}`);
+    return { name, assertionIds: [...new Set(fragments.flatMap(({ assertionIds }) => assertionIds))],
+      evidenceCheck: [...new Set(fragments.map(({ evidenceCheck }) => evidenceCheck))].join(',') };
+  });
+  const securityAssertions = observedScenarios.find(({ name }) => name === 'security-negative-matrix')?.assertionIds ?? [];
+  if (securityAssertions.length !== securityNegativeMatrixAssertions.length
+    || securityNegativeMatrixAssertions.some((assertionId) => !securityAssertions.includes(assertionId))) {
+    throw new Error('SECURITY_NEGATIVE_MATRIX_ASSERTION_INVENTORY_INVALID');
+  }
   const coverageMarkers = evidenceMarkers.filter(({ marker }) => marker.permissionBranchesCoveredPercent !== undefined);
   if (coverageMarkers.length !== 1 || coverageMarkers[0].marker.permissionBranchesCoveredPercent !== 100) {
     throw new Error('PERMISSION_BRANCH_COVERAGE_EVIDENCE_INVALID');

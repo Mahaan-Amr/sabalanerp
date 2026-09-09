@@ -34,7 +34,8 @@ const main = async () => {
     const [clock] = await first.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
     await first.performanceFeaturePhaseVersion.create({ data: { version: 1, phase: 'EXPANSION_RETIREMENT', releaseEnabled: false,
       effectiveFrom: clock.now, recordedByUserId: users[0].id, reason: 'Isolated promotion race phase' } });
-    const createScheduledFixture = async (suffix: string, approvalUserIds = users.slice(1).map(({ id }) => id), authenticate = true) => {
+    const createScheduledFixture = async (suffix: string, approvalUserIds = users.slice(1).map(({ id }) => id),
+      authenticate = true, evidenceMode: 'VALID' | 'STALE' | 'WRONG_GATE' | 'UNRELATED' = 'VALID') => {
       const [fixtureClock] = await first.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
       const personnel = await first.personnel.create({ data: { firstName: 'آزمون', lastName: suffix } });
       const relationship = await first.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status: 'ACTIVE',
@@ -57,9 +58,10 @@ const main = async () => {
         releaseInfrastructureHash: '8'.repeat(64), backendImageDigest: `sha256:${'9'.repeat(64)}`,
         frontendImageDigest: `sha256:${'a'.repeat(64)}`, inquiryImageDigest: `sha256:${'b'.repeat(64)}`,
         targetPhase: 'EXPANSION_RETIREMENT', targetCohortVersionId: cohort.id, targetCohortStage: 'PILOT',
-        targetMembershipHash: cohort.membershipHash, targetReadyPopulation: 1, targetMemberCount: 1, targetGate: 9,
+        targetMembershipHash: evidenceMode === 'UNRELATED' ? '0'.repeat(64) : cohort.membershipHash,
+        targetReadyPopulation: 1, targetMemberCount: 1, targetGate: evidenceMode === 'WRONG_GATE' ? 8 : 9,
         encryptedPayloadId: payload.id, attestationKeyId: 'race-key', authenticatedByUserId: users[0].id,
-        verifiedAt: fixtureClock.now, validUntil: new Date(fixtureClock.now.getTime() + 60_000) } });
+        verifiedAt: fixtureClock.now, validUntil: new Date(fixtureClock.now.getTime() + (evidenceMode === 'STALE' ? 100 : 60_000)) } });
       await first.performanceRolloutDecision.createMany({ data: ['HUMAN_RESOURCES', 'SECURITY_PRIVACY', 'SYSTEM_OWNER'].map((ownerType, index) => ({
         scopeType: 'COHORT', scopeId: cohort.id, ownerType, action: 'APPROVE', version: 1, actorUserId: approvalUserIds[index],
         reasonCode: 'RACE_APPROVED', authorityHash: 'c'.repeat(64), evidenceHash: evidence.evidenceHash, promotionEvidenceId: evidence.id,
@@ -79,6 +81,12 @@ const main = async () => {
     await assert.rejects(() => createScheduledFixture('same-owner', [users[1].id, users[1].id, users[1].id]),
       /three distinct currently authorized owner approvals/,
       'PostgreSQL rejects three role labels when one actor supplied every approval');
+    await assert.rejects(() => createScheduledFixture('wrong-gate', undefined, true, 'WRONG_GATE'),
+      /missing, stale, revoked, incomplete or unrelated/, 'PostgreSQL rejects an incomplete target gate');
+    await assert.rejects(() => createScheduledFixture('unrelated', undefined, true, 'UNRELATED'),
+      /missing, stale, revoked, incomplete or unrelated/, 'PostgreSQL rejects evidence bound to another membership');
+    await assert.rejects(() => createScheduledFixture('stale', undefined, true, 'STALE'),
+      /missing, stale, revoked, incomplete or unrelated/, 'PostgreSQL rejects evidence that expires before scheduling takes effect');
 
     const revoked = await createScheduledFixture('revoke');
     await delay(Math.max(0, revoked.effectiveFrom.getTime() - Date.now() + 20));

@@ -23,7 +23,12 @@ const release: PerformanceRuntimeReleaseIdentity = {
 };
 const now = new Date('2026-09-09T06:00:00.000Z');
 const key = Buffer.alloc(32, 7);
-const unsigned = (): Omit<PerformancePromotionEvidenceReport, 'attestation'> => ({
+const phaseNames = [
+  'SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT',
+  'RESULT_LEVEL_BADGE', 'ANALYTICS_RANKING_CALIBRATION', 'PDF_EXCEL_EXPORT',
+  'CONSEQUENCE_HANDOFF', 'EXPANSION_RETIREMENT',
+] as const;
+const unsigned = (phase: typeof phaseNames[number] = 'SUPERVISOR_HR_PILOT'): Omit<PerformancePromotionEvidenceReport, 'attestation'> => ({
   schemaVersion: 1,
   decision: 'EVIDENCE_COMPLETE',
   productionActivationAuthorized: false,
@@ -31,7 +36,7 @@ const unsigned = (): Omit<PerformancePromotionEvidenceReport, 'attestation'> => 
   releaseIdentityHash: canonicalPerformanceHash(release),
   release,
   target: {
-    phase: 'SUPERVISOR_HR_PILOT',
+    phase,
     cohortVersionId: 'cohort-1',
     cohortStage: 'PILOT',
     membershipHash: '4'.repeat(64),
@@ -39,11 +44,8 @@ const unsigned = (): Omit<PerformancePromotionEvidenceReport, 'attestation'> => 
     memberCount: 1,
   },
   blockers: [],
-  gates: [
-    'SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT',
-    'RESULT_LEVEL_BADGE', 'ANALYTICS_RANKING_CALIBRATION', 'PDF_EXCEL_EXPORT',
-    'CONSEQUENCE_HANDOFF', 'EXPANSION_RETIREMENT',
-  ].map((name, index) => ({ number: index + 1, name, status: index < 4 ? 'PASS' : 'NOT_REQUIRED' })),
+  gates: phaseNames.map((name, index) => ({ number: index + 1, name,
+    status: index <= phaseNames.indexOf(phase) ? 'PASS' : 'NOT_REQUIRED' })),
   verifiedAt: new Date(now.getTime() - 60_000).toISOString(),
   validUntil: new Date(now.getTime() + 60_000).toISOString(),
 });
@@ -112,5 +114,17 @@ assert.throws(() => verifyPerformancePromotionEvidence(signed(), {
   now, release, phase: 'SUPERVISOR_HR_PILOT', cohortVersionId: 'cohort-1', cohortStage: 'PILOT',
   membershipHash: '4'.repeat(64), readyPopulation: 2, memberCount: 1, keyId: 'promotion-test-v1', key,
 }), (error: { code?: string }) => error.code === 'PERFORMANCE_PROMOTION_EVIDENCE_POPULATION_CHANGED');
+
+for (const [targetIndex, phase] of phaseNames.entries()) {
+  for (let missingGate = 0; missingGate <= targetIndex; missingGate++) {
+    const report = unsigned(phase);
+    report.gates[missingGate].status = 'BLOCKED';
+    assert.throws(() => verifyPerformancePromotionEvidence(signed(report), {
+      now, release, phase, cohortVersionId: 'cohort-1', cohortStage: 'PILOT',
+      membershipHash: '4'.repeat(64), readyPopulation: 1, memberCount: 1, keyId: 'promotion-test-v1', key,
+    }), (error: { code?: string }) => error.code === 'PERFORMANCE_PROMOTION_EVIDENCE_INCOMPLETE',
+    `${phase} must fail closed when gate ${missingGate + 1} is absent`);
+  }
+}
 
 console.log('Personnel performance promotion evidence tests passed.');

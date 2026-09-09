@@ -212,6 +212,10 @@ const main = async () => {
     if (evidenceActor.nullable === 'NO') applySql('20260909112000_performance_automatic_incident_evidence_actor');
     await exerciseMonitoring(first);
     await pauseRace(first, second, database.runId);
+    execFileSync(process.execPath, ['--import', 'tsx', 'src/services/__tests__/performanceOperationalInbox.integration.test.ts', database.databaseName], {
+      cwd: path.join(repositoryRoot, 'backend'), env: { ...process.env, DATABASE_URL: database.databaseUrl },
+      stdio: 'inherit', timeout: 120_000,
+    });
   } finally {
     await Promise.allSettled([first.$disconnect(), second.$disconnect()]);
     await database.cleanup();

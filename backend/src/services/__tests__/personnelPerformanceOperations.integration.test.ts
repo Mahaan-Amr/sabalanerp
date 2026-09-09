@@ -9,6 +9,7 @@ import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disa
 import { resolvePersonnelPerformanceWriteGate, assertPersonnelPerformanceWriteAdmission } from '../personnelPerformanceRolloutPolicy';
 import { restrictPerformanceEvidence } from '../personnelPerformanceRestrictions';
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
+import { configurePerformanceOperationalRoute } from '../personnelPerformanceMonitoringStore';
 import {
   activatePerformanceCohort,
   activateDuePerformanceCohorts,
@@ -101,6 +102,10 @@ const main = async () => {
         const owner = await tx.user.create({ data: { email: `${suffix}-${ownerType}@example.invalid`, username: `${suffix}-${ownerType}`,
           password: 'not-used', firstName: 'مالک', lastName: ownerType } });
         owners.push({ owner, ownerType });
+        // Operational ownership is a separate prerequisite from rollout approval.
+        // Keep both explicit so the eligibility assertions reach their intended gate.
+        await configurePerformanceOperationalRoute(tx, { actorUserId: actor.id, routeKey: ownerType,
+          recipientUserId: owner.id, verifiedAt: new Date(), reason: 'Isolated operational route owner fixture' });
         for (const featureCode of [cohortPermission, resumePermission]) await tx.hrFeatureAccessGrant.create({ data: {
           stableKey: `${suffix}:${ownerType}:${featureCode}`, userId: owner.id, featureCode, level: 'ADMIN',
           effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated rollout owner' } });

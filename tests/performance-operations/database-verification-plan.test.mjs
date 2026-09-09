@@ -11,6 +11,7 @@ test('database collector routes shared-client suites through the migrated-clone 
     'src/services/__tests__/personnelPerformancePolicy.integration.test.ts',
     'src/services/__tests__/personnelPerformanceWorkflow.integration.test.ts',
     'src/services/__tests__/personnelPerformanceExportLineage.integration.test.ts',
+    'src/services/__tests__/personnelPerformanceMonitoring.integration.test.ts',
     'src/services/__tests__/personnelPerformanceSafetyRaces.integration.test.ts',
   ]);
   for (const check of checks) {

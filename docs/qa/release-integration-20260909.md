@@ -4,6 +4,7 @@
 
 - Production/upstream base: `50899f8484ac1f4280c3488c4806400bbbf30f87`.
 - Coworker source: `origin/ferpheri` at `0d97f997eefdf74e9775ceb687e4d4d60ef42c01`.
+- Final fetch discovered two additional coworker commits; the release cut was advanced explicitly to `c8db25f39d9c590c03993ffa01f58e287ebeb726`, merged as `dd49eb1f`. Later coworker work is outside this frozen release cut.
 - Performance commit: `73d8e2d9`; integration merge: `8eb230a8`.
 - Candidate worktree: `D:/sabalanerp-performance-20260909`, branch `codex/release-integration-20260909`.
 - Final release commit and clean tree identify the complete candidate; record final review and deployment identities in the release handoff.
@@ -44,3 +45,11 @@ Final spec review found that the newly merged local verification collector still
 The existing SSHFS off-server checkpoint mount initially returned `Input/output error` because its reverse SSH tunnel was absent. The existing loopback tunnel was re-established to the running local backup SSH service, without altering backup files, keys or server application data. The mount became readable again. The canonical read-only deployment drill preflight returned healthy under its existing initial-checkpoint grace policy for `deploy-20260906T121523Z-50899f8484ac`; this is **not** a claim that a new recovery drill ran.
 
 Full encrypted checkpoint creation, local restore validation, remote streaming read-back, migration, immutable-image startup and mandatory post-release gates remain the responsibility of the unmodified canonical deployment script. No force, bypass, local-only substitute backup, manual database reset or public-write maintenance path is permitted. This evidence file does not itself attest deployment completion.
+
+## Final coworker monitoring delta
+
+The final release cut additionally includes operational monitoring and four additive schema migrations. A shared pause-reference index replaces an intermediate unique index; no business rows are removed. Candidate clones reached 288 migrations, while the source retained 281 and the same preservation fingerprint.
+
+Review identified and corrected three bounded release concerns: inactive monitoring churn/stale enabled-phase selection; unsupported cohort attribution of unscoped observations; and operational notifications falling through generic authorization with a nonexistent destination. The collector now honors the latest phase, preserves closed samples on repetition/retry, and records unscoped measurements globally. Operational alerts recheck active current incident-route ownership before generic ADMIN access and open the existing personal inbox. This is not an incident-action UI or permission to activate HR performance.
+
+Focused monitoring collector regressions passed 7/7; operational-owner unit regressions passed 2/2. The real migrated-clone monitoring suite passed, including actual inbox authorization for a non-ADMIN owner, unrelated ADMIN rejection, revocation on reassignment, inactive recipient/missing-route denial, and destination checks. The collector includes this self-isolating monitoring suite. Existing Operations fixtures now explicitly assign required monitoring owners without weakening runtime gates or changing eligibility assertions; Foundation, Disclosure and Operations passed again through the 288-migration clone. The unchanged Privacy line-64 failure remains present and makes the full shared wrapper exit 1, as it should; it is not hidden by the successful suites.

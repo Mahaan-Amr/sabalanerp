@@ -187,8 +187,8 @@ const openOrUpdateIncident = async (tx: Prisma.TransactionClient, input: {
     const route = await tx.performanceOperationalRoute.findUnique({ where: { routeKey: input.routeKey } });
     if (route) await publishNotificationEvent(tx, { type: 'PERFORMANCE_OPERATIONAL_ALERT',
       deduplicationKey: `performance-operational-alert:${incident.id}`, recipientIds: [route.recipientUserId],
-      actorId: null, workspace: 'hr', feature: 'PERSONNEL_PERFORMANCE', resourceType: 'PERFORMANCE_OPERATIONAL_INCIDENT',
-      resourceId: incident.id, actionUrl: '/dashboard/hr/performance/operations', payload: {} });
+      actorId: null, workspace: 'hr', feature: null, resourceType: 'PERFORMANCE_OPERATIONAL_INCIDENT',
+      resourceId: incident.id, actionUrl: '/dashboard/personal/notifications', payload: {} });
   }
   return incident;
 };
@@ -380,22 +380,45 @@ export const escalateOverduePerformanceOperationalIncidents = async (client: Cli
       eventHash: canonicalPerformanceHash({ auditId, incidentId: incident.id, evidenceHash, at: now }) } });
     if (route) await publishNotificationEvent(tx, { type: 'PERFORMANCE_OPERATIONAL_ALERT',
       deduplicationKey: `performance-operational-overdue:${incident.id}`, recipientIds: [route.recipientUserId],
-      workspace: 'hr', feature: 'PERSONNEL_PERFORMANCE', resourceType: 'PERFORMANCE_OPERATIONAL_INCIDENT',
-      resourceId: incident.id, actionUrl: '/dashboard/hr/performance/operations', payload: {} });
+      workspace: 'hr', feature: null, resourceType: 'PERFORMANCE_OPERATIONAL_INCIDENT',
+      resourceId: incident.id, actionUrl: '/dashboard/personal/notifications', payload: {} });
   }
   return { escalated: overdue.length };
 });
 
+// Collector samples are closed-window evidence, not refreshable live projections.
+// Keep the public window writer's correction behavior for explicit callers.
+const recordCollectedWindow = (client: PrismaClient, input: WindowInput) => transaction(client, async (tx) => {
+  const existing = await tx.performanceOperationalWindow.findFirst({ where: {
+    metricKey: input.metricKey, scope: input.scope, cohortVersionId: input.cohortVersionId ?? null,
+    windowStart: input.windowStart, windowEnd: input.windowEnd,
+  } });
+  if (existing) return;
+  await recordPerformanceOperationalWindow(tx, input);
+});
+
 export const runPerformanceOperationalMonitoring = async (client: PrismaClient, now = new Date()) => {
+  // Retention remains independent of activation and monitoring failures.
+  const retention = await purgeExpiredPerformanceOperationalWindows(client, now);
+  const phase = await client.performanceFeaturePhaseVersion.findFirst({ where: { effectiveFrom: { lte: now } },
+    orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }], select: { releaseEnabled: true } });
+  if (!phase?.releaseEnabled) return { skipped: 'INACTIVE' as const, retention };
+
   const heartbeatDetection = await detectMissingPerformanceOperationalHeartbeats(client, now);
   const intervalMs = 5 * 60_000;
   const windowEnd = new Date(Math.floor(now.getTime() / intervalMs) * intervalMs);
   const windowStart = new Date(windowEnd.getTime() - intervalMs);
-  const phase = await client.performanceFeaturePhaseVersion.findFirst({ where: { effectiveFrom: { lte: windowEnd },
-    releaseEnabled: true }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
-    select: { cohortVersionId: true } });
-  const scope = phase?.cohortVersionId ? 'COHORT' as const : 'ALL' as const;
-  const cohortVersionId = phase?.cohortVersionId ?? undefined;
+  // A metric-provider heartbeat is not proof that this collector completed.
+  // Keep a separate durable watermark in the existing component-keyed table.
+  const completed = await client.performanceOperationalHeartbeat.findUnique({ where: { component: 'COLLECTOR_WINDOW' } });
+  if (completed && completed.observedAt >= windowEnd) {
+    const incidentEscalation = await escalateOverduePerformanceOperationalIncidents(client, now);
+    return { skipped: 'WINDOW_ALREADY_COLLECTED' as const, heartbeatDetection, incidentEscalation, retention };
+  }
+  // Request, workflow and export observations have no verified cohort identity.
+  // A phase transition cannot retroactively assign them to the current cohort.
+  const scope = 'ALL' as const;
+  const cohortVersionId = undefined;
   const observations = await client.performanceOperationalRequestObservation.findMany({ where: {
     observedAt: { gt: windowStart, lte: windowEnd },
   }, orderBy: { durationMs: 'asc' } });
@@ -403,15 +426,15 @@ export const runPerformanceOperationalMonitoring = async (client: PrismaClient, 
   for (const definition of PERFORMANCE_OPERATIONAL_METRICS.filter((metric) => metric.p95Ms !== undefined)) {
     const durations = observations.filter(({ metricKey }) => metricKey === definition.metricKey).map(({ durationMs }) => durationMs);
     if (!durations.length) continue;
-    await recordPerformanceOperationalWindow(client, { metricKey: definition.metricKey, scope, cohortVersionId,
+    await recordCollectedWindow(client, { metricKey: definition.metricKey, scope, cohortVersionId,
       windowStart, windowEnd, numerator: durations.length, denominator: durations.length,
       p95Ms: percentile(durations, 0.95), p99Ms: percentile(durations, 0.99) });
   }
   const nonInputRequests = observations.filter(({ responseStatus }) => responseStatus < 400 || responseStatus >= 500);
-  if (nonInputRequests.length) await recordPerformanceOperationalWindow(client, { metricKey: 'HTTP_5XX_RATE', scope, cohortVersionId,
+  if (nonInputRequests.length) await recordCollectedWindow(client, { metricKey: 'HTTP_5XX_RATE', scope, cohortVersionId,
     windowStart, windowEnd, numerator: nonInputRequests.filter(({ responseStatus }) => responseStatus >= 500).length,
     denominator: nonInputRequests.length });
-  if (observations.length) await recordPerformanceOperationalWindow(client, { metricKey: 'TIMEOUT_RATE', scope, cohortVersionId,
+  if (observations.length) await recordCollectedWindow(client, { metricKey: 'TIMEOUT_RATE', scope, cohortVersionId,
     windowStart, windowEnd, numerator: observations.filter(({ timedOut }) => timedOut).length, denominator: observations.length });
   const permissionIntervalMs = 15 * 60_000;
   const permissionWindowEnd = new Date(Math.floor(now.getTime() / permissionIntervalMs) * permissionIntervalMs);
@@ -422,7 +445,7 @@ export const runPerformanceOperationalMonitoring = async (client: PrismaClient, 
   if (permissionObservations.length) {
     const previous = await client.performanceOperationalWindow.findFirst({ where: { metricKey: 'PERMISSION_DENIAL_RATE',
       scope, cohortVersionId: cohortVersionId ?? null, windowEnd: { lt: permissionWindowEnd } }, orderBy: { windowEnd: 'desc' } });
-    await recordPerformanceOperationalWindow(client, { metricKey: 'PERMISSION_DENIAL_RATE', scope, cohortVersionId,
+    await recordCollectedWindow(client, { metricKey: 'PERMISSION_DENIAL_RATE', scope, cohortVersionId,
       windowStart: permissionWindowStart, windowEnd: permissionWindowEnd,
       numerator: permissionObservations.filter(({ authorizationDecision }) => authorizationDecision === 'DENIED').length,
       denominator: permissionObservations.length, baselineBps: previous?.measuredBps ?? undefined });
@@ -434,28 +457,29 @@ export const runPerformanceOperationalMonitoring = async (client: PrismaClient, 
   const deadlines = sections.map((section) => section.status === 'SUBMITTED' ? section.reviewDueAt! : section.submissionDueAt!);
   const overdue = deadlines.filter((deadline) => deadline < windowEnd);
   const overOneWorkingDay = overdue.some((deadline) => addTehranWorkingDays(deadline, 1) < windowEnd);
-  await recordPerformanceOperationalWindow(client, { metricKey: 'WORKFLOW_OVERDUE_RATE', scope, cohortVersionId,
+  await recordCollectedWindow(client, { metricKey: 'WORKFLOW_OVERDUE_RATE', scope, cohortVersionId,
     windowStart, windowEnd, numerator: overdue.length, denominator: Math.max(sections.length, 1) });
-  await recordPerformanceOperationalWindow(client, { metricKey: 'WORKFLOW_MAX_OVERDUE', scope, cohortVersionId,
+  await recordCollectedWindow(client, { metricKey: 'WORKFLOW_MAX_OVERDUE', scope, cohortVersionId,
     windowStart, windowEnd, numerator: overdue.length ? 1 : 0, denominator: 1,
     maxAgeSeconds: overOneWorkingDay ? 8 * 60 * 60 + 1 : 0 });
   const exports = await client.performanceExportReceipt.findMany({ select: { status: true, requestedAt: true, attemptCount: true, failureCode: true } });
   const queued = exports.filter(({ status }) => status === 'QUEUED');
   const oldestQueueAge = queued.length ? Math.max(...queued.map(({ requestedAt }) => Math.floor((windowEnd.getTime() - requestedAt.getTime()) / 1_000))) : 0;
-  await recordPerformanceOperationalWindow(client, { metricKey: 'EXPORT_QUEUE_AGE', scope, cohortVersionId,
+  await recordCollectedWindow(client, { metricKey: 'EXPORT_QUEUE_AGE', scope, cohortVersionId,
     windowStart, windowEnd, numerator: queued.length, denominator: Math.max(queued.length, 1), maxAgeSeconds: Math.max(oldestQueueAge, 0) });
   const exhausted = exports.filter(({ status, attemptCount, failureCode }) => status === 'FAILED'
     && attemptCount >= 3 && failureCode === 'PERFORMANCE_EXPORT_RETRY_EXHAUSTED').length;
-  await recordPerformanceOperationalWindow(client, { metricKey: 'EXPORT_JOB_FAILURE', scope, cohortVersionId,
+  await recordCollectedWindow(client, { metricKey: 'EXPORT_JOB_FAILURE', scope, cohortVersionId,
     windowStart, windowEnd, numerator: exhausted, denominator: Math.max(exports.length, exhausted, 1), retryExhausted: exhausted > 0 });
-  await recordPerformanceOperationalHeartbeat(client, { component: 'METRIC', observedAt: now });
   await getPerformanceOperationalDashboard(client, now);
   await recordPerformanceOperationalHeartbeat(client, { component: 'DASHBOARD', observedAt: now });
   await client.notificationOutbox.count({ where: { status: { in: ['PENDING', 'PROCESSING'] } } });
   await recordPerformanceOperationalHeartbeat(client, { component: 'ALERT', observedAt: now });
-  const [incidentEscalation, retention] = await Promise.all([
-    escalateOverduePerformanceOperationalIncidents(client, now),
-    purgeExpiredPerformanceOperationalWindows(client, now),
-  ]);
+  const incidentEscalation = await escalateOverduePerformanceOperationalIncidents(client, now);
+  await recordPerformanceOperationalHeartbeat(client, { component: 'METRIC', observedAt: now });
+  await transaction(client, (tx) => tx.performanceOperationalHeartbeat.upsert({
+    where: { component: 'COLLECTOR_WINDOW' }, update: { observedAt: windowEnd },
+    create: { component: 'COLLECTOR_WINDOW', observedAt: windowEnd },
+  }));
   return { heartbeatDetection, incidentEscalation, retention };
 };

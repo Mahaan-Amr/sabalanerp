@@ -17,6 +17,7 @@ export const performanceDatabaseChecks = (root, environment = process.env) => {
     ['policy', 'personnelPerformancePolicy'],
     ['workflow', 'personnelPerformanceWorkflow'],
     ['lineage', 'personnelPerformanceExportLineage'],
+    ['monitoring', 'personnelPerformanceMonitoring'],
     ['safety-races', 'personnelPerformanceSafetyRaces'],
   ];
   return suites.map(([name, suite]) => ({

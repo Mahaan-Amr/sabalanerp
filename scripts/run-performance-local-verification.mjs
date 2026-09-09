@@ -4,6 +4,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performanceSourceHash } from './performance-source-identity.mjs';
+import { capturePerformanceRuntimeSourceBinding } from './performance-runtime-source-binding.mjs';
 import { runPerformanceVerification } from './performance-local-verification.mjs';
 import { canonicalPerformanceEvidence as canonical } from './performance-evidence-canonical.mjs';
 
@@ -69,16 +70,8 @@ const main = async () => {
   const captureIdentity = async () => {
     const identity = { commit: command('git', ['rev-parse', 'HEAD']), sourceHash: await performanceSourceHash() };
     if (mode === 'unit') return identity;
-    const images = {};
-    const runtimeImageLabels = {};
-    for (const service of ['backend', 'frontend', 'inquiry']) {
-      preflight();
-      images[service] = command('docker', ['inspect', '--format', '{{.Image}}', `sabalanerp-local-${service}-1`]);
-      runtimeImageLabels[service] = {
-        commit: command('docker', ['inspect', '--format', '{{ index .Config.Labels "io.sabalan.performance.source-commit" }}', `sabalanerp-local-${service}-1`]),
-        sourceHash: command('docker', ['inspect', '--format', '{{ index .Config.Labels "io.sabalan.performance.source-hash" }}', `sabalanerp-local-${service}-1`]),
-      };
-    }
+    preflight();
+    const runtime = capturePerformanceRuntimeSourceBinding({ ...identity, command });
     preflight();
     const metadata = JSON.parse(command('docker', [...composeArgs, 'exec', '-T', 'postgres', 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
       '--username', 'postgres', '--dbname', 'sabalanerp', '--tuples-only', '--no-align', '--command',
@@ -89,13 +82,9 @@ const main = async () => {
           (SELECT "policyKind", version, lifecycle, "effectiveFrom", "contentHash" FROM performance_policy_versions) p)
       )`,
     ]));
-    const labelsMatch = Object.values(runtimeImageLabels).every((labels) => labels.commit === identity.commit
-      && labels.sourceHash === identity.sourceHash);
-    return { ...identity, images, runtimeImageLabels, appliedMigrationHash: digest(canonical(metadata.migrations)),
+    return { ...identity, ...runtime, appliedMigrationHash: digest(canonical(metadata.migrations)),
       policyMetadataHash: digest(canonical(metadata.policies)),
       composeSourceHash: digest(await readFile('docker-compose.local.yml')),
-      runtimeSourceBinding: labelsMatch ? { status: 'IMAGE_LABELS_MATCH_SOURCE', evidenceHash: digest(canonical(runtimeImageLabels)) }
-        : 'NOT_ATTESTED',
     };
   };
 

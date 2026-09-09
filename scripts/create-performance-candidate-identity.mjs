@@ -1,8 +1,11 @@
 import { createHash, sign } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { performanceCandidateSignerFromEnvironment } from './performance-acceptance-artifact.mjs';
 import { canonicalPerformanceEvidence as canonical } from './performance-evidence-canonical.mjs';
+import { performanceSourceHash } from './performance-source-identity.mjs';
+import { verifyPerformanceRuntimeSourceBinding } from './performance-runtime-source-binding.mjs';
 
 const args = process.argv.slice(2);
 if (args.length !== 4 || args[0] !== '--report' || args[2] !== '--output') {
@@ -17,10 +20,18 @@ try {
     throw new Error('LOCAL_REPORT_NOT_STABLE_PASS');
   }
   const source = report.identity;
-  if (source.runtimeSourceBinding?.status !== 'IMAGE_LABELS_MATCH_SOURCE'
+  if (source.runtimeSourceBinding?.status !== 'LIVE_IMAGE_IDENTITIES_MATCH_SOURCE'
     || !/^[a-f0-9]{64}$/.test(source.runtimeSourceBinding.evidenceHash)) {
     throw new Error('RUNTIME_SOURCE_BINDING_UNPROVEN');
   }
+  const current = {
+    commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    sourceHash: await performanceSourceHash(),
+  };
+  if (source.commit !== current.commit || source.sourceHash !== current.sourceHash) {
+    throw new Error('REPORT_SOURCE_CHANGED');
+  }
+  verifyPerformanceRuntimeSourceBinding(source, current);
   const release = {
     commit: source.commit,
     sourceHash: source.sourceHash,

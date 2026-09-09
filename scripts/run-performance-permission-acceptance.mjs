@@ -48,7 +48,7 @@ try {
   const openP1 = findings.filter((finding) => severity(finding) === 'P1').length;
   if (openP0 || openP1) throw new Error('OPEN_CRITICAL_FINDINGS');
   const started = performance.now();
-  execute('foundation-unit-routes', 'npm', ['run', 'test:personnel-performance-foundation'], repositoryRoot);
+  execute('foundation-unit-routes', 'npm', ['--prefix', 'backend', 'run', 'test:personnel-performance-foundation'], repositoryRoot);
   for (const file of [
     'personnelPerformanceFoundation.integration.test.ts',
     'personnelPerformanceWorkflow.integration.test.ts',

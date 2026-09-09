@@ -670,8 +670,7 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
     <div
       aria-label="گزینه‌ها"
       role="group"
-      tabIndex={0}
-      className="flex gap-1 overflow-x-auto rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)] focus-visible:ring-offset-2 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:flex-wrap"
+      className="flex gap-1 overflow-x-auto rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-1 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:flex-wrap"
     >
       {options.map((option) => {
         const Icon = option.icon;

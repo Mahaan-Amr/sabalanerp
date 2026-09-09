@@ -4,7 +4,7 @@ import { prisma } from '../../lib/prisma';
 import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
 import { performanceVaultKeyFromEnvironment, persistPerformancePayload } from '../personnelPerformancePayloadStore';
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
-import { placePerformanceLegalHold } from '../personnelPerformanceLegalHoldStore';
+import { decidePerformanceLegalHold, placePerformanceLegalHold } from '../personnelPerformanceLegalHoldStore';
 import {
   approvePerformanceBulkErasure,
   approvePerformanceErasureImpact,
@@ -35,6 +35,11 @@ const main = async () => {
       await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:retention:second`, userId: secondApprover.id,
         featureCode: 'MANAGE_PERFORMANCE_RETENTION', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'),
         grantedByUserId: actor.id, reason: 'Independent bulk erasure approval' } });
+      for (const [userId, key] of [[actor.id, 'actor'], [secondApprover.id, 'second']] as const) {
+        await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:release-hold:${key}`, userId,
+          featureCode: 'RELEASE_PERFORMANCE_LEGAL_HOLD', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'),
+          grantedByUserId: actor.id, reason: 'Backup hold completion acceptance' } });
+      }
       const personnel = await tx.personnel.create({ data: { firstName: 'موضوع', lastName: 'حذف' } });
       const relationship = await tx.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status: 'ENDED',
         effectiveFrom: new Date('2010-01-01Z'), effectiveTo: new Date('2011-01-01Z'), createdBy: actor.id } });
@@ -108,6 +113,18 @@ const main = async () => {
       assert.equal(await tx.performanceDeletionReceipt.count({ where: { deletedRecordId: { in: [draftId, draftPayload.id] } } }), 2);
       const replay = await executePerformanceErasureOperation(tx, operation.id, new Date('2026-09-10Z'));
       assert.equal(replay.id, operation.id, 'a retry reuses the stable operation without duplicate deletion');
+      const backupHold = await placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION',
+        aggregateId: evaluation.id, reasonCode: 'BACKUP_PRESERVATION_REQUIRED' });
+      await assert.rejects(() => recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id,
+        location: 'INDEPENDENT_BACKUP', copyKey: `${suffix}:backup`, status: 'ERASED',
+        evidenceHash: canonicalPerformanceHash({ suffix, backup: 'blocked-by-hold' }) }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_ERASURE_BACKUP_LEGAL_HOLD_ACTIVE');
+      assert.equal((await executePerformanceErasureOperation(tx, operation.id, new Date('2027-01-02Z'))).status, 'LIVE_ERASED_BACKUP_PENDING',
+        'automatic backup expiry cannot bypass a later legal hold');
+      await decidePerformanceLegalHold(tx, { actorUserId: actor.id, holdId: backupHold.id,
+        action: 'APPROVE_RELEASE', reasonCode: 'BACKUP_PRESERVATION_COMPLETE' });
+      await decidePerformanceLegalHold(tx, { actorUserId: secondApprover.id, holdId: backupHold.id,
+        action: 'APPROVE_RELEASE', reasonCode: 'BACKUP_PRESERVATION_COMPLETE' });
       await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id, location: 'INDEPENDENT_BACKUP',
         copyKey: `${suffix}:backup`, status: 'ERASED', evidenceHash: canonicalPerformanceHash({ suffix, backup: 'expired' }) });
       assert.equal((await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operation.id } })).status, 'COMPLETED');

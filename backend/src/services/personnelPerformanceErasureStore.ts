@@ -84,9 +84,27 @@ const discoverGraph = async (tx: Client, evaluationId: string) => {
   ])].sort() };
 };
 
+type ErasureScope = Awaited<ReturnType<typeof discoverGraph>> & { schemaVersion: 1 };
+const activePerformanceErasureHold = async (tx: Client, operation: { encryptedScopeId: string }) => {
+  const scope = await readPerformancePayload<ErasureScope>(tx, operation.encryptedScopeId, performanceVaultKeyFromEnvironment());
+  const holdScopes = [
+    { aggregateType: 'EVALUATION', aggregateId: scope.graph.evaluationId },
+    { aggregateType: 'PERFORMANCE_SUBJECT', aggregateId: scope.graph.subjectId },
+    ...scope.graph.sectionIds.map((aggregateId) => ({ aggregateType: 'EVALUATION_SECTION', aggregateId })),
+    ...scope.graph.privacyCaseIds.map((aggregateId) => ({ aggregateType: 'PERFORMANCE_PRIVACY_CASE', aggregateId })),
+    ...scope.graph.consequenceHandoffIds.map((aggregateId) => ({ aggregateType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', aggregateId })),
+    ...scope.graph.exportIds.map((aggregateId) => ({ aggregateType: 'PERFORMANCE_EXPORT', aggregateId })),
+    ...scope.graph.policyVersionIds.map((aggregateId) => ({ aggregateType: 'POLICY_VERSION', aggregateId })),
+    ...scope.graph.criterionVersionIds.map((aggregateId) => ({ aggregateType: 'CRITERION_VERSION', aggregateId })),
+    ...scope.graph.templateVersionIds.map((aggregateId) => ({ aggregateType: 'TEMPLATE_VERSION', aggregateId })),
+  ];
+  return tx.performanceLegalHold.findFirst({ where: { status: 'ACTIVE', OR: holdScopes }, select: { id: true } });
+};
+
 const refreshOperationStatus = async (tx: Client, operationId: string, now = new Date()) => {
   const operation = await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operationId } });
-  const expired = await tx.performanceRecoverableCopy.findMany({ where: { operationId, location: 'INDEPENDENT_BACKUP',
+  const activeHold = operation.liveErasedAt ? await activePerformanceErasureHold(tx, operation) : null;
+  const expired = activeHold ? [] : await tx.performanceRecoverableCopy.findMany({ where: { operationId, location: 'INDEPENDENT_BACKUP',
     status: 'RECOVERABLE', recoverableUntil: { lte: now } }, orderBy: { version: 'desc' } });
   if (expired[0]) {
     const latestBackup = await tx.performanceRecoverableCopy.findFirst({ where: { operationId, location: 'INDEPENDENT_BACKUP' }, orderBy: { version: 'desc' } });
@@ -103,9 +121,10 @@ const refreshOperationStatus = async (tx: Client, operationId: string, now = new
   const latest = new Map<PerformanceCopyLocation, PerformanceCopyStatus>();
   for (const row of rows) if (!latest.has(row.location as PerformanceCopyLocation)) latest.set(row.location as PerformanceCopyLocation, row.status as PerformanceCopyStatus);
   const copies = requiredPerformanceCopyLocations.map((location) => ({ location, status: latest.get(location) ?? 'UNKNOWN' as const }));
-  const status = decidePerformanceErasureProgress({ impactApproved: Boolean(impact?.approvedAt), recordCount: operation.recordCount,
+  const decidedStatus = decidePerformanceErasureProgress({ impactApproved: Boolean(impact?.approvedAt), recordCount: operation.recordCount,
     bulkThreshold: operation.bulkThreshold, distinctBulkApproverIds: approvals.map(({ actorUserId }) => actorUserId), copies,
     liveErased: Boolean(operation.liveErasedAt), partialFailure: operation.status === 'PARTIAL_RESTRICTED' });
+  const status = activeHold && operation.liveErasedAt ? 'LIVE_ERASED_BACKUP_PENDING' : decidedStatus;
   return tx.performanceErasureOperation.update({ where: { id: operationId }, data: { status,
     completedAt: status === 'COMPLETED' ? now : null } });
 };
@@ -221,6 +240,10 @@ export const recordPerformanceRecoverableCopy = async (client: Client, input: { 
     if (input.status === 'RECOVERABLE' && !input.recoverableUntil) throw erasureError('تاریخ خروج نسخه قابل بازیابی از چرخه الزامی است.', 'PERFORMANCE_COPY_EXPIRY_REQUIRED', 422);
     const operation = await tx.performanceErasureOperation.findUnique({ where: { id: input.operationId } });
     if (!operation) throw erasureError('عملیات حذف پیدا نشد.', 'PERFORMANCE_ERASURE_OPERATION_NOT_FOUND', 404);
+    if (operation.liveErasedAt && input.location === 'INDEPENDENT_BACKUP'
+      && ['ERASED', 'VERIFIED_ABSENT'].includes(input.status) && await activePerformanceErasureHold(tx, operation)) {
+      throw erasureError('تا زمان رفع توقف نگهداری، حذف آخرین نسخه قابل بازیابی مجاز نیست.', 'PERFORMANCE_ERASURE_BACKUP_LEGAL_HOLD_ACTIVE');
+    }
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'performance-erasure-copy:' + operation.id + ':' + input.location}, 0))`;
     const latest = await tx.performanceRecoverableCopy.findFirst({ where: { operationId: operation.id, location: input.location }, orderBy: { version: 'desc' } });
     const copy = await tx.performanceRecoverableCopy.create({ data: { operationId: operation.id, location: input.location,
@@ -230,7 +253,6 @@ export const recordPerformanceRecoverableCopy = async (client: Client, input: { 
     return copy;
   });
 
-type ErasureScope = Awaited<ReturnType<typeof discoverGraph>> & { schemaVersion: 1 };
 const receipt = async (tx: Prisma.TransactionClient, input: { table: string; recordId: string; payloadId?: string; aggregateType: string;
   aggregateIdForHash: string; operation: { scopeHash: string; policyVersionId: string; dependencyHash: string }; actorUserId: string | null }) => {
   const existing = await tx.performanceDeletionReceipt.findUnique({ where: { deletedTableName_deletedRecordId: {
@@ -276,7 +298,7 @@ export const executePerformanceErasureOperation = async (client: Client, operati
   const claimed = await client.performanceErasureOperation.updateMany({ where: { id: operationId,
     status: { in: ['READY', 'RUNNING', 'PARTIAL_RESTRICTED'] }, OR: [{ claimedAt: null }, { claimedAt: { lt: new Date(now.getTime() - retryDelayMs) } }] },
     data: { status: 'RUNNING', claimedAt: now, attemptCount: { increment: 1 }, lastFailureCode: null } });
-  if (claimed.count !== 1) return refreshOperationStatus(client, operationId, now);
+  if (claimed.count !== 1) return runPerformanceSerializableTransaction(client, (tx) => refreshOperationStatus(tx, operationId, now));
   try {
     await runPerformanceSerializableTransaction(client, async (tx) => {
       const operation = await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operationId } });
@@ -316,7 +338,7 @@ export const executePerformanceErasureOperation = async (client: Client, operati
         evidenceHash: canonicalPerformanceHash({ operationId, scopeHash: operation.scopeHash, erasedAt: now.toISOString() }), checkedAt: now } });
       await tx.performanceErasureOperation.update({ where: { id: operationId }, data: { liveErasedAt: now, claimedAt: null } });
     });
-    return refreshOperationStatus(client, operationId, now);
+    return runPerformanceSerializableTransaction(client, (tx) => refreshOperationStatus(tx, operationId, now));
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'PERFORMANCE_ERASURE_STORAGE_OR_PROCESS_FAILURE';
     const operation = await client.performanceErasureOperation.update({ where: { id: operationId }, data: { status: 'PARTIAL_RESTRICTED', claimedAt: null,
@@ -339,7 +361,7 @@ export const runDailyPerformanceErasure = async (client: PrismaClient, now = new
   const executed: Array<Awaited<ReturnType<typeof executePerformanceErasureOperation>>> = [];
   for (const operation of retryable) executed.push(await executePerformanceErasureOperation(client, operation.id, now));
   const pendingCopies = await client.performanceErasureOperation.findMany({ where: { status: 'LIVE_ERASED_BACKUP_PENDING' } });
-  for (const operation of pendingCopies) await refreshOperationStatus(client, operation.id, now);
+  for (const operation of pendingCopies) await runPerformanceSerializableTransaction(client, (tx) => refreshOperationStatus(tx, operation.id, now));
   return { prepared: prepared.length, executed };
 };
 
@@ -373,22 +395,32 @@ const ensureRestoreRetentionPolicyEvidence = async (
   }
   const existing = await current.performancePolicyVersion.findUnique({ where: { id: source.id } });
   if (existing) {
-    if (existing.contentHash !== source.contentHash || existing.policyKind !== source.policyKind) {
+    if (existing.contentHash !== source.contentHash || existing.policyKind !== source.policyKind
+      || existing.version !== source.version || existing.predecessorId !== source.predecessorId) {
       throw erasureError('شناسه سیاست بازیابی‌شده با شاهد حذف تعارض دارد.', 'PERFORMANCE_RESTORE_ERASURE_POLICY_CONFLICT');
     }
     return existing;
   }
+  if (source.version > 1) {
+    if (!source.predecessorId) throw erasureError('زنجیره نسخه سیاست مبدأ ناقص است.', 'PERFORMANCE_RESTORE_ERASURE_POLICY_LINEAGE_INVALID');
+    await ensureRestoreRetentionPolicyEvidence(current, safety, source.predecessorId);
+  }
+  const conflictingVersion = await current.performancePolicyVersion.findUnique({ where: {
+    policyKind_version: { policyKind: 'RETENTION', version: source.version },
+  } });
+  if (conflictingVersion) {
+    throw erasureError('نسخه سیاست بازیابی‌شده با زنجیره موجود تعارض دارد.', 'PERFORMANCE_RESTORE_ERASURE_POLICY_CONFLICT');
+  }
   const creator = await current.user.findFirst({ orderBy: { id: 'asc' }, select: { id: true } });
   if (!creator) throw erasureError('عامل سیستمی برای حفظ شاهد سیاست بازیابی وجود ندارد.', 'PERFORMANCE_RESTORE_ERASURE_CREATOR_MISSING');
-  const maximum = await current.performancePolicyVersion.aggregate({ where: { policyKind: 'RETENTION' }, _max: { version: true } });
   const encrypted = await persistPerformancePayload(current, {
     aggregateType: 'PERFORMANCE_RESTORE_POLICY_EVIDENCE', aggregateId: source.id,
     payloadKind: 'RETENTION_POLICY', schemaVersion: 1, payload: content,
     keyring: performanceVaultKeyFromEnvironment(),
   });
   return current.performancePolicyVersion.create({ data: {
-    id: source.id, policyKind: 'RETENTION', version: Math.max(source.version, (maximum._max.version ?? 0) + 1),
-    lifecycle: 'RETIRED', contentHash: source.contentHash, encryptedPayloadId: encrypted.id,
+    id: source.id, policyKind: 'RETENTION', version: source.version, predecessorId: source.predecessorId,
+    lifecycle: 'DRAFT', contentHash: source.contentHash, encryptedPayloadId: encrypted.id,
     publicationReason: 'SYSTEM_RECOVERY_ERASURE_REPLAY_EVIDENCE', createdByUserId: creator.id,
     createdAt: source.createdAt,
   } });

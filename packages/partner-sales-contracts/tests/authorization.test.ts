@@ -30,6 +30,12 @@ test('missing active responder has one canonical actionable operational message'
     message: 'برای حساب شما پاسخ‌دهنده قیمت فعال تعیین نشده است.' });
 });
 
+test('integrity conflict names a user action without deflecting to support', () => {
+  const error = partnerError('INTEGRITY_CONFLICT');
+  assert.match(error.message, /صفحه را تازه کنید و دوباره اقدام کنید/);
+  assert.doesNotMatch(error.message, /پشتیبانی|تماس بگیرید/);
+});
+
 test('non-Admin actors retain the same exceptions and hidden/expired authority fails closed', () => {
   const context = PermissionContextSchema.parse({
     actorId: 'manager', persona: 'INTERNAL', isAdmin: false, partnerSellerId: 'partner', partnerStatus: 'ACTIVE',

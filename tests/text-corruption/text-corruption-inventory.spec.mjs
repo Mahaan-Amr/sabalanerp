@@ -35,3 +35,10 @@ test('continues to report question marks that replaced user-facing text', () => 
   assert.equal(records.length, 1);
   assert.equal(records[0].class, 'question-marks');
 });
+
+test('reports a two-question-mark JSX text node instead of treating it as an operator', () => {
+  const records = scan('export const Label = () => <span>??</span>;');
+
+  assert.equal(records.length, 1);
+  assert.equal(records[0].class, 'question-marks');
+});

@@ -63,6 +63,10 @@ function hasQuestionMarkCorruption(lineText) {
     let runEnd = index + 2;
     while (lineText[runEnd] === '?') runEnd += 1;
 
+    const previous = lineText.slice(0, index).trimEnd().at(-1);
+    const following = lineText.slice(runEnd).trimStart()[0];
+    if (previous === '>' || following === '<') return true;
+
     // Exactly two question marks in executable source are the JavaScript/TypeScript
     // nullish-coalescing operator (or the prefix of ??=), not damaged text.
     if (runEnd - index === 2) {

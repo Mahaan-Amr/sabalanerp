@@ -1,6 +1,6 @@
 import { performanceSourceHash } from './performance-source-identity.mjs';
 import { validatePromotionMeasurements } from './performance-promotion-measurements.mjs';
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, createPublicKey, verify } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -49,6 +49,17 @@ const attestationKey = () => {
   return keyId && !/^(change|replace|example|placeholder|local)/i.test(keyId)
     && key.length >= 32 && key.toString('base64') === encoded.replace(/\s/g, '') ? { keyId, key } : null;
 };
+const measurementVerifier = () => {
+  const keyId = process.env.PERFORMANCE_MEASUREMENT_ATTESTATION_KEY_ID?.trim() ?? '';
+  const encoded = process.env.PERFORMANCE_MEASUREMENT_ATTESTATION_PUBLIC_KEY_BASE64?.trim() ?? '';
+  if (!keyId || /^(change|replace|example|placeholder|local|test|fixture)/i.test(keyId) || !encoded) return null;
+  try {
+    const der = Buffer.from(encoded, 'base64');
+    if (der.toString('base64') !== encoded.replace(/\s/g, '')) return null;
+    const publicKey = createPublicKey({ key: der, format: 'der', type: 'spki' });
+    return publicKey.asymmetricKeyType === 'ed25519' ? { keyId, publicKey } : null;
+  } catch { return null; }
+};
 
 
 try {
@@ -66,6 +77,8 @@ try {
   else if (execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() !== input.release.commit) blockers.push('RELEASE_COMMIT_MISMATCH');
   if (validRelease(input.release) && await performanceSourceHash() !== input.release.sourceHash) blockers.push('RELEASE_SOURCE_MISMATCH');
   const checks = Array.isArray(input.checks) ? input.checks : [];
+  const measurementKey = measurementVerifier();
+  if (!measurementKey) blockers.push('MEASUREMENT_ATTESTATION_CONFIGURATION_MISSING');
   const verified = new Map();
   for (const name of gateChecks.flatMap(([, names]) => names)) {
     const entries = checks.filter((check) => check?.name === name);
@@ -77,12 +90,17 @@ try {
       const bytes = await readFile(artifactPath);
       if (!digest(entry.sha256) || hash(bytes) !== entry.sha256) throw new Error('ARTIFACT_HASH_MISMATCH');
       const artifact = JSON.parse(bytes);
+      const { measurementAttestation, ...unsignedArtifact } = artifact;
       const observedAt = Date.parse(artifact.observedAt);
       if (artifact.schemaVersion !== 1 || artifact.check !== name || artifact.status !== 'PASS'
         || !Number.isFinite(artifact.durationMs) || artifact.durationMs < 0
         || !Number.isFinite(observedAt) || observedAt > Date.now() || Date.now() - observedAt > MAX_EVIDENCE_AGE_MS
         || typeof artifact.command !== 'string' || !artifact.command.trim()
         || canonical(artifact.release) !== canonical(input.release)) throw new Error('ARTIFACT_INVALID_OR_STALE');
+      if (!measurementKey || measurementAttestation?.keyId !== measurementKey.keyId
+        || measurementAttestation?.algorithm !== 'Ed25519' || typeof measurementAttestation.signature !== 'string'
+        || !verify(null, Buffer.from(canonical(unsignedArtifact)), measurementKey.publicKey,
+          Buffer.from(measurementAttestation.signature, 'base64'))) throw new Error('ARTIFACT_ATTESTATION_INVALID');
       if (!validatePromotionMeasurements(name, artifact.measurements, artifact.observedAt, input.release.infrastructureHash)) throw new Error('MEASUREMENT_EVIDENCE_INCOMPLETE');
       if (name === 'cohort-promotion' && validTarget(input.target)
         && (artifact.measurements.stage !== input.target.cohortStage

@@ -22,10 +22,13 @@ import {
 import { personnelPerformanceAPI } from "@/lib/api";
 import {
   criterionDraftValidation,
+  createTypedApplicabilityRule,
   defaultCriterionDraft,
   lifecyclePresentation,
   policyKindLabel,
+  performanceApplicabilityFacts,
   summarizePreview,
+  typedApplicabilityValuesFromInput,
   type CriterionDraft,
   type PerformanceLifecycle,
   type PerformancePolicyKind,
@@ -43,7 +46,30 @@ type TemplateContent = {
   titleFa: string;
   categories: Array<{ id: string; titleFa: string; weightPercent: string; required: boolean; criteria: Array<{ criterionVersionId: string; weightPercent: string }> }>;
 };
-type VersionContent = { titleFa?: string; kind?: CriterionDraft["kind"]; categories?: TemplateContent["categories"] };
+type OwnerReference = { id: string; title: string; isActive: boolean; jobId?: string };
+type CatalogImportPreview = {
+  importIdentity: string;
+  contentHash: string;
+  importable: boolean;
+  warnings: string[];
+  criterionCount: number;
+  templateCount: number;
+  reviewStatus: string;
+  publicationTriggered: false;
+  compositions: Array<{
+    jobReferenceCode: string;
+    positionReferenceCode: string;
+    jobSharePercent: string;
+    addendumSharePercent: string;
+    basis: "JOB_WITH_POSITION_ADDENDUM" | "JOB_ONLY";
+  }>;
+};
+type VersionContent = {
+  titleFa?: string;
+  kind?: CriterionDraft["kind"];
+  categories?: TemplateContent["categories"];
+  catalogSource?: { reviewStatus?: "BUSINESS_REVIEW_PENDING" | "APPROVED" };
+};
 type VersionRow = {
   id: string;
   version: number;
@@ -148,6 +174,8 @@ export default function PerformancePolicyAdministration() {
   const [templates, setTemplates] = useState<VersionRow[]>([]);
   const [policies, setPolicies] = useState<VersionRow[]>([]);
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>();
+  const [ownerReferences, setOwnerReferences] = useState<{ jobs: OwnerReference[]; positions: OwnerReference[] }>({ jobs: [], positions: [] });
+  const [ownerReferenceUnavailable, setOwnerReferenceUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -167,6 +195,9 @@ export default function PerformancePolicyAdministration() {
   const [templateAdditionalCriteria, setTemplateAdditionalCriteria] = useState<Array<{ id: string; criterionVersionId: string; weightPercent: string }>>([]);
   const [templateCategoryWeight, setTemplateCategoryWeight] = useState("100.00");
   const [templateExtraCategories, setTemplateExtraCategories] = useState<TemplateCategoryDraft[]>([]);
+  const [catalogDialog, setCatalogDialog] = useState(false);
+  const [catalogText, setCatalogText] = useState("");
+  const [catalogPreview, setCatalogPreview] = useState<CatalogImportPreview>();
   const [scheduleTarget, setScheduleTarget] = useState<{ kind: ArtifactKind; row: VersionRow }>();
   const [effectiveDate, setEffectiveDate] = useState(nextTehranDate());
   const [publicationReason, setPublicationReason] = useState("");
@@ -189,14 +220,25 @@ export default function PerformancePolicyAdministration() {
       const nextCapabilities = capabilityResponse.data.capabilities ?? {};
       setCapabilities(nextCapabilities);
       if (!nextCapabilities.MANAGE_PERFORMANCE_POLICY) return;
-      const [criterionResponse, templateResponse, policyResponse] = await Promise.all([
+      const [criterionResponse, templateResponse, policyResponse, ownerReferenceResult] = await Promise.all([
         personnelPerformanceAPI.criteria(),
         personnelPerformanceAPI.templates(),
         personnelPerformanceAPI.policies(),
+        personnelPerformanceAPI.ownerReferences().then((response) => ({ ok: true as const, response })).catch(() => ({ ok: false as const })),
       ]);
       setCriteria(criterionResponse.data.criteria ?? []);
       setTemplates(templateResponse.data.templates ?? []);
       setPolicies(policyResponse.data.policies ?? []);
+      if (ownerReferenceResult.ok) {
+        setOwnerReferences({
+          jobs: ownerReferenceResult.response.data.references.jobs ?? [],
+          positions: ownerReferenceResult.response.data.references.positions ?? [],
+        });
+        setOwnerReferenceUnavailable(false);
+      } else {
+        setOwnerReferences({ jobs: [], positions: [] });
+        setOwnerReferenceUnavailable(true);
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -360,12 +402,21 @@ export default function PerformancePolicyAdministration() {
               }
             },
             variant: "solid",
-          }]}
+          }, ...(tab === "templates" ? [{
+            label: "درون‌ریزی کاتالوگ نقش",
+            onClick: () => {
+              setCatalogText("");
+              setCatalogPreview(undefined);
+              setCatalogDialog(true);
+            },
+            variant: "outline" as const,
+          }] : [])]}
         >
           <div className="space-y-3">
             {rows.length === 0 && <ErpInlineState kind="empty" title="هنوز نسخه‌ای در این بخش ثبت نشده است." />}
             {rows.map((row) => {
               const status = lifecyclePresentation(row.lifecycle);
+              const proposedCatalogContent = row.content?.catalogSource?.reviewStatus === "BUSINESS_REVIEW_PENDING";
               const editablePolicyKind = isEditablePolicyKind(row.policyKind) ? row.policyKind : undefined;
               const title = tab === "criteria"
                 ? row.content?.titleFa || row.conceptCode
@@ -380,6 +431,7 @@ export default function PerformancePolicyAdministration() {
                         <p className="font-bold">{title}</p>
                         <ErpBadge tone={status.tone}>{status.label}</ErpBadge>
                         <ErpBadge variant="outline">نسخه {row.version.toLocaleString("fa-IR")}</ErpBadge>
+                        {proposedCatalogContent && <ErpBadge tone="warning">پیشنهادی · در انتظار تأیید کسب‌وکاری</ErpBadge>}
                       </div>
                       <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">
                         {row.publicationReason || (row.lifecycle === "DRAFT" ? "هنوز منتشر نشده" : "دلیل انتشار ثبت شده است")}
@@ -413,7 +465,7 @@ export default function PerformancePolicyAdministration() {
                         setTemplateEditId(row.id);
                         setTemplateDialog(true);
                       }} />}
-                      {row.lifecycle === "DRAFT" && <ErpButton label="پیش‌نمایش و انتشار" onClick={() => void openSchedule(tab, row)} />}
+                      {row.lifecycle === "DRAFT" && !proposedCatalogContent && <ErpButton label="پیش‌نمایش و انتشار" onClick={() => void openSchedule(tab, row)} />}
                       {row.lifecycle === "SCHEDULED" && tab === "policies" && row.effectiveFrom
                         && new Date(row.effectiveFrom).getTime() <= Date.now()
                         && <ErpButton label="بازپیش‌نمایش و تأیید" onClick={() => void openSchedule("policies", row)} />}
@@ -491,10 +543,26 @@ export default function PerformancePolicyAdministration() {
           </div>}
           <ErpCheckbox label="وجود شاهد قابل اتکا برای امتیازدهی الزامی است" checked={criterionDraft.evidence.required} onChange={(event) => setCriterionDraft({ ...criterionDraft, evidence: { ...criterionDraft.evidence, required: event.target.checked } })} />
           <ErpField label="حداقل شاهد قابل اتکا" error={criterionDraft.evidence.required && criterionDraft.evidence.minimumReliableCount < 1 ? "حداقل یک شاهد قابل اتکا لازم است." : undefined}><ErpInput type="number" min={0} max={10} value={criterionDraft.evidence.minimumReliableCount} onChange={(event) => setCriterionDraft({ ...criterionDraft, evidence: { ...criterionDraft.evidence, minimumReliableCount: Number(event.target.value) } })} /></ErpField>
-          <ErpField label="واقعیت کنترل‌شده کاربردپذیری" hint="در صورت انتخاب، معیار فقط برای رابطه‌هایی که با این واقعیت منطبق‌اند اعمال می‌شود."><ErpSelect value={criterionDraft.applicability?.fact ?? ""} onChange={(event) => setCriterionDraft({ ...criterionDraft, applicability: event.target.value ? { fact: event.target.value, operator: "IN", values: [] } : null })}>
-            <option value="">برای همه</option><option value="jobId">شغل</option><option value="positionId">جایگاه</option><option value="organizationalUnitId">واحد سازمانی</option><option value="locationId">محل کار</option><option value="shiftType">نوع شیفت</option><option value="assignmentType">نوع مأموریت</option><option value="responsibilityCodes">کد مسئولیت</option><option value="hasSafetyDuty">مسئولیت ایمنی</option>
+          <ErpField label="واقعیت کنترل‌شده کاربردپذیری" hint="مقدار و نسخه منبع در Snapshot ذخیره می‌شود؛ داده ناموجود یا ناسازگار ارزیابی را متوقف می‌کند."><ErpSelect value={criterionDraft.applicability?.fact ?? ""} onChange={(event) => setCriterionDraft({
+            ...criterionDraft,
+            applicability: event.target.value ? createTypedApplicabilityRule(event.target.value as Parameters<typeof createTypedApplicabilityRule>[0]) : null,
+          })}>
+            <option value="">برای همه</option>
+            {performanceApplicabilityFacts.map((item) => <option key={item.fact} value={item.fact}>{item.label}</option>)}
           </ErpSelect></ErpField>
-          {criterionDraft.applicability && <ErpField label="مقادیر مجاز" required error={criterionDraft.applicability.values.length === 0 ? "حداقل یک مقدار کاربردپذیری وارد کنید." : undefined} hint="چند مقدار را با ویرگول جدا کنید."><ErpInput value={criterionDraft.applicability.values.join(", ")} onChange={(event) => setCriterionDraft({ ...criterionDraft, applicability: { ...criterionDraft.applicability!, values: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) } })} /></ErpField>}
+          {criterionDraft.applicability && <div className="grid gap-3 md:grid-cols-2">
+            <ErpField label="روش انطباق"><ErpSelect value={criterionDraft.applicability.operator} onChange={(event) => {
+              const operator = event.target.value as "EQUALS" | "IN" | "EXISTS";
+              setCriterionDraft({ ...criterionDraft, applicability: { ...criterionDraft.applicability!, operator, values: operator === "EXISTS" ? [] : criterionDraft.applicability!.factType === "BOOLEAN" ? [true] : [] } });
+            }}>
+              {criterionDraft.applicability.factType !== "STRING_LIST" && <option value="EQUALS">برابر است با</option>}
+              <option value="IN">یکی از مقدارها</option>
+              <option value="EXISTS">مقدار ثبت شده است</option>
+            </ErpSelect></ErpField>
+            {criterionDraft.applicability.operator !== "EXISTS" && criterionDraft.applicability.factType === "BOOLEAN" && <ErpField label="مقدار بله/خیر" required><ErpSelect value={String(criterionDraft.applicability.values[0] ?? "")} onChange={(event) => setCriterionDraft({ ...criterionDraft, applicability: { ...criterionDraft.applicability!, values: typedApplicabilityValuesFromInput("BOOLEAN", event.target.value) } })}><option value="true">بله</option><option value="false">خیر</option></ErpSelect></ErpField>}
+            {criterionDraft.applicability.operator !== "EXISTS" && (criterionDraft.applicability.fact === "jobId" || criterionDraft.applicability.fact === "positionId") && <ErpField label={criterionDraft.applicability.fact === "jobId" ? "شغل مجاز" : "جایگاه مجاز"} required error={criterionDraft.applicability.values.length === 0 ? "یک مرجع مجاز انتخاب کنید." : undefined} hint={ownerReferenceUnavailable ? "مرجع مجاز اکنون در دسترس نیست و ذخیره متوقف است." : undefined}><ErpSelect disabled={ownerReferenceUnavailable} value={String(criterionDraft.applicability.values[0] ?? "")} onChange={(event) => setCriterionDraft({ ...criterionDraft, applicability: { ...criterionDraft.applicability!, values: event.target.value ? [event.target.value] : [] } })}><option value="">انتخاب کنید</option>{(criterionDraft.applicability.fact === "jobId" ? ownerReferences.jobs : ownerReferences.positions).map((owner) => <option key={owner.id} value={owner.id} disabled={!owner.isActive}>{owner.title}{owner.isActive ? "" : " · بازنشسته/غیرفعال"}</option>)}</ErpSelect></ErpField>}
+            {criterionDraft.applicability.operator !== "EXISTS" && criterionDraft.applicability.factType !== "BOOLEAN" && criterionDraft.applicability.fact !== "jobId" && criterionDraft.applicability.fact !== "positionId" && <ErpField label={criterionDraft.applicability.factType === "STRING_LIST" ? "مقادیر مجاز" : "مقدار مجاز"} required error={criterionDraft.applicability.values.length === 0 ? "حداقل یک مقدار کاربردپذیری وارد کنید." : undefined} hint={criterionDraft.applicability.operator === "IN" ? "چند مقدار را با ویرگول جدا کنید." : undefined}><ErpInput type={criterionDraft.applicability.factType === "DATE" ? "date" : "text"} value={criterionDraft.applicability.values.join(", ")} onChange={(event) => setCriterionDraft({ ...criterionDraft, applicability: { ...criterionDraft.applicability!, values: typedApplicabilityValuesFromInput(criterionDraft.applicability!.factType, event.target.value) } })} /></ErpField>}
+          </div>}
           <fieldset aria-describedby="criterion-evidence-error" className="space-y-2">
             <legend className="text-sm font-semibold">گونه‌های شاهد مجاز <span aria-hidden="true">*</span></legend>
             <div className="grid gap-2 sm:grid-cols-3">{([
@@ -503,6 +571,39 @@ export default function PerformancePolicyAdministration() {
             {criterionDraft.evidence.allowedKinds.length === 0 && <p id="criterion-evidence-error" role="alert" className="text-sm text-[var(--sds-danger)]">حداقل یک گونه شاهد انتخاب کنید.</p>}
           </fieldset>
         </div>}
+      </ErpSheet>
+
+      <ErpSheet open={catalogDialog} onClose={() => !pending && setCatalogDialog(false)} title="پیش‌نمایش و درون‌ریزی کاتالوگ نقش" presentation="modal" size="wide" pending={pending} footer={<div className="flex justify-end gap-2">
+        <ErpButton label="انصراف" variant="ghost" onClick={() => setCatalogDialog(false)} />
+        <ErpButton label="بررسی کاتالوگ" variant="outline" disabled={pending || !catalogText.trim()} onClick={() => void run(async () => {
+          const manifest = JSON.parse(catalogText) as unknown;
+          const response = await personnelPerformanceAPI.previewCatalogImport(manifest);
+          setCatalogPreview(response.data.preview);
+        }, "کاتالوگ بدون هیچ انتشار یا تغییری بررسی شد.")} />
+        <ErpButton label="ساخت پیش‌نویس‌ها" variant="solid" disabled={pending || !catalogPreview?.importable} onClick={() => void run(async () => {
+          const manifest = JSON.parse(catalogText) as unknown;
+          await personnelPerformanceAPI.applyCatalogImport(manifest);
+        }, "معیارها و الگوها فقط به‌صورت پیش‌نویس ساخته شدند؛ هیچ انتشاری انجام نشد.").then((ok) => ok && setCatalogDialog(false))} />
+      </div>}>
+        <div className="space-y-4">
+          <ErpInlineState kind="stale" title="این عملیات فقط DRAFT می‌سازد. انتشار، فعال‌سازی و تأیید محتوای سازمانی مسیرهای جداگانه دارند." />
+          <ErpField label="manifest نسخه‌دار کاتالوگ" required hint="JSON کاتالوگ با هویت منبع، هش کانونی، واقعیت‌های نوع‌دار و مراجع واقعی شغل/جایگاه را وارد کنید.">
+            <ErpTextarea rows={12} dir="ltr" value={catalogText} onChange={(event) => { setCatalogText(event.target.value); setCatalogPreview(undefined); }} />
+          </ErpField>
+          {catalogPreview && <div className="space-y-3">
+            <ErpSummaryGrid columns={3} items={[
+              { label: "معیار پیشنهادی", value: catalogPreview.criterionCount.toLocaleString("fa-IR") },
+              { label: "الگو/افزوده پیشنهادی", value: catalogPreview.templateCount.toLocaleString("fa-IR") },
+              { label: "وضعیت بازبینی", value: catalogPreview.reviewStatus === "APPROVED" ? "تأییدشده" : "در انتظار بازبینی", tone: catalogPreview.reviewStatus === "APPROVED" ? "success" : "warning" },
+            ]} />
+            {catalogPreview.warnings.map((warning) => <ErpInlineState key={warning} kind="stale" title={warning} />)}
+            {catalogPreview.compositions.map((composition) => <ErpCard key={composition.positionReferenceCode} className="p-3">
+              <p className="font-bold">{composition.positionReferenceCode}</p>
+              <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">شغل {composition.jobSharePercent}٪ · افزوده جایگاه {composition.addendumSharePercent}٪ · {composition.basis === "JOB_ONLY" ? "بدون افزوده" : "ترکیب شغل و افزوده"}</p>
+            </ErpCard>)}
+            {!catalogPreview.importable && <ErpInlineState kind="error" title="این manifest فقط قابل پیش‌نمایش است؛ شناسه‌های واقعی و فعال شغل/جایگاه هنوز حل نشده‌اند." />}
+          </div>}
+        </div>
       </ErpSheet>
 
       <ErpSheet open={policyDialog} onClose={() => !pending && setPolicyDialog(false)} title={policyEditId ? "ویرایش پیش‌نویس سیاست" : "ساخت پیش‌نویس سیاست"} presentation="modal" size="wide" pending={pending} footer={<div className="flex justify-end gap-2">
@@ -564,8 +665,11 @@ export default function PerformancePolicyAdministration() {
         ).then((ok) => ok && (setTemplateDialog(false), setTemplateEditId(undefined)))} />
       </div>}>
         <div className="space-y-4">
-          <ErpField label="نوع الگو"><ErpSelect disabled={Boolean(templateEditId)} value={templateKind} onChange={(event) => setTemplateKind(event.target.value as typeof templateKind)}><option value="JOB_TEMPLATE">الگوی ارزیابی شغل</option><option value="POSITION_ADDENDUM">افزوده جایگاه سازمانی</option></ErpSelect></ErpField>
-          <ErpField label={templateKind === "JOB_TEMPLATE" ? "شناسه شغل" : "شناسه جایگاه"} required error={!templateOwnerId.trim() ? "شناسه مالک الگو الزامی است." : undefined}><ErpInput disabled={Boolean(templateEditId)} value={templateOwnerId} onChange={(event) => setTemplateOwnerId(event.target.value)} dir="ltr" /></ErpField>
+          <ErpField label="نوع الگو"><ErpSelect disabled={Boolean(templateEditId)} value={templateKind} onChange={(event) => {
+            setTemplateKind(event.target.value as typeof templateKind);
+            setTemplateOwnerId("");
+          }}><option value="JOB_TEMPLATE">الگوی ارزیابی شغل</option><option value="POSITION_ADDENDUM">افزوده جایگاه سازمانی</option></ErpSelect></ErpField>
+          <ErpField label={templateKind === "JOB_TEMPLATE" ? "شغل" : "جایگاه سازمانی"} required error={!templateOwnerId.trim() ? "مالک الگو را از فهرست مجاز انتخاب کنید." : undefined} hint={ownerReferenceUnavailable ? "مرجع مجاز شغل و جایگاه اکنون در دسترس نیست؛ ساخت الگو تا بازیابی مرجع متوقف است." : undefined}><ErpSelect disabled={Boolean(templateEditId) || ownerReferenceUnavailable} value={templateOwnerId} onChange={(event) => setTemplateOwnerId(event.target.value)}><option value="">انتخاب کنید</option>{(templateKind === "JOB_TEMPLATE" ? ownerReferences.jobs : ownerReferences.positions).map((owner) => <option key={owner.id} value={owner.id} disabled={!owner.isActive}>{owner.title}{owner.isActive ? "" : " · بازنشسته/غیرفعال"}</option>)}</ErpSelect></ErpField>
           <ErpField label="عنوان فارسی الگو" required error={!templateTitle.trim() ? "عنوان الگو الزامی است." : undefined}><ErpInput value={templateTitle} onChange={(event) => setTemplateTitle(event.target.value)} /></ErpField>
           <ErpField label="معیار امتیازآور آغازین" required error={!templateCriterionId ? "یک معیار قضاوتی منتشرشده انتخاب کنید." : undefined}><ErpSelect value={templateCriterionId} onChange={(event) => setTemplateCriterionId(event.target.value)}><option value="">انتخاب کنید</option>{criteria.filter((row) => (row.lifecycle === "ACTIVE" || row.lifecycle === "SCHEDULED") && row.content?.kind === "JUDGMENT").map((row) => <option key={row.id} value={row.id}>{row.content?.titleFa} · نسخه {row.version.toLocaleString("fa-IR")}</option>)}</ErpSelect></ErpField>
           <ErpField label="وزن معیار آغازین" required><ErpInput type="number" min={0} max={100} step={0.01} value={templateCriterionWeight} onChange={(event) => setTemplateCriterionWeight(event.target.value)} /></ErpField>

@@ -17,6 +17,9 @@ export const performanceDatabaseChecks = (root, environment = process.env) => {
     ['policy', 'personnelPerformancePolicy'],
     ['workflow', 'personnelPerformanceWorkflow'],
     ['lineage', 'personnelPerformanceExportLineage'],
+    ['promotion-race', 'personnelPerformancePromotionEvidenceRace'],
+    ['erasure', 'personnelPerformanceErasure'],
+    ['erasure-recovery', 'personnelPerformanceErasureRecovery'],
     ['monitoring', 'personnelPerformanceMonitoring'],
     ['safety-races', 'personnelPerformanceSafetyRaces'],
   ];
@@ -30,6 +33,7 @@ export const performanceDatabaseChecks = (root, environment = process.env) => {
     env: {
       DATABASE_URL: name === 'lineage' ? source.replace('connection_limit=2', 'connection_limit=4') : source,
       NODE_ENV: 'test', PERFORMANCE_RACE_ITERATIONS: String(iterations),
+      PERFORMANCE_ERASURE_BULK_THRESHOLD: '100',
       PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID: 'local-development-v1',
       PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64: 'cGVyZi1sb2NhbC0wMTIzNDU2Nzg5YWJjZGVmLXYxISE=',
     },
@@ -79,8 +83,12 @@ const main = async () => {
           (SELECT "policyKind", version, lifecycle, "effectiveFrom", "contentHash" FROM performance_policy_versions) p)
       )`,
     ]));
-    return { ...identity, images, sourceDatabaseAppliedMigrationHash: digest(JSON.stringify(metadata.migrations)),
-      policyMetadataHash: digest(JSON.stringify(metadata.policies)),
+    const canonical = (value) => JSON.stringify(value, function (_key, item) {
+      return item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
+    });
+    return { ...identity, images, appliedMigrationHash: digest(canonical(metadata.migrations)),
+      policyMetadataHash: digest(canonical(metadata.policies)),
       composeSourceHash: digest(await readFile('docker-compose.local.yml')),
       runtimeSourceBinding: 'NOT_ATTESTED',
     };

@@ -105,6 +105,13 @@ const REGISTERED_NOTIFICATION_EVENTS = {
     allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
     allowedRecipientResolvers: ['DIRECT_USER'],
   },
+  PERFORMANCE_LEGAL_HOLD_REVIEW_OVERDUE: {
+    type: 'PERFORMANCE_LEGAL_HOLD_REVIEW_OVERDUE', mandatory: true,
+    titleTemplate: 'بازبینی توقف نگهداری عقب افتاده است', messageTemplate: 'یک توقف نگهداری عملکرد از مهلت بازبینی ۹۰روزه عبور کرده است.',
+    priority: 'URGENT', allowedVariables: ['reviewBy'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
   ...PARTNER_NOTIFICATION_EVENTS,
   HR_DUTY_ASSIGNED: {
     type: 'HR_DUTY_ASSIGNED', mandatory: true,

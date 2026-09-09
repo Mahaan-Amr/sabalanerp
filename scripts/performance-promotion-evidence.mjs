@@ -1,6 +1,6 @@
 import { performanceSourceHash } from './performance-source-identity.mjs';
 import { validatePromotionMeasurements } from './performance-promotion-measurements.mjs';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, createPublicKey, verify } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -25,6 +25,41 @@ const digest = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(val
 const validRelease = (release) => release && /^[a-f0-9]{40}$/.test(release.commit)
   && ['sourceHash', 'schemaHash', 'policyHash', 'infrastructureHash'].every((key) => digest(release[key]))
   && ['backend', 'frontend', 'inquiry'].every((key) => /^sha256:[a-f0-9]{64}$/.test(release.images?.[key]));
+const phases = gateChecks.map(([name]) => name);
+const stages = ['PILOT', 'TEN_PERCENT', 'TWENTY_FIVE_PERCENT', 'FIFTY_PERCENT', 'ALL'];
+const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
+const targetMemberCountIsValid = (target) => {
+  if (!Number.isSafeInteger(target.readyPopulation) || target.readyPopulation <= 0
+    || !Number.isSafeInteger(target.memberCount) || target.memberCount <= 0
+    || target.memberCount > target.readyPopulation) return false;
+  if (target.cohortStage === 'PILOT') {
+    return target.memberCount >= Math.min(10, target.readyPopulation)
+      && target.memberCount <= Math.min(25, target.readyPopulation);
+  }
+  const percent = { TEN_PERCENT: 10, TWENTY_FIVE_PERCENT: 25, FIFTY_PERCENT: 50, ALL: 100 }[target.cohortStage];
+  return Boolean(percent) && target.memberCount === Math.ceil(target.readyPopulation * percent / 100);
+};
+const validTarget = (target) => target && phases.includes(target.phase) && typeof target.cohortVersionId === 'string' && target.cohortVersionId.trim()
+  && stages.includes(target.cohortStage) && digest(target.membershipHash)
+  && targetMemberCountIsValid(target);
+const attestationKey = () => {
+  const keyId = process.env.PERFORMANCE_PROMOTION_ATTESTATION_KEY_ID?.trim() ?? '';
+  const encoded = process.env.PERFORMANCE_PROMOTION_ATTESTATION_KEY_BASE64?.trim() ?? '';
+  const key = encoded ? Buffer.from(encoded, 'base64') : Buffer.alloc(0);
+  return keyId && !/^(change|replace|example|placeholder|local)/i.test(keyId)
+    && key.length >= 32 && key.toString('base64') === encoded.replace(/\s/g, '') ? { keyId, key } : null;
+};
+const measurementVerifier = () => {
+  const keyId = process.env.PERFORMANCE_MEASUREMENT_ATTESTATION_KEY_ID?.trim() ?? '';
+  const encoded = process.env.PERFORMANCE_MEASUREMENT_ATTESTATION_PUBLIC_KEY_BASE64?.trim() ?? '';
+  if (!keyId || /^(change|replace|example|placeholder|local|test|fixture)/i.test(keyId) || !encoded) return null;
+  try {
+    const der = Buffer.from(encoded, 'base64');
+    if (der.toString('base64') !== encoded.replace(/\s/g, '')) return null;
+    const publicKey = createPublicKey({ key: der, format: 'der', type: 'spki' });
+    return publicKey.asymmetricKeyType === 'ed25519' ? { keyId, publicKey } : null;
+  } catch { return null; }
+};
 
 
 try {
@@ -42,6 +77,8 @@ try {
   else if (execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() !== input.release.commit) blockers.push('RELEASE_COMMIT_MISMATCH');
   if (validRelease(input.release) && await performanceSourceHash() !== input.release.sourceHash) blockers.push('RELEASE_SOURCE_MISMATCH');
   const checks = Array.isArray(input.checks) ? input.checks : [];
+  const measurementKey = measurementVerifier();
+  if (!measurementKey) blockers.push('MEASUREMENT_ATTESTATION_CONFIGURATION_MISSING');
   const verified = new Map();
   for (const name of gateChecks.flatMap(([, names]) => names)) {
     const entries = checks.filter((check) => check?.name === name);
@@ -53,27 +90,52 @@ try {
       const bytes = await readFile(artifactPath);
       if (!digest(entry.sha256) || hash(bytes) !== entry.sha256) throw new Error('ARTIFACT_HASH_MISMATCH');
       const artifact = JSON.parse(bytes);
+      const { measurementAttestation, ...unsignedArtifact } = artifact;
+      const observedAt = Date.parse(artifact.observedAt);
       if (artifact.schemaVersion !== 1 || artifact.check !== name || artifact.status !== 'PASS'
         || !Number.isFinite(artifact.durationMs) || artifact.durationMs < 0
-        || !Number.isFinite(Date.parse(artifact.observedAt)) || Date.parse(artifact.observedAt) > Date.now()
+        || !Number.isFinite(observedAt) || observedAt > Date.now() || Date.now() - observedAt > MAX_EVIDENCE_AGE_MS
         || typeof artifact.command !== 'string' || !artifact.command.trim()
         || canonical(artifact.release) !== canonical(input.release)) throw new Error('ARTIFACT_INVALID_OR_STALE');
-      if (!validatePromotionMeasurements(name, artifact.measurements, artifact.observedAt)) throw new Error('RETIREMENT_EVIDENCE_INCOMPLETE');
+      if (!measurementKey || measurementAttestation?.keyId !== measurementKey.keyId
+        || measurementAttestation?.algorithm !== 'Ed25519' || typeof measurementAttestation.signature !== 'string'
+        || !verify(null, Buffer.from(canonical(unsignedArtifact)), measurementKey.publicKey,
+          Buffer.from(measurementAttestation.signature, 'base64'))) throw new Error('ARTIFACT_ATTESTATION_INVALID');
+      if (!validatePromotionMeasurements(name, artifact.measurements, artifact.observedAt, input.release.infrastructureHash)) throw new Error('MEASUREMENT_EVIDENCE_INCOMPLETE');
+      if (name === 'cohort-promotion' && validTarget(input.target)
+        && (artifact.measurements.stage !== input.target.cohortStage
+          || artifact.measurements.readyPopulation !== input.target.readyPopulation
+          || artifact.measurements.members !== input.target.memberCount)) throw new Error('COHORT_TARGET_MISMATCH');
       verified.set(name, { status: 'PASS', sha256: entry.sha256, durationMs: artifact.durationMs });
     } catch {
       verified.set(name, { status: 'BLOCKED', reason: 'ARTIFACT_UNVERIFIED' });
     }
   }
+  const targetIsValid = validTarget(input.target);
+  const targetIndex = targetIsValid ? phases.indexOf(input.target.phase) : phases.length - 1;
   const gates = gateChecks.map(([name, names], index) => ({
     number: index + 1, name,
-    status: blockers.length === 0 && names.every((check) => verified.get(check).status === 'PASS') ? 'PASS' : 'BLOCKED',
+    status: targetIsValid && index > targetIndex ? 'NOT_REQUIRED'
+      : blockers.length === 0 && names.every((check) => verified.get(check).status === 'PASS') ? 'PASS' : 'BLOCKED',
     checks: names.map((check) => ({ name: check, ...verified.get(check) })),
   }));
-  const decision = gates.every(({ status }) => status === 'PASS') ? 'EVIDENCE_COMPLETE' : 'BLOCKED';
-  const report = {
+  if (!targetIsValid) blockers.push('PROMOTION_TARGET_MISSING');
+  const verifiedAt = new Date().toISOString();
+  const validUntil = Date.parse(input.validUntil);
+  if (!Number.isFinite(validUntil) || validUntil <= Date.parse(verifiedAt)
+    || validUntil - Date.parse(verifiedAt) > MAX_EVIDENCE_AGE_MS) blockers.push('PROMOTION_VALIDITY_WINDOW_INVALID');
+  const signer = attestationKey();
+  if (!signer) blockers.push('PROMOTION_ATTESTATION_CONFIGURATION_MISSING');
+  const decision = targetIsValid && signer && blockers.length === 0
+    && gates.every(({ status }, index) => index > targetIndex || status === 'PASS')
+    ? 'EVIDENCE_COMPLETE' : 'BLOCKED';
+  const unsignedReport = {
     schemaVersion: 1, decision, productionActivationAuthorized: false,
-    manifestHash: hash(inputBytes), releaseIdentityHash: hash(canonical(input.release ?? null)), blockers, gates,
+    manifestHash: hash(inputBytes), releaseIdentityHash: hash(canonical(input.release ?? null)), release: input.release ?? null,
+    target: input.target ?? null, blockers, gates, verifiedAt, validUntil: input.validUntil ?? null,
   };
+  const report = signer ? { ...unsignedReport, attestation: { keyId: signer.keyId, algorithm: 'HMAC-SHA256',
+    signature: createHmac('sha256', signer.key).update(canonical(unsignedReport)).digest('hex') } } : unsignedReport;
   await writeFile(args[3], `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   console.log(`Performance promotion evidence: ${decision}. Report written.`);
   process.exitCode = decision === 'EVIDENCE_COMPLETE' ? 0 : 1;

@@ -1,11 +1,26 @@
 import { performanceSourceHash } from '../../scripts/performance-source-identity.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { validatePromotionMeasurements } from '../../scripts/performance-promotion-measurements.mjs';
+
+const canonical = (value) => JSON.stringify(value, function (_key, item) {
+  return item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
+});
+const measurementKeys = generateKeyPairSync('ed25519');
+const measurementEnvironment = {
+  PERFORMANCE_MEASUREMENT_ATTESTATION_KEY_ID: 'acceptance-runner-v1',
+  PERFORMANCE_MEASUREMENT_ATTESTATION_PUBLIC_KEY_BASE64: measurementKeys.publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+};
+const attestMeasurementArtifact = (artifact) => ({ ...artifact, measurementAttestation: {
+  keyId: measurementEnvironment.PERFORMANCE_MEASUREMENT_ATTESTATION_KEY_ID, algorithm: 'Ed25519',
+  signature: sign(null, Buffer.from(canonical(artifact)), measurementKeys.privateKey).toString('base64'),
+} });
 
 test('cohort evidence requires whole-person population counts for every rollout stage', () => {
   const measured = { stage: 'ALL', openP0: 0, openP1: 0, reconciliationMismatches: 0,
@@ -49,7 +64,7 @@ test('promotion evidence command rejects absent evidence and writes a blocked re
   }
 });
 
-test('only hash-verified, matching-release check artifacts satisfy a gate', async () => {
+test('hash-verified matching-release artifacts still require approved measurements', async () => {
   const { createHash } = await import('node:crypto');
   const { execFileSync } = await import('node:child_process');
   const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-evidence-'));
@@ -71,7 +86,7 @@ test('only hash-verified, matching-release check artifacts satisfy a gate', asyn
     await writeFile(input, JSON.stringify({ schemaVersion: 1, release, checks }));
     const run = (report) => spawnSync(process.execPath, [command, '--input', input, '--output', report], { encoding: 'utf8' });
     assert.equal(run(output).status, 1, 'other gates remain blocked');
-    assert.equal(JSON.parse(await readFile(output, 'utf8')).gates[1].status, 'PASS');
+    assert.equal(JSON.parse(await readFile(output, 'utf8')).gates[1].status, 'BLOCKED');
     await writeFile(input, JSON.stringify({ schemaVersion: 1, release: { ...release, sourceHash: '0'.repeat(64) }, checks }));
     const stale = path.join(directory, 'stale.json');
     assert.equal(run(stale).status, 1);
@@ -81,6 +96,46 @@ test('only hash-verified, matching-release check artifacts satisfy a gate', asyn
     const tampered = path.join(directory, 'tampered.json');
     assert.equal(run(tampered).status, 1);
     assert.equal(JSON.parse(await readFile(tampered, 'utf8')).gates[1].status, 'BLOCKED');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('a signed report admits an exact target only with approved measurement contracts', async () => {
+  const { createHash, createHmac } = await import('node:crypto');
+  const { execFileSync } = await import('node:child_process');
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-signed-evidence-'));
+  try {
+    const release = { commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+      sourceHash: await performanceSourceHash(), schemaHash: 'a'.repeat(64), policyHash: 'b'.repeat(64), infrastructureHash: 'c'.repeat(64),
+      images: { backend: `sha256:${'d'.repeat(64)}`, frontend: `sha256:${'e'.repeat(64)}`, inquiry: `sha256:${'f'.repeat(64)}` } };
+    const target = { phase: 'SCHEMA_PROTECTION', cohortVersionId: 'cohort-exact', cohortStage: 'PILOT', membershipHash: '9'.repeat(64),
+      readyPopulation: 10, memberCount: 10 };
+    const checks = [];
+    for (const name of ['additive-migration', 'permission-matrix', 'encryption', 'audit-lineage', 'retention', 'legal-hold', 'erasure', 'backup-restore']) {
+      const observedAt = new Date().toISOString();
+      const bytes = JSON.stringify(attestMeasurementArtifact({ schemaVersion: 1, release, check: name, status: 'PASS', durationMs: 10,
+        observedAt, command: `acceptance:${name}`, measurements: { contractVersion: 1,
+          measurementSource: 'INDEPENDENT_ACCEPTANCE_RUN', runId: `release-run-${name}`, executedBy: 'ci-acceptance-owner',
+          rawEvidenceHash: createHash('sha256').update(`raw:${name}`).digest('hex'), environmentHash: release.infrastructureHash,
+          sampleCount: 1, assertionsExecuted: 1, failures: 0, skipped: 0, commandExitCode: 0,
+          startedAt: new Date(Date.parse(observedAt) - 10).toISOString(), finishedAt: observedAt } }));
+      await writeFile(path.join(directory, `${name}.json`), bytes);
+      checks.push({ name, path: `${name}.json`, sha256: createHash('sha256').update(bytes).digest('hex') });
+    }
+    const validUntil = new Date(Date.now() + 60_000).toISOString();
+    await writeFile(path.join(directory, 'input.json'), JSON.stringify({ schemaVersion: 1, release, target, validUntil, checks }));
+    const key = Buffer.alloc(32, 17);
+    const output = path.join(directory, 'report.json');
+    const result = spawnSync(process.execPath, [command, '--input', path.join(directory, 'input.json'), '--output', output], {
+      encoding: 'utf8', env: { ...process.env, PERFORMANCE_PROMOTION_ATTESTATION_KEY_ID: 'collector-v1',
+        PERFORMANCE_PROMOTION_ATTESTATION_KEY_BASE64: key.toString('base64'), ...measurementEnvironment },
+    });
+    assert.equal(result.status, 0);
+    const report = JSON.parse(await readFile(output, 'utf8'));
+    assert.equal(report.decision, 'EVIDENCE_COMPLETE');
+    assert.deepEqual(report.target, target);
+    assert.deepEqual(report.gates.map(({ status }) => status), ['PASS', ...Array(8).fill('NOT_REQUIRED')]);
+    const { attestation, ...unsigned } = report;
+    assert.equal(attestation.signature, createHmac('sha256', key).update(canonical(unsigned)).digest('hex'));
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -139,12 +194,13 @@ test('retirement accepts complete measurements but rejects 29 healthy days or an
       successfulDeploymentIds: ['deployment-a', 'deployment-b'], successfulRestoreIds: ['restore-a', 'restore-b'],
       approvals: ['HUMAN_RESOURCES', 'SECURITY_PRIVACY', 'SYSTEM_OWNER'].map((name) => ({ name, actorId: `actor-${name}`, decision: 'APPROVE', receiptHash: 'a'.repeat(64) })) };
     for (const [index, change, expected] of [[0, {}, 'PASS'], [1, { continuouslyHealthySince: daysAgo(29) }, 'BLOCKED'], [2, { openP1: 1 }, 'BLOCKED']]) {
-      const bytes = JSON.stringify({ schemaVersion: 1, release, check: 'compatibility-retirement', status: 'PASS', durationMs: 100, observedAt,
-        command: 'measured-retirement-report', measurements: { ...measurements, ...change } });
+      const bytes = JSON.stringify(attestMeasurementArtifact({ schemaVersion: 1, release, check: 'compatibility-retirement', status: 'PASS', durationMs: 100, observedAt,
+        command: 'measured-retirement-report', measurements: { ...measurements, ...change } }));
       await writeFile(path.join(directory, 'artifact.json'), bytes);
       await writeFile(path.join(directory, 'input.json'), JSON.stringify({ schemaVersion: 1, release, checks: [{ name: 'compatibility-retirement', path: 'artifact.json', sha256: createHash('sha256').update(bytes).digest('hex') }] }));
       const output = path.join(directory, `report-${index}.json`);
-      spawnSync(process.execPath, [command, '--input', path.join(directory, 'input.json'), '--output', output]);
+      spawnSync(process.execPath, [command, '--input', path.join(directory, 'input.json'), '--output', output],
+        { env: { ...process.env, ...measurementEnvironment } });
       const report = JSON.parse(await readFile(output, 'utf8'));
       assert.equal(report.gates[8].checks.find(({ name }) => name === 'compatibility-retirement').status, expected);
       assert.equal(report.productionActivationAuthorized, false);
@@ -165,12 +221,13 @@ test('rehearsal requires real hash values before comparing repeated dry-runs', a
       dryRuns: [{ count: 1 }, { count: 1 }], idempotentApplyReconciliations: 3, driftInjected: true, concurrentHrWriteRetried: true };
     for (const [index, values, expected] of [[0, measurements, 'BLOCKED'], [1, { ...measurements, runbookHash: 'a'.repeat(64),
       dryRuns: [{ count: 1, hash: 'b'.repeat(64) }, { count: 1, hash: 'b'.repeat(64) }] }, 'PASS']]) {
-      const bytes = JSON.stringify({ schemaVersion: 1, release, check: 'runbook-rehearsal', status: 'PASS', durationMs: 1,
-        observedAt: new Date().toISOString(), command: 'rehearsal', measurements: values });
+      const bytes = JSON.stringify(attestMeasurementArtifact({ schemaVersion: 1, release, check: 'runbook-rehearsal', status: 'PASS', durationMs: 1,
+        observedAt: new Date().toISOString(), command: 'rehearsal', measurements: values }));
       await writeFile(path.join(directory, 'artifact.json'), bytes);
       await writeFile(path.join(directory, 'input.json'), JSON.stringify({ schemaVersion: 1, release, checks: [{ name: 'runbook-rehearsal', path: 'artifact.json', sha256: createHash('sha256').update(bytes).digest('hex') }] }));
       const output = path.join(directory, `${index}.json`);
-      spawnSync(process.execPath, [command, '--input', path.join(directory, 'input.json'), '--output', output]);
+      spawnSync(process.execPath, [command, '--input', path.join(directory, 'input.json'), '--output', output],
+        { env: { ...process.env, ...measurementEnvironment } });
       const report = JSON.parse(await readFile(output, 'utf8'));
       assert.equal(report.gates[3].checks.find(({ name }) => name === 'runbook-rehearsal').status, expected);
     }

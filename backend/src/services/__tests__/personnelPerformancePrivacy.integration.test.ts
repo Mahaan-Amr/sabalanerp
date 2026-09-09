@@ -82,7 +82,7 @@ const main = async () => {
       await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 2, action: 'VERIFY', reasonCode: 'IDENTITY_AND_SCOPE_VERIFIED' });
       await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 3, action: 'RESPOND', reasonCode: 'RETENTION_DECISION_RECORDED' });
       const erasureResponse = await getPerformancePrivacyCase(tx, actor.id, erasure.id);
-      assert.equal((erasureResponse.response as { decision: string }).decision, 'RETAINED_UNDER_POLICY');
+      assert.equal((erasureResponse.response as { decision: string }).decision, 'ERASURE_PENDING_POLICY_EXECUTION');
       assert.equal((erasureResponse.response as { deletionCompleted: boolean }).deletionCompleted, false);
       assert.equal(await tx.performanceEvaluation.count({ where: { id: evaluation.id } }), 1);
       await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 4, action: 'CLOSE', reasonCode: 'RESPONSE_DELIVERED' });

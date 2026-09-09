@@ -251,11 +251,11 @@ export const actOnPerformancePrivacyCase = async (client: Client, input: {
       })),
       withheldCategories: ['THIRD_PARTY_INFORMATION','SUPERVISOR_NARRATIVE','CRITERION_SCORES','OTHER_PERSONNEL_RANKING','INTERNAL_REVIEW_NOTES'],
     } : record.requestKind === 'ERASURE' ? {
-      schemaVersion: 1, decision: ids.length ? 'RETAINED_UNDER_POLICY' : 'NO_SCOPED_EVALUATIONS', deletionCompleted: false,
+      schemaVersion: 1, decision: ids.length ? 'ERASURE_PENDING_POLICY_EXECUTION' : 'NO_SCOPED_EVALUATIONS', deletionCompleted: false,
       reasonCode: input.reasonCode, closedRequestPreservationDays: 90,
       records: retentionDecisions.map((decision) => ({ retentionDecisionId: decision.id, classification: decision.classification,
         status: decision.status, policyVersionId: decision.policyVersionId, reviewAfter: decision.deleteAfter?.toISOString() ?? null })),
-      backupStatus: 'INDEPENDENT_CHECKPOINT_POLICY',
+      backupStatus: ids.length ? 'PENDING_RECOVERABLE_COPY_ACCOUNTING' : 'NOT_APPLICABLE',
     } : {
       schemaVersion: 1, decision: ids.length ? 'CORRECTION_DECIDED' : 'NO_SCOPED_EVALUATIONS',
       reasonCode: input.reasonCode, corrections: corrections.map(({ id, status, decidedAt }) => ({ id, status, decidedAt: decidedAt?.toISOString() ?? null })),

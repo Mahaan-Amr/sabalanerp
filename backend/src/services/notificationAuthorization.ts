@@ -14,6 +14,7 @@ export type NotificationAuthorizationUser = {
 
 export type NotificationWithAuthorizationEvent = {
   id: string;
+  userId?: string;
   type?: string;
   event: {
     workspace: string | null;
@@ -93,7 +94,9 @@ const canAccessPerformanceNotification = async (
       where: { id: resourceId }, select: { subjectId: true },
     });
     if (!privacyCase) return false;
-    if (row.type === 'PERFORMANCE_PRIVACY_DEADLINE') return permissions.has('VIEW_PERFORMANCE_PRIVACY_CASE');
+    if (row.type === 'PERFORMANCE_PRIVACY_DEADLINE') {
+      return row.userId === userId && permissions.has('VIEW_PERFORMANCE_PRIVACY_CASE');
+    }
     if (!personnelId) return false;
     const subject = await database.performanceSubject.findUnique({
       where: { id: privacyCase.subjectId }, select: { personnelId: true },

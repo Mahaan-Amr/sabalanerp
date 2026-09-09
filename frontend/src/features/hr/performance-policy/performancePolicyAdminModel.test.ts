@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import {
   criterionDraftValidation,
+  createTypedApplicabilityRule,
   defaultCriterionDraft,
   lifecyclePresentation,
   policyKindLabel,
   summarizePreview,
+  typedApplicabilityValuesFromInput,
 } from './performancePolicyAdminModel';
 
 assert.deepEqual(lifecyclePresentation('SCHEDULED'), { label: 'زمان‌بندی‌شده', tone: 'info' });
@@ -14,6 +16,12 @@ assert.deepEqual(criterionDraftValidation(defaultCriterionDraft()), [
   'معنای کسب‌وکاری معیار را وارد کنید.',
   'برای هر پنج درجه توضیح رفتاری اختصاصی بنویسید.',
 ]);
+assert.deepEqual(createTypedApplicabilityRule('hasSafetyDuty'), {
+  schemaVersion: 1, fact: 'hasSafetyDuty', factType: 'BOOLEAN', source: 'VERSIONED_DOCUMENTED_DUTY', sourceVersion: 'PERF_APPLICABILITY_V1', operator: 'EQUALS', values: [true],
+});
+assert.deepEqual(typedApplicabilityValuesFromInput('BOOLEAN', 'false'), [false]);
+assert.deepEqual(typedApplicabilityValuesFromInput('STRING_LIST', 'PAYABLES, RECEIVABLES'), ['PAYABLES', 'RECEIVABLES']);
+assert.deepEqual(typedApplicabilityValuesFromInput('DATE', '2026-01-15'), ['2026-01-15']);
 assert.deepEqual(summarizePreview({
   eligible: 10, evaluated: 10, increased: 2, decreased: 1, unchanged: 5,
   expired: 1, needsNewEvaluation: 1, errors: 0,

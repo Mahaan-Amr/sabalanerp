@@ -4,6 +4,11 @@ import type {
   PerformanceCriterionKind,
   PerformanceEvidenceKind,
   PerformanceLevelPolicySnapshot,
+  TypedPerformanceApplicabilityRule,
+} from './personnelPerformanceCalculation';
+import {
+  PERFORMANCE_APPLICABILITY_FACT_TYPES,
+  validateTypedPerformanceApplicabilityRule,
 } from './personnelPerformanceCalculation';
 
 const stableJson = (value: unknown): string => {
@@ -26,6 +31,7 @@ export const CONTROLLED_PERFORMANCE_FACTS = new Set([
   'positionId',
   'organizationalUnitId',
   'locationId',
+  'workplaceId',
   'shiftType',
   'assignmentType',
   'responsibilityCodes',
@@ -41,10 +47,11 @@ export type PerformanceCriterionPolicyContent = {
   kind: PerformanceCriterionKind;
   anchorsFa: string[];
   applicability: {
+    schemaVersion?: never;
     fact: string;
     operator: 'EQUALS' | 'IN' | 'EXISTS';
     values: unknown[];
-  } | null;
+  } | TypedPerformanceApplicabilityRule | null;
   evidence: {
     allowedKinds: PerformanceEvidenceKind[];
     minimumReliableCount: number;
@@ -68,10 +75,27 @@ export const validateCriterionPolicyContent = (content: PerformanceCriterionPoli
   } else if (content.anchorsFa.length > 0) {
     errors.push('KPI، متن توضیحی و کنترل بله/خیر درجه پنهان و امتیاز مرکب ندارند.');
   }
-  if (content.applicability && !CONTROLLED_PERFORMANCE_FACTS.has(content.applicability.fact)) {
-    errors.push('قاعده کاربردپذیری باید فقط از واقعیت کنترل‌شده تصویر ثابت استفاده کند.');
+  if (content.applicability && 'schemaVersion' in content.applicability
+    && content.applicability.schemaVersion !== undefined && content.applicability.schemaVersion !== 1) {
+    errors.push('نسخه قاعده کاربردپذیری پشتیبانی نمی‌شود؛ نسخه‌های قدیمی باید بدون schemaVersion و نسخه جدید باید ۱ باشد.');
+  } else if (content.applicability?.schemaVersion === 1) {
+    if (content.applicability.fact === ('locationId' as string)) {
+      errors.push('واقعیت locationId پشتیبانی نمی‌شود؛ از workplaceId با منبع سازمانی نسخه‌دار استفاده کنید.');
+    } else if (!Object.prototype.hasOwnProperty.call(PERFORMANCE_APPLICABILITY_FACT_TYPES, content.applicability.fact)) {
+      errors.push('قاعده کاربردپذیری باید فقط از واقعیت کنترل‌شده قرارداد نوع‌دار استفاده کند.');
+    } else {
+      errors.push(...validateTypedPerformanceApplicabilityRule(content.applicability));
+    }
+  } else if (content.applicability) {
+    if (!CONTROLLED_PERFORMANCE_FACTS.has(content.applicability.fact)) {
+      errors.push('قاعده کاربردپذیری باید فقط از واقعیت کنترل‌شده تصویر ثابت استفاده کند.');
+    }
+    if (!['EQUALS', 'IN', 'EXISTS'].includes(content.applicability.operator) || !Array.isArray(content.applicability.values)) {
+      errors.push('ساختار یا عملگر قاعده کاربردپذیری قدیمی معتبر نیست.');
+    }
   }
-  if (content.applicability?.operator !== 'EXISTS' && content.applicability?.values.length === 0) {
+  if (content.applicability?.operator !== 'EXISTS' && Array.isArray(content.applicability?.values)
+    && content.applicability.values.length === 0) {
     errors.push('قاعده کاربردپذیری بدون مقدار معتبر نیست.');
   }
   if (!Number.isInteger(content.evidence.minimumReliableCount) || content.evidence.minimumReliableCount < 0) {

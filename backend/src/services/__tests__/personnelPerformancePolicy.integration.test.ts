@@ -9,11 +9,18 @@ import {
   cancelScheduledPerformanceVersion,
   createPerformanceCriterionDraft,
   createPerformancePolicyDraft,
+  createPerformanceTemplateDraft,
   DEFAULT_CURRENT_LEVEL_POLICY_CONTENT,
   previewPerformancePolicy,
+  previewPerformanceRoleCatalogImport,
+  importPerformanceRoleCatalogDraft,
+  schedulePerformanceCriterion,
+  schedulePerformanceTemplate,
   schedulePerformancePolicy,
 } from '../personnelPerformancePolicyStore';
 import { DEFAULT_LEVEL_POLICY_CONTENT, nextTehranDayStart } from '../personnelPerformancePolicy';
+import { performanceRoleCatalogContentHash } from '../personnelPerformanceRoleCatalog';
+import { persistPerformancePayload } from '../personnelPerformancePayloadStore';
 
 const repositoryRoot = path.resolve(process.cwd(), '..');
 const sourceDatabaseUrl = process.env.DATABASE_URL
@@ -33,6 +40,177 @@ const main = async () => {
     lastName: 'سیاست',
   } });
   await enablePerformanceTestRelease(first, actor.id);
+  const templateContent = {
+    schemaVersion: 1 as const,
+    titleFa: 'الگوی اعتبارسنجی مالک',
+    categories: [{
+      id: 'main', titleFa: 'اصلی', weightPercent: '100.00', required: true,
+      criteria: [{ criterionVersionId: `owner-criterion-${database.runId}`, weightPercent: '100.00' }],
+    }],
+  };
+  const ownerUnit = await first.hrOrganizationalUnit.create({ data: {
+    code: `OWNER-UNIT-${database.runId}`, name: 'واحد مالک', type: 'DEPARTMENT', createdBy: actor.id,
+  } });
+  const activeJob = await first.hrJob.create({ data: {
+    code: `OWNER-JOB-${database.runId}`, title: 'شغل فعال', createdBy: actor.id,
+  } });
+  const retiredJob = await first.hrJob.create({ data: {
+    code: `OWNER-RETIRED-${database.runId}`, title: 'شغل بازنشسته', isActive: false, createdBy: actor.id,
+  } });
+  const activePosition = await first.hrPosition.create({ data: {
+    code: `OWNER-POS-${database.runId}`, title: 'جایگاه فعال', jobId: activeJob.id,
+    organizationalUnitId: ownerUnit.id, createdBy: actor.id,
+  } });
+  const validOwnerDraft = await createPerformanceTemplateDraft(first, {
+    templateKind: 'JOB_TEMPLATE', ownerType: 'JOB', ownerId: activeJob.id,
+    content: templateContent, createdByUserId: actor.id, keyring,
+  });
+  assert.equal(validOwnerDraft.ownerId, activeJob.id);
+  await assert.rejects(createPerformanceTemplateDraft(first, {
+    templateKind: 'JOB_TEMPLATE', ownerType: 'JOB', ownerId: 'missing-job',
+    content: templateContent, createdByUserId: actor.id, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_TEMPLATE_OWNER_UNAVAILABLE');
+  await assert.rejects(createPerformanceTemplateDraft(first, {
+    templateKind: 'JOB_TEMPLATE', ownerType: 'JOB', ownerId: retiredJob.id,
+    content: templateContent, createdByUserId: actor.id, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_TEMPLATE_OWNER_RETIRED');
+  await assert.rejects(createPerformanceTemplateDraft(first, {
+    templateKind: 'POSITION_ADDENDUM', ownerType: 'JOB', ownerId: activeJob.id,
+    content: templateContent, createdByUserId: actor.id, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_TEMPLATE_OWNER_TYPE_MISMATCH');
+  const validPositionDraft = await createPerformanceTemplateDraft(first, {
+    templateKind: 'POSITION_ADDENDUM', ownerType: 'POSITION', ownerId: activePosition.id,
+    content: templateContent, createdByUserId: actor.id, keyring,
+  });
+  assert.equal(validPositionDraft.ownerId, activePosition.id);
+  const futureRetiredJob = await first.hrJob.create({ data: {
+    code: `OWNER-FUTURE-RETIRED-${database.runId}`, title: 'شغل با بازنشستگی آینده', createdBy: actor.id,
+  } });
+  const futureRetiredDraft = await createPerformanceTemplateDraft(first, {
+    templateKind: 'JOB_TEMPLATE', ownerType: 'JOB', ownerId: futureRetiredJob.id,
+    content: templateContent, createdByUserId: actor.id, keyring,
+  });
+  const ownerSchedulingNow = new Date();
+  const futureRetirement = nextTehranDayStart(ownerSchedulingNow);
+  await first.hrFoundationLifecycleVersion.create({ data: {
+    stableKey: `future-retired-job-${database.runId}`, entityType: 'JOB', entityId: futureRetiredJob.id, version: 1,
+    status: 'INACTIVE', effectiveFrom: futureRetirement, reason: 'بازنشستگی آینده برای آزمون مالک الگو',
+    beforeJson: { isActive: true }, afterJson: { isActive: false }, changedByUserId: actor.id,
+  } });
+  await assert.rejects(schedulePerformanceTemplate(first, {
+    versionId: futureRetiredDraft.id, effectiveFrom: new Date(futureRetirement.getTime() + 24 * 60 * 60 * 1_000),
+    reason: 'آزمون جلوگیری از انتشار برای مالک بازنشسته', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_TEMPLATE_OWNER_RETIRED');
+
+  const importJob = await first.hrJob.create({ data: {
+    code: `IMPORT-JOB-${database.runId}`, title: 'شغل درون‌ریزی', createdBy: actor.id,
+  } });
+  const importPosition = await first.hrPosition.create({ data: {
+    code: `IMPORT-POS-${database.runId}`, title: 'جایگاه درون‌ریزی', jobId: importJob.id,
+    organizationalUnitId: ownerUnit.id, createdBy: actor.id,
+  } });
+  const importManifest: any = {
+    schemaVersion: 1,
+    catalog: {
+      stableKey: `PERF_IMPORT_${database.runId.toUpperCase()}`, versionCode: 'VERSION_1', lifecycle: 'DRAFT',
+      importIdentity: `PERF-IMPORT:${database.runId}:V1`, contentHash: '0'.repeat(64),
+      contentHashMethod: 'SHA256_CANONICAL_JSON_EXCLUDING_CATALOG_CONTENT_HASH',
+    },
+    source: { provenanceCategory: 'LOCAL', asOf: new Date().toISOString(), references: ['integration-controlled-source'], extractedFacts: true },
+    review: { contentOrigin: 'COMPANY_CONTROLLED_SOURCE', status: 'BUSINESS_REVIEW_PENDING' },
+    applicabilityDictionary: Object.entries({
+      jobId: 'ID', positionId: 'ID', organizationalUnitId: 'ID', workplaceId: 'ID', shiftType: 'STRING',
+      assignmentType: 'STRING', responsibilityCodes: 'STRING_LIST', effectiveDate: 'DATE', hasSafetyDuty: 'BOOLEAN',
+    }).map(([fact, type]) => ({ fact, type, operators: type === 'STRING_LIST' ? ['IN', 'EXISTS'] : ['EQUALS', 'IN', 'EXISTS'], unknown: 'BLOCK', source: 'employment-assignment', sourceVersion: 'v1' })),
+    evidenceDictionary: [{ code: 'CONTROLLED_SOURCE', classification: 'CANONICAL_EVIDENCE' }],
+    jobs: [{
+      reference: { code: 'IMPORT_JOB', id: importJob.id, synthetic: false }, titleFa: 'شغل درون‌ریزی',
+      categories: [{ code: 'CORE', titleFa: 'اصلی', weight: 100 }],
+      criteria: [{
+        conceptCode: `IMPORT_QUALITY_${database.runId.toUpperCase()}`, versionCode: 'QUALITY_V1', titleFa: 'کیفیت درون‌ریزی', meaningFa: 'کیفیت ثبت‌شده در منبع کنترل‌شده',
+        kind: 'JUDGMENT', categoryCode: 'CORE', weight: 100, applicability: null,
+        anchorsFa: ['خیلی ضعیف', 'ضعیف', 'مطابق انتظار', 'خوب', 'برجسته'],
+        evidencePolicy: { dictionaryCodes: ['CONTROLLED_SOURCE'], minimumReliableCount: 1, windowDays: 30, automaticGrade: false },
+        outsideControlFactors: ['نبود داده ورودی'],
+      }],
+    }],
+    positions: [{
+      reference: { code: 'IMPORT_POSITION', id: importPosition.id, synthetic: false }, jobReferenceCode: 'IMPORT_JOB', titleFa: 'افزوده درون‌ریزی',
+      composition: { jobWeight: 80, addendumWeight: 20 }, categories: [{ code: 'ADDENDUM', titleFa: 'افزوده', weight: 100 }],
+      criteria: [{
+        conceptCode: `IMPORT_ADDENDUM_${database.runId.toUpperCase()}`, versionCode: 'ADDENDUM_V1', titleFa: 'کنترل افزوده', meaningFa: 'انتظار ویژه جایگاه کنترل‌شده',
+        kind: 'JUDGMENT', categoryCode: 'ADDENDUM', weight: 100,
+        applicability: { fact: 'positionId', operator: 'EQUALS', values: ['IMPORT_POSITION'] },
+        anchorsFa: ['خیلی ضعیف', 'ضعیف', 'مطابق انتظار', 'خوب', 'برجسته'],
+        evidencePolicy: { dictionaryCodes: ['CONTROLLED_SOURCE'], minimumReliableCount: 1, windowDays: 30, automaticGrade: false },
+        outsideControlFactors: ['نبود داده ورودی'],
+      }],
+    }],
+  };
+  importManifest.catalog.contentHash = performanceRoleCatalogContentHash(importManifest);
+  const importPreview = await previewPerformanceRoleCatalogImport(first, importManifest);
+  assert.equal(importPreview.importable, true);
+  assert.deepEqual(importPreview.compositions.map(({ jobSharePercent, addendumSharePercent }) => ({ jobSharePercent, addendumSharePercent })), [
+    { jobSharePercent: '80.00', addendumSharePercent: '20.00' },
+  ]);
+  const imported = await importPerformanceRoleCatalogDraft(first, {
+    manifest: importManifest, createdByUserId: actor.id, keyring,
+  });
+  assert.equal(imported.publicationTriggered, false);
+  assert.equal(imported.retried, false);
+  assert.equal(imported.criterionVersionIds.length, 2);
+  assert.equal(imported.templateVersionIds.length, 2);
+  assert.equal(await first.performanceCriterionVersion.count({ where: { id: { in: imported.criterionVersionIds }, lifecycle: 'DRAFT' } }), 2);
+  assert.equal(await first.performanceTemplateVersion.count({ where: { id: { in: imported.templateVersionIds }, lifecycle: 'DRAFT' } }), 2);
+  await assert.rejects(schedulePerformanceCriterion(first, {
+    versionId: imported.criterionVersionIds[0], effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
+    reason: 'آزمون جلوگیری از انتشار محتوای پیشنهادی', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED');
+  await assert.rejects(schedulePerformanceTemplate(first, {
+    versionId: imported.templateVersionIds[0], effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
+    reason: 'آزمون جلوگیری از انتشار الگوی پیشنهادی', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED');
+  const retriedImport = await importPerformanceRoleCatalogDraft(first, {
+    manifest: importManifest, createdByUserId: actor.id, keyring,
+  });
+  assert.deepEqual(retriedImport.criterionVersionIds, imported.criterionVersionIds);
+  assert.equal(retriedImport.retried, true);
+  assert.equal(await first.performanceOperationReceipt.count({ where: { operationKind: 'IMPORT_ROLE_CATALOG_DRAFT' } }), 1);
+
+  const conflictingImport = structuredClone(importManifest);
+  conflictingImport.jobs[0].titleFa = 'عنوان متعارض';
+  conflictingImport.catalog.contentHash = performanceRoleCatalogContentHash(conflictingImport);
+  await assert.rejects(importPerformanceRoleCatalogDraft(first, {
+    manifest: conflictingImport, createdByUserId: actor.id, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_ROLE_CATALOG_IMPORT_CONFLICT');
+
+  const recoverableImport = structuredClone(importManifest);
+  const recoveryJob = await first.hrJob.create({ data: {
+    code: `RECOVERY-JOB-${database.runId}`, title: 'شغل بازیابی', createdBy: actor.id,
+  } });
+  const recoveryPosition = await first.hrPosition.create({ data: {
+    code: `RECOVERY-POS-${database.runId}`, title: 'جایگاه بازیابی', jobId: recoveryJob.id,
+    organizationalUnitId: ownerUnit.id, createdBy: actor.id,
+  } });
+  recoverableImport.catalog.stableKey = `PERF_RECOVERY_${database.runId.toUpperCase()}`;
+  recoverableImport.catalog.versionCode = 'RECOVERY_V1';
+  recoverableImport.catalog.importIdentity = `PERF-RECOVERY:${database.runId}:V1`;
+  recoverableImport.jobs[0].criteria[0].conceptCode = `RECOVERY_QUALITY_${database.runId.toUpperCase()}`;
+  recoverableImport.jobs[0].reference.id = recoveryJob.id;
+  recoverableImport.positions[0].criteria[0].conceptCode = `RECOVERY_ADDENDUM_${database.runId.toUpperCase()}`;
+  recoverableImport.positions[0].reference.id = 'missing-position';
+  recoverableImport.catalog.contentHash = performanceRoleCatalogContentHash(recoverableImport);
+  const criterionCountBeforeRecovery = await first.performanceCriterionVersion.count();
+  await assert.rejects(importPerformanceRoleCatalogDraft(first, {
+    manifest: recoverableImport, createdByUserId: actor.id, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_TEMPLATE_OWNER_UNAVAILABLE');
+  assert.equal(await first.performanceCriterionVersion.count(), criterionCountBeforeRecovery, 'failed import must roll back every draft');
+  recoverableImport.positions[0].reference.id = recoveryPosition.id;
+  recoverableImport.catalog.contentHash = performanceRoleCatalogContentHash(recoverableImport);
+  const recovered = await importPerformanceRoleCatalogDraft(first, {
+    manifest: recoverableImport, createdByUserId: actor.id, keyring,
+  });
+  assert.equal(recovered.criterionVersionIds.length, 2);
   const content = {
     schemaVersion: 1 as const,
     conceptCode: `PERF-CONCURRENCY-${database.runId.toUpperCase()}`,
@@ -64,6 +242,10 @@ const main = async () => {
     contentHash: 'a'.repeat(64),
     createdByUserId: actor.id,
   } });
+  const activationPayload = await persistPerformancePayload(first, {
+    aggregateType: 'CRITERION_VERSION', aggregateId: activationVersion.id, payloadKind: 'CRITERION_CONTENT', schemaVersion: 1,
+    payload: { ...content, conceptCode: activationIdentity.conceptCode }, keyring,
+  });
   const activationTime = new Date();
   await first.performanceCriterionVersion.update({
     where: { id: activationVersion.id },
@@ -73,6 +255,8 @@ const main = async () => {
       publicationReason: 'آزمون فعال‌سازی اتمیک و تکرارپذیر',
       publishedByUserId: actor.id,
       publishedAt: activationTime,
+      encryptedPayloadId: activationPayload.id,
+      contentHash: activationPayload.contentHash,
     },
   });
   const activationKey = `artifact-activation-${database.runId}`;
@@ -98,12 +282,18 @@ const main = async () => {
     contentHash: 'b'.repeat(64),
     createdByUserId: actor.id,
   } });
+  const systemActivationPayload = await persistPerformancePayload(first, {
+    aggregateType: 'CRITERION_VERSION', aggregateId: systemActivationVersion.id, payloadKind: 'CRITERION_CONTENT', schemaVersion: 1,
+    payload: { ...content, conceptCode: systemActivationIdentity.conceptCode }, keyring,
+  });
   await first.performanceCriterionVersion.update({ where: { id: systemActivationVersion.id }, data: {
     lifecycle: 'SCHEDULED',
     effectiveFrom: activationTime,
     publicationReason: 'آزمون عامل سیستمی نگهداری زمان‌بندی‌شده',
     publishedByUserId: actor.id,
     publishedAt: activationTime,
+    encryptedPayloadId: systemActivationPayload.id,
+    contentHash: systemActivationPayload.contentHash,
   } });
   await activateDuePerformanceArtifacts(first, {
     actorUserId: null,

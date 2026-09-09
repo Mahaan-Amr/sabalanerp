@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import type { RequestHandler } from 'express';
-import router, { classifyPerformanceRequestMetric, performanceRequestObservationOutcome, projectPersonnelPerformanceCapabilities } from '../personnel-performance';
+import router, {
+  classifyPerformanceRequestMetric,
+  performanceRequestObservationOutcome,
+  projectPersonnelPerformanceCapabilities,
+} from '../personnel-performance';
 
 const registeredRoutes = (router as unknown as {
   stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
@@ -33,6 +37,7 @@ assert.deepEqual(registeredRoutes, [
   'POST /reminders/run',
   'GET /badge/me',
   'POST /badges',
+  'POST /badge-deliveries',
   'GET /history/:personnelId',
   'POST /analytics',
   'POST /ranking',
@@ -46,6 +51,7 @@ assert.deepEqual(registeredRoutes, [
   'GET /consequence-handoffs/:handoffId',
   'POST /results/:resultId/suspend',
   'POST /evaluations/:evaluationId/corrections',
+  'GET /owner-references',
   'GET /criteria',
   'POST /criteria',
   'PUT /criteria/:versionId',
@@ -54,6 +60,8 @@ assert.deepEqual(registeredRoutes, [
   'POST /templates',
   'PUT /templates/:versionId',
   'POST /templates/:versionId/schedule',
+  'POST /catalog-import/preview',
+  'POST /catalog-import/apply',
   'GET /policies',
   'POST /policies',
   'PUT /policies/:versionId',
@@ -78,11 +86,19 @@ assert.deepEqual(registeredRoutes, [
   'POST /operations/disable',
   'POST /operations/training-evidence',
   'POST /operations/cohorts',
+  'POST /operations/promotion-evidence',
+  'POST /operations/promotion-evidence/:promotionEvidenceId/revoke',
   'POST /operations/cohorts/:cohortVersionId/decisions',
   'POST /operations/cohorts/:cohortVersionId/activate',
   'POST /operations/pauses/:pauseId/decisions',
   'POST /operations/pauses/:pauseId/resume',
-  'POST /retention/evaluations/:evaluationId/assess', 'GET /legal-holds',
+  'POST /retention/evaluations/:evaluationId/assess',
+  'GET /retention/erasure',
+  'POST /retention/erasure/policies/:policyVersionId/impact-approval',
+  'POST /retention/erasure/:operationId/bulk-approvals',
+  'POST /retention/erasure/:operationId/copies',
+  'POST /retention/erasure/:operationId/run',
+  'GET /legal-holds',
   'POST /legal-holds',
   'POST /legal-holds/:holdId/decisions',
 ]);
@@ -92,11 +108,32 @@ const rolloutLayer = (router as unknown as {
 }).stack.find((layer) => layer.route?.path === '/rollout');
 assert.ok(rolloutLayer && rolloutLayer.route!.stack.length >= 2, 'rollout metadata must retain server-side authorization middleware');
 
-for (const path of ['/readiness/reconstruct', '/readiness/:runId/retry', '/supervisor/sections/:sectionId/submit', '/reviews/:submissionId/decision', '/sections/:sectionId/not-evaluable', '/evaluations/:evaluationId/invalidate', '/exports', '/consequence-handoffs', '/results/:resultId/suspend', '/evaluations/:evaluationId/corrections', '/criteria', '/templates', '/policies', '/activation/run-due-policies', '/activation/run-due-artifacts']) {
+const ownerReferenceLayer = (router as unknown as {
+  stack: Array<{ route?: { path: string; stack: Array<{ handle: RequestHandler }> } }>;
+}).stack.find((layer) => layer.route?.path === '/owner-references');
+assert.ok(ownerReferenceLayer && ownerReferenceLayer.route!.stack.length >= 2,
+  'performance owner references must use policy authority without broad organization access');
+
+for (const path of ['/readiness/reconstruct', '/readiness/:runId/retry', '/supervisor/sections/:sectionId/submit', '/reviews/:submissionId/decision', '/sections/:sectionId/not-evaluable', '/evaluations/:evaluationId/invalidate', '/exports', '/consequence-handoffs', '/results/:resultId/suspend', '/evaluations/:evaluationId/corrections', '/criteria', '/templates', '/catalog-import/apply', '/policies', '/activation/run-due-policies', '/activation/run-due-artifacts']) {
   const writeLayer = (router as unknown as {
     stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
   }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);
   assert.ok(writeLayer && writeLayer.route!.stack.length >= 3, `${path} writes require permission and server-side rollout middleware`);
+}
+
+for (const path of ['/operations/promotion-evidence', '/operations/promotion-evidence/:promotionEvidenceId/revoke']) {
+  const evidenceLayer = (router as unknown as {
+    stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
+  }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);
+  assert.ok(evidenceLayer && evidenceLayer.route!.stack.length >= 2, `${path} requires explicit evidence-administration authorization`);
+}
+
+for (const path of ['/retention/erasure/policies/:policyVersionId/impact-approval', '/retention/erasure/:operationId/bulk-approvals',
+  '/retention/erasure/:operationId/copies', '/retention/erasure/:operationId/run']) {
+  const erasureLayer = (router as unknown as {
+    stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
+  }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);
+  assert.ok(erasureLayer && erasureLayer.route!.stack.length >= 2, `${path} requires explicit retention-erasure authorization`);
 }
 
 assert.deepEqual(projectPersonnelPerformanceCapabilities([

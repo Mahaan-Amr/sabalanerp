@@ -18,6 +18,8 @@ import {
   type PerformanceAnalyticsMember,
   type PerformanceConsequenceRule,
   PERFORMANCE_LEVELS,
+  performanceLevelForCode,
+  samePerformanceLevel,
   performanceReportingQuarter,
   performanceReportingMonths,
   performancePeerFamilyKey,
@@ -36,7 +38,26 @@ import { generatePdfBufferFromHtml } from '../utils/pdf';
 // Vault snapshots must contain JSON values: dates become ISO strings and absent fields are omitted.
 const reportingSnapshot = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
-const disclosureError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
+const disclosureError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status, statusCode: status });
+
+export const erasePerformanceExportArtifacts = async (
+  client: PrismaClient | Prisma.TransactionClient, exportIds: readonly string[], erasedAt = new Date(),
+) => {
+  if (!exportIds.length) return { erased: 0 };
+  const [receipts, artifacts] = await Promise.all([
+    client.performanceExportReceipt.findMany({ where: { id: { in: [...exportIds] } }, select: { id: true, artifactPath: true } }),
+    client.performanceExportArtifact.findMany({ where: { exportId: { in: [...exportIds] } }, select: { artifactPath: true } }),
+  ]);
+  const paths = new Set(artifacts.map(({ artifactPath }) => artifactPath));
+  for (const receipt of receipts) if (receipt.artifactPath) paths.add(receipt.artifactPath);
+  for (const artifactPath of paths) {
+    await unlink(artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+  }
+  await client.performanceExportReceipt.updateMany({ where: { id: { in: receipts.map(({ id }) => id) } }, data: {
+    status: PerformanceExportStatus.DELETED, artifactPath: null, deletedAt: erasedAt,
+  } });
+  return { erased: paths.size };
+};
 
 type ConsequencePolicyContent = { schemaVersion: 1; rules: Record<string, PerformanceConsequenceRule> };
 const effectiveConsequencePolicy = async (client: PrismaClient | Prisma.TransactionClient, at = new Date()) => {
@@ -124,7 +145,7 @@ const auditDisclosure = async (client: PrismaClient | Prisma.TransactionClient, 
   reason?: string;
   evidenceHash?: string;
   encryptedPayloadId?: string;
-}): Promise<unknown> => {
+}): Promise<{ id: string; occurredAt: Date }> => {
   if ('$transaction' in client) {
     return client.$transaction((tx) => auditDisclosure(tx, input), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
@@ -157,8 +178,8 @@ const auditDisclosure = async (client: PrismaClient | Prisma.TransactionClient, 
   } });
 };
 
-const activeRelationshipForPersonnel = async (client: PrismaClient | Prisma.TransactionClient, personnelId: string) => client.hrEmploymentRelationship.findFirst({
-  where: { personnelId, status: { in: ['ACTIVE', 'SUSPENDED'] } },
+const activeRelationshipForPersonnel = async (client: PrismaClient | Prisma.TransactionClient, personnelId: string, now = new Date()) => client.hrEmploymentRelationship.findFirst({
+  where: { personnelId, status: { in: ['ACTIVE', 'SUSPENDED'] }, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
   orderBy: [{ effectiveFrom: 'desc' }, { id: 'desc' }],
   select: { id: true, personnelId: true, status: true, effectiveFrom: true, effectiveTo: true },
 });
@@ -196,7 +217,7 @@ const activeDisclosureCohort = (client: PrismaClient | Prisma.TransactionClient,
   ? client.performanceCohortVersion.findFirst({ where: { id: cohortVersionId, lifecycle: 'ACTIVE', effectiveFrom: { lte: new Date() } }, select: { id: true } })
   : Promise.resolve(null);
 
-const projectionForPersonnel = async (client: PrismaClient, personnelId: string) => {
+const projectionForPersonnel = async (client: PrismaClient | Prisma.TransactionClient, personnelId: string) => {
   const relationship = await activeRelationshipForPersonnel(client, personnelId);
   if (!relationship) return null;
   const subject = await client.performanceSubject.findFirst({
@@ -246,6 +267,116 @@ export const getPersonnelPerformanceBadges = async (client: PrismaClient, input:
   return badges.filter(({ badge }) => badge !== null);
 };
 
+const PERSONAL_SUMMARY_KIND = 'PERSONAL_PERFORMANCE_LEVEL_SUMMARY' as const;
+const IDENTITY_VERIFICATION_METHODS = new Set(['IN_PERSON_GOVERNMENT_ID', 'IN_PERSON_EMPLOYEE_RECORD']);
+
+export const deliverPersonalPerformanceSummary = async (client: PrismaClient | Prisma.TransactionClient, input: {
+  actorUserId: string;
+  personnelId: string;
+  identityVerification: {
+    methodCode: 'IN_PERSON_GOVERNMENT_ID' | 'IN_PERSON_EMPLOYEE_RECORD';
+    evidenceReference: string;
+    verifiedAt: Date;
+  };
+  keyring?: PerformanceVaultKey;
+}) => {
+  const verification = input.identityVerification;
+  if (!verification || !IDENTITY_VERIFICATION_METHODS.has(verification.methodCode)
+    || typeof verification.evidenceReference !== 'string' || verification.evidenceReference.trim().length < 3
+    || verification.evidenceReference.length > 256 || !(verification.verifiedAt instanceof Date)
+    || !Number.isFinite(verification.verifiedAt.getTime())) {
+    throw disclosureError('احراز هویت معتبر پیش از تحویل خلاصه الزامی است.', 'PERFORMANCE_PERSONAL_SUMMARY_IDENTITY_REQUIRED', 422);
+  }
+  const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
+  return runPerformanceSerializableTransaction(client, async (tx) => {
+    await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+    const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+    if (verification.verifiedAt > clock.now) {
+      throw disclosureError('زمان احراز هویت معتبر نیست.', 'PERFORMANCE_PERSONAL_SUMMARY_IDENTITY_REQUIRED', 422);
+    }
+    const [actor, relationship, recipientAccount] = await Promise.all([
+      tx.user.findUnique({ where: { id: input.actorUserId }, select: { isActive: true, personnelId: true } }),
+      activeRelationshipForPersonnel(tx, input.personnelId, clock.now),
+      tx.user.findFirst({ where: { personnelId: input.personnelId, isActive: true }, select: { id: true } }),
+    ]);
+    const subject = relationship ? await tx.performanceSubject.findFirst({ where: {
+      personnelId: input.personnelId, employmentRelationshipId: relationship.id, identityDetachedAt: null,
+    }, orderBy: { createdAt: 'desc' } }) : null;
+    const permissions = actor?.isActive ? await activeHrActionPermissionsForUser(tx, input.actorUserId, clock.now) : [];
+    const supervisorResponsibility = actor?.isActive && actor.personnelId && relationship ? await tx.hrAssignmentPerformanceResponsibility.findFirst({
+      where: {
+        status: 'ACTIVE', effectiveFrom: { lte: clock.now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: clock.now } }],
+        employmentAssignment: {
+          employmentRelationshipId: relationship.id, effectiveFrom: { lte: clock.now },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gt: clock.now } }],
+        },
+        supervisorAssignment: {
+          effectiveFrom: { lte: clock.now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: clock.now } }],
+          employmentRelationship: {
+            personnelId: actor.personnelId, status: { in: ['ACTIVE', 'SUSPENDED'] }, effectiveFrom: { lte: clock.now },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gt: clock.now } }],
+          },
+        },
+      },
+      select: { id: true },
+    }) : null;
+    const authority = permissions.includes('DELIVER_PERFORMANCE_PERSONAL_SUMMARY')
+      ? { kind: 'HR_DELIVERY_PERMISSION' as const, code: 'DELIVER_PERFORMANCE_PERSONAL_SUMMARY' }
+      : supervisorResponsibility && permissions.includes('SUBMIT_PERFORMANCE_EVALUATION')
+        ? { kind: 'CURRENT_RESPONSIBLE_SUPERVISOR' as const, responsibilityId: supervisorResponsibility.id, code: 'SUBMIT_PERFORMANCE_EVALUATION' }
+        : null;
+    if (!actor?.isActive || !relationship || !subject || recipientAccount || !authority) {
+      await auditDisclosure(client, {
+        aggregateType: 'PERSONAL_PERFORMANCE_SUMMARY_DENIAL', aggregateId: canonicalPerformanceHash(input.personnelId),
+        eventType: 'PERSONAL_PERFORMANCE_SUMMARY_DELIVERY_DENIED', actorUserId: input.actorUserId,
+        authorityCodes: ['DELIVER_PERFORMANCE_PERSONAL_SUMMARY'],
+      });
+      throw disclosureError('تحویل خلاصه شخصی عملکرد مجاز نیست.', 'PERFORMANCE_PERSONAL_SUMMARY_DELIVERY_FORBIDDEN', 403);
+    }
+    const summary = await projectionForPersonnel(tx, input.personnelId);
+    if (!summary) throw disclosureError('خلاصه عملکرد موقتاً در دسترس نیست.', 'PERFORMANCE_PERSONAL_SUMMARY_UNAVAILABLE', 409);
+    const deliveryId = randomUUID();
+    const projectionSource = await tx.performanceCurrentLevelProjection.findUnique({
+      where: { subjectId: subject.id },
+      select: { levelPolicyVersionId: true, sourceResultsHash: true, version: true },
+    });
+    const receiptPayload = {
+      schemaVersion: 1,
+      summaryKind: PERSONAL_SUMMARY_KIND,
+      retentionClass: 'DISCLOSURE_RECEIPT',
+      recipientPersonnelId: input.personnelId,
+      subjectId: subject.id,
+      employmentRelationshipId: relationship.id,
+      actorUserId: input.actorUserId,
+      authority,
+      identityVerification: { methodCode: verification.methodCode, verifiedAt: verification.verifiedAt.toISOString() },
+      identityEvidenceReferenceHash: canonicalPerformanceHash(verification.evidenceReference.trim()),
+      deliveredAt: clock.now.toISOString(),
+      source: {
+        projectionVersion: projectionSource?.version ?? summary.version,
+        levelPolicyVersionId: projectionSource?.levelPolicyVersionId ?? null,
+        sourceResultsHash: projectionSource?.sourceResultsHash ?? null,
+      },
+      summary,
+      summaryHash: canonicalPerformanceHash(summary),
+    };
+    const encrypted = await persistPerformancePayload(tx, {
+      aggregateType: 'PERSONAL_PERFORMANCE_SUMMARY_DELIVERY', aggregateId: deliveryId,
+      payloadKind: 'DISCLOSURE_RECEIPT', schemaVersion: 1, payload: receiptPayload, keyring,
+    });
+    const receipt = await auditDisclosure(tx, {
+      aggregateType: 'PERSONAL_PERFORMANCE_SUMMARY_DELIVERY', aggregateId: subject.id,
+      eventType: 'PERSONAL_PERFORMANCE_SUMMARY_DELIVERED', actorUserId: input.actorUserId,
+      authorityCodes: [authority.code], reason: 'IDENTITY_VERIFIED_PERSONAL_SUMMARY_DELIVERY',
+      evidenceHash: encrypted.contentHash, encryptedPayloadId: encrypted.id,
+    });
+    return {
+      summary,
+      receipt: { id: receipt.id, deliveredAt: receipt.occurredAt, summaryKind: PERSONAL_SUMMARY_KIND, schemaVersion: 1 },
+    };
+  });
+};
+
 type ResultPayload = {
   exactScore?: string;
   displayScore?: string;
@@ -275,11 +406,13 @@ export const getPerformanceHistory = async (client: PrismaClient, input: {
   const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
   const history = await Promise.all(results.map(async (result) => {
     const payload = await readPerformancePayload<ResultPayload>(client, result.encryptedPayloadId, keyring);
+    const level = performanceLevelForCode(result.levelCode);
     return {
       id: result.id,
       version: result.version,
       status: result.status,
-      levelCode: result.levelCode,
+      levelCode: level?.code ?? null,
+      levelLabelFa: level?.labelFa ?? 'خلاصه عملکرد موقتاً در دسترس نیست',
       levelPolicyVersionId: result.levelPolicyVersionId,
       acceptedAt: result.acceptedAt,
       expiresAt: result.expiresAt,
@@ -485,6 +618,13 @@ export const fixedCohortPerformanceTrend = async (
     if (!members.has(evaluation.subjectId)) members.set(evaluation.subjectId, { levelCode: result.levelCode, resultId: result.id, evaluationId: evaluation.id });
     byPeriod.set(periodKey, members);
   }
+  if ([...byPeriod.values()].some((period) => [...period.values()].some(({ levelCode }) => !performanceLevelForCode(levelCode)))) {
+    return {
+      suppressed: true as const,
+      reasonCode: 'PERFORMANCE_LEVEL_UNAVAILABLE',
+      messageFa: 'خلاصه عملکرد موقتاً در دسترس نیست.',
+    };
+  }
   const fixedSubjects = periodKeys.reduce<Set<string>>((intersection, periodKey, index) => {
     const subjects = new Set(byPeriod.get(periodKey)?.keys() ?? []);
     return index === 0 ? subjects : new Set([...intersection].filter((subjectId) => subjects.has(subjectId)));
@@ -524,7 +664,7 @@ export const fixedCohortPerformanceTrend = async (
     periodKey,
     levelDistribution: PERFORMANCE_LEVELS.map((level) => ({
       levelCode: level.code, labelFa: level.labelFa,
-      count: [...fixedSubjects].filter((subjectId) => byPeriod.get(periodKey)?.get(subjectId)?.levelCode === level.code).length,
+      count: [...fixedSubjects].filter((subjectId) => samePerformanceLevel(byPeriod.get(periodKey)?.get(subjectId)?.levelCode, level.code)).length,
     })),
   }));
   const fixedSuppressed = fixedSubjects.size < 10 || fixedPeriods.some(({ levelDistribution }) => levelDistribution.some(({ count }) => count > 0 && count < 10));
@@ -636,7 +776,7 @@ export const listPerformanceEvaluators = async (client: PrismaClient) => {
   }) : [];
 };
 
-const exportRows = (report: unknown) => {
+export const performanceExportRows = (report: unknown) => {
   const object = report && typeof report === 'object' ? report as Record<string, unknown> : { value: report };
   const rows = Array.isArray(object.peerGroups)
     ? (object.peerGroups as Array<{ peerGroupKey: string; groups: Array<{ labelFa: string; members: Array<Record<string, unknown>> }> }>).flatMap((peer) => peer.groups.flatMap((group) => group.members.map((member) => ({ peerGroupKey: peer.peerGroupKey, level: group.labelFa, ...member }))))
@@ -644,15 +784,18 @@ const exportRows = (report: unknown) => {
   return rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, escapePerformanceSpreadsheetCell(value)])));
 };
 
-const renderExportArtifact = async (kind: 'XLSX' | 'PDF', rows: Array<Record<string, unknown>>, signal: AbortSignal) => {
+export const performanceExportPdfHtml = (rows: Array<Record<string, unknown>>) => {
+  const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+  return `<!doctype html><html dir="rtl" lang="fa"><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;padding:24px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:6px;text-align:right}h1{font-size:20px}</style><h1>گزارش محرمانه عملکرد</h1><table><thead><tr>${headers.map((header) => `<th>${escapePerformanceExportHtml(header)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${headers.map((header) => `<td>${escapePerformanceExportHtml(row[header])}</td>`).join('')}</tr>`).join('')}</tbody></table></html>`;
+};
+
+export const renderPerformanceExportArtifact = async (kind: 'XLSX' | 'PDF', rows: Array<Record<string, unknown>>, signal: AbortSignal) => {
   if (kind === 'XLSX') {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), 'گزارش عملکرد');
     return { bytes: XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
   }
-  const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))];
-  const html = `<!doctype html><html dir="rtl" lang="fa"><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;padding:24px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:6px;text-align:right}h1{font-size:20px}</style><h1>گزارش محرمانه عملکرد</h1><table><thead><tr>${headers.map((header) => `<th>${escapePerformanceExportHtml(header)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${headers.map((header) => `<td>${escapePerformanceExportHtml(row[header])}</td>`).join('')}</tr>`).join('')}</tbody></table></html>`;
-  return { bytes: await generatePdfBufferFromHtml({ htmlContent: html, signal }), mimeType: 'application/pdf' };
+  return { bytes: await generatePdfBufferFromHtml({ htmlContent: performanceExportPdfHtml(rows), signal }), mimeType: 'application/pdf' };
 };
 
 export const processPerformanceExport = async (client: PrismaClient, exportId: string, keyring = performanceVaultKeyFromEnvironment()) => {
@@ -680,13 +823,13 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
   if (!receipt?.encryptedPayloadId) return null;
   try {
     const payload = await readPerformancePayload<{ report: unknown; scope: { evidenceRevision: string } }>(client, receipt.encryptedPayloadId, keyring);
-    const rows = exportRows(payload.report);
+    const rows = performanceExportRows(payload.report);
     if ((receipt.exportKind === 'XLSX' && rows.length > 100_000) || (receipt.exportKind === 'PDF' && rows.length > 12_500)) {
       throw disclosureError('دامنه خروجی از سقف مجاز بیشتر است.', 'PERFORMANCE_EXPORT_SCOPE_TOO_LARGE', 422);
     }
     await mkdir(exportRoot(), { recursive: true, mode: 0o700 });
     const artifactPath = receipt.artifactPath!;
-    const rendered = await withinPerformanceExportDeadline((signal) => renderExportArtifact(receipt.exportKind as 'XLSX' | 'PDF', rows, signal));
+    const rendered = await withinPerformanceExportDeadline((signal) => renderPerformanceExportArtifact(receipt.exportKind as 'XLSX' | 'PDF', rows, signal));
     const artifactHash = createHash('sha256').update(rendered.bytes).digest('hex');
     const maximumBytes = receipt.exportKind === 'PDF' ? 50 * 1024 * 1024 : 100 * 1024 * 1024;
     if (rendered.bytes.length > maximumBytes) {
@@ -1247,16 +1390,19 @@ export const listEligibleConsequenceResults = async (client: PrismaClient, input
     },
     orderBy: [{ acceptedAt: 'desc' }, { version: 'desc' }], take: 4,
   }) : [];
-  return results.map((result) => ({
-    id: result.id,
-    levelCode: result.levelCode,
-    labelFa: PERFORMANCE_LEVELS.find(({ code }) => code === result.levelCode)?.labelFa ?? result.levelCode,
-    acceptedAt: result.acceptedAt,
-    expiresAt: result.expiresAt,
-    measurementFrom: evaluationById.get(result.evaluationId)?.measurementFrom,
-    measurementTo: evaluationById.get(result.evaluationId)?.measurementTo,
-    status: result.status,
-  }));
+  return results.flatMap((result) => {
+    const level = performanceLevelForCode(result.levelCode);
+    return level ? [{
+      id: result.id,
+      levelCode: level.code,
+      labelFa: level.labelFa,
+      acceptedAt: result.acceptedAt,
+      expiresAt: result.expiresAt,
+      measurementFrom: evaluationById.get(result.evaluationId)?.measurementFrom,
+      measurementTo: evaluationById.get(result.evaluationId)?.measurementTo,
+      status: result.status,
+    }] : [];
+  });
 };
 
 export const getPerformanceConsequenceHandoff = async (client: PrismaClient | Prisma.TransactionClient, input: { handoffId: string; actorUserId: string; keyring?: PerformanceVaultKey }) => {

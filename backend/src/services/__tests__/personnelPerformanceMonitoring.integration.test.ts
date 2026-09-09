@@ -171,15 +171,18 @@ const pauseRace = async (first: PrismaClient, second: PrismaClient, runId: strin
     assert.equal(await first.performanceOperationalIncident.count(), 1);
     assert.equal(await first.performanceSafetyPause.count({ where: { status: 'ACTIVE' } }), 1,
       'concurrent threshold evaluation creates one durable pause');
+    const pendingOutbox = await first.notificationOutbox.findFirstOrThrow();
+    const firstAttemptAt = new Date(pendingOutbox.availableAt.getTime() + 1);
     const failedDelivery = await deliverPendingNotificationOutbox(first, async () => { throw new Error('injected route failure'); },
-      new Date('2026-09-09T08:00:01.000Z'));
+      firstAttemptAt);
     assert.equal(failedDelivery.failed, 1);
     const outbox = await first.notificationOutbox.findFirstOrThrow();
     assert.equal(outbox.status, 'PENDING');
     assert.equal(outbox.attempts, 1);
-    await first.notificationOutbox.update({ where: { id: outbox.id }, data: { availableAt: new Date('2026-09-09T08:01:00.000Z') } });
+    const retryAt = new Date(firstAttemptAt.getTime() + 60_000);
+    await first.notificationOutbox.update({ where: { id: outbox.id }, data: { availableAt: retryAt } });
     const retriedDelivery = await deliverPendingNotificationOutbox(first, async () => undefined,
-      new Date('2026-09-09T08:01:00.000Z'));
+      retryAt);
     assert.equal(retriedDelivery.delivered, 1);
     assert.deepEqual(await first.notificationOutbox.findUnique({ where: { id: outbox.id }, select: { status: true, attempts: true } }),
       { status: 'PROCESSED', attempts: 2 }, 'the canonical alert outbox retries without duplicating the incident');

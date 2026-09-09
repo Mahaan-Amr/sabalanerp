@@ -7693,20 +7693,22 @@ model PerformanceTemplateVersion {
 }
 
 model PerformanceCohortVersion {
-  id                String                       @id @default(cuid())
-  cohortKey         String
-  version           Int
-  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
-  predecessorId     String?
-  membershipHash    String
-  stage             String?
-  targetPercent     Int?
-  readinessHash     String?
-  effectiveFrom     DateTime?
-  activationReason  String?
-  activatedByUserId String?
-  createdByUserId   String
-  createdAt         DateTime                     @default(now())
+  id                  String                       @id @default(cuid())
+  cohortKey           String
+  version             Int
+  lifecycle           PerformanceArtifactLifecycle @default(DRAFT)
+  predecessorId       String?
+  membershipHash      String
+  stage               String?
+  targetPercent       Int?
+  readinessHash       String?
+  targetPhase         PerformanceRolloutPhase?
+  promotionEvidenceId String?
+  effectiveFrom       DateTime?
+  activationReason    String?
+  activatedByUserId   String?
+  createdByUserId     String
+  createdAt           DateTime                     @default(now())
 
   @@unique([cohortKey, version])
   @@index([lifecycle, effectiveFrom])
@@ -7728,21 +7730,63 @@ model PerformanceTrainingEvidence {
 }
 
 model PerformanceRolloutDecision {
-  id            String   @id @default(cuid())
-  scopeType     String
-  scopeId       String
-  ownerType     String
-  action        String
-  version       Int
-  actorUserId   String
-  reasonCode    String
-  authorityHash String
-  evidenceHash  String
-  decidedAt     DateTime @default(now())
+  id                  String   @id @default(cuid())
+  scopeType           String
+  scopeId             String
+  ownerType           String
+  action              String
+  version             Int
+  actorUserId         String
+  reasonCode          String
+  authorityHash       String
+  evidenceHash        String
+  promotionEvidenceId String?
+  decidedAt           DateTime @default(now())
 
   @@unique([scopeType, scopeId, ownerType, version])
   @@index([scopeType, scopeId, action, decidedAt])
   @@map("performance_rollout_decisions")
+}
+
+model PerformancePromotionEvidence {
+  id                        String                  @id
+  evidenceHash              String                  @unique
+  manifestHash              String
+  releaseCommit             String
+  releaseSourceHash         String
+  releaseSchemaHash         String
+  releasePolicyHash         String
+  releaseInfrastructureHash String
+  backendImageDigest        String
+  frontendImageDigest       String
+  inquiryImageDigest        String
+  targetPhase               PerformanceRolloutPhase
+  targetCohortVersionId     String
+  targetCohortStage         String
+  targetMembershipHash      String
+  targetReadyPopulation     Int
+  targetMemberCount         Int
+  targetGate                Int
+  encryptedPayloadId        String                  @unique
+  attestationKeyId          String
+  authenticatedByUserId     String
+  verifiedAt                DateTime
+  validUntil                DateTime
+  createdAt                 DateTime                @default(now())
+
+  @@index([targetCohortVersionId, targetPhase, validUntil])
+  @@map("performance_promotion_evidence")
+}
+
+model PerformancePromotionEvidenceRevocation {
+  id                  String   @id
+  promotionEvidenceId String
+  reasonCode          String
+  revokedByUserId     String
+  revokedAt           DateTime @default(now())
+
+  @@index([promotionEvidenceId, revokedAt])
+  @@map("performance_promotion_evidence_revocations")
 }
 
 model PerformanceCohortMember {
@@ -7758,34 +7802,35 @@ model PerformanceCohortMember {
 }
 
 model PerformanceFeaturePhaseVersion {
-  id               String                  @id @default(cuid())
-  version          Int                     @unique
-  phase            PerformanceRolloutPhase
-  releaseEnabled   Boolean                 @default(false)
-  cohortVersionId  String?
-  predecessorId    String?
-  reason           String
-  effectiveFrom    DateTime
-  recordedByUserId String
-  createdAt        DateTime                @default(now())
+  id                  String                  @id @default(cuid())
+  version             Int                     @unique
+  phase               PerformanceRolloutPhase
+  releaseEnabled      Boolean                 @default(false)
+  cohortVersionId     String?
+  promotionEvidenceId String?
+  predecessorId       String?
+  reason              String
+  effectiveFrom       DateTime
+  recordedByUserId    String
+  createdAt           DateTime                @default(now())
 
   @@index([effectiveFrom, version])
   @@map("performance_feature_phase_versions")
 }
 
 model PerformanceSafetyPause {
-  id              String    @id @default(cuid())
-  phaseVersionId  String
-  cohortVersionId String?
-  scope           String
-  status          String    @default("ACTIVE")
-  reasonCode      String
-  reason          String
-  startedByUserId String?
-  startedAt       DateTime  @default(now())
-  resumedByUserId String?
-  resumedAt       DateTime?
-  resumeReason    String?
+  id               String    @id @default(cuid())
+  phaseVersionId   String
+  cohortVersionId  String?
+  scope            String
+  status           String    @default("ACTIVE")
+  reasonCode       String
+  reason           String
+  startedByUserId  String?
+  startedAt        DateTime  @default(now())
+  resumedByUserId  String?
+  resumedAt        DateTime?
+  resumeReason     String?
   sourceIncidentId String?   @unique
 
   @@index([status, startedAt])
@@ -7794,45 +7839,48 @@ model PerformanceSafetyPause {
 }
 
 model PerformanceOperationalRoute {
-  id String @id @default(cuid())
-  routeKey String @unique
+  id              String   @id @default(cuid())
+  routeKey        String   @unique
   recipientUserId String
-  verifiedAt DateTime
-  configuredById String
-  reason String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  verifiedAt      DateTime
+  configuredById  String
+  reason          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
   @@index([recipientUserId, verifiedAt])
   @@map("performance_operational_routes")
 }
 
 model PerformanceOperationalHeartbeat {
-  id String @id @default(cuid())
-  component String @unique
+  id         String   @id @default(cuid())
+  component  String   @unique
   observedAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
   @@index([observedAt])
   @@map("performance_operational_heartbeats")
 }
 
 model PerformanceOperationalWindow {
-  id String @id @default(cuid())
-  metricKey String
-  scope String
+  id              String   @id @default(cuid())
+  metricKey       String
+  scope           String
   cohortVersionId String?
-  windowStart DateTime
-  windowEnd DateTime
-  numerator Int
-  denominator Int
-  p95Ms Int?
-  p99Ms Int?
-  maxAgeSeconds Int?
-  baselineBps Int?
-  retryExhausted Boolean @default(false)
-  measuredBps Int?
-  thresholdState String
-  createdAt DateTime @default(now())
+  windowStart     DateTime
+  windowEnd       DateTime
+  numerator       Int
+  denominator     Int
+  p95Ms           Int?
+  p99Ms           Int?
+  maxAgeSeconds   Int?
+  baselineBps     Int?
+  retryExhausted  Boolean  @default(false)
+  measuredBps     Int?
+  thresholdState  String
+  createdAt       DateTime @default(now())
+
   @@unique([metricKey, scope, cohortVersionId, windowStart, windowEnd])
   @@index([metricKey, scope, cohortVersionId, windowEnd])
   @@index([createdAt])
@@ -7840,41 +7888,43 @@ model PerformanceOperationalWindow {
 }
 
 model PerformanceOperationalRequestObservation {
-  id String @id @default(cuid())
-  metricKey String
-  durationMs Int
-  responseStatus Int
+  id                    String   @id @default(cuid())
+  metricKey             String
+  durationMs            Int
+  responseStatus        Int
   authorizationDecision String
-  timedOut Boolean @default(false)
-  observedAt DateTime @default(now())
+  timedOut              Boolean  @default(false)
+  observedAt            DateTime @default(now())
+
   @@index([observedAt, metricKey])
   @@map("performance_operational_request_observations")
 }
 
 model PerformanceOperationalIncident {
-  id String @id @default(cuid())
-  deduplicationKey String @unique
-  category String
-  metricKey String?
-  routeKey String
-  scope String
-  cohortVersionId String?
-  severity String
-  status String @default("OPEN")
-  thresholdCode String
-  occurrenceCount Int @default(1)
-  firstObservedAt DateTime
-  lastObservedAt DateTime
+  id               String    @id @default(cuid())
+  deduplicationKey String    @unique
+  category         String
+  metricKey        String?
+  routeKey         String
+  scope            String
+  cohortVersionId  String?
+  severity         String
+  status           String    @default("OPEN")
+  thresholdCode    String
+  occurrenceCount  Int       @default(1)
+  firstObservedAt  DateTime
+  lastObservedAt   DateTime
   acknowledgeDueAt DateTime
   containmentDueAt DateTime?
-  escalationDueAt DateTime?
-  acknowledgedAt DateTime?
-  containedAt DateTime?
-  escalatedAt DateTime?
-  resolvedAt DateTime?
-  safetyPauseId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  escalationDueAt  DateTime?
+  acknowledgedAt   DateTime?
+  containedAt      DateTime?
+  escalatedAt      DateTime?
+  resolvedAt       DateTime?
+  safetyPauseId    String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
   @@index([status, severity, firstObservedAt])
   @@index([scope, cohortVersionId, status])
   @@index([safetyPauseId])
@@ -7882,13 +7932,14 @@ model PerformanceOperationalIncident {
 }
 
 model PerformanceOperationalIncidentEvidence {
-  id String @id @default(cuid())
-  incidentId String
-  action String
-  actorUserId String?
-  reasonCode String
+  id           String   @id @default(cuid())
+  incidentId   String
+  action       String
+  actorUserId  String?
+  reasonCode   String
   evidenceHash String
-  recordedAt DateTime @default(now())
+  recordedAt   DateTime @default(now())
+
   @@index([incidentId, recordedAt])
   @@map("performance_operational_incident_evidence")
 }
@@ -8242,12 +8293,12 @@ model PerformanceExportReceipt {
 
 // Sealed source index; plaintext identifiers and reconstruction stay in the protected vault.
 model PerformanceExportLineage {
-  exportId           String   @id
-  schemaVersion      Int
-  reconstructionId   String   @unique
-  dependencyHash     String
-  dependencyCount    Int
-  createdAt          DateTime @default(now())
+  exportId         String   @id
+  schemaVersion    Int
+  reconstructionId String   @unique
+  dependencyHash   String
+  dependencyCount  Int
+  createdAt        DateTime @default(now())
 
   @@map("performance_export_lineage")
 }
@@ -8394,6 +8445,78 @@ model PerformanceDeletionReceipt {
   @@unique([deletedTableName, deletedRecordId])
   @@index([aggregateType, executedAt])
   @@map("performance_deletion_receipts")
+}
+
+model PerformanceErasureImpactApproval {
+  id                  String    @id @default(cuid())
+  policyVersionId     String    @unique
+  populationHash      String
+  eligibleScopeCount  Int
+  erasableRecordCount Int
+  approvedByUserId    String?
+  approvedAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  @@index([approvedAt, createdAt])
+  @@map("performance_erasure_impact_approvals")
+}
+
+model PerformanceErasureOperation {
+  id               String    @id @default(cuid())
+  operationKeyHash String    @unique
+  retentionStateId String    @unique
+  aggregateType    String
+  aggregateIdHash  String
+  policyVersionId  String
+  encryptedScopeId String    @unique
+  scopeHash        String
+  dependencyHash   String
+  status           String    @default("PENDING_IMPACT_APPROVAL")
+  recordCount      Int
+  bulkThreshold    Int
+  attemptCount     Int       @default(0)
+  lastFailureCode  String?
+  claimedAt        DateTime?
+  nextRetryAt      DateTime?
+  liveErasedAt     DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status, nextRetryAt, createdAt])
+  @@index([policyVersionId, status])
+  @@map("performance_erasure_operations")
+}
+
+model PerformanceErasureApproval {
+  id            String   @id @default(cuid())
+  operationId   String
+  actorUserId   String
+  reasonCode    String
+  authorityHash String
+  approvedAt    DateTime @default(now())
+
+  @@unique([operationId, actorUserId])
+  @@index([operationId, approvedAt])
+  @@map("performance_erasure_approvals")
+}
+
+model PerformanceRecoverableCopy {
+  id               String    @id @default(cuid())
+  operationId      String
+  location         String
+  copyKeyHash      String
+  status           String
+  version          Int       @default(1)
+  recoverableUntil DateTime?
+  evidenceHash     String
+  checkedByUserId  String?
+  checkedAt        DateTime  @default(now())
+
+  @@index([operationId, location, copyKeyHash])
+  @@unique([operationId, location, version])
+  @@index([status, recoverableUntil])
+  @@map("performance_recoverable_copies")
 }
 
 model PerformancePrivacyCase {

@@ -30,15 +30,18 @@ type InventoryReadinessSourceRow = {
   personnelId: string;
   employmentRelationshipId: string | null;
   assignmentId: string | null;
-  classification: 'PERSONNEL_INACTIVE' | 'EMPLOYMENT_RELATIONSHIP_MISSING' | 'RELATIONSHIP_PLANNED'
-    | 'RELATIONSHIP_OUTSIDE_PERIOD' | 'EMPLOYMENT_ASSIGNMENT_MISSING' | 'ASSIGNMENT_OUTSIDE_PERIOD';
+  classification: PerformanceReadinessInventoryClassification;
 };
+
+export type PerformanceReadinessInventoryClassification = 'PERSONNEL_INACTIVE' | 'EMPLOYMENT_RELATIONSHIP_MISSING'
+  | 'RELATIONSHIP_PLANNED' | 'RELATIONSHIP_OUTSIDE_PERIOD' | 'EMPLOYMENT_ASSIGNMENT_MISSING'
+  | 'ASSIGNMENT_OUTSIDE_PERIOD';
 
 type ReadinessSourceRow = EligibleReadinessSourceRow | InventoryReadinessSourceRow;
 
 export type PerformanceReadinessCoverage = {
   inventory: { personnelCount: number; relationshipCount: number; assignmentCount: number };
-  inventoryClassifications: Record<string, number>;
+  inventoryClassifications: Partial<Record<PerformanceReadinessInventoryClassification, number>>;
   periodEligibility: { personnelCount: number; relationshipCount: number; assignmentCount: number };
   structuralTemplateReadiness: {
     readyPersonnelCount: number;
@@ -212,14 +215,32 @@ const loadReadinessSource = async (client: PrismaClient, period: { measurementFr
       contextPeriods,
     };
   }).filter((row) => !row.effectiveTo || row.effectiveTo > row.effectiveFrom);
+  const allocationEventsByRelationship = new Map<string, Map<number, Prisma.Decimal>>();
   for (const row of mappedAssignments) {
-    const contexts = mappedAssignments
-      .filter((candidate) => candidate.employmentRelationshipId === row.employmentRelationshipId)
-      .flatMap((candidate) => candidate.responsibilityPeriods);
-    const checkpoints = [...new Set(contexts.flatMap((context) => [context.effectiveFrom.getTime(), context.effectiveTo?.getTime()].filter((value): value is number => value !== undefined)))];
-    row.allocationConsistent = checkpoints.every((checkpoint) => contexts
-      .filter((context) => context.effectiveFrom.getTime() <= checkpoint && (!context.effectiveTo || context.effectiveTo.getTime() > checkpoint))
-      .reduce((sum, context) => sum.add(context.allocationPercent), new Prisma.Decimal(0)).lte(100));
+    const events = allocationEventsByRelationship.get(row.employmentRelationshipId) ?? new Map<number, Prisma.Decimal>();
+    for (const responsibility of row.responsibilityPeriods) {
+      const allocation = new Prisma.Decimal(responsibility.allocationPercent);
+      const start = responsibility.effectiveFrom.getTime();
+      events.set(start, (events.get(start) ?? new Prisma.Decimal(0)).add(allocation));
+      if (responsibility.effectiveTo) {
+        const end = responsibility.effectiveTo.getTime();
+        events.set(end, (events.get(end) ?? new Prisma.Decimal(0)).sub(allocation));
+      }
+    }
+    allocationEventsByRelationship.set(row.employmentRelationshipId, events);
+  }
+  const allocationConsistentByRelationship = new Map<string, boolean>();
+  for (const [relationshipId, events] of allocationEventsByRelationship) {
+    let total = new Prisma.Decimal(0);
+    let consistent = true;
+    for (const [, delta] of [...events].sort(([left], [right]) => left - right)) {
+      total = total.add(delta);
+      if (total.gt(100)) consistent = false;
+    }
+    allocationConsistentByRelationship.set(relationshipId, consistent);
+  }
+  for (const row of mappedAssignments) {
+    row.allocationConsistent = allocationConsistentByRelationship.get(row.employmentRelationshipId) ?? true;
   }
   const eligibleByAssignmentId = new Map(mappedAssignments.filter((row) => activePersonnelIds.has(row.personnelId))
     .map((row) => [row.assignmentId, row]));
@@ -307,7 +328,7 @@ const readinessCoverage = async (
 
 const inventoryClassificationCounts = (rows: ReadinessSourceRow[]) => rows
   .filter((row): row is InventoryReadinessSourceRow => row.readinessKind !== 'ELIGIBLE_ASSIGNMENT')
-  .reduce<Record<string, number>>((totals, row) => ({
+  .reduce<Partial<Record<PerformanceReadinessInventoryClassification, number>>>((totals, row) => ({
     ...totals, [row.classification]: (totals[row.classification] ?? 0) + 1,
   }), {});
 

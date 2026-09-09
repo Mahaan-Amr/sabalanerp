@@ -18,7 +18,7 @@ export const workflowStatusPresentation = (status: string) => presentations[stat
 
 export type ReadinessCoverage = {
   inventory: { personnelCount: number; relationshipCount: number; assignmentCount: number };
-  inventoryClassifications: Record<string, number>;
+  inventoryClassifications: Partial<Record<ReadinessInventoryClassification, number>>;
   periodEligibility: { personnelCount: number; relationshipCount: number; assignmentCount: number };
   structuralTemplateReadiness: {
     readyPersonnelCount: number;
@@ -32,7 +32,11 @@ export type ReadinessCoverage = {
   resultBadge: { subjectCount: number };
 };
 
-const readinessClassificationLabels: Record<string, string> = {
+export type ReadinessInventoryClassification = "PERSONNEL_INACTIVE" | "EMPLOYMENT_RELATIONSHIP_MISSING"
+  | "RELATIONSHIP_PLANNED" | "RELATIONSHIP_OUTSIDE_PERIOD" | "EMPLOYMENT_ASSIGNMENT_MISSING"
+  | "ASSIGNMENT_OUTSIDE_PERIOD";
+
+const readinessClassificationLabels: Record<ReadinessInventoryClassification, string> = {
   PERSONNEL_INACTIVE: "پرسنل غیرفعال یا بایگانی‌شده",
   EMPLOYMENT_RELATIONSHIP_MISSING: "بدون رابطه استخدامی",
   RELATIONSHIP_PLANNED: "رابطه برنامه‌ریزی‌شده",
@@ -66,9 +70,9 @@ export const buildReadinessCoverageSections = (coverage: ReadinessCoverage) => {
       { label: "نشان نتیجه", value: coverage.resultBadge.subjectCount },
     ] },
   ];
-  const classifications = Object.entries(coverage.inventoryClassifications)
+  const classifications = (Object.entries(coverage.inventoryClassifications) as Array<[ReadinessInventoryClassification, number]>)
     .filter(([, value]) => value > 0)
-    .map(([code, value]) => ({ label: readinessClassificationLabels[code] ?? code, value }));
+    .map(([code, value]) => ({ label: readinessClassificationLabels[code], value }));
   return classifications.length ? [...sections, { title: "طبقه‌بندی پیوندها", items: classifications }] : sections;
 };
 

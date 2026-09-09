@@ -13,10 +13,23 @@ const checkedName = (value: string) => {
   return value;
 };
 
-const compose = (repositoryRoot: string, command: string) => execFileSync('docker', [
-  'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
-  'sh', '-lc', command,
-], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+const compose = (repositoryRoot: string, command: string) => {
+  verifySabalanerpLocalPostgres(repositoryRoot);
+  return execFileSync('docker', [
+    'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
+    'sh', '-lc', command,
+  ], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+};
+
+export const assertDispatchDocumentsMigrationTarget = (databaseUrl: string, expectedName: string) => {
+  checkedName(expectedName);
+  const target = new URL(databaseUrl);
+  if (target.protocol !== 'postgresql:' || !LOCAL_ENDPOINTS.has(target.host)
+    || target.pathname !== `/${expectedName}`
+    || target.searchParams.getAll('schema').some(schema => schema !== 'public')) {
+    throw new Error('Candidate migrations require the exact temporary sabalanerp-local database and public schema.');
+  }
+};
 
 export const assertSabalanerpLocalPostgres = (output: string) => {
   const trimmed = output.trim();
@@ -53,11 +66,26 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
   }
   const databaseUrl = new URL(source);
   databaseUrl.pathname = `/${databaseName}`;
+  assertDispatchDocumentsMigrationTarget(databaseUrl.toString(), databaseName);
   const quoted = `"${databaseName}"`;
   verifySabalanerpLocalPostgres(input.repositoryRoot);
   compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'CREATE DATABASE ${quoted}'`);
   try {
     compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges ${input.schemaOnly ? '--schema-only' : ''} | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+    if (input.schemaOnly) {
+      // Keep the source migration identities/checksums, but no business rows.
+      compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges --data-only --table=public._prisma_migrations | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+    }
+    assertDispatchDocumentsMigrationTarget(databaseUrl.toString(), databaseName);
+    const actualName = compose(input.repositoryRoot,
+      `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname ${quoted} --command 'SELECT current_database()'`).trim();
+    if (actualName !== databaseName) throw new Error('Temporary migration database identity mismatch.');
+    execFileSync(process.execPath, [
+      require.resolve('prisma/build/index.js'), 'migrate', 'deploy',
+      '--schema', path.join(input.repositoryRoot, 'backend/prisma/schema.prisma'),
+    ], { cwd: path.join(input.repositoryRoot, 'backend'),
+      env: { ...process.env, DATABASE_URL: databaseUrl.toString() },
+      stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
   } catch (error) {
     compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
     throw error;

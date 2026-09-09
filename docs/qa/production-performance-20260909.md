@@ -44,7 +44,7 @@
 از ریشه همین worktree:
 
 ```powershell
-node --test tests/performance-operations/accounting-marker-indexes.test.mjs
+node --test tests/accounting-performance/accounting-marker-indexes.test.mjs
 npm run architecture:check
 npm --prefix backend run build
 ```
@@ -61,7 +61,7 @@ npx tsx --test src/services/__tests__/contractCreationTransactionBudget.test.ts
 ## باقی‌مانده و استقرار
 
 - migration فقط آماده شده؛ روی جدول‌های واقعی local یا production اعمال نشده است.
-- استقرار نیازمند اجازه جداگانه و مسیر `docs/operations/zero-data-loss-deployment.md` است: checkpoint محلی و نسخه رمزگذاری‌شده خارج سرور باید تأیید شوند و سپس migration و imageهای جدید در مرز maintenance اعمال شوند. تغییر داده یا تضعیف gate مجاز نیست.
+- کاربر در ادامه صریحاً ادغام، push و استقرار را مجاز کرد. مسیر `docs/operations/zero-data-loss-deployment.md` همچنان الزامی است: checkpoint محلی و نسخه رمزگذاری‌شده خارج سرور باید تأیید شوند و سپس migration و imageهای جدید در مرز maintenance اعمال شوند. تغییر داده یا تضعیف gate مجاز نیست.
 - پس از استقرار: مقایسه p50/p95 بارگذاری و جست‌وجوی حسابداری با ترافیک عادی، بررسی صف/timeout، و یک تلاش کنترل‌شده برای ثبت پیش‌نویس اصلی با کنترل عدم تکرار لازم است.
 - فیلترهای ترکیبی فهرست هنوز روی مجموعه summaryها اجرا می‌شوند؛ برای رشد بسیار بزرگ داده، read model صفحه‌بندی‌شده با حفظ دقیق جمع‌ها و فیلترهای وضعیت، مرحله بعدی است.
 - مرورگر امکان پاسخ قدیمی جست‌وجو پس از پاسخ جدید را دارد (مشاهده کد، نه بازتولید قطعی). در این مجموعه هیچ رفتار frontend تغییر نکرده است.

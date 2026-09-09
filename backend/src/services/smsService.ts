@@ -7,6 +7,7 @@ import axios from 'axios';
 import dns from 'dns';
 import http from 'http';
 import https from 'https';
+import { resolveHiringInvitationTemplate } from './hiringSmsTemplate';
 
 interface SendVerificationCodeResponse {
   status: number;
@@ -119,9 +120,8 @@ class SmsService {
       process.env.SMS_IR_CONTRACT_CONFIRM_TEMPLATE_ID || '385075',
       10
     );
-    this.hiringInvitationTemplateId = parseInt(
-      process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || '343660',
-      10
+    this.hiringInvitationTemplateId = resolveHiringInvitationTemplate(
+      process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID
     );
     this.hiringCorrectionTemplateId = parseInt(
       process.env.SMS_IR_HIRING_CORRECTION_TEMPLATE_ID || '763918',

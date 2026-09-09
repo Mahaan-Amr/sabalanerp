@@ -19,4 +19,3 @@ WHERE metadata @? '$.** ? (exists(@.partnerCaseId) || exists(@.partnerPreparatio
 CREATE INDEX accounting_audit_private_evidence_idx ON accounting_audit_logs (id)
 WHERE "beforeState" @? '$.** ? (exists(@.partnerCaseId) || exists(@.partnerPreparation) || exists(@.partnerReceivable) || exists(@.partnerFact) || exists(@.financialEvidenceHash) || @.sourceKind == "PARTNER_INTERNAL_RECORD" || @.sourceKind == "SABALAN_TO_PARTNER")'::jsonpath
    OR "afterState" @? '$.** ? (exists(@.partnerCaseId) || exists(@.partnerPreparation) || exists(@.partnerReceivable) || exists(@.partnerFact) || exists(@.financialEvidenceHash) || @.sourceKind == "PARTNER_INTERNAL_RECORD" || @.sourceKind == "SABALAN_TO_PARTNER")'::jsonpath;
-

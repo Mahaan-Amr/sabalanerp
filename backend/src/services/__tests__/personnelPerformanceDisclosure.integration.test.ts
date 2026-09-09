@@ -207,20 +207,21 @@ const main = async () => {
         permissionHash: 'permission', status: 'QUEUED', artifactPath: unrelatedArtifactPath,
         artifactHash: 'unrelated-artifact-hash', expiresAt: new Date('2000-01-01Z'),
       } });
-      assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 1, 'a scoped hold must not block unrelated cleanup');
+      assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 0, 'historical exports without verified source lineage must be preserved');
       await access(artifactPath);
       await access(failedAttemptPath);
-      await assert.rejects(() => access(unrelatedArtifactPath));
+      await access(unrelatedArtifactPath);
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT held_export');
-      assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 1);
-      await assert.rejects(() => access(artifactPath));
-      await assert.rejects(() => access(failedAttemptPath), 'cleanup must remove every failed attempt only after the hold is released');
-      const cleaned = await tx.performanceExportReceipt.findUniqueOrThrow({ where: { id: exportId } });
-      assert.equal(cleaned.status, 'DELETED');
-      assert.equal(cleaned.encryptedPayloadId, null, 'full report payload must be redacted at cleanup');
-      assert.equal(await tx.performanceEncryptedPayload.findUnique({ where: { id: payloadId } }), null);
-      assert.ok(await tx.performanceDeletionReceipt.findFirst({ where: { deletedPayloadId: payloadId, reasonCode: 'PERFORMANCE_EXPORT_TTL_CLEANUP' } }));
-      assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: exportId, eventType: 'PERFORMANCE_EXPORT_CLEANED_UP' } }));
+      assert.equal(await cleanupExpiredPerformanceExports(tx, cleanupAt), 0, 'releasing a hold cannot manufacture historical lineage');
+      await access(artifactPath);
+      await access(failedAttemptPath);
+      const preserved = await tx.performanceExportReceipt.findUniqueOrThrow({ where: { id: exportId } });
+      assert.notEqual(preserved.status, 'DELETED');
+      assert.equal(preserved.encryptedPayloadId, payloadId);
+      assert.equal(await tx.performanceDeletionReceipt.count({ where: { deletedPayloadId: payloadId } }), 0);
+      const attempt = await tx.performanceExportCleanupAttempt.findUniqueOrThrow({ where: { exportId } });
+      assert.equal(attempt.status, 'HELD');
+      assert.equal(attempt.lastFailureCode, 'PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED');
       throw new Error('ROLLBACK_EXPORT_CLEANUP_TEST');
     }), /ROLLBACK_EXPORT_CLEANUP_TEST/);
   } finally {

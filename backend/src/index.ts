@@ -147,7 +147,7 @@ const validateProductionEnvironment = () => {
   const hiringTemplateId =
     process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || "";
   const hasInvalidHiringTemplate =
-    hiringTemplateId !== "343360" ||
+    hiringTemplateId !== "343660" ||
     process.env.SMS_IR_HIRING_CORRECTION_TEMPLATE_ID !== "763918" ||
     process.env.SMS_IR_HIRING_OFFER_TEMPLATE_ID !== "894291";
   const hiringTemplateParameters = (
@@ -206,7 +206,7 @@ const validateProductionEnvironment = () => {
         ? "JWT_SECRET must be at least 32 chars and not a placeholder."
         : "",
       hasInvalidHiringTemplate
-        ? "Hiring SMS template IDs must be exactly invitation=343360, correction=763918, offer=894291."
+        ? "Hiring SMS template IDs must be exactly invitation=343660, correction=763918, offer=894291."
         : "",
       hasInvalidHiringTemplateParameters
         ? "SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS must be exactly CODE."

@@ -179,6 +179,8 @@ export const activatePerformanceCohort = async (client: Client, input: {
   if (!cohort || cohort.lifecycle !== 'DRAFT' || !cohort.stage || !validDate(input.effectiveFrom)
     || input.effectiveFrom < clock.now || input.reason.trim().length < 8) throw rolloutError('PERFORMANCE_COHORT_ACTIVATION_INVALID', 422);
   const approvals = await currentApprovals(tx, 'COHORT', cohort.id);
+  await assertCohortEligibility(tx, cohort, clock.now);
+  await assertCohortEligibility(tx, cohort, input.effectiveFrom);
   const latestPhase = await tx.performanceFeaturePhaseVersion.findFirst({ orderBy: { version: 'desc' } });
   const scheduled = await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'SCHEDULED', effectiveFrom: input.effectiveFrom,
     activationReason: input.reason.trim(), activatedByUserId: input.actorUserId } });

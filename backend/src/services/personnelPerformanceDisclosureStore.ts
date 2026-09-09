@@ -1,3 +1,4 @@
+import { capturePerformanceExportSources, sealPerformanceExportLineage, resolvePerformanceExportDependencies, findPerformanceExportLegalHold } from './personnelPerformanceExportLineage';
 import { activePerformanceRestrictionIds } from './personnelPerformanceRestrictionQueries';
 import { readPerformanceRetentionPolicy } from './personnelPerformanceRetentionStore';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -31,6 +32,9 @@ import {
 import { runPerformanceSerializableTransaction } from './personnelPerformancePolicyStore';
 import { publishNotificationEvent } from './notificationService';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
+
+// Vault snapshots must contain JSON values: dates become ISO strings and absent fields are omitted.
+const reportingSnapshot = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
 const disclosureError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
 
@@ -188,7 +192,7 @@ const requireScopedConsequenceAuthority = async (client: PrismaClient | Prisma.T
   }
 };
 
-const activeDisclosureCohort = (client: PrismaClient, cohortVersionId: string | null | undefined) => cohortVersionId
+const activeDisclosureCohort = (client: PrismaClient | Prisma.TransactionClient, cohortVersionId: string | null | undefined) => cohortVersionId
   ? client.performanceCohortVersion.findFirst({ where: { id: cohortVersionId, lifecycle: 'ACTIVE', effectiveFrom: { lte: new Date() } }, select: { id: true } })
   : Promise.resolve(null);
 
@@ -366,7 +370,7 @@ const analyticsPopulation = async (client: PrismaClient, keyring: PerformanceVau
   });
 };
 
-const analyticsAuthorizedSubjectIds = async (client: PrismaClient) => {
+const analyticsAuthorizedSubjectIds = async (client: PrismaClient | Prisma.TransactionClient) => {
   const phase = await client.performanceFeaturePhaseVersion.findFirst({ where: { effectiveFrom: { lte: new Date() } }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] });
   if (!phase?.releaseEnabled || ['SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT', 'RESULT_LEVEL_BADGE'].includes(phase.phase)) return [];
   const cohort = await activeDisclosureCohort(client, phase.cohortVersionId);
@@ -375,12 +379,12 @@ const analyticsAuthorizedSubjectIds = async (client: PrismaClient) => {
 };
 
 const historicalAnalyticsPopulation = async (
-  client: PrismaClient,
+  client: PrismaClient | Prisma.TransactionClient,
   keyring: PerformanceVaultKey,
   reportingFrom: Date,
   reportingTo: Date,
   namedRanking = false,
-): Promise<PerformanceAnalyticsMember[]> => {
+): Promise<Array<PerformanceAnalyticsMember & { resultId: string; evaluationId: string }>> => {
   const authorizedSubjectIds = await analyticsAuthorizedSubjectIds(client);
   if (!authorizedSubjectIds.length) return [];
   const evaluations = await client.performanceEvaluation.findMany({ where: {
@@ -409,7 +413,7 @@ const historicalAnalyticsPopulation = async (
     }, include: { personnel: { select: { id: true, firstName: true, lastName: true } } },
   });
   const relationshipById = new Map(relationships.map((relationship) => [relationship.id, relationship]));
-  const members: PerformanceAnalyticsMember[] = [];
+  const members: Array<PerformanceAnalyticsMember & { resultId: string; evaluationId: string }> = [];
   for (const subject of subjects) {
     const relationship = subject.employmentRelationshipId ? relationshipById.get(subject.employmentRelationshipId) : null;
     const result = latestBySubject.get(subject.id);
@@ -436,6 +440,7 @@ const historicalAnalyticsPopulation = async (
     }
     if (namedRanking && (!completeJobCoverage || peerKeys.size !== 1 || assignments.length !== sections.length || !sections.length)) continue;
     members.push({
+      resultId: result.id, evaluationId: evaluation.id,
       subjectId: subject.id, personnelId: relationship.personnel.id,
       displayName: `${relationship.personnel.firstName} ${relationship.personnel.lastName}`.trim(),
       employmentRelationshipId: relationship.id, levelCode: result.levelCode,
@@ -538,7 +543,7 @@ export const fixedCohortPerformanceTrend = async (
   };
 };
 
-export const getPerformanceAnalytics = async (client: PrismaClient, input: {
+const buildPerformanceAnalyticsSnapshot = async (client: Prisma.TransactionClient, input: {
   actorUserId: string;
   personnelIds?: readonly string[];
   mode?: 'AGGREGATE' | 'NAMED_RANKING';
@@ -558,17 +563,23 @@ export const getPerformanceAnalytics = async (client: PrismaClient, input: {
     : await fixedCohortPerformanceTrend(client, authorizedSubjectIds, quarter.from, quarter.to);
   const result = trend ? { ...baseResult, trend: trend.suppressed ? trend : { ...trend, reconstruction: undefined } } : baseResult;
   const reconstructionId = randomUUID();
-  await client.$transaction(async (tx) => {
+  const tx = client;
+  const reconstruction = {
+    population,
+    trendReconstruction: trend && !trend.suppressed ? trend.reconstruction : trend,
+    report: result,
+  };
+  {
     const snapshot = await persistPerformancePayload(tx, {
       aggregateType: 'PERFORMANCE_ANALYTICS_RECONSTRUCTION', aggregateId: reconstructionId, payloadKind: 'REPORTING_WINDOW', schemaVersion: 1,
-      payload: {
+      payload: reportingSnapshot({
         asOf: new Date().toISOString(), windowKind: 'CANONICAL_QUARTER',
         reportingFrom: quarter.from.toISOString(), reportingTo: quarter.to.toISOString(),
         mode: input.mode ?? 'AGGREGATE',
         population: population.map(({ subjectId, employmentRelationshipId, levelCode, comparabilitySignature, peerGroupKey, measurementTo }) => ({ subjectId, employmentRelationshipId, levelCode, comparabilitySignature, peerGroupKey, measurementTo })),
         suppressionOrResult: result,
         trendReconstruction: trend && !trend.suppressed ? trend.reconstruction : trend,
-      }, keyring,
+      }), keyring,
     });
     await auditDisclosure(tx, {
       aggregateType: 'PERFORMANCE_ANALYTICS', aggregateId: reconstructionId,
@@ -578,9 +589,12 @@ export const getPerformanceAnalytics = async (client: PrismaClient, input: {
       evidenceHash: snapshot.contentHash,
       encryptedPayloadId: snapshot.id,
     });
-  });
-  return result;
+  }
+  return { result, reconstruction, authorizedSubjectIds, quarter };
 };
+
+export const getPerformanceAnalytics = async (client: PrismaClient, input: Parameters<typeof buildPerformanceAnalyticsSnapshot>[1]) =>
+  runPerformanceSerializableTransaction(client, async (tx) => (await buildPerformanceAnalyticsSnapshot(tx, input)).result);
 
 export const getEvaluatorCalibration = async (client: PrismaClient, input: { actorUserId: string; evaluatorPersonnelId: string; keyring?: PerformanceVaultKey }) => {
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
@@ -750,35 +764,35 @@ export const requestPerformanceExport = async (client: PrismaClient, input: {
   const permissionCodes = await activeHrActionPermissionsForUser(client, input.actorUserId);
   const requiredView = input.reportKind === 'NAMED_RANKING' ? 'VIEW_NAMED_PERFORMANCE_RANKING' : 'VIEW_PERFORMANCE_ANALYTICS';
   if (!permissionCodes.includes(requiredView)) throw disclosureError('مجوز مشاهده محتوای این خروجی معتبر نیست.', 'PERFORMANCE_EXPORT_VIEW_PERMISSION_REQUIRED', 403);
-  const revision = await evidenceRevision(client);
-  const report = await getPerformanceAnalytics(client, {
-    actorUserId: input.actorUserId,
-    personnelIds: input.personnelIds,
-    mode: input.reportKind === 'NAMED_RANKING' ? 'NAMED_RANKING' : 'AGGREGATE',
-    reportingFrom: input.reportingFrom, reportingTo: input.reportingTo,
-    keyring,
-  });
-  if (report.suppressed) throw disclosureError(report.messageFa, report.reasonCode, 409);
   const token = randomBytes(32).toString('base64url');
-  const now = new Date();
   const id = randomUUID();
-  const scope = { evidenceRevision: revision, reportKind: input.reportKind, personnelIds: [...(input.personnelIds ?? [])].sort(), purpose: input.purpose.trim(), generatedFromHash: canonicalPerformanceHash(report) };
-  const receipt = await client.$transaction(async (tx) => {
-    if (await evidenceRevision(tx, true) !== revision) throw disclosureError('شواهد گزارش تغییر کرده است؛ خروجی تازه درخواست کنید.', 'PERFORMANCE_EXPORT_EVIDENCE_CHANGED', 409);
+  const receipt = await runPerformanceSerializableTransaction(client, async (tx) => {
+    const revision = await evidenceRevision(tx, true);
+    const currentPermissions = await activeHrActionPermissionsForUser(tx, input.actorUserId);
+    if (!currentPermissions.includes(requiredView) || !currentPermissions.includes('REQUEST_PERFORMANCE_EXPORT')) {
+      throw disclosureError('مجوز خروجی معتبر نیست.', 'PERFORMANCE_EXPORT_VIEW_PERMISSION_REQUIRED', 403);
+    }
+    const snapshot = await buildPerformanceAnalyticsSnapshot(tx, {
+      actorUserId: input.actorUserId, mode: input.reportKind === 'NAMED_RANKING' ? 'NAMED_RANKING' : 'AGGREGATE',
+      reportingFrom: input.reportingFrom, reportingTo: input.reportingTo, keyring,
+    });
+    const report = snapshot.result;
+    if (report.suppressed) throw disclosureError(report.messageFa, report.reasonCode, 409);
+    const sources = await capturePerformanceExportSources(tx, snapshot.authorizedSubjectIds, snapshot.quarter.from, snapshot.quarter.to);
+    const scope = { evidenceRevision: revision, reportKind: input.reportKind, personnelIds: [], purpose: input.purpose.trim(), generatedFromHash: canonicalPerformanceHash(report) };
     const encrypted = await persistPerformancePayload(tx, {
       aggregateType: 'PERFORMANCE_EXPORT', aggregateId: id, payloadKind: 'SCOPE_SNAPSHOT', schemaVersion: 1,
-      payload: { scope, report }, keyring,
+      payload: reportingSnapshot({ scope, report }), keyring,
     });
-    return tx.performanceExportReceipt.create({ data: {
-      id,
-      requestedByUserId: input.actorUserId,
-      exportKind: input.exportKind,
-      scopeHash: canonicalPerformanceHash(scope),
-      permissionHash: canonicalPerformanceHash(permissionCodes.sort()),
-      encryptedPayloadId: encrypted.id,
-      downloadTokenHash: tokenHash(token),
-      expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+    const created = await tx.performanceExportReceipt.create({ data: {
+      id, requestedByUserId: input.actorUserId, exportKind: input.exportKind,
+      scopeHash: canonicalPerformanceHash(scope), permissionHash: canonicalPerformanceHash(currentPermissions.sort()),
+      encryptedPayloadId: encrypted.id, downloadTokenHash: tokenHash(token), expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
     } });
+    const lineage = await sealPerformanceExportLineage(tx, id, sources, snapshot.reconstruction, keyring);
+    await auditDisclosure(tx, { aggregateType: 'PERFORMANCE_EXPORT', aggregateId: id, eventType: 'PERFORMANCE_EXPORT_LINEAGE_SEALED',
+      actorUserId: input.actorUserId, authorityCodes: currentPermissions, evidenceHash: lineage.contentHash, encryptedPayloadId: lineage.id });
+    return created;
   });
   queueMicrotask(() => { void processPerformanceExport(client, receipt.id, keyring).catch(() => {
     console.error('Performance export dispatch failed closed; queued work remains available for recovery.');
@@ -928,14 +942,24 @@ const cleanupPerformanceExport = async (
     if (!receipt.downloadedAt && (!receipt.expiresAt || receipt.expiresAt > now)) return false;
     const payload = receipt.encryptedPayloadId
       ? await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: receipt.encryptedPayloadId } }) : null;
-    const scopes = [{ aggregateType: 'PERFORMANCE_EXPORT', aggregateIdHash: scopeHash }];
+    let dependencies;
+    try {
+      dependencies = await resolvePerformanceExportDependencies(tx, exportId);
+    } catch {
+      await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'HELD', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED' } });
+      return false;
+    }
+    const scopes = [{ aggregateType: 'PERFORMANCE_EXPORT', aggregateIdHash: scopeHash }, ...dependencies];
+    for (const scope of [...dependencies].sort((a, b) => `${a.aggregateType}:${a.aggregateIdHash}`.localeCompare(`${b.aggregateType}:${b.aggregateIdHash}`))) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${scope.aggregateType}:${scope.aggregateIdHash}`}, 0))`;
+    }
     if (payload) {
       const aggregateIdHash = createHash('sha256').update(payload.aggregateId).digest('hex');
       const lockKey = `${payload.aggregateType}:${aggregateIdHash}`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
       scopes.push({ aggregateType: payload.aggregateType, aggregateIdHash });
     }
-    if (await tx.performanceLegalHold.findFirst({ where: { status: 'ACTIVE', OR: scopes }, select: { id: true } })) {
+    if (await findPerformanceExportLegalHold(tx, exportId, scopes)) {
       await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'HELD', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_LEGAL_HOLD_ACTIVE' } });
       return false;
     }

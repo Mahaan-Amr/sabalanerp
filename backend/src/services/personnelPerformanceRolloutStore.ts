@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
 import { canonicalPerformanceHash } from './personnelPerformancePolicy';
 import { runPerformanceSerializableTransaction } from './personnelPerformancePolicyStore';
+import { assertPerformanceOperationalExpansionReady } from './personnelPerformanceMonitoringStore';
 
 type Client = PrismaClient | Prisma.TransactionClient;
 type OwnerType = 'HUMAN_RESOURCES' | 'SECURITY_PRIVACY' | 'SYSTEM_OWNER';
@@ -179,6 +180,7 @@ export const activatePerformanceCohort = async (client: Client, input: {
   if (!cohort || cohort.lifecycle !== 'DRAFT' || !cohort.stage || !validDate(input.effectiveFrom)
     || input.effectiveFrom < clock.now || input.reason.trim().length < 8) throw rolloutError('PERFORMANCE_COHORT_ACTIVATION_INVALID', 422);
   const approvals = await currentApprovals(tx, 'COHORT', cohort.id);
+  await assertPerformanceOperationalExpansionReady(tx, clock.now);
   await assertCohortEligibility(tx, cohort, clock.now);
   await assertCohortEligibility(tx, cohort, input.effectiveFrom);
   const latestPhase = await tx.performanceFeaturePhaseVersion.findFirst({ orderBy: { version: 'desc' } });
@@ -202,6 +204,7 @@ export const activateDuePerformanceCohorts = async (client: Client, now = new Da
   const activated: Array<typeof due[number]> = [];
   for (const cohort of due) {
     const approvals = await currentApprovals(tx, 'COHORT', cohort.id);
+    await assertPerformanceOperationalExpansionReady(tx, now);
     await assertCohortEligibility(tx, cohort, now);
     await tx.performanceCohortVersion.updateMany({ where: { cohortKey: cohort.cohortKey, lifecycle: 'ACTIVE', id: { not: cohort.id } },
       data: { lifecycle: 'RETIRED' } });

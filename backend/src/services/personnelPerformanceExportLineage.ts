@@ -8,6 +8,16 @@ const hashId = (id: string) => createHash('sha256').update(id).digest('hex');
 const dependencyHash = (scopes: Scope[]) => hashId(scopes.map(({ aggregateType, aggregateIdHash }) => `${aggregateType}:${aggregateIdHash}`).sort().join('\n'));
 const unavailable = () => Object.assign(new Error('وابستگی منابع خروجی قابل تأیید نیست؛ شواهد تا بررسی نگهداری می‌شود.'), { code: 'PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED', status: 409 });
 
+// Only known evidence defects are preservation outcomes. Database, key configuration,
+// and programming failures must reach the cleanup retry/reporting boundary.
+export const isPerformanceLineageEvidenceUnavailable = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' && [
+    'PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED',
+    'PERFORMANCE_RETENTION_DEPENDENCY_UNVERIFIED',
+    'PERFORMANCE_PAYLOAD_NOT_FOUND',
+    'PERFORMANCE_PAYLOAD_AUTHENTICATION_FAILED',
+  ].includes(error.code);
+
 // The reporting population includes exclusions and denominator-only subjects, not only displayed rows.
 // Capture within the same transaction/snapshot as the report; never reconstruct old exports from today's graph.
 export const capturePerformanceExportSources = async (tx: Prisma.TransactionClient, subjectIds: string[], from: Date, to: Date) => {
@@ -137,7 +147,10 @@ export const findPerformanceExportLegalHold = async (tx: Prisma.TransactionClien
     if (!handoff) return hold; // A held scope with missing ownership cannot authorize deletion.
     if (!subjectHashes.has(hashId(handoff.subjectId))) continue;
     let linkage;
-    try { linkage = await readPerformanceConsequenceDependencies(tx, handoff); } catch { return hold; }
+    try { linkage = await readPerformanceConsequenceDependencies(tx, handoff); } catch (error) {
+      if (!isPerformanceLineageEvidenceUnavailable(error)) throw error;
+      return hold;
+    }
     if (linkage.resultIds === null || linkage.resultIds.some((id) => resultHashes.has(hashId(id)))) return hold;
     const results = await tx.performanceAcceptedResult.findMany({ where: { id: { in: linkage.resultIds } }, select: { evaluationId: true } });
     if (results.length !== linkage.resultIds.length || results.some(({ evaluationId }) => evaluationHashes.has(hashId(evaluationId)))) return hold;

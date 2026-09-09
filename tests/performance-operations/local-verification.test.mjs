@@ -6,7 +6,20 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runPerformanceVerification } from '../../scripts/performance-local-verification.mjs';
 
-test('verification preserves failed command evidence and cannot claim promotion readiness', async () => {
+const posixOnly = { skip: process.platform === 'win32' ? 'Requires POSIX process groups; run in the existing local Linux container.' : false };
+
+test('Windows fails closed instead of using unsafe process-tree termination', { skip: process.platform !== 'win32' }, async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-verification-'));
+  try {
+    await assert.rejects(runPerformanceVerification({ directory,
+      identity: async () => ({ commit: 'fixture', sourceHash: 'fixture' }),
+      checks: [{ name: 'unsupported', command: process.execPath, args: ['-e', 'process.exit(0)'] }],
+    }), /PROCESS_GROUP_UNAVAILABLE/);
+    assert.equal(JSON.parse(await readFile(path.join(directory, 'report.json'), 'utf8')).status, 'RUNNING');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('verification preserves failed command evidence and cannot claim promotion readiness', posixOnly, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-verification-'));
   try {
     const report = await runPerformanceVerification({ directory,
@@ -25,7 +38,7 @@ test('verification preserves failed command evidence and cannot claim promotion 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('timeout stops inherited log writers before the evidence is finalized', async () => {
+test('timeout stops inherited log writers before the evidence is finalized', posixOnly, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-verification-'));
   try {
     const descendant = "process.on('SIGTERM', () => {}); console.log('descendant-ready'); setInterval(() => console.log('still-running'), 50)";
@@ -44,7 +57,7 @@ test('timeout stops inherited log writers before the evidence is finalized', asy
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('successful commands cannot pass a candidate that changes while checks execute', async () => {
+test('successful commands cannot pass a candidate that changes while checks execute', posixOnly, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-verification-'));
   let version = 0;
   try {

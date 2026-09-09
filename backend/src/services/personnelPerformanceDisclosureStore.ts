@@ -1,4 +1,4 @@
-import { capturePerformanceExportSources, sealPerformanceExportLineage, resolvePerformanceExportDependencies, findPerformanceExportLegalHold } from './personnelPerformanceExportLineage';
+import { capturePerformanceExportSources, sealPerformanceExportLineage, resolvePerformanceExportDependencies, findPerformanceExportLegalHold, isPerformanceLineageEvidenceUnavailable } from './personnelPerformanceExportLineage';
 import { activePerformanceRestrictionIds } from './personnelPerformanceRestrictionQueries';
 import { readPerformanceRetentionPolicy } from './personnelPerformanceRetentionStore';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -945,7 +945,8 @@ const cleanupPerformanceExport = async (
     let dependencies;
     try {
       dependencies = await resolvePerformanceExportDependencies(tx, exportId);
-    } catch {
+    } catch (error) {
+      if (!isPerformanceLineageEvidenceUnavailable(error)) throw error;
       await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'HELD', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED' } });
       return false;
     }

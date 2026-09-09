@@ -6,14 +6,19 @@ import { createContract, type ContractTransactionRunner } from '../contractServi
 import { buildLegacyContractMigrationPlan } from '../contractProductGraphMigration';
 
 const rollback = Symbol('contract snapshot persistence rollback');
+const delayMs = Number(process.env.CONTRACT_SNAPSHOT_DELAY_MS || 0);
+assert(Number.isFinite(delayMs) && delayMs >= 0 && delayMs <= 6_000);
 const transactionHarness: ContractTransactionRunner = {
-  async $transaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>) {
+  async $transaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>, options?: { maxWait?: number; timeout?: number }) {
     let result!: T;
     try {
       await prisma.$transaction(async tx => {
+        if (delayMs) await new Promise(resolve => setTimeout(resolve, delayMs));
         result = await work(tx);
+        assert.equal(await tx.salesContractProductGraphState.count({ where: { contractId: (result as any).id } }), 1);
+        assert.equal(await tx.salesContractProductGraphAudit.count({ where: { contractId: (result as any).id } }), 1);
         throw rollback;
-      });
+      }, options);
     } catch (error) {
       if (error !== rollback) throw error;
     }
@@ -22,6 +27,9 @@ const transactionHarness: ContractTransactionRunner = {
 };
 
 const run = async () => {
+  const databaseUrl = new URL(process.env.DATABASE_URL || '');
+  assert(['127.0.0.1', 'localhost'].includes(databaseUrl.hostname) && databaseUrl.port === '55432',
+    'Only the existing sabalanerp-local database is allowed');
   const candidates = await prisma.salesContract.findMany({
     where: {
       productGraphState: { isNot: null },
@@ -99,6 +107,8 @@ const run = async () => {
   assert.equal(savedData.customer.communications, undefined);
   assert(Array.isArray(savedData.products));
   assert(Buffer.byteLength(JSON.stringify(savedData), 'utf8') < 200_000);
+  assert.equal(await prisma.salesContract.findUnique({ where: { id: created.id } }), null,
+    'The test must roll back its contract, items and product graph');
 };
 
 run()

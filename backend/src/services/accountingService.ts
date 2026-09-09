@@ -1,4 +1,6 @@
 import { prisma } from '../lib/prisma';
+import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates } from './accountingListProjection';
+import { normalizePersianSearchTokens } from './crmCustomerSearch';
 import { randomUUID } from 'node:crypto';
 import { canonicalHash, InstantSchema } from '@sabalanerp/partner-sales-contracts';
 import { buildAccountingContractSourceSnapshot } from './contractSnapshotBoundary';
@@ -940,26 +942,32 @@ const attachAccountingCollections = async (contracts: any[]) => {
   const [records, receivables, payments, taxRecords, flags, corrections] = await Promise.all([
     prisma.accountingFinancialRecord.findMany({
       where: { contractId: { in: contractIds } },
+      select: accountingFinancialSummarySelect,
       orderBy: { createdAt: 'desc' }
     }),
     prisma.accountingReceivable.findMany({
       where: { contractId: { in: contractIds } },
+      select: { contractId: true, status: true, dueDate: true },
       orderBy: { dueDate: 'asc' }
     }),
     prisma.accountingPaymentStatus.findMany({
       where: { contractId: { in: contractIds } },
+      select: { contractId: true, status: true, amount: true },
       orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }]
     }),
     prisma.accountingTaxRecord.findMany({
       where: { contractId: { in: contractIds } },
+      select: { contractId: true, submissionStatus: true },
       orderBy: { createdAt: 'desc' }
     }),
     prisma.accountingContractFlag.findMany({
       where: { contractId: { in: contractIds } },
+      select: { contractId: true, status: true, severity: true },
       orderBy: { createdAt: 'desc' }
     }),
     prisma.accountingCorrectionRequest.findMany({
       where: { contractId: { in: contractIds } },
+      select: { contractId: true, status: true },
       orderBy: { createdAt: 'desc' }
     })
   ]);
@@ -1026,17 +1034,17 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
   const [rawContracts, settings] = await Promise.all([
     prisma.salesContract.findMany({
       where,
-      include: getAccountingInclude(),
+      select: accountingContractListSelect,
       orderBy
     }),
     getDefaultSettings()
   ]);
 
-  const contracts = await attachAccountingCollections(rawContracts);
+  const contracts = await attachAccountingCollections(await attachAccountingListDates(prisma, rawContracts));
   let items = await Promise.all(contracts.map((contract) => buildContractRow(contract, settings)));
 
   if (search) {
-    const lowered = search.toLowerCase();
+    const lowered = normalizePersianSearchTokens(search).join(' ');
     items = items.filter((item: any) => {
       const date = item.contractDate ? new Date(item.contractDate) : null;
       const dateParts = date && !Number.isNaN(date.getTime())
@@ -1054,9 +1062,9 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
         item.accounting?.receivableStatus,
         item.accounting?.taxStatus,
         ...dateParts
-      ].filter(Boolean).join(' ').toLowerCase();
+      ].filter(Boolean).join(' ');
 
-      return haystack.includes(lowered);
+      return normalizePersianSearchTokens(haystack).join(' ').includes(lowered);
     });
   }
 

@@ -4,6 +4,7 @@ import { getUserWorkspaces } from '../middleware/workspace';
 import { canAccessTicket } from './supportTicketPolicy';
 import { canReadPartnerNotification, PARTNER_NOTIFICATION_RESOURCE } from './partnerSales/notifications/access';
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
+import { canAccessPerformanceOperationalAlert } from './performanceOperationalNotificationAccess';
 
 export type NotificationAuthorizationUser = {
   id: string;
@@ -56,6 +57,7 @@ type AuthorizedSupportTicket = {
 };
 
 const PERFORMANCE_NOTIFICATION_TYPES = new Set([
+  'PERFORMANCE_OPERATIONAL_ALERT',
   'PERFORMANCE_SUPERVISOR_TASK',
   'PERFORMANCE_REVIEW_READY',
   'PERFORMANCE_SUBMISSION_DECIDED',
@@ -77,6 +79,9 @@ const canAccessPerformanceNotification = async (
   row: NotificationWithAuthorizationEvent,
   contextPromise: Promise<PerformanceNotificationContext | null>,
 ) => {
+  if (row.type === 'PERFORMANCE_OPERATIONAL_ALERT') {
+    return canAccessPerformanceOperationalAlert(database, userId, row.event);
+  }
   if (!row.type || !PERFORMANCE_NOTIFICATION_TYPES.has(row.type) || !row.event) return null;
   const context = await contextPromise;
   if (!context) return false;
@@ -202,7 +207,8 @@ export const filterCurrentlyAuthorizedNotifications = async <
   const crossWorkspaceDutyIds = [...new Set(rows
     .filter((row) => row.event?.resourceType === 'HR_DUTY' && row.event.resourceId)
     .map((row) => row.event!.resourceId!))];
-  const hasPerformanceNotifications = rows.some((row) => row.type && PERFORMANCE_NOTIFICATION_TYPES.has(row.type));
+  const hasPerformanceNotifications = rows.some((row) => row.type
+    && row.type !== 'PERFORMANCE_OPERATIONAL_ALERT' && PERFORMANCE_NOTIFICATION_TYPES.has(row.type));
   const performanceContext: Promise<PerformanceNotificationContext | null> = hasPerformanceNotifications
     ? Promise.all([
         database.user.findUnique({ where: { id: user.id }, select: { personnelId: true } }),

@@ -8,6 +8,7 @@ import {
 } from '../services/personnelPerformanceRolloutStore';
 import { placePerformanceLegalHold, decidePerformanceLegalHold, listPerformanceLegalHolds } from '../services/personnelPerformanceLegalHoldStore';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../services/personnelPerformanceOperationsStore';
+import { acknowledgePerformanceOperationalIncident, configurePerformanceOperationalRoute, getPerformanceOperationalDashboard, recordPerformanceIntegrityFailure, recordPerformanceRequestObservation } from '../services/personnelPerformanceMonitoringStore';
 import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue } from '../services/personnelPerformancePrivacyStore';
 import { restrictPerformanceEvidence } from '../services/personnelPerformanceRestrictions';
 import { findApplicablePerformancePause } from '../services/personnelPerformanceRolloutPolicy';
@@ -79,6 +80,35 @@ import {
 
 const router = express.Router();
 router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
+export const classifyPerformanceRequestMetric = (method: string, path: string) => {
+  if (method === 'GET' && path.startsWith('/badge')) return 'BADGE_API_LATENCY';
+  if (method === 'GET' && path.startsWith('/traces/')) return 'RESULT_REPRODUCTION_LATENCY';
+  if (method === 'PUT' && path.endsWith('/draft')) return 'DRAFT_SAVE_API_LATENCY';
+  if (method === 'POST' && ['/analytics', '/ranking', '/calibration'].includes(path)) return 'ANALYTICS_API_LATENCY';
+  if (method === 'POST' && ['/submit', '/decision', '/not-evaluable', '/suspend', '/cancel', '/invalidate'].some((suffix) => path.endsWith(suffix))) return 'ATOMIC_TRANSITION_API_LATENCY';
+  if (method === 'GET') return 'AUTHORIZED_READ_API_LATENCY';
+  return null;
+};
+export const performanceRequestObservationOutcome = (responseStatus: number, completed: boolean) => ({
+  responseStatus: completed ? responseStatus : 499,
+  timedOut: !completed || [408, 504].includes(responseStatus),
+});
+router.use((req, res, next) => {
+  const metricKey = classifyPerformanceRequestMetric(req.method, req.path);
+  const startedAt = performance.now();
+  let recorded = false;
+  const record = (completed: boolean) => {
+    if (recorded) return;
+    recorded = true;
+    if (!metricKey) return;
+    const outcome = performanceRequestObservationOutcome(res.statusCode, completed);
+    void recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)), ...outcome })
+      .catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
+  };
+  res.once('finish', () => record(true));
+  res.once('close', () => record(false));
+  next();
+});
 router.post('/compensation-agreements', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_COMPENSATION_AGREEMENTS'] }), async (req: AuthRequest, res, next) => {
   try {
     const agreement = await publishCompensationAgreement(prisma, { ...req.body, actorUserId: req.user!.id });
@@ -646,6 +676,15 @@ router.post('/restrictions/:restrictionId/release', requireHrAuthorization({ act
 router.get('/operations', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (_req, res, next) => {
   try { return res.json({ success: true, operations: await getPersonnelPerformanceOperationsState(prisma) }); } catch (error) { return next(error); }
 });
+router.get('/operations/monitoring', requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_AUDIT', 'MANAGE_PERFORMANCE_ROLLOUT'] }), async (_req, res, next) => {
+  try { return res.json({ success: true, monitoring: await getPerformanceOperationalDashboard(prisma) }); } catch (error) { return next(error); }
+});
+router.post('/operations/monitoring/routes', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, route: await configurePerformanceOperationalRoute(prisma, { actorUserId: req.user!.id, routeKey: req.body.routeKey, recipientUserId: req.body.recipientUserId, verifiedAt: new Date(req.body.verifiedAt), reason: req.body.reason }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/incidents/:incidentId/actions', async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, incident: await acknowledgePerformanceOperationalIncident(prisma, { actorUserId: req.user!.id, incidentId: req.params.incidentId, action: req.body.action, reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash }) }); } catch (error) { return next(error); }
+});
 router.post('/operations/pause', requireHrAuthorization({ actionPermissionCodes: ['PAUSE_PERFORMANCE_EVALUATION'] }), async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, pause: await pausePersonnelPerformance(prisma, {
     actorUserId: req.user!.id, phaseVersionId: req.body.phaseVersionId, scope: req.body.scope, cohortVersionId: req.body.cohortVersionId,
@@ -712,7 +751,9 @@ router.post('/legal-holds/:holdId/decisions', async (req: AuthRequest, res, next
   }) }); } catch (error) { return next(error); }
 });
 
-router.use((error: unknown, _req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+router.use(async (error: unknown, _req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+  try { await recordPerformanceIntegrityFailure(prisma, error); }
+  catch { console.error('Personnel performance integrity incident routing failed closed: PERFORMANCE_OPERATIONAL_ALERT_FAILED'); }
   if (res.headersSent) return next(error);
   const detail = error && typeof error === 'object' ? error as { code?: unknown; status?: unknown; statusCode?: unknown; message?: unknown } : {};
   const message = typeof detail.message === 'string' ? detail.message : '';

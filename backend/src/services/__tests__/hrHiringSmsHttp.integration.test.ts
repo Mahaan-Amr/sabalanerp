@@ -25,7 +25,8 @@ test('hiring SMS methods send the approved SMS.ir template IDs and exact case-se
     process.env.SMS_IR_API_KEY = 'test-api-key';
     process.env.SMS_IR_API_URL = `http://127.0.0.1:${address.port}`;
     process.env.SMS_IR_ENVIRONMENT = 'production';
-    delete process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID;
+    // Production retains the previous image's configuration for safe rollback.
+    process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID = '343360';
     process.env.SMS_IR_HIRING_CORRECTION_TEMPLATE_ID = '763918';
     process.env.SMS_IR_HIRING_OFFER_TEMPLATE_ID = '894291';
     const { default: sms } = await import('../smsService');

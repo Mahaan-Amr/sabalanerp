@@ -33,6 +33,14 @@ export interface NotificationPolicyDraft {
 }
 
 const REGISTERED_NOTIFICATION_EVENTS = {
+  PERFORMANCE_OPERATIONAL_ALERT: {
+    type: 'PERFORMANCE_OPERATIONAL_ALERT', mandatory: true,
+    titleTemplate: 'هشدار عملیاتی ارزیابی عملکرد',
+    messageTemplate: 'یک شاخص عملیاتی ارزیابی عملکرد به پیگیری فوری نیاز دارد.',
+    priority: 'URGENT', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
   PERFORMANCE_SUPERVISOR_TASK: {
     type: 'PERFORMANCE_SUPERVISOR_TASK', mandatory: true,
     titleTemplate: 'ارزیابی عملکرد جدید', messageTemplate: 'یک بخش ارزیابی عملکرد برای تکمیل آماده است.',

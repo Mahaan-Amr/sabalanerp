@@ -1633,7 +1633,7 @@ test('public, identity, and confirmation routes share the responsive semantic fo
 
   await page.setViewportSize({ width: 390, height: 844 });
   for (const route of routes) {
-    await page.goto(route);
+    await page.goto(route, { waitUntil: 'commit' });
     const workspace = page.locator('main.sds-workspace');
     await expect(workspace).toBeVisible();
     expect(await workspace.evaluate((element) => {

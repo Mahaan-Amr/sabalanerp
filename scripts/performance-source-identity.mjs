@@ -17,6 +17,7 @@ export const performanceSourceHash = async () => {
     'backend/src', 'backend/prisma', 'frontend/src', 'packages', 'scripts', 'deploy', '.github', 'tests',
     'backend/tsconfig.json', 'frontend/tsconfig.json', 'playwright*.config.*',
     'docs/operations', 'docs/adr', 'AGENTS.md', 'CONTEXT.md', '*package*.json', '*Dockerfile*', 'docker-compose*.yml',
+    ':(exclude)**/node_modules',
   ], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).split('\0').filter(Boolean).sort();
   const hash = createHash('sha256');
   const inquiryCommit = assertInquiryCheckoutMatchesGitlink({

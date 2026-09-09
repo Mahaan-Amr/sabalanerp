@@ -1287,7 +1287,7 @@ test('Contract submission preserves input across an invalid response, succeeds o
   const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
   await expect(submit).toBeEnabled({ timeout: 60_000 });
   await submit.click();
-  await expect(page.getByText(/ثبت قرارداد انجام نشد\. اطلاعات واردشده حفظ شده است\. ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید/)).toBeVisible();
+  await expect(page.getByText(/ثبت قرارداد انجام نشد\. اطلاعات واردشده حفظ شده است\. اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید/)).toBeVisible();
   await expect(submit).toBeEnabled();
 
   await Promise.all([

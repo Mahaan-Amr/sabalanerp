@@ -28,7 +28,16 @@ The user authorized integration, push to main and production deployment, with no
 - Five partial-index SQL fixtures passed inside temporary tables with rollback; no index migration was applied to the source local database.
 - HR foundation, policy, workflow, disclosure and retention unit suites passed; frontend policy/workflow/badge model suites passed.
 - Hiring SMS HTTP test passed against a loopback fake receiver, including the legacy configured value producing only the new approved template. No real SMS was sent. Template-resolution unit tests passed.
-- Root performance operations: 8 passed on Windows, 3 POSIX-only tests explicitly skipped; those exact three tests passed in the existing `sabalanerp-local` Linux backend container. Windows fail-closed process-group rejection has its own passing test. No timeout guarantee was weakened.
+- Root performance operations: 10 passed on Windows, 3 POSIX-only tests explicitly skipped; those exact three tests passed in the existing `sabalanerp-local` Linux backend container. Windows fail-closed process-group rejection has its own passing test. No timeout guarantee was weakened.
+- Backend lint, deployment-control, system-recovery and notification suites passed. Partner harness unit, transport, foundation and inventory checks passed.
+- Candidate databases migrated from 281 to 284 migrations. Foundation, Disclosure and Operations passed through the collector-generated isolated-clone wrapper; ExportLineage passed through its generated command with four local test connections (gate, worker and observer require more than two). Policy and Workflow passed against their isolated candidate clones. SafetyRaces passed 10 iterations, each with four deterministic orderings and zero failures; this is not rollout/promotion evidence.
+- The source database retained 281 migrations and the same preservation fingerprint. Only exact temporary test clones were removed by their checked cleanup harness; source data and production data were not deleted.
+
+## Known baseline failure and collector correction
+
+`personnelPerformancePrivacy.integration.test.ts:64` fails because ADMIN deadline-notice authorization returns one visible notification where the assertion expects zero. The test and corresponding authorization behavior are unchanged from the production base; this is recorded as a pre-existing failure, not a passing privacy suite. Later assertions in that suite are not covered by this run. HR performance remains inactive; this release does not authorize activation, waive its promotion gates, or claim full privacy acceptance.
+
+Final spec review found that the newly merged local verification collector still sent shared-client suites to the source schema and constrained the lineage observer to two connections. It now routes Foundation/Disclosure/Operations/Privacy through the checked migrated temporary clone, runs self-isolating suites separately, labels source migration metadata as source metadata, and uses four connections only for the local lineage fixture. It still includes the failing privacy test and reports failure; it does not skip or bless it. Two planner regressions passed. The local regression default is ten explicit race iterations; callers may request up to 1,000, with bounded per-iteration timeout overhead. None of these settings changes a production pool or promotion requirement.
 
 ## Production preflight observations
 

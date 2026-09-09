@@ -44,6 +44,7 @@ const main = async () => {
       }
       console.log(JSON.stringify({ database: database.databaseName, sourceMigrations: before.migrations.length,
         candidateMigrations: candidate.migrations.length,
+        candidateMigrationHash: createHash('sha256').update(JSON.stringify(candidate.migrations)).digest('hex'),
         applied: candidate.migrations.filter(row => !before.migrations.some(old => old.migration_name === row.migration_name)).map(row => row.migration_name) }));
       let failures = 0;
       for (const suite of ['personnelPerformanceFoundation', 'personnelPerformanceDisclosure',

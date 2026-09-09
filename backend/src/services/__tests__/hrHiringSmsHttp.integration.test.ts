@@ -38,7 +38,7 @@ test('hiring SMS methods send the approved SMS.ir template IDs and exact case-se
     assert.equal(offer.success, true);
     assert.equal(report.deliveryState, 1);
     assert.deepEqual(requests.slice(0, 3).map(({ body }) => ({ templateId: body.templateId, parameters: body.parameters })), [
-      { templateId: 343360, parameters: [{ name: 'CODE', value: '123456' }] },
+      { templateId: 343660, parameters: [{ name: 'CODE', value: '123456' }] },
       { templateId: 763918, parameters: [{ name: 'DETAILS', value: 'اصلاح کد ملی' }, { name: 'CODE', value: '123456' }] },
       { templateId: 894291, parameters: [{ name: 'CODE', value: '123456' }] },
     ]);

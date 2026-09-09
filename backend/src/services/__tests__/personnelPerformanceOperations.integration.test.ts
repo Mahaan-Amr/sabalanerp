@@ -108,6 +108,10 @@ const main = async () => {
           action: 'APPROVE', reasonCode: 'READINESS_VERIFIED', evidenceHash });
       }
       const [activationClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+      await assert.rejects(() => activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
+        effectiveFrom: new Date('2100-01-01Z'), reason: 'Training expires before the scheduled activation' }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED');
+      assert.equal((await tx.performanceCohortVersion.findUniqueOrThrow({ where: { id: proposal.id } })).lifecycle, 'DRAFT');
       const effectiveFrom = new Date(activationClock.now.getTime() + 1_000);
       const scheduled = await activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
         effectiveFrom, reason: 'Three independently approved owners' });

@@ -1,6 +1,6 @@
 # Personnel performance operations and evidence
 
-Status: implementation in progress for #362. Production activation and compatibility retirement remain prohibited. A successful software test run is not the nine-gate promotion decision.
+Status: integrated implementation remains incomplete under #356 despite closure of #358–#362. Production activation and compatibility retirement remain prohibited. A successful software test run is not the nine-gate promotion decision.
 
 ## Retention boundary
 
@@ -41,6 +41,16 @@ Restrictions exclude their evaluations from current-level recomputation, analyti
 Legal-hold creation and release have independent permissions. Two distinct, currently authorized release decisions with matching reasons within twenty-four hours are required; duplicate decisions do not count twice. Active holds expose their ninety-day review deadline through `/legal-holds`. Hold propagation to every dependent storage class, subject notifications and automatic review escalation are still required.
 
 ## Evidence verifier
+
+### Local regression collection
+
+`npm run performance:verify:local -- all` runs the combined foundation/security, policy, workflow, disclosure and operations suites, backend/frontend builds, lint, architecture and design-system checks (including foundation/adoption tests), then the existing PostgreSQL integration suites and four safety-race orderings at 100 iterations each. Use `unit` or `database` for a narrower run. Database runs require the default local credentials and healthy existing `sabalanerp-local` services; they never start a stack. Integration tests use the existing transaction/temporary-database harnesses and own cleanup.
+
+Each run creates a private directory under `test-results/personnel-performance/` with command logs and `report.json`. It records exit codes, durations and log hashes, plus checkout commit/source identity before and after. Database runs additionally record actual running image IDs, the applied-migration metadata hash, policy metadata hash and Compose source hash. A changed or unavailable final identity blocks the report. Failed commands remain recorded and independent checks continue. Timeouts and handled interruptions terminate the owned process group before hashing logs and produce a non-PASS outcome. An abrupt exit or unconfirmed shutdown leaves the report `RUNNING`, which is not PASS evidence. Logs can contain test diagnostics and must remain restricted.
+
+These are **local software regression results**. `promotionDecision` remains `NOT_EVALUATED` even when the local status is `PASS`. The collector does not attest that running images contain the checkout, that applied migrations equal the checkout schema, or that policy metadata supplies an approved active policy. It does not substitute for browser acceptance, complete twelve-race measurements, failure injection, recovery/capacity exercises, approved owner decisions, or durable promotion-artifact storage. It cannot generate an `EVIDENCE_COMPLETE` promotion decision.
+
+The combined performance suite now includes the foundation authorization, vault, rollout and route regressions. Cohort scheduling rechecks current eligibility and eligibility at the requested effective time before persisting the future transition. Population evidence requires integer ready/member counts at every stage, complete coverage at ALL, and the rounded-up percentage count at each percentage stage.
 
 Run:
 
@@ -86,6 +96,20 @@ Do not retire prototype/compatibility components before 30 continuously healthy 
 
 ## Outstanding implementation and evidence
 
+The integration review of `57b02bac` found two specific release blockers beyond the approved operational-input deferrals: cohort scheduling/activation accepts owner evidence hashes without verifying measured, release-bound promotion evidence; export cleanup checks export/payload holds without complete subject/evaluation-to-export dependency propagation. Neither is made safe by a passing local test command. The missing scheduling eligibility check and population measurement validation are corrected by the #356 follow-up; the larger blockers require their own implementation and regression evidence.
+
+The remaining work is tracked as native children and blocking dependencies of #356:
+
+| Child | Canonical ownership |
+| --- | --- |
+| [#365](https://github.com/Mahaan-Amr/sabalanerp/issues/365) | Export reconstruction lineage and dependent legal-hold preservation |
+| [#366](https://github.com/Mahaan-Amr/sabalanerp/issues/366) | Retention classification, daily erasure and recoverable-copy accounting; depends on #365 |
+| [#367](https://github.com/Mahaan-Amr/sabalanerp/issues/367) | Runtime verification of promotion evidence and rollout admission |
+| [#368](https://github.com/Mahaan-Amr/sabalanerp/issues/368) | Operational monitoring, routed alerts and threshold enforcement |
+| [#369](https://github.com/Mahaan-Amr/sabalanerp/issues/369) | Complete acceptance harness and immutable candidate handoff; depends on #365–#368 |
+
+Each child records its shared schema/service/maintenance boundaries. The approved operational-input deferrals remain separate from these implementation gaps. #356 stays open until actual integration and acceptance, and #357 retains independent final QA.
+
 - Complete retention classification and dependency/copy discovery for every record/artifact class, daily physical erasure, first-run/bulk approval thresholds, backup-copy inventory and expiry attestation, process-crash cleanup rehearsal, and privacy/hold notifications and escalation. Evaluation assessment and formal policy-based preservation responses are implemented; these do not certify physical erasure.
 - Complete deterministic races for the implemented write fences, measured alert routing, observability and hypercare ownership. Transactional versioned cohort scheduling/activation and evidence-backed resume approvals are implemented; live activation and owner assignment remain prohibited/deferred as stated above.
 - Trusted evidence collection/orchestration, complete twelve-race harness with 100 iterations each, full failure injection, measured Baseline/Growth/Stress, migration and real restore rehearsals.
@@ -100,3 +124,13 @@ An evaluation with accepted evidence preserves that evidence class even after ca
 A verified erasure request can now receive a formal `RETAINED_UNDER_POLICY` response backed by those decisions, with `deletionCompleted: false`. Its open scope remains preserved; closure does not remove the required 90-day preservation period. The response does not claim removal from live storage or backups.
 
 Authorized reviewers can page through pending requests with `GET /api/personnel-performance/privacy/requests?afterId=...`. The queue orders requests oldest first, returns at most 50 with a continuation cursor, shows the next action and deadline, and audits the displayed scope without copying confidential narratives. Subject ownership does not grant queue access.
+
+## Export source lineage and legal holds (#365)
+
+New exports seal `performance_export_dependencies` and `performance_export_lineage` in the same transaction as the export request. The index stores scope types and hashed identities; the protected reconstruction payload stores the reporting window, cutoff, selected results, historical trend members, denominator-only subjects, source versions and hashes, relationship/assignment and peer-family facts, and report outcome. Index entries cannot be changed or appended after sealing. Source evidence remains independently protected; export expiry is not authority to erase those records.
+
+`resolvePerformanceExportDependencies` is the shared interface for the physical-erasure child #366. It verifies the sealed index and protected payload before returning source scopes. `findPerformanceExportLegalHold` checks direct source holds and descendant holds against the sealed evaluation roots, including later review, trace, result, privacy-case and consequence-handoff evidence. Handoff selected-result, trend and projection links use the same resolver as evaluation retention; unknown held handoff linkage preserves evidence. Cleanup, artifact publication, and hold placement/release share the disclosure fence. Releasing one hold never bypasses another hold or an unavailable retention policy.
+
+Historical exports without a verified lineage remain `HELD` in the cleanup journal with `PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED`; their payloads and every inventoried attempt file remain preserved. No historical lineage is inferred from today's population. Successful live cleanup retains its immutable source index and audit and stays `LIVE_DELETED_PENDING_BACKUP`; it does not attest complete erasure of recoverable copies.
+
+`npm --prefix backend run test:personnel-performance-disclosure:db` covers real generated named/aggregate exports, historical trend and denominator sources, immutable lineage, historical unknown lineage, subject/evaluation/descendant holds, failed-attempt files, unrelated expiry, dual-approval release, and both winning orders of cleanup/hold and publication/hold. The race barriers observe actual PostgreSQL lock contention on the existing local service. These are regression checks, not the complete twelve-race promotion gate or production activation evidence.

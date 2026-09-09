@@ -8139,6 +8139,28 @@ model PerformanceExportReceipt {
   @@map("performance_export_receipts")
 }
 
+// Sealed source index; plaintext identifiers and reconstruction stay in the protected vault.
+model PerformanceExportLineage {
+  exportId           String   @id
+  schemaVersion      Int
+  reconstructionId   String   @unique
+  dependencyHash     String
+  dependencyCount    Int
+  createdAt          DateTime @default(now())
+
+  @@map("performance_export_lineage")
+}
+
+model PerformanceExportDependency {
+  exportId        String
+  aggregateType   String
+  aggregateIdHash String
+
+  @@id([exportId, aggregateType, aggregateIdHash])
+  @@index([aggregateType, aggregateIdHash])
+  @@map("performance_export_dependencies")
+}
+
 model PerformancePeerFamilyVersion {
   id                String                       @id @default(cuid())
   familyKey         String

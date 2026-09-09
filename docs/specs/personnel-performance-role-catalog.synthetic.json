@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "catalog": {
+    "stableKey": "PERF_ROLE_CATALOG_SYNTHETIC",
+    "versionCode": "SYNTHETIC_V1",
+    "lifecycle": "DRAFT",
+    "effectiveContext": "ACCEPTANCE_EXAMPLE_ONLY",
+    "importIdentity": "PERF-ROLE-CATALOG:SYNTHETIC:V1",
+    "contentHash": "4046d0207d1110d4e3be6d994695f035bc23303bfdbb11a40ca9dbc769c40687",
+    "contentHashMethod": "SHA256_CANONICAL_JSON_EXCLUDING_CATALOG_CONTENT_HASH"
+  },
+  "source": {
+    "provenanceCategory": "SYNTHETIC",
+    "asOf": "2026-09-09T00:00:00.000Z",
+    "references": [
+      "GitHub issue #370 acceptance examples",
+      "GitHub issue #356 PERF-COORD-20260909-v1"
+    ],
+    "extractedFacts": false,
+    "notes": "No workforce database was queried; every Job, Position, responsibility and coverage row is synthetic."
+  },
+  "review": {
+    "contentOrigin": "AI_PROPOSED",
+    "status": "BUSINESS_REVIEW_PENDING",
+    "reviewerRole": "UNASSIGNED",
+    "reviewedAt": null
+  },
+  "applicabilityDictionary": [
+    { "fact": "jobId", "type": "ID", "operators": ["EQUALS", "IN"], "unknown": "BLOCK", "source": "PERIOD_EFFECTIVE_POSITION_JOB", "sourceVersion": "PERF_APPLICABILITY_V1" },
+    { "fact": "positionId", "type": "ID", "operators": ["EQUALS", "IN"], "unknown": "BLOCK", "source": "PERIOD_EFFECTIVE_ASSIGNMENT", "sourceVersion": "PERF_APPLICABILITY_V1" },
+    { "fact": "organizationalUnitId", "type": "ID", "operators": ["EQUALS", "IN"], "unknown": "BLOCK", "source": "PERIOD_EFFECTIVE_ASSIGNMENT_OR_SNAPSHOT", "sourceVersion": "PERF_APPLICABILITY_V1" },
+    { "fact": "workplaceId", "type": "ID", "operators": ["EQUALS", "IN", "EXISTS"], "unknown": "BLOCK", "source": "PERIOD_EFFECTIVE_ASSIGNMENT", "sourceVersion": "PERF_APPLICABILITY_V1" },
+    { "fact": "shiftType", "type": "STRING", "operators": ["EQUALS", "IN", "EXISTS"], "unknown": "BLOCK", "source": "VERSIONED_WORK_SCHEDULE_OR_ASSIGNMENT_FACT", "sourceVersion": "PERF_APPLICABILITY_V1" },
+    { "fact": "assignmentType", "type": "STRING", "operators": ["EQUALS", "IN"], "unknown": "BLOCK", "source": "PERIOD_EFFECTIVE_ASSIGNMENT", "sourceVersion": "PERF_APPLICABILITY_V1" },
+    { "fact": "responsibilityCodes", "type": "STRING_LIST", "operators": ["IN", "EXISTS"], "unknown": "BLOCK", "source": "VERSIONED_DOCUMENTED_RESPONSIBILITY", "sourceVersion": "PERF_APPLICABILITY_V1" },
+    { "fact": "effectiveDate", "type": "DATE", "operators": ["EQUALS", "IN"], "unknown": "BLOCK", "source": "EVALUATION_ASSIGNMENT_SECTION", "sourceVersion": "PERF_APPLICABILITY_V1" },
+    { "fact": "hasSafetyDuty", "type": "BOOLEAN", "operators": ["EQUALS"], "unknown": "BLOCK", "source": "VERSIONED_DOCUMENTED_DUTY", "sourceVersion": "PERF_APPLICABILITY_V1" }
+  ],
+  "applicabilitySnapshotContract": {
+    "schemaVersion": 1,
+    "container": "__applicability",
+    "snapshotVersion": "REQUIRED_STABLE_VERSION",
+    "sourceVersions": "REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION",
+    "effectiveAt": "REQUIRED_ISO_TIMESTAMP",
+    "unknown": "BLOCK"
+  },
+  "evidenceDictionary": [
+    {
+      "code": "CONTROLLED_LEDGER_ENTRY",
+      "classification": "CANONICAL_EVIDENCE",
+      "sourceProcess": "Approved accounting or operational ledger",
+      "recordVersion": "Immutable record id plus source version",
+      "lineage": "Performer Personnel and effective assignment must be attributable independently of the recording User",
+      "attribution": "PERFORMER_PERSONNEL_AND_RECORDING_USER_SEPARATE",
+      "ownerRole": "PROCESS_OWNER_UNASSIGNED"
+    },
+    {
+      "code": "APPROVED_WORK_ITEM",
+      "classification": "CANONICAL_EVIDENCE",
+      "sourceProcess": "Approved work item or case lifecycle",
+      "recordVersion": "Work item id, revision and effective timestamps",
+      "lineage": "Recorded assignment or performer attribution; unknown attribution blocks use",
+      "attribution": "RECORDED_PERFORMER_ONLY",
+      "ownerRole": "PROCESS_OWNER_UNASSIGNED"
+    },
+    {
+      "code": "CONTROLLED_DOCUMENT_REVISION",
+      "classification": "CONTROLLED_DOCUMENT",
+      "sourceProcess": "Versioned procedure, checklist or approved document",
+      "recordVersion": "Document id, revision and approval state",
+      "lineage": "Document revision linked to the effective work period",
+      "attribution": "DOCUMENT_IS_CONTEXT_NOT_PERFORMER_PROOF",
+      "ownerRole": "DOCUMENT_OWNER_UNASSIGNED"
+    },
+    {
+      "code": "STRUCTURED_SUPERVISOR_OBSERVATION",
+      "classification": "STRUCTURED_OBSERVATION",
+      "sourceProcess": "Criterion-specific Supervisor observation",
+      "recordVersion": "Observation id, form version and observed time",
+      "lineage": "Effective responsible Supervisor assignment and subject assignment section",
+      "attribution": "SUPERVISOR_OBSERVER_AND_SUBJECT_SEPARATE",
+      "ownerRole": "HUMAN_RESOURCES_UNASSIGNED"
+    },
+    {
+      "code": "FUTURE_SOURCE_INTEGRATION",
+      "classification": "MISSING_OR_FUTURE_INTEGRATION",
+      "sourceProcess": "Not presently verified",
+      "recordVersion": "Unavailable",
+      "lineage": "Must be defined before evidence can be relied upon",
+      "attribution": "UNKNOWN_BLOCKS_USE",
+      "ownerRole": "UNASSIGNED"
+    }
+  ],
+  "jobs": [
+    {
+      "reference": { "code": "SYN_JOB_ACCOUNTING_SPECIALIST", "id": null, "synthetic": true },
+      "titleFa": "کارشناس حسابداری (نمونه ساختگی)",
+      "purposeFa": "ثبت و پیگیری دقیق عملیات مالی در محدوده مسئولیت مستندشده.",
+      "responsibilitiesFa": ["ثبت به‌موقع اسناد در فرایند مصوب.", "پیگیری مغایرت‌ها تا تعیین تکلیف قابل ردیابی."],
+      "categories": [
+        { "code": "COMMON", "titleFa": "انتظارهای مشترک", "weight": 30 },
+        { "code": "ACCOUNTING_TECHNICAL", "titleFa": "انتظارهای تخصصی حسابداری", "weight": 70 }
+      ],
+      "criteria": [
+        {
+          "conceptCode": "ACCOUNTABILITY_TRACEABILITY", "versionCode": "ACCOUNTABILITY_TRACEABILITY_V1",
+          "titleFa": "پاسخ‌گویی و قابلیت پیگیری", "meaningFa": "کار را با مالکیت روشن و سابقه قابل پیگیری تا نتیجه دنبال می‌کند.",
+          "kind": "JUDGMENT", "categoryCode": "COMMON", "weight": 100, "applicability": null,
+          "anchorsFa": ["کارها غالباً بدون مالکیت روشن یا پیگیری رها می‌شوند.", "پیگیری ناپیوسته است و برای تکمیل به یادآوری مکرر نیاز دارد.", "کارهای معمول را با سابقه کافی و در زمان مورد انتظار پیگیری می‌کند.", "مغایرت‌ها را پیش‌دستانه روشن و مسیر حل را مستند می‌کند.", "به‌طور پایدار پیگیری پیچیده را با شفافیت استثنایی تا نتیجه هدایت می‌کند."],
+          "evidencePolicy": { "dictionaryCodes": ["APPROVED_WORK_ITEM", "STRUCTURED_SUPERVISOR_OBSERVATION"], "minimumReliableCount": 2, "windowDays": 90, "automaticGrade": false },
+          "outsideControlFactors": ["تأخیر تأیید واحد دیگر", "قطعی سامانه یا دسترسی ثبت‌شده"]
+        },
+        {
+          "conceptCode": "ACCOUNTING_RECORD_QUALITY", "versionCode": "ACCOUNTING_RECORD_QUALITY_V1",
+          "titleFa": "کیفیت ثبت مالی", "meaningFa": "ثبت‌های مالی را مطابق سند و کنترل مصوب، دقیق و قابل بازبینی انجام می‌دهد.",
+          "kind": "JUDGMENT", "categoryCode": "ACCOUNTING_TECHNICAL", "weight": 100, "applicability": null,
+          "anchorsFa": ["خطاهای اثرگذار یا نبود مستندات به‌صورت تکرارشونده مشاهده می‌شود.", "ثبت‌ها گاه به اصلاح اساسی یا تکمیل مستندات نیاز دارند.", "ثبت‌های معمول دقیق، مستند و مطابق کنترل‌های مصوب هستند.", "مغایرت‌های پیچیده را زود تشخیص می‌دهد و با مستندات روشن اصلاح می‌کند.", "به‌طور پایدار کیفیت برجسته ایجاد می‌کند و ریسک ثبت را پیش از اثرگذاری آشکار می‌سازد."],
+          "evidencePolicy": { "dictionaryCodes": ["CONTROLLED_LEDGER_ENTRY", "CONTROLLED_DOCUMENT_REVISION"], "minimumReliableCount": 3, "windowDays": 90, "automaticGrade": false },
+          "outsideControlFactors": ["سند ورودی ناقص یا دیررس", "تغییر کنترل مصوب در میانه دوره"]
+        }
+      ]
+    },
+    {
+      "reference": { "code": "SYN_JOB_ACCOUNTING_MANAGER", "id": null, "synthetic": true },
+      "titleFa": "مدیر حسابداری (نمونه ساختگی)",
+      "purposeFa": "هدایت کنترل‌های مالی، تخصیص کار و رفع مغایرت‌های بین‌فرایندی.",
+      "responsibilitiesFa": ["تعیین اولویت و مالکیت روشن برای مغایرت‌های مالی.", "بازبینی اثربخشی کنترل‌ها و پیگیری اصلاحات."],
+      "categories": [
+        { "code": "COMMON", "titleFa": "انتظارهای مشترک", "weight": 30 },
+        { "code": "ACCOUNTING_MANAGEMENT", "titleFa": "رهبری کنترل مالی", "weight": 70 }
+      ],
+      "criteria": [
+        {
+          "conceptCode": "MANAGER_ACCOUNTABILITY", "versionCode": "MANAGER_ACCOUNTABILITY_V1",
+          "titleFa": "پاسخ‌گویی مدیریتی", "meaningFa": "مالکیت تصمیم و پیگیری تیم را روشن و قابل حسابرسی نگه می‌دارد.",
+          "kind": "JUDGMENT", "categoryCode": "COMMON", "weight": 100, "applicability": null,
+          "anchorsFa": ["مالکیت کارها مبهم است و مسائل مهم بدون پیگیری می‌مانند.", "تخصیص و پیگیری انجام می‌شود اما ناپایدار یا دیرهنگام است.", "مالکیت، اولویت و پیگیری کارهای معمول روشن و به‌موقع است.", "وابستگی‌ها و ریسک‌ها را پیش‌دستانه هماهنگ و مستند می‌کند.", "به‌طور پایدار پاسخ‌گویی روشن و یادگیری قابل تکرار در تیم ایجاد می‌کند."],
+          "evidencePolicy": { "dictionaryCodes": ["APPROVED_WORK_ITEM", "STRUCTURED_SUPERVISOR_OBSERVATION"], "minimumReliableCount": 2, "windowDays": 90, "automaticGrade": false },
+          "outsideControlFactors": ["نبود اختیار مصوب برای تصمیم", "وابستگی حل‌نشده به مدیریت دیگر"]
+        },
+        {
+          "conceptCode": "FINANCIAL_CONTROL_LEADERSHIP", "versionCode": "FINANCIAL_CONTROL_LEADERSHIP_V1",
+          "titleFa": "رهبری کنترل‌های مالی", "meaningFa": "کنترل‌های مالی را متناسب با ریسک هدایت و اثربخشی آن‌ها را بازبینی می‌کند.",
+          "kind": "JUDGMENT", "categoryCode": "ACCOUNTING_MANAGEMENT", "weight": 100, "applicability": null,
+          "anchorsFa": ["کنترل‌های اصلی نادیده می‌مانند یا مغایرت اثرگذار دیر کشف می‌شود.", "کنترل‌ها اجرا می‌شوند اما پوشش و پیگیری اصلاحات ناپایدار است.", "کنترل‌های مصوب به‌طور منظم بازبینی و مغایرت‌ها تعیین تکلیف می‌شوند.", "ریسک‌های نوظهور را زود شناسایی و کنترل متناسب پیشنهاد می‌کند.", "سامانه کنترل را به‌طور پایدار قابل اتکا، شفاف و یادگیرنده نگه می‌دارد."],
+          "evidencePolicy": { "dictionaryCodes": ["CONTROLLED_LEDGER_ENTRY", "CONTROLLED_DOCUMENT_REVISION", "APPROVED_WORK_ITEM"], "minimumReliableCount": 3, "windowDays": 90, "automaticGrade": false },
+          "outsideControlFactors": ["کنترل تصویب‌نشده یا متعارض", "رخداد بیرونی خارج از اختیار مدیر"]
+        }
+      ]
+    },
+    {
+      "reference": { "code": "SYN_JOB_SALES_SPECIALIST", "id": null, "synthetic": true },
+      "titleFa": "کارشناس فروش (نمونه ساختگی)",
+      "purposeFa": "پیگیری فرصت‌ها و تعهدات مشتری در چهارچوب فرایند و اختیار مصوب.",
+      "responsibilitiesFa": ["ثبت و پیگیری تعاملات و تعهدات مشتری.", "هماهنگی دقیق درخواست مشتری با واحدهای پاسخ‌گو."],
+      "categories": [
+        { "code": "COMMON", "titleFa": "انتظارهای مشترک", "weight": 30 },
+        { "code": "SALES_TECHNICAL", "titleFa": "انتظارهای تخصصی فروش", "weight": 70 }
+      ],
+      "criteria": [
+        {
+          "conceptCode": "CUSTOMER_COMMITMENT_OWNERSHIP", "versionCode": "CUSTOMER_COMMITMENT_OWNERSHIP_V1",
+          "titleFa": "مالکیت تعهد مشتری", "meaningFa": "تعهدات مجاز به مشتری را دقیق ثبت و تا تعیین تکلیف پیگیری می‌کند.",
+          "kind": "JUDGMENT", "categoryCode": "COMMON", "weight": 100, "applicability": null,
+          "anchorsFa": ["تعهدها مبهم یا بدون پیگیری می‌مانند و اعتماد مشتری آسیب می‌بیند.", "بخشی از تعهدها ثبت می‌شوند اما پیگیری یکنواخت نیست.", "تعهدهای معمول روشن، مجاز و در زمان مورد انتظار پیگیری می‌شوند.", "ریسک تأخیر یا ابهام را زود اطلاع می‌دهد و هماهنگی مؤثر انجام می‌دهد.", "در موقعیت‌های پیچیده نیز به‌طور پایدار شفافیت و اعتماد برجسته ایجاد می‌کند."],
+          "evidencePolicy": { "dictionaryCodes": ["APPROVED_WORK_ITEM", "STRUCTURED_SUPERVISOR_OBSERVATION"], "minimumReliableCount": 3, "windowDays": 90, "automaticGrade": false },
+          "outsideControlFactors": ["تغییر ظرفیت یا زمان‌بندی واحد تحویل", "تغییر درخواست مشتری پس از ثبت"]
+        },
+        {
+          "conceptCode": "SALES_PROCESS_DISCIPLINE", "versionCode": "SALES_PROCESS_DISCIPLINE_V1",
+          "titleFa": "انضباط فرایند فروش", "meaningFa": "مراحل و داده‌های فروش را مطابق فرایند مصوب کامل و قابل پیگیری نگه می‌دارد.",
+          "kind": "JUDGMENT", "categoryCode": "SALES_TECHNICAL", "weight": 100, "applicability": null,
+          "anchorsFa": ["مراحل مهم یا داده‌های لازم به‌طور تکراری ناقص می‌مانند.", "فرایند معمولاً دنبال می‌شود اما نقص‌های قابل توجه نیازمند اصلاح است.", "مراحل و داده‌های معمول کامل، درست و به‌موقع ثبت می‌شوند.", "نقص یا تعارض فرایندی را زود تشخیص می‌دهد و مسئولانه رفع می‌کند.", "به‌طور پایدار کیفیت فرایند برجسته و یادگیری قابل استفاده برای تیم ایجاد می‌کند."],
+          "evidencePolicy": { "dictionaryCodes": ["APPROVED_WORK_ITEM", "CONTROLLED_DOCUMENT_REVISION"], "minimumReliableCount": 3, "windowDays": 90, "automaticGrade": false },
+          "outsideControlFactors": ["قطعی ابزار ثبت", "نبود داده ورودی از منبع مسئول"]
+        }
+      ]
+    },
+    {
+      "reference": { "code": "SYN_JOB_WORKSHOP_OPERATOR", "id": null, "synthetic": true },
+      "titleFa": "اپراتور کارگاه (نمونه ساختگی)",
+      "purposeFa": "اجرای ایمن و باکیفیت عملیات کارگاهی طبق دستور و کنترل مصوب.",
+      "responsibilitiesFa": ["اجرای کنترل‌های ایمنی پیش از کار.", "ثبت و اعلام انحراف کیفیت یا وضعیت تجهیز."],
+      "categories": [
+        { "code": "COMMON", "titleFa": "انتظارهای مشترک", "weight": 30 },
+        { "code": "WORKSHOP_TECHNICAL", "titleFa": "انتظارهای تخصصی کارگاه", "weight": 70 }
+      ],
+      "criteria": [
+        {
+          "conceptCode": "SAFETY_RESPONSIBILITY", "versionCode": "SAFETY_RESPONSIBILITY_V1",
+          "titleFa": "مسئولیت‌پذیری ایمنی", "meaningFa": "کنترل‌های ایمنی را اجرا و خطر را بدون پنهان‌سازی گزارش می‌کند.",
+          "kind": "JUDGMENT", "categoryCode": "COMMON", "weight": 100,
+          "applicability": { "schemaVersion": 1, "fact": "hasSafetyDuty", "factType": "BOOLEAN", "operator": "EQUALS", "values": [true] },
+          "anchorsFa": ["کنترل‌های حیاتی نادیده گرفته یا خطر گزارش نمی‌شود.", "کنترل‌ها ناپایدارند و گزارش خطر گاهی دیر انجام می‌شود.", "کنترل‌های معمول اجرا و خطرها به‌موقع گزارش می‌شوند.", "خطرهای کمتر آشکار را پیش‌دستانه شناسایی و مسیر ایمن را هماهنگ می‌کند.", "به‌طور پایدار الگوی برجسته رفتار ایمن و یادگیری تیمی ایجاد می‌کند."],
+          "evidencePolicy": { "dictionaryCodes": ["CONTROLLED_DOCUMENT_REVISION", "STRUCTURED_SUPERVISOR_OBSERVATION"], "minimumReliableCount": 2, "windowDays": 90, "automaticGrade": false },
+          "outsideControlFactors": ["تجهیز معیوب خارج از اختیار اپراتور", "دستور متعارض یا کنترل تصویب‌نشده"]
+        },
+        {
+          "conceptCode": "WORKSHOP_QUALITY_DISCIPLINE", "versionCode": "WORKSHOP_QUALITY_DISCIPLINE_V1",
+          "titleFa": "انضباط کیفیت کارگاه", "meaningFa": "کیفیت خروجی و انحراف‌ها را طبق کنترل مصوب بررسی و ثبت می‌کند.",
+          "kind": "JUDGMENT", "categoryCode": "WORKSHOP_TECHNICAL", "weight": 100, "applicability": null,
+          "anchorsFa": ["انحراف‌های مهم کیفیت نادیده می‌مانند یا ثبت قابل اتکا وجود ندارد.", "کنترل کیفیت انجام می‌شود اما ثبات یا پیگیری کافی ندارد.", "کنترل‌های معمول درست اجرا و انحراف‌ها به‌موقع ثبت می‌شوند.", "الگوهای انحراف را زود تشخیص می‌دهد و از تکرار جلوگیری می‌کند.", "به‌طور پایدار کیفیت برجسته و بهبود قابل اندازه‌گیری فرایند ایجاد می‌کند."],
+          "evidencePolicy": { "dictionaryCodes": ["APPROVED_WORK_ITEM", "STRUCTURED_SUPERVISOR_OBSERVATION"], "minimumReliableCount": 3, "windowDays": 90, "automaticGrade": false },
+          "outsideControlFactors": ["مواد اولیه نامنطبق", "تغییر برنامه تولید خارج از اختیار اپراتور"]
+        }
+      ]
+    }
+  ],
+  "positions": [
+    {
+      "reference": { "code": "SYN_POS_ACCOUNTS_RECEIVABLE", "id": null, "synthetic": true },
+      "jobReferenceCode": "SYN_JOB_ACCOUNTING_SPECIALIST", "titleFa": "کارشناس حساب‌های دریافتنی (نمونه ساختگی)",
+      "documentedDifferenceFa": "پیگیری ثبت‌شده مطالبات و مغایرت حساب مشتری.",
+      "composition": { "jobWeight": 80, "addendumWeight": 20 },
+      "categories": [{ "code": "RECEIVABLES", "titleFa": "افزوده دریافتنی", "weight": 100 }],
+      "criteria": [{
+        "conceptCode": "RECEIVABLES_FOLLOW_THROUGH", "versionCode": "RECEIVABLES_FOLLOW_THROUGH_V1",
+        "titleFa": "پیگیری مطالبات", "meaningFa": "مطالبات و مغایرت‌های مشتری را در محدوده اختیار تا تعیین تکلیف پیگیری می‌کند.",
+        "kind": "JUDGMENT", "categoryCode": "RECEIVABLES", "weight": 100,
+        "applicability": { "schemaVersion": 1, "fact": "positionId", "factType": "ID", "operator": "EQUALS", "values": ["SYN_POS_ACCOUNTS_RECEIVABLE"] },
+        "anchorsFa": ["مطالبات بدون پیگیری روشن یا با سابقه ناقص رها می‌شوند.", "پیگیری انجام می‌شود اما ناپیوسته یا دیرهنگام است.", "مطالبات معمول با سابقه روشن و در زمان مورد انتظار پیگیری می‌شوند.", "مغایرت و ریسک تأخیر را پیش‌دستانه آشکار و هماهنگ می‌کند.", "در پرونده‌های پیچیده نیز پیگیری برجسته، دقیق و قابل اتکا ایجاد می‌کند."],
+        "evidencePolicy": { "dictionaryCodes": ["CONTROLLED_LEDGER_ENTRY", "APPROVED_WORK_ITEM"], "minimumReliableCount": 3, "windowDays": 90, "automaticGrade": false },
+        "outsideControlFactors": ["اختلاف تأییدنشده مشتری", "نبود اختیار مصوب برای اقدام بعدی"]
+      }]
+    },
+    {
+      "reference": { "code": "SYN_POS_ACCOUNTS_PAYABLE", "id": null, "synthetic": true },
+      "jobReferenceCode": "SYN_JOB_ACCOUNTING_SPECIALIST", "titleFa": "کارشناس حساب‌های پرداختنی (نمونه ساختگی)",
+      "documentedDifferenceFa": "کنترل ثبت‌شده اسناد پرداخت و مغایرت تأمین‌کننده.",
+      "composition": { "jobWeight": 80, "addendumWeight": 20 },
+      "categories": [{ "code": "PAYABLES", "titleFa": "افزوده پرداختنی", "weight": 100 }],
+      "criteria": [{
+        "conceptCode": "PAYABLES_CONTROL", "versionCode": "PAYABLES_CONTROL_V1",
+        "titleFa": "کنترل پرداختنی‌ها", "meaningFa": "اسناد پرداخت را پیش از ارسال در محدوده کنترل مصوب بررسی و مغایرت را پیگیری می‌کند.",
+        "kind": "JUDGMENT", "categoryCode": "PAYABLES", "weight": 100,
+        "applicability": { "schemaVersion": 1, "fact": "positionId", "factType": "ID", "operator": "EQUALS", "values": ["SYN_POS_ACCOUNTS_PAYABLE"] },
+        "anchorsFa": ["کنترل‌های اصلی نادیده می‌مانند یا مغایرت اثرگذار ثبت نمی‌شود.", "کنترل انجام می‌شود اما نقص‌های قابل توجه نیازمند اصلاح است.", "اسناد معمول مطابق کنترل مصوب بررسی و مغایرت‌ها ثبت می‌شوند.", "ریسک پرداخت یا سند را زود تشخیص می‌دهد و مسئولانه هماهنگ می‌کند.", "در موارد پیچیده نیز کنترل برجسته و سابقه کاملاً قابل اتکا ایجاد می‌کند."],
+        "evidencePolicy": { "dictionaryCodes": ["CONTROLLED_LEDGER_ENTRY", "CONTROLLED_DOCUMENT_REVISION"], "minimumReliableCount": 3, "windowDays": 90, "automaticGrade": false },
+        "outsideControlFactors": ["سند ناقص تأمین‌کننده", "تأخیر تأیید بودجه یا اختیار پرداخت"]
+      }]
+    },
+    {
+      "reference": { "code": "SYN_POS_ACCOUNTING_MANAGER", "id": null, "synthetic": true },
+      "jobReferenceCode": "SYN_JOB_ACCOUNTING_MANAGER", "titleFa": "مدیر حسابداری (نمونه ساختگی)",
+      "documentedDifferenceFa": "تفاوت مستند جداگانه‌ای برای Position فرض نشده است.",
+      "composition": { "jobWeight": 100, "addendumWeight": 0 }, "categories": [], "criteria": []
+    },
+    {
+      "reference": { "code": "SYN_POS_SALES_SPECIALIST", "id": null, "synthetic": true },
+      "jobReferenceCode": "SYN_JOB_SALES_SPECIALIST", "titleFa": "کارشناس فروش (نمونه ساختگی)",
+      "documentedDifferenceFa": "تفاوت مستند جداگانه‌ای برای Position فرض نشده است.",
+      "composition": { "jobWeight": 100, "addendumWeight": 0 }, "categories": [], "criteria": []
+    }
+  ],
+  "coverage": {
+    "status": "UNAVAILABLE",
+    "selectedPeriod": { "from": "2026-08-01T00:00:00.000Z", "toExclusive": "2026-09-01T00:00:00.000Z" },
+    "counts": null,
+    "limitations": [
+      "No authorized current workforce database or approved production snapshot was available.",
+      "Historical local counts are not a current roster or production baseline.",
+      "Protected named coverage output cannot be committed to Git or GitHub.",
+      "Catalog content and responsible business reviewers remain unapproved and unassigned."
+    ],
+    "protectedArtifact": {
+      "custodianRole": "UNASSIGNED",
+      "storage": "OUTSIDE_GIT_IN_APPROVED_RESTRICTED_HR_LOCATION",
+      "access": "NAMED_HR_CUSTODIAN_AND_EXPLICITLY_AUTHORIZED_REVIEWERS_ONLY"
+    }
+  },
+  "syntheticCoverageExamples": [
+    { "personnelRef": "SYN_PERSONNEL_RECEIVABLES", "relationshipRefs": ["SYN_REL_RECEIVABLES_1"], "assignmentSectionRefs": ["SYN_SEC_RECEIVABLES_1"], "effectiveJob": "SYN_JOB_ACCOUNTING_SPECIALIST", "effectivePosition": "SYN_POS_ACCOUNTS_RECEIVABLE", "userStatus": "ACTIVE_USER", "readiness": "SYNTHETIC_READY", "resultStatus": "NOT_EVALUATED" },
+    { "personnelRef": "SYN_PERSONNEL_PAYABLES", "relationshipRefs": ["SYN_REL_PAYABLES_1"], "assignmentSectionRefs": ["SYN_SEC_PAYABLES_1"], "effectiveJob": "SYN_JOB_ACCOUNTING_SPECIALIST", "effectivePosition": "SYN_POS_ACCOUNTS_PAYABLE", "userStatus": "ACTIVE_USER", "readiness": "SYNTHETIC_READY", "resultStatus": "NOT_EVALUATED" },
+    { "personnelRef": "SYN_PERSONNEL_ACCOUNTING_MANAGER", "relationshipRefs": ["SYN_REL_MANAGER_1"], "assignmentSectionRefs": ["SYN_SEC_MANAGER_1"], "effectiveJob": "SYN_JOB_ACCOUNTING_MANAGER", "effectivePosition": "SYN_POS_ACCOUNTING_MANAGER", "userStatus": "ACTIVE_USER", "readiness": "SYNTHETIC_READY", "resultStatus": "NOT_EVALUATED" },
+    { "personnelRef": "SYN_PERSONNEL_SALES", "relationshipRefs": ["SYN_REL_SALES_1", "SYN_REL_SALES_2"], "assignmentSectionRefs": ["SYN_SEC_SALES_1", "SYN_SEC_SALES_2"], "effectiveJob": "SYN_JOB_SALES_SPECIALIST", "effectivePosition": "SYN_POS_SALES_SPECIALIST", "userStatus": "ACTIVE_USER", "readiness": "SYNTHETIC_REEMPLOYMENT_REQUIRES_PERIOD_SELECTION", "resultStatus": "NOT_EVALUATED" },
+    { "personnelRef": "SYN_PERSONNEL_WORKER_NO_ACCOUNT", "relationshipRefs": ["SYN_REL_WORKER_1"], "assignmentSectionRefs": ["SYN_SEC_WORKER_1"], "effectiveJob": "SYN_JOB_WORKSHOP_OPERATOR", "effectivePosition": null, "userStatus": "NO_USER", "readiness": "SYNTHETIC_POSITION_MISSING", "resultStatus": "NOT_EVALUATED" }
+  ]
+}

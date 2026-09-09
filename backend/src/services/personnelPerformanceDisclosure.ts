@@ -177,15 +177,19 @@ export const buildPerformanceAnalytics = (input: {
   const exactScoreStatistics = signatures.size === 1 && scores.length === input.selected.length
     ? { average: scores.reduce((sum, score) => sum + score, 0) / scores.length }
     : null;
+  const levelDistribution = PERFORMANCE_LEVELS.map((level) => {
+    const count = input.selected.filter(({ levelCode }) => samePerformanceLevel(levelCode, level.code)).length;
+    return {
+      levelCode: level.code,
+      labelFa: level.labelFa,
+      count,
+      percent: Number((count * 100 / input.selected.length).toFixed(2)),
+    };
+  });
   return {
     suppressed: false as const,
     eligibleCount: input.selected.length,
-    levelDistribution: PERFORMANCE_LEVELS.map((level) => ({
-      levelCode: level.code,
-      labelFa: level.labelFa,
-      count: input.selected.filter(({ levelCode }) => samePerformanceLevel(levelCode, level.code)).length,
-      percent: Number((input.selected.filter(({ levelCode }) => samePerformanceLevel(levelCode, level.code)).length * 100 / input.selected.length).toFixed(2)),
-    })),
+    levelDistribution,
     exactScoreStatistics,
   };
 };

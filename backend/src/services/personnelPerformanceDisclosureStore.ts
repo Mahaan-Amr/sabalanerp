@@ -37,7 +37,7 @@ import { generatePdfBufferFromHtml } from '../utils/pdf';
 // Vault snapshots must contain JSON values: dates become ISO strings and absent fields are omitted.
 const reportingSnapshot = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
-const disclosureError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
+const disclosureError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status, statusCode: status });
 
 export const erasePerformanceExportArtifacts = async (
   client: PrismaClient | Prisma.TransactionClient, exportIds: readonly string[], erasedAt = new Date(),
@@ -334,6 +334,10 @@ export const deliverPersonalPerformanceSummary = async (client: PrismaClient | P
     const summary = await projectionForPersonnel(tx, input.personnelId);
     if (!summary) throw disclosureError('خلاصه عملکرد موقتاً در دسترس نیست.', 'PERFORMANCE_PERSONAL_SUMMARY_UNAVAILABLE', 409);
     const deliveryId = randomUUID();
+    const projectionSource = await tx.performanceCurrentLevelProjection.findUnique({
+      where: { subjectId: subject.id },
+      select: { levelPolicyVersionId: true, sourceResultsHash: true, version: true },
+    });
     const receiptPayload = {
       schemaVersion: 1,
       summaryKind: PERSONAL_SUMMARY_KIND,
@@ -346,7 +350,11 @@ export const deliverPersonalPerformanceSummary = async (client: PrismaClient | P
       identityVerification: { methodCode: verification.methodCode, verifiedAt: verification.verifiedAt.toISOString() },
       identityEvidenceReferenceHash: canonicalPerformanceHash(verification.evidenceReference.trim()),
       deliveredAt: clock.now.toISOString(),
-      source: { projectionVersion: summary.version, levelPolicyVersionId: await tx.performanceCurrentLevelProjection.findUnique({ where: { subjectId: subject.id }, select: { levelPolicyVersionId: true } }).then((row) => row?.levelPolicyVersionId ?? null) },
+      source: {
+        projectionVersion: projectionSource?.version ?? summary.version,
+        levelPolicyVersionId: projectionSource?.levelPolicyVersionId ?? null,
+        sourceResultsHash: projectionSource?.sourceResultsHash ?? null,
+      },
       summary,
       summaryHash: canonicalPerformanceHash(summary),
     };

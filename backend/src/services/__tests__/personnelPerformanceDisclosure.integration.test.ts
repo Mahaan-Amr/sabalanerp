@@ -1,6 +1,6 @@
 import { enablePerformanceTestRelease, enrollPerformanceTestCohort } from './personnelPerformanceTestRelease';
 import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
-import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
+import { canonicalPerformanceHash, DEFAULT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicy';
 import { persistPerformancePayload, performanceVaultKeyFromEnvironment, readPerformancePayload } from '../personnelPerformancePayloadStore';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -20,6 +20,10 @@ import {
 } from '../personnelPerformanceDisclosureStore';
 import { buildPerformanceAnalytics, PERFORMANCE_LEVELS } from '../personnelPerformanceDisclosure';
 import { publishCompensationAgreement } from '../hrCompensationAgreementStore';
+import { DEFAULT_CURRENT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicyStore';
+import { persistAcceptedPerformanceResult } from '../personnelPerformanceResultStore';
+import { getPersonnelPerformanceBadges } from '../personnelPerformanceDisclosureStore';
+import { PerformancePolicyKind } from '@prisma/client';
 
 const seed = async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], marker: string) => {
       const suffix = `${Date.now().toString(36)}-${marker}`;
@@ -52,7 +56,133 @@ const seed = async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
       return { tx, suffix, actor, personnel, relationship, subject, payload, handoff, marker };
 };
 
+const publishPolicyFixture = async (
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  actorUserId: string,
+  policyKind: PerformancePolicyKind,
+  content: Record<string, unknown>,
+  suffix: string,
+) => {
+  const id = `disclosure-policy-${policyKind.toLowerCase()}-${suffix}`;
+  const previewId = `disclosure-preview-${policyKind.toLowerCase()}-${suffix}`;
+  const payload = await persistPerformancePayload(tx, {
+    aggregateType: 'POLICY_VERSION', aggregateId: id, payloadKind: 'POLICY_CONTENT_REVISION_1', schemaVersion: 1,
+    payload: content, keyring: performanceVaultKeyFromEnvironment(),
+  });
+  const policy = await tx.performancePolicyVersion.create({ data: {
+    id, policyKind, version: 1, contentHash: payload.contentHash, encryptedPayloadId: payload.id, createdByUserId: actorUserId,
+  } });
+  const previewPayload = await persistPerformancePayload(tx, {
+    aggregateType: 'POLICY_ACTIVATION_PREVIEW', aggregateId: previewId, payloadKind: 'POPULATION_RESULT', schemaVersion: 1,
+    payload: { fixture: true, population: [] }, keyring: performanceVaultKeyFromEnvironment(),
+  });
+  const effectiveAt = new Date(Date.now() - 10_000);
+  await tx.performancePolicyActivationPreview.create({ data: {
+    id: previewId, policyVersionId: id, policyContentHash: policy.contentHash,
+    populationHash: previewPayload.contentHash, encryptedPayloadId: previewPayload.id,
+    eligibleSubjectCount: 0, evaluatedSubjectCount: 0, increasedCount: 0, decreasedCount: 0,
+    unchangedCount: 0, expiredCount: 0, needsNewEvaluationCount: 0, errorCount: 0,
+    resultHash: previewPayload.contentHash, generatedAt: effectiveAt, confirmedAt: effectiveAt, confirmedByUserId: actorUserId,
+  } });
+  await tx.performancePolicyVersion.update({ where: { id }, data: {
+    lifecycle: 'SCHEDULED', effectiveFrom: effectiveAt, publicationReason: 'Rollback-only disclosure compatibility fixture',
+    publishedByUserId: actorUserId, publishedAt: effectiveAt, activationPreviewId: previewId,
+    activationPreviewHash: previewPayload.contentHash, activationConfirmedAt: effectiveAt,
+  } });
+  return tx.performancePolicyVersion.update({ where: { id }, data: { lifecycle: 'ACTIVE' } });
+};
+
 const main = async () => {
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const suffix = `${Date.now().toString(36)}-accepted-level-chain`;
+    const actor = await tx.user.create({ data: {
+      email: `${suffix}@example.invalid`, username: suffix, password: 'not-used', firstName: 'عامل', lastName: 'زنجیره',
+    } });
+    await enablePerformanceTestRelease(tx, actor.id);
+    await tx.hrFeatureCatalog.upsert({ where: { code: 'DELIVER_PERFORMANCE_PERSONAL_SUMMARY' }, update: {}, create: {
+      code: 'DELIVER_PERFORMANCE_PERSONAL_SUMMARY', workspaceCode: 'HUMAN_RESOURCES', version: 1,
+      displayName: 'تحویل خلاصه شخصی عملکرد',
+    } });
+    await tx.hrFeatureAccessGrant.create({ data: {
+      stableKey: `${suffix}:summary-delivery`, userId: actor.id, featureCode: 'DELIVER_PERFORMANCE_PERSONAL_SUMMARY',
+      level: 'EDIT', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Rollback-only accepted-level delivery fixture',
+    } });
+    await publishPolicyFixture(tx, actor.id, PerformancePolicyKind.LEVEL_CLASSIFICATION, DEFAULT_LEVEL_POLICY_CONTENT, suffix);
+    await publishPolicyFixture(tx, actor.id, PerformancePolicyKind.CURRENT_LEVEL, DEFAULT_CURRENT_LEVEL_POLICY_CONTENT, suffix);
+    const expectedCodes = ['URGENT_IMPROVEMENT', 'IMPROVEMENT', 'MEETS', 'EXCEEDS', 'OUTSTANDING'] as const;
+    const subjects: Array<{ personnelId: string; subjectId: string }> = [];
+    const immutableHashes: Array<{ resultId: string; exactScoreHash: string; payloadHash: string }> = [];
+    for (let index = 0; index < expectedCodes.length; index += 1) {
+      const personnel = await tx.personnel.create({ data: { firstName: 'سطح', lastName: String(index + 1) } });
+      const relationship = await tx.hrEmploymentRelationship.create({ data: {
+        personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01Z'), createdBy: actor.id,
+      } });
+      const subject = await tx.performanceSubject.create({ data: {
+        stableKey: `${suffix}-subject-${index}`, nonDisplayKey: `${suffix}-opaque-${index}`,
+        personnelId: personnel.id, employmentRelationshipId: relationship.id, createdByUserId: actor.id,
+      } });
+      const evaluation = await tx.performanceEvaluation.create({ data: {
+        stableKey: `${suffix}-evaluation-${index}`, subjectId: subject.id,
+        measurementFrom: new Date('2026-08-01Z'), measurementTo: new Date('2026-08-31T20:29:59.999Z'),
+        createdByUserId: actor.id,
+      } });
+      await tx.performanceEvaluation.update({ where: { id: evaluation.id }, data: { status: 'READY_FOR_SUBMISSION' } });
+      await tx.performanceEvaluation.update({ where: { id: evaluation.id }, data: { status: 'UNDER_REVIEW' } });
+      const criterionId = `${suffix}-criterion-${index}`;
+      const calculationInput = {
+        template: {
+          schemaVersion: 1 as const, templateVersionId: `${suffix}-template-${index}`, scoringPolicyVersionId: 'scoring-v1',
+          jobSharePercent: '100.00', addendumSharePercent: '0.00',
+          categories: [{ id: 'result', titleFa: 'نتیجه', weightPercent: '100.00', required: true, criteria: [{
+            criterionVersionId: criterionId, titleFa: 'نتیجه مصوب', weightPercent: '100.00', kind: 'JUDGMENT' as const,
+            anchorsFa: ['یک', 'دو', 'سه', 'چهار', 'پنج'], applicability: null,
+            evidence: { minimumReliableCount: 1, allowedKinds: ['STRUCTURED_OBSERVATION' as const], required: true },
+          }] }],
+        },
+        sections: [{
+          sectionId: `${suffix}-section-${index}`, effectiveDays: 31, allocationPercent: '100.00',
+          effectiveFrom: '2026-08-01T00:00:00.000Z', effectiveTo: '2026-08-31T20:29:59.999Z', snapshotFacts: {},
+          responses: [{ criterionVersionId: criterionId, grade: (index + 1) as 1 | 2 | 3 | 4 | 5, evidence: [{
+            kind: 'STRUCTURED_OBSERVATION' as const, quality: 'RELIABLE' as const, occurredAt: '2026-08-15T00:00:00.000Z',
+            referenceId: `${suffix}-evidence-${index}`, sourceVersion: '1', contentHash: String(index + 1).repeat(64),
+          }] }],
+        }],
+      };
+      const accepted = await persistAcceptedPerformanceResult(tx, {
+        evaluationId: evaluation.id, calculationInput, acceptedByUserId: actor.id,
+        idempotencyKey: `${suffix}-accept-${index}`, acceptedAt: new Date('2026-09-01Z'), keyring: performanceVaultKeyFromEnvironment(),
+      });
+      assert.equal(accepted.idempotent, false);
+      const acceptedOutput = accepted as { historicalLevel: { levelCode: string }; result: { id: string }; idempotent: false };
+      assert.equal(acceptedOutput.historicalLevel.levelCode, expectedCodes[index]);
+      const row = await tx.performanceAcceptedResult.findUniqueOrThrow({ where: { id: acceptedOutput.result.id } });
+      const encrypted = await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: row.encryptedPayloadId } });
+      immutableHashes.push({ resultId: row.id, exactScoreHash: row.exactScoreHash, payloadHash: encrypted.plaintextHash });
+      subjects.push({ personnelId: personnel.id, subjectId: subject.id });
+    }
+    await enrollPerformanceTestCohort(tx, actor.id, subjects.map(({ subjectId }) => subjectId));
+    const badges = await getPersonnelPerformanceBadges(tx as any, { actorUserId: actor.id, personnelIds: subjects.map(({ personnelId }) => personnelId) });
+    assert.deepEqual(badges.map(({ badge }) => badge?.levelCode), expectedCodes);
+    const projections = await tx.performanceCurrentLevelProjection.findMany({ where: { subjectId: { in: subjects.map(({ subjectId }) => subjectId) } }, orderBy: { levelCode: 'asc' } });
+    assert.equal(projections.length, 5);
+    const delivered = await deliverPersonalPerformanceSummary(tx, {
+      actorUserId: actor.id, personnelId: subjects[2].personnelId,
+      identityVerification: { methodCode: 'IN_PERSON_EMPLOYEE_RECORD', evidenceReference: `${suffix}-employee-record`, verifiedAt: new Date() },
+    });
+    assert.equal(delivered.summary.levelCode, 'MEETS');
+    const receipt = await tx.performanceAuditEvent.findUniqueOrThrow({ where: { id: delivered.receipt.id } });
+    const receiptPayload = await readPerformancePayload<any>(tx, receipt.encryptedPayloadId!, performanceVaultKeyFromEnvironment());
+    const deliveredProjection = await tx.performanceCurrentLevelProjection.findUniqueOrThrow({ where: { subjectId: subjects[2].subjectId } });
+    assert.equal(receiptPayload.source.sourceResultsHash, deliveredProjection.sourceResultsHash);
+    assert.equal(receiptPayload.source.levelPolicyVersionId, deliveredProjection.levelPolicyVersionId);
+    assert.deepEqual(await Promise.all(immutableHashes.map(async ({ resultId }) => {
+      const row = await tx.performanceAcceptedResult.findUniqueOrThrow({ where: { id: resultId } });
+      const encrypted = await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: row.encryptedPayloadId } });
+      return { resultId, exactScoreHash: row.exactScoreHash, payloadHash: encrypted.plaintextHash };
+    })), immutableHashes, 'projection and presentation reads preserve immutable accepted-result hashes');
+    throw new Error('ROLLBACK_ACCEPTED_LEVEL_CHAIN');
+  }, { timeout: 120_000 }), /ROLLBACK_ACCEPTED_LEVEL_CHAIN/);
+
   const exportPopulation = Array.from({ length: 50 }, (_, index) => ({
     subjectId: `export-subject-${index}`, personnelId: `export-personnel-${index}`,
     displayName: `پرسنل ${index}`, employmentRelationshipId: `export-relationship-${index}`,
@@ -143,12 +273,12 @@ const main = async () => {
       },
     };
     await assert.rejects(() => deliverPersonalPerformanceSummary(tx, { ...input, actorUserId: outsider.id }),
-      (error: any) => error?.code === 'PERFORMANCE_PERSONAL_SUMMARY_DELIVERY_FORBIDDEN');
+      (error: any) => error?.code === 'PERFORMANCE_PERSONAL_SUMMARY_DELIVERY_FORBIDDEN' && error?.statusCode === 403);
     await assert.rejects(() => deliverPersonalPerformanceSummary(tx, { ...input, actorUserId: historicalSupervisorUser.id }),
       (error: any) => error?.code === 'PERFORMANCE_PERSONAL_SUMMARY_DELIVERY_FORBIDDEN', 'historical supervision never authorizes current delivery');
     await assert.rejects(() => deliverPersonalPerformanceSummary(tx, {
       actorUserId: actor.id, personnelId: personnel.id, identityVerification: undefined as any,
-    }), (error: any) => error?.code === 'PERFORMANCE_PERSONAL_SUMMARY_IDENTITY_REQUIRED');
+    }), (error: any) => error?.code === 'PERFORMANCE_PERSONAL_SUMMARY_IDENTITY_REQUIRED' && error?.statusCode === 422);
     const delivered = await deliverPersonalPerformanceSummary(tx, { ...input, actorUserId: actor.id });
     assert.deepEqual(delivered.summary, {
       state: 'UNEVALUATED', labelFa: 'ارزیابی‌نشده',
@@ -164,6 +294,7 @@ const main = async () => {
     assert.equal(receiptPayload.recipientPersonnelId, personnel.id);
     assert.equal(receiptPayload.summaryKind, 'PERSONAL_PERFORMANCE_LEVEL_SUMMARY');
     assert.equal(receiptPayload.retentionClass, 'DISCLOSURE_RECEIPT');
+    assert.deepEqual(receiptPayload.source, { projectionVersion: 0, levelPolicyVersionId: null, sourceResultsHash: null });
     assert.equal('score' in receiptPayload, false);
     assert.equal('criteria' in receiptPayload, false);
     assert.equal('narrative' in receiptPayload, false);

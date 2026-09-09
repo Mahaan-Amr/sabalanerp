@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { RequestHandler } from 'express';
-import router, { projectPersonnelPerformanceCapabilities } from '../personnel-performance';
+import router, { classifyPerformanceRequestMetric, projectPersonnelPerformanceCapabilities } from '../personnel-performance';
 
 const registeredRoutes = (router as unknown as {
   stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
@@ -71,6 +71,9 @@ assert.deepEqual(registeredRoutes, [
   'POST /restrictions',
   'POST /restrictions/:restrictionId/release',
   'GET /operations',
+  'GET /operations/monitoring',
+  'POST /operations/monitoring/routes',
+  'POST /operations/incidents/:incidentId/actions',
   'POST /operations/pause',
   'POST /operations/disable',
   'POST /operations/training-evidence',
@@ -106,5 +109,11 @@ assert.deepEqual(projectPersonnelPerformanceCapabilities([
   VIEW_NAMED_PERFORMANCE_RANKING: true,
 });
 assert.deepEqual(projectPersonnelPerformanceCapabilities([]), {});
+assert.equal(classifyPerformanceRequestMetric('GET', '/badge/me'), 'BADGE_API_LATENCY');
+assert.equal(classifyPerformanceRequestMetric('PUT', '/supervisor/sections/one/draft'), 'DRAFT_SAVE_API_LATENCY');
+assert.equal(classifyPerformanceRequestMetric('POST', '/reviews/one/decision'), 'ATOMIC_TRANSITION_API_LATENCY');
+assert.equal(classifyPerformanceRequestMetric('POST', '/analytics'), 'ANALYTICS_API_LATENCY');
+assert.equal(classifyPerformanceRequestMetric('GET', '/traces/one'), 'RESULT_REPRODUCTION_LATENCY');
+assert.equal(classifyPerformanceRequestMetric('POST', '/exports'), null, 'asynchronous export generation is sampled by its queue metrics');
 
 console.log('Personnel performance route contract tests passed.');

@@ -9,6 +9,7 @@ import { resolvePersonnelPerformanceWriteGate } from './personnelPerformanceRoll
 import { cleanupExpiredPerformanceExports, processQueuedPerformanceExports } from './personnelPerformanceDisclosureStore';
 import { activateDuePerformanceCohorts } from './personnelPerformanceRolloutStore';
 import { runPerformancePrivacyDeadlineNotifications } from './personnelPerformancePrivacyStore';
+import { recordPerformanceMaintenanceFailure, runPerformanceOperationalMonitoring } from './personnelPerformanceMonitoringStore';
 
 const SYSTEM_ACTOR = null;
 
@@ -28,6 +29,8 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
       const candidate = error && typeof error === 'object' && 'code' in error ? error.code : null;
       const code = typeof candidate === 'string' && /^PERFORMANCE_[A-Z_]{1,80}$/.test(candidate) ? candidate : 'PERFORMANCE_MAINTENANCE_FAILED';
       console.error(`Personnel performance maintenance ${operation} failed closed: ${code}`);
+      try { await recordPerformanceMaintenanceFailure(client, { operationCode: code, observedAt: now }); }
+      catch { console.error('Personnel performance maintenance alert routing failed closed: PERFORMANCE_OPERATIONAL_ALERT_FAILED'); }
       return { ok: false as const, error: code };
     }
   };
@@ -51,7 +54,8 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
   const exportQueue = await isolate('export queue', () => processQueuedPerformanceExports(client));
   const cohorts = await isolate('cohort activation', () => activateDuePerformanceCohorts(client, now));
   const privacyDeadlines = await isolate('privacy deadlines', () => runPerformancePrivacyDeadlineNotifications(client, now));
-  return { policyGate, policies, artifacts, cohorts, privacyDeadlines, expiry, relationshipReconciliation, exportCleanup, exportQueue };
+  const operationalMonitoring = await isolate('operational monitoring', () => runPerformanceOperationalMonitoring(client, now));
+  return { policyGate, policies, artifacts, cohorts, privacyDeadlines, operationalMonitoring, expiry, relationshipReconciliation, exportCleanup, exportQueue };
 };
 
 export const startPersonnelPerformanceMaintenance = (client: PrismaClient) => {

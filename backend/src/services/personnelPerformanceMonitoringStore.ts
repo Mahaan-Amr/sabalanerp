@@ -102,7 +102,12 @@ type WindowInput = {
   baselineBps?: number; retryExhausted?: boolean;
 };
 
-const evaluateThreshold = async (tx: Prisma.TransactionClient, definition: MetricDefinition, input: WindowInput, measuredBps: number) => {
+const evaluateThreshold = async (tx: Prisma.TransactionClient, definition: MetricDefinition, input: WindowInput) => {
+  // Validated Int32 counts and 0..10,000 bps keep even the 3x baseline
+  // cross-products exact within Number.MAX_SAFE_INTEGER. Never compare rounded display values.
+  const scaledNumerator = input.numerator * 10_000;
+  const above = (basisPoints: number) => scaledNumerator > input.denominator * basisPoints;
+  const atLeast = (basisPoints: number) => scaledNumerator >= input.denominator * basisPoints;
   if (definition.p95Ms !== undefined && definition.p99Ms !== undefined) {
     if ((input.p99Ms ?? 0) > definition.p99Ms) return { severity: 'HIGH' as const, code: 'P99_BUDGET_BREACH', pause: false };
     if ((input.p95Ms ?? 0) > definition.p95Ms) {
@@ -117,20 +122,20 @@ const evaluateThreshold = async (tx: Prisma.TransactionClient, definition: Metri
   }
   switch (input.metricKey) {
     case 'HTTP_5XX_RATE':
-      if (measuredBps > 100) return { severity: 'CRITICAL' as const, code: 'HTTP_5XX_RATE_PAUSE', pause: true };
-      if (measuredBps > 10) return { severity: 'HIGH' as const, code: 'HTTP_5XX_RATE_HIGH', pause: false };
+      if (above(100)) return { severity: 'CRITICAL' as const, code: 'HTTP_5XX_RATE_PAUSE', pause: true };
+      if (above(10)) return { severity: 'HIGH' as const, code: 'HTTP_5XX_RATE_HIGH', pause: false };
       return null;
-    case 'TIMEOUT_RATE': return measuredBps > 50 ? { severity: 'CRITICAL' as const, code: 'TIMEOUT_RATE_PAUSE', pause: true } : null;
+    case 'TIMEOUT_RATE': return above(50) ? { severity: 'CRITICAL' as const, code: 'TIMEOUT_RATE_PAUSE', pause: true } : null;
     case 'DATABASE_POOL_UTILIZATION':
-      if (measuredBps >= 8_500) return { severity: 'CRITICAL' as const, code: 'POOL_EXPANSION_BLOCKER', pause: false };
-      if (measuredBps >= 7_500) return { severity: 'CRITICAL' as const, code: 'POOL_CRITICAL', pause: false };
-      if (measuredBps >= 6_000) return { severity: 'WARNING' as const, code: 'POOL_WARNING', pause: false };
+      if (atLeast(8_500)) return { severity: 'CRITICAL' as const, code: 'POOL_EXPANSION_BLOCKER', pause: false };
+      if (atLeast(7_500)) return { severity: 'CRITICAL' as const, code: 'POOL_CRITICAL', pause: false };
+      if (atLeast(6_000)) return { severity: 'WARNING' as const, code: 'POOL_WARNING', pause: false };
       return null;
     case 'EXPORT_QUEUE_AGE': return (input.maxAgeSeconds ?? 0) > 300 ? { severity: 'HIGH' as const, code: 'EXPORT_QUEUE_OVER_FIVE_MINUTES', pause: false } : null;
     case 'EXPORT_JOB_FAILURE': return input.retryExhausted ? { severity: 'HIGH' as const, code: 'EXPORT_RETRY_EXHAUSTED', pause: false } : null;
-    case 'WORKFLOW_OVERDUE_RATE': return measuredBps > 500 ? { severity: 'WARNING' as const, code: 'WORKFLOW_OVERDUE_OVER_FIVE_PERCENT', pause: false } : null;
+    case 'WORKFLOW_OVERDUE_RATE': return above(500) ? { severity: 'WARNING' as const, code: 'WORKFLOW_OVERDUE_OVER_FIVE_PERCENT', pause: false } : null;
     case 'WORKFLOW_MAX_OVERDUE': return (input.maxAgeSeconds ?? 0) > 8 * 60 * 60 ? { severity: 'WARNING' as const, code: 'WORKFLOW_OVER_ONE_WORKING_DAY', pause: false } : null;
-    case 'PERMISSION_DENIAL_RATE': return input.baselineBps !== undefined && measuredBps > input.baselineBps * 3
+    case 'PERMISSION_DENIAL_RATE': return input.baselineBps !== undefined && above(input.baselineBps * 3)
       ? { severity: 'WARNING' as const, code: 'PERMISSION_DENIAL_OVER_BASELINE', pause: false } : null;
     default: return null;
   }
@@ -199,9 +204,11 @@ export const recordPerformanceOperationalWindow = async (client: Client, input: 
   if (!definition || !['ALL', 'COHORT'].includes(input.scope) || (input.scope === 'COHORT' && !input.cohortVersionId)
     || (input.scope === 'ALL' && input.cohortVersionId !== undefined) || duration !== definition?.samplingSeconds * 1_000
     || !Number.isInteger(input.numerator) || input.numerator < 0 || !Number.isInteger(input.denominator) || input.denominator <= 0
-    || input.numerator > input.denominator) throw error('PERFORMANCE_OPERATIONAL_WINDOW_INVALID', 422);
+    || input.numerator > input.denominator || input.denominator > 2_147_483_647
+    || (input.baselineBps !== undefined && (!Number.isInteger(input.baselineBps)
+      || input.baselineBps < 0 || input.baselineBps > 10_000))) throw error('PERFORMANCE_OPERATIONAL_WINDOW_INVALID', 422);
   const measuredBps = Math.round(input.numerator * 10_000 / input.denominator);
-  const threshold = await evaluateThreshold(tx, definition, input, measuredBps);
+  const threshold = await evaluateThreshold(tx, definition, input);
   const existing = await tx.performanceOperationalWindow.findFirst({ where: { metricKey: input.metricKey, scope: input.scope,
     cohortVersionId: input.cohortVersionId ?? null, windowStart: input.windowStart, windowEnd: input.windowEnd } });
   const window = existing ? await tx.performanceOperationalWindow.update({ where: { id: existing.id }, data: {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PrismaClient } from '@prisma/client';
-import { runPerformanceOperationalMonitoring } from '../personnelPerformanceMonitoringStore';
+import { recordPerformanceOperationalWindow, runPerformanceOperationalMonitoring } from '../personnelPerformanceMonitoringStore';
 
 const now = new Date('2026-09-09T08:01:00Z');
 const equal = (a: any, b: any) => a instanceof Date && b instanceof Date ? +a === +b : a === b;
@@ -72,6 +72,51 @@ const fixture = () => {
     run: (at = now) => runPerformanceOperationalMonitoring(client as PrismaClient, at),
   };
 };
+
+test('ratio decisions use exact boundaries while stored basis points stay rounded', async () => {
+  const cases = [
+    ['HTTP_5XX_RATE', 50, 'HEALTHY', 10, false],
+    ['HTTP_5XX_RATE', 51, 'HTTP_5XX_RATE_HIGH', 10, false],
+    ['HTTP_5XX_RATE', 500, 'HTTP_5XX_RATE_HIGH', 100, false],
+    ['HTTP_5XX_RATE', 501, 'HTTP_5XX_RATE_PAUSE', 100, true],
+    ['TIMEOUT_RATE', 250, 'HEALTHY', 50, false],
+    ['TIMEOUT_RATE', 251, 'TIMEOUT_RATE_PAUSE', 50, true],
+    ['WORKFLOW_OVERDUE_RATE', 2500, 'HEALTHY', 500, false],
+    ['WORKFLOW_OVERDUE_RATE', 2501, 'WORKFLOW_OVERDUE_OVER_FIVE_PERCENT', 500, false],
+    ['DATABASE_POOL_UTILIZATION', 29999, 'HEALTHY', 6000, false],
+    ['DATABASE_POOL_UTILIZATION', 30000, 'POOL_WARNING', 6000, false],
+    ['DATABASE_POOL_UTILIZATION', 37499, 'POOL_WARNING', 7500, false],
+    ['DATABASE_POOL_UTILIZATION', 37500, 'POOL_CRITICAL', 7500, false],
+    ['DATABASE_POOL_UTILIZATION', 42499, 'POOL_CRITICAL', 8500, false],
+    ['DATABASE_POOL_UTILIZATION', 42500, 'POOL_EXPANSION_BLOCKER', 8500, false],
+    ['PERMISSION_DENIAL_RATE', 150, 'HEALTHY', 30, false],
+    ['PERMISSION_DENIAL_RATE', 151, 'PERMISSION_DENIAL_OVER_BASELINE', 30, false],
+  ] as const;
+  for (const [metricKey, numerator, expected, rounded, pause] of cases) {
+    const f = fixture();
+    const result = await recordPerformanceOperationalWindow(f.client, { metricKey, scope: 'ALL',
+      windowStart: new Date(now.getTime() - (metricKey === 'PERMISSION_DENIAL_RATE' ? 900 : 300) * 1000),
+      windowEnd: now, numerator, denominator: 50000,
+      ...(metricKey === 'PERMISSION_DENIAL_RATE' ? { baselineBps: 10 } : {}),
+    });
+    assert.equal(result.window.thresholdState, expected, `${metricKey} numerator=${numerator}`);
+    assert.equal(result.window.measuredBps, rounded);
+    assert.equal(Boolean(result.incident?.safetyPauseId), pause);
+  }
+});
+
+test('ratio inputs fit persisted integers and bounded basis-point baselines', async () => {
+  const input = { metricKey: 'HTTP_5XX_RATE', scope: 'ALL' as const, windowStart: new Date(now.getTime() - 300000),
+    windowEnd: now, numerator: 1, denominator: 2147483647 };
+  assert.equal((await recordPerformanceOperationalWindow(fixture().client, input)).window.thresholdState, 'HEALTHY');
+  for (const invalid of [{ denominator: 2147483648 }, { numerator: 2147483648, denominator: 2147483648 },
+    { numerator: 0.5 }, { denominator: Infinity }, { baselineBps: -1 }, { baselineBps: 10001 }, { baselineBps: 0.5 }]) {
+    const f = fixture();
+    await assert.rejects(() => recordPerformanceOperationalWindow(f.client, { ...input, ...invalid }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_OPERATIONAL_WINDOW_INVALID');
+    assert.equal(f.windows.length, 0);
+  }
+});
 
 test('absent or disabled latest phase performs retention only, including disabled-after-enabled', async (t) => {
   for (const mode of ['absent', 'disabled', 'disabled-after-enabled']) await t.test(mode, async () => {

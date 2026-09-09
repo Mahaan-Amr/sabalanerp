@@ -7781,15 +7781,116 @@ model PerformanceSafetyPause {
   status          String    @default("ACTIVE")
   reasonCode      String
   reason          String
-  startedByUserId String
+  startedByUserId String?
   startedAt       DateTime  @default(now())
   resumedByUserId String?
   resumedAt       DateTime?
   resumeReason    String?
+  sourceIncidentId String?   @unique
 
   @@index([status, startedAt])
   @@index([cohortVersionId, status])
   @@map("performance_safety_pauses")
+}
+
+model PerformanceOperationalRoute {
+  id String @id @default(cuid())
+  routeKey String @unique
+  recipientUserId String
+  verifiedAt DateTime
+  configuredById String
+  reason String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([recipientUserId, verifiedAt])
+  @@map("performance_operational_routes")
+}
+
+model PerformanceOperationalHeartbeat {
+  id String @id @default(cuid())
+  component String @unique
+  observedAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([observedAt])
+  @@map("performance_operational_heartbeats")
+}
+
+model PerformanceOperationalWindow {
+  id String @id @default(cuid())
+  metricKey String
+  scope String
+  cohortVersionId String?
+  windowStart DateTime
+  windowEnd DateTime
+  numerator Int
+  denominator Int
+  p95Ms Int?
+  p99Ms Int?
+  maxAgeSeconds Int?
+  baselineBps Int?
+  retryExhausted Boolean @default(false)
+  measuredBps Int?
+  thresholdState String
+  createdAt DateTime @default(now())
+  @@unique([metricKey, scope, cohortVersionId, windowStart, windowEnd])
+  @@index([metricKey, scope, cohortVersionId, windowEnd])
+  @@index([createdAt])
+  @@map("performance_operational_windows")
+}
+
+model PerformanceOperationalRequestObservation {
+  id String @id @default(cuid())
+  metricKey String
+  durationMs Int
+  responseStatus Int
+  authorizationDecision String
+  timedOut Boolean @default(false)
+  observedAt DateTime @default(now())
+  @@index([observedAt, metricKey])
+  @@map("performance_operational_request_observations")
+}
+
+model PerformanceOperationalIncident {
+  id String @id @default(cuid())
+  deduplicationKey String @unique
+  category String
+  metricKey String?
+  routeKey String
+  scope String
+  cohortVersionId String?
+  severity String
+  status String @default("OPEN")
+  thresholdCode String
+  occurrenceCount Int @default(1)
+  firstObservedAt DateTime
+  lastObservedAt DateTime
+  acknowledgeDueAt DateTime
+  containmentDueAt DateTime?
+  escalationDueAt DateTime?
+  acknowledgedAt DateTime?
+  containedAt DateTime?
+  escalatedAt DateTime?
+  resolvedAt DateTime?
+  safetyPauseId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, severity, firstObservedAt])
+  @@index([scope, cohortVersionId, status])
+  @@index([safetyPauseId])
+  @@map("performance_operational_incidents")
+}
+
+model PerformanceOperationalIncidentEvidence {
+  id String @id @default(cuid())
+  incidentId String
+  action String
+  actorUserId String?
+  reasonCode String
+  evidenceHash String
+  recordedAt DateTime @default(now())
+  @@index([incidentId, recordedAt])
+  @@map("performance_operational_incident_evidence")
 }
 
 model PerformanceCycle {

@@ -172,7 +172,7 @@ const main = async () => {
       };
       const accepted = await persistAcceptedPerformanceResult(tx, {
         evaluationId: evaluation.id, calculationInput, acceptedByUserId: actor.id,
-        idempotencyKey: `${suffix}-accept-${index}`, acceptedAt: new Date('2026-09-01Z'), keyring: performanceVaultKeyFromEnvironment(),
+        idempotencyKey: `${suffix}-accept-${index}`, acceptedAt: new Date(), keyring: performanceVaultKeyFromEnvironment(),
       });
       assert.equal(accepted.idempotent, false);
       const acceptedOutput = accepted as { historicalLevel: { levelCode: string }; result: { id: string }; idempotent: false };
@@ -219,6 +219,21 @@ const main = async () => {
     const pdfHtml = performanceExportPdfHtml(canonicalRows);
     for (const { levelCode, labelFa } of canonicalRows) {
       assert.ok(pdfHtml.includes(String(levelCode)) && pdfHtml.includes(String(labelFa)), 'PDF and Excel use the same accepted-result level rows');
+    }
+    const previousExecutable = process.env.PUPPETEER_EXECUTABLE_PATH;
+    if (!previousExecutable && process.platform === 'darwin') {
+      const macChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+      await access(macChrome);
+      process.env.PUPPETEER_EXECUTABLE_PATH = macChrome;
+    }
+    try {
+      const pdfArtifact = await renderPerformanceExportArtifact('PDF', canonicalRows, new AbortController().signal);
+      assert.equal(pdfArtifact.mimeType, 'application/pdf');
+      assert.equal(pdfArtifact.bytes.subarray(0, 4).toString(), '%PDF');
+      assert.ok(pdfArtifact.bytes.length > 1_000, 'rendered PDF must contain the canonical five-level table');
+    } finally {
+      if (previousExecutable) process.env.PUPPETEER_EXECUTABLE_PATH = previousExecutable;
+      else delete process.env.PUPPETEER_EXECUTABLE_PATH;
     }
     const delivered = await deliverPersonalPerformanceSummary(tx, {
       actorUserId: actor.id, personnelId: subjects[4].personnelId,

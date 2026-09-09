@@ -1,4 +1,5 @@
 export type PerformanceLevelCode = 'URGENT_IMPROVEMENT' | 'IMPROVEMENT' | 'IMPROVEMENT_NEEDED' | 'MEETS' | 'MEETS_EXPECTATIONS' | 'EXCEEDS' | 'EXCEEDS_EXPECTATIONS' | 'OUTSTANDING';
+export type PerformanceLevelTone = 'danger' | 'warning' | 'success' | 'primary' | 'purple' | 'neutral';
 
 export type PerformanceBadgeSummary = {
   state: 'UNEVALUATED' | 'NEEDS_NEW_EVALUATION' | 'LEVEL' | 'TEMPORARILY_UNAVAILABLE';
@@ -21,16 +22,17 @@ const levelPresentation = {
   OUTSTANDING: { tone: 'purple', asset: 'diamond' },
 } as const;
 
-export const performanceLevelTone = (levelCode: string) =>
+export const performanceLevelTone = (levelCode: string): PerformanceLevelTone =>
   levelPresentation[levelCode as PerformanceLevelCode]?.tone ?? 'neutral';
 
 export const performanceBadgePresentation = (badge: PerformanceBadgeSummary) => {
   const level = badge.state === 'LEVEL' && badge.levelCode ? levelPresentation[badge.levelCode] : null;
   const asset = level?.asset ?? 'neutral-frame';
+  const tone: PerformanceLevelTone = level?.tone ?? 'neutral';
   return {
     labelFa: badge.labelFa,
     meaningFa: badge.meaningFa,
-    tone: level?.tone ?? 'neutral',
+    tone,
     lightAsset: `/assets/performance-rank-badges-v2/light/${asset}.png`,
     darkAsset: `/assets/performance-rank-badges-v2/dark/${asset}.png`,
     neutral: !level,

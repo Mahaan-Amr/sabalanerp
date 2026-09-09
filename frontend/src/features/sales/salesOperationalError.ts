@@ -11,6 +11,14 @@ type ErrorPayload = {
   trackingId?: unknown;
 };
 
+type ErrorWithResponse = {
+  response?: {
+    data?: unknown;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+};
+
 type ValidationDetail = {
   path?: unknown;
   param?: unknown;
@@ -46,6 +54,34 @@ const safeBusinessMessage = (payload: ErrorPayload): string => {
   const candidates = [payload.error, payload.message]
     .filter((value): value is string => typeof value === 'string');
   return candidates.find(isSafeBusinessText) || '';
+};
+
+export const normalizeSalesBlobError = async (error: unknown): Promise<unknown> => {
+  const candidate = error as ErrorWithResponse;
+  const data = candidate?.response?.data;
+  if (typeof Blob === 'undefined' || !(data instanceof Blob) || data.size > 100_000) return error;
+
+  try {
+    const text = await data.text();
+    if (!text.trim()) return error;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { error: text };
+    }
+    if (typeof payload === 'string') payload = { error: payload };
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return error;
+    return {
+      ...candidate,
+      response: {
+        ...candidate.response,
+        data: payload,
+      },
+    };
+  } catch {
+    return error;
+  }
 };
 
 const isNetworkFailure = (error: unknown): boolean => {

@@ -51,7 +51,7 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
 
   return (
     <ErpSection title="مانده ارسال" description="مقادیر قرارداد، رزروشده، خارج‌شده و قابل بارگیری از شواهد ثبت‌شده محاسبه می‌شوند.">
-      {refreshError && <ErpInlineState kind="stale" title="آخرین اطلاعات موفق نمایش داده می‌شود؛ به‌روزرسانی انجام نشد." className="mb-4" />}
+      {refreshError && <ErpInlineState kind="stale" title={<>آخرین اطلاعات موفق نمایش داده می‌شود. {refreshError}</>} className="mb-4" />}
       {!data?.rows.length ? (
         <ErpEmptyState title="هنوز شواهد ارسال قابل نمایش نیست" />
       ) : (

@@ -9,7 +9,7 @@ import EnhancedDropdown from '@/components/EnhancedDropdown';
 import ProductImportExportModal from '@/components/ProductImportExportModal';
 import SuccessModal from '@/components/SuccessModal';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpLoading, ErpPagination, ErpToolbar } from '@/components/erp';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 const generateFullProductName = (product: Product): string => {
   const parts = [
@@ -43,7 +43,7 @@ export default function ProductsPage() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [listError, setListError] = useState('');
-  const [rowError, setRowError] = useState<{ productId: string; message: string } | null>(null);
+  const [rowError, setRowError] = useState<{ productId: string; message: string; kind: 'error' | 'permission' | 'stale' } | null>(null);
   const [showImportExportModal, setShowImportExportModal] = useState(false);
 
   const itemsPerPage = 20;
@@ -111,17 +111,20 @@ export default function ProductsPage() {
 
   const handleDeleteConfirm = async () => {
     if (!deleteConfirm.product) return;
+    const product = deleteConfirm.product;
 
     try {
       setDeleting(true);
-      const response = await salesAPI.deleteProduct(deleteConfirm.product.id);
+      const response = await salesAPI.deleteProduct(product.id);
       if (response.data.success) {
         setModalMessage('محصول با موفقیت حذف شد');
         setShowSuccessModal(true);
         setDeleteConfirm({ show: false, product: null });
         fetchProducts();
       } else {
-        setRowError({ productId: deleteConfirm.product.id, message: getSalesOperationalErrorMessage({ response }, {
+        const failure = { response };
+        setDeleteConfirm({ show: false, product: null });
+        setRowError({ productId: product.id, kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
           failedAction: 'حذف محصول',
           nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
@@ -129,7 +132,8 @@ export default function ProductsPage() {
       }
     } catch (error: any) {
       console.error('Error deleting product:', error);
-      setRowError({ productId: deleteConfirm.product.id, message: getSalesOperationalErrorMessage(error, {
+      setDeleteConfirm({ show: false, product: null });
+      setRowError({ productId: product.id, kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
         failedAction: 'حذف محصول',
         nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
@@ -151,7 +155,8 @@ export default function ProductsPage() {
         setShowSuccessModal(true);
         fetchProducts();
       } else {
-        setRowError({ productId: product.id, message: getSalesOperationalErrorMessage({ response }, {
+        const failure = { response };
+        setRowError({ productId: product.id, kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
           failedAction: 'تغییر وضعیت محصول',
           nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
@@ -159,7 +164,7 @@ export default function ProductsPage() {
       }
     } catch (error: any) {
       console.error('Error toggling status:', error);
-      setRowError({ productId: product.id, message: getSalesOperationalErrorMessage(error, {
+      setRowError({ productId: product.id, kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
         failedAction: 'تغییر وضعیت محصول',
         nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
@@ -205,7 +210,7 @@ export default function ProductsPage() {
                 <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{product.namePersian}</p>
                 <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{generateFullProductName(product)}</p>
                 {rowError?.productId === product.id && (
-                  <ErpInlineState kind="error" title={rowError.message} className="mt-2" />
+                  <ErpInlineState kind={rowError.kind} title={rowError.message} className="mt-2" />
                 )}
               </div>
             ),

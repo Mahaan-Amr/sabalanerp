@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductCreationValidationErrors, mapProductEditValidationErrors } from './salesOperationalError';
+import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductCreationValidationErrors, mapProductEditValidationErrors, normalizeSalesBlobError } from './salesOperationalError';
 
 test('unexpected sales failure preserves input and exposes a safe tracking reference without deflecting to support', () => {
   const message = getSalesOperationalErrorMessage({
@@ -130,6 +130,36 @@ test('permission and stale responses keep their non-error presentation semantics
   assert.equal(getSalesOperationalErrorKind({ response: { status: 403 } }), 'permission');
   assert.equal(getSalesOperationalErrorKind({ response: { status: 409 } }), 'stale');
   assert.equal(getSalesOperationalErrorKind({ response: { status: 500 } }), 'error');
+});
+
+test('blob download failures preserve a safe business cause and tracking reference', async () => {
+  const normalized = await normalizeSalesBlobError({
+    response: {
+      status: 422,
+      data: new Blob([JSON.stringify({
+        error: 'قالب اکسل برای این کاتالوگ آماده نیست؛ دوباره تلاش کنید.',
+        trackingId: 'EXCEL-42',
+      })], { type: 'application/json' }),
+    },
+  });
+
+  assert.equal(getSalesOperationalErrorMessage(normalized, {
+    failedAction: 'دانلود قالب اکسل',
+    nextStep: 'دوباره روی «دانلود قالب» بزنید.',
+  }), 'قالب اکسل برای این کاتالوگ آماده نیست؛ دوباره تلاش کنید. دوباره روی «دانلود قالب» بزنید. کد پیگیری: EXCEL-42');
+});
+
+test('technical blob download payload is not exposed to the user', async () => {
+  const normalized = await normalizeSalesBlobError({
+    response: { status: 500, data: new Blob(['Prisma P2002 constraint']) },
+  });
+
+  const message = getSalesOperationalErrorMessage(normalized, {
+    failedAction: 'دریافت خروجی اکسل',
+    nextStep: 'دوباره روی «دریافت خروجی» بزنید.',
+  });
+  assert.equal(message, 'دریافت خروجی اکسل انجام نشد. دوباره روی «دریافت خروجی» بزنید.');
+  assert.doesNotMatch(message, /Prisma|P2002|constraint/);
 });
 
 test('product edit validation maps only safe messages to editable fields', () => {

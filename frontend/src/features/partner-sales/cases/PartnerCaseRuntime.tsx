@@ -10,7 +10,7 @@ import { openPartnerPdf, readPartnerAccount, readPartnerCases, sendPartnerConfir
 import type { PartnerAccountView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
-import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 export function PartnerCaseRuntime() {
   const [rows, setRows] = useState<PartnerCaseRuntimeRow[]>([]);
@@ -18,7 +18,7 @@ export function PartnerCaseRuntime() {
   const [collections, setCollections] = useState<Record<string, RetailCollectionHistory>>({});
   const [corrections, setCorrections] = useState<Record<string, PartnerCorrectionStatus | null>>({});
   const [busy, setBusy] = useState(true);
-  const [error, setError] = useState<{ message: string; caseId?: string }>();
+  const [error, setError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale'; caseId?: string }>();
   const load = useCallback(async () => {
     setBusy(true); setError(undefined);
     try {
@@ -32,7 +32,7 @@ export function PartnerCaseRuntime() {
       setCorrections(Object.fromEntries(supplementary.flatMap(item => item.correction !== undefined
         ? [[item.caseId, item.correction]] : [])));
     } catch (reason) {
-      setError({ message: getSalesOperationalErrorMessage(reason, {
+      setError({ kind: getSalesOperationalErrorKind(reason), message: getSalesOperationalErrorMessage(reason, {
         failedAction: 'دریافت پرونده‌های فروش همکار',
         nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
       }) });
@@ -43,7 +43,7 @@ export function PartnerCaseRuntime() {
     setError(undefined);
     try { await action(); await load(); }
     catch (reason) {
-      setError({ caseId, message: getSalesOperationalErrorMessage(reason, {
+      setError({ caseId, kind: getSalesOperationalErrorKind(reason), message: getSalesOperationalErrorMessage(reason, {
         failedAction: name,
         nextStep: 'وضعیت پرونده را تازه‌سازی و سپس دوباره بررسی کنید.',
         uncertainMutation: true,
@@ -53,10 +53,10 @@ export function PartnerCaseRuntime() {
   useEffect(() => { void load(); }, [load]);
   if (busy) return <ErpLoading />;
   return <ErpWorkspacePage title="پرونده‌های فروش همکار" context="حقیقت جاری پرونده، وصول و حساب سبلان">
-    {error && !error.caseId && <ErpInlineState kind="error" title={error.message} action={{ label: 'تلاش دوباره', onClick: load }} />}
+    {error && !error.caseId && <ErpInlineState kind={error.kind} title={error.message} action={{ label: 'تلاش دوباره', onClick: load }} />}
     {!error && !rows.length && <ErpEmptyState icon={FaFileContract} title="پرونده‌ای ثبت نشده است" />}
     <div className="space-y-8">{rows.map((row, index) => <div key={row.view.owner.caseId} className="space-y-2">
-      {error?.caseId === row.view.owner.caseId && <ErpInlineState kind="error" title={error.message} />}
+      {error?.caseId === row.view.owner.caseId && <ErpInlineState kind={error.kind} title={error.message} />}
       <PartnerCaseWorkspace
       view={row.view} account={index === 0 ? account : undefined}
       collections={collections[row.view.owner.caseId]} correction={corrections[row.view.owner.caseId]}

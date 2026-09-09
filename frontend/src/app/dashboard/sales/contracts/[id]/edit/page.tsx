@@ -98,7 +98,7 @@ export default function SalesContractEditPage() {
 
         if (nextContract.accountingEditLocked && !nextContract.canOpenCorrectionEdit) {
           setError('این قرارداد پس از تأیید مالی قابل‌ویرایش نیست. از صفحه قرارداد، مسیر درخواست اصلاح را بررسی کنید.');
-          setErrorKind('permission');
+          setErrorKind('stale');
           return;
         }
 

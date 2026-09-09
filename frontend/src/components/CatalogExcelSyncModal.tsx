@@ -3,6 +3,7 @@ import { ErpButton, ErpInlineState, ErpSegmentedControl, ErpSheet } from '@/comp
 import React, { useState } from 'react';
 import { FaDownload, FaExclamationTriangle, FaFileExcel, FaUpload } from 'react-icons/fa';
 import ExcelFileUpload from './ExcelFileUpload';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 
 interface CatalogSyncPlan {
   importId: string;
@@ -84,6 +85,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   const [plan, setPlan] = useState<CatalogSyncPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
 
   const reset = () => {
     setActiveTab('import');
@@ -91,6 +93,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
     setPlan(null);
     setLoading(false);
     setError(null);
+    setErrorKind('error');
   };
 
   const close = () => {
@@ -105,7 +108,12 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
       const response = await downloadTemplate();
       downloadBlob(response, `${filenamePrefix}-template.xlsx`);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'خطا در دانلود قالب اکسل');
+      const normalizedError = await normalizeSalesBlobError(err);
+      setError(getSalesOperationalErrorMessage(normalizedError, {
+        failedAction: 'دانلود قالب اکسل',
+        nextStep: 'دوباره روی «دانلود قالب» بزنید.',
+      }));
+      setErrorKind(getSalesOperationalErrorKind(normalizedError));
     } finally {
       setLoading(false);
     }
@@ -118,7 +126,12 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
       const response = await exportData();
       downloadBlob(response, `${filenamePrefix}-export-${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'خطا در خروجی اکسل');
+      const normalizedError = await normalizeSalesBlobError(err);
+      setError(getSalesOperationalErrorMessage(normalizedError, {
+        failedAction: 'دریافت خروجی اکسل',
+        nextStep: 'دوباره روی «دریافت خروجی» بزنید.',
+      }));
+      setErrorKind(getSalesOperationalErrorKind(normalizedError));
     } finally {
       setLoading(false);
     }
@@ -126,7 +139,8 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
 
   const handlePreview = async () => {
     if (!selectedFile) {
-      setError('لطفا فایل اکسل را انتخاب کنید');
+      setError('فایل اکسل انتخاب نشده است. فایل موردنظر را انتخاب کنید و دوباره ادامه دهید.');
+      setErrorKind('error');
       return;
     }
     try {
@@ -135,7 +149,11 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
       const response = await previewImport(selectedFile);
       setPlan(response.data.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'خطا در بررسی فایل اکسل');
+      setError(getSalesOperationalErrorMessage(err, {
+        failedAction: 'بررسی فایل اکسل',
+        nextStep: 'محتوای فایل را اصلاح کنید یا فایل دیگری انتخاب کنید.',
+      }));
+      setErrorKind(getSalesOperationalErrorKind(err));
     } finally {
       setLoading(false);
     }
@@ -151,7 +169,12 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
       onComplete?.(appliedPlan);
       close();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'خطا در اعمال تغییرات اکسل');
+      setError(getSalesOperationalErrorMessage(err, {
+        failedAction: 'اعمال تغییرات اکسل',
+        nextStep: 'نتیجهٔ فعلی کاتالوگ را بررسی کنید؛ فقط اگر تغییرات اعمال نشده بود دوباره تلاش کنید.',
+        uncertainMutation: true,
+      }));
+      setErrorKind(getSalesOperationalErrorKind(err));
     } finally {
       setLoading(false);
     }
@@ -246,7 +269,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
             </div>
           )}
 
-          {error ? <ErpInlineState kind="error" title={error} className="mt-4" /> : null}
+          {error ? <ErpInlineState kind={errorKind} title={error} className="mt-4" /> : null}
         </div>
     </ErpSheet>
   );

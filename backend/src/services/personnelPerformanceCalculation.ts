@@ -242,6 +242,10 @@ export const validateTypedPerformanceApplicabilityRule = (
   rule: TypedPerformanceApplicabilityRule,
 ): string[] => {
   const errors: string[] = [];
+  if (!rule || typeof rule !== 'object') return ['قاعده کاربردپذیری نوع‌دار باید یک شیء باشد.'];
+  if (rule.schemaVersion !== 1) errors.push('نسخه قاعده کاربردپذیری نوع‌دار پشتیبانی نمی‌شود.');
+  if (!['EQUALS', 'IN', 'EXISTS'].includes(rule.operator)) errors.push('عملگر قاعده کاربردپذیری پشتیبانی نمی‌شود.');
+  if (!Array.isArray(rule.values)) return [...errors, 'مقادیر قاعده کاربردپذیری باید آرایه باشند.'];
   const expectedType = PERFORMANCE_APPLICABILITY_FACT_TYPES[rule.fact];
   if (!expectedType) return ['واقعیت کنترل‌شده این قرارداد پشتیبانی نمی‌شود.'];
   if (rule.factType !== expectedType) errors.push(`نوع واقعیت «${rule.fact}» باید ${expectedType} باشد.`);
@@ -295,6 +299,12 @@ const evaluateApplicability = (
   }
   if (!criterion.applicability) return { decision: 'APPLICABLE', reason: 'معیار برای همه مأموریت‌ها کاربرد دارد.' };
   const rule = criterion.applicability;
+  if (typeof rule !== 'object' || !Array.isArray(rule.values) || !['EQUALS', 'IN', 'EXISTS'].includes(rule.operator)) {
+    return { decision: 'BLOCKED', reason: 'ساختار یا عملگر قاعده کاربردپذیری معتبر نیست.' };
+  }
+  if ('schemaVersion' in rule && rule.schemaVersion !== undefined && rule.schemaVersion !== 1) {
+    return { decision: 'BLOCKED', reason: 'نسخه قاعده کاربردپذیری پشتیبانی نمی‌شود.' };
+  }
   if (rule.schemaVersion === 1) {
     const validationErrors = validateTypedPerformanceApplicabilityRule(rule);
     if (validationErrors.length > 0) {

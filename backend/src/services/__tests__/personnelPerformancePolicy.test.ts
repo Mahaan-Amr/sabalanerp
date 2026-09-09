@@ -81,6 +81,14 @@ assert.ok(validateCriterionPolicyContent({
   ...typedCriterion,
   applicability: { ...typedCriterion.applicability, fact: 'responsibilityCodes', factType: 'STRING_LIST', operator: 'EQUALS' },
 } as PerformanceCriterionPolicyContent).some((message) => message.includes('فهرستی')));
+assert.ok(validateCriterionPolicyContent({
+  ...typedCriterion,
+  applicability: { ...typedCriterion.applicability, schemaVersion: 2 },
+} as unknown as PerformanceCriterionPolicyContent).some((message) => message.includes('نسخه قاعده')));
+assert.ok(validateCriterionPolicyContent({
+  ...typedCriterion,
+  applicability: { ...typedCriterion.applicability, operator: 'NOT_EQUALS' },
+} as unknown as PerformanceCriterionPolicyContent).some((message) => message.includes('عملگر')));
 
 const catalogManifest: any = {
   schemaVersion: 1,
@@ -144,6 +152,36 @@ const orphanCriterion = structuredClone(catalogManifest);
 orphanCriterion.jobs[0].criteria[0].categoryCode = 'UNKNOWN_CATEGORY';
 orphanCriterion.catalog.contentHash = performanceRoleCatalogContentHash(orphanCriterion);
 assert.ok(inspectPerformanceRoleCatalogManifest(orphanCriterion).errors.some((message) => message.includes('دسته تعریف‌نشده')));
+const unknownProvenance = structuredClone(catalogManifest);
+unknownProvenance.source.provenanceCategory = 'TYPO_PROVENANCE';
+unknownProvenance.catalog.contentHash = performanceRoleCatalogContentHash(unknownProvenance);
+assert.ok(inspectPerformanceRoleCatalogManifest(unknownProvenance).errors.some((message) => message.includes('رده منشأ')));
+const inconsistentSynthetic = structuredClone(catalogManifest);
+inconsistentSynthetic.source.provenanceCategory = 'SYNTHETIC';
+inconsistentSynthetic.source.extractedFacts = false;
+inconsistentSynthetic.catalog.contentHash = performanceRoleCatalogContentHash(inconsistentSynthetic);
+assert.ok(inspectPerformanceRoleCatalogManifest(inconsistentSynthetic).errors.some((message) => message.includes('منشأ ساختگی')));
+const wrongOwnerType = structuredClone(catalogManifest);
+wrongOwnerType.positions[0].criteria[0].applicability.fact = 'jobId';
+wrongOwnerType.positions[0].criteria[0].applicability.values = ['POSITION_PAYABLES'];
+wrongOwnerType.catalog.contentHash = performanceRoleCatalogContentHash(wrongOwnerType);
+assert.ok(inspectPerformanceRoleCatalogManifest(wrongOwnerType).errors.some((message) => message.includes('نوع نادرست')));
+const unresolvedOwnerReference = structuredClone(catalogManifest);
+unresolvedOwnerReference.positions[0].criteria[0].applicability.values = ['POSITION_DOES_NOT_EXIST'];
+unresolvedOwnerReference.catalog.contentHash = performanceRoleCatalogContentHash(unresolvedOwnerReference);
+assert.ok(inspectPerformanceRoleCatalogManifest(unresolvedOwnerReference).errors.some((message) => message.includes('حل نشده')));
+const unknownEvidence = structuredClone(catalogManifest);
+unknownEvidence.evidenceDictionary[0].classification = 'BOGUS';
+unknownEvidence.catalog.contentHash = performanceRoleCatalogContentHash(unknownEvidence);
+assert.ok(inspectPerformanceRoleCatalogManifest(unknownEvidence).errors.some((message) => message.includes('طبقه‌بندی پشتیبانی‌شده')));
+const malformedApplicability = structuredClone(catalogManifest);
+delete malformedApplicability.positions[0].criteria[0].applicability.values;
+assert.doesNotThrow(() => inspectPerformanceRoleCatalogManifest(malformedApplicability));
+assert.ok(inspectPerformanceRoleCatalogManifest(malformedApplicability).errors.some((message) => message.includes('ساختار کاتالوگ ناقص')));
+const excessivePrecision = structuredClone(catalogManifest);
+excessivePrecision.jobs[0].categories[0].weight = 100.001;
+excessivePrecision.catalog.contentHash = performanceRoleCatalogContentHash(excessivePrecision);
+assert.ok(inspectPerformanceRoleCatalogManifest(excessivePrecision).errors.some((message) => message.includes('جمع وزن دسته‌ها')));
 
 const levels = {
   schemaVersion: 1 as const,

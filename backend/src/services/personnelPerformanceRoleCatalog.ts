@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { canonicalPerformanceHash, type PerformanceCriterionPolicyContent } from './personnelPerformancePolicy';
 import {
   PERFORMANCE_APPLICABILITY_FACT_TYPES,
@@ -50,6 +51,7 @@ type EvidenceDictionaryEntry = {
   code: string;
   classification: 'CANONICAL_EVIDENCE' | 'CONTROLLED_DOCUMENT' | 'STRUCTURED_OBSERVATION' | 'MISSING_OR_FUTURE_INTEGRATION';
 };
+type CatalogProvenanceCategory = 'SYNTHETIC' | 'LOCAL' | 'PRODUCTION' | 'COMPANY_CONTROLLED_SOURCE';
 
 export type PerformanceRoleCatalogManifest = {
   schemaVersion: 1;
@@ -62,7 +64,7 @@ export type PerformanceRoleCatalogManifest = {
     contentHashMethod: 'SHA256_CANONICAL_JSON_EXCLUDING_CATALOG_CONTENT_HASH';
   };
   source: {
-    provenanceCategory: string;
+    provenanceCategory: CatalogProvenanceCategory;
     asOf: string;
     references: string[];
     extractedFacts: boolean;
@@ -137,6 +139,10 @@ const codePattern = /^[A-Z0-9][A-Z0-9_-]{2,95}$/;
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const percent = (value: number) => value.toFixed(2);
+const hasAtMostTwoDecimals = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+  && new Prisma.Decimal(String(value)).decimalPlaces() <= 2;
+const decimalSumIsHundred = (values: number[]) => values
+  .reduce((sum, value) => sum.add(String(value)), new Prisma.Decimal(0)).eq(100);
 
 const hasCatalogManifestShape = (input: CatalogRecord) => {
   if (!isRecord(input.catalog) || !isRecord(input.source) || !isRecord(input.review)
@@ -144,6 +150,7 @@ const hasCatalogManifestShape = (input: CatalogRecord) => {
     || !Array.isArray(input.jobs) || !Array.isArray(input.positions)) return false;
   const validCriterion = (value: unknown) => isRecord(value)
     && (value.applicability === null || isRecord(value.applicability))
+    && (value.applicability === null || Array.isArray(value.applicability.values))
     && Array.isArray(value.anchorsFa)
     && isRecord(value.evidencePolicy)
     && Array.isArray(value.evidencePolicy.dictionaryCodes)
@@ -155,6 +162,7 @@ const hasCatalogManifestShape = (input: CatalogRecord) => {
     && Array.isArray(value.criteria)
     && value.criteria.every(validCriterion);
   return input.applicabilityDictionary.every(isRecord)
+    && input.applicabilityDictionary.every((entry) => Array.isArray(entry.operators))
     && input.evidenceDictionary.every(isRecord)
     && input.jobs.every(validRole)
     && input.positions.every((position) => validRole(position) && isRecord(position.composition));
@@ -176,7 +184,7 @@ const evidenceKind = (classification: EvidenceDictionaryEntry['classification'])
 const resolveApplicability = (
   criterion: CatalogCriterion,
   dictionary: Map<string, ApplicabilityDictionaryEntry>,
-  ownerIds: Map<string, string | null>,
+  ownerIds: { jobs: Map<string, string | null>; positions: Map<string, string | null> },
   errors: string[],
 ): TypedPerformanceApplicabilityRule | null => {
   if (!criterion.applicability) return null;
@@ -194,9 +202,15 @@ const resolveApplicability = (
   if (!definition.operators.includes(criterion.applicability.operator)) {
     errors.push(`عملگر معیار ${criterion.conceptCode} در فرهنگ واقعیت ${definition.fact} مجاز نیست.`);
   }
+  const referenceMap = definition.fact === 'jobId' ? ownerIds.jobs
+    : definition.fact === 'positionId' ? ownerIds.positions : null;
   const values = criterion.applicability.values.map((value) => {
-    if (typeof value !== 'string' || !ownerIds.has(value)) return value;
-    return ownerIds.get(value) ?? value;
+    if (!referenceMap) return value;
+    if (typeof value !== 'string' || !referenceMap.has(value) || !referenceMap.get(value)) {
+      errors.push(`مرجع ${definition.fact} در معیار ${criterion.conceptCode} حل نشده یا از نوع نادرست است.`);
+      return value;
+    }
+    return referenceMap.get(value)!;
   });
   const rule: TypedPerformanceApplicabilityRule = {
     schemaVersion: 1,
@@ -231,6 +245,9 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
     || !Array.isArray(manifest.source.references) || manifest.source.references.length === 0) {
     errors.push('منبع کاتالوگ باید تاریخ مبنا و ارجاع‌های قابل پیگیری داشته باشد.');
   }
+  if (!['SYNTHETIC', 'LOCAL', 'PRODUCTION', 'COMPANY_CONTROLLED_SOURCE'].includes(manifest.source?.provenanceCategory)) {
+    errors.push('رده منشأ کاتالوگ پشتیبانی نمی‌شود.');
+  }
   if (!manifest.review || !['BUSINESS_REVIEW_PENDING', 'REJECTED', 'APPROVED'].includes(manifest.review.status)) {
     errors.push('وضعیت بازبینی کسب‌وکاری کاتالوگ معتبر نیست.');
   }
@@ -252,14 +269,32 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
 
   const evidenceEntries = Array.isArray(manifest.evidenceDictionary) ? manifest.evidenceDictionary : [];
   const evidenceDictionary = new Map(evidenceEntries.map((entry) => [entry.code, entry]));
+  if (evidenceDictionary.size !== evidenceEntries.length || evidenceEntries.some((entry) => !codePattern.test(text(entry.code))
+    || !['CANONICAL_EVIDENCE', 'CONTROLLED_DOCUMENT', 'STRUCTURED_OBSERVATION', 'MISSING_OR_FUTURE_INTEGRATION'].includes(entry.classification))) {
+    errors.push('فرهنگ شاهد باید کدهای یکتا و طبقه‌بندی پشتیبانی‌شده داشته باشد.');
+  }
   const jobs = Array.isArray(manifest.jobs) ? manifest.jobs : [];
   const positions = Array.isArray(manifest.positions) ? manifest.positions : [];
   if (jobs.length === 0) errors.push('کاتالوگ باید دست‌کم یک شغل داشته باشد.');
-  const ownerIds = new Map<string, string | null>();
-  for (const owner of [...jobs, ...positions]) {
-    if (!codePattern.test(text(owner.reference?.code)) || ownerIds.has(owner.reference?.code)) {
+  const jobOwnerIds = new Map<string, string | null>();
+  const positionOwnerIds = new Map<string, string | null>();
+  const allOwnerCodes = new Set<string>();
+  for (const [owner, ownerMap] of [...jobs.map((job) => [job, jobOwnerIds] as const), ...positions.map((position) => [position, positionOwnerIds] as const)]) {
+    if (!codePattern.test(text(owner.reference?.code)) || allOwnerCodes.has(owner.reference?.code)) {
       errors.push('کد مرجع هر شغل و جایگاه باید معتبر و یکتا باشد.');
-    } else ownerIds.set(owner.reference.code, typeof owner.reference.id === 'string' && owner.reference.id.trim() ? owner.reference.id : null);
+    } else {
+      allOwnerCodes.add(owner.reference.code);
+      ownerMap.set(owner.reference.code, typeof owner.reference.id === 'string' && owner.reference.id.trim() ? owner.reference.id : null);
+    }
+  }
+  const allReferences = [...jobs, ...positions].map((owner) => owner.reference);
+  if (manifest.source?.provenanceCategory === 'SYNTHETIC') {
+    if (manifest.source.extractedFacts !== false || allReferences.some((reference) => reference.synthetic !== true || reference.id !== null)) {
+      errors.push('منشأ ساختگی فقط با extractedFacts=false و مراجع synthetic بدون شناسه واقعی معتبر است.');
+    }
+  } else if (manifest.source?.extractedFacts !== true
+    || allReferences.some((reference) => reference.synthetic !== false || !text(reference.id))) {
+    errors.push('منشأ غیرساختگی به extractedFacts=true و شناسه‌های واقعی غیرساختگی نیاز دارد.');
   }
 
   const criteria: PlannedPerformanceCatalogCriterion[] = [];
@@ -272,7 +307,8 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
       || !Number.isFinite(category.weight) || category.weight <= 0)) {
       errors.push(`دسته‌های ${role.reference.code} باید کد و عنوان معتبر و وزن مثبت داشته باشند.`);
     }
-    if (!Array.isArray(role.categories) || role.categories.reduce((sum, category) => sum + category.weight, 0) !== 100) {
+    if (!role.categories.every((category) => hasAtMostTwoDecimals(category.weight))
+      || !decimalSumIsHundred(role.categories.map((category) => category.weight))) {
       errors.push(`جمع وزن دسته‌های ${role.reference?.code ?? 'مالک'} باید ۱۰۰ باشد.`);
     }
     const plannedCriteria = Array.isArray(role.criteria) ? role.criteria : [];
@@ -285,7 +321,7 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
         errors.push(`معیار ${criterion.conceptCode} به دسته تعریف‌نشده ${criterion.categoryCode ?? ''} ارجاع می‌دهد.`);
       }
       if (!codePattern.test(text(criterion.versionCode)) || !text(criterion.titleFa) || !text(criterion.meaningFa)
-        || !Number.isFinite(criterion.weight) || criterion.weight <= 0) {
+        || !hasAtMostTwoDecimals(criterion.weight) || criterion.weight <= 0) {
         errors.push(`نسخه، عنوان، معنا و وزن معیار ${criterion.conceptCode} باید معتبر باشد.`);
       }
       if (criterion.kind !== 'JUDGMENT' || !Array.isArray(criterion.anchorsFa) || criterion.anchorsFa.length !== 5) {
@@ -298,6 +334,7 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
         }
         return evidenceKind(entry.classification);
       }).filter((kind): kind is NonNullable<typeof kind> => Boolean(kind));
+      if (allowedKinds.length === 0) errors.push(`معیار ${criterion.conceptCode} باید دست‌کم یک گونه شاهد قابل اتکا داشته باشد.`);
       criteria.push({
         sourceOwnerCode: role.reference.code,
         sourceVersionCode: criterion.versionCode,
@@ -308,7 +345,7 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
           meaningFa: criterion.meaningFa,
           kind: criterion.kind,
           anchorsFa: criterion.anchorsFa,
-          applicability: resolveApplicability(criterion, applicabilityDictionary, ownerIds, errors),
+          applicability: resolveApplicability(criterion, applicabilityDictionary, { jobs: jobOwnerIds, positions: positionOwnerIds }, errors),
           evidence: {
             allowedKinds: [...new Set(allowedKinds)],
             minimumReliableCount: criterion.evidencePolicy?.minimumReliableCount,
@@ -327,7 +364,8 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
     }
     for (const category of role.categories ?? []) {
       const categoryCriteria = plannedCriteria.filter((criterion) => criterion.categoryCode === category.code);
-      if (!categoryCodes.has(category.code) || categoryCriteria.reduce((sum, criterion) => sum + criterion.weight, 0) !== 100) {
+      if (!categoryCodes.has(category.code) || !categoryCriteria.every((criterion) => hasAtMostTwoDecimals(criterion.weight))
+        || !decimalSumIsHundred(categoryCriteria.map((criterion) => criterion.weight))) {
         errors.push(`جمع وزن معیارهای دسته ${category.code} باید ۱۰۰ باشد.`);
       }
     }
@@ -335,7 +373,7 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
       sourceOwnerCode: role.reference.code,
       templateKind,
       ownerType: templateKind === 'JOB_TEMPLATE' ? 'JOB' : 'POSITION',
-      ownerId: ownerIds.get(role.reference.code) ?? null,
+      ownerId: (templateKind === 'JOB_TEMPLATE' ? jobOwnerIds : positionOwnerIds).get(role.reference.code) ?? null,
       titleFa: role.titleFa,
       categories: (role.categories ?? []).map((category) => ({
         id: category.code,
@@ -356,7 +394,8 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
     if (!job) errors.push(`جایگاه ${position.reference?.code ?? ''} به شغل ناشناخته ارجاع می‌دهد.`);
     const jobWeight = position.composition?.jobWeight;
     const addendumWeight = position.composition?.addendumWeight;
-    if (!Number.isFinite(jobWeight) || !Number.isFinite(addendumWeight) || jobWeight + addendumWeight !== 100
+    if (!hasAtMostTwoDecimals(jobWeight) || !hasAtMostTwoDecimals(addendumWeight)
+      || !decimalSumIsHundred([jobWeight, addendumWeight])
       || jobWeight < 70 || addendumWeight > 30 || addendumWeight < 0) {
       errors.push(`ترکیب شغل و افزوده جایگاه ${position.reference?.code ?? ''} باید جمع ۱۰۰، سهم شغل حداقل ۷۰ و افزوده حداکثر ۳۰ باشد.`);
     }
@@ -368,9 +407,9 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
     if (hasAddendum) planRole(position, 'POSITION_ADDENDUM');
     compositions.push({
       jobReferenceCode: position.jobReferenceCode,
-      jobId: job ? ownerIds.get(job.reference.code) ?? null : null,
+      jobId: job ? jobOwnerIds.get(job.reference.code) ?? null : null,
       positionReferenceCode: position.reference.code,
-      positionId: ownerIds.get(position.reference.code) ?? null,
+      positionId: positionOwnerIds.get(position.reference.code) ?? null,
       jobSharePercent: percent(jobWeight),
       addendumSharePercent: percent(addendumWeight),
       basis: hasAddendum ? 'JOB_WITH_POSITION_ADDENDUM' : 'JOB_ONLY',
@@ -378,7 +417,7 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
   }
 
   const warnings: string[] = [];
-  const unresolvedOwners = [...ownerIds.values()].some((id) => id === null);
+  const unresolvedOwners = [...jobOwnerIds.values(), ...positionOwnerIds.values()].some((id) => id === null);
   if (unresolvedOwners) warnings.push('شناسه واقعی یک یا چند شغل/جایگاه حل نشده و این نسخه فقط قابل پیش‌نمایش است.');
   if (manifest.source?.provenanceCategory === 'SYNTHETIC') warnings.push('محتوای ساختگی فقط برای پذیرش نرم‌افزار است و به داده شرکت تبدیل نمی‌شود.');
   if (manifest.review?.status !== 'APPROVED') warnings.push('محتوا هنوز تأیید کسب‌وکاری نشده و در صورت درون‌ریزی فقط DRAFT می‌ماند.');

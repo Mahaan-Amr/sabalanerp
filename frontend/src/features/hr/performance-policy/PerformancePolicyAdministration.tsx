@@ -64,7 +64,12 @@ type CatalogImportPreview = {
     basis: "JOB_WITH_POSITION_ADDENDUM" | "JOB_ONLY";
   }>;
 };
-type VersionContent = { titleFa?: string; kind?: CriterionDraft["kind"]; categories?: TemplateContent["categories"] };
+type VersionContent = {
+  titleFa?: string;
+  kind?: CriterionDraft["kind"];
+  categories?: TemplateContent["categories"];
+  catalogSource?: { reviewStatus?: "BUSINESS_REVIEW_PENDING" | "APPROVED" };
+};
 type VersionRow = {
   id: string;
   version: number;
@@ -411,6 +416,7 @@ export default function PerformancePolicyAdministration() {
             {rows.length === 0 && <ErpInlineState kind="empty" title="هنوز نسخه‌ای در این بخش ثبت نشده است." />}
             {rows.map((row) => {
               const status = lifecyclePresentation(row.lifecycle);
+              const proposedCatalogContent = row.content?.catalogSource?.reviewStatus === "BUSINESS_REVIEW_PENDING";
               const editablePolicyKind = isEditablePolicyKind(row.policyKind) ? row.policyKind : undefined;
               const title = tab === "criteria"
                 ? row.content?.titleFa || row.conceptCode
@@ -425,6 +431,7 @@ export default function PerformancePolicyAdministration() {
                         <p className="font-bold">{title}</p>
                         <ErpBadge tone={status.tone}>{status.label}</ErpBadge>
                         <ErpBadge variant="outline">نسخه {row.version.toLocaleString("fa-IR")}</ErpBadge>
+                        {proposedCatalogContent && <ErpBadge tone="warning">پیشنهادی · در انتظار تأیید کسب‌وکاری</ErpBadge>}
                       </div>
                       <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">
                         {row.publicationReason || (row.lifecycle === "DRAFT" ? "هنوز منتشر نشده" : "دلیل انتشار ثبت شده است")}
@@ -458,7 +465,7 @@ export default function PerformancePolicyAdministration() {
                         setTemplateEditId(row.id);
                         setTemplateDialog(true);
                       }} />}
-                      {row.lifecycle === "DRAFT" && <ErpButton label="پیش‌نمایش و انتشار" onClick={() => void openSchedule(tab, row)} />}
+                      {row.lifecycle === "DRAFT" && !proposedCatalogContent && <ErpButton label="پیش‌نمایش و انتشار" onClick={() => void openSchedule(tab, row)} />}
                       {row.lifecycle === "SCHEDULED" && tab === "policies" && row.effectiveFrom
                         && new Date(row.effectiveFrom).getTime() <= Date.now()
                         && <ErpButton label="بازپیش‌نمایش و تأیید" onClick={() => void openSchedule("policies", row)} />}

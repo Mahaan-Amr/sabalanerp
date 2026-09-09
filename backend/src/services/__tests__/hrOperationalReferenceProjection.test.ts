@@ -25,6 +25,15 @@ const positions = [
     vacancy: 0,
     lifecycle: [{ id: 'history-secret-2' }],
   },
+  {
+    id: 'position-with-inactive-job',
+    title: 'جایگاه با شغل غیرفعال',
+    jobId: 'job-retired',
+    jobTitle: 'شغل پیشین',
+    jobIsActive: false,
+    isActive: true,
+    vacancy: 1,
+  },
 ];
 
 const viewProjection = projectHrOperationalReference(positions, { includeAvailableCapacity: false });
@@ -36,6 +45,7 @@ assert.deepEqual(viewProjection, {
   positions: [
     { id: 'position-active', title: 'کارشناس منابع انسانی', isActive: true, jobId: 'job-active' },
     { id: 'position-inactive', title: 'جایگاه پیشین', isActive: false, jobId: 'job-retired' },
+    { id: 'position-with-inactive-job', title: 'جایگاه با شغل غیرفعال', isActive: false, jobId: 'job-retired' },
   ],
 });
 
@@ -48,6 +58,7 @@ assert.deepEqual(actionProjection, {
   positions: [
     { id: 'position-active', title: 'کارشناس منابع انسانی', isActive: true, jobId: 'job-active', availableCapacity: 2 },
     { id: 'position-inactive', title: 'جایگاه پیشین', isActive: false, jobId: 'job-retired', availableCapacity: 0 },
+    { id: 'position-with-inactive-job', title: 'جایگاه با شغل غیرفعال', isActive: false, jobId: 'job-retired', availableCapacity: 1 },
   ],
 });
 

@@ -306,6 +306,15 @@ assert.equal(calculateTypedApplicability({ ...booleanRule, fact: 'jobId', factTy
 assert.equal(calculateTypedApplicability(booleanRule, {
   __applicability: typedSnapshotMetadata, hasSafetyDuty: null,
 }).status, 'BLOCKED');
+assert.equal(calculateTypedApplicability({ ...booleanRule, operator: 'NOT_EQUALS' }, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
+}).status, 'BLOCKED');
+assert.equal(calculateTypedApplicability({ ...booleanRule, schemaVersion: 2 }, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
+}).status, 'BLOCKED');
+assert.equal(calculateTypedApplicability({ ...booleanRule, values: undefined }, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
+}).status, 'BLOCKED');
 
 const optionalEvidenceTemplate: PerformanceTemplateSnapshot = {
   ...template,

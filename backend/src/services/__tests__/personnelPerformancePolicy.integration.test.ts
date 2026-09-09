@@ -14,10 +14,13 @@ import {
   previewPerformancePolicy,
   previewPerformanceRoleCatalogImport,
   importPerformanceRoleCatalogDraft,
+  schedulePerformanceCriterion,
+  schedulePerformanceTemplate,
   schedulePerformancePolicy,
 } from '../personnelPerformancePolicyStore';
 import { DEFAULT_LEVEL_POLICY_CONTENT, nextTehranDayStart } from '../personnelPerformancePolicy';
 import { performanceRoleCatalogContentHash } from '../personnelPerformanceRoleCatalog';
+import { persistPerformancePayload } from '../personnelPerformancePayloadStore';
 
 const repositoryRoot = path.resolve(process.cwd(), '..');
 const sourceDatabaseUrl = process.env.DATABASE_URL
@@ -80,6 +83,24 @@ const main = async () => {
     content: templateContent, createdByUserId: actor.id, keyring,
   });
   assert.equal(validPositionDraft.ownerId, activePosition.id);
+  const futureRetiredJob = await first.hrJob.create({ data: {
+    code: `OWNER-FUTURE-RETIRED-${database.runId}`, title: 'شغل با بازنشستگی آینده', createdBy: actor.id,
+  } });
+  const futureRetiredDraft = await createPerformanceTemplateDraft(first, {
+    templateKind: 'JOB_TEMPLATE', ownerType: 'JOB', ownerId: futureRetiredJob.id,
+    content: templateContent, createdByUserId: actor.id, keyring,
+  });
+  const ownerSchedulingNow = new Date();
+  const futureRetirement = nextTehranDayStart(ownerSchedulingNow);
+  await first.hrFoundationLifecycleVersion.create({ data: {
+    stableKey: `future-retired-job-${database.runId}`, entityType: 'JOB', entityId: futureRetiredJob.id, version: 1,
+    status: 'INACTIVE', effectiveFrom: futureRetirement, reason: 'بازنشستگی آینده برای آزمون مالک الگو',
+    beforeJson: { isActive: true }, afterJson: { isActive: false }, changedByUserId: actor.id,
+  } });
+  await assert.rejects(schedulePerformanceTemplate(first, {
+    versionId: futureRetiredDraft.id, effectiveFrom: new Date(futureRetirement.getTime() + 24 * 60 * 60 * 1_000),
+    reason: 'آزمون جلوگیری از انتشار برای مالک بازنشسته', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_TEMPLATE_OWNER_RETIRED');
 
   const importJob = await first.hrJob.create({ data: {
     code: `IMPORT-JOB-${database.runId}`, title: 'شغل درون‌ریزی', createdBy: actor.id,
@@ -141,6 +162,14 @@ const main = async () => {
   assert.equal(imported.templateVersionIds.length, 2);
   assert.equal(await first.performanceCriterionVersion.count({ where: { id: { in: imported.criterionVersionIds }, lifecycle: 'DRAFT' } }), 2);
   assert.equal(await first.performanceTemplateVersion.count({ where: { id: { in: imported.templateVersionIds }, lifecycle: 'DRAFT' } }), 2);
+  await assert.rejects(schedulePerformanceCriterion(first, {
+    versionId: imported.criterionVersionIds[0], effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
+    reason: 'آزمون جلوگیری از انتشار محتوای پیشنهادی', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED');
+  await assert.rejects(schedulePerformanceTemplate(first, {
+    versionId: imported.templateVersionIds[0], effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
+    reason: 'آزمون جلوگیری از انتشار الگوی پیشنهادی', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED');
   const retriedImport = await importPerformanceRoleCatalogDraft(first, {
     manifest: importManifest, createdByUserId: actor.id, keyring,
   });
@@ -213,6 +242,10 @@ const main = async () => {
     contentHash: 'a'.repeat(64),
     createdByUserId: actor.id,
   } });
+  const activationPayload = await persistPerformancePayload(first, {
+    aggregateType: 'CRITERION_VERSION', aggregateId: activationVersion.id, payloadKind: 'CRITERION_CONTENT', schemaVersion: 1,
+    payload: { ...content, conceptCode: activationIdentity.conceptCode }, keyring,
+  });
   const activationTime = new Date();
   await first.performanceCriterionVersion.update({
     where: { id: activationVersion.id },
@@ -222,6 +255,8 @@ const main = async () => {
       publicationReason: 'آزمون فعال‌سازی اتمیک و تکرارپذیر',
       publishedByUserId: actor.id,
       publishedAt: activationTime,
+      encryptedPayloadId: activationPayload.id,
+      contentHash: activationPayload.contentHash,
     },
   });
   const activationKey = `artifact-activation-${database.runId}`;
@@ -247,12 +282,18 @@ const main = async () => {
     contentHash: 'b'.repeat(64),
     createdByUserId: actor.id,
   } });
+  const systemActivationPayload = await persistPerformancePayload(first, {
+    aggregateType: 'CRITERION_VERSION', aggregateId: systemActivationVersion.id, payloadKind: 'CRITERION_CONTENT', schemaVersion: 1,
+    payload: { ...content, conceptCode: systemActivationIdentity.conceptCode }, keyring,
+  });
   await first.performanceCriterionVersion.update({ where: { id: systemActivationVersion.id }, data: {
     lifecycle: 'SCHEDULED',
     effectiveFrom: activationTime,
     publicationReason: 'آزمون عامل سیستمی نگهداری زمان‌بندی‌شده',
     publishedByUserId: actor.id,
     publishedAt: activationTime,
+    encryptedPayloadId: systemActivationPayload.id,
+    contentHash: systemActivationPayload.contentHash,
   } });
   await activateDuePerformanceArtifacts(first, {
     actorUserId: null,

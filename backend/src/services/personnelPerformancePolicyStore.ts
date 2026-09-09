@@ -61,6 +61,12 @@ export type ScoringPolicyContent = {
 export type PerformanceTemplatePolicyContent = {
   schemaVersion: 1;
   titleFa: string;
+  catalogSource?: {
+    importIdentity: string;
+    catalogVersion: string;
+    sourceAsOf: string;
+    reviewStatus: 'BUSINESS_REVIEW_PENDING' | 'APPROVED';
+  };
   categories: Array<{
     id: string;
     titleFa: string;
@@ -68,6 +74,20 @@ export type PerformanceTemplatePolicyContent = {
     required: boolean;
     criteria: Array<{ criterionVersionId: string; weightPercent: string }>;
   }>;
+};
+
+const catalogReviewStatus = (content: unknown) => {
+  if (!content || typeof content !== 'object' || !('catalogSource' in content)) return null;
+  const source = (content as { catalogSource?: unknown }).catalogSource;
+  if (!source || typeof source !== 'object' || !('reviewStatus' in source)) return 'INVALID';
+  return (source as { reviewStatus?: unknown }).reviewStatus;
+};
+
+const ensureCatalogContentApprovedForPublication = (content: unknown) => {
+  const reviewStatus = catalogReviewStatus(content);
+  if (reviewStatus !== null && reviewStatus !== 'APPROVED') {
+    throw policyError('محتوای پیشنهادی کاتالوگ تا ثبت نسخه تأییدشده کسب‌وکاری قابل انتشار نیست.', 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED', 409);
+  }
 };
 
 export type PerformancePolicyContent = LevelPolicyContent | CurrentLevelPolicyContent | ScoringPolicyContent | {
@@ -307,8 +327,14 @@ export const updatePerformanceCriterionDraft = async (client: PrismaClient, inpu
     if (identity?.conceptCode !== input.content.conceptCode) {
       throw policyError('تغییر مفهوم کسب‌وکاری به هویت معیار تازه نیاز دارد.', 'PERFORMANCE_CRITERION_IDENTITY_CHANGE', 409);
     }
+    const previousContent = version.encryptedPayloadId
+      ? await readPerformancePayload<PerformanceCriterionPolicyContent & { catalogSource?: unknown }>(tx, version.encryptedPayloadId, keyring)
+      : null;
+    const content = previousContent?.catalogSource
+      ? { ...input.content, catalogSource: previousContent.catalogSource }
+      : input.content;
     const encrypted = await persistVersionContent(tx, {
-      aggregateType: 'CRITERION_VERSION', aggregateId: version.id, payloadKindPrefix: 'CRITERION', content: input.content, keyring,
+      aggregateType: 'CRITERION_VERSION', aggregateId: version.id, payloadKindPrefix: 'CRITERION', content, keyring,
     });
     return tx.performanceCriterionVersion.update({
       where: { id: version.id }, data: { contentHash: encrypted.contentHash, encryptedPayloadId: encrypted.id },
@@ -497,6 +523,12 @@ export const importPerformanceRoleCatalogDraft = async (client: PrismaClient, in
       const content: PerformanceTemplatePolicyContent = {
         schemaVersion: 1,
         titleFa: template.titleFa,
+        catalogSource: {
+          importIdentity: plan.importIdentity,
+          catalogVersion: plan.manifest.catalog.versionCode,
+          sourceAsOf: plan.manifest.source.asOf,
+          reviewStatus: plan.manifest.review.status === 'APPROVED' ? 'APPROVED' : 'BUSINESS_REVIEW_PENDING',
+        },
         categories: template.categories.map((category) => ({
           id: category.id,
           titleFa: category.titleFa,
@@ -591,8 +623,14 @@ export const updatePerformanceTemplateDraft = async (client: PrismaClient, input
     if (!version || version.lifecycle !== PerformanceArtifactLifecycle.DRAFT) {
       throw policyError('فقط نسخه پیش‌نویس الگو قابل ویرایش است.', 'PERFORMANCE_VERSION_NOT_EDITABLE', 409);
     }
+    const previousContent = version.encryptedPayloadId
+      ? await readPerformancePayload<PerformanceTemplatePolicyContent>(tx, version.encryptedPayloadId, keyring)
+      : null;
+    const content = previousContent?.catalogSource
+      ? { ...input.content, catalogSource: previousContent.catalogSource }
+      : input.content;
     const encrypted = await persistVersionContent(tx, {
-      aggregateType: 'TEMPLATE_VERSION', aggregateId: version.id, payloadKindPrefix: 'TEMPLATE', content: input.content, keyring,
+      aggregateType: 'TEMPLATE_VERSION', aggregateId: version.id, payloadKindPrefix: 'TEMPLATE', content, keyring,
     });
     return tx.performanceTemplateVersion.update({
       where: { id: version.id }, data: { contentHash: encrypted.contentHash, encryptedPayloadId: encrypted.id },
@@ -1050,13 +1088,19 @@ const scheduleArtifact = async (client: PrismaClient, input: {
   reason: string;
   publishedByUserId: string;
   now?: Date;
+  keyring?: PerformanceVaultKey;
 }) => {
   const now = input.now ?? new Date();
+  const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
   ensureNoErrors(validatePerformancePublication({ now, effectiveFrom: input.effectiveFrom, reason: input.reason }));
   return asTx(client, async (tx) => {
     if (input.artifactType === 'criterion') {
       const version = await tx.performanceCriterionVersion.findUnique({ where: { id: input.versionId } });
       if (!version || version.lifecycle !== PerformanceArtifactLifecycle.DRAFT) throw policyError('فقط نسخه پیش‌نویس معیار قابل زمان‌بندی است.', 'PERFORMANCE_VERSION_NOT_SCHEDULABLE', 409);
+      if (!version.encryptedPayloadId) throw policyError('محتوای معیار در دسترس نیست.', 'PERFORMANCE_VERSION_NOT_SCHEDULABLE', 409);
+      const content = await readPerformancePayload<PerformanceCriterionPolicyContent>(tx, version.encryptedPayloadId, keyring);
+      ensureNoErrors(validateCriterionPolicyContent(content));
+      ensureCatalogContentApprovedForPublication(content);
       const alreadyScheduled = await tx.performanceCriterionVersion.findFirst({ where: {
         criterionIdentityId: version.criterionIdentityId,
         lifecycle: PerformanceArtifactLifecycle.SCHEDULED,
@@ -1070,6 +1114,16 @@ const scheduleArtifact = async (client: PrismaClient, input: {
     }
     const version = await tx.performanceTemplateVersion.findUnique({ where: { id: input.versionId } });
     if (!version || version.lifecycle !== PerformanceArtifactLifecycle.DRAFT) throw policyError('فقط نسخه پیش‌نویس الگو قابل زمان‌بندی است.', 'PERFORMANCE_VERSION_NOT_SCHEDULABLE', 409);
+    if (!version.encryptedPayloadId) throw policyError('محتوای الگو در دسترس نیست.', 'PERFORMANCE_VERSION_NOT_SCHEDULABLE', 409);
+    const content = await readPerformancePayload<PerformanceTemplatePolicyContent>(tx, version.encryptedPayloadId, keyring);
+    ensureNoErrors(validateTemplateContent(content));
+    ensureCatalogContentApprovedForPublication(content);
+    await validateTemplateOwner(tx, {
+      templateKind: version.templateKind,
+      ownerType: version.ownerType,
+      ownerId: version.ownerId,
+      at: input.effectiveFrom,
+    });
     const alreadyScheduled = await tx.performanceTemplateVersion.findFirst({ where: {
       templateKind: version.templateKind,
       ownerType: version.ownerType,
@@ -1504,6 +1558,10 @@ export const activateDuePerformanceArtifacts = async (client: PrismaClient, inpu
       if (criterionIdentities.has(version.criterionIdentityId)) throw policyError('بیش از یک نسخه هم‌زمان برای یک معیار آماده فعال‌سازی است.', 'PERFORMANCE_ARTIFACT_ACTIVATION_CONFLICT', 409);
       criterionIdentities.add(version.criterionIdentityId);
       await acquireVersionLock(tx, `performance-criterion:${version.criterionIdentityId}`);
+      if (!version.encryptedPayloadId) throw policyError('محتوای معیار در دسترس نیست.', 'PERFORMANCE_VERSION_NOT_SCHEDULABLE', 409);
+      const content = await readPerformancePayload<PerformanceCriterionPolicyContent>(tx, version.encryptedPayloadId, keyring);
+      ensureNoErrors(validateCriterionPolicyContent(content));
+      ensureCatalogContentApprovedForPublication(content);
       const active = await tx.performanceCriterionVersion.findFirst({
         where: { criterionIdentityId: version.criterionIdentityId, lifecycle: PerformanceArtifactLifecycle.ACTIVE },
       });
@@ -1525,6 +1583,16 @@ export const activateDuePerformanceArtifacts = async (client: PrismaClient, inpu
       if (templateOwners.has(ownerKey)) throw policyError('بیش از یک نسخه هم‌زمان برای یک الگو آماده فعال‌سازی است.', 'PERFORMANCE_ARTIFACT_ACTIVATION_CONFLICT', 409);
       templateOwners.add(ownerKey);
       await acquireVersionLock(tx, `performance-template:${version.templateKind}:${version.ownerType}:${version.ownerId}`);
+      if (!version.encryptedPayloadId) throw policyError('محتوای الگو در دسترس نیست.', 'PERFORMANCE_VERSION_NOT_SCHEDULABLE', 409);
+      const content = await readPerformancePayload<PerformanceTemplatePolicyContent>(tx, version.encryptedPayloadId, keyring);
+      ensureNoErrors(validateTemplateContent(content));
+      ensureCatalogContentApprovedForPublication(content);
+      await validateTemplateOwner(tx, {
+        templateKind: version.templateKind,
+        ownerType: version.ownerType,
+        ownerId: version.ownerId,
+        at: now,
+      });
       const active = await tx.performanceTemplateVersion.findFirst({
         where: {
           templateKind: version.templateKind, ownerType: version.ownerType, ownerId: version.ownerId,

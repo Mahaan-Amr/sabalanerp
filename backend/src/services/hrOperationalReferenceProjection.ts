@@ -32,7 +32,7 @@ export const projectHrOperationalReference = (
   positions: positions.map((position) => ({
     id: position.id,
     title: position.title,
-    isActive: position.isActive,
+    isActive: position.isActive && position.jobIsActive,
     jobId: position.jobId,
     ...(options.includeAvailableCapacity ? { availableCapacity: position.vacancy } : {}),
   })),

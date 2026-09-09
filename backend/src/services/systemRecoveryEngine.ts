@@ -863,7 +863,6 @@ export const stageAndPromoteRecovery = async (input: {
     } else {
       await fs.promises.rm(SANITIZED_MARKER_PATH, { force: true });
     }
-    await resumeInquiryAfterRecovery();
     await input.onProgress(90);
     return { promoted: true, journal };
   } catch (error) {
@@ -871,7 +870,8 @@ export const stageAndPromoteRecovery = async (input: {
       ? JSON.parse(await fs.promises.readFile(RESTORE_JOURNAL_PATH, 'utf8')) as RestoreJournal
       : journal;
     if (currentJournal.phase === 'DATABASE_PROMOTED') {
-      await resumeInquiryAfterRecovery();
+      // The promoted database stays behind the inquiry restart marker until
+      // startup replays every post-checkpoint erasure and finalizes recovery.
       return { promoted: true, journal: currentJournal };
     }
     if (fs.existsSync(safetyFilesRoot)) {

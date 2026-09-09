@@ -6,6 +6,7 @@ import { performanceVaultKeyFromEnvironment, persistPerformancePayload, readPerf
 import { runPerformanceSerializableTransaction } from './personnelPerformancePolicyStore';
 import { assessPerformanceEvaluationRetention } from './personnelPerformanceRetentionStore';
 import { resolvePerformanceExportDependencies } from './personnelPerformanceExportLineage';
+import { erasePerformanceExportArtifacts } from './personnelPerformanceDisclosureStore';
 import {
   classifyPerformanceErasureRecords,
   decidePerformanceErasureProgress,
@@ -130,6 +131,12 @@ export const preparePerformanceErasureOperations = async (client: Client, now = 
     }
     const newest = [...newestByAggregate.values()];
     const discovered: Array<Awaited<ReturnType<typeof refreshOperationStatus>>> = [];
+    const pending: Array<{
+      state: typeof newest[number];
+      scope: Awaited<ReturnType<typeof discoverGraph>>;
+      erasableRecordCount: number;
+      scopeHash: string;
+    }> = [];
     for (const state of newest) {
       const existing = await tx.performanceErasureOperation.findUnique({ where: { retentionStateId: state.id } });
       if (existing) { discovered.push(await refreshOperationStatus(tx, existing.id, now)); continue; }
@@ -138,14 +145,27 @@ export const preparePerformanceErasureOperations = async (client: Client, now = 
       const erasableRecordCount = scope.classifiedRecords.filter(({ erasableContent }) => erasableContent).length + scope.payloadIds.length;
       if (erasableRecordCount === 0) continue;
       const scopeHash = canonicalPerformanceHash({ graph: scope.graph, classifiedRecords: scope.classifiedRecords, payloadIds: scope.payloadIds });
+      pending.push({ state, scope, erasableRecordCount, scopeHash });
+    }
+    const impactByPolicy = new Map<string, Awaited<ReturnType<typeof tx.performanceErasureImpactApproval.findUniqueOrThrow>>>();
+    for (const policyVersionId of [...new Set(pending.map(({ state }) => state.policyVersionId))].sort()) {
+      const population = pending.filter(({ state }) => state.policyVersionId === policyVersionId);
+      const impact = await tx.performanceErasureImpactApproval.upsert({ where: { policyVersionId }, update: {}, create: {
+        policyVersionId,
+        populationHash: canonicalPerformanceHash(population.map(({ state, scopeHash, erasableRecordCount }) => ({
+          retentionStateId: state.id, scopeHash, erasableRecordCount,
+        })).sort((left, right) => left.retentionStateId.localeCompare(right.retentionStateId))),
+        eligibleScopeCount: population.length,
+        erasableRecordCount: population.reduce((total, item) => total + item.erasableRecordCount, 0),
+      } });
+      impactByPolicy.set(policyVersionId, impact);
+    }
+    for (const { state, scope, erasableRecordCount, scopeHash } of pending) {
       const operationKeyHash = performanceErasureOperationIdentity({ aggregateType: state.aggregateType, aggregateId: state.aggregateId,
         policyVersionId: state.policyVersionId, retentionStateId: state.id, scopeHash });
       const payload = await persistPerformancePayload(tx, { aggregateType: 'PERFORMANCE_ERASURE_OPERATION', aggregateId: operationKeyHash,
         payloadKind: 'ERASURE_SCOPE', schemaVersion: 1, payload: { schemaVersion: 1, ...scope }, keyring: performanceVaultKeyFromEnvironment() });
-      const impact = await tx.performanceErasureImpactApproval.upsert({ where: { policyVersionId: state.policyVersionId }, update: {}, create: {
-        policyVersionId: state.policyVersionId, populationHash: canonicalPerformanceHash(newest.map(({ id }) => id).sort()),
-        eligibleScopeCount: newest.length, erasableRecordCount,
-      } });
+      const impact = impactByPolicy.get(state.policyVersionId)!;
       const operation = await tx.performanceErasureOperation.create({ data: {
         operationKeyHash, retentionStateId: state.id, aggregateType: state.aggregateType, aggregateIdHash: sha256(state.aggregateId),
         policyVersionId: state.policyVersionId, encryptedScopeId: payload.id, scopeHash,
@@ -258,38 +278,44 @@ export const executePerformanceErasureOperation = async (client: Client, operati
     data: { status: 'RUNNING', claimedAt: now, attemptCount: { increment: 1 }, lastFailureCode: null } });
   if (claimed.count !== 1) return refreshOperationStatus(client, operationId, now);
   try {
-    const operation = await client.performanceErasureOperation.findUniqueOrThrow({ where: { id: operationId } });
-    const scope = await readPerformancePayload<ErasureScope>(client, operation.encryptedScopeId, performanceVaultKeyFromEnvironment());
-    const impact = await client.performanceErasureImpactApproval.findUnique({ where: { policyVersionId: operation.policyVersionId } });
-    const approvals = await client.performanceErasureApproval.findMany({ where: { operationId }, select: { actorUserId: true } });
-    if (!impact?.approvedAt) throw erasureError('تصویب اثر نخستین اجرای سیاست حذف وجود ندارد.', 'PERFORMANCE_ERASURE_IMPACT_APPROVAL_REQUIRED');
-    const activeApprovers: string[] = [];
-    for (const approval of approvals) if ((await activeHrActionPermissionsForUser(client, approval.actorUserId, now)).includes('MANAGE_PERFORMANCE_RETENTION')) activeApprovers.push(approval.actorUserId);
-    if (operation.recordCount > operation.bulkThreshold && new Set(activeApprovers).size < 2) throw erasureError('حذف دسته‌ای به تصویب دو عامل مستقل و همچنان مجاز نیاز دارد.', 'PERFORMANCE_ERASURE_DUAL_CONTROL_REQUIRED');
-    const latestState = await client.performanceRetentionState.findFirst({ where: { aggregateType: operation.aggregateType,
-      aggregateId: scope.graph.evaluationId }, orderBy: { version: 'desc' } });
-    if (latestState?.id !== operation.retentionStateId || latestState.status !== 'PENDING_COPY_AND_RECONSTRUCTION_REVIEW') {
-      throw erasureError('مبنای نگهداری پس از کشف دامنه تغییر کرده است.', 'PERFORMANCE_ERASURE_RETENTION_DRIFT');
-    }
-    const copies = await client.performanceRecoverableCopy.findMany({ where: { operationId }, orderBy: [{ version: 'desc' }, { id: 'desc' }] });
-    const latest = new Map<string, string>();
-    for (const copy of copies) if (!latest.has(copy.location)) latest.set(copy.location, copy.status);
-    if (requiredPerformanceCopyLocations.some((location) => !latest.has(location) || latest.get(location) === 'UNKNOWN'
-      || (location !== 'LIVE_DATABASE' && location !== 'INDEPENDENT_BACKUP' && ['PRESENT', 'RECOVERABLE'].includes(latest.get(location)!)))) {
-      throw erasureError('بررسی همه نسخه‌های قابل بازیابی کامل نشده است.', 'PERFORMANCE_ERASURE_COPY_REVIEW_REQUIRED');
-    }
-    const actorUserId = impact.approvedByUserId;
-    await dependencies?.eraseArtifacts?.(scope.graph.exportIds);
-    if ('$transaction' in client) {
-      await client.$transaction((tx) => deleteLiveScope(tx, operation, scope, actorUserId), { isolationLevel: 'Serializable' });
-    } else {
-      await deleteLiveScope(client, operation, scope, actorUserId);
-    }
-    const latestLive = await client.performanceRecoverableCopy.findFirst({ where: { operationId, location: 'LIVE_DATABASE' }, orderBy: { version: 'desc' } });
-    await client.performanceRecoverableCopy.create({ data: { operationId, location: 'LIVE_DATABASE', copyKeyHash: sha256(`live-erased:${operationId}`),
-      status: 'ERASED', version: (latestLive?.version ?? 0) + 1,
-      evidenceHash: canonicalPerformanceHash({ operationId, scopeHash: operation.scopeHash, erasedAt: now.toISOString() }), checkedAt: now } });
-    await client.performanceErasureOperation.update({ where: { id: operationId }, data: { liveErasedAt: now, claimedAt: null } });
+    await runPerformanceSerializableTransaction(client, async (tx) => {
+      const operation = await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operationId } });
+      const scope = await readPerformancePayload<ErasureScope>(tx, operation.encryptedScopeId, performanceVaultKeyFromEnvironment());
+      for (const location of requiredPerformanceCopyLocations) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'performance-erasure-copy:' + operation.id + ':' + location}, 0))`;
+      }
+      const impact = await tx.performanceErasureImpactApproval.findUnique({ where: { policyVersionId: operation.policyVersionId } });
+      const approvals = await tx.performanceErasureApproval.findMany({ where: { operationId }, select: { actorUserId: true } });
+      if (!impact?.approvedAt) throw erasureError('تصویب اثر نخستین اجرای سیاست حذف وجود ندارد.', 'PERFORMANCE_ERASURE_IMPACT_APPROVAL_REQUIRED');
+      const activeApprovers: string[] = [];
+      for (const approval of approvals) if ((await activeHrActionPermissionsForUser(tx, approval.actorUserId, now)).includes('MANAGE_PERFORMANCE_RETENTION')) activeApprovers.push(approval.actorUserId);
+      if (operation.recordCount > operation.bulkThreshold && new Set(activeApprovers).size < 2) throw erasureError('حذف دسته‌ای به تصویب دو عامل مستقل و همچنان مجاز نیاز دارد.', 'PERFORMANCE_ERASURE_DUAL_CONTROL_REQUIRED');
+      const latestState = await assessPerformanceEvaluationRetention(tx, { actorUserId: null, evaluationId: scope.graph.evaluationId });
+      if (latestState.id !== operation.retentionStateId || latestState.status !== 'PENDING_COPY_AND_RECONSTRUCTION_REVIEW') {
+        throw erasureError('مبنای نگهداری پس از کشف دامنه تغییر کرده است.', 'PERFORMANCE_ERASURE_RETENTION_DRIFT');
+      }
+      const currentScope = await discoverGraph(tx, scope.graph.evaluationId);
+      const currentScopeHash = canonicalPerformanceHash({ graph: currentScope.graph, classifiedRecords: currentScope.classifiedRecords, payloadIds: currentScope.payloadIds });
+      const currentDependencyHash = canonicalPerformanceHash({ handoffs: currentScope.graph.consequenceHandoffIds, exports: currentScope.verifiedExportDependencies });
+      if (currentScopeHash !== operation.scopeHash || currentDependencyHash !== operation.dependencyHash) {
+        throw erasureError('دامنه یا وابستگی حذف پس از تصویب تغییر کرده است.', 'PERFORMANCE_ERASURE_SCOPE_DRIFT');
+      }
+      const copies = await tx.performanceRecoverableCopy.findMany({ where: { operationId }, orderBy: [{ version: 'desc' }, { id: 'desc' }] });
+      const latest = new Map<string, string>();
+      for (const copy of copies) if (!latest.has(copy.location)) latest.set(copy.location, copy.status);
+      if (requiredPerformanceCopyLocations.some((location) => !latest.has(location) || latest.get(location) === 'UNKNOWN'
+        || (location !== 'LIVE_DATABASE' && location !== 'INDEPENDENT_BACKUP' && ['PRESENT', 'RECOVERABLE'].includes(latest.get(location)!)))) {
+        throw erasureError('بررسی همه نسخه‌های قابل بازیابی کامل نشده است.', 'PERFORMANCE_ERASURE_COPY_REVIEW_REQUIRED');
+      }
+      const actorUserId = impact.approvedByUserId;
+      await (dependencies?.eraseArtifacts ?? ((exportIds) => erasePerformanceExportArtifacts(tx, exportIds, now)))(scope.graph.exportIds);
+      await deleteLiveScope(tx, operation, scope, actorUserId);
+      const latestLive = await tx.performanceRecoverableCopy.findFirst({ where: { operationId, location: 'LIVE_DATABASE' }, orderBy: { version: 'desc' } });
+      await tx.performanceRecoverableCopy.create({ data: { operationId, location: 'LIVE_DATABASE', copyKeyHash: sha256(`live-erased:${operationId}`),
+        status: 'ERASED', version: (latestLive?.version ?? 0) + 1,
+        evidenceHash: canonicalPerformanceHash({ operationId, scopeHash: operation.scopeHash, erasedAt: now.toISOString() }), checkedAt: now } });
+      await tx.performanceErasureOperation.update({ where: { id: operationId }, data: { liveErasedAt: now, claimedAt: null } });
+    });
     return refreshOperationStatus(client, operationId, now);
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'PERFORMANCE_ERASURE_STORAGE_OR_PROCESS_FAILURE';
@@ -334,16 +360,66 @@ export const listPerformanceErasureOperations = async (client: Client, actorUser
   })) };
 };
 
+const ensureRestoreRetentionPolicyEvidence = async (
+  current: Prisma.TransactionClient, safety: PrismaClient, policyVersionId: string,
+) => {
+  const source = await safety.performancePolicyVersion.findUnique({ where: { id: policyVersionId } });
+  if (!source?.encryptedPayloadId || source.policyKind !== 'RETENTION') {
+    throw erasureError('نسخه سیاست مبدأ برای بازاجرای حذف قابل تأیید نیست.', 'PERFORMANCE_RESTORE_ERASURE_POLICY_MISSING');
+  }
+  const content = await readPerformancePayload<unknown>(safety, source.encryptedPayloadId, performanceVaultKeyFromEnvironment());
+  if (canonicalPerformanceHash(content) !== source.contentHash) {
+    throw erasureError('تمامیت سیاست مبدأ برای بازاجرای حذف معتبر نیست.', 'PERFORMANCE_RESTORE_ERASURE_POLICY_INVALID');
+  }
+  const existing = await current.performancePolicyVersion.findUnique({ where: { id: source.id } });
+  if (existing) {
+    if (existing.contentHash !== source.contentHash || existing.policyKind !== source.policyKind) {
+      throw erasureError('شناسه سیاست بازیابی‌شده با شاهد حذف تعارض دارد.', 'PERFORMANCE_RESTORE_ERASURE_POLICY_CONFLICT');
+    }
+    return existing;
+  }
+  const creator = await current.user.findFirst({ orderBy: { id: 'asc' }, select: { id: true } });
+  if (!creator) throw erasureError('عامل سیستمی برای حفظ شاهد سیاست بازیابی وجود ندارد.', 'PERFORMANCE_RESTORE_ERASURE_CREATOR_MISSING');
+  const maximum = await current.performancePolicyVersion.aggregate({ where: { policyKind: 'RETENTION' }, _max: { version: true } });
+  const encrypted = await persistPerformancePayload(current, {
+    aggregateType: 'PERFORMANCE_RESTORE_POLICY_EVIDENCE', aggregateId: source.id,
+    payloadKind: 'RETENTION_POLICY', schemaVersion: 1, payload: content,
+    keyring: performanceVaultKeyFromEnvironment(),
+  });
+  return current.performancePolicyVersion.create({ data: {
+    id: source.id, policyKind: 'RETENTION', version: Math.max(source.version, (maximum._max.version ?? 0) + 1),
+    lifecycle: 'RETIRED', contentHash: source.contentHash, encryptedPayloadId: encrypted.id,
+    publicationReason: 'SYSTEM_RECOVERY_ERASURE_REPLAY_EVIDENCE', createdByUserId: creator.id,
+    createdAt: source.createdAt,
+  } });
+};
+
 export const replayPerformanceErasureAfterRestore = async (current: PrismaClient, safety: PrismaClient, now = new Date()) => {
   const prior = await safety.performanceErasureOperation.findMany({ where: { liveErasedAt: { not: null } }, orderBy: { liveErasedAt: 'asc' } });
   let replayed = 0;
   for (const source of prior) {
-    const existing = await current.performanceErasureOperation.findUnique({ where: { operationKeyHash: source.operationKeyHash } });
-    if (existing?.liveErasedAt) continue;
-    const policy = await current.performancePolicyVersion.findUnique({ where: { id: source.policyVersionId } });
-    if (!policy) throw erasureError('نسخه سیاست لازم برای بازاجرای حذف پس از بازیابی وجود ندارد.', 'PERFORMANCE_RESTORE_ERASURE_POLICY_MISSING');
     const scope = await readPerformancePayload<ErasureScope>(safety, source.encryptedScopeId, performanceVaultKeyFromEnvironment());
-    await current.$transaction((tx) => deleteLiveScope(tx, source, scope, null), { isolationLevel: 'Serializable' });
+    const expectedIdentity = performanceErasureOperationIdentity({ aggregateType: source.aggregateType,
+      aggregateId: scope.graph.evaluationId, policyVersionId: source.policyVersionId,
+      retentionStateId: source.retentionStateId, scopeHash: source.scopeHash });
+    const scopeHash = canonicalPerformanceHash({ graph: scope.graph, classifiedRecords: scope.classifiedRecords, payloadIds: scope.payloadIds });
+    const dependencyHash = canonicalPerformanceHash({ handoffs: scope.graph.consequenceHandoffIds, exports: scope.verifiedExportDependencies });
+    if (expectedIdentity !== source.operationKeyHash || scopeHash !== source.scopeHash || dependencyHash !== source.dependencyHash) {
+      throw erasureError('تمامیت عملیات حذف مبدأ برای بازاجرا معتبر نیست.', 'PERFORMANCE_RESTORE_ERASURE_SCOPE_INVALID');
+    }
+    const copyRows = await safety.performanceRecoverableCopy.findMany({ where: { operationId: source.id }, orderBy: [{ version: 'desc' }, { id: 'desc' }] });
+    const latestCopies = new Map<string, string>();
+    for (const copy of copyRows) if (!latestCopies.has(copy.location)) latestCopies.set(copy.location, copy.status);
+    if (latestCopies.get('LIVE_DATABASE') !== 'ERASED' || requiredPerformanceCopyLocations
+      .filter((location) => !['LIVE_DATABASE', 'INDEPENDENT_BACKUP'].includes(location))
+      .some((location) => !['VERIFIED_ABSENT', 'ERASED'].includes(latestCopies.get(location) ?? 'UNKNOWN'))) {
+      throw erasureError('شواهد نسخه‌های قابل بازیابی برای بازاجرای حذف کامل نیست.', 'PERFORMANCE_RESTORE_ERASURE_COPY_EVIDENCE_INVALID');
+    }
+    await runPerformanceSerializableTransaction(current, async (tx) => {
+      await ensureRestoreRetentionPolicyEvidence(tx, safety, source.policyVersionId);
+      await erasePerformanceExportArtifacts(tx, scope.graph.exportIds, now);
+      await deleteLiveScope(tx, source, scope, null);
+    });
     replayed += 1;
   }
   return { replayed, verifiedAt: now };

@@ -37,6 +37,25 @@ const reportingSnapshot = (value: unknown): Prisma.InputJsonValue => JSON.parse(
 
 const disclosureError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
 
+export const erasePerformanceExportArtifacts = async (
+  client: PrismaClient | Prisma.TransactionClient, exportIds: readonly string[], erasedAt = new Date(),
+) => {
+  if (!exportIds.length) return { erased: 0 };
+  const [receipts, artifacts] = await Promise.all([
+    client.performanceExportReceipt.findMany({ where: { id: { in: [...exportIds] } }, select: { id: true, artifactPath: true } }),
+    client.performanceExportArtifact.findMany({ where: { exportId: { in: [...exportIds] } }, select: { artifactPath: true } }),
+  ]);
+  const paths = new Set(artifacts.map(({ artifactPath }) => artifactPath));
+  for (const receipt of receipts) if (receipt.artifactPath) paths.add(receipt.artifactPath);
+  for (const artifactPath of paths) {
+    await unlink(artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+  }
+  await client.performanceExportReceipt.updateMany({ where: { id: { in: receipts.map(({ id }) => id) } }, data: {
+    status: PerformanceExportStatus.DELETED, artifactPath: null, deletedAt: erasedAt,
+  } });
+  return { erased: paths.size };
+};
+
 type ConsequencePolicyContent = { schemaVersion: 1; rules: Record<string, PerformanceConsequenceRule> };
 const effectiveConsequencePolicy = async (client: PrismaClient | Prisma.TransactionClient, at = new Date()) => {
   const version = await client.performanceConsequencePolicyVersion.findFirst({

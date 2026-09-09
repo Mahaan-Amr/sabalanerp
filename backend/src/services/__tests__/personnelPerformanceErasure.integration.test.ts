@@ -4,12 +4,14 @@ import { prisma } from '../../lib/prisma';
 import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
 import { performanceVaultKeyFromEnvironment, persistPerformancePayload } from '../personnelPerformancePayloadStore';
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
+import { placePerformanceLegalHold } from '../personnelPerformanceLegalHoldStore';
 import {
   approvePerformanceBulkErasure,
   approvePerformanceErasureImpact,
   executePerformanceErasureOperation,
   preparePerformanceErasureOperations,
   recordPerformanceRecoverableCopy,
+  replayPerformanceErasureAfterRestore,
 } from '../personnelPerformanceErasureStore';
 import { enablePerformanceTestRelease, publishPerformanceTestRetentionPolicy } from './personnelPerformanceTestRelease';
 
@@ -25,6 +27,9 @@ const main = async () => {
       await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:retention`, userId: actor.id,
         featureCode: 'MANAGE_PERFORMANCE_RETENTION', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'),
         grantedByUserId: actor.id, reason: 'Isolated erasure acceptance' } });
+      await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:legal-hold`, userId: actor.id,
+        featureCode: 'PLACE_PERFORMANCE_LEGAL_HOLD', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'),
+        grantedByUserId: actor.id, reason: 'Erasure and legal-hold race acceptance' } });
       const secondApprover = await tx.user.create({ data: { email: `${suffix}-second@example.invalid`, username: `${suffix}-second`,
         password: 'not-used', firstName: 'عامل', lastName: 'دوم' } });
       await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:retention:second`, userId: secondApprover.id,
@@ -54,11 +59,33 @@ const main = async () => {
         eventType: 'EVALUATION_CANCELLED', actorUserId: actor.id, eventHash: canonicalPerformanceHash({ suffix, event: 'cancelled' }),
         occurredAt: new Date('2011-01-01Z') } });
       const policy = await publishPerformanceTestRetentionPolicy(tx, actor.id);
+      const secondImpactEvaluation = await tx.performanceEvaluation.create({ data: { stableKey: `${suffix}:impact-evaluation`, subjectId: subject.id,
+        measurementFrom: new Date('2010-01-01Z'), measurementTo: new Date('2010-12-31Z'), createdByUserId: actor.id } });
+      const secondImpactSection = await tx.performanceEvaluationSection.create({ data: { evaluationId: secondImpactEvaluation.id,
+        employmentAssignmentId: assignment.id, responsibleSupervisorPersonnelId: actorPersonnel.id,
+        effectiveFrom: new Date('2010-01-01Z'), effectiveTo: new Date('2010-12-31Z'), allocationPercent: 100 } });
+      const secondImpactDraftId = randomUUID();
+      const secondImpactPayload = await persistPerformancePayload(tx, { aggregateType: 'PERFORMANCE_DRAFT', aggregateId: secondImpactDraftId,
+        payloadKind: 'DRAFT_CONTENT', schemaVersion: 1, payload: { narrative: 'second impact scope' }, keyring: performanceVaultKeyFromEnvironment() });
+      await tx.performanceDraft.create({ data: { id: secondImpactDraftId, sectionId: secondImpactSection.id,
+        supervisorUserId: actor.id, supervisorPersonnelId: actorPersonnel.id, revision: 1, encryptedPayloadId: secondImpactPayload.id,
+        contentHash: canonicalPerformanceHash({ narrative: 'second impact scope' }), createdAt: new Date('2010-01-01Z') } });
+      await tx.performanceEvaluationSection.update({ where: { id: secondImpactSection.id }, data: { status: 'CANCELLED' } });
+      await tx.performanceEvaluation.update({ where: { id: secondImpactEvaluation.id }, data: { status: 'CANCELLED', writerVersion: { increment: 1 } } });
+      await tx.performanceAuditEvent.create({ data: { id: randomUUID(), aggregateType: 'EVALUATION', aggregateId: secondImpactEvaluation.id,
+        eventType: 'EVALUATION_CANCELLED', actorUserId: actor.id, eventHash: canonicalPerformanceHash({ suffix, event: 'impact-cancelled' }),
+        occurredAt: new Date('2011-01-01Z') } });
       const assessment = await assessPerformanceEvaluationRetention(tx, { actorUserId: actor.id, evaluationId: evaluation.id });
+      await assessPerformanceEvaluationRetention(tx, { actorUserId: actor.id, evaluationId: secondImpactEvaluation.id });
       assert.equal(assessment.status, 'PENDING_COPY_AND_RECONSTRUCTION_REVIEW');
-      const [operation] = await preparePerformanceErasureOperations(tx, new Date('2026-09-09Z'), 1);
+      const initialOperations = await preparePerformanceErasureOperations(tx, new Date('2026-09-09Z'), 1);
+      const operation = initialOperations.find(({ retentionStateId }) => retentionStateId === assessment.id)!;
       assert.ok(operation);
       assert.equal(operation.status, 'PENDING_IMPACT_APPROVAL');
+      const impactPreview = await tx.performanceErasureImpactApproval.findUniqueOrThrow({ where: { policyVersionId: policy.id } });
+      assert.equal(impactPreview.eligibleScopeCount, 2);
+      assert.equal(impactPreview.erasableRecordCount, initialOperations.reduce((total, item) => total + item.recordCount, 0),
+        'the approval preview aggregates every eligible scope under the policy');
       await approvePerformanceErasureImpact(tx, { actorUserId: actor.id, policyVersionId: policy.id });
       for (const location of ['TEMPORARY_STORAGE', 'DATABASE_REPLICA', 'ARTIFACT_STORAGE'] as const) {
         await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id, location,
@@ -72,6 +99,8 @@ const main = async () => {
       assert.equal((await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operation.id } })).status, 'PENDING_BULK_APPROVAL');
       await approvePerformanceBulkErasure(tx, { actorUserId: secondApprover.id, operationId: operation.id, reasonCode: 'APPROVED_SCOPE' });
       assert.equal((await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operation.id } })).status, 'READY');
+      const checkpointDraft = await tx.performanceDraft.findUniqueOrThrow({ where: { id: draftId } });
+      const checkpointPayload = await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: draftPayload.id } });
       const erased = await executePerformanceErasureOperation(tx, operation.id, new Date('2026-09-09Z'));
       assert.equal(erased.status, 'LIVE_ERASED_BACKUP_PENDING');
       assert.equal(await tx.performanceDraft.count({ where: { id: draftId } }), 0);
@@ -80,8 +109,31 @@ const main = async () => {
       const replay = await executePerformanceErasureOperation(tx, operation.id, new Date('2026-09-10Z'));
       assert.equal(replay.id, operation.id, 'a retry reuses the stable operation without duplicate deletion');
       await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id, location: 'INDEPENDENT_BACKUP',
-        copyKey: `${suffix}:backup-expired`, status: 'ERASED', evidenceHash: canonicalPerformanceHash({ suffix, backup: 'expired' }) });
+        copyKey: `${suffix}:backup`, status: 'ERASED', evidenceHash: canonicalPerformanceHash({ suffix, backup: 'expired' }) });
       assert.equal((await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operation.id } })).status, 'COMPLETED');
+      await tx.performanceEncryptedPayload.create({ data: checkpointPayload });
+      await tx.performanceDraft.create({ data: checkpointDraft });
+      const receiptCountBeforeReplay = await tx.performanceDeletionReceipt.count({ where: { deletedRecordId: { in: [draftId, draftPayload.id] } } });
+      const restoreReplay = await replayPerformanceErasureAfterRestore(tx as any, tx as any, new Date('2026-09-10Z'));
+      assert.equal(restoreReplay.replayed >= 1, true);
+      assert.equal(await tx.performanceDraft.count({ where: { id: draftId } }), 0, 'a restored checkpoint cannot reintroduce erased content');
+      assert.equal(await tx.performanceEncryptedPayload.count({ where: { id: draftPayload.id } }), 0);
+      assert.equal(await tx.performanceDeletionReceipt.count({ where: { deletedRecordId: { in: [draftId, draftPayload.id] } } }), receiptCountBeforeReplay,
+        'restore replay reuses the immutable receipts');
+
+      const heldOperation = initialOperations.find(({ id }) => id !== operation.id)!;
+      for (const location of ['TEMPORARY_STORAGE', 'DATABASE_REPLICA', 'ARTIFACT_STORAGE', 'INDEPENDENT_BACKUP'] as const) {
+        await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: heldOperation.id, location,
+          copyKey: `${suffix}:held:${location}`, status: 'VERIFIED_ABSENT', evidenceHash: canonicalPerformanceHash({ suffix, location, held: true }) });
+      }
+      await approvePerformanceBulkErasure(tx, { actorUserId: actor.id, operationId: heldOperation.id, reasonCode: 'APPROVED_HELD_SCOPE' });
+      await approvePerformanceBulkErasure(tx, { actorUserId: secondApprover.id, operationId: heldOperation.id, reasonCode: 'APPROVED_HELD_SCOPE' });
+      await placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION',
+        aggregateId: secondImpactEvaluation.id, reasonCode: 'ACTIVE_INVESTIGATION' });
+      const held = await executePerformanceErasureOperation(tx, heldOperation.id, new Date('2026-09-10Z'));
+      assert.equal(held.status, 'PARTIAL_RESTRICTED', 'a legal hold committed before deletion wins the shared fence');
+      assert.equal(await tx.performanceDraft.count({ where: { id: secondImpactDraftId } }), 1);
+      assert.equal(await tx.performanceDeletionReceipt.count({ where: { deletedRecordId: secondImpactDraftId } }), 0);
 
       const retryEvaluation = await tx.performanceEvaluation.create({ data: { stableKey: `${suffix}:retry-evaluation`, subjectId: subject.id,
         measurementFrom: new Date('2010-01-01Z'), measurementTo: new Date('2010-12-31Z'), createdByUserId: actor.id } });
@@ -101,13 +153,18 @@ const main = async () => {
         occurredAt: new Date('2011-01-01Z') } });
       await assessPerformanceEvaluationRetention(tx, { actorUserId: actor.id, evaluationId: retryEvaluation.id });
       const prepared = await preparePerformanceErasureOperations(tx, new Date('2026-09-11Z'), 1);
-      const retryOperation = prepared.find(({ id }) => id !== operation.id)!;
+      const retryState = await tx.performanceRetentionState.findFirstOrThrow({ where: { aggregateType: 'EVALUATION', aggregateId: retryEvaluation.id },
+        orderBy: { version: 'desc' } });
+      const retryOperation = prepared.find(({ retentionStateId }) => retentionStateId === retryState.id)!;
       for (const location of ['TEMPORARY_STORAGE', 'DATABASE_REPLICA', 'ARTIFACT_STORAGE', 'INDEPENDENT_BACKUP'] as const) {
         await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: retryOperation.id, location,
           copyKey: `${suffix}:retry:${location}`, status: 'VERIFIED_ABSENT', evidenceHash: canonicalPerformanceHash({ suffix, location, retry: true }) });
       }
       await approvePerformanceBulkErasure(tx, { actorUserId: actor.id, operationId: retryOperation.id, reasonCode: 'APPROVED_RETRY_SCOPE' });
       await approvePerformanceBulkErasure(tx, { actorUserId: secondApprover.id, operationId: retryOperation.id, reasonCode: 'APPROVED_RETRY_SCOPE' });
+      await tx.performanceErasureOperation.update({ where: { id: retryOperation.id }, data: {
+        status: 'RUNNING', claimedAt: new Date('2026-09-10T00:00:00Z'), attemptCount: { increment: 1 },
+      } });
       const failed = await executePerformanceErasureOperation(tx, retryOperation.id, new Date('2026-09-11Z'), {
         eraseArtifacts: async () => { throw Object.assign(new Error('injected storage outage'), { code: 'PERFORMANCE_ERASURE_STORAGE_FAILURE' }); },
       });

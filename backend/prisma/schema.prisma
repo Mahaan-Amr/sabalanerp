@@ -8513,7 +8513,7 @@ model PerformanceRecoverableCopy {
   checkedByUserId  String?
   checkedAt        DateTime  @default(now())
 
-  @@unique([operationId, location, copyKeyHash])
+  @@index([operationId, location, copyKeyHash])
   @@unique([operationId, location, version])
   @@index([status, recoverableUntil])
   @@map("performance_recoverable_copies")

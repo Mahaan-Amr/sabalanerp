@@ -49,7 +49,11 @@ export const assessPerformanceEvaluationRetention = async (client: PrismaClient 
   const traces = await tx.performanceCalculationTrace.findMany({ where: { evaluationId: evaluation.id }, orderBy: { id: 'asc' } });
   const snapshots = await tx.performanceSnapshot.findMany({ where: { evaluationId: evaluation.id }, orderBy: { id: 'asc' } });
   const corrections = await tx.performanceCorrection.findMany({ where: { evaluationId: evaluation.id }, orderBy: { id: 'asc' } });
-  const restrictions = await tx.performanceEvidenceRestriction.findMany({ where: { evaluationId: evaluation.id }, orderBy: { id: 'asc' } });
+  // The erasure worker's own quarantine prevents reads while a retry is pending;
+  // it is not a new business-retention dependency and must not deadlock that retry.
+  const restrictions = await tx.performanceEvidenceRestriction.findMany({ where: {
+    evaluationId: evaluation.id, reasonCode: { not: 'ERASURE_PARTIAL_FAILURE' },
+  }, orderBy: { id: 'asc' } });
   const scopes = await tx.performancePrivacyScope.findMany({ where: { evaluationId: evaluation.id } });
   const cases = await tx.performancePrivacyCase.findMany({ where: { id: { in: scopes.map(({ caseId }) => caseId) } }, orderBy: { id: 'asc' } });
   const bindings = await tx.performanceArtifactSnapshotBinding.findMany({ where: { snapshotId: { in: snapshots.map(({ id }) => id) } }, orderBy: { id: 'asc' } });

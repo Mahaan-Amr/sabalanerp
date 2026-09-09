@@ -2945,7 +2945,7 @@ model LogisticsAllocationDraft {
 }
 
 model LogisticsAllocationDraftLine {
-  id                   String                   @id @default(cuid())
+  id                   String                        @id @default(cuid())
   draftId              String
   sourceKind           PhysicalFulfillmentSourceKind @default(SALES_CONTRACT)
   sourceContractId     String?
@@ -2957,14 +2957,14 @@ model LogisticsAllocationDraftLine {
   partnerIntegrityHash String?
   partnerDeliveryId    String?
   partnerLineageId     String?
-  quantity             Decimal                  @db.Decimal(18, 3)
+  quantity             Decimal                       @db.Decimal(18, 3)
   unit                 String
   snapshot             Json
-  createdAt            DateTime                 @default(now())
-  draft                LogisticsAllocationDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
-  partnerRevision      PartnerCaseRevision? @relation(fields: [partnerCaseId, partnerCaseRevision, partnerIntegrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_draft_revision_owner")
-  partnerDeliveryItem  PartnerCaseDeliveryItem? @relation(fields: [partnerCaseId, partnerCaseRevision, partnerDeliveryId, productRowId], references: [caseId, revision, deliveryId, productRowId], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_draft_delivery_row")
-  partnerLineage       PartnerFulfillmentLineage? @relation(fields: [partnerLineageId, partnerCaseId, productRowId, unit], references: [id, caseId, productRowId, unit], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_draft_lineage_owner")
+  createdAt            DateTime                      @default(now())
+  draft                LogisticsAllocationDraft      @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  partnerRevision      PartnerCaseRevision?          @relation(fields: [partnerCaseId, partnerCaseRevision, partnerIntegrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_draft_revision_owner")
+  partnerDeliveryItem  PartnerCaseDeliveryItem?      @relation(fields: [partnerCaseId, partnerCaseRevision, partnerDeliveryId, productRowId], references: [caseId, revision, deliveryId, productRowId], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_draft_delivery_row")
+  partnerLineage       PartnerFulfillmentLineage?    @relation(fields: [partnerLineageId, partnerCaseId, productRowId, unit], references: [id, caseId, productRowId, unit], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_draft_lineage_owner")
 
   @@index([draftId])
   @@index([sourceContractItemId])
@@ -2972,36 +2972,36 @@ model LogisticsAllocationDraftLine {
 }
 
 model LogisticsAllocationRevision {
-  id                     String                               @id @default(cuid())
-  sourceKind             PhysicalFulfillmentSourceKind        @default(SALES_CONTRACT)
-  batchId                String
-  loadingId              String
-  queueTurnId            String
-  revisionNumber         Int
-  snapshot               Json
-  integrityHash          String                               @unique
-  finalizedAt            DateTime                             @default(now())
-  finalizedBy            String
-  sealedAt               DateTime?
-  predecessorRevisionId  String?                              @unique
-  partnerCaseId          String?
-  partnerCaseRevision    Int?
-  partnerIntegrityHash   String?
+  id                      String                               @id @default(cuid())
+  sourceKind              PhysicalFulfillmentSourceKind        @default(SALES_CONTRACT)
+  batchId                 String
+  loadingId               String
+  queueTurnId             String
+  revisionNumber          Int
+  snapshot                Json
+  integrityHash           String                               @unique
+  finalizedAt             DateTime                             @default(now())
+  finalizedBy             String
+  sealedAt                DateTime?
+  predecessorRevisionId   String?                              @unique
+  partnerCaseId           String?
+  partnerCaseRevision     Int?
+  partnerIntegrityHash    String?
   partnerInternalRecordId String?
-  partnerDeliveryId      String?
-  batch                  LogisticsAllocationBatch             @relation(fields: [batchId], references: [id], onDelete: Restrict)
-  loading                LogisticsLoading                     @relation(fields: [loadingId], references: [id], onDelete: Restrict)
-  queueTurn              GuardDriverQueueTurn                 @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
-  lines                  LogisticsAllocationRevisionLine[]
-  candidate              AccountingDispatchCandidate?
-  predecessorRevision    LogisticsAllocationRevision?         @relation("AllocationRevisionSuccessor", fields: [predecessorRevisionId], references: [id], onDelete: Restrict)
-  successorRevision      LogisticsAllocationRevision?         @relation("AllocationRevisionSuccessor")
-  physicalExit           GuardPhysicalExit?
-  manualOutageExit       ManualOutageExit?
-  pricingReferences      LogisticsAllocationRevisionPricing[]
-  pricedAllocationEvents DispatchPricedAllocationEvent[]
-  partnerRevision        PartnerCaseRevision?                 @relation(fields: [partnerCaseId, partnerCaseRevision, partnerIntegrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_revision_owner")
-  partnerPricing         PartnerAllocationRevisionPricing?
+  partnerDeliveryId       String?
+  batch                   LogisticsAllocationBatch             @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  loading                 LogisticsLoading                     @relation(fields: [loadingId], references: [id], onDelete: Restrict)
+  queueTurn               GuardDriverQueueTurn                 @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
+  lines                   LogisticsAllocationRevisionLine[]
+  candidate               AccountingDispatchCandidate?
+  predecessorRevision     LogisticsAllocationRevision?         @relation("AllocationRevisionSuccessor", fields: [predecessorRevisionId], references: [id], onDelete: Restrict)
+  successorRevision       LogisticsAllocationRevision?         @relation("AllocationRevisionSuccessor")
+  physicalExit            GuardPhysicalExit?
+  manualOutageExit        ManualOutageExit?
+  pricingReferences       LogisticsAllocationRevisionPricing[]
+  pricedAllocationEvents  DispatchPricedAllocationEvent[]
+  partnerRevision         PartnerCaseRevision?                 @relation(fields: [partnerCaseId, partnerCaseRevision, partnerIntegrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_revision_owner")
+  partnerPricing          PartnerAllocationRevisionPricing?
 
   @@unique([loadingId, queueTurnId, revisionNumber])
   @@index([loadingId, finalizedAt])
@@ -3012,7 +3012,7 @@ model LogisticsAllocationRevision {
 model LogisticsAllocationRevisionLine {
   id                    String                         @id @default(cuid())
   revisionId            String
-  sourceKind            PhysicalFulfillmentSourceKind @default(SALES_CONTRACT)
+  sourceKind            PhysicalFulfillmentSourceKind  @default(SALES_CONTRACT)
   sourceContractId      String?
   sourceContractItemId  String?
   productRowId          String
@@ -3028,9 +3028,9 @@ model LogisticsAllocationRevisionLine {
   integrityHash         String                         @unique
   revision              LogisticsAllocationRevision    @relation(fields: [revisionId], references: [id], onDelete: Restrict)
   pricedAllocationEvent DispatchPricedAllocationEvent?
-  partnerRevision       PartnerCaseRevision? @relation(fields: [partnerCaseId, partnerCaseRevision, partnerIntegrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_line_revision_owner")
-  partnerDeliveryItem   PartnerCaseDeliveryItem? @relation(fields: [partnerCaseId, partnerCaseRevision, partnerDeliveryId, productRowId], references: [caseId, revision, deliveryId, productRowId], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_line_delivery_row")
-  partnerLineage        PartnerFulfillmentLineage? @relation(fields: [partnerLineageId, partnerCaseId, productRowId, unit], references: [id, caseId, productRowId, unit], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_line_lineage_owner")
+  partnerRevision       PartnerCaseRevision?           @relation(fields: [partnerCaseId, partnerCaseRevision, partnerIntegrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_line_revision_owner")
+  partnerDeliveryItem   PartnerCaseDeliveryItem?       @relation(fields: [partnerCaseId, partnerCaseRevision, partnerDeliveryId, productRowId], references: [caseId, revision, deliveryId, productRowId], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_line_delivery_row")
+  partnerLineage        PartnerFulfillmentLineage?     @relation(fields: [partnerLineageId, partnerCaseId, productRowId, unit], references: [id, caseId, productRowId, unit], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_line_lineage_owner")
   partnerPricedEvent    PartnerPricedAllocationEvent?
 
   @@index([revisionId])
@@ -3276,27 +3276,27 @@ model DispatchPricedAllocationEvent {
 }
 
 model PartnerAllocationRevisionPricing {
-  id                           String @id @default(cuid())
-  allocationRevisionId         String @unique
-  caseId                       String
-  caseRevision                 Int
-  integrityHash                String
-  internalRecordId             String
-  sourceFinancialRecordId      String
-  financialApprovalEvidenceId  String
-  preparationEvidenceHash      String
-  readinessEvidenceHash        String
-  currency                     String
-  grossAmount                  Decimal @db.Decimal(38, 12)
-  discountAmount               Decimal @db.Decimal(38, 12)
-  netAmount                    Decimal @db.Decimal(38, 12)
-  pricingIntegrityHash         String @unique
-  createdAt                    DateTime @default(now()) @db.Timestamptz(3)
-  allocationRevision           LogisticsAllocationRevision @relation(fields: [allocationRevisionId], references: [id], onDelete: Restrict)
-  revision                     PartnerCaseRevision @relation(fields: [caseId, caseRevision, integrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_pricing_revision_owner")
-  internalRecord               SabalanToPartnerSaleRecord @relation(fields: [internalRecordId, caseId], references: [id, caseId], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_pricing_internal_owner")
-  sourceFinancialRecord        AccountingFinancialRecord @relation(fields: [sourceFinancialRecordId], references: [id], onDelete: Restrict)
-  events                       PartnerPricedAllocationEvent[]
+  id                          String                         @id @default(cuid())
+  allocationRevisionId        String                         @unique
+  caseId                      String
+  caseRevision                Int
+  integrityHash               String
+  internalRecordId            String
+  sourceFinancialRecordId     String
+  financialApprovalEvidenceId String
+  preparationEvidenceHash     String
+  readinessEvidenceHash       String
+  currency                    String
+  grossAmount                 Decimal                        @db.Decimal(38, 12)
+  discountAmount              Decimal                        @db.Decimal(38, 12)
+  netAmount                   Decimal                        @db.Decimal(38, 12)
+  pricingIntegrityHash        String                         @unique
+  createdAt                   DateTime                       @default(now()) @db.Timestamptz(3)
+  allocationRevision          LogisticsAllocationRevision    @relation(fields: [allocationRevisionId], references: [id], onDelete: Restrict)
+  revision                    PartnerCaseRevision            @relation(fields: [caseId, caseRevision, integrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_pricing_revision_owner")
+  internalRecord              SabalanToPartnerSaleRecord     @relation(fields: [internalRecordId, caseId], references: [id, caseId], onDelete: Restrict, onUpdate: NoAction, map: "partner_allocation_pricing_internal_owner")
+  sourceFinancialRecord       AccountingFinancialRecord      @relation(fields: [sourceFinancialRecordId], references: [id], onDelete: Restrict)
+  events                      PartnerPricedAllocationEvent[]
 
   @@unique([allocationRevisionId, caseId])
   @@index([caseId, caseRevision])
@@ -3304,20 +3304,20 @@ model PartnerAllocationRevisionPricing {
 }
 
 model PartnerPricedAllocationEvent {
-  id                       String @id @default(cuid())
-  allocationRevisionLineId String @unique
+  id                       String                           @id @default(cuid())
+  allocationRevisionLineId String                           @unique
   pricingReferenceId       String
   approvalEvidenceId       String
-  quantity                 Decimal @db.Decimal(18, 3)
-  grossAmount              Decimal @db.Decimal(38, 12)
-  discountAmount           Decimal @db.Decimal(38, 12)
-  netAmount                Decimal @db.Decimal(38, 12)
+  quantity                 Decimal                          @db.Decimal(18, 3)
+  grossAmount              Decimal                          @db.Decimal(38, 12)
+  discountAmount           Decimal                          @db.Decimal(38, 12)
+  netAmount                Decimal                          @db.Decimal(38, 12)
   consumesFinalRemainder   Boolean
   evidence                 Json
-  integrityHash            String @unique
-  recordedAt               DateTime @default(now()) @db.Timestamptz(3)
+  integrityHash            String                           @unique
+  recordedAt               DateTime                         @default(now()) @db.Timestamptz(3)
   recordedBy               String
-  allocationRevisionLine   LogisticsAllocationRevisionLine @relation(fields: [allocationRevisionLineId], references: [id], onDelete: Restrict)
+  allocationRevisionLine   LogisticsAllocationRevisionLine  @relation(fields: [allocationRevisionLineId], references: [id], onDelete: Restrict)
   pricingReference         PartnerAllocationRevisionPricing @relation(fields: [pricingReferenceId], references: [id], onDelete: Restrict)
 
   @@index([pricingReferenceId, recordedAt])
@@ -3441,29 +3441,29 @@ enum ShipmentStatementOperationsAction {
 }
 
 model ShipmentStatementOperationsControl {
-  id          String   @id
-  paused      Boolean  @default(true)
-  incident    Boolean  @default(false)
-  revision    Int      @default(0)
-  changedAt   DateTime @default(now())
-  changedBy   String?
-  reason      String
-  createdAt   DateTime @default(now())
+  id        String   @id
+  paused    Boolean  @default(true)
+  incident  Boolean  @default(false)
+  revision  Int      @default(0)
+  changedAt DateTime @default(now())
+  changedBy String?
+  reason    String
+  createdAt DateTime @default(now())
 
   @@map("shipment_statement_operations_controls")
 }
 
 model ShipmentStatementOperationsEvent {
-  id            String                            @id @default(cuid())
-  revision      Int                               @unique
-  action        ShipmentStatementOperationsAction
-  paused        Boolean
-  incident      Boolean
-  actorId       String
-  reason        String
+  id                    String                            @id @default(cuid())
+  revision              Int                               @unique
+  action                ShipmentStatementOperationsAction
+  paused                Boolean
+  incident              Boolean
+  actorId               String
+  reason                String
   previousIntegrityHash String?
-  integrityHash String                            @unique
-  createdAt     DateTime                          @default(now())
+  integrityHash         String                            @unique
+  createdAt             DateTime                          @default(now())
 
   @@index([createdAt])
   @@map("shipment_statement_operations_events")
@@ -3644,24 +3644,24 @@ model DispatchBiometricAttempt {
 }
 
 model BiometricConnectorChallenge {
-  id            String   @id
-  operation     String
-  workstationId String
-  actorId       String
-  subjectId     String
-  contextId     String
-  contextHash   String?
-  finger        String?
-  commandDigest String
-  nonceHash     String   @unique
-  status        String   @default("ISSUED")
-  issuedAt      DateTime
-  expiresAt     DateTime
+  id                  String    @id
+  operation           String
+  workstationId       String
+  actorId             String
+  subjectId           String
+  contextId           String
+  contextHash         String?
+  finger              String?
+  commandDigest       String
+  nonceHash           String    @unique
+  status              String    @default("ISSUED")
+  issuedAt            DateTime
+  expiresAt           DateTime
   processingStartedAt DateTime?
-  completedAt   DateTime?
-  resultDigest  String?
-  resultSummary Json?
-  createdAt     DateTime @default(now())
+  completedAt         DateTime?
+  resultDigest        String?
+  resultSummary       Json?
+  createdAt           DateTime  @default(now())
 
   @@index([subjectId, operation, status])
   @@index([expiresAt, status])
@@ -4007,7 +4007,7 @@ model LogisticsLoadingCorrection {
 }
 
 model ShipmentQuantityEvidence {
-  id                    String                       @id @default(cuid())
+  id                    String                        @id @default(cuid())
   sourceKind            PhysicalFulfillmentSourceKind @default(SALES_CONTRACT)
   contractId            String?
   contractItemId        String?
@@ -4018,26 +4018,26 @@ model ShipmentQuantityEvidence {
   productRowId          String
   unit                  String
   kind                  ShipmentQuantityEvidenceKind
-  quantity              Decimal                      @db.Decimal(18, 3)
+  quantity              Decimal                       @db.Decimal(18, 3)
   effectiveAt           DateTime
-  recordedAt            DateTime                     @default(now())
+  recordedAt            DateTime                      @default(now())
   sourceType            String
   sourceId              String
-  sourceVersion         Int                          @default(1)
+  sourceVersion         Int                           @default(1)
   integrityHash         String
   metadata              Json?
   guardReturnMovementId String?
   returnEvidenceId      String?
   dispatchEvidenceId    String?
-  contract              SalesContract?               @relation(fields: [contractId], references: [id], onDelete: Restrict)
-  contractItem          ContractItem?                @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
+  contract              SalesContract?                @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  contractItem          ContractItem?                 @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
   partnerLineage        PartnerFulfillmentLineage?    @relation(fields: [partnerLineageId, partnerCaseId, productRowId, unit], references: [id, caseId, productRowId, unit], onDelete: Restrict, onUpdate: NoAction, map: "shipment_quantity_partner_lineage")
-  partnerRevision       PartnerCaseRevision?         @relation(fields: [partnerCaseId, partnerCaseRevision, partnerIntegrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "shipment_quantity_partner_revision")
-  guardReturnMovement   SecurityVehicleMovement?     @relation(fields: [guardReturnMovementId], references: [id], onDelete: Restrict)
-  returnEvidence        ShipmentQuantityEvidence?    @relation("ShipmentReturnEvidence", fields: [returnEvidenceId], references: [id], onDelete: Restrict)
-  linkedCorrections     ShipmentQuantityEvidence[]   @relation("ShipmentReturnEvidence")
-  dispatchEvidence      ShipmentQuantityEvidence?    @relation("ShipmentReturnDispatch", fields: [dispatchEvidenceId], references: [id], onDelete: Restrict)
-  linkedReturns         ShipmentQuantityEvidence[]   @relation("ShipmentReturnDispatch")
+  partnerRevision       PartnerCaseRevision?          @relation(fields: [partnerCaseId, partnerCaseRevision, partnerIntegrityHash], references: [caseId, revision, integrityHash], onDelete: Restrict, onUpdate: NoAction, map: "shipment_quantity_partner_revision")
+  guardReturnMovement   SecurityVehicleMovement?      @relation(fields: [guardReturnMovementId], references: [id], onDelete: Restrict)
+  returnEvidence        ShipmentQuantityEvidence?     @relation("ShipmentReturnEvidence", fields: [returnEvidenceId], references: [id], onDelete: Restrict)
+  linkedCorrections     ShipmentQuantityEvidence[]    @relation("ShipmentReturnEvidence")
+  dispatchEvidence      ShipmentQuantityEvidence?     @relation("ShipmentReturnDispatch", fields: [dispatchEvidenceId], references: [id], onDelete: Restrict)
+  linkedReturns         ShipmentQuantityEvidence[]    @relation("ShipmentReturnDispatch")
 
   @@unique([sourceType, sourceId, sourceVersion], map: "shipment_quantity_evidence_sourceType_sourceId_sourceVersion_ke")
   @@unique([guardReturnMovementId, contractItemId, dispatchEvidenceId], map: "shipment_quantity_evidence_guardReturnMovementId_contractItemId")
@@ -4377,30 +4377,30 @@ model ChartOfAccount {
 }
 
 model AccountingFinancialRecord {
-  id                      String                           @id @default(cuid())
+  id                      String                             @id @default(cuid())
   kind                    FinancialRecordKind
-  status                  AccountingRecordStatus           @default(DRAFT)
+  status                  AccountingRecordStatus             @default(DRAFT)
   sourceKind              AccountingSourceKind
   sourceId                String?
   contractId              String?
   customerId              String?
   periodId                String?
-  amount                  Decimal                          @default(0) @db.Decimal(18, 2)
-  currency                String                           @default("ریال")
+  amount                  Decimal                            @default(0) @db.Decimal(18, 2)
+  currency                String                             @default("ریال")
   sourceSnapshot          Json?
   metadata                Json?
-  idempotencyKey          String?                          @unique
+  idempotencyKey          String?                            @unique
   systemInvoiceNumber     String?
   systemInvoiceDate       DateTime?
-  sepidarAmount           Decimal?                         @db.Decimal(18, 2)
+  sepidarAmount           Decimal?                           @db.Decimal(18, 2)
   financiallyApprovedAt   DateTime?
   financiallyApprovedBy   String?
   createdBy               String
   postedAt                DateTime?
   voidedAt                DateTime?
-  createdAt               DateTime                         @default(now())
-  updatedAt               DateTime                         @updatedAt
-  period                  AccountingPeriod?                @relation(fields: [periodId], references: [id])
+  createdAt               DateTime                           @default(now())
+  updatedAt               DateTime                           @updatedAt
+  period                  AccountingPeriod?                  @relation(fields: [periodId], references: [id])
   invoiceItems            AccountingInvoiceCandidateItem[]
   receivables             AccountingReceivable[]
   taxRecords              AccountingTaxRecord[]
@@ -5429,31 +5429,31 @@ model HrEmploymentRelationship {
 }
 
 model HrEmploymentAssignment {
-  id                                String                   @id @default(cuid())
-  employmentRelationshipId          String
-  positionId                        String?
-  positionSnapshot                  Json?
-  type                              HrAssignmentType
-  effectiveFrom                     DateTime
-  effectiveTo                       DateTime?
-  organizationalUnitId              String?
-  organizationalUnitSnapshot        Json?
-  workplaceId                       String?
-  costCenterId                      String?
-  responsibleSupervisorAssignmentId String?
-  performanceAllocationPercent      Decimal?                 @db.Decimal(5, 2)
-  scheduleContributing              Boolean                  @default(false)
-  createdBy                         String
-  createdAt                         DateTime                 @default(now())
-  updatedAt                         DateTime                 @updatedAt
-  employmentRelationship            HrEmploymentRelationship @relation(fields: [employmentRelationshipId], references: [id], onDelete: Restrict)
-  position                          HrPosition?              @relation(fields: [positionId], references: [id], onDelete: Restrict)
-  organizationalUnit                HrOrganizationalUnit?    @relation(fields: [organizationalUnitId], references: [id], onDelete: Restrict)
-  workplace                         HrWorkplace?             @relation(fields: [workplaceId], references: [id], onDelete: Restrict)
-  costCenter                        HrCostCenter?            @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
-  responsibleSupervisorAssignment   HrEmploymentAssignment?  @relation("HrResponsibleSupervisor", fields: [responsibleSupervisorAssignmentId], references: [id], onDelete: Restrict)
-  supervisedAssignments             HrEmploymentAssignment[] @relation("HrResponsibleSupervisor")
-  performanceResponsibilities       HrAssignmentPerformanceResponsibility[] @relation("HrPerformanceAssignment")
+  id                                    String                                  @id @default(cuid())
+  employmentRelationshipId              String
+  positionId                            String?
+  positionSnapshot                      Json?
+  type                                  HrAssignmentType
+  effectiveFrom                         DateTime
+  effectiveTo                           DateTime?
+  organizationalUnitId                  String?
+  organizationalUnitSnapshot            Json?
+  workplaceId                           String?
+  costCenterId                          String?
+  responsibleSupervisorAssignmentId     String?
+  performanceAllocationPercent          Decimal?                                @db.Decimal(5, 2)
+  scheduleContributing                  Boolean                                 @default(false)
+  createdBy                             String
+  createdAt                             DateTime                                @default(now())
+  updatedAt                             DateTime                                @updatedAt
+  employmentRelationship                HrEmploymentRelationship                @relation(fields: [employmentRelationshipId], references: [id], onDelete: Restrict)
+  position                              HrPosition?                             @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  organizationalUnit                    HrOrganizationalUnit?                   @relation(fields: [organizationalUnitId], references: [id], onDelete: Restrict)
+  workplace                             HrWorkplace?                            @relation(fields: [workplaceId], references: [id], onDelete: Restrict)
+  costCenter                            HrCostCenter?                           @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  responsibleSupervisorAssignment       HrEmploymentAssignment?                 @relation("HrResponsibleSupervisor", fields: [responsibleSupervisorAssignmentId], references: [id], onDelete: Restrict)
+  supervisedAssignments                 HrEmploymentAssignment[]                @relation("HrResponsibleSupervisor")
+  performanceResponsibilities           HrAssignmentPerformanceResponsibility[] @relation("HrPerformanceAssignment")
   supervisedPerformanceResponsibilities HrAssignmentPerformanceResponsibility[] @relation("HrPerformanceSupervisor")
 
   @@index([employmentRelationshipId, type, effectiveFrom, effectiveTo])
@@ -5463,20 +5463,20 @@ model HrEmploymentAssignment {
 }
 
 model HrAssignmentPerformanceResponsibility {
-  id                     String                 @id @default(cuid())
-  employmentAssignmentId String
-  supervisorAssignmentId String
-  effectiveFrom          DateTime
-  effectiveTo            DateTime?
-  allocationPercent      Decimal                @db.Decimal(5, 2)
-  status                 String                 @default("ACTIVE")
-  supersedesResponsibilityId String?
-  reason                 String
-  createdBy              String
-  createdAt              DateTime               @default(now())
-  employmentAssignment   HrEmploymentAssignment @relation("HrPerformanceAssignment", fields: [employmentAssignmentId], references: [id], onDelete: Restrict)
-  supervisorAssignment   HrEmploymentAssignment @relation("HrPerformanceSupervisor", fields: [supervisorAssignmentId], references: [id], onDelete: Restrict)
-  supersedesResponsibility HrAssignmentPerformanceResponsibility? @relation("HrPerformanceResponsibilityCorrection", fields: [supersedesResponsibilityId], references: [id], onDelete: Restrict)
+  id                           String                                  @id @default(cuid())
+  employmentAssignmentId       String
+  supervisorAssignmentId       String
+  effectiveFrom                DateTime
+  effectiveTo                  DateTime?
+  allocationPercent            Decimal                                 @db.Decimal(5, 2)
+  status                       String                                  @default("ACTIVE")
+  supersedesResponsibilityId   String?
+  reason                       String
+  createdBy                    String
+  createdAt                    DateTime                                @default(now())
+  employmentAssignment         HrEmploymentAssignment                  @relation("HrPerformanceAssignment", fields: [employmentAssignmentId], references: [id], onDelete: Restrict)
+  supervisorAssignment         HrEmploymentAssignment                  @relation("HrPerformanceSupervisor", fields: [supervisorAssignmentId], references: [id], onDelete: Restrict)
+  supersedesResponsibility     HrAssignmentPerformanceResponsibility?  @relation("HrPerformanceResponsibilityCorrection", fields: [supersedesResponsibilityId], references: [id], onDelete: Restrict)
   supersededByResponsibilities HrAssignmentPerformanceResponsibility[] @relation("HrPerformanceResponsibilityCorrection")
 
   @@index([employmentAssignmentId, effectiveFrom, effectiveTo], map: "hr_perf_resp_assignment_period_idx")
@@ -7693,20 +7693,22 @@ model PerformanceTemplateVersion {
 }
 
 model PerformanceCohortVersion {
-  id                String                       @id @default(cuid())
-  cohortKey         String
-  version           Int
-  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
-  predecessorId     String?
-  membershipHash    String
-  stage             String?
-  targetPercent     Int?
-  readinessHash     String?
-  effectiveFrom     DateTime?
-  activationReason  String?
-  activatedByUserId String?
-  createdByUserId   String
-  createdAt         DateTime                     @default(now())
+  id                  String                       @id @default(cuid())
+  cohortKey           String
+  version             Int
+  lifecycle           PerformanceArtifactLifecycle @default(DRAFT)
+  predecessorId       String?
+  membershipHash      String
+  stage               String?
+  targetPercent       Int?
+  readinessHash       String?
+  targetPhase         PerformanceRolloutPhase?
+  promotionEvidenceId String?
+  effectiveFrom       DateTime?
+  activationReason    String?
+  activatedByUserId   String?
+  createdByUserId     String
+  createdAt           DateTime                     @default(now())
 
   @@unique([cohortKey, version])
   @@index([lifecycle, effectiveFrom])
@@ -7728,21 +7730,63 @@ model PerformanceTrainingEvidence {
 }
 
 model PerformanceRolloutDecision {
-  id            String   @id @default(cuid())
-  scopeType     String
-  scopeId       String
-  ownerType     String
-  action        String
-  version       Int
-  actorUserId   String
-  reasonCode    String
-  authorityHash String
-  evidenceHash  String
-  decidedAt     DateTime @default(now())
+  id                  String   @id @default(cuid())
+  scopeType           String
+  scopeId             String
+  ownerType           String
+  action              String
+  version             Int
+  actorUserId         String
+  reasonCode          String
+  authorityHash       String
+  evidenceHash        String
+  promotionEvidenceId String?
+  decidedAt           DateTime @default(now())
 
   @@unique([scopeType, scopeId, ownerType, version])
   @@index([scopeType, scopeId, action, decidedAt])
   @@map("performance_rollout_decisions")
+}
+
+model PerformancePromotionEvidence {
+  id                        String                  @id
+  evidenceHash              String                  @unique
+  manifestHash              String
+  releaseCommit             String
+  releaseSourceHash         String
+  releaseSchemaHash         String
+  releasePolicyHash         String
+  releaseInfrastructureHash String
+  backendImageDigest        String
+  frontendImageDigest       String
+  inquiryImageDigest        String
+  targetPhase               PerformanceRolloutPhase
+  targetCohortVersionId     String
+  targetCohortStage         String
+  targetMembershipHash      String
+  targetReadyPopulation     Int
+  targetMemberCount         Int
+  targetGate                Int
+  encryptedPayloadId        String                  @unique
+  attestationKeyId          String
+  authenticatedByUserId     String
+  verifiedAt                DateTime
+  validUntil                DateTime
+  createdAt                 DateTime                @default(now())
+
+  @@index([targetCohortVersionId, targetPhase, validUntil])
+  @@map("performance_promotion_evidence")
+}
+
+model PerformancePromotionEvidenceRevocation {
+  id                  String   @id
+  promotionEvidenceId String
+  reasonCode          String
+  revokedByUserId     String
+  revokedAt           DateTime @default(now())
+
+  @@index([promotionEvidenceId, revokedAt])
+  @@map("performance_promotion_evidence_revocations")
 }
 
 model PerformanceCohortMember {
@@ -7758,34 +7802,35 @@ model PerformanceCohortMember {
 }
 
 model PerformanceFeaturePhaseVersion {
-  id               String                  @id @default(cuid())
-  version          Int                     @unique
-  phase            PerformanceRolloutPhase
-  releaseEnabled   Boolean                 @default(false)
-  cohortVersionId  String?
-  predecessorId    String?
-  reason           String
-  effectiveFrom    DateTime
-  recordedByUserId String
-  createdAt        DateTime                @default(now())
+  id                  String                  @id @default(cuid())
+  version             Int                     @unique
+  phase               PerformanceRolloutPhase
+  releaseEnabled      Boolean                 @default(false)
+  cohortVersionId     String?
+  promotionEvidenceId String?
+  predecessorId       String?
+  reason              String
+  effectiveFrom       DateTime
+  recordedByUserId    String
+  createdAt           DateTime                @default(now())
 
   @@index([effectiveFrom, version])
   @@map("performance_feature_phase_versions")
 }
 
 model PerformanceSafetyPause {
-  id              String    @id @default(cuid())
-  phaseVersionId  String
-  cohortVersionId String?
-  scope           String
-  status          String    @default("ACTIVE")
-  reasonCode      String
-  reason          String
-  startedByUserId String?
-  startedAt       DateTime  @default(now())
-  resumedByUserId String?
-  resumedAt       DateTime?
-  resumeReason    String?
+  id               String    @id @default(cuid())
+  phaseVersionId   String
+  cohortVersionId  String?
+  scope            String
+  status           String    @default("ACTIVE")
+  reasonCode       String
+  reason           String
+  startedByUserId  String?
+  startedAt        DateTime  @default(now())
+  resumedByUserId  String?
+  resumedAt        DateTime?
+  resumeReason     String?
   sourceIncidentId String?   @unique
 
   @@index([status, startedAt])
@@ -7794,45 +7839,48 @@ model PerformanceSafetyPause {
 }
 
 model PerformanceOperationalRoute {
-  id String @id @default(cuid())
-  routeKey String @unique
+  id              String   @id @default(cuid())
+  routeKey        String   @unique
   recipientUserId String
-  verifiedAt DateTime
-  configuredById String
-  reason String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  verifiedAt      DateTime
+  configuredById  String
+  reason          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
   @@index([recipientUserId, verifiedAt])
   @@map("performance_operational_routes")
 }
 
 model PerformanceOperationalHeartbeat {
-  id String @id @default(cuid())
-  component String @unique
+  id         String   @id @default(cuid())
+  component  String   @unique
   observedAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
   @@index([observedAt])
   @@map("performance_operational_heartbeats")
 }
 
 model PerformanceOperationalWindow {
-  id String @id @default(cuid())
-  metricKey String
-  scope String
+  id              String   @id @default(cuid())
+  metricKey       String
+  scope           String
   cohortVersionId String?
-  windowStart DateTime
-  windowEnd DateTime
-  numerator Int
-  denominator Int
-  p95Ms Int?
-  p99Ms Int?
-  maxAgeSeconds Int?
-  baselineBps Int?
-  retryExhausted Boolean @default(false)
-  measuredBps Int?
-  thresholdState String
-  createdAt DateTime @default(now())
+  windowStart     DateTime
+  windowEnd       DateTime
+  numerator       Int
+  denominator     Int
+  p95Ms           Int?
+  p99Ms           Int?
+  maxAgeSeconds   Int?
+  baselineBps     Int?
+  retryExhausted  Boolean  @default(false)
+  measuredBps     Int?
+  thresholdState  String
+  createdAt       DateTime @default(now())
+
   @@unique([metricKey, scope, cohortVersionId, windowStart, windowEnd])
   @@index([metricKey, scope, cohortVersionId, windowEnd])
   @@index([createdAt])
@@ -7840,41 +7888,43 @@ model PerformanceOperationalWindow {
 }
 
 model PerformanceOperationalRequestObservation {
-  id String @id @default(cuid())
-  metricKey String
-  durationMs Int
-  responseStatus Int
+  id                    String   @id @default(cuid())
+  metricKey             String
+  durationMs            Int
+  responseStatus        Int
   authorizationDecision String
-  timedOut Boolean @default(false)
-  observedAt DateTime @default(now())
+  timedOut              Boolean  @default(false)
+  observedAt            DateTime @default(now())
+
   @@index([observedAt, metricKey])
   @@map("performance_operational_request_observations")
 }
 
 model PerformanceOperationalIncident {
-  id String @id @default(cuid())
-  deduplicationKey String @unique
-  category String
-  metricKey String?
-  routeKey String
-  scope String
-  cohortVersionId String?
-  severity String
-  status String @default("OPEN")
-  thresholdCode String
-  occurrenceCount Int @default(1)
-  firstObservedAt DateTime
-  lastObservedAt DateTime
+  id               String    @id @default(cuid())
+  deduplicationKey String    @unique
+  category         String
+  metricKey        String?
+  routeKey         String
+  scope            String
+  cohortVersionId  String?
+  severity         String
+  status           String    @default("OPEN")
+  thresholdCode    String
+  occurrenceCount  Int       @default(1)
+  firstObservedAt  DateTime
+  lastObservedAt   DateTime
   acknowledgeDueAt DateTime
   containmentDueAt DateTime?
-  escalationDueAt DateTime?
-  acknowledgedAt DateTime?
-  containedAt DateTime?
-  escalatedAt DateTime?
-  resolvedAt DateTime?
-  safetyPauseId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  escalationDueAt  DateTime?
+  acknowledgedAt   DateTime?
+  containedAt      DateTime?
+  escalatedAt      DateTime?
+  resolvedAt       DateTime?
+  safetyPauseId    String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
   @@index([status, severity, firstObservedAt])
   @@index([scope, cohortVersionId, status])
   @@index([safetyPauseId])
@@ -7882,13 +7932,14 @@ model PerformanceOperationalIncident {
 }
 
 model PerformanceOperationalIncidentEvidence {
-  id String @id @default(cuid())
-  incidentId String
-  action String
-  actorUserId String?
-  reasonCode String
+  id           String   @id @default(cuid())
+  incidentId   String
+  action       String
+  actorUserId  String?
+  reasonCode   String
   evidenceHash String
-  recordedAt DateTime @default(now())
+  recordedAt   DateTime @default(now())
+
   @@index([incidentId, recordedAt])
   @@map("performance_operational_incident_evidence")
 }
@@ -7910,40 +7961,40 @@ model PerformanceCycle {
 }
 
 model PerformanceReadinessRun {
-  id                  String    @id @default(cuid())
-  stableKey           String    @unique
-  measurementFrom     DateTime
-  measurementTo       DateTime
-  sourceCount         Int
-  sourceHash          String
-  status              String    @default("RUNNING")
-  cursorAssignmentId  String?
-  appliedCount        Int       @default(0)
-  blockedCount        Int       @default(0)
-  failedCount         Int       @default(0)
-  driftDetected       Boolean   @default(false)
-  requestedByUserId   String
-  startedAt           DateTime  @default(now())
-  completedAt         DateTime?
-  updatedAt           DateTime  @updatedAt
-  records             PerformanceReadinessRecord[]
+  id                 String                       @id @default(cuid())
+  stableKey          String                       @unique
+  measurementFrom    DateTime
+  measurementTo      DateTime
+  sourceCount        Int
+  sourceHash         String
+  status             String                       @default("RUNNING")
+  cursorAssignmentId String?
+  appliedCount       Int                          @default(0)
+  blockedCount       Int                          @default(0)
+  failedCount        Int                          @default(0)
+  driftDetected      Boolean                      @default(false)
+  requestedByUserId  String
+  startedAt          DateTime                     @default(now())
+  completedAt        DateTime?
+  updatedAt          DateTime                     @updatedAt
+  records            PerformanceReadinessRecord[]
 
   @@index([status, startedAt])
   @@map("performance_readiness_runs")
 }
 
 model PerformanceReadinessRecord {
-  id                     String   @id @default(cuid())
+  id                     String                  @id @default(cuid())
   runId                  String
   employmentAssignmentId String
   sourceHash             String
   status                 String
   blockerCode            String?
-  attemptCount           Int      @default(1)
+  attemptCount           Int                     @default(1)
   lastErrorCode          String?
   evaluationId           String?
   sectionId              String?
-  processedAt            DateTime @default(now())
+  processedAt            DateTime                @default(now())
   run                    PerformanceReadinessRun @relation(fields: [runId], references: [id], onDelete: Restrict)
 
   @@unique([runId, employmentAssignmentId])
@@ -8242,12 +8293,12 @@ model PerformanceExportReceipt {
 
 // Sealed source index; plaintext identifiers and reconstruction stay in the protected vault.
 model PerformanceExportLineage {
-  exportId           String   @id
-  schemaVersion      Int
-  reconstructionId   String   @unique
-  dependencyHash     String
-  dependencyCount    Int
-  createdAt          DateTime @default(now())
+  exportId         String   @id
+  schemaVersion    Int
+  reconstructionId String   @unique
+  dependencyHash   String
+  dependencyCount  Int
+  createdAt        DateTime @default(now())
 
   @@map("performance_export_lineage")
 }
@@ -8315,16 +8366,16 @@ model PerformanceConsequenceHandoff {
 }
 
 model PerformanceConsequencePackage {
-  id                            String   @id @default(cuid())
-  encryptedPayloadId            String   @unique
-  snapshotHash                  String
-  destinationResponsibilityId   String
-  destinationWorkspaceCode      String
-  destinationFeatureCode        String?
-  destinationQueueCode          String
-  destinationVersion            Int
-  assignedDestinationUserId     String
-  createdAt                     DateTime @default(now())
+  id                          String   @id @default(cuid())
+  encryptedPayloadId          String   @unique
+  snapshotHash                String
+  destinationResponsibilityId String
+  destinationWorkspaceCode    String
+  destinationFeatureCode      String?
+  destinationQueueCode        String
+  destinationVersion          Int
+  assignedDestinationUserId   String
+  createdAt                   DateTime @default(now())
 
   @@index([assignedDestinationUserId, createdAt])
   @@map("performance_consequence_packages")
@@ -8349,25 +8400,25 @@ model PerformanceConsequencePolicyVersion {
 }
 
 model HrCompensationAgreement {
-  id                       String   @id @default(cuid())
+  id                       String    @id @default(cuid())
   employmentRelationshipId String
   version                  Int
-  status                   String   @default("DRAFT")
+  status                   String    @default("DRAFT")
   effectiveFrom            DateTime
   effectiveTo              DateTime?
-  currency                 String   @default("IRR")
+  currency                 String    @default("IRR")
   componentsJson           Json
-  totalRials               Decimal  @db.Decimal(18, 0)
-  payRangeMinimumRials     Decimal  @db.Decimal(18, 0)
-  payRangeMaximumRials     Decimal  @db.Decimal(18, 0)
+  totalRials               Decimal   @db.Decimal(18, 0)
+  payRangeMinimumRials     Decimal   @db.Decimal(18, 0)
+  payRangeMaximumRials     Decimal   @db.Decimal(18, 0)
   budgetCode               String
-  budgetAvailableRials     Decimal  @db.Decimal(18, 0)
+  budgetAvailableRials     Decimal   @db.Decimal(18, 0)
   legalControlStatus       String
   contentHash              String
   approvedByUserId         String?
   approvedAt               DateTime?
   createdByUserId          String
-  createdAt                DateTime @default(now())
+  createdAt                DateTime  @default(now())
 
   @@unique([employmentRelationshipId, version])
   @@index([employmentRelationshipId, status, effectiveFrom, effectiveTo])
@@ -8469,23 +8520,23 @@ model PerformanceRecoverableCopy {
 }
 
 model PerformancePrivacyCase {
-  id                   String   @id @default(cuid())
-  subjectId            String
-  requestKind          String
-  status               String   @default("RECEIVED")
-  requestedByUserId    String
-  requestedAt          DateTime @default(now())
-  acknowledgeBy        DateTime
-  verifyBy             DateTime
-  respondBy            DateTime
-  extensionCount       Int      @default(0)
-  identityVerifiedAt   DateTime?
-  verifiedByUserId     String?
-  scopeHash            String
-  encryptedRequestId  String   @unique
-  encryptedResponseId String?  @unique
-  closedAt             DateTime?
-  version              Int      @default(1)
+  id                  String    @id @default(cuid())
+  subjectId           String
+  requestKind         String
+  status              String    @default("RECEIVED")
+  requestedByUserId   String
+  requestedAt         DateTime  @default(now())
+  acknowledgeBy       DateTime
+  verifyBy            DateTime
+  respondBy           DateTime
+  extensionCount      Int       @default(0)
+  identityVerifiedAt  DateTime?
+  verifiedByUserId    String?
+  scopeHash           String
+  encryptedRequestId  String    @unique
+  encryptedResponseId String?   @unique
+  closedAt            DateTime?
+  version             Int       @default(1)
 
   @@index([subjectId, status])
   @@index([status, respondBy])
@@ -8518,13 +8569,13 @@ model PerformancePrivacyDecision {
 }
 
 model PerformanceEvidenceRestriction {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   evaluationId     String
   privacyCaseId    String?
-  status           String   @default("ACTIVE")
+  status           String    @default("ACTIVE")
   reasonCode       String
   createdByUserId  String
-  createdAt        DateTime @default(now())
+  createdAt        DateTime  @default(now())
   releasedByUserId String?
   releasedAt       DateTime?
   releaseReason    String?
@@ -8548,16 +8599,16 @@ model PerformanceLegalHoldDecision {
 }
 
 model PerformanceExportCleanupAttempt {
-  id              String   @id @default(cuid())
-  exportId        String   @unique
+  id              String    @id @default(cuid())
+  exportId        String    @unique
   policyVersionId String
   artifactHash    String?
   scopeHash       String
-  status          String   @default("PENDING")
-  attemptCount    Int      @default(0)
+  status          String    @default("PENDING")
+  attemptCount    Int       @default(0)
   lastFailureCode String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   liveDeletedAt   DateTime?
 
   @@index([status, updatedAt])
@@ -9088,18 +9139,18 @@ model PartnerSaleCase {
 }
 
 model SabalanToPartnerSaleRecord {
-  id                  String                      @id
-  recordNumber        String                      @unique
-  caseId              String                      @unique
-  kind                String                      @default("SABALAN_TO_PARTNER")
+  id                  String                             @id
+  recordNumber        String                             @unique
+  caseId              String                             @unique
+  kind                String                             @default("SABALAN_TO_PARTNER")
   commercialAccountId String
   expectedRevision    Int
   integrityHash       String
-  case                PartnerSaleCase             @relation("PartnerInternalOwner", fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  caseLink            PartnerSaleCase?            @relation("PartnerInternalLink")
+  case                PartnerSaleCase                    @relation("PartnerInternalOwner", fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  caseLink            PartnerSaleCase?                   @relation("PartnerInternalLink")
   fulfillmentLineages PartnerFulfillmentLineage[]
   allocationPricing   PartnerAllocationRevisionPricing[]
-  commercialAccount   PartnerCommercialAccount    @relation(fields: [commercialAccountId], references: [id], onDelete: Restrict)
+  commercialAccount   PartnerCommercialAccount           @relation(fields: [commercialAccountId], references: [id], onDelete: Restrict)
 
   @@unique([id, caseId])
   @@map("sabalan_to_partner_sale_records")
@@ -9119,7 +9170,7 @@ model PartnerCaseRevision {
   caseId                  String
   revision                Int
   predecessorRevision     Int?
-  schemaVersion           Int                             @default(1)
+  schemaVersion           Int                                @default(1)
   integrityHash           String
   graphHash               String
   graph                   Json
@@ -9131,14 +9182,14 @@ model PartnerCaseRevision {
   internalProjection      Json
   customerProjection      Json
   actorId                 String
-  commandId               String                          @unique
-  recordedAt              DateTime                        @default(now()) @db.Timestamptz(3)
-  assemblyTransaction     BigInt                          @default(dbgenerated("txid_current()"))
-  case                    PartnerSaleCase                 @relation("PartnerCaseHistory", fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  headOf                  PartnerSaleCase[]               @relation("PartnerCaseHead")
-  committedBy             PartnerSaleCase[]               @relation("PartnerCommittedRevision")
-  predecessor             PartnerCaseRevision?            @relation("PartnerRevisionLineage", fields: [caseId, predecessorRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_revision_predecessor")
-  successors              PartnerCaseRevision[]           @relation("PartnerRevisionLineage")
+  commandId               String                             @unique
+  recordedAt              DateTime                           @default(now()) @db.Timestamptz(3)
+  assemblyTransaction     BigInt                             @default(dbgenerated("txid_current()"))
+  case                    PartnerSaleCase                    @relation("PartnerCaseHistory", fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  headOf                  PartnerSaleCase[]                  @relation("PartnerCaseHead")
+  committedBy             PartnerSaleCase[]                  @relation("PartnerCommittedRevision")
+  predecessor             PartnerCaseRevision?               @relation("PartnerRevisionLineage", fields: [caseId, predecessorRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction, map: "partner_revision_predecessor")
+  successors              PartnerCaseRevision[]              @relation("PartnerRevisionLineage")
   events                  PartnerCaseEvent[]
   paymentPlans            PartnerPaymentPlan[]
   outputs                 PartnerCustomerOutputSnapshot[]
@@ -9219,14 +9270,14 @@ model PartnerCaseDelivery {
 }
 
 model PartnerCaseDeliveryItem {
-  caseId       String
-  revision     Int
-  deliveryId   String
-  productRowId String
-  quantity     Decimal               @db.Decimal
-  delivery     PartnerCaseDelivery   @relation(fields: [caseId, revision, deliveryId], references: [caseId, revision, id], onDelete: Restrict, onUpdate: NoAction)
-  binding      PartnerCaseRowBinding @relation(fields: [caseId, revision, productRowId], references: [caseId, revision, productRowId], onDelete: Restrict, onUpdate: NoAction)
-  allocationDraftLines LogisticsAllocationDraftLine[]
+  caseId                  String
+  revision                Int
+  deliveryId              String
+  productRowId            String
+  quantity                Decimal                           @db.Decimal
+  delivery                PartnerCaseDelivery               @relation(fields: [caseId, revision, deliveryId], references: [caseId, revision, id], onDelete: Restrict, onUpdate: NoAction)
+  binding                 PartnerCaseRowBinding             @relation(fields: [caseId, revision, productRowId], references: [caseId, revision, productRowId], onDelete: Restrict, onUpdate: NoAction)
+  allocationDraftLines    LogisticsAllocationDraftLine[]
   allocationRevisionLines LogisticsAllocationRevisionLine[]
 
   @@id([caseId, revision, deliveryId, productRowId])
@@ -9500,24 +9551,24 @@ model PartnerCustomerArtifact {
 /// Stable bridge from a committed Partner graph row into fulfillment. The
 /// standard shipment projection remains the owner of reservation/dispatch facts.
 model PartnerFulfillmentLineage {
-  id               String                     @id
-  caseId           String
-  caseRevision     Int
-  integrityHash    String
-  internalRecordId String
-  productRowId     String
-  quantity         Decimal                    @db.Decimal(18, 3)
-  unit             String
-  recipient        Json
-  deliveryIds      Json
-  commandId        String
-  createdAt        DateTime                   @default(now()) @db.Timestamptz(3)
-  case             PartnerSaleCase            @relation(fields: [caseId], references: [id], onDelete: Restrict)
-  revision         PartnerCaseRevision        @relation(fields: [caseId, caseRevision], references: [caseId, revision], onDelete: Restrict, onUpdate: NoAction, map: "partner_fulfillment_revision")
-  internalRecord   SabalanToPartnerSaleRecord @relation(fields: [internalRecordId, caseId], references: [id, caseId], onDelete: Restrict, onUpdate: NoAction, map: "partner_fulfillment_internal_record_owner")
-  rowBinding       PartnerCaseRowBinding      @relation(fields: [caseId, caseRevision, productRowId], references: [caseId, revision, productRowId], onDelete: Restrict, onUpdate: NoAction, map: "partner_fulfillment_row_binding")
-  shipmentEvidence ShipmentQuantityEvidence[]
-  allocationDraftLines LogisticsAllocationDraftLine[]
+  id                      String                            @id
+  caseId                  String
+  caseRevision            Int
+  integrityHash           String
+  internalRecordId        String
+  productRowId            String
+  quantity                Decimal                           @db.Decimal(18, 3)
+  unit                    String
+  recipient               Json
+  deliveryIds             Json
+  commandId               String
+  createdAt               DateTime                          @default(now()) @db.Timestamptz(3)
+  case                    PartnerSaleCase                   @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  revision                PartnerCaseRevision               @relation(fields: [caseId, caseRevision], references: [caseId, revision], onDelete: Restrict, onUpdate: NoAction, map: "partner_fulfillment_revision")
+  internalRecord          SabalanToPartnerSaleRecord        @relation(fields: [internalRecordId, caseId], references: [id, caseId], onDelete: Restrict, onUpdate: NoAction, map: "partner_fulfillment_internal_record_owner")
+  rowBinding              PartnerCaseRowBinding             @relation(fields: [caseId, caseRevision, productRowId], references: [caseId, revision, productRowId], onDelete: Restrict, onUpdate: NoAction, map: "partner_fulfillment_row_binding")
+  shipmentEvidence        ShipmentQuantityEvidence[]
+  allocationDraftLines    LogisticsAllocationDraftLine[]
   allocationRevisionLines LogisticsAllocationRevisionLine[]
 
   @@unique([id, caseId, productRowId, unit], map: "partner_lineage_shipment_identity")

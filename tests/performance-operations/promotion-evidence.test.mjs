@@ -84,6 +84,45 @@ test('only hash-verified, matching-release check artifacts satisfy a gate', asyn
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test('a signed report admits only the exact requested phase and cohort target', async () => {
+  const { createHash, createHmac } = await import('node:crypto');
+  const { execFileSync } = await import('node:child_process');
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-signed-evidence-'));
+  try {
+    const release = { commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+      sourceHash: await performanceSourceHash(), schemaHash: 'a'.repeat(64), policyHash: 'b'.repeat(64), infrastructureHash: 'c'.repeat(64),
+      images: { backend: `sha256:${'d'.repeat(64)}`, frontend: `sha256:${'e'.repeat(64)}`, inquiry: `sha256:${'f'.repeat(64)}` } };
+    const target = { phase: 'SCHEMA_PROTECTION', cohortVersionId: 'cohort-exact', cohortStage: 'PILOT', membershipHash: '9'.repeat(64),
+      readyPopulation: 10, memberCount: 10 };
+    const checks = [];
+    for (const name of ['additive-migration', 'permission-matrix', 'encryption', 'audit-lineage', 'retention', 'legal-hold', 'erasure', 'backup-restore']) {
+      const bytes = JSON.stringify({ schemaVersion: 1, release, check: name, status: 'PASS', durationMs: 10,
+        observedAt: new Date().toISOString(), command: `acceptance:${name}` });
+      await writeFile(path.join(directory, `${name}.json`), bytes);
+      checks.push({ name, path: `${name}.json`, sha256: createHash('sha256').update(bytes).digest('hex') });
+    }
+    const validUntil = new Date(Date.now() + 60_000).toISOString();
+    await writeFile(path.join(directory, 'input.json'), JSON.stringify({ schemaVersion: 1, release, target, validUntil, checks }));
+    const key = Buffer.alloc(32, 17);
+    const output = path.join(directory, 'report.json');
+    const result = spawnSync(process.execPath, [command, '--input', path.join(directory, 'input.json'), '--output', output], {
+      encoding: 'utf8', env: { ...process.env, PERFORMANCE_PROMOTION_ATTESTATION_KEY_ID: 'collector-v1',
+        PERFORMANCE_PROMOTION_ATTESTATION_KEY_BASE64: key.toString('base64') },
+    });
+    assert.equal(result.status, 0);
+    const report = JSON.parse(await readFile(output, 'utf8'));
+    assert.equal(report.decision, 'EVIDENCE_COMPLETE');
+    assert.deepEqual(report.target, target);
+    assert.deepEqual(report.gates.map(({ status }) => status), ['PASS', ...Array(8).fill('NOT_REQUIRED')]);
+    const { attestation, ...unsigned } = report;
+    const canonical = (value) => JSON.stringify(value, function (_key, item) {
+      return item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
+    });
+    assert.equal(attestation.signature, createHmac('sha256', key).update(canonical(unsigned)).digest('hex'));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('a PASS label cannot replace retirement measurements', async () => {
   const { createHash } = await import('node:crypto');
   const { execFileSync } = await import('node:child_process');

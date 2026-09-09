@@ -38,6 +38,7 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'MANAGE_PERFORMANCE_ROLLOUT', labelFa: 'مدیریت مرحله و جامعه فعال‌سازی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'PAUSE_PERFORMANCE_EVALUATION', labelFa: 'توقف ایمن ارزیابی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'RECORD_PERFORMANCE_TRAINING', labelFa: 'ثبت شاهد آموزش فعال‌سازی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'RECORD_PERFORMANCE_PROMOTION_EVIDENCE', labelFa: 'ثبت و ابطال بسته شواهد ارتقای عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'APPROVE_PERFORMANCE_COHORT_HR', labelFa: 'تصویب منابع انسانی جامعه عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'APPROVE_PERFORMANCE_COHORT_SECURITY', labelFa: 'تصویب امنیت و حریم خصوصی جامعه عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'APPROVE_PERFORMANCE_COHORT_SYSTEM', labelFa: 'تصویب مالک سامانه جامعه عملکرد', level: 'ADMIN', prerequisites: [] },

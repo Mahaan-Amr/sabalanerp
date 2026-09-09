@@ -14,6 +14,10 @@ if (!['unit', 'database', 'all'].includes(mode) || process.argv.length !== 3) {
   process.exit(2);
 }
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const canonical = (value) => JSON.stringify(value, function (_key, item) {
+  return item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
+});
 const command = (name, args) => execFileSync(name, args, { cwd: root, encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const composeArgs = ['compose', '-f', path.join(root, 'docker-compose.local.yml')];
 const preflight = () => {
@@ -46,8 +50,8 @@ const captureIdentity = async () => {
         (SELECT "policyKind", version, lifecycle, "effectiveFrom", "contentHash" FROM performance_policy_versions) p)
     )`,
   ]));
-  return { ...identity, images, appliedMigrationHash: digest(JSON.stringify(metadata.migrations)),
-    policyMetadataHash: digest(JSON.stringify(metadata.policies)),
+  return { ...identity, images, appliedMigrationHash: digest(canonical(metadata.migrations)),
+    policyMetadataHash: digest(canonical(metadata.policies)),
     composeSourceHash: digest(await readFile('docker-compose.local.yml')),
     runtimeSourceBinding: 'NOT_ATTESTED',
   };

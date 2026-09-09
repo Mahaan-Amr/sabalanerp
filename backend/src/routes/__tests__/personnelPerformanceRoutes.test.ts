@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import type { RequestHandler } from 'express';
-import router, { classifyPerformanceRequestMetric, performanceRequestObservationOutcome, projectPersonnelPerformanceCapabilities } from '../personnel-performance';
+import router, {
+  classifyPerformanceRequestMetric,
+  performanceRequestObservationOutcome,
+  projectPersonnelPerformanceCapabilities,
+} from '../personnel-performance';
 
 const registeredRoutes = (router as unknown as {
   stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
@@ -78,6 +82,8 @@ assert.deepEqual(registeredRoutes, [
   'POST /operations/disable',
   'POST /operations/training-evidence',
   'POST /operations/cohorts',
+  'POST /operations/promotion-evidence',
+  'POST /operations/promotion-evidence/:promotionEvidenceId/revoke',
   'POST /operations/cohorts/:cohortVersionId/decisions',
   'POST /operations/cohorts/:cohortVersionId/activate',
   'POST /operations/pauses/:pauseId/decisions',
@@ -105,6 +111,13 @@ for (const path of ['/readiness/reconstruct', '/readiness/:runId/retry', '/super
   assert.ok(writeLayer && writeLayer.route!.stack.length >= 3, `${path} writes require permission and server-side rollout middleware`);
 }
 
+for (const path of ['/operations/promotion-evidence', '/operations/promotion-evidence/:promotionEvidenceId/revoke']) {
+  const evidenceLayer = (router as unknown as {
+    stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
+  }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);
+  assert.ok(evidenceLayer && evidenceLayer.route!.stack.length >= 2, `${path} requires explicit evidence-administration authorization`);
+}
+
 for (const path of ['/retention/erasure/policies/:policyVersionId/impact-approval', '/retention/erasure/:operationId/bulk-approvals',
   '/retention/erasure/:operationId/copies', '/retention/erasure/:operationId/run']) {
   const erasureLayer = (router as unknown as {
@@ -112,6 +125,7 @@ for (const path of ['/retention/erasure/policies/:policyVersionId/impact-approva
   }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);
   assert.ok(erasureLayer && erasureLayer.route!.stack.length >= 2, `${path} requires explicit retention-erasure authorization`);
 }
+
 assert.deepEqual(projectPersonnelPerformanceCapabilities([
   'PERSONNEL',
   'VIEW_PERFORMANCE_HISTORY',

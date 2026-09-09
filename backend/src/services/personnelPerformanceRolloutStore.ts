@@ -1,8 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import type { Prisma, PrismaClient } from '@prisma/client';
+import type { PerformanceRolloutPhase, Prisma, PrismaClient } from '@prisma/client';
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
 import { canonicalPerformanceHash } from './personnelPerformancePolicy';
 import { runPerformanceSerializableTransaction } from './personnelPerformancePolicyStore';
+import { persistPerformancePayload, performanceVaultKeyFromEnvironment, readPerformancePayload } from './personnelPerformancePayloadStore';
+import {
+  performancePromotionAttestationKeyFromEnvironment,
+  performanceRuntimeReleaseIdentityFromEnvironment,
+  verifyPerformancePromotionEvidence,
+  type PerformanceCohortStage,
+  type PerformancePromotionEvidenceReport,
+} from './personnelPerformancePromotionEvidence';
 import { assertPerformanceOperationalExpansionReady } from './personnelPerformanceMonitoringStore';
 
 type Client = PrismaClient | Prisma.TransactionClient;
@@ -17,6 +25,9 @@ const ownerPermission: Record<OwnerType, { cohort: string; resume: string }> = {
 const stagePercent: Record<Stage, number> = {
   PILOT: 10, TEN_PERCENT: 10, TWENTY_FIVE_PERCENT: 25, FIFTY_PERCENT: 50, ALL: 100,
 };
+const phases: PerformanceRolloutPhase[] = ['SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT',
+  'RESULT_LEVEL_BADGE', 'ANALYTICS_RANKING_CALIBRATION', 'PDF_EXCEL_EXPORT', 'CONSEQUENCE_HANDOFF', 'EXPANSION_RETIREMENT'];
+const stages: Stage[] = ['PILOT', 'TEN_PERCENT', 'TWENTY_FIVE_PERCENT', 'FIFTY_PERCENT', 'ALL'];
 const rolloutError = (code: string, status = 409) => Object.assign(new Error('اقدام فعال‌سازی با شواهد، اختیار یا وضعیت فعلی مجاز نیست.'), { code, status });
 const validHash = (value: string) => /^[a-f0-9]{64}$/.test(value);
 const validReason = (value: string) => /^[A-Z][A-Z0-9_]{2,79}$/.test(value);
@@ -41,6 +52,23 @@ const requirePermission = async (tx: Prisma.TransactionClient, actorUserId: stri
   return canonicalPerformanceHash({ actorUserId, permission, effectivePermissions: permissions.sort() });
 };
 
+const currentPerformanceReleaseIdentity = async (tx: Prisma.TransactionClient) => {
+  const configured = performanceRuntimeReleaseIdentityFromEnvironment();
+  const [row] = await tx.$queryRaw<Array<{ metadata: { migrations: unknown; policies: unknown } }>>`
+    SELECT json_build_object(
+      'migrations', (SELECT json_agg(row_to_json(m) ORDER BY m.migration_name) FROM
+        (SELECT migration_name, checksum, finished_at IS NOT NULL AS finished,
+          rolled_back_at IS NOT NULL AS rolled_back FROM _prisma_migrations) m),
+      'policies', (SELECT json_agg(row_to_json(p) ORDER BY p."policyKind", p.version) FROM
+        (SELECT "policyKind", version, lifecycle, "effectiveFrom", "contentHash" FROM performance_policy_versions) p)
+    ) AS metadata`;
+  const schemaHash = canonicalPerformanceHash(row.metadata.migrations);
+  const policyHash = canonicalPerformanceHash(row.metadata.policies);
+  if (configured.schemaHash !== schemaHash) throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_SCHEMA_CHANGED');
+  if (configured.policyHash !== policyHash) throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_POLICY_CHANGED');
+  return configured;
+};
+
 export const recordPerformanceTrainingEvidence = async (client: Client, input: {
   actorUserId: string; subjectId: string; curriculumHash: string; evidenceHash: string; completedAt: Date; validUntil: Date;
 }) => runPerformanceSerializableTransaction(client, async (tx) => {
@@ -62,13 +90,15 @@ export const recordPerformanceTrainingEvidence = async (client: Client, input: {
 });
 
 export const proposePerformanceCohort = async (client: Client, input: {
-  actorUserId: string; cohortKey: string; stage: Stage; subjectIds: string[]; readinessHash: string; reason: string; now?: Date;
+  actorUserId: string; cohortKey: string; stage: Stage; targetPhase: PerformanceRolloutPhase;
+  subjectIds: string[]; readinessHash: string; reason: string; now?: Date;
 }) => runPerformanceSerializableTransaction(client, async (tx) => {
   const authorityHash = await requirePermission(tx, input.actorUserId, 'MANAGE_PERFORMANCE_ROLLOUT');
   const subjectIds = [...new Set(input.subjectIds)].sort();
   const now = input.now ?? new Date();
   if (!input.cohortKey.trim() || !subjectIds.length || subjectIds.length > 10_000 || !validHash(input.readinessHash)
-    || input.reason.trim().length < 8 || input.reason.length > 2_000 || !Object.prototype.hasOwnProperty.call(stagePercent, input.stage)) {
+    || input.reason.trim().length < 8 || input.reason.length > 2_000 || !Object.prototype.hasOwnProperty.call(stagePercent, input.stage)
+    || !phases.includes(input.targetPhase)) {
     throw rolloutError('PERFORMANCE_COHORT_PROPOSAL_INVALID', 422);
   }
   const subjects = await tx.performanceSubject.findMany({ where: { id: { in: subjectIds }, identityDetachedAt: null,
@@ -90,9 +120,19 @@ export const proposePerformanceCohort = async (client: Client, input: {
     orderBy: [{ subjectId: 'asc' }, { completedAt: 'desc' }] });
   if (new Set(training.map(({ subjectId }) => subjectId)).size !== subjectIds.length) throw rolloutError('PERFORMANCE_COHORT_TRAINING_MISSING');
   const previous = await tx.performanceCohortVersion.findFirst({ where: { cohortKey: input.cohortKey }, orderBy: { version: 'desc' } });
+  const latestPhase = await tx.performanceFeaturePhaseVersion.findFirst({ where: { effectiveFrom: { lte: now } },
+    orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] });
+  const expectedStageIndex = previous?.stage ? stages.indexOf(previous.stage as Stage) + 1 : 0;
+  const currentPhaseIndex = latestPhase ? phases.indexOf(latestPhase.phase) : -1;
+  const targetPhaseIndex = phases.indexOf(input.targetPhase);
+  if (stages.indexOf(input.stage) !== expectedStageIndex || (previous && previous.lifecycle !== 'ACTIVE')
+    || targetPhaseIndex < currentPhaseIndex || targetPhaseIndex > currentPhaseIndex + 1) {
+    throw rolloutError('PERFORMANCE_COHORT_STAGE_OUT_OF_ORDER');
+  }
   const cohort = await tx.performanceCohortVersion.create({ data: { cohortKey: input.cohortKey, version: (previous?.version ?? 0) + 1,
     predecessorId: previous?.id, membershipHash: canonicalPerformanceHash(subjectIds), stage: input.stage,
-    targetPercent: stagePercent[input.stage], readinessHash: input.readinessHash, activationReason: input.reason.trim(), createdByUserId: input.actorUserId } });
+    targetPercent: stagePercent[input.stage], readinessHash: input.readinessHash, targetPhase: input.targetPhase,
+    activationReason: input.reason.trim(), createdByUserId: input.actorUserId } });
   await tx.performanceCohortMember.createMany({ data: subjectIds.map((subjectId) => ({ cohortVersionId: cohort.id, subjectId,
     eligibilityHash: canonicalPerformanceHash({ subjectId, readinessHash: input.readinessHash,
       trainingEvidenceIds: training.filter((row) => row.subjectId === subjectId).map(({ id }) => id).sort() }) })) });
@@ -105,21 +145,35 @@ export const proposePerformanceCohort = async (client: Client, input: {
 
 export const decidePerformanceRollout = async (client: Client, input: {
   actorUserId: string; scopeType: 'COHORT' | 'SAFETY_PAUSE'; scopeId: string; ownerType: OwnerType;
-  action: 'APPROVE' | 'VETO' | 'APPROVE_RESUME'; reasonCode: string; evidenceHash: string;
+  action: 'APPROVE' | 'VETO' | 'APPROVE_RESUME'; reasonCode: string; evidenceHash?: string; promotionEvidenceId?: string;
 }) => runPerformanceSerializableTransaction(client, async (tx) => {
   const expectedAction = input.scopeType === 'COHORT' ? ['APPROVE', 'VETO'] : ['APPROVE_RESUME'];
-  if (!validOwnerType(input.ownerType) || !expectedAction.includes(input.action) || !validReason(input.reasonCode) || !validHash(input.evidenceHash)) {
+  if (!validOwnerType(input.ownerType) || !expectedAction.includes(input.action) || !validReason(input.reasonCode)) {
     throw rolloutError('PERFORMANCE_ROLLOUT_DECISION_INVALID', 422);
   }
   const permission = input.scopeType === 'COHORT' ? ownerPermission[input.ownerType].cohort : ownerPermission[input.ownerType].resume;
   const authorityHash = await requirePermission(tx, input.actorUserId, permission);
-  const scope = input.scopeType === 'COHORT'
-    ? await tx.performanceCohortVersion.findUnique({ where: { id: input.scopeId } })
-    : await tx.performanceSafetyPause.findUnique({ where: { id: input.scopeId } });
-  if (!scope) throw rolloutError('PERFORMANCE_ROLLOUT_SCOPE_UNAVAILABLE', 404);
+  let evidenceHash = input.evidenceHash;
+  if (input.scopeType === 'COHORT') {
+    await tx.$queryRaw`SELECT id FROM performance_cohort_versions WHERE id = ${input.scopeId} FOR UPDATE`;
+    const cohort = await tx.performanceCohortVersion.findUnique({ where: { id: input.scopeId } });
+    if (!cohort) throw rolloutError('PERFORMANCE_ROLLOUT_SCOPE_UNAVAILABLE', 404);
+    if (input.action === 'APPROVE') {
+      if (!input.promotionEvidenceId) throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_REQUIRED', 422);
+      evidenceHash = (await assertPerformancePromotionEvidence(tx, input.promotionEvidenceId, cohort)).evidenceHash;
+    } else if (!evidenceHash || !validHash(evidenceHash)) throw rolloutError('PERFORMANCE_ROLLOUT_DECISION_INVALID', 422);
+  } else {
+    if (!await tx.performanceSafetyPause.findUnique({ where: { id: input.scopeId } })) {
+      throw rolloutError('PERFORMANCE_ROLLOUT_SCOPE_UNAVAILABLE', 404);
+    }
+    if (!evidenceHash || !validHash(evidenceHash)) throw rolloutError('PERFORMANCE_ROLLOUT_DECISION_INVALID', 422);
+  }
   const previous = await tx.performanceRolloutDecision.findFirst({ where: { scopeType: input.scopeType, scopeId: input.scopeId,
     ownerType: input.ownerType }, orderBy: { version: 'desc' } });
-  return tx.performanceRolloutDecision.create({ data: { ...input, version: (previous?.version ?? 0) + 1, authorityHash } });
+  return tx.performanceRolloutDecision.create({ data: { actorUserId: input.actorUserId, scopeType: input.scopeType, scopeId: input.scopeId,
+    ownerType: input.ownerType, action: input.action, reasonCode: input.reasonCode, evidenceHash: evidenceHash!,
+    promotionEvidenceId: input.scopeType === 'COHORT' && input.action === 'APPROVE' ? input.promotionEvidenceId : null,
+    version: (previous?.version ?? 0) + 1, authorityHash } });
 });
 
 const currentApprovals = async (tx: Prisma.TransactionClient, scopeType: 'COHORT' | 'SAFETY_PAUSE', scopeId: string) => {
@@ -128,7 +182,9 @@ const currentApprovals = async (tx: Prisma.TransactionClient, scopeType: 'COHORT
   for (const row of decisions) if (!latestByOwner.has(row.ownerType)) latestByOwner.set(row.ownerType, row);
   const latest = [...latestByOwner.values()];
   const action = scopeType === 'COHORT' ? 'APPROVE' : 'APPROVE_RESUME';
-  if (latest.length !== 3 || latest.some((row) => row.action !== action) || new Set(latest.map(({ actorUserId }) => actorUserId)).size !== 3) {
+  if (latest.length !== 3 || latest.some((row) => row.action !== action) || new Set(latest.map(({ actorUserId }) => actorUserId)).size !== 3
+    || (scopeType === 'COHORT' && (latest.some(({ promotionEvidenceId }) => !promotionEvidenceId)
+      || new Set(latest.map(({ promotionEvidenceId }) => promotionEvidenceId)).size !== 1))) {
     throw rolloutError('PERFORMANCE_ROLLOUT_APPROVALS_INCOMPLETE');
   }
   for (const row of latest) {
@@ -168,7 +224,143 @@ const assertCohortEligibility = async (tx: Prisma.TransactionClient, cohort: {
     || canonicalPerformanceHash(runs.map(({ sourceHash }) => sourceHash).sort()) !== cohort.readinessHash) {
     throw rolloutError('PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED');
   }
+  const populationSubjects = await tx.performanceSubject.findMany({ where: { identityDetachedAt: null, employmentRelationshipId: { not: null } },
+    select: { id: true, employmentRelationshipId: true } });
+  const populationRelationships = await tx.hrEmploymentRelationship.findMany({ where: {
+    id: { in: populationSubjects.map(({ employmentRelationshipId }) => employmentRelationshipId!) }, status: { in: ['ACTIVE', 'SUSPENDED'] },
+    effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+  }, select: { id: true } });
+  const relationshipIds = new Set(populationRelationships.map(({ id }) => id));
+  const candidates = populationSubjects.filter(({ employmentRelationshipId }) => relationshipIds.has(employmentRelationshipId!));
+  const populationTraining = await tx.performanceTrainingEvidence.findMany({ where: { subjectId: { in: candidates.map(({ id }) => id) },
+    completedAt: { lte: now }, validUntil: { gt: now } }, select: { subjectId: true } });
+  const trained = new Set(populationTraining.map(({ subjectId }) => subjectId));
+  const populationEvaluations = await tx.performanceEvaluation.findMany({ where: { subjectId: { in: candidates.map(({ id }) => id) },
+  }, select: { id: true, subjectId: true } });
+  const populationReadiness = await tx.performanceReadinessRecord.findMany({ where: { evaluationId: { in: populationEvaluations.map(({ id }) => id) },
+    status: 'APPLIED' }, select: { evaluationId: true, runId: true } });
+  const populationRuns = await tx.performanceReadinessRun.findMany({ where: { id: { in: populationReadiness.map(({ runId }) => runId) },
+    status: 'COMPLETED', driftDetected: false }, select: { id: true } });
+  const populationRunIds = new Set(populationRuns.map(({ id }) => id));
+  const readyEvaluationIds = new Set(populationReadiness.filter(({ runId }) => populationRunIds.has(runId)).map(({ evaluationId }) => evaluationId));
+  const readyPopulation = new Set(populationEvaluations.filter(({ id, subjectId }) => readyEvaluationIds.has(id) && trained.has(subjectId))
+    .map(({ subjectId }) => subjectId)).size;
+  return { memberCount: subjectIds.length, readyPopulation };
 };
+
+type PromotionCohort = {
+  id: string;
+  stage: string | null;
+  targetPhase: PerformanceRolloutPhase | null;
+  membershipHash: string;
+  readinessHash: string | null;
+};
+
+const assertPerformancePromotionEvidence = async (
+  tx: Prisma.TransactionClient,
+  promotionEvidenceId: string,
+  cohort: PromotionCohort,
+  now?: Date,
+  population?: { readyPopulation: number; memberCount: number },
+) => {
+  if (!cohort.stage || !cohort.targetPhase || !stages.includes(cohort.stage as Stage)) {
+    throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_UNRELATED');
+  }
+  const [clock] = now ? [{ now }] : await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  const currentPopulation = population ?? await assertCohortEligibility(tx, cohort, clock.now);
+  const evidence = await tx.performancePromotionEvidence.findUnique({ where: { id: promotionEvidenceId } });
+  if (!evidence) throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_UNAVAILABLE');
+  if (await tx.performancePromotionEvidenceRevocation.findFirst({ where: { promotionEvidenceId } })) {
+    throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_REVOKED');
+  }
+  const report = await readPerformancePayload<PerformancePromotionEvidenceReport>(tx, evidence.encryptedPayloadId, performanceVaultKeyFromEnvironment());
+  const verified = verifyPerformancePromotionEvidence(report, {
+    now: clock.now,
+    release: await currentPerformanceReleaseIdentity(tx),
+    phase: cohort.targetPhase,
+    cohortVersionId: cohort.id,
+    cohortStage: cohort.stage as PerformanceCohortStage,
+    membershipHash: cohort.membershipHash,
+    readyPopulation: currentPopulation.readyPopulation,
+    memberCount: currentPopulation.memberCount,
+    ...performancePromotionAttestationKeyFromEnvironment(),
+  });
+  if (verified.evidenceHash !== evidence.evidenceHash || evidence.targetCohortVersionId !== cohort.id
+    || evidence.targetCohortStage !== cohort.stage || evidence.targetMembershipHash !== cohort.membershipHash
+    || evidence.targetPhase !== cohort.targetPhase || evidence.targetReadyPopulation !== currentPopulation.readyPopulation
+    || evidence.targetMemberCount !== currentPopulation.memberCount || evidence.validUntil <= clock.now) {
+    throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_TAMPERED');
+  }
+  return { ...evidence, evidenceHash: verified.evidenceHash };
+};
+
+export const recordPerformancePromotionEvidence = async (client: Client, input: {
+  actorUserId: string;
+  report: PerformancePromotionEvidenceReport;
+}) => runPerformanceSerializableTransaction(client, async (tx) => {
+  await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+  const authorityHash = await requirePermission(tx, input.actorUserId, 'RECORD_PERFORMANCE_PROMOTION_EVIDENCE');
+  const targetCohortVersionId = input.report?.target?.cohortVersionId;
+  if (typeof targetCohortVersionId !== 'string' || !targetCohortVersionId) throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_UNRELATED', 422);
+  await tx.$queryRaw`SELECT id FROM performance_cohort_versions WHERE id = ${targetCohortVersionId} FOR UPDATE`;
+  const cohort = await tx.performanceCohortVersion.findUnique({ where: { id: targetCohortVersionId } });
+  if (!cohort || !['DRAFT', 'SCHEDULED'].includes(cohort.lifecycle)) throw rolloutError('PERFORMANCE_ROLLOUT_SCOPE_UNAVAILABLE', 404);
+  if (!cohort.stage || !cohort.targetPhase) throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_UNRELATED', 422);
+  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  const population = await assertCohortEligibility(tx, cohort, clock.now);
+  const verified = verifyPerformancePromotionEvidence(input.report, {
+    now: clock.now,
+    release: await currentPerformanceReleaseIdentity(tx),
+    phase: cohort.targetPhase,
+    cohortVersionId: cohort.id,
+    cohortStage: cohort.stage as PerformanceCohortStage,
+    membershipHash: cohort.membershipHash,
+    readyPopulation: population.readyPopulation,
+    memberCount: population.memberCount,
+    ...performancePromotionAttestationKeyFromEnvironment(),
+  });
+  const existing = await tx.performancePromotionEvidence.findUnique({ where: { evidenceHash: verified.evidenceHash } });
+  if (existing) return existing;
+  const id = randomUUID();
+  const payload = await persistPerformancePayload(tx, { aggregateType: 'PERFORMANCE_PROMOTION_EVIDENCE', aggregateId: id,
+    payloadKind: 'AUTHENTICATED_REPORT', schemaVersion: 1, payload: input.report, keyring: performanceVaultKeyFromEnvironment() });
+  const evidence = await tx.performancePromotionEvidence.create({ data: {
+    id, evidenceHash: verified.evidenceHash, manifestHash: input.report.manifestHash,
+    releaseCommit: input.report.release.commit, releaseSourceHash: input.report.release.sourceHash,
+    releaseSchemaHash: input.report.release.schemaHash, releasePolicyHash: input.report.release.policyHash,
+    releaseInfrastructureHash: input.report.release.infrastructureHash,
+    backendImageDigest: input.report.release.images.backend, frontendImageDigest: input.report.release.images.frontend,
+    inquiryImageDigest: input.report.release.images.inquiry, targetPhase: input.report.target.phase,
+    targetCohortVersionId: input.report.target.cohortVersionId, targetCohortStage: input.report.target.cohortStage,
+    targetMembershipHash: input.report.target.membershipHash, targetReadyPopulation: input.report.target.readyPopulation,
+    targetMemberCount: input.report.target.memberCount, targetGate: verified.targetGate, encryptedPayloadId: payload.id,
+    attestationKeyId: input.report.attestation.keyId, authenticatedByUserId: input.actorUserId,
+    verifiedAt: new Date(input.report.verifiedAt), validUntil: new Date(input.report.validUntil),
+  } });
+  await appendRolloutAudit(tx, { aggregateType: 'PERFORMANCE_PROMOTION_EVIDENCE', aggregateId: id,
+    eventType: 'PERFORMANCE_PROMOTION_EVIDENCE_AUTHENTICATED', actorUserId: input.actorUserId,
+    reason: 'AUTHENTICATED_RELEASE_BOUND_EVIDENCE', authorityHash,
+    evidence: { evidenceHash: evidence.evidenceHash, manifestHash: evidence.manifestHash, targetCohortVersionId: cohort.id,
+      targetPhase: evidence.targetPhase, validUntil: evidence.validUntil } });
+  return evidence;
+});
+
+export const revokePerformancePromotionEvidence = async (client: Client, input: {
+  actorUserId: string; promotionEvidenceId: string; reasonCode: string;
+}) => runPerformanceSerializableTransaction(client, async (tx) => {
+  await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+  const authorityHash = await requirePermission(tx, input.actorUserId, 'RECORD_PERFORMANCE_PROMOTION_EVIDENCE');
+  if (!validReason(input.reasonCode)) throw rolloutError('PERFORMANCE_PROMOTION_REVOCATION_INVALID', 422);
+  if (!await tx.performancePromotionEvidence.findUnique({ where: { id: input.promotionEvidenceId } })) {
+    throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_UNAVAILABLE', 404);
+  }
+  const revocation = await tx.performancePromotionEvidenceRevocation.create({ data: { id: randomUUID(),
+    promotionEvidenceId: input.promotionEvidenceId, reasonCode: input.reasonCode, revokedByUserId: input.actorUserId } });
+  await appendRolloutAudit(tx, { aggregateType: 'PERFORMANCE_PROMOTION_EVIDENCE', aggregateId: input.promotionEvidenceId,
+    eventType: 'PERFORMANCE_PROMOTION_EVIDENCE_REVOKED', actorUserId: input.actorUserId, reason: input.reasonCode,
+    authorityHash, evidence: { revocationId: revocation.id, promotionEvidenceId: input.promotionEvidenceId } });
+  return revocation;
+});
 
 export const activatePerformanceCohort = async (client: Client, input: {
   actorUserId: string; cohortVersionId: string; effectiveFrom: Date; reason: string;
@@ -176,20 +368,21 @@ export const activatePerformanceCohort = async (client: Client, input: {
   await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
   await requirePermission(tx, input.actorUserId, 'TECHNICALLY_ACTIVATE_PERFORMANCE_COHORT');
   const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  await tx.$queryRaw`SELECT id FROM performance_cohort_versions WHERE id = ${input.cohortVersionId} FOR UPDATE`;
   const cohort = await tx.performanceCohortVersion.findUnique({ where: { id: input.cohortVersionId } });
   if (!cohort || cohort.lifecycle !== 'DRAFT' || !cohort.stage || !validDate(input.effectiveFrom)
     || input.effectiveFrom < clock.now || input.reason.trim().length < 8) throw rolloutError('PERFORMANCE_COHORT_ACTIVATION_INVALID', 422);
   const approvals = await currentApprovals(tx, 'COHORT', cohort.id);
+  const populationNow = await assertCohortEligibility(tx, cohort, clock.now);
+  const populationAtActivation = await assertCohortEligibility(tx, cohort, input.effectiveFrom);
+  const promotionEvidenceId = approvals[0].promotionEvidenceId!;
+  await assertPerformancePromotionEvidence(tx, promotionEvidenceId, cohort, input.effectiveFrom, populationNow);
   await assertPerformanceOperationalExpansionReady(tx, clock.now);
-  await assertCohortEligibility(tx, cohort, clock.now);
-  await assertCohortEligibility(tx, cohort, input.effectiveFrom);
-  const latestPhase = await tx.performanceFeaturePhaseVersion.findFirst({ orderBy: { version: 'desc' } });
+  if (populationAtActivation.readyPopulation !== populationNow.readyPopulation || populationAtActivation.memberCount !== populationNow.memberCount) {
+    throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_POPULATION_CHANGED');
+  }
   const scheduled = await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'SCHEDULED', effectiveFrom: input.effectiveFrom,
-    activationReason: input.reason.trim(), activatedByUserId: input.actorUserId } });
-  await tx.performanceFeaturePhaseVersion.create({ data: { version: (latestPhase?.version ?? 0) + 1, predecessorId: latestPhase?.id,
-    phase: latestPhase?.phase ?? 'SUPERVISOR_HR_PILOT', releaseEnabled: true, cohortVersionId: cohort.id,
-    effectiveFrom: input.effectiveFrom, recordedByUserId: input.actorUserId,
-    reason: `${input.reason.trim()} | ${canonicalPerformanceHash(approvals.map(({ id }) => id).sort())}` } });
+    activationReason: input.reason.trim(), activatedByUserId: input.actorUserId, promotionEvidenceId } });
   await appendRolloutAudit(tx, { aggregateType: 'PERFORMANCE_COHORT_VERSION', aggregateId: cohort.id,
     eventType: 'PERFORMANCE_COHORT_SCHEDULED', actorUserId: input.actorUserId, reason: input.reason.trim(),
     authorityHash: canonicalPerformanceHash({ actorUserId: input.actorUserId, approvalIds: approvals.map(({ id }) => id).sort() }),
@@ -203,12 +396,20 @@ export const activateDuePerformanceCohorts = async (client: Client, now = new Da
     orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }] });
   const activated: Array<typeof due[number]> = [];
   for (const cohort of due) {
+    await tx.$queryRaw`SELECT id FROM performance_cohort_versions WHERE id = ${cohort.id} FOR UPDATE`;
     const approvals = await currentApprovals(tx, 'COHORT', cohort.id);
+    const population = await assertCohortEligibility(tx, cohort, now);
+    const promotionEvidenceId = approvals[0].promotionEvidenceId!;
+    await assertPerformancePromotionEvidence(tx, promotionEvidenceId, cohort, now, population);
     await assertPerformanceOperationalExpansionReady(tx, now);
-    await assertCohortEligibility(tx, cohort, now);
     await tx.performanceCohortVersion.updateMany({ where: { cohortKey: cohort.cohortKey, lifecycle: 'ACTIVE', id: { not: cohort.id } },
       data: { lifecycle: 'RETIRED' } });
-    const active = await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'ACTIVE' } });
+    const active = await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'ACTIVE', promotionEvidenceId } });
+    const latestPhase = await tx.performanceFeaturePhaseVersion.findFirst({ orderBy: { version: 'desc' } });
+    await tx.performanceFeaturePhaseVersion.create({ data: { version: (latestPhase?.version ?? 0) + 1, predecessorId: latestPhase?.id,
+      phase: cohort.targetPhase!, releaseEnabled: true, cohortVersionId: cohort.id, promotionEvidenceId,
+      effectiveFrom: cohort.effectiveFrom!, recordedByUserId: cohort.activatedByUserId!,
+      reason: `${cohort.activationReason} | ${canonicalPerformanceHash(approvals.map(({ id }) => id).sort())}` } });
     await appendRolloutAudit(tx, { aggregateType: 'PERFORMANCE_COHORT_VERSION', aggregateId: cohort.id,
       eventType: 'PERFORMANCE_COHORT_ACTIVATED', actorUserId: null, reason: 'SCHEDULED_ACTIVATION',
       authorityHash: canonicalPerformanceHash({ system: 'PERSONNEL_PERFORMANCE_MAINTENANCE', approvalIds: approvals.map(({ id }) => id).sort() }),

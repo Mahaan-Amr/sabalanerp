@@ -11,11 +11,19 @@ import {
   decidePerformanceRollout,
   proposePerformanceCohort,
   recordPerformanceTrainingEvidence,
+  recordPerformancePromotionEvidence,
+  revokePerformancePromotionEvidence,
   resumePersonnelPerformance,
 } from '../services/personnelPerformanceRolloutStore';
 import { placePerformanceLegalHold, decidePerformanceLegalHold, listPerformanceLegalHolds } from '../services/personnelPerformanceLegalHoldStore';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../services/personnelPerformanceOperationsStore';
-import { acknowledgePerformanceOperationalIncident, configurePerformanceOperationalRoute, getPerformanceOperationalDashboard, recordPerformanceIntegrityFailure, recordPerformanceRequestObservation } from '../services/personnelPerformanceMonitoringStore';
+import {
+  acknowledgePerformanceOperationalIncident,
+  configurePerformanceOperationalRoute,
+  getPerformanceOperationalDashboard,
+  recordPerformanceIntegrityFailure,
+  recordPerformanceRequestObservation,
+} from '../services/personnelPerformanceMonitoringStore';
 import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue } from '../services/personnelPerformancePrivacyStore';
 import { restrictPerformanceEvidence } from '../services/personnelPerformanceRestrictions';
 import { findApplicablePerformancePause } from '../services/personnelPerformanceRolloutPolicy';
@@ -92,7 +100,8 @@ export const classifyPerformanceRequestMetric = (method: string, path: string) =
   if (method === 'GET' && path.startsWith('/traces/')) return 'RESULT_REPRODUCTION_LATENCY';
   if (method === 'PUT' && path.endsWith('/draft')) return 'DRAFT_SAVE_API_LATENCY';
   if (method === 'POST' && ['/analytics', '/ranking', '/calibration'].includes(path)) return 'ANALYTICS_API_LATENCY';
-  if (method === 'POST' && ['/submit', '/decision', '/not-evaluable', '/suspend', '/cancel', '/invalidate'].some((suffix) => path.endsWith(suffix))) return 'ATOMIC_TRANSITION_API_LATENCY';
+  if (method === 'POST' && ['/submit', '/decision', '/not-evaluable', '/suspend', '/cancel', '/invalidate']
+    .some((suffix) => path.endsWith(suffix))) return 'ATOMIC_TRANSITION_API_LATENCY';
   if (method === 'GET') return 'AUTHORIZED_READ_API_LATENCY';
   return null;
 };
@@ -109,8 +118,8 @@ router.use((req, res, next) => {
     recorded = true;
     if (!metricKey) return;
     const outcome = performanceRequestObservationOutcome(res.statusCode, completed);
-    void recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)), ...outcome })
-      .catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
+    void recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      ...outcome }).catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
   };
   res.once('finish', () => record(true));
   res.once('close', () => record(false));
@@ -687,10 +696,16 @@ router.get('/operations/monitoring', requireHrAuthorization({ actionPermissionCo
   try { return res.json({ success: true, monitoring: await getPerformanceOperationalDashboard(prisma) }); } catch (error) { return next(error); }
 });
 router.post('/operations/monitoring/routes', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (req: AuthRequest, res, next) => {
-  try { return res.json({ success: true, route: await configurePerformanceOperationalRoute(prisma, { actorUserId: req.user!.id, routeKey: req.body.routeKey, recipientUserId: req.body.recipientUserId, verifiedAt: new Date(req.body.verifiedAt), reason: req.body.reason }) }); } catch (error) { return next(error); }
+  try { return res.json({ success: true, route: await configurePerformanceOperationalRoute(prisma, {
+    actorUserId: req.user!.id, routeKey: req.body.routeKey, recipientUserId: req.body.recipientUserId,
+    verifiedAt: new Date(req.body.verifiedAt), reason: req.body.reason,
+  }) }); } catch (error) { return next(error); }
 });
 router.post('/operations/incidents/:incidentId/actions', async (req: AuthRequest, res, next) => {
-  try { return res.json({ success: true, incident: await acknowledgePerformanceOperationalIncident(prisma, { actorUserId: req.user!.id, incidentId: req.params.incidentId, action: req.body.action, reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash }) }); } catch (error) { return next(error); }
+  try { return res.json({ success: true, incident: await acknowledgePerformanceOperationalIncident(prisma, {
+    actorUserId: req.user!.id, incidentId: req.params.incidentId, action: req.body.action,
+    reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash,
+  }) }); } catch (error) { return next(error); }
 });
 router.post('/operations/pause', requireHrAuthorization({ actionPermissionCodes: ['PAUSE_PERFORMANCE_EVALUATION'] }), async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, pause: await pausePersonnelPerformance(prisma, {
@@ -711,13 +726,24 @@ router.post('/operations/training-evidence', async (req: AuthRequest, res, next)
 router.post('/operations/cohorts', async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, cohort: await proposePerformanceCohort(prisma, {
     actorUserId: req.user!.id, cohortKey: req.body.cohortKey, stage: req.body.stage, subjectIds: req.body.subjectIds,
-    readinessHash: req.body.readinessHash, reason: req.body.reason,
+    targetPhase: req.body.targetPhase, readinessHash: req.body.readinessHash, reason: req.body.reason,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/promotion-evidence', requireHrAuthorization({ actionPermissionCodes: ['RECORD_PERFORMANCE_PROMOTION_EVIDENCE'] }), async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, evidence: await recordPerformancePromotionEvidence(prisma, {
+    actorUserId: req.user!.id, report: req.body.report,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/promotion-evidence/:promotionEvidenceId/revoke', requireHrAuthorization({ actionPermissionCodes: ['RECORD_PERFORMANCE_PROMOTION_EVIDENCE'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, revocation: await revokePerformancePromotionEvidence(prisma, {
+    actorUserId: req.user!.id, promotionEvidenceId: req.params.promotionEvidenceId, reasonCode: req.body.reasonCode,
   }) }); } catch (error) { return next(error); }
 });
 router.post('/operations/cohorts/:cohortVersionId/decisions', async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, decision: await decidePerformanceRollout(prisma, {
     actorUserId: req.user!.id, scopeType: 'COHORT', scopeId: req.params.cohortVersionId, ownerType: req.body.ownerType,
     action: req.body.action, reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash,
+    promotionEvidenceId: req.body.promotionEvidenceId,
   }) }); } catch (error) { return next(error); }
 });
 router.post('/operations/cohorts/:cohortVersionId/activate', async (req: AuthRequest, res, next) => {

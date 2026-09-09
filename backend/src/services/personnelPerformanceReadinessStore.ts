@@ -348,9 +348,6 @@ export const getPerformanceReadinessCoverage = async (client: PrismaClient, inpu
   const source = await loadReadinessSource(client, run);
   const snapshot = readinessSourceSnapshot(source.rows);
   if (snapshot.count !== run.sourceCount || snapshot.hash !== run.sourceHash) {
-    if (run.status !== 'DRIFTED' || !run.driftDetected) await client.performanceReadinessRun.update({
-      where: { id: run.id }, data: { status: 'DRIFTED', driftDetected: true },
-    });
     throw readinessError('منبع داده از زمان اجرای بازسازی تغییر کرده است.', 'PERFORMANCE_READINESS_DRIFT', 409);
   }
   return readinessCoverage(client, source, run.id);
@@ -592,7 +589,14 @@ const processReadinessRow = async (
               jobId: plan.jobId ?? row.jobId, positionId: plan.positionId ?? row.positionId,
               organizationalUnitId: plan.organizationalUnitId ?? row.organizationalUnitId,
               workplaceId: plan.workplaceId ?? row.workplaceId, assignmentType: row.assignmentType,
-            }, plan.effectiveFrom, plan.sourceVersion ?? `HR_EMPLOYMENT_ASSIGNMENT:${row.assignmentId}`),
+            }, plan.effectiveFrom, {
+              jobId: plan.sourceVersion ?? `HR_EMPLOYMENT_ASSIGNMENT:${row.assignmentId}`,
+              positionId: plan.sourceVersion ?? `HR_EMPLOYMENT_ASSIGNMENT:${row.assignmentId}`,
+              organizationalUnitId: plan.sourceVersion ?? `HR_EMPLOYMENT_ASSIGNMENT:${row.assignmentId}`,
+              workplaceId: plan.sourceVersion ?? `HR_EMPLOYMENT_ASSIGNMENT:${row.assignmentId}`,
+              assignmentType: `HR_EMPLOYMENT_ASSIGNMENT:${row.assignmentId}`,
+              effectiveDate: `PERFORMANCE_EVALUATION_SECTION:${section.id}`,
+            }),
             costCenterId: plan.costCenterId ?? row.costCenterId,
             responsibleSupervisorAssignmentId: plan.responsibleSupervisorAssignmentId,
             responsibleSupervisorPersonnelId: plan.responsibleSupervisorPersonnelId,
@@ -744,12 +748,18 @@ export const retryFailedPerformanceReadinessRecords = async (client: PrismaClien
 }) => {
   const run = await client.performanceReadinessRun.findUnique({ where: { id: input.runId } });
   if (!run) throw readinessError('اجرای بازسازی آمادگی پیدا نشد.', 'PERFORMANCE_READINESS_RUN_NOT_FOUND', 404);
+  if (run.status !== 'FAILED') {
+    throw readinessError('فقط اجرای ناموفق و کامل‌پیمایش‌شده قابل تلاش مجدد است.', 'PERFORMANCE_READINESS_RETRY_STATUS_INVALID', 409);
+  }
   const source = await loadReadinessSource(client, run);
   const rows = source.rows;
   const snapshot = readinessSourceSnapshot(rows);
   if (snapshot.count !== run.sourceCount || snapshot.hash !== run.sourceHash) {
     await client.performanceReadinessRun.update({ where: { id: run.id }, data: { status: 'DRIFTED', driftDetected: true } });
     throw readinessError('منبع داده از زمان شروع بازسازی تغییر کرده است. ابتدا مغایرت را بررسی کنید.', 'PERFORMANCE_READINESS_DRIFT', 409);
+  }
+  if (rows.length && run.cursorAssignmentId !== rows.at(-1)?.sourceKey) {
+    throw readinessError('پیمایش منبع این اجرا هنوز کامل نشده است.', 'PERFORMANCE_READINESS_RETRY_SOURCE_INCOMPLETE', 409);
   }
   const failed = await client.performanceReadinessRecord.findMany({
     where: { runId: run.id, status: 'FAILED' }, orderBy: { employmentAssignmentId: 'asc' }, take: Math.min(500, Math.max(1, input.batchSize ?? 100)),

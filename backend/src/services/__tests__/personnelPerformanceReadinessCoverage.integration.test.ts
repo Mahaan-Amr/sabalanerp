@@ -5,6 +5,7 @@ import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease'
 import {
   getPerformanceReadinessCoverage,
   reconstructPerformanceReadiness,
+  retryFailedPerformanceReadinessRecords,
   type PerformanceReadinessInventoryClassification,
 } from '../personnelPerformanceReadinessStore';
 import { readPerformancePayload } from '../personnelPerformancePayloadStore';
@@ -145,13 +146,24 @@ const main = async () => {
     const evaluationsBeforeInventory = await client.performanceEvaluation.count({ where: { createdByUserId: actor.id } });
     assert.equal(evaluationsBeforeInventory, 0, 'inventory rows never create scoreable evaluations');
 
+    const partial = await reconstructPerformanceReadiness(client, {
+      idempotencyKey: `partial-${suffix}`, measurementFrom, measurementTo, actorUserId: actor.id, batchSize: 1, keyring,
+    });
+    assert.equal(partial.run.status, 'RUNNING');
+    await assert.rejects(
+      retryFailedPerformanceReadinessRecords(client, { runId: partial.run.id, actorUserId: actor.id, keyring }),
+      (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_READINESS_RETRY_STATUS_INVALID',
+      'retry cannot falsely complete a source inventory whose cursor has not reached its final leaf',
+    );
+
     await client.personnel.create({ data: { firstName: 'رانش', lastName: suffix } });
     await assert.rejects(
       getPerformanceReadinessCoverage(client, { runId: result.run.id }),
       (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_READINESS_DRIFT',
       'completed coverage never mixes immutable run records with a changed live Personnel inventory',
     );
-    assert.equal((await client.performanceReadinessRun.findUniqueOrThrow({ where: { id: result.run.id } })).status, 'DRIFTED');
+    assert.equal((await client.performanceReadinessRun.findUniqueOrThrow({ where: { id: result.run.id } })).status, 'COMPLETED',
+      'readiness reporting remains observational; only the explicit reconstruction command persists drift');
 
     console.log('Personnel performance readiness coverage integration tests passed.');
   } finally {

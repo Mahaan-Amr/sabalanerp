@@ -54,13 +54,16 @@ export type PerformanceReadinessSnapshotFacts = {
   effectiveDate: string;
 };
 
+type PerformanceReadinessFactName = 'jobId' | 'positionId' | 'organizationalUnitId' | 'workplaceId'
+  | 'assignmentType' | 'effectiveDate';
+
 export const buildPerformanceReadinessSnapshotFacts = (assignment: {
   jobId: string | null;
   positionId: string | null;
   organizationalUnitId: string | null;
   workplaceId: string | null;
   assignmentType: string;
-}, effectiveDate: Date, sourceVersion: string): PerformanceReadinessSnapshotFacts => {
+}, effectiveDate: Date, recordSourceVersions: Record<PerformanceReadinessFactName, string>): PerformanceReadinessSnapshotFacts => {
   const facts = {
     ...(assignment.jobId ? { jobId: assignment.jobId } : {}),
     ...(assignment.positionId ? { positionId: assignment.positionId } : {}),
@@ -74,7 +77,7 @@ export const buildPerformanceReadinessSnapshotFacts = (assignment: {
       schemaVersion: 1,
       snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
       sourceVersions: Object.fromEntries(Object.keys(facts).map((fact) => [fact, 'PERF_APPLICABILITY_V1'])),
-      recordSourceVersions: Object.fromEntries(Object.keys(facts).map((fact) => [fact, sourceVersion])),
+      recordSourceVersions: Object.fromEntries(Object.keys(facts).map((fact) => [fact, recordSourceVersions[fact as PerformanceReadinessFactName]])),
       effectiveAt: effectiveDate.toISOString(),
     },
     ...facts,

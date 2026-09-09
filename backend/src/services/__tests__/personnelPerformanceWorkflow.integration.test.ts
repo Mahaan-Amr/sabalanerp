@@ -257,6 +257,8 @@ const main = async () => {
       assert.equal(metadata.sourceVersions.workplaceId, 'PERF_APPLICABILITY_V1');
       assert.match(metadata.recordSourceVersions.workplaceId, /^HR_FOUNDATION_POSITION:/,
         'stable rule-contract versions remain separate from recorded historical provenance');
+      assert.match(metadata.recordSourceVersions.assignmentType, /^HR_EMPLOYMENT_ASSIGNMENT:/);
+      assert.match(metadata.recordSourceVersions.effectiveDate, /^PERFORMANCE_EVALUATION_SECTION:/);
     }
 
     const targetRecord = await first.performanceReadinessRecord.findFirstOrThrow({ where: {

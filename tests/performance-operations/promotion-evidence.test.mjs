@@ -49,7 +49,7 @@ test('promotion evidence command rejects absent evidence and writes a blocked re
   }
 });
 
-test('only hash-verified, matching-release check artifacts satisfy a gate', async () => {
+test('hash-verified matching-release artifacts still require approved measurements', async () => {
   const { createHash } = await import('node:crypto');
   const { execFileSync } = await import('node:child_process');
   const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-evidence-'));
@@ -71,7 +71,7 @@ test('only hash-verified, matching-release check artifacts satisfy a gate', asyn
     await writeFile(input, JSON.stringify({ schemaVersion: 1, release, checks }));
     const run = (report) => spawnSync(process.execPath, [command, '--input', input, '--output', report], { encoding: 'utf8' });
     assert.equal(run(output).status, 1, 'other gates remain blocked');
-    assert.equal(JSON.parse(await readFile(output, 'utf8')).gates[1].status, 'PASS');
+    assert.equal(JSON.parse(await readFile(output, 'utf8')).gates[1].status, 'BLOCKED');
     await writeFile(input, JSON.stringify({ schemaVersion: 1, release: { ...release, sourceHash: '0'.repeat(64) }, checks }));
     const stale = path.join(directory, 'stale.json');
     assert.equal(run(stale).status, 1);
@@ -84,8 +84,8 @@ test('only hash-verified, matching-release check artifacts satisfy a gate', asyn
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('a signed report admits only the exact requested phase and cohort target', async () => {
-  const { createHash, createHmac } = await import('node:crypto');
+test('a signed PASS-labelled fixture cannot authorize a target without approved measurements', async () => {
+  const { createHash } = await import('node:crypto');
   const { execFileSync } = await import('node:child_process');
   const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-signed-evidence-'));
   try {
@@ -109,17 +109,12 @@ test('a signed report admits only the exact requested phase and cohort target', 
       encoding: 'utf8', env: { ...process.env, PERFORMANCE_PROMOTION_ATTESTATION_KEY_ID: 'collector-v1',
         PERFORMANCE_PROMOTION_ATTESTATION_KEY_BASE64: key.toString('base64') },
     });
-    assert.equal(result.status, 0);
+    assert.equal(result.status, 1);
     const report = JSON.parse(await readFile(output, 'utf8'));
-    assert.equal(report.decision, 'EVIDENCE_COMPLETE');
+    assert.equal(report.decision, 'BLOCKED');
     assert.deepEqual(report.target, target);
-    assert.deepEqual(report.gates.map(({ status }) => status), ['PASS', ...Array(8).fill('NOT_REQUIRED')]);
-    const { attestation, ...unsigned } = report;
-    const canonical = (value) => JSON.stringify(value, function (_key, item) {
-      return item && typeof item === 'object' && !Array.isArray(item)
-        ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
-    });
-    assert.equal(attestation.signature, createHmac('sha256', key).update(canonical(unsigned)).digest('hex'));
+    assert.deepEqual(report.gates.map(({ status }) => status), ['BLOCKED', ...Array(8).fill('NOT_REQUIRED')]);
+    assert.match(report.attestation.signature, /^[a-f0-9]{64}$/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

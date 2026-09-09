@@ -390,18 +390,20 @@ export const activatePerformanceCohort = async (client: Client, input: {
   return scheduled;
 });
 
-export const activateDuePerformanceCohorts = async (client: Client, now = new Date()) => runPerformanceSerializableTransaction(client, async (tx) => {
+export const activateDuePerformanceCohorts = async (client: Client) => runPerformanceSerializableTransaction(client, async (tx) => {
   await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
-  const due = await tx.performanceCohortVersion.findMany({ where: { lifecycle: 'SCHEDULED', effectiveFrom: { lte: now }, stage: { not: null } },
+  const [selectionClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  const due = await tx.performanceCohortVersion.findMany({ where: { lifecycle: 'SCHEDULED', effectiveFrom: { lte: selectionClock.now }, stage: { not: null } },
     orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }] });
   const activated: Array<typeof due[number]> = [];
   for (const cohort of due) {
     await tx.$queryRaw`SELECT id FROM performance_cohort_versions WHERE id = ${cohort.id} FOR UPDATE`;
+    const [activationClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
     const approvals = await currentApprovals(tx, 'COHORT', cohort.id);
-    const population = await assertCohortEligibility(tx, cohort, now);
+    const population = await assertCohortEligibility(tx, cohort, activationClock.now);
     const promotionEvidenceId = approvals[0].promotionEvidenceId!;
-    await assertPerformancePromotionEvidence(tx, promotionEvidenceId, cohort, now, population);
-    await assertPerformanceOperationalExpansionReady(tx, now);
+    await assertPerformancePromotionEvidence(tx, promotionEvidenceId, cohort, activationClock.now, population);
+    await assertPerformanceOperationalExpansionReady(tx, activationClock.now);
     await tx.performanceCohortVersion.updateMany({ where: { cohortKey: cohort.cohortKey, lifecycle: 'ACTIVE', id: { not: cohort.id } },
       data: { lifecycle: 'RETIRED' } });
     const active = await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'ACTIVE', promotionEvidenceId } });
@@ -413,7 +415,7 @@ export const activateDuePerformanceCohorts = async (client: Client, now = new Da
     await appendRolloutAudit(tx, { aggregateType: 'PERFORMANCE_COHORT_VERSION', aggregateId: cohort.id,
       eventType: 'PERFORMANCE_COHORT_ACTIVATED', actorUserId: null, reason: 'SCHEDULED_ACTIVATION',
       authorityHash: canonicalPerformanceHash({ system: 'PERSONNEL_PERFORMANCE_MAINTENANCE', approvalIds: approvals.map(({ id }) => id).sort() }),
-      evidence: { cohortId: cohort.id, effectiveFrom: cohort.effectiveFrom, activatedAt: now } });
+      evidence: { cohortId: cohort.id, effectiveFrom: cohort.effectiveFrom, activatedAt: activationClock.now } });
     activated.push(active);
   }
   return activated;

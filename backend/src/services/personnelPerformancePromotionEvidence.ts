@@ -40,6 +40,16 @@ const phases: PerformanceRolloutPhase[] = [
 ];
 const digest = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const imageDigest = (value: unknown): value is string => typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value);
+const exactDeploymentDigest = (value: string) => value.startsWith('sha256:') ? value : value.match(/@?(sha256:[a-f0-9]{64})$/)?.[1] ?? '';
+const targetPopulationIsValid = (stage: PerformanceCohortStage, readyPopulation: number, memberCount: number) => {
+  if (!Number.isSafeInteger(readyPopulation) || readyPopulation < 1 || !Number.isSafeInteger(memberCount)
+    || memberCount < 1 || memberCount > readyPopulation) return false;
+  if (stage === 'PILOT') return memberCount >= Math.min(10, readyPopulation) && memberCount <= Math.min(25, readyPopulation);
+  const percent: Record<Exclude<PerformanceCohortStage, 'PILOT'>, number> = {
+    TEN_PERCENT: 10, TWENTY_FIVE_PERCENT: 25, FIFTY_PERCENT: 50, ALL: 100,
+  };
+  return memberCount === Math.ceil(readyPopulation * percent[stage] / 100);
+};
 const stableJson = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>)
@@ -93,8 +103,7 @@ export const verifyPerformancePromotionEvidence = (report: PerformancePromotionE
     || report.target.cohortStage !== expected.cohortStage || report.target.membershipHash !== expected.membershipHash) {
     throw evidenceError('PERFORMANCE_PROMOTION_EVIDENCE_UNRELATED');
   }
-  if (!Number.isSafeInteger(report.target.readyPopulation) || report.target.readyPopulation < 1
-    || !Number.isSafeInteger(report.target.memberCount) || report.target.memberCount < 1
+  if (!targetPopulationIsValid(report.target.cohortStage, report.target.readyPopulation, report.target.memberCount)
     || report.target.readyPopulation !== expected.readyPopulation || report.target.memberCount !== expected.memberCount) {
     throw evidenceError('PERFORMANCE_PROMOTION_EVIDENCE_POPULATION_CHANGED');
   }
@@ -135,5 +144,17 @@ export const performanceRuntimeReleaseIdentityFromEnvironment = (environment: No
     },
   };
   if (!validRelease(release)) throw evidenceError('PERFORMANCE_RELEASE_IDENTITY_UNAVAILABLE');
+  const deployed = {
+    backend: exactDeploymentDigest(environment.DEPLOYMENT_BACKEND_IMAGE?.trim() ?? ''),
+    frontend: exactDeploymentDigest(environment.DEPLOYMENT_FRONTEND_IMAGE?.trim() ?? ''),
+    inquiry: exactDeploymentDigest(environment.DEPLOYMENT_INQUIRY_IMAGE?.trim() ?? ''),
+  };
+  const runtimeInfrastructureHash = environment.PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH?.trim() ?? '';
+  if (!imageDigest(deployed.backend) || !imageDigest(deployed.frontend) || !imageDigest(deployed.inquiry)
+    || deployed.backend !== release.images.backend || deployed.frontend !== release.images.frontend
+    || deployed.inquiry !== release.images.inquiry || !digest(runtimeInfrastructureHash)
+    || runtimeInfrastructureHash !== release.infrastructureHash) {
+    throw evidenceError('PERFORMANCE_RELEASE_RUNTIME_IDENTITY_MISMATCH');
+  }
   return release;
 };

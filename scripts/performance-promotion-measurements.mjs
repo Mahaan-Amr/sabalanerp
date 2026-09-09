@@ -119,5 +119,7 @@ const validators = {
 
 export const validatePromotionMeasurements = (check, measurements, observedAt) => {
   const validate = validators[check];
-  return !validate || (measurements && validate(measurements, observedAt) === true);
+  // A PASS label and a hash only prove that bytes were preserved. Until a
+  // check has an approved measurement contract, it must remain a blocker.
+  return Boolean(validate && measurements && validate(measurements, observedAt) === true);
 };

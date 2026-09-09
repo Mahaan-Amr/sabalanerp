@@ -27,10 +27,20 @@ const validRelease = (release) => release && /^[a-f0-9]{40}$/.test(release.commi
   && ['backend', 'frontend', 'inquiry'].every((key) => /^sha256:[a-f0-9]{64}$/.test(release.images?.[key]));
 const phases = gateChecks.map(([name]) => name);
 const stages = ['PILOT', 'TEN_PERCENT', 'TWENTY_FIVE_PERCENT', 'FIFTY_PERCENT', 'ALL'];
+const targetMemberCountIsValid = (target) => {
+  if (!Number.isSafeInteger(target.readyPopulation) || target.readyPopulation <= 0
+    || !Number.isSafeInteger(target.memberCount) || target.memberCount <= 0
+    || target.memberCount > target.readyPopulation) return false;
+  if (target.cohortStage === 'PILOT') {
+    return target.memberCount >= Math.min(10, target.readyPopulation)
+      && target.memberCount <= Math.min(25, target.readyPopulation);
+  }
+  const percent = { TEN_PERCENT: 10, TWENTY_FIVE_PERCENT: 25, FIFTY_PERCENT: 50, ALL: 100 }[target.cohortStage];
+  return Boolean(percent) && target.memberCount === Math.ceil(target.readyPopulation * percent / 100);
+};
 const validTarget = (target) => target && phases.includes(target.phase) && typeof target.cohortVersionId === 'string' && target.cohortVersionId.trim()
   && stages.includes(target.cohortStage) && digest(target.membershipHash)
-  && Number.isSafeInteger(target.readyPopulation) && target.readyPopulation > 0
-  && Number.isSafeInteger(target.memberCount) && target.memberCount > 0 && target.memberCount <= target.readyPopulation;
+  && targetMemberCountIsValid(target);
 const attestationKey = () => {
   const keyId = process.env.PERFORMANCE_PROMOTION_ATTESTATION_KEY_ID?.trim() ?? '';
   const encoded = process.env.PERFORMANCE_PROMOTION_ATTESTATION_KEY_BASE64?.trim() ?? '';

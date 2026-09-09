@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import {
   performancePromotionAttestationMessage,
+  performanceRuntimeReleaseIdentityFromEnvironment,
   verifyPerformancePromotionEvidence,
   type PerformancePromotionEvidenceReport,
   type PerformanceRuntimeReleaseIdentity,
@@ -54,6 +55,25 @@ const signed = (report = unsigned()): PerformancePromotionEvidenceReport => ({
     signature: createHmac('sha256', key).update(performancePromotionAttestationMessage(report)).digest('hex'),
   },
 });
+
+const releaseEnvironment = {
+  PERFORMANCE_RELEASE_COMMIT: release.commit,
+  PERFORMANCE_RELEASE_SOURCE_HASH: release.sourceHash,
+  PERFORMANCE_RELEASE_SCHEMA_HASH: release.schemaHash,
+  PERFORMANCE_RELEASE_POLICY_HASH: release.policyHash,
+  PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH: release.infrastructureHash,
+  PERFORMANCE_RELEASE_BACKEND_IMAGE: release.images.backend,
+  PERFORMANCE_RELEASE_FRONTEND_IMAGE: release.images.frontend,
+  PERFORMANCE_RELEASE_INQUIRY_IMAGE: release.images.inquiry,
+  PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH: release.infrastructureHash,
+  DEPLOYMENT_BACKEND_IMAGE: release.images.backend,
+  DEPLOYMENT_FRONTEND_IMAGE: release.images.frontend,
+  DEPLOYMENT_INQUIRY_IMAGE: release.images.inquiry,
+};
+assert.deepEqual(performanceRuntimeReleaseIdentityFromEnvironment(releaseEnvironment), release);
+assert.throws(() => performanceRuntimeReleaseIdentityFromEnvironment({
+  ...releaseEnvironment, DEPLOYMENT_BACKEND_IMAGE: `sha256:${'9'.repeat(64)}`,
+}), (error: { code?: string }) => error.code === 'PERFORMANCE_RELEASE_RUNTIME_IDENTITY_MISMATCH');
 
 assert.doesNotThrow(() => verifyPerformancePromotionEvidence(signed(), {
   now, release, phase: 'SUPERVISOR_HR_PILOT', cohortVersionId: 'cohort-1', cohortStage: 'PILOT',

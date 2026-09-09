@@ -58,7 +58,7 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
   const exportCleanup = await isolate('export cleanup', () => cleanupExpiredPerformanceExports(client, now));
   const exportQueue = await isolate('export queue', () => processQueuedPerformanceExports(client));
   const operationalMonitoring = await isolate('operational monitoring', () => runPerformanceOperationalMonitoring(client, now));
-  const cohorts = await isolate('cohort activation', () => activateDuePerformanceCohorts(client, now));
+  const cohorts = await isolate('cohort activation', () => activateDuePerformanceCohorts(client));
   const privacyDeadlines = await isolate('privacy deadlines', () => runPerformancePrivacyDeadlineNotifications(client, now));
   const retentionErasure = await isolate('retention erasure', () => runDailyPerformanceErasure(client, now));
   const legalHoldReviews = await isolate('legal hold reviews', () => runPerformanceLegalHoldReviewNotifications(client, now));

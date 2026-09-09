@@ -1,6 +1,7 @@
 import { enablePerformanceTestRelease, enrollPerformanceTestCohort, publishPerformanceTestRetentionPolicy } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
 import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
 import { createPerformancePolicyDraft, updatePerformancePolicyDraft, DEFAULT_CURRENT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicyStore';
@@ -125,7 +126,10 @@ const main = async () => {
         PERFORMANCE_RELEASE_SOURCE_HASH: release.sourceHash, PERFORMANCE_RELEASE_SCHEMA_HASH: release.schemaHash,
         PERFORMANCE_RELEASE_POLICY_HASH: release.policyHash, PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH: release.infrastructureHash,
         PERFORMANCE_RELEASE_BACKEND_IMAGE: release.images.backend, PERFORMANCE_RELEASE_FRONTEND_IMAGE: release.images.frontend,
-        PERFORMANCE_RELEASE_INQUIRY_IMAGE: release.images.inquiry });
+        PERFORMANCE_RELEASE_INQUIRY_IMAGE: release.images.inquiry,
+        PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH: release.infrastructureHash,
+        DEPLOYMENT_BACKEND_IMAGE: release.images.backend, DEPLOYMENT_FRONTEND_IMAGE: release.images.frontend,
+        DEPLOYMENT_INQUIRY_IMAGE: release.images.inquiry });
       const unsigned: Omit<PerformancePromotionEvidenceReport, 'attestation'> = { schemaVersion: 1, decision: 'EVIDENCE_COMPLETE',
         productionActivationAuthorized: false, manifestHash: 'f'.repeat(64), releaseIdentityHash: canonicalPerformanceHash(release), release,
         target: { phase: 'EXPANSION_RETIREMENT', cohortVersionId: proposal.id, cohortStage: 'PILOT', membershipHash: proposal.membershipHash,
@@ -179,20 +183,31 @@ const main = async () => {
         effectiveFrom, reason: 'Changed release identity must fail' }),
       (error: { code?: string }) => error.code === 'PERFORMANCE_PROMOTION_EVIDENCE_RELEASE_CHANGED');
       process.env.PERFORMANCE_RELEASE_SOURCE_HASH = release.sourceHash;
+      process.env.DEPLOYMENT_BACKEND_IMAGE = `sha256:${'9'.repeat(64)}`;
+      await assert.rejects(() => activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
+        effectiveFrom, reason: 'Running image mismatch must fail' }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_RELEASE_RUNTIME_IDENTITY_MISMATCH');
+      process.env.DEPLOYMENT_BACKEND_IMAGE = release.images.backend;
       const scheduled = await activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
         effectiveFrom, reason: 'Three independently approved owners' });
       assert.equal(scheduled.lifecycle, 'SCHEDULED');
       assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: proposal.id, eventType: 'PERFORMANCE_COHORT_SCHEDULED' } }));
+      await delay(Math.max(0, effectiveFrom.getTime() - Date.now() + 20));
       const securityOwner = owners.find(({ ownerType }) => ownerType === 'SECURITY_PRIVACY')!;
       await decidePerformanceRollout(tx, { actorUserId: securityOwner.owner.id, scopeType: 'COHORT', scopeId: proposal.id,
         ownerType: securityOwner.ownerType, action: 'VETO', reasonCode: 'LATE_SECURITY_VETO', evidenceHash });
-      await assert.rejects(() => activateDuePerformanceCohorts(tx, new Date(effectiveFrom.getTime() + 1)),
+      await assert.rejects(() => activateDuePerformanceCohorts(tx),
         (error: { code?: string }) => error.code === 'PERFORMANCE_ROLLOUT_APPROVALS_INCOMPLETE', 'a late veto blocks due activation');
       await decidePerformanceRollout(tx, { actorUserId: securityOwner.owner.id, scopeType: 'COHORT', scopeId: proposal.id,
         ownerType: securityOwner.ownerType, action: 'APPROVE', reasonCode: 'SECURITY_VETO_RESOLVED', promotionEvidenceId: promotionEvidence.id });
+      process.env.DEPLOYMENT_BACKEND_IMAGE = `sha256:${'9'.repeat(64)}`;
+      await assert.rejects(() => activateDuePerformanceCohorts(tx),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_RELEASE_RUNTIME_IDENTITY_MISMATCH',
+        'due activation rechecks the actual running image identity');
+      process.env.DEPLOYMENT_BACKEND_IMAGE = release.images.backend;
       await revokePerformancePromotionEvidence(tx, { actorUserId: actor.id, promotionEvidenceId: promotionEvidence.id,
         reasonCode: 'CANDIDATE_REVOKED' });
-      await assert.rejects(() => activateDuePerformanceCohorts(tx, new Date(effectiveFrom.getTime() + 1)),
+      await assert.rejects(() => activateDuePerformanceCohorts(tx),
         (error: { code?: string }) => error.code === 'PERFORMANCE_PROMOTION_EVIDENCE_REVOKED',
         'revocation committed before due activation must fail closed');
       assert.equal(await tx.performanceFeaturePhaseVersion.count({ where: { cohortVersionId: proposal.id } }), 0,

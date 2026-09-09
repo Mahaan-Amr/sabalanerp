@@ -24,10 +24,11 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
   await page.goto('/dashboard/hr/personnel/performance');
   await expect(page.getByRole('heading', { name: 'گردش ارزیابی عملکرد' })).toBeVisible();
 
-  const apiResponses: Array<{ url: string; status: number }> = [];
+  const apiResponses: Array<{ url: string; status: number; cacheControl: string }> = [];
   page.on('response', (response) => {
     if (response.url().includes('/api/hr/personnel-performance/')) {
-      apiResponses.push({ url: response.url(), status: response.status() });
+      apiResponses.push({ url: response.url(), status: response.status(),
+        cacheControl: response.headers()['cache-control'] ?? '' });
     }
   });
   const measurements = [];
@@ -71,10 +72,12 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
   }
   expect(apiResponses.length).toBeGreaterThan(0);
   expect(apiResponses.filter(({ status }) => status >= 500)).toEqual([]);
+  expect(apiResponses.every(({ cacheControl }) => cacheControl.includes('private') && cacheControl.includes('no-store'))).toBe(true);
 
   const accounts = JSON.parse(process.env.PERFORMANCE_BROWSER_ACCOUNTS_JSON || 'null') as null | Record<string, {
     username: string; password: string; expectedCapabilities: string[];
     lifecycle: Array<{ status: string; evaluationId: string }>;
+    security: { maliciousHtml: string; formula: string; hiddenNonDisplayKey: string };
   }>;
   expect(accounts).toBeTruthy();
   const roleChecks = [];
@@ -91,6 +94,8 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
     if (role === 'noAccess') {
       await expect(rolePage.getByRole('heading', { name: 'دسترسی به این بخش مجاز نیست' })).toBeVisible();
       await expect(rolePage.getByRole('heading', { name: 'گردش ارزیابی عملکرد' })).toHaveCount(0);
+      await expect(rolePage.locator('body')).not.toContainText(account.security.hiddenNonDisplayKey);
+      await expect(rolePage.locator('body')).not.toContainText(account.security.maliciousHtml);
     } else {
       await expect(rolePage.getByRole('heading', { name: 'گردش ارزیابی عملکرد' })).toBeVisible();
     }
@@ -101,16 +106,19 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
       for (const label of ['پیش‌نویس', 'نیازمند اصلاح', 'در انتظار بررسی', 'پذیرفته‌شده']) {
         await expect(rolePage.getByText(label, { exact: true }).first()).toBeVisible();
       }
+      await expect(rolePage.getByText(account.security.maliciousHtml, { exact: false }).first()).toBeVisible();
+      expect(await rolePage.evaluate(() => (globalThis as typeof globalThis & { __performancePwned?: boolean }).__performancePwned)).toBeUndefined();
     }
     const actionChecks = [];
     const readExpectations = [
       { path: '/api/hr/personnel-performance/supervisor/sections', allowed: role === 'supervisor' },
       { path: '/api/hr/personnel-performance/reviews', allowed: role === 'reviewer' },
-      { path: '/api/hr/personnel-performance/lifecycle/sections', allowed: role === 'lifecycleManager' },
+      { path: '/api/hr/personnel-performance/lifecycle/sections', allowed: role === 'reviewer' || role === 'lifecycleManager' },
     ];
     for (const expectation of readExpectations) {
       const action = await context.request.get(expectation.path);
-      expect(action.status()).toBe(expectation.allowed ? 200 : 403);
+      expect(action.status(), `${role} ${expectation.path}`).toBe(expectation.allowed ? 200 : 403);
+      expect(action.headers()['cache-control']).toContain('no-store');
       actionChecks.push({ action: `GET ${expectation.path}`, status: action.status(), allowed: expectation.allowed });
       await action.dispose();
     }
@@ -119,16 +127,47 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
         data: { reason: `آزمون مرورگری چرخه ${state.status} با اختیار واقعی و ماندگاری پایگاه داده.` },
       });
       const actionBody = await action.json();
-      const expectedStatus = role !== 'lifecycleManager' ? 403 : state.status === 'ACCEPTED' ? 409 : 200;
-      expect(action.status()).toBe(expectedStatus);
+      const expectedStatus = role !== 'lifecycleManager' ? 403 : state.status === 'DRAFT' ? 200 : 409;
+      expect(action.status(), `${role} cancel ${state.status}: ${JSON.stringify(actionBody)}`).toBe(expectedStatus);
+      expect(action.headers()['cache-control']).toContain('no-store');
       if (expectedStatus === 200) expect(actionBody.evaluation?.status).toBe('CANCELLED');
-      if (role === 'lifecycleManager' && state.status === 'ACCEPTED') {
+      if (role === 'lifecycleManager' && state.status !== 'DRAFT') {
         expect(actionBody.code).toBe('PERFORMANCE_CANCELLATION_STATE_INVALID');
       }
       actionChecks.push({ action: 'cancel', lifecycleState: state.status, status: action.status(),
         persistedOutcome: expectedStatus === 200 ? actionBody.evaluation?.status : actionBody.code });
       await action.dispose();
     }
+    if (role === 'noAccess') {
+      const realId = account.lifecycle[0].evaluationId;
+      const [real, unknown, searched] = await Promise.all([
+        context.request.post(`/api/hr/personnel-performance/evaluations/${realId}/cancel`, { data: { reason: 'بررسی عدم افشای شناسه واقعی' } }),
+        context.request.post('/api/hr/personnel-performance/evaluations/00000000-0000-4000-8000-000000000000/cancel', { data: { reason: 'بررسی عدم افشای شناسه ناشناخته' } }),
+        context.request.get(`/api/hr/personnel-performance/lifecycle/sections?search=${encodeURIComponent(account.security.maliciousHtml)}`),
+      ]);
+      expect([real.status(), unknown.status(), searched.status()]).toEqual([403, 403, 403]);
+      const [realBody, unknownBody, searchedBody] = await Promise.all([real.json(), unknown.json(), searched.json()]);
+      expect(Object.keys(realBody).sort()).toEqual(Object.keys(unknownBody).sort());
+      expect(JSON.stringify([realBody, unknownBody, searchedBody])).not.toContain(realId);
+      expect(JSON.stringify(searchedBody)).not.toMatch(/count|total|result|placeholder|search/i);
+      for (const response of [real, unknown, searched]) {
+        expect(response.headers()['cache-control']).toContain('no-store');
+        await response.dispose();
+      }
+    }
+    const placeholderValues = await rolePage.locator('[placeholder]').evaluateAll((elements) =>
+      elements.map((element) => element.getAttribute('placeholder') ?? ''));
+    expect(JSON.stringify(placeholderValues)).not.toContain(account.security.hiddenNonDisplayKey);
+    expect(JSON.stringify(placeholderValues)).not.toContain(account.lifecycle[0].evaluationId);
+    const storedBrowserState = await rolePage.evaluate(async () => {
+      const cacheEntries = 'caches' in globalThis
+        ? (await Promise.all((await caches.keys()).map(async (name) => (await caches.open(name)).keys())))
+          .flat().map((request) => request.url)
+        : [];
+      return { local: JSON.stringify(localStorage), session: JSON.stringify(sessionStorage), cacheEntries };
+    });
+    const persistedSecrets = [account.security.hiddenNonDisplayKey, ...account.lifecycle.map(({ evaluationId }) => evaluationId)];
+    expect(persistedSecrets.some((secret) => JSON.stringify(storedBrowserState).includes(secret))).toBe(false);
     roleChecks.push({ name: role, capabilities: account.expectedCapabilities, realPersistence: true, actionChecks });
     await context.close();
   }
@@ -141,6 +180,12 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
   console.log(`PERFORMANCE_BROWSER_MATRIX:${JSON.stringify({ viewports: measurements, roles: roleChecks,
     realBrowser: true, realPersistence: true, lifecycleStates: ['DRAFT', 'REJECTED', 'SUBMITTED', 'ACCEPTED'],
     pageUsableP95Ms: percentile(usableDurations, 0.95), pageUsableP99Ms: percentile(usableDurations, 0.99),
-    roleActionScopeMatrixComplete: roleChecks.length === 4 && roleChecks.every(({ actionChecks }) => actionChecks.length === 7) })}`);
+    roleActionScopeMatrixComplete: roleChecks.length === 4 && roleChecks.every(({ actionChecks }) => actionChecks.length === 7),
+    securityNegativeMatrix: [
+      'persisted-route-identifier-enumeration-equivalence',
+      'persisted-route-search-count-placeholder-nondisclosure',
+      'browser-cache-no-store',
+      'persisted-malicious-text-inert-browser-rendering',
+    ] })}`);
   await page.context().close();
 });

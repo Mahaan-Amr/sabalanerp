@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   PERFORMANCE_ACCEPTANCE_FAILURE_SCENARIOS,
+  PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES,
   PERFORMANCE_ACCEPTANCE_INTEGRATED_CHECKS,
   PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS,
   PERFORMANCE_ACCEPTANCE_RACES,
@@ -53,6 +54,7 @@ const measurementsFor = (name) => ({
     permissionBranchesCoveredPercent: 100, additionalDisclosures: 0, openP0: 0, openP1: 0 },
   'browser-matrix': { realBrowser: true, realPersistence: true, roleActionScopeMatrixComplete: true,
     pageUsableP95Ms: 1000, pageUsableP99Ms: 1200,
+    securityNegativeMatrix: [...PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES],
     roles: ['noAccess', 'supervisor', 'reviewer', 'lifecycleManager'].map((role) => ({ name: role, capabilities: [], realPersistence: true })),
     lifecycleStates: ['DRAFT', 'REJECTED', 'SUBMITTED', 'ACCEPTED'],
     viewports: ['360', '390', '768', '1280', '1920'].map((viewport) => ({ name: viewport, usableDurationMs: 1000, rtl: true,

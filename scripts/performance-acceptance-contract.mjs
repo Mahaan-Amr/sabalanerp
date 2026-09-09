@@ -86,6 +86,9 @@ export const validatePerformanceAcceptanceLane = (lane, measurements, observedAt
   }
   if (lane === 'browser-matrix') {
     return exactNamedMeasurements(measurements?.viewports, PERFORMANCE_ACCEPTANCE_BROWSER_MATRIX.viewports.map(String))
+      && Array.isArray(measurements?.securityNegativeMatrix)
+      && measurements.securityNegativeMatrix.length === PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES.length
+      && PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES.every((name) => measurements.securityNegativeMatrix.includes(name))
       && validatePromotionMeasurements('browser-acceptance', measurements, observedAt, infrastructureHash);
   }
   if (lane === 'export-capacity') {
@@ -97,6 +100,12 @@ export const validatePerformanceAcceptanceLane = (lane, measurements, observedAt
 
 export const PERFORMANCE_ACCEPTANCE_INTEGRATED_CHECKS = integratedChecks;
 export const PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS = nondisclosureScenarios;
+export const PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES = Object.freeze([
+  'persisted-route-identifier-enumeration-equivalence',
+  'persisted-route-search-count-placeholder-nondisclosure',
+  'browser-cache-no-store',
+  'persisted-malicious-text-inert-browser-rendering',
+]);
 
 export const PERFORMANCE_ACCEPTANCE_BROWSER_MATRIX = Object.freeze({
   viewports: Object.freeze([360, 390, 768, 1280, 1920]),

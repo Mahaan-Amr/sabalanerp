@@ -29,13 +29,12 @@ const environment = {
 const raw = [];
 const evidenceMarkers = [];
 const securityNegativeMatrixAssertions = [
-  'identifier-count-search-placeholder-cache-leakage',
-  'malicious-free-text-escaping',
-  'spreadsheet-formula-injection',
+  'persisted-malicious-free-text-export',
+  'persisted-spreadsheet-formula-export',
   'pdf-excel-canonical-leakage',
-  'encryption-key-rotation-boundary',
+  'persisted-encryption-key-rotation',
   'audit-disclosure-download',
-  'differencing-reidentification-blocked',
+  'persisted-differencing-reidentification-blocked',
   'independent-admin-no-bypass',
   'idor',
   'scope-revocation',

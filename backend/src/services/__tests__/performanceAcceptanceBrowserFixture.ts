@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 
@@ -25,12 +25,17 @@ const cleanup = async (runId: string) => {
     const evaluationIds = evaluations.map(({ id }) => id);
     const sections = await tx.performanceEvaluationSection.findMany({ where: { evaluationId: { in: evaluationIds } },
       select: { employmentAssignmentId: true } });
+    const cohorts = await tx.performanceCohortVersion.findMany({ where: { cohortKey: `${runId}:cohort` }, select: { id: true } });
+    const cohortIds = cohorts.map(({ id }) => id);
     await tx.performanceAuditEvent.deleteMany({ where: { OR: [
       { actorUserId: { in: userIds } },
       { aggregateType: 'EVALUATION', aggregateId: { in: evaluationIds } },
     ] } });
     await tx.performanceEvaluationSection.deleteMany({ where: { evaluationId: { in: evaluationIds } } });
     await tx.performanceEvaluation.deleteMany({ where: { id: { in: evaluationIds } } });
+    await tx.performanceFeaturePhaseVersion.deleteMany({ where: { reason: `${runId}:browser-release-fixture` } });
+    await tx.performanceCohortMember.deleteMany({ where: { cohortVersionId: { in: cohortIds } } });
+    await tx.performanceCohortVersion.deleteMany({ where: { id: { in: cohortIds } } });
     await tx.performanceSubject.deleteMany({ where: { id: { in: subjectIds } } });
     await tx.hrEmploymentAssignment.deleteMany({ where: { id: { in: sections.map(({ employmentAssignmentId }) => employmentAssignmentId) } } });
     await tx.hrEmploymentRelationship.deleteMany({ where: { id: { in: subjects.flatMap(({ employmentRelationshipId }) => employmentRelationshipId ? [employmentRelationshipId] : []) } } });
@@ -60,8 +65,13 @@ const setup = async () => {
   ]);
   if (!workspace || features.length !== requiredFeatures.length) throw new Error('PERFORMANCE_BROWSER_CATALOG_UNAVAILABLE');
   const accounts: Record<string, { username: string; password: string; expectedCapabilities: readonly string[];
-    lifecycle: Array<{ status: string; evaluationId: string }> }> = {};
+    lifecycle: Array<{ status: string; evaluationId: string }>;
+    security: { maliciousHtml: string; formula: string; hiddenNonDisplayKey: string } }> = {};
   const lifecycle: Array<{ status: string; evaluationId: string }> = [];
+  const subjectIds: string[] = [];
+  const maliciousHtml = '<img src=x onerror="globalThis.__performancePwned=true">';
+  const formula = '=1+1';
+  const hiddenNonDisplayKey = `${runId}:hidden:DRAFT`;
   await client.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
     let lifecycleManagerId = '';
@@ -80,10 +90,14 @@ const setup = async () => {
         level: 'ADMIN' as const, effectiveFrom: new Date('2020-01-01Z'), reason: 'Synthetic browser acceptance fixture',
       })) });
       if (role === 'lifecycleManager') lifecycleManagerId = user.id;
-      accounts[role] = { username, password, expectedCapabilities, lifecycle };
+      accounts[role] = { username, password, expectedCapabilities, lifecycle,
+        security: { maliciousHtml, formula, hiddenNonDisplayKey } };
     }
     for (const [index, status] of ['DRAFT', 'REJECTED', 'SUBMITTED', 'ACCEPTED'].entries()) {
-      const personnel = await tx.personnel.create({ data: { firstName: 'پذیرش', lastName: `چرخه ${status}` } });
+      const personnel = await tx.personnel.create({ data: {
+        firstName: status === 'DRAFT' ? maliciousHtml : 'پذیرش',
+        lastName: status === 'DRAFT' ? formula : `چرخه ${status}`,
+      } });
       const relationship = await tx.hrEmploymentRelationship.create({ data: {
         personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2025-01-01Z'), createdBy: lifecycleManagerId,
       } });
@@ -95,6 +109,7 @@ const setup = async () => {
         stableKey: `${runId}:subject:${status}`, nonDisplayKey: `${runId}:hidden:${status}`,
         personnelId: personnel.id, employmentRelationshipId: relationship.id, createdByUserId: lifecycleManagerId,
       } });
+      subjectIds.push(subject.id);
       const evaluation = await tx.performanceEvaluation.create({ data: {
         stableKey: `${runId}:evaluation:${status}`, subjectId: subject.id,
         measurementFrom: new Date(`2026-0${index + 1}-01Z`), measurementTo: new Date(`2026-0${index + 1}-20Z`),
@@ -113,6 +128,28 @@ const setup = async () => {
       } });
       lifecycle.push({ status, evaluationId: evaluation.id });
     }
+    const [databaseClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+    const cohort = await tx.performanceCohortVersion.create({ data: {
+      cohortKey: `${runId}:cohort`, version: 1,
+      membershipHash: createHash('sha256').update(JSON.stringify([...subjectIds].sort())).digest('hex'),
+      createdByUserId: lifecycleManagerId,
+    } });
+    await tx.performanceCohortMember.createMany({ data: subjectIds.map((subjectId) => ({
+      cohortVersionId: cohort.id, subjectId,
+      eligibilityHash: createHash('sha256').update(`${runId}:${subjectId}`).digest('hex'),
+    })) });
+    await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: {
+      lifecycle: 'SCHEDULED', effectiveFrom: databaseClock.now, activatedByUserId: lifecycleManagerId,
+      activationReason: 'Persistent browser acceptance fixture',
+    } });
+    await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'ACTIVE' } });
+    const latestPhase = await tx.performanceFeaturePhaseVersion.findFirst({ orderBy: { version: 'desc' } });
+    await tx.performanceFeaturePhaseVersion.create({ data: {
+      version: (latestPhase?.version ?? 0) + 1, predecessorId: latestPhase?.id,
+      phase: 'EXPANSION_RETIREMENT', releaseEnabled: true, cohortVersionId: cohort.id,
+      effectiveFrom: databaseClock.now, recordedByUserId: lifecycleManagerId,
+      reason: `${runId}:browser-release-fixture`,
+    } });
   });
   console.log(`PERFORMANCE_BROWSER_FIXTURE:${JSON.stringify({ runId, accounts })}`);
 };

@@ -243,15 +243,4 @@ assert.ok(validateConsequenceHandoff({
 
 void Promise.all([exportDeadlineCheck, invalidPdfCheck]).then(() => {
   console.log('Personnel performance disclosure policy tests passed.');
-  if (process.env.PERFORMANCE_ACCEPTANCE_PERMISSION_EVIDENCE === '1') {
-    console.log(`PERFORMANCE_PERMISSION_EVIDENCE:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_PERMISSION_EVIDENCE_V1', scenarios: [
-      { name: 'security-negative-matrix', assertionIds: [
-        'identifier-count-search-placeholder-cache-leakage',
-        'malicious-free-text-escaping',
-        'spreadsheet-formula-injection',
-        'encryption-key-rotation-boundary',
-        'differencing-reidentification-blocked',
-      ] },
-    ], additionalDisclosures: 0 })}`);
-  }
 });

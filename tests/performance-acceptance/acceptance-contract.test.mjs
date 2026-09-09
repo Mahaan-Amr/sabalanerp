@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   PERFORMANCE_ACCEPTANCE_BROWSER_MATRIX,
+  PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES,
   PERFORMANCE_ACCEPTANCE_DEFERRALS,
   PERFORMANCE_ACCEPTANCE_FAILURE_SCENARIOS,
   PERFORMANCE_ACCEPTANCE_RACES,
@@ -38,6 +39,12 @@ test('failure and browser acceptance cannot silently omit an approved dimension'
     ['keyboard', 'focus', 'reduced-motion', 'zoom-200']);
   assert.equal(PERFORMANCE_ACCEPTANCE_BROWSER_MATRIX.direction, 'rtl');
   assert.equal(PERFORMANCE_ACCEPTANCE_BROWSER_MATRIX.persistence, 'REAL_LOCAL_POSTGRESQL');
+  assert.deepEqual(PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES, [
+    'persisted-route-identifier-enumeration-equivalence',
+    'persisted-route-search-count-placeholder-nondisclosure',
+    'browser-cache-no-store',
+    'persisted-malicious-text-inert-browser-rendering',
+  ]);
 });
 
 test('approved production inputs remain explicit deferrals and never PASS evidence', () => {

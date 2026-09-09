@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { assertHttpReady, inspectLocalComposeProject } from './design-system-e2e-preflight.mjs';
 import { performanceMeasurementSignerFromEnvironment, signedPerformanceAcceptanceLane } from './performance-acceptance-artifact.mjs';
+import { PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES } from './performance-acceptance-contract.mjs';
 
 const args = process.argv.slice(2);
 if (args.length !== 2 || args[0] !== '--identity') {
@@ -42,7 +43,12 @@ try {
   const markerLine = result.stdout.split(/\r?\n/).find((line) => line.includes('PERFORMANCE_BROWSER_MATRIX:'));
   const marker = JSON.parse(markerLine?.slice(markerLine.indexOf('PERFORMANCE_BROWSER_MATRIX:')
     + 'PERFORMANCE_BROWSER_MATRIX:'.length) ?? 'null');
-  if (!marker || marker.viewports?.length !== 5) throw new Error('BROWSER_MATRIX_EVIDENCE_MISSING');
+  if (!marker || marker.viewports?.length !== 5
+    || !Array.isArray(marker.securityNegativeMatrix)
+    || marker.securityNegativeMatrix.length !== PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES.length
+    || PERFORMANCE_ACCEPTANCE_BROWSER_SECURITY_NEGATIVES.some((name) => !marker.securityNegativeMatrix.includes(name))) {
+    throw new Error('BROWSER_MATRIX_EVIDENCE_MISSING');
+  }
   const signer = performanceMeasurementSignerFromEnvironment();
   if (!signer) throw new Error('MEASUREMENT_SIGNER_UNAVAILABLE');
   console.log(JSON.stringify(signedPerformanceAcceptanceLane({

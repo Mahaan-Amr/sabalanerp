@@ -94,6 +94,26 @@ const publishPolicyFixture = async (
 
 const main = async () => {
   await assert.rejects(prisma.$transaction(async (tx) => {
+    const aggregateId = `security-key-rotation-${Date.now()}`;
+    const keyV1 = { keyId: 'security-persisted-v1', key: Buffer.from('0123456789abcdef0123456789abcdef') };
+    const keyV2 = { keyId: 'security-persisted-v2', key: Buffer.from('fedcba9876543210fedcba9876543210') };
+    const first = await persistPerformancePayload(tx, {
+      aggregateType: 'PERFORMANCE_SECURITY_ACCEPTANCE', aggregateId, payloadKind: 'KEY_ROTATION_V1', schemaVersion: 1,
+      payload: { confidential: 'نسخه اول رمزگذاری‌شده' }, keyring: keyV1,
+    });
+    assert.equal((await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: first.id } })).keyId, keyV1.keyId);
+    await assert.rejects(() => readPerformancePayload(tx, first.id, keyV2),
+      'a persisted payload must not be readable through a different key version');
+    assert.deepEqual(await readPerformancePayload(tx, first.id, keyV1), { confidential: 'نسخه اول رمزگذاری‌شده' });
+    const second = await persistPerformancePayload(tx, {
+      aggregateType: 'PERFORMANCE_SECURITY_ACCEPTANCE', aggregateId, payloadKind: 'KEY_ROTATION_V2', schemaVersion: 1,
+      payload: { confidential: 'نسخه دوم رمزگذاری‌شده' }, keyring: keyV2,
+    });
+    assert.equal((await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: second.id } })).keyId, keyV2.keyId);
+    assert.deepEqual(await readPerformancePayload(tx, second.id, keyV2), { confidential: 'نسخه دوم رمزگذاری‌شده' });
+    throw new Error('ROLLBACK_PERSISTED_KEY_ROTATION_SECURITY');
+  }), /ROLLBACK_PERSISTED_KEY_ROTATION_SECURITY/);
+  await assert.rejects(prisma.$transaction(async (tx) => {
     const suffix = `${Date.now().toString(36)}-accepted-level-chain`;
     const actor = await tx.user.create({ data: {
       email: `${suffix}@example.invalid`, username: suffix, password: 'not-used', firstName: 'عامل', lastName: 'زنجیره',
@@ -130,7 +150,10 @@ const main = async () => {
     const immutableHashes: Array<{ resultId: string; exactScoreHash: string; payloadHash: string }> = [];
     for (let index = 0; index < boundaryScenarios.length; index += 1) {
       const scenario = boundaryScenarios[index];
-      const personnel = await tx.personnel.create({ data: { firstName: 'سطح', lastName: String(index + 1) } });
+      const personnel = await tx.personnel.create({ data: {
+        firstName: index === 0 ? '=1+1' : index === 1 ? '<img src=x onerror="globalThis.__performancePwned=true">' : 'سطح',
+        lastName: String(index + 1),
+      } });
       const relationship = await tx.hrEmploymentRelationship.create({ data: {
         personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01Z'), createdBy: actor.id,
       } });
@@ -227,6 +250,42 @@ const main = async () => {
     for (const { levelCode, labelFa } of canonicalRows) {
       assert.ok(pdfHtml.includes(String(levelCode)) && pdfHtml.includes(String(labelFa)), 'PDF and Excel use the same accepted-result level rows');
     }
+    const persistedAdversarialPersonnel = await tx.personnel.findMany({
+      where: { id: { in: subjects.slice(0, 2).map(({ personnelId }) => personnelId) } }, orderBy: { firstName: 'asc' },
+    });
+    const persistedAdversarialPopulation = persistedAdversarialPersonnel.flatMap((personnel, personIndex) =>
+      Array.from({ length: 10 }, (_, copyIndex) => ({
+        subjectId: `${subjects[personIndex].subjectId}-security-${copyIndex}`,
+        personnelId: personnel.id,
+        displayName: `${personnel.firstName} ${personnel.lastName}`,
+        employmentRelationshipId: `${subjects[personIndex].relationshipId}-security-${copyIndex}`,
+        levelCode: personIndex === 0 ? 'MEETS' : 'EXCEEDS',
+        comparabilitySignature: 'persisted-security-v1', peerGroupKey: 'persisted-security-peer',
+        measurementTo: new Date('2026-08-31T20:29:59.999Z'),
+      })));
+    const persistedDifferencingAttempt = buildPerformanceAnalytics({
+      population: persistedAdversarialPopulation, selected: persistedAdversarialPopulation.slice(0, 12),
+    });
+    assert.deepEqual(persistedDifferencingAttempt, {
+      suppressed: true, reasonCode: 'COMPLEMENTARY_GROUP_TOO_SMALL',
+      messageFa: 'این فیلتر به‌دلیل حفاظت از محرمانگی قابل نمایش نیست.',
+    });
+    const persistedNamedReport = buildPerformanceAnalytics({
+      population: persistedAdversarialPopulation, selected: persistedAdversarialPopulation, mode: 'NAMED_RANKING',
+    });
+    assert.equal(persistedNamedReport.suppressed, false);
+    const persistedExportRows = performanceExportRows(persistedNamedReport);
+    const persistedWorkbook = XLSX.read((await renderPerformanceExportArtifact('XLSX', persistedExportRows,
+      new AbortController().signal)).bytes);
+    const persistedXlsxRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+      persistedWorkbook.Sheets[persistedWorkbook.SheetNames[0]], { raw: false },
+    );
+    assert.ok(persistedXlsxRows.some(({ displayName }) => String(displayName).startsWith("'=1+1")),
+      'persisted formula-leading personnel text must be inert in the canonical Excel artifact');
+    const persistedPdfHtml = performanceExportPdfHtml(persistedExportRows);
+    assert.equal(persistedPdfHtml.includes('<img src=x'), false,
+      'persisted malicious personnel text must not become executable markup in the canonical PDF input');
+    assert.ok(persistedPdfHtml.includes('&lt;img src=x onerror='));
     const previousExecutable = process.env.PUPPETEER_EXECUTABLE_PATH;
     if (!previousExecutable && process.platform === 'darwin') {
       const macChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -567,7 +626,11 @@ const main = async () => {
       { name: 'identity-verified-summary-delivery', assertionIds: ['verified-recipient-time-type-receipt'] },
       { name: 'no-score-criteria-narrative-rank-leak', assertionIds: ['minimal-summary-negative-fields'] },
       { name: 'manual-consequence-boundary', assertionIds: ['independent-scope', 'immutable-manual-handoff'] },
-      { name: 'security-negative-matrix', assertionIds: ['pdf-excel-canonical-leakage'] },
+      { name: 'security-negative-matrix', assertionIds: [
+        'persisted-malicious-free-text-export', 'persisted-spreadsheet-formula-export',
+        'pdf-excel-canonical-leakage', 'persisted-encryption-key-rotation',
+        'persisted-differencing-reidentification-blocked',
+      ] },
     ], additionalDisclosures: 0 })}`);
   }
 };

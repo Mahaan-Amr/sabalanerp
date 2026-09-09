@@ -27,6 +27,7 @@ const validRelease = (release) => release && /^[a-f0-9]{40}$/.test(release.commi
   && ['backend', 'frontend', 'inquiry'].every((key) => /^sha256:[a-f0-9]{64}$/.test(release.images?.[key]));
 const phases = gateChecks.map(([name]) => name);
 const stages = ['PILOT', 'TEN_PERCENT', 'TWENTY_FIVE_PERCENT', 'FIFTY_PERCENT', 'ALL'];
+const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
 const targetMemberCountIsValid = (target) => {
   if (!Number.isSafeInteger(target.readyPopulation) || target.readyPopulation <= 0
     || !Number.isSafeInteger(target.memberCount) || target.memberCount <= 0
@@ -76,12 +77,13 @@ try {
       const bytes = await readFile(artifactPath);
       if (!digest(entry.sha256) || hash(bytes) !== entry.sha256) throw new Error('ARTIFACT_HASH_MISMATCH');
       const artifact = JSON.parse(bytes);
+      const observedAt = Date.parse(artifact.observedAt);
       if (artifact.schemaVersion !== 1 || artifact.check !== name || artifact.status !== 'PASS'
         || !Number.isFinite(artifact.durationMs) || artifact.durationMs < 0
-        || !Number.isFinite(Date.parse(artifact.observedAt)) || Date.parse(artifact.observedAt) > Date.now()
+        || !Number.isFinite(observedAt) || observedAt > Date.now() || Date.now() - observedAt > MAX_EVIDENCE_AGE_MS
         || typeof artifact.command !== 'string' || !artifact.command.trim()
         || canonical(artifact.release) !== canonical(input.release)) throw new Error('ARTIFACT_INVALID_OR_STALE');
-      if (!validatePromotionMeasurements(name, artifact.measurements, artifact.observedAt)) throw new Error('RETIREMENT_EVIDENCE_INCOMPLETE');
+      if (!validatePromotionMeasurements(name, artifact.measurements, artifact.observedAt, input.release.infrastructureHash)) throw new Error('MEASUREMENT_EVIDENCE_INCOMPLETE');
       if (name === 'cohort-promotion' && validTarget(input.target)
         && (artifact.measurements.stage !== input.target.cohortStage
           || artifact.measurements.readyPopulation !== input.target.readyPopulation
@@ -102,7 +104,8 @@ try {
   if (!targetIsValid) blockers.push('PROMOTION_TARGET_MISSING');
   const verifiedAt = new Date().toISOString();
   const validUntil = Date.parse(input.validUntil);
-  if (!Number.isFinite(validUntil) || validUntil <= Date.parse(verifiedAt)) blockers.push('PROMOTION_VALIDITY_WINDOW_INVALID');
+  if (!Number.isFinite(validUntil) || validUntil <= Date.parse(verifiedAt)
+    || validUntil - Date.parse(verifiedAt) > MAX_EVIDENCE_AGE_MS) blockers.push('PROMOTION_VALIDITY_WINDOW_INVALID');
   const signer = attestationKey();
   if (!signer) blockers.push('PROMOTION_ATTESTATION_CONFIGURATION_MISSING');
   const decision = targetIsValid && signer && blockers.length === 0

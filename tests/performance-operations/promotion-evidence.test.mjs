@@ -84,8 +84,8 @@ test('hash-verified matching-release artifacts still require approved measuremen
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('a signed PASS-labelled fixture cannot authorize a target without approved measurements', async () => {
-  const { createHash } = await import('node:crypto');
+test('a signed report admits an exact target only with approved measurement contracts', async () => {
+  const { createHash, createHmac } = await import('node:crypto');
   const { execFileSync } = await import('node:child_process');
   const directory = await mkdtemp(path.join(os.tmpdir(), 'performance-signed-evidence-'));
   try {
@@ -96,8 +96,13 @@ test('a signed PASS-labelled fixture cannot authorize a target without approved 
       readyPopulation: 10, memberCount: 10 };
     const checks = [];
     for (const name of ['additive-migration', 'permission-matrix', 'encryption', 'audit-lineage', 'retention', 'legal-hold', 'erasure', 'backup-restore']) {
+      const observedAt = new Date().toISOString();
       const bytes = JSON.stringify({ schemaVersion: 1, release, check: name, status: 'PASS', durationMs: 10,
-        observedAt: new Date().toISOString(), command: `acceptance:${name}` });
+        observedAt, command: `acceptance:${name}`, measurements: { contractVersion: 1,
+          measurementSource: 'INDEPENDENT_ACCEPTANCE_RUN', runId: `release-run-${name}`, executedBy: 'ci-acceptance-owner',
+          rawEvidenceHash: createHash('sha256').update(`raw:${name}`).digest('hex'), environmentHash: release.infrastructureHash,
+          sampleCount: 1, assertionsExecuted: 1, failures: 0, skipped: 0, commandExitCode: 0,
+          startedAt: new Date(Date.parse(observedAt) - 10).toISOString(), finishedAt: observedAt } });
       await writeFile(path.join(directory, `${name}.json`), bytes);
       checks.push({ name, path: `${name}.json`, sha256: createHash('sha256').update(bytes).digest('hex') });
     }
@@ -109,12 +114,17 @@ test('a signed PASS-labelled fixture cannot authorize a target without approved 
       encoding: 'utf8', env: { ...process.env, PERFORMANCE_PROMOTION_ATTESTATION_KEY_ID: 'collector-v1',
         PERFORMANCE_PROMOTION_ATTESTATION_KEY_BASE64: key.toString('base64') },
     });
-    assert.equal(result.status, 1);
+    assert.equal(result.status, 0);
     const report = JSON.parse(await readFile(output, 'utf8'));
-    assert.equal(report.decision, 'BLOCKED');
+    assert.equal(report.decision, 'EVIDENCE_COMPLETE');
     assert.deepEqual(report.target, target);
-    assert.deepEqual(report.gates.map(({ status }) => status), ['BLOCKED', ...Array(8).fill('NOT_REQUIRED')]);
-    assert.match(report.attestation.signature, /^[a-f0-9]{64}$/);
+    assert.deepEqual(report.gates.map(({ status }) => status), ['PASS', ...Array(8).fill('NOT_REQUIRED')]);
+    const { attestation, ...unsigned } = report;
+    const canonical = (value) => JSON.stringify(value, function (_key, item) {
+      return item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
+    });
+    assert.equal(attestation.signature, createHmac('sha256', key).update(canonical(unsigned)).digest('hex'));
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

@@ -130,6 +130,7 @@ const main = async () => {
         PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH: release.infrastructureHash,
         DEPLOYMENT_BACKEND_IMAGE: release.images.backend, DEPLOYMENT_FRONTEND_IMAGE: release.images.frontend,
         DEPLOYMENT_INQUIRY_IMAGE: release.images.inquiry });
+      const reportClock = new Date();
       const unsigned: Omit<PerformancePromotionEvidenceReport, 'attestation'> = { schemaVersion: 1, decision: 'EVIDENCE_COMPLETE',
         productionActivationAuthorized: false, manifestHash: 'f'.repeat(64), releaseIdentityHash: canonicalPerformanceHash(release), release,
         target: { phase: 'EXPANSION_RETIREMENT', cohortVersionId: proposal.id, cohortStage: 'PILOT', membershipHash: proposal.membershipHash,
@@ -138,7 +139,7 @@ const main = async () => {
         gates: ['SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT', 'RESULT_LEVEL_BADGE',
           'ANALYTICS_RANKING_CALIBRATION', 'PDF_EXCEL_EXPORT', 'CONSEQUENCE_HANDOFF', 'EXPANSION_RETIREMENT']
           .map((name, index) => ({ number: index + 1, name, status: 'PASS' as const })),
-        verifiedAt: new Date('2026-01-01Z').toISOString(), validUntil: new Date('2101-01-01Z').toISOString() };
+        verifiedAt: new Date(reportClock.getTime() - 1_000).toISOString(), validUntil: new Date(reportClock.getTime() + 3_600_000).toISOString() };
       const report: PerformancePromotionEvidenceReport = { ...unsigned, attestation: { keyId: 'promotion-test-v1', algorithm: 'HMAC-SHA256',
         signature: createHmac('sha256', promotionKey).update(performancePromotionAttestationMessage(unsigned)).digest('hex') } };
       await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:promotion-evidence`, userId: actor.id,

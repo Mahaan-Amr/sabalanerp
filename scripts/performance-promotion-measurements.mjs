@@ -23,6 +23,22 @@ const noIntegrityFailure = (result) => result?.disclosures === 0 && result.calcu
 const approvalsValid = (approvals) => Array.isArray(approvals) && approvals.length === 3 && complete(approvals, owners, (approval) => approval.decision === 'APPROVE'
   && typeof approval.actorId === 'string' && approval.actorId.trim() && typeof approval.receiptHash === 'string'
   && /^[a-f0-9]{64}$/.test(approval.receiptHash)) && new Set(approvals.map(({ actorId }) => actorId)).size === 3;
+const genericMeasured = (result, observedAt, expectedEnvironmentHash) => {
+  const startedAt = Date.parse(result?.startedAt);
+  const finishedAt = Date.parse(result?.finishedAt);
+  const observed = Date.parse(observedAt);
+  return result?.contractVersion === 1 && result.measurementSource === 'INDEPENDENT_ACCEPTANCE_RUN'
+    && typeof result.runId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9:_-]{7,127}$/.test(result.runId)
+    && typeof result.executedBy === 'string' && result.executedBy.trim().length >= 3
+    && !/^(fixture|test|local|example|placeholder)/i.test(result.executedBy)
+    && digest(result.rawEvidenceHash) && digest(result.environmentHash)
+    && (!expectedEnvironmentHash || result.environmentHash === expectedEnvironmentHash)
+    && Number.isSafeInteger(result.sampleCount) && result.sampleCount > 0
+    && Number.isSafeInteger(result.assertionsExecuted) && result.assertionsExecuted > 0
+    && result.failures === 0 && result.skipped === 0 && result.commandExitCode === 0
+    && Number.isFinite(startedAt) && Number.isFinite(finishedAt) && Number.isFinite(observed)
+    && startedAt <= finishedAt && finishedAt <= observed && observed - finishedAt <= 300_000;
+};
 
 const retirementMeasured = (result, observedAt) => {
   const activation = Date.parse(result.publicActivatedAt);
@@ -117,9 +133,8 @@ const validators = {
     && Number.isInteger(result.idempotentApplyReconciliations) && result.idempotentApplyReconciliations >= 3 && result.driftInjected === true && result.concurrentHrWriteRetried === true,
 };
 
-export const validatePromotionMeasurements = (check, measurements, observedAt) => {
+export const validatePromotionMeasurements = (check, measurements, observedAt, expectedEnvironmentHash) => {
   const validate = validators[check];
-  // A PASS label and a hash only prove that bytes were preserved. Until a
-  // check has an approved measurement contract, it must remain a blocker.
-  return Boolean(validate && measurements && validate(measurements, observedAt) === true);
+  if (!measurements) return false;
+  return validate ? validate(measurements, observedAt) === true : genericMeasured(measurements, observedAt, expectedEnvironmentHash);
 };

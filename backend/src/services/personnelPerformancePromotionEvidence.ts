@@ -38,6 +38,7 @@ const phases: PerformanceRolloutPhase[] = [
   'RESULT_LEVEL_BADGE', 'ANALYTICS_RANKING_CALIBRATION', 'PDF_EXCEL_EXPORT',
   'CONSEQUENCE_HANDOFF', 'EXPANSION_RETIREMENT',
 ];
+const MAX_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
 const digest = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const imageDigest = (value: unknown): value is string => typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value);
 const exactDeploymentDigest = (value: string) => value.startsWith('sha256:') ? value : value.match(/@?(sha256:[a-f0-9]{64})$/)?.[1] ?? '';
@@ -117,7 +118,8 @@ export const verifyPerformancePromotionEvidence = (report: PerformancePromotionE
   const verifiedAt = Date.parse(report.verifiedAt);
   const validUntil = Date.parse(report.validUntil);
   if (!Number.isFinite(verifiedAt) || !Number.isFinite(validUntil) || verifiedAt > expected.now.getTime()
-    || validUntil <= expected.now.getTime() || validUntil <= verifiedAt) throw evidenceError('PERFORMANCE_PROMOTION_EVIDENCE_STALE');
+    || expected.now.getTime() - verifiedAt > MAX_EVIDENCE_AGE_MS || validUntil <= expected.now.getTime()
+    || validUntil <= verifiedAt || validUntil - verifiedAt > MAX_EVIDENCE_AGE_MS) throw evidenceError('PERFORMANCE_PROMOTION_EVIDENCE_STALE');
   return { evidenceHash: canonicalPerformanceHash(unsigned), targetGate: targetIndex + 1 };
 };
 

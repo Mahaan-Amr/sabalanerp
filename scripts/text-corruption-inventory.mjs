@@ -12,8 +12,6 @@ const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.git']);
 
 const mojibakeRegex = /[\u00d8\u00d9\u00db\u00c3]/;
 const replacementRegex = /\uFFFD|\u00ef\u00bf\u00bd/;
-const questionRegex = /\?{2,}/;
-
 const records = [];
 
 function walk(dir) {
@@ -32,10 +30,56 @@ function walk(dir) {
   }
 }
 
+function hasQuestionMarkCorruption(lineText) {
+  let quote = '';
+  let escaped = false;
+
+  for (let index = 0; index < lineText.length; index += 1) {
+    const character = lineText[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (character === '\\' && quote) {
+      escaped = true;
+      continue;
+    }
+
+    if (quote) {
+      if (character === '?' && lineText[index + 1] === '?') return true;
+      if (character === quote) quote = '';
+      continue;
+    }
+
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character;
+      continue;
+    }
+
+    if (character !== '?' || lineText[index + 1] !== '?') continue;
+
+    let runEnd = index + 2;
+    while (lineText[runEnd] === '?') runEnd += 1;
+
+    // Exactly two question marks in executable source are the JavaScript/TypeScript
+    // nullish-coalescing operator (or the prefix of ??=), not damaged text.
+    if (runEnd - index === 2) {
+      index = runEnd - 1;
+      continue;
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
 function classify(lineText) {
   if (replacementRegex.test(lineText)) return 'replacement-char';
   if (mojibakeRegex.test(lineText)) return 'mojibake';
-  if (questionRegex.test(lineText)) return 'question-marks';
+  if (hasQuestionMarkCorruption(lineText)) return 'question-marks';
   return '';
 }
 
@@ -88,7 +132,7 @@ const csvBody = records
   .join('\n');
 
 const csvPath = path.join(outDir, 'text-corruption-inventory.csv');
-fs.writeFileSync(csvPath, csvHeader + csvBody + '\n', 'utf8');
+fs.writeFileSync(csvPath, csvHeader + csvBody + (csvBody ? '\n' : ''), 'utf8');
 
 const byClass = records.reduce((acc, r) => {
   acc[r.class] = (acc[r.class] || 0) + 1;

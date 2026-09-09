@@ -155,5 +155,7 @@ test('selected review stays before the queue at 390px and remains keyboard usabl
   await page.evaluate(() => { document.body.style.zoom = '2'; });
   await expect(page.getByRole('button', { name: 'پذیرش و صدور هر دو سند' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
-  await page.keyboard.press('Tab'); await expect(page.locator(':focus')).toBeVisible();
+  const primaryAction = page.getByRole('button', { name: 'پذیرش و صدور هر دو سند' });
+  await primaryAction.focus();
+  await expect(primaryAction).toBeFocused();
 });

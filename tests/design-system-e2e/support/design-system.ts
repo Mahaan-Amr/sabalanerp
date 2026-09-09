@@ -68,6 +68,12 @@ export const assertNoSeriousAxeViolations = async (page: Page) => {
 
 export const assertMinimumTargetSize = async (locator: Locator, minimum = 44) => {
   const undersized = await locator.evaluateAll((elements, size) => elements
+    // Framework development controls are not part of the shipped application
+    // and must not satisfy or fail Sabalan's interaction contract.
+    .filter((element) => (
+      !element.closest('nextjs-portal')
+      && !element.hasAttribute('data-nextjs-dev-tools-button')
+    ))
     .filter((element) => {
       const target = element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)
         ? element.closest('label') || element

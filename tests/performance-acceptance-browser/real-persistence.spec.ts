@@ -121,12 +121,12 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
       const actionBody = await action.json();
       const expectedStatus = role !== 'lifecycleManager' ? 403 : state.status === 'ACCEPTED' ? 409 : 200;
       expect(action.status()).toBe(expectedStatus);
-      if (expectedStatus === 200) expect(actionBody.status).toBe('CANCELLED');
+      if (expectedStatus === 200) expect(actionBody.evaluation?.status).toBe('CANCELLED');
       if (role === 'lifecycleManager' && state.status === 'ACCEPTED') {
         expect(actionBody.code).toBe('PERFORMANCE_CANCELLATION_STATE_INVALID');
       }
       actionChecks.push({ action: 'cancel', lifecycleState: state.status, status: action.status(),
-        persistedOutcome: expectedStatus === 200 ? actionBody.status : actionBody.code });
+        persistedOutcome: expectedStatus === 200 ? actionBody.evaluation?.status : actionBody.code });
       await action.dispose();
     }
     roleChecks.push({ name: role, capabilities: account.expectedCapabilities, realPersistence: true, actionChecks });

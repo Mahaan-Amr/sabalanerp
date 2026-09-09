@@ -6,7 +6,7 @@
     "lifecycle": "DRAFT",
     "effectiveContext": "ACCEPTANCE_EXAMPLE_ONLY",
     "importIdentity": "PERF-ROLE-CATALOG:SYNTHETIC:V1",
-    "contentHash": "4046d0207d1110d4e3be6d994695f035bc23303bfdbb11a40ca9dbc769c40687",
+    "contentHash": "0df55076e24193a961904570e02afbba9c8eb1a0db39c5bd99eddf5881edd44b",
     "contentHashMethod": "SHA256_CANONICAL_JSON_EXCLUDING_CATALOG_CONTENT_HASH"
   },
   "source": {
@@ -39,7 +39,7 @@
   "applicabilitySnapshotContract": {
     "schemaVersion": 1,
     "container": "__applicability",
-    "snapshotVersion": "REQUIRED_STABLE_VERSION",
+    "snapshotVersion": "PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1",
     "sourceVersions": "REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION",
     "effectiveAt": "REQUIRED_ISO_TIMESTAMP",
     "unknown": "BLOCK"

@@ -52,6 +52,17 @@ test('the producer snapshot contract carries versioned effective metadata', asyn
   assert.match(validateRoleCatalogManifest(manifest).join('\n'), /sourceVersions/i);
 });
 
+test('the catalog requires stable import and effective-context identities', async () => {
+  const manifest = await loadFixture();
+  delete manifest.catalog.importIdentity;
+  delete manifest.catalog.effectiveContext;
+  manifest.catalog.contentHash = manifestContentHash(manifest);
+
+  const errors = validateRoleCatalogManifest(manifest).join('\n');
+  assert.match(errors, /importIdentity/i);
+  assert.match(errors, /effectiveContext/i);
+});
+
 test('typed applicability enforces v1 fact types and operator value shapes', async () => {
   const manifest = await loadFixture();
   const safetyRule = manifest.jobs[3].criteria[0].applicability;
@@ -62,6 +73,29 @@ test('typed applicability enforces v1 fact types and operator value shapes', asy
   const errors = validateRoleCatalogManifest(manifest).join('\n');
   assert.match(errors, /factType must match/i);
   assert.match(errors, /EQUALS requires exactly one/i);
+});
+
+test('typed applicability enforces dictionary operators and ISO date-only values', async () => {
+  const manifest = await loadFixture();
+  manifest.jobs[0].criteria[0].applicability = {
+    schemaVersion: 1,
+    fact: 'jobId',
+    factType: 'ID',
+    operator: 'EXISTS',
+    values: [],
+  };
+  manifest.jobs[0].criteria[1].applicability = {
+    schemaVersion: 1,
+    fact: 'effectiveDate',
+    factType: 'DATE',
+    operator: 'EQUALS',
+    values: ['2026-09-09T00:00:00.000Z'],
+  };
+  manifest.catalog.contentHash = manifestContentHash(manifest);
+
+  const errors = validateRoleCatalogManifest(manifest).join('\n');
+  assert.match(errors, /operator not allowed/i);
+  assert.match(errors, /same-type scalar/i);
 });
 
 test('the contract requires five Persian anchors for every judgment criterion', async () => {

@@ -6,15 +6,15 @@ const isCode = (value) => typeof value === 'string' && /^[A-Z0-9][A-Z0-9_-]{2,95
 const isSha256 = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
 const CONTROLLED_FACTS = new Map([
-  ['jobId', 'ID'],
-  ['positionId', 'ID'],
-  ['organizationalUnitId', 'ID'],
-  ['workplaceId', 'ID'],
-  ['shiftType', 'STRING'],
-  ['assignmentType', 'STRING'],
-  ['responsibilityCodes', 'STRING_LIST'],
-  ['effectiveDate', 'DATE'],
-  ['hasSafetyDuty', 'BOOLEAN'],
+  ['jobId', { type: 'ID', operators: ['EQUALS', 'IN'] }],
+  ['positionId', { type: 'ID', operators: ['EQUALS', 'IN'] }],
+  ['organizationalUnitId', { type: 'ID', operators: ['EQUALS', 'IN'] }],
+  ['workplaceId', { type: 'ID', operators: ['EQUALS', 'IN', 'EXISTS'] }],
+  ['shiftType', { type: 'STRING', operators: ['EQUALS', 'IN', 'EXISTS'] }],
+  ['assignmentType', { type: 'STRING', operators: ['EQUALS', 'IN'] }],
+  ['responsibilityCodes', { type: 'STRING_LIST', operators: ['IN', 'EXISTS'] }],
+  ['effectiveDate', { type: 'DATE', operators: ['EQUALS', 'IN'] }],
+  ['hasSafetyDuty', { type: 'BOOLEAN', operators: ['EQUALS'] }],
 ]);
 
 const EVIDENCE_CLASSES = new Set([
@@ -37,9 +37,16 @@ const COVERAGE_COUNT_FIELDS = [
 
 const valueMatchesType = (value, type) => {
   if (type === 'BOOLEAN') return typeof value === 'boolean';
-  if (type === 'DATE') return typeof value === 'string' && Number.isFinite(Date.parse(value));
+  if (type === 'DATE') {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  }
   return typeof value === 'string' && value.trim().length > 0;
 };
+
+const sameMembers = (left, right) => Array.isArray(left) && left.length === right.length
+  && left.every((value) => right.includes(value));
 
 const stableJson = (value) => {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
@@ -99,12 +106,13 @@ const validateCriterion = (criterion, path, evidenceCodes, errors) => {
     errors.push(`${path} must record outside-control factors.`);
   }
   if (criterion.applicability !== null) {
-    const factType = CONTROLLED_FACTS.get(criterion.applicability?.fact);
-    if (!factType) errors.push(`${path} uses a non-controlled applicability fact.`);
+    const factDefinition = CONTROLLED_FACTS.get(criterion.applicability?.fact);
+    const factType = factDefinition?.type;
+    if (!factDefinition) errors.push(`${path} uses a non-controlled applicability fact.`);
     if (criterion.applicability?.schemaVersion !== 1) errors.push(`${path}.applicability.schemaVersion must be 1.`);
     if (criterion.applicability?.factType !== factType) errors.push(`${path}.applicability.factType must match the dictionary.`);
-    if (!['EQUALS', 'IN', 'EXISTS'].includes(criterion.applicability?.operator)) {
-      errors.push(`${path} uses an unsupported applicability operator.`);
+    if (!factDefinition?.operators.includes(criterion.applicability?.operator)) {
+      errors.push(`${path} uses an operator not allowed for its controlled fact.`);
     }
     const values = criterion.applicability?.values;
     if (!Array.isArray(values)) {
@@ -165,6 +173,11 @@ export const validateRoleCatalogManifest = (manifest) => {
   if (!isCode(manifest.catalog?.stableKey) || !isCode(manifest.catalog?.versionCode)) {
     errors.push('Catalog requires stable key and version identity.');
   }
+  if (typeof manifest.catalog?.importIdentity !== 'string'
+    || !/^[A-Z0-9][A-Z0-9:_-]{2,127}$/.test(manifest.catalog.importIdentity)) {
+    errors.push('Catalog requires a stable importIdentity.');
+  }
+  if (!isCode(manifest.catalog?.effectiveContext)) errors.push('Catalog requires a stable effectiveContext.');
   if (manifest.catalog?.lifecycle !== 'DRAFT') errors.push('The proposed catalog must remain DRAFT.');
   if (!isSha256(manifest.catalog?.contentHash)) errors.push('Catalog requires a SHA-256 content hash field.');
   else if (manifest.catalog.contentHashMethod !== 'SHA256_CANONICAL_JSON_EXCLUDING_CATALOG_CONTENT_HASH'
@@ -185,20 +198,22 @@ export const validateRoleCatalogManifest = (manifest) => {
     errors.push('Review status is missing or unsupported.');
   }
 
-  const declaredFacts = new Map((manifest.applicabilityDictionary ?? []).map((entry) => [entry.fact, entry.type]));
+  const declaredFacts = new Map((manifest.applicabilityDictionary ?? []).map((entry) => [entry.fact, entry]));
   for (const [index, entry] of (manifest.applicabilityDictionary ?? []).entries()) {
     if (entry.unknown !== 'BLOCK') errors.push(`applicabilityDictionary[${index}].unknown must be BLOCK.`);
     if (typeof entry.source !== 'string' || entry.source.trim() === '') errors.push(`applicabilityDictionary[${index}].source is required.`);
     if (typeof entry.sourceVersion !== 'string' || entry.sourceVersion.trim() === '') errors.push(`applicabilityDictionary[${index}].sourceVersion is required.`);
   }
-  for (const [fact, type] of CONTROLLED_FACTS) {
-    if (declaredFacts.get(fact) !== type) errors.push(`Applicability dictionary must define ${fact} as ${type}.`);
+  for (const [fact, definition] of CONTROLLED_FACTS) {
+    const declared = declaredFacts.get(fact);
+    if (declared?.type !== definition.type) errors.push(`Applicability dictionary must define ${fact} as ${definition.type}.`);
+    if (!sameMembers(declared?.operators, definition.operators)) errors.push(`Applicability dictionary operators for ${fact} do not match the controlled schema.`);
   }
   if (declaredFacts.has('locationId')) errors.push('Applicability dictionary must use canonical workplaceId, not locationId.');
   const snapshotContract = manifest.applicabilitySnapshotContract;
   if (snapshotContract?.schemaVersion !== 1) errors.push('applicabilitySnapshotContract.schemaVersion must be 1.');
   if (snapshotContract?.container !== '__applicability') errors.push('applicabilitySnapshotContract.container must be __applicability.');
-  if (snapshotContract?.snapshotVersion !== 'REQUIRED_STABLE_VERSION') errors.push('applicabilitySnapshotContract.snapshotVersion is required.');
+  if (snapshotContract?.snapshotVersion !== 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1') errors.push('applicabilitySnapshotContract.snapshotVersion must match the producer identity.');
   if (snapshotContract?.sourceVersions !== 'REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION') errors.push('applicabilitySnapshotContract.sourceVersions is required.');
   if (snapshotContract?.effectiveAt !== 'REQUIRED_ISO_TIMESTAMP') errors.push('applicabilitySnapshotContract.effectiveAt is required.');
   if (snapshotContract?.unknown !== 'BLOCK') errors.push('applicabilitySnapshotContract.unknown must be BLOCK.');

@@ -7,10 +7,42 @@ export type PerformanceCriterionKind = 'JUDGMENT' | 'KPI_EVIDENCE' | 'EXPLANATOR
 export type PerformanceEvidenceKind = 'OPERATIONAL_REFERENCE' | 'CONTROLLED_DOCUMENT' | 'STRUCTURED_OBSERVATION';
 export type PerformanceEvidenceQuality = 'RELIABLE' | 'INCOMPLETE' | 'DISPUTED' | 'MISSING' | 'INVALIDATED';
 
-export type PerformanceApplicabilityRule = {
+export const PERFORMANCE_APPLICABILITY_FACT_TYPES = {
+  jobId: 'ID',
+  positionId: 'ID',
+  organizationalUnitId: 'ID',
+  workplaceId: 'ID',
+  shiftType: 'STRING',
+  assignmentType: 'STRING',
+  responsibilityCodes: 'STRING_LIST',
+  effectiveDate: 'DATE',
+  hasSafetyDuty: 'BOOLEAN',
+} as const;
+
+export type PerformanceApplicabilityFact = keyof typeof PERFORMANCE_APPLICABILITY_FACT_TYPES;
+export type PerformanceApplicabilityFactType = typeof PERFORMANCE_APPLICABILITY_FACT_TYPES[PerformanceApplicabilityFact];
+export type LegacyPerformanceApplicabilityRule = {
+  schemaVersion?: never;
   fact: string;
   operator: 'EQUALS' | 'IN' | 'EXISTS';
   values: unknown[];
+};
+export type TypedPerformanceApplicabilityRule = {
+  schemaVersion: 1;
+  fact: PerformanceApplicabilityFact;
+  factType: PerformanceApplicabilityFactType;
+  source: string;
+  sourceVersion: string;
+  operator: 'EQUALS' | 'IN' | 'EXISTS';
+  values: unknown[];
+};
+export type PerformanceApplicabilityRule = LegacyPerformanceApplicabilityRule | TypedPerformanceApplicabilityRule;
+
+type PerformanceApplicabilitySnapshotMetadata = {
+  schemaVersion: 1;
+  snapshotVersion: string;
+  sourceVersions: Record<string, string>;
+  effectiveAt: string;
 };
 
 export type PerformanceCriterionSnapshot = {
@@ -189,6 +221,67 @@ export const validatePerformanceTemplate = (template: PerformanceTemplateSnapsho
   return errors;
 };
 
+const validDateFact = (value: unknown) => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().startsWith(value);
+};
+
+export const performanceApplicabilityValueMatchesType = (
+  value: unknown,
+  type: PerformanceApplicabilityFactType,
+): boolean => {
+  if (type === 'BOOLEAN') return typeof value === 'boolean';
+  if (type === 'STRING_LIST') return Array.isArray(value)
+    && value.every((item) => typeof item === 'string' && item.trim().length > 0);
+  if (type === 'DATE') return validDateFact(value);
+  return typeof value === 'string' && value.trim().length > 0;
+};
+
+export const validateTypedPerformanceApplicabilityRule = (
+  rule: TypedPerformanceApplicabilityRule,
+): string[] => {
+  const errors: string[] = [];
+  const expectedType = PERFORMANCE_APPLICABILITY_FACT_TYPES[rule.fact];
+  if (!expectedType) return ['واقعیت کنترل‌شده این قرارداد پشتیبانی نمی‌شود.'];
+  if (rule.factType !== expectedType) errors.push(`نوع واقعیت «${rule.fact}» باید ${expectedType} باشد.`);
+  if (!rule.source?.trim() || !rule.sourceVersion?.trim()) errors.push(`منبع و نسخه منبع واقعیت «${rule.fact}» الزامی است.`);
+  if (rule.operator === 'EXISTS') {
+    if (rule.values.length > 0) errors.push('عملگر وجود باید بدون مقدار ثبت شود.');
+    return errors;
+  }
+  if (rule.values.length === 0) errors.push('قاعده کاربردپذیری بدون مقدار معتبر نیست.');
+  if (rule.operator === 'EQUALS' && rule.factType === 'STRING_LIST') {
+    errors.push('واقعیت فهرستی فقط با عملگر IN یا EXISTS قابل مقایسه است.');
+  }
+  if (rule.operator === 'EQUALS' && rule.values.length !== 1) {
+    errors.push('عملگر برابری باید دقیقاً یک مقدار داشته باشد.');
+  }
+  const valueType = rule.factType === 'STRING_LIST' ? 'STRING' : rule.factType;
+  if (rule.values.some((value) => !performanceApplicabilityValueMatchesType(value, valueType))) {
+    errors.push(`نوع مقدارهای قاعده با نوع واقعیت «${rule.fact}» سازگار نیست.`);
+  }
+  if (new Set(rule.values.map((value) => JSON.stringify(value))).size !== rule.values.length) {
+    errors.push('مقدار تکراری در قاعده کاربردپذیری مجاز نیست.');
+  }
+  return errors;
+};
+
+const typedSnapshotMetadata = (
+  facts: Record<string, unknown>,
+  rule: TypedPerformanceApplicabilityRule,
+): PerformanceApplicabilitySnapshotMetadata | null => {
+  const metadata = facts.__applicability;
+  if (!metadata || typeof metadata !== 'object') return null;
+  const candidate = metadata as Partial<PerformanceApplicabilitySnapshotMetadata>;
+  if (candidate.schemaVersion !== 1
+    || typeof candidate.snapshotVersion !== 'string' || !candidate.snapshotVersion.trim()
+    || typeof candidate.effectiveAt !== 'string' || !Number.isFinite(new Date(candidate.effectiveAt).getTime())
+    || !candidate.sourceVersions || typeof candidate.sourceVersions !== 'object'
+    || candidate.sourceVersions[rule.fact] !== rule.sourceVersion) return null;
+  return candidate as PerformanceApplicabilitySnapshotMetadata;
+};
+
 const evaluateApplicability = (
   criterion: PerformanceCriterionSnapshot,
   facts: Record<string, unknown>,
@@ -202,6 +295,30 @@ const evaluateApplicability = (
   }
   if (!criterion.applicability) return { decision: 'APPLICABLE', reason: 'معیار برای همه مأموریت‌ها کاربرد دارد.' };
   const rule = criterion.applicability;
+  if (rule.schemaVersion === 1) {
+    const validationErrors = validateTypedPerformanceApplicabilityRule(rule);
+    if (validationErrors.length > 0) {
+      return { decision: 'BLOCKED', reason: `قرارداد کاربردپذیری معتبر نیست: ${validationErrors[0]}` };
+    }
+    if (!typedSnapshotMetadata(facts, rule)) {
+      return { decision: 'BLOCKED', reason: `نسخه منبع واقعیت «${rule.fact}» با قرارداد ${rule.sourceVersion} منطبق نیست.` };
+    }
+    if (!Object.prototype.hasOwnProperty.call(facts, rule.fact) || facts[rule.fact] === null || facts[rule.fact] === undefined) {
+      return { decision: 'BLOCKED', reason: `واقعیت کنترل‌شده «${rule.fact}» در تصویر ثابت موجود نیست.` };
+    }
+    const typedFact = facts[rule.fact];
+    if (!performanceApplicabilityValueMatchesType(typedFact, rule.factType)) {
+      return { decision: 'BLOCKED', reason: `نوع واقعیت کنترل‌شده «${rule.fact}» با قرارداد ${rule.factType} سازگار نیست.` };
+    }
+    const typedMatches = rule.operator === 'EXISTS'
+      ? true
+      : rule.operator === 'IN' && rule.factType === 'STRING_LIST'
+        ? (typedFact as string[]).some((item) => rule.values.includes(item))
+        : rule.values.some((value) => Object.is(value, typedFact));
+    return typedMatches
+      ? { decision: 'APPLICABLE', reason: 'واقعیت نوع‌دار تصویر ثابت با قاعده کاربردپذیری منطبق است.' }
+      : { decision: 'NOT_APPLICABLE', reason: 'واقعیت نوع‌دار تصویر ثابت با قاعده کاربردپذیری منطبق نیست.' };
+  }
   if (!Object.prototype.hasOwnProperty.call(facts, rule.fact)) {
     return { decision: 'BLOCKED', reason: `واقعیت کنترل‌شده «${rule.fact}» در تصویر ثابت موجود نیست.` };
   }

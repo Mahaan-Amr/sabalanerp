@@ -12,7 +12,19 @@ const mockPolicyApi = async (page: Page, canManage = true) => {
     const url = new URL(route.request().url());
     const body = url.pathname.endsWith('/capabilities')
       ? { success: true, capabilities: canManage ? { MANAGE_PERFORMANCE_POLICY: true, VIEW_PERFORMANCE_HISTORY: true } : {} }
-      : url.pathname.endsWith('/criteria') ? { success: true, criteria: [] }
+      : url.pathname.endsWith('/owner-references') ? { success: true, references: {
+          jobs: [
+            { id: 'job-safe-1', title: 'کارشناس حسابداری', isActive: true },
+            { id: 'job-retired-1', title: 'شغل قدیمی', isActive: false },
+          ],
+          positions: [{ id: 'position-safe-1', title: 'کارشناس دریافتنی', isActive: true, jobId: 'job-safe-1' }],
+        } }
+      : url.pathname.endsWith('/catalog-import/preview') ? { success: true, preview: {
+          importIdentity: 'catalog-v1', contentHash: 'a'.repeat(64), importable: true, warnings: [],
+          criterionCount: 2, templateCount: 2, reviewStatus: 'BUSINESS_REVIEW_PENDING', publicationTriggered: false,
+          compositions: [{ jobReferenceCode: 'JOB-1', positionReferenceCode: 'POSITION-1', jobSharePercent: '80.00', addendumSharePercent: '20.00', basis: 'JOB_WITH_POSITION_ADDENDUM' }],
+        } }
+        : url.pathname.endsWith('/criteria') ? { success: true, criteria: [] }
         : url.pathname.endsWith('/templates') ? { success: true, templates: [] }
           : url.pathname.endsWith('/policies') ? { success: true, policies: [] }
             : { success: true };
@@ -32,6 +44,13 @@ test('performance policy administration sheets are RTL, accessible, responsive, 
   await expect(criterionDialog).toBeVisible();
   await expect(criterionDialog.getByText('عنوان فارسی معیار الزامی است.')).toBeVisible();
   await expect(criterionDialog.getByRole('button', { name: 'ذخیره پیش‌نویس' })).toBeDisabled();
+  await criterionDialog.getByRole('combobox', { name: 'واقعیت کنترل‌شده کاربردپذیری' }).selectOption('hasSafetyDuty');
+  await expect(criterionDialog.getByRole('combobox', { name: 'مقدار بله/خیر' })).toHaveValue('true');
+  await criterionDialog.getByRole('combobox', { name: 'واقعیت کنترل‌شده کاربردپذیری' }).selectOption('jobId');
+  await expect(criterionDialog.getByRole('combobox', { name: 'شغل مجاز' })).toContainText('کارشناس حسابداری');
+  await expect(criterionDialog.getByRole('combobox', { name: 'شغل مجاز' })).toContainText('شغل قدیمی · بازنشسته/غیرفعال');
+  await criterionDialog.getByRole('combobox', { name: 'واقعیت کنترل‌شده کاربردپذیری' }).selectOption('responsibilityCodes');
+  await expect(criterionDialog.getByRole('textbox', { name: 'مقادیر مجاز' })).toBeVisible();
   await assertVisibleFocus(criterionDialog.getByRole('textbox', { name: 'عنوان فارسی' }));
   await assertNoSeriousAxeViolations(page);
   await setViewportAndZoom(page, { width: 390, height: 844 }, 2);
@@ -42,6 +61,9 @@ test('performance policy administration sheets are RTL, accessible, responsive, 
   await page.getByRole('button', { name: 'الگو و افزوده' }).click();
   await page.getByRole('button', { name: 'الگوی جدید' }).click();
   const templateDialog = page.getByRole('dialog', { name: 'ساخت پیش‌نویس الگو' });
+  await expect(templateDialog.getByRole('combobox', { name: 'شغل' })).toContainText('کارشناس حسابداری');
+  await expect(templateDialog.getByRole('combobox', { name: 'شغل' })).toContainText('شغل قدیمی · بازنشسته/غیرفعال');
+  await templateDialog.getByRole('combobox', { name: 'شغل' }).selectOption('job-safe-1');
   await expect(templateDialog.getByText('جمع وزن دسته‌ها: ۱۰۰٪')).toBeVisible();
   await templateDialog.getByRole('button', { name: 'افزودن معیار به دسته اصلی' }).click();
   await expect(templateDialog.getByText('جمع وزن معیارهای دسته اصلی: ۱۰۰٪')).toBeVisible();
@@ -50,6 +72,15 @@ test('performance policy administration sheets are RTL, accessible, responsive, 
   await expect(templateDialog.getByRole('button', { name: 'ساخت الگو' })).toBeDisabled();
   await page.keyboard.press('Escape');
   await expect(templateDialog).toBeHidden();
+  await page.getByRole('button', { name: 'درون‌ریزی کاتالوگ نقش' }).click();
+  const catalogDialog = page.getByRole('dialog', { name: 'پیش‌نمایش و درون‌ریزی کاتالوگ نقش' });
+  await expect(catalogDialog.getByText('این عملیات فقط DRAFT می‌سازد.')).toBeVisible();
+  await catalogDialog.getByRole('textbox', { name: 'manifest نسخه‌دار کاتالوگ' }).fill('{}');
+  await catalogDialog.getByRole('button', { name: 'بررسی کاتالوگ' }).click();
+  await expect(catalogDialog.getByText('شغل 80.00٪ · افزوده جایگاه 20.00٪')).toBeVisible();
+  await expect(catalogDialog.getByRole('button', { name: 'ساخت پیش‌نویس‌ها' })).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(catalogDialog).toBeHidden();
 
   await setViewportAndZoom(page, { width: 1440, height: 900 }, 1);
   await page.getByRole('button', { name: 'سیاست‌های سازمانی' }).click();

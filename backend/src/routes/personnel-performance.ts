@@ -35,6 +35,7 @@ import { requireHrAuthorization } from '../middleware/hrAuthorization';
 import { requirePersonnelPerformanceWriteGate } from '../middleware/personnelPerformanceRollout';
 import { PERFORMANCE_ACTION_PERMISSION_CODES } from '../services/hrActionPermissionCatalog';
 import { activeHrActionPermissionsForUser } from '../services/hrAuthorizationService';
+import { loadHrOperationalReference } from '../services/hrOperationalReferenceProjection';
 import {
   activateDuePerformanceArtifacts,
   activateDuePerformancePolicies,
@@ -42,10 +43,12 @@ import {
   createPerformanceCriterionDraft,
   createPerformancePolicyDraft,
   createPerformanceTemplateDraft,
+  importPerformanceRoleCatalogDraft,
   listPerformanceCriteria,
   listPerformancePolicies,
   listPerformanceTemplates,
   previewPerformancePolicy,
+  previewPerformanceRoleCatalogImport,
   retirePerformanceArtifactVersion,
   schedulePerformanceCriterion,
   schedulePerformancePolicy,
@@ -489,6 +492,15 @@ router.post('/evaluations/:evaluationId/corrections', reviewPerformance, require
 const managePolicy = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_POLICY'] });
 const policyWriteGate = requirePersonnelPerformanceWriteGate('MANAGE_POLICY');
 
+router.get('/owner-references', managePolicy, async (_req, res, next) => {
+  try {
+    return res.json({
+      success: true,
+      references: await loadHrOperationalReference(prisma, { includeAvailableCapacity: false }),
+    });
+  } catch (error) { return next(error); }
+});
+
 router.get('/criteria', managePolicy, async (_req, res, next) => {
   try {
     return res.json({ success: true, criteria: await listPerformanceCriteria(prisma) });
@@ -562,6 +574,22 @@ router.post('/templates/:versionId/schedule', managePolicy, policyWriteGate, asy
       publishedByUserId: req.user!.id,
     });
     return res.json({ success: true, version });
+  } catch (error) { return next(error); }
+});
+
+router.post('/catalog-import/preview', managePolicy, async (req, res, next) => {
+  try {
+    return res.json({ success: true, preview: await previewPerformanceRoleCatalogImport(prisma, req.body) });
+  } catch (error) { return next(error); }
+});
+
+router.post('/catalog-import/apply', managePolicy, policyWriteGate, async (req: AuthRequest, res, next) => {
+  try {
+    const result = await importPerformanceRoleCatalogDraft(prisma, {
+      manifest: req.body,
+      createdByUserId: req.user!.id,
+    });
+    return res.status(201).json({ success: true, result });
   } catch (error) { return next(error); }
 });
 

@@ -1542,6 +1542,7 @@ export const personnelPerformanceAPI = {
   cancelEvaluation: (evaluationId: string, reason: string) => api.post(`/hr/personnel-performance/evaluations/${encodeURIComponent(evaluationId)}/cancel`, { reason }),
   invalidateEvaluation: (evaluationId: string, reason: string) => api.post(`/hr/personnel-performance/evaluations/${encodeURIComponent(evaluationId)}/invalidate`, { reason }),
   runReminders: () => api.post('/hr/personnel-performance/reminders/run'),
+  ownerReferences: () => api.get('/hr/personnel-performance/owner-references'),
   criteria: () => api.get('/hr/personnel-performance/criteria'),
   createCriterion: (content: unknown) => api.post('/hr/personnel-performance/criteria', content),
   updateCriterion: (versionId: string, content: unknown) => api.put(`/hr/personnel-performance/criteria/${versionId}`, content),
@@ -1554,6 +1555,8 @@ export const personnelPerformanceAPI = {
   scheduleTemplate: (versionId: string, input: { effectiveFrom: string; reason: string }) => (
     api.post(`/hr/personnel-performance/templates/${versionId}/schedule`, input)
   ),
+  previewCatalogImport: (manifest: unknown) => api.post('/hr/personnel-performance/catalog-import/preview', manifest),
+  applyCatalogImport: (manifest: unknown) => api.post('/hr/personnel-performance/catalog-import/apply', manifest),
   policies: () => api.get('/hr/personnel-performance/policies'),
   createPolicy: (input: unknown) => api.post('/hr/personnel-performance/policies', input),
   updatePolicy: (versionId: string, content: unknown) => api.put(`/hr/personnel-performance/policies/${versionId}`, content),

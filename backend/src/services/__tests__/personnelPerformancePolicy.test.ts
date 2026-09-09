@@ -7,6 +7,11 @@ import {
   validatePerformancePublication,
 } from '../personnelPerformancePolicy';
 import { validatePerformanceVaultEnvironment } from '../personnelPerformancePayloadStore';
+import type { PerformanceCriterionPolicyContent } from '../personnelPerformancePolicy';
+import {
+  inspectPerformanceRoleCatalogManifest,
+  performanceRoleCatalogContentHash,
+} from '../personnelPerformanceRoleCatalog';
 
 assert.throws(() => validatePerformanceVaultEnvironment({
   PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID: 'production-v1',
@@ -46,6 +51,99 @@ assert.ok(validateCriterionPolicyContent({
 }).some((message) => message.includes('واقعیت کنترل‌شده')));
 assert.ok(validateCriterionPolicyContent({ ...criterion, anchorsFa: criterion.anchorsFa.slice(0, 4) })
   .some((message) => message.includes('پنج درجه')));
+
+const typedCriterion: PerformanceCriterionPolicyContent = {
+  ...criterion,
+  applicability: {
+    schemaVersion: 1 as const,
+    fact: 'hasSafetyDuty',
+    factType: 'BOOLEAN' as const,
+    source: 'VERSIONED_DOCUMENTED_DUTY',
+    sourceVersion: 'v1',
+    operator: 'EQUALS' as const,
+    values: [true],
+  },
+};
+assert.deepEqual(validateCriterionPolicyContent(typedCriterion), []);
+assert.ok(validateCriterionPolicyContent({
+  ...typedCriterion,
+  applicability: { ...typedCriterion.applicability, values: ['true'] },
+} as PerformanceCriterionPolicyContent).some((message) => message.includes('نوع')));
+assert.ok(validateCriterionPolicyContent({
+  ...typedCriterion,
+  applicability: { ...typedCriterion.applicability, fact: 'locationId', factType: 'ID' },
+} as PerformanceCriterionPolicyContent).some((message) => message.includes('workplaceId')));
+assert.ok(validateCriterionPolicyContent({
+  ...typedCriterion,
+  applicability: { ...typedCriterion.applicability, operator: 'EXISTS', values: [true] },
+} as PerformanceCriterionPolicyContent).some((message) => message.includes('بدون مقدار')));
+assert.ok(validateCriterionPolicyContent({
+  ...typedCriterion,
+  applicability: { ...typedCriterion.applicability, fact: 'responsibilityCodes', factType: 'STRING_LIST', operator: 'EQUALS' },
+} as PerformanceCriterionPolicyContent).some((message) => message.includes('فهرستی')));
+
+const catalogManifest: any = {
+  schemaVersion: 1,
+  catalog: {
+    stableKey: 'PERF_ROLE_CATALOG_TEST', versionCode: 'TEST_V1', lifecycle: 'DRAFT',
+    importIdentity: 'PERF-ROLE-CATALOG:TEST:V1', contentHash: '0'.repeat(64),
+    contentHashMethod: 'SHA256_CANONICAL_JSON_EXCLUDING_CATALOG_CONTENT_HASH',
+  },
+  source: { provenanceCategory: 'PRODUCTION', asOf: '2026-09-09T00:00:00.000Z', references: ['controlled-source-v1'], extractedFacts: true },
+  review: { contentOrigin: 'COMPANY_CONTROLLED_SOURCE', status: 'BUSINESS_REVIEW_PENDING' },
+  applicabilityDictionary: Object.entries({
+    jobId: 'ID', positionId: 'ID', organizationalUnitId: 'ID', workplaceId: 'ID', shiftType: 'STRING',
+    assignmentType: 'STRING', responsibilityCodes: 'STRING_LIST', effectiveDate: 'DATE', hasSafetyDuty: 'BOOLEAN',
+  }).map(([fact, type]) => ({ fact, type, operators: type === 'STRING_LIST' ? ['IN', 'EXISTS'] : ['EQUALS', 'IN', 'EXISTS'], unknown: 'BLOCK', source: 'employment-assignment', sourceVersion: 'v1' })),
+  evidenceDictionary: [{ code: 'CONTROLLED_SOURCE', classification: 'CANONICAL_EVIDENCE' }],
+  jobs: [{
+    reference: { code: 'JOB_ACCOUNTING', id: 'job-1', synthetic: false }, titleFa: 'کارشناس حسابداری',
+    categories: [{ code: 'CORE', titleFa: 'اصلی', weight: 100 }],
+    criteria: [{
+      conceptCode: 'ACCOUNTING_QUALITY', versionCode: 'ACCOUNTING_QUALITY_V1', titleFa: 'کیفیت ثبت', meaningFa: 'ثبت دقیق و قابل پیگیری',
+      kind: 'JUDGMENT', categoryCode: 'CORE', weight: 100, applicability: null,
+      anchorsFa: ['خیلی ضعیف', 'ضعیف', 'مطابق انتظار', 'خوب', 'برجسته'],
+      evidencePolicy: { dictionaryCodes: ['CONTROLLED_SOURCE'], minimumReliableCount: 1, windowDays: 30, automaticGrade: false },
+      outsideControlFactors: ['نبود سند ورودی'],
+    }],
+  }],
+  positions: [{
+    reference: { code: 'POSITION_PAYABLES', id: 'position-1', synthetic: false }, jobReferenceCode: 'JOB_ACCOUNTING', titleFa: 'کارشناس پرداختنی',
+    composition: { jobWeight: 80, addendumWeight: 20 }, categories: [{ code: 'ADDENDUM', titleFa: 'افزوده', weight: 100 }],
+    criteria: [{
+      conceptCode: 'PAYABLES_CONTROL', versionCode: 'PAYABLES_CONTROL_V1', titleFa: 'کنترل پرداخت', meaningFa: 'کنترل دقیق پرداختنی‌ها',
+      kind: 'JUDGMENT', categoryCode: 'ADDENDUM', weight: 100,
+      applicability: { fact: 'positionId', operator: 'EQUALS', values: ['POSITION_PAYABLES'] },
+      anchorsFa: ['خیلی ضعیف', 'ضعیف', 'مطابق انتظار', 'خوب', 'برجسته'],
+      evidencePolicy: { dictionaryCodes: ['CONTROLLED_SOURCE'], minimumReliableCount: 1, windowDays: 30, automaticGrade: false },
+      outsideControlFactors: ['نبود سند ورودی'],
+    }],
+  }, {
+    reference: { code: 'POSITION_ACCOUNTING', id: 'position-2', synthetic: false }, jobReferenceCode: 'JOB_ACCOUNTING', titleFa: 'کارشناس عمومی',
+    composition: { jobWeight: 100, addendumWeight: 0 }, categories: [], criteria: [],
+  }],
+};
+catalogManifest.catalog.contentHash = performanceRoleCatalogContentHash(catalogManifest);
+const inspectedCatalog = inspectPerformanceRoleCatalogManifest(catalogManifest);
+assert.deepEqual(inspectedCatalog.errors, []);
+assert.equal(inspectedCatalog.plan?.importable, true);
+assert.deepEqual(inspectedCatalog.plan?.compositions.map(({ jobSharePercent, addendumSharePercent, basis }) => ({ jobSharePercent, addendumSharePercent, basis })), [
+  { jobSharePercent: '80.00', addendumSharePercent: '20.00', basis: 'JOB_WITH_POSITION_ADDENDUM' },
+  { jobSharePercent: '100.00', addendumSharePercent: '0.00', basis: 'JOB_ONLY' },
+]);
+assert.deepEqual(inspectedCatalog.plan?.criteria[1].content.applicability, {
+  schemaVersion: 1, fact: 'positionId', factType: 'ID', source: 'employment-assignment', sourceVersion: 'v1', operator: 'EQUALS', values: ['position-1'],
+});
+const nonBlockingUnknown = structuredClone(catalogManifest);
+nonBlockingUnknown.applicabilityDictionary[0].unknown = 'NOT_APPLICABLE';
+nonBlockingUnknown.catalog.contentHash = performanceRoleCatalogContentHash(nonBlockingUnknown);
+assert.ok(inspectPerformanceRoleCatalogManifest(nonBlockingUnknown).errors.some((message) => message.includes('BLOCK')));
+assert.doesNotThrow(() => inspectPerformanceRoleCatalogManifest({ ...catalogManifest, jobs: [null] }));
+assert.ok(inspectPerformanceRoleCatalogManifest({ ...catalogManifest, jobs: [null] }).errors.some((message) => message.includes('ساختار کاتالوگ ناقص')));
+const orphanCriterion = structuredClone(catalogManifest);
+orphanCriterion.jobs[0].criteria[0].categoryCode = 'UNKNOWN_CATEGORY';
+orphanCriterion.catalog.contentHash = performanceRoleCatalogContentHash(orphanCriterion);
+assert.ok(inspectPerformanceRoleCatalogManifest(orphanCriterion).errors.some((message) => message.includes('دسته تعریف‌نشده')));
 
 const levels = {
   schemaVersion: 1 as const,

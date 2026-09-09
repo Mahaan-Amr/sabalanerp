@@ -241,6 +241,72 @@ const unverifiableEvidence = calculatePerformanceEvaluation({
 });
 assert.equal(unverifiableEvidence.status, 'NOT_EVALUABLE');
 
+const typedApplicabilityTemplate = (applicability: Record<string, unknown>): PerformanceTemplateSnapshot => ({
+  schemaVersion: 1,
+  templateVersionId: 'typed-applicability-v1',
+  scoringPolicyVersionId: 'scoring-v1',
+  jobSharePercent: '100.00',
+  addendumSharePercent: '0.00',
+  categories: [{
+    id: 'typed', titleFa: 'کاربردپذیری نوع‌دار', weightPercent: '100.00', required: true,
+    criteria: [{
+      criterionVersionId: 'typed-rule-v1', titleFa: 'قاعده نوع‌دار', weightPercent: '100.00', kind: 'JUDGMENT',
+      anchorsFa: ['یک', 'دو', 'سه', 'چهار', 'پنج'],
+      applicability: applicability as never,
+      evidence: { minimumReliableCount: 0, allowedKinds: [], required: false },
+    }],
+  }],
+});
+const typedSnapshotMetadata = {
+  schemaVersion: 1,
+  snapshotVersion: 'assignment-facts-v1',
+  sourceVersions: { hasSafetyDuty: 'PERF_APPLICABILITY_V1', responsibilityCodes: 'PERF_APPLICABILITY_V1', effectiveDate: 'PERF_APPLICABILITY_V1' },
+  effectiveAt: '2026-01-15T00:00:00.000Z',
+};
+const calculateTypedApplicability = (applicability: Record<string, unknown>, snapshotFacts: Record<string, unknown>) => (
+  calculatePerformanceEvaluation({
+    template: typedApplicabilityTemplate(applicability),
+    sections: [{
+      sectionId: 'typed-section', effectiveDays: 1, allocationPercent: '100.00',
+      effectiveFrom: '2026-01-01T00:00:00.000Z', effectiveTo: '2026-01-31T23:59:59.999Z',
+      snapshotFacts,
+      responses: [{ criterionVersionId: 'typed-rule-v1', grade: 3, evidence: [] }],
+    }],
+  })
+);
+const booleanRule = { schemaVersion: 1, fact: 'hasSafetyDuty', factType: 'BOOLEAN', source: 'VERSIONED_DOCUMENTED_DUTY', sourceVersion: 'PERF_APPLICABILITY_V1', operator: 'EQUALS', values: [true] };
+assert.equal(calculateTypedApplicability(booleanRule, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
+}).status, 'SCORED');
+assert.equal(calculateTypedApplicability(booleanRule, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: 'true',
+}).status, 'BLOCKED', 'string true must never match a BOOLEAN rule');
+const listResult = calculateTypedApplicability({
+  schemaVersion: 1, fact: 'responsibilityCodes', factType: 'STRING_LIST', source: 'VERSIONED_DOCUMENTED_RESPONSIBILITY', sourceVersion: 'PERF_APPLICABILITY_V1', operator: 'IN', values: ['PAYABLES'],
+}, { __applicability: typedSnapshotMetadata, responsibilityCodes: ['RECEIVABLES', 'PAYABLES'] });
+assert.equal(listResult.status, 'SCORED');
+assert.equal(listResult.trace.sections[0].categories[0].criteria[0].applicabilityDecision, 'APPLICABLE');
+const dateResult = calculateTypedApplicability({
+  schemaVersion: 1, fact: 'effectiveDate', factType: 'DATE', source: 'EVALUATION_ASSIGNMENT_SECTION', sourceVersion: 'PERF_APPLICABILITY_V1', operator: 'EQUALS', values: ['2026-01-15'],
+}, { __applicability: typedSnapshotMetadata, effectiveDate: '2026-01-15' });
+assert.equal(dateResult.status, 'SCORED');
+assert.equal(calculateTypedApplicability(booleanRule, { hasSafetyDuty: true }).status, 'BLOCKED');
+const staleSource = calculateTypedApplicability(booleanRule, {
+  __applicability: { ...typedSnapshotMetadata, sourceVersions: { ...typedSnapshotMetadata.sourceVersions, hasSafetyDuty: 'PERF_APPLICABILITY_V2' } },
+  hasSafetyDuty: true,
+});
+assert.equal(staleSource.status, 'BLOCKED');
+assert.ok(staleSource.reasons.some((reason) => reason.includes('PERF_APPLICABILITY_V1')));
+assert.equal(calculateTypedApplicability({ ...booleanRule, values: [false] }, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: false,
+}).status, 'SCORED');
+assert.equal(calculateTypedApplicability({ ...booleanRule, fact: 'jobId', factType: 'ID', source: 'PERIOD_EFFECTIVE_POSITION_JOB', values: ['job-1'] }, {
+  __applicability: { ...typedSnapshotMetadata, sourceVersions: { ...typedSnapshotMetadata.sourceVersions, jobId: 'PERF_APPLICABILITY_V1' } }, jobId: 'job-1',
+}).status, 'SCORED');
+assert.equal(calculateTypedApplicability(booleanRule, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: null,
+}).status, 'BLOCKED');
+
 const optionalEvidenceTemplate: PerformanceTemplateSnapshot = {
   ...template,
   jobSharePercent: '100.00',

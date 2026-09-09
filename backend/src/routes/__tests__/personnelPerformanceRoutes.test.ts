@@ -51,6 +51,7 @@ assert.deepEqual(registeredRoutes, [
   'GET /consequence-handoffs/:handoffId',
   'POST /results/:resultId/suspend',
   'POST /evaluations/:evaluationId/corrections',
+  'GET /owner-references',
   'GET /criteria',
   'POST /criteria',
   'PUT /criteria/:versionId',
@@ -59,6 +60,8 @@ assert.deepEqual(registeredRoutes, [
   'POST /templates',
   'PUT /templates/:versionId',
   'POST /templates/:versionId/schedule',
+  'POST /catalog-import/preview',
+  'POST /catalog-import/apply',
   'GET /policies',
   'POST /policies',
   'PUT /policies/:versionId',
@@ -105,7 +108,13 @@ const rolloutLayer = (router as unknown as {
 }).stack.find((layer) => layer.route?.path === '/rollout');
 assert.ok(rolloutLayer && rolloutLayer.route!.stack.length >= 2, 'rollout metadata must retain server-side authorization middleware');
 
-for (const path of ['/readiness/reconstruct', '/readiness/:runId/retry', '/supervisor/sections/:sectionId/submit', '/reviews/:submissionId/decision', '/sections/:sectionId/not-evaluable', '/evaluations/:evaluationId/invalidate', '/exports', '/consequence-handoffs', '/results/:resultId/suspend', '/evaluations/:evaluationId/corrections', '/criteria', '/templates', '/policies', '/activation/run-due-policies', '/activation/run-due-artifacts']) {
+const ownerReferenceLayer = (router as unknown as {
+  stack: Array<{ route?: { path: string; stack: Array<{ handle: RequestHandler }> } }>;
+}).stack.find((layer) => layer.route?.path === '/owner-references');
+assert.ok(ownerReferenceLayer && ownerReferenceLayer.route!.stack.length >= 2,
+  'performance owner references must use policy authority without broad organization access');
+
+for (const path of ['/readiness/reconstruct', '/readiness/:runId/retry', '/supervisor/sections/:sectionId/submit', '/reviews/:submissionId/decision', '/sections/:sectionId/not-evaluable', '/evaluations/:evaluationId/invalidate', '/exports', '/consequence-handoffs', '/results/:resultId/suspend', '/evaluations/:evaluationId/corrections', '/criteria', '/templates', '/catalog-import/apply', '/policies', '/activation/run-due-policies', '/activation/run-due-artifacts']) {
   const writeLayer = (router as unknown as {
     stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
   }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);

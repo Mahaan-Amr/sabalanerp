@@ -12,17 +12,20 @@ import {
   createPerformancePolicyDraft,
   createPerformanceTemplateDraft,
   DEFAULT_CURRENT_LEVEL_POLICY_CONTENT,
+  DEFAULT_SCORING_POLICY_CONTENT,
+  freezePerformanceTemplateSnapshot,
   previewPerformancePolicy,
   previewPerformanceRoleCatalogImport,
   importPerformanceRoleCatalogDraft,
   schedulePerformanceCriterion,
   schedulePerformanceTemplate,
   schedulePerformancePolicy,
+  updatePerformanceTemplateDraft,
 } from '../personnelPerformancePolicyStore';
 import { DEFAULT_LEVEL_POLICY_CONTENT, nextTehranDayStart } from '../personnelPerformancePolicy';
 import { performanceRoleCatalogContentHash } from '../personnelPerformanceRoleCatalog';
 import { persistPerformancePayload, readPerformancePayload } from '../personnelPerformancePayloadStore';
-import { calculatePerformanceEvaluation, type PerformanceTemplateSnapshot } from '../personnelPerformanceCalculation';
+import { calculatePerformanceEvaluation } from '../personnelPerformanceCalculation';
 
 const repositoryRoot = path.resolve(process.cwd(), '..');
 const sourceDatabaseUrl = process.env.DATABASE_URL
@@ -68,6 +71,26 @@ const main = async () => {
     content: templateContent, createdByUserId: actor.id, keyring,
   });
   assert.equal(validOwnerDraft.ownerId, activeJob.id);
+  await assert.rejects(createPerformanceTemplateDraft(first, {
+    templateKind: 'JOB_TEMPLATE', ownerType: 'JOB', ownerId: activeJob.id,
+    content: { ...templateContent, catalogSource: {
+      importIdentity: 'FORGED', catalogVersion: 'V1', manifestContentHash: 'a'.repeat(64),
+      sourceAsOf: new Date().toISOString(), sourceProvenanceCategory: 'LOCAL',
+      manifestContentOrigin: 'COMPANY_CONTROLLED_SOURCE', manifestReviewStatus: 'APPROVED', reviewStatus: 'APPROVED',
+      approvedAt: new Date().toISOString(), approvedByUserId: actor.id, approvalReason: 'تأیید جعلی سمت کاربر',
+    } } as any,
+    createdByUserId: actor.id, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_SOURCE_SERVER_OWNED');
+  await assert.rejects(updatePerformanceTemplateDraft(first, {
+    versionId: validOwnerDraft.id,
+    content: { ...templateContent, catalogSource: {
+      importIdentity: 'FORGED', catalogVersion: 'V1', manifestContentHash: 'a'.repeat(64),
+      sourceAsOf: new Date().toISOString(), sourceProvenanceCategory: 'LOCAL',
+      manifestContentOrigin: 'COMPANY_CONTROLLED_SOURCE', manifestReviewStatus: 'APPROVED', reviewStatus: 'APPROVED',
+      approvedAt: new Date().toISOString(), approvedByUserId: actor.id, approvalReason: 'تأیید جعلی سمت کاربر',
+    } } as any,
+    keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_SOURCE_SERVER_OWNED');
   await assert.rejects(createPerformanceTemplateDraft(first, {
     templateKind: 'JOB_TEMPLATE', ownerType: 'JOB', ownerId: 'missing-job',
     content: templateContent, createdByUserId: actor.id, keyring,
@@ -127,8 +150,18 @@ const main = async () => {
     applicabilityDictionary: Object.entries({
       jobId: 'ID', positionId: 'ID', organizationalUnitId: 'ID', workplaceId: 'ID', shiftType: 'STRING',
       assignmentType: 'STRING', responsibilityCodes: 'STRING_LIST', effectiveDate: 'DATE', hasSafetyDuty: 'BOOLEAN',
-    }).map(([fact, type]) => ({ fact, type, operators: type === 'STRING_LIST' ? ['IN', 'EXISTS'] : ['EQUALS', 'IN', 'EXISTS'], unknown: 'BLOCK', source: 'employment-assignment', sourceVersion: 'v1' })),
-    evidenceDictionary: [{ code: 'CONTROLLED_SOURCE', classification: 'CANONICAL_EVIDENCE' }],
+    }).map(([fact, type]) => ({
+      fact, type,
+      operators: fact === 'workplaceId' || fact === 'shiftType' ? ['EQUALS', 'IN', 'EXISTS']
+        : fact === 'responsibilityCodes' ? ['IN', 'EXISTS']
+          : fact === 'hasSafetyDuty' ? ['EQUALS'] : ['EQUALS', 'IN'],
+      unknown: 'BLOCK', source: 'employment-assignment', sourceVersion: 'v1',
+    })),
+    evidenceDictionary: [{
+      code: 'CONTROLLED_SOURCE', classification: 'CANONICAL_EVIDENCE', sourceProcess: 'فرایند کنترل‌شده',
+      recordVersion: 'شناسه و نسخه تغییرناپذیر', lineage: 'انتساب مؤثر ثبت‌شده',
+      attribution: 'RECORDED_PERFORMER_ONLY', ownerRole: 'HR_POLICY_OWNER',
+    }],
     jobs: [{
       reference: { code: 'IMPORT_JOB', id: importJob.id, synthetic: false }, titleFa: 'شغل درون‌ریزی',
       categories: [{ code: 'CORE', titleFa: 'اصلی', weight: 100 }],
@@ -146,7 +179,7 @@ const main = async () => {
       criteria: [{
         conceptCode: `IMPORT_ADDENDUM_${database.runId.toUpperCase()}`, versionCode: 'ADDENDUM_V1', titleFa: 'کنترل افزوده', meaningFa: 'انتظار ویژه جایگاه کنترل‌شده',
         kind: 'JUDGMENT', categoryCode: 'ADDENDUM', weight: 100,
-        applicability: { fact: 'positionId', operator: 'EQUALS', values: ['IMPORT_POSITION'] },
+        applicability: { schemaVersion: 1, fact: 'positionId', factType: 'ID', operator: 'EQUALS', values: ['IMPORT_POSITION'] },
         anchorsFa: ['خیلی ضعیف', 'ضعیف', 'مطابق انتظار', 'خوب', 'برجسته'],
         evidencePolicy: { dictionaryCodes: ['CONTROLLED_SOURCE'], minimumReliableCount: 1, windowDays: 30, automaticGrade: false },
         outsideControlFactors: ['نبود داده ورودی'],
@@ -168,29 +201,39 @@ const main = async () => {
   assert.equal(imported.templateVersionIds.length, 2);
   assert.equal(await first.performanceCriterionVersion.count({ where: { id: { in: imported.criterionVersionIds }, lifecycle: 'DRAFT' } }), 2);
   assert.equal(await first.performanceTemplateVersion.count({ where: { id: { in: imported.templateVersionIds }, lifecycle: 'DRAFT' } }), 2);
+  const catalogSchedulingNow = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000);
+  const artifactEffectiveFrom = nextTehranDayStart(catalogSchedulingNow);
+  const catalogReceipt = await first.performanceOperationReceipt.findFirstOrThrow({
+    where: { operationKind: 'IMPORT_ROLE_CATALOG_DRAFT', intentHash: importManifest.catalog.contentHash },
+  });
+  const catalogReceiptEvidence = await readPerformancePayload<any>(first, catalogReceipt.encryptedPayloadId, keyring);
+  assert.deepEqual(catalogReceiptEvidence.manifest.source.references, importManifest.source.references);
+  assert.equal(catalogReceiptEvidence.manifest.evidenceDictionary[0].lineage, importManifest.evidenceDictionary[0].lineage);
+  assert.deepEqual(catalogReceiptEvidence.manifest.jobs[0].criteria[0].outsideControlFactors,
+    importManifest.jobs[0].criteria[0].outsideControlFactors);
   await assert.rejects(schedulePerformanceCriterion(first, {
-    versionId: imported.criterionVersionIds[0], effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
-    reason: 'آزمون جلوگیری از انتشار محتوای پیشنهادی', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+    versionId: imported.criterionVersionIds[0], effectiveFrom: artifactEffectiveFrom,
+    reason: 'آزمون جلوگیری از انتشار محتوای پیشنهادی', publishedByUserId: actor.id, now: catalogSchedulingNow, keyring,
   }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED');
   await assert.rejects(schedulePerformanceTemplate(first, {
-    versionId: imported.templateVersionIds[0], effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
-    reason: 'آزمون جلوگیری از انتشار الگوی پیشنهادی', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+    versionId: imported.templateVersionIds[0], effectiveFrom: artifactEffectiveFrom,
+    reason: 'آزمون جلوگیری از انتشار الگوی پیشنهادی', publishedByUserId: actor.id, now: catalogSchedulingNow, keyring,
   }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED');
   const approvedCriterion = await approvePerformanceCatalogDraft(first, {
     artifactType: 'criterion', versionId: imported.criterionVersionIds[0],
-    reason: 'بازبینی معیار در برابر منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+    reason: 'بازبینی معیار در برابر منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: catalogSchedulingNow, keyring,
   });
   const approvedTemplate = await approvePerformanceCatalogDraft(first, {
     artifactType: 'template', versionId: imported.templateVersionIds[0],
-    reason: 'بازبینی الگو و مالک آن در منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+    reason: 'بازبینی الگو و مالک آن در منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: catalogSchedulingNow, keyring,
   });
   const approvedAddendumCriterion = await approvePerformanceCatalogDraft(first, {
     artifactType: 'criterion', versionId: imported.criterionVersionIds[1],
-    reason: 'بازبینی معیار افزوده در برابر منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+    reason: 'بازبینی معیار افزوده در برابر منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: catalogSchedulingNow, keyring,
   });
   const approvedAddendumTemplate = await approvePerformanceCatalogDraft(first, {
     artifactType: 'template', versionId: imported.templateVersionIds[1],
-    reason: 'بازبینی الگوی افزوده در منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: ownerSchedulingNow, keyring,
+    reason: 'بازبینی الگوی افزوده در منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: catalogSchedulingNow, keyring,
   });
   const approvedCriterionContent = await readPerformancePayload<any>(first, approvedCriterion.encryptedPayloadId!, keyring);
   const approvedTemplateContent = await readPerformancePayload<any>(first, approvedTemplate.encryptedPayloadId!, keyring);
@@ -200,55 +243,98 @@ const main = async () => {
   assert.equal(await first.performanceAuditEvent.count({
     where: { eventType: 'CATALOG_BUSINESS_APPROVED', aggregateId: { in: [approvedCriterion.id, approvedTemplate.id, approvedAddendumCriterion.id, approvedAddendumTemplate.id] } },
   }), 4);
-  const addendumCriterionContent = await readPerformancePayload<any>(first, approvedAddendumCriterion.encryptedPayloadId!, keyring);
-  const addendumTemplateContent = await readPerformancePayload<any>(first, approvedAddendumTemplate.encryptedPayloadId!, keyring);
-  const frozenImportedSnapshot = Object.freeze({
-    schemaVersion: 1,
-    templateVersionId: approvedAddendumTemplate.id,
-    scoringPolicyVersionId: 'SCORING_CONTRACT_V1',
-    jobSharePercent: '80.00',
-    addendumSharePercent: '20.00',
-    categories: addendumTemplateContent.categories.map((category: any) => ({
-      ...category,
-      criteria: category.criteria.map((criterion: any) => ({
-        criterionVersionId: criterion.criterionVersionId,
-        titleFa: addendumCriterionContent.titleFa,
-        weightPercent: criterion.weightPercent,
-        kind: addendumCriterionContent.kind,
-        anchorsFa: addendumCriterionContent.anchorsFa,
-        applicability: addendumCriterionContent.applicability,
-        evidence: addendumCriterionContent.evidence,
-      })),
-    })),
-  }) as PerformanceTemplateSnapshot;
+  await schedulePerformanceCriterion(first, {
+    versionId: approvedCriterion.id, effectiveFrom: artifactEffectiveFrom,
+    reason: 'انتشار معیار پس از تأیید کسب‌وکاری ثبت‌شده', publishedByUserId: actor.id, now: catalogSchedulingNow, keyring,
+  });
+  await schedulePerformanceTemplate(first, {
+    versionId: approvedTemplate.id, effectiveFrom: artifactEffectiveFrom,
+    reason: 'انتشار الگو پس از تأیید کسب‌وکاری ثبت‌شده', publishedByUserId: actor.id, now: catalogSchedulingNow, keyring,
+  });
+  await schedulePerformanceCriterion(first, {
+    versionId: approvedAddendumCriterion.id, effectiveFrom: artifactEffectiveFrom,
+    reason: 'انتشار معیار افزوده پس از تأیید کسب‌وکاری', publishedByUserId: actor.id, now: catalogSchedulingNow, keyring,
+  });
+  await schedulePerformanceTemplate(first, {
+    versionId: approvedAddendumTemplate.id, effectiveFrom: artifactEffectiveFrom,
+    reason: 'انتشار افزوده جایگاه پس از تأیید کسب‌وکاری', publishedByUserId: actor.id, now: catalogSchedulingNow, keyring,
+  });
+  await activateDuePerformanceArtifacts(first, {
+    actorUserId: actor.id, idempotencyKey: `catalog-activation-${database.runId}`, now: artifactEffectiveFrom, keyring,
+  });
+  const scoringDraft = await createPerformancePolicyDraft(first, {
+    policyKind: PerformancePolicyKind.SCORING, content: DEFAULT_SCORING_POLICY_CONTENT,
+    createdByUserId: actor.id, keyring,
+  });
+  const scoringPreview = await previewPerformancePolicy(first, {
+    versionId: scoringDraft.id, asOf: artifactEffectiveFrom, now: catalogSchedulingNow, keyring,
+  });
+  await schedulePerformancePolicy(first, {
+    versionId: scoringDraft.id, effectiveFrom: artifactEffectiveFrom,
+    reason: 'سیاست امتیازدهی آزمون زنجیره کاتالوگ', confirmedByUserId: actor.id,
+    confirmedPreviewHash: scoringPreview.preview.resultHash,
+    confirmedPopulationHash: scoringPreview.sourcePopulationHash,
+    now: catalogSchedulingNow, keyring,
+  });
+  await activateDuePerformancePolicies(first, {
+    actorUserId: actor.id, idempotencyKey: `catalog-scoring-activation-${database.runId}`,
+    now: artifactEffectiveFrom, keyring,
+  });
+  const catalogPersonnel = await first.personnel.create({ data: { firstName: 'پرسنل', lastName: 'کاتالوگ' } });
+  const catalogRelationship = await first.hrEmploymentRelationship.create({ data: {
+    personnelId: catalogPersonnel.id, status: 'ACTIVE', effectiveFrom: catalogSchedulingNow, createdBy: actor.id,
+  } });
+  const catalogAssignment = await first.hrEmploymentAssignment.create({ data: {
+    employmentRelationshipId: catalogRelationship.id, positionId: importPosition.id, organizationalUnitId: ownerUnit.id,
+    type: 'PRIMARY', effectiveFrom: catalogSchedulingNow, performanceAllocationPercent: '100.00', createdBy: actor.id,
+  } });
+  const catalogSubject = await first.performanceSubject.create({ data: {
+    stableKey: `catalog-subject-${database.runId}`, nonDisplayKey: `opaque-catalog-${database.runId}`,
+    personnelId: catalogPersonnel.id, employmentRelationshipId: catalogRelationship.id, createdByUserId: actor.id,
+  } });
+  const catalogEvaluation = await first.performanceEvaluation.create({ data: {
+    stableKey: `catalog-evaluation-${database.runId}`, subjectId: catalogSubject.id,
+    measurementFrom: artifactEffectiveFrom,
+    measurementTo: new Date(artifactEffectiveFrom.getTime() + 86_400_000), createdByUserId: actor.id,
+  } });
+  const catalogSection = await first.performanceEvaluationSection.create({ data: {
+    evaluationId: catalogEvaluation.id, employmentAssignmentId: catalogAssignment.id,
+    responsibleSupervisorPersonnelId: catalogPersonnel.id, effectiveFrom: artifactEffectiveFrom,
+    effectiveTo: new Date(artifactEffectiveFrom.getTime() + 86_400_000), allocationPercent: '100.00',
+  } });
+  const frozen = await first.$transaction((tx) => freezePerformanceTemplateSnapshot(tx, {
+    evaluationId: catalogEvaluation.id,
+    sectionId: catalogSection.id,
+    jobTemplateVersionId: approvedTemplate.id,
+    positionAddendumVersionId: approvedAddendumTemplate.id,
+    sectionStartedAt: artifactEffectiveFrom,
+    capturedAt: artifactEffectiveFrom,
+    keyring,
+  }));
+  const storedSnapshot = await first.performanceSnapshot.findUniqueOrThrow({ where: { id: frozen.snapshotId } });
+  const persistedFrozenSnapshot = await readPerformancePayload<any>(first, storedSnapshot.encryptedPayloadId, keyring);
+  assert.equal(persistedFrozenSnapshot.jobSharePercent, '80.000000');
+  assert.equal(persistedFrozenSnapshot.addendumSharePercent, '20.000000');
   const importedCalculation = calculatePerformanceEvaluation({
-    template: frozenImportedSnapshot,
+    template: persistedFrozenSnapshot,
     sections: [{
       sectionId: 'imported-effective-section', effectiveDays: 1, allocationPercent: '100.00',
-      effectiveFrom: '2026-09-01T00:00:00.000Z', effectiveTo: '2026-09-30T23:59:59.999Z',
+      effectiveFrom: artifactEffectiveFrom.toISOString(), effectiveTo: new Date(artifactEffectiveFrom.getTime() + 86_399_999).toISOString(),
       snapshotFacts: {
         __applicability: {
           schemaVersion: 1, snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
-          sourceVersions: { positionId: 'v1' }, effectiveAt: '2026-09-15T00:00:00.000Z',
+          sourceVersions: { positionId: 'v1' }, effectiveAt: artifactEffectiveFrom.toISOString(),
         },
         positionId: importPosition.id,
       },
-      responses: [{
-        criterionVersionId: approvedAddendumCriterion.id, grade: 4,
-        evidence: [{ kind: 'OPERATIONAL_REFERENCE', quality: 'RELIABLE', occurredAt: '2026-09-15', referenceId: 'controlled-record-1', sourceVersion: 'v1', contentHash: 'a'.repeat(64) }],
-      }],
+      responses: [approvedCriterion.id, approvedAddendumCriterion.id].map((criterionVersionId, index) => ({
+        criterionVersionId, grade: (index === 0 ? 3 : 4) as 3 | 4,
+        evidence: [{ kind: 'OPERATIONAL_REFERENCE' as const, quality: 'RELIABLE' as const, occurredAt: artifactEffectiveFrom.toISOString(), referenceId: `controlled-record-${index}`, sourceVersion: 'v1', contentHash: 'a'.repeat(64) }],
+      })),
     }],
   });
   assert.equal(importedCalculation.status, 'SCORED');
-  assert.equal(importedCalculation.exactScore, '75.000000');
-  await schedulePerformanceCriterion(first, {
-    versionId: approvedCriterion.id, effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
-    reason: 'انتشار معیار پس از تأیید کسب‌وکاری ثبت‌شده', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
-  });
-  await schedulePerformanceTemplate(first, {
-    versionId: approvedTemplate.id, effectiveFrom: nextTehranDayStart(ownerSchedulingNow),
-    reason: 'انتشار الگو پس از تأیید کسب‌وکاری ثبت‌شده', publishedByUserId: actor.id, now: ownerSchedulingNow, keyring,
-  });
+  assert.equal(importedCalculation.exactScore, '55.000000');
   const retriedImport = await importPerformanceRoleCatalogDraft(first, {
     manifest: importManifest, createdByUserId: actor.id, keyring,
   });
@@ -339,13 +425,14 @@ const main = async () => {
     },
   });
   const activationKey = `artifact-activation-${database.runId}`;
+  const artifactReceiptCountBefore = await first.performanceOperationReceipt.count({ where: { operationKind: 'ACTIVATE_DUE_ARTIFACTS' } });
   const activations = await Promise.all([
     activateDuePerformanceArtifacts(first, { actorUserId: actor.id, idempotencyKey: activationKey, now: activationTime, keyring }),
     activateDuePerformanceArtifacts(second, { actorUserId: actor.id, idempotencyKey: activationKey, now: activationTime, keyring }),
   ]);
   assert.deepEqual(activations[0], activations[1]);
   assert.deepEqual(activations[0].activatedCriterionVersionIds, [activationVersion.id]);
-  assert.equal(await first.performanceOperationReceipt.count({ where: { operationKind: 'ACTIVATE_DUE_ARTIFACTS' } }), 1);
+  assert.equal(await first.performanceOperationReceipt.count({ where: { operationKind: 'ACTIVATE_DUE_ARTIFACTS' } }), artifactReceiptCountBefore + 1);
   assert.equal(await first.performanceAuditEvent.count({
     where: { aggregateType: 'CRITERION_VERSION', aggregateId: activationVersion.id, eventType: 'ACTIVATED' },
   }), 1);

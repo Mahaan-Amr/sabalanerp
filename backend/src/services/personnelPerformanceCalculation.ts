@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import roleCatalogContract from '../contracts/personnelPerformanceRoleCatalog.json';
 
 export const PERFORMANCE_GRADE_POINTS = ['0', '25', '50', '75', '100'] as const;
 
@@ -7,19 +8,19 @@ export type PerformanceCriterionKind = 'JUDGMENT' | 'KPI_EVIDENCE' | 'EXPLANATOR
 export type PerformanceEvidenceKind = 'OPERATIONAL_REFERENCE' | 'CONTROLLED_DOCUMENT' | 'STRUCTURED_OBSERVATION';
 export type PerformanceEvidenceQuality = 'RELIABLE' | 'INCOMPLETE' | 'DISPUTED' | 'MISSING' | 'INVALIDATED';
 
-export const PERFORMANCE_APPLICABILITY_FACT_TYPES = {
-  jobId: 'ID',
-  positionId: 'ID',
-  organizationalUnitId: 'ID',
-  workplaceId: 'ID',
-  shiftType: 'STRING',
-  assignmentType: 'STRING',
-  responsibilityCodes: 'STRING_LIST',
-  effectiveDate: 'DATE',
-  hasSafetyDuty: 'BOOLEAN',
-} as const;
+export const PERFORMANCE_APPLICABILITY_FACT_TYPES = Object.fromEntries(
+  Object.entries(roleCatalogContract.applicabilityFacts).map(([fact, definition]) => [fact, definition.type]),
+) as {
+  jobId: 'ID'; positionId: 'ID'; organizationalUnitId: 'ID'; workplaceId: 'ID'; shiftType: 'STRING';
+  assignmentType: 'STRING'; responsibilityCodes: 'STRING_LIST'; effectiveDate: 'DATE'; hasSafetyDuty: 'BOOLEAN';
+};
 
-export const PERFORMANCE_APPLICABILITY_SNAPSHOT_VERSION = 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1' as const;
+export const PERFORMANCE_APPLICABILITY_FACT_OPERATORS = roleCatalogContract.applicabilityFacts as Record<
+  keyof typeof PERFORMANCE_APPLICABILITY_FACT_TYPES,
+  { type: typeof PERFORMANCE_APPLICABILITY_FACT_TYPES[keyof typeof PERFORMANCE_APPLICABILITY_FACT_TYPES]; operators: Array<'EQUALS' | 'IN' | 'EXISTS'> }
+>;
+
+export const PERFORMANCE_APPLICABILITY_SNAPSHOT_VERSION = roleCatalogContract.snapshotVersion;
 
 export type PerformanceApplicabilityFact = keyof typeof PERFORMANCE_APPLICABILITY_FACT_TYPES;
 export type PerformanceApplicabilityFactType = typeof PERFORMANCE_APPLICABILITY_FACT_TYPES[PerformanceApplicabilityFact];

@@ -8,5 +8,16 @@
     "FIXTURE",
     "HISTORICAL_DOCUMENT"
   ],
-  "snapshotVersion": "PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1"
+  "snapshotVersion": "PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1",
+  "applicabilityFacts": {
+    "jobId": { "type": "ID", "operators": ["EQUALS", "IN"] },
+    "positionId": { "type": "ID", "operators": ["EQUALS", "IN"] },
+    "organizationalUnitId": { "type": "ID", "operators": ["EQUALS", "IN"] },
+    "workplaceId": { "type": "ID", "operators": ["EQUALS", "IN", "EXISTS"] },
+    "shiftType": { "type": "STRING", "operators": ["EQUALS", "IN", "EXISTS"] },
+    "assignmentType": { "type": "STRING", "operators": ["EQUALS", "IN"] },
+    "responsibilityCodes": { "type": "STRING_LIST", "operators": ["IN", "EXISTS"] },
+    "effectiveDate": { "type": "DATE", "operators": ["EQUALS", "IN"] },
+    "hasSafetyDuty": { "type": "BOOLEAN", "operators": ["EQUALS"] }
+  }
 }

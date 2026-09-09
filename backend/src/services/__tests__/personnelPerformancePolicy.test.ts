@@ -106,8 +106,18 @@ const catalogManifest: any = {
   applicabilityDictionary: Object.entries({
     jobId: 'ID', positionId: 'ID', organizationalUnitId: 'ID', workplaceId: 'ID', shiftType: 'STRING',
     assignmentType: 'STRING', responsibilityCodes: 'STRING_LIST', effectiveDate: 'DATE', hasSafetyDuty: 'BOOLEAN',
-  }).map(([fact, type]) => ({ fact, type, operators: type === 'STRING_LIST' ? ['IN', 'EXISTS'] : ['EQUALS', 'IN', 'EXISTS'], unknown: 'BLOCK', source: 'employment-assignment', sourceVersion: 'v1' })),
-  evidenceDictionary: [{ code: 'CONTROLLED_SOURCE', classification: 'CANONICAL_EVIDENCE' }],
+  }).map(([fact, type]) => ({
+    fact, type,
+    operators: fact === 'workplaceId' || fact === 'shiftType' ? ['EQUALS', 'IN', 'EXISTS']
+      : fact === 'responsibilityCodes' ? ['IN', 'EXISTS']
+        : fact === 'hasSafetyDuty' ? ['EQUALS'] : ['EQUALS', 'IN'],
+    unknown: 'BLOCK', source: 'employment-assignment', sourceVersion: 'v1',
+  })),
+  evidenceDictionary: [{
+    code: 'CONTROLLED_SOURCE', classification: 'CANONICAL_EVIDENCE', sourceProcess: 'فرایند کنترل‌شده',
+    recordVersion: 'شناسه و نسخه تغییرناپذیر', lineage: 'انتساب مؤثر ثبت‌شده',
+    attribution: 'RECORDED_PERFORMER_ONLY', ownerRole: 'HR_POLICY_OWNER',
+  }],
   jobs: [{
     reference: { code: 'JOB_ACCOUNTING', id: 'job-1', synthetic: false }, titleFa: 'کارشناس حسابداری',
     categories: [{ code: 'CORE', titleFa: 'اصلی', weight: 100 }],
@@ -125,7 +135,7 @@ const catalogManifest: any = {
     criteria: [{
       conceptCode: 'PAYABLES_CONTROL', versionCode: 'PAYABLES_CONTROL_V1', titleFa: 'کنترل پرداخت', meaningFa: 'کنترل دقیق پرداختنی‌ها',
       kind: 'JUDGMENT', categoryCode: 'ADDENDUM', weight: 100,
-      applicability: { fact: 'positionId', operator: 'EQUALS', values: ['POSITION_PAYABLES'] },
+      applicability: { schemaVersion: 1, fact: 'positionId', factType: 'ID', operator: 'EQUALS', values: ['POSITION_PAYABLES'] },
       anchorsFa: ['خیلی ضعیف', 'ضعیف', 'مطابق انتظار', 'خوب', 'برجسته'],
       evidencePolicy: { dictionaryCodes: ['CONTROLLED_SOURCE'], minimumReliableCount: 1, windowDays: 30, automaticGrade: false },
       outsideControlFactors: ['نبود سند ورودی'],
@@ -182,6 +192,22 @@ const malformedApplicability = structuredClone(catalogManifest);
 delete malformedApplicability.positions[0].criteria[0].applicability.values;
 assert.doesNotThrow(() => inspectPerformanceRoleCatalogManifest(malformedApplicability));
 assert.ok(inspectPerformanceRoleCatalogManifest(malformedApplicability).errors.some((message) => message.includes('ساختار کاتالوگ ناقص')));
+const malformedAnchor = structuredClone(catalogManifest);
+malformedAnchor.jobs[0].criteria[0].anchorsFa[0] = null;
+assert.doesNotThrow(() => inspectPerformanceRoleCatalogManifest(malformedAnchor));
+assert.ok(inspectPerformanceRoleCatalogManifest(malformedAnchor).errors.some((message) => message.includes('ساختار کاتالوگ ناقص')));
+const missingTypedSchema = structuredClone(catalogManifest);
+delete missingTypedSchema.positions[0].criteria[0].applicability.schemaVersion;
+missingTypedSchema.catalog.contentHash = performanceRoleCatalogContentHash(missingTypedSchema);
+assert.ok(inspectPerformanceRoleCatalogManifest(missingTypedSchema).errors.some((message) => message.includes('نسخه یا نوع')));
+const mismatchedTypedFact = structuredClone(catalogManifest);
+mismatchedTypedFact.positions[0].criteria[0].applicability.factType = 'BOOLEAN';
+mismatchedTypedFact.catalog.contentHash = performanceRoleCatalogContentHash(mismatchedTypedFact);
+assert.ok(inspectPerformanceRoleCatalogManifest(mismatchedTypedFact).errors.some((message) => message.includes('نسخه یا نوع')));
+const driftedDictionaryOperators = structuredClone(catalogManifest);
+driftedDictionaryOperators.applicabilityDictionary.find((entry: any) => entry.fact === 'jobId').operators.push('EXISTS');
+driftedDictionaryOperators.catalog.contentHash = performanceRoleCatalogContentHash(driftedDictionaryOperators);
+assert.ok(inspectPerformanceRoleCatalogManifest(driftedDictionaryOperators).errors.some((message) => message.includes('عملگرهای فرهنگ')));
 const excessivePrecision = structuredClone(catalogManifest);
 excessivePrecision.jobs[0].categories[0].weight = 100.001;
 excessivePrecision.catalog.contentHash = performanceRoleCatalogContentHash(excessivePrecision);
@@ -238,6 +264,19 @@ const inspectedSynthetic = inspectPerformanceRoleCatalogManifest(syntheticPrevie
 assert.deepEqual(inspectedSynthetic.errors, []);
 assert.equal(inspectedSynthetic.plan?.importable, false);
 assert.ok(inspectedSynthetic.plan?.warnings.some((message) => message.includes('ساختگی')));
+for (const provenanceCategory of ['SEED', 'FIXTURE', 'SANITIZED_RECOVERY', 'HISTORICAL_DOCUMENT']) {
+  const nonCompanyCatalog = structuredClone(catalogManifest);
+  nonCompanyCatalog.source.provenanceCategory = provenanceCategory;
+  nonCompanyCatalog.catalog.contentHash = performanceRoleCatalogContentHash(nonCompanyCatalog);
+  assert.equal(inspectPerformanceRoleCatalogManifest(nonCompanyCatalog).plan?.importable, false,
+    `${provenanceCategory} must remain preview-only`);
+}
+const malformedCatalogProvenance = structuredClone(catalogManifest);
+malformedCatalogProvenance.source.references = [null];
+malformedCatalogProvenance.review.contentOrigin = 42;
+malformedCatalogProvenance.catalog.contentHash = performanceRoleCatalogContentHash(malformedCatalogProvenance);
+assert.ok(inspectPerformanceRoleCatalogManifest(malformedCatalogProvenance).errors.some((message) => message.includes('منبع کاتالوگ')));
+assert.ok(inspectPerformanceRoleCatalogManifest(malformedCatalogProvenance).errors.some((message) => message.includes('منشأ محتوای')));
 
 const levels = {
   schemaVersion: 1 as const,

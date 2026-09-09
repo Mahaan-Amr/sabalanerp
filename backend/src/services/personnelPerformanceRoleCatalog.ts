@@ -9,6 +9,7 @@ import {
 } from './personnelPerformancePolicy';
 import {
   PERFORMANCE_APPLICABILITY_FACT_TYPES,
+  PERFORMANCE_APPLICABILITY_FACT_OPERATORS,
   validateTypedPerformanceApplicabilityRule,
   type PerformanceApplicabilityFact,
   type PerformanceApplicabilityFactType,
@@ -26,7 +27,13 @@ type CatalogCriterion = {
   kind: 'JUDGMENT';
   categoryCode: string;
   weight: number;
-  applicability: { fact: string; operator: 'EQUALS' | 'IN' | 'EXISTS'; values: unknown[] } | null;
+  applicability: {
+    schemaVersion: 1;
+    fact: string;
+    factType: PerformanceApplicabilityFactType;
+    operator: 'EQUALS' | 'IN' | 'EXISTS';
+    values: unknown[];
+  } | null;
   anchorsFa: string[];
   evidencePolicy: {
     dictionaryCodes: string[];
@@ -57,6 +64,11 @@ type ApplicabilityDictionaryEntry = {
 type EvidenceDictionaryEntry = {
   code: string;
   classification: 'CANONICAL_EVIDENCE' | 'CONTROLLED_DOCUMENT' | 'STRUCTURED_OBSERVATION' | 'MISSING_OR_FUTURE_INTEGRATION';
+  sourceProcess: string;
+  recordVersion: string;
+  lineage: string;
+  attribution: string;
+  ownerRole: string;
 };
 type CatalogProvenanceCategory = typeof roleCatalogContract.provenanceCategories[number];
 
@@ -166,6 +178,8 @@ const hasAtMostTwoDecimals = (value: unknown): value is number => typeof value =
   && new Prisma.Decimal(String(value)).decimalPlaces() <= 2;
 const decimalSumIsHundred = (values: number[]) => values
   .reduce((sum, value) => sum.add(String(value)), new Prisma.Decimal(0)).eq(100);
+const sameMembers = (left: unknown, right: readonly string[]) => Array.isArray(left) && left.length === right.length
+  && left.every((value) => typeof value === 'string' && right.includes(value));
 
 const hasCatalogManifestShape = (input: CatalogRecord) => {
   if (!isRecord(input.catalog) || !isRecord(input.source) || !isRecord(input.review) || !isRecord(input.applicabilitySnapshotContract)
@@ -174,7 +188,7 @@ const hasCatalogManifestShape = (input: CatalogRecord) => {
   const validCriterion = (value: unknown) => isRecord(value)
     && (value.applicability === null || isRecord(value.applicability))
     && (value.applicability === null || Array.isArray(value.applicability.values))
-    && Array.isArray(value.anchorsFa)
+    && Array.isArray(value.anchorsFa) && value.anchorsFa.every((anchor) => typeof anchor === 'string')
     && isRecord(value.evidencePolicy)
     && typeof value.weight === 'number'
     && typeof value.evidencePolicy.minimumReliableCount === 'number'
@@ -221,12 +235,19 @@ const resolveApplicability = (
     errors.push(`معیار ${criterion.conceptCode} از واقعیت کاربردپذیری تعریف‌نشده استفاده می‌کند.`);
     return null;
   }
+  const controlledDefinition = PERFORMANCE_APPLICABILITY_FACT_OPERATORS[definition.fact];
   if (definition.unknown !== 'BLOCK' || typeof definition.source !== 'string' || !definition.source.trim()
     || typeof definition.sourceVersion !== 'string' || !definition.sourceVersion.trim()) {
     errors.push(`واقعیت ${definition.fact} باید منبع نسخه‌دار و رفتار BLOCK برای مقدار نامعلوم داشته باشد.`);
   }
   if (PERFORMANCE_APPLICABILITY_FACT_TYPES[definition.fact] !== definition.type) {
     errors.push(`نوع واقعیت ${definition.fact} با قرارداد کاربردپذیری سامانه سازگار نیست.`);
+  }
+  if (!controlledDefinition || !sameMembers(definition.operators, controlledDefinition.operators)) {
+    errors.push(`عملگرهای فرهنگ واقعیت ${definition.fact} با قرارداد کنترل‌شده سامانه منطبق نیست.`);
+  }
+  if (criterion.applicability.schemaVersion !== 1 || criterion.applicability.factType !== definition.type) {
+    errors.push(`نسخه یا نوع قاعده معیار ${criterion.conceptCode} با فرهنگ کاربردپذیری منطبق نیست.`);
   }
   if (!definition.operators.includes(criterion.applicability.operator)) {
     errors.push(`عملگر معیار ${criterion.conceptCode} در فرهنگ واقعیت ${definition.fact} مجاز نیست.`);
@@ -272,7 +293,8 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
     errors.push('هش محتوای کاتالوگ با JSON کانونی منطبق نیست.');
   }
   if (!manifest.source || !text(manifest.source.asOf) || !Number.isFinite(new Date(manifest.source.asOf).getTime())
-    || !Array.isArray(manifest.source.references) || manifest.source.references.length === 0) {
+    || !Array.isArray(manifest.source.references) || manifest.source.references.length === 0
+    || manifest.source.references.some((reference) => !text(reference))) {
     errors.push('منبع کاتالوگ باید تاریخ مبنا و ارجاع‌های قابل پیگیری داشته باشد.');
   }
   if (!roleCatalogContract.provenanceCategories.includes(manifest.source?.provenanceCategory)) {
@@ -281,6 +303,7 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
   if (!manifest.review || !['BUSINESS_REVIEW_PENDING', 'REJECTED', 'APPROVED'].includes(manifest.review.status)) {
     errors.push('وضعیت بازبینی کسب‌وکاری کاتالوگ معتبر نیست.');
   }
+  if (!text(manifest.review?.contentOrigin)) errors.push('منشأ محتوای بازبینی‌شده باید روشن و غیرخالی باشد.');
   if (manifest.review?.status === 'REJECTED') errors.push('کاتالوگ ردشده قابل درون‌ریزی نیست.');
   if ((manifest.source?.provenanceCategory === 'SYNTHETIC' || manifest.review?.contentOrigin === 'AI_PROPOSED')
     && manifest.review?.status === 'APPROVED') errors.push('محتوای ساختگی یا تولیدشده با هوش مصنوعی نمی‌تواند تأییدشده ثبت شود.');
@@ -306,13 +329,18 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
     if (!entry || entry.type !== factType || entry.unknown !== 'BLOCK' || !text(entry.source) || !text(entry.sourceVersion)) {
       errors.push(`فرهنگ کاربردپذیری باید ${fact} را با نوع ${factType}، منبع نسخه‌دار و رفتار BLOCK تعریف کند.`);
     }
+    const controlled = PERFORMANCE_APPLICABILITY_FACT_OPERATORS[fact as PerformanceApplicabilityFact];
+    if (!entry || !sameMembers(entry.operators, controlled.operators)) {
+      errors.push(`عملگرهای فرهنگ واقعیت ${fact} با قرارداد کنترل‌شده سامانه منطبق نیست.`);
+    }
   }
   if (applicabilityDictionary.has('locationId')) errors.push('به‌جای locationId باید از workplaceId استفاده شود.');
 
   const evidenceEntries = Array.isArray(manifest.evidenceDictionary) ? manifest.evidenceDictionary : [];
   const evidenceDictionary = new Map(evidenceEntries.map((entry) => [entry.code, entry]));
   if (evidenceDictionary.size !== evidenceEntries.length || evidenceEntries.some((entry) => !codePattern.test(text(entry.code))
-    || !['CANONICAL_EVIDENCE', 'CONTROLLED_DOCUMENT', 'STRUCTURED_OBSERVATION', 'MISSING_OR_FUTURE_INTEGRATION'].includes(entry.classification))) {
+    || !['CANONICAL_EVIDENCE', 'CONTROLLED_DOCUMENT', 'STRUCTURED_OBSERVATION', 'MISSING_OR_FUTURE_INTEGRATION'].includes(entry.classification)
+    || [entry.sourceProcess, entry.recordVersion, entry.lineage, entry.attribution, entry.ownerRole].some((field) => !text(field)))) {
     errors.push('فرهنگ شاهد باید کدهای یکتا و طبقه‌بندی پشتیبانی‌شده داشته باشد.');
   }
   const jobs = Array.isArray(manifest.jobs) ? manifest.jobs : [];
@@ -500,7 +528,7 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
       manifest,
       importIdentity: manifest.catalog.importIdentity,
       contentHash: manifest.catalog.contentHash,
-      importable: !unresolvedOwners && manifest.source.provenanceCategory !== 'SYNTHETIC',
+      importable: !unresolvedOwners && ['PRODUCTION', 'LOCAL'].includes(manifest.source.provenanceCategory),
       warnings,
       criteria,
       templates,

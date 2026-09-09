@@ -117,7 +117,10 @@ test('performance policy administration sheets are RTL, accessible, responsive, 
   expect(postedCatalog.applicabilityDictionary[0]).toMatchObject({ fact: 'positionId', sourceVersion: 'PERF_APPLICABILITY_V1' });
   await expect(catalogDialog.getByText('شغل 80.00٪ · افزوده جایگاه 20.00٪')).toBeVisible();
   await expect(catalogDialog.getByRole('button', { name: 'ساخت پیش‌نویس‌ها' })).toBeEnabled();
-  await page.keyboard.press('Escape');
+  const catalogApplyRequest = page.waitForRequest((request) => request.method() === 'POST'
+    && request.url().endsWith('/api/hr/personnel-performance/catalog-import/apply'));
+  await catalogDialog.getByRole('button', { name: 'ساخت پیش‌نویس‌ها' }).click();
+  expect((await catalogApplyRequest).postDataJSON()).toEqual(representativeCatalogManifest);
   await expect(catalogDialog).toBeHidden();
 
   await setViewportAndZoom(page, { width: 1440, height: 900 }, 1);

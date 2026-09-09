@@ -98,7 +98,8 @@ export const validateCriterionPolicyContent = (content: PerformanceCriterionPoli
   if (typeof content.meaningFa !== 'string' || !content.meaningFa.trim() || !containsPersian(content.meaningFa)) errors.push('معنای فارسی معیار الزامی است.');
   if (!Array.isArray(content.anchorsFa)) return [...errors, 'لنگرهای رفتاری معیار باید آرایه باشند.'];
   if (content.kind === 'JUDGMENT') {
-    if (content.anchorsFa.length !== 5 || content.anchorsFa.some((anchor) => !anchor.trim() || !containsPersian(anchor))) {
+    if (content.anchorsFa.length !== 5
+      || content.anchorsFa.some((anchor) => typeof anchor !== 'string' || !anchor.trim() || !containsPersian(anchor))) {
       errors.push('برای معیار قضاوتی، توضیح رفتاری فارسی هر پنج درجه الزامی است.');
     }
   } else if (content.anchorsFa.length > 0) {
@@ -130,7 +131,11 @@ export const validateCriterionPolicyContent = (content: PerformanceCriterionPoli
     errors.push('قاعده کاربردپذیری بدون مقدار معتبر نیست.');
   }
   if (!content.evidence || typeof content.evidence !== 'object') return [...errors, 'سیاست شاهد معیار الزامی است.'];
-  if (!Array.isArray(content.evidence.allowedKinds)) errors.push('گونه‌های شاهد معیار باید آرایه باشند.');
+  const supportedEvidenceKinds = new Set(['OPERATIONAL_REFERENCE', 'CONTROLLED_DOCUMENT', 'STRUCTURED_OBSERVATION']);
+  if (!Array.isArray(content.evidence.allowedKinds)
+    || content.evidence.allowedKinds.some((kind) => !supportedEvidenceKinds.has(kind))) {
+    errors.push('گونه‌های شاهد معیار باید آرایه‌ای از مقادیر پشتیبانی‌شده باشند.');
+  }
   if (!Number.isInteger(content.evidence.minimumReliableCount) || content.evidence.minimumReliableCount < 0) {
     errors.push('حداقل تعداد شاهد قابل اتکا معتبر نیست.');
   }

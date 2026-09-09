@@ -9,17 +9,7 @@ const hasPersian = (value) => typeof value === 'string' && /[\u0600-\u06ff]/.tes
 const isCode = (value) => typeof value === 'string' && /^[A-Z0-9][A-Z0-9_-]{2,95}$/.test(value);
 const isSha256 = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
-const CONTROLLED_FACTS = new Map([
-  ['jobId', { type: 'ID', operators: ['EQUALS', 'IN'] }],
-  ['positionId', { type: 'ID', operators: ['EQUALS', 'IN'] }],
-  ['organizationalUnitId', { type: 'ID', operators: ['EQUALS', 'IN'] }],
-  ['workplaceId', { type: 'ID', operators: ['EQUALS', 'IN', 'EXISTS'] }],
-  ['shiftType', { type: 'STRING', operators: ['EQUALS', 'IN', 'EXISTS'] }],
-  ['assignmentType', { type: 'STRING', operators: ['EQUALS', 'IN'] }],
-  ['responsibilityCodes', { type: 'STRING_LIST', operators: ['IN', 'EXISTS'] }],
-  ['effectiveDate', { type: 'DATE', operators: ['EQUALS', 'IN'] }],
-  ['hasSafetyDuty', { type: 'BOOLEAN', operators: ['EQUALS'] }],
-]);
+const CONTROLLED_FACTS = new Map(Object.entries(ROLE_CATALOG_CONTRACT.applicabilityFacts));
 
 const EVIDENCE_CLASSES = new Set([
   'CANONICAL_EVIDENCE',

@@ -62,6 +62,8 @@
     "architecture:check": "node scripts/check-database-client-ownership.mjs",
     "performance:verify:local": "node scripts/run-performance-local-verification.mjs",
     "performance:promotion:verify": "node scripts/performance-promotion-evidence.mjs",
+    "performance:acceptance:run": "node scripts/run-performance-acceptance.mjs",
+    "performance:acceptance:races": "node scripts/run-performance-race-acceptance.mjs",
     "test:personnel-performance-operations": "node --test tests/performance-operations/*.test.mjs tests/performance-acceptance/*.test.mjs && npm --prefix backend run test:personnel-performance-operations",
     "test:personnel-performance-operations:db": "npm --prefix backend run test:personnel-performance-operations:db",
     "test:personnel-performance-policy": "npm --prefix backend run test:personnel-performance-policy && npm --prefix frontend run test:hr-performance-policy",

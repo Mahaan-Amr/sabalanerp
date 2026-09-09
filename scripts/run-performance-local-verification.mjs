@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performanceSourceHash } from './performance-source-identity.mjs';
 import { runPerformanceVerification } from './performance-local-verification.mjs';
+import { canonicalPerformanceEvidence as canonical } from './performance-evidence-canonical.mjs';
 
 export const performanceDatabaseChecks = (root, environment = process.env) => {
   const iterations = Number(environment.PERFORMANCE_RACE_ITERATIONS ?? '10');
@@ -83,10 +84,6 @@ const main = async () => {
           (SELECT "policyKind", version, lifecycle, "effectiveFrom", "contentHash" FROM performance_policy_versions) p)
       )`,
     ]));
-    const canonical = (value) => JSON.stringify(value, function (_key, item) {
-      return item && typeof item === 'object' && !Array.isArray(item)
-        ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
-    });
     return { ...identity, images, appliedMigrationHash: digest(canonical(metadata.migrations)),
       policyMetadataHash: digest(canonical(metadata.policies)),
       composeSourceHash: digest(await readFile('docker-compose.local.yml')),

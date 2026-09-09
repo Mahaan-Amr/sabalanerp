@@ -114,8 +114,9 @@ const validators = {
     ['transaction', 'queue', 'storage', 'encryption', 'notification', 'migration', 'reconciliation', 'restore'],
     (scenario) => scenario.executed === true && scenario.failClosed === true && scenario.lostAcknowledgedWrites === 0),
   'browser-acceptance': (result) => result.realBrowser === true && result.realPersistence === true && result.roleActionScopeMatrixComplete === true
-    && complete(result.viewports, ['360', '768', '1280', '1920'], (viewport) => viewport.rtl === true
-      && viewport.light === true && viewport.dark === true && viewport.keyboard === true && viewport.focus === true && viewport.reducedMotion === true),
+    && complete(result.viewports, ['360', '390', '768', '1280', '1920'], (viewport) => viewport.rtl === true
+      && viewport.light === true && viewport.dark === true && viewport.keyboard === true && viewport.focus === true
+      && viewport.reducedMotion === true && viewport.zoom200 === true),
   'export-capacity': (result) => finite(result.requestP99Ms) && result.requestP99Ms <= 2000
     && finite(result.queueP95Ms) && result.queueP95Ms < 300000
     && complete(result.formats, ['Excel', 'PDF'], (format) => {

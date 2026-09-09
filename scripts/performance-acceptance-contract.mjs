@@ -1,3 +1,5 @@
+import { validatePromotionMeasurements } from './performance-promotion-measurements.mjs';
+
 const invariants = Object.freeze([
   'ONE_VALID_TRUTH',
   'NO_LOST_WRITE',
@@ -42,6 +44,59 @@ export const PERFORMANCE_ACCEPTANCE_LANES = Object.freeze([
   'export-capacity',
 ]);
 
+const integratedChecks = Object.freeze([
+  'backend-build', 'frontend-build', 'lint', 'architecture', 'design-system',
+  'performance-unit', 'performance-foundation-database', 'performance-policy-database',
+  'performance-workflow-database', 'performance-disclosure-database', 'performance-operations-database',
+]);
+
+const nondisclosureScenarios = Object.freeze([
+  'role-workspace-feature-action-scope-effective-time', 'personnel-without-user',
+  'supervisor-without-authority', 'no-hr-proxy', 'self-evaluation-denied',
+  'authorized-subordinate-self-review-audited', 'typed-applicability-unknown-blocked',
+  'five-level-disclosure-chain', 'identity-verified-summary-delivery',
+  'no-score-criteria-narrative-rank-leak', 'privacy-correction-boundary',
+  'manual-consequence-boundary',
+]);
+
+const completeNamedPasses = (items, required) => Array.isArray(items) && items.length === required.length
+  && required.every((name) => items.filter((item) => item?.name === name && item.status === 'PASS').length === 1);
+const exactNamedMeasurements = (items, required) => Array.isArray(items) && items.length === required.length
+  && required.every((name) => items.filter((item) => item?.name === name).length === 1);
+
+export const validatePerformanceAcceptanceLane = (lane, measurements, observedAt, infrastructureHash) => {
+  if (lane === 'integrated-regression') {
+    return completeNamedPasses(measurements?.checks, integratedChecks)
+      && measurements.openP0 === 0 && measurements.openP1 === 0 && measurements.skipped === 0;
+  }
+  if (lane === 'twelve-races') {
+    return exactNamedMeasurements(measurements?.races, PERFORMANCE_ACCEPTANCE_RACES.map(({ name }) => name))
+      && validatePromotionMeasurements('deterministic-races', measurements, observedAt, infrastructureHash);
+  }
+  if (lane === 'failure-recovery') {
+    return exactNamedMeasurements(measurements?.failureInjection?.scenarios, PERFORMANCE_ACCEPTANCE_FAILURE_SCENARIOS)
+      && validatePromotionMeasurements('failure-injection', measurements?.failureInjection, observedAt, infrastructureHash)
+      && validatePromotionMeasurements('runbook-rehearsal', measurements?.runbookRehearsal, observedAt, infrastructureHash);
+  }
+  if (lane === 'permission-nondisclosure') {
+    return completeNamedPasses(measurements?.scenarios, nondisclosureScenarios)
+      && measurements.permissionBranchesCoveredPercent === 100
+      && measurements.additionalDisclosures === 0 && measurements.openP0 === 0 && measurements.openP1 === 0;
+  }
+  if (lane === 'browser-matrix') {
+    return exactNamedMeasurements(measurements?.viewports, PERFORMANCE_ACCEPTANCE_BROWSER_MATRIX.viewports.map(String))
+      && validatePromotionMeasurements('browser-acceptance', measurements, observedAt, infrastructureHash);
+  }
+  if (lane === 'export-capacity') {
+    return exactNamedMeasurements(measurements?.formats, ['Excel', 'PDF'])
+      && validatePromotionMeasurements('export-capacity', measurements, observedAt, infrastructureHash);
+  }
+  return false;
+};
+
+export const PERFORMANCE_ACCEPTANCE_INTEGRATED_CHECKS = integratedChecks;
+export const PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS = nondisclosureScenarios;
+
 export const PERFORMANCE_ACCEPTANCE_BROWSER_MATRIX = Object.freeze({
   viewports: Object.freeze([360, 390, 768, 1280, 1920]),
   themes: Object.freeze(['light', 'dark']),
@@ -70,12 +125,15 @@ export const PERFORMANCE_ACCEPTANCE_DEFERRALS = Object.freeze([
 
 const digest = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
-export const validPerformanceCandidateIdentity = (identity) => Boolean(identity
+export const validPerformanceCandidateIdentityShape = (identity) => Boolean(identity
   && /^[a-f0-9]{40}$/.test(identity.commit)
   && ['sourceHash', 'schemaHash', 'policyHash', 'infrastructureHash'].every((key) => digest(identity[key]))
   && ['backend', 'frontend', 'inquiry'].every((key) => /^sha256:[a-f0-9]{64}$/.test(identity.images?.[key]))
   && identity.runtimeSourceBinding?.status === 'ATTESTED'
-  && digest(identity.runtimeSourceBinding.evidenceHash));
+  && digest(identity.runtimeSourceBinding.evidenceHash)
+  && typeof identity.runtimeSourceBinding.keyId === 'string'
+  && identity.runtimeSourceBinding.algorithm === 'Ed25519'
+  && typeof identity.runtimeSourceBinding.signature === 'string');
 
 export const buildPerformanceAcceptancePlan = ({ mode = 'release', raceIterations } = {}) => {
   if (!['release', 'diagnostic'].includes(mode)) throw new Error('Acceptance mode must be release or diagnostic');

@@ -4,6 +4,7 @@ import { createHash, createHmac, createPublicKey, verify } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { canonicalPerformanceEvidence as canonical } from './performance-evidence-canonical.mjs';
 
 const gateChecks = [
   ['SCHEMA_PROTECTION', ['additive-migration', 'permission-matrix', 'encryption', 'audit-lineage', 'retention', 'legal-hold', 'erasure', 'backup-restore']],
@@ -17,10 +18,6 @@ const gateChecks = [
   ['EXPANSION_RETIREMENT', ['capacity-profiles', 'cohort-promotion', 'compatibility-retirement', 'three-owner-approval', 'browser-acceptance', 'failure-injection']],
 ];
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const canonical = (value) => JSON.stringify(value, function (_key, item) {
-  return item && typeof item === 'object' && !Array.isArray(item)
-    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
-});
 const digest = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const validRelease = (release) => release && /^[a-f0-9]{40}$/.test(release.commit)
   && ['sourceHash', 'schemaHash', 'policyHash', 'infrastructureHash'].every((key) => digest(release[key]))

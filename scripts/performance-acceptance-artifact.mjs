@@ -40,6 +40,9 @@ const publicKeyFromEnvironment = (environment, idName, keyName) => {
 export const performanceMeasurementSignerFromEnvironment = (environment = process.env) => privateKeyFromEnvironment(environment,
   'PERFORMANCE_MEASUREMENT_ATTESTATION_KEY_ID', 'PERFORMANCE_MEASUREMENT_ATTESTATION_PRIVATE_KEY_BASE64');
 
+export const performanceCandidateSignerFromEnvironment = (environment = process.env) => privateKeyFromEnvironment(environment,
+  'PERFORMANCE_CANDIDATE_ATTESTATION_KEY_ID', 'PERFORMANCE_CANDIDATE_ATTESTATION_PRIVATE_KEY_BASE64');
+
 export const performanceAcceptanceTrustFromEnvironment = (environment = process.env) => ({
   measurementPublicKey: publicKeyFromEnvironment(environment,
     'PERFORMANCE_MEASUREMENT_ATTESTATION_KEY_ID', 'PERFORMANCE_MEASUREMENT_ATTESTATION_PUBLIC_KEY_BASE64'),

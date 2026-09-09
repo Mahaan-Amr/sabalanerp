@@ -52,6 +52,8 @@ services:
         DEBIAN_MIRROR: http://deb.debian.org/debian
         DEBIAN_SECURITY_MIRROR: http://security.debian.org/debian-security
         NPM_CONFIG_REGISTRY: https://mirror.abrha.net/repository/npm/
+        PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_SOURCE_COMMIT:-unattested}
+        PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH:-unattested}
     stop_grace_period: 30s
     command: ["sh", "-c", "node dist/scripts/recovery-database-preflight.js && npx prisma migrate deploy && node dist/index.js"]
     environment:
@@ -117,6 +119,8 @@ services:
         DEBIAN_MIRROR: http://deb.debian.org/debian
         DEBIAN_SECURITY_MIRROR: http://security.debian.org/debian-security
         NPM_CONFIG_REGISTRY: https://mirror.abrha.net/repository/npm/
+        PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_SOURCE_COMMIT:-unattested}
+        PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH:-unattested}
     environment:
       NODE_ENV: development
       PORT: 3001
@@ -152,6 +156,8 @@ services:
         BACKEND_API_ORIGIN: http://backend:5000
         NEXT_PUBLIC_ENABLE_PROTOTYPES: "1"
         NPM_CONFIG_REGISTRY: https://mirror.abrha.net/repository/npm/
+        PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_SOURCE_COMMIT:-unattested}
+        PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH:-unattested}
     environment:
       NODE_ENV: development
       NEXT_DIST_DIR: .next-local

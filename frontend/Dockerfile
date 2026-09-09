@@ -2,6 +2,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+ARG PERFORMANCE_SOURCE_COMMIT=unattested
+ARG PERFORMANCE_SOURCE_HASH=unattested
+LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
+  io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
+
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG http_proxy

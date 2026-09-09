@@ -1649,7 +1649,6 @@ test('public, identity, and confirmation routes share the responsive semantic fo
           || field.getAttribute('type') === 'radio'
         ))
     )).toBe(true);
-    await page.waitForLoadState('networkidle');
   }
 });
 

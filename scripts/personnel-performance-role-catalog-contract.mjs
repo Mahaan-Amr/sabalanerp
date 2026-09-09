@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const ROLE_CATALOG_CONTRACT = require('../backend/src/contracts/personnelPerformanceRoleCatalog.json');
 
 const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const hasPersian = (value) => typeof value === 'string' && /[\u0600-\u06ff]/.test(value);
@@ -184,7 +188,7 @@ export const validateRoleCatalogManifest = (manifest) => {
     || manifestContentHash(manifest) !== manifest.catalog.contentHash) {
     errors.push('Catalog content hash does not match the canonical manifest content.');
   }
-  if (!['SYNTHETIC', 'PRODUCTION', 'LOCAL', 'SANITIZED_RECOVERY', 'SEED', 'FIXTURE', 'HISTORICAL_DOCUMENT'].includes(manifest.source?.provenanceCategory)) {
+  if (!ROLE_CATALOG_CONTRACT.provenanceCategories.includes(manifest.source?.provenanceCategory)) {
     errors.push('Source provenance category is missing or unsupported.');
   }
   if (!manifest.source?.asOf || !Array.isArray(manifest.source?.references)) errors.push('Source requires as-of time and references.');
@@ -213,7 +217,7 @@ export const validateRoleCatalogManifest = (manifest) => {
   const snapshotContract = manifest.applicabilitySnapshotContract;
   if (snapshotContract?.schemaVersion !== 1) errors.push('applicabilitySnapshotContract.schemaVersion must be 1.');
   if (snapshotContract?.container !== '__applicability') errors.push('applicabilitySnapshotContract.container must be __applicability.');
-  if (snapshotContract?.snapshotVersion !== 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1') errors.push('applicabilitySnapshotContract.snapshotVersion must match the producer identity.');
+  if (snapshotContract?.snapshotVersion !== ROLE_CATALOG_CONTRACT.snapshotVersion) errors.push('applicabilitySnapshotContract.snapshotVersion must match the producer identity.');
   if (snapshotContract?.sourceVersions !== 'REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION') errors.push('applicabilitySnapshotContract.sourceVersions is required.');
   if (snapshotContract?.effectiveAt !== 'REQUIRED_ISO_TIMESTAMP') errors.push('applicabilitySnapshotContract.effectiveAt is required.');
   if (snapshotContract?.unknown !== 'BLOCK') errors.push('applicabilitySnapshotContract.unknown must be BLOCK.');

@@ -7,6 +7,26 @@ import {
   setViewportAndZoom,
 } from './support/design-system';
 
+const representativeCatalogManifest = {
+  schemaVersion: 1,
+  catalog: {
+    stableKey: 'PERF_ROLE_CATALOG_E2E', versionCode: 'E2E_V1', lifecycle: 'DRAFT',
+    importIdentity: 'PERF-ROLE-CATALOG:E2E:V1', contentHash: 'a'.repeat(64),
+    contentHashMethod: 'SHA256_CANONICAL_JSON_EXCLUDING_CATALOG_CONTENT_HASH',
+  },
+  source: { provenanceCategory: 'LOCAL', asOf: '2026-09-09T00:00:00.000Z', references: ['e2e-controlled-source'], extractedFacts: true },
+  review: { contentOrigin: 'COMPANY_CONTROLLED_SOURCE', status: 'BUSINESS_REVIEW_PENDING' },
+  applicabilitySnapshotContract: {
+    schemaVersion: 1, container: '__applicability', snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
+    sourceVersions: 'REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION', effectiveAt: 'REQUIRED_ISO_TIMESTAMP', unknown: 'BLOCK',
+  },
+  applicabilityDictionary: [{
+    fact: 'positionId', type: 'ID', operators: ['EQUALS', 'IN'], unknown: 'BLOCK',
+    source: 'PERIOD_EFFECTIVE_ASSIGNMENT', sourceVersion: 'PERF_APPLICABILITY_V1',
+  }],
+  evidenceDictionary: [], jobs: [], positions: [],
+};
+
 const mockPolicyApi = async (page: Page, canManage = true) => {
   await page.route('**/api/hr/personnel-performance/**', async (route) => {
     const url = new URL(route.request().url());
@@ -24,7 +44,10 @@ const mockPolicyApi = async (page: Page, canManage = true) => {
           criterionCount: 2, templateCount: 2, reviewStatus: 'BUSINESS_REVIEW_PENDING', publicationTriggered: false,
           compositions: [{ jobReferenceCode: 'JOB-1', positionReferenceCode: 'POSITION-1', jobSharePercent: '80.00', addendumSharePercent: '20.00', basis: 'JOB_WITH_POSITION_ADDENDUM' }],
         } }
-        : url.pathname.endsWith('/criteria') ? { success: true, criteria: [] }
+        : url.pathname.endsWith('/criteria') ? { success: true, criteria: [{
+            id: 'catalog-criterion-v1', version: 1, lifecycle: 'DRAFT', conceptCode: 'CATALOG_CRITERION',
+            content: { titleFa: 'معیار پیشنهادی کاتالوگ', catalogSource: { reviewStatus: 'BUSINESS_REVIEW_PENDING' } },
+          }] }
         : url.pathname.endsWith('/templates') ? { success: true, templates: [] }
           : url.pathname.endsWith('/policies') ? { success: true, policies: [] }
             : { success: true };
@@ -57,6 +80,14 @@ test('performance policy administration sheets are RTL, accessible, responsive, 
   await assertNoHorizontalOverflow(page);
   await page.keyboard.press('Escape');
   await expect(criterionDialog).toBeHidden();
+  await page.getByRole('button', { name: 'ثبت تأیید کسب‌وکاری' }).click();
+  const approvalDialog = page.getByRole('dialog', { name: 'تأیید کسب‌وکاری محتوای کاتالوگ' });
+  await approvalDialog.getByRole('textbox', { name: 'دلیل قابل حسابرسی' }).fill('بازبینی کسب‌وکاری معیار پیشنهادی');
+  const approvalRequest = page.waitForRequest((request) => request.method() === 'POST'
+    && request.url().endsWith('/api/hr/personnel-performance/catalog-import/criteria/catalog-criterion-v1/approve'));
+  await approvalDialog.getByRole('button', { name: 'ثبت تأیید' }).click();
+  expect((await approvalRequest).postDataJSON()).toEqual({ reason: 'بازبینی کسب‌وکاری معیار پیشنهادی' });
+  await expect(approvalDialog).toBeHidden();
 
   await page.getByRole('button', { name: 'الگو و افزوده' }).click();
   await page.getByRole('button', { name: 'الگوی جدید' }).click();
@@ -75,8 +106,15 @@ test('performance policy administration sheets are RTL, accessible, responsive, 
   await page.getByRole('button', { name: 'درون‌ریزی کاتالوگ نقش' }).click();
   const catalogDialog = page.getByRole('dialog', { name: 'پیش‌نمایش و درون‌ریزی کاتالوگ نقش' });
   await expect(catalogDialog.getByText('این عملیات فقط DRAFT می‌سازد.')).toBeVisible();
-  await catalogDialog.getByRole('textbox', { name: 'manifest نسخه‌دار کاتالوگ' }).fill('{}');
+  await catalogDialog.getByRole('textbox', { name: 'manifest نسخه‌دار کاتالوگ' }).fill(JSON.stringify(representativeCatalogManifest));
+  const catalogPreviewRequest = page.waitForRequest((request) => request.method() === 'POST'
+    && request.url().endsWith('/api/hr/personnel-performance/catalog-import/preview'));
   await catalogDialog.getByRole('button', { name: 'بررسی کاتالوگ' }).click();
+  const postedCatalog = (await catalogPreviewRequest).postDataJSON() as typeof representativeCatalogManifest;
+  expect(postedCatalog.schemaVersion).toBe(1);
+  expect(postedCatalog.catalog.lifecycle).toBe('DRAFT');
+  expect(postedCatalog.applicabilitySnapshotContract.snapshotVersion).toBe('PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1');
+  expect(postedCatalog.applicabilityDictionary[0]).toMatchObject({ fact: 'positionId', sourceVersion: 'PERF_APPLICABILITY_V1' });
   await expect(catalogDialog.getByText('شغل 80.00٪ · افزوده جایگاه 20.00٪')).toBeVisible();
   await expect(catalogDialog.getByRole('button', { name: 'ساخت پیش‌نویس‌ها' })).toBeEnabled();
   await page.keyboard.press('Escape');

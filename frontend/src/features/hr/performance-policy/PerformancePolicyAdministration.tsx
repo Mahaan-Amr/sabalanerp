@@ -203,7 +203,7 @@ export default function PerformancePolicyAdministration() {
   const [publicationReason, setPublicationReason] = useState("");
   const [impactConfirmed, setImpactConfirmed] = useState(false);
   const [preview, setPreview] = useState<ConfirmedPolicyPreview>();
-  const [lifecycleAction, setLifecycleAction] = useState<{ action: "cancel" | "retire"; kind: ArtifactKind; row: VersionRow }>();
+  const [lifecycleAction, setLifecycleAction] = useState<{ action: "approve" | "cancel" | "retire"; kind: ArtifactKind; row: VersionRow }>();
   const [lifecycleReason, setLifecycleReason] = useState("");
   const [pending, setPending] = useState(false);
   const [traceId, setTraceId] = useState("");
@@ -466,6 +466,10 @@ export default function PerformancePolicyAdministration() {
                         setTemplateDialog(true);
                       }} />}
                       {row.lifecycle === "DRAFT" && !proposedCatalogContent && <ErpButton label="پیش‌نمایش و انتشار" onClick={() => void openSchedule(tab, row)} />}
+                      {row.lifecycle === "DRAFT" && proposedCatalogContent && tab !== "policies" && <ErpButton label="ثبت تأیید کسب‌وکاری" tone="success" onClick={() => {
+                        setLifecycleReason("");
+                        setLifecycleAction({ action: "approve", kind: tab as ArtifactKind, row });
+                      }} />}
                       {row.lifecycle === "SCHEDULED" && tab === "policies" && row.effectiveFrom
                         && new Date(row.effectiveFrom).getTime() <= Date.now()
                         && <ErpButton label="بازپیش‌نمایش و تأیید" onClick={() => void openSchedule("policies", row)} />}
@@ -728,13 +732,15 @@ export default function PerformancePolicyAdministration() {
         </div>
       </ErpSheet>
 
-      <ErpSheet open={Boolean(lifecycleAction)} onClose={() => !pending && setLifecycleAction(undefined)} title={lifecycleAction?.action === "cancel" ? "لغو نسخه زمان‌بندی‌شده" : "بازنشسته‌کردن نسخه فعال"} presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2">
+      <ErpSheet open={Boolean(lifecycleAction)} onClose={() => !pending && setLifecycleAction(undefined)} title={lifecycleAction?.action === "approve" ? "تأیید کسب‌وکاری محتوای کاتالوگ" : lifecycleAction?.action === "cancel" ? "لغو نسخه زمان‌بندی‌شده" : "بازنشسته‌کردن نسخه فعال"} presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2">
         <ErpButton label="بازگشت" variant="ghost" onClick={() => setLifecycleAction(undefined)} />
-        <ErpButton label={lifecycleAction?.action === "cancel" ? "تأیید لغو" : "تأیید بازنشستگی"} tone={lifecycleAction?.action === "cancel" ? "danger" : "warning"} variant="solid" disabled={pending || lifecycleReason.trim().length < 8} onClick={() => lifecycleAction && void run(
-          () => lifecycleAction.action === "cancel"
-            ? personnelPerformanceAPI.cancelVersion(lifecycleAction.kind, lifecycleAction.row.id, lifecycleReason.trim())
-            : personnelPerformanceAPI.retireVersion(lifecycleAction.kind as "criteria" | "templates", lifecycleAction.row.id, lifecycleReason.trim()),
-          lifecycleAction.action === "cancel" ? "زمان‌بندی نسخه لغو شد." : "نسخه بازنشسته شد.",
+        <ErpButton label={lifecycleAction?.action === "approve" ? "ثبت تأیید" : lifecycleAction?.action === "cancel" ? "تأیید لغو" : "تأیید بازنشستگی"} tone={lifecycleAction?.action === "approve" ? "success" : lifecycleAction?.action === "cancel" ? "danger" : "warning"} variant="solid" disabled={pending || lifecycleReason.trim().length < 8} onClick={() => lifecycleAction && void run(
+          () => lifecycleAction.action === "approve"
+            ? personnelPerformanceAPI.approveCatalogDraft(lifecycleAction.kind as "criteria" | "templates", lifecycleAction.row.id, lifecycleReason.trim())
+            : lifecycleAction.action === "cancel"
+              ? personnelPerformanceAPI.cancelVersion(lifecycleAction.kind, lifecycleAction.row.id, lifecycleReason.trim())
+              : personnelPerformanceAPI.retireVersion(lifecycleAction.kind as "criteria" | "templates", lifecycleAction.row.id, lifecycleReason.trim()),
+          lifecycleAction.action === "approve" ? "تأیید کسب‌وکاری با ردپای حسابرسی ثبت شد." : lifecycleAction.action === "cancel" ? "زمان‌بندی نسخه لغو شد." : "نسخه بازنشسته شد.",
         ).then((ok) => ok && setLifecycleAction(undefined))} />
       </div>}>
         <ErpField label="دلیل قابل حسابرسی" required error={lifecycleReason.trim().length < 8 ? "دلیل قابل حسابرسی باید دست‌کم ۸ نویسه باشد." : undefined}>

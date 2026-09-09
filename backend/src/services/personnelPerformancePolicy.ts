@@ -60,14 +60,43 @@ export type PerformanceCriterionPolicyContent = {
   };
 };
 
+export type PerformanceTemplatePolicyContent = {
+  schemaVersion: 1;
+  titleFa: string;
+  catalogSource?: {
+    importIdentity: string;
+    catalogVersion: string;
+    manifestContentHash: string;
+    sourceAsOf: string;
+    sourceProvenanceCategory: string;
+    manifestContentOrigin: string;
+    manifestReviewerRole?: string;
+    manifestReviewedAt?: string | null;
+    manifestReviewStatus: 'BUSINESS_REVIEW_PENDING' | 'REJECTED' | 'APPROVED';
+    reviewStatus: 'BUSINESS_REVIEW_PENDING' | 'APPROVED';
+    approvedAt?: string;
+    approvedByUserId?: string;
+    approvalReason?: string;
+  };
+  categories: Array<{
+    id: string;
+    titleFa: string;
+    weightPercent: string;
+    required: boolean;
+    criteria: Array<{ criterionVersionId: string; weightPercent: string }>;
+  }>;
+};
+
 const containsPersian = (value: string) => /[\u0600-\u06ff]/.test(value);
 
 export const validateCriterionPolicyContent = (content: PerformanceCriterionPolicyContent): string[] => {
   const errors: string[] = [];
+  if (!content || typeof content !== 'object') return ['ساختار معیار باید یک شیء باشد.'];
   if (content.schemaVersion !== 1) errors.push('نسخه ساختار معیار پشتیبانی نمی‌شود.');
-  if (!/^[A-Z0-9][A-Z0-9_-]{2,63}$/.test(content.conceptCode)) errors.push('کد مفهوم معیار معتبر نیست.');
-  if (!content.titleFa.trim() || !containsPersian(content.titleFa)) errors.push('عنوان فارسی معیار الزامی است.');
-  if (!content.meaningFa.trim() || !containsPersian(content.meaningFa)) errors.push('معنای فارسی معیار الزامی است.');
+  if (typeof content.conceptCode !== 'string' || !/^[A-Z0-9][A-Z0-9_-]{2,63}$/.test(content.conceptCode)) errors.push('کد مفهوم معیار معتبر نیست.');
+  if (typeof content.titleFa !== 'string' || !content.titleFa.trim() || !containsPersian(content.titleFa)) errors.push('عنوان فارسی معیار الزامی است.');
+  if (typeof content.meaningFa !== 'string' || !content.meaningFa.trim() || !containsPersian(content.meaningFa)) errors.push('معنای فارسی معیار الزامی است.');
+  if (!Array.isArray(content.anchorsFa)) return [...errors, 'لنگرهای رفتاری معیار باید آرایه باشند.'];
   if (content.kind === 'JUDGMENT') {
     if (content.anchorsFa.length !== 5 || content.anchorsFa.some((anchor) => !anchor.trim() || !containsPersian(anchor))) {
       errors.push('برای معیار قضاوتی، توضیح رفتاری فارسی هر پنج درجه الزامی است.');
@@ -75,7 +104,9 @@ export const validateCriterionPolicyContent = (content: PerformanceCriterionPoli
   } else if (content.anchorsFa.length > 0) {
     errors.push('KPI، متن توضیحی و کنترل بله/خیر درجه پنهان و امتیاز مرکب ندارند.');
   }
-  if (content.applicability && 'schemaVersion' in content.applicability
+  if (content.applicability && typeof content.applicability !== 'object') {
+    errors.push('ساختار قاعده کاربردپذیری معتبر نیست.');
+  } else if (content.applicability && 'schemaVersion' in content.applicability
     && content.applicability.schemaVersion !== undefined && content.applicability.schemaVersion !== 1) {
     errors.push('نسخه قاعده کاربردپذیری پشتیبانی نمی‌شود؛ نسخه‌های قدیمی باید بدون schemaVersion و نسخه جدید باید ۱ باشد.');
   } else if (content.applicability?.schemaVersion === 1) {
@@ -98,6 +129,8 @@ export const validateCriterionPolicyContent = (content: PerformanceCriterionPoli
     && content.applicability.values.length === 0) {
     errors.push('قاعده کاربردپذیری بدون مقدار معتبر نیست.');
   }
+  if (!content.evidence || typeof content.evidence !== 'object') return [...errors, 'سیاست شاهد معیار الزامی است.'];
+  if (!Array.isArray(content.evidence.allowedKinds)) errors.push('گونه‌های شاهد معیار باید آرایه باشند.');
   if (!Number.isInteger(content.evidence.minimumReliableCount) || content.evidence.minimumReliableCount < 0) {
     errors.push('حداقل تعداد شاهد قابل اتکا معتبر نیست.');
   }
@@ -107,8 +140,47 @@ export const validateCriterionPolicyContent = (content: PerformanceCriterionPoli
   if (content.evidence.required && content.evidence.minimumReliableCount < 1) {
     errors.push('شاهد الزامی باید حداقل یک ثبت قابل اتکا بخواهد.');
   }
-  if (new Set(content.evidence.allowedKinds).size !== content.evidence.allowedKinds.length) {
+  if (Array.isArray(content.evidence.allowedKinds)
+    && new Set(content.evidence.allowedKinds).size !== content.evidence.allowedKinds.length) {
     errors.push('نوع شاهد در سیاست معیار تکرار شده است.');
+  }
+  return errors;
+};
+
+export const validatePerformanceTemplateContent = (content: PerformanceTemplatePolicyContent): string[] => {
+  const errors: string[] = [];
+  if (!content || typeof content !== 'object') return ['ساختار الگوی ارزیابی باید یک شیء باشد.'];
+  const twoDecimals = (value: unknown): value is string => typeof value === 'string' && /^\d+(?:\.\d{1,2})?$/.test(value);
+  const sum = (values: string[]) => values.reduce((total, value) => total.add(value), new Prisma.Decimal(0));
+  if (content.schemaVersion !== 1 || typeof content.titleFa !== 'string' || !content.titleFa.trim()) {
+    errors.push('عنوان و نسخه ساختار الگوی ارزیابی الزامی است.');
+  }
+  if (!Array.isArray(content.categories)) return [...errors, 'دسته‌های الگوی ارزیابی باید آرایه باشند.'];
+  if (content.categories.length === 0
+    || content.categories.some((category) => !category || typeof category !== 'object' || !twoDecimals(category.weightPercent))
+    || !sum(content.categories.filter((category) => twoDecimals(category.weightPercent)).map((category) => category.weightPercent)).eq(100)) {
+    errors.push('جمع وزن دسته‌های الگو باید دقیقاً ۱۰۰ درصد باشد.');
+  }
+  const seen = new Set<string>();
+  for (const category of content.categories) {
+    if (!category || typeof category !== 'object') continue;
+    if (!twoDecimals(category.weightPercent) || new Prisma.Decimal(category.weightPercent).lte(0)) errors.push(`وزن دسته «${category.titleFa ?? ''}» معتبر نیست.`);
+    if (!Array.isArray(category.criteria)) {
+      errors.push(`معیارهای دسته «${category.titleFa ?? ''}» باید آرایه باشند.`);
+      continue;
+    }
+    if (category.criteria.length === 0
+      || category.criteria.some((criterion) => !criterion || typeof criterion !== 'object' || !twoDecimals(criterion.weightPercent))
+      || !sum(category.criteria.filter((criterion) => twoDecimals(criterion.weightPercent)).map((criterion) => criterion.weightPercent)).eq(100)) {
+      errors.push(`جمع وزن معیارهای دسته «${category.titleFa ?? ''}» باید دقیقاً ۱۰۰ درصد باشد.`);
+    }
+    for (const criterion of category.criteria) {
+      if (!criterion || typeof criterion !== 'object') continue;
+      if (!twoDecimals(criterion.weightPercent) || new Prisma.Decimal(criterion.weightPercent).lt(0)) errors.push('وزن معیار باید نامنفی و حداکثر دو رقم اعشار داشته باشد.');
+      if (typeof criterion.criterionVersionId !== 'string' || !criterion.criterionVersionId.trim()) errors.push('شناسه نسخه معیار در الگو الزامی است.');
+      if (seen.has(criterion.criterionVersionId)) errors.push('هر نسخه معیار فقط یک‌بار و در یک دسته الگو مجاز است.');
+      seen.add(criterion.criterionVersionId);
+    }
   }
   return errors;
 };

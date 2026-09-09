@@ -259,7 +259,7 @@ const typedApplicabilityTemplate = (applicability: Record<string, unknown>): Per
 });
 const typedSnapshotMetadata = {
   schemaVersion: 1,
-  snapshotVersion: 'assignment-facts-v1',
+  snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
   sourceVersions: { hasSafetyDuty: 'PERF_APPLICABILITY_V1', responsibilityCodes: 'PERF_APPLICABILITY_V1', effectiveDate: 'PERF_APPLICABILITY_V1' },
   effectiveAt: '2026-01-15T00:00:00.000Z',
 };
@@ -297,6 +297,16 @@ const staleSource = calculateTypedApplicability(booleanRule, {
 });
 assert.equal(staleSource.status, 'BLOCKED');
 assert.ok(staleSource.reasons.some((reason) => reason.includes('PERF_APPLICABILITY_V1')));
+assert.equal(calculateTypedApplicability(booleanRule, {
+  __applicability: { ...typedSnapshotMetadata, snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V2' },
+  hasSafetyDuty: true,
+}).status, 'BLOCKED', 'a different snapshot producer version must block evaluation');
+assert.doesNotThrow(() => calculateTypedApplicability({ ...booleanRule, source: 42 }, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
+}));
+assert.equal(calculateTypedApplicability({ ...booleanRule, sourceVersion: 42 }, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
+}).status, 'BLOCKED', 'malformed provenance must block instead of throwing');
 assert.equal(calculateTypedApplicability({ ...booleanRule, values: [false] }, {
   __applicability: typedSnapshotMetadata, hasSafetyDuty: false,
 }).status, 'SCORED');

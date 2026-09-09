@@ -62,6 +62,7 @@ assert.deepEqual(registeredRoutes, [
   'POST /templates/:versionId/schedule',
   'POST /catalog-import/preview',
   'POST /catalog-import/apply',
+  'POST /catalog-import/:artifactType/:versionId/approve',
   'GET /policies',
   'POST /policies',
   'PUT /policies/:versionId',
@@ -114,7 +115,7 @@ const ownerReferenceLayer = (router as unknown as {
 assert.ok(ownerReferenceLayer && ownerReferenceLayer.route!.stack.length >= 2,
   'performance owner references must use policy authority without broad organization access');
 
-for (const path of ['/readiness/reconstruct', '/readiness/:runId/retry', '/supervisor/sections/:sectionId/submit', '/reviews/:submissionId/decision', '/sections/:sectionId/not-evaluable', '/evaluations/:evaluationId/invalidate', '/exports', '/consequence-handoffs', '/results/:resultId/suspend', '/evaluations/:evaluationId/corrections', '/criteria', '/templates', '/catalog-import/apply', '/policies', '/activation/run-due-policies', '/activation/run-due-artifacts']) {
+for (const path of ['/readiness/reconstruct', '/readiness/:runId/retry', '/supervisor/sections/:sectionId/submit', '/reviews/:submissionId/decision', '/sections/:sectionId/not-evaluable', '/evaluations/:evaluationId/invalidate', '/exports', '/consequence-handoffs', '/results/:resultId/suspend', '/evaluations/:evaluationId/corrections', '/criteria', '/templates', '/catalog-import/apply', '/catalog-import/:artifactType/:versionId/approve', '/policies', '/activation/run-due-policies', '/activation/run-due-artifacts']) {
   const writeLayer = (router as unknown as {
     stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
   }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);

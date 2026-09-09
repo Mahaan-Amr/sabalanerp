@@ -99,6 +99,10 @@ const catalogManifest: any = {
   },
   source: { provenanceCategory: 'PRODUCTION', asOf: '2026-09-09T00:00:00.000Z', references: ['controlled-source-v1'], extractedFacts: true },
   review: { contentOrigin: 'COMPANY_CONTROLLED_SOURCE', status: 'BUSINESS_REVIEW_PENDING' },
+  applicabilitySnapshotContract: {
+    schemaVersion: 1, container: '__applicability', snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
+    sourceVersions: 'REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION', effectiveAt: 'REQUIRED_ISO_TIMESTAMP', unknown: 'BLOCK',
+  },
   applicabilityDictionary: Object.entries({
     jobId: 'ID', positionId: 'ID', organizationalUnitId: 'ID', workplaceId: 'ID', shiftType: 'STRING',
     assignmentType: 'STRING', responsibilityCodes: 'STRING_LIST', effectiveDate: 'DATE', hasSafetyDuty: 'BOOLEAN',
@@ -182,6 +186,58 @@ const excessivePrecision = structuredClone(catalogManifest);
 excessivePrecision.jobs[0].categories[0].weight = 100.001;
 excessivePrecision.catalog.contentHash = performanceRoleCatalogContentHash(excessivePrecision);
 assert.ok(inspectPerformanceRoleCatalogManifest(excessivePrecision).errors.some((message) => message.includes('جمع وزن دسته‌ها')));
+const malformedSource = structuredClone(catalogManifest);
+malformedSource.applicabilityDictionary[0].source = 42;
+malformedSource.catalog.contentHash = performanceRoleCatalogContentHash(malformedSource);
+assert.doesNotThrow(() => inspectPerformanceRoleCatalogManifest(malformedSource));
+assert.ok(inspectPerformanceRoleCatalogManifest(malformedSource).errors.some((message) => message.includes('منبع نسخه‌دار')));
+const malformedWeights = structuredClone(catalogManifest);
+malformedWeights.positions[0].composition.jobWeight = '80';
+assert.doesNotThrow(() => inspectPerformanceRoleCatalogManifest(malformedWeights));
+assert.ok(inspectPerformanceRoleCatalogManifest(malformedWeights).errors.some((message) => message.includes('ساختار کاتالوگ ناقص')));
+const invalidCriterionPolicy = structuredClone(catalogManifest);
+invalidCriterionPolicy.jobs[0].criteria[0].evidencePolicy.minimumReliableCount = 0;
+invalidCriterionPolicy.jobs[0].criteria[0].evidencePolicy.automaticGrade = true;
+invalidCriterionPolicy.jobs[0].criteria[0].outsideControlFactors = [];
+invalidCriterionPolicy.catalog.contentHash = performanceRoleCatalogContentHash(invalidCriterionPolicy);
+assert.equal(inspectPerformanceRoleCatalogManifest(invalidCriterionPolicy).plan, null,
+  'preview must reject policy content that import would reject');
+const selfApproved = structuredClone(catalogManifest);
+selfApproved.review.status = 'APPROVED';
+selfApproved.review.reviewerRole = 'UNASSIGNED';
+selfApproved.review.reviewedAt = null;
+selfApproved.catalog.contentHash = performanceRoleCatalogContentHash(selfApproved);
+assert.ok(inspectPerformanceRoleCatalogManifest(selfApproved).errors.some((message) => message.includes('نقش بازبین')));
+const reviewedManifest = structuredClone(catalogManifest);
+reviewedManifest.review = {
+  contentOrigin: 'COMPANY_CONTROLLED_SOURCE', status: 'APPROVED', reviewerRole: 'HR_POLICY_OWNER', reviewedAt: '2026-09-09T08:00:00.000Z',
+};
+reviewedManifest.catalog.contentHash = performanceRoleCatalogContentHash(reviewedManifest);
+const inspectedReviewedManifest = inspectPerformanceRoleCatalogManifest(reviewedManifest);
+assert.equal(inspectedReviewedManifest.plan?.criteria[0].content.catalogSource.reviewStatus, 'BUSINESS_REVIEW_PENDING',
+  'a manifest approval claim must never bypass local audited approval');
+assert.equal(inspectedReviewedManifest.plan?.criteria[0].content.catalogSource.manifestReviewStatus, 'APPROVED');
+const sanitizedRecovery = structuredClone(catalogManifest);
+sanitizedRecovery.source.provenanceCategory = 'SANITIZED_RECOVERY';
+sanitizedRecovery.catalog.contentHash = performanceRoleCatalogContentHash(sanitizedRecovery);
+assert.deepEqual(inspectPerformanceRoleCatalogManifest(sanitizedRecovery).errors, []);
+const mismatchedSnapshotContract = structuredClone(catalogManifest);
+mismatchedSnapshotContract.applicabilitySnapshotContract.snapshotVersion = 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V2';
+mismatchedSnapshotContract.catalog.contentHash = performanceRoleCatalogContentHash(mismatchedSnapshotContract);
+assert.ok(inspectPerformanceRoleCatalogManifest(mismatchedSnapshotContract).errors.some((message) => message.includes('تصویر ثابت')));
+const syntheticPreview = structuredClone(catalogManifest);
+syntheticPreview.source.provenanceCategory = 'SYNTHETIC';
+syntheticPreview.source.extractedFacts = false;
+syntheticPreview.review = { contentOrigin: 'AI_PROPOSED', status: 'BUSINESS_REVIEW_PENDING', reviewerRole: 'UNASSIGNED', reviewedAt: null };
+for (const owner of [...syntheticPreview.jobs, ...syntheticPreview.positions]) {
+  owner.reference.id = null;
+  owner.reference.synthetic = true;
+}
+syntheticPreview.catalog.contentHash = performanceRoleCatalogContentHash(syntheticPreview);
+const inspectedSynthetic = inspectPerformanceRoleCatalogManifest(syntheticPreview);
+assert.deepEqual(inspectedSynthetic.errors, []);
+assert.equal(inspectedSynthetic.plan?.importable, false);
+assert.ok(inspectedSynthetic.plan?.warnings.some((message) => message.includes('ساختگی')));
 
 const levels = {
   schemaVersion: 1 as const,

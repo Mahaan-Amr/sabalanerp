@@ -6,6 +6,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ErpInlineState } from '@/components/erp';
 import { getSalesOperationalErrorKind } from './salesOperationalError';
+import CatalogImagePicker from '@/components/CatalogImagePicker';
 
 const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -48,4 +49,16 @@ test('real HTTP response classes render as warning, permission, or danger states
   }));
   assert.match(failure, /role="alert"/);
   assert.match(failure, /sds-tone-danger/);
+});
+
+test('image validation is associated with the actual file input', () => {
+  const html = renderToStaticMarkup(React.createElement(CatalogImagePicker, {
+    images: [],
+    onChange: () => undefined,
+    error: 'تصویر معتبر را انتخاب کنید.',
+  }));
+  assert.match(html, /aria-invalid="true"/);
+  const errorId = html.match(/aria-errormessage="([^"]+)"/)?.[1];
+  assert.ok(errorId);
+  assert.match(html, new RegExp(`id="${errorId}"[^>]*role="alert"`));
 });

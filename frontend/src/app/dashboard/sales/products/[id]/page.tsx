@@ -335,8 +335,8 @@ const ProductDetailPage: React.FC = () => {
                   <CatalogImagePicker
                     images={formData.images}
                     onChange={(images) => setFormData({ ...formData, images })}
+                    error={fieldErrors.images}
                   />
-                  {fieldErrors.images && <ErpInlineState kind="error" title={fieldErrors.images} />}
                 </div>
               ) : (
                 <>

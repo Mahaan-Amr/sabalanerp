@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
-import type { PerformanceCriterionResponse, PerformanceCriterionSnapshot } from './personnelPerformanceCalculation';
+import {
+  PERFORMANCE_APPLICABILITY_SNAPSHOT_VERSION,
+  type PerformanceCriterionResponse,
+  type PerformanceCriterionSnapshot,
+} from './personnelPerformanceCalculation';
 
 export type PerformanceReadinessAssignment = {
   assignmentId: string;
@@ -41,7 +45,7 @@ export type PerformanceReadinessAssignment = {
 export type PerformanceReadinessSnapshotFacts = {
   __applicability: {
     schemaVersion: 1;
-    snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1';
+    snapshotVersion: typeof PERFORMANCE_APPLICABILITY_SNAPSHOT_VERSION;
     sourceVersions: Record<string, string>;
     recordSourceVersions: Record<string, string>;
     effectiveAt: string;
@@ -75,7 +79,7 @@ export const buildPerformanceReadinessSnapshotFacts = (assignment: {
   return {
     __applicability: {
       schemaVersion: 1,
-      snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
+      snapshotVersion: PERFORMANCE_APPLICABILITY_SNAPSHOT_VERSION,
       sourceVersions: Object.fromEntries(Object.keys(facts).map((fact) => [fact, 'PERF_APPLICABILITY_V1'])),
       recordSourceVersions: Object.fromEntries(Object.keys(facts).map((fact) => [fact, recordSourceVersions[fact as PerformanceReadinessFactName]])),
       effectiveAt: effectiveDate.toISOString(),

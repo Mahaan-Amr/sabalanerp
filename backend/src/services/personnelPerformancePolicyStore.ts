@@ -85,6 +85,16 @@ const withoutCatalogSource = <T extends object>(content: T): T => {
   const { catalogSource: _catalogSource, ...rest } = content as T & { catalogSource?: unknown };
   return rest as T;
 };
+const pendingCatalogSource = (source: CatalogSourceMetadata): CatalogSourceMetadata => {
+  const {
+    approvedAt: _approvedAt,
+    approvedByUserId: _approvedByUserId,
+    approvalReason: _approvalReason,
+    approvedBusinessContentHash: _approvedBusinessContentHash,
+    ...provenance
+  } = source;
+  return { ...provenance, reviewStatus: 'BUSINESS_REVIEW_PENDING' };
+};
 const rejectClientCatalogSource = (content: unknown) => {
   if (hasCatalogSourceProperty(content)) {
     throw policyError('اطلاعات منشأ و تأیید کاتالوگ فقط توسط سامانه ثبت می‌شود.', 'PERFORMANCE_CATALOG_SOURCE_SERVER_OWNED', 422);
@@ -104,6 +114,8 @@ const ensureCatalogContentApprovedForPublication = async (
     || typeof source.approvedAt !== 'string' || !Number.isFinite(new Date(source.approvedAt).getTime())
     || typeof source.approvedByUserId !== 'string' || !source.approvedByUserId.trim()
     || typeof source.approvalReason !== 'string' || source.approvalReason.trim().length < 8
+    || typeof source.approvedBusinessContentHash !== 'string' || !/^[a-f0-9]{64}$/.test(source.approvedBusinessContentHash)
+    || source.approvedBusinessContentHash !== canonicalPerformanceHash(withoutCatalogSource(content as Record<string, unknown>))
     || typeof source.manifestContentHash !== 'string' || !/^[a-f0-9]{64}$/.test(source.manifestContentHash))) {
     throw policyError('محتوای پیشنهادی کاتالوگ تا ثبت نسخه تأییدشده کسب‌وکاری قابل انتشار نیست.', 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED', 409);
   }
@@ -137,6 +149,7 @@ const ensureCatalogContentApprovedForPublication = async (
   if (approvalEvidence.versionId !== input.versionId
     || approvalEvidence.manifestContentHash !== source.manifestContentHash
     || approvalEvidence.importIdentity !== source.importIdentity
+    || approvalEvidence.approvedBusinessContentHash !== source.approvedBusinessContentHash
     || approvalEvidence.afterReviewStatus !== 'APPROVED') {
     throw policyError('شاهد رمزگذاری‌شده تأیید کسب‌وکاری با نسخه کاتالوگ منطبق نیست.', 'PERFORMANCE_CATALOG_APPROVAL_AUDIT_REQUIRED', 409);
   }
@@ -363,7 +376,7 @@ export const updatePerformanceCriterionDraft = async (client: PrismaClient, inpu
     if (hasCatalogSourceProperty(input.content) && !previousContent?.catalogSource) rejectClientCatalogSource(input.content);
     const baseContent = withoutCatalogSource(input.content);
     const content = previousContent?.catalogSource
-      ? { ...baseContent, catalogSource: previousContent.catalogSource }
+      ? { ...baseContent, catalogSource: pendingCatalogSource(previousContent.catalogSource as CatalogSourceMetadata) }
       : baseContent;
     const encrypted = await persistVersionContent(tx, {
       aggregateType: 'CRITERION_VERSION', aggregateId: version.id, payloadKindPrefix: 'CRITERION', content, keyring,
@@ -699,6 +712,7 @@ export const approvePerformanceCatalogDraft = async (client: PrismaClient, input
     if (!receiptEvidence.manifest || typeof receiptEvidence.manifest !== 'object') {
       throw policyError('نسخه کامل کاتالوگ در رسید درون‌ریزی موجود نیست.', 'PERFORMANCE_CATALOG_IMPORT_EVIDENCE_REQUIRED', 409);
     }
+    const approvedBusinessContentHash = canonicalPerformanceHash(withoutCatalogSource(content));
     const approvedContent = {
       ...content,
       catalogSource: {
@@ -707,6 +721,7 @@ export const approvePerformanceCatalogDraft = async (client: PrismaClient, input
         approvedAt: now.toISOString(),
         approvedByUserId: input.approvedByUserId,
         approvalReason: reason,
+        approvedBusinessContentHash,
       },
     };
     if (input.artifactType === 'criterion') {
@@ -740,6 +755,7 @@ export const approvePerformanceCatalogDraft = async (client: PrismaClient, input
         importIdentity: source.importIdentity,
         beforeReviewStatus: source.reviewStatus,
         afterReviewStatus: 'APPROVED',
+        approvedBusinessContentHash,
       },
       keyring,
     });
@@ -757,7 +773,8 @@ export const approvePerformanceCatalogDraft = async (client: PrismaClient, input
       encryptedPayloadId: auditEvidence.id,
       previousEventHash: previousEvent?.eventHash,
       eventHash: canonicalPerformanceHash({
-        auditId, versionId: version.id, manifestContentHash: source.manifestContentHash, evidenceHash: auditEvidence.contentHash,
+        auditId, versionId: version.id, manifestContentHash: source.manifestContentHash,
+        approvedBusinessContentHash, evidenceHash: auditEvidence.contentHash,
       }),
       occurredAt: now,
     } });
@@ -784,7 +801,7 @@ export const updatePerformanceTemplateDraft = async (client: PrismaClient, input
     if (hasCatalogSourceProperty(input.content) && !previousContent?.catalogSource) rejectClientCatalogSource(input.content);
     const baseContent = withoutCatalogSource(input.content);
     const content = previousContent?.catalogSource
-      ? { ...baseContent, catalogSource: previousContent.catalogSource }
+      ? { ...baseContent, catalogSource: pendingCatalogSource(previousContent.catalogSource) }
       : baseContent;
     const encrypted = await persistVersionContent(tx, {
       aggregateType: 'TEMPLATE_VERSION', aggregateId: version.id, payloadKindPrefix: 'TEMPLATE', content, keyring,

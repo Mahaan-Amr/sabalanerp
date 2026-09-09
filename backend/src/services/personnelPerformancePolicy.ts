@@ -77,6 +77,7 @@ export type PerformanceTemplatePolicyContent = {
     approvedAt?: string;
     approvedByUserId?: string;
     approvalReason?: string;
+    approvedBusinessContentHash?: string;
   };
   categories: Array<{
     id: string;

@@ -21,6 +21,7 @@ import {
   schedulePerformanceTemplate,
   schedulePerformancePolicy,
   updatePerformanceTemplateDraft,
+  updatePerformanceCriterionDraft,
 } from '../personnelPerformancePolicyStore';
 import { DEFAULT_LEVEL_POLICY_CONTENT, nextTehranDayStart } from '../personnelPerformancePolicy';
 import { performanceRoleCatalogContentHash } from '../personnelPerformanceRoleCatalog';
@@ -219,7 +220,7 @@ const main = async () => {
     versionId: imported.templateVersionIds[0], effectiveFrom: artifactEffectiveFrom,
     reason: 'آزمون جلوگیری از انتشار الگوی پیشنهادی', publishedByUserId: actor.id, now: catalogSchedulingNow, keyring,
   }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED');
-  const approvedCriterion = await approvePerformanceCatalogDraft(first, {
+  let approvedCriterion = await approvePerformanceCatalogDraft(first, {
     artifactType: 'criterion', versionId: imported.criterionVersionIds[0],
     reason: 'بازبینی معیار در برابر منبع کنترل‌شده شرکت', approvedByUserId: actor.id, now: catalogSchedulingNow, keyring,
   });
@@ -240,9 +241,25 @@ const main = async () => {
   assert.equal(approvedCriterionContent.catalogSource.reviewStatus, 'APPROVED');
   assert.equal(approvedCriterionContent.catalogSource.manifestContentHash, importManifest.catalog.contentHash);
   assert.equal(approvedTemplateContent.catalogSource.approvedByUserId, actor.id);
+  const editedCriterion = await updatePerformanceCriterionDraft(first, {
+    versionId: approvedCriterion.id,
+    content: { ...approvedCriterionContent, meaningFa: 'معنای بازبینی‌شده پس از تأیید نخست' },
+    keyring,
+  });
+  const editedCriterionContent = await readPerformancePayload<any>(first, editedCriterion.encryptedPayloadId!, keyring);
+  assert.equal(editedCriterionContent.catalogSource.reviewStatus, 'BUSINESS_REVIEW_PENDING');
+  assert.equal(editedCriterionContent.catalogSource.approvedBusinessContentHash, undefined);
+  await assert.rejects(schedulePerformanceCriterion(first, {
+    versionId: editedCriterion.id, effectiveFrom: artifactEffectiveFrom,
+    reason: 'جلوگیری از انتشار ویرایش بدون تأیید تازه', publishedByUserId: actor.id, now: catalogSchedulingNow, keyring,
+  }), (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_CATALOG_BUSINESS_APPROVAL_REQUIRED');
+  approvedCriterion = await approvePerformanceCatalogDraft(first, {
+    artifactType: 'criterion', versionId: editedCriterion.id,
+    reason: 'تأیید دوباره پس از ویرایش محتوای معیار', approvedByUserId: actor.id, now: new Date(catalogSchedulingNow.getTime() + 1_000), keyring,
+  });
   assert.equal(await first.performanceAuditEvent.count({
     where: { eventType: 'CATALOG_BUSINESS_APPROVED', aggregateId: { in: [approvedCriterion.id, approvedTemplate.id, approvedAddendumCriterion.id, approvedAddendumTemplate.id] } },
-  }), 4);
+  }), 5);
   await schedulePerformanceCriterion(first, {
     versionId: approvedCriterion.id, effectiveFrom: artifactEffectiveFrom,
     reason: 'انتشار معیار پس از تأیید کسب‌وکاری ثبت‌شده', publishedByUserId: actor.id, now: catalogSchedulingNow, keyring,

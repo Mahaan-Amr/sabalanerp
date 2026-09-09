@@ -251,6 +251,10 @@ export const validateTypedPerformanceApplicabilityRule = (
   if (!Array.isArray(rule.values)) return [...errors, 'مقادیر قاعده کاربردپذیری باید آرایه باشند.'];
   const expectedType = PERFORMANCE_APPLICABILITY_FACT_TYPES[rule.fact];
   if (!expectedType) return ['واقعیت کنترل‌شده این قرارداد پشتیبانی نمی‌شود.'];
+  const allowedOperators = PERFORMANCE_APPLICABILITY_FACT_OPERATORS[rule.fact].operators;
+  if (!allowedOperators.includes(rule.operator)) {
+    errors.push(`عملگر «${rule.operator}» برای واقعیت «${rule.fact}» مجاز نیست.`);
+  }
   if (rule.factType !== expectedType) errors.push(`نوع واقعیت «${rule.fact}» باید ${expectedType} باشد.`);
   if (typeof rule.source !== 'string' || !rule.source.trim()
     || typeof rule.sourceVersion !== 'string' || !rule.sourceVersion.trim()) {

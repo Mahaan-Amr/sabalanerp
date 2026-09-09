@@ -319,6 +319,12 @@ assert.equal(calculateTypedApplicability(booleanRule, {
 assert.equal(calculateTypedApplicability({ ...booleanRule, operator: 'NOT_EQUALS' }, {
   __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
 }).status, 'BLOCKED');
+assert.equal(calculateTypedApplicability({ ...booleanRule, operator: 'EXISTS', values: [] }, {
+  __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
+}).status, 'BLOCKED', 'an operator excluded by the canonical fact dictionary must block evaluation');
+assert.equal(calculateTypedApplicability({ ...booleanRule, fact: 'jobId', factType: 'ID', source: 'PERIOD_EFFECTIVE_POSITION_JOB', operator: 'EXISTS', values: [] }, {
+  __applicability: { ...typedSnapshotMetadata, sourceVersions: { ...typedSnapshotMetadata.sourceVersions, jobId: 'PERF_APPLICABILITY_V1' } }, jobId: 'job-1',
+}).status, 'BLOCKED', 'jobId EXISTS must not bypass the canonical operator contract');
 assert.equal(calculateTypedApplicability({ ...booleanRule, schemaVersion: 2 }, {
   __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
 }).status, 'BLOCKED');

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  applicabilityOperatorsForFact,
   criterionDraftValidation,
   createTypedApplicabilityRule,
   defaultCriterionDraft,
@@ -19,6 +20,16 @@ assert.deepEqual(criterionDraftValidation(defaultCriterionDraft()), [
 assert.deepEqual(createTypedApplicabilityRule('hasSafetyDuty'), {
   schemaVersion: 1, fact: 'hasSafetyDuty', factType: 'BOOLEAN', source: 'VERSIONED_DOCUMENTED_DUTY', sourceVersion: 'PERF_APPLICABILITY_V1', operator: 'EQUALS', values: [true],
 });
+assert.deepEqual(applicabilityOperatorsForFact('hasSafetyDuty'), ['EQUALS']);
+assert.deepEqual(applicabilityOperatorsForFact('jobId'), ['EQUALS', 'IN']);
+assert.deepEqual(applicabilityOperatorsForFact('responsibilityCodes'), ['IN', 'EXISTS']);
+assert.ok(criterionDraftValidation({
+  ...defaultCriterionDraft(),
+  titleFa: 'ایمنی',
+  meaningFa: 'رعایت ایمنی',
+  anchorsFa: ['۱', '۲', '۳', '۴', '۵'],
+  applicability: { ...createTypedApplicabilityRule('hasSafetyDuty'), operator: 'EXISTS', values: [] },
+}).includes('عملگر انتخاب‌شده برای این واقعیت کاربردپذیری مجاز نیست.'));
 assert.deepEqual(typedApplicabilityValuesFromInput('BOOLEAN', 'false'), [false]);
 assert.deepEqual(typedApplicabilityValuesFromInput('STRING_LIST', 'PAYABLES, RECEIVABLES'), ['PAYABLES', 'RECEIVABLES']);
 assert.deepEqual(typedApplicabilityValuesFromInput('DATE', '2026-01-15'), ['2026-01-15']);

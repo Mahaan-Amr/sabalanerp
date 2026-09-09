@@ -22,6 +22,7 @@ import {
 import { personnelPerformanceAPI } from "@/lib/api";
 import {
   criterionDraftValidation,
+  applicabilityOperatorsForFact,
   createTypedApplicabilityRule,
   defaultCriterionDraft,
   lifecyclePresentation,
@@ -559,9 +560,7 @@ export default function PerformancePolicyAdministration() {
               const operator = event.target.value as "EQUALS" | "IN" | "EXISTS";
               setCriterionDraft({ ...criterionDraft, applicability: { ...criterionDraft.applicability!, operator, values: operator === "EXISTS" ? [] : criterionDraft.applicability!.factType === "BOOLEAN" ? [true] : [] } });
             }}>
-              {criterionDraft.applicability.factType !== "STRING_LIST" && <option value="EQUALS">برابر است با</option>}
-              <option value="IN">یکی از مقدارها</option>
-              <option value="EXISTS">مقدار ثبت شده است</option>
+              {applicabilityOperatorsForFact(criterionDraft.applicability.fact).map((operator) => <option key={operator} value={operator}>{({ EQUALS: "برابر است با", IN: "یکی از مقدارها", EXISTS: "مقدار ثبت شده است" } as const)[operator]}</option>)}
             </ErpSelect></ErpField>
             {criterionDraft.applicability.operator !== "EXISTS" && criterionDraft.applicability.factType === "BOOLEAN" && <ErpField label="مقدار بله/خیر" required><ErpSelect value={String(criterionDraft.applicability.values[0] ?? "")} onChange={(event) => setCriterionDraft({ ...criterionDraft, applicability: { ...criterionDraft.applicability!, values: typedApplicabilityValuesFromInput("BOOLEAN", event.target.value) } })}><option value="true">بله</option><option value="false">خیر</option></ErpSelect></ErpField>}
             {criterionDraft.applicability.operator !== "EXISTS" && (criterionDraft.applicability.fact === "jobId" || criterionDraft.applicability.fact === "positionId") && <ErpField label={criterionDraft.applicability.fact === "jobId" ? "شغل مجاز" : "جایگاه مجاز"} required error={criterionDraft.applicability.values.length === 0 ? "یک مرجع مجاز انتخاب کنید." : undefined} hint={ownerReferenceUnavailable ? "مرجع مجاز اکنون در دسترس نیست و ذخیره متوقف است." : undefined}><ErpSelect disabled={ownerReferenceUnavailable} value={String(criterionDraft.applicability.values[0] ?? "")} onChange={(event) => setCriterionDraft({ ...criterionDraft, applicability: { ...criterionDraft.applicability!, values: event.target.value ? [event.target.value] : [] } })}><option value="">انتخاب کنید</option>{(criterionDraft.applicability.fact === "jobId" ? ownerReferences.jobs : ownerReferences.positions).map((owner) => <option key={owner.id} value={owner.id} disabled={!owner.isActive}>{owner.title}{owner.isActive ? "" : " · بازنشسته/غیرفعال"}</option>)}</ErpSelect></ErpField>}

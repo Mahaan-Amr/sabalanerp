@@ -32,7 +32,9 @@ const main = async () => {
   const source = new PrismaClient({ datasources: { db: { url: sourceDatabaseUrl } } });
   try {
     const before = await fingerprint(source);
-    const database = await createDispatchDocumentsTemporaryDatabase({ repositoryRoot, sourceDatabaseUrl });
+    const database = await createDispatchDocumentsTemporaryDatabase({ repositoryRoot, sourceDatabaseUrl, schemaOnly: true,
+      referenceDataTables: ['hr_workspace_catalogs', 'hr_feature_catalogs', 'hr_responsibility_type_catalogs',
+        'performance_disclosure_revision'] });
     const client = database.client();
     try {
       const candidate = await fingerprint(client);

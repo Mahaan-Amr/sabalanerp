@@ -57,6 +57,7 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
   repositoryRoot: string;
   sourceDatabaseUrl: string;
   schemaOnly?: boolean;
+  referenceDataTables?: string[];
 }) => {
   const runId = randomBytes(8).toString('hex');
   const databaseName = checkedName(`${DATABASE_PREFIX}${runId}`);
@@ -75,6 +76,10 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
     if (input.schemaOnly) {
       // Keep the source migration identities/checksums, but no business rows.
       compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges --data-only --table=public._prisma_migrations | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+      for (const table of input.referenceDataTables ?? []) {
+        if (!/^[a-z][a-z0-9_]*$/.test(table)) throw new Error(`Invalid reference-data table: ${table}`);
+        compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges --data-only --table=public.${table} | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+      }
     }
     assertDispatchDocumentsMigrationTarget(databaseUrl.toString(), databaseName);
     const actualName = compose(input.repositoryRoot,

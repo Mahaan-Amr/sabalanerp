@@ -430,6 +430,17 @@ const main = async () => {
     const suffix = `${Date.now().toString(36)}-scope`;
     const actor = await tx.user.create({ data: { email: `${suffix}@example.invalid`, username: suffix, password: 'not-used', firstName: 'عامل', lastName: 'محدوده' } });
   await enablePerformanceTestRelease(tx, actor.id);
+    const consequenceContent = { schemaVersion: 1, rules: { COMPENSATION_REVIEW: {
+      minimumResults: 1, maximumAgeDays: 365,
+      destination: { responsibilityTypeCode: 'PERFORMANCE_CONSEQUENCE_COMPENSATION_REVIEW', workspaceCode: 'HUMAN_RESOURCES', queueCode: 'COMPENSATION_REVIEW' },
+      requireLegalControl: false,
+    } } };
+    const consequencePolicy = await tx.performanceConsequencePolicyVersion.create({ data: { version: 1,
+      content: consequenceContent, contentHash: canonicalPerformanceHash(consequenceContent), createdByUserId: actor.id } });
+    await tx.performanceConsequencePolicyVersion.update({ where: { id: consequencePolicy.id }, data: { lifecycle: 'SCHEDULED',
+      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), publicationReason: 'Rollback-only scoped authority fixture',
+      publishedAt: new Date('2026-01-01T00:00:00.000Z'), publishedByUserId: actor.id } });
+    await tx.performanceConsequencePolicyVersion.update({ where: { id: consequencePolicy.id }, data: { lifecycle: 'ACTIVE' } });
     const personnelA = await tx.personnel.create({ data: { firstName: 'الف', lastName: 'محدوده' } });
     const personnelB = await tx.personnel.create({ data: { firstName: 'ب', lastName: 'محدوده' } });
     await tx.hrNamedResponsibility.create({ data: {

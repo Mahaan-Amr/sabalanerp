@@ -4,6 +4,13 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 export const loginAsAdmin = async (page: Page) => {
   const username = process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin';
   const password = process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123';
+  await page.route('**/api/hr/personnel-performance/badge/me', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, badge: null })
+    });
+  });
   await page.goto('/login');
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(username);
   await page.locator('input[type="password"]').fill(password);

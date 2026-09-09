@@ -16,6 +16,62 @@ const presentations: Record<string, { label: string; tone: WorkflowTone }> = {
 
 export const workflowStatusPresentation = (status: string) => presentations[status] ?? { label: status, tone: "neutral" as const };
 
+export type ReadinessCoverage = {
+  inventory: { personnelCount: number; relationshipCount: number; assignmentCount: number };
+  inventoryClassifications: Record<string, number>;
+  periodEligibility: { personnelCount: number; relationshipCount: number; assignmentCount: number };
+  structuralTemplateReadiness: {
+    readyPersonnelCount: number;
+    readyRelationshipCount: number;
+    readyAssignmentCount: number;
+    blockedSourceCount: number;
+    failedSourceCount: number;
+  };
+  cohort: { subjectCount: number };
+  acceptedResult: { subjectCount: number };
+  resultBadge: { subjectCount: number };
+};
+
+const readinessClassificationLabels: Record<string, string> = {
+  PERSONNEL_INACTIVE: "پرسنل غیرفعال یا بایگانی‌شده",
+  EMPLOYMENT_RELATIONSHIP_MISSING: "بدون رابطه استخدامی",
+  RELATIONSHIP_PLANNED: "رابطه برنامه‌ریزی‌شده",
+  RELATIONSHIP_OUTSIDE_PERIOD: "رابطه خارج از بازه",
+  EMPLOYMENT_ASSIGNMENT_MISSING: "بدون مأموریت",
+  ASSIGNMENT_OUTSIDE_PERIOD: "مأموریت خارج از بازه",
+};
+
+export const buildReadinessCoverageSections = (coverage: ReadinessCoverage) => {
+  const sections = [
+    { title: "موجودی پایه", items: [
+      { label: "پرسنل", value: coverage.inventory.personnelCount },
+      { label: "روابط استخدامی", value: coverage.inventory.relationshipCount },
+      { label: "مأموریت‌ها", value: coverage.inventory.assignmentCount },
+    ] },
+    { title: "واجد شرایط در بازه", items: [
+      { label: "پرسنل", value: coverage.periodEligibility.personnelCount },
+      { label: "روابط استخدامی", value: coverage.periodEligibility.relationshipCount },
+      { label: "مأموریت‌ها", value: coverage.periodEligibility.assignmentCount },
+    ] },
+    { title: "آمادگی ساختاری و الگو", items: [
+      { label: "پرسنل آماده", value: coverage.structuralTemplateReadiness.readyPersonnelCount },
+      { label: "روابط آماده", value: coverage.structuralTemplateReadiness.readyRelationshipCount },
+      { label: "مأموریت آماده", value: coverage.structuralTemplateReadiness.readyAssignmentCount },
+      { label: "مانع ساختاری", value: coverage.structuralTemplateReadiness.blockedSourceCount },
+      { label: "خطای پردازش", value: coverage.structuralTemplateReadiness.failedSourceCount },
+    ] },
+    { title: "خروجی‌های مستقل", items: [
+      { label: "عضو گروه", value: coverage.cohort.subjectCount },
+      { label: "نتیجه پذیرفته‌شده", value: coverage.acceptedResult.subjectCount },
+      { label: "نشان نتیجه", value: coverage.resultBadge.subjectCount },
+    ] },
+  ];
+  const classifications = Object.entries(coverage.inventoryClassifications)
+    .filter(([, value]) => value > 0)
+    .map(([code, value]) => ({ label: readinessClassificationLabels[code] ?? code, value }));
+  return classifications.length ? [...sections, { title: "طبقه‌بندی پیوندها", items: classifications }] : sections;
+};
+
 export type SupervisorResponseDraft = {
   grade?: 1 | 2 | 3 | 4 | 5;
   evidenceKind: "STRUCTURED_OBSERVATION" | "OPERATIONAL_REFERENCE" | "CONTROLLED_DOCUMENT";

@@ -19,9 +19,11 @@ import {
 } from "@/components/erp";
 import { personnelPerformanceAPI } from "@/lib/api";
 import {
+  buildReadinessCoverageSections,
   buildSupervisorDraft,
   hasCompleteEvidence,
   workflowStatusPresentation,
+  type ReadinessCoverage,
   type SupervisorResponseDraft,
 } from "./performanceWorkflowModel";
 
@@ -105,7 +107,7 @@ export default function PerformanceWorkflow({ initialSectionId, initialSubmissio
   const [decisionCategory, setDecisionCategory] = useState("");
   const [measurementFrom, setMeasurementFrom] = useState("");
   const [measurementTo, setMeasurementTo] = useState("");
-  const [readinessRun, setReadinessRun] = useState<Record<string, unknown>>();
+  const [readinessRun, setReadinessRun] = useState<(Record<string, unknown> & { coverage?: ReadinessCoverage })>();
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -314,14 +316,14 @@ export default function PerformanceWorkflow({ initialSectionId, initialSubmissio
         <div className="grid gap-3 md:grid-cols-2"><ErpField label="آغاز بازه" required><ErpInput type="datetime-local" value={measurementFrom} onChange={(event) => setMeasurementFrom(event.target.value)} /></ErpField><ErpField label="پایان بازه" required><ErpInput type="datetime-local" value={measurementTo} onChange={(event) => setMeasurementTo(event.target.value)} /></ErpField></div>
         <div className="mt-3 flex flex-wrap justify-end gap-2"><ErpButton label="اجرای یادآوری‌ها" variant="outline" disabled={pending} onClick={() => void run(() => personnelPerformanceAPI.runReminders(), "یادآوری‌های موعد بررسی شد.", false)} /><ErpButton label="شروع بازسازی" variant="solid" disabled={pending || !measurementFrom || !measurementTo} onClick={() => void run(async () => {
           const response = await personnelPerformanceAPI.reconstructReadiness({ measurementFrom: new Date(measurementFrom).toISOString(), measurementTo: new Date(measurementTo).toISOString(), batchSize: 100 }, crypto.randomUUID());
-          setReadinessRun(response.data.run);
+          setReadinessRun({ ...response.data.run, coverage: response.data.coverage });
         }, "یک بخش از بازسازی آمادگی اجرا شد.", false)} /></div>
-        {readinessRun && <div className="mt-4"><ErpSummaryGrid items={[
+        {readinessRun && <div className="mt-4 space-y-4"><ErpSummaryGrid items={[
           { label: "وضعیت اجرا", value: workflowStatusPresentation(String(readinessRun.status ?? "")).label },
-          { label: "شمار منبع", value: Number(readinessRun.sourceCount ?? 0).toLocaleString("fa-IR") },
-          { label: "ساخته‌شده", value: Number(readinessRun.appliedCount ?? 0).toLocaleString("fa-IR"), tone: "success" },
-          { label: "مانع ساختاری", value: Number(readinessRun.blockedCount ?? 0).toLocaleString("fa-IR"), tone: "warning" },
-        ]} /></div>}
+        ]} />{readinessRun.coverage && buildReadinessCoverageSections(readinessRun.coverage).map((section) => <ErpCard key={section.title} className="p-4">
+          <p className="mb-3 font-semibold text-[var(--sds-text-primary)]">{section.title}</p>
+          <ErpSummaryGrid items={section.items.map((item) => ({ label: item.label, value: item.value.toLocaleString("fa-IR") }))} />
+        </ErpCard>)}</div>}
       </ErpSection>}
 
       <ErpSheet open={Boolean(lifecycleAction)} onClose={() => !pending && setLifecycleAction(undefined)} title={lifecycleAction?.kind === "extend" ? "تمدید مهلت ارسال" : lifecycleAction?.kind === "not-evaluable" ? "ثبت غیرقابل‌ارزیابی" : lifecycleAction?.kind === "invalidate" ? "تعلیق اثر نتیجه" : "لغو پرونده ارزیابی"} presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" onClick={() => setLifecycleAction(undefined)} /><ErpButton label="ثبت اقدام" tone={lifecycleAction?.kind === "extend" ? "primary" : "danger"} variant="solid" disabled={!lifecycleAction || lifecycleReason.trim().length < 8 || (lifecycleAction.kind === "extend" && !lifecycleDueAt)} onClick={() => lifecycleAction && void (async () => {

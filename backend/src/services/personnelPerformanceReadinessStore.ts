@@ -5,19 +5,51 @@ import { performanceVaultKeyFromEnvironment, persistPerformancePayload, type Per
 import { runPerformanceSerializableTransaction } from './personnelPerformancePolicyStore';
 import { publishNotificationEvent } from './notificationService';
 import {
+  buildPerformanceReadinessSnapshotFacts,
   buildPerformanceReadinessSnapshot,
   derivePerformanceSectionPlans,
   type PerformanceReadinessAssignment,
 } from './personnelPerformanceWorkflow';
+import { projectFoundationAtEvent } from './hrFoundationGovernance';
 
 const readinessError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
 const DAY_MS = 86_400_000;
 
-type ReadinessSourceRow = PerformanceReadinessAssignment & {
+type EligibleReadinessSourceRow = PerformanceReadinessAssignment & {
+  readinessKind: 'ELIGIBLE_ASSIGNMENT';
+  sourceKey: string;
   organizationalUnitId: string | null;
   workplaceId: string | null;
   costCenterId: string | null;
   assignmentType: string;
+};
+
+type InventoryReadinessSourceRow = {
+  readinessKind: 'STRUCTURAL_BLOCKER' | 'INELIGIBLE';
+  sourceKey: string;
+  personnelId: string;
+  employmentRelationshipId: string | null;
+  assignmentId: string | null;
+  classification: 'PERSONNEL_INACTIVE' | 'EMPLOYMENT_RELATIONSHIP_MISSING' | 'RELATIONSHIP_PLANNED'
+    | 'RELATIONSHIP_OUTSIDE_PERIOD' | 'EMPLOYMENT_ASSIGNMENT_MISSING' | 'ASSIGNMENT_OUTSIDE_PERIOD';
+};
+
+type ReadinessSourceRow = EligibleReadinessSourceRow | InventoryReadinessSourceRow;
+
+export type PerformanceReadinessCoverage = {
+  inventory: { personnelCount: number; relationshipCount: number; assignmentCount: number };
+  inventoryClassifications: Record<string, number>;
+  periodEligibility: { personnelCount: number; relationshipCount: number; assignmentCount: number };
+  structuralTemplateReadiness: {
+    readyPersonnelCount: number;
+    readyRelationshipCount: number;
+    readyAssignmentCount: number;
+    blockedSourceCount: number;
+    failedSourceCount: number;
+  };
+  cohort: { subjectCount: number };
+  acceptedResult: { subjectCount: number };
+  resultBadge: { subjectCount: number };
 };
 
 const snapshotDefinition = (value: Prisma.JsonValue | null): Record<string, unknown> | null => {
@@ -35,66 +67,99 @@ const earlierOptional = (...values: Array<Date | null>) => {
 };
 
 const loadReadinessSource = async (client: PrismaClient, period: { measurementFrom: Date; measurementTo: Date }) => {
-  const rows = await client.hrEmploymentAssignment.findMany({
-    where: {
-      effectiveFrom: { lt: period.measurementTo },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: period.measurementFrom } }],
-      employmentRelationship: {
-        status: { in: ['ACTIVE', 'SUSPENDED', 'ENDED'] },
-        effectiveFrom: { lt: period.measurementTo },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gt: period.measurementFrom } }],
-      },
-    },
+  const personnelRows = await client.personnel.findMany({
     select: {
       id: true,
-      type: true,
-      effectiveFrom: true,
-      effectiveTo: true,
-      positionId: true,
-      positionSnapshot: true,
-      organizationalUnitId: true,
-      organizationalUnitSnapshot: true,
-      workplaceId: true,
-      costCenterId: true,
-      performanceAllocationPercent: true,
-      employmentRelationship: { select: { id: true, personnelId: true, status: true, effectiveFrom: true, effectiveTo: true } },
-      position: { select: { jobId: true } },
-      responsibleSupervisorAssignmentId: true,
-      responsibleSupervisorAssignment: {
-        select: {
-          effectiveFrom: true, effectiveTo: true,
-          employmentRelationship: { select: { personnelId: true, status: true, effectiveFrom: true, effectiveTo: true } },
-        },
-      },
-      performanceResponsibilities: {
-        where: {
-          status: 'ACTIVE',
-          effectiveFrom: { lt: period.measurementTo },
-          OR: [{ effectiveTo: null }, { effectiveTo: { gt: period.measurementFrom } }],
-        },
-        orderBy: { effectiveFrom: 'asc' },
-        select: {
-          id: true, supervisorAssignmentId: true, effectiveFrom: true, effectiveTo: true, allocationPercent: true,
-          supervisorAssignment: {
+      isActive: true,
+      archivedAt: true,
+      hrEmploymentRelationships: { orderBy: { id: 'asc' }, select: {
+        id: true, status: true, effectiveFrom: true, effectiveTo: true,
+        assignments: { orderBy: { id: 'asc' }, select: {
+          id: true, type: true, effectiveFrom: true, effectiveTo: true,
+          positionId: true, positionSnapshot: true, organizationalUnitId: true, organizationalUnitSnapshot: true,
+          workplaceId: true, costCenterId: true, performanceAllocationPercent: true,
+          position: { select: {
+            id: true, code: true, codeOccurrence: true, title: true, jobId: true, organizationalUnitId: true,
+            workplaceId: true, costCenterId: true, supervisorPositionId: true, capacity: true, isActive: true,
+          } },
+          responsibleSupervisorAssignmentId: true,
+          responsibleSupervisorAssignment: { select: {
+            effectiveFrom: true, effectiveTo: true,
+            employmentRelationship: { select: { personnelId: true, status: true, effectiveFrom: true, effectiveTo: true } },
+          } },
+          performanceResponsibilities: {
+            where: { status: 'ACTIVE' }, orderBy: { effectiveFrom: 'asc' },
             select: {
-              effectiveFrom: true, effectiveTo: true,
-              employmentRelationship: { select: { personnelId: true, status: true, effectiveFrom: true, effectiveTo: true } },
+              id: true, supervisorAssignmentId: true, effectiveFrom: true, effectiveTo: true, allocationPercent: true,
+              supervisorAssignment: { select: {
+                effectiveFrom: true, effectiveTo: true,
+                employmentRelationship: { select: { personnelId: true, status: true, effectiveFrom: true, effectiveTo: true } },
+              } },
             },
           },
-        },
-      },
+        } },
+      } },
     },
     orderBy: { id: 'asc' },
   });
-  const primaryRelationships = new Set(rows.filter(({ type }) => type === 'PRIMARY').map(({ employmentRelationship }) => employmentRelationship.id));
-  const mapped = rows.map<ReadinessSourceRow>((row) => {
+  const relationships = personnelRows.flatMap((personnel) => personnel.hrEmploymentRelationships.map((relationship) => ({
+    ...relationship, personnelId: personnel.id,
+  })));
+  const personnelById = new Map(personnelRows.map((personnel) => [personnel.id, personnel]));
+  const relationshipById = new Map(relationships.map((relationship) => [relationship.id, relationship]));
+  const activePersonnelIds = new Set(personnelRows.filter((personnel) => personnel.isActive && !personnel.archivedAt).map(({ id }) => id));
+  const assignments = relationships.flatMap((relationship) => relationship.assignments.map((assignment) => ({
+    ...assignment, employmentRelationshipId: relationship.id,
+  })));
+  const positionIds = [...new Set(assignments.map(({ positionId }) => positionId).filter((id): id is string => Boolean(id)))];
+  const positionVersions = positionIds.length ? await client.hrFoundationLifecycleVersion.findMany({
+    where: { entityType: 'POSITION', entityId: { in: positionIds } }, orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }],
+    select: { entityId: true, version: true, effectiveFrom: true, afterJson: true },
+  }) : [];
+  const versionsByPosition = new Map<string, typeof positionVersions>();
+  for (const version of positionVersions) versionsByPosition.set(version.entityId, [...(versionsByPosition.get(version.entityId) ?? []), version]);
+  const eligibleRelationships = new Set(relationships.filter((relationship) => relationship.status !== 'PLANNED'
+    && relationship.effectiveFrom < period.measurementTo
+    && (!relationship.effectiveTo || relationship.effectiveTo > period.measurementFrom)).map(({ id }) => id));
+  const eligiblePersonnel = new Set(personnelRows.filter((personnel) => personnel.isActive && !personnel.archivedAt)
+    .flatMap((personnel) => personnel.hrEmploymentRelationships.filter(({ id }) => eligibleRelationships.has(id)).map(() => personnel.id)));
+  const eligibleAssignments = assignments.filter((assignment) => eligibleRelationships.has(assignment.employmentRelationshipId)
+    && assignment.effectiveFrom < period.measurementTo && (!assignment.effectiveTo || assignment.effectiveTo > period.measurementFrom));
+  const primaryRelationships = new Set(eligibleAssignments.filter(({ type }) => type === 'PRIMARY').map(({ employmentRelationshipId }) => employmentRelationshipId));
+  const mappedAssignments = eligibleAssignments.map<EligibleReadinessSourceRow>((row) => {
+    const relationship = relationshipById.get(row.employmentRelationshipId)!;
+    const personnel = personnelById.get(relationship.personnelId)!;
     const positionHistory = snapshotDefinition(row.positionSnapshot);
     const organizationalHistory = snapshotDefinition(row.organizationalUnitSnapshot);
-    const effectiveFrom = later(row.effectiveFrom, row.employmentRelationship.effectiveFrom);
-    const effectiveTo = earlierOptional(row.effectiveTo, row.employmentRelationship.effectiveTo);
+    const effectiveFrom = later(row.effectiveFrom, relationship.effectiveFrom);
+    const effectiveTo = earlierOptional(row.effectiveTo, relationship.effectiveTo);
     const sectionFrom = later(effectiveFrom, period.measurementFrom);
     const sectionTo = earlierOptional(effectiveTo, period.measurementTo) ?? period.measurementTo;
-    const responsibilityPeriods = row.performanceResponsibilities.map((responsibility) => {
+    const versions = row.position ? versionsByPosition.get(row.position.id) ?? [] : [];
+    const contextBoundaries = [sectionFrom, ...versions
+      .map(({ effectiveFrom }) => effectiveFrom)
+      .filter((effectiveFrom) => effectiveFrom > sectionFrom && effectiveFrom < sectionTo), sectionTo]
+      .sort((left, right) => left.getTime() - right.getTime());
+    const contextPeriods = contextBoundaries.slice(0, -1).map((contextFrom, index) => {
+      const definition = positionHistory ?? (row.position ? projectFoundationAtEvent(row.position, versions, contextFrom) : null);
+      const applicableVersion = [...versions].reverse().find((version) => version.effectiveFrom <= contextFrom);
+      return {
+        effectiveFrom: contextFrom,
+        effectiveTo: contextBoundaries[index + 1]!,
+        positionId: row.positionId ?? (typeof definition?.id === 'string' ? definition.id : null),
+        jobId: typeof definition?.jobId === 'string' ? definition.jobId : null,
+        organizationalUnitId: (typeof definition?.organizationalUnitId === 'string' ? definition.organizationalUnitId : null)
+          ?? row.organizationalUnitId ?? (typeof organizationalHistory?.id === 'string' ? organizationalHistory.id : null),
+        workplaceId: (typeof definition?.workplaceId === 'string' ? definition.workplaceId : null) ?? row.workplaceId,
+        costCenterId: (typeof definition?.costCenterId === 'string' ? definition.costCenterId : null) ?? row.costCenterId,
+        sourceVersion: applicableVersion
+          ? `HR_FOUNDATION_POSITION:${row.positionId}:${applicableVersion.version}`
+          : `HR_EMPLOYMENT_ASSIGNMENT:${row.id}`,
+      };
+    });
+    const firstContext = contextPeriods[0]!;
+    const responsibilityPeriods = row.performanceResponsibilities.filter((responsibility) => responsibility.effectiveFrom < period.measurementTo
+      && (!responsibility.effectiveTo || responsibility.effectiveTo > period.measurementFrom)).map((responsibility) => {
       const responsibilityFrom = later(responsibility.effectiveFrom, sectionFrom);
       const responsibilityTo = earlierOptional(responsibility.effectiveTo, sectionTo) ?? sectionTo;
       const supervisor = responsibility.supervisorAssignment;
@@ -120,31 +185,35 @@ const loadReadinessSource = async (client: PrismaClient, period: { measurementFr
       return responsibility.supervisorCoversPeriod;
     }) && coveredUntil.getTime() === sectionTo.getTime();
     const firstResponsibility = responsibilityPeriods[0];
-    return {
+      return {
+      readinessKind: 'ELIGIBLE_ASSIGNMENT',
+      sourceKey: row.id,
       assignmentId: row.id,
-      employmentRelationshipId: row.employmentRelationship.id,
-      personnelId: row.employmentRelationship.personnelId,
+      employmentRelationshipId: relationship.id,
+      personnelId: personnel.id,
       effectiveFrom,
       effectiveTo,
       responsibleSupervisorAssignmentId: firstResponsibility?.supervisorAssignmentId ?? row.responsibleSupervisorAssignmentId,
       responsibleSupervisorPersonnelId: firstResponsibility?.supervisorPersonnelId ?? null,
       responsibilityPeriods,
       responsibilityHistoryComplete,
-      relationshipStatus: row.employmentRelationship.status as ReadinessSourceRow['relationshipStatus'],
-      hasPrimaryAssignment: primaryRelationships.has(row.employmentRelationship.id),
-      positionId: row.positionId ?? (typeof positionHistory?.id === 'string' ? positionHistory.id : null),
-      jobId: row.position?.jobId ?? (typeof positionHistory?.jobId === 'string' ? positionHistory.jobId : null),
-      hasHistoricalContext: Boolean(row.organizationalUnitId || organizationalHistory),
+      relationshipStatus: relationship.status as EligibleReadinessSourceRow['relationshipStatus'],
+      hasPrimaryAssignment: primaryRelationships.has(relationship.id),
+      positionId: firstContext.positionId,
+      jobId: firstContext.jobId,
+      hasHistoricalContext: Boolean(positionHistory || versions.length)
+        && contextPeriods.every((context) => Boolean(context.organizationalUnitId)),
       performanceAllocationPercent: firstResponsibility?.allocationPercent ?? row.performanceAllocationPercent?.toFixed(2) ?? null,
       allocationConsistent: true,
-      organizationalUnitId: row.organizationalUnitId ?? (typeof organizationalHistory?.id === 'string' ? organizationalHistory.id : null),
-      workplaceId: row.workplaceId,
-      costCenterId: row.costCenterId,
+      organizationalUnitId: firstContext.organizationalUnitId,
+      workplaceId: firstContext.workplaceId,
+      costCenterId: firstContext.costCenterId,
       assignmentType: row.type,
+      contextPeriods,
     };
   }).filter((row) => !row.effectiveTo || row.effectiveTo > row.effectiveFrom);
-  for (const row of mapped) {
-    const contexts = mapped
+  for (const row of mappedAssignments) {
+    const contexts = mappedAssignments
       .filter((candidate) => candidate.employmentRelationshipId === row.employmentRelationshipId)
       .flatMap((candidate) => candidate.responsibilityPeriods);
     const checkpoints = [...new Set(contexts.flatMap((context) => [context.effectiveFrom.getTime(), context.effectiveTo?.getTime()].filter((value): value is number => value !== undefined)))];
@@ -152,20 +221,117 @@ const loadReadinessSource = async (client: PrismaClient, period: { measurementFr
       .filter((context) => context.effectiveFrom.getTime() <= checkpoint && (!context.effectiveTo || context.effectiveTo.getTime() > checkpoint))
       .reduce((sum, context) => sum.add(context.allocationPercent), new Prisma.Decimal(0)).lte(100));
   }
-  return mapped;
+  const eligibleByAssignmentId = new Map(mappedAssignments.filter((row) => activePersonnelIds.has(row.personnelId))
+    .map((row) => [row.assignmentId, row]));
+  const sourceRows: ReadinessSourceRow[] = personnelRows.flatMap((personnel) => {
+    const activePersonnel = personnel.isActive && !personnel.archivedAt;
+    if (!personnel.hrEmploymentRelationships.length) return [{
+      readinessKind: activePersonnel ? 'STRUCTURAL_BLOCKER' : 'INELIGIBLE', sourceKey: `personnel:${personnel.id}`,
+      personnelId: personnel.id, employmentRelationshipId: null, assignmentId: null,
+      classification: activePersonnel ? 'EMPLOYMENT_RELATIONSHIP_MISSING' : 'PERSONNEL_INACTIVE',
+    } satisfies InventoryReadinessSourceRow];
+    return personnel.hrEmploymentRelationships.flatMap((relationship) => {
+      const relationshipEligible = eligibleRelationships.has(relationship.id);
+      const ineligibleClassification = relationship.status === 'PLANNED' ? 'RELATIONSHIP_PLANNED' : 'RELATIONSHIP_OUTSIDE_PERIOD';
+      if (!relationship.assignments.length) return [{
+        readinessKind: activePersonnel && relationshipEligible ? 'STRUCTURAL_BLOCKER' : 'INELIGIBLE',
+        sourceKey: `relationship:${relationship.id}`, personnelId: personnel.id,
+        employmentRelationshipId: relationship.id, assignmentId: null,
+        classification: !activePersonnel ? 'PERSONNEL_INACTIVE'
+          : relationshipEligible ? 'EMPLOYMENT_ASSIGNMENT_MISSING' : ineligibleClassification,
+      } satisfies InventoryReadinessSourceRow];
+      return relationship.assignments.map((assignment): ReadinessSourceRow => {
+        const eligible = activePersonnel ? eligibleByAssignmentId.get(assignment.id) : undefined;
+        if (eligible) return eligible;
+        return {
+          readinessKind: 'INELIGIBLE', sourceKey: assignment.id, personnelId: personnel.id,
+          employmentRelationshipId: relationship.id, assignmentId: assignment.id,
+          classification: !activePersonnel ? 'PERSONNEL_INACTIVE'
+            : !relationshipEligible ? ineligibleClassification : 'ASSIGNMENT_OUTSIDE_PERIOD',
+        };
+      });
+    });
+  }).sort((left, right) => left.sourceKey.localeCompare(right.sourceKey));
+  return {
+    rows: sourceRows,
+    inventory: { personnelCount: personnelRows.length, relationshipCount: relationships.length, assignmentCount: assignments.length },
+    periodEligibility: {
+      personnelCount: eligiblePersonnel.size,
+      relationshipCount: relationships.filter((relationship) => eligibleRelationships.has(relationship.id)
+        && activePersonnelIds.has(relationship.personnelId)).length,
+      assignmentCount: eligibleByAssignmentId.size,
+    },
+  };
 };
 
-const sourceRowHash = (row: ReadinessSourceRow) => canonicalPerformanceHash({
-  ...row,
-  effectiveFrom: row.effectiveFrom.toISOString(),
-  effectiveTo: row.effectiveTo?.toISOString() ?? null,
-});
+const readinessCoverage = async (
+  client: PrismaClient,
+  source: Awaited<ReturnType<typeof loadReadinessSource>>,
+  runId: string,
+): Promise<PerformanceReadinessCoverage> => {
+  const [statuses, appliedRecords, activeCohort, acceptedResultSubjects, badgeSubjects] = await Promise.all([
+    client.performanceReadinessRecord.groupBy({ by: ['status'], where: { runId }, _count: true }),
+    client.performanceReadinessRecord.findMany({
+      where: { runId, status: 'APPLIED' }, select: { employmentAssignmentId: true },
+    }),
+    client.performanceCohortVersion.findFirst({
+      where: { lifecycle: 'ACTIVE' }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }], select: { id: true },
+    }),
+    client.performanceEvaluation.findMany({
+      where: { acceptedResultId: { not: null } },
+      distinct: ['subjectId'], select: { subjectId: true },
+    }),
+    client.performanceCurrentLevelProjection.count({ where: { state: 'LEVEL', levelCode: { not: null } } }),
+  ]);
+  const count = (status: string) => statuses.find((item) => item.status === status)?._count ?? 0;
+  const inventoryClassifications = source.rows.filter((row): row is InventoryReadinessSourceRow => row.readinessKind !== 'ELIGIBLE_ASSIGNMENT')
+    .reduce<Record<string, number>>((totals, row) => ({
+      ...totals, [row.classification]: (totals[row.classification] ?? 0) + 1,
+    }), {});
+  const inventoryBlockers = source.rows.filter((row) => row.readinessKind === 'STRUCTURAL_BLOCKER').length;
+  const appliedAssignmentIds = new Set(appliedRecords.map(({ employmentAssignmentId }) => employmentAssignmentId));
+  const readyRows = source.rows.filter((row): row is EligibleReadinessSourceRow => (
+    row.readinessKind === 'ELIGIBLE_ASSIGNMENT' && appliedAssignmentIds.has(row.assignmentId)
+  ));
+  return {
+    inventory: source.inventory,
+    inventoryClassifications,
+    periodEligibility: source.periodEligibility,
+    structuralTemplateReadiness: {
+      readyPersonnelCount: new Set(readyRows.map(({ personnelId }) => personnelId)).size,
+      readyRelationshipCount: new Set(readyRows.map(({ employmentRelationshipId }) => employmentRelationshipId)).size,
+      readyAssignmentCount: count('APPLIED'), blockedSourceCount: count('BLOCKED') + inventoryBlockers, failedSourceCount: count('FAILED'),
+    },
+    cohort: { subjectCount: activeCohort ? await client.performanceCohortMember.count({ where: { cohortVersionId: activeCohort.id } }) : 0 },
+    acceptedResult: { subjectCount: acceptedResultSubjects.length },
+    resultBadge: { subjectCount: badgeSubjects },
+  };
+};
+
+export const getPerformanceReadinessCoverage = async (client: PrismaClient, input: {
+  runId: string;
+  measurementFrom: Date;
+  measurementTo: Date;
+}) => {
+  const source = await loadReadinessSource(client, input);
+  return readinessCoverage(client, source, input.runId);
+};
+
+const sourceRowHash = (row: ReadinessSourceRow) => canonicalPerformanceHash(row.readinessKind === 'ELIGIBLE_ASSIGNMENT' ? {
+  readinessKind: row.readinessKind,
+  sourceKey: row.sourceKey,
+  workflowHash: buildPerformanceReadinessSnapshot([row]).hash,
+  organizationalUnitId: row.organizationalUnitId,
+  workplaceId: row.workplaceId,
+  costCenterId: row.costCenterId,
+  assignmentType: row.assignmentType,
+} : row);
 
 const readinessSourceSnapshot = (rows: ReadinessSourceRow[]) => ({
   count: rows.length,
   hash: canonicalPerformanceHash(rows
-    .map((row) => ({ assignmentId: row.assignmentId, hash: sourceRowHash(row) }))
-    .sort((left, right) => left.assignmentId.localeCompare(right.assignmentId))),
+    .map((row) => ({ sourceKey: row.sourceKey, hash: sourceRowHash(row) }))
+    .sort((left, right) => left.sourceKey.localeCompare(right.sourceKey))),
 });
 
 const promoteCompleteEvaluations = async (client: PrismaClient, runId: string, rows: ReadinessSourceRow[]) => {
@@ -173,9 +339,10 @@ const promoteCompleteEvaluations = async (client: PrismaClient, runId: string, r
     where: { runId }, select: { employmentAssignmentId: true, status: true, evaluationId: true },
   });
   const recordMap = new Map(records.map((record) => [record.employmentAssignmentId, record]));
-  const relationshipIds = [...new Set(rows.map(({ employmentRelationshipId }) => employmentRelationshipId))];
+  const eligibleRows = rows.filter((row): row is EligibleReadinessSourceRow => row.readinessKind === 'ELIGIBLE_ASSIGNMENT');
+  const relationshipIds = [...new Set(eligibleRows.map(({ employmentRelationshipId }) => employmentRelationshipId))];
   const evaluationIds = relationshipIds.flatMap((relationshipId) => {
-    const assignmentIds = rows.filter((row) => row.employmentRelationshipId === relationshipId).map(({ assignmentId }) => assignmentId);
+    const assignmentIds = eligibleRows.filter((row) => row.employmentRelationshipId === relationshipId).map(({ assignmentId }) => assignmentId);
     if (!assignmentIds.length || assignmentIds.some((assignmentId) => recordMap.get(assignmentId)?.status !== 'APPLIED')) return [];
     const evaluationId = assignmentIds.map((assignmentId) => recordMap.get(assignmentId)?.evaluationId).find(Boolean);
     return evaluationId ? [evaluationId] : [];
@@ -224,7 +391,7 @@ const appendReadinessAudit = async (tx: Prisma.TransactionClient, input: {
   } });
 };
 
-const activeTemplateVersions = async (tx: Prisma.TransactionClient, row: ReadinessSourceRow, at: Date) => {
+const activeTemplateVersions = async (tx: Prisma.TransactionClient, row: EligibleReadinessSourceRow, at: Date) => {
   const versions = await tx.performanceTemplateVersion.findMany({ where: {
     lifecycle: { in: [PerformanceArtifactLifecycle.ACTIVE, PerformanceArtifactLifecycle.RETIRED] },
     effectiveFrom: { lte: at },
@@ -263,32 +430,41 @@ const processReadinessRow = async (
     keyring: PerformanceVaultKey;
   },
 ) => runPerformanceSerializableTransaction(client, async (tx) => {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'performance-readiness-assignment:' + input.row.assignmentId}, 0))`;
+  const recordKey = input.row.sourceKey;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'performance-readiness-source:' + recordKey}, 0))`;
   const existingRecord = await tx.performanceReadinessRecord.findUnique({
-    where: { runId_employmentAssignmentId: { runId: input.runId, employmentAssignmentId: input.row.assignmentId } },
+    where: { runId_employmentAssignmentId: { runId: input.runId, employmentAssignmentId: recordKey } },
   });
-  if (existingRecord?.status === 'APPLIED' || existingRecord?.status === 'BLOCKED') return existingRecord;
-  const snapshot = buildPerformanceReadinessSnapshot([input.row]);
+  if (existingRecord && ['APPLIED', 'BLOCKED', 'INELIGIBLE'].includes(existingRecord.status)) return existingRecord;
+  if (input.row.readinessKind !== 'ELIGIBLE_ASSIGNMENT') {
+    return { sourceKey: recordKey, status: input.row.readinessKind, classification: input.row.classification };
+  }
+  const row = input.row;
+  const snapshot = buildPerformanceReadinessSnapshot([row]);
   const blocker = snapshot.blockers[0];
   if (blocker) {
     return tx.performanceReadinessRecord.upsert({
-      where: { runId_employmentAssignmentId: { runId: input.runId, employmentAssignmentId: input.row.assignmentId } },
+      where: { runId_employmentAssignmentId: { runId: input.runId, employmentAssignmentId: recordKey } },
       create: {
-        runId: input.runId, employmentAssignmentId: input.row.assignmentId, sourceHash: sourceRowHash(input.row),
+        runId: input.runId, employmentAssignmentId: recordKey, sourceHash: sourceRowHash(row),
         status: 'BLOCKED', blockerCode: blocker.code,
       },
       update: {
-        sourceHash: sourceRowHash(input.row), status: 'BLOCKED', blockerCode: blocker.code,
+        sourceHash: sourceRowHash(row), status: 'BLOCKED', blockerCode: blocker.code,
         attemptCount: { increment: 1 }, lastErrorCode: null, processedAt: new Date(),
       },
     });
   }
-  const periodRows = input.allRows.filter((row) => row.employmentRelationshipId === input.row.employmentRelationshipId);
+  const periodRows = input.allRows.filter((candidate): candidate is EligibleReadinessSourceRow => (
+    candidate.readinessKind === 'ELIGIBLE_ASSIGNMENT' && candidate.employmentRelationshipId === row.employmentRelationshipId
+  ));
   const plans = derivePerformanceSectionPlans(periodRows, input)
-    .filter((candidate) => candidate.employmentAssignmentId === input.row.assignmentId);
+    .filter((candidate) => candidate.employmentAssignmentId === row.assignmentId);
   const planArtifacts = await Promise.all(plans.map(async (plan) => {
     const [templateVersions, scoringPolicy] = await Promise.all([
-      activeTemplateVersions(tx, input.row, plan.effectiveFrom),
+      activeTemplateVersions(tx, {
+        ...row, jobId: plan.jobId ?? row.jobId, positionId: plan.positionId ?? row.positionId,
+      }, plan.effectiveFrom),
       effectiveScoringPolicy(tx, plan.effectiveFrom),
     ]);
     return { plan, templateVersions, scoringPolicy };
@@ -297,24 +473,24 @@ const processReadinessRow = async (
     ? 'JOB_TEMPLATE_VERSION_MISSING'
     : planArtifacts.some(({ scoringPolicy }) => !scoringPolicy?.encryptedPayloadId) ? 'SCORING_POLICY_VERSION_MISSING' : null;
   if (policyBlocker) return tx.performanceReadinessRecord.upsert({
-    where: { runId_employmentAssignmentId: { runId: input.runId, employmentAssignmentId: input.row.assignmentId } },
+    where: { runId_employmentAssignmentId: { runId: input.runId, employmentAssignmentId: recordKey } },
     create: {
-      runId: input.runId, employmentAssignmentId: input.row.assignmentId, sourceHash: sourceRowHash(input.row),
+      runId: input.runId, employmentAssignmentId: recordKey, sourceHash: sourceRowHash(row),
       status: 'BLOCKED', blockerCode: policyBlocker,
     },
     update: {
-      sourceHash: sourceRowHash(input.row), status: 'BLOCKED', blockerCode: policyBlocker,
+      sourceHash: sourceRowHash(row), status: 'BLOCKED', blockerCode: policyBlocker,
       attemptCount: { increment: 1 }, lastErrorCode: null, processedAt: new Date(),
     },
   });
   const subject = await tx.performanceSubject.upsert({
     where: { personnelId_employmentRelationshipId: {
-      personnelId: input.row.personnelId, employmentRelationshipId: input.row.employmentRelationshipId,
+      personnelId: row.personnelId, employmentRelationshipId: row.employmentRelationshipId,
     } },
     create: {
-      stableKey: canonicalPerformanceHash({ relationshipId: input.row.employmentRelationshipId, subject: 'PERSONNEL_PERFORMANCE' }),
-      nonDisplayKey: randomUUID(), personnelId: input.row.personnelId,
-      employmentRelationshipId: input.row.employmentRelationshipId, createdByUserId: input.actorUserId,
+      stableKey: canonicalPerformanceHash({ relationshipId: row.employmentRelationshipId, subject: 'PERSONNEL_PERFORMANCE' }),
+      nonDisplayKey: randomUUID(), personnelId: row.personnelId,
+      employmentRelationshipId: row.employmentRelationshipId, createdByUserId: input.actorUserId,
     },
     update: {},
   });
@@ -334,10 +510,10 @@ const processReadinessRow = async (
     const contextPayload = await persistPerformancePayload(tx, {
       aggregateType: 'EVALUATION', aggregateId: evaluation.id, payloadKind: 'CONTEXT_SNAPSHOT', schemaVersion: 1,
       payload: {
-        schemaVersion: 1, personnelId: input.row.personnelId,
-        employmentRelationshipId: input.row.employmentRelationshipId,
+        schemaVersion: 1, personnelId: row.personnelId,
+        employmentRelationshipId: row.employmentRelationshipId,
         measurementFrom: input.measurementFrom.toISOString(), measurementTo: input.measurementTo.toISOString(),
-        sourceAssignmentIds: input.allRows.filter((row) => row.employmentRelationshipId === input.row.employmentRelationshipId).map((row) => row.assignmentId).sort(),
+        sourceAssignmentIds: periodRows.map((candidate) => candidate.assignmentId).sort(),
         scoringPolicyVersionIds: [...new Set(planArtifacts.map(({ scoringPolicy }) => scoringPolicy!.id))].sort(),
       },
       keyring: input.keyring,
@@ -355,10 +531,10 @@ const processReadinessRow = async (
     const dueAt = new Date(plan.effectiveTo.getTime() + (7 * DAY_MS));
     const section = await tx.performanceEvaluationSection.upsert({
       where: { evaluationId_employmentAssignmentId_effectiveFrom: {
-        evaluationId: evaluation.id, employmentAssignmentId: input.row.assignmentId, effectiveFrom: plan.effectiveFrom,
+        evaluationId: evaluation.id, employmentAssignmentId: row.assignmentId, effectiveFrom: plan.effectiveFrom,
       } },
       create: {
-        evaluationId: evaluation.id, employmentAssignmentId: input.row.assignmentId,
+        evaluationId: evaluation.id, employmentAssignmentId: row.assignmentId,
         responsibleSupervisorPersonnelId: plan.responsibleSupervisorPersonnelId,
         effectiveFrom: plan.effectiveFrom, effectiveTo: plan.effectiveTo, allocationPercent: new Prisma.Decimal(plan.allocationPercent),
         originalSubmissionDueAt: dueAt, submissionDueAt: dueAt,
@@ -372,9 +548,13 @@ const processReadinessRow = async (
         payload: {
           schemaVersion: 1,
           assignment: {
-            assignmentId: input.row.assignmentId, assignmentType: input.row.assignmentType,
-            positionId: input.row.positionId, jobId: input.row.jobId,
-            organizationalUnitId: input.row.organizationalUnitId, workplaceId: input.row.workplaceId, costCenterId: input.row.costCenterId,
+            assignmentId: row.assignmentId,
+            ...buildPerformanceReadinessSnapshotFacts({
+              jobId: plan.jobId ?? row.jobId, positionId: plan.positionId ?? row.positionId,
+              organizationalUnitId: plan.organizationalUnitId ?? row.organizationalUnitId,
+              workplaceId: plan.workplaceId ?? row.workplaceId, assignmentType: row.assignmentType,
+            }, plan.effectiveFrom, plan.sourceVersion ?? `HR_EMPLOYMENT_ASSIGNMENT:${row.assignmentId}`),
+            costCenterId: plan.costCenterId ?? row.costCenterId,
             responsibleSupervisorAssignmentId: plan.responsibleSupervisorAssignmentId,
             responsibleSupervisorPersonnelId: plan.responsibleSupervisorPersonnelId,
             responsibilityId: plan.responsibilityId,
@@ -416,13 +596,13 @@ const processReadinessRow = async (
     sections.push(section);
   }
   return tx.performanceReadinessRecord.upsert({
-    where: { runId_employmentAssignmentId: { runId: input.runId, employmentAssignmentId: input.row.assignmentId } },
+    where: { runId_employmentAssignmentId: { runId: input.runId, employmentAssignmentId: recordKey } },
     create: {
-      runId: input.runId, employmentAssignmentId: input.row.assignmentId, sourceHash: sourceRowHash(input.row),
+      runId: input.runId, employmentAssignmentId: recordKey, sourceHash: sourceRowHash(row),
       status: 'APPLIED', evaluationId: evaluation.id, sectionId: sections[0]?.id,
     },
     update: {
-      sourceHash: sourceRowHash(input.row), status: 'APPLIED', blockerCode: null, lastErrorCode: null,
+      sourceHash: sourceRowHash(row), status: 'APPLIED', blockerCode: null, lastErrorCode: null,
       evaluationId: evaluation.id, sectionId: sections[0]?.id, attemptCount: { increment: 1 }, processedAt: new Date(),
     },
   });
@@ -440,7 +620,8 @@ export const reconstructPerformanceReadiness = async (client: PrismaClient, inpu
   if (!(input.measurementFrom < input.measurementTo)) throw readinessError('بازه بازسازی آمادگی معتبر نیست.', 'PERFORMANCE_PERIOD_INVALID', 422);
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
   const batchSize = Math.min(500, Math.max(1, input.batchSize ?? 100));
-  const rows = await loadReadinessSource(client, input);
+  const source = await loadReadinessSource(client, input);
+  const rows = source.rows;
   const snapshot = readinessSourceSnapshot(rows);
   const stableKey = runStableKey(input);
   let run = await client.performanceReadinessRun.findUnique({ where: { stableKey } });
@@ -448,7 +629,7 @@ export const reconstructPerformanceReadiness = async (client: PrismaClient, inpu
     run = await client.performanceReadinessRun.update({
       where: { id: run.id }, data: { status: 'DRIFTED', driftDetected: true },
     });
-    return { run, processed: 0, hasMore: false, drift: true };
+    return { run, processed: 0, hasMore: false, drift: true, coverage: await readinessCoverage(client, source, run.id) };
   }
   if (!run) {
     run = await client.performanceReadinessRun.create({ data: {
@@ -456,7 +637,9 @@ export const reconstructPerformanceReadiness = async (client: PrismaClient, inpu
       sourceCount: snapshot.count, sourceHash: snapshot.hash, requestedByUserId: input.actorUserId,
     } });
   }
-  if (run.status === 'COMPLETED') return { run, processed: 0, hasMore: false, drift: false };
+  if (run.status === 'COMPLETED') return {
+    run, processed: 0, hasMore: false, drift: false, coverage: await readinessCoverage(client, source, run.id),
+  };
   const cycleStableKey = canonicalPerformanceHash({ measurementFrom: input.measurementFrom.toISOString(), measurementTo: input.measurementTo.toISOString() });
   const cycle = await client.performanceCycle.upsert({
     where: { stableKey: cycleStableKey },
@@ -466,7 +649,7 @@ export const reconstructPerformanceReadiness = async (client: PrismaClient, inpu
     },
     update: {},
   });
-  const candidates = rows.filter((row) => !run!.cursorAssignmentId || row.assignmentId > run!.cursorAssignmentId).slice(0, batchSize);
+  const candidates = rows.filter((row) => !run!.cursorAssignmentId || row.sourceKey > run!.cursorAssignmentId).slice(0, batchSize);
   for (const row of candidates) {
     try {
       await processReadinessRow(client, {
@@ -477,16 +660,17 @@ export const reconstructPerformanceReadiness = async (client: PrismaClient, inpu
     } catch (error) {
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'PERFORMANCE_READINESS_RECORD_FAILED';
       await client.performanceReadinessRecord.upsert({
-        where: { runId_employmentAssignmentId: { runId: run.id, employmentAssignmentId: row.assignmentId } },
-        create: { runId: run.id, employmentAssignmentId: row.assignmentId, sourceHash: sourceRowHash(row), status: 'FAILED', lastErrorCode: code },
+        where: { runId_employmentAssignmentId: { runId: run.id, employmentAssignmentId: row.sourceKey } },
+        create: { runId: run.id, employmentAssignmentId: row.sourceKey, sourceHash: sourceRowHash(row), status: 'FAILED', lastErrorCode: code },
         update: { status: 'FAILED', lastErrorCode: code, attemptCount: { increment: 1 }, processedAt: new Date() },
       });
     }
-    run = await client.performanceReadinessRun.update({ where: { id: run.id }, data: { cursorAssignmentId: row.assignmentId } });
+    run = await client.performanceReadinessRun.update({ where: { id: run.id }, data: { cursorAssignmentId: row.sourceKey } });
   }
-  const hasMore = rows.some((row) => !run!.cursorAssignmentId || row.assignmentId > run!.cursorAssignmentId);
+  const hasMore = rows.some((row) => !run!.cursorAssignmentId || row.sourceKey > run!.cursorAssignmentId);
   const counts = await client.performanceReadinessRecord.groupBy({ by: ['status'], where: { runId: run.id }, _count: true });
   const count = (status: string) => counts.find((item) => item.status === status)?._count ?? 0;
+  const inventoryBlockers = rows.filter((row) => row.readinessKind === 'STRUCTURAL_BLOCKER').length;
   if (!hasMore) {
     const failed = count('FAILED');
     if (!failed) {
@@ -494,17 +678,21 @@ export const reconstructPerformanceReadiness = async (client: PrismaClient, inpu
     }
     run = await client.performanceReadinessRun.update({ where: { id: run.id }, data: {
       status: failed ? 'FAILED' : 'COMPLETED', completedAt: failed ? null : new Date(),
-      appliedCount: count('APPLIED'), blockedCount: count('BLOCKED'), failedCount: failed,
+      appliedCount: count('APPLIED'), blockedCount: count('BLOCKED') + inventoryBlockers, failedCount: failed,
     } });
     await runPerformanceSerializableTransaction(client, (tx) => appendReadinessAudit(tx, {
       runId: run!.id, actorUserId: input.actorUserId,
       eventType: failed ? 'READINESS_FAILED' : 'READINESS_COMPLETED',
       reason: failed ? 'بازسازی آمادگی با رکوردهای نیازمند تلاش مجدد پایان یافت.' : 'بازسازی آمادگی داده عملکرد تکمیل شد.',
-      evidence: { sourceCount: run!.sourceCount, sourceHash: run!.sourceHash, appliedCount: run!.appliedCount, blockedCount: run!.blockedCount, failedCount: run!.failedCount },
+      evidence: {
+        sourceCount: run!.sourceCount, sourceHash: run!.sourceHash, appliedCount: run!.appliedCount,
+        blockedCount: run!.blockedCount, failedCount: run!.failedCount,
+        inventory: source.inventory, periodEligibility: source.periodEligibility,
+      },
       keyring,
     }));
   }
-  return { run, processed: candidates.length, hasMore, drift: false };
+  return { run, processed: candidates.length, hasMore, drift: false, coverage: await readinessCoverage(client, source, run.id) };
 };
 
 export const retryFailedPerformanceReadinessRecords = async (client: PrismaClient, input: {
@@ -515,7 +703,8 @@ export const retryFailedPerformanceReadinessRecords = async (client: PrismaClien
 }) => {
   const run = await client.performanceReadinessRun.findUnique({ where: { id: input.runId } });
   if (!run) throw readinessError('اجرای بازسازی آمادگی پیدا نشد.', 'PERFORMANCE_READINESS_RUN_NOT_FOUND', 404);
-  const rows = await loadReadinessSource(client, run);
+  const source = await loadReadinessSource(client, run);
+  const rows = source.rows;
   const snapshot = readinessSourceSnapshot(rows);
   if (snapshot.count !== run.sourceCount || snapshot.hash !== run.sourceHash) {
     await client.performanceReadinessRun.update({ where: { id: run.id }, data: { status: 'DRIFTED', driftDetected: true } });
@@ -524,7 +713,7 @@ export const retryFailedPerformanceReadinessRecords = async (client: PrismaClien
   const failed = await client.performanceReadinessRecord.findMany({
     where: { runId: run.id, status: 'FAILED' }, orderBy: { employmentAssignmentId: 'asc' }, take: Math.min(500, Math.max(1, input.batchSize ?? 100)),
   });
-  const rowMap = new Map(rows.map((row) => [row.assignmentId, row]));
+  const rowMap = new Map(rows.map((row) => [row.sourceKey, row]));
   const cycle = await client.performanceCycle.findFirstOrThrow({ where: { measurementFrom: run.measurementFrom, measurementTo: run.measurementTo } });
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
   for (const record of failed) {
@@ -546,6 +735,7 @@ export const retryFailedPerformanceReadinessRecords = async (client: PrismaClien
   }
   const counts = await client.performanceReadinessRecord.groupBy({ by: ['status'], where: { runId: run.id }, _count: true });
   const count = (status: string) => counts.find((item) => item.status === status)?._count ?? 0;
+  const inventoryBlockers = rows.filter((row) => row.readinessKind === 'STRUCTURAL_BLOCKER').length;
   const remainingFailures = count('FAILED');
   if (!remainingFailures) {
     await promoteCompleteEvaluations(client, run.id, rows);
@@ -555,8 +745,11 @@ export const retryFailedPerformanceReadinessRecords = async (client: PrismaClien
     data: {
       status: remainingFailures ? 'FAILED' : 'COMPLETED',
       completedAt: remainingFailures ? null : new Date(),
-      appliedCount: count('APPLIED'), blockedCount: count('BLOCKED'), failedCount: remainingFailures,
+      appliedCount: count('APPLIED'), blockedCount: count('BLOCKED') + inventoryBlockers, failedCount: remainingFailures,
     },
   });
-  return { run: updated, retried: failed.length, remainingFailures };
+  return {
+    run: updated, retried: failed.length, remainingFailures,
+    coverage: await readinessCoverage(client, source, updated.id),
+  };
 };

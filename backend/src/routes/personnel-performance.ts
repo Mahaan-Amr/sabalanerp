@@ -57,6 +57,7 @@ import {
 import { reproduceAcceptedPerformanceResult, suspendAcceptedPerformanceResult } from '../services/personnelPerformanceResultStore';
 import { PerformancePolicyKind, PerformanceReviewDecision, PerformanceTemplateKind } from '@prisma/client';
 import {
+  getPerformanceReadinessCoverage,
   reconstructPerformanceReadiness,
   retryFailedPerformanceReadinessRecords,
 } from '../services/personnelPerformanceReadinessStore';
@@ -220,7 +221,10 @@ router.get('/readiness/:runId', manageReadiness, async (req, res, next) => {
       where: { runId: run.id }, orderBy: { employmentAssignmentId: 'asc' },
       select: { employmentAssignmentId: true, status: true, blockerCode: true, attemptCount: true, lastErrorCode: true, processedAt: true },
     });
-    return res.json({ success: true, run, records });
+    const coverage = await getPerformanceReadinessCoverage(prisma, {
+      runId: run.id, measurementFrom: run.measurementFrom, measurementTo: run.measurementTo,
+    });
+    return res.json({ success: true, run, records, coverage });
   } catch (error) { return next(error); }
 });
 

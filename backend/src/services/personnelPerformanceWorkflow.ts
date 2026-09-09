@@ -26,6 +26,57 @@ export type PerformanceReadinessAssignment = {
   hasHistoricalContext: boolean;
   performanceAllocationPercent: string | null;
   allocationConsistent: boolean;
+  contextPeriods?: Array<{
+    effectiveFrom: Date;
+    effectiveTo: Date;
+    positionId: string | null;
+    jobId: string | null;
+    organizationalUnitId: string | null;
+    workplaceId: string | null;
+    costCenterId: string | null;
+    sourceVersion: string;
+  }>;
+};
+
+export type PerformanceReadinessSnapshotFacts = {
+  __applicability: {
+    schemaVersion: 1;
+    snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1';
+    sourceVersions: Record<string, string>;
+    effectiveAt: string;
+  };
+  jobId?: string;
+  positionId?: string;
+  organizationalUnitId?: string;
+  workplaceId?: string;
+  assignmentType: string;
+  effectiveDate: string;
+};
+
+export const buildPerformanceReadinessSnapshotFacts = (assignment: {
+  jobId: string | null;
+  positionId: string | null;
+  organizationalUnitId: string | null;
+  workplaceId: string | null;
+  assignmentType: string;
+}, effectiveDate: Date, sourceVersion: string): PerformanceReadinessSnapshotFacts => {
+  const facts = {
+    ...(assignment.jobId ? { jobId: assignment.jobId } : {}),
+    ...(assignment.positionId ? { positionId: assignment.positionId } : {}),
+    ...(assignment.organizationalUnitId ? { organizationalUnitId: assignment.organizationalUnitId } : {}),
+    ...(assignment.workplaceId ? { workplaceId: assignment.workplaceId } : {}),
+    assignmentType: assignment.assignmentType,
+    effectiveDate: effectiveDate.toISOString().slice(0, 10),
+  };
+  return {
+    __applicability: {
+      schemaVersion: 1,
+      snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
+      sourceVersions: Object.fromEntries(Object.keys(facts).map((fact) => [fact, sourceVersion])),
+      effectiveAt: effectiveDate.toISOString(),
+    },
+    ...facts,
+  };
 };
 
 export type PerformanceReadinessBlocker = {
@@ -58,6 +109,9 @@ const stableReadinessRows = (assignments: readonly PerformanceReadinessAssignmen
     hasHistoricalContext: assignment.hasHistoricalContext,
     performanceAllocationPercent: assignment.performanceAllocationPercent,
     allocationConsistent: assignment.allocationConsistent,
+    contextPeriods: assignment.contextPeriods?.map((period) => ({
+      ...period, effectiveFrom: period.effectiveFrom.toISOString(), effectiveTo: period.effectiveTo.toISOString(),
+    })),
   }))
   .sort((left, right) => left.assignmentId.localeCompare(right.assignmentId));
 
@@ -97,18 +151,38 @@ export const derivePerformanceSectionPlans = (
   assignments: readonly PerformanceReadinessAssignment[],
   period: { measurementFrom: Date; measurementTo: Date },
 ) => assignments
-  .flatMap((assignment) => assignment.responsibilityPeriods.map((responsibility) => ({
-    employmentAssignmentId: assignment.assignmentId,
-    responsibilityId: responsibility.responsibilityId,
-    responsibleSupervisorAssignmentId: responsibility.supervisorAssignmentId,
-    responsibleSupervisorPersonnelId: responsibility.supervisorPersonnelId!,
-    allocationPercent: responsibility.allocationPercent,
-    effectiveFrom: [assignment.effectiveFrom, responsibility.effectiveFrom, period.measurementFrom]
-      .reduce((latest, value) => value > latest ? value : latest),
-    effectiveTo: [assignment.effectiveTo, responsibility.effectiveTo, period.measurementTo]
-      .filter((value): value is Date => Boolean(value))
-      .reduce((earliest, value) => value < earliest ? value : earliest, period.measurementTo),
-  })))
+  .flatMap((assignment) => assignment.responsibilityPeriods.flatMap((responsibility) => {
+    const contexts = assignment.contextPeriods?.length ? assignment.contextPeriods : [{
+      effectiveFrom: assignment.effectiveFrom,
+      effectiveTo: assignment.effectiveTo ?? period.measurementTo,
+      positionId: assignment.positionId,
+      jobId: assignment.jobId,
+      organizationalUnitId: null,
+      workplaceId: null,
+      costCenterId: null,
+      sourceVersion: `assignment:${assignment.assignmentId}`,
+    }];
+    return contexts.map((context) => ({
+      employmentAssignmentId: assignment.assignmentId,
+      responsibilityId: responsibility.responsibilityId,
+      responsibleSupervisorAssignmentId: responsibility.supervisorAssignmentId,
+      responsibleSupervisorPersonnelId: responsibility.supervisorPersonnelId!,
+      allocationPercent: responsibility.allocationPercent,
+      ...(assignment.contextPeriods?.length ? {
+        positionId: context.positionId,
+        jobId: context.jobId,
+        organizationalUnitId: context.organizationalUnitId,
+        workplaceId: context.workplaceId,
+        costCenterId: context.costCenterId,
+        sourceVersion: context.sourceVersion,
+      } : {}),
+      effectiveFrom: [assignment.effectiveFrom, responsibility.effectiveFrom, context.effectiveFrom, period.measurementFrom]
+        .reduce((latest, value) => value > latest ? value : latest),
+      effectiveTo: [assignment.effectiveTo, responsibility.effectiveTo, context.effectiveTo, period.measurementTo]
+        .filter((value): value is Date => Boolean(value))
+        .reduce((earliest, value) => value < earliest ? value : earliest, period.measurementTo),
+    }));
+  }))
   .filter((plan) => plan.responsibleSupervisorPersonnelId && plan.effectiveFrom < plan.effectiveTo)
   .sort((left, right) => left.effectiveFrom.getTime() - right.effectiveFrom.getTime()
     || left.employmentAssignmentId.localeCompare(right.employmentAssignmentId));

@@ -5,6 +5,7 @@ import { PerformanceReviewDecision } from '@prisma/client';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 import { reconstructPerformanceReadiness, retryFailedPerformanceReadinessRecords } from '../personnelPerformanceReadinessStore';
 import { DEFAULT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicy';
+import { readPerformancePayload } from '../personnelPerformancePayloadStore';
 import {
   activateDuePerformanceArtifacts,
   activateDuePerformancePolicies,
@@ -71,7 +72,15 @@ const main = async () => {
     const unit = await first.hrOrganizationalUnit.create({ data: {
       code: `PERF-UNIT-${suffix}`, name: 'واحد آزمون عملکرد', type: 'DEPARTMENT', createdBy: firstReviewer.id,
     } });
+    const nextUnit = await first.hrOrganizationalUnit.create({ data: {
+      code: `PERF-UNIT-NEXT-${suffix}`, name: 'واحد دوم آزمون عملکرد', type: 'DEPARTMENT', createdBy: firstReviewer.id,
+    } });
+    const [workplace, nextWorkplace] = await Promise.all([
+      first.hrWorkplace.create({ data: { code: `PERF-WORK-${suffix}`, name: 'محل نخست آزمون', createdBy: firstReviewer.id } }),
+      first.hrWorkplace.create({ data: { code: `PERF-WORK-NEXT-${suffix}`, name: 'محل دوم آزمون', createdBy: firstReviewer.id } }),
+    ]);
     const job = await first.hrJob.create({ data: { code: `PERF-JOB-${suffix}`, title: 'شغل آزمون عملکرد', createdBy: firstReviewer.id } });
+    const nextJob = await first.hrJob.create({ data: { code: `PERF-JOB-NEXT-${suffix}`, title: 'شغل دوم آزمون عملکرد', createdBy: firstReviewer.id } });
     const policyEffectiveFrom = new Date('2024-12-31T20:30:00.000Z');
     const criterionContent = {
       schemaVersion: 1 as const,
@@ -101,6 +110,14 @@ const main = async () => {
     await schedulePerformanceTemplate(first, {
       versionId: templateVersion.id, effectiveFrom: policyEffectiveFrom,
       reason: 'انتشار الگوی آزمون گردش عملکرد', publishedByUserId: firstReviewer.id, now: publicationNow,
+    });
+    const nextTemplateVersion = await createPerformanceTemplateDraft(first, {
+      templateKind: 'JOB_TEMPLATE', ownerType: 'JOB', ownerId: nextJob.id,
+      content: templateContent, createdByUserId: firstReviewer.id, keyring,
+    });
+    await schedulePerformanceTemplate(first, {
+      versionId: nextTemplateVersion.id, effectiveFrom: policyEffectiveFrom,
+      reason: 'انتشار الگوی دوم آزمون گردش عملکرد', publishedByUserId: firstReviewer.id, now: publicationNow,
     });
     const createPolicy = async (kind: 'SCORING' | 'LEVEL_CLASSIFICATION' | 'CURRENT_LEVEL', content: typeof DEFAULT_SCORING_POLICY_CONTENT | typeof DEFAULT_LEVEL_POLICY_CONTENT | typeof DEFAULT_CURRENT_LEVEL_POLICY_CONTENT) => {
       const policy = await createPerformancePolicyDraft(first, {
@@ -133,10 +150,24 @@ const main = async () => {
     } });
     const targetPosition = await first.hrPosition.create({ data: {
       code: `PERF-TARGET-${suffix}`, title: 'جایگاه پرسنل آزمون', capacity: 1,
-      organizationalUnitId: unit.id, jobId: job.id, supervisorPositionId: supervisorPosition.id, createdBy: firstReviewer.id,
+      organizationalUnitId: nextUnit.id, workplaceId: nextWorkplace.id, jobId: nextJob.id,
+      supervisorPositionId: supervisorPosition.id, createdBy: firstReviewer.id,
     } });
     const measurementFrom = new Date('2026-01-01T00:00:00.000Z');
     const measurementTo = new Date('2026-04-01T00:00:00.000Z');
+    await first.hrFoundationLifecycleVersion.createMany({ data: [
+      {
+        stableKey: `target-position-origin-${suffix}`, entityType: 'POSITION', entityId: targetPosition.id, version: 1,
+        status: 'ACTIVE', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'زمینه نخست آزمون تاریخ مؤثر',
+        afterJson: { jobId: job.id, organizationalUnitId: unit.id, workplaceId: workplace.id }, changedByUserId: firstReviewer.id,
+      },
+      {
+        stableKey: `target-position-transition-${suffix}`, entityType: 'POSITION', entityId: targetPosition.id, version: 2,
+        status: 'ACTIVE', effectiveFrom: new Date('2026-03-20T00:00:00.000Z'), reason: 'تغییر آزمون تاریخ مؤثر',
+        beforeJson: { jobId: job.id, organizationalUnitId: unit.id, workplaceId: workplace.id },
+        afterJson: { jobId: nextJob.id, organizationalUnitId: nextUnit.id, workplaceId: nextWorkplace.id }, changedByUserId: firstReviewer.id,
+      },
+    ] });
     const supervisorRelationship = await first.hrEmploymentRelationship.create({ data: {
       personnelId: supervisorPersonnel.id, status: 'ACTIVE', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), createdBy: firstReviewer.id,
     } });
@@ -158,7 +189,7 @@ const main = async () => {
     } });
     const targetAssignment = await first.hrEmploymentAssignment.create({ data: {
       employmentRelationshipId: targetRelationship.id, positionId: targetPosition.id, type: 'PRIMARY',
-      effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), organizationalUnitId: unit.id,
+      effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), organizationalUnitId: unit.id, workplaceId: workplace.id,
       responsibleSupervisorAssignmentId: replacementSupervisorAssignment.id, performanceAllocationPercent: '100.00', createdBy: firstReviewer.id,
     } });
     await first.hrAssignmentPerformanceResponsibility.create({ data: {
@@ -182,18 +213,51 @@ const main = async () => {
       idempotencyKey: readinessKey, measurementFrom, measurementTo, actorUserId: firstReviewer.id, batchSize: 1, keyring,
     });
     assert.equal(readiness.run.status, 'COMPLETED');
-    assert.equal(readiness.run.sourceCount, 3);
+    assert.ok(readiness.run.sourceCount >= 3);
     assert.equal(readiness.run.appliedCount, 1);
-    assert.equal(readiness.run.blockedCount, 2, 'top-level assignments are explicit structural blockers, never inferred');
+    assert.ok(readiness.run.blockedCount >= 2);
+    const fixtureReadinessRecords = await first.performanceReadinessRecord.findMany({ where: {
+      runId: readiness.run.id, employmentAssignmentId: { in: [supervisorAssignment.id, replacementSupervisorAssignment.id, targetAssignment.id] },
+    } });
+    assert.equal(fixtureReadinessRecords.filter(({ status }) => status === 'BLOCKED').length, 2,
+      'top-level assignments are explicit structural blockers, never inferred');
+    assert.equal(fixtureReadinessRecords.filter(({ status }) => status === 'APPLIED').length, 1);
     const replay = await reconstructPerformanceReadiness(first, {
       idempotencyKey: readinessKey, measurementFrom, measurementTo, actorUserId: firstReviewer.id, batchSize: 10, keyring,
     });
     assert.equal(replay.processed, 0);
     assert.equal(await first.performanceEvaluationSection.count({ where: { employmentAssignmentId: targetAssignment.id } }), 2);
 
+    const historicalSections = await first.performanceEvaluationSection.findMany({
+      where: { employmentAssignmentId: targetAssignment.id }, orderBy: { effectiveFrom: 'asc' },
+      select: { effectiveFrom: true, templateSnapshotId: true },
+    });
+    const historicalFacts = await Promise.all(historicalSections.map(async (historicalSection) => {
+      const snapshot = await first.performanceSnapshot.findUniqueOrThrow({ where: { id: historicalSection.templateSnapshotId! } });
+      const payload = await readPerformancePayload<{ assignment: Record<string, unknown> }>(first, snapshot.encryptedPayloadId, keyring);
+      return payload.assignment;
+    }));
+    assert.deepEqual(historicalFacts.map((facts) => ({
+      jobId: facts.jobId, organizationalUnitId: facts.organizationalUnitId,
+      workplaceId: facts.workplaceId, effectiveDate: facts.effectiveDate,
+    })), [
+      { jobId: job.id, organizationalUnitId: unit.id, workplaceId: workplace.id, effectiveDate: '2026-01-01' },
+      { jobId: nextJob.id, organizationalUnitId: nextUnit.id, workplaceId: nextWorkplace.id, effectiveDate: '2026-03-20' },
+    ], 'saved facts resolve each effective Position history segment instead of today\'s structure');
+    for (const facts of historicalFacts) {
+      assert.equal('locationId' in facts, false, 'the producer uses the agreed workplaceId fact name');
+      assert.equal('hasSafetyDuty' in facts, false, 'unavailable facts remain unknown instead of false');
+      assert.equal('responsibilityCodes' in facts, false, 'unavailable role responsibility codes remain unknown');
+      const metadata = facts.__applicability as { snapshotVersion: string; sourceVersions: Record<string, string> };
+      assert.equal(metadata.snapshotVersion, 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1');
+      assert.ok(metadata.sourceVersions.workplaceId);
+    }
+
     const targetRecord = await first.performanceReadinessRecord.findFirstOrThrow({ where: {
       runId: readiness.run.id, employmentAssignmentId: targetAssignment.id, status: 'APPLIED',
     } });
+    assert.equal(await first.user.count({ where: { personnelId: targetPersonnel.id } }), 0,
+      'a subject without a User account remains eligible when the Personnel relationship and assignment are valid');
     const section = await first.performanceEvaluationSection.findUniqueOrThrow({ where: { id: targetRecord.sectionId! } });
     const admittedEvaluation = await first.performanceEvaluation.findUniqueOrThrow({ where: { id: section.evaluationId } });
     await enrollPerformanceTestCohort(first, firstReviewer.id, [admittedEvaluation.subjectId]);
@@ -208,6 +272,31 @@ const main = async () => {
       (error: unknown) => Boolean(error && typeof error === 'object' && 'status' in error && error.status === 404),
       'an unrelated holder of submission permission must receive a non-disclosing not-found response',
     );
+
+    await first.user.update({ where: { id: supervisorUser.id }, data: { isActive: false } });
+    await assert.rejects(
+      saveSupervisorPerformanceDraft(first, { sectionId: section.id, userId: supervisorUser.id, payload: { responses: [] }, keyring }),
+      (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'PERFORMANCE_RECORD_UNAVAILABLE'),
+      'an inactive Supervisor User cannot submit judgment',
+    );
+    await first.user.update({ where: { id: supervisorUser.id }, data: { isActive: true } });
+    await first.hrEmploymentRelationship.update({ where: { id: supervisorRelationship.id }, data: { status: 'SUSPENDED' } });
+    await assert.rejects(
+      saveSupervisorPerformanceDraft(first, { sectionId: section.id, userId: supervisorUser.id, payload: { responses: [] }, keyring }),
+      (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'PERFORMANCE_SUPERVISOR_INACTIVE'),
+      'a Supervisor without active employment cannot submit judgment',
+    );
+    await first.hrEmploymentRelationship.update({ where: { id: supervisorRelationship.id }, data: { status: 'ACTIVE' } });
+    const submitGrant = await first.hrFeatureAccessGrant.findFirstOrThrow({ where: {
+      userId: supervisorUser.id, featureCode: 'SUBMIT_PERFORMANCE_EVALUATION', status: 'ACTIVE',
+    } });
+    await first.hrFeatureAccessGrant.update({ where: { id: submitGrant.id }, data: { status: 'REVOKED', revokedAt: new Date() } });
+    await assert.rejects(
+      saveSupervisorPerformanceDraft(first, { sectionId: section.id, userId: supervisorUser.id, payload: { responses: [] }, keyring }),
+      (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'PERFORMANCE_SUBMISSION_PERMISSION_REVOKED'),
+      'a Supervisor without active submission permission cannot submit judgment',
+    );
+    await first.hrFeatureAccessGrant.update({ where: { id: submitGrant.id }, data: { status: 'ACTIVE', revokedAt: null } });
 
     await saveSupervisorPerformanceDraft(first, {
       sectionId: section.id, userId: supervisorUser.id, payload: { responses: [{
@@ -342,20 +431,25 @@ const main = async () => {
       reason: 'بازگردانی ممیزی‌شده سهم عملکرد پس از آزمون رانش', createdBy: firstReviewer.id,
     } });
     const failureKey = `failure-injection-${suffix}`;
-    await assert.rejects(reconstructPerformanceReadiness(first, {
-      idempotencyKey: failureKey,
-      measurementFrom: new Date('2026-04-01T00:00:00.000Z'),
-      measurementTo: new Date('2026-07-01T00:00:00.000Z'),
-      actorUserId: firstReviewer.id,
-      batchSize: 10,
-      keyring: { keyId: 'invalid-key', key: Buffer.from('too-short') },
-    }));
+    await assert.rejects(async () => {
+      let batch;
+      do {
+        batch = await reconstructPerformanceReadiness(first, {
+          idempotencyKey: failureKey,
+          measurementFrom: new Date('2026-04-01T00:00:00.000Z'),
+          measurementTo: new Date('2026-07-01T00:00:00.000Z'),
+          actorUserId: firstReviewer.id,
+          batchSize: 10,
+          keyring: { keyId: 'invalid-key', key: Buffer.from('too-short') },
+        });
+      } while (batch.hasMore);
+    });
     const failedRun = await first.performanceReadinessRun.findUniqueOrThrow({
       where: { stableKey: (await first.performanceReadinessRun.findFirstOrThrow({ where: { requestedByUserId: firstReviewer.id, status: 'FAILED' }, orderBy: { startedAt: 'desc' } })).stableKey },
     });
-    assert.equal(failedRun.failedCount, 1, 'encryption failure is isolated as a retryable record failure');
+    assert.ok(failedRun.failedCount >= 1, 'encryption failures are isolated as retryable assignment-record failures');
     const recovered = await retryFailedPerformanceReadinessRecords(first, {
-      runId: failedRun.id, actorUserId: firstReviewer.id, batchSize: 10, keyring,
+      runId: failedRun.id, actorUserId: firstReviewer.id, batchSize: 500, keyring,
     });
     assert.equal(recovered.remainingFailures, 0);
     assert.equal(recovered.run.status, 'COMPLETED');

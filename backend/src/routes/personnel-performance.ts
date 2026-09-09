@@ -221,9 +221,7 @@ router.get('/readiness/:runId', manageReadiness, async (req, res, next) => {
       where: { runId: run.id }, orderBy: { employmentAssignmentId: 'asc' },
       select: { employmentAssignmentId: true, status: true, blockerCode: true, attemptCount: true, lastErrorCode: true, processedAt: true },
     });
-    const coverage = await getPerformanceReadinessCoverage(prisma, {
-      runId: run.id, measurementFrom: run.measurementFrom, measurementTo: run.measurementTo,
-    });
+    const coverage = await getPerformanceReadinessCoverage(prisma, { runId: run.id });
     return res.json({ success: true, run, records, coverage });
   } catch (error) { return next(error); }
 });

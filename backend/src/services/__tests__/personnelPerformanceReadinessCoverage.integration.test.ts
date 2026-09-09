@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
-import { reconstructPerformanceReadiness } from '../personnelPerformanceReadinessStore';
+import {
+  getPerformanceReadinessCoverage,
+  reconstructPerformanceReadiness,
+  type PerformanceReadinessInventoryClassification,
+} from '../personnelPerformanceReadinessStore';
 import { readPerformancePayload } from '../personnelPerformancePayloadStore';
 
 const repositoryRoot = path.resolve(process.cwd(), '..');
@@ -32,15 +36,19 @@ const main = async () => {
       return result;
     };
     const baseline = await runReadiness(`coverage-baseline-${suffix}`);
-    const [withoutRelationship, withoutAssignment, archived, planned, outsidePeriod, multiAssignment] = await Promise.all([
+    const [withoutRelationship, withoutAssignment, archived, planned, outsidePeriod, multiAssignment,
+      invalidRelationshipPeriod, invalidAssignmentPeriod] = await Promise.all([
       client.personnel.create({ data: { firstName: 'بدون', lastName: `رابطه ${suffix}` } }),
       client.personnel.create({ data: { firstName: 'بدون', lastName: `مأموریت ${suffix}` } }),
       client.personnel.create({ data: { firstName: 'بایگانی', lastName: suffix, isActive: false, archivedAt: new Date('2025-12-01T00:00:00.000Z') } }),
       client.personnel.create({ data: { firstName: 'برنامه', lastName: suffix } }),
       client.personnel.create({ data: { firstName: 'خارج', lastName: `بازه ${suffix}` } }),
       client.personnel.create({ data: { firstName: 'چند', lastName: `مأموریت ${suffix}` } }),
+      client.personnel.create({ data: { firstName: 'رابطه', lastName: `بازه نامعتبر ${suffix}` } }),
+      client.personnel.create({ data: { firstName: 'مأموریت', lastName: `بازه نامعتبر ${suffix}` } }),
     ]);
-    const [withoutAssignmentRelationship, plannedRelationship, outsideRelationship, multiRelationship] = await Promise.all([
+    const [withoutAssignmentRelationship, plannedRelationship, outsideRelationship, multiRelationship,
+      invalidRelationship, invalidAssignmentRelationship] = await Promise.all([
       client.hrEmploymentRelationship.create({ data: {
         personnelId: withoutAssignment.id, status: 'ACTIVE', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), createdBy: 'coverage-test',
       } }),
@@ -53,6 +61,13 @@ const main = async () => {
       } }),
       client.hrEmploymentRelationship.create({ data: {
         personnelId: multiAssignment.id, status: 'ACTIVE', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), createdBy: 'coverage-test',
+      } }),
+      client.hrEmploymentRelationship.create({ data: {
+        personnelId: invalidRelationshipPeriod.id, status: 'ACTIVE', effectiveFrom: new Date('2026-03-01T00:00:00.000Z'),
+        effectiveTo: new Date('2026-02-01T00:00:00.000Z'), createdBy: 'coverage-test',
+      } }),
+      client.hrEmploymentRelationship.create({ data: {
+        personnelId: invalidAssignmentPeriod.id, status: 'ACTIVE', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), createdBy: 'coverage-test',
       } }),
     ]);
     await client.hrEmploymentRelationship.create({ data: {
@@ -67,6 +82,10 @@ const main = async () => {
         employmentRelationshipId: multiRelationship.id, type: 'SECONDARY', effectiveFrom: new Date('2025-02-01T00:00:00.000Z'),
         performanceAllocationPercent: '40.00', createdBy: 'coverage-test',
       },
+      {
+        employmentRelationshipId: invalidAssignmentRelationship.id, type: 'PRIMARY', effectiveFrom: new Date('2026-03-01T00:00:00.000Z'),
+        effectiveTo: new Date('2026-02-01T00:00:00.000Z'), performanceAllocationPercent: '100.00', createdBy: 'coverage-test',
+      },
     ] });
 
     const result = await runReadiness(`coverage-${suffix}`);
@@ -75,30 +94,32 @@ const main = async () => {
       personnelCount: result.coverage.inventory.personnelCount - baseline.coverage.inventory.personnelCount,
       relationshipCount: result.coverage.inventory.relationshipCount - baseline.coverage.inventory.relationshipCount,
       assignmentCount: result.coverage.inventory.assignmentCount - baseline.coverage.inventory.assignmentCount,
-    }, { personnelCount: 6, relationshipCount: 5, assignmentCount: 2 },
+    }, { personnelCount: 8, relationshipCount: 7, assignmentCount: 3 },
     'inventory totals count canonical records once even when Personnel has multiple assignments');
     assert.deepEqual({
       personnelCount: result.coverage.periodEligibility.personnelCount - baseline.coverage.periodEligibility.personnelCount,
       relationshipCount: result.coverage.periodEligibility.relationshipCount - baseline.coverage.periodEligibility.relationshipCount,
       assignmentCount: result.coverage.periodEligibility.assignmentCount - baseline.coverage.periodEligibility.assignmentCount,
-    }, { personnelCount: 2, relationshipCount: 2, assignmentCount: 2 },
+    }, { personnelCount: 3, relationshipCount: 3, assignmentCount: 2 },
     'period eligibility remains separate from structural readiness');
     for (const [classification, expectedIncrease] of Object.entries({
       EMPLOYMENT_RELATIONSHIP_MISSING: 1, EMPLOYMENT_ASSIGNMENT_MISSING: 1, PERSONNEL_INACTIVE: 1,
       RELATIONSHIP_PLANNED: 2, RELATIONSHIP_OUTSIDE_PERIOD: 1,
+      RELATIONSHIP_INTERVAL_INVALID: 1, ASSIGNMENT_INTERVAL_INVALID: 1,
     })) assert.equal(
-      (result.coverage.inventoryClassifications[classification] ?? 0) - (baseline.coverage.inventoryClassifications[classification] ?? 0),
+      (result.coverage.inventoryClassifications[classification as PerformanceReadinessInventoryClassification] ?? 0)
+        - (baseline.coverage.inventoryClassifications[classification as PerformanceReadinessInventoryClassification] ?? 0),
       expectedIncrease,
     );
     assert.equal(result.coverage.structuralTemplateReadiness.readyAssignmentCount, baseline.coverage.structuralTemplateReadiness.readyAssignmentCount);
     assert.equal(result.coverage.structuralTemplateReadiness.readyPersonnelCount, baseline.coverage.structuralTemplateReadiness.readyPersonnelCount);
     assert.equal(result.coverage.structuralTemplateReadiness.readyRelationshipCount, baseline.coverage.structuralTemplateReadiness.readyRelationshipCount);
-    assert.equal(result.coverage.structuralTemplateReadiness.blockedSourceCount - baseline.coverage.structuralTemplateReadiness.blockedSourceCount, 4);
+    assert.equal(result.coverage.structuralTemplateReadiness.blockedSourceCount - baseline.coverage.structuralTemplateReadiness.blockedSourceCount, 6);
     assert.equal(result.coverage.structuralTemplateReadiness.failedSourceCount, baseline.coverage.structuralTemplateReadiness.failedSourceCount);
     assert.deepEqual(result.coverage.cohort, baseline.coverage.cohort);
     assert.deepEqual(result.coverage.acceptedResult, baseline.coverage.acceptedResult);
     assert.deepEqual(result.coverage.resultBadge, baseline.coverage.resultBadge);
-    assert.equal(result.run.sourceCount - baseline.run.sourceCount, 8, 'every Personnel is represented while relationship and assignment leaves remain distinct');
+    assert.equal(result.run.sourceCount - baseline.run.sourceCount, 10, 'every Personnel is represented while relationship and assignment leaves remain distinct');
 
     const completionAudit = await client.performanceAuditEvent.findFirstOrThrow({
       where: { aggregateType: 'READINESS_RUN', aggregateId: result.run.id, eventType: 'READINESS_COMPLETED' },
@@ -123,6 +144,14 @@ const main = async () => {
     assert.ok(newRecords.every((record) => record.status === 'BLOCKED' && record.blockerCode === 'POSITION_MISSING'));
     const evaluationsBeforeInventory = await client.performanceEvaluation.count({ where: { createdByUserId: actor.id } });
     assert.equal(evaluationsBeforeInventory, 0, 'inventory rows never create scoreable evaluations');
+
+    await client.personnel.create({ data: { firstName: 'رانش', lastName: suffix } });
+    await assert.rejects(
+      getPerformanceReadinessCoverage(client, { runId: result.run.id }),
+      (error: unknown) => (error as { code?: string }).code === 'PERFORMANCE_READINESS_DRIFT',
+      'completed coverage never mixes immutable run records with a changed live Personnel inventory',
+    );
+    assert.equal((await client.performanceReadinessRun.findUniqueOrThrow({ where: { id: result.run.id } })).status, 'DRIFTED');
 
     console.log('Personnel performance readiness coverage integration tests passed.');
   } finally {

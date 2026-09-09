@@ -43,6 +43,7 @@ export type PerformanceReadinessSnapshotFacts = {
     schemaVersion: 1;
     snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1';
     sourceVersions: Record<string, string>;
+    recordSourceVersions: Record<string, string>;
     effectiveAt: string;
   };
   jobId?: string;
@@ -72,7 +73,8 @@ export const buildPerformanceReadinessSnapshotFacts = (assignment: {
     __applicability: {
       schemaVersion: 1,
       snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
-      sourceVersions: Object.fromEntries(Object.keys(facts).map((fact) => [fact, sourceVersion])),
+      sourceVersions: Object.fromEntries(Object.keys(facts).map((fact) => [fact, 'PERF_APPLICABILITY_V1'])),
+      recordSourceVersions: Object.fromEntries(Object.keys(facts).map((fact) => [fact, sourceVersion])),
       effectiveAt: effectiveDate.toISOString(),
     },
     ...facts,

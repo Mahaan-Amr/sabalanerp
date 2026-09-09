@@ -21,6 +21,7 @@ import { personnelPerformanceAPI } from "@/lib/api";
 import {
   buildReadinessCoverageSections,
   buildSupervisorDraft,
+  completeReadinessBatches,
   hasCompleteEvidence,
   workflowStatusPresentation,
   type ReadinessCoverage,
@@ -315,9 +316,12 @@ export default function PerformanceWorkflow({ initialSectionId, initialSubmissio
       {surface === "readiness" && canManage && <ErpSection title="بازسازی آمادگی داده" description="اجرا با شمار و هش منبع ثبت می‌شود؛ مغایرت یا مانع ساختاری به‌صورت رکوردی باقی می‌ماند.">
         <div className="grid gap-3 md:grid-cols-2"><ErpField label="آغاز بازه" required><ErpInput type="datetime-local" value={measurementFrom} onChange={(event) => setMeasurementFrom(event.target.value)} /></ErpField><ErpField label="پایان بازه" required><ErpInput type="datetime-local" value={measurementTo} onChange={(event) => setMeasurementTo(event.target.value)} /></ErpField></div>
         <div className="mt-3 flex flex-wrap justify-end gap-2"><ErpButton label="اجرای یادآوری‌ها" variant="outline" disabled={pending} onClick={() => void run(() => personnelPerformanceAPI.runReminders(), "یادآوری‌های موعد بررسی شد.", false)} /><ErpButton label="شروع بازسازی" variant="solid" disabled={pending || !measurementFrom || !measurementTo} onClick={() => void run(async () => {
-          const response = await personnelPerformanceAPI.reconstructReadiness({ measurementFrom: new Date(measurementFrom).toISOString(), measurementTo: new Date(measurementTo).toISOString(), batchSize: 100 }, crypto.randomUUID());
-          setReadinessRun({ ...response.data.run, coverage: response.data.coverage });
-        }, "یک بخش از بازسازی آمادگی اجرا شد.", false)} /></div>
+          const idempotencyKey = crypto.randomUUID();
+          const result = await completeReadinessBatches(idempotencyKey, async (stableKey) => (await personnelPerformanceAPI.reconstructReadiness({
+            measurementFrom: new Date(measurementFrom).toISOString(), measurementTo: new Date(measurementTo).toISOString(), batchSize: 100,
+          }, stableKey)).data);
+          setReadinessRun({ ...result.run, coverage: result.coverage });
+        }, "بازسازی آمادگی تکمیل شد.", false)} /></div>
         {readinessRun && <div className="mt-4 space-y-4"><ErpSummaryGrid items={[
           { label: "وضعیت اجرا", value: workflowStatusPresentation(String(readinessRun.status ?? "")).label },
         ]} />{readinessRun.coverage && buildReadinessCoverageSections(readinessRun.coverage).map((section) => <ErpCard key={section.title} className="p-4">

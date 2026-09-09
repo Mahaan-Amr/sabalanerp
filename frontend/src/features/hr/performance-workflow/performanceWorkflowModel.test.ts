@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { buildReadinessCoverageSections, buildSupervisorDraft, hasCompleteEvidence, workflowStatusPresentation } from "./performanceWorkflowModel";
+import {
+  buildReadinessCoverageSections,
+  buildSupervisorDraft,
+  completeReadinessBatches,
+  hasCompleteEvidence,
+  workflowStatusPresentation,
+} from "./performanceWorkflowModel";
 
 assert.deepEqual(workflowStatusPresentation("REJECTED"), { label: "نیازمند اصلاح", tone: "danger" });
 assert.deepEqual(workflowStatusPresentation("ACCEPTED"), { label: "پذیرفته‌شده", tone: "success" });
@@ -61,4 +67,18 @@ assert.deepEqual(buildReadinessCoverageSections({
   { title: "طبقه‌بندی پیوندها", items: [{ label: "بدون رابطه استخدامی", value: 2 }, { label: "بدون مأموریت", value: 1 }, { label: "رابطه برنامه‌ریزی‌شده", value: 3 }] },
 ]);
 
-console.log("Personnel performance workflow frontend model tests passed.");
+void (async () => {
+  const observedKeys: string[] = [];
+  let batch = 0;
+  const completed = await completeReadinessBatches("stable-readiness-key", async (idempotencyKey) => {
+    observedKeys.push(idempotencyKey);
+    batch += 1;
+    return { hasMore: batch < 3, run: { status: batch < 3 ? "RUNNING" : "COMPLETED" } };
+  });
+  assert.deepEqual(observedKeys, ["stable-readiness-key", "stable-readiness-key", "stable-readiness-key"]);
+  assert.equal(completed.run.status, "COMPLETED");
+  console.log("Personnel performance workflow frontend model tests passed.");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

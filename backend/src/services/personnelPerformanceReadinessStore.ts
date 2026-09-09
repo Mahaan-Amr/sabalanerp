@@ -35,7 +35,7 @@ type InventoryReadinessSourceRow = {
 
 export type PerformanceReadinessInventoryClassification = 'PERSONNEL_INACTIVE' | 'EMPLOYMENT_RELATIONSHIP_MISSING'
   | 'RELATIONSHIP_PLANNED' | 'RELATIONSHIP_OUTSIDE_PERIOD' | 'EMPLOYMENT_ASSIGNMENT_MISSING'
-  | 'ASSIGNMENT_OUTSIDE_PERIOD';
+  | 'ASSIGNMENT_OUTSIDE_PERIOD' | 'RELATIONSHIP_INTERVAL_INVALID' | 'ASSIGNMENT_INTERVAL_INVALID';
 
 type ReadinessSourceRow = EligibleReadinessSourceRow | InventoryReadinessSourceRow;
 
@@ -122,11 +122,13 @@ const loadReadinessSource = async (client: PrismaClient, period: { measurementFr
   const versionsByPosition = new Map<string, typeof positionVersions>();
   for (const version of positionVersions) versionsByPosition.set(version.entityId, [...(versionsByPosition.get(version.entityId) ?? []), version]);
   const eligibleRelationships = new Set(relationships.filter((relationship) => relationship.status !== 'PLANNED'
+    && (!relationship.effectiveTo || relationship.effectiveFrom < relationship.effectiveTo)
     && relationship.effectiveFrom < period.measurementTo
     && (!relationship.effectiveTo || relationship.effectiveTo > period.measurementFrom)).map(({ id }) => id));
   const eligiblePersonnel = new Set(personnelRows.filter((personnel) => personnel.isActive && !personnel.archivedAt)
     .flatMap((personnel) => personnel.hrEmploymentRelationships.filter(({ id }) => eligibleRelationships.has(id)).map(() => personnel.id)));
   const eligibleAssignments = assignments.filter((assignment) => eligibleRelationships.has(assignment.employmentRelationshipId)
+    && (!assignment.effectiveTo || assignment.effectiveFrom < assignment.effectiveTo)
     && assignment.effectiveFrom < period.measurementTo && (!assignment.effectiveTo || assignment.effectiveTo > period.measurementFrom));
   const primaryRelationships = new Set(eligibleAssignments.filter(({ type }) => type === 'PRIMARY').map(({ employmentRelationshipId }) => employmentRelationshipId));
   const mappedAssignments = eligibleAssignments.map<EligibleReadinessSourceRow>((row) => {
@@ -252,23 +254,29 @@ const loadReadinessSource = async (client: PrismaClient, period: { measurementFr
       classification: activePersonnel ? 'EMPLOYMENT_RELATIONSHIP_MISSING' : 'PERSONNEL_INACTIVE',
     } satisfies InventoryReadinessSourceRow];
     return personnel.hrEmploymentRelationships.flatMap((relationship) => {
+      const relationshipIntervalValid = !relationship.effectiveTo || relationship.effectiveFrom < relationship.effectiveTo;
       const relationshipEligible = eligibleRelationships.has(relationship.id);
       const ineligibleClassification = relationship.status === 'PLANNED' ? 'RELATIONSHIP_PLANNED' : 'RELATIONSHIP_OUTSIDE_PERIOD';
       if (!relationship.assignments.length) return [{
-        readinessKind: activePersonnel && relationshipEligible ? 'STRUCTURAL_BLOCKER' : 'INELIGIBLE',
+        readinessKind: activePersonnel && (relationshipEligible || !relationshipIntervalValid) ? 'STRUCTURAL_BLOCKER' : 'INELIGIBLE',
         sourceKey: `relationship:${relationship.id}`, personnelId: personnel.id,
         employmentRelationshipId: relationship.id, assignmentId: null,
         classification: !activePersonnel ? 'PERSONNEL_INACTIVE'
-          : relationshipEligible ? 'EMPLOYMENT_ASSIGNMENT_MISSING' : ineligibleClassification,
+          : !relationshipIntervalValid ? 'RELATIONSHIP_INTERVAL_INVALID'
+            : relationshipEligible ? 'EMPLOYMENT_ASSIGNMENT_MISSING' : ineligibleClassification,
       } satisfies InventoryReadinessSourceRow];
       return relationship.assignments.map((assignment): ReadinessSourceRow => {
         const eligible = activePersonnel ? eligibleByAssignmentId.get(assignment.id) : undefined;
         if (eligible) return eligible;
+        const assignmentIntervalValid = !assignment.effectiveTo || assignment.effectiveFrom < assignment.effectiveTo;
         return {
-          readinessKind: 'INELIGIBLE', sourceKey: assignment.id, personnelId: personnel.id,
+          readinessKind: activePersonnel && (!relationshipIntervalValid || !assignmentIntervalValid) ? 'STRUCTURAL_BLOCKER' : 'INELIGIBLE',
+          sourceKey: assignment.id, personnelId: personnel.id,
           employmentRelationshipId: relationship.id, assignmentId: assignment.id,
           classification: !activePersonnel ? 'PERSONNEL_INACTIVE'
-            : !relationshipEligible ? ineligibleClassification : 'ASSIGNMENT_OUTSIDE_PERIOD',
+            : !relationshipIntervalValid ? 'RELATIONSHIP_INTERVAL_INVALID'
+              : !assignmentIntervalValid ? 'ASSIGNMENT_INTERVAL_INVALID'
+                : !relationshipEligible ? ineligibleClassification : 'ASSIGNMENT_OUTSIDE_PERIOD',
         };
       });
     });
@@ -334,11 +342,18 @@ const inventoryClassificationCounts = (rows: ReadinessSourceRow[]) => rows
 
 export const getPerformanceReadinessCoverage = async (client: PrismaClient, input: {
   runId: string;
-  measurementFrom: Date;
-  measurementTo: Date;
 }) => {
-  const source = await loadReadinessSource(client, input);
-  return readinessCoverage(client, source, input.runId);
+  const run = await client.performanceReadinessRun.findUnique({ where: { id: input.runId } });
+  if (!run) throw readinessError('اجرای بازسازی آمادگی پیدا نشد.', 'PERFORMANCE_READINESS_RUN_NOT_FOUND', 404);
+  const source = await loadReadinessSource(client, run);
+  const snapshot = readinessSourceSnapshot(source.rows);
+  if (snapshot.count !== run.sourceCount || snapshot.hash !== run.sourceHash) {
+    if (run.status !== 'DRIFTED' || !run.driftDetected) await client.performanceReadinessRun.update({
+      where: { id: run.id }, data: { status: 'DRIFTED', driftDetected: true },
+    });
+    throw readinessError('منبع داده از زمان اجرای بازسازی تغییر کرده است.', 'PERFORMANCE_READINESS_DRIFT', 409);
+  }
+  return readinessCoverage(client, source, run.id);
 };
 
 const sourceRowHash = (row: ReadinessSourceRow) => canonicalPerformanceHash(row.readinessKind === 'ELIGIBLE_ASSIGNMENT' ? {
@@ -766,13 +781,29 @@ export const retryFailedPerformanceReadinessRecords = async (client: PrismaClien
   if (!remainingFailures) {
     await promoteCompleteEvaluations(client, run.id, rows);
   }
-  const updated = await client.performanceReadinessRun.update({
-    where: { id: run.id },
-    data: {
-      status: remainingFailures ? 'FAILED' : 'COMPLETED',
-      completedAt: remainingFailures ? null : new Date(),
-      appliedCount: count('APPLIED'), blockedCount: count('BLOCKED') + inventoryBlockers, failedCount: remainingFailures,
-    },
+  const updated = await runPerformanceSerializableTransaction(client, async (tx) => {
+    const completedRun = await tx.performanceReadinessRun.update({
+      where: { id: run.id },
+      data: {
+        status: remainingFailures ? 'FAILED' : 'COMPLETED',
+        completedAt: remainingFailures ? null : new Date(),
+        appliedCount: count('APPLIED'), blockedCount: count('BLOCKED') + inventoryBlockers, failedCount: remainingFailures,
+      },
+    });
+    if (!remainingFailures && run.status !== 'COMPLETED') await appendReadinessAudit(tx, {
+      runId: completedRun.id, actorUserId: input.actorUserId,
+      eventType: 'READINESS_COMPLETED',
+      reason: 'بازسازی آمادگی پس از تلاش مجدد رکوردهای ناموفق تکمیل شد.',
+      evidence: {
+        sourceCount: completedRun.sourceCount, sourceHash: completedRun.sourceHash,
+        appliedCount: completedRun.appliedCount, blockedCount: completedRun.blockedCount, failedCount: completedRun.failedCount,
+        inventory: source.inventory,
+        inventoryClassifications: inventoryClassificationCounts(rows),
+        periodEligibility: source.periodEligibility,
+      },
+      keyring,
+    });
+    return completedRun;
   });
   return {
     run: updated, retried: failed.length, remainingFailures,

@@ -34,7 +34,7 @@ export type ReadinessCoverage = {
 
 export type ReadinessInventoryClassification = "PERSONNEL_INACTIVE" | "EMPLOYMENT_RELATIONSHIP_MISSING"
   | "RELATIONSHIP_PLANNED" | "RELATIONSHIP_OUTSIDE_PERIOD" | "EMPLOYMENT_ASSIGNMENT_MISSING"
-  | "ASSIGNMENT_OUTSIDE_PERIOD";
+  | "ASSIGNMENT_OUTSIDE_PERIOD" | "RELATIONSHIP_INTERVAL_INVALID" | "ASSIGNMENT_INTERVAL_INVALID";
 
 const readinessClassificationLabels: Record<ReadinessInventoryClassification, string> = {
   PERSONNEL_INACTIVE: "پرسنل غیرفعال یا بایگانی‌شده",
@@ -43,6 +43,18 @@ const readinessClassificationLabels: Record<ReadinessInventoryClassification, st
   RELATIONSHIP_OUTSIDE_PERIOD: "رابطه خارج از بازه",
   EMPLOYMENT_ASSIGNMENT_MISSING: "بدون مأموریت",
   ASSIGNMENT_OUTSIDE_PERIOD: "مأموریت خارج از بازه",
+  RELATIONSHIP_INTERVAL_INVALID: "بازه نامعتبر رابطه استخدامی",
+  ASSIGNMENT_INTERVAL_INVALID: "بازه نامعتبر مأموریت",
+};
+
+export const completeReadinessBatches = async <T extends { hasMore: boolean }>(
+  idempotencyKey: string,
+  runBatch: (idempotencyKey: string) => Promise<T>,
+) => {
+  let result: T;
+  do result = await runBatch(idempotencyKey);
+  while (result.hasMore);
+  return result;
 };
 
 export const buildReadinessCoverageSections = (coverage: ReadinessCoverage) => {

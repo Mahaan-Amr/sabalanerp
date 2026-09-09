@@ -248,9 +248,15 @@ const main = async () => {
       assert.equal('locationId' in facts, false, 'the producer uses the agreed workplaceId fact name');
       assert.equal('hasSafetyDuty' in facts, false, 'unavailable facts remain unknown instead of false');
       assert.equal('responsibilityCodes' in facts, false, 'unavailable role responsibility codes remain unknown');
-      const metadata = facts.__applicability as { snapshotVersion: string; sourceVersions: Record<string, string> };
+      const metadata = facts.__applicability as {
+        snapshotVersion: string;
+        sourceVersions: Record<string, string>;
+        recordSourceVersions: Record<string, string>;
+      };
       assert.equal(metadata.snapshotVersion, 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1');
-      assert.ok(metadata.sourceVersions.workplaceId);
+      assert.equal(metadata.sourceVersions.workplaceId, 'PERF_APPLICABILITY_V1');
+      assert.match(metadata.recordSourceVersions.workplaceId, /^HR_FOUNDATION_POSITION:/,
+        'stable rule-contract versions remain separate from recorded historical provenance');
     }
 
     const targetRecord = await first.performanceReadinessRecord.findFirstOrThrow({ where: {
@@ -453,6 +459,14 @@ const main = async () => {
     });
     assert.equal(recovered.remainingFailures, 0);
     assert.equal(recovered.run.status, 'COMPLETED');
+    const retryCompletionAudit = await first.performanceAuditEvent.findFirstOrThrow({ where: {
+      aggregateType: 'READINESS_RUN', aggregateId: recovered.run.id, eventType: 'READINESS_COMPLETED',
+    }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }] });
+    const retryEvidence = await readPerformancePayload<{ inventoryClassifications: Record<string, number> }>(
+      first, retryCompletionAudit.encryptedPayloadId!, keyring,
+    );
+    assert.ok(retryEvidence.inventoryClassifications,
+      'a successfully recovered readiness run receives final immutable classification evidence');
     const recoveredTarget = await first.performanceReadinessRecord.findFirstOrThrow({ where: {
       runId: recovered.run.id, employmentAssignmentId: targetAssignment.id, status: 'APPLIED',
     } });

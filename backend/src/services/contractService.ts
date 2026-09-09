@@ -502,8 +502,16 @@ export interface CreateContractData {
 }
 
 export interface ContractTransactionRunner {
-  $transaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  $transaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>, options?: {
+    maxWait?: number;
+    timeout?: number;
+  }): Promise<T>;
 }
+
+// Creation writes the contract, rows, deliveries, payments, canonical graph and
+// audit as one atomic unit. Give this path bounded headroom beyond Prisma's
+// default 5s; do not raise the global timeout or retry ambiguous failed writes.
+const CONTRACT_CREATE_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const;
 
 export interface UpdateContractData {
   customerId?: string;
@@ -902,7 +910,7 @@ export async function createContract(
         }
         await onCreated?.(tx, contract);
         return contract;
-      });
+      }, CONTRACT_CREATE_TRANSACTION_OPTIONS);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&

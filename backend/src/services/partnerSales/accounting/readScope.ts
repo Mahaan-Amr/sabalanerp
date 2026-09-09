@@ -65,17 +65,19 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   }
   const partnerContracts = cases.map(row => row.customerContractId);
   const ordinaryContract = { OR: [{ contractId: null }, { contractId: { notIn: partnerContracts } }] };
-  const markerPath = PARTNER_ACCOUNTING_MARKER_JSON_PATH;
+  // Static, code-owned SQL literal lets generic prepared plans prove the
+  // partial-index predicate too. Never interpolate request data here.
+  const markerPath = Prisma.raw(`'${PARTNER_ACCOUNTING_MARKER_JSON_PATH}'::jsonpath`);
   // Discriminators are not sufficient for imported/partial records. Retained
   // private evidence at any nested JSON depth also prevents ordinary fallback.
   const markedRows = await database.$queryRaw<Array<{ kind: ListKind; id: string }>>`
     SELECT 'FINANCIAL' AS kind, id FROM accounting_financial_records
-      WHERE jsonb_build_array(metadata, "sourceSnapshot") @? ${markerPath}::jsonpath
-    UNION ALL SELECT 'RECEIVABLE', id FROM accounting_receivables WHERE metadata @? ${markerPath}::jsonpath
-    UNION ALL SELECT 'PAYMENT', id FROM accounting_payment_statuses WHERE metadata @? ${markerPath}::jsonpath
-    UNION ALL SELECT 'TAX', id FROM accounting_tax_records WHERE metadata @? ${markerPath}::jsonpath
+      WHERE metadata @? ${markerPath} OR "sourceSnapshot" @? ${markerPath}
+    UNION ALL SELECT 'RECEIVABLE', id FROM accounting_receivables WHERE metadata @? ${markerPath}
+    UNION ALL SELECT 'PAYMENT', id FROM accounting_payment_statuses WHERE metadata @? ${markerPath}
+    UNION ALL SELECT 'TAX', id FROM accounting_tax_records WHERE metadata @? ${markerPath}
     UNION ALL SELECT 'AUDIT', id FROM accounting_audit_logs
-      WHERE jsonb_build_array("beforeState", "afterState") @? ${markerPath}::jsonpath`;
+      WHERE "beforeState" @? ${markerPath} OR "afterState" @? ${markerPath}`;
   const markedIds = (kind: ListKind) => markedRows.filter(row => row.kind === kind).map(row => row.id);
   const ordinaryFinancial: Prisma.AccountingFinancialRecordWhereInput = { AND: [
     { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE }, id: { notIn: markedIds('FINANCIAL') } },

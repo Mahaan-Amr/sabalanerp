@@ -166,4 +166,11 @@ const main = async () => {
     }, { timeout: 30_000 });
   } catch (error) { if (error !== rollback) throw error; } finally { await rm(directory, { recursive: true, force: true }); }
 };
-main().finally(() => prisma.$disconnect());
+main().then(() => {
+  if (process.env.PERFORMANCE_ACCEPTANCE_PERMISSION_EVIDENCE === '1') {
+    console.log(`PERFORMANCE_PERMISSION_EVIDENCE:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_PERMISSION_EVIDENCE_V1', scenarios: [
+      { name: 'privacy-correction-boundary', assertionIds: ['current-case-authority', 'legal-hold-scope', 'download-revocation'] },
+      { name: 'security-negative-matrix', assertionIds: ['idor', 'scope-revocation', 'single-use-download', 'hold-revocation', 'notification-redaction'] },
+    ], additionalDisclosures: 0 })}`);
+  }
+}).finally(() => prisma.$disconnect());

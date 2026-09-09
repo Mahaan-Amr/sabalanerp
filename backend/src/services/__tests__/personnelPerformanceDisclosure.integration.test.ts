@@ -553,6 +553,15 @@ const main = async () => {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
   console.log('Personnel performance disclosure integration tests passed.');
+  if (process.env.PERFORMANCE_ACCEPTANCE_PERMISSION_EVIDENCE === '1') {
+    console.log(`PERFORMANCE_PERMISSION_EVIDENCE:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_PERMISSION_EVIDENCE_V1', scenarios: [
+      { name: 'no-hr-proxy', assertionIds: ['current-authority-only-delivery'] },
+      { name: 'five-level-disclosure-chain', assertionIds: ['five-level-policy-calculation-projection-api-analytics-xlsx-pdf'] },
+      { name: 'identity-verified-summary-delivery', assertionIds: ['verified-recipient-time-type-receipt'] },
+      { name: 'no-score-criteria-narrative-rank-leak', assertionIds: ['minimal-summary-negative-fields'] },
+      { name: 'manual-consequence-boundary', assertionIds: ['independent-scope', 'immutable-manual-handoff'] },
+    ], additionalDisclosures: 0 })}`);
+  }
 };
 
 main().finally(() => prisma.$disconnect());

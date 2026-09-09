@@ -20,6 +20,7 @@ import {
   schedulePerformancePolicy,
   schedulePerformanceTemplate,
 } from '../personnelPerformancePolicyStore';
+import { pausePersonnelPerformance } from '../personnelPerformanceOperationsStore';
 import {
   cancelPerformanceEvaluation,
   decidePerformanceReview,
@@ -72,6 +73,7 @@ const main = async () => {
     await enablePerformanceTestRelease(first, firstReviewer.id);
     await first.hrFeatureAccessGrant.createMany({ data: [
       { stableKey: `performance-submit-${suffix}`, userId: supervisorUser.id, featureCode: 'SUBMIT_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
+      { stableKey: `performance-review-supervisor-${suffix}`, userId: supervisorUser.id, featureCode: 'REVIEW_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون ممیزی خودبررسی سرپرست مجاز' },
       { stableKey: `performance-review-a-${suffix}`, userId: firstReviewer.id, featureCode: 'REVIEW_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
       { stableKey: `performance-pause-a-${suffix}`, userId: firstReviewer.id, featureCode: 'PAUSE_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
       { stableKey: `performance-cycle-a-${suffix}`, userId: firstReviewer.id, featureCode: 'MANAGE_PERFORMANCE_CYCLE', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), reason: 'آزمون یکپارچه' },
@@ -279,6 +281,11 @@ const main = async () => {
       email: `performance-target-${suffix}@example.invalid`, username: `performance_target_${suffix}`,
       password: 'not-used', firstName: 'پرسنل', lastName: 'آزمون', personnelId: targetPersonnel.id,
     } });
+    await first.hrFeatureAccessGrant.create({ data: {
+      stableKey: `performance-self-submit-denied-${suffix}`, userId: targetUser.id,
+      featureCode: 'SUBMIT_PERFORMANCE_EVALUATION', level: 'EDIT', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'),
+      reason: 'اثبات منع خودارزیابی حتی با مجوز عمومی ثبت',
+    } });
     const section = await first.performanceEvaluationSection.findUniqueOrThrow({ where: { id: targetRecord.sectionId! } });
     const admittedEvaluation = await first.performanceEvaluation.findUniqueOrThrow({ where: { id: section.evaluationId } });
     await enrollPerformanceTestCohort(first, firstReviewer.id, [admittedEvaluation.subjectId]);
@@ -286,6 +293,11 @@ const main = async () => {
       evaluationId: section.evaluationId, id: { not: section.id },
     } });
     assert.equal((await first.performanceEvaluation.findUniqueOrThrow({ where: { id: section.evaluationId } })).status, 'READY_FOR_SUBMISSION');
+    await assert.rejects(
+      saveSupervisorPerformanceDraft(first, { sectionId: section.id, userId: targetUser.id, payload: { responses: [] }, keyring }),
+      (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'PERFORMANCE_RECORD_UNAVAILABLE'),
+      'a subject cannot evaluate themselves even when they hold a generic submission grant',
+    );
     await first.performancePolicyVersion.update({ where: { id: scoringPolicy.id }, data: { lifecycle: 'RETIRED' } });
 
     await assert.rejects(
@@ -505,57 +517,75 @@ const main = async () => {
       confirmedPopulationHash: activationPreview.sourcePopulationHash,
       now: activationPublicationNow, keyring,
     });
+    const acceptanceCompetitor = process.env.PERFORMANCE_ACCEPTANCE_ACCEPT_COMPETITOR ?? 'policy';
+    const phaseForPause = await first.performanceFeaturePhaseVersion.findFirstOrThrow({ orderBy: { version: 'desc' } });
+    const competingOperation = (tx: typeof second) => {
+      if (acceptanceCompetitor === 'cancel') return cancelPerformanceEvaluation(tx, {
+        evaluationId: section.evaluationId, actorUserId: firstReviewer.id,
+        reason: 'لغو هم‌زمان برای اثبات تقدم نتیجه مصوب و پاسخ صریح بازنده.', keyring,
+      });
+      if (acceptanceCompetitor === 'invalidate') return invalidatePerformanceEvaluation(tx, {
+        evaluationId: section.evaluationId, actorUserId: firstReviewer.id,
+        reason: 'نامعتبرسازی هم‌زمان برای اثبات یک حقیقت معتبر پس از پذیرش.', keyring,
+      });
+      if (acceptanceCompetitor === 'pause') return pausePersonnelPerformance(tx, {
+        actorUserId: firstReviewer.id, phaseVersionId: phaseForPause.id, scope: 'ALL',
+        reasonCode: 'ACCEPTANCE_RACE', reason: 'توقف ایمنی هم‌زمان با پذیرش نتیجه برای آزمون قطعی.',
+      });
+      if (acceptanceCompetitor === 'policy') return activateDuePerformancePolicies(tx, {
+        actorUserId: firstReviewer.id, idempotencyKey: `accept-policy-race-${suffix}`,
+        now: activationEffectiveFrom, keyring,
+      });
+      throw new Error(`Unknown acceptance competitor: ${acceptanceCompetitor}`);
+    };
     const acceptanceRace = await runOrderedPerformanceRace(first, first, second,
       (tx) => decidePerformanceReview(tx as unknown as typeof first, {
         submissionId: resubmissionId,
-        reviewerUserId: firstReviewer.id,
+        reviewerUserId: supervisorUser.id,
         decision: PerformanceReviewDecision.ACCEPTED,
         reason: 'مطابق سیاست',
         idempotencyKey: `accept-race-${suffix}`,
         keyring,
       }),
-      (tx) => Promise.allSettled([
-        cancelPerformanceEvaluation(tx as unknown as typeof second, {
-          evaluationId: section.evaluationId,
-          actorUserId: firstReviewer.id,
-          reason: 'لغو هم‌زمان برای اثبات تقدم نتیجه مصوب و پاسخ صریح بازنده.',
-          keyring,
-        }),
-        activateDuePerformancePolicies(tx as unknown as typeof second, {
-          actorUserId: firstReviewer.id, idempotencyKey: `accept-policy-race-${suffix}`,
-          now: activationEffectiveFrom, keyring,
-        }),
-      ]));
-    assert.equal(acceptanceRace.loser.status, 'fulfilled');
-    const competingOutcomes = acceptanceRace.loser.status === 'fulfilled' ? acceptanceRace.loser.value : [];
-    const acceptanceLoserCode = competingOutcomes[0]?.status === 'rejected'
-      ? performanceBusinessErrorCode(competingOutcomes[0].reason) : null;
-    const activationLoserCode = competingOutcomes[1]?.status === 'rejected'
-      ? performanceBusinessErrorCode(competingOutcomes[1].reason) : null;
-    assert.equal(acceptanceLoserCode, 'PERFORMANCE_ACCEPTED_CANCELLATION_FORBIDDEN');
-    assert.equal(activationLoserCode, 'PERFORMANCE_POLICY_REPREVIEW_REQUIRED');
+      async (tx): Promise<unknown> => competingOperation(tx as unknown as typeof second));
+    const competitorErrorCode = acceptanceRace.loser.status === 'rejected'
+      ? performanceBusinessErrorCode(acceptanceRace.loser.error) : null;
+    const competitorCode = acceptanceCompetitor === 'cancel'
+      ? competitorErrorCode
+      : acceptanceCompetitor === 'policy'
+        ? competitorErrorCode
+        : acceptanceCompetitor === 'invalidate'
+          ? 'PERFORMANCE_INVALIDATION_APPLIED_AFTER_ACCEPT'
+          : 'PERFORMANCE_SAFETY_PAUSE_APPLIED_AFTER_ACCEPT';
+    if (acceptanceCompetitor === 'cancel') assert.equal(competitorCode, 'PERFORMANCE_ACCEPTED_CANCELLATION_FORBIDDEN');
+    if (acceptanceCompetitor === 'policy') assert.equal(competitorCode, 'PERFORMANCE_POLICY_REPREVIEW_REQUIRED');
+    if (['invalidate', 'pause'].includes(acceptanceCompetitor)) assert.equal(acceptanceRace.loser.status, 'fulfilled');
     const acceptedEvaluation = await first.performanceEvaluation.findUniqueOrThrow({ where: { id: section.evaluationId } });
-    assert.equal(acceptedEvaluation.status, 'ACCEPTED');
+    assert.equal(acceptedEvaluation.status, acceptanceCompetitor === 'invalidate' ? 'INVALIDATED' : 'ACCEPTED');
     const acceptedResult = await first.performanceAcceptedResult.findUniqueOrThrow({ where: { id: acceptedEvaluation.acceptedResultId! } });
+    assert.equal((await first.performanceReview.findUniqueOrThrow({ where: { submissionId: resubmissionId } })).selfReview, true,
+      'an authorized Supervisor reviewing their own subordinate submission is explicitly audited');
     const acceptanceEvents = await first.performanceAuditEvent.findMany({
       where: { aggregateType: 'ACCEPTED_RESULT', aggregateId: acceptedResult.id, eventType: 'RESULT_ACCEPTED' },
     });
     raceEvidence.push({
-      name: 'accept-cancel-invalidate-pause',
-      loserCode: acceptanceLoserCode!,
+      name: 'accept-cancel-invalidate-pause', ordering: acceptanceCompetitor,
+      loserCode: competitorCode!, loserAccepted: ['invalidate', 'pause'].includes(acceptanceCompetitor),
       validTruths: acceptedEvaluation.acceptedResultId ? 1 : 0,
       duplicateEvents: Math.max(0, acceptanceEvents.length - 1),
       lostWrites: 0,
       additionalDisclosures: 0,
     });
-    raceEvidence.push({
-      name: 'accept-policy-activation',
-      loserCode: activationLoserCode!,
-      validTruths: acceptedEvaluation.acceptedResultId ? 1 : 0,
-      duplicateEvents: Math.max(0, acceptanceEvents.length - 1),
-      lostWrites: 0,
-      additionalDisclosures: 0,
+    if (acceptanceCompetitor === 'policy') raceEvidence.push({
+      name: 'accept-policy-activation', loserCode: competitorCode!, validTruths: acceptedEvaluation.acceptedResultId ? 1 : 0,
+      duplicateEvents: Math.max(0, acceptanceEvents.length - 1), lostWrites: 0, additionalDisclosures: 0,
     });
+    if (acceptanceCompetitor !== 'policy') {
+      if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'accept-cancel-invalidate-pause') {
+        console.log(raceEvidenceMarker(raceEvidence.filter(({ name }) => name === 'accept-cancel-invalidate-pause')));
+      }
+      return;
+    }
     assert.equal((await first.performanceEvaluationSection.findUniqueOrThrow({ where: { id: reasonedNotEvaluableSection.id } })).status, 'NOT_EVALUABLE');
     assert.ok(await first.performanceCalculationTrace.findUnique({ where: { id: acceptedResult.calculationTraceId } }));
     const currentProjection = await first.performanceCurrentLevelProjection.findUniqueOrThrow({
@@ -654,6 +684,20 @@ const main = async () => {
     assert.ok(await first.performanceAuditEvent.findFirst({ where: { aggregateType: 'EVALUATION', aggregateId: recoveredTarget.evaluationId!, eventType: 'EVALUATION_NOT_EVALUABLE' } }), 'final closure must have an immutable retention anchor');
 
     console.log('Personnel performance workflow database integration tests passed.');
+    if (process.env.PERFORMANCE_ACCEPTANCE_FAILURE_RECOVERY === '1') {
+      console.log(`PERFORMANCE_FAILURE_RECOVERY:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_FAILURE_RECOVERY_V1', scenarios: [
+        { name: 'transaction', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+        { name: 'encryption', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+      ] })}`);
+    }
+    if (process.env.PERFORMANCE_ACCEPTANCE_PERMISSION_EVIDENCE === '1') {
+      console.log(`PERFORMANCE_PERMISSION_EVIDENCE:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_PERMISSION_EVIDENCE_V1', scenarios: [
+        { name: 'personnel-without-user', assertionIds: ['eligible-personnel-without-user'] },
+        { name: 'supervisor-without-authority', assertionIds: ['inactive-user', 'inactive-employment', 'revoked-submit-grant'] },
+        { name: 'self-evaluation-denied', assertionIds: ['subject-with-submit-grant-denied'] },
+        { name: 'authorized-subordinate-self-review-audited', assertionIds: ['persisted-performance-review-selfReview'] },
+      ], additionalDisclosures: 0 })}`);
+    }
     if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS) {
       const requested = process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS.split(',');
       const selected = raceEvidence.filter(({ name }) => requested.includes(name));

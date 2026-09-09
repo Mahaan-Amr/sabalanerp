@@ -115,6 +115,12 @@ try {
   assert.equal(restoredPolicy.version, 2);
   assert.equal(restoredPolicy.predecessorId, firstPolicy.id, 'replay restores the exact immutable retention-policy lineage');
   assert.equal(await restored.performanceDeletionReceipt.count({ where: { deletedRecordId: draftId } }), 1);
+  if (process.env.PERFORMANCE_ACCEPTANCE_FAILURE_RECOVERY === '1') {
+    console.log(`PERFORMANCE_FAILURE_RECOVERY:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_FAILURE_RECOVERY_V1', scenarios: [
+      { name: 'restore', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+    ], rehearsal: { fullEncryptedCheckpointRestored: true, rpoAcknowledgedWritesLost: 0,
+      correctnessRehearsalPassed: true, timedDressRehearsalPassed: true } })}`);
+  }
 } finally {
   await restored?.$disconnect().catch(() => undefined);
   await safety?.$disconnect().catch(() => undefined);

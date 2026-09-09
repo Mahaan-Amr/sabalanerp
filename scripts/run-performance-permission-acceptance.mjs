@@ -24,14 +24,27 @@ const environment = {
   NODE_ENV: 'test',
   PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID: 'local-development-v1',
   PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64: 'cGVyZi1sb2NhbC0wMTIzNDU2Nzg5YWJjZGVmLXYxISE=',
+  PERFORMANCE_ACCEPTANCE_PERMISSION_EVIDENCE: '1',
 };
 const raw = [];
+const evidenceMarkers = [];
 const execute = (name, command, commandArgs, cwd) => {
   const result = spawnSync(command, commandArgs, { cwd, env: environment, encoding: 'utf8',
     timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 });
   raw.push(JSON.stringify({ name, exitCode: result.status, signal: result.signal,
     stdout: result.stdout, stderr: result.stderr }));
   if (result.error || result.status !== 0) throw new Error(`PERMISSION_CHECK_FAILED:${name}`);
+  for (const line of result.stdout.split(/\r?\n/).filter((item) => item.startsWith('PERFORMANCE_PERMISSION_EVIDENCE:'))) {
+    let marker;
+    try { marker = JSON.parse(line.slice('PERFORMANCE_PERMISSION_EVIDENCE:'.length)); } catch { marker = null; }
+    if (marker?.contract !== 'PERSONNEL_PERFORMANCE_PERMISSION_EVIDENCE_V1'
+      || !Array.isArray(marker.scenarios) || marker.scenarios.some((scenario) => typeof scenario?.name !== 'string'
+        || !Array.isArray(scenario.assertionIds) || scenario.assertionIds.length === 0
+        || scenario.assertionIds.some((id) => typeof id !== 'string' || !id))) {
+      throw new Error(`PERMISSION_EVIDENCE_INVALID:${name}`);
+    }
+    evidenceMarkers.push({ check: name, marker });
+  }
 };
 
 try {
@@ -50,17 +63,27 @@ try {
   const started = performance.now();
   execute('foundation-unit-routes', 'npm', ['--prefix', 'backend', 'run', 'test:personnel-performance-foundation'], repositoryRoot);
   for (const file of [
-    'personnelPerformanceFoundation.integration.test.ts',
+    'dispatchDocumentsCandidateSchema.integration.test.ts',
+    'personnelPerformancePolicy.integration.test.ts',
+    'personnelPerformanceReadinessCoverage.integration.test.ts',
     'personnelPerformanceWorkflow.integration.test.ts',
-    'personnelPerformanceDisclosure.integration.test.ts',
-    'personnelPerformancePrivacy.integration.test.ts',
   ]) execute(file, process.execPath, ['--import', 'tsx', `src/services/__tests__/${file}`], path.join(repositoryRoot, 'backend'));
   const signer = performanceMeasurementSignerFromEnvironment();
   if (!signer) throw new Error('MEASUREMENT_SIGNER_UNAVAILABLE');
+  const observedScenarios = evidenceMarkers.flatMap(({ check, marker }) => marker.scenarios
+    .map((scenario) => ({ ...scenario, evidenceCheck: check })));
+  if (observedScenarios.length !== PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS.length
+    || PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS.some((name) => observedScenarios
+      .filter((scenario) => scenario.name === name).length !== 1)) throw new Error('PERMISSION_SCENARIO_EVIDENCE_INCOMPLETE');
+  const coverageMarkers = evidenceMarkers.filter(({ marker }) => marker.permissionBranchesCoveredPercent !== undefined);
+  if (coverageMarkers.length !== 1 || coverageMarkers[0].marker.permissionBranchesCoveredPercent !== 100) {
+    throw new Error('PERMISSION_BRANCH_COVERAGE_EVIDENCE_INVALID');
+  }
+  const additionalDisclosures = evidenceMarkers.reduce((total, { marker }) => total + marker.additionalDisclosures, 0);
   const measurements = {
-    scenarios: PERFORMANCE_ACCEPTANCE_NONDISCLOSURE_SCENARIOS.map((name) => ({ name, status: 'PASS' })),
-    permissionBranchesCoveredPercent: 100,
-    additionalDisclosures: 0,
+    scenarios: observedScenarios.map(({ name, assertionIds, evidenceCheck }) => ({ name, status: 'PASS', assertionIds, evidenceCheck })),
+    permissionBranchesCoveredPercent: coverageMarkers[0].marker.permissionBranchesCoveredPercent,
+    additionalDisclosures,
     openP0,
     openP1,
   };

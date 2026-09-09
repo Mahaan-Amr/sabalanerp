@@ -58,8 +58,8 @@ const measurementsFor = (name) => ({
     viewports: ['360', '390', '768', '1280', '1920'].map((viewport) => ({ name: viewport, usableDurationMs: 1000, rtl: true,
       light: true, dark: true, keyboard: true, focus: true, reducedMotion: true, zoom200: true })) },
   'export-capacity': { requestP99Ms: 1000, queueP95Ms: 1000, formats: [
-    { name: 'Excel', samples: 1, p95Ms: 1000, maximumDurationMs: 2000, concurrentJobs: 5, units: 100000, megabytes: 100, partialArtifacts: 0 },
-    { name: 'PDF', samples: 1, p95Ms: 1000, maximumDurationMs: 2000, concurrentJobs: 2, units: 500, megabytes: 50, partialArtifacts: 0 },
+    { name: 'Excel', samples: 1, p95Ms: 1000, maximumDurationMs: 2000, concurrentJobs: 5, units: 100000, maximumBytes: 10_000_000, byteLimit: 100 * 1024 * 1024, partialArtifacts: 0 },
+    { name: 'PDF', samples: 1, p95Ms: 1000, maximumDurationMs: 2000, concurrentJobs: 2, units: 500, maximumBytes: 5_000_000, byteLimit: 50 * 1024 * 1024, partialArtifacts: 0 },
   ] },
 }[name]);
 const command = (name, exitCode = 0, identity = candidateIdentity()) => ({

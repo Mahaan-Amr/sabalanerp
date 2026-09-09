@@ -798,6 +798,9 @@ export const renderPerformanceExportArtifact = async (kind: 'XLSX' | 'PDF', rows
   return { bytes: await generatePdfBufferFromHtml({ htmlContent: performanceExportPdfHtml(rows), signal }), mimeType: 'application/pdf' };
 };
 
+export const performancePdfPageCount = (bytes: Buffer) =>
+  (bytes.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length;
+
 export const processPerformanceExport = async (client: PrismaClient, exportId: string, keyring = performanceVaultKeyFromEnvironment()) => {
   const receipt = await runPerformanceSerializableTransaction(client, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'performance-export-queue'}, 0))`;
@@ -832,6 +835,9 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
     const rendered = await withinPerformanceExportDeadline((signal) => renderPerformanceExportArtifact(receipt.exportKind as 'XLSX' | 'PDF', rows, signal));
     const artifactHash = createHash('sha256').update(rendered.bytes).digest('hex');
     const maximumBytes = receipt.exportKind === 'PDF' ? 50 * 1024 * 1024 : 100 * 1024 * 1024;
+    if (receipt.exportKind === 'PDF' && performancePdfPageCount(rendered.bytes) > 500) {
+      throw disclosureError('تعداد صفحه‌های خروجی از سقف مجاز بیشتر است.', 'PERFORMANCE_EXPORT_SCOPE_TOO_LARGE', 422);
+    }
     if (rendered.bytes.length > maximumBytes) {
       throw disclosureError('حجم فایل خروجی از سقف مجاز بیشتر است.', 'PERFORMANCE_EXPORT_FILE_TOO_LARGE', 422);
     }

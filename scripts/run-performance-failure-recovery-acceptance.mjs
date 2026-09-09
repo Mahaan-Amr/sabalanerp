@@ -26,8 +26,10 @@ const environment = {
   PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID: 'local-development-v1',
   PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64: 'cGVyZi1sb2NhbC0wMTIzNDU2Nzg5YWJjZGVmLXYxISE=',
   PERFORMANCE_ACCEPTANCE_INJECT_MIGRATION_FAILURE: '1',
+  PERFORMANCE_ACCEPTANCE_FAILURE_RECOVERY: '1',
 };
 const raw = [];
+const observations = [];
 const execute = (name, file, timeout = 15 * 60_000) => {
   const started = performance.now();
   const result = spawnSync(process.execPath, ['--import', 'tsx', `src/services/__tests__/${file}`], {
@@ -36,6 +38,18 @@ const execute = (name, file, timeout = 15 * 60_000) => {
   raw.push(JSON.stringify({ name, exitCode: result.status, signal: result.signal,
     durationMs: performance.now() - started, stdout: result.stdout, stderr: result.stderr }));
   if (result.error || result.status !== 0) throw new Error(`FAILURE_RECOVERY_CHECK_FAILED:${name}`);
+  const markers = result.stdout.split(/\r?\n/).filter((line) => line.startsWith('PERFORMANCE_FAILURE_RECOVERY:'));
+  if (markers.length !== 1) throw new Error(`FAILURE_RECOVERY_EVIDENCE_COUNT_INVALID:${name}`);
+  let marker;
+  try { marker = JSON.parse(markers[0].slice('PERFORMANCE_FAILURE_RECOVERY:'.length)); } catch { marker = null; }
+  if (marker?.contract !== 'PERSONNEL_PERFORMANCE_FAILURE_RECOVERY_V1' || !Array.isArray(marker.scenarios)) {
+    throw new Error(`FAILURE_RECOVERY_EVIDENCE_INVALID:${name}`);
+  }
+  for (const scenario of marker.scenarios) {
+    if (typeof scenario?.name !== 'string' || scenario.injected !== true || scenario.failClosed !== true
+      || scenario.lostAcknowledgedWrites !== 0) throw new Error(`FAILURE_RECOVERY_SCENARIO_INVALID:${name}`);
+  }
+  observations.push({ check: name, marker });
   return result.stdout;
 };
 
@@ -79,30 +93,49 @@ try {
     transaction: ['transaction-encryption'],
     queue: ['queue-notification'],
     storage: ['transaction-storage-encryption'],
-    encryption: ['transaction-encryption', 'transaction-storage-encryption'],
+    encryption: ['transaction-encryption'],
     notification: ['queue-notification'],
     migration: ['migration-dry-run-1', 'migration-dry-run-2'],
     reconciliation: ['readiness-reconciliation-1', 'readiness-reconciliation-2', 'readiness-reconciliation-3'],
     restore: ['restore-correctness', 'restore-dress-rehearsal'],
   };
+  const scenarioEvidence = Object.entries(scenarioChecks).map(([name, evidenceChecks]) => {
+    const matching = observations.filter(({ check, marker }) => evidenceChecks.includes(check)
+      && marker.scenarios.some((scenario) => scenario.name === name));
+    if (matching.length !== evidenceChecks.length || matching.some(({ marker }) => marker.scenarios
+      .filter((scenario) => scenario.name === name).length !== 1)) throw new Error(`FAILURE_RECOVERY_SCENARIO_MISSING:${name}`);
+    return { name, evidenceChecks, executed: matching.every(({ marker }) => marker.scenarios
+      .some((scenario) => scenario.name === name && scenario.injected === true)),
+    failClosed: matching.every(({ marker }) => marker.scenarios
+      .some((scenario) => scenario.name === name && scenario.failClosed === true)),
+    lostAcknowledgedWrites: Math.max(...matching.map(({ marker }) => marker.scenarios
+      .find((scenario) => scenario.name === name).lostAcknowledgedWrites)) };
+  });
+  const readinessRehearsals = observations.filter(({ check }) => check.startsWith('readiness-reconciliation-'))
+    .map(({ marker }) => marker.rehearsal);
+  const restoreRehearsals = observations.filter(({ check }) => check.startsWith('restore-'))
+    .map(({ marker }) => marker.rehearsal);
+  if (readinessRehearsals.length !== 3 || readinessRehearsals.some((item) => item?.idempotentApplyReconciliations !== 1
+    || item.driftInjected !== true || item.concurrentHrWriteRetried !== true)
+    || restoreRehearsals.length !== 2 || restoreRehearsals.some((item) => item?.fullEncryptedCheckpointRestored !== true
+      || item.rpoAcknowledgedWritesLost !== 0 || item.correctnessRehearsalPassed !== true
+      || item.timedDressRehearsalPassed !== true)) throw new Error('FAILURE_RECOVERY_REHEARSAL_EVIDENCE_INVALID');
   const measurements = {
     failureInjection: {
-      scenarios: Object.entries(scenarioChecks).map(([name, evidenceChecks]) => ({
-        name, evidenceChecks, executed: true, failClosed: true, lostAcknowledgedWrites: 0,
-      })),
+      scenarios: scenarioEvidence,
     },
     runbookRehearsal: {
-      fullEncryptedCheckpointRestored: true,
-      rpoAcknowledgedWritesLost: 0,
-      correctnessRehearsalPassed: true,
-      timedDressRehearsalPassed: true,
+      fullEncryptedCheckpointRestored: restoreRehearsals.every((item) => item.fullEncryptedCheckpointRestored),
+      rpoAcknowledgedWritesLost: Math.max(...restoreRehearsals.map((item) => item.rpoAcknowledgedWritesLost)),
+      correctnessRehearsalPassed: restoreRehearsals[0].correctnessRehearsalPassed,
+      timedDressRehearsalPassed: restoreRehearsals[1].timedDressRehearsalPassed,
       operatorId,
       runbookHash: createHash('sha256').update(await readFile(path.join(repositoryRoot,
         'docs/operations/personnel-performance-operations.md'))).digest('hex'),
       dryRuns,
-      idempotentApplyReconciliations: 3,
-      driftInjected: true,
-      concurrentHrWriteRetried: true,
+      idempotentApplyReconciliations: readinessRehearsals.reduce((sum, item) => sum + item.idempotentApplyReconciliations, 0),
+      driftInjected: readinessRehearsals.every((item) => item.driftInjected),
+      concurrentHrWriteRetried: readinessRehearsals.every((item) => item.concurrentHrWriteRetried),
     },
   };
   console.log(JSON.stringify(signedPerformanceAcceptanceLane({

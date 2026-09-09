@@ -56,7 +56,8 @@ const nondisclosureScenarios = Object.freeze([
   'authorized-subordinate-self-review-audited', 'typed-applicability-unknown-blocked',
   'five-level-disclosure-chain', 'identity-verified-summary-delivery',
   'no-score-criteria-narrative-rank-leak', 'privacy-correction-boundary',
-  'manual-consequence-boundary',
+  'manual-consequence-boundary', 'catalog-import-composition-recovery',
+  'personnel-inventory-reemployment-boundaries', 'security-negative-matrix',
 ]);
 
 const completeNamedPasses = (items, required) => Array.isArray(items) && items.length === required.length

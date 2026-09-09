@@ -76,6 +76,7 @@ export const runOrderedPerformanceRace = async <A, B>(
 
 export const raceEvidenceMarker = (scenarios: Array<{
   name: string;
+  ordering?: string;
   loserCode: string;
   validTruths: number;
   duplicateEvents: number;

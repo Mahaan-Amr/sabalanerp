@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { renderPerformanceExportArtifact } from '../personnelPerformanceDisclosureStore';
+import * as XLSX from 'xlsx';
+import { performancePdfPageCount, renderPerformanceExportArtifact } from '../personnelPerformanceDisclosureStore';
 
 const percentile = (values: number[], ratio: number) => [...values].sort((a, b) => a - b)[Math.ceil(values.length * ratio) - 1];
-const rows = (count: number) => Array.from({ length: count }, (_, index) => ({
+const rows = (count: number, longPdfCell = false) => Array.from({ length: count }, (_, index) => ({
   row: index + 1,
-  level: 'مطابق انتظار',
+  level: longPdfCell ? 'مطابق انتظار '.repeat(50) : 'مطابق انتظار',
   period: '1405-Q2',
 }));
 
 const run = async (kind: 'XLSX' | 'PDF', concurrentJobs: number, unitRows: number) => {
-  const input = rows(unitRows);
+  const input = rows(unitRows, kind === 'PDF');
   const durations: number[] = [];
   const results = await Promise.all(Array.from({ length: concurrentJobs }, async () => {
     const started = performance.now();
@@ -18,12 +19,17 @@ const run = async (kind: 'XLSX' | 'PDF', concurrentJobs: number, unitRows: numbe
     durations.push(performance.now() - started);
     return rendered;
   }));
-  for (const result of results) {
+  const observed = results.map((result) => {
     assert.ok(result.bytes.length > 0);
     assert.equal(kind === 'PDF' ? result.bytes.subarray(0, 4).toString() : result.bytes.subarray(0, 2).toString(),
       kind === 'PDF' ? '%PDF' : 'PK');
-  }
-  return { durations, partialArtifacts: 0 };
+    if (kind === 'PDF') return { units: performancePdfPageCount(result.bytes),
+      bytes: result.bytes.length };
+    const workbook = XLSX.read(result.bytes);
+    const range = XLSX.utils.decode_range(workbook.Sheets[workbook.SheetNames[0]]['!ref']!);
+    return { units: range.e.r - range.s.r, bytes: result.bytes.length };
+  });
+  return { durations, observed, partialArtifacts: 0 };
 };
 
 const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -34,14 +40,15 @@ const format = (name: 'Excel' | 'PDF', measurement: Awaited<ReturnType<typeof ru
   p95Ms: percentile(measurement.durations, 0.95),
   maximumDurationMs: Math.max(...measurement.durations),
   concurrentJobs: name === 'Excel' ? 5 : 2,
-  units: name === 'Excel' ? 100_000 : 500,
-  megabytes: name === 'Excel' ? 100 : 50,
+  units: Math.min(...measurement.observed.map(({ units }) => units)),
+  maximumBytes: Math.max(...measurement.observed.map(({ bytes }) => bytes)),
+  byteLimit: (name === 'Excel' ? 100 : 50) * 1024 * 1024,
   partialArtifacts: measurement.partialArtifacts,
 });
 const main = async () => {
   const [excel, pdf] = await Promise.all([
     run('XLSX', 5, 100_000),
-    run('PDF', 2, 12_500),
+    run('PDF', 2, 3_830),
   ]);
   console.log(`PERFORMANCE_EXPORT_CAPACITY:${JSON.stringify({ formats: [format('Excel', excel), format('PDF', pdf)] })}`);
 };

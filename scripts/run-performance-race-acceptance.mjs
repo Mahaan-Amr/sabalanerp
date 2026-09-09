@@ -21,8 +21,13 @@ const identity = JSON.parse(await readFile(path.resolve(identityPath), 'utf8'));
 const source = 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public&connection_limit=4&pool_timeout=10';
 const suites = [
   { name: 'workflow', scenarios: ['double-submit', 'double-hr-decision', 'submit-context-change',
-    'accept-policy-activation', 'accept-cancel-invalidate-pause', 'unknown-response-after-commit'],
-    file: 'personnelPerformanceWorkflow.integration.test.ts' },
+    'accept-policy-activation', 'unknown-response-after-commit'],
+    file: 'personnelPerformanceWorkflow.integration.test.ts', environment: { PERFORMANCE_ACCEPTANCE_ACCEPT_COMPETITOR: 'policy' } },
+  ...['cancel', 'invalidate', 'pause'].map((ordering) => ({
+    name: `workflow-accept-${ordering}`, scenarios: ['accept-cancel-invalidate-pause'],
+    file: 'personnelPerformanceWorkflow.integration.test.ts', aggregateOrdering: ordering,
+    environment: { PERFORMANCE_ACCEPTANCE_ACCEPT_COMPETITOR: ordering },
+  })),
   { name: 'export-lineage', scenarios: ['correction-expiry-recomputation', 'export-revoke-correction-hold'],
     file: 'personnelPerformanceExportLineage.integration.test.ts' },
   { name: 'erasure', scenarios: ['deletion-legal-hold'], file: 'personnelPerformanceErasure.integration.test.ts' },
@@ -34,6 +39,7 @@ const raw = [];
 const scenarioRuns = new Map(PERFORMANCE_ACCEPTANCE_RACES.map(({ name }) => [name, []]));
 const started = performance.now();
 for (let iteration = 1; iteration <= plan.raceIterations; iteration += 1) {
+  const combinedAcceptanceOrderings = new Map();
   for (const suite of suites) {
     const result = spawnSync(process.execPath, ['--import', 'tsx', `src/services/__tests__/${suite.file}`], {
       cwd: path.join(repositoryRoot, 'backend'),
@@ -65,8 +71,23 @@ for (let iteration = 1; iteration <= plan.raceIterations; iteration += 1) {
       console.error(`Race acceptance evidence marker is missing or incomplete for ${suite.name}.`);
       process.exit(1);
     }
-    for (const scenario of marker.scenarios) scenarioRuns.get(scenario.name).push(scenario);
+    for (const scenario of marker.scenarios) {
+      if (suite.aggregateOrdering) {
+        if (scenario.ordering !== suite.aggregateOrdering || combinedAcceptanceOrderings.has(suite.aggregateOrdering)) {
+          console.error(`Race acceptance ordering evidence is invalid for ${suite.name}.`);
+          process.exit(1);
+        }
+        combinedAcceptanceOrderings.set(suite.aggregateOrdering, scenario);
+      } else scenarioRuns.get(scenario.name).push(scenario);
+    }
   }
+  if (['cancel', 'invalidate', 'pause'].some((ordering) => !combinedAcceptanceOrderings.has(ordering))) {
+    console.error(`Combined acceptance lifecycle evidence is incomplete at iteration ${iteration}.`);
+    process.exit(1);
+  }
+  scenarioRuns.get('accept-cancel-invalidate-pause').push({
+    name: 'accept-cancel-invalidate-pause', orderings: [...combinedAcceptanceOrderings.keys()],
+  });
   console.error(`Performance acceptance races: ${iteration}/${plan.raceIterations}`);
 }
 const measurements = {

@@ -130,7 +130,8 @@ const validators = {
       return positive(format.samples) && finite(format.p95Ms) && format.p95Ms <= (excel ? 120000 : 180000)
         && finite(format.maximumDurationMs) && format.maximumDurationMs <= 300000
         && format.concurrentJobs === (excel ? 5 : 2) && format.units === (excel ? 100000 : 500)
-        && format.megabytes === (excel ? 100 : 50) && format.partialArtifacts === 0;
+        && format.byteLimit === (excel ? 100 : 50) * 1024 * 1024
+        && positive(format.maximumBytes) && format.maximumBytes <= format.byteLimit && format.partialArtifacts === 0;
     }),
   'runbook-rehearsal': (result) => result.fullEncryptedCheckpointRestored === true && result.rpoAcknowledgedWritesLost === 0
     && result.correctnessRehearsalPassed === true && result.timedDressRehearsalPassed === true

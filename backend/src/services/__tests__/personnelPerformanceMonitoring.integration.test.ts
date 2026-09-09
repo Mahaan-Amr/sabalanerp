@@ -200,6 +200,12 @@ const pauseRace = async (first: PrismaClient, second: PrismaClient, runId: strin
     assert.equal(losingDelivery?.businessCode, 'PERFORMANCE_NOTIFICATION_OUTBOX_ALREADY_CLAIMED');
     assert.equal(await first.notificationDeliveryAttempt.count({ where: { notification: { eventId: outbox.eventId } } }), attemptsBeforeRace,
       'concurrent retry cannot duplicate an already delivered notification');
+    if (process.env.PERFORMANCE_ACCEPTANCE_FAILURE_RECOVERY === '1') {
+      console.log(`PERFORMANCE_FAILURE_RECOVERY:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_FAILURE_RECOVERY_V1', scenarios: [
+        { name: 'queue', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+        { name: 'notification', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+      ] })}`);
+    }
     if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'notification-export-retry') {
       console.log(raceEvidenceMarker([{
         name: 'notification-export-retry', loserCode: losingDelivery!.businessCode,

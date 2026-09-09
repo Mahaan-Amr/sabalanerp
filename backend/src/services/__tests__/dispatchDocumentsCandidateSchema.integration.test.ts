@@ -53,6 +53,9 @@ const main = async () => {
           SELECT to_regclass('performance_acceptance_failed_migration_probe')::text AS present`;
         assert.equal(rollback.present, null, 'an interrupted transactional migration must leave no partial schema');
         console.log('PERFORMANCE_FAILURE_INJECTION:migration:PASS');
+        console.log(`PERFORMANCE_FAILURE_RECOVERY:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_FAILURE_RECOVERY_V1', scenarios: [
+          { name: 'migration', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+        ] })}`);
       }
       console.log(JSON.stringify({ database: database.databaseName, sourceMigrations: before.migrations.length,
         candidateMigrations: candidate.migrations.length,

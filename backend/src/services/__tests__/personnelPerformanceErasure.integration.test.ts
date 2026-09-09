@@ -205,6 +205,11 @@ const main = async () => {
       assert.equal(retried.id, retryOperation.id);
       assert.equal(retried.status, 'COMPLETED');
       assert.equal(await tx.performanceDraft.count({ where: { id: retryDraftId } }), 0);
+      if (process.env.PERFORMANCE_ACCEPTANCE_FAILURE_RECOVERY === '1') {
+        console.log(`PERFORMANCE_FAILURE_RECOVERY:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_FAILURE_RECOVERY_V1', scenarios: [
+          { name: 'storage', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+        ] })}`);
+      }
       if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'deletion-legal-hold') {
         console.log(raceEvidenceMarker([{
           name: 'deletion-legal-hold', loserCode: held!.lastFailureCode!, validTruths: 1,

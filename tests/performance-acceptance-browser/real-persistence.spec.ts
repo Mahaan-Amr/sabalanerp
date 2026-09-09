@@ -74,6 +74,7 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
 
   const accounts = JSON.parse(process.env.PERFORMANCE_BROWSER_ACCOUNTS_JSON || 'null') as null | Record<string, {
     username: string; password: string; expectedCapabilities: string[];
+    lifecycle: Array<{ status: string; evaluationId: string }>;
   }>;
   expect(accounts).toBeTruthy();
   const roleChecks = [];
@@ -101,7 +102,34 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
         await expect(rolePage.getByText(label, { exact: true }).first()).toBeVisible();
       }
     }
-    roleChecks.push({ name: role, capabilities: account.expectedCapabilities, realPersistence: true });
+    const actionChecks = [];
+    const readExpectations = [
+      { path: '/api/hr/personnel-performance/supervisor/sections', allowed: role === 'supervisor' },
+      { path: '/api/hr/personnel-performance/reviews', allowed: role === 'reviewer' },
+      { path: '/api/hr/personnel-performance/lifecycle/sections', allowed: role === 'lifecycleManager' },
+    ];
+    for (const expectation of readExpectations) {
+      const action = await context.request.get(expectation.path);
+      expect(action.status()).toBe(expectation.allowed ? 200 : 403);
+      actionChecks.push({ action: `GET ${expectation.path}`, status: action.status(), allowed: expectation.allowed });
+      await action.dispose();
+    }
+    for (const state of account.lifecycle) {
+      const action = await context.request.post(`/api/hr/personnel-performance/evaluations/${state.evaluationId}/cancel`, {
+        data: { reason: `آزمون مرورگری چرخه ${state.status} با اختیار واقعی و ماندگاری پایگاه داده.` },
+      });
+      const actionBody = await action.json();
+      const expectedStatus = role !== 'lifecycleManager' ? 403 : state.status === 'ACCEPTED' ? 409 : 200;
+      expect(action.status()).toBe(expectedStatus);
+      if (expectedStatus === 200) expect(actionBody.status).toBe('CANCELLED');
+      if (role === 'lifecycleManager' && state.status === 'ACCEPTED') {
+        expect(actionBody.code).toBe('PERFORMANCE_CANCELLATION_STATE_INVALID');
+      }
+      actionChecks.push({ action: 'cancel', lifecycleState: state.status, status: action.status(),
+        persistedOutcome: expectedStatus === 200 ? actionBody.status : actionBody.code });
+      await action.dispose();
+    }
+    roleChecks.push({ name: role, capabilities: account.expectedCapabilities, realPersistence: true, actionChecks });
     await context.close();
   }
 
@@ -113,6 +141,6 @@ test('real persisted performance UI matrix is RTL, accessible, keyboard-safe, an
   console.log(`PERFORMANCE_BROWSER_MATRIX:${JSON.stringify({ viewports: measurements, roles: roleChecks,
     realBrowser: true, realPersistence: true, lifecycleStates: ['DRAFT', 'REJECTED', 'SUBMITTED', 'ACCEPTED'],
     pageUsableP95Ms: percentile(usableDurations, 0.95), pageUsableP99Ms: percentile(usableDurations, 0.99),
-    roleActionScopeMatrixComplete: roleChecks.length === 4 })}`);
+    roleActionScopeMatrixComplete: roleChecks.length === 4 && roleChecks.every(({ actionChecks }) => actionChecks.length === 7) })}`);
   await page.context().close();
 });

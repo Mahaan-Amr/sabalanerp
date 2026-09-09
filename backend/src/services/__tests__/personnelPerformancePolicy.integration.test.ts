@@ -649,6 +649,12 @@ const main = async () => {
   }), 1);
 
   console.log('Personnel performance policy integration and concurrency tests passed.');
+  if (process.env.PERFORMANCE_ACCEPTANCE_PERMISSION_EVIDENCE === '1') {
+    console.log(`PERFORMANCE_PERMISSION_EVIDENCE:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_PERMISSION_EVIDENCE_V1', scenarios: [
+      { name: 'typed-applicability-unknown-blocked', assertionIds: ['typed-fact-dictionary', 'unknown-block', 'draft-import-idempotency', 'conflicting-retry', 'rollback-recovery', '80-20-and-100-0-composition'] },
+      { name: 'catalog-import-composition-recovery', assertionIds: ['draft-only', 'no-automatic-publication', 'repeat-safe-import', 'conflict-rejected', 'transactional-recovery'] },
+    ], additionalDisclosures: 0 })}`);
+  }
   } finally {
     await Promise.allSettled([first.$disconnect(), second.$disconnect()]);
     await database.cleanup();

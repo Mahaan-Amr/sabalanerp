@@ -25,6 +25,10 @@ const cleanup = async (runId: string) => {
     const evaluationIds = evaluations.map(({ id }) => id);
     const sections = await tx.performanceEvaluationSection.findMany({ where: { evaluationId: { in: evaluationIds } },
       select: { employmentAssignmentId: true } });
+    await tx.performanceAuditEvent.deleteMany({ where: { OR: [
+      { actorUserId: { in: userIds } },
+      { aggregateType: 'EVALUATION', aggregateId: { in: evaluationIds } },
+    ] } });
     await tx.performanceEvaluationSection.deleteMany({ where: { evaluationId: { in: evaluationIds } } });
     await tx.performanceEvaluation.deleteMany({ where: { id: { in: evaluationIds } } });
     await tx.performanceSubject.deleteMany({ where: { id: { in: subjectIds } } });
@@ -35,6 +39,7 @@ const cleanup = async (runId: string) => {
     await tx.hrWorkspaceAccessGrant.deleteMany({ where: { userId: { in: userIds } } });
     await tx.authSession.deleteMany({ where: { userId: { in: userIds } } });
     await tx.recognizedBrowserProfile.deleteMany({ where: { userId: { in: userIds } } });
+    await tx.notificationDeliveryAttempt.deleteMany({ where: { notification: { userId: { in: userIds } } } });
     await tx.notification.deleteMany({ where: { userId: { in: userIds } } });
     await tx.authenticationEvent.deleteMany({ where: { OR: [
       { userId: { in: userIds } },
@@ -54,7 +59,9 @@ const setup = async () => {
     client.hrFeatureCatalog.findMany({ where: { code: { in: requiredFeatures } }, select: { code: true } }),
   ]);
   if (!workspace || features.length !== requiredFeatures.length) throw new Error('PERFORMANCE_BROWSER_CATALOG_UNAVAILABLE');
-  const accounts: Record<string, { username: string; password: string; expectedCapabilities: readonly string[] }> = {};
+  const accounts: Record<string, { username: string; password: string; expectedCapabilities: readonly string[];
+    lifecycle: Array<{ status: string; evaluationId: string }> }> = {};
+  const lifecycle: Array<{ status: string; evaluationId: string }> = [];
   await client.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
     let lifecycleManagerId = '';
@@ -73,7 +80,7 @@ const setup = async () => {
         level: 'ADMIN' as const, effectiveFrom: new Date('2020-01-01Z'), reason: 'Synthetic browser acceptance fixture',
       })) });
       if (role === 'lifecycleManager') lifecycleManagerId = user.id;
-      accounts[role] = { username, password, expectedCapabilities };
+      accounts[role] = { username, password, expectedCapabilities, lifecycle };
     }
     for (const [index, status] of ['DRAFT', 'REJECTED', 'SUBMITTED', 'ACCEPTED'].entries()) {
       const personnel = await tx.personnel.create({ data: { firstName: 'پذیرش', lastName: `چرخه ${status}` } });
@@ -101,6 +108,10 @@ const setup = async () => {
       if (status !== 'DRAFT') await tx.performanceEvaluationSection.update({ where: { id: section.id }, data: { status: 'SUBMITTED' } });
       if (status === 'REJECTED') await tx.performanceEvaluationSection.update({ where: { id: section.id }, data: { status: 'REJECTED' } });
       if (status === 'ACCEPTED') await tx.performanceEvaluationSection.update({ where: { id: section.id }, data: { status: 'ACCEPTED' } });
+      if (status !== 'DRAFT') await tx.performanceEvaluation.update({ where: { id: evaluation.id }, data: {
+        status: status === 'SUBMITTED' ? 'UNDER_REVIEW' : status === 'ACCEPTED' ? 'ACCEPTED' : 'READY_FOR_SUBMISSION',
+      } });
+      lifecycle.push({ status, evaluationId: evaluation.id });
     }
   });
   console.log(`PERFORMANCE_BROWSER_FIXTURE:${JSON.stringify({ runId, accounts })}`);

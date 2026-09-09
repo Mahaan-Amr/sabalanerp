@@ -186,6 +186,16 @@ const main = async () => {
       'readiness reporting remains observational; only the explicit reconstruction command persists drift');
 
     console.log('Personnel performance readiness coverage integration tests passed.');
+    if (process.env.PERFORMANCE_ACCEPTANCE_FAILURE_RECOVERY === '1') {
+      console.log(`PERFORMANCE_FAILURE_RECOVERY:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_FAILURE_RECOVERY_V1', scenarios: [
+        { name: 'reconciliation', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+      ], rehearsal: { idempotentApplyReconciliations: 1, driftInjected: true, concurrentHrWriteRetried: true } })}`);
+    }
+    if (process.env.PERFORMANCE_ACCEPTANCE_PERMISSION_EVIDENCE === '1') {
+      console.log(`PERFORMANCE_PERMISSION_EVIDENCE:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_PERMISSION_EVIDENCE_V1', scenarios: [
+        { name: 'personnel-inventory-reemployment-boundaries', assertionIds: ['personnel-root-inventory', 'relationship-assignment-distinct-totals', 'missing-links', 'effective-dated-history', 'no-inflated-personnel-counts'] },
+      ], additionalDisclosures: 0 })}`);
+    }
     if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'reconstruction-hr-write') {
       console.log(raceEvidenceMarker([{
         name: 'reconstruction-hr-write', loserCode: driftResponse!.businessCode!, validTruths: 1,

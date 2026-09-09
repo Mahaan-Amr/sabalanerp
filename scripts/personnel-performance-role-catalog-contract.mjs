@@ -193,6 +193,10 @@ export const validateRoleCatalogManifest = (manifest) => {
   }
 
   const declaredFacts = new Map((manifest.applicabilityDictionary ?? []).map((entry) => [entry.fact, entry]));
+  if (declaredFacts.size !== (manifest.applicabilityDictionary ?? []).length
+    || [...declaredFacts.keys()].some((fact) => !CONTROLLED_FACTS.has(fact))) {
+    errors.push('Applicability dictionary must contain only unique controlled facts.');
+  }
   for (const [index, entry] of (manifest.applicabilityDictionary ?? []).entries()) {
     if (entry.unknown !== 'BLOCK') errors.push(`applicabilityDictionary[${index}].unknown must be BLOCK.`);
     if (typeof entry.source !== 'string' || entry.source.trim() === '') errors.push(`applicabilityDictionary[${index}].source is required.`);

@@ -319,6 +319,12 @@ assert.equal(calculateTypedApplicability(booleanRule, {
 assert.equal(calculateTypedApplicability({ ...booleanRule, operator: 'NOT_EQUALS' }, {
   __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
 }).status, 'BLOCKED');
+assert.doesNotThrow(() => calculateTypedApplicability({ ...booleanRule, fact: 'toString' }, {
+  __applicability: typedSnapshotMetadata, toString: true,
+}));
+assert.equal(calculateTypedApplicability({ ...booleanRule, fact: 'constructor' }, {
+  __applicability: typedSnapshotMetadata, constructor: true,
+}).status, 'BLOCKED', 'prototype-named facts must be rejected instead of inherited from the contract object');
 assert.equal(calculateTypedApplicability({ ...booleanRule, operator: 'EXISTS', values: [] }, {
   __applicability: typedSnapshotMetadata, hasSafetyDuty: true,
 }).status, 'BLOCKED', 'an operator excluded by the canonical fact dictionary must block evaluation');

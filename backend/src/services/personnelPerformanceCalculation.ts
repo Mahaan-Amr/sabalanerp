@@ -249,8 +249,10 @@ export const validateTypedPerformanceApplicabilityRule = (
   if (rule.schemaVersion !== 1) errors.push('نسخه قاعده کاربردپذیری نوع‌دار پشتیبانی نمی‌شود.');
   if (!['EQUALS', 'IN', 'EXISTS'].includes(rule.operator)) errors.push('عملگر قاعده کاربردپذیری پشتیبانی نمی‌شود.');
   if (!Array.isArray(rule.values)) return [...errors, 'مقادیر قاعده کاربردپذیری باید آرایه باشند.'];
+  if (!Object.prototype.hasOwnProperty.call(PERFORMANCE_APPLICABILITY_FACT_TYPES, rule.fact)) {
+    return ['واقعیت کنترل‌شده این قرارداد پشتیبانی نمی‌شود.'];
+  }
   const expectedType = PERFORMANCE_APPLICABILITY_FACT_TYPES[rule.fact];
-  if (!expectedType) return ['واقعیت کنترل‌شده این قرارداد پشتیبانی نمی‌شود.'];
   const allowedOperators = PERFORMANCE_APPLICABILITY_FACT_OPERATORS[rule.fact].operators;
   if (!allowedOperators.includes(rule.operator)) {
     errors.push(`عملگر «${rule.operator}» برای واقعیت «${rule.fact}» مجاز نیست.`);

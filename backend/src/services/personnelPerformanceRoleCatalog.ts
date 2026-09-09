@@ -235,7 +235,9 @@ const resolveApplicability = (
     errors.push(`معیار ${criterion.conceptCode} از واقعیت کاربردپذیری تعریف‌نشده استفاده می‌کند.`);
     return null;
   }
-  const controlledDefinition = PERFORMANCE_APPLICABILITY_FACT_OPERATORS[definition.fact];
+  const controlledDefinition = Object.prototype.hasOwnProperty.call(PERFORMANCE_APPLICABILITY_FACT_OPERATORS, definition.fact)
+    ? PERFORMANCE_APPLICABILITY_FACT_OPERATORS[definition.fact]
+    : undefined;
   if (definition.unknown !== 'BLOCK' || typeof definition.source !== 'string' || !definition.source.trim()
     || typeof definition.sourceVersion !== 'string' || !definition.sourceVersion.trim()) {
     errors.push(`واقعیت ${definition.fact} باید منبع نسخه‌دار و رفتار BLOCK برای مقدار نامعلوم داشته باشد.`);
@@ -324,6 +326,10 @@ export const inspectPerformanceRoleCatalogManifest = (input: unknown): Performan
   const applicabilityDictionary = new Map<string, ApplicabilityDictionaryEntry>(
     applicabilityEntries.map((entry) => [entry.fact, entry]),
   );
+  if (applicabilityDictionary.size !== applicabilityEntries.length
+    || applicabilityEntries.some((entry) => !Object.prototype.hasOwnProperty.call(PERFORMANCE_APPLICABILITY_FACT_TYPES, entry.fact))) {
+    errors.push('فرهنگ کاربردپذیری فقط باید واقعیت‌های یکتای قرارداد کنترل‌شده سامانه را تعریف کند.');
+  }
   for (const [fact, factType] of Object.entries(PERFORMANCE_APPLICABILITY_FACT_TYPES)) {
     const entry = applicabilityDictionary.get(fact);
     if (!entry || entry.type !== factType || entry.unknown !== 'BLOCK' || !text(entry.source) || !text(entry.sourceVersion)) {

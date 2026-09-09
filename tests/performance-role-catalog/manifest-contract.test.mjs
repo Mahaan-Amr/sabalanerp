@@ -44,6 +44,17 @@ test('the applicability dictionary is versioned and fails closed on unknown fact
   assert.match(errors, /sourceVersion/i);
 });
 
+test('the applicability dictionary rejects prototype-named and duplicate facts', async () => {
+  const manifest = await loadFixture();
+  manifest.applicabilityDictionary.push({
+    fact: 'constructor', type: 'ID', operators: ['EQUALS'], unknown: 'BLOCK', source: 'malformed-source', sourceVersion: 'v1',
+  });
+  manifest.applicabilityDictionary.push(structuredClone(manifest.applicabilityDictionary[0]));
+  manifest.catalog.contentHash = manifestContentHash(manifest);
+
+  assert.match(validateRoleCatalogManifest(manifest).join('\n'), /only unique controlled facts/i);
+});
+
 test('the producer snapshot contract carries versioned effective metadata', async () => {
   const manifest = await loadFixture();
   if (manifest.applicabilitySnapshotContract) delete manifest.applicabilitySnapshotContract.sourceVersions;

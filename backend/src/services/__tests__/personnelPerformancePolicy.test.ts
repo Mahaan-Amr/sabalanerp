@@ -208,6 +208,16 @@ const driftedDictionaryOperators = structuredClone(catalogManifest);
 driftedDictionaryOperators.applicabilityDictionary.find((entry: any) => entry.fact === 'jobId').operators.push('EXISTS');
 driftedDictionaryOperators.catalog.contentHash = performanceRoleCatalogContentHash(driftedDictionaryOperators);
 assert.ok(inspectPerformanceRoleCatalogManifest(driftedDictionaryOperators).errors.some((message) => message.includes('عملگرهای فرهنگ')));
+const prototypeNamedFact = structuredClone(catalogManifest);
+prototypeNamedFact.applicabilityDictionary.push({
+  fact: 'constructor', type: 'ID', operators: ['EQUALS'], unknown: 'BLOCK', source: 'malformed-source', sourceVersion: 'v1',
+});
+prototypeNamedFact.positions[0].criteria[0].applicability = {
+  schemaVersion: 1, fact: 'constructor', factType: 'ID', operator: 'EQUALS', values: ['malformed-value'],
+};
+prototypeNamedFact.catalog.contentHash = performanceRoleCatalogContentHash(prototypeNamedFact);
+assert.doesNotThrow(() => inspectPerformanceRoleCatalogManifest(prototypeNamedFact));
+assert.ok(inspectPerformanceRoleCatalogManifest(prototypeNamedFact).errors.some((message) => message.includes('قرارداد کنترل‌شده')));
 const excessivePrecision = structuredClone(catalogManifest);
 excessivePrecision.jobs[0].categories[0].weight = 100.001;
 excessivePrecision.catalog.contentHash = performanceRoleCatalogContentHash(excessivePrecision);

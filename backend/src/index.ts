@@ -78,6 +78,7 @@ import partnerCorrectionRoutes from "./routes/partner-corrections";
 import partnerAccountingRoutes from "./routes/partner-accounting";
 import partnerReportRoutes from "./routes/partner-reports";
 import partnerOperationsRoutes from "./routes/partner-operations";
+import partnerActivationRoutes from "./routes/partner-activation";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -297,6 +298,7 @@ app.use("/api/partner/corrections", partnerCorrectionRoutes);
 app.use("/api/partner/accounting", partnerAccountingRoutes);
 app.use("/api/partner/reports", partnerReportRoutes);
 app.use("/api/partner/operations", partnerOperationsRoutes);
+app.use("/api/partner/activation", partnerActivationRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/orders", orderRoutes);

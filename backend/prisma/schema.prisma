@@ -757,27 +757,49 @@ model RecoveryAuditEvent {
 }
 
 model DeploymentOperation {
-  id             String    @id
-  activeKey      String?   @unique
-  releaseId      String
-  targetCommit   String
-  owner          String
-  phase          String
-  leaseToken     String    @unique
-  leaseExpiresAt DateTime
-  heartbeatAt    DateTime
-  startedAt      DateTime
-  completedAt    DateTime?
-  errorCode      String?
-  errorMessage   String?
-  checkpointJson Json?
-  reportJson     Json?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                      String                              @id
+  activeKey               String?                             @unique
+  releaseId               String
+  targetCommit            String
+  owner                   String
+  phase                   String
+  leaseToken              String                              @unique
+  leaseExpiresAt          DateTime
+  heartbeatAt             DateTime
+  startedAt               DateTime
+  completedAt             DateTime?
+  errorCode               String?
+  errorMessage            String?
+  checkpointJson          Json?
+  reportJson              Json?
+  createdAt               DateTime                            @default(now())
+  updatedAt               DateTime                            @updatedAt
+  partnerReleaseReadiness PartnerReleaseReadinessPublication?
 
   @@index([phase, leaseExpiresAt])
   @@index([startedAt])
   @@map("deployment_operations")
+}
+
+model PartnerReleaseReadinessPublication {
+  id                       String              @id
+  deploymentId             String              @unique
+  releaseId                String
+  targetCommit             String
+  schemaId                 String
+  checkedAt                DateTime
+  expiresAt                DateTime
+  packageSha256            String
+  trustEnvelopeSha256      String
+  trustKeyId               String
+  packageBytesBase64       String
+  trustEnvelopeBytesBase64 String
+  evidenceJson             Json
+  createdAt                DateTime            @default(now())
+  deployment               DeploymentOperation @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
+
+  @@index([releaseId, expiresAt])
+  @@map("partner_release_readiness_publications")
 }
 
 model Personnel {
@@ -7774,18 +7796,18 @@ model PerformanceFeaturePhaseVersion {
 }
 
 model PerformanceSafetyPause {
-  id              String    @id @default(cuid())
-  phaseVersionId  String
-  cohortVersionId String?
-  scope           String
-  status          String    @default("ACTIVE")
-  reasonCode      String
-  reason          String
-  startedByUserId String?
-  startedAt       DateTime  @default(now())
-  resumedByUserId String?
-  resumedAt       DateTime?
-  resumeReason    String?
+  id               String    @id @default(cuid())
+  phaseVersionId   String
+  cohortVersionId  String?
+  scope            String
+  status           String    @default("ACTIVE")
+  reasonCode       String
+  reason           String
+  startedByUserId  String?
+  startedAt        DateTime  @default(now())
+  resumedByUserId  String?
+  resumedAt        DateTime?
+  resumeReason     String?
   sourceIncidentId String?   @unique
 
   @@index([status, startedAt])
@@ -7794,45 +7816,48 @@ model PerformanceSafetyPause {
 }
 
 model PerformanceOperationalRoute {
-  id String @id @default(cuid())
-  routeKey String @unique
+  id              String   @id @default(cuid())
+  routeKey        String   @unique
   recipientUserId String
-  verifiedAt DateTime
-  configuredById String
-  reason String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  verifiedAt      DateTime
+  configuredById  String
+  reason          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
   @@index([recipientUserId, verifiedAt])
   @@map("performance_operational_routes")
 }
 
 model PerformanceOperationalHeartbeat {
-  id String @id @default(cuid())
-  component String @unique
+  id         String   @id @default(cuid())
+  component  String   @unique
   observedAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
   @@index([observedAt])
   @@map("performance_operational_heartbeats")
 }
 
 model PerformanceOperationalWindow {
-  id String @id @default(cuid())
-  metricKey String
-  scope String
+  id              String   @id @default(cuid())
+  metricKey       String
+  scope           String
   cohortVersionId String?
-  windowStart DateTime
-  windowEnd DateTime
-  numerator Int
-  denominator Int
-  p95Ms Int?
-  p99Ms Int?
-  maxAgeSeconds Int?
-  baselineBps Int?
-  retryExhausted Boolean @default(false)
-  measuredBps Int?
-  thresholdState String
-  createdAt DateTime @default(now())
+  windowStart     DateTime
+  windowEnd       DateTime
+  numerator       Int
+  denominator     Int
+  p95Ms           Int?
+  p99Ms           Int?
+  maxAgeSeconds   Int?
+  baselineBps     Int?
+  retryExhausted  Boolean  @default(false)
+  measuredBps     Int?
+  thresholdState  String
+  createdAt       DateTime @default(now())
+
   @@unique([metricKey, scope, cohortVersionId, windowStart, windowEnd])
   @@index([metricKey, scope, cohortVersionId, windowEnd])
   @@index([createdAt])
@@ -7840,41 +7865,43 @@ model PerformanceOperationalWindow {
 }
 
 model PerformanceOperationalRequestObservation {
-  id String @id @default(cuid())
-  metricKey String
-  durationMs Int
-  responseStatus Int
+  id                    String   @id @default(cuid())
+  metricKey             String
+  durationMs            Int
+  responseStatus        Int
   authorizationDecision String
-  timedOut Boolean @default(false)
-  observedAt DateTime @default(now())
+  timedOut              Boolean  @default(false)
+  observedAt            DateTime @default(now())
+
   @@index([observedAt, metricKey])
   @@map("performance_operational_request_observations")
 }
 
 model PerformanceOperationalIncident {
-  id String @id @default(cuid())
-  deduplicationKey String @unique
-  category String
-  metricKey String?
-  routeKey String
-  scope String
-  cohortVersionId String?
-  severity String
-  status String @default("OPEN")
-  thresholdCode String
-  occurrenceCount Int @default(1)
-  firstObservedAt DateTime
-  lastObservedAt DateTime
+  id               String    @id @default(cuid())
+  deduplicationKey String    @unique
+  category         String
+  metricKey        String?
+  routeKey         String
+  scope            String
+  cohortVersionId  String?
+  severity         String
+  status           String    @default("OPEN")
+  thresholdCode    String
+  occurrenceCount  Int       @default(1)
+  firstObservedAt  DateTime
+  lastObservedAt   DateTime
   acknowledgeDueAt DateTime
   containmentDueAt DateTime?
-  escalationDueAt DateTime?
-  acknowledgedAt DateTime?
-  containedAt DateTime?
-  escalatedAt DateTime?
-  resolvedAt DateTime?
-  safetyPauseId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  escalationDueAt  DateTime?
+  acknowledgedAt   DateTime?
+  containedAt      DateTime?
+  escalatedAt      DateTime?
+  resolvedAt       DateTime?
+  safetyPauseId    String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
   @@index([status, severity, firstObservedAt])
   @@index([scope, cohortVersionId, status])
   @@index([safetyPauseId])
@@ -7882,13 +7909,14 @@ model PerformanceOperationalIncident {
 }
 
 model PerformanceOperationalIncidentEvidence {
-  id String @id @default(cuid())
-  incidentId String
-  action String
-  actorUserId String?
-  reasonCode String
+  id           String   @id @default(cuid())
+  incidentId   String
+  action       String
+  actorUserId  String?
+  reasonCode   String
   evidenceHash String
-  recordedAt DateTime @default(now())
+  recordedAt   DateTime @default(now())
+
   @@index([incidentId, recordedAt])
   @@map("performance_operational_incident_evidence")
 }
@@ -8242,12 +8270,12 @@ model PerformanceExportReceipt {
 
 // Sealed source index; plaintext identifiers and reconstruction stay in the protected vault.
 model PerformanceExportLineage {
-  exportId           String   @id
-  schemaVersion      Int
-  reconstructionId   String   @unique
-  dependencyHash     String
-  dependencyCount    Int
-  createdAt          DateTime @default(now())
+  exportId         String   @id
+  schemaVersion    Int
+  reconstructionId String   @unique
+  dependencyHash   String
+  dependencyCount  Int
+  createdAt        DateTime @default(now())
 
   @@map("performance_export_lineage")
 }

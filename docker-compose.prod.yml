@@ -96,6 +96,8 @@ services:
       BIOMETRIC_CONNECTOR_MODE: ${BIOMETRIC_CONNECTOR_MODE:-unconfigured}
       BIOMETRIC_WORKSTATIONS_JSON: ${BIOMETRIC_WORKSTATIONS_JSON:-{}}
       SMS_IR_TIMEOUT_MS: ${SMS_IR_TIMEOUT_MS:-30000}
+      DEPLOYMENT_RELEASE_ID: ${DEPLOYMENT_RELEASE_ID:-}
+      PARTNER_SCHEMA_ID: ${PARTNER_SCHEMA_ID:-}
       SMS_IR_DNS_SERVERS: ${SMS_IR_DNS_SERVERS:-}
       CONTRACT_CONFIRM_LINK_TTL_DAYS: ${CONTRACT_CONFIRM_LINK_TTL_DAYS}
       CONTRACT_CONFIRM_OTP_TTL_MINUTES: ${CONTRACT_CONFIRM_OTP_TTL_MINUTES}
@@ -128,6 +130,7 @@ services:
       - backend_recovery:/app/storage/recovery
       - recovery_coordination:/app/recovery-coordination
       - inquiry_data:/app/recovery-sources/inquiry
+      - ${DEPLOYMENT_SECRET_DIR:-./deploy/secrets}/partner-release-trust-public.der:/run/deployment-secrets/partner-release-trust-public.der:ro
     depends_on:
       postgres:
         condition: service_healthy

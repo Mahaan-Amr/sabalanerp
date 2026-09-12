@@ -27,11 +27,13 @@ export const resolveEligibleResponder: NonNullable<PartnerInquiryDependencies['r
   const user = await tx.user.findUnique({ where: { id: input.responderId }, select: {
     isActive: true, partnerProfile: { select: { id: true } }, role: true,
   } });
-  if (!user?.isActive || user.partnerProfile) return { ok: false, error: partnerError('NOT_ASSIGNED') };
+  if (!user?.isActive || user.partnerProfile || user.role === 'ADMIN') {
+    return { ok: false, error: partnerError('NOT_ASSIGNED') };
+  }
   const authority = await resolveScopedActions(tx, input.responderId, 'PARTNER');
   const grant = authority.grants.find(candidate => candidate.action === 'INQUIRY_RESPOND' &&
     candidate.rootKind === 'INQUIRY' && candidate.purpose === 'RESPONDER' && candidate.scope === 'ASSIGNED');
-  if (user.role !== 'ADMIN' && !grant) return { ok: false, error: partnerError('NOT_ASSIGNED') };
+  if (!grant) return { ok: false, error: partnerError('NOT_ASSIGNED') };
   return { ok: true, value: { responderId: input.responderId,
     eligibilityEvidence: { version: 1, source: 'CURRENT_RESPONDER_AUTHORITY', role: user.role,
       authorizationRevision: authority.authorizationRevision,

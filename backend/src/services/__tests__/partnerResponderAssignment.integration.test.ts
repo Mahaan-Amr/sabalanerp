@@ -40,6 +40,9 @@ test('profile responder assignment is append-only, CAS protected and exactly rep
         cohortId: partnerId, enrollmentPaused: false, operationalPaused: true } });
       await tx.partnerCohortMembership.create({ data: { id: partnerId, profileId: partnerId, cohortId: partnerId,
         actorId, eligibilityEvidence: { fixture: true } } });
+      const adminResponder = await resolveEligibleResponder(tx, { responderId: actorId });
+      assert.equal(adminResponder.ok ? null : adminResponder.error.code, 'NOT_ASSIGNED',
+        'مدیر سیستم پاسخ‌دهنده عادی قیمت نیست');
       for (const responderId of [responderA, responderB]) await grantScopedAction(tx,
         { actorId, reason: 'مجوز پاسخ استعلام برای تست', correlationId: `grant-${responderId}` },
         { principal: { kind: 'USER', id: responderId }, domain: 'PARTNER', action: 'INQUIRY_RESPOND',

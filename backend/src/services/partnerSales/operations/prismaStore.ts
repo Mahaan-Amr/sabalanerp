@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import * as contracts from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
+import { readAuthorizationDecisionByCorrelation } from '../../effectiveAuthorization/audit';
 import type { OperationsState } from './contracts';
 import type { Incident, OperationsStore, RecordedCommand, RemediationEvidence } from './service';
 import type { ReadinessEvidence } from './readiness';
 import { PARTNER_OPERATIONS_CONTROL_ID } from '../authorization/technicalRollout';
+import { createPrismaPartnerProfileStore } from '../profiles/prismaStore';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -13,7 +15,9 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
 
 export function createPrismaPartnerOperationsStore(input: {
   database: PrismaClient; actorId: string; correlationId: string;
+  runtimeIdentity: { releaseId: string; schemaId: string };
 }): OperationsStore {
+  const profileStore = createPrismaPartnerProfileStore(input.database);
   return { transaction: work => input.database.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM partner_operations_controls
       WHERE id = ${PARTNER_OPERATIONS_CONTROL_ID} FOR UPDATE`;
@@ -23,6 +27,10 @@ export function createPrismaPartnerOperationsStore(input: {
       } } },
     });
     let selected = await loadControl();
+    let enrollmentAuthorization: { evidenceId: string; authorizationRevision: number; lifecycleRevision: number } | null = null;
+    let enrollmentReadiness: ReadinessEvidence | null = null;
+    let enrollmentCandidateEvidence: { sellerId: string; profileId: string; profileRevision: number;
+      gateEvidenceIds: string[] } | null = null;
     const readState = (): OperationsState => ({ revision: selected.revision,
       enrollmentPaused: selected.enrollmentPaused, operationalPaused: selected.operationalPaused,
       ...(selected.lastOperationalPauseAt ? { lastOperationalPauseAt: selected.lastOperationalPauseAt.toISOString() } : {}),
@@ -34,26 +42,57 @@ export function createPrismaPartnerOperationsStore(input: {
       authorize: async () => {
         const authorizationRoot = selected.cohort?.memberships[0]?.profile ??
           await tx.partnerProfile.findFirst({ orderBy: { id: 'asc' }, select: { id: true, userId: true } });
-        if (!authorizationRoot) return { ok: false, error: contracts.partnerError('NOT_FOUND') };
-        return createAuditedPartnerAuthorization(tx, { actorId: input.actorId,
+        const authorizationTarget = authorizationRoot ? undefined : { prospectiveProfileOwnerId: input.actorId };
+        const result = await createAuditedPartnerAuthorization(tx, { actorId: input.actorId,
           purpose: 'OPERATIONS', channel: 'API' },
-        { correlationId: input.correlationId, reason: 'مدیریت عملیاتی کانال فروشنده همکار' })
-          .authorize('OPERATIONS_MANAGE', { kind: 'PROFILE', id: authorizationRoot.id });
+        { correlationId: input.correlationId, reason: 'مدیریت عملیاتی کانال فروشنده همکار' },
+        authorizationTarget)
+          .authorize('OPERATIONS_MANAGE', { kind: 'PROFILE',
+            id: authorizationRoot?.id ?? `prospective:operations:${input.actorId}` });
+        if (result.ok) {
+          const rootId = authorizationRoot?.id ?? `prospective:operations:${input.actorId}`;
+          const evidence = await readAuthorizationDecisionByCorrelation(tx, { domain: 'PARTNER', actorId: input.actorId,
+            action: 'OPERATIONS_MANAGE', rootKind: 'PROFILE', rootId, purpose: 'OPERATIONS', channel: 'API',
+            correlationId: input.correlationId, allowed: true });
+          if (!evidence) return { ok: false, error: contracts.partnerError('INTEGRITY_CONFLICT') };
+          enrollmentAuthorization = { evidenceId: evidence.id, authorizationRevision: result.value.authorizationRevision,
+            lifecycleRevision: result.value.lifecycleRevision };
+        }
+        return result;
       },
       readState: async () => readState(),
       writeState: async state => {
         if (!selected.cohort && state.cohort) {
           await tx.partnerReleaseCohort.create({ data: { id: state.cohort.id, name: state.cohort.name,
-            activationEnabled: false, enrollmentPaused: true, operationalPaused: true } });
+            activationEnabled: true, enrollmentPaused: true, operationalPaused: true,
+            readinessEvidence: selected.readinessEvidence === null ? Prisma.DbNull
+              : selected.readinessEvidence as Prisma.InputJsonValue } });
         }
         if (state.cohort) {
           const currentSellerIds = new Set(selected.cohort?.memberships.map(item => item.profile.userId) ?? []);
           for (const sellerId of state.cohort.sellerIds.filter(id => !currentSellerIds.has(id))) {
             const profile = await tx.partnerProfile.findUniqueOrThrow({ where: { userId: sellerId }, select: { id: true } });
+            if (!enrollmentAuthorization || !enrollmentReadiness || !enrollmentCandidateEvidence ||
+                enrollmentCandidateEvidence.sellerId !== sellerId || enrollmentCandidateEvidence.profileId !== profile.id) {
+              throw new Error('Missing current Partner enrollment provenance');
+            }
             await tx.partnerCohortMembership.create({ data: { id: randomUUID(), profileId: profile.id,
               cohortId: state.cohort.id, actorId: input.actorId,
-              eligibilityEvidence: json({ schemaVersion: 1, source: 'OPERATIONS_CONTROL' }) } });
+              eligibilityEvidence: json({ schemaVersion: 1, source: 'OPERATIONS_CONTROL',
+                readinessEvidenceId: enrollmentReadiness.evidenceId,
+                authorizationEvidenceId: enrollmentAuthorization.evidenceId,
+                authorizationCorrelationId: input.correlationId,
+                authorizationRevision: enrollmentAuthorization.authorizationRevision,
+                lifecycleRevision: enrollmentAuthorization.lifecycleRevision,
+                profileRevision: enrollmentCandidateEvidence.profileRevision,
+                gateEvidenceIds: enrollmentCandidateEvidence.gateEvidenceIds }) } });
           }
+          await tx.partnerReleaseCohort.update({ where: { id: state.cohort.id }, data: {
+            activationEnabled: selected.cohort ? selected.cohort.activationEnabled : true,
+            enrollmentPaused: state.enrollmentPaused, operationalPaused: state.operationalPaused,
+            readinessEvidence: selected.readinessEvidence === null ? Prisma.DbNull
+              : selected.readinessEvidence as Prisma.InputJsonValue,
+          } });
         }
         const updated = await tx.partnerOperationsControl.updateMany({
           where: { id: PARTNER_OPERATIONS_CONTROL_ID, revision: selected.revision },
@@ -81,12 +120,19 @@ export function createPrismaPartnerOperationsStore(input: {
       },
       readiness: async () => {
         const evidence = selected.readinessEvidence as unknown as ReadinessEvidence | null;
-        return { evidence: evidence ?? null, current: { now: now(), releaseId: selected.cohortId ?? PARTNER_OPERATIONS_CONTROL_ID,
-          schemaId: 'partner-schema-v1' } };
+        enrollmentReadiness = evidence;
+        return { evidence: evidence ?? null, current: { now: now(), ...input.runtimeIdentity } };
       },
       enrollmentCandidate: async sellerId => {
-        const profile = await tx.partnerProfile.findUnique({ where: { userId: sellerId }, select: { id: true, state: true } });
-        return profile ? { sellerId, profileId: profile.id, eligible: profile.state === 'ACTIVE' } : null;
+        const profile = await tx.partnerProfile.findUnique({ where: { userId: sellerId }, select: {
+          id: true, userId: true, state: true, revision: true, firstActivatedAt: true, irreversibleAt: true } });
+        if (!profile || !['PENDING', 'ACTIVE'].includes(profile.state)) return null;
+        const gates = await profileStore.readActivationGates(tx, profile);
+        const eligible = profile.state === 'ACTIVE' || gates.identityVerified && gates.commercialTermsReady && gates.creditTermsReady &&
+          gates.responderReady && gates.conversionCleared && gates.userActive && !gates.conflictingInternalAuthority;
+        enrollmentCandidateEvidence = { sellerId, profileId: profile.id, profileRevision: profile.revision,
+          gateEvidenceIds: [...gates.evidenceIds].sort() };
+        return { sellerId, profileId: profile.id, eligible };
       },
       listOpenIncidents: async () => {
         const rows = await tx.partnerOperationsIncident.findMany({ where: { resolution: { equals: Prisma.AnyNull } },

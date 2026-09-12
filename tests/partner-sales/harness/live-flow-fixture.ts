@@ -105,8 +105,6 @@ async function seed(namespace: string) {
       { id: id.adminUser, email: `${namespace}-admin@example.invalid`, username: id.adminUser,
         password: passwordHash, firstName: 'آزمون', lastName: 'مدیر سامانه', role: 'ADMIN' },
     ] });
-    await tx.workspacePermission.create({ data: { id: `${namespace}-workspace`, userId: id.user,
-      workspace: 'sales', permissionLevel: 'edit' } });
     await tx.workspacePermission.create({ data: { id: `${namespace}-accounting-workspace`, userId: id.accountingUser,
       workspace: 'accounting', permissionLevel: 'admin', grantedBy: id.accountingUser } });
     await tx.workspacePermission.create({ data: { id: `${namespace}-ordinary-accounting-workspace`, userId: id.ordinaryAccountingUser,

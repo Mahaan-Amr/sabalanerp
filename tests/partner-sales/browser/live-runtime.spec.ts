@@ -66,7 +66,9 @@ test('authenticated Partner case reads and persists correction state @live-runti
     await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(namespace);
     await page.getByRole('textbox', { name: 'رمز عبور' }).fill(password);
     await page.getByRole('button', { name: 'ورود', exact: true }).click();
-    await page.waitForURL(/\/dashboard(?:$|\?)/);
+    await page.waitForURL(/\/dashboard\/sales\/(?:partners|partner-inquiries|partner-cases)/);
+    await expect(page.getByText('ایجاد فروش همکار', { exact: true })).toBeVisible();
+    await expect(page.getByText('مشتریان و مشخصات همکاری', { exact: true })).toBeVisible();
     await page.waitForTimeout(750);
     await page.goto('/dashboard/sales/contracts/create');
     await expect(page.getByRole('heading', { name: 'ایجاد فروش همکار' })).toBeVisible();

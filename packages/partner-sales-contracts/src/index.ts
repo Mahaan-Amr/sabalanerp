@@ -13,6 +13,7 @@ export * from './inquiry-v2';
 export * from './workspaces-v2';
 export * from './management-commands-v2';
 export * from './ports-v2';
+export * from './activation-package-v3';
 export * from './technical-catalog';
 export * from './technical-draft';
 export * from './technical-recovery';

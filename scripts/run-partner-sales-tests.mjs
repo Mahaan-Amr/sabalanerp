@@ -52,9 +52,9 @@ async function hashFiles(root) {
   return result;
 }
 
-function run(name, commandArgs, environment = {}, timeoutMs = 10 * 60_000) {
+function run(name, commandArgs, environment = {}, timeoutMs = 10 * 60_000, cwd = repositoryRoot) {
   const result = spawnSync(process.execPath, commandArgs, {
-    cwd: repositoryRoot, env: { ...process.env, PARTNER_QA_RUN_ID: runId,
+    cwd, env: { ...process.env, PARTNER_QA_RUN_ID: runId,
       NODE_PATH: path.join(repositoryRoot, 'backend/node_modules'),
       CONTRACT_RECOVERY_TEST_DATABASE_URL:
         'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public&connection_limit=2&pool_timeout=10',
@@ -65,7 +65,7 @@ function run(name, commandArgs, environment = {}, timeoutMs = 10 * 60_000) {
   const logFile = `${manifest.checks.length}-${name.replaceAll(/[^a-z0-9]+/gi, '-')}.log`;
   writeFileSync(path.join(output, logFile), log);
   process.stdout.write(log);
-  manifest.checks.push({ name, command: ['node', ...commandArgs].join(' '), logFile, status: result.status === 0 ? 'pass' : 'fail', exitCode: result.status });
+  manifest.checks.push({ name, command: ['node', ...commandArgs].join(' '), cwd: path.relative(repositoryRoot, cwd) || '.', logFile, status: result.status === 0 ? 'pass' : 'fail', exitCode: result.status });
   if (result.error || result.status !== 0) throw new Error(`${name} failed; see test output.`);
 }
 
@@ -201,7 +201,12 @@ try {
     'backend/node_modules/tsx/dist/cli.mjs', '--test',
     'tests/partner-sales/integration/workspace-query.test.ts',
     'tests/partner-sales/integration/workspace-transport.test.ts',
+    'backend/src/routes/__tests__/partnerActivationTransport.test.ts',
   ]);
+  if (['transport', 'integration', 'all'].includes(mode)) run('Partner activation frontend transport', [
+    'node_modules/tsx/dist/cli.mjs', '--test',
+    'src/features/partner-sales/__tests__/activationHttpPort.test.ts',
+  ], {}, 10 * 60_000, path.join(repositoryRoot, 'frontend'));
   if (['integration', 'all'].includes(mode)) run('Partner lifecycle and downstream integration', [
     'backend/node_modules/tsx/dist/cli.mjs', '--test', '--test-concurrency=1',
     'backend/src/services/__tests__/partnerCustomerOutput.test.ts',
@@ -210,6 +215,10 @@ try {
     'backend/src/services/__tests__/partnerFulfillment.test.ts',
     'backend/src/services/__tests__/partnerFinancialCorrection.integration.test.ts',
     'backend/src/services/__tests__/partnerOperationsPrisma.integration.test.ts',
+    'backend/src/services/__tests__/partnerActivationPackage.integration.test.ts',
+    'backend/src/services/__tests__/partnerReleaseEvidence.test.ts',
+    'backend/src/services/__tests__/partnerReleaseEvidence.integration.test.ts',
+    'backend/src/services/__tests__/partnerTrustedClaimsEnvelope.test.ts',
   ]);
   if (['foundation', 'all'].includes(mode)) run('foundation consumer contract', ['--test', 'tests/partner-sales/foundation-contract.test.mjs']);
   if (['typecheck', 'all'].includes(mode)) run('typecheck', ['frontend/node_modules/typescript/bin/tsc', '-p', 'tests/partner-sales/tsconfig.json']);

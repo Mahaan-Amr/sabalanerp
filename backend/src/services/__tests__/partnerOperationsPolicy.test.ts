@@ -63,6 +63,20 @@ test('every action port is classified; new enrollment is separate from active co
   assert.equal(operationForCommand({ type: 'CASE_DRAFT_REVISE' } as contract.PartnerCommand), 'CASE_DRAFT_WRITE');
 });
 
+test('cohort enrollment may proceed while operational traffic remains paused', () => {
+  const evidence = { source: 'DATABASE_VERIFIED' as const, releaseId: 'release-333', schemaId: 'schema-333',
+    checkedAt: '2026-08-27T07:59:00.000Z', expiresAt: '2026-08-27T08:10:00.000Z', evidenceId: 'evidence-333',
+    gates: Object.fromEntries(readinessGates.map(gate => [gate, true])),
+    acceptedBy: Object.fromEntries(acceptanceResponsibilities.map(role => [role, 'approval-333'])) };
+  const operator: PermissionContext = { ...permission, actorId: 'operator-333', persona: 'INTERNAL', isAdmin: true,
+    purpose: 'OPERATIONS', scope: 'COMPANY', partnerSellerId: 'candidate-333', partnerStatus: 'PENDING' };
+  const state = { ...initialOperationsState(), enrollmentPaused: false, operationalPaused: true,
+    cohort: { id: 'cohort-333', name: 'همکاران تأییدشده', sellerIds: [] } };
+  assert.equal(checkOperationsGate(contract, state, { operation: 'COHORT_ENROLL', permission: operator,
+    readiness: { evidence, current: { now: permission.evaluatedAt, releaseId: evidence.releaseId,
+      schemaId: evidence.schemaId } } }), null);
+});
+
 test('pause preserves support cancellation, internal remediation and healthy committed obligations', () => {
   const state = initialOperationsState();
   const internal: PermissionContext = { ...permission, actorId: 'operator-333', persona: 'INTERNAL', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND' };

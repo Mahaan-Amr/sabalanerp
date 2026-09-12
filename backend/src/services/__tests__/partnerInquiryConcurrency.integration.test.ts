@@ -28,7 +28,12 @@ async function setup(database: PrismaClient, state: 'PENDING' | 'REJECTED' = 'PE
   await database.$transaction(async tx => {
     await tx.user.createMany({ data: [partnerId, responderId, managerId].map((id, index) => ({ id, username: id,
       email: `${id}@example.invalid`, password: 'not-a-login', firstName: `Race${index}`, lastName: 'Fixture',
-      ...(id === responderId || id === managerId ? { role: 'ADMIN' as const } : {}) })) });
+      ...(id === managerId ? { role: 'ADMIN' as const } : {}) })) });
+    await tx.effectiveActionGrant.createMany({ data: ['INQUIRY_READ', 'INQUIRY_RESPOND'].map((action, index) => ({
+      id: `${prefix}-responder-grant-${index}`, principalKind: 'USER' as const, principalId: responderId,
+      subjectUserId: responderId, domain: 'PARTNER', action, rootKind: 'INQUIRY', purpose: 'RESPONDER',
+      scope: 'ASSIGNED' as const, effect: 'ALLOW' as const, grantedBy: managerId,
+      reason: 'مجوز پاسخ‌دهنده تست همزمانی', correlationId: `${prefix}-responder-grant` })) });
     await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
     await tx.partnerReleaseCohort.create({ data: { id: partnerId, name: partnerId, activationEnabled: true,
       enrollmentPaused: false, operationalPaused: false } });
@@ -87,6 +92,7 @@ async function cleanup(database: PrismaClient, fixture: Fixture) {
     } });
     await tx.partnerReleaseCohort.delete({ where: { id: fixture.partnerId } });
     await tx.partnerProfile.delete({ where: { id: fixture.partnerId } });
+    await tx.effectiveActionGrant.deleteMany({ where: { id: { startsWith: `${fixture.prefix}-responder-grant-` } } });
     // Re-enable FK triggers before removing users. The live outbox worker can
     // finish a claimed delivery while this test cleans up; normal constraints
     // make that insert serialize before the cascading user delete instead of

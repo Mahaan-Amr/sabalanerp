@@ -32,7 +32,7 @@ lost reason, while `راکد` requires a dormant reason and may carry a revisit 
 The migration adds Partner revision/CAS fields, immutable match/transfer/event
 evidence and transaction-local owner/transfer guards. It does not change an
 ordinary Customer until an approved transfer binds that Customer to an active
-Partner Profile. Public contracts 1.9.0 keep wire schemaVersion 1 and add only
+Partner Profile. Public contracts 1.10.0 keep wire schemaVersion 1 and add only
 the v2 CRM action vocabulary plus the inferred masked-match type.
 
 ## Technical catalog

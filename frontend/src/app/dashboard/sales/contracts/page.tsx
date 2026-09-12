@@ -1,6 +1,6 @@
 'use client';
 import { ErpInlineState, ErpPressable } from '@/components/erp';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaCheck,
@@ -190,7 +190,8 @@ export default function ContractsPage() {
   });
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
-  const [operationError, setOperationError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale'; source: 'load' | 'action'; contractId?: string } | null>(null);
+  const [operationError, setOperationError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale'; source: 'contracts' | 'profile' | 'action'; contractId?: string } | null>(null);
+  const contractLoadSequenceRef = useRef(0);
 
   useEffect(() => {
     loadCurrentUser();
@@ -210,11 +211,13 @@ export default function ContractsPage() {
 
   const loadContracts = useCallback(async (page = 1, options: { append?: boolean } = {}) => {
     const append = options.append === true;
+    const requestSequence = ++contractLoadSequenceRef.current;
     try {
       if (append) {
         setLoadingMore(true);
       } else {
         setLoading(true);
+        setLoadingMore(false);
         setOperationError(null);
       }
 
@@ -226,26 +229,30 @@ export default function ContractsPage() {
         lifecycleView,
       });
 
+      if (requestSequence !== contractLoadSequenceRef.current) return;
+
       if (response.data.success) {
         setContracts((current) => (append ? [...current, ...response.data.data] : response.data.data));
-        setOperationError((current) => current?.source === 'load' ? null : current);
+        setOperationError((current) => current?.source === 'contracts' ? null : current);
         if (response.data.pagination) {
           setPagination(response.data.pagination);
         }
       } else {
         const failure = { response };
-        setOperationError({ source: 'load', kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
+        setOperationError({ source: 'contracts', kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
           failedAction: 'دریافت فهرست قراردادها',
           nextStep: 'دوباره تلاش کنید.'
         }) });
       }
     } catch (error) {
+      if (requestSequence !== contractLoadSequenceRef.current) return;
       console.error('Error loading contracts:', error);
-      setOperationError({ source: 'load', kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
+      setOperationError({ source: 'contracts', kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
         failedAction: 'دریافت فهرست قراردادها',
         nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
       }) });
     } finally {
+      if (requestSequence !== contractLoadSequenceRef.current) return;
       if (append) {
         setLoadingMore(false);
       } else {
@@ -267,7 +274,7 @@ export default function ContractsPage() {
       }
     } catch (error) {
       console.error('Error loading user profile:', error);
-      setOperationError({ source: 'load', kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
+      setOperationError({ source: 'profile', kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
         failedAction: 'دریافت دسترسی‌های فروش',
         nextStep: 'صفحه را تازه‌سازی کنید و دوباره تلاش کنید.'
       }) });
@@ -362,7 +369,7 @@ export default function ContractsPage() {
 
   const handleDownloadPdf = async (contractId: string) => {
     setPdfActionLoading(contractId);
-    setOperationError(null);
+    setOperationError((current) => current?.source === 'action' && current.contractId === contractId ? null : current);
     try {
       const response = await salesAPI.downloadContractPdf(contractId, { fresh: false });
       downloadBlobResponse(response, `sales_contract_${contractId}.pdf`);
@@ -686,7 +693,7 @@ export default function ContractsPage() {
     >
       {operationError && !operationError.contractId && (
         <ErpInlineState
-          kind={operationError.source === 'load' && contracts.length > 0 ? 'stale' : operationError.kind}
+          kind={operationError.source !== 'action' && contracts.length > 0 ? 'stale' : operationError.kind}
           title={operationError.message}
           action={{ label: 'تازه‌سازی فهرست', onClick: () => loadContracts(1, { append: false }), tone: 'primary' }}
         />

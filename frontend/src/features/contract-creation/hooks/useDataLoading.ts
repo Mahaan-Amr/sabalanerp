@@ -85,6 +85,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   const hasLoadedRef = useRef(false);
   const errorSequenceRef = useRef(0);
   const activeErrorSourceRef = useRef<string | null>(null);
+  const customerRequestSequenceRef = useRef(0);
 
   const reportError = useCallback((source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
     errorSequenceRef.current += 1;
@@ -160,11 +161,13 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   );
 
   const loadCustomers = useCallback(async (params: CustomerLoadParams = {}) => {
+    const requestSequence = ++customerRequestSequenceRef.current;
     try {
       const response = await crmAPI.getCustomers({
         limit: params.limit ?? 3,
         search: params.search?.trim() || undefined
       });
+      if (requestSequence !== customerRequestSequenceRef.current) return [];
       if (response.data.success) {
         const data = response.data.data || [];
         setCustomers(data);
@@ -173,6 +176,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       }
       return [];
     } catch (err: any) {
+      if (requestSequence !== customerRequestSequenceRef.current) return [];
       if (isForbiddenError(err)) {
         const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
         reportError('customers', message, 'permission');

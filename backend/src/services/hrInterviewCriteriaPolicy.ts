@@ -1,4 +1,13 @@
-const answerTypes = new Set(['TEXT', 'SCORE_1_TO_5', 'YES_NO', 'ADDRESS', 'STRENGTHS_WEAKNESSES', 'COMPANION']);
+const answerTypes = new Set(['TEXT', 'SCORE_1_TO_5', 'YES_NO', 'ADDRESS', 'STRENGTHS_WEAKNESSES', 'COMPANION', 'PERSONALITY_TEST_SUMMARY']);
+
+export const PERSONALITY_TEST_SUMMARY_CRITERION = {
+  stableId: 'personalityTestSummary',
+  title: 'نتایج آزمون‌های DISC، BIG FIVE و EQ',
+  description: null,
+  answerType: 'PERSONALITY_TEST_SUMMARY',
+  isActive: true,
+  allowUnassessed: false,
+} as const;
 
 const DEFAULT_INTERVIEW_CRITERIA_SOURCE = [
   ['appearance', 'نوع پوشش'], ['grooming', 'آراستگی'], ['resume', 'رزومه'],
@@ -21,14 +30,17 @@ const SPECIALIZED_ANSWER_TYPES: Record<string, string> = {
   companion: 'COMPANION',
 };
 
-export const DEFAULT_INTERVIEW_CRITERIA = DEFAULT_INTERVIEW_CRITERIA_SOURCE.map(([stableId, title]) => ({
-  stableId,
-  title,
-  description: null,
-  answerType: SPECIALIZED_ANSWER_TYPES[stableId] ?? 'SCORE_1_TO_5',
-  isActive: true,
-  allowUnassessed: true,
-}));
+export const DEFAULT_INTERVIEW_CRITERIA = [
+  ...DEFAULT_INTERVIEW_CRITERIA_SOURCE.map(([stableId, title]) => ({
+    stableId,
+    title,
+    description: null,
+    answerType: SPECIALIZED_ANSWER_TYPES[stableId] ?? 'SCORE_1_TO_5',
+    isActive: true,
+    allowUnassessed: true,
+  })),
+  PERSONALITY_TEST_SUMMARY_CRITERION,
+];
 
 export type InterviewCriterionPublicationInput = {
   stableId: string;
@@ -42,7 +54,7 @@ export type InterviewCriterionPublicationInput = {
 export const normalizeInterviewCriteriaPublication = (items: InterviewCriterionPublicationInput[]) => {
   if (!Array.isArray(items) || items.length === 0) throw new Error('At least one interview criterion is required.');
   const stableIds = new Set<string>();
-  return items.map((item, index) => {
+  const normalized = items.map((item, index) => {
     const stableId = String(item.stableId || '').trim();
     const title = String(item.title || '').trim();
     const description = String(item.description || '').trim() || null;
@@ -53,4 +65,17 @@ export const normalizeInterviewCriteriaPublication = (items: InterviewCriterionP
     stableIds.add(stableId);
     return { stableId, title, description, answerType, isActive: item.isActive !== false, allowUnassessed: item.allowUnassessed === true, order: index + 1 };
   });
+  const protectedCriterion = normalized[17];
+  if (protectedCriterion?.stableId !== PERSONALITY_TEST_SUMMARY_CRITERION.stableId) {
+    throw new Error('خلاصه آزمون‌های شخصیتی باید معیار هجدهم باقی بماند.');
+  }
+  if (
+    protectedCriterion.title !== PERSONALITY_TEST_SUMMARY_CRITERION.title
+    || protectedCriterion.answerType !== PERSONALITY_TEST_SUMMARY_CRITERION.answerType
+    || protectedCriterion.isActive !== true
+    || protectedCriterion.allowUnassessed !== false
+  ) {
+    throw new Error('معیار سیستمی خلاصه آزمون‌های شخصیتی قابل تغییر یا غیرفعال‌سازی نیست.');
+  }
+  return normalized;
 };

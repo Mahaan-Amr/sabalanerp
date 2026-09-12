@@ -35,6 +35,9 @@ const record = (value: unknown): Record<string, unknown> | null => (
 );
 
 const nonEmpty = (value: unknown) => typeof value === "string" && value.trim().length > 0;
+const boundedText = (value: unknown, maximumLength: number) => (
+  typeof value === "string" && value.length <= maximumLength
+);
 const validJudgment = (value: unknown) => ["POSITIVE", "NEUTRAL", "NEGATIVE"].includes(String(value));
 const validYesNo = (value: unknown) => value === "YES" || value === "NO";
 const validScore = (value: unknown, allowUnassessed: boolean) => (
@@ -68,6 +71,20 @@ const v2CriterionIsComplete = (
         && Array.isArray(answer.weaknesses)
         && answer.weaknesses.length === 5
         && answer.weaknesses.every(nonEmpty);
+    case "PERSONALITY_TEST_SUMMARY": {
+      const summary = record(answer.personalityTestSummary);
+      if (
+        !summary
+        || typeof summary.discNotProvided !== "boolean"
+        || !boundedText(summary.discResult, 100)
+        || !boundedText(summary.bigFiveResult, 1000)
+        || !boundedText(summary.eqResult, 1000)
+      ) return false;
+      const discResult = String(summary.discResult).trim();
+      return summary.discNotProvided === true
+        ? discResult.length === 0
+        : discResult.length > 0;
+    }
     default:
       return false;
   }
@@ -98,7 +115,7 @@ const assertSchemaTwoGuidedHrInterviewEvidence = (
   }
 
   const snapshotCriteria = criteriaSnapshot.map(record);
-  const supportedAnswerTypes = new Set(["SCORE_1_TO_5", "TEXT", "ADDRESS", "YES_NO", "COMPANION", "STRENGTHS_WEAKNESSES"]);
+  const supportedAnswerTypes = new Set(["SCORE_1_TO_5", "TEXT", "ADDRESS", "YES_NO", "COMPANION", "STRENGTHS_WEAKNESSES", "PERSONALITY_TEST_SUMMARY"]);
   const stableIds = snapshotCriteria.map((criterion) => criterion?.stableId);
   if (
     !snapshotCriteria.length

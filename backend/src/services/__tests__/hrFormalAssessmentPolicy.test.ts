@@ -120,7 +120,14 @@ assert.throws(() => assertGuidedHrInterviewEvidence({
     decisionReason: "Prototype payload must not bypass canonical score validation.",
   },
 }), (error: any) => error?.code === "HR_INTERVIEW_EVIDENCE_INVALID" && error?.target === "snapshot");
-const schemaTwoCriteria = GUIDED_HR_INTERVIEW_CRITERION_IDS.map((stableId, index) => ({
+const legacySchemaTwoCriteria: Array<{
+  stableId: string;
+  order: number;
+  title: string;
+  answerType: string;
+  isActive: boolean;
+  allowUnassessed: boolean;
+}> = GUIDED_HR_INTERVIEW_CRITERION_IDS.map((stableId, index) => ({
   stableId,
   order: index + 1,
   title: `Criterion ${index + 1}`,
@@ -128,7 +135,15 @@ const schemaTwoCriteria = GUIDED_HR_INTERVIEW_CRITERION_IDS.map((stableId, index
   isActive: true,
   allowUnassessed: false,
 }));
-const schemaTwoAnswers = Object.fromEntries(GUIDED_HR_INTERVIEW_CRITERION_IDS.map((criterionId) => [criterionId, {
+const schemaTwoCriteria = [...legacySchemaTwoCriteria, {
+  stableId: "personalityTestSummary",
+  order: 18,
+  title: "نتایج آزمون‌های DISC، BIG FIVE و EQ",
+  answerType: "PERSONALITY_TEST_SUMMARY",
+  isActive: true,
+  allowUnassessed: false,
+}];
+const schemaTwoAnswers = Object.fromEntries(schemaTwoCriteria.map(({ stableId: criterionId }) => [criterionId, {
   score: 3,
   text: "",
   note: "",
@@ -136,6 +151,12 @@ const schemaTwoAnswers = Object.fromEntries(GUIDED_HR_INTERVIEW_CRITERION_IDS.ma
   companionPresent: null,
   strengths: [],
   weaknesses: [],
+  personalityTestSummary: criterionId === "personalityTestSummary" ? {
+    discResult: "Di",
+    discNotProvided: false,
+    bigFiveResult: "",
+    eqResult: "",
+  } : undefined,
 }]));
 assert.doesNotThrow(() => assertGuidedHrInterviewEvidence({
   schemaVersion: 2,
@@ -149,6 +170,39 @@ assert.doesNotThrow(() => assertGuidedHrInterviewEvidence({
   customCriteria: [
     { id: "custom-text", title: "Custom text", kind: "text", score: null, text: "Recorded answer", yesNo: null },
   ],
+}));
+assert.doesNotThrow(() => assertGuidedHrInterviewEvidence({
+  schemaVersion: 2,
+  criteriaTemplateVersion: 1,
+  criteriaSnapshot: legacySchemaTwoCriteria,
+  state: {
+    answers: Object.fromEntries(legacySchemaTwoCriteria.map(({ stableId }) => [stableId, schemaTwoAnswers[stableId]])),
+    decision: "POSITIVE",
+    decisionReason: "Existing seventeen-criterion drafts remain valid.",
+  },
+  customCriteria: [],
+}));
+assert.doesNotThrow(() => assertGuidedHrInterviewEvidence({
+  schemaVersion: 2,
+  criteriaTemplateVersion: 1,
+  criteriaSnapshot: schemaTwoCriteria,
+  state: {
+    answers: {
+      ...schemaTwoAnswers,
+      personalityTestSummary: {
+        ...schemaTwoAnswers.personalityTestSummary,
+        personalityTestSummary: {
+          discResult: "",
+          discNotProvided: true,
+          bigFiveResult: "",
+          eqResult: "",
+        },
+      },
+    },
+    decision: "POSITIVE",
+    decisionReason: "Candidate did not provide a DISC result.",
+  },
+  customCriteria: [],
 }));
 assert.throws(() => assertGuidedHrInterviewEvidence({
   schemaVersion: 2,
@@ -245,6 +299,33 @@ assert.throws(() => assertGuidedHrInterviewEvidence({
 }), (error: any) => error?.code === "HR_INTERVIEW_EVIDENCE_INVALID"
   && error?.target === "custom-criterion"
   && error?.criterionId === undefined);
+
+for (const invalidPersonalityTestSummary of [
+  { discResult: "", discNotProvided: false, bigFiveResult: "", eqResult: "" },
+  { discResult: "Di", discNotProvided: true, bigFiveResult: "", eqResult: "" },
+  { discResult: "D".repeat(101), discNotProvided: false, bigFiveResult: "", eqResult: "" },
+  { discResult: "Di", discNotProvided: false, bigFiveResult: "B".repeat(1001), eqResult: "" },
+]) {
+  assert.throws(() => assertGuidedHrInterviewEvidence({
+    schemaVersion: 2,
+    criteriaTemplateVersion: 1,
+    criteriaSnapshot: schemaTwoCriteria,
+    state: {
+      answers: {
+        ...schemaTwoAnswers,
+        personalityTestSummary: {
+          ...schemaTwoAnswers.personalityTestSummary,
+          personalityTestSummary: invalidPersonalityTestSummary,
+        },
+      },
+      decision: "POSITIVE",
+      decisionReason: "Invalid applicant-reported personality summary.",
+    },
+    customCriteria: [],
+  }), (error: any) => error?.code === "HR_INTERVIEW_EVIDENCE_INVALID"
+    && error?.target === "criterion"
+    && error?.criterionId === "personalityTestSummary");
+}
 
 const revisedEvidence = projectFormalAssessmentEvidenceGate([
   {

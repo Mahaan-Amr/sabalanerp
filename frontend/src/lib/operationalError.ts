@@ -75,7 +75,7 @@ export const getOperationalErrorMessage = (error: unknown, options: OperationalE
   const requestTrackingId = (error as { config?: { headers?: { get?: (name: string) => unknown; [key: string]: unknown } } })
     ?.config?.headers?.get?.('x-correlation-id')
     || (error as { config?: { headers?: Record<string, unknown> } })?.config?.headers?.['x-correlation-id'];
-  const businessMessage = status > 0 && status < 500 ? safeBusinessMessage(payload) : '';
+  const businessMessage = status > 0 ? safeBusinessMessage(payload) : '';
   const failure = businessMessage
     ? asSentence(businessMessage)
     : isNetworkFailure(error)

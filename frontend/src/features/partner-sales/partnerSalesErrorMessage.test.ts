@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getPartnerSalesErrorMessage } from './partnerSalesErrorMessage';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '../sales/salesOperationalError';
+import { getPartnerSalesErrorMessage, normalizePartnerSalesOperationalError } from './partnerSalesErrorMessage';
 
 test('partner sales integrity errors stay actionable without a support deflection', () => {
   const message = getPartnerSalesErrorMessage({ code: 'INTEGRITY_CONFLICT' });
@@ -18,4 +19,17 @@ test('customer scope failures use the same public not-found message', () => {
     getPartnerSalesErrorMessage({ code: 'CUSTOMER_OUT_OF_SCOPE' }),
     getPartnerSalesErrorMessage({ code: 'NOT_FOUND' }),
   );
+});
+
+test('top-level partner errors retain their canonical message and semantic kind at runtime', () => {
+  const forbidden = normalizePartnerSalesOperationalError({
+    code: 'FORBIDDEN',
+    status: 403,
+    message: getPartnerSalesErrorMessage({ code: 'FORBIDDEN' }),
+  });
+  assert.equal(getSalesOperationalErrorKind(forbidden), 'permission');
+  assert.match(getSalesOperationalErrorMessage(forbidden, {
+    failedAction: 'دریافت پرونده فروش همکار',
+    nextStep: 'به صفحه قبل برگردید.',
+  }), /اجازه انجام این اقدام را ندارید/);
 });

@@ -52,6 +52,17 @@ test('technical English payload is replaced with a Persian operation-specific re
   assert.equal(message, 'به‌روزرسانی محصول انجام نشد. اطلاعات محصول را بررسی کنید و دوباره تلاش کنید.');
 });
 
+test('safe Persian server cause remains visible even for a 5xx response', () => {
+  const message = getSalesOperationalErrorMessage({
+    response: { status: 503, data: { error: 'سرویس تولید PDF موقتاً آماده نیست؛ چند دقیقه دیگر دوباره تلاش کنید.' } },
+  }, {
+    failedAction: 'ساخت PDF قرارداد',
+    nextStep: 'چند دقیقه دیگر دوباره روی «ساخت PDF» بزنید.',
+  });
+
+  assert.match(message, /^سرویس تولید PDF موقتاً آماده نیست/);
+});
+
 test('connection failure names the cause and gives a safe retry step', () => {
   const message = getSalesOperationalErrorMessage({
     code: 'ERR_NETWORK',

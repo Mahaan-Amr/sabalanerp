@@ -359,6 +359,7 @@ export default function ContractDetailPage() {
   const handleDownloadPdf = async () => {
     if (!contract) return;
     setActionLoading('download');
+    setError('');
     try {
       const response = await salesAPI.downloadContractPdf(contract.id, { fresh: printVariant === 'summary', variant: printVariant });
       const suffix = printVariant === 'summary' ? '_summary' : '';
@@ -378,6 +379,7 @@ export default function ContractDetailPage() {
   const handlePrintContract = async () => {
     if (!contract) return;
     setActionLoading('print');
+    setError('');
     try {
       const response = await salesAPI.printContract(contract.id);
       if (!response.data?.success) {
@@ -411,6 +413,7 @@ export default function ContractDetailPage() {
   const handlePrintSummaryContract = async () => {
     if (!contract) return;
     setActionLoading('print-summary');
+    setError('');
     try {
       const pdfResponse = await salesAPI.getContractPdf(contract.id, { fresh: true, variant: 'summary' });
       if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {

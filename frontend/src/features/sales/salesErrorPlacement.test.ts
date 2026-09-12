@@ -83,9 +83,21 @@ test('Sale load and mutation feedback retain HTTP semantic kinds', () => {
 
 test('leaving product edit mode clears validation that can no longer be corrected', () => {
   const detail = source('src/app/dashboard/sales/products/[id]/page.tsx');
-  assert.match(detail, /const cancelEditing = \(\) => \{\s*setEditing\(false\);\s*setFieldErrors\(\{\}\);\s*setFeedback\(undefined\)/);
+  assert.match(detail, /const cancelEditing = \(\) => \{\s*if \(savedFormSnapshot\) setFormData\(savedFormSnapshot\);\s*setEditing\(false\);\s*setFieldErrors\(\{\}\);\s*setFeedback\(undefined\)/);
   assert.match(detail, /editing \? cancelEditing\(\) : setEditing\(true\)/);
   assert.match(detail, /onClick=\{cancelEditing\}/);
+});
+
+test('successful Sale retries clear superseded operational errors', () => {
+  const wizard = source('src/features/contract-creation/CreateContractWizardClient.tsx');
+  const detail = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
+  const list = source('src/app/dashboard/sales/contracts/page.tsx');
+  const products = source('src/app/dashboard/sales/products/page.tsx');
+  assert.match(wizard, /updateWizardData\([\s\S]*?setErrors\(prev => \(\{ \.\.\.prev, signature: '' \}\)\);[\s\S]*?catch/);
+  assert.match(detail, /setActionLoading\('download'\);\s*setError\(''\)/);
+  assert.match(detail, /setActionLoading\('print-summary'\);\s*setError\(''\)/);
+  assert.match(list, /setPdfActionLoading\(contractId\);\s*setOperationError\(null\)/);
+  assert.match(products, /if \(response\.data\.success\) \{\s*setRowError\(null\)/);
 });
 
 test('signature operations render their HTTP semantic kind', () => {

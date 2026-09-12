@@ -183,6 +183,7 @@ const ProductDetailPage: React.FC = () => {
   }
 
   const cancelEditing = () => {
+    if (savedFormSnapshot) setFormData(savedFormSnapshot);
     setEditing(false);
     setFieldErrors({});
     setFeedback(undefined);

@@ -122,6 +122,7 @@ export default function ProductsPage() {
       setDeleting(true);
       const response = await salesAPI.deleteProduct(product.id);
       if (response.data.success) {
+        setRowError(null);
         setModalMessage('محصول با موفقیت حذف شد');
         setShowSuccessModal(true);
         setDeleteConfirm({ show: false, product: null });

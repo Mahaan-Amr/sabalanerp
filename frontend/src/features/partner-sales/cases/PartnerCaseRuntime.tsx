@@ -11,6 +11,7 @@ import type { PartnerAccountView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { normalizePartnerSalesOperationalError } from '../partnerSalesErrorMessage';
 
 export function PartnerCaseRuntime() {
   const [rows, setRows] = useState<PartnerCaseRuntimeRow[]>([]);
@@ -32,7 +33,8 @@ export function PartnerCaseRuntime() {
       setCorrections(Object.fromEntries(supplementary.flatMap(item => item.correction !== undefined
         ? [[item.caseId, item.correction]] : [])));
     } catch (reason) {
-      setError({ kind: getSalesOperationalErrorKind(reason), message: getSalesOperationalErrorMessage(reason, {
+      const normalizedReason = normalizePartnerSalesOperationalError(reason);
+      setError({ kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
         failedAction: 'دریافت پرونده‌های فروش همکار',
         nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
       }) });
@@ -43,7 +45,7 @@ export function PartnerCaseRuntime() {
     setError(undefined);
     try { await action(); await load(); }
     catch (reason) {
-      const normalizedReason = await normalizeSalesBlobError(reason);
+      const normalizedReason = normalizePartnerSalesOperationalError(await normalizeSalesBlobError(reason));
       setError({ caseId, kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
         failedAction: name,
         nextStep: 'وضعیت پرونده را تازه‌سازی و سپس دوباره بررسی کنید.',
@@ -56,7 +58,7 @@ export function PartnerCaseRuntime() {
     try {
       await openPartnerPdf(caseId, snapshotId, 'PREVIEW');
     } catch (reason) {
-      const normalizedReason = await normalizeSalesBlobError(reason);
+      const normalizedReason = normalizePartnerSalesOperationalError(await normalizeSalesBlobError(reason));
       setError({ caseId, kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
         failedAction: 'پیش‌نمایش سند فروش همکار',
         nextStep: 'دوباره روی «پیش‌نمایش» بزنید.',

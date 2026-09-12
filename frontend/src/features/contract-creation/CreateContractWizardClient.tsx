@@ -4438,6 +4438,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           lastOpenedAt: statusData.lastOpenedAt || null
         }
       });
+      setErrors(prev => ({ ...prev, signature: '' }));
     } catch (error: any) {
       setSignatureErrorKind(getSalesOperationalErrorKind(error));
       setErrors(prev => ({

@@ -361,6 +361,7 @@ export default function ContractsPage() {
 
   const handleDownloadPdf = async (contractId: string) => {
     setPdfActionLoading(contractId);
+    setOperationError(null);
     try {
       const response = await salesAPI.downloadContractPdf(contractId, { fresh: false });
       downloadBlobResponse(response, `sales_contract_${contractId}.pdf`);

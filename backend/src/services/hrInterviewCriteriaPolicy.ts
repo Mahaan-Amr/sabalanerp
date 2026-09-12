@@ -69,6 +69,11 @@ export const normalizeInterviewCriteriaPublication = (items: InterviewCriterionP
   if (protectedCriterion?.stableId !== PERSONALITY_TEST_SUMMARY_CRITERION.stableId) {
     throw new Error('خلاصه آزمون‌های شخصیتی باید معیار هجدهم باقی بماند.');
   }
+  if (normalized.some((criterion, index) => (
+    index !== 17 && criterion.answerType === PERSONALITY_TEST_SUMMARY_CRITERION.answerType
+  ))) {
+    throw new Error('نوع پاسخ خلاصه آزمون‌های شخصیتی فقط برای معیار هجدهم مجاز است.');
+  }
   if (
     protectedCriterion.title !== PERSONALITY_TEST_SUMMARY_CRITERION.title
     || protectedCriterion.answerType !== PERSONALITY_TEST_SUMMARY_CRITERION.answerType

@@ -5,14 +5,9 @@ import { useRouter } from "next/navigation";
 import { FaArrowDown, FaArrowUp, FaChevronDown, FaChevronUp } from "react-icons/fa";
 import { ErpBadge, ErpButton, ErpCard, ErpIconButton, ErpInput, ErpInlineState, ErpLoading, ErpPage, ErpSection, ErpSelect, ErpSheet, ErpTextarea } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
-import { canMoveInterviewCriterion, isProtectedPersonalityTestCriterion } from "@/features/hr-hiring/interviewCriteriaAdminPolicy";
+import { INTERVIEW_CRITERIA_ANSWER_TYPE_OPTIONS, canMoveInterviewCriterion, isProtectedPersonalityTestCriterion } from "@/features/hr-hiring/interviewCriteriaAdminPolicy";
 
 type Criterion = { stableId: string; title: string; description: string | null; answerType: string; isActive: boolean; allowUnassessed?: boolean };
-const answerTypes = [
-  ["TEXT", "پاسخ تشریحی"], ["SCORE_1_TO_5", "امتیاز ۱ تا ۵"], ["YES_NO", "بله یا خیر"],
-  ["ADDRESS", "نشانی"], ["STRENGTHS_WEAKNESSES", "نقاط قوت و ضعف"], ["COMPANION", "همراه"],
-  ["PERSONALITY_TEST_SUMMARY", "خلاصه آزمون‌های شخصیتی"],
-];
 
 export default function InterviewCriteriaPage() {
   const router = useRouter();
@@ -65,7 +60,7 @@ export default function InterviewCriteriaPage() {
                 <ErpBadge tone={criterion.isActive ? "success" : "neutral"}>معیار {(index + 1).toLocaleString("fa-IR")}</ErpBadge>
               </div>
               <ErpInput disabled={!canManage || protectedCriterion} aria-label={`عنوان معیار ${(index + 1).toLocaleString("fa-IR")}`} value={criterion.title} onChange={(event) => update(index, { title: event.target.value })} />
-              <ErpSelect disabled={!canManage || protectedCriterion} aria-label={`نوع پاسخ معیار ${(index + 1).toLocaleString("fa-IR")}`} value={criterion.answerType} onChange={(event) => update(index, { answerType: event.target.value })}>{answerTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSelect>
+              <ErpSelect disabled={!canManage || protectedCriterion} aria-label={`نوع پاسخ معیار ${(index + 1).toLocaleString("fa-IR")}`} value={criterion.answerType} onChange={(event) => update(index, { answerType: event.target.value })}>{protectedCriterion && <option value="PERSONALITY_TEST_SUMMARY">خلاصه آزمون‌های شخصیتی</option>}{INTERVIEW_CRITERIA_ANSWER_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSelect>
               <div className="flex flex-wrap items-center justify-end gap-1">
                 <ErpIconButton label="انتقال به بالا" title="انتقال به بالا" icon={FaArrowUp} disabled={!canManage || !canMoveInterviewCriterion(draft, index, index - 1)} onClick={() => move(index, index - 1)} />
                 <ErpIconButton label="انتقال به پایین" title="انتقال به پایین" icon={FaArrowDown} disabled={!canManage || !canMoveInterviewCriterion(draft, index, index + 1)} onClick={() => move(index, index + 1)} />

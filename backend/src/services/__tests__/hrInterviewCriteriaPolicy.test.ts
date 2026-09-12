@@ -25,5 +25,9 @@ assert.throws(() => normalizeInterviewCriteriaPublication([
   PERSONALITY_TEST_SUMMARY_CRITERION,
   DEFAULT_INTERVIEW_CRITERIA[16],
 ]), /هجدهم/);
+assert.throws(() => normalizeInterviewCriteriaPublication([
+  { ...DEFAULT_INTERVIEW_CRITERIA[0], answerType: 'PERSONALITY_TEST_SUMMARY' },
+  ...DEFAULT_INTERVIEW_CRITERIA.slice(1),
+]), /فقط برای معیار هجدهم/);
 
 console.log('HR interview criteria publication tests passed.');

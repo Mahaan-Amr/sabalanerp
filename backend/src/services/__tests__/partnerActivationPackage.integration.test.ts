@@ -9,6 +9,7 @@ import { createOperationsService } from '../partnerSales/operations/service';
 import { acceptanceResponsibilities, readinessGates } from '../partnerSales/operations/readiness';
 import { createPartnerLifecycleDatabase } from './partnerCaseLifecycleDatabase';
 import { grantScopedAction } from '../effectiveAuthorization/scopedActions';
+import { resolveWorkspaceRouteAvailability } from '../workspaceRouteAvailability';
 
 function databaseUrl() {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -190,6 +191,14 @@ test('activation package bootstraps and activates one converted seller from immu
     assert.ok(activated.ok && activated.value.activationBundleId && activated.value.activationBundleHash,
       'activation باید بسته شواهد تازه را اتمیک بسازد و در receipt برگرداند');
     assert.equal((await database.partnerProfile.findUniqueOrThrow({ where: { userId } })).state, 'ACTIVE');
+    const [createRoute, casesRoute, managementRoute] = await Promise.all([
+      resolveWorkspaceRouteAvailability(database, { userId, role: 'USER', path: '/dashboard/sales/contracts/create' }),
+      resolveWorkspaceRouteAvailability(database, { userId, role: 'USER', path: '/dashboard/sales/partner-cases' }),
+      resolveWorkspaceRouteAvailability(database, { userId, role: 'USER', path: '/dashboard/sales/partners' }),
+    ]);
+    assert.equal(createRoute.allowed, true, 'فروشنده فعال باید مسیر ایجاد فروش همکار را در منو ببیند');
+    assert.equal(casesRoute.allowed, true, 'فروشنده فعال باید مسیر پرونده‌ها و حساب خود را در منو ببیند');
+    assert.equal(managementRoute.allowed, false, 'فروشنده همکار نباید وارد مدیریت داخلی فروشندگان شود');
     const activeView = await service.query({ schemaVersion: 3, purpose: 'PARTNER_ACTIVATION', userId });
     assert.equal(activeView.ok && activeView.value.subject?.actions[0]?.enabled, false);
     const replay = await service.execute(await command('PROFILE_ACTIVATE', {

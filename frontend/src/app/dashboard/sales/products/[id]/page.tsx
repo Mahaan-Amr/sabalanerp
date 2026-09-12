@@ -169,9 +169,9 @@ const ProductDetailPage: React.FC = () => {
     return new Intl.NumberFormat('fa-IR').format(price) + ' ریال';
   };
 
-  if (loading) return <ErpLoading />;
+  if (loading && !product) return <ErpLoading />;
 
-  if (loadError) {
+  if (loadError && !product) {
     return (
       <SalesAuthoringPage title="جزئیات محصول" backHref="/dashboard/sales/products">
         <ErpInlineState kind={loadErrorKind} title={loadError} action={{ label: 'تلاش دوباره', onClick: fetchProduct }} />
@@ -203,6 +203,13 @@ const ProductDetailPage: React.FC = () => {
         ? { kind: 'error', title: getSalesErrorSummary(fieldErrors) }
         : feedback ?? (editing && savedFormSnapshot && hasSalesDraftChanged(formData, savedFormSnapshot) ? { kind: 'stale', title: 'تغییرات این فرم تا زمان ذخیره نهایی نشده‌اند.' } : undefined)}
     >
+      {loadError && (
+        <ErpInlineState
+          kind="stale"
+          title={`آخرین اطلاعات موفق محصول نمایش داده می‌شود. ${loadError}`}
+          action={{ label: 'دریافت دوباره', onClick: fetchProduct }}
+        />
+      )}
       <SalesAuthoringSection title="مشخصات و قیمت‌گذاری محصول">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Product Information */}

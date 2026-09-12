@@ -184,7 +184,23 @@ test('Sale data retries preserve visible failures until a current request succee
   assert.match(contractDetail, /action=\{\{ label: 'دریافت دوباره', onClick: \(\) => void loadContract\(\) \}\}/);
   assert.match(contractDetail, /if \(loading && !contract\)/);
   assert.match(contractDetail, /آخرین اطلاعات موفق قرارداد نمایش داده می‌شود/);
+  assert.match(detail, /if \(loading && !product\)/);
+  assert.match(detail, /آخرین اطلاعات موفق محصول نمایش داده می‌شود/);
   assert.match(contracts, /label: 'دریافت دوباره دسترسی‌ها', onClick: loadCurrentUser/);
+});
+
+test('resolved Sale failure envelopes are routed to operational feedback', () => {
+  const contractDetail = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
+  const catalog = source('src/components/CatalogExcelSyncModal.tsx');
+  const shipment = source('src/features/shipment-quantities/ShipmentQuantitySummary.tsx');
+  const wizard = source('src/features/contract-creation/CreateContractWizardClient.tsx');
+  const dataLoading = source('src/features/contract-creation/hooks/useDataLoading.ts');
+
+  assert.match(contractDetail, /assertSuccessfulSalesResponse\(response\)/);
+  assert.match(catalog, /assertSuccessfulSalesResponse\(response\)/);
+  assert.match(shipment, /assertSuccessfulSalesResponse\(response\)/);
+  assert.match(wizard, /assertSuccessfulSalesResponse\(response\)/);
+  assert.match(dataLoading, /if \(!profile\) return/);
 });
 
 test('contract detail renders permission and stale failures with their semantic kind', () => {

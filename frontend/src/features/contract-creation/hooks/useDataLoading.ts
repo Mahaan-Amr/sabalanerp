@@ -380,6 +380,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     try {
       const profile = await loadUserProfile();
       if (!isLatestRequest('initial', requestSequence)) return;
+      if (!profile) return;
       const features = (profile?.permissions?.features || []).map((item: any) => item.feature);
       const workspaces = profile?.permissions?.workspaces || [];
       const nextCapabilities = buildCapabilities(features, workspaces);

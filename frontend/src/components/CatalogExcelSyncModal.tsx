@@ -3,7 +3,7 @@ import { ErpButton, ErpInlineState, ErpSegmentedControl, ErpSheet } from '@/comp
 import React, { useRef, useState } from 'react';
 import { FaDownload, FaExclamationTriangle, FaFileExcel, FaUpload } from 'react-icons/fa';
 import ExcelFileUpload from './ExcelFileUpload';
-import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 
 interface CatalogSyncPlan {
   importId: string;
@@ -152,6 +152,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
     try {
       setLoading(true);
       const response = await previewImport(selectedFile);
+      assertSuccessfulSalesResponse(response);
       setPlan(response.data.data);
       clearError('preview');
     } catch (err: any) {
@@ -169,6 +170,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
     try {
       setLoading(true);
       const response = await applyImport(plan.importId);
+      assertSuccessfulSalesResponse(response);
       const appliedPlan = response.data.data;
       onComplete?.(appliedPlan);
       close();

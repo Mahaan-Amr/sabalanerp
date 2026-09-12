@@ -58,6 +58,12 @@ export const normalizeBlobOperationalError = async (error: unknown): Promise<unk
   }
 };
 
+export const assertSuccessfulOperationalResponse = (
+  response: { data?: { success?: unknown } },
+): void => {
+  if (response?.data?.success !== true) throw { response };
+};
+
 const isNetworkFailure = (error: unknown): boolean => {
   const candidate = error as { code?: unknown; name?: unknown; message?: unknown; response?: unknown };
   if (candidate?.response) return false;
@@ -75,13 +81,15 @@ export const getOperationalErrorMessage = (error: unknown, options: OperationalE
   const requestTrackingId = (error as { config?: { headers?: { get?: (name: string) => unknown; [key: string]: unknown } } })
     ?.config?.headers?.get?.('x-correlation-id')
     || (error as { config?: { headers?: Record<string, unknown> } })?.config?.headers?.['x-correlation-id'];
-  // Generic 5xx bodies may contain proxy, database, or implementation details.
-  const businessMessage = status > 0 && status < 500 ? safeBusinessMessage(payload) : '';
+  // The same strict allow-list protects all response classes, including 5xx bodies.
+  const businessMessage = safeBusinessMessage(payload);
   const failure = businessMessage
     ? asSentence(businessMessage)
     : isNetworkFailure(error)
       ? asSentence(`${options.failedAction} انجام نشد چون ارتباط با سامانه برقرار نشد`)
-      : asSentence(`${options.failedAction} انجام نشد`);
+      : response
+        ? asSentence(`${options.failedAction} انجام نشد چون پاسخ قابل‌استفاده‌ای از سامانه دریافت نشد`)
+        : asSentence(`${options.failedAction} انجام نشد چون نتیجه قابل‌اعتمادی دریافت نشد`);
   const preserve = options.preserveInput ? 'اطلاعات واردشده حفظ شده است.' : '';
   const requestedNextStep = options.uncertainMutation && (!businessMessage || status >= 500) && !options.nextStep.includes('فقط اگر')
     ? 'وضعیت فعلی را بررسی کنید؛ فقط اگر عملیات انجام نشده بود دوباره تلاش کنید.'

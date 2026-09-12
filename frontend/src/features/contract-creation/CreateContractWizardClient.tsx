@@ -122,7 +122,7 @@ import {
 } from '@/features/contract-creation/services/contractCreationDraftPolicy';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
-import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { assertSuccessfulSalesResponse, getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 // Import constants
@@ -4435,9 +4435,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     try {
       const response = await salesAPI.getConfirmationStatus(signatureContractId);
       if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
-      if (!response.data.success) {
-        return;
-      }
+      assertSuccessfulSalesResponse(response);
 
       const statusData = response.data.data;
       const existingSignature = wizardData.signature;

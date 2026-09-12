@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ErpBadge, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpSummaryGrid } from '@/components/erp';
 import { shipmentQuantityAPI } from '@/lib/api';
 import { formatShipmentQuantity, shipmentHealthPresentation, type ShipmentQuantityRow } from './shipmentQuantityPresentation';
-import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface ProjectionResponse {
   cutoff: string;
@@ -34,6 +34,7 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
     const request = contractId ? shipmentQuantityAPI.getContract(contractId) : shipmentQuantityAPI.getCustomer(customerId!);
     request.then((response) => {
       if (!active) return;
+      assertSuccessfulSalesResponse(response);
       setData(response.data.data);
       setRefreshError('');
       setRefreshErrorKind('error');

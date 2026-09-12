@@ -42,7 +42,7 @@ import { buildContractPaymentPresentation } from '@/features/sales/contractPayme
 import { PartnerAccountViewSchema, PartnerCaseViewSchema, type PartnerAccountView, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import { PartnerCaseWorkspace } from '@/features/partner-sales/cases/PartnerCaseWorkspace';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
-import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker, hasAnyPendingOperation } from '@/features/sales/latestRequestTracker';
 
 interface Contract {
@@ -336,7 +336,9 @@ export default function ContractDetailPage() {
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
     try {
-      await salesAPI.reassignResponsibleSeller(contract.id, nextSellerId, sellerChangeReason.trim());
+      const response = await salesAPI.reassignResponsibleSeller(contract.id, nextSellerId, sellerChangeReason.trim());
+      if (!isLatestOperation(errorSource, requestSequence)) return;
+      assertSuccessfulSalesResponse(response);
       setNextSellerId('');
       setSellerChangeReason('');
       await loadContract();
@@ -360,7 +362,9 @@ export default function ContractDetailPage() {
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
     try {
-      await salesAPI.assignLegacyRealizedCredit(contract.id, nextSellerId, sellerChangeReason.trim());
+      const response = await salesAPI.assignLegacyRealizedCredit(contract.id, nextSellerId, sellerChangeReason.trim());
+      if (!isLatestOperation(errorSource, requestSequence)) return;
+      assertSuccessfulSalesResponse(response);
       setNextSellerId('');
       setSellerChangeReason('');
       await loadContract();

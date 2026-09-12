@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductCreationValidationErrors, mapProductEditValidationErrors, normalizeSalesBlobError } from './salesOperationalError';
+import { assertSuccessfulSalesResponse, getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductCreationValidationErrors, mapProductEditValidationErrors, normalizeSalesBlobError } from './salesOperationalError';
 import { createLatestRequestTracker, hasAnyPendingOperation } from './latestRequestTracker';
 
 test('related seller mutations share one pending guard', () => {
@@ -45,7 +45,7 @@ test('unexpected sales failure preserves input and exposes a safe tracking refer
 
   assert.equal(
     message,
-    'ثبت قرارداد انجام نشد. اطلاعات واردشده حفظ شده است. دوباره تلاش کنید. کد پیگیری: TRACE-42',
+    'ثبت قرارداد انجام نشد چون پاسخ قابل‌استفاده‌ای از سامانه دریافت نشد. اطلاعات واردشده حفظ شده است. دوباره تلاش کنید. کد پیگیری: TRACE-42',
   );
   assert.doesNotMatch(message, /پشتیبانی|تماس بگیرید/);
 });
@@ -75,18 +75,18 @@ test('technical English payload is replaced with a Persian operation-specific re
     nextStep: 'اطلاعات محصول را بررسی کنید و دوباره تلاش کنید.',
   });
 
-  assert.equal(message, 'به‌روزرسانی محصول انجام نشد. اطلاعات محصول را بررسی کنید و دوباره تلاش کنید.');
+  assert.equal(message, 'به‌روزرسانی محصول انجام نشد چون پاسخ قابل‌استفاده‌ای از سامانه دریافت نشد. اطلاعات محصول را بررسی کنید و دوباره تلاش کنید.');
 });
 
-test('generic 5xx response does not expose an untrusted server body', () => {
+test('safe 5xx response keeps its user-correctable cause', () => {
   const message = getSalesOperationalErrorMessage({
-    response: { status: 503, data: { error: 'سرویس تولید PDF موقتاً آماده نیست؛ چند دقیقه دیگر دوباره تلاش کنید.' } },
+    response: { status: 503, data: { error: 'سرویس تولید PDF موقتاً آماده نیست.' } },
   }, {
     failedAction: 'ساخت PDF قرارداد',
     nextStep: 'چند دقیقه دیگر دوباره روی «ساخت PDF» بزنید.',
   });
 
-  assert.equal(message, 'ساخت PDF قرارداد انجام نشد. چند دقیقه دیگر دوباره روی «ساخت PDF» بزنید.');
+  assert.equal(message, 'سرویس تولید PDF موقتاً آماده نیست. چند دقیقه دیگر دوباره روی «ساخت PDF» بزنید.');
 });
 
 test('safe 5xx mutation cause does not bypass reconciliation before retry', () => {
@@ -98,9 +98,14 @@ test('safe 5xx mutation cause does not bypass reconciliation before retry', () =
     uncertainMutation: true,
   });
 
-  assert.doesNotMatch(message, /پاسخ نهایی ثبت قرارداد دریافت نشد/);
-  assert.match(message, /^ثبت قرارداد انجام نشد/);
+  assert.match(message, /^پاسخ نهایی ثبت قرارداد دریافت نشد/);
   assert.match(message, /وضعیت فعلی را بررسی کنید؛ فقط اگر عملیات انجام نشده بود دوباره تلاش کنید/);
+});
+
+test('resolved failure envelopes cannot continue through a success path', () => {
+  const response = { data: { success: false, error: 'اطلاعات نامعتبر است؛ مقادیر مشخص‌شده را اصلاح کنید.' } };
+  assert.throws(() => assertSuccessfulSalesResponse(response), (failure: any) => failure.response === response);
+  assert.doesNotThrow(() => assertSuccessfulSalesResponse({ data: { success: true, data: { id: 'ok' } } }));
 });
 
 test('connection failure names the cause and gives a safe retry step', () => {
@@ -122,7 +127,7 @@ test('response-less unknown failure does not invent a connectivity cause or an u
     preserveInput: true,
   });
 
-  assert.equal(message, 'ثبت قرارداد انجام نشد. اطلاعات واردشده حفظ شده است. دوباره تلاش کنید.');
+  assert.equal(message, 'ثبت قرارداد انجام نشد چون نتیجه قابل‌اعتمادی دریافت نشد. اطلاعات واردشده حفظ شده است. دوباره تلاش کنید.');
   assert.doesNotMatch(message, /ارتباط|boom|کد پیگیری/);
 });
 
@@ -134,7 +139,7 @@ test('mixed Persian and technical payload never reaches the user', () => {
     nextStep: 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.',
   });
 
-  assert.match(message, /^ثبت قرارداد انجام نشد\./);
+  assert.match(message, /^ثبت قرارداد انجام نشد چون پاسخ قابل‌استفاده‌ای از سامانه دریافت نشد\./);
   assert.doesNotMatch(message, /Prisma|P2002|constraint|customerId/);
 });
 
@@ -164,7 +169,7 @@ test('unknown mutation failure requires reconciliation before retry', () => {
     nextStep: 'دوباره تلاش کنید.',
     uncertainMutation: true,
   });
-  assert.equal(message, 'حذف محصول انجام نشد. وضعیت فعلی را بررسی کنید؛ فقط اگر عملیات انجام نشده بود دوباره تلاش کنید. کد پیگیری: REQUEST-77');
+  assert.equal(message, 'حذف محصول انجام نشد چون پاسخ قابل‌استفاده‌ای از سامانه دریافت نشد. وضعیت فعلی را بررسی کنید؛ فقط اگر عملیات انجام نشده بود دوباره تلاش کنید. کد پیگیری: REQUEST-77');
 });
 
 test('contract creation can use its more specific reconciliation step', () => {
@@ -209,7 +214,7 @@ test('technical blob download payload is not exposed to the user', async () => {
     failedAction: 'دریافت خروجی اکسل',
     nextStep: 'دوباره روی «دریافت خروجی» بزنید.',
   });
-  assert.equal(message, 'دریافت خروجی اکسل انجام نشد. دوباره روی «دریافت خروجی» بزنید.');
+  assert.equal(message, 'دریافت خروجی اکسل انجام نشد چون پاسخ قابل‌استفاده‌ای از سامانه دریافت نشد. دوباره روی «دریافت خروجی» بزنید.');
   assert.doesNotMatch(message, /Prisma|P2002|constraint/);
 });
 

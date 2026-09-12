@@ -858,10 +858,20 @@ export default function CreateContractWizard({
     setErrors({ general: error });
   }, []);
 
+  const handleDataLoaded = useCallback(() => {
+    setErrors(previous => {
+      if (!previous.general) return previous;
+      const next = { ...previous };
+      delete next.general;
+      return next;
+    });
+  }, []);
+
   // Data loading is now provided by useDataLoading hook
   const dataLoading = useDataLoading({
     autoLoad: !stateRestored, // Only auto-load if not restoring from localStorage
-    onError: handleDataLoadingError
+    onError: handleDataLoadingError,
+    onDataLoaded: handleDataLoaded
   });
 
   // Extract data from dataLoading hook

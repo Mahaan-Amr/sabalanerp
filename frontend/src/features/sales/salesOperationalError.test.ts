@@ -63,6 +63,19 @@ test('safe Persian server cause remains visible even for a 5xx response', () => 
   assert.match(message, /^سرویس تولید PDF موقتاً آماده نیست/);
 });
 
+test('safe 5xx mutation cause does not bypass reconciliation before retry', () => {
+  const message = getSalesOperationalErrorMessage({
+    response: { status: 500, data: { error: 'پاسخ نهایی ثبت قرارداد دریافت نشد؛ وضعیت قرارداد نامشخص است.' } },
+  }, {
+    failedAction: 'ثبت قرارداد',
+    nextStep: 'دوباره تلاش کنید.',
+    uncertainMutation: true,
+  });
+
+  assert.match(message, /^پاسخ نهایی ثبت قرارداد دریافت نشد/);
+  assert.match(message, /وضعیت فعلی را بررسی کنید؛ فقط اگر عملیات انجام نشده بود دوباره تلاش کنید/);
+});
+
 test('connection failure names the cause and gives a safe retry step', () => {
   const message = getSalesOperationalErrorMessage({
     code: 'ERR_NETWORK',

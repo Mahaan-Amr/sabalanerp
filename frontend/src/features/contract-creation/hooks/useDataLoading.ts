@@ -83,6 +83,13 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   const [error, setError] = useState<string | null>(null);
 
   const hasLoadedRef = useRef(false);
+  const errorSequenceRef = useRef(0);
+
+  const reportError = useCallback((message: string, kind: 'error' | 'permission' | 'stale') => {
+    errorSequenceRef.current += 1;
+    setError(message);
+    onErrorRef.current?.(message, kind);
+  }, []);
 
   const isForbiddenError = (err: any) => err?.response?.status === 403;
 
@@ -158,17 +165,15 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     } catch (err: any) {
       if (isForbiddenError(err)) {
         const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
-        setError(message);
-        if (onErrorRef.current) onErrorRef.current(message, 'permission');
+        reportError(message, 'permission');
         setCustomers([]);
         return [];
       }
       const errorMsg = loadErrorMessage(err, 'فهرست مشتریان');
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
+      reportError(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [reportError]);
 
   const loadProducts = useCallback(async (limit: number = 1000) => {
     try {
@@ -180,11 +185,10 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       return [];
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'فهرست محصولات');
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
+      reportError(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [reportError]);
 
   const loadDepartments = useCallback(async () => {
     try {
@@ -196,11 +200,10 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       return [];
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'اطلاعات واحد فروش');
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
+      reportError(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [reportError]);
 
   const loadCuttingTypes = useCallback(async () => {
     try {
@@ -216,11 +219,10 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         return [];
       }
       const errorMsg = loadErrorMessage(err, 'انواع برش');
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
+      reportError(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [reportError]);
 
   const loadSubServices = useCallback(async (limit: number = 1000) => {
     try {
@@ -236,11 +238,10 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         return [];
       }
       const errorMsg = loadErrorMessage(err, 'فهرست ابزارها');
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
+      reportError(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [reportError]);
 
   const loadStoneFinishings = useCallback(async (limit: number = 1000) => {
     try {
@@ -261,13 +262,12 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         return [];
       }
       const errorMsg = loadErrorMessage(err, 'روش‌های پرداخت سنگ');
-      setError(errorMsg);
+      reportError(errorMsg, getSalesOperationalErrorKind(err));
       setStoneFinishings([]);
       setStoneFinishingLoadState('error');
-      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [reportError]);
 
   const loadUserProfile = useCallback(async () => {
     try {
@@ -294,15 +294,15 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       return null;
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'اطلاعات کاربر');
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
+      reportError(errorMsg, getSalesOperationalErrorKind(err));
       return null;
     }
-  }, [buildCapabilities]);
+  }, [buildCapabilities, reportError]);
 
   const loadInitialData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const errorSequenceAtStart = errorSequenceRef.current;
 
     try {
       const profile = await loadUserProfile();
@@ -317,8 +317,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       } else {
         const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
         setCustomers([]);
-        setError(message);
-        if (onErrorRef.current) onErrorRef.current(message, 'permission');
+        reportError(message, 'permission');
       }
       if (nextCapabilities.canLoadCuttingTypes) tasks.push(loadCuttingTypes());
       if (nextCapabilities.canLoadSubServices) tasks.push(loadSubServices(1000));
@@ -331,17 +330,17 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
 
       await Promise.all(tasks);
 
-      if (onDataLoadedRef.current) {
+      if (errorSequenceRef.current === errorSequenceAtStart && onDataLoadedRef.current) {
+        setError(null);
         onDataLoadedRef.current();
       }
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'اطلاعات اولیه قرارداد');
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg, getSalesOperationalErrorKind(err));
+      reportError(errorMsg, getSalesOperationalErrorKind(err));
     } finally {
       setLoading(false);
     }
-  }, [buildCapabilities, loadUserProfile, loadProducts, loadDepartments, loadCustomers, loadCuttingTypes, loadSubServices, loadStoneFinishings]);
+  }, [buildCapabilities, loadUserProfile, loadProducts, loadDepartments, loadCustomers, loadCuttingTypes, loadSubServices, loadStoneFinishings, reportError]);
 
   useEffect(() => {
     if (autoLoad && !hasLoadedRef.current) {

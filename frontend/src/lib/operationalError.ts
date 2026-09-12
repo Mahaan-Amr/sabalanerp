@@ -82,7 +82,7 @@ export const getOperationalErrorMessage = (error: unknown, options: OperationalE
       ? asSentence(`${options.failedAction} انجام نشد چون ارتباط با سامانه برقرار نشد`)
       : asSentence(`${options.failedAction} انجام نشد`);
   const preserve = options.preserveInput ? 'اطلاعات واردشده حفظ شده است.' : '';
-  const requestedNextStep = options.uncertainMutation && !businessMessage && !options.nextStep.includes('فقط اگر')
+  const requestedNextStep = options.uncertainMutation && (!businessMessage || status >= 500) && !options.nextStep.includes('فقط اگر')
     ? 'وضعیت فعلی را بررسی کنید؛ فقط اگر عملیات انجام نشده بود دوباره تلاش کنید.'
     : options.nextStep;
   const nextStep = failure.includes(requestedNextStep.trim()) ? '' : asSentence(requestedNextStep);

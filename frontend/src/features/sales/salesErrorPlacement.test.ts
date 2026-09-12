@@ -98,6 +98,7 @@ test('successful Sale retries clear superseded operational errors', () => {
   assert.match(detail, /setActionLoading\('print-summary'\);\s*setError\(''\)/);
   assert.match(list, /setPdfActionLoading\(contractId\);\s*setOperationError\(null\)/);
   assert.match(products, /if \(response\.data\.success\) \{\s*setRowError\(null\)/);
+  assert.match(wizard, /const handleDataLoaded[\s\S]*?delete next\.general[\s\S]*?onDataLoaded: handleDataLoaded/);
 });
 
 test('signature operations render their HTTP semantic kind', () => {

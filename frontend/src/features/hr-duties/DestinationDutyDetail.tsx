@@ -23,7 +23,7 @@ import { hrDutyApi, type DestinationDuty } from './hrDutyApi';
 import { destinationDutySourceVersionLabel, initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
 import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
-import { getOperationalErrorMessage } from '@/lib/operationalError';
+import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatNumericInputText } from '@/lib/numberFormat';
 import { collateralReceiptDatePayload } from './collateralReceiptDate';
@@ -70,7 +70,7 @@ const failureMessage = (error: any) => {
   if (code.includes('ENVELOPE')) return 'نسخه وظیفه تغییر کرده است. فهرست را به‌روزرسانی کنید.';
   if (error?.response?.status === 403) return 'دسترسی شما به این وظیفه معتبر نیست.';
   if (error?.response?.status === 404) return 'این وظیفه در این فضای کاری در دسترس نیست.';
-  return getOperationalErrorMessage(error, {
+  return getSalesOperationalErrorMessage(error, {
     failedAction: 'به‌روزرسانی وضعیت وظیفه',
     nextStep: 'آخرین نمایش موفق حفظ شده است؛ وضعیت وظیفه را تازه‌سازی کنید.',
   });

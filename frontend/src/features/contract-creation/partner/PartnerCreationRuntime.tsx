@@ -9,7 +9,7 @@ import {
   type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalFamily, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpSelect } from '@/components/erp';
+import { ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpSelect, ErpTextarea } from '@/components/erp';
 import api from '@/lib/api';
 import { createPartnerTechnicalHttpPorts } from './partnerTechnicalHttpPorts';
 import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/partnerInquiryHttpPorts';
@@ -21,6 +21,8 @@ import { createPartnerCaseSubmission, type PartnerSubmitCommand } from './partne
 import { enterPartnerWizard } from './partnerWizardEntry';
 import { partnerRetailSummary } from './partnerRetail';
 import { buildPartnerProductionTechnicalDraft } from './partnerProductionTechnicalDraft';
+import { buildPartnerCustomerCreateCommand, emptyPartnerCustomerDraft, validatePartnerCustomerDraft,
+  type PartnerCustomerDraft } from './partnerCustomerCreation';
 
 type PartnerContext = Extract<PartnerCreationContext, { kind: 'PARTNER' }>;
 type Access = { schemaVersion: 1; recoveryId: string; browserSessionId: string;
@@ -102,6 +104,9 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
   const [finishingId, setFinishingId] = useState('');
   const [includeRemainder, setIncludeRemainder] = useState(false);
   const [customerId, setCustomerId] = useState('');
+  const [customerDraft, setCustomerDraft] = useState<PartnerCustomerDraft>(emptyPartnerCustomerDraft);
+  const [showCustomerForm, setShowCustomerForm] = useState(false);
+  const [customerNotice, setCustomerNotice] = useState<string | null>(null);
   const [wizard, setWizard] = useState<PartnerWizardDraft | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,10 +122,45 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
         const saved = readStored<PersistedRuntime>(runtimeKey(parsed.data.actorId));
         if (saved?.actorId === parsed.data.actorId) { setRuntime(saved); setCustomerId(saved.customerId); }
         else setCustomerId(parsed.data.customers[0]?.id || '');
+        setShowCustomerForm(parsed.data.customers.length === 0);
       }
     }).catch(() => active && setError('تشخیص مسیر ایجاد قرارداد انجام نشد. دوباره تلاش کنید.'));
     return () => { active = false; };
   }, []);
+
+  const createCustomer = async (partner: PartnerContext) => {
+    if (pending || !validatePartnerCustomerDraft(customerDraft)) return;
+    setPending(true); setError(null); setCustomerNotice(null);
+    try {
+      const command = await buildPartnerCustomerCreateCommand(customerDraft, {
+        commandId: `partner-customer-${crypto.randomUUID()}`,
+        correlationId: `partner-customer-correlation-${crypto.randomUUID()}`,
+        idempotencyKey: `partner-customer-idempotency-${crypto.randomUUID()}`,
+      });
+      const response = await api.post('/crm/partner/customers', command, {
+        headers: { 'X-Correlation-Id': command.correlationId },
+      });
+      const value = (response.data as { data?: unknown })?.data;
+      const row = value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>).customer : null;
+      if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('Invalid customer response');
+      const customer = row as Record<string, unknown>;
+      if (typeof customer.customerId !== 'string' || typeof customer.displayName !== 'string') {
+        throw new Error('Invalid customer response');
+      }
+      const created = { id: customer.customerId, displayName: customer.displayName, address: customerDraft.address.trim() };
+      setContext({ ...partner, customers: [created, ...partner.customers] });
+      setCustomerId(created.id);
+      setCustomerDraft(emptyPartnerCustomerDraft);
+      setShowCustomerForm(false);
+      setCustomerNotice('مشتری با موفقیت ثبت و برای فروش همکار انتخاب شد.');
+    } catch (caught) {
+      const response = (caught as { response?: { data?: { code?: string } } })?.response;
+      setError(response?.data?.code === 'STATE_CONFLICT'
+        ? 'مشتری با این شماره تماس یا کد ملی قبلاً ثبت شده است.'
+        : 'ثبت مشتری کامل نشد. ورودی‌ها را بررسی و دوباره تلاش کنید.');
+    } finally { setPending(false); }
+  };
 
   useEffect(() => {
     if (context?.kind !== 'PARTNER' || !context.writable || runtime) return;
@@ -293,7 +333,6 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
   if (context.kind === 'ORDINARY_SALES') return <>{ordinary}</>;
   if (!context.writable) return <ErpInlineState kind="permission"
     title={`ایجاد پرونده فروش همکار در وضعیت فعلی مجاز نیست.${context.blockedCode ? ` (${context.blockedCode})` : ''}`} />;
-  if (!context.customers.length) return <ErpInlineState kind="empty" title="ابتدا یک مشتری خصوصی فروش همکار ثبت کنید." />;
   if (wizard && submission) return <PartnerContractWizard draft={wizard} onChange={updateWizard} recovery={{ state: 'writable' }}
     submission={submission} now={Date.now()} renderSection={renderSection}
     validateStep={(step, draft) => step === 'customer' && !draft.intent.customerId ? 'مشتری را انتخاب کنید.'
@@ -312,11 +351,47 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
   const dimensional = !['prepared', 'volumetric'].includes(family);
   const familyLabels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی',
     longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
+  if (showCustomerForm || !context.customers.length) return <section dir="rtl" className="mx-auto min-w-0 max-w-4xl space-y-5">
+    <h1 className="text-2xl font-bold">ثبت مشتری فروش همکار</h1>
+    <ErpInlineState kind="empty" title="برای شروع فروش، ابتدا مشتری خود را ثبت کنید. این مشتری فقط در حساب فروش همکار شما قرار می‌گیرد." />
+    <ErpCard className="space-y-4 p-4 sm:p-6">
+      <ErpField label="نوع مشتری" required><ErpSelect value={customerDraft.customerType}
+        onChange={event => setCustomerDraft({ ...customerDraft, customerType: event.target.value as 'Individual' | 'Company' })}>
+        <option value="Individual">شخص حقیقی</option><option value="Company">شخص حقوقی</option>
+      </ErpSelect></ErpField>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <ErpField label="نام" required><ErpInput value={customerDraft.firstName} maxLength={120}
+          onChange={event => setCustomerDraft({ ...customerDraft, firstName: event.target.value })} /></ErpField>
+        <ErpField label="نام خانوادگی" required><ErpInput value={customerDraft.lastName} maxLength={120}
+          onChange={event => setCustomerDraft({ ...customerDraft, lastName: event.target.value })} /></ErpField>
+      </div>
+      {customerDraft.customerType === 'Company' && <ErpField label="نام شرکت"><ErpInput value={customerDraft.companyName} maxLength={500}
+        onChange={event => setCustomerDraft({ ...customerDraft, companyName: event.target.value })} /></ErpField>}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <ErpField label="شماره تماس" required><ErpInput inputMode="tel" value={customerDraft.phone} maxLength={30}
+          onChange={event => setCustomerDraft({ ...customerDraft, phone: event.target.value })} /></ErpField>
+        <ErpField label="کد ملی / شناسه ملی"><ErpInput inputMode="numeric" value={customerDraft.nationalCode} maxLength={30}
+          onChange={event => setCustomerDraft({ ...customerDraft, nationalCode: event.target.value })} /></ErpField>
+      </div>
+      <ErpField label="شهر"><ErpInput value={customerDraft.city} maxLength={500}
+        onChange={event => setCustomerDraft({ ...customerDraft, city: event.target.value })} /></ErpField>
+      <ErpField label="نشانی تحویل" required><ErpTextarea value={customerDraft.address} maxLength={1000} rows={3}
+        onChange={event => setCustomerDraft({ ...customerDraft, address: event.target.value })} /></ErpField>
+      <div className="flex flex-wrap gap-3">
+        <ErpButton label={pending ? 'در حال ثبت…' : 'ثبت مشتری و ادامه'} disabled={pending || !validatePartnerCustomerDraft(customerDraft)}
+          onClick={() => void createCustomer(context)} />
+        {context.customers.length > 0 && <ErpButton label="انصراف" variant="outline" disabled={pending} onClick={() => setShowCustomerForm(false)} />}
+      </div>
+    </ErpCard>
+    {error && <ErpInlineState kind="error" title={error} />}
+  </section>;
   return <section dir="rtl" className="mx-auto min-w-0 max-w-4xl space-y-5">
     <h1 className="text-2xl font-bold">ایجاد فروش همکار</h1>
+    {customerNotice && <ErpInlineState kind="success" title={customerNotice} />}
     <ErpCard className="space-y-4 p-4 sm:p-6">
       <ErpField label="مشتری" required><ErpSelect value={customerId} onChange={event => setCustomerId(event.target.value)}>
         {context.customers.map(customer => <option key={customer.id} value={customer.id}>{customer.displayName}</option>)}</ErpSelect></ErpField>
+      <ErpButton label="ثبت مشتری جدید" variant="outline" disabled={pending} onClick={() => { setError(null); setCustomerNotice(null); setShowCustomerForm(true); }} />
       <ErpField label="خانواده محصول" required><ErpSelect value={family}
         onChange={event => setFamily(event.target.value as PartnerTechnicalFamily)}>
         {(Object.keys(familyLabels) as PartnerTechnicalFamily[]).map(value =>

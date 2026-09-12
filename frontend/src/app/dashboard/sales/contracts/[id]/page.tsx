@@ -408,6 +408,12 @@ export default function ContractDetailPage() {
       if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {
         openPdfUrl(pdfResponse.data.data.url, true);
         clearOperationalError('print');
+      } else {
+        const failure = { response: pdfResponse };
+        showOperationalError('print', getSalesOperationalErrorMessage(failure, {
+          failedAction: 'دریافت فایل PDF قرارداد',
+          nextStep: 'دوباره روی «پرینت» بزنید.'
+        }), getSalesOperationalErrorKind(failure));
       }
     } catch (error: any) {
       showOperationalError('print', getSalesOperationalErrorMessage(error, {
@@ -533,7 +539,8 @@ export default function ContractDetailPage() {
 
   const partnerRoute = resolvePartnerContractRoute(contract);
   if (partnerRoute.kind === 'blocked') {
-    return <ErpInlineState kind="error" title="شواهد نسخه پرونده فروش همکار کامل نیست؛ برای جلوگیری از نمایش نادرست، دسترسی متوقف شد." />;
+    return <ErpInlineState kind="error" title="شواهد نسخه پرونده فروش همکار کامل نیست؛ برای جلوگیری از نمایش نادرست، دسترسی متوقف شد. اطلاعات قرارداد را دوباره دریافت کنید."
+      action={{ label: 'دریافت دوباره', onClick: () => void loadContract() }} />;
   }
   if (partnerRoute.kind === 'partner') {
     const projection = PartnerCaseViewSchema.safeParse(contract.partnerCaseView);

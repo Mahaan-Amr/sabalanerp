@@ -22,11 +22,11 @@ test('contract, product, and partner action failures are rendered beside their r
   const contracts = source('src/app/dashboard/sales/contracts/page.tsx');
   const products = source('src/app/dashboard/sales/products/page.tsx');
   const partnerCases = source('src/features/partner-sales/cases/PartnerCaseRuntime.tsx');
-  assert.match(contracts, /operationError\?\.contractId === contract\.id/);
-  assert.match(contracts, /kind=\{operationError\.kind\}/);
-  assert.match(products, /rowError\?\.productId === product\.id/);
+  assert.match(contracts, /latestOperationError\(\(item\) => item\.contractId === contract\.id\)/);
+  assert.match(contracts, /kind=\{rowError\.kind\}/);
+  assert.match(products, /latestProductError\(product\.id\)/);
   assert.match(products, /kind=\{rowError\.kind\}/);
-  assert.match(partnerCases, /error\?\.caseId === row\.view\.owner\.caseId/);
+  assert.match(partnerCases, /latestCaseError\(row\.view\.owner\.caseId\)/);
   assert.match(partnerCases, /kind=\{error\.kind\}/);
 });
 
@@ -34,7 +34,7 @@ test('failed product deletion closes confirmation before exposing its row error'
   const page = source('src/app/dashboard/sales/products/page.tsx');
   const deleteHandler = page.slice(page.indexOf('const handleDeleteConfirm'), page.indexOf('const handleToggleStatus'));
   assert.equal(deleteHandler.match(/setDeleteConfirm\(\{ show: false, product: null \}\)/g)?.length, 3);
-  assert.match(deleteHandler, /catch[\s\S]*setDeleteConfirm\(\{ show: false, product: null \}\)[\s\S]*setRowError/);
+  assert.match(deleteHandler, /catch[\s\S]*setDeleteConfirm\(\{ show: false, product: null \}\)[\s\S]*reportRowError\(errorKey/);
 });
 
 test('accounting workflow lock is presented as stale state rather than missing permission', () => {
@@ -95,14 +95,14 @@ test('successful Sale retries clear superseded operational errors', () => {
   const detail = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
   const list = source('src/app/dashboard/sales/contracts/page.tsx');
   const products = source('src/app/dashboard/sales/products/page.tsx');
-  assert.match(wizard, /updateWizardData\([\s\S]*?setErrors\(prev => \(\{ \.\.\.prev, signature: '' \}\)\);[\s\S]*?catch/);
+  assert.match(wizard, /signatureErrorsRef\.current\.delete\(source\)[\s\S]*publishSignatureError\(\)/);
   assert.match(detail, /downloadBlobResponse\([\s\S]*?clearOperationalError\('download'\)/);
   assert.match(detail, /openPdfUrl\(pdfResponse\.data\.data\.url, true\);\s*clearOperationalError\('print-summary'\)/);
   assert.doesNotMatch(detail, /setActionLoading\('(download|print|print-summary)'\);\s*setError/);
-  assert.match(list, /downloadBlobResponse\([\s\S]*?setOperationError\(\(current\) => current\?\.source === 'action'/);
-  assert.match(products, /if \(response\.data\.success\) \{\s*setRowError\(\(current\) => current\?\.productId === product\.id \? null : current\)/);
+  assert.match(list, /downloadBlobResponse\([\s\S]*?clearOperationError\(errorKey\)/);
+  assert.match(products, /if \(response\.data\.success\) \{\s*clearRowError\(errorKey\)/);
   assert.match(wizard, /const handleDataLoaded[\s\S]*?delete next\.general[\s\S]*?onDataLoaded: handleDataLoaded/);
-  assert.match(list, /if \(response\.data\.success\) \{[\s\S]*?setOperationError\(\(current\) => current\?\.source === 'contracts' \? null : current\)/);
+  assert.match(list, /if \(response\.data\.success\) \{[\s\S]*?clearOperationError\('contracts'\)/);
 });
 
 test('data retry clears only the error produced by the recovered source', () => {
@@ -120,10 +120,46 @@ test('data retry clears only the error produced by the recovered source', () => 
 test('signature operations render their HTTP semantic kind', () => {
   const wizard = source('src/features/contract-creation/CreateContractWizardClient.tsx');
   const signature = source('src/features/contract-creation/components/steps/Step8DigitalSignature.tsx');
-  assert.match(wizard, /setSignatureErrorKind\(getSalesOperationalErrorKind\(/);
+  assert.match(wizard, /reportSignatureError\(errorSource,[\s\S]*getSalesOperationalErrorKind\(/);
   assert.match(wizard, /signatureErrorKind=\{signatureErrorKind\}/);
-  assert.match(wizard, /const handleResendConfirmation[\s\S]*?setErrors\(prev => \(\{ \.\.\.prev, signature: '' \}\)\);[\s\S]*?salesAPI\.resendConfirmation/);
+  assert.match(wizard, /const handleResendConfirmation[\s\S]*?beginSignatureOperation\(errorSource\)[\s\S]*?salesAPI\.resendConfirmation[\s\S]*?clearSignatureError\(errorSource\)/);
   assert.match(signature, /kind=\{signatureErrorKind\} title=\{errors\.signature\}/);
+});
+
+test('concurrent Sale actions retain errors until the matching operation recovers', () => {
+  const wizard = source('src/features/contract-creation/CreateContractWizardClient.tsx');
+  const contracts = source('src/app/dashboard/sales/contracts/page.tsx');
+  const products = source('src/app/dashboard/sales/products/page.tsx');
+  const partnerCases = source('src/features/partner-sales/cases/PartnerCaseRuntime.tsx');
+
+  assert.match(wizard, /signatureErrorsRef = useRef\(new Map/);
+  assert.match(wizard, /signatureOperationSequenceRef = useRef\(new Map/);
+  assert.match(wizard, /if \(!isLatestSignatureOperation\(errorSource, requestSequence\)\) return/);
+  assert.doesNotMatch(wizard, /const handle(DownloadPdf|PrintContract|SendConfirmation|ResendConfirmation)[\s\S]{0,500}setErrors\(previous => \(\{ \.\.\.previous, signature: '' \}\)\)/);
+
+  assert.match(contracts, /const errorKey = `action:\$\{contractId\}:download`/);
+  assert.match(contracts, /const errorKey = `action:\$\{actionKey\}`/);
+  assert.match(contracts, /reportOperationError\(errorKey,[\s\S]*failedAction: 'دریافت فایل PDF قرارداد'/);
+  assert.match(products, /const errorKey = `\$\{product\.id\}:delete`/);
+  assert.match(products, /const errorKey = `\$\{product\.id\}:toggle`/);
+  assert.match(partnerCases, /const errorKey = `\$\{caseId\}:\$\{operation\}`/);
+  assert.match(partnerCases, /actionSequenceRef = useRef\(new Map/);
+});
+
+test('Sale data retries preserve visible failures until a current request succeeds', () => {
+  const create = source('src/app/dashboard/sales/products/create/page.tsx');
+  const detail = source('src/app/dashboard/sales/products/[id]/page.tsx');
+  const contractDetail = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
+  const contracts = source('src/app/dashboard/sales/contracts/page.tsx');
+
+  assert.match(create, /masterDataRequestSequenceRef/);
+  assert.doesNotMatch(create, /setLoading\(true\);\s*setLoadError\(''\)/);
+  assert.match(detail, /productRequestSequenceRef/);
+  assert.doesNotMatch(detail, /setLoading\(true\);\s*setLoadError\(''\)/);
+  assert.doesNotMatch(detail, /setSaving\(true\);\s*setFeedback\(undefined\)/);
+  assert.match(contractDetail, /failedAction: 'دریافت فایل PDF قرارداد'/);
+  assert.match(contractDetail, /action=\{\{ label: 'دریافت دوباره', onClick: \(\) => void loadContract\(\) \}\}/);
+  assert.match(contracts, /label: 'دریافت دوباره دسترسی‌ها', onClick: loadCurrentUser/);
 });
 
 test('contract detail renders permission and stale failures with their semantic kind', () => {

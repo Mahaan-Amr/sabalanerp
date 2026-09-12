@@ -1032,12 +1032,36 @@ export default function CreateContractWizard({
   const [pdfActionLoading, setPdfActionLoading] = useState(false);
   const [printActionLoading, setPrintActionLoading] = useState(false);
   const [signatureErrorKind, setSignatureErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const signatureErrorSequenceRef = useRef(0);
+  const signatureErrorsRef = useRef(new Map<string, { message: string; kind: 'error' | 'permission' | 'stale'; order: number }>());
+  const signatureOperationSequenceRef = useRef(new Map<string, number>());
+  const publishSignatureError = useCallback(() => {
+    const latest = Array.from(signatureErrorsRef.current.values()).sort((left, right) => right.order - left.order)[0];
+    setSignatureErrorKind(latest?.kind || 'error');
+    setErrors((previous) => ({ ...previous, signature: latest?.message || '' }));
+  }, []);
+  const reportSignatureError = useCallback((source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
+    const order = ++signatureErrorSequenceRef.current;
+    signatureErrorsRef.current.set(source, { message, kind, order });
+    setSignatureErrorKind(kind);
+    setErrors((previous) => ({ ...previous, signature: message }));
+  }, []);
+  const clearSignatureError = useCallback((source: string) => {
+    if (!signatureErrorsRef.current.delete(source)) return;
+    publishSignatureError();
+  }, [publishSignatureError]);
+  const beginSignatureOperation = useCallback((source: string) => {
+    const sequence = (signatureOperationSequenceRef.current.get(source) || 0) + 1;
+    signatureOperationSequenceRef.current.set(source, sequence);
+    return sequence;
+  }, []);
+  const isLatestSignatureOperation = useCallback((source: string, sequence: number) =>
+    signatureOperationSequenceRef.current.get(source) === sequence, []);
   const digitalSignature = useDigitalSignature({
     onError: (error) => {
-      setSignatureErrorKind('error');
-      setErrors({ signature: error });
+      reportSignatureError('digital-signature', error, 'error');
     },
-    onSuccess: () => undefined
+    onSuccess: () => clearSignatureError('digital-signature')
   });
 
   // NOTE: Layer session items sync is now handled internally by useStairSystemV2 hook
@@ -4407,6 +4431,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   // Digital confirmation handlers
   const refreshConfirmationStatus = async () => {
+    const errorSource = 'confirmation-status';
+    const requestSequence = beginSignatureOperation(errorSource);
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
       return;
@@ -4414,6 +4440,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     try {
       const response = await salesAPI.getConfirmationStatus(signatureContractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!response.data.success) {
         return;
       }
@@ -4448,16 +4475,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           lastOpenedAt: statusData.lastOpenedAt || null
         }
       });
-      setErrors(prev => ({ ...prev, signature: '' }));
+      clearSignatureError(errorSource);
     } catch (error: any) {
-      setSignatureErrorKind(getSalesOperationalErrorKind(error));
-      setErrors(prev => ({
-        ...prev,
-        signature: getSalesOperationalErrorMessage(error, {
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
           failedAction: 'دریافت وضعیت تأیید قرارداد',
           nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
-        })
-      }));
+        }), getSalesOperationalErrorKind(error));
     }
   };
 
@@ -4491,94 +4515,98 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   };
 
   const handleDownloadContractPdf = async () => {
+    const errorSource = 'download';
+    const requestSequence = beginSignatureOperation(errorSource);
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
-      setSignatureErrorKind('error');
-      setErrors(prev => ({ ...prev, signature: 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.' }));
+      reportSignatureError(errorSource, 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.', 'error');
       return;
     }
 
     setPdfActionLoading(true);
-    setErrors(prev => ({ ...prev, signature: '' }));
     try {
       const response = await salesAPI.downloadContractPdf(signatureContractId, { fresh: false });
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       downloadBlobResponse(response, `sales_contract_${signatureContractId}.pdf`);
+      clearSignatureError(errorSource);
     } catch (error: any) {
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       const normalizedError = await normalizeSalesBlobError(error);
-      setSignatureErrorKind(getSalesOperationalErrorKind(normalizedError));
-      setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(normalizedError, {
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(normalizedError, {
         failedAction: 'دانلود PDF قرارداد',
         nextStep: 'دوباره روی «دانلود PDF» بزنید.'
-      }) }));
+      }), getSalesOperationalErrorKind(normalizedError));
     } finally {
-      setPdfActionLoading(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) setPdfActionLoading(false);
     }
   };
 
   const handlePrintContractPdf = async () => {
+    const errorSource = 'print';
+    const requestSequence = beginSignatureOperation(errorSource);
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
-      setSignatureErrorKind('error');
-      setErrors(prev => ({ ...prev, signature: 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.' }));
+      reportSignatureError(errorSource, 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.', 'error');
       return;
     }
 
     setPrintActionLoading(true);
-    setErrors(prev => ({ ...prev, signature: '' }));
     try {
       const printResponse = await salesAPI.printContract(signatureContractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!printResponse.data?.success) {
         const failure = { response: printResponse };
-        setSignatureErrorKind(getSalesOperationalErrorKind(failure));
-        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(failure, {
+        reportSignatureError(errorSource, getSalesOperationalErrorMessage(failure, {
           failedAction: 'آماده‌سازی پرینت قرارداد',
           nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
-        }) }));
+        }), getSalesOperationalErrorKind(failure));
         return;
       }
 
       const url = await getPrintablePdfUrl(signatureContractId, false);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!url) {
-        setSignatureErrorKind('error');
-        setErrors(prev => ({ ...prev, signature: 'فایل PDF قرارداد آماده نشده است؛ دوباره روی «پرینت قرارداد» بزنید.' }));
+        reportSignatureError(errorSource, 'فایل PDF قرارداد آماده نشده است؛ دوباره روی «پرینت قرارداد» بزنید.', 'error');
         return;
       }
 
       await refreshConfirmationStatus();
       openPdfUrl(url, true);
+      clearSignatureError(errorSource);
     } catch (error: any) {
-      setSignatureErrorKind(getSalesOperationalErrorKind(error));
-      setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
         failedAction: 'آماده‌سازی پرینت قرارداد',
         nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
-      }) }));
+      }), getSalesOperationalErrorKind(error));
     } finally {
-      setPrintActionLoading(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) setPrintActionLoading(false);
     }
   };
 
   const handleSendForConfirmation = async () => {
+    const errorSource = 'send-confirmation';
+    const requestSequence = beginSignatureOperation(errorSource);
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
-      setSignatureErrorKind('error');
-      setErrors(prev => ({ ...prev, signature: 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.' }));
+      reportSignatureError(errorSource, 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.', 'error');
       return;
     }
 
     digitalSignature.setSendingCode(true);
-    setErrors(prev => ({ ...prev, signature: '' }));
     try {
       const response = await salesAPI.sendForConfirmation(signatureContractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!response.data.success) {
         const failure = { response };
-        setSignatureErrorKind(getSalesOperationalErrorKind(failure));
-        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(failure, {
+        reportSignatureError(errorSource, getSalesOperationalErrorMessage(failure, {
           failedAction: 'ارسال پیام تأیید قرارداد',
           nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
-        }) }));
+        }), getSalesOperationalErrorKind(failure));
         return;
       }
 
@@ -4608,50 +4636,55 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
       });
       await refreshConfirmationStatus();
+      clearSignatureError(errorSource);
     } catch (error: any) {
-      setSignatureErrorKind(getSalesOperationalErrorKind(error));
-      setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
         failedAction: 'ارسال پیام تأیید قرارداد',
         nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
-      }) }));
+      }), getSalesOperationalErrorKind(error));
     } finally {
-      digitalSignature.setSendingCode(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) digitalSignature.setSendingCode(false);
     }
   };
 
   const handleResendConfirmation = async () => {
+    const errorSource = 'resend-confirmation';
+    const requestSequence = beginSignatureOperation(errorSource);
     if (!wizardData.signature?.contractId) {
       return;
     }
     digitalSignature.setSendingCode(true);
-    setErrors(prev => ({ ...prev, signature: '' }));
     try {
       const response = await salesAPI.resendConfirmation(wizardData.signature.contractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!response.data.success) {
         const failure = { response };
-        setSignatureErrorKind(getSalesOperationalErrorKind(failure));
-        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(failure, {
+        reportSignatureError(errorSource, getSalesOperationalErrorMessage(failure, {
           failedAction: 'ارسال دوباره کد تأیید',
           nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
-        }) }));
+        }), getSalesOperationalErrorKind(failure));
         return;
       }
       await refreshConfirmationStatus();
+      clearSignatureError(errorSource);
     } catch (error: any) {
-      setSignatureErrorKind(getSalesOperationalErrorKind(error));
-      setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
         failedAction: 'ارسال دوباره کد تأیید',
         nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
-      }) }));
+      }), getSalesOperationalErrorKind(error));
     } finally {
-      digitalSignature.setSendingCode(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) digitalSignature.setSendingCode(false);
     }
   };
 
   const handleCancelContract = async () => {
+    const errorSource = 'cancel';
+    const requestSequence = beginSignatureOperation(errorSource);
     if (!wizardData.signature?.contractId) {
       return;
     }
@@ -4659,27 +4692,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     digitalSignature.setSendingCode(true);
     try {
       const response = await salesAPI.cancelContract(wizardData.signature.contractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!response.data.success) {
         const failure = { response };
-        setSignatureErrorKind(getSalesOperationalErrorKind(failure));
-        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(failure, {
+        reportSignatureError(errorSource, getSalesOperationalErrorMessage(failure, {
           failedAction: 'لغو قرارداد',
           nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
-        }) }));
+        }), getSalesOperationalErrorKind(failure));
         return;
       }
       await refreshConfirmationStatus();
+      clearSignatureError(errorSource);
       router.push('/dashboard/sales/contracts');
     } catch (error: any) {
-      setSignatureErrorKind(getSalesOperationalErrorKind(error));
-      setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
         failedAction: 'لغو قرارداد',
         nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
-      }) }));
+      }), getSalesOperationalErrorKind(error));
     } finally {
-      digitalSignature.setSendingCode(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) digitalSignature.setSendingCode(false);
     }
   };
 

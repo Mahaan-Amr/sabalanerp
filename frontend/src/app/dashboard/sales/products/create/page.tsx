@@ -1,6 +1,6 @@
 'use client';
 import { ErpCard, ErpCheckbox, ErpField as SalesAuthoringField, ErpFieldView, ErpInput, ErpPressable } from '@/components/erp';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   FaCheck,
@@ -293,6 +293,7 @@ export default function CreateStoneProductWizard() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [loadErrorKind, setLoadErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const masterDataRequestSequenceRef = useRef(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -359,10 +360,9 @@ export default function CreateStoneProductWizard() {
   }, []);
 
   const loadMasterData = async () => {
+    const requestSequence = ++masterDataRequestSequenceRef.current;
     try {
       setLoading(true);
-      setLoadError('');
-      setLoadErrorKind('error');
 
       // Load all master data in parallel
       const [
@@ -383,6 +383,8 @@ export default function CreateStoneProductWizard() {
         inventoryAPI.getColors({ limit: 100, isActive: true })
       ]);
 
+      if (requestSequence !== masterDataRequestSequenceRef.current) return;
+
       setMasterData({
         cutTypes: cutTypesResponse.data.success ? cutTypesResponse.data.data : [],
         stoneMaterials: stoneMaterialsResponse.data.success ? stoneMaterialsResponse.data.data : [],
@@ -392,7 +394,10 @@ export default function CreateStoneProductWizard() {
         finishTypes: finishTypesResponse.data.success ? finishTypesResponse.data.data : [],
         colors: colorsResponse.data.success ? colorsResponse.data.data : []
       });
+      setLoadError('');
+      setLoadErrorKind('error');
     } catch (error) {
+      if (requestSequence !== masterDataRequestSequenceRef.current) return;
       console.error('Error loading master data:', error);
       setLoadErrorKind(getSalesOperationalErrorKind(error));
       setLoadError(getSalesOperationalErrorMessage(error, {
@@ -400,7 +405,7 @@ export default function CreateStoneProductWizard() {
         nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
       }));
     } finally {
-      setLoading(false);
+      if (requestSequence === masterDataRequestSequenceRef.current) setLoading(false);
     }
   };
 

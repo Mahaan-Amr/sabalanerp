@@ -44,9 +44,26 @@ export default function ProductsPage() {
   const [modalMessage, setModalMessage] = useState('');
   const [listError, setListError] = useState('');
   const [listErrorKind, setListErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
-  const [rowError, setRowError] = useState<{ productId: string; message: string; kind: 'error' | 'permission' | 'stale' } | null>(null);
+  const [rowErrors, setRowErrors] = useState<Array<{ key: string; productId: string; message: string; kind: 'error' | 'permission' | 'stale'; order: number }>>([]);
   const [showImportExportModal, setShowImportExportModal] = useState(false);
   const productRequestSequenceRef = useRef(0);
+  const rowActionSequenceRef = useRef(new Map<string, number>());
+  const beginRowAction = (key: string) => {
+    const sequence = (rowActionSequenceRef.current.get(key) || 0) + 1;
+    rowActionSequenceRef.current.set(key, sequence);
+    return sequence;
+  };
+  const isLatestRowAction = (key: string, sequence: number) =>
+    rowActionSequenceRef.current.get(key) === sequence;
+  const rowErrorSequenceRef = useRef(0);
+  const reportRowError = (key: string, value: Omit<(typeof rowErrors)[number], 'key' | 'order'>) => {
+    const order = ++rowErrorSequenceRef.current;
+    setRowErrors((current) => [...current.filter((item) => item.key !== key), { ...value, key, order }]);
+  };
+  const clearRowError = (key: string) => setRowErrors((current) => current.filter((item) => item.key !== key));
+  const latestProductError = (productId: string) => rowErrors
+    .filter((item) => item.productId === productId)
+    .sort((left, right) => right.order - left.order)[0];
 
   const itemsPerPage = 20;
 
@@ -120,12 +137,15 @@ export default function ProductsPage() {
   const handleDeleteConfirm = async () => {
     if (!deleteConfirm.product) return;
     const product = deleteConfirm.product;
+    const errorKey = `${product.id}:delete`;
+    const requestSequence = beginRowAction(errorKey);
 
     try {
       setDeleting(true);
       const response = await salesAPI.deleteProduct(product.id);
+      if (!isLatestRowAction(errorKey, requestSequence)) return;
       if (response.data.success) {
-        setRowError((current) => current?.productId === product.id ? null : current);
+        clearRowError(errorKey);
         setModalMessage('محصول با موفقیت حذف شد');
         setShowSuccessModal(true);
         setDeleteConfirm({ show: false, product: null });
@@ -133,53 +153,58 @@ export default function ProductsPage() {
       } else {
         const failure = { response };
         setDeleteConfirm({ show: false, product: null });
-        setRowError({ productId: product.id, kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
+        reportRowError(errorKey, { productId: product.id, kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
           failedAction: 'حذف محصول',
           nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
         }) });
       }
     } catch (error: any) {
+      if (!isLatestRowAction(errorKey, requestSequence)) return;
       console.error('Error deleting product:', error);
       setDeleteConfirm({ show: false, product: null });
-      setRowError({ productId: product.id, kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
+      reportRowError(errorKey, { productId: product.id, kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
         failedAction: 'حذف محصول',
         nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
       }) });
     } finally {
-      setDeleting(false);
+      if (isLatestRowAction(errorKey, requestSequence)) setDeleting(false);
     }
   };
 
   const handleToggleStatus = async (product: Product) => {
     if (!canEditProducts(currentUser)) return;
+    const errorKey = `${product.id}:toggle`;
+    const requestSequence = beginRowAction(errorKey);
 
     setDeleting(true);
     try {
       const response = await salesAPI.updateProduct(product.id, { isActive: !product.isActive });
+      if (!isLatestRowAction(errorKey, requestSequence)) return;
       if (response.data.success) {
-        setRowError((current) => current?.productId === product.id ? null : current);
+        clearRowError(errorKey);
         setModalMessage(`وضعیت ${product.namePersian} با موفقیت تغییر کرد`);
         setShowSuccessModal(true);
         fetchProducts();
       } else {
         const failure = { response };
-        setRowError({ productId: product.id, kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
+        reportRowError(errorKey, { productId: product.id, kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
           failedAction: 'تغییر وضعیت محصول',
           nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
         }) });
       }
     } catch (error: any) {
+      if (!isLatestRowAction(errorKey, requestSequence)) return;
       console.error('Error toggling status:', error);
-      setRowError({ productId: product.id, kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
+      reportRowError(errorKey, { productId: product.id, kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
         failedAction: 'تغییر وضعیت محصول',
         nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
       }) });
     } finally {
-      setDeleting(false);
+      if (isLatestRowAction(errorKey, requestSequence)) setDeleting(false);
     }
   };
 
@@ -214,15 +239,18 @@ export default function ProductsPage() {
             id: 'product',
             header: 'محصول',
             priority: 'primary',
-            cell: (product) => (
-              <div className="min-w-0">
-                <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{product.namePersian}</p>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{generateFullProductName(product)}</p>
-                {rowError?.productId === product.id && (
-                  <ErpInlineState kind={rowError.kind} title={rowError.message} className="mt-2" />
-                )}
-              </div>
-            ),
+            cell: (product) => {
+              const rowError = latestProductError(product.id);
+              return (
+                <div className="min-w-0">
+                  <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{product.namePersian}</p>
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{generateFullProductName(product)}</p>
+                  {rowError && (
+                    <ErpInlineState kind={rowError.kind} title={rowError.message} className="mt-2" />
+                  )}
+                </div>
+              );
+            },
           },
           { id: 'dimensions', header: 'ابعاد', mobileLabel: 'ابعاد', cell: (product) => formatDimensions(product.widthValue, product.thicknessValue, 'سانتی‌متر') },
           { id: 'mine', header: 'معدن', mobileLabel: 'معدن', cell: (product) => product.mineNamePersian || '-' },

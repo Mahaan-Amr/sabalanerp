@@ -1,6 +1,6 @@
 'use client';
 import { ErpBadge, ErpCard, ErpField as SalesAuthoringField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Product } from '@/types/product';
 import { resolveBackendAssetUrl, salesAPI } from '@/lib/api';
@@ -48,6 +48,7 @@ const ProductDetailPage: React.FC = () => {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState(false);
   const [savedFormSnapshot, setSavedFormSnapshot] = useState<ProductEditValues | null>(null);
+  const productRequestSequenceRef = useRef(0);
   const [formData, setFormData] = useState<ProductEditValues>({
     basePrice: '',
     motherLengthValue: '',
@@ -64,11 +65,11 @@ const ProductDetailPage: React.FC = () => {
   }, [productId]);
 
   const fetchProduct = async () => {
+    const requestSequence = ++productRequestSequenceRef.current;
     try {
       setLoading(true);
-      setLoadError('');
-      setLoadErrorKind('error');
       const response = await salesAPI.getProduct(productId);
+      if (requestSequence !== productRequestSequenceRef.current) return;
 
       if (response.data.success && response.data.data) {
         const data = response.data;
@@ -83,9 +84,13 @@ const ProductDetailPage: React.FC = () => {
         };
         setFormData(nextFormData);
         setSavedFormSnapshot(nextFormData);
+        setLoadError('');
+        setLoadErrorKind('error');
       } else if (response.data.success) {
         setProduct(null);
         setSavedFormSnapshot(null);
+        setLoadError('');
+        setLoadErrorKind('error');
       } else {
         const failure = { response };
         setLoadErrorKind(getSalesOperationalErrorKind(failure));
@@ -95,6 +100,7 @@ const ProductDetailPage: React.FC = () => {
         }));
       }
     } catch (error) {
+      if (requestSequence !== productRequestSequenceRef.current) return;
       console.error('Error fetching product:', error);
       setLoadErrorKind(getSalesOperationalErrorKind(error));
       setLoadError(getSalesOperationalErrorMessage(error, {
@@ -102,15 +108,13 @@ const ProductDetailPage: React.FC = () => {
         nextStep: 'به فهرست محصولات برگردید یا دوباره تلاش کنید.'
       }));
     } finally {
-      setLoading(false);
+      if (requestSequence === productRequestSequenceRef.current) setLoading(false);
     }
   };
 
   const handleSave = async () => {
     try {
       setSaving(true);
-      setFeedback(undefined);
-      setFieldErrors({});
       const response = await salesAPI.updateProduct(productId, {
         basePrice: formData.basePrice ? parseFloat(formData.basePrice) : null,
         motherLengthValue: formData.motherLengthValue
@@ -126,6 +130,7 @@ const ProductDetailPage: React.FC = () => {
         setProduct(response.data.data);
         setSavedFormSnapshot(formData);
         setEditing(false);
+        setFieldErrors({});
         setFeedback({ kind: 'success', title: 'محصول با موفقیت به‌روزرسانی شد.' });
       } else {
         const mapped = mapProductEditValidationErrors(response.data?.details || []);

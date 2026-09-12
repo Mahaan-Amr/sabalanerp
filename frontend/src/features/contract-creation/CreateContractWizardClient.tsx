@@ -122,7 +122,7 @@ import {
 } from '@/features/contract-creation/services/contractCreationDraftPolicy';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
-import { getSalesErrorSummary, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 
 // Import constants
 import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
@@ -1019,12 +1019,16 @@ export default function CreateContractWizard({
   const deliverySchedule = useDeliverySchedule(wizardData.products);
 
   // Digital Signature (Step 8) state is now provided by useDigitalSignature hook
-  const digitalSignature = useDigitalSignature({
-    onError: (error) => setErrors({ signature: error }),
-    onSuccess: () => undefined
-  });
   const [pdfActionLoading, setPdfActionLoading] = useState(false);
   const [printActionLoading, setPrintActionLoading] = useState(false);
+  const [signatureErrorKind, setSignatureErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const digitalSignature = useDigitalSignature({
+    onError: (error) => {
+      setSignatureErrorKind('error');
+      setErrors({ signature: error });
+    },
+    onSuccess: () => undefined
+  });
 
   // NOTE: Layer session items sync is now handled internally by useStairSystemV2 hook
   // The hook has its own useEffect that syncs when drafts change
@@ -4435,6 +4439,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
       });
     } catch (error: any) {
+      setSignatureErrorKind(getSalesOperationalErrorKind(error));
       setErrors(prev => ({
         ...prev,
         signature: getSalesOperationalErrorMessage(error, {
@@ -4477,6 +4482,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const handleDownloadContractPdf = async () => {
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
+      setSignatureErrorKind('error');
       setErrors(prev => ({ ...prev, signature: 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.' }));
       return;
     }
@@ -4488,6 +4494,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       downloadBlobResponse(response, `sales_contract_${signatureContractId}.pdf`);
     } catch (error: any) {
       const normalizedError = await normalizeSalesBlobError(error);
+      setSignatureErrorKind(getSalesOperationalErrorKind(normalizedError));
       setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(normalizedError, {
         failedAction: 'دانلود PDF قرارداد',
         nextStep: 'دوباره روی «دانلود PDF» بزنید.'
@@ -4500,6 +4507,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const handlePrintContractPdf = async () => {
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
+      setSignatureErrorKind('error');
       setErrors(prev => ({ ...prev, signature: 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.' }));
       return;
     }
@@ -4509,7 +4517,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     try {
       const printResponse = await salesAPI.printContract(signatureContractId);
       if (!printResponse.data?.success) {
-        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage({ response: printResponse }, {
+        const failure = { response: printResponse };
+        setSignatureErrorKind(getSalesOperationalErrorKind(failure));
+        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(failure, {
           failedAction: 'آماده‌سازی پرینت قرارداد',
           nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
@@ -4519,6 +4529,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
       const url = await getPrintablePdfUrl(signatureContractId, false);
       if (!url) {
+        setSignatureErrorKind('error');
         setErrors(prev => ({ ...prev, signature: 'فایل PDF قرارداد آماده نشده است؛ دوباره روی «پرینت قرارداد» بزنید.' }));
         return;
       }
@@ -4526,6 +4537,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       await refreshConfirmationStatus();
       openPdfUrl(url, true);
     } catch (error: any) {
+      setSignatureErrorKind(getSalesOperationalErrorKind(error));
       setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
         failedAction: 'آماده‌سازی پرینت قرارداد',
         nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
@@ -4539,6 +4551,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const handleSendForConfirmation = async () => {
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
+      setSignatureErrorKind('error');
       setErrors(prev => ({ ...prev, signature: 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.' }));
       return;
     }
@@ -4548,7 +4561,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     try {
       const response = await salesAPI.sendForConfirmation(signatureContractId);
       if (!response.data.success) {
-        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage({ response }, {
+        const failure = { response };
+        setSignatureErrorKind(getSalesOperationalErrorKind(failure));
+        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(failure, {
           failedAction: 'ارسال پیام تأیید قرارداد',
           nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
@@ -4583,6 +4598,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       });
       await refreshConfirmationStatus();
     } catch (error: any) {
+      setSignatureErrorKind(getSalesOperationalErrorKind(error));
       setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
         failedAction: 'ارسال پیام تأیید قرارداد',
         nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.',
@@ -4601,7 +4617,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     try {
       const response = await salesAPI.resendConfirmation(wizardData.signature.contractId);
       if (!response.data.success) {
-        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage({ response }, {
+        const failure = { response };
+        setSignatureErrorKind(getSalesOperationalErrorKind(failure));
+        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(failure, {
           failedAction: 'ارسال دوباره کد تأیید',
           nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
@@ -4610,6 +4628,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       }
       await refreshConfirmationStatus();
     } catch (error: any) {
+      setSignatureErrorKind(getSalesOperationalErrorKind(error));
       setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
         failedAction: 'ارسال دوباره کد تأیید',
         nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
@@ -4629,7 +4648,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     try {
       const response = await salesAPI.cancelContract(wizardData.signature.contractId);
       if (!response.data.success) {
-        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage({ response }, {
+        const failure = { response };
+        setSignatureErrorKind(getSalesOperationalErrorKind(failure));
+        setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(failure, {
           failedAction: 'لغو قرارداد',
           nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
@@ -4639,6 +4660,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       await refreshConfirmationStatus();
       router.push('/dashboard/sales/contracts');
     } catch (error: any) {
+      setSignatureErrorKind(getSalesOperationalErrorKind(error));
       setErrors(prev => ({ ...prev, signature: getSalesOperationalErrorMessage(error, {
         failedAction: 'لغو قرارداد',
         nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
@@ -6001,6 +6023,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           <Step8DigitalSignature
             wizardData={wizardData}
             errors={errors}
+            signatureErrorKind={signatureErrorKind}
             sendingCode={digitalSignature.sendingCode}
             onSendForConfirmation={handleSendForConfirmation}
             onResendConfirmation={handleResendConfirmation}

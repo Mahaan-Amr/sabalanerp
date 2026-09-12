@@ -83,7 +83,17 @@ test('Sale load and mutation feedback retain HTTP semantic kinds', () => {
 
 test('leaving product edit mode clears validation that can no longer be corrected', () => {
   const detail = source('src/app/dashboard/sales/products/[id]/page.tsx');
-  assert.match(detail, /setEditing\(false\);\s*setFieldErrors\(\{\}\);\s*setFeedback\(undefined\)/);
+  assert.match(detail, /const cancelEditing = \(\) => \{\s*setEditing\(false\);\s*setFieldErrors\(\{\}\);\s*setFeedback\(undefined\)/);
+  assert.match(detail, /editing \? cancelEditing\(\) : setEditing\(true\)/);
+  assert.match(detail, /onClick=\{cancelEditing\}/);
+});
+
+test('signature operations render their HTTP semantic kind', () => {
+  const wizard = source('src/features/contract-creation/CreateContractWizardClient.tsx');
+  const signature = source('src/features/contract-creation/components/steps/Step8DigitalSignature.tsx');
+  assert.match(wizard, /setSignatureErrorKind\(getSalesOperationalErrorKind\(/);
+  assert.match(wizard, /signatureErrorKind=\{signatureErrorKind\}/);
+  assert.match(signature, /kind=\{signatureErrorKind\} title=\{errors\.signature\}/);
 });
 
 test('contract detail renders permission and stale failures with their semantic kind', () => {

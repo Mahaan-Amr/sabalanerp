@@ -182,6 +182,12 @@ const ProductDetailPage: React.FC = () => {
     );
   }
 
+  const cancelEditing = () => {
+    setEditing(false);
+    setFieldErrors({});
+    setFeedback(undefined);
+  };
+
   return (
     <SalesAuthoringPage
       title="جزئیات محصول"
@@ -201,7 +207,7 @@ const ProductDetailPage: React.FC = () => {
                   اطلاعات محصول
                 </h2>
                 <ErpPressable type="button"
-                  onClick={() => setEditing(!editing)}
+                  onClick={() => editing ? cancelEditing() : setEditing(true)}
                   tone="primary"
                   variant="solid"
                   className="px-4 py-2"
@@ -373,11 +379,7 @@ const ProductDetailPage: React.FC = () => {
                   {saving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}
                 </ErpPressable>
                 <ErpPressable type="button"
-                  onClick={() => {
-                    setEditing(false);
-                    setFieldErrors({});
-                    setFeedback(undefined);
-                  }}
+                  onClick={cancelEditing}
                   variant="ghost"
                   className="flex-1 px-6 py-3"
                 >

@@ -28,6 +28,9 @@ test('local provisioning fills every activation selector through the real query'
         firstName: 'فریبا', lastName: 'پورشهید', role: 'SALES' },
       { id: 'local-yaghoobi', username: 'yaghoobi', email: 'yaghoobi@example.invalid', password: 'disabled',
         firstName: 'محمد', lastName: 'یعقوبی', role: 'SALES' },
+      ...Array.from({ length: 110 }, (_, index) => ({ id: `aaa-filler-${String(index).padStart(3, '0')}`,
+        username: `filler-${index}`, email: `filler-${index}@example.invalid`, password: 'disabled',
+        firstName: 'کاربر', lastName: `آزمایشی ${index}`, role: 'USER' as const })),
     ] });
     await provisionLocalPartnerQa(database, { subjectUsername: 'pourshahid', responderUsername: 'yaghoobi',
       releaseId: 'local-partner-qa', schemaId: 'partner-schema-v1' });
@@ -36,14 +39,18 @@ test('local provisioning fills every activation selector through the real query'
       resolveVerifiedReadiness: async () => null,
       authorize: async () => ({ ok: true, value: { evidenceId: 'test-read', isAdmin: true } }),
     });
-    const result = await service.query({ schemaVersion: 3, purpose: 'PARTNER_ACTIVATION', userId: 'local-fariba' });
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    assert.equal(result.value.release.status, 'READY');
-    assert.equal(result.value.identityEvidence.length, 1);
-    assert.equal(result.value.commercialTerms.length, 1);
-    assert.equal(result.value.creditTerms.length, 1);
-    assert.deepEqual(result.value.responders.map(item => item.label), ['محمد یعقوبی']);
+    const initial = await service.query({ schemaVersion: 3, purpose: 'PARTNER_ACTIVATION' });
+    assert.equal(initial.ok, true);
+    if (!initial.ok) return;
+    assert.equal(initial.value.candidates.some(item => item.userId === 'local-fariba'), true);
+    const selected = await service.query({ schemaVersion: 3, purpose: 'PARTNER_ACTIVATION', userId: 'local-fariba' });
+    assert.equal(selected.ok, true);
+    if (!selected.ok) return;
+    assert.equal(selected.value.release.status, 'READY');
+    assert.equal(selected.value.identityEvidence.length, 1);
+    assert.equal(selected.value.commercialTerms.length, 1);
+    assert.equal(selected.value.creditTerms.length, 1);
+    assert.deepEqual(selected.value.responders.map(item => item.label), ['محمد یعقوبی']);
   } finally {
     await database.$disconnect();
     await temporary.cleanup();

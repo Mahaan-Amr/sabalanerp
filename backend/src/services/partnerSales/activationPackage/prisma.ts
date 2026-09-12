@@ -113,9 +113,18 @@ export function createPrismaPartnerActivationPackage(input: {
           where: { id: PARTNER_OPERATIONS_CONTROL_ID }, include: { cohort: true },
         });
         const evidence = await ready(tx, control.readinessEvidence, input.runtimeIdentity);
-        const candidates = await tx.user.findMany({ where: { isActive: true, partnerProfile: null,
-          ...(request.userId ? { id: request.userId } : {}) }, orderBy: { id: 'asc' }, take: 100,
-          select: { id: true, firstName: true, lastName: true, username: true } });
+        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        const candidateSelect = { id: true, firstName: true, lastName: true, username: true } as const;
+        const preparedCandidates = request.userId ? [] : await tx.user.findMany({ where: { isActive: true,
+          partnerProfile: null, partnerIdentityEvidence: { some: { revokedAt: null, issuedAt: { lte: clock.now },
+            OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] } } },
+          orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }, { id: 'asc' }], take: 100, select: candidateSelect });
+        const fallbackLimit = Math.max(0, 100 - preparedCandidates.length);
+        const fallbackCandidates = fallbackLimit === 0 ? [] : await tx.user.findMany({ where: { isActive: true,
+          partnerProfile: null, ...(request.userId ? { id: request.userId }
+            : { id: { notIn: preparedCandidates.map(user => user.id) } }) },
+          orderBy: { id: 'asc' }, take: fallbackLimit, select: candidateSelect });
+        const candidates = request.userId ? fallbackCandidates : [...preparedCandidates, ...fallbackCandidates];
         const profile = request.userId ? await tx.partnerProfile.findUnique({ where: { userId: request.userId },
           include: { user: { select: { firstName: true, lastName: true, username: true } } } }) : null;
         const readTarget = request.userId ?? candidates[0]?.id ?? input.actorId;
@@ -125,7 +134,6 @@ export function createPrismaPartnerActivationPackage(input: {
           ...(!profile ? { prospectiveOwnerId: readTarget } : {}) });
         if (!access.ok) return access;
         if (!access.value.isAdmin) return { ok: false as const, error: partnerError('FORBIDDEN') };
-        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
         const openIncident = await tx.partnerOperationsIncident.findFirst({
           where: { resolution: { equals: Prisma.AnyNull } }, select: { key: true },
         });

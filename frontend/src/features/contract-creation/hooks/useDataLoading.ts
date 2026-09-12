@@ -122,6 +122,11 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     publishLatestError();
   }, [publishLatestError]);
 
+  const reportResponseFailure = useCallback((source: string, response: unknown, resource: string) => {
+    const failure = { response };
+    reportError(source, loadErrorMessage(failure, resource), getSalesOperationalErrorKind(failure));
+  }, [reportError]);
+
   const isForbiddenError = (err: any) => err?.response?.status === 403;
 
   const hasAnyFeature = useCallback((features: string[], candidates: string[]) => {
@@ -195,6 +200,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         recoverError('customers');
         return data;
       }
+      reportResponseFailure('customers', response, 'فهرست مشتریان');
       return [];
     } catch (err: any) {
       if (!isLatestRequest('customers', requestSequence)) return [];
@@ -208,7 +214,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       reportError('customers', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [beginRequest, isLatestRequest, recoverError, reportError]);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadProducts = useCallback(async (limit: number = 1000) => {
     const requestSequence = beginRequest('products');
@@ -220,6 +226,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         recoverError('products');
         return response.data.data;
       }
+      reportResponseFailure('products', response, 'فهرست محصولات');
       return [];
     } catch (err: any) {
       if (!isLatestRequest('products', requestSequence)) return [];
@@ -227,7 +234,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       reportError('products', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [beginRequest, isLatestRequest, recoverError, reportError]);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadDepartments = useCallback(async () => {
     const requestSequence = beginRequest('departments');
@@ -239,6 +246,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         recoverError('departments');
         return response.data.data;
       }
+      reportResponseFailure('departments', response, 'اطلاعات واحد فروش');
       return [];
     } catch (err: any) {
       if (!isLatestRequest('departments', requestSequence)) return [];
@@ -246,7 +254,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       reportError('departments', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [beginRequest, isLatestRequest, recoverError, reportError]);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadCuttingTypes = useCallback(async () => {
     const requestSequence = beginRequest('cuttingTypes');
@@ -258,6 +266,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         recoverError('cuttingTypes');
         return response.data.data;
       }
+      reportResponseFailure('cuttingTypes', response, 'انواع برش');
       return [];
     } catch (err: any) {
       if (!isLatestRequest('cuttingTypes', requestSequence)) return [];
@@ -270,7 +279,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       reportError('cuttingTypes', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [beginRequest, isLatestRequest, recoverError, reportError]);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadSubServices = useCallback(async (limit: number = 1000) => {
     const requestSequence = beginRequest('subServices');
@@ -282,6 +291,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         recoverError('subServices');
         return response.data.data;
       }
+      reportResponseFailure('subServices', response, 'فهرست ابزارها');
       return [];
     } catch (err: any) {
       if (!isLatestRequest('subServices', requestSequence)) return [];
@@ -294,7 +304,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       reportError('subServices', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [beginRequest, isLatestRequest, recoverError, reportError]);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadStoneFinishings = useCallback(async (limit: number = 1000) => {
     const requestSequence = beginRequest('stoneFinishings');
@@ -308,8 +318,8 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         recoverError('stoneFinishings');
         return data;
       }
-      setStoneFinishings([]);
-      setStoneFinishingLoadState('empty');
+      reportResponseFailure('stoneFinishings', response, 'روش‌های پرداخت سنگ');
+      setStoneFinishingLoadState('error');
       return [];
     } catch (err: any) {
       if (!isLatestRequest('stoneFinishings', requestSequence)) return [];
@@ -325,7 +335,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       setStoneFinishingLoadState('error');
       return [];
     }
-  }, [beginRequest, isLatestRequest, recoverError, reportError]);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadUserProfile = useCallback(async () => {
     const requestSequence = beginRequest('userProfile');
@@ -352,6 +362,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         recoverError('userProfile');
         return userData;
       }
+      reportResponseFailure('userProfile', response, 'اطلاعات کاربر');
       return null;
     } catch (err: any) {
       if (!isLatestRequest('userProfile', requestSequence)) return null;
@@ -359,7 +370,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       reportError('userProfile', errorMsg, getSalesOperationalErrorKind(err));
       return null;
     }
-  }, [beginRequest, buildCapabilities, isLatestRequest, recoverError, reportError]);
+  }, [beginRequest, buildCapabilities, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadInitialData = useCallback(async () => {
     const requestSequence = beginRequest('initial');

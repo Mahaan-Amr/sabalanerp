@@ -123,6 +123,7 @@ import {
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
 import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 // Import constants
 import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
@@ -1029,7 +1030,7 @@ export default function CreateContractWizard({
   const [signatureErrorKind, setSignatureErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const signatureErrorSequenceRef = useRef(0);
   const signatureErrorsRef = useRef(new Map<string, { message: string; kind: 'error' | 'permission' | 'stale'; order: number }>());
-  const signatureOperationSequenceRef = useRef(new Map<string, number>());
+  const signatureOperationTrackerRef = useRef(createLatestRequestTracker());
   const publishSignatureError = useCallback(() => {
     const latest = Array.from(signatureErrorsRef.current.values()).sort((left, right) => right.order - left.order)[0];
     setSignatureErrorKind(latest?.kind || 'error');
@@ -1046,12 +1047,10 @@ export default function CreateContractWizard({
     publishSignatureError();
   }, [publishSignatureError]);
   const beginSignatureOperation = useCallback((source: string) => {
-    const sequence = (signatureOperationSequenceRef.current.get(source) || 0) + 1;
-    signatureOperationSequenceRef.current.set(source, sequence);
-    return sequence;
+    return signatureOperationTrackerRef.current.begin(source);
   }, []);
   const isLatestSignatureOperation = useCallback((source: string, sequence: number) =>
-    signatureOperationSequenceRef.current.get(source) === sequence, []);
+    signatureOperationTrackerRef.current.isLatest(source, sequence), []);
   const digitalSignature = useDigitalSignature({
     onError: (error) => {
       reportSignatureError('digital-signature', error, 'error');

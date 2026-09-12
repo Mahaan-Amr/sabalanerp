@@ -35,6 +35,7 @@ import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitize
 import { sourceStatusLabels, StatusBadge } from '@/features/accounting/accountingUi';
 import { parseContractStatusQuery } from '@/features/sales/contractListQuery';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 interface Contract {
   id: string;
@@ -197,14 +198,12 @@ export default function ContractsPage() {
   const [operationErrors, setOperationErrors] = useState<Array<{ key: string; message: string; kind: 'error' | 'permission' | 'stale'; source: 'contracts' | 'profile' | 'action'; contractId?: string; order: number }>>([]);
   const operationErrorSequenceRef = useRef(0);
   const contractLoadSequenceRef = useRef(0);
-  const actionSequenceRef = useRef(new Map<string, number>());
+  const actionTrackerRef = useRef(createLatestRequestTracker());
   const beginAction = useCallback((key: string) => {
-    const sequence = (actionSequenceRef.current.get(key) || 0) + 1;
-    actionSequenceRef.current.set(key, sequence);
-    return sequence;
+    return actionTrackerRef.current.begin(key);
   }, []);
   const isLatestAction = useCallback((key: string, sequence: number) =>
-    actionSequenceRef.current.get(key) === sequence, []);
+    actionTrackerRef.current.isLatest(key, sequence), []);
   const reportOperationError = useCallback((key: string, value: Omit<(typeof operationErrors)[number], 'key' | 'order'>) => {
     const order = ++operationErrorSequenceRef.current;
     setOperationErrors((current) => [...current.filter((item) => item.key !== key), { ...value, key, order }]);

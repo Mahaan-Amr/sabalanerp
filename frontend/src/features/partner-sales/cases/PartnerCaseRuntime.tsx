@@ -19,6 +19,7 @@ import type { RetailCollectionHistory } from '../collections/RetailCollectionsPa
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { normalizePartnerSalesOperationalError } from '../partnerSalesErrorMessage';
+import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 export function PartnerCaseRuntime() {
   const [rows, setRows] = useState<PartnerCaseRuntimeRow[]>([]);
@@ -30,13 +31,11 @@ export function PartnerCaseRuntime() {
   const [caseErrors, setCaseErrors] = useState<Array<{ key: string; message: string; kind: 'error' | 'permission' | 'stale'; caseId: string; order: number }>>([]);
   const caseErrorSequenceRef = useRef(0);
   const loadSequenceRef = useRef(0);
-  const actionSequenceRef = useRef(new Map<string, number>());
+  const actionTrackerRef = useRef(createLatestRequestTracker());
   const beginCaseAction = useCallback((key: string) => {
-    const sequence = (actionSequenceRef.current.get(key) || 0) + 1;
-    actionSequenceRef.current.set(key, sequence);
-    return sequence;
+    return actionTrackerRef.current.begin(key);
   }, []);
-  const isLatestCaseAction = useCallback((key: string, sequence: number) => actionSequenceRef.current.get(key) === sequence, []);
+  const isLatestCaseAction = useCallback((key: string, sequence: number) => actionTrackerRef.current.isLatest(key, sequence), []);
   const reportCaseError = useCallback((key: string, value: Omit<(typeof caseErrors)[number], 'key' | 'order'>) => {
     const order = ++caseErrorSequenceRef.current;
     setCaseErrors((current) => [...current.filter((item) => item.key !== key), { ...value, key, order }]);

@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductCreationValidationErrors, mapProductEditValidationErrors, normalizeSalesBlobError } from './salesOperationalError';
-import { createLatestRequestTracker } from './latestRequestTracker';
+import { createLatestRequestTracker, hasAnyPendingOperation } from './latestRequestTracker';
+
+test('related seller mutations share one pending guard', () => {
+  const pending = new Set(['seller-change']);
+  assert.equal(hasAnyPendingOperation(pending, ['seller-change', 'legacy-credit']), true);
+  pending.delete('seller-change');
+  assert.equal(hasAnyPendingOperation(pending, ['seller-change', 'legacy-credit']), false);
+});
 
 test('a late response cannot replace the result of a newer request for the same source', async () => {
   const tracker = createLatestRequestTracker();

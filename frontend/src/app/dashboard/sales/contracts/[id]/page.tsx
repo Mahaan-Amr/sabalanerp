@@ -43,6 +43,7 @@ import { PartnerAccountViewSchema, PartnerCaseViewSchema, type PartnerAccountVie
 import { PartnerCaseWorkspace } from '@/features/partner-sales/cases/PartnerCaseWorkspace';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { createLatestRequestTracker, hasAnyPendingOperation } from '@/features/sales/latestRequestTracker';
 
 interface Contract {
   id: string;
@@ -205,7 +206,7 @@ export default function ContractDetailPage() {
     order: number;
   }>>([]);
   const operationalErrorSequenceRef = useRef(0);
-  const operationSequenceRef = useRef(new Map<string, number>());
+  const operationTrackerRef = useRef(createLatestRequestTracker());
   const contractRequestSequenceRef = useRef(0);
   const [printVariant, setPrintVariant] = useState<SalesContractPrintVariant>('original');
   const canManageSellers = currentUser?.role === 'ADMIN' || hasPermission(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN);
@@ -229,13 +230,11 @@ export default function ContractDetailPage() {
   };
 
   const beginOperation = (source: string) => {
-    const sequence = (operationSequenceRef.current.get(source) || 0) + 1;
-    operationSequenceRef.current.set(source, sequence);
-    return sequence;
+    return operationTrackerRef.current.begin(source);
   };
 
   const isLatestOperation = (source: string, sequence: number) =>
-    operationSequenceRef.current.get(source) === sequence;
+    operationTrackerRef.current.isLatest(source, sequence);
 
   useEffect(() => {
     loadContract();
@@ -551,12 +550,13 @@ export default function ContractDetailPage() {
   const visibleOperationalError = operationalErrors
     .filter((item) => item.source !== 'load')
     .sort((left, right) => right.order - left.order)[0];
+  const sellerMutationPending = hasAnyPendingOperation(pendingOperations, ['seller-change', 'legacy-credit']);
 
-  if (loading) {
+  if (loading && !contract) {
     return <ErpLoading />;
   }
 
-  if (loadError || !contract) {
+  if (!contract) {
     if (wasJustCreated) {
       return (
         <ErpPage
@@ -691,6 +691,13 @@ export default function ContractDetailPage() {
           kind="stale"
           title={`این قرارداد غیرفعال و فقط‌خواندنی است${contract.inactiveReason ? ` — ${contract.inactiveReason}` : ''}`}
           className="mb-4"
+        />
+      )}
+      {loadError && (
+        <ErpInlineState
+          kind="stale"
+          title={`آخرین اطلاعات موفق قرارداد نمایش داده می‌شود. ${loadError.message}`}
+          action={{ label: 'دریافت دوباره', onClick: () => void loadContract() }}
         />
       )}
       {visibleOperationalError && (
@@ -974,8 +981,8 @@ export default function ContractDetailPage() {
                     {sellerOptions.map((seller) => <option key={seller.id} value={seller.id}>{`${seller.firstName || ''} ${seller.lastName || ''}`.trim() || seller.username}</option>)}
                   </ErpSelect>
                   <ErpTextarea value={sellerChangeReason} onChange={(event) => setSellerChangeReason(event.target.value)} placeholder="دلیل تغییر مسئول (الزامی)" className="min-h-20 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]" />
-                  <ErpPressable type="submit" disabled={pendingOperations.has('seller-change') || pendingOperations.has('legacy-credit') || !nextSellerId || !sellerChangeReason.trim()} onClick={handleSellerChange} className="w-full rounded-lg bg-[var(--sds-accent)] px-3 py-2 text-sm font-bold text-[var(--sds-text-inverse)] disabled:opacity-50">{pendingOperations.has('seller-change') ? 'در حال ثبت...' : 'ثبت تغییر مسئول با سابقه حسابرسی'}</ErpPressable>
-                  {contract.realizedAt && !contract.realizedSeller && <ErpPressable type="submit" disabled={pendingOperations.has('seller-change') || pendingOperations.has('legacy-credit') || !nextSellerId || !sellerChangeReason.trim()} onClick={handleLegacyCreditAssignment} className="w-full rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-warning)] disabled:opacity-50">انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی</ErpPressable>}
+                  <ErpPressable type="submit" disabled={sellerMutationPending || !nextSellerId || !sellerChangeReason.trim()} onClick={handleSellerChange} className="w-full rounded-lg bg-[var(--sds-accent)] px-3 py-2 text-sm font-bold text-[var(--sds-text-inverse)] disabled:opacity-50">{pendingOperations.has('seller-change') ? 'در حال ثبت...' : 'ثبت تغییر مسئول با سابقه حسابرسی'}</ErpPressable>
+                  {contract.realizedAt && !contract.realizedSeller && <ErpPressable type="submit" disabled={sellerMutationPending || !nextSellerId || !sellerChangeReason.trim()} onClick={handleLegacyCreditAssignment} className="w-full rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-warning)] disabled:opacity-50">انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی</ErpPressable>}
                 </div>
               </ErpSection>
             )}

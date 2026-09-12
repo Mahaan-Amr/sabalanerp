@@ -10,6 +10,7 @@ import ProductImportExportModal from '@/components/ProductImportExportModal';
 import SuccessModal from '@/components/SuccessModal';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpLoading, ErpPagination, ErpToolbar } from '@/components/erp';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 const generateFullProductName = (product: Product): string => {
   const parts = [
@@ -52,14 +53,12 @@ export default function ProductsPage() {
   const [rowErrors, setRowErrors] = useState<Array<{ key: string; productId: string; message: string; kind: 'error' | 'permission' | 'stale'; order: number }>>([]);
   const [showImportExportModal, setShowImportExportModal] = useState(false);
   const productRequestSequenceRef = useRef(0);
-  const rowActionSequenceRef = useRef(new Map<string, number>());
+  const rowActionTrackerRef = useRef(createLatestRequestTracker());
   const beginRowAction = (key: string) => {
-    const sequence = (rowActionSequenceRef.current.get(key) || 0) + 1;
-    rowActionSequenceRef.current.set(key, sequence);
-    return sequence;
+    return rowActionTrackerRef.current.begin(key);
   };
   const isLatestRowAction = (key: string, sequence: number) =>
-    rowActionSequenceRef.current.get(key) === sequence;
+    rowActionTrackerRef.current.isLatest(key, sequence);
   const rowErrorSequenceRef = useRef(0);
   const reportRowError = (key: string, value: Omit<(typeof rowErrors)[number], 'key' | 'order'>) => {
     const order = ++rowErrorSequenceRef.current;

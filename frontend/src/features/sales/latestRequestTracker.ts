@@ -17,3 +17,6 @@ export const createLatestRequestTracker = (): LatestRequestTracker => {
     },
   };
 };
+
+export const hasAnyPendingOperation = (pending: ReadonlySet<string>, sources: readonly string[]): boolean =>
+  sources.some((source) => pending.has(source));

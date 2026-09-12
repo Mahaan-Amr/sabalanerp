@@ -137,12 +137,12 @@ test('concurrent Sale actions retain errors until the matching operation recover
   const partnerCases = source('src/features/partner-sales/cases/PartnerCaseRuntime.tsx');
 
   assert.match(wizard, /signatureErrorsRef = useRef\(new Map/);
-  assert.match(wizard, /signatureOperationSequenceRef = useRef\(new Map/);
+  assert.match(wizard, /signatureOperationTrackerRef = useRef\(createLatestRequestTracker\(\)\)/);
   assert.match(wizard, /if \(!isLatestSignatureOperation\(errorSource, requestSequence\)\) return/);
   assert.doesNotMatch(wizard, /const handle(DownloadPdf|PrintContract|SendConfirmation|ResendConfirmation)[\s\S]{0,500}setErrors\(previous => \(\{ \.\.\.previous, signature: '' \}\)\)/);
 
   assert.match(contractDetail, /operationalErrors, setOperationalErrors/);
-  assert.match(contractDetail, /operationSequenceRef = useRef\(new Map/);
+  assert.match(contractDetail, /operationTrackerRef = useRef\(createLatestRequestTracker\(\)\)/);
   assert.match(contractDetail, /current\.filter\(\(item\) => item\.source !== source\)/);
   assert.match(contractDetail, /if \(!isLatestOperation\(errorSource, requestSequence\)\) return/);
   assert.match(contracts, /const errorKey = `action:\$\{contractId\}:download`/);
@@ -151,7 +151,7 @@ test('concurrent Sale actions retain errors until the matching operation recover
   assert.match(products, /const errorKey = `\$\{product\.id\}:delete`/);
   assert.match(products, /const errorKey = `\$\{product\.id\}:toggle`/);
   assert.match(partnerCases, /const errorKey = `\$\{caseId\}:\$\{operation\}`/);
-  assert.match(partnerCases, /actionSequenceRef = useRef\(new Map/);
+  assert.match(partnerCases, /actionTrackerRef = useRef\(createLatestRequestTracker\(\)\)/);
 });
 
 test('concurrent Sale actions retain independent pending state', () => {
@@ -182,6 +182,8 @@ test('Sale data retries preserve visible failures until a current request succee
   assert.doesNotMatch(detail, /setSaving\(true\);\s*setFeedback\(undefined\)/);
   assert.match(contractDetail, /failedAction: 'دریافت فایل PDF قرارداد'/);
   assert.match(contractDetail, /action=\{\{ label: 'دریافت دوباره', onClick: \(\) => void loadContract\(\) \}\}/);
+  assert.match(contractDetail, /if \(loading && !contract\)/);
+  assert.match(contractDetail, /آخرین اطلاعات موفق قرارداد نمایش داده می‌شود/);
   assert.match(contracts, /label: 'دریافت دوباره دسترسی‌ها', onClick: loadCurrentUser/);
 });
 

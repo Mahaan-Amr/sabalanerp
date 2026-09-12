@@ -1,6 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductCreationValidationErrors, mapProductEditValidationErrors, normalizeSalesBlobError } from './salesOperationalError';
+import { createLatestRequestTracker } from './latestRequestTracker';
+
+test('a late response cannot replace the result of a newer request for the same source', async () => {
+  const tracker = createLatestRequestTracker();
+  const accepted: string[] = [];
+  let finishOld!: () => void;
+  const oldResponse = new Promise<void>((resolve) => { finishOld = resolve; });
+
+  const oldSequence = tracker.begin('products');
+  const oldCompletion = oldResponse.then(() => {
+    if (tracker.isLatest('products', oldSequence)) accepted.push('old');
+  });
+  const newSequence = tracker.begin('products');
+  if (tracker.isLatest('products', newSequence)) accepted.push('new');
+  finishOld();
+  await oldCompletion;
+
+  assert.deepEqual(accepted, ['new']);
+});
 
 test('unexpected sales failure preserves input and exposes a safe tracking reference without deflecting to support', () => {
   const message = getSalesOperationalErrorMessage({
@@ -52,7 +71,7 @@ test('technical English payload is replaced with a Persian operation-specific re
   assert.equal(message, 'به‌روزرسانی محصول انجام نشد. اطلاعات محصول را بررسی کنید و دوباره تلاش کنید.');
 });
 
-test('safe Persian server cause remains visible even for a 5xx response', () => {
+test('generic 5xx response does not expose an untrusted server body', () => {
   const message = getSalesOperationalErrorMessage({
     response: { status: 503, data: { error: 'سرویس تولید PDF موقتاً آماده نیست؛ چند دقیقه دیگر دوباره تلاش کنید.' } },
   }, {
@@ -60,7 +79,7 @@ test('safe Persian server cause remains visible even for a 5xx response', () => 
     nextStep: 'چند دقیقه دیگر دوباره روی «ساخت PDF» بزنید.',
   });
 
-  assert.match(message, /^سرویس تولید PDF موقتاً آماده نیست/);
+  assert.equal(message, 'ساخت PDF قرارداد انجام نشد. چند دقیقه دیگر دوباره روی «ساخت PDF» بزنید.');
 });
 
 test('safe 5xx mutation cause does not bypass reconciliation before retry', () => {
@@ -72,7 +91,8 @@ test('safe 5xx mutation cause does not bypass reconciliation before retry', () =
     uncertainMutation: true,
   });
 
-  assert.match(message, /^پاسخ نهایی ثبت قرارداد دریافت نشد/);
+  assert.doesNotMatch(message, /پاسخ نهایی ثبت قرارداد دریافت نشد/);
+  assert.match(message, /^ثبت قرارداد انجام نشد/);
   assert.match(message, /وضعیت فعلی را بررسی کنید؛ فقط اگر عملیات انجام نشده بود دوباره تلاش کنید/);
 });
 

@@ -188,8 +188,12 @@ export default function ContractsPage() {
     total: 0,
     pages: 1,
   });
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
+  const [pendingActions, setPendingActions] = useState<Set<string>>(() => new Set());
+  const setActionPending = useCallback((key: string, pending: boolean) => setPendingActions(current => {
+    const next = new Set(current);
+    if (pending) next.add(key); else next.delete(key);
+    return next;
+  }), []);
   const [operationErrors, setOperationErrors] = useState<Array<{ key: string; message: string; kind: 'error' | 'permission' | 'stale'; source: 'contracts' | 'profile' | 'action'; contractId?: string; order: number }>>([]);
   const operationErrorSequenceRef = useRef(0);
   const contractLoadSequenceRef = useRef(0);
@@ -388,7 +392,7 @@ export default function ContractsPage() {
   const handleDownloadPdf = async (contractId: string) => {
     const errorKey = `action:${contractId}:download`;
     const requestSequence = beginAction(errorKey);
-    setPdfActionLoading(contractId);
+    setActionPending(errorKey, true);
     try {
       const response = await salesAPI.downloadContractPdf(contractId, { fresh: false });
       if (!isLatestAction(errorKey, requestSequence)) return;
@@ -403,7 +407,7 @@ export default function ContractsPage() {
         nextStep: 'دوباره روی «دانلود PDF» بزنید.'
       }) });
     } finally {
-      if (isLatestAction(errorKey, requestSequence)) setPdfActionLoading(null);
+      if (isLatestAction(errorKey, requestSequence)) setActionPending(errorKey, false);
     }
   };
 
@@ -411,7 +415,7 @@ export default function ContractsPage() {
     const actionKey = `${contractId}:${action}`;
     const errorKey = `action:${actionKey}`;
     const requestSequence = beginAction(errorKey);
-    setActionLoading(actionKey);
+    setActionPending(errorKey, true);
     try {
       let response;
       switch (action) {
@@ -466,7 +470,7 @@ export default function ContractsPage() {
         uncertainMutation: true
       }) });
     } finally {
-      if (isLatestAction(errorKey, requestSequence)) setActionLoading(null);
+      if (isLatestAction(errorKey, requestSequence)) setActionPending(errorKey, false);
     }
   };
 
@@ -593,7 +597,7 @@ export default function ContractsPage() {
         onClick: () => handleDownloadPdf(contract.id),
         icon: FaDownload,
         tone: 'success',
-        disabled: pdfActionLoading === contract.id,
+        disabled: pendingActions.has(`action:${contract.id}:download`),
       });
     }
     if (contractPermissions.canPrint) {
@@ -602,7 +606,7 @@ export default function ContractsPage() {
         onClick: () => handleStatusAction(contract.id, 'print'),
         icon: FaPrint,
         tone: 'purple',
-        disabled: actionLoading === `${contract.id}:print`,
+        disabled: pendingActions.has(`action:${contract.id}:print`),
       });
     }
     if (contractPermissions.canEdit && (!contract.accountingEditLocked || contract.canOpenCorrectionEdit)) {
@@ -620,7 +624,7 @@ export default function ContractsPage() {
         onClick: () => handleStatusAction(contract.id, 'approve'),
         icon: FaCheck,
         tone: 'success',
-        disabled: actionLoading === `${contract.id}:approve`,
+        disabled: pendingActions.has(`action:${contract.id}:approve`),
       });
     }
 
@@ -630,7 +634,7 @@ export default function ContractsPage() {
         onClick: () => handleStatusAction(contract.id, 'reject'),
         icon: FaTimes,
         tone: 'danger',
-        disabled: actionLoading === `${contract.id}:reject`,
+        disabled: pendingActions.has(`action:${contract.id}:reject`),
       });
     }
 
@@ -640,7 +644,7 @@ export default function ContractsPage() {
         onClick: () => handleStatusAction(contract.id, 'sign'),
         icon: FaSignature,
         tone: 'success',
-        disabled: actionLoading === `${contract.id}:sign`,
+        disabled: pendingActions.has(`action:${contract.id}:sign`),
       });
     }
 

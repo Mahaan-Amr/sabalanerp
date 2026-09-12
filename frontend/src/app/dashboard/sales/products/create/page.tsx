@@ -385,14 +385,34 @@ export default function CreateStoneProductWizard() {
 
       if (requestSequence !== masterDataRequestSequenceRef.current) return;
 
+      const responses = [
+        cutTypesResponse,
+        stoneMaterialsResponse,
+        cutWidthsResponse,
+        thicknessesResponse,
+        minesResponse,
+        finishTypesResponse,
+        colorsResponse
+      ];
+      const failedResponse = responses.find((response) => !response.data.success);
+      if (failedResponse) {
+        const failure = { response: failedResponse };
+        setLoadErrorKind(getSalesOperationalErrorKind(failure));
+        setLoadError(getSalesOperationalErrorMessage(failure, {
+          failedAction: 'دریافت کامل گزینه‌های ساخت محصول',
+          nextStep: 'گزینه‌های قبلی حفظ شده‌اند؛ دوباره تلاش کنید.'
+        }));
+        return;
+      }
+
       setMasterData({
-        cutTypes: cutTypesResponse.data.success ? cutTypesResponse.data.data : [],
-        stoneMaterials: stoneMaterialsResponse.data.success ? stoneMaterialsResponse.data.data : [],
-        cutWidths: cutWidthsResponse.data.success ? cutWidthsResponse.data.data : [],
-        thicknesses: thicknessesResponse.data.success ? thicknessesResponse.data.data : [],
-        mines: minesResponse.data.success ? minesResponse.data.data : [],
-        finishTypes: finishTypesResponse.data.success ? finishTypesResponse.data.data : [],
-        colors: colorsResponse.data.success ? colorsResponse.data.data : []
+        cutTypes: cutTypesResponse.data.data,
+        stoneMaterials: stoneMaterialsResponse.data.data,
+        cutWidths: cutWidthsResponse.data.data,
+        thicknesses: thicknessesResponse.data.data,
+        mines: minesResponse.data.data,
+        finishTypes: finishTypesResponse.data.data,
+        colors: colorsResponse.data.data
       });
       setLoadError('');
       setLoadErrorKind('error');

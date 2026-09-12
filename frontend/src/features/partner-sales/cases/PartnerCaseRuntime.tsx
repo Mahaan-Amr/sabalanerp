@@ -51,18 +51,71 @@ export function PartnerCaseRuntime() {
     const requestSequence = ++loadSequenceRef.current;
     setBusy(true);
     try {
-      const [cases, accountView] = await Promise.all([readPartnerCases(), readPartnerAccount().catch(() => undefined)]);
+      const [cases, accountResult] = await Promise.all([
+        readPartnerCases(),
+        readPartnerAccount()
+          .then(value => ({ ok: true as const, value }))
+          .catch(reason => ({ ok: false as const, reason }))
+      ]);
       if (requestSequence !== loadSequenceRef.current) return;
-      setRows(cases); setAccount(accountView);
-      const supplementary = await Promise.all(cases.map(async row => ({ caseId: row.view.owner.caseId,
-        collections: ['COMMITTED', 'VOIDED'].includes(row.view.state)
-          ? await readPartnerCollections(row.view.owner).catch(() => undefined) : undefined,
-        correction: await readPartnerCorrection(row.view.owner.caseId).catch(() => undefined) })));
+      setRows(cases);
+      if (accountResult.ok) setAccount(accountResult.value);
+      const supplementary = await Promise.all(cases.map(async row => {
+        const caseId = row.view.owner.caseId;
+        const collectionsResult = ['COMMITTED', 'VOIDED'].includes(row.view.state)
+          ? await readPartnerCollections(row.view.owner)
+            .then(value => ({ ok: true as const, value }))
+            .catch(reason => ({ ok: false as const, reason }))
+          : undefined;
+        const correctionResult = await readPartnerCorrection(caseId)
+          .then(value => ({ ok: true as const, value }))
+          .catch(reason => ({ ok: false as const, reason }));
+        return { caseId, collectionsResult, correctionResult };
+      }));
       if (requestSequence !== loadSequenceRef.current) return;
-      setCollections(Object.fromEntries(supplementary.flatMap(item => item.collections ? [[item.caseId, item.collections]] : [])));
-      setCorrections(Object.fromEntries(supplementary.flatMap(item => item.correction !== undefined
-        ? [[item.caseId, item.correction]] : [])));
-      setLoadError(undefined);
+      setCollections(current => {
+        const next = { ...current };
+        supplementary.forEach(item => {
+          if (item.collectionsResult?.ok) next[item.caseId] = item.collectionsResult.value;
+        });
+        return next;
+      });
+      setCorrections(current => {
+        const next = { ...current };
+        supplementary.forEach(item => {
+          if (item.correctionResult.ok) next[item.caseId] = item.correctionResult.value;
+        });
+        return next;
+      });
+      supplementary.forEach(item => {
+        const collectionKey = `${item.caseId}:load-collections`;
+        if (item.collectionsResult?.ok) clearCaseError(collectionKey);
+        else if (item.collectionsResult) {
+          const reason = normalizePartnerSalesOperationalError(item.collectionsResult.reason);
+          reportCaseError(collectionKey, { caseId: item.caseId, kind: getSalesOperationalErrorKind(reason), message: getSalesOperationalErrorMessage(reason, {
+            failedAction: 'دریافت سابقهٔ وصول این پرونده',
+            nextStep: 'اطلاعات قبلی حفظ شده است؛ صفحه را تازه‌سازی کنید.'
+          }) });
+        }
+        const correctionKey = `${item.caseId}:load-correction`;
+        if (item.correctionResult.ok) clearCaseError(correctionKey);
+        else {
+          const reason = normalizePartnerSalesOperationalError(item.correctionResult.reason);
+          reportCaseError(correctionKey, { caseId: item.caseId, kind: getSalesOperationalErrorKind(reason), message: getSalesOperationalErrorMessage(reason, {
+            failedAction: 'دریافت وضعیت اصلاح این پرونده',
+            nextStep: 'اطلاعات قبلی حفظ شده است؛ صفحه را تازه‌سازی کنید.'
+          }) });
+        }
+      });
+      if (accountResult.ok) {
+        setLoadError(undefined);
+      } else {
+        const reason = normalizePartnerSalesOperationalError(accountResult.reason);
+        setLoadError({ kind: getSalesOperationalErrorKind(reason), message: getSalesOperationalErrorMessage(reason, {
+          failedAction: 'دریافت اطلاعات حساب فروش همکار',
+          nextStep: 'پرونده‌ها و اطلاعات قبلی حفظ شده‌اند؛ دوباره تلاش کنید.'
+        }) });
+      }
     } catch (reason) {
       if (requestSequence !== loadSequenceRef.current) return;
       const normalizedReason = normalizePartnerSalesOperationalError(reason);
@@ -72,7 +125,7 @@ export function PartnerCaseRuntime() {
       }) });
     }
     finally { if (requestSequence === loadSequenceRef.current) setBusy(false); }
-  }, []);
+  }, [clearCaseError, reportCaseError]);
   const runAction = useCallback(async (caseId: string, operation: string, name: string, action: () => Promise<unknown>) => {
     const errorKey = `${caseId}:${operation}`;
     const actionSequence = beginCaseAction(errorKey);

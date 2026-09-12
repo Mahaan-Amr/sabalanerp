@@ -39,7 +39,12 @@ export default function ProductsPage() {
   const [totalProducts, setTotalProducts] = useState(0);
   const [currentUser, setCurrentUser] = useState<PermissionUser | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; product: Product | null }>({ show: false, product: null });
-  const [deleting, setDeleting] = useState(false);
+  const [pendingRowActions, setPendingRowActions] = useState<Set<string>>(() => new Set());
+  const setRowActionPending = (key: string, pending: boolean) => setPendingRowActions(current => {
+    const next = new Set(current);
+    if (pending) next.add(key); else next.delete(key);
+    return next;
+  });
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [listError, setListError] = useState('');
@@ -141,7 +146,7 @@ export default function ProductsPage() {
     const requestSequence = beginRowAction(errorKey);
 
     try {
-      setDeleting(true);
+      setRowActionPending(errorKey, true);
       const response = await salesAPI.deleteProduct(product.id);
       if (!isLatestRowAction(errorKey, requestSequence)) return;
       if (response.data.success) {
@@ -169,7 +174,7 @@ export default function ProductsPage() {
         uncertainMutation: true
       }) });
     } finally {
-      if (isLatestRowAction(errorKey, requestSequence)) setDeleting(false);
+      if (isLatestRowAction(errorKey, requestSequence)) setRowActionPending(errorKey, false);
     }
   };
 
@@ -178,7 +183,7 @@ export default function ProductsPage() {
     const errorKey = `${product.id}:toggle`;
     const requestSequence = beginRowAction(errorKey);
 
-    setDeleting(true);
+    setRowActionPending(errorKey, true);
     try {
       const response = await salesAPI.updateProduct(product.id, { isActive: !product.isActive });
       if (!isLatestRowAction(errorKey, requestSequence)) return;
@@ -204,7 +209,7 @@ export default function ProductsPage() {
         uncertainMutation: true
       }) });
     } finally {
-      if (isLatestRowAction(errorKey, requestSequence)) setDeleting(false);
+      if (isLatestRowAction(errorKey, requestSequence)) setRowActionPending(errorKey, false);
     }
   };
 
@@ -272,7 +277,7 @@ export default function ProductsPage() {
         rowActions={(product) => [
           { label: 'مشاهده', href: `/dashboard/sales/products/${product.id}`, icon: FaEye, tone: 'neutral' },
           ...(canEditProducts(currentUser)
-            ? [{ label: product.isActive ? 'غیرفعال کردن' : 'فعال کردن', onClick: () => handleToggleStatus(product), icon: product.isActive ? FaToggleOn : FaToggleOff, tone: product.isActive ? 'success' as const : 'danger' as const, disabled: deleting }]
+            ? [{ label: product.isActive ? 'غیرفعال کردن' : 'فعال کردن', onClick: () => handleToggleStatus(product), icon: product.isActive ? FaToggleOn : FaToggleOff, tone: product.isActive ? 'success' as const : 'danger' as const, disabled: pendingRowActions.has(`${product.id}:toggle`) }]
             : []),
           ...(canDeleteProducts(currentUser)
             ? [{ label: 'حذف', onClick: () => setDeleteConfirm({ show: true, product }), icon: FaTrash, tone: 'danger' as const }]
@@ -333,8 +338,8 @@ export default function ProductsPage() {
               این عمل قابل بازگشت نیست و اگر محصول در قراردادها استفاده شده باشد، حذف آن امکان‌پذیر نخواهد بود.
             </p>
             <div className="mt-6 flex flex-wrap justify-end gap-2">
-              <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={() => setDeleteConfirm({ show: false, product: null })} disabled={deleting} />
-              <ErpButton label={deleting ? 'در حال حذف...' : 'حذف محصول'} icon={FaTrash} tone="danger" variant="solid" onClick={handleDeleteConfirm} disabled={deleting} />
+              <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={() => setDeleteConfirm({ show: false, product: null })} disabled={Boolean(deleteConfirm.product && pendingRowActions.has(`${deleteConfirm.product.id}:delete`))} />
+              <ErpButton label={deleteConfirm.product && pendingRowActions.has(`${deleteConfirm.product.id}:delete`) ? 'در حال حذف...' : 'حذف محصول'} icon={FaTrash} tone="danger" variant="solid" onClick={handleDeleteConfirm} disabled={Boolean(deleteConfirm.product && pendingRowActions.has(`${deleteConfirm.product.id}:delete`))} />
             </div>
           </ErpCard>
         </div>

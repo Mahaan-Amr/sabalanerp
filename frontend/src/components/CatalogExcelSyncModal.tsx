@@ -84,21 +84,17 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [plan, setPlan] = useState<CatalogSyncPlan | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [errorKind, setErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
-  const errorSourceRef = useRef<string | null>(null);
+  const [errors, setErrors] = useState<Array<{ source: string; message: string; kind: 'error' | 'permission' | 'stale'; order: number }>>([]);
+  const errorSequenceRef = useRef(0);
+  const visibleError = [...errors].sort((left, right) => right.order - left.order)[0];
 
   const showError = (source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
-    errorSourceRef.current = source;
-    setError(message);
-    setErrorKind(kind);
+    const order = ++errorSequenceRef.current;
+    setErrors(current => [...current.filter(item => item.source !== source), { source, message, kind, order }]);
   };
 
   const clearError = (source: string) => {
-    if (errorSourceRef.current !== source) return;
-    errorSourceRef.current = null;
-    setError(null);
-    setErrorKind('error');
+    setErrors(current => current.filter(item => item.source !== source));
   };
 
   const reset = () => {
@@ -106,9 +102,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
     setSelectedFile(null);
     setPlan(null);
     setLoading(false);
-    errorSourceRef.current = null;
-    setError(null);
-    setErrorKind('error');
+    setErrors([]);
   };
 
   const close = () => {
@@ -278,7 +272,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
             </div>
           )}
 
-          {error ? <ErpInlineState kind={errorKind} title={error} className="mt-4" /> : null}
+          {visibleError ? <ErpInlineState kind={visibleError.kind} title={visibleError.message} className="mt-4" /> : null}
         </div>
     </ErpSheet>
   );

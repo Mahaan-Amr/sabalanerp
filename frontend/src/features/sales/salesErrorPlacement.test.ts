@@ -50,7 +50,8 @@ test('cached shipment warning retains the actionable refresh failure', () => {
 test('catalog download failures normalize blob responses before building their message', () => {
   const modal = source('src/components/CatalogExcelSyncModal.tsx');
   assert.match(modal, /await normalizeSalesBlobError\(err\)/);
-  assert.match(modal, /kind=\{errorKind\}/);
+  assert.match(modal, /kind=\{visibleError\.kind\}/);
+  assert.match(modal, /current\.filter\(item => item\.source !== source\)/);
   assert.match(modal, /downloadBlob\(response, `\$\{filenamePrefix\}-template\.xlsx`\);\s*clearError\('template'\)/);
   assert.doesNotMatch(modal, /setLoading\(true\);\s*setError\(null\);\s*const response = await (downloadTemplate|exportData|previewImport|applyImport)/);
 });
@@ -96,8 +97,8 @@ test('successful Sale retries clear superseded operational errors', () => {
   const list = source('src/app/dashboard/sales/contracts/page.tsx');
   const products = source('src/app/dashboard/sales/products/page.tsx');
   assert.match(wizard, /signatureErrorsRef\.current\.delete\(source\)[\s\S]*publishSignatureError\(\)/);
-  assert.match(detail, /downloadBlobResponse\([\s\S]*?clearOperationalError\('download'\)/);
-  assert.match(detail, /openPdfUrl\(pdfResponse\.data\.data\.url, true\);\s*clearOperationalError\('print-summary'\)/);
+  assert.match(detail, /downloadBlobResponse\([\s\S]*?clearOperationalError\(errorSource\)/);
+  assert.match(detail, /openPdfUrl\(pdfResponse\.data\.data\.url, true\);\s*clearOperationalError\(errorSource\)/);
   assert.doesNotMatch(detail, /setActionLoading\('(download|print|print-summary)'\);\s*setError/);
   assert.match(list, /downloadBlobResponse\([\s\S]*?clearOperationError\(errorKey\)/);
   assert.match(products, /if \(response\.data\.success\) \{\s*clearRowError\(errorKey\)/);
@@ -111,7 +112,7 @@ test('data retry clears only the error produced by the recovered source', () => 
   assert.match(loading, /if \(!activeErrorsRef\.current\.delete\(source\)\) return/);
   assert.match(loading, /Array\.from\(activeErrorsRef\.current\.values\(\)\)[\s\S]*?sort\(\(left, right\) => right\.order - left\.order\)/);
   assert.match(loading, /setCustomers\(data\);\s*recoverError\('customers'\)/);
-  assert.match(loading, /requestSequence !== customerRequestSequenceRef\.current/);
+  assert.match(loading, /!isLatestRequest\('customers', requestSequence\)/);
   const contracts = source('src/app/dashboard/sales/contracts/page.tsx');
   assert.match(contracts, /requestSequence !== contractLoadSequenceRef\.current/);
   assert.match(contracts, /source: 'profile'/);
@@ -128,6 +129,7 @@ test('signature operations render their HTTP semantic kind', () => {
 
 test('concurrent Sale actions retain errors until the matching operation recovers', () => {
   const wizard = source('src/features/contract-creation/CreateContractWizardClient.tsx');
+  const contractDetail = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
   const contracts = source('src/app/dashboard/sales/contracts/page.tsx');
   const products = source('src/app/dashboard/sales/products/page.tsx');
   const partnerCases = source('src/features/partner-sales/cases/PartnerCaseRuntime.tsx');
@@ -137,6 +139,10 @@ test('concurrent Sale actions retain errors until the matching operation recover
   assert.match(wizard, /if \(!isLatestSignatureOperation\(errorSource, requestSequence\)\) return/);
   assert.doesNotMatch(wizard, /const handle(DownloadPdf|PrintContract|SendConfirmation|ResendConfirmation)[\s\S]{0,500}setErrors\(previous => \(\{ \.\.\.previous, signature: '' \}\)\)/);
 
+  assert.match(contractDetail, /operationalErrors, setOperationalErrors/);
+  assert.match(contractDetail, /operationSequenceRef = useRef\(new Map/);
+  assert.match(contractDetail, /current\.filter\(\(item\) => item\.source !== source\)/);
+  assert.match(contractDetail, /if \(!isLatestOperation\(errorSource, requestSequence\)\) return/);
   assert.match(contracts, /const errorKey = `action:\$\{contractId\}:download`/);
   assert.match(contracts, /const errorKey = `action:\$\{actionKey\}`/);
   assert.match(contracts, /reportOperationError\(errorKey,[\s\S]*failedAction: 'دریافت فایل PDF قرارداد'/);
@@ -144,6 +150,21 @@ test('concurrent Sale actions retain errors until the matching operation recover
   assert.match(products, /const errorKey = `\$\{product\.id\}:toggle`/);
   assert.match(partnerCases, /const errorKey = `\$\{caseId\}:\$\{operation\}`/);
   assert.match(partnerCases, /actionSequenceRef = useRef\(new Map/);
+});
+
+test('concurrent Sale actions retain independent pending state', () => {
+  const contracts = source('src/app/dashboard/sales/contracts/page.tsx');
+  const detail = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
+  const products = source('src/app/dashboard/sales/products/page.tsx');
+  assert.match(contracts, /pendingActions\.has\(`action:\$\{contract\.id\}:approve`\)/);
+  assert.match(detail, /pendingOperations\.has\('action:approve'\)/);
+  assert.match(products, /pendingRowActions\.has\(`\$\{product\.id\}:toggle`\)/);
+});
+
+test('partial product master data keeps prior choices and reports the failed response', () => {
+  const create = source('src/app/dashboard/sales/products/create/page.tsx');
+  assert.match(create, /const failedResponse = responses\.find\(\(response\) => !response\.data\.success\)/);
+  assert.match(create, /if \(failedResponse\)[\s\S]*?setLoadError[\s\S]*?return;[\s\S]*?setMasterData/);
 });
 
 test('Sale data retries preserve visible failures until a current request succeeds', () => {
@@ -164,7 +185,8 @@ test('Sale data retries preserve visible failures until a current request succee
 
 test('contract detail renders permission and stale failures with their semantic kind', () => {
   const page = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
-  assert.match(page, /if \(error\) return \([\s\S]*kind=\{errorKind\}/);
+  assert.match(page, /if \(loadError\) return \([\s\S]*kind=\{loadError\.kind\}/);
+  assert.match(page, /kind=\{visibleOperationalError\.kind\}/);
   assert.match(page, /getSalesOperationalErrorKind/);
 });
 

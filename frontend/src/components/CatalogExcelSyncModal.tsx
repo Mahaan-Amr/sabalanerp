@@ -1,6 +1,6 @@
 'use client';
 import { ErpButton, ErpInlineState, ErpSegmentedControl, ErpSheet } from '@/components/erp';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { FaDownload, FaExclamationTriangle, FaFileExcel, FaUpload } from 'react-icons/fa';
 import ExcelFileUpload from './ExcelFileUpload';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
@@ -86,12 +86,27 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const errorSourceRef = useRef<string | null>(null);
+
+  const showError = (source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
+    errorSourceRef.current = source;
+    setError(message);
+    setErrorKind(kind);
+  };
+
+  const clearError = (source: string) => {
+    if (errorSourceRef.current !== source) return;
+    errorSourceRef.current = null;
+    setError(null);
+    setErrorKind('error');
+  };
 
   const reset = () => {
     setActiveTab('import');
     setSelectedFile(null);
     setPlan(null);
     setLoading(false);
+    errorSourceRef.current = null;
     setError(null);
     setErrorKind('error');
   };
@@ -104,16 +119,15 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   const handleTemplate = async () => {
     try {
       setLoading(true);
-      setError(null);
       const response = await downloadTemplate();
       downloadBlob(response, `${filenamePrefix}-template.xlsx`);
+      clearError('template');
     } catch (err: any) {
       const normalizedError = await normalizeSalesBlobError(err);
-      setError(getSalesOperationalErrorMessage(normalizedError, {
+      showError('template', getSalesOperationalErrorMessage(normalizedError, {
         failedAction: 'دانلود قالب اکسل',
         nextStep: 'دوباره روی «دانلود قالب» بزنید.',
-      }));
-      setErrorKind(getSalesOperationalErrorKind(normalizedError));
+      }), getSalesOperationalErrorKind(normalizedError));
     } finally {
       setLoading(false);
     }
@@ -122,16 +136,15 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   const handleExport = async () => {
     try {
       setLoading(true);
-      setError(null);
       const response = await exportData();
       downloadBlob(response, `${filenamePrefix}-export-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      clearError('export');
     } catch (err: any) {
       const normalizedError = await normalizeSalesBlobError(err);
-      setError(getSalesOperationalErrorMessage(normalizedError, {
+      showError('export', getSalesOperationalErrorMessage(normalizedError, {
         failedAction: 'دریافت خروجی اکسل',
         nextStep: 'دوباره روی «دریافت خروجی» بزنید.',
-      }));
-      setErrorKind(getSalesOperationalErrorKind(normalizedError));
+      }), getSalesOperationalErrorKind(normalizedError));
     } finally {
       setLoading(false);
     }
@@ -139,21 +152,19 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
 
   const handlePreview = async () => {
     if (!selectedFile) {
-      setError('فایل اکسل انتخاب نشده است. فایل موردنظر را انتخاب کنید و دوباره ادامه دهید.');
-      setErrorKind('error');
+      showError('preview', 'فایل اکسل انتخاب نشده است. فایل موردنظر را انتخاب کنید و دوباره ادامه دهید.', 'error');
       return;
     }
     try {
       setLoading(true);
-      setError(null);
       const response = await previewImport(selectedFile);
       setPlan(response.data.data);
+      clearError('preview');
     } catch (err: any) {
-      setError(getSalesOperationalErrorMessage(err, {
+      showError('preview', getSalesOperationalErrorMessage(err, {
         failedAction: 'بررسی فایل اکسل',
         nextStep: 'محتوای فایل را اصلاح کنید یا فایل دیگری انتخاب کنید.',
-      }));
-      setErrorKind(getSalesOperationalErrorKind(err));
+      }), getSalesOperationalErrorKind(err));
     } finally {
       setLoading(false);
     }
@@ -163,18 +174,16 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
     if (!plan?.importId) return;
     try {
       setLoading(true);
-      setError(null);
       const response = await applyImport(plan.importId);
       const appliedPlan = response.data.data;
       onComplete?.(appliedPlan);
       close();
     } catch (err: any) {
-      setError(getSalesOperationalErrorMessage(err, {
+      showError('apply', getSalesOperationalErrorMessage(err, {
         failedAction: 'اعمال تغییرات اکسل',
         nextStep: 'نتیجهٔ فعلی کاتالوگ را بررسی کنید؛ فقط اگر تغییرات اعمال نشده بود دوباره تلاش کنید.',
         uncertainMutation: true,
-      }));
-      setErrorKind(getSalesOperationalErrorKind(err));
+      }), getSalesOperationalErrorKind(err));
     } finally {
       setLoading(false);
     }
@@ -216,7 +225,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
               </div>
 
               <ExcelFileUpload
-                onFileSelect={(file) => { setSelectedFile(file); setPlan(null); setError(null); }}
+                onFileSelect={(file) => { setSelectedFile(file); setPlan(null); clearError('preview'); }}
                 onFileRemove={() => { setSelectedFile(null); setPlan(null); }}
                 selectedFile={selectedFile}
                 loading={loading}

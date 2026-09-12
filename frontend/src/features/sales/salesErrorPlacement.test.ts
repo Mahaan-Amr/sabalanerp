@@ -51,6 +51,8 @@ test('catalog download failures normalize blob responses before building their m
   const modal = source('src/components/CatalogExcelSyncModal.tsx');
   assert.match(modal, /await normalizeSalesBlobError\(err\)/);
   assert.match(modal, /kind=\{errorKind\}/);
+  assert.match(modal, /downloadBlob\(response, `\$\{filenamePrefix\}-template\.xlsx`\);\s*clearError\('template'\)/);
+  assert.doesNotMatch(modal, /setLoading\(true\);\s*setError\(null\);\s*const response = await (downloadTemplate|exportData|previewImport|applyImport)/);
 });
 
 test('every Sale blob PDF failure is normalized and partner preview reports its rejection', () => {

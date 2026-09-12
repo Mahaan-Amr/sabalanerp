@@ -122,7 +122,7 @@ import {
 } from '@/features/contract-creation/services/contractCreationDraftPolicy';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
-import { assertSuccessfulSalesResponse, getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { assertSuccessfulSalesDownload, assertSuccessfulSalesResponse, getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 // Import constants
@@ -4519,6 +4519,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     try {
       const response = await salesAPI.downloadContractPdf(signatureContractId, { fresh: false });
       if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      await assertSuccessfulSalesDownload(response);
       downloadBlobResponse(response, `sales_contract_${signatureContractId}.pdf`);
       clearSignatureError(errorSource);
     } catch (error: any) {

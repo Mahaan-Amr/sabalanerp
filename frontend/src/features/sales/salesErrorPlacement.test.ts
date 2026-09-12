@@ -68,6 +68,14 @@ test('every Sale blob PDF failure is normalized and partner preview reports its 
   const partner = source('src/features/partner-sales/cases/PartnerCaseRuntime.tsx');
   assert.match(partner, /const previewPdf = useCallback/);
   assert.match(partner, /failedAction: mode === 'FINAL' \? 'صدور سند فروش همکار' : 'پیش‌نمایش سند فروش همکار'/);
+  for (const path of [
+    'src/app/dashboard/sales/contracts/page.tsx',
+    'src/app/dashboard/sales/contracts/[id]/page.tsx',
+    'src/features/contract-creation/CreateContractWizardClient.tsx',
+    'src/features/partner-sales/cases/partnerCaseHttpPort.ts',
+  ]) {
+    assert.match(source(path), /await assertSuccessfulSalesDownload\(response\)/);
+  }
 });
 
 test('Sale load and mutation feedback retain HTTP semantic kinds', () => {

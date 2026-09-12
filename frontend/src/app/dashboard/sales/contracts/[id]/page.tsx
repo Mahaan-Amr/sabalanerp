@@ -42,7 +42,7 @@ import { buildContractPaymentPresentation } from '@/features/sales/contractPayme
 import { PartnerAccountViewSchema, PartnerCaseViewSchema, type PartnerAccountView, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import { PartnerCaseWorkspace } from '@/features/partner-sales/cases/PartnerCaseWorkspace';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
-import { assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { assertSuccessfulSalesDownload, assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker, hasAnyPendingOperation } from '@/features/sales/latestRequestTracker';
 
 interface Contract {
@@ -428,6 +428,7 @@ export default function ContractDetailPage() {
     try {
       const response = await salesAPI.downloadContractPdf(contract.id, { fresh: printVariant === 'summary', variant: printVariant });
       if (!isLatestOperation(errorSource, requestSequence)) return;
+      await assertSuccessfulSalesDownload(response);
       const suffix = printVariant === 'summary' ? '_summary' : '';
       downloadBlobResponse(response, `sales_contract_${contract.contractNumber || contract.id}${suffix}.pdf`);
       clearOperationalError(errorSource);

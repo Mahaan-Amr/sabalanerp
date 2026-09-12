@@ -78,6 +78,17 @@ test('technical English payload is replaced with a Persian operation-specific re
   assert.equal(message, 'به‌روزرسانی محصول انجام نشد چون پاسخ قابل‌استفاده‌ای از سامانه دریافت نشد. اطلاعات محصول را بررسی کنید و دوباره تلاش کنید.');
 });
 
+test('generic Persian failure text is not presented as a concrete cause', () => {
+  const message = getSalesOperationalErrorMessage({
+    response: { status: 400, data: { error: 'عملیات انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.' } },
+  }, {
+    failedAction: 'ثبت قرارداد',
+    nextStep: 'فیلدهای مشخص‌شده را اصلاح کنید و دوباره تلاش کنید.',
+  });
+
+  assert.equal(message, 'ثبت قرارداد انجام نشد چون پاسخ قابل‌استفاده‌ای از سامانه دریافت نشد. فیلدهای مشخص‌شده را اصلاح کنید و دوباره تلاش کنید.');
+});
+
 test('safe 5xx response keeps its user-correctable cause', () => {
   const message = getSalesOperationalErrorMessage({
     response: { status: 503, data: { error: 'سرویس تولید PDF موقتاً آماده نیست.' } },

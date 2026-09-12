@@ -2,6 +2,7 @@ import { PartnerAccountViewSchema, PartnerCaseRuntimeResultSchema, canonicalHash
   type PartnerCaseRuntimeRow, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
+import { assertSuccessfulSalesDownload } from '@/features/sales/salesOperationalError';
 import api from '@/lib/api';
 
 export type { PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
@@ -66,6 +67,7 @@ export async function sendPartnerConfirmation(caseId: string) {
 
 export async function openPartnerPdf(caseId: string, snapshotId: string, mode: 'PREVIEW' | 'FINAL' | 'DOWNLOAD_EXISTING') {
   const response = await api.post(`/partner/cases/${encodeURIComponent(caseId)}/output`, { snapshotId, mode }, { responseType: 'blob' });
+  await assertSuccessfulSalesDownload(response);
   const url = URL.createObjectURL(response.data as Blob);
   window.open(url, '_blank', 'noopener,noreferrer');
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);

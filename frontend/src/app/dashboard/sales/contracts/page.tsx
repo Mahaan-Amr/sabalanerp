@@ -34,7 +34,7 @@ import { downloadBlobResponse } from '@/lib/downloadFile';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 import { sourceStatusLabels, StatusBadge } from '@/features/accounting/accountingUi';
 import { parseContractStatusQuery } from '@/features/sales/contractListQuery';
-import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { assertSuccessfulSalesDownload, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 interface Contract {
@@ -401,6 +401,7 @@ export default function ContractsPage() {
     try {
       const response = await salesAPI.downloadContractPdf(contractId, { fresh: false });
       if (!isLatestAction(errorKey, requestSequence)) return;
+      await assertSuccessfulSalesDownload(response);
       downloadBlobResponse(response, `sales_contract_${contractId}.pdf`);
       clearOperationError(errorKey);
     } catch (error) {

@@ -12,7 +12,7 @@ type ErrorWithResponse = { response?: { data?: unknown; [key: string]: unknown }
 
 const PERSIAN_TEXT = /[\u0600-\u06ff]/;
 const TECHNICAL_OR_DEFLECTING_TEXT =
-  /(?:پشتیبانی|تماس بگیرید|stack|traceback|prisma|typeerror|referenceerror|validation failed|server error|internal[_ -]?failure|error loading|exception|constraint|database|sql|select\s|insert\s|update\s|delete\s|\bat\s+\w|\/api\/|[{}[\]<>]|\b[A-Z][A-Z0-9]+_[A-Z0-9_]+\b)/i;
+  /(?:پشتیبانی|تماس بگیرید|عملیات(?: فروش)? انجام نشد|خطایی رخ داد|مشکلی پیش آمد|خطا در|stack|traceback|prisma|typeerror|referenceerror|validation failed|server error|internal[_ -]?failure|error loading|exception|constraint|database|sql|select\s|insert\s|update\s|delete\s|\bat\s+\w|\/api\/|[{}[\]<>]|\b[A-Z][A-Z0-9]+_[A-Z0-9_]+\b)/i;
 const SAFE_LATIN_TERMS = new Set(['PDF', 'CRM', 'CNC', 'OTP', 'SMS', 'Excel']);
 
 const asSentence = (value: string): string => {
@@ -71,7 +71,7 @@ export const assertSuccessfulOperationalResult = (
 };
 
 export const assertSuccessfulBlobOperationalResponse = async (
-  response: { data?: unknown; [key: string]: unknown },
+  response: { data?: unknown },
 ): Promise<void> => {
   const data = response?.data;
   if (typeof Blob !== 'undefined' && data instanceof Blob && !/json/i.test(data.type)) return;

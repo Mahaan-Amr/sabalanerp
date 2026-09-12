@@ -8205,6 +8205,108 @@ model PerformanceCorrection {
   @@map("performance_corrections")
 }
 
+model SimplePerformanceProfile {
+  id              String                               @id @default(cuid())
+  stableKey       String
+  nameFa          String
+  version         Int
+  isActive        Boolean                              @default(true)
+  createdByUserId String
+  createdAt       DateTime                             @default(now())
+  indicators      SimplePerformanceIndicator[]
+  assignments     SimplePerformanceProfileAssignment[]
+  evaluations     SimplePerformanceEvaluation[]
+
+  @@unique([stableKey, version])
+  @@index([isActive, nameFa])
+  @@map("simple_performance_profiles")
+}
+
+model SimplePerformanceIndicator {
+  id            String                   @id @default(cuid())
+  profileId     String
+  code          String
+  categoryFa    String?
+  titleFa       String
+  unitFa        String
+  target        Decimal                  @db.Decimal(18, 4)
+  direction     String
+  weightPercent Decimal                  @db.Decimal(7, 4)
+  sortOrder     Int
+  profile       SimplePerformanceProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  values        SimplePerformanceValue[]
+
+  @@unique([profileId, code])
+  @@index([profileId, sortOrder])
+  @@map("simple_performance_indicators")
+}
+
+model SimplePerformanceProfileAssignment {
+  id               String                   @id @default(cuid())
+  personnelId      String                   @unique
+  profileId        String
+  assignedByUserId String
+  assignedAt       DateTime                 @default(now())
+  profile          SimplePerformanceProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+
+  @@index([profileId])
+  @@map("simple_performance_profile_assignments")
+}
+
+model SimplePerformanceEvaluation {
+  id                 String                   @id @default(cuid())
+  personnelId        String
+  profileId          String
+  evaluationDate     DateTime                 @db.Date
+  status             String                   @default("DRAFT")
+  evaluatorUserId    String
+  evaluatorAuthority String
+  score              Decimal?                 @db.Decimal(7, 2)
+  levelCode          String?
+  finalizedAt        DateTime?
+  correctionOfId     String?
+  correctionReason   String?
+  supersededAt       DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  profile            SimplePerformanceProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  values             SimplePerformanceValue[]
+
+  @@index([personnelId, status, finalizedAt])
+  @@index([correctionOfId])
+  @@map("simple_performance_evaluations")
+}
+
+model SimplePerformanceValue {
+  id           String                      @id @default(cuid())
+  evaluationId String
+  indicatorId  String
+  actual       Decimal                     @db.Decimal(18, 4)
+  score        Decimal?                    @db.Decimal(7, 2)
+  evaluation   SimplePerformanceEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  indicator    SimplePerformanceIndicator  @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
+
+  @@unique([evaluationId, indicatorId])
+  @@index([indicatorId])
+  @@map("simple_performance_values")
+}
+
+model SimplePerformanceAudit {
+  id              String   @id @default(cuid())
+  evaluationId    String?
+  personnelId     String?
+  actorUserId     String
+  authoritySource String?
+  eventType       String
+  reason          String?
+  details         Json?
+  createdAt       DateTime @default(now())
+
+  @@index([evaluationId, createdAt])
+  @@index([personnelId, createdAt])
+  @@map("simple_performance_audits")
+}
+
 model PerformanceAuditEvent {
   id                 String   @id @default(cuid())
   aggregateType      String
@@ -8513,8 +8615,8 @@ model PerformanceRecoverableCopy {
   checkedByUserId  String?
   checkedAt        DateTime  @default(now())
 
-  @@index([operationId, location, copyKeyHash])
   @@unique([operationId, location, version])
+  @@index([operationId, location, copyKeyHash])
   @@index([status, recoverableUntil])
   @@map("performance_recoverable_copies")
 }

@@ -2,7 +2,7 @@ import {
   actionPermissionsForLegacyAuthority,
   expandHrActionPermissionSelection,
   getHrActionPermissionDefinition,
-  PERFORMANCE_ACTION_PERMISSION_CODES,
+  INDEPENDENT_PERFORMANCE_ACTION_PERMISSION_CODES,
 } from './hrActionPermissionCatalog';
 
 export type HrAccessLevel = 'VIEW' | 'EDIT' | 'ADMIN';
@@ -96,7 +96,7 @@ export const evaluateHrAuthorization = (
   ));
   const actionPermissionCodes = requirement.actionPermissionCodes ?? [];
   const requiresIndependentGrant = snapshot.user.role !== 'ADMIN' && actionPermissionCodes.some((code) => (
-    PERFORMANCE_ACTION_PERMISSION_CODES.includes(code as (typeof PERFORMANCE_ACTION_PERMISSION_CODES)[number])
+    INDEPENDENT_PERFORMANCE_ACTION_PERMISSION_CODES.includes(code)
   ));
   if (actionPermissionCodes.length && (!baseline || requiresIndependentGrant)) {
     const authorized = actionPermissionCodes.some(hasActionPermission);

@@ -5,7 +5,7 @@ export type HrActionPermissionDefinition = {
   prerequisites: readonly string[];
 };
 
-const PERFORMANCE_ACTION_PERMISSIONS = [
+const LEGACY_PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'REQUEST_PERFORMANCE_PRIVACY_CASE', labelFa: 'ثبت درخواست حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_PRIVACY_CASE', labelFa: 'مشاهده پرونده حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'ACKNOWLEDGE_PERFORMANCE_PRIVACY_CASE', labelFa: 'اعلام دریافت درخواست حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
@@ -49,7 +49,19 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'APPROVE_PERFORMANCE_RESUME_SYSTEM', labelFa: 'تصویب مالک سامانه رفع توقف عملکرد', level: 'ADMIN', prerequisites: [] },
 ] as const;
 
+const PERFORMANCE_ACTION_PERMISSIONS = [
+  { code: 'VIEW_PERFORMANCE_EVALUATIONS', labelFa: 'مشاهده ارزیابی‌های عملکرد', level: 'VIEW', prerequisites: [] },
+  { code: 'EVALUATE_DIRECT_REPORTS', labelFa: 'ارزیابی افراد تحت سرپرستی', level: 'EDIT', prerequisites: [] },
+  { code: 'EVALUATE_ALL_PERSONNEL', labelFa: 'ارزیابی همه پرسنل', level: 'EDIT', prerequisites: [] },
+  { code: 'MANAGE_PERFORMANCE_PROFILES', labelFa: 'مدیریت الگوهای ارزیابی', level: 'ADMIN', prerequisites: [] },
+  { code: 'VIEW_PERFORMANCE_BADGE_LIST', labelFa: 'مشاهده نشان در فهرست پرسنل', level: 'VIEW', prerequisites: [] },
+] as const;
+
 export const PERFORMANCE_ACTION_PERMISSION_CODES = PERFORMANCE_ACTION_PERMISSIONS.map(({ code }) => code);
+export const INDEPENDENT_PERFORMANCE_ACTION_PERMISSION_CODES = [
+  ...LEGACY_PERFORMANCE_ACTION_PERMISSIONS.map(({ code }) => code),
+  ...PERFORMANCE_ACTION_PERMISSION_CODES,
+] as readonly string[];
 
 export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
   code: string;
@@ -111,7 +123,11 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
   },
 ] as const;
 
-export const HR_ACTION_PERMISSIONS = HR_ACTION_PERMISSION_GROUPS.flatMap((group) => group.permissions);
+const ALL_HR_ACTION_PERMISSIONS = [
+  ...LEGACY_PERFORMANCE_ACTION_PERMISSIONS,
+  ...HR_ACTION_PERMISSION_GROUPS.flatMap((group) => group.permissions),
+];
+export const HR_ACTION_PERMISSIONS = [...new Map(ALL_HR_ACTION_PERMISSIONS.map((permission) => [permission.code, permission])).values()];
 const definitions = new Map(HR_ACTION_PERMISSIONS.map((permission) => [permission.code, permission]));
 
 export const getHrActionPermissionDefinition = (code: string) => definitions.get(code);

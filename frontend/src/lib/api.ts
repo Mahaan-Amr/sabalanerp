@@ -1500,6 +1500,18 @@ export const servicesAPI = {
 
 export const personnelPerformanceAPI = {
   capabilities: () => api.get('/hr/personnel-performance/capabilities'),
+  simpleWorkspace: () => api.get('/hr/personnel-performance/simple/workspace'),
+  simpleProfiles: () => api.get('/hr/personnel-performance/simple/profiles'),
+  createSimpleProfile: (input: unknown) => api.post('/hr/personnel-performance/simple/profiles', input),
+  assignSimpleProfile: (input: { personnelId: string; profileId: string }) => api.post('/hr/personnel-performance/simple/profile-assignments', input),
+  createSimpleEvaluation: (input: { personnelId: string; evaluationDate: string }) => api.post('/hr/personnel-performance/simple/evaluations', input),
+  saveSimpleEvaluation: (evaluationId: string, values: Array<{ indicatorId: string; actual: string }>) => api.put(
+    `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/draft`, { values },
+  ),
+  finalizeSimpleEvaluation: (evaluationId: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/finalize`),
+  correctSimpleEvaluation: (evaluationId: string, reason: string) => api.post(
+    `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/corrections`, { reason },
+  ),
   personalBadge: () => api.get('/hr/personnel-performance/badge/me'),
   badges: (personnelIds: string[]) => api.post('/hr/personnel-performance/badges', { personnelIds }),
   history: (personnelId: string) => api.get(`/hr/personnel-performance/history/${encodeURIComponent(personnelId)}`),

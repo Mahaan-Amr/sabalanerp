@@ -17,6 +17,14 @@ const registeredRoutes = (router as unknown as {
 assert.deepEqual(registeredRoutes, [
   'POST /compensation-agreements',
   'GET /capabilities',
+  'GET /simple/workspace',
+  'GET /simple/profiles',
+  'POST /simple/profiles',
+  'POST /simple/profile-assignments',
+  'POST /simple/evaluations',
+  'PUT /simple/evaluations/:evaluationId/draft',
+  'POST /simple/evaluations/:evaluationId/finalize',
+  'POST /simple/evaluations/:evaluationId/corrections',
   'GET /rollout',
   'POST /readiness/reconstruct',
   'GET /readiness/:runId',
@@ -139,12 +147,11 @@ for (const path of ['/retention/erasure/policies/:policyVersionId/impact-approva
 
 assert.deepEqual(projectPersonnelPerformanceCapabilities([
   'PERSONNEL',
-  'VIEW_PERFORMANCE_HISTORY',
+  'VIEW_PERFORMANCE_EVALUATIONS',
   'VIEW_NAMED_PERFORMANCE_RANKING',
   'RECORD_INITIAL_INTERVIEW',
 ]), {
-  VIEW_PERFORMANCE_HISTORY: true,
-  VIEW_NAMED_PERFORMANCE_RANKING: true,
+  VIEW_PERFORMANCE_EVALUATIONS: true,
 });
 assert.deepEqual(projectPersonnelPerformanceCapabilities([]), {});
 assert.equal(classifyPerformanceRequestMetric('GET', '/badge/me'), 'BADGE_API_LATENCY');

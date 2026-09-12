@@ -1,4 +1,4 @@
-export type PerformanceLevelCode = 'URGENT_IMPROVEMENT' | 'IMPROVEMENT' | 'IMPROVEMENT_NEEDED' | 'MEETS' | 'MEETS_EXPECTATIONS' | 'EXCEEDS' | 'EXCEEDS_EXPECTATIONS' | 'OUTSTANDING';
+export type PerformanceLevelCode = 'URGENT_IMPROVEMENT' | 'IMPROVEMENT' | 'IMPROVEMENT_NEEDED' | 'NEEDS_IMPROVEMENT' | 'MEETS' | 'MEETS_EXPECTATIONS' | 'EXCEEDS' | 'EXCEEDS_EXPECTATIONS' | 'OUTSTANDING';
 export type PerformanceLevelTone = 'danger' | 'warning' | 'success' | 'primary' | 'purple' | 'neutral';
 
 export type PerformanceBadgeSummary = {
@@ -15,6 +15,7 @@ const levelPresentation = {
   URGENT_IMPROVEMENT: { tone: 'danger', asset: 'agate' },
   IMPROVEMENT: { tone: 'warning', asset: 'amber' },
   IMPROVEMENT_NEEDED: { tone: 'warning', asset: 'amber' },
+  NEEDS_IMPROVEMENT: { tone: 'warning', asset: 'amber' },
   MEETS: { tone: 'success', asset: 'emerald-v2' },
   MEETS_EXPECTATIONS: { tone: 'success', asset: 'emerald-v2' },
   EXCEEDS: { tone: 'primary', asset: 'ruby' },

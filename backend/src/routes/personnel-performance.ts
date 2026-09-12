@@ -98,6 +98,17 @@ import {
   getPersonnelPerformanceBadges,
   requestPerformanceExport,
 } from '../services/personnelPerformanceDisclosureStore';
+import {
+  assignSimplePerformanceProfile,
+  createSimplePerformanceCorrection,
+  createSimplePerformanceEvaluation,
+  createSimplePerformanceProfile,
+  finalizeSimplePerformanceEvaluation,
+  getSimplePerformanceBadges,
+  getSimplePerformanceWorkspace,
+  listSimplePerformanceProfiles,
+  saveSimplePerformanceDraft,
+} from '../services/simplePersonnelPerformanceStore';
 
 const router = express.Router();
 router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
@@ -153,6 +164,70 @@ router.get('/capabilities', async (req: AuthRequest, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+const requireAnySimplePerformancePermission = (codes: string[]) => async (req: AuthRequest, res: express.Response, next: express.NextFunction) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    const permissions = new Set(await activeHrActionPermissionsForUser(prisma, req.user.id));
+    if (!codes.some((code) => permissions.has(code))) return res.status(403).json({ success: false, message: 'اجازه این کار را ندارید.' });
+    return next();
+  } catch (error) { return next(error); }
+};
+
+const useSimplePerformance = requireAnySimplePerformancePermission([
+  'VIEW_PERFORMANCE_EVALUATIONS', 'EVALUATE_DIRECT_REPORTS', 'EVALUATE_ALL_PERSONNEL', 'MANAGE_PERFORMANCE_PROFILES',
+]);
+const manageSimpleProfiles = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_PROFILES'] });
+
+router.get('/simple/workspace', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await getSimplePerformanceWorkspace(prisma, req.user!.id)) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/simple/profiles', useSimplePerformance, async (_req, res, next) => {
+  try { return res.json({ success: true, profiles: await listSimplePerformanceProfiles(prisma) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/profiles', manageSimpleProfiles, async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, profile: await createSimplePerformanceProfile(prisma, { ...req.body, actorUserId: req.user!.id }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/profile-assignments', manageSimpleProfiles, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, assignment: await assignSimplePerformanceProfile(prisma, {
+    actorUserId: req.user!.id, personnelId: String(req.body.personnelId ?? ''), profileId: String(req.body.profileId ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, evaluation: await createSimplePerformanceEvaluation(prisma, {
+    actorUserId: req.user!.id, personnelId: String(req.body.personnelId ?? ''), evaluationDate: String(req.body.evaluationDate ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.put('/simple/evaluations/:evaluationId/draft', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await saveSimplePerformanceDraft(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId, values: Array.isArray(req.body.values) ? req.body.values : [],
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/finalize', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await finalizeSimplePerformanceEvaluation(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId,
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/corrections', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, evaluation: await createSimplePerformanceCorrection(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId, reason: String(req.body.reason ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
 });
 
 router.get('/rollout', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (_req, res, next) => {
@@ -325,7 +400,7 @@ router.post('/reminders/run', manageLifecycle, requirePersonnelPerformanceWriteG
 });
 
 const viewBadgeList = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_BADGE_LIST'] });
-const viewHistory = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_HISTORY'] });
+const viewHistory = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_EVALUATIONS'] });
 const viewAnalytics = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_ANALYTICS'] });
 const viewNamedRanking = requireHrAuthorization({ actionPermissionCodes: ['VIEW_NAMED_PERFORMANCE_RANKING'] });
 const viewCalibration = requireHrAuthorization({ actionPermissionCodes: ['VIEW_EVALUATOR_CALIBRATION'] });
@@ -347,12 +422,29 @@ const subjectIdForHandoff = async (req: AuthRequest) => (
 router.get('/badge/me', async (req: AuthRequest, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { personnelId: true } });
+    if (user?.personnelId) {
+      const simple = await getSimplePerformanceBadges(prisma, [user.personnelId]);
+      if (simple[user.personnelId]) return res.json({ success: true, badge: simple[user.personnelId] });
+    }
     return res.json({ success: true, badge: await getPersonalPerformanceBadge(prisma, req.user.id) });
   } catch (error) { return next(error); }
 });
 
 router.post('/badges', viewBadgeList, async (req: AuthRequest, res, next) => {
-  try { return res.json({ success: true, badges: await getPersonnelPerformanceBadges(prisma, { actorUserId: req.user!.id, personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : [] }) }); }
+  try {
+    const personnelIds = Array.isArray(req.body.personnelIds) ? req.body.personnelIds.map(String) : [];
+    const [legacy, simple] = await Promise.all([
+      getPersonnelPerformanceBadges(prisma, { actorUserId: req.user!.id, personnelIds }),
+      getSimplePerformanceBadges(prisma, personnelIds),
+    ]);
+    const legacyByPersonnel = new Map(legacy.map((item) => [item.personnelId, item.badge]));
+    const badges = personnelIds.flatMap((personnelId) => {
+      const badge = simple[personnelId] ?? legacyByPersonnel.get(personnelId);
+      return badge ? [{ personnelId, badge }] : [];
+    });
+    return res.json({ success: true, badges });
+  }
   catch (error) { return next(error); }
 });
 
@@ -882,7 +974,7 @@ router.use(async (error: unknown, _req: import('express').Request, res: import('
   if (message.includes('PERFORMANCE_RELEASE_DISABLED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_RELEASE_DISABLED', message: 'انتشار ارزیابی عملکرد فعال نیست.' });
   if (message.includes('PERFORMANCE_FIX_FORWARD_REQUIRED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_FIX_FORWARD_REQUIRED', message: 'پس از ثبت شواهد فقط توقف ایمن و اصلاح روبه‌جلو مجاز است.' });
   const status = detail.status ?? detail.statusCode;
-  if (typeof detail.code === 'string' && /^(PERFORMANCE|HR)_[A-Z0-9_]+$/.test(detail.code)
+  if (typeof detail.code === 'string' && /^(PERFORMANCE|HR|SIMPLE)_[A-Z0-9_]+$/.test(detail.code)
     && typeof status === 'number' && [400,403,404,409,410,422,429,503].includes(status)) {
     return res.status(status).json({ success: false, code: detail.code, message });
   }

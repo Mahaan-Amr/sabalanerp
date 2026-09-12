@@ -147,11 +147,12 @@ export function PartnerCaseRuntime() {
       }) });
     }
   }, [beginCaseAction, clearCaseError, isLatestCaseAction, load, reportCaseError]);
-  const previewPdf = useCallback(async (caseId: string, snapshotId: string) => {
-    const errorKey = `${caseId}:preview`;
+  const previewPdf = useCallback(async (caseId: string, snapshotId: string, mode: 'PREVIEW' | 'FINAL' = 'PREVIEW') => {
+    const operation = mode === 'FINAL' ? 'issue' : 'preview';
+    const errorKey = `${caseId}:${operation}`;
     const actionSequence = beginCaseAction(errorKey);
     try {
-      await openPartnerPdf(caseId, snapshotId, 'PREVIEW');
+      await openPartnerPdf(caseId, snapshotId, mode);
       if (!isLatestCaseAction(errorKey, actionSequence)) return;
       clearCaseError(errorKey);
     } catch (reason) {
@@ -159,8 +160,8 @@ export function PartnerCaseRuntime() {
       const normalizedReason = normalizePartnerSalesOperationalError(await normalizeSalesBlobError(reason));
       if (!isLatestCaseAction(errorKey, actionSequence)) return;
       reportCaseError(errorKey, { caseId, kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
-        failedAction: 'پیش‌نمایش سند فروش همکار',
-        nextStep: 'دوباره روی «پیش‌نمایش» بزنید.',
+        failedAction: mode === 'FINAL' ? 'صدور سند فروش همکار' : 'پیش‌نمایش سند فروش همکار',
+        nextStep: mode === 'FINAL' ? 'دوباره روی «صدور سند» بزنید.' : 'دوباره روی «پیش‌نمایش» بزنید.',
       }) });
     }
   }, [beginCaseAction, clearCaseError, isLatestCaseAction, reportCaseError]);
@@ -184,7 +185,7 @@ export function PartnerCaseRuntime() {
               actions={{
                 ...row.actions,
                 onPreview: row.snapshotId ? () => void previewPdf(row.view.owner.caseId, row.snapshotId!) : undefined,
-                onIssue: row.snapshotId ? () => void runAction(row.view.owner.caseId, 'issue', 'صدور سند فروش همکار', () => openPartnerPdf(row.view.owner.caseId, row.snapshotId!, 'FINAL')) : undefined,
+                onIssue: row.snapshotId ? () => void previewPdf(row.view.owner.caseId, row.snapshotId!, 'FINAL') : undefined,
                 onSendConfirmation: () => void runAction(row.view.owner.caseId, 'send-confirmation', 'ارسال تأییدیه فروش همکار', () => sendPartnerConfirmation(row.view.owner.caseId)),
                 onRequestCorrection: () => void runAction(row.view.owner.caseId, 'request-correction:retail', 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, 'RETAIL_ONLY')),
                 onRequestVoid: () => void runAction(row.view.owner.caseId, 'request-void', 'ثبت درخواست ابطال فروش همکار', () => requestPartnerCorrection(row.view, 'VOID')),

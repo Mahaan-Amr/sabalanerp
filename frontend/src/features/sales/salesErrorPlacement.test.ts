@@ -67,7 +67,7 @@ test('every Sale blob PDF failure is normalized and partner preview reports its 
   }
   const partner = source('src/features/partner-sales/cases/PartnerCaseRuntime.tsx');
   assert.match(partner, /const previewPdf = useCallback/);
-  assert.match(partner, /failedAction: 'پیش‌نمایش سند فروش همکار'/);
+  assert.match(partner, /failedAction: mode === 'FINAL' \? 'صدور سند فروش همکار' : 'پیش‌نمایش سند فروش همکار'/);
 });
 
 test('Sale load and mutation feedback retain HTTP semantic kinds', () => {
@@ -219,6 +219,8 @@ test('Sale permission and seller loads expose recoverable failures', () => {
   assert.match(products, /setProfileError\(/);
   assert.match(products, /دریافت دسترسی‌ها/);
   assert.match(partnerCases, /assertSuccessfulSalesResult\(result/);
+  assert.match(partnerCases, /onIssue: row\.snapshotId \? \(\) => void previewPdf\(row\.view\.owner\.caseId, row\.snapshotId!, 'FINAL'\)/);
+  assert.doesNotMatch(partnerCases, /onIssue:[^\n]+runAction/);
 });
 
 test('contract detail renders permission and stale failures with their semantic kind', () => {

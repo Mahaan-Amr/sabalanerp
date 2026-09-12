@@ -93,6 +93,7 @@ test('signature operations render their HTTP semantic kind', () => {
   const signature = source('src/features/contract-creation/components/steps/Step8DigitalSignature.tsx');
   assert.match(wizard, /setSignatureErrorKind\(getSalesOperationalErrorKind\(/);
   assert.match(wizard, /signatureErrorKind=\{signatureErrorKind\}/);
+  assert.match(wizard, /const handleResendConfirmation[\s\S]*?setErrors\(prev => \(\{ \.\.\.prev, signature: '' \}\)\);[\s\S]*?salesAPI\.resendConfirmation/);
   assert.match(signature, /kind=\{signatureErrorKind\} title=\{errors\.signature\}/);
 });
 

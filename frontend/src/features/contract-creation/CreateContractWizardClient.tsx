@@ -4614,6 +4614,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
     digitalSignature.setSendingCode(true);
+    setErrors(prev => ({ ...prev, signature: '' }));
     try {
       const response = await salesAPI.resendConfirmation(wizardData.signature.contractId);
       if (!response.data.success) {

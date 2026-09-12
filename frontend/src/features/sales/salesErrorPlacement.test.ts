@@ -221,6 +221,7 @@ test('Sale permission and seller loads expose recoverable failures', () => {
   assert.match(partnerCases, /assertSuccessfulSalesResult\(result/);
   assert.match(partnerCases, /onIssue: row\.snapshotId \? \(\) => void previewPdf\(row\.view\.owner\.caseId, row\.snapshotId!, 'FINAL'\)/);
   assert.doesNotMatch(partnerCases, /onIssue:[^\n]+runAction/);
+  assert.match(partnerCases, /await openPartnerPdf\(caseId, snapshotId, mode\);[\s\S]{0,200}if \(mode === 'FINAL'\) await load\(\)/);
 });
 
 test('contract detail renders permission and stale failures with their semantic kind', () => {

@@ -154,6 +154,8 @@ export function PartnerCaseRuntime() {
     try {
       await openPartnerPdf(caseId, snapshotId, mode);
       if (!isLatestCaseAction(errorKey, actionSequence)) return;
+      if (mode === 'FINAL') await load();
+      if (!isLatestCaseAction(errorKey, actionSequence)) return;
       clearCaseError(errorKey);
     } catch (reason) {
       if (!isLatestCaseAction(errorKey, actionSequence)) return;
@@ -164,7 +166,7 @@ export function PartnerCaseRuntime() {
         nextStep: mode === 'FINAL' ? 'دوباره روی «صدور سند» بزنید.' : 'دوباره روی «پیش‌نمایش» بزنید.',
       }) });
     }
-  }, [beginCaseAction, clearCaseError, isLatestCaseAction, reportCaseError]);
+  }, [beginCaseAction, clearCaseError, isLatestCaseAction, load, reportCaseError]);
   useEffect(() => { void load(); }, [load]);
   if (busy) return <ErpLoading />;
   return <ErpWorkspacePage title="پرونده‌های فروش همکار" context="حقیقت جاری پرونده، وصول و حساب سبلان">

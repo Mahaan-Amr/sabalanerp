@@ -84,11 +84,20 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
 
   const hasLoadedRef = useRef(false);
   const errorSequenceRef = useRef(0);
+  const activeErrorSourceRef = useRef<string | null>(null);
 
-  const reportError = useCallback((message: string, kind: 'error' | 'permission' | 'stale') => {
+  const reportError = useCallback((source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
     errorSequenceRef.current += 1;
+    activeErrorSourceRef.current = source;
     setError(message);
     onErrorRef.current?.(message, kind);
+  }, []);
+
+  const recoverError = useCallback((source: string) => {
+    if (activeErrorSourceRef.current !== source) return;
+    activeErrorSourceRef.current = null;
+    setError(null);
+    onDataLoadedRef.current?.();
   }, []);
 
   const isForbiddenError = (err: any) => err?.response?.status === 403;
@@ -159,57 +168,61 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       if (response.data.success) {
         const data = response.data.data || [];
         setCustomers(data);
+        recoverError('customers');
         return data;
       }
       return [];
     } catch (err: any) {
       if (isForbiddenError(err)) {
         const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
-        reportError(message, 'permission');
+        reportError('customers', message, 'permission');
         setCustomers([]);
         return [];
       }
       const errorMsg = loadErrorMessage(err, 'فهرست مشتریان');
-      reportError(errorMsg, getSalesOperationalErrorKind(err));
+      reportError('customers', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [reportError]);
+  }, [recoverError, reportError]);
 
   const loadProducts = useCallback(async (limit: number = 1000) => {
     try {
       const response = await salesAPI.getProducts({ limit });
       if (response.data.success) {
         setProducts(response.data.data);
+        recoverError('products');
         return response.data.data;
       }
       return [];
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'فهرست محصولات');
-      reportError(errorMsg, getSalesOperationalErrorKind(err));
+      reportError('products', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [reportError]);
+  }, [recoverError, reportError]);
 
   const loadDepartments = useCallback(async () => {
     try {
       const response = await salesAPI.getDepartments();
       if (response.data.success) {
         setDepartments(response.data.data);
+        recoverError('departments');
         return response.data.data;
       }
       return [];
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'اطلاعات واحد فروش');
-      reportError(errorMsg, getSalesOperationalErrorKind(err));
+      reportError('departments', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [reportError]);
+  }, [recoverError, reportError]);
 
   const loadCuttingTypes = useCallback(async () => {
     try {
       const response = await servicesAPI.getCuttingTypes({ isActive: true });
       if (response.data.success) {
         setCuttingTypes(response.data.data);
+        recoverError('cuttingTypes');
         return response.data.data;
       }
       return [];
@@ -219,16 +232,17 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         return [];
       }
       const errorMsg = loadErrorMessage(err, 'انواع برش');
-      reportError(errorMsg, getSalesOperationalErrorKind(err));
+      reportError('cuttingTypes', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [reportError]);
+  }, [recoverError, reportError]);
 
   const loadSubServices = useCallback(async (limit: number = 1000) => {
     try {
       const response = await servicesAPI.getSubServices({ isActive: true, limit });
       if (response.data.success) {
         setSubServices(response.data.data);
+        recoverError('subServices');
         return response.data.data;
       }
       return [];
@@ -238,10 +252,10 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         return [];
       }
       const errorMsg = loadErrorMessage(err, 'فهرست ابزارها');
-      reportError(errorMsg, getSalesOperationalErrorKind(err));
+      reportError('subServices', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, [reportError]);
+  }, [recoverError, reportError]);
 
   const loadStoneFinishings = useCallback(async (limit: number = 1000) => {
     try {
@@ -250,6 +264,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         const data = response.data.data || [];
         setStoneFinishings(data);
         setStoneFinishingLoadState(data.length > 0 ? 'available' : 'empty');
+        recoverError('stoneFinishings');
         return data;
       }
       setStoneFinishings([]);
@@ -262,12 +277,12 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         return [];
       }
       const errorMsg = loadErrorMessage(err, 'روش‌های پرداخت سنگ');
-      reportError(errorMsg, getSalesOperationalErrorKind(err));
+      reportError('stoneFinishings', errorMsg, getSalesOperationalErrorKind(err));
       setStoneFinishings([]);
       setStoneFinishingLoadState('error');
       return [];
     }
-  }, [reportError]);
+  }, [recoverError, reportError]);
 
   const loadUserProfile = useCallback(async () => {
     try {
@@ -289,15 +304,16 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
           lastName: userData.lastName || '',
           role: userData.role
         });
+        recoverError('userProfile');
         return userData;
       }
       return null;
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'اطلاعات کاربر');
-      reportError(errorMsg, getSalesOperationalErrorKind(err));
+      reportError('userProfile', errorMsg, getSalesOperationalErrorKind(err));
       return null;
     }
-  }, [buildCapabilities, reportError]);
+  }, [buildCapabilities, recoverError, reportError]);
 
   const loadInitialData = useCallback(async () => {
     setLoading(true);
@@ -317,7 +333,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       } else {
         const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
         setCustomers([]);
-        reportError(message, 'permission');
+        reportError('customers', message, 'permission');
       }
       if (nextCapabilities.canLoadCuttingTypes) tasks.push(loadCuttingTypes());
       if (nextCapabilities.canLoadSubServices) tasks.push(loadSubServices(1000));
@@ -331,12 +347,13 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       await Promise.all(tasks);
 
       if (errorSequenceRef.current === errorSequenceAtStart && onDataLoadedRef.current) {
+        activeErrorSourceRef.current = null;
         setError(null);
         onDataLoadedRef.current();
       }
     } catch (err: any) {
       const errorMsg = loadErrorMessage(err, 'اطلاعات اولیه قرارداد');
-      reportError(errorMsg, getSalesOperationalErrorKind(err));
+      reportError('initial', errorMsg, getSalesOperationalErrorKind(err));
     } finally {
       setLoading(false);
     }

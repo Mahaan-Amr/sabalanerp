@@ -228,6 +228,7 @@ export default function ContractsPage() {
 
       if (response.data.success) {
         setContracts((current) => (append ? [...current, ...response.data.data] : response.data.data));
+        setOperationError((current) => current?.source === 'load' ? null : current);
         if (response.data.pagination) {
           setPagination(response.data.pagination);
         }

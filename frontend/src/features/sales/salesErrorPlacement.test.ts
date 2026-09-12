@@ -99,6 +99,14 @@ test('successful Sale retries clear superseded operational errors', () => {
   assert.match(list, /setPdfActionLoading\(contractId\);\s*setOperationError\(null\)/);
   assert.match(products, /if \(response\.data\.success\) \{\s*setRowError\(null\)/);
   assert.match(wizard, /const handleDataLoaded[\s\S]*?delete next\.general[\s\S]*?onDataLoaded: handleDataLoaded/);
+  assert.match(list, /if \(response\.data\.success\) \{[\s\S]*?setOperationError\(\(current\) => current\?\.source === 'load' \? null : current\)/);
+});
+
+test('data retry clears only the error produced by the recovered source', () => {
+  const loading = source('src/features/contract-creation/hooks/useDataLoading.ts');
+  assert.match(loading, /activeErrorSourceRef\.current = source/);
+  assert.match(loading, /if \(activeErrorSourceRef\.current !== source\) return/);
+  assert.match(loading, /setCustomers\(data\);\s*recoverError\('customers'\)/);
 });
 
 test('signature operations render their HTTP semantic kind', () => {

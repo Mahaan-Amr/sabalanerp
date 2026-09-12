@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { FEATURE_WORKSPACE_MAP, type Feature } from '../middleware/feature';
 import { HR_REDESIGN_CATALOG } from './hrRedesignDataContracts';
-import { HR_ACTION_PERMISSIONS } from './hrActionPermissionCatalog';
+import { AUTHORIZABLE_HR_ACTION_PERMISSIONS } from './hrActionPermissionCatalog';
 // Explicit resource-scoped actions use the same central access entry point.
 // Legacy workspace/feature access does not imply a resource-scoped grant.
 export { grantScopedAction, readScopedActions, revokeScopedAction, resolveScopedActions } from './effectiveAuthorization/scopedActions';
@@ -50,7 +50,7 @@ type EffectiveAccessClient = Pick<
 
 const ADMIN_WORKSPACES = ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics'];
 const HR_FEATURE_CODES = HR_REDESIGN_CATALOG.workspaceFeatures.map(({ code }) => code);
-const HR_ACTION_CODES = new Set(HR_ACTION_PERMISSIONS.map(({ code }) => code));
+const HR_ACTION_CODES = new Set(AUTHORIZABLE_HR_ACTION_PERMISSIONS.map(({ code }) => code));
 
 const activeLegacyGrant = (
   grant: { isActive: boolean; expiresAt?: Date | null },

@@ -102,6 +102,7 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
       { code: 'MANAGE_HR_WORK', labelFa: 'مدیریت کارهای منابع انسانی', level: 'EDIT', prerequisites: ['HR_WORK_MANAGEMENT'] },
       { code: 'MANAGE_COMPENSATION', labelFa: 'مدیریت پیشنهاد و جبران خدمت', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
       { code: 'MANAGE_PAYROLL', labelFa: 'ثبت و تأیید اطلاعات حقوق', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'MANAGE_COMPENSATION_AGREEMENTS', labelFa: 'انتشار توافق جبران خدمت', level: 'ADMIN', prerequisites: [] },
       { code: 'MANAGE_FINANCE_EVIDENCE', labelFa: 'مجوز قدیمی شواهد مالی (غیرفعال در استخدام)', level: 'EDIT', prerequisites: [] },
       { code: 'REVIEW_IDENTITY_DOCUMENTS', labelFa: 'دریافت و تطبیق اسناد هویتی', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
       { code: 'APPROVE_IDENTITY_CLEARANCE', labelFa: 'تأیید نهایی احراز هویت', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
@@ -123,12 +124,12 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
   },
 ] as const;
 
-const ALL_HR_ACTION_PERMISSIONS = [
+export const HR_ACTION_PERMISSIONS = HR_ACTION_PERMISSION_GROUPS.flatMap((group) => group.permissions);
+export const AUTHORIZABLE_HR_ACTION_PERMISSIONS = [...new Map([
   ...LEGACY_PERFORMANCE_ACTION_PERMISSIONS,
-  ...HR_ACTION_PERMISSION_GROUPS.flatMap((group) => group.permissions),
-];
-export const HR_ACTION_PERMISSIONS = [...new Map(ALL_HR_ACTION_PERMISSIONS.map((permission) => [permission.code, permission])).values()];
-const definitions = new Map(HR_ACTION_PERMISSIONS.map((permission) => [permission.code, permission]));
+  ...HR_ACTION_PERMISSIONS,
+].map((permission) => [permission.code, permission])).values()];
+const definitions = new Map(AUTHORIZABLE_HR_ACTION_PERMISSIONS.map((permission) => [permission.code, permission]));
 
 export const getHrActionPermissionDefinition = (code: string) => definitions.get(code);
 

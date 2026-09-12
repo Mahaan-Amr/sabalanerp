@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {
+  AUTHORIZABLE_HR_ACTION_PERMISSIONS,
+  HR_ACTION_PERMISSIONS,
   HR_ACTION_PERMISSION_GROUPS,
   PERFORMANCE_ACTION_PERMISSION_CODES,
   actionPermissionsForLegacyAuthority,
@@ -27,6 +29,13 @@ assert.deepEqual(PERFORMANCE_ACTION_PERMISSION_CODES, [
   'MANAGE_PERFORMANCE_PROFILES',
   'VIEW_PERFORMANCE_BADGE_LIST',
 ]);
+
+const visibleActionCodes = HR_ACTION_PERMISSIONS.map(({ code }) => code);
+const authorizableActionCodes = AUTHORIZABLE_HR_ACTION_PERMISSIONS.map(({ code }) => code);
+assert.ok(!visibleActionCodes.includes('SUBMIT_PERFORMANCE_EVALUATION'));
+assert.ok(!visibleActionCodes.includes('MANAGE_PERFORMANCE_ROLLOUT'));
+assert.ok(authorizableActionCodes.includes('SUBMIT_PERFORMANCE_EVALUATION'));
+assert.ok(authorizableActionCodes.includes('MANAGE_PERFORMANCE_ROLLOUT'));
 
 for (const code of PERFORMANCE_ACTION_PERMISSION_CODES) {
   assert.deepEqual(

@@ -5,7 +5,7 @@ import {
   type HrAuthorizationRequirement,
   type HrAuthorizationSnapshot,
 } from './hrAuthorizationPolicy';
-import { HR_ACTION_PERMISSIONS, actionPermissionsForLegacyAuthority } from './hrActionPermissionCatalog';
+import { AUTHORIZABLE_HR_ACTION_PERMISSIONS, HR_ACTION_PERMISSIONS, actionPermissionsForLegacyAuthority } from './hrActionPermissionCatalog';
 import { getEffectiveUserAccess } from './effectiveAccessService';
 
 type HrAuthorizationClient = PrismaClient | Prisma.TransactionClient;
@@ -73,7 +73,7 @@ export const activeHrActionPermissionsForUser = async (
   const activeFeatureCodes = new Set(snapshot.featureGrants
     .filter((grant) => grant.status === 'ACTIVE' && grant.effectiveFrom <= at && (!grant.effectiveTo || grant.effectiveTo > at))
     .map(({ featureCode }) => featureCode));
-  return HR_ACTION_PERMISSIONS
+  return AUTHORIZABLE_HR_ACTION_PERMISSIONS
     .map(({ code }) => code)
     // Action permissions are independently scoped destination authority. They
     // do not admit the holder to ordinary HR pages and therefore do not

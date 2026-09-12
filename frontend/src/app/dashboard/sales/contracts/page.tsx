@@ -218,7 +218,6 @@ export default function ContractsPage() {
       } else {
         setLoading(true);
         setLoadingMore(false);
-        setOperationError(null);
       }
 
       const response = await salesAPI.getContracts({
@@ -271,6 +270,7 @@ export default function ContractsPage() {
       if (response.data.success) {
         const user: User = response.data.data;
         setContractPermissions(getContractPermissions(user));
+        setOperationError((current) => current?.source === 'profile' ? null : current);
       }
     } catch (error) {
       console.error('Error loading user profile:', error);
@@ -369,10 +369,10 @@ export default function ContractsPage() {
 
   const handleDownloadPdf = async (contractId: string) => {
     setPdfActionLoading(contractId);
-    setOperationError((current) => current?.source === 'action' && current.contractId === contractId ? null : current);
     try {
       const response = await salesAPI.downloadContractPdf(contractId, { fresh: false });
       downloadBlobResponse(response, `sales_contract_${contractId}.pdf`);
+      setOperationError((current) => current?.source === 'action' && current.contractId === contractId ? null : current);
     } catch (error) {
       console.error('Error downloading contract PDF:', error);
       const normalizedError = await normalizeSalesBlobError(error);
@@ -414,6 +414,7 @@ export default function ContractsPage() {
             openPdfUrl(pdfResponse.data.data.url, true);
           }
         }
+        setOperationError((current) => current?.source === 'action' && current.contractId === contractId ? null : current);
         await loadContracts(1, { append: false });
       } else {
         const failure = { response };

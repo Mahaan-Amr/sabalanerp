@@ -40,6 +40,11 @@ type StoneFinishingLoadState = 'idle' | 'available' | 'empty' | 'forbidden' | 'e
 
 type PermissionLevel = 'view' | 'edit' | 'admin';
 type CustomerLoadParams = { limit?: number; search?: string };
+type DataLoadError = {
+  message: string;
+  kind: 'error' | 'permission' | 'stale';
+  order: number;
+};
 
 const permissionLevels: PermissionLevel[] = ['view', 'edit', 'admin'];
 
@@ -84,22 +89,34 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
 
   const hasLoadedRef = useRef(false);
   const errorSequenceRef = useRef(0);
-  const activeErrorSourceRef = useRef<string | null>(null);
+  const activeErrorsRef = useRef(new Map<string, DataLoadError>());
   const customerRequestSequenceRef = useRef(0);
+
+  const publishLatestError = useCallback(() => {
+    const latest = Array.from(activeErrorsRef.current.values())
+      .sort((left, right) => right.order - left.order)[0];
+
+    if (latest) {
+      setError(latest.message);
+      onErrorRef.current?.(latest.message, latest.kind);
+      return;
+    }
+
+    setError(null);
+    onDataLoadedRef.current?.();
+  }, []);
 
   const reportError = useCallback((source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
     errorSequenceRef.current += 1;
-    activeErrorSourceRef.current = source;
+    activeErrorsRef.current.set(source, { message, kind, order: errorSequenceRef.current });
     setError(message);
     onErrorRef.current?.(message, kind);
   }, []);
 
   const recoverError = useCallback((source: string) => {
-    if (activeErrorSourceRef.current !== source) return;
-    activeErrorSourceRef.current = null;
-    setError(null);
-    onDataLoadedRef.current?.();
-  }, []);
+    if (!activeErrorsRef.current.delete(source)) return;
+    publishLatestError();
+  }, [publishLatestError]);
 
   const isForbiddenError = (err: any) => err?.response?.status === 403;
 
@@ -232,6 +249,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       return [];
     } catch (err: any) {
       if (isForbiddenError(err)) {
+        recoverError('cuttingTypes');
         setCuttingTypes([]);
         return [];
       }
@@ -252,6 +270,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       return [];
     } catch (err: any) {
       if (isForbiddenError(err)) {
+        recoverError('subServices');
         setSubServices([]);
         return [];
       }
@@ -276,6 +295,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       return [];
     } catch (err: any) {
       if (isForbiddenError(err)) {
+        recoverError('stoneFinishings');
         setStoneFinishings([]);
         setStoneFinishingLoadState('forbidden');
         return [];
@@ -321,7 +341,6 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
 
   const loadInitialData = useCallback(async () => {
     setLoading(true);
-    setError(null);
     const errorSequenceAtStart = errorSequenceRef.current;
 
     try {
@@ -349,9 +368,10 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       }
 
       await Promise.all(tasks);
+      const recoveredInitialError = activeErrorsRef.current.has('initial');
+      recoverError('initial');
 
-      if (errorSequenceRef.current === errorSequenceAtStart && onDataLoadedRef.current) {
-        activeErrorSourceRef.current = null;
+      if (!recoveredInitialError && errorSequenceRef.current === errorSequenceAtStart && activeErrorsRef.current.size === 0 && onDataLoadedRef.current) {
         setError(null);
         onDataLoadedRef.current();
       }
@@ -361,7 +381,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     } finally {
       setLoading(false);
     }
-  }, [buildCapabilities, loadUserProfile, loadProducts, loadDepartments, loadCustomers, loadCuttingTypes, loadSubServices, loadStoneFinishings, reportError]);
+  }, [buildCapabilities, loadUserProfile, loadProducts, loadDepartments, loadCustomers, loadCuttingTypes, loadSubServices, loadStoneFinishings, recoverError, reportError]);
 
   useEffect(() => {
     if (autoLoad && !hasLoadedRef.current) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ErpEmptyState, ErpInlineState, ErpLoading, ErpWorkspacePage } from '@/components/erp';
 import { FaFileContract } from 'react-icons/fa';
 import { PartnerCaseWorkspace } from './PartnerCaseWorkspace';
@@ -20,31 +20,51 @@ export function PartnerCaseRuntime() {
   const [corrections, setCorrections] = useState<Record<string, PartnerCorrectionStatus | null>>({});
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale'; caseId?: string }>();
+  const loadSequenceRef = useRef(0);
+  const actionSequenceRef = useRef(new Map<string, number>());
+  const beginCaseAction = useCallback((caseId: string) => {
+    const sequence = (actionSequenceRef.current.get(caseId) || 0) + 1;
+    actionSequenceRef.current.set(caseId, sequence);
+    return sequence;
+  }, []);
+  const isLatestCaseAction = useCallback((caseId: string, sequence: number) => actionSequenceRef.current.get(caseId) === sequence, []);
   const load = useCallback(async () => {
-    setBusy(true); setError(undefined);
+    const requestSequence = ++loadSequenceRef.current;
+    setBusy(true);
     try {
       const [cases, accountView] = await Promise.all([readPartnerCases(), readPartnerAccount().catch(() => undefined)]);
+      if (requestSequence !== loadSequenceRef.current) return;
       setRows(cases); setAccount(accountView);
       const supplementary = await Promise.all(cases.map(async row => ({ caseId: row.view.owner.caseId,
         collections: ['COMMITTED', 'VOIDED'].includes(row.view.state)
           ? await readPartnerCollections(row.view.owner).catch(() => undefined) : undefined,
         correction: await readPartnerCorrection(row.view.owner.caseId).catch(() => undefined) })));
+      if (requestSequence !== loadSequenceRef.current) return;
       setCollections(Object.fromEntries(supplementary.flatMap(item => item.collections ? [[item.caseId, item.collections]] : [])));
       setCorrections(Object.fromEntries(supplementary.flatMap(item => item.correction !== undefined
         ? [[item.caseId, item.correction]] : [])));
+      setError((current) => current?.caseId ? current : undefined);
     } catch (reason) {
+      if (requestSequence !== loadSequenceRef.current) return;
       const normalizedReason = normalizePartnerSalesOperationalError(reason);
       setError({ kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
         failedAction: 'دریافت پرونده‌های فروش همکار',
         nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
       }) });
     }
-    finally { setBusy(false); }
+    finally { if (requestSequence === loadSequenceRef.current) setBusy(false); }
   }, []);
   const runAction = useCallback(async (caseId: string, name: string, action: () => Promise<unknown>) => {
-    setError(undefined);
-    try { await action(); await load(); }
+    const actionSequence = beginCaseAction(caseId);
+    try {
+      await action();
+      if (!isLatestCaseAction(caseId, actionSequence)) return;
+      await load();
+      if (!isLatestCaseAction(caseId, actionSequence)) return;
+      setError((current) => current?.caseId === caseId ? undefined : current);
+    }
     catch (reason) {
+      if (!isLatestCaseAction(caseId, actionSequence)) return;
       const normalizedReason = normalizePartnerSalesOperationalError(await normalizeSalesBlobError(reason));
       setError({ caseId, kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
         failedAction: name,
@@ -52,19 +72,22 @@ export function PartnerCaseRuntime() {
         uncertainMutation: true,
       }) });
     }
-  }, [load]);
+  }, [beginCaseAction, isLatestCaseAction, load]);
   const previewPdf = useCallback(async (caseId: string, snapshotId: string) => {
-    setError(undefined);
+    const actionSequence = beginCaseAction(caseId);
     try {
       await openPartnerPdf(caseId, snapshotId, 'PREVIEW');
+      if (!isLatestCaseAction(caseId, actionSequence)) return;
+      setError((current) => current?.caseId === caseId ? undefined : current);
     } catch (reason) {
+      if (!isLatestCaseAction(caseId, actionSequence)) return;
       const normalizedReason = normalizePartnerSalesOperationalError(await normalizeSalesBlobError(reason));
       setError({ caseId, kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
         failedAction: 'پیش‌نمایش سند فروش همکار',
         nextStep: 'دوباره روی «پیش‌نمایش» بزنید.',
       }) });
     }
-  }, []);
+  }, [beginCaseAction, isLatestCaseAction]);
   useEffect(() => { void load(); }, [load]);
   if (busy) return <ErpLoading />;
   return <ErpWorkspacePage title="پرونده‌های فروش همکار" context="حقیقت جاری پرونده، وصول و حساب سبلان">

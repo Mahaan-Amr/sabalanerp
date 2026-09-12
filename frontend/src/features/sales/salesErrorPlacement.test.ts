@@ -94,18 +94,20 @@ test('successful Sale retries clear superseded operational errors', () => {
   const list = source('src/app/dashboard/sales/contracts/page.tsx');
   const products = source('src/app/dashboard/sales/products/page.tsx');
   assert.match(wizard, /updateWizardData\([\s\S]*?setErrors\(prev => \(\{ \.\.\.prev, signature: '' \}\)\);[\s\S]*?catch/);
-  assert.match(detail, /setActionLoading\('download'\);\s*setError\(''\)/);
-  assert.match(detail, /setActionLoading\('print-summary'\);\s*setError\(''\)/);
-  assert.match(list, /setPdfActionLoading\(contractId\);\s*setOperationError\(\(current\) => current\?\.source === 'action'/);
-  assert.match(products, /if \(response\.data\.success\) \{\s*setRowError\(null\)/);
+  assert.match(detail, /downloadBlobResponse\([\s\S]*?clearOperationalError\('download'\)/);
+  assert.match(detail, /openPdfUrl\(pdfResponse\.data\.data\.url, true\);\s*clearOperationalError\('print-summary'\)/);
+  assert.doesNotMatch(detail, /setActionLoading\('(download|print|print-summary)'\);\s*setError/);
+  assert.match(list, /downloadBlobResponse\([\s\S]*?setOperationError\(\(current\) => current\?\.source === 'action'/);
+  assert.match(products, /if \(response\.data\.success\) \{\s*setRowError\(\(current\) => current\?\.productId === product\.id \? null : current\)/);
   assert.match(wizard, /const handleDataLoaded[\s\S]*?delete next\.general[\s\S]*?onDataLoaded: handleDataLoaded/);
   assert.match(list, /if \(response\.data\.success\) \{[\s\S]*?setOperationError\(\(current\) => current\?\.source === 'contracts' \? null : current\)/);
 });
 
 test('data retry clears only the error produced by the recovered source', () => {
   const loading = source('src/features/contract-creation/hooks/useDataLoading.ts');
-  assert.match(loading, /activeErrorSourceRef\.current = source/);
-  assert.match(loading, /if \(activeErrorSourceRef\.current !== source\) return/);
+  assert.match(loading, /activeErrorsRef\.current\.set\(source, \{ message, kind, order: errorSequenceRef\.current \}\)/);
+  assert.match(loading, /if \(!activeErrorsRef\.current\.delete\(source\)\) return/);
+  assert.match(loading, /Array\.from\(activeErrorsRef\.current\.values\(\)\)[\s\S]*?sort\(\(left, right\) => right\.order - left\.order\)/);
   assert.match(loading, /setCustomers\(data\);\s*recoverError\('customers'\)/);
   assert.match(loading, /requestSequence !== customerRequestSequenceRef\.current/);
   const contracts = source('src/app/dashboard/sales/contracts/page.tsx');

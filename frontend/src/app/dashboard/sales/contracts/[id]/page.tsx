@@ -1,6 +1,6 @@
 'use client';
 import { ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import {
   FaCalendarAlt,
@@ -196,6 +196,8 @@ export default function ContractDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const errorSourceRef = useRef<string | null>(null);
+  const contractRequestSequenceRef = useRef(0);
   const [printVariant, setPrintVariant] = useState<SalesContractPrintVariant>('original');
   const canManageSellers = currentUser?.role === 'ADMIN' || hasPermission(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN);
 
@@ -204,6 +206,19 @@ export default function ContractDetailPage() {
     : action === 'reject'
       ? 'رد قرارداد'
       : 'امضای قرارداد';
+
+  const showOperationalError = (source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
+    errorSourceRef.current = source;
+    setError(message);
+    setErrorKind(kind);
+  };
+
+  const clearOperationalError = (source: string) => {
+    if (errorSourceRef.current !== source) return;
+    errorSourceRef.current = null;
+    setError(null);
+    setErrorKind('error');
+  };
 
   useEffect(() => {
     loadContract();
@@ -216,26 +231,26 @@ export default function ContractDetailPage() {
   }, [canManageSellers]);
 
   const loadContract = async () => {
+    const requestSequence = ++contractRequestSequenceRef.current;
     try {
       setLoading(true);
       const response = await salesAPI.getContract(contractId);
+      if (requestSequence !== contractRequestSequenceRef.current) return;
       if (response.data.success) {
         setContract(response.data.data);
-        setError(null);
-        setErrorKind('error');
+        clearOperationalError('load');
       } else {
-        setError('قرارداد پیدا نشد. به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.');
-        setErrorKind('stale');
+        showOperationalError('load', 'قرارداد پیدا نشد. به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.', 'stale');
       }
     } catch (error: any) {
+      if (requestSequence !== contractRequestSequenceRef.current) return;
       console.error('Error loading contract:', error);
-      setError(getSalesOperationalErrorMessage(error, {
+      showOperationalError('load', getSalesOperationalErrorMessage(error, {
         failedAction: 'دریافت قرارداد',
         nextStep: 'به فهرست قراردادها برگردید یا دوباره تلاش کنید.'
-      }));
-      setErrorKind(getSalesOperationalErrorKind(error));
+      }), getSalesOperationalErrorKind(error));
     } finally {
-      setLoading(false);
+      if (requestSequence === contractRequestSequenceRef.current) setLoading(false);
     }
   };
 
@@ -274,23 +289,21 @@ export default function ContractDetailPage() {
 
       if (response.data.success) {
         await loadContract();
-        setError(null);
+        clearOperationalError(`action:${action}`);
       } else {
-        setError(getSalesOperationalErrorMessage({ response }, {
+        showOperationalError(`action:${action}`, getSalesOperationalErrorMessage({ response }, {
           failedAction: actionName(action),
           nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
-        }));
-        setErrorKind(getSalesOperationalErrorKind({ response }));
+        }), getSalesOperationalErrorKind({ response }));
       }
     } catch (error: any) {
       console.error(`Error ${action}ing contract:`, error);
-      setError(getSalesOperationalErrorMessage(error, {
+      showOperationalError(`action:${action}`, getSalesOperationalErrorMessage(error, {
         failedAction: actionName(action),
         nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
-      }));
-      setErrorKind(getSalesOperationalErrorKind(error));
+      }), getSalesOperationalErrorKind(error));
     } finally {
       setActionLoading(null);
     }
@@ -304,13 +317,13 @@ export default function ContractDetailPage() {
       setNextSellerId('');
       setSellerChangeReason('');
       await loadContract();
+      clearOperationalError('seller-change');
     } catch (reason: any) {
-      setError(getSalesOperationalErrorMessage(reason, {
+      showOperationalError('seller-change', getSalesOperationalErrorMessage(reason, {
         failedAction: 'تغییر مسئول فروش قرارداد',
         nextStep: 'فروشنده جدید و دلیل تغییر را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
-      }));
-      setErrorKind(getSalesOperationalErrorKind(reason));
+      }), getSalesOperationalErrorKind(reason));
     } finally {
       setChangingSeller(false);
     }
@@ -324,13 +337,13 @@ export default function ContractDetailPage() {
       setNextSellerId('');
       setSellerChangeReason('');
       await loadContract();
+      clearOperationalError('legacy-credit');
     } catch (reason: any) {
-      setError(getSalesOperationalErrorMessage(reason, {
+      showOperationalError('legacy-credit', getSalesOperationalErrorMessage(reason, {
         failedAction: 'انتساب فروش قطعی قدیمی',
         nextStep: 'فروشنده و دلیل انتساب را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
-      }));
-      setErrorKind(getSalesOperationalErrorKind(reason));
+      }), getSalesOperationalErrorKind(reason));
     } finally {
       setChangingSeller(false);
     }
@@ -359,18 +372,17 @@ export default function ContractDetailPage() {
   const handleDownloadPdf = async () => {
     if (!contract) return;
     setActionLoading('download');
-    setError('');
     try {
       const response = await salesAPI.downloadContractPdf(contract.id, { fresh: printVariant === 'summary', variant: printVariant });
       const suffix = printVariant === 'summary' ? '_summary' : '';
       downloadBlobResponse(response, `sales_contract_${contract.contractNumber || contract.id}${suffix}.pdf`);
+      clearOperationalError('download');
     } catch (error: any) {
       const normalizedError = await normalizeSalesBlobError(error);
-      setError(getSalesOperationalErrorMessage(normalizedError, {
+      showOperationalError('download', getSalesOperationalErrorMessage(normalizedError, {
         failedAction: 'دانلود PDF قرارداد',
         nextStep: 'دوباره روی «دانلود PDF» بزنید.'
-      }));
-      setErrorKind(getSalesOperationalErrorKind(normalizedError));
+      }), getSalesOperationalErrorKind(normalizedError));
     } finally {
       setActionLoading(null);
     }
@@ -379,16 +391,14 @@ export default function ContractDetailPage() {
   const handlePrintContract = async () => {
     if (!contract) return;
     setActionLoading('print');
-    setError('');
     try {
       const response = await salesAPI.printContract(contract.id);
       if (!response.data?.success) {
-        setError(getSalesOperationalErrorMessage({ response }, {
+        showOperationalError('print', getSalesOperationalErrorMessage({ response }, {
           failedAction: 'آماده‌سازی پرینت قرارداد',
           nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
-        }));
-        setErrorKind(getSalesOperationalErrorKind({ response }));
+        }), getSalesOperationalErrorKind({ response }));
         return;
       }
 
@@ -397,14 +407,14 @@ export default function ContractDetailPage() {
       const pdfResponse = await salesAPI.getContractPdf(contract.id, { fresh: false, variant: 'original' });
       if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {
         openPdfUrl(pdfResponse.data.data.url, true);
+        clearOperationalError('print');
       }
     } catch (error: any) {
-      setError(getSalesOperationalErrorMessage(error, {
+      showOperationalError('print', getSalesOperationalErrorMessage(error, {
         failedAction: 'آماده‌سازی پرینت قرارداد',
         nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
-      }));
-      setErrorKind(getSalesOperationalErrorKind(error));
+      }), getSalesOperationalErrorKind(error));
     } finally {
       setActionLoading(null);
     }
@@ -413,24 +423,22 @@ export default function ContractDetailPage() {
   const handlePrintSummaryContract = async () => {
     if (!contract) return;
     setActionLoading('print-summary');
-    setError('');
     try {
       const pdfResponse = await salesAPI.getContractPdf(contract.id, { fresh: true, variant: 'summary' });
       if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {
         openPdfUrl(pdfResponse.data.data.url, true);
+        clearOperationalError('print-summary');
       } else {
-        setError(getSalesOperationalErrorMessage({ response: pdfResponse }, {
+        showOperationalError('print-summary', getSalesOperationalErrorMessage({ response: pdfResponse }, {
           failedAction: 'آماده‌سازی خلاصه قرارداد',
           nextStep: 'دوباره روی «پرینت خلاصه» بزنید.'
-        }));
-        setErrorKind(getSalesOperationalErrorKind({ response: pdfResponse }));
+        }), getSalesOperationalErrorKind({ response: pdfResponse }));
       }
     } catch (error: any) {
-      setError(getSalesOperationalErrorMessage(error, {
+      showOperationalError('print-summary', getSalesOperationalErrorMessage(error, {
         failedAction: 'آماده‌سازی خلاصه قرارداد',
         nextStep: 'دوباره روی «پرینت خلاصه» بزنید.'
-      }));
-      setErrorKind(getSalesOperationalErrorKind(error));
+      }), getSalesOperationalErrorKind(error));
     } finally {
       setActionLoading(null);
     }
@@ -442,23 +450,20 @@ export default function ContractDetailPage() {
     try {
       const response = await salesAPI.resendConfirmation(contract.id);
       if (response.data?.success) {
-        setError(null);
-        setErrorKind('error');
+        clearOperationalError('resend-confirmation');
       } else {
-        setError(getSalesOperationalErrorMessage({ response }, {
+        showOperationalError('resend-confirmation', getSalesOperationalErrorMessage({ response }, {
           failedAction: 'ارسال دوباره کد تأیید',
           nextStep: 'شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
           uncertainMutation: true
-        }));
-        setErrorKind(getSalesOperationalErrorKind({ response }));
+        }), getSalesOperationalErrorKind({ response }));
       }
     } catch (error: any) {
-      setError(getSalesOperationalErrorMessage(error, {
+      showOperationalError('resend-confirmation', getSalesOperationalErrorMessage(error, {
         failedAction: 'ارسال دوباره کد تأیید',
         nextStep: 'شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
-      }));
-      setErrorKind(getSalesOperationalErrorKind(error));
+      }), getSalesOperationalErrorKind(error));
     } finally {
       setActionLoading(null);
     }

@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FaBoxes, FaEye, FaEyeSlash, FaFileExcel, FaPlus, FaToggleOff, FaToggleOn, FaTrash } from 'react-icons/fa';
 import { Product } from '@/types/product';
 import { dashboardAPI, salesAPI } from '@/lib/api';
@@ -46,6 +46,7 @@ export default function ProductsPage() {
   const [listErrorKind, setListErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const [rowError, setRowError] = useState<{ productId: string; message: string; kind: 'error' | 'permission' | 'stale' } | null>(null);
   const [showImportExportModal, setShowImportExportModal] = useState(false);
+  const productRequestSequenceRef = useRef(0);
 
   const itemsPerPage = 20;
 
@@ -58,7 +59,6 @@ export default function ProductsPage() {
     try {
       const response = await dashboardAPI.getProfile();
       if (response.data.success) {
-        setRowError(null);
         setCurrentUser(response.data.data);
       }
     } catch (error) {
@@ -67,10 +67,9 @@ export default function ProductsPage() {
   };
 
   const fetchProducts = async () => {
+    const requestSequence = ++productRequestSequenceRef.current;
     try {
       setLoading(true);
-      setListError('');
-      setListErrorKind('error');
       const params: any = { page: currentPage, limit: itemsPerPage };
       if (showDeleted) params.includeDeleted = true;
       if (searchTerm) params.search = searchTerm;
@@ -80,11 +79,14 @@ export default function ProductsPage() {
       if (filterStatus !== 'all') params.isActive = filterStatus === 'active';
 
       const response = await salesAPI.getProducts(params);
+      if (requestSequence !== productRequestSequenceRef.current) return;
       if (response.data.success) {
         const pagination = response.data.pagination || {};
         setProducts(response.data.data || []);
         setTotalPages(pagination.pages || 1);
         setTotalProducts(pagination.total || 0);
+        setListError('');
+        setListErrorKind('error');
       } else {
         const failure = { response };
         setListErrorKind(getSalesOperationalErrorKind(failure));
@@ -94,6 +96,7 @@ export default function ProductsPage() {
         }));
       }
     } catch (error) {
+      if (requestSequence !== productRequestSequenceRef.current) return;
       console.error('Error fetching products:', error);
       setListErrorKind(getSalesOperationalErrorKind(error));
       setListError(getSalesOperationalErrorMessage(error, {
@@ -101,7 +104,7 @@ export default function ProductsPage() {
         nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
       }));
     } finally {
-      setLoading(false);
+      if (requestSequence === productRequestSequenceRef.current) setLoading(false);
     }
   };
 
@@ -122,7 +125,7 @@ export default function ProductsPage() {
       setDeleting(true);
       const response = await salesAPI.deleteProduct(product.id);
       if (response.data.success) {
-        setRowError(null);
+        setRowError((current) => current?.productId === product.id ? null : current);
         setModalMessage('محصول با موفقیت حذف شد');
         setShowSuccessModal(true);
         setDeleteConfirm({ show: false, product: null });
@@ -156,7 +159,7 @@ export default function ProductsPage() {
     try {
       const response = await salesAPI.updateProduct(product.id, { isActive: !product.isActive });
       if (response.data.success) {
-        setRowError(null);
+        setRowError((current) => current?.productId === product.id ? null : current);
         setModalMessage(`وضعیت ${product.namePersian} با موفقیت تغییر کرد`);
         setShowSuccessModal(true);
         fetchProducts();

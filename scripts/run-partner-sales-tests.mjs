@@ -216,6 +216,7 @@ try {
     'backend/src/services/__tests__/partnerFinancialCorrection.integration.test.ts',
     'backend/src/services/__tests__/partnerOperationsPrisma.integration.test.ts',
     'backend/src/services/__tests__/partnerActivationPackage.integration.test.ts',
+    'backend/src/services/__tests__/partnerLocalQaProvisioning.integration.test.ts',
     'backend/src/services/__tests__/partnerReleaseEvidence.test.ts',
     'backend/src/services/__tests__/partnerReleaseEvidence.integration.test.ts',
     'backend/src/services/__tests__/partnerTrustedClaimsEnvelope.test.ts',

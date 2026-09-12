@@ -71,6 +71,7 @@
     "test:shipment-statement-operations": "tsx src/services/__tests__/shipmentStatementOperations.test.ts && tsx src/services/__tests__/shipmentStatementCutoverPrismaRepository.test.ts && tsx src/services/__tests__/allocationPricingBinding.test.ts && tsx src/services/__tests__/dispatchDocumentContracts.test.ts && tsx src/services/__tests__/deploymentShipmentStatementCutoverRuntime.test.ts",
     "test:shipment-statement-operations:db": "tsx src/services/__tests__/shipmentStatementOperationsConcurrency.integration.test.ts",
     "partner-release:publish-readiness": "tsx src/scripts/publish-partner-release-readiness.ts",
+    "partner-local-qa:provision": "tsx src/scripts/provision-partner-local-qa.ts",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "db:migrate": "prisma migrate dev",

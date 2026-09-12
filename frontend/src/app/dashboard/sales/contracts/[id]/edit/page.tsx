@@ -12,7 +12,7 @@ import {
   contractCorrectionCategoryLabel,
 } from '@/features/contract-creation/services/contractCorrectionPresentation';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
-import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 const CreateContractWizardClient = dynamic(
   () => import('@/features/contract-creation/CreateContractWizardClient'),
@@ -55,6 +55,8 @@ export default function SalesContractEditPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const [retryLoad, setRetryLoad] = useState(false);
+  const [retrySequence, setRetrySequence] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -69,12 +71,15 @@ export default function SalesContractEditPage() {
 
         if (!mounted) return;
         if (!contractResponse.data.success || !contractResponse.data.data) {
+          setRetryLoad(false);
           setError('قرارداد پیدا نشد. به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.');
           setErrorKind('stale');
           return;
         }
 
         const nextContract = contractResponse.data.data as ContractForEdit;
+        assertSuccessfulSalesResponse(profileResponse);
+        setRetryLoad(false);
         const user = profileResponse.data?.data as User | undefined;
         const permissions = user ? getContractPermissions(user) : null;
 
@@ -109,6 +114,7 @@ export default function SalesContractEditPage() {
         }
 
         setContract(nextContract);
+        setRetryLoad(false);
         setError(null);
         setErrorKind('error');
       } catch (err: any) {
@@ -118,6 +124,7 @@ export default function SalesContractEditPage() {
           nextStep: 'به صفحه مشاهده قرارداد برگردید یا دوباره تلاش کنید.'
         }));
         setErrorKind(getSalesOperationalErrorKind(err));
+        setRetryLoad(true);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -128,7 +135,7 @@ export default function SalesContractEditPage() {
     return () => {
       mounted = false;
     };
-  }, [contractId]);
+  }, [contractId, retrySequence]);
 
   if (loading) {
     return (
@@ -145,8 +152,8 @@ export default function SalesContractEditPage() {
           kind={errorKind}
           title={error || 'قرارداد پیدا نشد. به فهرست قراردادها برگردید.'}
           action={{
-            label: 'مشاهده قرارداد',
-            href: `/dashboard/sales/contracts/${contractId}`
+            label: retryLoad ? 'تلاش دوباره' : 'مشاهده قرارداد',
+            ...(retryLoad ? { onClick: () => setRetrySequence((current) => current + 1) } : { href: `/dashboard/sales/contracts/${contractId}` })
           }}
         />
       </div>

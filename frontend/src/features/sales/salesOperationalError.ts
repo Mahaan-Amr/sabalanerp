@@ -1,5 +1,7 @@
 import {
+  assertSuccessfulBlobOperationalResponse,
   assertSuccessfulOperationalResponse,
+  assertSuccessfulOperationalResult,
   getOperationalErrorKind,
   getOperationalErrorMessage,
   isSafeOperationalBusinessText,
@@ -10,6 +12,8 @@ export const getSalesOperationalErrorMessage = getOperationalErrorMessage;
 export const getSalesOperationalErrorKind = getOperationalErrorKind;
 export const normalizeSalesBlobError = normalizeBlobOperationalError;
 export const assertSuccessfulSalesResponse = assertSuccessfulOperationalResponse;
+export const assertSuccessfulSalesResult = assertSuccessfulOperationalResult;
+export const assertSuccessfulSalesDownload = assertSuccessfulBlobOperationalResponse;
 
 type ValidationDetail = {
   path?: unknown;

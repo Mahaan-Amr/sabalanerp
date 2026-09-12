@@ -64,6 +64,21 @@ export const assertSuccessfulOperationalResponse = (
   if (response?.data?.success !== true) throw { response };
 };
 
+export const assertSuccessfulOperationalResult = (
+  result: { success?: unknown },
+): void => {
+  if (result?.success !== true) throw { response: { data: result } };
+};
+
+export const assertSuccessfulBlobOperationalResponse = async (
+  response: { data?: unknown; [key: string]: unknown },
+): Promise<void> => {
+  const data = response?.data;
+  if (typeof Blob !== 'undefined' && data instanceof Blob && !/json/i.test(data.type)) return;
+  const normalized = await normalizeBlobOperationalError({ response }) as { response?: { data?: { success?: unknown } } };
+  assertSuccessfulOperationalResponse(normalized.response || response as { data?: { success?: unknown } });
+};
+
 const isNetworkFailure = (error: unknown): boolean => {
   const candidate = error as { code?: unknown; name?: unknown; message?: unknown; response?: unknown };
   if (candidate?.response) return false;

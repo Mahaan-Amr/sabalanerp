@@ -50,6 +50,7 @@ export default function ProductsPage() {
   const [modalMessage, setModalMessage] = useState('');
   const [listError, setListError] = useState('');
   const [listErrorKind, setListErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const [profileError, setProfileError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale' }>();
   const [rowErrors, setRowErrors] = useState<Array<{ key: string; productId: string; message: string; kind: 'error' | 'permission' | 'stale'; order: number }>>([]);
   const [showImportExportModal, setShowImportExportModal] = useState(false);
   const productRequestSequenceRef = useRef(0);
@@ -81,9 +82,20 @@ export default function ProductsPage() {
       const response = await dashboardAPI.getProfile();
       if (response.data.success) {
         setCurrentUser(response.data.data);
+        setProfileError(undefined);
+      } else {
+        const failure = { response };
+        setProfileError({ kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
+          failedAction: 'دریافت دسترسی‌های کاتالوگ فروش',
+          nextStep: 'دوباره روی «دریافت دسترسی‌ها» بزنید.'
+        }) });
       }
     } catch (error) {
       console.error('Error loading user profile:', error);
+      setProfileError({ kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت دسترسی‌های کاتالوگ فروش',
+        nextStep: 'اتصال را بررسی کنید و دوباره روی «دریافت دسترسی‌ها» بزنید.'
+      }) });
     }
   };
 
@@ -292,6 +304,9 @@ export default function ProductsPage() {
         }
         footer={<ErpPagination currentPage={currentPage} totalPages={totalPages} totalItems={totalProducts} itemsPerPage={itemsPerPage} itemLabel="محصول" onPageChange={setCurrentPage} />}
       >
+        {profileError && (
+          <ErpInlineState kind={profileError.kind} title={profileError.message} action={{ label: 'دریافت دسترسی‌ها', onClick: loadCurrentUser, tone: 'primary' }} />
+        )}
         {listError && (
           <ErpInlineState
             kind={products.length > 0 ? 'stale' : listErrorKind}

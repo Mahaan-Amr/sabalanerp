@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertSuccessfulSalesResponse, getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductCreationValidationErrors, mapProductEditValidationErrors, normalizeSalesBlobError } from './salesOperationalError';
+import { assertSuccessfulSalesDownload, assertSuccessfulSalesResponse, assertSuccessfulSalesResult, getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductCreationValidationErrors, mapProductEditValidationErrors, normalizeSalesBlobError } from './salesOperationalError';
 import { createLatestRequestTracker, hasAnyPendingOperation } from './latestRequestTracker';
 
 test('related seller mutations share one pending guard', () => {
@@ -106,6 +106,13 @@ test('resolved failure envelopes cannot continue through a success path', () => 
   const response = { data: { success: false, error: 'اطلاعات نامعتبر است؛ مقادیر مشخص‌شده را اصلاح کنید.' } };
   assert.throws(() => assertSuccessfulSalesResponse(response), (failure: any) => failure.response === response);
   assert.doesNotThrow(() => assertSuccessfulSalesResponse({ data: { success: true, data: { id: 'ok' } } }));
+  assert.throws(() => assertSuccessfulSalesResult(response.data), (failure: any) => failure.response?.data === response.data);
+});
+
+test('resolved JSON download failures cannot be saved as spreadsheet files', async () => {
+  const failedDownload = { data: new Blob([JSON.stringify({ success: false, error: 'فایل آماده نشد؛ دوباره تلاش کنید.' })], { type: 'application/json' }) };
+  await assert.rejects(() => assertSuccessfulSalesDownload(failedDownload), (failure: any) => failure.response?.data?.success === false);
+  await assert.doesNotReject(() => assertSuccessfulSalesDownload({ data: new Blob(['sheet'], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }) }));
 });
 
 test('connection failure names the cause and gives a safe retry step', () => {

@@ -243,7 +243,7 @@ export default function ContractDetailPage() {
 
   useEffect(() => {
     if (!canManageSellers) return;
-    salesReportsAPI.getSellers().then((response) => setSellerOptions(response.data.data || [])).catch(() => undefined);
+    void loadSellerOptions();
   }, [canManageSellers]);
 
   const loadContract = async () => {
@@ -273,13 +273,31 @@ export default function ContractDetailPage() {
   const loadCurrentUser = async () => {
     try {
       const response = await dashboardAPI.getProfile();
-      if (response.data.success) {
-        const user = response.data.data;
-        setCurrentUser(user);
-        setContractPermissions(getContractPermissions(user));
-      }
+      assertSuccessfulSalesResponse(response);
+      const user = response.data.data;
+      setCurrentUser(user);
+      setContractPermissions(getContractPermissions(user));
+      clearOperationalError('profile');
     } catch (error) {
       console.error('Error loading user profile:', error);
+      showOperationalError('profile', getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت دسترسی‌های قرارداد',
+        nextStep: 'دوباره روی «دریافت دسترسی‌ها» بزنید.'
+      }), getSalesOperationalErrorKind(error));
+    }
+  };
+
+  const loadSellerOptions = async () => {
+    try {
+      const response = await salesReportsAPI.getSellers();
+      assertSuccessfulSalesResponse(response);
+      setSellerOptions(response.data.data || []);
+      clearOperationalError('sellers');
+    } catch (error) {
+      showOperationalError('sellers', getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت فهرست فروشندگان',
+        nextStep: 'دوباره روی «دریافت فروشندگان» بزنید.'
+      }), getSalesOperationalErrorKind(error));
     }
   };
 
@@ -705,7 +723,15 @@ export default function ContractDetailPage() {
         />
       )}
       {visibleOperationalError && (
-        <ErpInlineState kind={visibleOperationalError.kind} title={visibleOperationalError.message} />
+        <ErpInlineState
+          kind={visibleOperationalError.kind}
+          title={visibleOperationalError.message}
+          action={visibleOperationalError.source === 'profile'
+            ? { label: 'دریافت دسترسی‌ها', onClick: () => void loadCurrentUser() }
+            : visibleOperationalError.source === 'sellers'
+              ? { label: 'دریافت فروشندگان', onClick: () => void loadSellerOptions() }
+              : undefined}
+        />
       )}
 
       <ErpSection title="خروجی چاپ قرارداد" description="نوع خروجی فروش را انتخاب کنید و سپس دانلود یا پرینت بگیرید.">

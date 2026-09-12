@@ -292,6 +292,12 @@ export default function ContractsPage() {
         const user: User = response.data.data;
         setContractPermissions(getContractPermissions(user));
         clearOperationError('profile');
+      } else {
+        const failure = { response };
+        reportOperationError('profile', { source: 'profile', kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
+          failedAction: 'دریافت دسترسی‌های فروش',
+          nextStep: 'صفحه را تازه‌سازی کنید و دوباره تلاش کنید.'
+        }) });
       }
     } catch (error) {
       console.error('Error loading user profile:', error);

@@ -17,7 +17,7 @@ import {
 import type { PartnerAccountView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
-import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { assertSuccessfulSalesResult, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { normalizePartnerSalesOperationalError } from '../partnerSalesErrorMessage';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
@@ -129,8 +129,9 @@ export function PartnerCaseRuntime() {
     const errorKey = `${caseId}:${operation}`;
     const actionSequence = beginCaseAction(errorKey);
     try {
-      await action();
+      const result = await action();
       if (!isLatestCaseAction(errorKey, actionSequence)) return;
+      assertSuccessfulSalesResult(result as { success?: unknown });
       await load();
       if (!isLatestCaseAction(errorKey, actionSequence)) return;
       clearCaseError(errorKey);

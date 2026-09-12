@@ -197,10 +197,28 @@ test('resolved Sale failure envelopes are routed to operational feedback', () =>
   const dataLoading = source('src/features/contract-creation/hooks/useDataLoading.ts');
 
   assert.match(contractDetail, /assertSuccessfulSalesResponse\(response\)/);
+  assert.match(catalog, /assertSuccessfulSalesDownload\(response\)/);
   assert.match(catalog, /assertSuccessfulSalesResponse\(response\)/);
   assert.match(shipment, /assertSuccessfulSalesResponse\(response\)/);
   assert.match(wizard, /assertSuccessfulSalesResponse\(response\)/);
   assert.match(dataLoading, /if \(!profile\) return/);
+});
+
+test('Sale permission and seller loads expose recoverable failures', () => {
+  const contractEdit = source('src/app/dashboard/sales/contracts/[id]/edit/page.tsx');
+  const contractDetail = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
+  const contracts = source('src/app/dashboard/sales/contracts/page.tsx');
+  const products = source('src/app/dashboard/sales/products/page.tsx');
+  const partnerCases = source('src/features/partner-sales/cases/PartnerCaseRuntime.tsx');
+
+  assert.match(contractEdit, /assertSuccessfulSalesResponse\(profileResponse\)/);
+  assert.match(contractEdit, /retryLoad \? 'تلاش دوباره'/);
+  assert.match(contractDetail, /showOperationalError\('profile'/);
+  assert.match(contractDetail, /showOperationalError\('sellers'/);
+  assert.match(contracts, /else \{\s*const failure = \{ response \};\s*reportOperationError\('profile'/);
+  assert.match(products, /setProfileError\(/);
+  assert.match(products, /دریافت دسترسی‌ها/);
+  assert.match(partnerCases, /assertSuccessfulSalesResult\(result/);
 });
 
 test('contract detail renders permission and stale failures with their semantic kind', () => {

@@ -95,7 +95,7 @@ export const remainingRecoveryGuidance = (products: readonly Product[], badRowId
   const immediateText = immediateSources.length ? ` سنگ مصرف‌شده در این ردیف از باقی‌ماندهٔ ${immediateSources.map(label).join('، ')} تولید شده است.` : '';
   const dependencyText = dependencies.length ? ` ${uncertain ? 'ردیف‌های مرتبط برای بررسی وابستگی' : 'ردیف‌های وابسته'}: ${dependencies.map(label).join('، ')}.` : ' ردیف وابسته‌ای در این زنجیره شناسایی نشد.';
   const instructions = uncertain || pending.size || !affected.size
-    ? ' ترتیب وابستگی قابل تأیید نیست؛ ردیفی را حذف نکنید و با کد پیگیری از پشتیبانی کمک بگیرید.'
+    ? ' ترتیب وابستگی قابل تأیید نیست؛ ردیفی را حذف نکنید، مشخصات همه ردیف‌های مرتبط را بررسی و دوباره ذخیره کنید.'
     : ` مشخصات ردیف‌ها را حفظ کنید. ترتیب ساخت مجدد از همان سنگ منبع: ${order.map(shortLabel).join(' سپس ')}.` +
       (dependencies.length ? ` در صورت نیاز به حذف دستی برای جایگزینی، ترتیب حذف برعکس است: ${[...order].reverse().map(shortLabel).join(' سپس ')}.` : ' فقط همین ردیف را بازسازی کنید؛ حذف محصولات مستقل لازم نیست.');
   return {

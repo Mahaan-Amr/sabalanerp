@@ -102,7 +102,9 @@ test('successful Sale retries clear superseded operational errors', () => {
   assert.doesNotMatch(detail, /setActionLoading\('(download|print|print-summary)'\);\s*setError/);
   assert.match(list, /downloadBlobResponse\([\s\S]*?clearOperationError\(errorKey\)/);
   assert.match(products, /if \(response\.data\.success\) \{\s*clearRowError\(errorKey\)/);
-  assert.match(wizard, /const handleDataLoaded[\s\S]*?delete next\.general[\s\S]*?onDataLoaded: handleDataLoaded/);
+  assert.match(wizard, /const handleDataLoadingError[\s\S]*?setDataLoadingError\(\{ message: error, kind \}\)/);
+  assert.match(wizard, /const handleDataLoaded[\s\S]*?setDataLoadingError\(undefined\)[\s\S]*?onDataLoaded: handleDataLoaded/);
+  assert.doesNotMatch(wizard, /const handleDataLoaded[\s\S]{0,300}delete next\.general/);
   assert.match(list, /if \(response\.data\.success\) \{[\s\S]*?clearOperationError\('contracts'\)/);
 });
 

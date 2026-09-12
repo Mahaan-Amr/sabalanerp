@@ -742,6 +742,7 @@ export default function CreateContractWizard({
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [generalErrorKind, setGeneralErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const [dataLoadingError, setDataLoadingError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale' }>();
 
   useEffect(() => {
     if (!Object.values(errors).some(Boolean)) return;
@@ -854,17 +855,11 @@ export default function CreateContractWizard({
 
   // Memoized error handler to prevent infinite loop
   const handleDataLoadingError = useCallback((error: string, kind: 'error' | 'permission' | 'stale') => {
-    setGeneralErrorKind(kind);
-    setErrors({ general: error });
+    setDataLoadingError({ message: error, kind });
   }, []);
 
   const handleDataLoaded = useCallback(() => {
-    setErrors(previous => {
-      if (!previous.general) return previous;
-      const next = { ...previous };
-      delete next.general;
-      return next;
-    });
+    setDataLoadingError(undefined);
   }, []);
 
   // Data loading is now provided by useDataLoading hook
@@ -6386,6 +6381,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             kind="stale"
             title="ذخیرهٔ بازیابی محلی محدود شده است؛ تا برقراری ذخیرهٔ امن سرور این صفحه را نبندید."
           />
+        )}
+        {dataLoadingError && (
+          <ErpInlineState kind={dataLoadingError.kind} title={dataLoadingError.message} />
         )}
         {errors.general && (
           <ErpInlineState kind={generalErrorKind} title={errors.general} />

@@ -17,6 +17,8 @@ delete missing[1].meta.remainingSource.generatedRemainingStoneIds;
 const uncertain = remainingRecoveryGuidance(missing, ids[1]);
 assert.deepEqual(uncertain.rebuildProductRowIds, []);
 assert.ok(uncertain.message.includes('ردیفی را حذف نکنید'));
+assert.ok(uncertain.message.includes('مشخصات همه ردیف‌های مرتبط را بررسی'));
+assert.doesNotMatch(uncertain.message, /پشتیبانی|تماس بگیرید/);
 assert.equal(uncertain.relatedProductRowIds.includes(ids[4]), false);
 for (const generated of [[], ['wrong-secondary']]) {
   const orphan = structuredClone(products);

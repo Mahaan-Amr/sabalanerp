@@ -352,7 +352,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
       row.width < stockInfo.sanitized.width || row.length < stockInfo.sanitized.length
     );
 
-    const childProducts: ContractProduct[] = normalizedRows.map((row, index) => {
+    let cuttingCalculationFailed = false;
+    const childProducts: ContractProduct[] = normalizedRows.flatMap((row, index) => {
       const operation = operationCalculations[index];
       const operationResult = operation?.calculation.ok
         ? operation.calculation.result
@@ -366,12 +367,18 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
       const cuttingBreakdown = calculateRemainingChildCuttingBreakdown({
         row,
         stock: stockInfo.sanitized,
-        rate: cuttingCostPerMeter
+        rate: cuttingCostPerMeter,
+        sourcePieceQuantities: validation.sourcePieceQuantities,
+        sawKerfCm: remainingStoneSawKerfEnabled ? SAW_KERF_CM : 0
       });
+      if (!cuttingBreakdown) {
+        cuttingCalculationFailed = true;
+        return [];
+      }
       const cuttingCost = cuttingBreakdown.reduce((total, entry) => total + entry.cost, 0);
       const cutType: 'longitudinal' | 'cross' | null = lengthCut ? 'cross' : (widthCut ? 'longitudinal' : null);
 
-      return {
+      return [{
         rowId: childRowIds[index],
         productId: sourceProduct.productId,
         product: sourceProduct.product,
@@ -494,8 +501,15 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
               }
             : undefined
         }
-      };
+      }];
     });
+
+    if (cuttingCalculationFailed) {
+      setErrors({
+        products: 'چیدمان برش این محصول قابل محاسبه نیست؛ ابعاد و تعداد را بررسی کنید.'
+      });
+      return;
+    }
 
     const sourceInventory = resolveRemainingStoneSourceInventory(canonicalSourceProduct);
     const productsForReplay = [

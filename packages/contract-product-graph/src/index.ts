@@ -24,6 +24,7 @@ export {
   calculatePackingPlan,
   calculatePricing
 } from './packingPricing';
+export { packPreservedSourceDistribution } from './preservedSourcePacking';
 export type {
   PackedPlacement,
   PackedRemainder,

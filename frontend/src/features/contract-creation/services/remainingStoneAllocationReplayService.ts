@@ -400,11 +400,26 @@ export const replayRemainingStoneAllocations = ({
     const physicalPieces = successfulAllocation.physicalPiecesByRow.get(row.id) || [];
     const widthCut = row.width < stock.width;
     const lengthCut = row.length < stock.length;
-    const cuttingBreakdown = calculateRemainingChildCuttingBreakdown({
+    const calculatedCuttingBreakdown = calculateRemainingChildCuttingBreakdown({
       row,
       stock,
-      rate: Number(recalculatedChild.cuttingCostPerMeter || 0)
+      rate: Number(recalculatedChild.cuttingCostPerMeter || 0),
+      sourcePieceQuantities: successfulAllocation.sourcePieceQuantities,
+      sawKerfCm: recalculatedChild.sawKerfEnabled
+        ? Number(recalculatedChild.sawKerfCm || 0)
+        : 0
     });
+    if (!calculatedCuttingBreakdown && recalculatedChild.remainderChildPolicyInput) {
+      conflicts.push({
+        kind: 'capacity',
+        childRowId: child.rowId || '',
+        childLabel: child.stoneName || child.product?.namePersian || 'محصول باقی‌مانده',
+        allocationId: row.id,
+        reason: 'چیدمان برش این محصول قابل محاسبه نیست؛ ابعاد و تعداد را بررسی کنید.'
+      });
+      return;
+    }
+    const cuttingBreakdown = calculatedCuttingBreakdown || [];
     const cuttingCost = cuttingBreakdown.reduce((total, entry) => total + entry.cost, 0);
     const allocationOrder = getAllocationOrder(recalculatedChild, replayIndex);
     let generatedRemainingStoneIds =

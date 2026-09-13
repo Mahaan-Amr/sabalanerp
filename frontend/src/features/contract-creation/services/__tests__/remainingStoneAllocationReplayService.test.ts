@@ -246,10 +246,10 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
   assert.equal(Number(available.reduce((sum, stone) => sum + stone.squareMeters, 0).toFixed(6)), 0.07);
   assert.deepEqual(replayedChild.cuttingBreakdown, [
     { type: 'longitudinal', meters: 0.6, rate: 20_000, cost: 12_000 },
-    { type: 'cross', meters: 0.07, rate: 20_000, cost: 1_400 }
+    { type: 'cross', meters: 0.14, rate: 20_000, cost: 2_800 }
   ]);
-  assert.equal(replayedChild.cuttingCost, 13_400);
-  assert.equal(replayedChild.totalPrice, 13_400);
+  assert.equal(replayedChild.cuttingCost, 14_800);
+  assert.equal(replayedChild.totalPrice, 14_800);
   assert.deepEqual(replayedChild.remainderChildPolicyInput, {
     allocationId: 'allocation-child-two-axis-cut',
     allocationOrder: 0,

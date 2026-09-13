@@ -81,35 +81,24 @@ export const remainingRecoveryGuidance = (products: readonly Product[], badRowId
     const id = ready[0];
     order.push(id); pending.delete(id);
   }
-  const label = (id: string) => {
-    const index = products.findIndex(p => identity(p) === id);
-    if (index < 0) return `شناسهٔ ${id} (در پیش‌نویس یافت نشد)`;
-    const title = String(products[index].stoneName ?? products[index].name ?? 'بدون نام');
-    return `ردیف ${index + 1} «${title}»`;
-  };
-  const shortLabel = (id: string) => `ردیف ${products.findIndex(p => identity(p) === id) + 1}`;
   const dependencies = [...affected].filter(id => id !== badRowId);
-  const rootText = sourceProductRowId ? ` منبع سنگ: ${label(sourceProductRowId)}.` : '';
-  const immediateSources = [...new Set(strings(source(bad ?? {}).consumedSourceStoneIds)
-    .flatMap(id => [...(producers.get(id) ?? [])]))];
-  const immediateText = immediateSources.length ? ` سنگ مصرف‌شده در این ردیف از باقی‌ماندهٔ ${immediateSources.map(label).join('، ')} تولید شده است.` : '';
-  const dependencyText = dependencies.length ? ` ${uncertain ? 'ردیف‌های مرتبط برای بررسی وابستگی' : 'ردیف‌های وابسته'}: ${dependencies.map(label).join('، ')}.` : ' ردیف وابسته‌ای در این زنجیره شناسایی نشد.';
   const instructions = uncertain || pending.size || !affected.size
-    ? ' ترتیب وابستگی قابل تأیید نیست؛ ردیفی را حذف نکنید، مشخصات همه ردیف‌های مرتبط را بررسی و دوباره ذخیره کنید.'
-    : ` مشخصات ردیف‌ها را حفظ کنید. ترتیب ساخت مجدد از همان سنگ منبع: ${order.map(shortLabel).join(' سپس ')}.` +
-      (dependencies.length ? ` در صورت نیاز به حذف دستی برای جایگزینی، ترتیب حذف برعکس است: ${[...order].reverse().map(shortLabel).join(' سپس ')}.` : ' فقط همین ردیف را بازسازی کنید؛ حذف محصولات مستقل لازم نیست.');
+    ? ' این محصول و محصولاتی را که از باقی‌ماندهٔ همین سنگ ساخته‌اید باز کنید؛ منبع سنگ، ابعاد و مقدار مصرف را دوباره بررسی و ذخیره کنید. تا رفع خطا هیچ محصولی را حذف نکنید.'
+    : dependencies.length
+      ? ' ابتدا محصولات وابسته به همین سنگ را حذف کنید؛ از آخرین محصول ساخته‌شده شروع کنید. سپس این محصول را حذف و دوباره از سنگ منبع بسازید و محصولات وابسته را به ترتیب قبلی ایجاد کنید.'
+      : ' این محصول را باز کنید و منبع سنگ، ابعاد و مقدار مصرف را دوباره بررسی و ذخیره کنید.';
   return {
     sourceProductRowId, relatedProductRowIds: [...affected], rebuildProductRowIds: uncertain || pending.size ? [] : order,
-    message: `بازسازی خودکار ${label(badRowId)} بدون تغییر مبلغ یا مصرف سنگ قابل تأیید نیست.${reason(causeCode)}${rootText}${immediateText}${dependencyText}${unsupportedLayout ? ' صرف ساخت مجدد همین چیدمان کافی نیست؛ شواهد دقیق سهم هر قطعه از منبع باید بررسی شود.' : ''}${instructions} هیچ ردیف یا مبلغی خودکار تغییر نکرده و پیش‌نویس حفظ شده است. ثبت فقط پس از کنترل دوبارهٔ کل زنجیره امکان‌پذیر است.`
+    message: `مصرف سنگ این محصول قابل تأیید نیست.${reason(causeCode)}${instructions} هیچ محصول یا مبلغی تغییر نکرده و پیش‌نویس شما حفظ شده است.`
   };
 };
 
 const reason = (code?: string) => {
   if (!code) return '';
-  if (code.includes('price') || code.includes('total') || code.includes('zero-material')) return ' شواهد مبلغ مواد اولیه، برش یا عملیات با محاسبهٔ معتبر ردیف سازگار نیست.';
-  if (code.includes('inventory') || code.includes('consumed')) return ' موجودی منبع یا سابقهٔ مصرف سنگ با باقی‌ماندهٔ ثبت‌شده سازگار نیست.';
-  if (code.includes('order')) return ' ترتیب مصرف سنگ در ردیف‌های وابسته روشن یا یکتا نیست.';
-  if (code.includes('lineage') || code.includes('identity') || code.includes('ownership')) return ' شناسهٔ منبع یا ارتباط مصرف سنگ بین ردیف‌ها ناقص یا متناقض است.';
-  if (code.includes('layout') || code.includes('geometry') || code.includes('piece')) return ' ابعاد یا چیدمان هر قطعه روی سنگ منبع با شواهد موجود قابل بازسازی دقیق نیست.';
-  return ' بخشی از شواهد لازم برای بازسازی دقیق این ردیف ناقص یا متناقض است.';
+  if (code.includes('price') || code.includes('total') || code.includes('zero-material')) return ' مبلغ سنگ یا خدمات با محاسبهٔ فعلی هماهنگ نیست.';
+  if (code.includes('inventory') || code.includes('consumed')) return ' موجودی باقی‌مانده با مصرف ثبت‌شده هماهنگ نیست.';
+  if (code.includes('order')) return ' ترتیب مصرف باقی‌مانده مشخص نیست.';
+  if (code.includes('lineage') || code.includes('identity') || code.includes('ownership')) return ' منبع سنگ کامل یا معتبر نیست.';
+  if (code.includes('layout') || code.includes('geometry') || code.includes('piece')) return ' ابعاد محصول با سنگ منبع هماهنگ نیست.';
+  return ' اطلاعات منبع یا مصرف سنگ ناقص یا ناسازگار است.';
 };

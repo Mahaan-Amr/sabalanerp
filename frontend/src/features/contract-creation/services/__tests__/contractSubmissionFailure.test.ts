@@ -83,11 +83,14 @@ const rowError = {
     }
   }
 };
-const recoveryMessage = 'ردیف 2؛ منبع سنگ: ردیف 1؛ وابسته: ردیف 3. ترتیب ساخت مجدد: ردیف 2 سپس ردیف 3. پیش‌نویس حفظ شده است. کد پیگیری: recovery-test';
+const recoveryMessage = 'مصرف سنگ این محصول قابل تأیید نیست. ابتدا محصولات وابسته به همین سنگ را حذف کنید. سپس این محصول را دوباره بسازید. پیش‌نویس شما حفظ شده است. کد پیگیری: recovery-test';
 const recoveryError = { response: { status: 422, data: { code: 'contract-product-graph-validation-failed',
   trackingId: 'recovery-test', details: [{ path: 'productRow:row-2', message: recoveryMessage }] } } };
-assert.deepEqual(mapProductValidationFailure(recoveryError, mapAxiosFormErrors(recoveryError, 'fallback')),
-  { 'productRow:row-2': recoveryMessage }, 'Complete chain guidance survives the shared create/edit error mapping');
+const mappedRecoveryError = mapProductValidationFailure(recoveryError, mapAxiosFormErrors(recoveryError, 'fallback'));
+assert.deepEqual(mappedRecoveryError,
+  { 'productRow:row-2': recoveryMessage }, 'Simple recovery guidance survives the shared create/edit error mapping');
+assert.doesNotMatch(mappedRecoveryError['productRow:row-2'], /ردیف|row|contract-row/i,
+  'The visible recovery message does not expose the internal field key');
 assert.deepEqual(buildContractSubmissionDiagnostic(rowError, 1_000), {
   occurredAt: 1_000,
   httpStatus: 422,

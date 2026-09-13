@@ -250,6 +250,21 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
   ]);
   assert.equal(replayedChild.cuttingCost, 13_400);
   assert.equal(replayedChild.totalPrice, 13_400);
+  assert.deepEqual(replayedChild.remainderChildPolicyInput, {
+    allocationId: 'allocation-child-two-axis-cut',
+    allocationOrder: 0,
+    sourceProductRowId: 'source-secondary-remnants',
+    secondaryOwnerProductRowId: 'source-secondary-remnants',
+    selectedRemainingStoneId: 'stock-14-0.8-1',
+    lengthMeters: '0.6',
+    widthMeters: '0.07',
+    quantity: 1,
+    sourcePieceQuantities: [1],
+    kerfMeters: '0',
+    calibrationEnabled: false,
+    longitudinalCutRateToman: '20000',
+    crossCutRateToman: '20000'
+  }, 'the validated modal replay must carry its exact allocation into persistence');
 }
 
 {

@@ -26,6 +26,7 @@ export interface RemainingPartitionAllocation {
   remainingAreas: RemainingStone[];
   remainingAreaSheetIndexes: Map<string, number>;
   physicalPiecesByRow: Map<string, StonePartition[]>;
+  sourcePieceQuantities?: number[];
 }
 
 interface RemainingPartitionAllocationOptions {
@@ -235,6 +236,10 @@ export const allocateRemainingStonePartitions = (
     consumedSourcePieces: sheets.length,
     remainingAreas,
     remainingAreaSheetIndexes,
-    physicalPiecesByRow
+    physicalPiecesByRow,
+    sourcePieceQuantities:
+      expandedRows.length === validRows.reduce((sum, row) => sum + getQuantity(row.quantity), 0)
+        ? sheets.map(sheet => sheet.length)
+        : undefined
   };
 };

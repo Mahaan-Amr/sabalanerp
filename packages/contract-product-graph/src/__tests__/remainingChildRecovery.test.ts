@@ -44,6 +44,125 @@ const tamperedOwner = JSON.parse(serializeCanonicalProductGraph(plan.graph));
 tamperedOwner.allocations[0].intentSnapshot.secondaryOwnerProductRowId = 'unrelated-owner';
 assert.throws(() => parseCanonicalProductGraph(tamperedOwner), /owner/);
 assert.deepEqual(planLegacyProductGraphMigration(input), plan, 'Recovery must be deterministic');
+
+{
+  const [source, child] = structuredClone(products);
+  const sourceRowId = source.rowId;
+  const sourceStock = source.remainingStoneSourceInventory[0];
+  const untouchedStock = source.remainingStoneSourceInventory[1];
+  const allocationId = 'current-writer-cross-cut';
+  const consumed = Array.from({ length: 5 }, (_, index) => `${sourceStock.id}:unit:${index + 1}`);
+  const generated = consumed.map(id => `${id}:secondary:1`);
+  const physicalPieces = Array.from({ length: 5 }, (_, index) => ({
+    id: `${allocationId}:piece:${index + 1}`,
+    width: 12,
+    length: 1,
+    quantity: 1,
+    squareMeters: 0.12
+  }));
+  child.rowId = child.productRowId = 'current-writer-cross-cut-child';
+  child.parentProductRowId = sourceRowId;
+  child.length = 1;
+  child.width = child.diameterOrWidth = 12;
+  child.quantity = 5;
+  child.squareMeters = 0.6;
+  child.originalLength = 1.25;
+  child.originalWidth = 12;
+  child.cuttingCost = child.physicalCuttingCost = child.totalPrice = 12000;
+  child.cuttingBreakdown = [{ type: 'cross', meters: 0.6, rate: 20000, cost: 12000 }];
+  child.remainingStoneAllocationOrder = 0;
+  child.sawKerfEnabled = false;
+  child.calibrationCutEnabled = false;
+  child.longitudinalPolicyInput = {
+    ...source.longitudinalPolicyInput,
+    sourceBatchId: 'current-writer-cross-cut-child-preview',
+    motherWidthMeters: '0.12',
+    lengthMeters: '1',
+    widthMeters: '0.12',
+    quantity: 5,
+    requestedAreaSquareMeters: '0.6',
+    baseRateToman: '0',
+    baseMaterialPricing: 'paid-source-zero',
+    mandatoryEnabled: false,
+    mandatoryPercentage: '20',
+    rememberedMandatoryPercentage: '20'
+  };
+  child.remainderChildPolicyInput = {
+    allocationId,
+    allocationOrder: 0,
+    sourceProductRowId: sourceRowId,
+    secondaryOwnerProductRowId: sourceRowId,
+    selectedRemainingStoneId: sourceStock.id,
+    lengthMeters: '1',
+    widthMeters: '0.12',
+    quantity: 5,
+    sourcePieceQuantities: [1, 1, 1, 1, 1],
+    kerfMeters: '0',
+    calibrationEnabled: false,
+    crossCutRateToman: '20000'
+  };
+  child.meta = {
+    pricing: { materialCost: 0, cuttingCost: 12000, toolsCost: 0, finishingCost: 0, totalPrice: 12000 },
+    remainingSource: {
+      sourceProductRowId: sourceRowId,
+      sourceRemainingStoneId: sourceStock.id,
+      sourceRemainingStone: sourceStock,
+      allocationId,
+      partitionId: allocationId,
+      allocationOrder: 0,
+      allocatedQuantity: 5,
+      consumedSourceStoneIds: consumed,
+      generatedRemainingStoneIds: generated,
+      physicalPieces
+    }
+  };
+  source.usedRemainingStones = [{
+    id: `used-${allocationId}`,
+    width: 12,
+    length: 1,
+    quantity: 5,
+    cuttingCost: 12000,
+    physicalPieces
+  }];
+  source.remainingStones = [{
+    id: generated[0],
+    width: 12,
+    length: 0.25,
+    quantity: 5,
+    squareMeters: 0.15,
+    isAvailable: true,
+    sourceCutId: sourceStock.sourceCutId
+  }, untouchedStock];
+  const result = planLegacyProductGraphMigration({ ...input, products: [source, child] });
+  assert.ok(result.ok, JSON.stringify(result.ok ? {} : result.conflicts));
+  if (result.ok) {
+    assert.equal(result.graph.allocations.length, 1);
+    assert.equal(result.graph.allocations[0].packingPlan.crossCutMeters, '0.6');
+    assert.equal(result.graph.rows[1].commercial.totalAmountToman, '12000');
+  }
+  const withoutCurrentWriterEvidence = structuredClone([source, child]);
+  delete withoutCurrentWriterEvidence[1].remainderChildPolicyInput;
+  const historicalResult = planLegacyProductGraphMigration({
+    ...input,
+    products: withoutCurrentWriterEvidence
+  });
+  assert.equal(historicalResult.ok, false, 'historical cross-cut evidence remains fail-closed');
+  if (!historicalResult.ok) {
+    assert.ok(historicalResult.conflicts.some(conflict =>
+      'causeCode' in conflict && [
+        'contradictory-source-ownership',
+        'unsupported-physical-layout'
+      ].includes(conflict.causeCode || '')
+    ));
+  }
+  const contradictoryCurrentWriterEvidence = structuredClone([source, child]);
+  contradictoryCurrentWriterEvidence[1].remainderChildPolicyInput.lengthMeters = '0.9';
+  const contradictoryResult = planLegacyProductGraphMigration({
+    ...input,
+    products: contradictoryCurrentWriterEvidence
+  });
+  assert.equal(contradictoryResult.ok, false, 'canonical evidence must exactly match the visible row');
+}
 const replay = replayRemainderAllocations({ policyVersion: policy.packing, pricingPolicyVersion: policy.pricing,
   roundingPolicyVersion: policy.rounding, baseInventory: plan.graph.sourceBatches.flatMap(b => b.initialRemainders ?? []),
   childIntents: plan.graph.allocations.map(a => a.intentSnapshot!) });

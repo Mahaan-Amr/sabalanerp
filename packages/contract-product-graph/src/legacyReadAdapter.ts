@@ -447,17 +447,19 @@ export const readLegacyProductGraph = ({
               legacySnapshot
             }
           };
-          sourceBatches.push({
-            sourceBatchId: policyInput.sourceBatchId,
-            ownerProductRowId: productRowId,
-            initialRemainders: materializePaidRemainderStocks({
-              ownerProductRowId: productRowId,
-              catalogProductId,
+          if (product.remainderChildPolicyInput === undefined) {
+            sourceBatches.push({
               sourceBatchId: policyInput.sourceBatchId,
-              remainders: calculation.result.packingPlan.remainders,
-              startingCreationOrder: index * 1000
-            })
-          });
+              ownerProductRowId: productRowId,
+              initialRemainders: materializePaidRemainderStocks({
+                ownerProductRowId: productRowId,
+                catalogProductId,
+                sourceBatchId: policyInput.sourceBatchId,
+                remainders: calculation.result.packingPlan.remainders,
+                startingCreationOrder: index * 1000
+              })
+            });
+          }
         }
       } catch (error) {
         conflicts.push({

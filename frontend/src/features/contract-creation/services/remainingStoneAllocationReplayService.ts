@@ -11,6 +11,11 @@ import { allocateRemainingStonePartitions } from './remainingStonePartitionServi
 import { recalculateRemainingChildAddOns } from './remainingStoneChildAddOnService';
 import { calculateSlabRemainingStones, calculateSmartLongitudinalCutPlan } from './remainingStoneService';
 import { calculateRemainingChildCuttingBreakdown } from './remainingStoneCuttingService';
+import {
+  parseCanonicalDecimal,
+  parseStableIdentity,
+  type RemainderChildPolicyInput
+} from '@sabalanerp/contract-product-graph';
 
 export interface RemainingStoneReplayConflict {
   kind: 'source-missing' | 'inventory-changed' | 'add-on' | 'capacity';
@@ -214,6 +219,52 @@ const replaceAllocatedStockGroup = (
 const getChildOperationTotal = (child: ContractProduct, cuttingCost: number): number =>
   cuttingCost + Number(child.totalSubServiceCost || 0) + Number(child.finishingCost || 0);
 
+const createRemainderChildPolicyInput = ({
+  child,
+  sourceRowId,
+  stock,
+  allocationId,
+  allocationOrder,
+  row,
+  cuttingBreakdown,
+  sourcePieceQuantities
+}: {
+  child: ContractProduct;
+  sourceRowId: string;
+  stock: RemainingStone;
+  allocationId: string;
+  allocationOrder: number;
+  row: StonePartition;
+  cuttingBreakdown: ContractProduct['cuttingBreakdown'];
+  sourcePieceQuantities?: number[];
+}): RemainderChildPolicyInput => {
+  const rate = (type: 'longitudinal' | 'cross') =>
+    cuttingBreakdown?.find(line => line.type === type)?.rate;
+  const longitudinalRate = rate('longitudinal');
+  const crossRate = rate('cross');
+  return {
+    allocationId: parseStableIdentity('allocation', allocationId),
+    allocationOrder,
+    sourceProductRowId: parseStableIdentity('product-row', sourceRowId),
+    secondaryOwnerProductRowId: parseStableIdentity('product-row', sourceRowId),
+    selectedRemainingStoneId: parseStableIdentity('remaining-stone', stock.id),
+    lengthMeters: parseCanonicalDecimal(String(row.length)),
+    widthMeters: parseCanonicalDecimal(String(row.width / 100)),
+    quantity: row.quantity,
+    ...(sourcePieceQuantities === undefined ? {} : { sourcePieceQuantities }),
+    kerfMeters: parseCanonicalDecimal(
+      child.sawKerfEnabled ? String(Number(child.sawKerfCm || 0) / 100) : '0'
+    ),
+    calibrationEnabled: child.calibrationCutEnabled === true,
+    ...(longitudinalRate === undefined
+      ? {}
+      : { longitudinalCutRateToman: parseCanonicalDecimal(String(longitudinalRate)) }),
+    ...(crossRate === undefined
+      ? {}
+      : { crossCutRateToman: parseCanonicalDecimal(String(crossRate)) })
+  };
+};
+
 export const replayRemainingStoneAllocations = ({
   products,
   sourceRowId,
@@ -392,6 +443,16 @@ export const replayRemainingStoneAllocations = ({
 
     updatedChildren.set(childIndex, {
       ...recalculatedChild,
+      remainderChildPolicyInput: createRemainderChildPolicyInput({
+        child: recalculatedChild,
+        sourceRowId,
+        stock,
+        allocationId: row.id,
+        allocationOrder,
+        row,
+        cuttingBreakdown,
+        sourcePieceQuantities: successfulAllocation.sourcePieceQuantities
+      }),
       parentProductIndex: sourceIndex,
       parentProductRowId: sourceRowId,
       remainingStoneAllocationOrder: allocationOrder,

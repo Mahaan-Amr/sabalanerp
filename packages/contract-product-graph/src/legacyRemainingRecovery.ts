@@ -1,7 +1,12 @@
 import Decimal from 'decimal.js';
 import { parseCanonicalDecimal as canonical } from './canonicalDecimal';
 import { parseStableIdentity } from './stableIdentity';
-import { replayRemainderAllocations, type PaidRemainderStock, type RemainderChildIntent } from './remainderPolicy';
+import {
+  parseRemainderChildPolicyInput,
+  replayRemainderAllocations,
+  type PaidRemainderStock,
+  type RemainderChildIntent
+} from './remainderPolicy';
 import type { CanonicalAllocation, CanonicalProductGraph, CanonicalProductRow } from './productGraph';
 import type { LegacyProductGraphConflict } from './legacyReadAdapter';
 
@@ -175,8 +180,11 @@ export const recoverLegacyRemainingChildren = (
       const s = source(p);
       const root = text(s.sourceProductRowId);
       const childRow = graph.rows.find(r => r.productRowId === affected);
+      const explicitPolicy = p.remainderChildPolicyInput === undefined
+        ? undefined
+        : parseRemainderChildPolicyInput(p.remainderChildPolicyInput);
       if (!childRow || p.parentProductRowId !== root || p.productId !== productsById.get(root)?.productId ||
-        p.longitudinalPolicyInput !== undefined || p.isMandatory === true) throw new Error('contradictory-source-ownership');
+        (p.longitudinalPolicyInput !== undefined && !explicitPolicy) || p.isMandatory === true) throw new Error('contradictory-source-ownership');
       if (!equal(p.originalTotalPrice, 0) || !equal(record(record(p.meta).pricing).materialCost, 0)) throw new Error('unproven-zero-material');
       for (const value of [p.pricePerSquareMeter, p.unitPrice, p.mandatoryPercentage]) {
         if (value !== undefined && !equal(value, 0)) throw new Error('conflicting-material-price');
@@ -196,10 +204,16 @@ export const recoverLegacyRemainingChildren = (
         throw new Error('missing-or-already-consumed-source');
       }
       const quantity = integer(p.quantity);
-      if (quantity !== s.allocatedQuantity || p.lengthUnit !== 'm' || p.widthUnit !== 'cm' ||
-        !sameGeometry(p.length, selected.lengthMeters)) throw new Error('unsupported-physical-layout');
-      const lengthMeters = canonical(decimal(p.length).toFixed());
-      const widthMeters = canonical(decimal(p.width).div(100).toFixed());
+      if (quantity !== s.allocatedQuantity || p.lengthUnit !== 'm' || p.widthUnit !== 'cm') {
+        throw new Error('unsupported-physical-layout');
+      }
+      const lengthMeters = explicitPolicy?.lengthMeters ?? canonical(decimal(p.length).toFixed());
+      const widthMeters = explicitPolicy?.widthMeters ?? canonical(decimal(p.width).div(100).toFixed());
+      if (
+        (explicitPolicy === undefined && !sameGeometry(p.length, selected.lengthMeters)) ||
+        !sameGeometry(p.length, lengthMeters) ||
+        !sameGeometry(p.width, widthMeters, 100)
+      ) throw new Error('unsupported-physical-layout');
       const pieces = list(s.physicalPieces);
       if (pieces.length !== quantity || pieces.some(piece => piece.quantity !== 1 ||
         !equal(piece.length, p.length) || !equal(piece.width, p.width)) ||
@@ -207,8 +221,12 @@ export const recoverLegacyRemainingChildren = (
         throw new Error('physical-piece-evidence-mismatch');
       }
       if (p.sawKerfEnabled !== false && p.sawKerfEnabled !== true) throw new Error('missing-kerf-policy');
-      const kerfMeters = p.sawKerfEnabled ? canonical(decimal(p.sawKerfCm).div(100).toFixed()) : canonical('0');
-      const distribution = uniqueSourceDistribution(consumed, generated, selected.widthMeters, widthMeters, kerfMeters, quantity);
+      const legacyKerfMeters = p.sawKerfEnabled ? canonical(decimal(p.sawKerfCm).div(100).toFixed()) : canonical('0');
+      const kerfMeters = explicitPolicy?.kerfMeters ?? legacyKerfMeters;
+      if (kerfMeters !== legacyKerfMeters) throw new Error('conflicting-kerf-policy');
+      const distribution = explicitPolicy
+        ? explicitPolicy.sourcePieceQuantities
+        : uniqueSourceDistribution(consumed, generated, selected.widthMeters, widthMeters, kerfMeters, quantity);
       const breakdown = list(p.cuttingBreakdown);
       if (new Set(breakdown.map(b => b.type)).size !== breakdown.length ||
         breakdown.some(b => !['longitudinal', 'cross', 'calibration'].includes(String(b.type)))) throw new Error('invalid-cutting-evidence');
@@ -219,13 +237,35 @@ export const recoverLegacyRemainingChildren = (
       if (p.calibrationCutEnabled !== undefined && typeof p.calibrationCutEnabled !== 'boolean') throw new Error('missing-calibration-policy');
       const calibrationEnabled = p.calibrationCutEnabled === true || breakdown.some(b => b.type === 'calibration' && decimal(b.meters).gt(0));
       if (p.calibrationCutEnabled === false && calibrationEnabled) throw new Error('conflicting-calibration-evidence');
+      if (explicitPolicy && (
+        explicitPolicy.sourceProductRowId !== root ||
+        explicitPolicy.allocationId !== allocationId ||
+        (explicitPolicy.allocationOrder !== undefined && explicitPolicy.allocationOrder !== order) ||
+        explicitPolicy.quantity !== quantity ||
+        explicitPolicy.calibrationEnabled !== calibrationEnabled ||
+        aliases.get(explicitPolicy.selectedRemainingStoneId ?? '') !== selectedId
+      )) throw new Error('canonical-remainder-evidence-mismatch');
+      const explicitRate = (type: string) => type === 'longitudinal'
+        ? explicitPolicy?.longitudinalCutRateToman
+        : type === 'cross'
+          ? explicitPolicy?.crossCutRateToman
+          : explicitPolicy?.calibrationCutRateToman;
+      if (explicitPolicy) {
+        for (const type of ['longitudinal', 'cross', 'calibration']) {
+          const canonicalRate = explicitRate(type);
+          const legacyRate = rate(type);
+          if (canonicalRate !== legacyRate) {
+            throw new Error('cutting-rate-evidence-mismatch');
+          }
+        }
+      }
       const intent: RemainderChildIntent = {
         allocationId: parseStableIdentity('allocation', allocationId), allocationOrder: order,
         childProductRowId: childRow.productRowId, sourceProductRowId: parseStableIdentity('product-row', root),
         secondaryOwnerProductRowId: parseStableIdentity('product-row', root),
         selectedRemainingStoneId: selected.remainingStoneId, catalogProductId: childRow.catalogProductId,
         lengthMeters, widthMeters, quantity, kerfMeters, calibrationEnabled,
-        sourcePieceQuantities: distribution,
+        ...(distribution === undefined ? {} : { sourcePieceQuantities: distribution }),
         ...(rate('longitudinal') !== undefined ? { longitudinalCutRateToman: rate('longitudinal') } : {}),
         ...(rate('cross') !== undefined ? { crossCutRateToman: rate('cross') } : {}),
         ...(rate('calibration') !== undefined ? { calibrationCutRateToman: rate('calibration') } : {})
@@ -248,12 +288,34 @@ export const recoverLegacyRemainingChildren = (
         if (amount !== undefined && !equal(amount, allocation.cuttingAmountToman)) throw new Error('cutting-price-drift');
       }
       const secondaries = replay.result.inventory.filter(stock => allocation.generatedRemainingStoneIds.includes(stock.remainingStoneId));
-      const expectedGenerated = allocation.packingPlan.remainders.map(r => `${consumed[r.sourceOrdinal]}:secondary:1`);
-      if (JSON.stringify([...expectedGenerated].sort()) !== JSON.stringify([...generated].sort()) || secondaries.length > 1) {
+      const remainderSequenceBySource = new Map<string, number>();
+      const sourceOrdinalOffset =
+        allocation.packingPlan.remainders.some(remainder => remainder.sourceOrdinal === consumed.length) &&
+        !allocation.packingPlan.remainders.some(remainder => remainder.sourceOrdinal === 0)
+          ? 1
+          : 0;
+      const expectedGenerated = allocation.packingPlan.remainders.map(remainder => {
+        const sourceId = consumed[remainder.sourceOrdinal - sourceOrdinalOffset];
+        if (!sourceId) throw new Error('secondary-lineage-mismatch');
+        const sequence = (remainderSequenceBySource.get(sourceId) ?? 0) + 1;
+        remainderSequenceBySource.set(sourceId, sequence);
+        return {
+          id: `${sourceId}:secondary:${sequence}`,
+          lengthMeters: remainder.lengthMeters,
+          widthMeters: remainder.widthMeters
+        };
+      });
+      if (JSON.stringify(expectedGenerated.map(item => item.id).sort()) !== JSON.stringify([...generated].sort())) {
         throw new Error('secondary-lineage-mismatch');
       }
       for (const id of consumed) pools.get(selectedId!)!.delete(id);
-      if (secondaries.length) addPool(secondaries[0].remainingStoneId, generated);
+      for (const secondary of secondaries) {
+        const matchingIds = expectedGenerated
+          .filter(item => item.lengthMeters === secondary.lengthMeters && item.widthMeters === secondary.widthMeters)
+          .map(item => item.id);
+        if (matchingIds.length !== secondary.quantity) throw new Error('secondary-lineage-mismatch');
+        addPool(secondary.remainingStoneId, matchingIds);
+      }
       inventory = [...replay.result.inventory];
       allocations.push({ ...allocation, intentSnapshot: intent });
       const groups = new Set(graph.operationGroups.filter(g => g.productRowId === affected).map(g => g.operationGroupId));

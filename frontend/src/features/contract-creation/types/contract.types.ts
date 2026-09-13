@@ -426,6 +426,8 @@ export interface ContractProduct {
   productType: ContractProductType; // product type
   /** Canonical seller intent used by both the modal preview and authoritative save. */
   longitudinalPolicyInput?: import('@sabalanerp/contract-product-graph').LongitudinalProductInput;
+  /** Exact paid-remainder allocation already validated by the product modal replay. */
+  remainderChildPolicyInput?: import('@sabalanerp/contract-product-graph').RemainderChildPolicyInput;
   /** Canonical slab seller intent, including stable manual source rows. */
   slabPolicyInput?: import('@sabalanerp/contract-product-graph').SlabPolicyInput;
   /** Canonical stair-part seller intent used to reconstruct authoritative geometry. */

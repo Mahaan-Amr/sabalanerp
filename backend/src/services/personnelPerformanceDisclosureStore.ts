@@ -393,6 +393,10 @@ export const getPerformanceHistory = async (client: PrismaClient, input: {
   actorUserId: string;
   personnelId: string;
   keyring?: PerformanceVaultKey;
+  page?: number;
+  pageSize?: number;
+  authorityCode?: string;
+  includeHasMoreProbe?: boolean;
 }) => {
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
   const subjects = await client.performanceSubject.findMany({ where: { personnelId: input.personnelId } });
@@ -401,9 +405,13 @@ export const getPerformanceHistory = async (client: PrismaClient, input: {
     where: { subjectId: { in: subjects.map(({ id }) => id) } },
     orderBy: [{ measurementTo: 'desc' }, { id: 'desc' }],
   });
+  const page = Math.max(1, Math.floor(input.page ?? 1));
+  const pageSize = Math.min(100, Math.max(1, Math.floor(input.pageSize ?? 50)));
   const results = evaluations.length ? await client.performanceAcceptedResult.findMany({
     where: { evaluationId: { in: evaluations.map(({ id }) => id) } },
     orderBy: [{ acceptedAt: 'desc' }, { version: 'desc' }],
+    skip: (page - 1) * pageSize,
+    take: pageSize + (input.includeHasMoreProbe ? 1 : 0),
   }) : [];
   const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
   const history = await Promise.all(results.map(async (result) => {
@@ -428,7 +436,7 @@ export const getPerformanceHistory = async (client: PrismaClient, input: {
   await auditDisclosure(client, {
     aggregateType: 'PERSONNEL_HISTORY_ACCESS', aggregateId: canonicalPerformanceHash(input.personnelId),
     eventType: 'PERFORMANCE_HISTORY_VIEWED', actorUserId: input.actorUserId,
-    authorityCodes: ['VIEW_PERFORMANCE_HISTORY'], evidenceHash: canonicalPerformanceHash(history.map(({ id, version }) => ({ id, version }))),
+    authorityCodes: [input.authorityCode ?? 'VIEW_PERFORMANCE_HISTORY'], evidenceHash: canonicalPerformanceHash(history.map(({ id, version }) => ({ id, version }))),
   });
   return history;
 };

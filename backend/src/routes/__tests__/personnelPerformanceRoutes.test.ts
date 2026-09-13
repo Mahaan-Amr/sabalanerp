@@ -19,6 +19,7 @@ assert.deepEqual(registeredRoutes, [
   'GET /capabilities',
   'GET /simple/workspace',
   'GET /simple/profiles',
+  'GET /simple/history/:personnelId',
   'POST /simple/profiles',
   'POST /simple/profile-assignments',
   'POST /simple/evaluations',

@@ -20,6 +20,20 @@ const runTransaction = <T>(client: Client, work: (tx: Prisma.TransactionClient) 
 
 const simpleError = (message: string, code: string, status = 422) => Object.assign(new Error(message), { code, status });
 const activeAt = (now: Date) => ({ effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] });
+const activeEmploymentForEvaluationDay = async (client: Client, personnelId: string, date: string) => {
+  const dayFrom = new Date(`${date}T00:00:00.000+03:30`);
+  const dayTo = new Date(`${date}T23:59:59.999+03:30`);
+  const relationships = await client.hrEmploymentRelationship.findMany({
+    where: {
+      personnelId, status: 'ACTIVE', effectiveFrom: { lte: dayTo },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: dayFrom } }],
+    },
+  orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
+  select: { id: true }, take: 2,
+  });
+  if (relationships.length > 1) throw simpleError('رابطه استخدامی نیاز به بررسی دارد.', 'SIMPLE_EMPLOYMENT_AMBIGUOUS', 409);
+  return relationships[0] ?? null;
+};
 
 const isResponsibleSupervisor = async (client: Client, actorUserId: string, personnelId: string, now = new Date()) => {
   const actor = await client.user.findUnique({ where: { id: actorUserId }, select: { personnelId: true } });
@@ -28,15 +42,15 @@ const isResponsibleSupervisor = async (client: Client, actorUserId: string, pers
     client.hrAssignmentPerformanceResponsibility.findFirst({
       where: {
         status: 'ACTIVE', ...activeAt(now),
-        supervisorAssignment: { employmentRelationship: { personnelId: actor.personnelId } },
-        employmentAssignment: { employmentRelationship: { personnelId } },
+        supervisorAssignment: { employmentRelationship: { personnelId: actor.personnelId, status: 'ACTIVE', ...activeAt(now) } },
+        employmentAssignment: { employmentRelationship: { personnelId, status: 'ACTIVE', ...activeAt(now) } },
       },
       select: { id: true },
     }),
     client.hrEmploymentAssignment.findFirst({
       where: {
-        ...activeAt(now), employmentRelationship: { personnelId },
-        responsibleSupervisorAssignment: { employmentRelationship: { personnelId: actor.personnelId } },
+        ...activeAt(now), employmentRelationship: { personnelId, status: 'ACTIVE', ...activeAt(now) },
+        responsibleSupervisorAssignment: { employmentRelationship: { personnelId: actor.personnelId, status: 'ACTIVE', ...activeAt(now) } },
       },
       select: { id: true },
     }),
@@ -75,29 +89,37 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
   const canSeeReports = permissions.has('EVALUATE_DIRECT_REPORTS');
   if (!canSeeAll && !canSeeReports) throw simpleError('اجازه مشاهده ارزیابی‌ها را ندارید.', 'SIMPLE_PERFORMANCE_VIEW_FORBIDDEN', 403);
 
-  let personnelIds: string[] | undefined;
-  if (!canSeeAll) {
+  let directReportPersonnelIds: string[] = [];
+  if (canSeeReports) {
     const actor = await client.user.findUnique({ where: { id: actorUserId }, select: { personnelId: true } });
-    if (!actor?.personnelId) personnelIds = [];
+    if (!actor?.personnelId) directReportPersonnelIds = [];
     else {
       const [responsibilities, primaryAssignments] = await Promise.all([
         client.hrAssignmentPerformanceResponsibility.findMany({
-          where: { status: 'ACTIVE', ...activeAt(now), supervisorAssignment: { employmentRelationship: { personnelId: actor.personnelId } } },
+          where: {
+            status: 'ACTIVE', ...activeAt(now),
+            supervisorAssignment: { employmentRelationship: { personnelId: actor.personnelId, status: 'ACTIVE', ...activeAt(now) } },
+            employmentAssignment: { employmentRelationship: { status: 'ACTIVE', ...activeAt(now) } },
+          },
           select: { employmentAssignment: { select: { employmentRelationship: { select: { personnelId: true } } } } },
         }),
         client.hrEmploymentAssignment.findMany({
-          where: { ...activeAt(now), responsibleSupervisorAssignment: { employmentRelationship: { personnelId: actor.personnelId } } },
+          where: {
+            ...activeAt(now), employmentRelationship: { status: 'ACTIVE', ...activeAt(now) },
+            responsibleSupervisorAssignment: { employmentRelationship: { personnelId: actor.personnelId, status: 'ACTIVE', ...activeAt(now) } },
+          },
           select: { employmentRelationship: { select: { personnelId: true } } },
         }),
       ]);
-      personnelIds = [...new Set([
+      directReportPersonnelIds = [...new Set([
         ...responsibilities.map((item) => item.employmentAssignment.employmentRelationship.personnelId),
         ...primaryAssignments.map((item) => item.employmentRelationship.personnelId),
       ])];
     }
   }
+  const personnelIds = canSeeAll ? undefined : directReportPersonnelIds;
   const personnel = await client.personnel.findMany({
-    where: { isActive: true, archivedAt: null, ...(personnelIds ? { id: { in: personnelIds } } : {}) },
+    where: { isActive: true, archivedAt: null, hrEmploymentRelationships: { some: { status: 'ACTIVE', ...activeAt(now) } }, ...(personnelIds ? { id: { in: personnelIds } } : {}) },
     select: {
       id: true, firstName: true, lastName: true, employeeNumber: true,
       department: { select: { name: true } },
@@ -105,19 +127,73 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
     orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
   });
   const ids = personnel.map(({ id }) => id);
-  const canSeeEvaluations = permissions.has('VIEW_PERFORMANCE_EVALUATIONS')
-    || permissions.has('EVALUATE_ALL_PERSONNEL') || permissions.has('EVALUATE_DIRECT_REPORTS');
-  const [assignments, evaluations, profiles] = await Promise.all([
+  const canViewHistory = permissions.has('VIEW_PERFORMANCE_EVALUATIONS');
+  const canEvaluate = permissions.has('EVALUATE_ALL_PERSONNEL') || permissions.has('EVALUATE_DIRECT_REPORTS');
+  const [historicalPersonnelIds, legacyHistoricalPersonnelIds] = canViewHistory ? await Promise.all([
+    client.simplePerformanceEvaluation.findMany({ where: { status: 'FINAL' }, distinct: ['personnelId'], select: { personnelId: true } }),
+    client.performanceSubject.findMany({ where: { personnelId: { not: null }, identityDetachedAt: null }, distinct: ['personnelId'], select: { personnelId: true } }),
+  ]) : [[], []];
+  const visibleEvaluationPersonnelIds = [...new Set([
+    ...ids,
+    ...historicalPersonnelIds.map(({ personnelId }) => personnelId),
+    ...legacyHistoricalPersonnelIds.flatMap(({ personnelId }) => personnelId ? [personnelId] : []),
+  ])];
+  const [assignments, evaluations, profiles, historyPersonnel] = await Promise.all([
     client.simplePerformanceProfileAssignment.findMany({ where: { personnelId: { in: ids } }, include: { profile: true } }),
-    canSeeEvaluations ? client.simplePerformanceEvaluation.findMany({
-      where: { personnelId: { in: ids } }, include: evaluationInclude,
+    canEvaluate ? client.simplePerformanceEvaluation.findMany({
+      where: {
+        personnelId: { in: ids }, status: 'DRAFT', evaluatorUserId: actorUserId,
+      }, include: evaluationInclude,
       orderBy: [{ finalizedAt: 'desc' }, { createdAt: 'desc' }],
     }) : Promise.resolve([]),
     listSimplePerformanceProfiles(client),
+    canViewHistory ? client.personnel.findMany({
+      where: { id: { in: visibleEvaluationPersonnelIds } },
+      select: { id: true, firstName: true, lastName: true, employeeNumber: true, department: { select: { name: true } } },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    }) : Promise.resolve([]),
   ]);
+  const evaluatorIds = [...new Set(evaluations.map(({ evaluatorUserId }) => evaluatorUserId))];
+  const evaluators = await client.user.findMany({
+    where: { id: { in: evaluatorIds } }, select: { id: true, firstName: true, lastName: true },
+  });
+  const evaluatorNames = new Map(evaluators.map((user) => [user.id, `${user.firstName} ${user.lastName}`.trim()]));
   return {
-    currentUserId: actorUserId, personnel, assignments, evaluations, profiles,
+    currentUserId: actorUserId, personnel, historyPersonnel, assignments,
+    evaluations: evaluations.map((evaluation) => ({ ...evaluation, evaluatorNameFa: evaluatorNames.get(evaluation.evaluatorUserId) || 'نامشخص' })),
+    profiles,
+    evaluablePersonnelIds: permissions.has('EVALUATE_ALL_PERSONNEL') ? ids : ids.filter((id) => directReportPersonnelIds.includes(id)),
     capabilities: Object.fromEntries([...permissions].map((code) => [code, true])),
+  };
+};
+
+export const getSimplePerformanceHistory = async (client: Client, input: {
+  actorUserId: string; personnelId: string; page?: number; pageSize?: number;
+}, now = new Date()) => {
+  const permissions = new Set(await activeHrActionPermissionsForUser(client, input.actorUserId, now));
+  if (!permissions.has('VIEW_PERFORMANCE_EVALUATIONS')) {
+    throw simpleError('اجازه مشاهده سابقه را ندارید.', 'SIMPLE_PERFORMANCE_VIEW_FORBIDDEN', 403);
+  }
+  const page = Math.max(1, Math.floor(input.page ?? 1));
+  const pageSize = Math.min(100, Math.max(1, Math.floor(input.pageSize ?? 50)));
+  const where = { personnelId: input.personnelId, status: 'FINAL' } as const;
+  const [evaluations, total] = await Promise.all([
+    client.simplePerformanceEvaluation.findMany({
+      where, include: evaluationInclude, orderBy: [{ finalizedAt: 'desc' }, { createdAt: 'desc' }],
+      skip: (page - 1) * pageSize, take: pageSize,
+    }),
+    client.simplePerformanceEvaluation.count({ where }),
+  ]);
+  const evaluatorIds = [...new Set(evaluations.map(({ evaluatorUserId }) => evaluatorUserId))];
+  const evaluators = await client.user.findMany({
+    where: { id: { in: evaluatorIds } }, select: { id: true, firstName: true, lastName: true },
+  });
+  const evaluatorNames = new Map(evaluators.map((user) => [user.id, `${user.firstName} ${user.lastName}`.trim()]));
+  return {
+    evaluations: evaluations.map((evaluation) => ({
+      ...evaluation, evaluatorNameFa: evaluatorNames.get(evaluation.evaluatorUserId) || 'نامشخص',
+    })),
+    page, pageSize, total, hasMore: page * pageSize < total,
   };
 };
 
@@ -158,11 +234,22 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
       },
       include: { indicators: { orderBy: { sortOrder: 'asc' } } },
     });
+    await tx.simplePerformanceAudit.create({ data: {
+      actorUserId: input.actorUserId, eventType: 'PROFILE_VERSION_CREATED',
+      details: { stableKey, profileId: profile.id, version: profile.version, previousProfileId: previous?.id ?? null },
+    } });
     if (previous) {
+      const affectedAssignments = await tx.simplePerformanceProfileAssignment.findMany({
+        where: { profileId: previous.id }, select: { personnelId: true },
+      });
       await tx.simplePerformanceProfileAssignment.updateMany({
         where: { profileId: previous.id },
         data: { profileId: profile.id, assignedByUserId: input.actorUserId, assignedAt: new Date() },
       });
+      if (affectedAssignments.length) await tx.simplePerformanceAudit.createMany({ data: affectedAssignments.map(({ personnelId }) => ({
+        personnelId, actorUserId: input.actorUserId, eventType: 'PROFILE_REASSIGNED',
+        details: { previousProfileId: previous.id, profileId: profile.id },
+      })) });
     }
     return profile;
   });
@@ -171,12 +258,13 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
 export const assignSimplePerformanceProfile = async (client: Client, input: {
   actorUserId: string; personnelId: string; profileId: string;
 }) => {
-  const [profile, personnel] = await Promise.all([
-    client.simplePerformanceProfile.findFirst({ where: { id: input.profileId, isActive: true } }),
-    client.personnel.findFirst({ where: { id: input.personnelId, isActive: true, archivedAt: null } }),
-  ]);
-  if (!profile || !personnel) throw simpleError('پرسنل یا الگو پیدا نشد.', 'SIMPLE_PROFILE_ASSIGNMENT_INVALID', 404);
   return runTransaction(client, async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "simple_performance_profiles" WHERE "id" = ${input.profileId} FOR UPDATE`;
+    const [profile, personnel] = await Promise.all([
+      tx.simplePerformanceProfile.findFirst({ where: { id: input.profileId, isActive: true } }),
+      tx.personnel.findFirst({ where: { id: input.personnelId, isActive: true, archivedAt: null } }),
+    ]);
+    if (!profile || !personnel) throw simpleError('پرسنل یا الگو پیدا نشد.', 'SIMPLE_PROFILE_ASSIGNMENT_INVALID', 404);
     const assignment = await tx.simplePerformanceProfileAssignment.upsert({
       where: { personnelId: input.personnelId },
       create: { personnelId: input.personnelId, profileId: input.profileId, assignedByUserId: input.actorUserId },
@@ -196,14 +284,18 @@ export const createSimplePerformanceEvaluation = async (client: Client, input: {
 }) => {
   const dateDecision = validateSimpleEvaluationDate(input.evaluationDate);
   if (!dateDecision.valid) throw simpleError(dateDecision.message!, 'SIMPLE_EVALUATION_DATE_INVALID');
-  const authority = await resolveSimpleEvaluationAuthority(client, input);
-  const assignment = await client.simplePerformanceProfileAssignment.findUnique({ where: { personnelId: input.personnelId } });
-  if (!assignment) throw simpleError('ابتدا یک الگو برای این پرسنل انتخاب کنید.', 'SIMPLE_PROFILE_REQUIRED');
   return runTransaction(client, async (tx) => {
+    const authority = await resolveSimpleEvaluationAuthority(tx, input);
+    const evaluationDate = new Date(`${input.evaluationDate}T00:00:00.000Z`);
+    const relationship = await activeEmploymentForEvaluationDay(tx, input.personnelId, input.evaluationDate);
+    if (!relationship) throw simpleError('رابطه استخدامی فعال پیدا نشد.', 'SIMPLE_EMPLOYMENT_REQUIRED');
+    await tx.$queryRaw`SELECT "id" FROM "simple_performance_profile_assignments" WHERE "personnelId" = ${input.personnelId} FOR SHARE`;
+    const assignment = await tx.simplePerformanceProfileAssignment.findUnique({ where: { personnelId: input.personnelId } });
+    if (!assignment) throw simpleError('ابتدا یک الگو برای این پرسنل انتخاب کنید.', 'SIMPLE_PROFILE_REQUIRED');
     const evaluation = await tx.simplePerformanceEvaluation.create({
       data: {
-        personnelId: input.personnelId, profileId: assignment.profileId,
-        evaluationDate: new Date(`${input.evaluationDate}T00:00:00.000Z`), evaluatorUserId: input.actorUserId,
+        personnelId: input.personnelId, employmentRelationshipId: relationship.id, profileId: assignment.profileId,
+        evaluationDate, evaluatorUserId: input.actorUserId,
         evaluatorAuthority: authority,
       },
       include: evaluationInclude,
@@ -220,6 +312,9 @@ const ownOpenEvaluation = async (client: Client, evaluationId: string, actorUser
   const evaluation = await client.simplePerformanceEvaluation.findUnique({ where: { id: evaluationId }, include: evaluationInclude });
   if (!evaluation) throw simpleError('ارزیابی پیدا نشد.', 'SIMPLE_EVALUATION_NOT_FOUND', 404);
   if (evaluation.status !== 'DRAFT') throw simpleError('این نتیجه نهایی شده است.', 'SIMPLE_EVALUATION_LOCKED', 409);
+  if (!evaluation.employmentRelationshipId || evaluation.employmentBindingStatus !== 'BOUND') {
+    throw simpleError('این پیش‌نویس قدیمی قابل ادامه نیست.', 'SIMPLE_EVALUATION_EMPLOYMENT_UNRESOLVED', 409);
+  }
   if (evaluation.evaluatorUserId !== actorUserId) throw simpleError('این پیش‌نویس متعلق به شما نیست.', 'SIMPLE_EVALUATION_DRAFT_OWNER', 403);
   await resolveSimpleEvaluationAuthority(client, { actorUserId, personnelId: evaluation.personnelId });
   return evaluation;
@@ -304,11 +399,15 @@ export const createSimplePerformanceCorrection = async (client: Client, input: {
   return runTransaction(client, async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "simple_performance_evaluations" WHERE "id" = ${input.evaluationId} FOR UPDATE`;
     const target = await tx.simplePerformanceEvaluation.findUnique({ where: { id: input.evaluationId }, include: evaluationInclude });
-    if (!target || target.status !== 'FINAL' || target.supersededAt) throw simpleError('نتیجه قابل اصلاح نیست.', 'SIMPLE_CORRECTION_TARGET_INVALID', 409);
+    if (!target || target.status !== 'FINAL' || target.supersededAt
+      || !target.employmentRelationshipId || target.employmentBindingStatus !== 'BOUND') {
+      throw simpleError('نتیجه قابل اصلاح نیست.', 'SIMPLE_CORRECTION_TARGET_INVALID', 409);
+    }
     const authority = await resolveSimpleEvaluationAuthority(tx, { actorUserId: input.actorUserId, personnelId: target.personnelId });
     const correction = await tx.simplePerformanceEvaluation.create({
       data: {
-        personnelId: target.personnelId, profileId: target.profileId, evaluationDate: target.evaluationDate,
+        personnelId: target.personnelId, employmentRelationshipId: target.employmentRelationshipId,
+        profileId: target.profileId, evaluationDate: target.evaluationDate,
         evaluatorUserId: input.actorUserId, evaluatorAuthority: authority, correctionOfId: target.id,
         correctionReason: reason,
         values: { create: target.values.map((value) => ({ indicatorId: value.indicatorId, actual: value.actual })) },
@@ -323,18 +422,36 @@ export const createSimplePerformanceCorrection = async (client: Client, input: {
   });
 };
 
-export const getSimplePerformanceBadges = async (client: Client, personnelIds: string[]) => {
+export const getSimplePerformanceBadges = async (client: Client, personnelIds: string[], now = new Date()) => {
+  const relationships = await client.hrEmploymentRelationship.findMany({
+    where: { personnelId: { in: personnelIds }, status: { in: ['ACTIVE', 'SUSPENDED'] }, ...activeAt(now) },
+    orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }], select: { id: true, personnelId: true },
+  });
+  const relationshipsByPersonnel = new Map<string, string[]>();
+  for (const relationship of relationships) {
+    relationshipsByPersonnel.set(relationship.personnelId, [
+      ...(relationshipsByPersonnel.get(relationship.personnelId) ?? []), relationship.id,
+    ]);
+  }
+  const currentRelationshipByPersonnel = new Map<string, string>();
+  const badges: Record<string, unknown> = {};
+  for (const [personnelId, relationshipIds] of relationshipsByPersonnel) {
+    if (relationshipIds.length === 1) currentRelationshipByPersonnel.set(personnelId, relationshipIds[0]);
+    else if (relationshipIds.length > 1) badges[personnelId] = {
+      state: 'UNASSESSED', labelFa: 'ارزیابی‌نشده', meaningFa: 'اطلاعات استخدام نیاز به بررسی دارد.', version: 1,
+    };
+  }
   const evaluations = await client.simplePerformanceEvaluation.findMany({
-    where: { personnelId: { in: personnelIds }, status: 'FINAL', supersededAt: null },
+    where: { employmentRelationshipId: { in: [...currentRelationshipByPersonnel.values()] }, status: 'FINAL', supersededAt: null },
     orderBy: [{ finalizedAt: 'desc' }, { createdAt: 'desc' }],
   });
-  const badges: Record<string, unknown> = {};
   for (const evaluation of evaluations) {
-    if (badges[evaluation.personnelId] || !evaluation.levelCode) continue;
+    if (badges[evaluation.personnelId] || !evaluation.levelCode
+      || currentRelationshipByPersonnel.get(evaluation.personnelId) !== evaluation.employmentRelationshipId) continue;
     const levelCode = evaluation.levelCode as keyof typeof SIMPLE_PERFORMANCE_LEVEL_LABELS;
     badges[evaluation.personnelId] = {
       state: 'LEVEL', levelCode, labelFa: SIMPLE_PERFORMANCE_LEVEL_LABELS[levelCode],
-      meaningFa: `امتیاز ${evaluation.score?.toString() ?? '۰'} از ۱۰۰`,
+      meaningFa: 'آخرین نتیجه نهایی عملکرد.',
       newestMeasurementTo: evaluation.evaluationDate.toISOString(), version: 1,
     };
   }

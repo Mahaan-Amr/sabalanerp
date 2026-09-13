@@ -1502,6 +1502,9 @@ export const personnelPerformanceAPI = {
   capabilities: () => api.get('/hr/personnel-performance/capabilities'),
   simpleWorkspace: () => api.get('/hr/personnel-performance/simple/workspace'),
   simpleProfiles: () => api.get('/hr/personnel-performance/simple/profiles'),
+  simpleHistory: (personnelId: string, page = 1) => api.get(
+    `/hr/personnel-performance/simple/history/${encodeURIComponent(personnelId)}`, { params: { page } },
+  ),
   createSimpleProfile: (input: unknown) => api.post('/hr/personnel-performance/simple/profiles', input),
   assignSimpleProfile: (input: { personnelId: string; profileId: string }) => api.post('/hr/personnel-performance/simple/profile-assignments', input),
   createSimpleEvaluation: (input: { personnelId: string; evaluationDate: string }) => api.post('/hr/personnel-performance/simple/evaluations', input),

@@ -5403,27 +5403,29 @@ model HrPosition {
 }
 
 model HrEmploymentRelationship {
-  id                    String                             @id @default(cuid())
-  personnelId           String
-  status                HrEmploymentStatus
-  effectiveFrom         DateTime
-  effectiveTo           DateTime?
-  originalStartDate     DateTime?
-  startDateVerified     Boolean                            @default(false)
-  endReason             String?
-  sourceSystem          String?
-  sourceId              String?
-  migratedAt            DateTime?
-  createdBy             String
-  createdAt             DateTime                           @default(now())
-  updatedAt             DateTime                           @updatedAt
-  hiringApplicationId   String?                            @unique
-  personnel             Personnel                          @relation(fields: [personnelId], references: [id], onDelete: Restrict)
-  assignments           HrEmploymentAssignment[]
-  assignmentWithdrawals HrEmploymentAssignmentWithdrawal[]
-  hiringApplication     HrJobApplication?                  @relation(fields: [hiringApplicationId], references: [id], onDelete: SetNull)
+  id                           String                             @id @default(cuid())
+  personnelId                  String
+  status                       HrEmploymentStatus
+  effectiveFrom                DateTime
+  effectiveTo                  DateTime?
+  originalStartDate            DateTime?
+  startDateVerified            Boolean                            @default(false)
+  endReason                    String?
+  sourceSystem                 String?
+  sourceId                     String?
+  migratedAt                   DateTime?
+  createdBy                    String
+  createdAt                    DateTime                           @default(now())
+  updatedAt                    DateTime                           @updatedAt
+  hiringApplicationId          String?                            @unique
+  personnel                    Personnel                          @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  assignments                  HrEmploymentAssignment[]
+  assignmentWithdrawals        HrEmploymentAssignmentWithdrawal[]
+  hiringApplication            HrJobApplication?                  @relation(fields: [hiringApplicationId], references: [id], onDelete: SetNull)
+  simplePerformanceEvaluations SimplePerformanceEvaluation[]
 
   @@unique([sourceSystem, sourceId])
+  @@unique([id, personnelId])
   @@index([personnelId, status, effectiveFrom, effectiveTo])
   @@map("hr_employment_relationships")
 }
@@ -8254,25 +8256,29 @@ model SimplePerformanceProfileAssignment {
 }
 
 model SimplePerformanceEvaluation {
-  id                 String                   @id @default(cuid())
-  personnelId        String
-  profileId          String
-  evaluationDate     DateTime                 @db.Date
-  status             String                   @default("DRAFT")
-  evaluatorUserId    String
-  evaluatorAuthority String
-  score              Decimal?                 @db.Decimal(7, 2)
-  levelCode          String?
-  finalizedAt        DateTime?
-  correctionOfId     String?
-  correctionReason   String?
-  supersededAt       DateTime?
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
-  profile            SimplePerformanceProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
-  values             SimplePerformanceValue[]
+  id                       String                    @id @default(cuid())
+  personnelId              String
+  employmentRelationshipId String?
+  employmentBindingStatus  String                    @default("BOUND")
+  profileId                String
+  evaluationDate           DateTime                  @db.Date
+  status                   String                    @default("DRAFT")
+  evaluatorUserId          String
+  evaluatorAuthority       String
+  score                    Decimal?                  @db.Decimal(38, 18)
+  levelCode                String?
+  finalizedAt              DateTime?
+  correctionOfId           String?
+  correctionReason         String?
+  supersededAt             DateTime?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  profile                  SimplePerformanceProfile  @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  employmentRelationship   HrEmploymentRelationship? @relation(fields: [employmentRelationshipId, personnelId], references: [id, personnelId], onDelete: Restrict)
+  values                   SimplePerformanceValue[]
 
   @@index([personnelId, status, finalizedAt])
+  @@index([employmentRelationshipId, status, finalizedAt])
   @@index([correctionOfId])
   @@map("simple_performance_evaluations")
 }
@@ -8282,7 +8288,7 @@ model SimplePerformanceValue {
   evaluationId String
   indicatorId  String
   actual       Decimal                     @db.Decimal(18, 4)
-  score        Decimal?                    @db.Decimal(7, 2)
+  score        Decimal?                    @db.Decimal(38, 18)
   evaluation   SimplePerformanceEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
   indicator    SimplePerformanceIndicator  @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
 

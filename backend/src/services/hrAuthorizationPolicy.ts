@@ -2,6 +2,7 @@ import {
   actionPermissionsForLegacyAuthority,
   expandHrActionPermissionSelection,
   getHrActionPermissionDefinition,
+  HR_ACTION_PERMISSIONS,
   INDEPENDENT_PERFORMANCE_ACTION_PERMISSION_CODES,
 } from './hrActionPermissionCatalog';
 
@@ -91,11 +92,12 @@ export const evaluateHrAuthorization = (
     candidate.featureCode === code && isEffective(candidate, at) && !candidate.bootstrapOnly
     && accessRank[candidate.level] >= accessRank[level]
   ));
-  const hasActionPermission = (code: string) => expandHrActionPermissionSelection([code]).every((requiredCode) => (
-    hasFeatureAt(requiredCode, getHrActionPermissionDefinition(requiredCode)?.level ?? 'VIEW')
-  ));
+  const hasActionPermission = (code: string) => HR_ACTION_PERMISSIONS.some((permission) => permission.code === code)
+    && expandHrActionPermissionSelection([code]).every((requiredCode) => (
+      hasFeatureAt(requiredCode, getHrActionPermissionDefinition(requiredCode)?.level ?? 'VIEW')
+    ));
   const actionPermissionCodes = requirement.actionPermissionCodes ?? [];
-  const requiresIndependentGrant = snapshot.user.role !== 'ADMIN' && actionPermissionCodes.some((code) => (
+  const requiresIndependentGrant = actionPermissionCodes.some((code) => (
     INDEPENDENT_PERFORMANCE_ACTION_PERMISSION_CODES.includes(code)
   ));
   if (actionPermissionCodes.length && (!baseline || requiresIndependentGrant)) {

@@ -105,6 +105,7 @@ import {
   createSimplePerformanceProfile,
   finalizeSimplePerformanceEvaluation,
   getSimplePerformanceBadges,
+  getSimplePerformanceHistory,
   getSimplePerformanceWorkspace,
   listSimplePerformanceProfiles,
   saveSimplePerformanceDraft,
@@ -188,6 +189,27 @@ router.get('/simple/workspace', useSimplePerformance, async (req: AuthRequest, r
 router.get('/simple/profiles', useSimplePerformance, async (_req, res, next) => {
   try { return res.json({ success: true, profiles: await listSimplePerformanceProfiles(prisma) }); }
   catch (error) { return next(error); }
+});
+
+router.get('/simple/history/:personnelId', requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_EVALUATIONS'] }), async (req: AuthRequest, res, next) => {
+  try {
+    const requestedPage = Number(req.query.page ?? 1);
+    const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1;
+    const [simple, legacy] = await Promise.all([
+      getSimplePerformanceHistory(prisma, {
+        actorUserId: req.user!.id, personnelId: req.params.personnelId,
+        page,
+      }),
+      getPerformanceHistory(prisma, {
+        actorUserId: req.user!.id, personnelId: req.params.personnelId,
+        page, pageSize: 50, includeHasMoreProbe: true, authorityCode: 'VIEW_PERFORMANCE_EVALUATIONS',
+      }),
+    ]);
+    return res.json({
+      success: true, ...simple,
+      legacyEvaluations: legacy.slice(0, 50), legacyHasMore: legacy.length > 50,
+    });
+  } catch (error) { return next(error); }
 });
 
 router.post('/simple/profiles', manageSimpleProfiles, async (req: AuthRequest, res, next) => {

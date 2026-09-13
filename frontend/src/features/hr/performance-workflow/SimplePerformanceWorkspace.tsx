@@ -16,7 +16,7 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { personnelPerformanceAPI } from "@/lib/api";
-import { dateFa } from "@/features/hr/hrUi";
+import { dateFa, dateTimeFa } from "@/features/hr/hrUi";
 
 type Indicator = {
   id: string; code: string; categoryFa?: string | null; titleFa: string; unitFa: string;
@@ -31,10 +31,16 @@ type Evaluation = {
   evaluatorUserId: string; evaluatorAuthority: "SUPERVISOR" | "HR_MANAGER"; score?: string | null;
   levelCode?: string | null; finalizedAt?: string | null; correctionOfId?: string | null;
   correctionReason?: string | null; supersededAt?: string | null; profile: Profile; values: Value[];
+  evaluatorNameFa: string;
+};
+type LegacyEvaluation = {
+  id: string; levelLabelFa: string; displayScore?: string | null; measurementTo: string;
+  acceptedAt: string; status: string;
 };
 type Workspace = {
   currentUserId: string;
-  personnel: Personnel[]; profiles: Profile[]; assignments: Assignment[]; evaluations: Evaluation[];
+  evaluablePersonnelIds: string[];
+  personnel: Personnel[]; historyPersonnel: Personnel[]; profiles: Profile[]; assignments: Assignment[]; evaluations: Evaluation[];
   capabilities: Record<string, boolean>;
 };
 type ProfileIndicatorDraft = Omit<Indicator, "id" | "sortOrder">;
@@ -53,6 +59,15 @@ const levelTones: Record<string, "danger" | "warning" | "success" | "primary" | 
 const todayInTehran = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
 }).format(new Date());
+const monthFa = (value: string) => new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+  year: "numeric", month: "long", timeZone: "Asia/Tehran",
+}).format(new Date(value));
+const scoreFa = (value?: string | null) => {
+  if (!value) return "—";
+  const [whole, fraction = ""] = value.split(".");
+  const shortFraction = fraction.slice(0, 4).replace(/0+$/, "");
+  return `${whole}${shortFraction ? `٫${shortFraction}` : ""}`.replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
+};
 const errorText = (error: unknown) => {
   const candidate = error as { response?: { data?: { message?: string } }; message?: string };
   return candidate.response?.data?.message || candidate.message || "انجام کار ممکن نشد.";
@@ -76,6 +91,10 @@ export default function SimplePerformanceWorkspace() {
   const [profileStableKey, setProfileStableKey] = useState<string | undefined>();
   const [profileIndicators, setProfileIndicators] = useState<ProfileIndicatorDraft[]>([emptyIndicator()]);
   const [correctionReason, setCorrectionReason] = useState<Record<string, string>>({});
+  const [history, setHistory] = useState<Evaluation[]>([]);
+  const [legacyHistory, setLegacyHistory] = useState<LegacyEvaluation[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
@@ -83,10 +102,24 @@ export default function SimplePerformanceWorkspace() {
       const response = await personnelPerformanceAPI.simpleWorkspace();
       const next = response.data as Workspace;
       setWorkspace(next);
-      setPersonnelId((current) => current || next.personnel[0]?.id || "");
+      setPersonnelId((current) => current || next.personnel[0]?.id || next.historyPersonnel[0]?.id || "");
     } catch (cause) { setError(errorText(cause)); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+
+  const loadHistory = useCallback(async (selectedPersonnelId: string, page = 1) => {
+    if (!selectedPersonnelId) return;
+    try {
+      const response = await personnelPerformanceAPI.simpleHistory(selectedPersonnelId, page);
+      const data = response.data as { evaluations: Evaluation[]; legacyEvaluations: LegacyEvaluation[]; hasMore: boolean; legacyHasMore: boolean };
+      setHistory((current) => page === 1 ? data.evaluations : [...current, ...data.evaluations]);
+      setLegacyHistory((current) => page === 1 ? data.legacyEvaluations : [...current, ...data.legacyEvaluations]);
+      setHistoryPage(page); setHistoryHasMore(data.hasMore || data.legacyHasMore);
+    } catch (cause) { setError(errorText(cause)); }
+  }, []);
+  useEffect(() => {
+    if (tab === "history" && workspace?.capabilities.VIEW_PERFORMANCE_EVALUATIONS) void loadHistory(personnelId);
+  }, [loadHistory, personnelId, tab, workspace?.capabilities.VIEW_PERFORMANCE_EVALUATIONS]);
 
   const selectedEvaluation = workspace?.evaluations.find(({ id }) => id === evaluationId);
   useEffect(() => {
@@ -95,10 +128,19 @@ export default function SimplePerformanceWorkspace() {
   }, [selectedEvaluation]);
   const selectedPersonnel = workspace?.personnel.find(({ id }) => id === personnelId);
   const assignment = workspace?.assignments.find((item) => item.personnelId === personnelId);
-  const history = useMemo(() => (workspace?.evaluations ?? []).filter((item) => item.personnelId === personnelId), [workspace, personnelId]);
-  const openDrafts = history.filter(({ status, evaluatorUserId }) => status === "DRAFT" && evaluatorUserId === workspace?.currentUserId);
+  const historyGroups = useMemo(() => {
+    const groups = new Map<string, Evaluation[]>();
+    for (const evaluation of history.filter(({ status }) => status === "FINAL")) {
+      const month = monthFa(evaluation.evaluationDate);
+      groups.set(month, [...(groups.get(month) ?? []), evaluation]);
+    }
+    return Array.from(groups.entries());
+  }, [history]);
+  const openDrafts = (workspace?.evaluations ?? []).filter(({ status, evaluatorUserId }) => status === "DRAFT" && evaluatorUserId === workspace?.currentUserId);
   const canEvaluate = Boolean(workspace?.capabilities.EVALUATE_DIRECT_REPORTS || workspace?.capabilities.EVALUATE_ALL_PERSONNEL);
+  const canEvaluateSelected = Boolean(workspace?.evaluablePersonnelIds.includes(personnelId));
   const canManageProfiles = Boolean(workspace?.capabilities.MANAGE_PERFORMANCE_PROFILES);
+  const canViewHistory = Boolean(workspace?.capabilities.VIEW_PERFORMANCE_EVALUATIONS);
   const draftComplete = Boolean(selectedEvaluation?.profile.indicators.every((indicator) => values[indicator.id]?.trim()));
 
   const run = async (work: () => Promise<void>, message: string) => {
@@ -166,7 +208,7 @@ export default function SimplePerformanceWorkspace() {
       <ErpSegmentedControl value={tab} onChange={setTab} options={[
         { value: "evaluate", label: "ارزیابی" },
         { value: "profiles", label: "الگوها", disabled: !canManageProfiles },
-        { value: "history", label: "سابقه" },
+        { value: "history", label: "سابقه", disabled: !canViewHistory },
       ]} />
 
       {tab === "evaluate" && <div className="space-y-4">
@@ -178,15 +220,15 @@ export default function SimplePerformanceWorkspace() {
             <ErpField label="تاریخ ارزیابی"><ErpInput type="date" max={todayInTehran()} value={evaluationDate} onChange={(event) => setEvaluationDate(event.target.value)} /></ErpField>
           </div>
           {selectedPersonnel && <p className="mt-3 text-sm text-[var(--sds-text-secondary)]">الگو: {assignment?.profile.nameFa || "انتخاب نشده"}</p>}
-          {canEvaluate && assignment && <div className="mt-4"><ErpButton label="ارزیابی تازه" onClick={() => void beginEvaluation()} disabled={pending || !personnelId} /></div>}
+          {canEvaluateSelected && assignment && <div className="mt-4"><ErpButton label="ارزیابی تازه" onClick={() => void beginEvaluation()} disabled={pending || !personnelId} /></div>}
           {!assignment && <ErpInlineState kind="empty" title="برای این پرسنل الگو انتخاب نشده است." />}
           {!canEvaluate && <ErpInlineState kind="permission" title="اجازه ثبت ارزیابی ندارید." />}
         </ErpSection>
 
         {openDrafts.length > 0 && !selectedEvaluation && <ErpSection title="پیش‌نویس‌ها"><div className="space-y-2">
           {openDrafts.map((evaluation) => <ErpCard key={evaluation.id} className="flex items-center justify-between gap-3 p-3">
-            <span>{dateFa(evaluation.evaluationDate)} · {evaluation.profile.nameFa}</span>
-            <ErpButton label="ادامه" variant="soft" onClick={() => setEvaluationId(evaluation.id)} />
+            <span>{workspace.personnel.find(({ id }) => id === evaluation.personnelId)?.firstName} {workspace.personnel.find(({ id }) => id === evaluation.personnelId)?.lastName} · {dateFa(evaluation.evaluationDate)} · {evaluation.profile.nameFa}</span>
+            <ErpButton label="ادامه" variant="soft" onClick={() => { setPersonnelId(evaluation.personnelId); setEvaluationId(evaluation.id); }} />
           </ErpCard>)}
         </div></ErpSection>}
 
@@ -227,13 +269,23 @@ export default function SimplePerformanceWorkspace() {
         </ErpCard>)}</div></ErpSection>
       </div>}
 
-      {tab === "history" && <ErpSection title="سابقه ارزیابی">
-        <ErpField label="پرسنل"><ErpSelect value={personnelId} onChange={(event) => setPersonnelId(event.target.value)}>{workspace.personnel.map((person) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName}</option>)}</ErpSelect></ErpField>
-        <div className="mt-4 space-y-3">{!history.filter(({ status }) => status === "FINAL").length && <ErpInlineState kind="empty" title="ارزیابی نهایی ثبت نشده است." />}
-          {history.filter(({ status }) => status === "FINAL").map((evaluation) => <ErpCard key={evaluation.id} className="p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{dateFa(evaluation.evaluationDate)}</p>{evaluation.levelCode && <ErpBadge tone={levelTones[evaluation.levelCode] || "neutral"}>{levelLabels[evaluation.levelCode] || evaluation.levelCode}</ErpBadge>}{evaluation.supersededAt && <ErpBadge tone="neutral">اصلاح‌شده</ErpBadge>}</div><p className="mt-2 text-sm text-[var(--sds-text-secondary)]">امتیاز: {evaluation.score ? Number(evaluation.score).toLocaleString("fa-IR") : "—"} · ارزیاب: {evaluation.evaluatorAuthority === "HR_MANAGER" ? "منابع انسانی" : "سرپرست"}</p></div></div>
-            {!evaluation.supersededAt && canEvaluate && <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]"><ErpField label="دلیل اصلاح"><ErpTextarea rows={2} value={correctionReason[evaluation.id] || ""} onChange={(event) => setCorrectionReason((items) => ({ ...items, [evaluation.id]: event.target.value }))} /></ErpField><div className="md:self-end"><ErpButton label="اصلاح نتیجه" variant="soft" onClick={() => void beginCorrection(evaluation)} disabled={pending} /></div></div>}
-          </ErpCard>)}
+      {tab === "history" && canViewHistory && <ErpSection title="سابقه ارزیابی">
+        <ErpField label="پرسنل"><ErpSelect value={personnelId} onChange={(event) => setPersonnelId(event.target.value)}>{workspace.historyPersonnel.map((person) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName}</option>)}</ErpSelect></ErpField>
+        <div className="mt-4 space-y-5">{!historyGroups.length && <ErpInlineState kind="empty" title="ارزیابی نهایی ثبت نشده است." />}
+          {historyGroups.map(([month, evaluations]) => <div key={month} className="space-y-3">
+            <p className="font-semibold">{month}</p>
+            {evaluations.map((evaluation) => <ErpCard key={evaluation.id} className="p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{dateFa(evaluation.evaluationDate)}</p>{evaluation.levelCode && <ErpBadge tone={levelTones[evaluation.levelCode] || "neutral"}>{levelLabels[evaluation.levelCode] || evaluation.levelCode}</ErpBadge>}{evaluation.supersededAt && <ErpBadge tone="neutral">اصلاح‌شده</ErpBadge>}</div><p className="mt-2 text-sm text-[var(--sds-text-secondary)]">امتیاز: {scoreFa(evaluation.score)} · ارزیاب: {evaluation.evaluatorNameFa} ({evaluation.evaluatorAuthority === "HR_MANAGER" ? "منابع انسانی" : "سرپرست"})</p>{evaluation.finalizedAt && <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">نهایی‌شده: {dateTimeFa(evaluation.finalizedAt)}</p>}</div></div>
+              {!evaluation.supersededAt && canEvaluateSelected && <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]"><ErpField label="دلیل اصلاح"><ErpTextarea rows={2} value={correctionReason[evaluation.id] || ""} onChange={(event) => setCorrectionReason((items) => ({ ...items, [evaluation.id]: event.target.value }))} /></ErpField><div className="md:self-end"><ErpButton label="اصلاح نتیجه" variant="soft" onClick={() => void beginCorrection(evaluation)} disabled={pending} /></div></div>}
+            </ErpCard>)}
+          </div>)}
+          {historyHasMore && <ErpButton label="نمایش بیشتر" variant="soft" onClick={() => void loadHistory(personnelId, historyPage + 1)} />}
+          {legacyHistory.length > 0 && <div className="space-y-3"><p className="font-semibold">سابقه قدیمی</p>
+            {legacyHistory.map((evaluation) => <ErpCard key={evaluation.id} className="p-4">
+              <div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{dateFa(evaluation.measurementTo)}</p><ErpBadge tone="neutral">{evaluation.levelLabelFa}</ErpBadge></div>
+              <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">نتیجه قدیمی · فقط برای مشاهده</p>
+            </ErpCard>)}
+          </div>}
         </div>
       </ErpSection>}
     </>}

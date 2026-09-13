@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   ErpBadge,
   ErpButton,
@@ -13,6 +14,7 @@ import {
   ErpSection,
   ErpSegmentedControl,
   ErpSelect,
+  ErpSheet,
   ErpTextarea,
 } from "@/components/erp";
 import { personnelPerformanceAPI } from "@/lib/api";
@@ -28,6 +30,7 @@ type Assignment = { personnelId: string; profileId: string; profile: Profile };
 type Value = { indicatorId: string; actual: string; score?: string | null };
 type Evaluation = {
   id: string; personnelId: string; evaluationDate: string; status: "DRAFT" | "FINAL";
+  createdAt: string;
   evaluatorUserId: string; evaluatorAuthority: "SUPERVISOR" | "HR_MANAGER"; score?: string | null;
   levelCode?: string | null; finalizedAt?: string | null; correctionOfId?: string | null;
   correctionReason?: string | null; supersededAt?: string | null; profile: Profile; values: Value[];
@@ -40,6 +43,7 @@ type LegacyEvaluation = {
 type Workspace = {
   currentUserId: string;
   evaluablePersonnelIds: string[];
+  latestFinalizedAtByPersonnel: Record<string, string>;
   personnel: Personnel[]; historyPersonnel: Personnel[]; profiles: Profile[]; assignments: Assignment[]; evaluations: Evaluation[];
   capabilities: Record<string, boolean>;
 };
@@ -75,18 +79,42 @@ const errorText = (error: unknown) => {
 const emptyIndicator = (): ProfileIndicatorDraft => ({
   code: "", categoryFa: "", titleFa: "", unitFa: "", target: "", direction: "HIGHER_IS_BETTER", weightPercent: "",
 });
+const previewPerformance = (profile: Profile | undefined, values: Record<string, string>) => {
+  if (!profile || !profile.indicators.every(({ id }) => values[id]?.trim())) return null;
+  let allTargetsReached = true;
+  const score = profile.indicators.reduce((total, indicator) => {
+    const target = Number(indicator.target);
+    const actual = Number(values[indicator.id]);
+    const reached = indicator.direction === "HIGHER_IS_BETTER" ? actual >= target : actual <= target;
+    allTargetsReached = allTargetsReached && reached;
+    const indicatorScore = indicator.direction === "HIGHER_IS_BETTER"
+      ? Math.min(100, actual / target * 100)
+      : target === 0 ? (actual === 0 ? 100 : 0) : Math.min(100, actual === 0 ? 100 : target / actual * 100);
+    return total + indicatorScore * Number(indicator.weightPercent) / 100;
+  }, 0);
+  const safeScore = !allTargetsReached && score >= 100 ? 99.9999 : score;
+  const level = allTargetsReached ? "OUTSTANDING" : safeScore >= 90 ? "EXCEEDS_EXPECTATIONS"
+    : safeScore >= 75 ? "MEETS_EXPECTATIONS" : safeScore >= 60 ? "NEEDS_IMPROVEMENT" : "URGENT_IMPROVEMENT";
+  return { score: safeScore.toFixed(2), level };
+};
 
 export default function SimplePerformanceWorkspace() {
+  const searchParams = useSearchParams();
+  const requestedPersonnelId = searchParams.get("personnelId") || "";
+  const directEvaluationOpened = useRef(false);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [tab, setTab] = useState<"evaluate" | "profiles" | "history">("evaluate");
   const [personnelId, setPersonnelId] = useState("");
   const [evaluationId, setEvaluationId] = useState("");
+  const [newEvaluationOpen, setNewEvaluationOpen] = useState(false);
+  const [confirmFinalize, setConfirmFinalize] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [evaluationDate, setEvaluationDate] = useState(todayInTehran());
   const [values, setValues] = useState<Record<string, string>>({});
+  const [savedValuesSignature, setSavedValuesSignature] = useState("{}");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [profileId, setProfileId] = useState("");
   const [profileName, setProfileName] = useState("");
   const [profileStableKey, setProfileStableKey] = useState<string | undefined>();
   const [profileIndicators, setProfileIndicators] = useState<ProfileIndicatorDraft[]>([emptyIndicator()]);
@@ -102,9 +130,15 @@ export default function SimplePerformanceWorkspace() {
       const response = await personnelPerformanceAPI.simpleWorkspace();
       const next = response.data as Workspace;
       setWorkspace(next);
-      setPersonnelId((current) => current || next.personnel[0]?.id || next.historyPersonnel[0]?.id || "");
+      setPersonnelId((current) => current || (next.personnel.some(({ id }) => id === requestedPersonnelId) ? requestedPersonnelId : "") || next.personnel[0]?.id || next.historyPersonnel[0]?.id || "");
+      if (!directEvaluationOpened.current && requestedPersonnelId
+        && next.evaluablePersonnelIds.includes(requestedPersonnelId)
+        && next.assignments.some(({ personnelId }) => personnelId === requestedPersonnelId)) {
+        directEvaluationOpened.current = true;
+        setNewEvaluationOpen(true);
+      }
     } catch (cause) { setError(errorText(cause)); }
-  }, []);
+  }, [requestedPersonnelId]);
   useEffect(() => { void load(); }, [load]);
 
   const loadHistory = useCallback(async (selectedPersonnelId: string, page = 1) => {
@@ -124,10 +158,12 @@ export default function SimplePerformanceWorkspace() {
   const selectedEvaluation = workspace?.evaluations.find(({ id }) => id === evaluationId);
   useEffect(() => {
     if (!selectedEvaluation) return;
-    setValues(Object.fromEntries(selectedEvaluation.values.map((value) => [value.indicatorId, String(value.actual)])));
+    const nextValues = Object.fromEntries(selectedEvaluation.values.map((value) => [value.indicatorId, String(value.actual)]));
+    setValues(nextValues); setSavedValuesSignature(JSON.stringify(nextValues));
   }, [selectedEvaluation]);
   const selectedPersonnel = workspace?.personnel.find(({ id }) => id === personnelId);
   const assignment = workspace?.assignments.find((item) => item.personnelId === personnelId);
+  const activeProfile = selectedEvaluation?.profile ?? (newEvaluationOpen ? assignment?.profile : undefined);
   const historyGroups = useMemo(() => {
     const groups = new Map<string, Evaluation[]>();
     for (const evaluation of history.filter(({ status }) => status === "FINAL")) {
@@ -141,7 +177,23 @@ export default function SimplePerformanceWorkspace() {
   const canEvaluateSelected = Boolean(workspace?.evaluablePersonnelIds.includes(personnelId));
   const canManageProfiles = Boolean(workspace?.capabilities.MANAGE_PERFORMANCE_PROFILES);
   const canViewHistory = Boolean(workspace?.capabilities.VIEW_PERFORMANCE_EVALUATIONS);
-  const draftComplete = Boolean(selectedEvaluation?.profile.indicators.every((indicator) => values[indicator.id]?.trim()));
+  const enteredValues = activeProfile?.indicators.flatMap((indicator) => {
+    const actual = values[indicator.id]?.trim();
+    return actual ? [{ indicatorId: indicator.id, actual }] : [];
+  }) ?? [];
+  const draftComplete = Boolean(activeProfile?.indicators.every((indicator) => values[indicator.id]?.trim()));
+  const preview = useMemo(() => previewPerformance(activeProfile, values), [activeProfile, values]);
+  const newerFinalExists = Boolean(selectedEvaluation
+    && workspace?.latestFinalizedAtByPersonnel[selectedEvaluation.personnelId]
+    && workspace.latestFinalizedAtByPersonnel[selectedEvaluation.personnelId] > selectedEvaluation.createdAt);
+  const valuesSignature = JSON.stringify(values);
+  const dirty = enteredValues.length > 0 && valuesSignature !== savedValuesSignature;
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   const run = async (work: () => Promise<void>, message: string) => {
     setPending(true); setError(""); setSuccess("");
@@ -150,30 +202,38 @@ export default function SimplePerformanceWorkspace() {
     finally { setPending(false); }
   };
 
-  const beginEvaluation = () => run(async () => {
-    const response = await personnelPerformanceAPI.createSimpleEvaluation({ personnelId, evaluationDate });
-    setEvaluationId(response.data.evaluation.id);
-  }, "ارزیابی تازه ساخته شد.");
+  const beginEvaluation = () => {
+    setEvaluationId(""); setValues({}); setSavedValuesSignature("{}"); setNewEvaluationOpen(true); setError(""); setSuccess("");
+  };
+  const closeEvaluation = () => {
+    if (dirty) return setConfirmDiscard(true);
+    setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setSavedValuesSignature("{}");
+  };
+  const discardEvaluation = () => {
+    setConfirmDiscard(false); setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setSavedValuesSignature("{}");
+  };
 
-  const saveDraft = () => selectedEvaluation && run(async () => {
-    await personnelPerformanceAPI.saveSimpleEvaluation(selectedEvaluation.id, selectedEvaluation.profile.indicators.flatMap((indicator) => {
-      const actual = values[indicator.id]?.trim();
-      return actual ? [{ indicatorId: indicator.id, actual }] : [];
-    }));
+  const saveDraft = () => dirty && run(async () => {
+    let id = selectedEvaluation?.id ?? "";
+    if (!id) {
+      const response = await personnelPerformanceAPI.createSimpleEvaluation({ personnelId, evaluationDate });
+      id = response.data.evaluation.id;
+      setEvaluationId(id); setNewEvaluationOpen(false);
+    }
+    await personnelPerformanceAPI.saveSimpleEvaluation(id, enteredValues);
+    setSavedValuesSignature(valuesSignature);
   }, "پیش‌نویس ذخیره شد.");
 
-  const finalize = () => selectedEvaluation && run(async () => {
-    await personnelPerformanceAPI.saveSimpleEvaluation(selectedEvaluation.id, selectedEvaluation.profile.indicators.flatMap((indicator) => {
-      const actual = values[indicator.id]?.trim();
-      return actual ? [{ indicatorId: indicator.id, actual }] : [];
-    }));
-    await personnelPerformanceAPI.finalizeSimpleEvaluation(selectedEvaluation.id);
-    setEvaluationId("");
+  const finalize = () => run(async () => {
+    let id = selectedEvaluation?.id ?? "";
+    if (!id) {
+      const response = await personnelPerformanceAPI.createSimpleEvaluation({ personnelId, evaluationDate });
+      id = response.data.evaluation.id;
+    }
+    await personnelPerformanceAPI.saveSimpleEvaluation(id, enteredValues);
+    await personnelPerformanceAPI.finalizeSimpleEvaluation(id);
+    setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setSavedValuesSignature("{}"); setConfirmFinalize(false);
   }, "ارزیابی نهایی شد.");
-
-  const assignProfile = () => run(async () => {
-    await personnelPerformanceAPI.assignSimpleProfile({ personnelId, profileId });
-  }, "الگو انتخاب شد.");
 
   const saveProfile = () => run(async () => {
     await personnelPerformanceAPI.createSimpleProfile({
@@ -207,21 +267,21 @@ export default function SimplePerformanceWorkspace() {
     {workspace && <>
       <ErpSegmentedControl value={tab} onChange={setTab} options={[
         { value: "evaluate", label: "ارزیابی" },
-        { value: "profiles", label: "الگوها", disabled: !canManageProfiles },
+        { value: "profiles", label: "فرم‌ها", disabled: !canManageProfiles },
         { value: "history", label: "سابقه", disabled: !canViewHistory },
       ]} />
 
       {tab === "evaluate" && <div className="space-y-4">
         <ErpSection title="انتخاب پرسنل">
           <div className="grid gap-3 md:grid-cols-2">
-            <ErpField label="پرسنل"><ErpSelect value={personnelId} onChange={(event) => { setPersonnelId(event.target.value); setEvaluationId(""); }}>
+            <ErpField label="پرسنل"><ErpSelect value={personnelId} onChange={(event) => { setPersonnelId(event.target.value); setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setSavedValuesSignature("{}"); }}>
               {workspace.personnel.map((person) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName}</option>)}
             </ErpSelect></ErpField>
             <ErpField label="تاریخ ارزیابی"><ErpInput type="date" max={todayInTehran()} value={evaluationDate} onChange={(event) => setEvaluationDate(event.target.value)} /></ErpField>
           </div>
-          {selectedPersonnel && <p className="mt-3 text-sm text-[var(--sds-text-secondary)]">الگو: {assignment?.profile.nameFa || "انتخاب نشده"}</p>}
-          {canEvaluateSelected && assignment && <div className="mt-4"><ErpButton label="ارزیابی تازه" onClick={() => void beginEvaluation()} disabled={pending || !personnelId} /></div>}
-          {!assignment && <ErpInlineState kind="empty" title="برای این پرسنل الگو انتخاب نشده است." />}
+          {selectedPersonnel && <p className="mt-3 text-sm text-[var(--sds-text-secondary)]">فرم: {assignment?.profile.nameFa || "آماده نیست"}</p>}
+          {canEvaluateSelected && assignment && !activeProfile && <div className="mt-4"><ErpButton label="ثبت ارزیابی" onClick={beginEvaluation} disabled={pending || !personnelId} /></div>}
+          {!assignment && <ErpInlineState kind="empty" title="فرم ارزیابی آماده نیست." action={canManageProfiles ? { label: "آماده‌سازی فرم", onClick: () => setTab("profiles") } : undefined} />}
           {!canEvaluate && <ErpInlineState kind="permission" title="اجازه ثبت ارزیابی ندارید." />}
         </ErpSection>
 
@@ -232,23 +292,18 @@ export default function SimplePerformanceWorkspace() {
           </ErpCard>)}
         </div></ErpSection>}
 
-        {selectedEvaluation?.status === "DRAFT" && <ErpSection title={`ارزیابی ${selectedEvaluation.profile.nameFa}`} actions={[{ label: "بستن", onClick: () => setEvaluationId("") }]}>
-          <div className="space-y-3">{selectedEvaluation.profile.indicators.map((indicator) => <ErpCard key={indicator.id} className="p-4">
+        {activeProfile && <ErpSection title={`ارزیابی ${activeProfile.nameFa}`} actions={[{ label: "بستن", onClick: closeEvaluation }]}>
+          <div className="space-y-3">{activeProfile.indicators.map((indicator) => <ErpCard key={indicator.id} className="p-4">
             <div className="grid gap-3 md:grid-cols-[1fr_12rem] md:items-end">
               <div><p className="font-semibold">{indicator.titleFa}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">هدف: {String(indicator.target)} {indicator.unitFa} · وزن: {String(indicator.weightPercent)}٪</p></div>
               <ErpField label={`مقدار واقعی (${indicator.unitFa})`} required><ErpInput type="number" min="0" inputMode="decimal" value={values[indicator.id] || ""} onChange={(event) => setValues((current) => ({ ...current, [indicator.id]: event.target.value }))} /></ErpField>
             </div>
           </ErpCard>)}</div>
-          <div className="mt-4 flex flex-wrap gap-2"><ErpButton label="ذخیره پیش‌نویس" variant="soft" onClick={() => void saveDraft()} disabled={pending} /><ErpButton label="نهایی‌کردن" onClick={() => void finalize()} disabled={pending || !draftComplete} /></div>
+          <div className="mt-4 flex flex-wrap gap-2"><ErpButton label="ذخیره" variant="soft" onClick={() => void saveDraft()} disabled={pending || !dirty} /><ErpButton label="ثبت نهایی" onClick={() => setConfirmFinalize(true)} disabled={pending || !draftComplete} /></div>
         </ErpSection>}
       </div>}
 
       {tab === "profiles" && canManageProfiles && <div className="space-y-4">
-        <ErpSection title="انتخاب الگو برای پرسنل">
-          <div className="grid gap-3 md:grid-cols-2"><ErpField label="پرسنل"><ErpSelect value={personnelId} onChange={(event) => setPersonnelId(event.target.value)}>{workspace.personnel.map((person) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName}</option>)}</ErpSelect></ErpField>
-          <ErpField label="الگو"><ErpSelect value={profileId} onChange={(event) => setProfileId(event.target.value)}><option value="">انتخاب کنید</option>{workspace.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.nameFa}</option>)}</ErpSelect></ErpField></div>
-          <div className="mt-4"><ErpButton label="ثبت الگو" onClick={() => void assignProfile()} disabled={pending || !personnelId || !profileId} /></div>
-        </ErpSection>
         <ErpSection title={profileStableKey ? "نسخه جدید الگو" : "الگوی تازه"}>
           <ErpField label="نام الگو" required><ErpInput value={profileName} onChange={(event) => setProfileName(event.target.value)} /></ErpField>
           <div className="mt-4 space-y-3">{profileIndicators.map((indicator, index) => <ErpCard key={index} className="p-4">
@@ -276,7 +331,7 @@ export default function SimplePerformanceWorkspace() {
             <p className="font-semibold">{month}</p>
             {evaluations.map((evaluation) => <ErpCard key={evaluation.id} className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{dateFa(evaluation.evaluationDate)}</p>{evaluation.levelCode && <ErpBadge tone={levelTones[evaluation.levelCode] || "neutral"}>{levelLabels[evaluation.levelCode] || evaluation.levelCode}</ErpBadge>}{evaluation.supersededAt && <ErpBadge tone="neutral">اصلاح‌شده</ErpBadge>}</div><p className="mt-2 text-sm text-[var(--sds-text-secondary)]">امتیاز: {scoreFa(evaluation.score)} · ارزیاب: {evaluation.evaluatorNameFa} ({evaluation.evaluatorAuthority === "HR_MANAGER" ? "منابع انسانی" : "سرپرست"})</p>{evaluation.finalizedAt && <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">نهایی‌شده: {dateTimeFa(evaluation.finalizedAt)}</p>}</div></div>
-              {!evaluation.supersededAt && canEvaluateSelected && <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]"><ErpField label="دلیل اصلاح"><ErpTextarea rows={2} value={correctionReason[evaluation.id] || ""} onChange={(event) => setCorrectionReason((items) => ({ ...items, [evaluation.id]: event.target.value }))} /></ErpField><div className="md:self-end"><ErpButton label="اصلاح نتیجه" variant="soft" onClick={() => void beginCorrection(evaluation)} disabled={pending} /></div></div>}
+              {!evaluation.supersededAt && canEvaluateSelected && (workspace.capabilities.EVALUATE_ALL_PERSONNEL || evaluation.evaluatorUserId === workspace.currentUserId) && <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]"><ErpField label="دلیل اصلاح"><ErpTextarea rows={2} value={correctionReason[evaluation.id] || ""} onChange={(event) => setCorrectionReason((items) => ({ ...items, [evaluation.id]: event.target.value }))} /></ErpField><div className="md:self-end"><ErpButton label="اصلاح نتیجه" variant="soft" onClick={() => void beginCorrection(evaluation)} disabled={pending} /></div></div>}
             </ErpCard>)}
           </div>)}
           {historyHasMore && <ErpButton label="نمایش بیشتر" variant="soft" onClick={() => void loadHistory(personnelId, historyPage + 1)} />}
@@ -288,6 +343,17 @@ export default function SimplePerformanceWorkspace() {
           </div>}
         </div>
       </ErpSection>}
+      <ErpSheet open={confirmFinalize} onClose={() => setConfirmFinalize(false)} title="ثبت نهایی ارزیابی؟" presentation="modal" footer={<div className="flex justify-end gap-2"><ErpButton label="بازگشت" variant="ghost" onClick={() => setConfirmFinalize(false)} /><ErpButton label="تأیید و ثبت" onClick={() => void finalize()} disabled={pending} /></div>}>
+        <div className="space-y-2 text-sm text-[var(--sds-text-secondary)]">
+          <p>{selectedPersonnel?.firstName} {selectedPersonnel?.lastName}</p>
+          <p>تاریخ: {dateFa(selectedEvaluation?.evaluationDate || evaluationDate)}</p>
+          {preview && <p>امتیاز: {scoreFa(preview.score)} · نشان: {levelLabels[preview.level]}</p>}
+          {newerFinalExists && <p className="text-[var(--sds-warning)]">بعد از این پیش‌نویس، نتیجه جدیدتری ثبت شده است. با ثبت این ارزیابی، جدیدترین نتیجه نشان داده می‌شود.</p>}
+        </div>
+      </ErpSheet>
+      <ErpSheet open={confirmDiscard} onClose={() => setConfirmDiscard(false)} title="بستن بدون ذخیره؟" presentation="modal" footer={<div className="flex justify-end gap-2"><ErpButton label="ادامه ویرایش" variant="ghost" onClick={() => setConfirmDiscard(false)} /><ErpButton label="بستن" tone="danger" onClick={discardEvaluation} /></div>}>
+        <p className="text-sm text-[var(--sds-text-secondary)]">مقدارهای واردشده ذخیره نشده‌اند.</p>
+      </ErpSheet>
     </>}
   </ErpPage>;
 }

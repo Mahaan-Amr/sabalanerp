@@ -53,6 +53,9 @@ for (const [actual, level] of [
 assert.equal(canEvaluatePersonnel({ hasEvaluateAll: true, hasEvaluateDirectReports: false, isResponsibleSupervisor: false }), 'HR_MANAGER');
 assert.equal(canEvaluatePersonnel({ hasEvaluateAll: false, hasEvaluateDirectReports: true, isResponsibleSupervisor: true }), 'SUPERVISOR');
 assert.equal(canEvaluatePersonnel({ hasEvaluateAll: false, hasEvaluateDirectReports: true, isResponsibleSupervisor: false }), null);
+assert.equal(canEvaluatePersonnel({
+  hasEvaluateAll: true, hasEvaluateDirectReports: true, isResponsibleSupervisor: true, isSelf: true,
+}), null, 'nobody may evaluate themselves');
 
 assert.deepEqual(validateSimpleEvaluationDate('2026-09-12', new Date('2026-09-12T12:00:00.000Z')), { valid: true });
 assert.equal(validateSimpleEvaluationDate('2026-09-13', new Date('2026-09-12T12:00:00.000Z')).valid, false);

@@ -76,7 +76,9 @@ export const canEvaluatePersonnel = (input: {
   hasEvaluateAll: boolean;
   hasEvaluateDirectReports: boolean;
   isResponsibleSupervisor: boolean;
+  isSelf?: boolean;
 }): SimpleEvaluatorAuthority | null => {
+  if (input.isSelf) return null;
   if (input.hasEvaluateAll) return 'HR_MANAGER';
   if (input.hasEvaluateDirectReports && input.isResponsibleSupervisor) return 'SUPERVISOR';
   return null;

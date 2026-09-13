@@ -11,6 +11,7 @@ import {
   getSimplePerformanceWorkspace,
   resolveSimpleEvaluationAuthority,
   saveSimplePerformanceDraft,
+  visibleSimplePerformancePersonnelIds,
 } from '../simplePersonnelPerformanceStore';
 
 const rollback = Symbol('rollback');
@@ -111,17 +112,110 @@ try {
       stableKey: 'simple-performance-supervisor-grant', userId: supervisor.id, featureCode: 'EVALUATE_DIRECT_REPORTS',
       level: 'EDIT', effectiveFrom: new Date(Date.now() - 60_000), reason: 'آزمون دسترسی سرپرست',
     } });
+    await tx.hrFeatureAccessGrant.create({ data: {
+      stableKey: 'simple-performance-supervisor-view-grant', userId: supervisor.id, featureCode: 'VIEW_PERFORMANCE_EVALUATIONS',
+      level: 'VIEW', effectiveFrom: new Date(Date.now() - 60_000), reason: 'آزمون مشاهده سابقه افراد زیرمجموعه',
+    } });
     const supervisorRelationship = await tx.hrEmploymentRelationship.create({ data: {
       personnelId: supervisorPersonnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
     } });
-    const supervisorAssignment = await tx.hrEmploymentAssignment.create({ data: {
-      employmentRelationshipId: supervisorRelationship.id, type: 'PRIMARY', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
+    const unit = await tx.hrOrganizationalUnit.create({ data: {
+      code: 'SIMPLE-PERFORMANCE-UNIT', name: 'فروش', type: 'DEPARTMENT', createdBy: actor.id,
+    } });
+    const job = await tx.hrJob.create({ data: { code: 'SIMPLE-PERFORMANCE-JOB', title: 'شغل آزمون', createdBy: actor.id } });
+    const supervisorPosition = await tx.hrPosition.create({ data: {
+      code: 'SIMPLE-PERFORMANCE-SUPERVISOR', title: 'سرپرست آزمون', capacity: 2,
+      organizationalUnitId: unit.id, jobId: job.id, createdBy: actor.id,
+    } });
+    const targetPosition = await tx.hrPosition.create({ data: {
+      code: 'SIMPLE-PERFORMANCE-TARGET', title: 'کارشناس آزمون',
+      organizationalUnitId: unit.id, jobId: job.id, supervisorPositionId: supervisorPosition.id, createdBy: actor.id,
     } });
     await tx.hrEmploymentAssignment.create({ data: {
-      employmentRelationshipId: targetRelationship.id, type: 'PRIMARY', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
-      responsibleSupervisorAssignmentId: supervisorAssignment.id, createdBy: actor.id,
+      employmentRelationshipId: supervisorRelationship.id, positionId: supervisorPosition.id, type: 'PRIMARY',
+      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), organizationalUnitId: unit.id, createdBy: actor.id,
+    } });
+    await tx.hrEmploymentAssignment.create({ data: {
+      employmentRelationshipId: targetRelationship.id, positionId: targetPosition.id, type: 'PRIMARY',
+      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), organizationalUnitId: unit.id, createdBy: actor.id,
     } });
     assert.equal(await resolveSimpleEvaluationAuthority(tx, { actorUserId: supervisor.id, personnelId: personnel.id }), 'SUPERVISOR');
+    assert.deepEqual(await visibleSimplePerformancePersonnelIds(tx, {
+      actorUserId: supervisor.id, personnelIds: [personnel.id, supervisorPersonnel.id],
+    }), [personnel.id], 'badge visibility is limited to current direct reports');
+    assert.ok((await getSimplePerformanceHistory(tx, {
+      actorUserId: supervisor.id, personnelId: personnel.id,
+    })).evaluations.length > 0, 'a supervisor may view a current direct report history');
+    await assert.rejects(
+      createSimplePerformanceCorrection(tx, { actorUserId: supervisor.id, evaluationId: correction.id, reason: 'اصلاح آزمون سرپرست' }),
+      (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'SIMPLE_CORRECTION_FORBIDDEN'),
+      'a supervisor may not correct a result finalized by another evaluator',
+    );
+    const automaticProfilePersonnel = await tx.personnel.create({ data: { firstName: 'فرم', lastName: 'خودکار' } });
+    const automaticProfileRelationship = await tx.hrEmploymentRelationship.create({ data: {
+      personnelId: automaticProfilePersonnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
+    } });
+    await tx.hrEmploymentAssignment.create({ data: {
+      employmentRelationshipId: automaticProfileRelationship.id, positionId: targetPosition.id, type: 'PRIMARY',
+      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), organizationalUnitId: unit.id, createdBy: actor.id,
+    } });
+    const automaticProfileEvaluation = await createSimplePerformanceEvaluation(tx, {
+      actorUserId: actor.id, personnelId: automaticProfilePersonnel.id, evaluationDate: today,
+    });
+    assert.equal(automaticProfileEvaluation.profileId, nextProfile.id,
+      'the active workbook profile matching the organizational unit applies without a personnel assignment');
+    const automaticProfileWorkspace = await getSimplePerformanceWorkspace(tx, actor.id);
+    assert.equal(
+      automaticProfileWorkspace.assignments.find(({ personnelId }) => personnelId === automaticProfilePersonnel.id)?.profileId,
+      nextProfile.id,
+      'the evaluation form exposes the automatically selected workbook profile',
+    );
+    const hrUnit = await tx.hrOrganizationalUnit.create({ data: {
+      code: 'SIMPLE-PERFORMANCE-HR-UNIT', name: 'واحد آزمایشی منابع انسانی', type: 'DEPARTMENT', createdBy: actor.id,
+    } });
+    const hrPosition = await tx.hrPosition.create({ data: {
+      code: 'SIMPLE-PERFORMANCE-HR-POSITION', title: 'کارشناس منابع انسانی',
+      organizationalUnitId: hrUnit.id, jobId: job.id, createdBy: actor.id,
+    } });
+    const hrPersonnel = await tx.personnel.create({ data: { firstName: 'منابع', lastName: 'انسانی' } });
+    const hrRelationship = await tx.hrEmploymentRelationship.create({ data: {
+      personnelId: hrPersonnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
+    } });
+    await tx.hrEmploymentAssignment.create({ data: {
+      employmentRelationshipId: hrRelationship.id, positionId: hrPosition.id, type: 'PRIMARY',
+      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), organizationalUnitId: hrUnit.id, createdBy: actor.id,
+    } });
+    const hrProfileEvaluation = await createSimplePerformanceEvaluation(tx, {
+      actorUserId: actor.id, personnelId: hrPersonnel.id, evaluationDate: today,
+    });
+    assert.equal(hrProfileEvaluation.profileId, 'simple-profile-hr-v1',
+      'common organizational-unit wording resolves to the matching workbook profile');
+    const secondSupervisorPersonnel = await tx.personnel.create({ data: { firstName: 'سرپرست', lastName: 'دوم' } });
+    const secondSupervisor = await tx.user.create({ data: {
+      email: 'simple-second-supervisor@example.invalid', username: 'simple_second_supervisor_test', password: 'not-used',
+      firstName: 'سرپرست', lastName: 'دوم', personnelId: secondSupervisorPersonnel.id,
+    } });
+    const secondSupervisorRelationship = await tx.hrEmploymentRelationship.create({ data: {
+      personnelId: secondSupervisorPersonnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
+    } });
+    await tx.hrEmploymentAssignment.create({ data: {
+      employmentRelationshipId: secondSupervisorRelationship.id, positionId: supervisorPosition.id, type: 'PRIMARY',
+      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), organizationalUnitId: unit.id, createdBy: actor.id,
+    } });
+    await tx.hrFeatureAccessGrant.create({ data: {
+      stableKey: 'simple-performance-second-supervisor-grant', userId: secondSupervisor.id, featureCode: 'EVALUATE_DIRECT_REPORTS',
+      level: 'EDIT', effectiveFrom: new Date(Date.now() - 60_000), reason: 'آزمون دسترسی سرپرست دوم',
+    } });
+    await assert.rejects(
+      resolveSimpleEvaluationAuthority(tx, { actorUserId: supervisor.id, personnelId: personnel.id }),
+      (error: unknown) => Boolean(error && typeof error === 'object' && 'status' in error && error.status === 403),
+      'a multiply occupied supervisor position grants nobody automatic authority',
+    );
+    await assert.rejects(
+      getSimplePerformanceHistory(tx, { actorUserId: supervisor.id, personnelId: personnel.id }),
+      (error: unknown) => Boolean(error && typeof error === 'object' && 'status' in error && error.status === 403),
+      'a former or ambiguous supervisor loses access to the personnel history',
+    );
     const unrelated = await tx.personnel.create({ data: { firstName: 'خارج', lastName: 'دامنه' } });
     await assert.rejects(
       resolveSimpleEvaluationAuthority(tx, { actorUserId: supervisor.id, personnelId: unrelated.id }),

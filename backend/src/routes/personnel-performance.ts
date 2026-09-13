@@ -109,6 +109,7 @@ import {
   getSimplePerformanceWorkspace,
   listSimplePerformanceProfiles,
   saveSimplePerformanceDraft,
+  visibleSimplePerformancePersonnelIds,
 } from '../services/simplePersonnelPerformanceStore';
 
 const router = express.Router();
@@ -455,7 +456,10 @@ router.get('/badge/me', async (req: AuthRequest, res, next) => {
 
 router.post('/badges', viewBadgeList, async (req: AuthRequest, res, next) => {
   try {
-    const personnelIds = Array.isArray(req.body.personnelIds) ? req.body.personnelIds.map(String) : [];
+    const requestedPersonnelIds = Array.isArray(req.body.personnelIds) ? req.body.personnelIds.map(String) : [];
+    const personnelIds = await visibleSimplePerformancePersonnelIds(prisma, {
+      actorUserId: req.user!.id, personnelIds: requestedPersonnelIds,
+    });
     const [legacy, simple] = await Promise.all([
       getPersonnelPerformanceBadges(prisma, { actorUserId: req.user!.id, personnelIds }),
       getSimplePerformanceBadges(prisma, personnelIds),

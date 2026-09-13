@@ -117,6 +117,16 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
 
   assert.deepEqual(getRemainingStoneDraftFieldErrors({
     products: [parent, allocatedChild],
+    draftProduct: {
+      ...allocatedChild,
+      longitudinalPolicyInput: {} as ContractProduct['longitudinalPolicyInput']
+    },
+    lastEditedField: 'length'
+  }), {
+    source: 'اطلاعات منبع این محصول قابل ویرایش نیست؛ محصول را حذف کنید و دوباره از سنگ باقی‌مانده بسازید.'
+  });
+  assert.deepEqual(getRemainingStoneDraftFieldErrors({
+    products: [parent, allocatedChild],
     draftProduct: allocatedChild,
     lastEditedField: 'length'
   }), {});
@@ -130,6 +140,53 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
     lastEditedField: 'length'
   }), {
     length: 'طول واردشده از ظرفیت سنگ باقی‌مانده بیشتر است؛ طول را کاهش دهید.'
+  });
+}
+
+{
+  const selectedStock = stock(40, 5, 100);
+  const parent = source('legacy-live-source', [selectedStock, stock(10, 10, 100)]);
+  const allocatedChild = {
+    ...child('legacy-live-child', parent.rowId as string, 0),
+    width: 40,
+    diameterOrWidth: 40,
+    length: 5,
+    quantity: 50,
+    squareMeters: 100,
+    meta: {
+      remainingSource: {
+        sourceProductRowId: parent.rowId as string,
+        sourceRemainingStoneId: selectedStock.id,
+        sourceRemainingStone: selectedStock,
+        sourceGroupKey: getRemainingStoneInventoryGroupKey(selectedStock),
+        allocationId: 'legacy-live-allocation',
+        allocationOrder: 0,
+        allocatedQuantity: 50
+      }
+    }
+  };
+
+  assert.deepEqual(getRemainingStoneDraftFieldErrors({
+    products: [parent, allocatedChild],
+    draftProduct: {
+      ...allocatedChild,
+      length: 5.001,
+      squareMeters: 100.02
+    },
+    lastEditedField: 'length'
+  }), {});
+
+  assert.deepEqual(getRemainingStoneDraftFieldErrors({
+    products: [parent, allocatedChild],
+    draftProduct: {
+      ...allocatedChild,
+      length: 5.001,
+      squareMeters: 100.02,
+      longitudinalPolicyInput: {} as ContractProduct['longitudinalPolicyInput']
+    },
+    lastEditedField: 'length'
+  }), {
+    source: 'اطلاعات منبع این محصول قابل ویرایش نیست؛ محصول را حذف کنید و دوباره از سنگ باقی‌مانده بسازید.'
   });
 }
 

@@ -467,9 +467,8 @@ export const replayRemainingStoneAllocations = ({
 };
 
 /**
- * Runs the same allocation replay used by the save path without mutating the
- * contract draft, so a seller can correct an invalid value while its field is
- * still open.
+ * Checks persisted remaining-stone compatibility and then runs the same
+ * allocation replay used by the save path without mutating the contract draft.
  */
 export const getRemainingStoneDraftFieldErrors = ({
   products,
@@ -491,6 +490,16 @@ export const getRemainingStoneDraftFieldErrors = ({
 
   const currentIndex = products.findIndex(product => product.rowId === rowId);
   if (currentIndex < 0) return {};
+  const currentProduct = products[currentIndex];
+  if (
+    sourceRowId !== rowId &&
+    !currentProduct.longitudinalPolicyInput &&
+    draftProduct.longitudinalPolicyInput
+  ) {
+    return {
+      source: 'اطلاعات منبع این محصول قابل ویرایش نیست؛ محصول را حذف کنید و دوباره از سنگ باقی‌مانده بسازید.'
+    };
+  }
   const candidateProducts = products.map((product, index) =>
     index === currentIndex ? draftProduct : product
   );

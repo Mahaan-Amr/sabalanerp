@@ -14,7 +14,7 @@ const product = ({
 }) => ({
   rowId,
   parentProductRowId,
-  productId: `catalog-${rowId}`,
+  productId: `catalog-${parentProductRowId || rowId}`,
   product: {},
   productType: 'stair',
   stoneCode: rowId,
@@ -55,6 +55,17 @@ const product = ({
     ? {
         remainingSource: {
           sourceProductRowId: parentProductRowId,
+          sourceRemainingStoneId: 'five-meter-stock',
+          sourceRemainingStone: {
+            id: 'five-meter-stock',
+            width: 40,
+            length: 5,
+            quantity: 100,
+            squareMeters: 200,
+            isAvailable: true,
+            sourceCutId: 'five-meter-cut'
+          },
+          sourceGroupKey: 'available|40|5',
           allocationId: 'live-allocation',
           allocationOrder: 0,
           allocatedQuantity: 50
@@ -63,14 +74,14 @@ const product = ({
     : undefined
 });
 
-test('Sales reports an invalid remaining-stone length while the user is editing', async ({ page }) => {
+test('Sales reports a legacy remaining-source incompatibility while the user is editing', async ({ page }) => {
   await loginAsAdmin(page);
   const inventory = [{
     id: 'five-meter-stock',
     width: 40,
     length: 5,
-    quantity: 50,
-    squareMeters: 100,
+    quantity: 100,
+    squareMeters: 200,
     isAvailable: true,
     sourceCutId: 'five-meter-cut'
   }];
@@ -114,8 +125,7 @@ test('Sales reports an invalid remaining-stone length while the user is editing'
   await expect(length).toHaveValue('5');
   await length.fill('5.001');
 
-  const message = 'طول واردشده از ظرفیت سنگ باقی‌مانده بیشتر است؛ طول را کاهش دهید.';
-  await expect(length).toHaveAttribute('aria-invalid', 'true');
+  const message = 'اطلاعات منبع این محصول قابل ویرایش نیست؛ محصول را حذف کنید و دوباره از سنگ باقی‌مانده بسازید.';
   await expect(dialog.getByText(message, { exact: true })).toBeVisible();
 
   await dialog.getByRole('button', { name: 'ذخیره تغییرات', exact: true }).click();
@@ -123,7 +133,7 @@ test('Sales reports an invalid remaining-stone length while the user is editing'
   await expect(dialog.getByText(message, { exact: true })).toBeVisible();
 
   await length.fill('5');
-  await expect(dialog.getByText(message, { exact: true })).toBeHidden();
+  await expect(dialog.getByText(message, { exact: true })).toBeVisible();
   const invalidEntries = [
     { field: dialog.locator('#longitudinal-width'), value: '40..1', message: 'عدد معتبر وارد کنید' },
     { field: dialog.locator('#longitudinal-quantity'), value: '50.5', message: 'تعداد صحیح وارد کنید' },

@@ -22,14 +22,13 @@ import {
   CompactUnitSwitch
 } from './productModalPrimitives';
 import { convertCompactLengthUnit } from './productModalState';
+import type { RemainingStoneDraftFieldErrors } from '../../services/remainingStoneAllocationReplayService';
 
 const fieldClass =
   'min-h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-accent)] focus:ring-1 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)]';
 const errorClass = 'mt-1 min-h-4 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]';
 const isPricedInput = (input: LongitudinalProductInput | LongitudinalTechnicalInput): input is LongitudinalProductInput =>
   !('inputRevision' in input);
-const TechnicalEditing = React.createContext(false);
-
 const toDisplayUnit = (
   value: CanonicalDecimal | undefined,
   unit: 'cm' | 'm'
@@ -51,6 +50,7 @@ function CompactDecimalField({
   unit,
   onUnitChange,
   onValueChange,
+  onValidityChange,
   error,
   inputMode = 'decimal',
   monetary = false,
@@ -62,12 +62,12 @@ function CompactDecimalField({
   unit?: 'cm' | 'm';
   onUnitChange?: (unit: 'cm' | 'm') => void;
   onValueChange: (value: string) => void;
+  onValidityChange?: (invalid: boolean) => void;
   error?: string;
   inputMode?: 'decimal' | 'numeric';
   monetary?: boolean;
   grouped?: boolean;
 }) {
-  const preserveIncompleteText = React.useContext(TechnicalEditing);
   const [draft, setDraft] = React.useState(value);
   const [entryError, setEntryError] = React.useState<string>();
   const editingRef = React.useRef(false);
@@ -127,24 +127,42 @@ function CompactDecimalField({
           }}
           onChange={event => {
             const next = event.target.value;
-            setEntryError(undefined);
+            let nextError: string | undefined;
+            if (next.trim() === '') {
+              nextError = undefined;
+            } else {
+              try {
+                if (inputMode === 'numeric' && !parseLongitudinalQuantityEntry(next).accepted) {
+                  nextError = 'تعداد صحیح وارد کنید';
+                } else {
+                  parseCanonicalDecimal(next);
+                }
+              } catch {
+                nextError = 'عدد معتبر وارد کنید';
+              }
+            }
+            setEntryError(nextError);
+            onValidityChange?.(Boolean(nextError));
             setDraft(next);
             onValueChange(next);
           }}
           onBlur={() => {
             editingRef.current = false;
-            if (preserveIncompleteText && draft.trim() !== '') {
+            if (draft.trim() !== '') {
               try {
                 if (inputMode === 'numeric' && !parseLongitudinalQuantityEntry(draft).accepted) {
                   setEntryError('تعداد صحیح وارد کنید');
+                  onValidityChange?.(true);
                   return;
                 }
                 parseCanonicalDecimal(draft);
               } catch {
                 setEntryError('عدد معتبر وارد کنید');
+                onValidityChange?.(true);
                 return;
               }
             }
+            onValidityChange?.(false);
             setDraft(value);
           }}
           aria-invalid={Boolean(entryError || error)}
@@ -162,13 +180,17 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
   onChange,
   showValidation = false,
   calculation: workerCalculation,
-  calculating = false
+  calculating = false,
+  liveErrors = {},
+  onEntryValidityChange
 }: {
   input: Input;
   onChange: (input: Input) => void;
   showValidation?: boolean;
   calculation?: LongitudinalProductCalculation | null;
   calculating?: boolean;
+  liveErrors?: RemainingStoneDraftFieldErrors;
+  onEntryValidityChange?: (fieldId: string, invalid: boolean) => void;
 }) {
   const pricingVisible = useProductPricingVisibility();
   const pricedInput = isPricedInput(input) ? input : undefined;
@@ -224,15 +246,59 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
     ? undefined
     : calculation?.conflicts.find(conflict => conflict.field === field)?.message;
   const conflictFor = (field: string) => {
+    const liveError = field === 'lengthMeters'
+      ? liveErrors.length
+      : field === 'widthMeters'
+        ? liveErrors.width
+        : field === 'quantity'
+          ? liveErrors.quantity
+          : field === 'requestedAreaSquareMeters'
+            ? liveErrors.area
+            : undefined;
+    if (liveError) return liveError;
     if (!showValidation) return undefined;
-    const message = rawConflictFor(field);
-    if (!message) return undefined;
-    if (field === 'dimensions') return 'طول یا مترمربع را وارد کنید';
-    if (field === 'baseRateToman') return 'قیمت را وارد کنید';
-    if (field === 'widthMeters') {
-      return `حداکثر عرض این سنگ ${Number(input.motherWidthMeters) * 100} سانتی‌متر است`;
+    const packingConflict = calculation?.ok
+      ? undefined
+      : calculation?.conflicts.find(conflict => conflict.code === 'packing-failed');
+    if (packingConflict) {
+      const target = input.lastManualField === 'area'
+        ? 'requestedAreaSquareMeters'
+        : input.lastManualField === 'quantity'
+          ? 'quantity'
+          : input.lastManualField === 'width'
+            ? 'widthMeters'
+            : 'lengthMeters';
+      if (field === target) {
+        const label = input.lastManualField === 'area'
+          ? 'مترمربع'
+          : input.lastManualField === 'quantity'
+            ? 'تعداد'
+            : input.lastManualField === 'width'
+              ? 'عرض'
+              : 'طول';
+        return `${label} واردشده با سنگ مادر سازگار نیست؛ ${label} را کاهش دهید`;
+      }
+      if (field === 'summary') return undefined;
     }
-    return 'اطلاعات این بخش را بررسی و اصلاح کنید';
+    const conflict = calculation?.ok
+      ? undefined
+      : calculation?.conflicts.find(item => item.field === field);
+    const message = conflict?.message;
+    if (!message) return undefined;
+    const code = conflict?.code;
+    if (code === 'invalid-quantity') return 'تعداد باید عدد صحیح باشد؛ تعداد را اصلاح کنید';
+    if (code === 'mother-width-missing') return 'عرض سنگ مادر ثبت نشده است؛ سنگ دیگری انتخاب کنید';
+    if (code === 'maximum-mother-width-exceeded') {
+      return `عرض واردشده بیشتر از عرض سنگ مادر است؛ عرض را حداکثر ${Number(input.motherWidthMeters) * 100} سانتی‌متر وارد کنید`;
+    }
+    if (code === 'invalid-mandatory-percentage') return 'درصد حکمی باید بیشتر از صفر باشد؛ درصد را اصلاح کنید';
+    if (code === 'base-rate-required') return 'قیمت هر مترمربع وارد نشده است؛ قیمت را وارد کنید';
+    if (code === 'longitudinal-cut-rate-missing') return 'نرخ برش طولی ثبت نشده است؛ نوع برش دیگری انتخاب کنید';
+    if (code === 'calibration-cut-rate-missing') return 'نرخ برش کالیبر ثبت نشده است؛ برش کالیبر را خاموش کنید';
+    if (code === 'packing-failed') return 'ابعاد یا تعداد با سنگ مادر سازگار نیست؛ طول، عرض یا تعداد را کاهش دهید';
+    if (code === 'invalid-decimal') return 'عدد واردشده معتبر نیست؛ مقدار را اصلاح کنید';
+    if (field === 'dimensions') return 'طول یا مترمربع وارد نشده است؛ یکی از آن‌ها را وارد کنید';
+    return message;
   };
   const commitDecimal = (
     field: 'lengthMeters' | 'widthMeters' | 'requestedAreaSquareMeters' | 'baseRateToman',
@@ -292,7 +358,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
       ];
 
   return (
-    <TechnicalEditing.Provider value={!pricedInput}><div className="space-y-3">
+    <div className="space-y-3">
       <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-4">
         <CompactDecimalField
           id="longitudinal-length"
@@ -306,6 +372,8 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
             'length',
             input.lengthDisplayUnit
           )}
+          onValidityChange={invalid => onEntryValidityChange?.('longitudinal-length', invalid)}
+          error={conflictFor('lengthMeters')}
           grouped
         />
         <CompactDecimalField
@@ -320,6 +388,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
             'width',
             input.widthDisplayUnit
           )}
+          onValidityChange={invalid => onEntryValidityChange?.('longitudinal-width', invalid)}
           error={conflictFor('widthMeters')}
         />
         <CompactDecimalField
@@ -348,6 +417,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
               lastManualField: 'quantity'
             });
           }}
+          onValidityChange={invalid => onEntryValidityChange?.('longitudinal-quantity', invalid)}
           error={conflictFor('quantity')}
         />
         <CompactDecimalField
@@ -359,10 +429,15 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
             value,
             'area'
           )}
+          onValidityChange={invalid => onEntryValidityChange?.('longitudinal-area', invalid)}
+          error={conflictFor('requestedAreaSquareMeters')}
         />
       </div>
       {conflictFor('dimensions') && (
         <div className={errorClass}>{conflictFor('dimensions')}</div>
+      )}
+      {liveErrors.source && (
+        <div role="alert" className={errorClass}>{liveErrors.source}</div>
       )}
 
       {showPricing && (pricedInput?.baseMaterialPricing === 'paid-source-zero' ? (
@@ -377,6 +452,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
           value={pricedInput?.baseRateToman ?? ''}
           monetary
           onValueChange={value => commitDecimal('baseRateToman', value, input.lastManualField)}
+          onValidityChange={invalid => onEntryValidityChange?.('longitudinal-base-rate', invalid)}
           error={conflictFor('baseRateToman')}
         />
       ))}
@@ -410,6 +486,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
                     // Keep the in-progress value local until it becomes valid.
                   }
                 }}
+                onValidityChange={invalid => onEntryValidityChange?.('longitudinal-mandatory-percentage', invalid)}
                 error={conflictFor('mandatoryPercentage')}
               />
             </div>
@@ -479,6 +556,6 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
           </div>
         ))}
       </section>
-    </div></TechnicalEditing.Provider>
+    </div>
   );
 }

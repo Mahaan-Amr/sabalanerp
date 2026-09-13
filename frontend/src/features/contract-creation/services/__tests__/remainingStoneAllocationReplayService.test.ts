@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { replayRemainingStoneAllocations } from '../remainingStoneAllocationReplayService';
+import {
+  formatRemainingStoneReplayConflicts,
+  getRemainingStoneDraftFieldErrors,
+  replayRemainingStoneAllocations
+} from '../remainingStoneAllocationReplayService';
 import type { ContractProduct, RemainingStone } from '../../types/contract.types';
 import { ensureContractProductRowIds } from '../../utils/contractProductIdentity';
 import {
@@ -99,6 +103,35 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
     }
   }
 });
+
+{
+  const parent = source('live-source', [stock(40, 5, 50)]);
+  const allocatedChild = {
+    ...child('live-child', parent.rowId as string, 0),
+    width: 40,
+    diameterOrWidth: 40,
+    length: 5,
+    quantity: 50,
+    squareMeters: 100
+  };
+
+  assert.deepEqual(getRemainingStoneDraftFieldErrors({
+    products: [parent, allocatedChild],
+    draftProduct: allocatedChild,
+    lastEditedField: 'length'
+  }), {});
+  assert.deepEqual(getRemainingStoneDraftFieldErrors({
+    products: [parent, allocatedChild],
+    draftProduct: {
+      ...allocatedChild,
+      length: 5.001,
+      squareMeters: 100.02
+    },
+    lastEditedField: 'length'
+  }), {
+    length: 'طول واردشده از ظرفیت سنگ باقی‌مانده بیشتر است؛ طول را کاهش دهید.'
+  });
+}
 
 {
   const parent = source('source-with-canonical-layer', [stock(9, 0.4)]);
@@ -352,6 +385,7 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
 {
   const parent = source('source-addon-conflict', [stock(60, 3)]);
   const conflictingChild = child('child-addon-conflict', parent.rowId as string, 0);
+  conflictingChild.stoneName = 'محصول پرداخت‌دار';
   conflictingChild.finishingId = 'finish-1';
   conflictingChild.finishingName = 'پرداخت نامعتبر';
   conflictingChild.finishingCalculationBase = 'squareMeters';
@@ -366,6 +400,30 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
   assert.equal(result.ok, false);
   assert.equal(result.conflicts[0].childRowId, conflictingChild.rowId);
   assert.match(result.conflicts[0].reason, /پرداخت سنگ/);
+
+  assert.deepEqual(getRemainingStoneDraftFieldErrors({
+    products: [parent, conflictingChild],
+    draftProduct: conflictingChild,
+    lastEditedField: 'area'
+  }), {
+    operations: 'ابزار یا پرداخت «محصول پرداخت‌دار» با ابعاد جدید سازگار نیست؛ مقدار آن را اصلاح کنید یا آن مورد را حذف کنید.'
+  });
+
+  assert.deepEqual(getRemainingStoneDraftFieldErrors({
+    products: [parent, conflictingChild],
+    draftProduct: { ...parent, length: 2 },
+    lastEditedField: 'length'
+  }), {
+    source: 'این تغییر، ابزار یا پرداخت «محصول پرداخت‌دار» را نامعتبر می‌کند؛ مقدار تغییرکرده را به حالت قبلی بازگردانید یا عملیات آن محصول را اصلاح کنید.'
+  });
+
+  const formatted = formatRemainingStoneReplayConflicts(result.conflicts);
+  assert.equal(
+    formatted,
+    'ابزار یا پرداخت «محصول پرداخت‌دار» با ابعاد محصول سازگار نیست؛ مقدار آن را اصلاح کنید یا آن مورد را حذف کنید.'
+  );
+  assert.doesNotMatch(formatted, /^\d+\./);
+  assert.doesNotMatch(formatted, /ردیف/);
 }
 
 {

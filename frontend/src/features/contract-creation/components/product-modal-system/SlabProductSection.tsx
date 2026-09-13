@@ -29,14 +29,13 @@ import {
   removeSlabSourceRow,
   replaceSlabSourceRow
 } from './slabProductState';
+import type { RemainingStoneDraftFieldErrors } from '../../services/remainingStoneAllocationReplayService';
 
 const fieldClass =
   'min-h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-accent)] focus:ring-1 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)]';
 const errorClass = 'mt-1 min-h-4 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]';
 const isPricedInput = (input: SlabPolicyInput | SlabTechnicalInput): input is SlabPolicyInput =>
   !('inputRevision' in input);
-const TechnicalEditing = React.createContext(false);
-
 const toDisplay = (value: CanonicalDecimal | undefined, unit: 'cm' | 'm') =>
   value === undefined ? '' : convertCompactLengthUnit(value, 'm', unit);
 
@@ -50,6 +49,7 @@ function SlabField({
   unit,
   onUnitChange,
   onChange,
+  onValidityChange,
   error,
   inputMode = 'decimal',
   monetary = false
@@ -60,11 +60,11 @@ function SlabField({
   unit?: 'cm' | 'm';
   onUnitChange?: (unit: 'cm' | 'm') => void;
   onChange: (value: string) => void;
+  onValidityChange?: (invalid: boolean) => void;
   error?: string;
   inputMode?: 'decimal' | 'numeric';
   monetary?: boolean;
 }) {
-  const preserveIncompleteText = React.useContext(TechnicalEditing);
   const [draft, setDraft] = React.useState(value);
   const [entryError, setEntryError] = React.useState<string>();
   const editingRef = React.useRef(false);
@@ -117,24 +117,42 @@ function SlabField({
             editingRef.current = true;
           }}
           onChange={event => {
-            setEntryError(undefined);
-            setDraft(event.target.value);
-            onChange(event.target.value);
+            const next = event.target.value;
+            let nextError: string | undefined;
+            if (next.trim() === '') {
+              nextError = undefined;
+            } else {
+              try {
+                const normalized = parseCanonicalDecimal(next);
+                if (inputMode === 'numeric' && (!/^[1-9]\d*$/.test(normalized) || !Number.isSafeInteger(Number(normalized)))) {
+                  nextError = 'تعداد صحیح و مثبت وارد کنید';
+                }
+              } catch {
+                nextError = 'عدد معتبر وارد کنید';
+              }
+            }
+            setEntryError(nextError);
+            onValidityChange?.(Boolean(nextError));
+            setDraft(next);
+            onChange(next);
           }}
           onBlur={() => {
             editingRef.current = false;
-            if (preserveIncompleteText && draft.trim() !== '') {
+            if (draft.trim() !== '') {
               try {
                 const normalized = parseCanonicalDecimal(draft);
                 if (inputMode === 'numeric' && (!/^[1-9]\d*$/.test(normalized) || !Number.isSafeInteger(Number(normalized)))) {
                   setEntryError('تعداد صحیح و مثبت وارد کنید');
+                  onValidityChange?.(true);
                   return;
                 }
               } catch {
                 setEntryError('عدد معتبر وارد کنید');
+                onValidityChange?.(true);
                 return;
               }
             }
+            onValidityChange?.(false);
             setDraft(value);
           }}
           aria-invalid={Boolean(entryError || error)}
@@ -162,13 +180,15 @@ function SlabSourceRow({
   index,
   onChange,
   onRemove,
-  error
+  error,
+  onEntryValidityChange
 }: {
   row: SlabSourceRowInput;
   index: number;
   onChange: (row: SlabSourceRowInput) => void;
   onRemove: () => void;
   error?: string;
+  onEntryValidityChange?: (fieldId: string, invalid: boolean) => void;
 }) {
   const commitDimension = (
     field: 'lengthMeters' | 'widthMeters',
@@ -189,6 +209,7 @@ function SlabSourceRow({
         unit={row.lengthDisplayUnit}
         onUnitChange={lengthDisplayUnit => onChange({ ...row, lengthDisplayUnit })}
         onChange={value => commitDimension('lengthMeters', value, row.lengthDisplayUnit)}
+        onValidityChange={invalid => onEntryValidityChange?.(`slab-source-${row.sourceRowId}-length`, invalid)}
         error={error}
       />
       <SlabField
@@ -200,6 +221,7 @@ function SlabSourceRow({
         unit={row.widthDisplayUnit}
         onUnitChange={widthDisplayUnit => onChange({ ...row, widthDisplayUnit })}
         onChange={value => commitDimension('widthMeters', value, row.widthDisplayUnit)}
+        onValidityChange={invalid => onEntryValidityChange?.(`slab-source-${row.sourceRowId}-width`, invalid)}
         error={error}
       />
       <SlabField
@@ -221,11 +243,17 @@ function SlabSourceRow({
             onChange({ ...row, quantity });
           });
         }}
+        onValidityChange={invalid => onEntryValidityChange?.(`slab-source-${row.sourceRowId}-quantity`, invalid)}
         error={error}
       />
       <ErpPressable
         type="button"
-        onClick={onRemove}
+        onClick={() => {
+          onEntryValidityChange?.(`slab-source-${row.sourceRowId}-length`, false);
+          onEntryValidityChange?.(`slab-source-${row.sourceRowId}-width`, false);
+          onEntryValidityChange?.(`slab-source-${row.sourceRowId}-quantity`, false);
+          onRemove();
+        }}
         className="self-center text-xs font-semibold text-[var(--sds-danger)] hover:underline"
       >
         حذف
@@ -241,6 +269,8 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
   showValidation = false,
   calculation: workerCalculation,
   calculating = false,
+  liveErrors = {},
+  onEntryValidityChange,
   sawKerfMeters,
   createSourceIdentity = () =>
     parseStableIdentity('slab-source-row', crypto.randomUUID())
@@ -250,6 +280,8 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
   showValidation?: boolean;
   calculation?: SlabCalculation | null;
   calculating?: boolean;
+  liveErrors?: RemainingStoneDraftFieldErrors;
+  onEntryValidityChange?: (fieldId: string, invalid: boolean) => void;
   /** Server-projected technical catalog fact. No implicit Partner kerf policy. */
   sawKerfMeters?: CanonicalDecimal;
   createSourceIdentity?: () => StableIdentity<'slab-source-row'>;
@@ -274,11 +306,18 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
     if (!showValidation) return undefined;
     const message = rawConflict(field);
     if (!message) return undefined;
-    if (field === 'geometry' || field === 'quantity') return 'ابعاد و تعداد را کامل کنید';
-    if (field === 'baseMaterialRateToman') return 'قیمت را وارد کنید';
-    if (field === 'squareMeterCutRateToman') return 'نرخ برش را وارد کنید';
-    if (field === 'sourceRows') return 'منابع واردشده برای تأمین سفارش کافی نیستند';
-    return 'اطلاعات این بخش را بررسی و اصلاح کنید';
+    const code = calculation?.ok
+      ? undefined
+      : calculation?.conflicts.find(item => item.field === field)?.code;
+    if (code === 'slab-geometry-incomplete') return 'ابعاد یا تعداد کامل نیست؛ طول، عرض و تعداد را کامل کنید';
+    if (code === 'slab-price-required') return 'قیمت سنگ مادر وارد نشده است؛ قیمت را وارد کنید';
+    if (code === 'slab-source-required') return 'منبع اسلب انتخاب نشده است؛ یک منبع اضافه کنید';
+    if (code === 'slab-source-insufficient') return 'منابع اسلب برای این سفارش کافی نیستند؛ مقدار سفارش را کاهش دهید یا منبع اضافه کنید';
+    if (code === 'duplicate-slab-source') return 'یک منبع اسلب تکراری است؛ منبع تکراری را حذف کنید';
+    if (code === 'slab-cut-rate-missing') return 'نرخ برش وارد نشده است؛ نرخ مربوط را وارد کنید';
+    if (code === 'invalid-slab-input' && field === 'sourceRows') return 'ابعاد یا تعداد یکی از منابع معتبر نیست؛ مقادیر همان منبع را اصلاح کنید';
+    if (code === 'invalid-slab-input') return 'اطلاعات فنی اسلب قابل خواندن نیست؛ طول، عرض، تعداد و منابع را دوباره وارد کنید';
+    return message;
   };
   const resolved = calculation?.ok ? calculation.result : undefined;
   const pricedResult = pricedInput && calculation?.ok && 'totalAmountToman' in calculation.result
@@ -297,7 +336,7 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
   const sourceError = conflict('sourceRows');
 
   return (
-    <TechnicalEditing.Provider value={!pricedInput}><div className="space-y-3">
+    <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <SlabField
           id="slab-length"
@@ -306,7 +345,8 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
           unit={input.lengthDisplayUnit}
           onUnitChange={lengthDisplayUnit => onChange({ ...input, lengthDisplayUnit })}
           onChange={value => commitDimension('lengthMeters', value, input.lengthDisplayUnit, 'length')}
-          error={conflict('geometry')}
+          onValidityChange={invalid => onEntryValidityChange?.('slab-length', invalid)}
+          error={liveErrors.length ?? (input.lastManualField === 'length' ? conflict('geometry') : undefined)}
         />
         <SlabField
           id="slab-width"
@@ -315,7 +355,8 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
           unit={input.widthDisplayUnit}
           onUnitChange={widthDisplayUnit => onChange({ ...input, widthDisplayUnit })}
           onChange={value => commitDimension('widthMeters', value, input.widthDisplayUnit, 'width')}
-          error={conflict('geometry')}
+          onValidityChange={invalid => onEntryValidityChange?.('slab-width', invalid)}
+          error={liveErrors.width ?? (input.lastManualField === 'width' ? conflict('geometry') : undefined)}
         />
         <SlabField
           id="slab-area"
@@ -324,7 +365,8 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
           onChange={value => safeCommit(() =>
             onChange(commitSlabDecimal(input, 'areaSquareMeters', value, 'area'))
           )}
-          error={conflict('geometry')}
+          onValidityChange={invalid => onEntryValidityChange?.('slab-area', invalid)}
+          error={liveErrors.area ?? (input.lastManualField === 'area' ? conflict('geometry') : undefined)}
         />
         <SlabField
           id="slab-quantity"
@@ -345,9 +387,11 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
               onChange({ ...input, quantity });
             });
           }}
-          error={conflict('quantity')}
+          onValidityChange={invalid => onEntryValidityChange?.('slab-quantity', invalid)}
+          error={liveErrors.quantity ?? conflict('quantity') ?? (!input.quantity ? conflict('geometry') : undefined)}
         />
       </div>
+      {conflict('slab') && <div role="alert" className={errorClass}>{conflict('slab')}</div>}
 
       {showPricing && <SlabField
         id="slab-base-rate"
@@ -360,7 +404,7 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
         error={conflict('baseMaterialRateToman')}
       />}
 
-      <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
+      <section id="slab-sources" tabIndex={-1} className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
         <div className="flex min-h-8 items-center justify-between gap-3">
           <h3 className="text-sm font-bold">اسلب‌های منبع</h3>
           <ErpPressable
@@ -398,9 +442,11 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
               ...input,
               sourceRows: removeSlabSourceRow(input.sourceRows, row.sourceRowId)
             })}
+            onEntryValidityChange={onEntryValidityChange}
           />
         ))}
         {sourceError && <div className={errorClass}>{sourceError}</div>}
+        {liveErrors.source && <div role="alert" className={errorClass}>{liveErrors.source}</div>}
       </section>
 
       {showPricing && <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
@@ -482,6 +528,6 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
           </div>
         ))}
       </section>
-    </div></TechnicalEditing.Provider>
+    </div>
   );
 }

@@ -30,7 +30,16 @@ test('first interview atomically materializes the canonical defaults as criteria
 
   assert.equal(criteriaSet.version, 1);
   assert.equal(criteriaSet.publishedByUserId, 'user-1');
-  assert.equal((criteriaSet.criteriaJson as unknown[]).length, 17);
+  assert.equal((criteriaSet.criteriaJson as unknown[]).length, 18);
+  assert.deepEqual((criteriaSet.criteriaJson as any[])[17], {
+    stableId: 'personalityTestSummary',
+    title: 'نتایج آزمون‌های DISC، BIG FIVE و EQ',
+    description: null,
+    answerType: 'PERSONALITY_TEST_SUMMARY',
+    isActive: true,
+    allowUnassessed: false,
+    order: 18,
+  });
   assert.deepEqual(calls, [{
     where: { version: 1 },
     create: {

@@ -40,9 +40,11 @@ test('login errors are Persian and successful login starts protected providers w
   await expect(loginError).not.toContainText('Invalid credentials');
 
   const protected401s: string[] = [];
+  let protectedResponses = 0;
   page.on('response', (response) => {
-    if (response.status() === 401 && response.url().includes('/api/workspace-permissions')) {
-      protected401s.push(response.url());
+    if (response.url().includes('/api/workspace-permissions')) {
+      protectedResponses += 1;
+      if (response.status() === 401) protected401s.push(response.url());
     }
   });
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(
@@ -53,7 +55,7 @@ test('login errors are Persian and successful login starts protected providers w
   );
   await page.getByRole('button', { name: 'ورود', exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
-  await page.waitForLoadState('networkidle');
+  await expect.poll(() => protectedResponses).toBeGreaterThan(0);
   expect(protected401s).toEqual([]);
 });
 

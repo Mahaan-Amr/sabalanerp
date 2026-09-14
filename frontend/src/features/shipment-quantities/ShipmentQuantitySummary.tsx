@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ErpBadge, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpSummaryGrid } from '@/components/erp';
 import { shipmentQuantityAPI } from '@/lib/api';
 import { formatShipmentQuantity, shipmentHealthPresentation, type ShipmentQuantityRow } from './shipmentQuantityPresentation';
+import { assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface ProjectionResponse {
   cutoff: string;
@@ -24,7 +25,8 @@ const unitLabel = (unit: string) => ({ meter: 'متر طول', squareMeter: 'م�
 export function ShipmentQuantitySummary({ contractId, customerId }: { contractId?: string; customerId?: string }) {
   const [data, setData] = useState<ProjectionResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshError, setRefreshError] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
+  const [refreshErrorKind, setRefreshErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
 
   useEffect(() => {
     let active = true;
@@ -32,10 +34,18 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
     const request = contractId ? shipmentQuantityAPI.getContract(contractId) : shipmentQuantityAPI.getCustomer(customerId!);
     request.then((response) => {
       if (!active) return;
+      assertSuccessfulSalesResponse(response);
       setData(response.data.data);
-      setRefreshError(false);
-    }).catch(() => {
-      if (active) setRefreshError(true);
+      setRefreshError('');
+      setRefreshErrorKind('error');
+    }).catch((error) => {
+      if (active) {
+        setRefreshErrorKind(getSalesOperationalErrorKind(error));
+        setRefreshError(getSalesOperationalErrorMessage(error, {
+          failedAction: 'دریافت اطلاعات ارسال',
+          nextStep: 'صفحه را تازه‌سازی و دوباره تلاش کنید.',
+        }));
+      }
     }).finally(() => {
       if (active) setLoading(false);
     });
@@ -43,11 +53,11 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
   }, [contractId, customerId]);
 
   if (loading && !data) return <ErpLoading />;
-  if (!data && refreshError) return <ErpInlineState kind="error" title="اطلاعات ارسال در دسترس نیست" />;
+  if (!data && refreshError) return <ErpInlineState kind={refreshErrorKind} title={refreshError} />;
 
   return (
     <ErpSection title="مانده ارسال" description="مقادیر قرارداد، رزروشده، خارج‌شده و قابل بارگیری از شواهد ثبت‌شده محاسبه می‌شوند.">
-      {refreshError && <ErpInlineState kind="stale" title="آخرین اطلاعات موفق نمایش داده می‌شود؛ به‌روزرسانی انجام نشد." className="mb-4" />}
+      {refreshError && <ErpInlineState kind="stale" title={<>آخرین اطلاعات موفق نمایش داده می‌شود. {refreshError}</>} className="mb-4" />}
       {!data?.rows.length ? (
         <ErpEmptyState title="هنوز شواهد ارسال قابل نمایش نیست" />
       ) : (

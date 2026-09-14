@@ -11,8 +11,10 @@ import {
 import { allocateRemainingStonePartitions } from './remainingStonePartitionService';
 import { recalculateRemainingChildAddOns } from './remainingStoneChildAddOnService';
 import { calculateSlabRemainingStones, calculateSmartLongitudinalCutPlan } from './remainingStoneService';
+import { parseStableIdentity, type RemainderChildPolicyInput } from '@sabalanerp/contract-product-graph';
 
 export interface RemainingStoneReplayConflict {
+  kind: 'source-missing' | 'inventory-changed' | 'add-on' | 'capacity';
   childRowId: string;
   childLabel: string;
   allocationId: string;
@@ -24,6 +26,13 @@ export interface RemainingStoneReplayResult {
   products: ContractProduct[];
   conflicts: RemainingStoneReplayConflict[];
 }
+
+export type RemainingStoneDraftField = 'length' | 'width' | 'quantity' | 'area' | 'source';
+
+export type RemainingStoneDraftFieldErrors = Partial<Record<
+  RemainingStoneDraftField | 'source' | 'operations',
+  string
+>>;
 
 interface ReplayOptions {
   products: ContractProduct[];
@@ -206,6 +215,59 @@ const replaceAllocatedStockGroup = (
 const getChildOperationTotal = (child: ContractProduct, cuttingCost: number): number =>
   cuttingCost + Number(child.totalSubServiceCost || 0) + Number(child.finishingCost || 0);
 
+const createRemainderChildPolicyInput = ({
+  child,
+  sourceRowId,
+  stock,
+  allocationId,
+  allocationOrder,
+  row,
+  cuttingBreakdown,
+  physicalPieces,
+  sourcePieceQuantities
+}: {
+  child: ContractProduct;
+  sourceRowId: string;
+  stock: RemainingStone;
+  allocationId: string;
+  allocationOrder: number;
+  row: StonePartition;
+  cuttingBreakdown: ContractProduct['cuttingBreakdown'];
+  physicalPieces: StonePartition[];
+  sourcePieceQuantities?: number[];
+}): RemainderChildPolicyInput => {
+  const rate = (type: 'longitudinal' | 'cross') =>
+    cuttingBreakdown?.find(line => line.type === type)?.rate;
+  const longitudinalRate = rate('longitudinal');
+  const crossRate = rate('cross');
+  return {
+    allocationId: parseStableIdentity('allocation', allocationId),
+    allocationOrder,
+    sourceProductRowId: parseStableIdentity('product-row', sourceRowId),
+    secondaryOwnerProductRowId: parseStableIdentity('product-row', sourceRowId),
+    selectedRemainingStoneId: parseStableIdentity('remaining-stone', stock.id),
+    lengthMeters: parseCanonicalDecimal(String(row.length)),
+    widthMeters: parseCanonicalDecimal(String(row.width / 100)),
+    quantity: row.quantity,
+    ...(physicalPieces.length === row.quantity ? {} : { physicalPieces: physicalPieces.map(piece => ({
+      logicalPieceOrdinal: piece.logicalPieceOrdinal!,
+      lengthMeters: parseCanonicalDecimal(String(piece.length)),
+      widthMeters: parseCanonicalDecimal(String(piece.width / 100))
+    })) }),
+    ...(sourcePieceQuantities === undefined ? {} : { sourcePieceQuantities }),
+    kerfMeters: parseCanonicalDecimal(
+      child.sawKerfEnabled ? String(Number(child.sawKerfCm || 0) / 100) : '0'
+    ),
+    calibrationEnabled: child.calibrationCutEnabled === true,
+    ...(longitudinalRate === undefined
+      ? {}
+      : { longitudinalCutRateToman: parseCanonicalDecimal(String(longitudinalRate)) }),
+    ...(crossRate === undefined
+      ? {}
+      : { crossCutRateToman: parseCanonicalDecimal(String(crossRate)) })
+  };
+};
+
 export const replayRemainingStoneAllocations = ({
   products,
   sourceRowId,
@@ -219,6 +281,7 @@ export const replayRemainingStoneAllocations = ({
       ok: false,
       products,
       conflicts: [{
+        kind: 'source-missing',
         childRowId: '',
         childLabel: 'محصول منبع',
         allocationId: '',
@@ -255,6 +318,7 @@ export const replayRemainingStoneAllocations = ({
           .find(group => group.key === expectation.groupKey)?.quantity || 0;
       if (actualQuantity !== expectation.expectedQuantity) {
         conflicts.push({
+          kind: 'inventory-changed',
           childRowId: child.rowId || '',
           childLabel: 'گروه باقی‌مانده',
           allocationId: expectation.groupKey,
@@ -267,8 +331,9 @@ export const replayRemainingStoneAllocations = ({
     const addOnResult = recalculateRemainingChildAddOns(child);
     if (!addOnResult.ok) {
       conflicts.push({
+        kind: 'add-on',
         childRowId: child.rowId || '',
-        childLabel: child.stoneName || child.product?.namePersian || `محصول ${childIndex + 1}`,
+        childLabel: child.stoneName || child.product?.namePersian || 'محصول باقی‌مانده',
         allocationId: getAllocationId(child),
         reason: addOnResult.reason || 'افزونه محصول با هندسه جدید سازگار نیست.'
       });
@@ -325,8 +390,9 @@ export const replayRemainingStoneAllocations = ({
 
     if (!successfulAllocation) {
       conflicts.push({
+        kind: 'capacity',
         childRowId: child.rowId || '',
-        childLabel: child.stoneName || child.product?.namePersian || `محصول ${childIndex + 1}`,
+        childLabel: child.stoneName || child.product?.namePersian || 'محصول باقی‌مانده',
         allocationId: row.id,
         reason: availableInventory.length > 0 ? lastReason : 'هیچ سنگ باقی‌مانده‌ای پس از محاسبه هندسه منبع موجود نیست.'
       });
@@ -395,6 +461,17 @@ export const replayRemainingStoneAllocations = ({
 
     updatedChildren.set(childIndex, {
       ...recalculatedChild,
+      remainderChildPolicyInput: createRemainderChildPolicyInput({
+        child: recalculatedChild,
+        sourceRowId,
+        stock,
+        allocationId: row.id,
+        allocationOrder,
+        row,
+        cuttingBreakdown,
+        physicalPieces,
+        sourcePieceQuantities: successfulAllocation.sourcePieceQuantitiesByRow.get(row.id)
+      }),
       parentProductIndex: sourceIndex,
       parentProductRowId: sourceRowId,
       remainingStoneAllocationOrder: allocationOrder,
@@ -470,7 +547,110 @@ export const replayRemainingStoneAllocations = ({
   return { ok: true, products: nextProducts, conflicts: [] };
 };
 
+/**
+ * Checks persisted remaining-stone compatibility and then runs the same
+ * allocation replay used by the save path without mutating the contract draft.
+ */
+export const getRemainingStoneDraftFieldErrors = ({
+  products,
+  draftProduct,
+  lastEditedField
+}: {
+  products: readonly ContractProduct[];
+  draftProduct: ContractProduct;
+  lastEditedField: RemainingStoneDraftField;
+}): RemainingStoneDraftFieldErrors => {
+  const rowId = draftProduct.rowId;
+  const sourceRowId =
+    draftProduct.parentProductRowId ||
+    draftProduct.meta?.remainingSource?.sourceProductRowId ||
+    (rowId && products.some(product => product.parentProductRowId === rowId)
+      ? rowId
+      : undefined);
+  if (!rowId || !sourceRowId) return {};
+
+  const currentIndex = products.findIndex(product => product.rowId === rowId);
+  if (currentIndex < 0) return {};
+  const currentProduct = products[currentIndex];
+  if (
+    sourceRowId !== rowId &&
+    !currentProduct.longitudinalPolicyInput &&
+    draftProduct.longitudinalPolicyInput
+  ) {
+    return {
+      source: 'اطلاعات منبع این محصول قابل ویرایش نیست؛ محصول را حذف کنید و دوباره از سنگ باقی‌مانده بسازید.'
+    };
+  }
+  const candidateProducts = products.map((product, index) =>
+    index === currentIndex ? draftProduct : product
+  );
+  const replay = replayRemainingStoneAllocations({
+    products: candidateProducts,
+    sourceRowId
+  });
+  if (replay.ok) return {};
+
+  const sourceConflict = replay.conflicts.find(conflict => conflict.kind === 'source-missing');
+  if (sourceConflict) {
+    return { source: 'سنگ منبع این محصول پیدا نشد؛ سنگ باقی‌مانده را دوباره انتخاب کنید.' };
+  }
+  const inventoryConflict = replay.conflicts.find(conflict => conflict.kind === 'inventory-changed');
+  if (inventoryConflict) {
+    return { quantity: 'موجودی سنگ باقی‌مانده تغییر کرده است؛ تعداد قابل‌استفاده را دوباره انتخاب کنید.' };
+  }
+  const addOnConflict = replay.conflicts.find(conflict => conflict.kind === 'add-on');
+  if (addOnConflict) {
+    if (addOnConflict.childRowId === rowId) {
+      return {
+        operations: `ابزار یا پرداخت «${addOnConflict.childLabel}» با ابعاد جدید سازگار نیست؛ مقدار آن را اصلاح کنید یا آن مورد را حذف کنید.`
+      };
+    }
+    return {
+      source: `این تغییر، ابزار یا پرداخت «${addOnConflict.childLabel}» را نامعتبر می‌کند؛ مقدار تغییرکرده را به حالت قبلی بازگردانید یا عملیات آن محصول را اصلاح کنید.`
+    };
+  }
+  const capacityConflicts = replay.conflicts.filter(conflict => conflict.kind === 'capacity');
+  if (capacityConflicts.length === 0) return {};
+
+  const conflictBelongsToDraft = capacityConflicts.some(
+    conflict => conflict.childRowId === rowId
+  );
+  const editingSource = sourceRowId === rowId;
+  if (editingSource && !conflictBelongsToDraft) {
+    const sourceMessages: Record<RemainingStoneDraftField, string> = {
+      length: 'تغییر طول برای محصول وابسته سنگ کافی باقی نمی‌گذارد؛ طول را به مقدار قبلی بازگردانید.',
+      width: 'تغییر عرض برای محصول وابسته سنگ کافی باقی نمی‌گذارد؛ عرض را به مقدار قبلی بازگردانید.',
+      quantity: 'تغییر تعداد برای محصول وابسته سنگ کافی باقی نمی‌گذارد؛ تعداد را به مقدار قبلی بازگردانید.',
+      area: 'تغییر مترمربع برای محصول وابسته سنگ کافی باقی نمی‌گذارد؛ مترمربع را به مقدار قبلی بازگردانید.',
+      source: 'تغییر منبع اسلب برای محصول وابسته سنگ کافی باقی نمی‌گذارد؛ منبع را به مقدار قبلی بازگردانید یا ظرفیت آن را بیشتر کنید.'
+    };
+    return { [lastEditedField]: sourceMessages[lastEditedField] };
+  }
+  const dependentSuffix = conflictBelongsToDraft
+    ? 'از ظرفیت سنگ باقی‌مانده بیشتر است'
+    : 'برای محصول وابسته سنگ کافی باقی نمی‌گذارد';
+  const messages: Record<RemainingStoneDraftField, string> = {
+    length: `طول واردشده ${dependentSuffix}؛ طول را کاهش دهید.`,
+    width: `عرض واردشده ${dependentSuffix}؛ عرض را کاهش دهید.`,
+    quantity: `تعداد واردشده ${dependentSuffix}؛ تعداد را کاهش دهید.`,
+    area: `مترمربع واردشده ${dependentSuffix}؛ مترمربع را کاهش دهید.`,
+    source: `منبع انتخاب‌شده ${dependentSuffix}؛ منبع بزرگ‌تری انتخاب کنید.`
+  };
+  return { [lastEditedField]: messages[lastEditedField] };
+};
+
 export const formatRemainingStoneReplayConflicts = (conflicts: RemainingStoneReplayConflict[]): string =>
   conflicts
-    .map((conflict, index) => `${index + 1}. ${conflict.childLabel}: ${conflict.reason}`)
+    .map((conflict) => {
+      if (conflict.kind === 'source-missing') {
+        return 'سنگ منبع پیدا نشد؛ سنگ باقی‌مانده را دوباره انتخاب کنید.';
+      }
+      if (conflict.kind === 'inventory-changed') {
+        return 'موجودی سنگ باقی‌مانده تغییر کرده است؛ تعداد قابل‌استفاده را دوباره انتخاب کنید.';
+      }
+      if (conflict.kind === 'add-on') {
+        return `ابزار یا پرداخت «${conflict.childLabel}» با ابعاد محصول سازگار نیست؛ مقدار آن را اصلاح کنید یا آن مورد را حذف کنید.`;
+      }
+      return `ابعاد یا تعداد «${conflict.childLabel}» از سنگ باقی‌مانده بیشتر است؛ مقدار واردشده را کاهش دهید.`;
+    })
     .join('\n');

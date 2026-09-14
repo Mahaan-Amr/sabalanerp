@@ -19,6 +19,7 @@ import type {
   ContractProduct,
   ContractUsageType,
   Product,
+  RemainingStone,
   StoneFinishing,
   SubService
 } from '../../types/contract.types';
@@ -40,8 +41,13 @@ import {
 import { longitudinalCutRateSnapshot } from '../product-modal-system/productModalState';
 import {
   useLongitudinalCalculationWorker,
+  useRemainingStoneDraftValidationWorker,
   useSlabCalculationWorker
 } from '../../hooks/useCanonicalProductCalculationWorker';
+import {
+  getRemainingStoneDraftFieldErrors,
+  type RemainingStoneDraftField
+} from '../../services/remainingStoneAllocationReplayService';
 
 const POLICY_VERSION = {
   calculationPolicyVersion: 'calculation-v1',
@@ -52,6 +58,28 @@ const POLICY_VERSION = {
 
 const centimetersToMeters = (value: number) =>
   parseCanonicalDecimal(String(value / 100));
+
+const packingRemaindersToInventory = (remainders: readonly {
+  remainingStoneId: string;
+  widthMeters: string;
+  lengthMeters: string;
+  sourceBatchId: string;
+  sourceOrdinal: number;
+  xMeters: string;
+  yMeters: string;
+}[]): RemainingStone[] => remainders.map(remainder => ({
+  id: remainder.remainingStoneId,
+  width: Number(remainder.widthMeters) * 100,
+  length: Number(remainder.lengthMeters),
+  squareMeters: Number(remainder.widthMeters) * Number(remainder.lengthMeters),
+  isAvailable: true,
+  sourceCutId: `${remainder.sourceBatchId}:${remainder.sourceOrdinal}`,
+  position: {
+    startWidth: Number(remainder.xMeters) * 100,
+    startLength: Number(remainder.yMeters)
+  },
+  quantity: 1
+}));
 
 const catalogFacts = (product: Product) => {
   const motherLength = Number(product.motherLengthValue);
@@ -161,6 +189,7 @@ export interface CompactProductConfigurationModalProps {
   readonly getCuttingTypePricePerMeter: (code: string) => number | null;
   readonly subServices: readonly SubService[];
   readonly stoneFinishings: readonly StoneFinishing[];
+  readonly products: readonly ContractProduct[];
   readonly error?: string;
 }
 
@@ -180,11 +209,28 @@ export function CompactProductConfigurationModal({
   getCuttingTypePricePerMeter,
   subServices,
   stoneFinishings,
+  products,
   error
 }: CompactProductConfigurationModalProps) {
   const [pending, setPending] = React.useState(false);
   const pendingRef = React.useRef(false);
   const [showValidation, setShowValidation] = React.useState(false);
+  const [lastRemainingStoneField, setLastRemainingStoneField] =
+    React.useState<RemainingStoneDraftField>();
+  const [invalidEntryFields, setInvalidEntryFields] = React.useState<Set<string>>(
+    () => new Set()
+  );
+  const updateEntryValidity = React.useCallback((fieldId: string, invalid: boolean) => {
+    setInvalidEntryFields(previous => {
+      const next = new Set(previous);
+      if (invalid) next.add(fieldId);
+      else next.delete(fieldId);
+      return next;
+    });
+  }, []);
+  React.useEffect(() => {
+    setInvalidEntryFields(new Set());
+  }, [currentProductType, productConfig.rowId]);
   React.useEffect(() => {
     const root = document.documentElement;
     const scrollPosition = window.scrollY;
@@ -513,6 +559,8 @@ export function CompactProductConfigurationModal({
   ]);
 
   const updateLongitudinal = (input: LongitudinalProductInput) => {
+    setShowValidation(true);
+    setLastRemainingStoneField(input.lastManualField);
     setLengthUnit(input.lengthDisplayUnit);
     setWidthUnit(input.widthDisplayUnit);
     setIsMandatory(input.mandatoryEnabled);
@@ -544,6 +592,12 @@ export function CompactProductConfigurationModal({
   };
 
   const updateSlab = (input: SlabPolicyInput) => {
+    setShowValidation(true);
+    setLastRemainingStoneField(
+      input.sourceRows !== productConfig.slabPolicyInput?.sourceRows
+        ? 'source'
+        : input.lastManualField ?? 'length'
+    );
     setLengthUnit(input.lengthDisplayUnit);
     setWidthUnit(input.widthDisplayUnit);
     setProductConfig(previous => ({
@@ -655,11 +709,86 @@ export function CompactProductConfigurationModal({
   ]);
 
   const updateOperations = (input: ProductOperationsInput) => {
+    setShowValidation(true);
     setProductConfig(previous => ({
       ...previous,
       operationPolicyInput: input
     }));
   };
+
+  const remainingStoneDraft = React.useMemo(() => {
+    if (!productConfig.rowId) return {};
+    const existingProduct = products.find(
+      product => product.rowId === productConfig.rowId
+    );
+    if (!existingProduct) return {};
+    const ownsRemainingChildren = products.some(
+      product => product.parentProductRowId === existingProduct.rowId
+    );
+    if (
+      currentProductType === 'longitudinal' &&
+      productConfig.longitudinalPolicyInput &&
+      longitudinalWorker.calculation?.ok
+    ) {
+      const input = productConfig.longitudinalPolicyInput;
+      const result = longitudinalWorker.calculation.result;
+      return {
+        draftProduct: {
+          ...existingProduct,
+          ...productConfig,
+          longitudinalPolicyInput: input,
+          length: numberInUnit(result.lengthMeters, input.lengthDisplayUnit),
+          width: numberInUnit(result.widthMeters, input.widthDisplayUnit),
+          lengthUnit: input.lengthDisplayUnit,
+          widthUnit: input.widthDisplayUnit,
+          quantity: Number(result.quantity ?? productConfig.quantity ?? existingProduct.quantity ?? 0),
+          squareMeters: Number(result.requestedAreaSquareMeters),
+          ...(ownsRemainingChildren
+            ? { remainingStoneSourceInventory: packingRemaindersToInventory(result.remainders) }
+            : {})
+        } as ContractProduct,
+        lastEditedField: lastRemainingStoneField ?? input.lastManualField
+      };
+    }
+    if (
+      currentProductType === 'slab' &&
+      productConfig.slabPolicyInput &&
+      slabWorker.calculation?.ok
+    ) {
+      const input = productConfig.slabPolicyInput;
+      const result = slabWorker.calculation.result;
+      return {
+        draftProduct: {
+          ...existingProduct,
+          ...productConfig,
+          slabPolicyInput: input,
+          length: numberInUnit(result.lengthMeters, input.lengthDisplayUnit),
+          width: numberInUnit(result.widthMeters, input.widthDisplayUnit),
+          lengthUnit: input.lengthDisplayUnit,
+          widthUnit: input.widthDisplayUnit,
+          quantity: result.quantity,
+          squareMeters: Number(result.finishedAreaSquareMeters),
+          ...(ownsRemainingChildren
+            ? { remainingStoneSourceInventory: packingRemaindersToInventory(result.packingPlan.remainders) }
+            : {})
+        } as ContractProduct,
+        lastEditedField: lastRemainingStoneField ?? input.lastManualField ?? 'length'
+      };
+    }
+    return {};
+  }, [
+    currentProductType,
+    longitudinalWorker.calculation,
+    lastRemainingStoneField,
+    productConfig,
+    products,
+    slabWorker.calculation
+  ]);
+  const remainingStoneFieldErrors = useRemainingStoneDraftValidationWorker({
+    products,
+    draftProduct: remainingStoneDraft.draftProduct,
+    lastEditedField: remainingStoneDraft.lastEditedField
+  });
 
   const facts = catalogFacts(selectedProduct);
   const title = isEditMode ? 'ویرایش تنظیمات محصول' : 'تنظیمات محصول';
@@ -676,6 +805,12 @@ export function CompactProductConfigurationModal({
     });
   };
   const validateDraft = () => {
+    const invalidEntryField = invalidEntryFields.values().next().value as string | undefined;
+    if (invalidEntryField) {
+      setShowValidation(true);
+      focusValidationTarget(invalidEntryField);
+      return false;
+    }
     if (
       currentProductType === 'longitudinal' &&
       productConfig.longitudinalPolicyInput
@@ -715,6 +850,31 @@ export function CompactProductConfigurationModal({
               : first === 'squareMeterCutRateToman'
                 ? 'slab-square-meter-cut-rate'
                 : 'slab-length'
+        );
+        return false;
+      }
+    }
+    if (remainingStoneDraft.draftProduct && remainingStoneDraft.lastEditedField) {
+      const remainingErrors = getRemainingStoneDraftFieldErrors({
+        products,
+        draftProduct: remainingStoneDraft.draftProduct,
+        lastEditedField: remainingStoneDraft.lastEditedField
+      });
+      const first = Object.keys(remainingErrors)[0] as keyof typeof remainingErrors | undefined;
+      if (first) {
+        setShowValidation(true);
+        focusValidationTarget(
+          first === 'width'
+            ? currentProductType === 'slab' ? 'slab-width' : 'longitudinal-width'
+            : first === 'quantity'
+              ? currentProductType === 'slab' ? 'slab-quantity' : 'longitudinal-quantity'
+              : first === 'area'
+                ? currentProductType === 'slab' ? 'slab-area' : 'longitudinal-area'
+                : first === 'operations'
+                  ? 'product-operations'
+                  : first === 'source' && currentProductType === 'slab'
+                    ? 'slab-sources'
+                  : currentProductType === 'slab' ? 'slab-length' : 'longitudinal-length'
         );
         return false;
       }
@@ -833,6 +993,8 @@ export function CompactProductConfigurationModal({
                     showValidation={showValidation}
                     calculation={longitudinalWorker.calculation}
                     calculating={longitudinalWorker.calculating}
+                    liveErrors={remainingStoneFieldErrors}
+                    onEntryValidityChange={updateEntryValidity}
                   />
                 )}
               {currentProductType === 'slab' && productConfig.slabPolicyInput && (
@@ -842,6 +1004,8 @@ export function CompactProductConfigurationModal({
                   showValidation={showValidation}
                   calculation={slabWorker.calculation}
                   calculating={slabWorker.calculating}
+                  liveErrors={remainingStoneFieldErrors}
+                  onEntryValidityChange={updateEntryValidity}
                   createSourceIdentity={() =>
                     parseStableIdentity('slab-source-row', crypto.randomUUID())}
                 />
@@ -860,6 +1024,11 @@ export function CompactProductConfigurationModal({
               </label>
 
               <div id="product-operations" tabIndex={-1}>
+                {remainingStoneFieldErrors.operations && (
+                  <div role="alert" className="mb-2 text-xs font-semibold text-[var(--sds-danger)]">
+                    {remainingStoneFieldErrors.operations}
+                  </div>
+                )}
                 <OperationCollectionsSection
                   input={currentOperations}
                   onChange={updateOperations}

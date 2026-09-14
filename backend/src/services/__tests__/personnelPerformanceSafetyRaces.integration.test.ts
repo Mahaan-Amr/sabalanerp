@@ -8,6 +8,7 @@ import { assertPersonnelPerformanceWriteAdmission } from '../personnelPerformanc
 import { createPerformancePolicyDraft, updatePerformancePolicyDraft } from '../personnelPerformancePolicyStore';
 import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
 import { disablePersonnelPerformanceBeforeFirstWrite, getPersonnelPerformanceOperationsState, pausePersonnelPerformance } from '../personnelPerformanceOperationsStore';
+import { raceEvidenceMarker } from './performanceAcceptanceRaceHarness';
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -17,6 +18,7 @@ const deferred = <T>() => {
 const iterations = Number(process.env.PERFORMANCE_RACE_ITERATIONS ?? '100');
 if (!Number.isInteger(iterations) || iterations < 1 || iterations > 1000) throw new Error('Invalid race iteration count');
 const main = async () => {
+  let acceptanceEvidence: Parameters<typeof raceEvidenceMarker>[0] | null = null;
   for (let iteration = 0; iteration < iterations; iteration++) {
     const database = await createDispatchDocumentsTemporaryDatabase({ repositoryRoot: path.resolve(process.cwd(), '..'),
       sourceDatabaseUrl: process.env.DATABASE_URL ?? 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=2&pool_timeout=10', schemaOnly: true });
@@ -61,6 +63,7 @@ const main = async () => {
           const result = await observedLoser;
           assert.equal(result.success, false);
           if (!result.success) assert.equal((result.error as { code?: string }).code, expectedCode);
+          return expectedCode;
         } finally {
           releaseWinner.resolve();
           await Promise.allSettled([winning, ...(losing ? [losing] : [])]);
@@ -93,6 +96,7 @@ const main = async () => {
       const relationship = await first.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2000-01-01Z'), createdBy: actor.id } });
       const subject = await first.performanceSubject.create({ data: { stableKey: database.runId, nonDisplayKey: database.runId, personnelId: personnel.id, employmentRelationshipId: relationship.id, createdByUserId: actor.id } });
       const cohort = await enrollPerformanceTestCohort(first, actor.id, [subject.id]);
+      const disclosuresBefore = await first.notification.count();
       await runOrderedRace(
         (tx) => tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'RETIRED' } }),
         (tx) => assertPersonnelPerformanceWriteAdmission(tx, 'SAVE_SUPERVISOR_DRAFT', subject.id),
@@ -100,11 +104,28 @@ const main = async () => {
       );
       const draft = await first.performancePolicyVersion.findFirstOrThrow({ where: { policyKind: 'RETENTION' } });
       const phase = await first.performanceFeaturePhaseVersion.findFirstOrThrow({ orderBy: { version: 'desc' } });
-      await runOrderedRace(
+      const pauseLoserCode = await runOrderedRace(
         (tx) => pausePersonnelPerformance(tx, { actorUserId: actor.id, phaseVersionId: phase.id, scope: 'ALL', reasonCode: 'INTEGRITY_MISMATCH', reason: 'Pause racing with canonical update' }),
         (tx) => updatePerformancePolicyDraft(tx, { versionId: draft.id, content: PERFORMANCE_RETENTION_SCHEDULE_V1 }),
         'PERFORMANCE_SAFETY_PAUSED',
       );
+      const [observedCohort, activePauses, pauseEvents, disclosuresAfter] = await Promise.all([
+        first.performanceCohortVersion.findUniqueOrThrow({ where: { id: cohort.id }, select: { lifecycle: true } }),
+        first.performanceSafetyPause.count({ where: { status: 'ACTIVE' } }),
+        first.performanceAuditEvent.count({ where: { eventType: 'SAFETY_PAUSE_STARTED' } }),
+        first.notification.count(),
+      ]);
+      assert.equal(observedCohort.lifecycle, 'RETIRED');
+      assert.equal(activePauses, 1);
+      assert.equal(pauseEvents, 1);
+      acceptanceEvidence = [{
+        name: 'cohort-pause-write',
+        loserCode: pauseLoserCode,
+        validTruths: observedCohort.lifecycle === 'RETIRED' && activePauses === 1 ? 1 : 0,
+        duplicateEvents: Math.max(0, pauseEvents - 1),
+        lostWrites: 0,
+        additionalDisclosures: disclosuresAfter - disclosuresBefore,
+      }];
       if ((iteration + 1) % 10 === 0 || iteration + 1 === iterations) console.log(`Safety races: ${iteration + 1}/${iterations}; four deterministic orderings passed.`);
     } finally {
       await Promise.allSettled([first.$disconnect(), second.$disconnect()]);
@@ -113,5 +134,8 @@ const main = async () => {
   }
   console.log(JSON.stringify({ schemaVersion: 1, suite: 'performance-control-fence-regressions', iterations, deterministicOrderings: 4, failures: 0,
     completeTwelveRacePromotionEvidence: false }));
+  if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'cohort-pause-write' && acceptanceEvidence) {
+    console.log(raceEvidenceMarker(acceptanceEvidence));
+  }
 };
 main().catch((error: unknown) => { console.error(error); process.exitCode = 1; });

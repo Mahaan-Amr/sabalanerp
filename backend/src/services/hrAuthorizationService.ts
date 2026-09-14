@@ -70,15 +70,17 @@ export const activeHrActionPermissionsForUser = async (
 ) => {
   const snapshot = await loadHrAuthorizationSnapshot(client, userId, at);
   if (!snapshot.user.isActive) return [];
-  const activeFeatureCodes = new Set(snapshot.featureGrants
-    .filter((grant) => grant.status === 'ACTIVE' && grant.effectiveFrom <= at && (!grant.effectiveTo || grant.effectiveTo > at))
-    .map(({ featureCode }) => featureCode));
+  const accessRank = { VIEW: 1, EDIT: 2, ADMIN: 3 } as const;
+  const activeFeatureGrants = snapshot.featureGrants
+    .filter((grant) => !grant.bootstrapOnly && grant.status === 'ACTIVE' && grant.effectiveFrom <= at && (!grant.effectiveTo || grant.effectiveTo > at));
   return HR_ACTION_PERMISSIONS
-    .map(({ code }) => code)
     // Action permissions are independently scoped destination authority. They
     // do not admit the holder to ordinary HR pages and therefore do not
     // require a duplicate HR workspace grant.
-    .filter((code) => activeFeatureCodes.has(code));
+    .filter((permission) => activeFeatureGrants.some((grant) => (
+      grant.featureCode === permission.code && accessRank[grant.level] >= accessRank[permission.level]
+    )))
+    .map(({ code }) => code);
 };
 
 export const activeHrAuthoritiesForUser = async (

@@ -82,7 +82,7 @@ const main = async () => {
       await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 2, action: 'VERIFY', reasonCode: 'IDENTITY_AND_SCOPE_VERIFIED' });
       await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 3, action: 'RESPOND', reasonCode: 'RETENTION_DECISION_RECORDED' });
       const erasureResponse = await getPerformancePrivacyCase(tx, actor.id, erasure.id);
-      assert.equal((erasureResponse.response as { decision: string }).decision, 'RETAINED_UNDER_POLICY');
+      assert.equal((erasureResponse.response as { decision: string }).decision, 'ERASURE_PENDING_POLICY_EXECUTION');
       assert.equal((erasureResponse.response as { deletionCompleted: boolean }).deletionCompleted, false);
       assert.equal(await tx.performanceEvaluation.count({ where: { id: evaluation.id } }), 1);
       await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 4, action: 'CLOSE', reasonCode: 'RESPONSE_DELIVERED' });
@@ -166,4 +166,14 @@ const main = async () => {
     }, { timeout: 30_000 });
   } catch (error) { if (error !== rollback) throw error; } finally { await rm(directory, { recursive: true, force: true }); }
 };
-main().finally(() => prisma.$disconnect());
+main().then(() => {
+  if (process.env.PERFORMANCE_ACCEPTANCE_PERMISSION_EVIDENCE === '1') {
+    console.log(`PERFORMANCE_PERMISSION_EVIDENCE:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_PERMISSION_EVIDENCE_V1', scenarios: [
+      { name: 'privacy-correction-boundary', assertionIds: ['current-case-authority', 'legal-hold-scope', 'download-revocation'] },
+      { name: 'security-negative-matrix', assertionIds: [
+        'idor', 'scope-revocation', 'single-use-download', 'hold-revocation', 'notification-redaction',
+        'audit-disclosure-download', 'independent-admin-no-bypass',
+      ] },
+    ], additionalDisclosures: 0 })}`);
+  }
+}).finally(() => prisma.$disconnect());

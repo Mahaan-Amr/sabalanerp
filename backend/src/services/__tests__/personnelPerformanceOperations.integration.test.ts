@@ -1,6 +1,7 @@
 import { enablePerformanceTestRelease, enrollPerformanceTestCohort, publishPerformanceTestRetentionPolicy } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { PERFORMANCE_RETENTION_SCHEDULE_V1 } from '../personnelPerformanceRetention';
 import { canonicalPerformanceHash } from '../personnelPerformancePolicy';
 import { createPerformancePolicyDraft, updatePerformancePolicyDraft, DEFAULT_CURRENT_LEVEL_POLICY_CONTENT } from '../personnelPerformancePolicyStore';
@@ -9,15 +10,18 @@ import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disa
 import { resolvePersonnelPerformanceWriteGate, assertPersonnelPerformanceWriteAdmission } from '../personnelPerformanceRolloutPolicy';
 import { restrictPerformanceEvidence } from '../personnelPerformanceRestrictions';
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
-import { configurePerformanceOperationalRoute } from '../personnelPerformanceMonitoringStore';
 import {
   activatePerformanceCohort,
   activateDuePerformanceCohorts,
   decidePerformanceRollout,
   proposePerformanceCohort,
+  recordPerformancePromotionEvidence,
   recordPerformanceTrainingEvidence,
+  revokePerformancePromotionEvidence,
   resumePersonnelPerformance,
 } from '../personnelPerformanceRolloutStore';
+import { performancePromotionAttestationMessage, type PerformancePromotionEvidenceReport,
+  type PerformanceRuntimeReleaseIdentity } from '../personnelPerformancePromotionEvidence';
 
 const rollback = Symbol('rollback-performance-operations');
 const main = async () => {
@@ -83,8 +87,13 @@ const main = async () => {
       await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:rollout-activation`, userId: actor.id,
         featureCode: 'TECHNICALLY_ACTIVATE_PERFORMANCE_COHORT', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'),
         grantedByUserId: actor.id, reason: 'Isolated rollout governance' } });
+      await assert.rejects(() => proposePerformanceCohort(tx, { actorUserId: actor.id, cohortKey: `${suffix}:out-of-order`,
+        stage: 'TEN_PERCENT', targetPhase: 'EXPANSION_RETIREMENT', subjectIds: [subject.id],
+        readinessHash: canonicalPerformanceHash([readinessSourceHash]), reason: 'Skipping the required pilot stage' }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_COHORT_STAGE_OUT_OF_ORDER');
       const proposal = await proposePerformanceCohort(tx, { actorUserId: actor.id, cohortKey: `${suffix}:governed`, stage: 'PILOT',
-        subjectIds: [subject.id], readinessHash: canonicalPerformanceHash([readinessSourceHash]), reason: 'Isolated governed cohort proposal' });
+        targetPhase: 'EXPANSION_RETIREMENT', subjectIds: [subject.id], readinessHash: canonicalPerformanceHash([readinessSourceHash]),
+        reason: 'Isolated governed cohort proposal' });
       assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: proposal.id, eventType: 'PERFORMANCE_COHORT_PROPOSED' } }));
       await assert.rejects(() => decidePerformanceRollout(tx, { actorUserId: actor.id, scopeType: 'COHORT', scopeId: proposal.id,
         ownerType: 'UNSUPPORTED_OWNER' as 'HUMAN_RESOURCES', action: 'APPROVE', reasonCode: 'READINESS_VERIFIED', evidenceHash }),
@@ -98,39 +107,112 @@ const main = async () => {
         ['SYSTEM_OWNER', 'APPROVE_PERFORMANCE_COHORT_SYSTEM', 'APPROVE_PERFORMANCE_RESUME_SYSTEM'],
       ] as const;
       const owners: Array<{ owner: { id: string }; ownerType: typeof ownerDefinitions[number][0] }> = [];
+      const promotionKey = Buffer.alloc(32, 23);
+      const [databaseIdentity] = await tx.$queryRaw<Array<{ metadata: { migrations: unknown; policies: unknown } }>>`
+        SELECT json_build_object(
+          'migrations', (SELECT json_agg(row_to_json(m) ORDER BY m.migration_name) FROM
+            (SELECT migration_name, checksum, finished_at IS NOT NULL AS finished,
+              rolled_back_at IS NOT NULL AS rolled_back FROM _prisma_migrations) m),
+          'policies', (SELECT json_agg(row_to_json(p) ORDER BY p."policyKind", p.version) FROM
+            (SELECT "policyKind", version, lifecycle, "effectiveFrom", "contentHash" FROM performance_policy_versions) p)
+        ) AS metadata`;
+      const release: PerformanceRuntimeReleaseIdentity = { commit: 'a'.repeat(40), sourceHash: 'b'.repeat(64),
+        schemaHash: canonicalPerformanceHash(databaseIdentity.metadata.migrations),
+        policyHash: canonicalPerformanceHash(databaseIdentity.metadata.policies),
+        infrastructureHash: 'e'.repeat(64), images: { backend: `sha256:${'1'.repeat(64)}`,
+          frontend: `sha256:${'2'.repeat(64)}`, inquiry: `sha256:${'3'.repeat(64)}` } };
+      Object.assign(process.env, { PERFORMANCE_PROMOTION_ATTESTATION_KEY_ID: 'promotion-test-v1',
+        PERFORMANCE_PROMOTION_ATTESTATION_KEY_BASE64: promotionKey.toString('base64'), PERFORMANCE_RELEASE_COMMIT: release.commit,
+        PERFORMANCE_RELEASE_SOURCE_HASH: release.sourceHash, PERFORMANCE_RELEASE_SCHEMA_HASH: release.schemaHash,
+        PERFORMANCE_RELEASE_POLICY_HASH: release.policyHash, PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH: release.infrastructureHash,
+        PERFORMANCE_RELEASE_BACKEND_IMAGE: release.images.backend, PERFORMANCE_RELEASE_FRONTEND_IMAGE: release.images.frontend,
+        PERFORMANCE_RELEASE_INQUIRY_IMAGE: release.images.inquiry,
+        PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH: release.infrastructureHash,
+        DEPLOYMENT_BACKEND_IMAGE: release.images.backend, DEPLOYMENT_FRONTEND_IMAGE: release.images.frontend,
+        DEPLOYMENT_INQUIRY_IMAGE: release.images.inquiry });
+      const reportClock = new Date();
+      const unsigned: Omit<PerformancePromotionEvidenceReport, 'attestation'> = { schemaVersion: 1, decision: 'EVIDENCE_COMPLETE',
+        productionActivationAuthorized: false, manifestHash: 'f'.repeat(64), releaseIdentityHash: canonicalPerformanceHash(release), release,
+        target: { phase: 'EXPANSION_RETIREMENT', cohortVersionId: proposal.id, cohortStage: 'PILOT', membershipHash: proposal.membershipHash,
+          readyPopulation: 1, memberCount: 1 },
+        blockers: [],
+        gates: ['SCHEMA_PROTECTION', 'POLICY_DARK_LAUNCH', 'READINESS', 'SUPERVISOR_HR_PILOT', 'RESULT_LEVEL_BADGE',
+          'ANALYTICS_RANKING_CALIBRATION', 'PDF_EXCEL_EXPORT', 'CONSEQUENCE_HANDOFF', 'EXPANSION_RETIREMENT']
+          .map((name, index) => ({ number: index + 1, name, status: 'PASS' as const })),
+        verifiedAt: new Date(reportClock.getTime() - 1_000).toISOString(), validUntil: new Date(reportClock.getTime() + 3_600_000).toISOString() };
+      const report: PerformancePromotionEvidenceReport = { ...unsigned, attestation: { keyId: 'promotion-test-v1', algorithm: 'HMAC-SHA256',
+        signature: createHmac('sha256', promotionKey).update(performancePromotionAttestationMessage(unsigned)).digest('hex') } };
+      await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:promotion-evidence`, userId: actor.id,
+        featureCode: 'RECORD_PERFORMANCE_PROMOTION_EVIDENCE', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'),
+        grantedByUserId: actor.id, reason: 'Isolated promotion evidence authentication' } });
+      const promotionEvidence = await recordPerformancePromotionEvidence(tx, { actorUserId: actor.id, report });
+      assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: promotionEvidence.id,
+        eventType: 'PERFORMANCE_PROMOTION_EVIDENCE_AUTHENTICATED' } }));
       for (const [ownerType, cohortPermission, resumePermission] of ownerDefinitions) {
         const owner = await tx.user.create({ data: { email: `${suffix}-${ownerType}@example.invalid`, username: `${suffix}-${ownerType}`,
           password: 'not-used', firstName: 'مالک', lastName: ownerType } });
         owners.push({ owner, ownerType });
-        // Operational ownership is a separate prerequisite from rollout approval.
-        // Keep both explicit so the eligibility assertions reach their intended gate.
-        await configurePerformanceOperationalRoute(tx, { actorUserId: actor.id, routeKey: ownerType,
-          recipientUserId: owner.id, verifiedAt: new Date(), reason: 'Isolated operational route owner fixture' });
         for (const featureCode of [cohortPermission, resumePermission]) await tx.hrFeatureAccessGrant.create({ data: {
           stableKey: `${suffix}:${ownerType}:${featureCode}`, userId: owner.id, featureCode, level: 'ADMIN',
           effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated rollout owner' } });
+        if (ownerType === 'HUMAN_RESOURCES') await assert.rejects(() => decidePerformanceRollout(tx, { actorUserId: owner.id,
+          scopeType: 'COHORT', scopeId: proposal.id, ownerType, action: 'APPROVE', reasonCode: 'HASH_ONLY_MUST_FAIL', evidenceHash }),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_PROMOTION_EVIDENCE_REQUIRED');
         await decidePerformanceRollout(tx, { actorUserId: owner.id, scopeType: 'COHORT', scopeId: proposal.id, ownerType,
-          action: 'APPROVE', reasonCode: 'READINESS_VERIFIED', evidenceHash });
+          action: 'APPROVE', reasonCode: 'READINESS_VERIFIED', promotionEvidenceId: promotionEvidence.id });
       }
       const [activationClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
       await assert.rejects(() => activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
         effectiveFrom: new Date('2100-01-01Z'), reason: 'Training expires before the scheduled activation' }),
       (error: { code?: string }) => error.code === 'PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED');
       assert.equal((await tx.performanceCohortVersion.findUniqueOrThrow({ where: { id: proposal.id } })).lifecycle, 'DRAFT');
-      const effectiveFrom = new Date(activationClock.now.getTime() + 1_000);
+      const effectiveFrom = new Date(activationClock.now.getTime() + 2_000);
+      await assert.rejects(() => activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
+        effectiveFrom, reason: 'Missing monitoring owners must fail' }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_OPERATIONAL_OWNER_MISSING');
+      for (const routeKey of ['SYSTEM_OWNER', 'HUMAN_RESOURCES', 'SECURITY_PRIVACY'] as const) {
+        await tx.performanceOperationalRoute.create({ data: { routeKey, recipientUserId: actor.id, verifiedAt: new Date(),
+          configuredById: actor.id, reason: 'Isolated promotion monitoring route' } });
+      }
+      process.env.PERFORMANCE_RELEASE_POLICY_HASH = '0'.repeat(64);
+      await assert.rejects(() => activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
+        effectiveFrom, reason: 'Changed policy identity must fail' }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_PROMOTION_EVIDENCE_POLICY_CHANGED');
+      process.env.PERFORMANCE_RELEASE_POLICY_HASH = release.policyHash;
+      process.env.PERFORMANCE_RELEASE_SOURCE_HASH = '0'.repeat(64);
+      await assert.rejects(() => activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
+        effectiveFrom, reason: 'Changed release identity must fail' }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_PROMOTION_EVIDENCE_RELEASE_CHANGED');
+      process.env.PERFORMANCE_RELEASE_SOURCE_HASH = release.sourceHash;
+      process.env.DEPLOYMENT_BACKEND_IMAGE = `sha256:${'9'.repeat(64)}`;
+      await assert.rejects(() => activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
+        effectiveFrom, reason: 'Running image mismatch must fail' }),
+      (error: { code?: string }) => error.code === 'PERFORMANCE_RELEASE_RUNTIME_IDENTITY_MISMATCH');
+      process.env.DEPLOYMENT_BACKEND_IMAGE = release.images.backend;
       const scheduled = await activatePerformanceCohort(tx, { actorUserId: actor.id, cohortVersionId: proposal.id,
         effectiveFrom, reason: 'Three independently approved owners' });
       assert.equal(scheduled.lifecycle, 'SCHEDULED');
       assert.ok(await tx.performanceAuditEvent.findFirst({ where: { aggregateId: proposal.id, eventType: 'PERFORMANCE_COHORT_SCHEDULED' } }));
+      await delay(Math.max(0, effectiveFrom.getTime() - Date.now() + 20));
       const securityOwner = owners.find(({ ownerType }) => ownerType === 'SECURITY_PRIVACY')!;
       await decidePerformanceRollout(tx, { actorUserId: securityOwner.owner.id, scopeType: 'COHORT', scopeId: proposal.id,
         ownerType: securityOwner.ownerType, action: 'VETO', reasonCode: 'LATE_SECURITY_VETO', evidenceHash });
-      await assert.rejects(() => activateDuePerformanceCohorts(tx, new Date(effectiveFrom.getTime() + 1)),
+      await assert.rejects(() => activateDuePerformanceCohorts(tx),
         (error: { code?: string }) => error.code === 'PERFORMANCE_ROLLOUT_APPROVALS_INCOMPLETE', 'a late veto blocks due activation');
       await decidePerformanceRollout(tx, { actorUserId: securityOwner.owner.id, scopeType: 'COHORT', scopeId: proposal.id,
-        ownerType: securityOwner.ownerType, action: 'APPROVE', reasonCode: 'SECURITY_VETO_RESOLVED', evidenceHash });
-      await assert.rejects(() => activateDuePerformanceCohorts(tx, new Date('2100-01-01Z')),
-        (error: { code?: string }) => error.code === 'PERFORMANCE_COHORT_ELIGIBILITY_EXPIRED', 'expired training blocks due activation');
+        ownerType: securityOwner.ownerType, action: 'APPROVE', reasonCode: 'SECURITY_VETO_RESOLVED', promotionEvidenceId: promotionEvidence.id });
+      process.env.DEPLOYMENT_BACKEND_IMAGE = `sha256:${'9'.repeat(64)}`;
+      await assert.rejects(() => activateDuePerformanceCohorts(tx),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_RELEASE_RUNTIME_IDENTITY_MISMATCH',
+        'due activation rechecks the actual running image identity');
+      process.env.DEPLOYMENT_BACKEND_IMAGE = release.images.backend;
+      await revokePerformancePromotionEvidence(tx, { actorUserId: actor.id, promotionEvidenceId: promotionEvidence.id,
+        reasonCode: 'CANDIDATE_REVOKED' });
+      await assert.rejects(() => activateDuePerformanceCohorts(tx),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_PROMOTION_EVIDENCE_REVOKED',
+        'revocation committed before due activation must fail closed');
+      assert.equal(await tx.performanceFeaturePhaseVersion.count({ where: { cohortVersionId: proposal.id } }), 0,
+        'failed due admission must not leak a future feature phase');
       const cohort = await enrollPerformanceTestCohort(tx, actor.id, [subject.id]);
       assert.equal((await assertPersonnelPerformanceWriteAdmission(tx, 'SAVE_SUPERVISOR_DRAFT', subject.id)).allowed, true);
       await tx.performanceCohortVersion.update({ where: { id: cohort.id }, data: { lifecycle: 'RETIRED' } });

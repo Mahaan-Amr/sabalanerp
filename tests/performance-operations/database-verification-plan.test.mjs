@@ -11,6 +11,9 @@ test('database collector routes shared-client suites through the migrated-clone 
     'src/services/__tests__/personnelPerformancePolicy.integration.test.ts',
     'src/services/__tests__/personnelPerformanceWorkflow.integration.test.ts',
     'src/services/__tests__/personnelPerformanceExportLineage.integration.test.ts',
+    'src/services/__tests__/personnelPerformancePromotionEvidenceRace.integration.test.ts',
+    'src/services/__tests__/personnelPerformanceErasure.integration.test.ts',
+    'src/services/__tests__/personnelPerformanceErasureRecovery.integration.test.ts',
     'src/services/__tests__/personnelPerformanceMonitoring.integration.test.ts',
     'src/services/__tests__/personnelPerformanceSafetyRaces.integration.test.ts',
   ]);
@@ -22,6 +25,7 @@ test('database collector routes shared-client suites through the migrated-clone 
     assert.equal(source.host, '127.0.0.1:55432');
     assert.equal(source.pathname, '/sabalanerp');
     assert.equal(check.env.NODE_ENV, 'test');
+    assert.equal(check.env.PERFORMANCE_ERASURE_BULK_THRESHOLD, '100');
     assert.equal(source.searchParams.get('pool_timeout'), '10');
     assert.equal(source.searchParams.get('connection_limit'), check.name.includes('lineage') ? '4' : '2');
   }

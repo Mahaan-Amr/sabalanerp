@@ -1,5 +1,6 @@
-import { PartnerInquiryViewV2Schema, partnerError, type PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
+import { PartnerInquiryViewV2Schema, type PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryView } from './inquiryPresentation';
+import { getPartnerSalesErrorMessage } from '../partnerSalesErrorMessage';
 
 export interface PartnerInquiryReadState {
   inquiry: PartnerInquiryView | null;
@@ -26,7 +27,7 @@ export function createPartnerInquiryReader(queries: PartnerQueryV2Port, inquiryI
         if (sequence !== request) return;
         if (!result.ok) {
           // A failed read is never permission to keep using an old approval.
-          publish({ inquiry: null, pending: false, error: partnerError(result.error.code).message });
+          publish({ inquiry: null, pending: false, error: getPartnerSalesErrorMessage(result.error) });
           return;
         }
         const parsed = PartnerInquiryViewV2Schema.safeParse(result.value);

@@ -80,9 +80,6 @@ const blankPerson = () => ({
   status: "ACTIVE",
   effectiveFrom: today(),
   positionId: "",
-  responsibleSupervisorAssignmentId: "",
-  performanceAllocationPercent: "100",
-  performanceContextReason: "ثبت زمینه عملکرد همراه تخصیص اولیه",
   confirmDuplicate: false,
   sourceCategory: "",
   reason: "",
@@ -92,9 +89,6 @@ const blankAssignment = () => ({
   type: "SECONDARY",
   effectiveFrom: today(),
   effectiveTo: "",
-  responsibleSupervisorAssignmentId: "",
-  performanceAllocationPercent: "100",
-  performanceContextReason: "ثبت زمینه عملکرد همراه تخصیص سازمانی",
   scheduleContributing: false,
 });
 const clearPersonnelScheduleDrafts = (userId: string) => {
@@ -154,12 +148,11 @@ export default function HrPersonnelPage() {
   const [success, setSuccess] = useState("");
   const [searchDraft, setSearchDraft] = useState(listState.search);
   const [form, setForm] = useState(blankPerson);
-  const [supervisors, setSupervisors] = useState<any[]>([]);
   const [assignmentRelationship, setAssignmentRelationship] = useState<
     string | null
   >(null);
   const [assignment, setAssignment] = useState(blankAssignment);
-  const [assignmentSupervisors, setAssignmentSupervisors] = useState<any[]>([]);
+  const [evaluablePersonnelIds, setEvaluablePersonnelIds] = useState<string[]>([]);
   const [endDates, setEndDates] = useState<Record<string, string>>({});
   const [actionPermissions, setActionPermissions] = useState<string[]>([]);
   const [canEditPersonnel, setCanEditPersonnel] = useState(false);
@@ -209,7 +202,7 @@ export default function HrPersonnelPage() {
           ...(expanded ? { focus: expanded } : {}),
         }),
         needsReference ? hrAPI.getOperationalReference("personnel") : Promise.resolve(null),
-        needsReference ? hrAuthorizationAPI.getMe() : Promise.resolve(null),
+        hrAuthorizationAPI.getMe(),
       ]);
       if (sequence !== loadSequence.current) return;
       if (peopleResult.status === "rejected") throw peopleResult.reason;
@@ -219,7 +212,10 @@ export default function HrPersonnelPage() {
           total: people.data.data.length,
           totalPages: 1,
       };
-      setRows(people.data.data);
+      setRows((current) => people.data.data.map((person: any) => ({
+        ...person,
+        performanceBadge: current.find((row: any) => row.id === person.id)?.performanceBadge,
+      })));
       setMeta(nextMeta);
       if (referenceResult.status === "fulfilled" && referenceResult.value) {
         const reference = referenceResult.value;
@@ -239,8 +235,20 @@ export default function HrPersonnelPage() {
             const badgeByPersonnel = new Map((badgeResponse.data.badges || []).map((item: any) => [item.personnelId, item.badge]));
             if (sequence === loadSequence.current) setRows(people.data.data.map((person: any) => ({ ...person, performanceBadge: badgeByPersonnel.get(person.id) || null })));
           } catch {
-            if (sequence === loadSequence.current) setRows(people.data.data.map((person: any) => ({ ...person, performanceBadge: null })));
+            if (sequence === loadSequence.current) setReferenceIssue("به‌روزرسانی نشان‌ها انجام نشد.");
           }
+        } else if (!permissions.includes('VIEW_PERFORMANCE_BADGE_LIST')) {
+          setRows(people.data.data.map((person: any) => ({ ...person, performanceBadge: null })));
+        }
+        if (permissions.includes('EVALUATE_ALL_PERSONNEL') || permissions.includes('EVALUATE_DIRECT_REPORTS')) {
+          try {
+            const workspaceResponse = await personnelPerformanceAPI.simpleWorkspace();
+            if (sequence === loadSequence.current) setEvaluablePersonnelIds(workspaceResponse.data.evaluablePersonnelIds || []);
+          } catch {
+            if (sequence === loadSequence.current) setEvaluablePersonnelIds([]);
+          }
+        } else {
+          setEvaluablePersonnelIds([]);
         }
         const personnelAccess = (authority.data.data.effectiveAccess?.features || [])
           .find((feature: any) => feature.feature === "PERSONNEL");
@@ -261,10 +269,12 @@ export default function HrPersonnelPage() {
         } else {
           setFoundation((current: any) => ({ ...current, availableUsers: [] }));
         }
-      } else if (needsReference) {
+      } else {
         setActionPermissions([]);
+        setEvaluablePersonnelIds([]);
         setCanEditPersonnel(false);
         setCanLinkUserAccounts(false);
+        setRows(people.data.data.map((person: any) => ({ ...person, performanceBadge: null })));
       }
       if (
         needsReference
@@ -357,40 +367,6 @@ export default function HrPersonnelPage() {
       window.removeEventListener("scroll", remember);
     };
   }, [expanded, listState, pathname]);
-  useEffect(() => {
-    const fetchCandidates = async () => {
-      if (!form.positionId || !form.effectiveFrom) return setSupervisors([]);
-      try {
-        const response = await hrAPI.getSupervisorCandidates({
-          positionId: form.positionId,
-          effectiveFrom: toIsoDate(form.effectiveFrom),
-        });
-        setSupervisors(response.data.data);
-      } catch {
-        setSupervisors([]);
-      }
-    };
-    void fetchCandidates();
-  }, [form.positionId, form.effectiveFrom]);
-  useEffect(() => {
-    const fetchCandidates = async () => {
-      if (!assignment.positionId || !assignment.effectiveFrom)
-        return setAssignmentSupervisors([]);
-      try {
-        const response = await hrAPI.getSupervisorCandidates({
-          positionId: assignment.positionId,
-          effectiveFrom: toIsoDate(assignment.effectiveFrom),
-          effectiveTo: assignment.effectiveTo
-            ? toIsoDate(assignment.effectiveTo)
-            : undefined,
-        });
-        setAssignmentSupervisors(response.data.data);
-      } catch {
-        setAssignmentSupervisors([]);
-      }
-    };
-    void fetchCandidates();
-  }, [assignment.positionId, assignment.effectiveFrom, assignment.effectiveTo]);
 
   const loadSchedule = useCallback(async () => {
     if (!expanded || listState.panel !== "schedule") {
@@ -726,7 +702,6 @@ export default function HrPersonnelPage() {
                     setForm({
                       ...form,
                       positionId: e.target.value,
-                      responsibleSupervisorAssignmentId: "",
                     })
                   }
                 >
@@ -758,39 +733,6 @@ export default function HrPersonnelPage() {
                   ))}
                 </ErpSelect>
               </ErpField>}
-              {supervisors.length > 1 && (
-                <div className="md:col-span-2">
-                  <ErpField
-                    label="سرپرست مسئول"
-                    required
-                    hint="جایگاه سرپرست چند متصدی دارد؛ یک فرد را صریح انتخاب کنید."
-                  >
-                    <ErpSelect
-
-                      value={form.responsibleSupervisorAssignmentId}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          responsibleSupervisorAssignmentId: e.target.value,
-                        })
-                      }
-                    >
-                      <option value="">انتخاب سرپرست</option>
-                      {supervisors.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name} · {item.positionTitle}
-                        </option>
-                      ))}
-                    </ErpSelect>
-                  </ErpField>
-                </div>
-              )}
-              <ErpField label="سهم عملکرد از مأموریت" required>
-                <ErpInput inputMode="decimal" value={form.performanceAllocationPercent} onChange={(e) => setForm({ ...form, performanceAllocationPercent: e.target.value })} />
-              </ErpField>
-              <ErpField label="دلیل ثبت زمینه عملکرد" required>
-                <ErpInput value={form.performanceContextReason} onChange={(e) => setForm({ ...form, performanceContextReason: e.target.value })} />
-              </ErpField>
               <ErpCheckbox
                   className="self-end rounded-xl border border-[var(--sds-border-default)] px-3 py-2.5 dark:border-[var(--sds-border-strong)]"
                   label="نام‌های مشابه را بررسی کرده‌ام"
@@ -842,12 +784,8 @@ export default function HrPersonnelPage() {
                   !form.lastName.trim() ||
                   !form.positionId ||
                   !form.effectiveFrom ||
-                  !form.performanceAllocationPercent ||
-                  form.performanceContextReason.trim().length < 8 ||
                   !form.sourceCategory ||
-                  form.reason.trim().length < 10 ||
-                  (supervisors.length > 1 &&
-                    !form.responsibleSupervisorAssignmentId)
+                  form.reason.trim().length < 10
                 }
                 onClick={() =>
                   run(
@@ -954,7 +892,7 @@ export default function HrPersonnelPage() {
               setAssignment={setAssignment}
               assignmentRelationship={assignmentRelationship}
               setAssignmentRelationship={setAssignmentRelationship}
-              assignmentSupervisors={assignmentSupervisors}
+              canEvaluatePerformance={evaluablePersonnelIds.includes(person.id)}
               endDates={endDates}
               setEndDates={setEndDates}
               run={run}
@@ -1086,7 +1024,7 @@ function PersonnelCard(props: any) {
     setAssignment,
     assignmentRelationship,
     setAssignmentRelationship,
-    assignmentSupervisors,
+    canEvaluatePerformance,
     endDates,
     setEndDates,
     run,
@@ -1143,7 +1081,11 @@ function PersonnelCard(props: any) {
         </div>
         {open ? <FaChevronUp /> : <FaChevronDown />}
       </ErpPressable>
-      {person.performanceBadge && <div className="mt-2"><PerformanceBadge badge={person.performanceBadge} /></div>}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {person.performanceBadge && <PerformanceBadge badge={person.performanceBadge} />}
+        {person.performanceBadge?.newestMeasurementTo && <span className="text-xs text-[var(--sds-text-secondary)]">آخرین ارزیابی: {dateFa(person.performanceBadge.newestMeasurementTo)}</span>}
+        {canEvaluatePerformance && relationship?.status === "ACTIVE" && <ErpButton label="ثبت ارزیابی" variant="soft" href={`/dashboard/hr/personnel/performance?personnelId=${encodeURIComponent(person.id)}`} />}
+      </div>
       {canCreatePerformanceConsequence && relationship && ['ACTIVE', 'SUSPENDED'].includes(relationship.status) && <div className="mt-2"><ErpButton label="ارجاع پیامد عملکرد" variant="soft" href={`/dashboard/hr/personnel/performance/consequence/new?personnelId=${encodeURIComponent(person.id)}&relationshipId=${encodeURIComponent(relationship.id)}`} /></div>}
       {relationship?.hiringApplication && (
         <Link
@@ -1310,7 +1252,6 @@ function PersonnelCard(props: any) {
                   foundation={foundation}
                   assignment={assignment}
                   setAssignment={setAssignment}
-                  supervisors={assignmentSupervisors}
                   run={run}
                   close={() => setAssignmentRelationship(null)}
                 />
@@ -1442,7 +1383,6 @@ function AssignmentForm({
   foundation,
   assignment,
   setAssignment,
-  supervisors,
   run,
   close,
 }: any) {
@@ -1488,7 +1428,6 @@ function AssignmentForm({
               setAssignment({
                 ...assignment,
                 positionId: e.target.value,
-                responsibleSupervisorAssignmentId: "",
               })
             }
           >
@@ -1522,40 +1461,6 @@ function AssignmentForm({
             }
           />
         </ErpField>
-        {supervisors.length > 1 && (
-          <ErpField label="سرپرست مسئول" required>
-            <ErpSelect
-
-              value={assignment.responsibleSupervisorAssignmentId}
-              onChange={(e) =>
-                setAssignment({
-                  ...assignment,
-                  responsibleSupervisorAssignmentId: e.target.value,
-                })
-              }
-            >
-              <option value="">انتخاب</option>
-              {supervisors.map((item: any) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </ErpSelect>
-          </ErpField>
-        )}
-        <ErpField label="سهم عملکرد از مأموریت" hint="درصد ثبت‌شده؛ مجموع مأموریت‌های هم‌زمان نباید از ۱۰۰ بیشتر شود." required>
-          <ErpInput
-            inputMode="decimal"
-            value={assignment.performanceAllocationPercent}
-            onChange={(e) => setAssignment({ ...assignment, performanceAllocationPercent: e.target.value })}
-          />
-        </ErpField>
-        <ErpField label="دلیل ثبت زمینه عملکرد" required>
-          <ErpInput
-            value={assignment.performanceContextReason}
-            onChange={(e) => setAssignment({ ...assignment, performanceContextReason: e.target.value })}
-          />
-        </ErpField>
         <label className="flex items-center gap-2 self-end rounded-xl border border-[var(--sds-border-default)] px-3 py-2.5 text-sm dark:border-[var(--sds-border-strong)]">
           <ErpInput
             type="checkbox"
@@ -1581,11 +1486,7 @@ function AssignmentForm({
           disabled={
             saving ||
             !assignment.positionId ||
-            !assignment.effectiveFrom ||
-            !assignment.performanceAllocationPercent ||
-            assignment.performanceContextReason.trim().length < 8 ||
-            (supervisors.length > 1 &&
-              !assignment.responsibleSupervisorAssignmentId)
+            !assignment.effectiveFrom
           }
           onClick={() =>
             run(
@@ -1604,29 +1505,9 @@ function AssignmentForm({
 
 function AssignmentRow({ item, endDate, setEndDate, run }: any) {
   const [withdrawalReason, setWithdrawalReason] = useState("");
-  const latestResponsibility = [...(item.performanceResponsibilities || [])].filter((row: any) => row.status === "ACTIVE").at(-1);
-  const [contextOpen, setContextOpen] = useState(false);
-  const [contextSupervisors, setContextSupervisors] = useState<any[]>([]);
-  const [performanceContext, setPerformanceContext] = useState({
-    effectiveFrom: fromIsoDate(latestResponsibility?.effectiveFrom || item.effectiveFrom),
-    effectiveTo: fromIsoDate(latestResponsibility?.effectiveTo || item.effectiveTo),
-    responsibleSupervisorAssignmentId: latestResponsibility?.supervisorAssignmentId || item.responsibleSupervisorAssignmentId || "",
-    performanceAllocationPercent: latestResponsibility?.allocationPercent || item.performanceAllocationPercent || "100",
-    reason: "تکمیل سابقه مسئولیت و سهم عملکرد",
-  });
-  const supervisor =
-    item.responsibleSupervisorAssignment?.employmentRelationship?.personnel;
   const isFuture = new Date(item.effectiveFrom).getTime() > Date.now();
   const isOpen = !item.effectiveTo;
   const positionTitle = item.position?.title || item.positionSnapshot?.title || item.positionSnapshot?.name || "جایگاه حذف‌شده";
-  useEffect(() => {
-    if (!contextOpen || !item.positionId || !performanceContext.effectiveFrom) return;
-    void hrAPI.getSupervisorCandidates({
-      positionId: item.positionId,
-      effectiveFrom: toIsoDate(performanceContext.effectiveFrom),
-      effectiveTo: performanceContext.effectiveTo ? toIsoDate(performanceContext.effectiveTo) : undefined,
-    }).then((response) => setContextSupervisors(response.data.data)).catch(() => setContextSupervisors([]));
-  }, [contextOpen, item.positionId, performanceContext.effectiveFrom, performanceContext.effectiveTo]);
   return (
     <div className="rounded-xl border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1646,47 +1527,9 @@ function AssignmentRow({ item, endDate, setEndDate, run }: any) {
             </ErpBadge>
           </p>
           <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
-            {dateFa(item.effectiveFrom)} تا {dateFa(item.effectiveTo)} · سرپرست
-            مسئول:{" "}
-            {supervisor
-              ? `${supervisor.firstName} ${supervisor.lastName}`
-              : "تعیین نشده"}
+            {dateFa(item.effectiveFrom)} تا {dateFa(item.effectiveTo)}
           </p>
-          <ErpButton className="mt-2" label={contextOpen ? "بستن اصلاح زمینه" : "اصلاح زمینه عملکرد"} icon={FaBriefcase} variant="ghost" onClick={() => setContextOpen(!contextOpen)} />
         </div>
-        {contextOpen && (
-          <div className="min-w-[280px] space-y-2">
-            <ErpField label="تاریخ اثر زمینه عملکرد" required>
-              <HrPersianCalendar value={performanceContext.effectiveFrom} onChange={(effectiveFrom) => setPerformanceContext({ ...performanceContext, effectiveFrom })} />
-            </ErpField>
-            <ErpField label="پایان دوره زمینه عملکرد" hint="برای دوره جاری می‌تواند خالی بماند.">
-              <HrPersianCalendar value={performanceContext.effectiveTo} onChange={(effectiveTo) => setPerformanceContext({ ...performanceContext, effectiveTo })} placeholder="بدون تاریخ پایان" />
-            </ErpField>
-            <ErpField label="سرپرست مسئول این دوره" required>
-              <ErpSelect value={performanceContext.responsibleSupervisorAssignmentId} onChange={(event) => setPerformanceContext({ ...performanceContext, responsibleSupervisorAssignmentId: event.target.value })}>
-                <option value="">انتخاب سرپرست</option>
-                {contextSupervisors.map((candidate: any) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.positionTitle}</option>)}
-              </ErpSelect>
-            </ErpField>
-            <ErpField label="سهم عملکرد از مأموریت" required>
-              <ErpInput inputMode="decimal" value={performanceContext.performanceAllocationPercent} onChange={(event) => setPerformanceContext({ ...performanceContext, performanceAllocationPercent: event.target.value })} />
-            </ErpField>
-            <ErpField label="دلیل اصلاح زمینه عملکرد" required>
-              <ErpInput value={performanceContext.reason} onChange={(event) => setPerformanceContext({ ...performanceContext, reason: event.target.value })} />
-            </ErpField>
-            <ErpButton
-              label="ثبت زمینه عملکرد"
-              icon={FaBriefcase}
-              variant="soft"
-              disabled={!performanceContext.responsibleSupervisorAssignmentId || !performanceContext.effectiveFrom || !performanceContext.performanceAllocationPercent || performanceContext.reason.trim().length < 8}
-              onClick={() => run(() => hrAPI.updateAssignmentPerformanceContext(item.id, {
-                ...performanceContext,
-                effectiveFrom: toIsoDate(performanceContext.effectiveFrom),
-                effectiveTo: performanceContext.effectiveTo ? toIsoDate(performanceContext.effectiveTo) : null,
-              }), "زمینه عملکرد و سابقه مسئول ارزیابی ثبت شد.")}
-            />
-          </div>
-        )}
         {isOpen && (
           <div className="min-w-[280px] space-y-2">
             <ErpField label="دلیل پس‌گرفتن تخصیص" required>

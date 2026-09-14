@@ -64,8 +64,12 @@ const actionGrants = (code: string, window = activeWindow) => expandHrActionPerm
   const historyOnly = snapshot({ featureGrants: actionGrants('VIEW_PERFORMANCE_HISTORY'), authorityGrants: [] });
   assert.equal(evaluateHrAuthorization(historyOnly, {
     actionPermissionCodes: ['VIEW_PERFORMANCE_HISTORY'],
-  }, now).allowed, true, 'the explicit performance-history grant authorizes only its own capability');
-  assert.equal(evaluateHrAuthorization(historyOnly, {
+  }, now).allowed, false, 'legacy performance permissions are retained only as historical grants');
+  const simpleHistory = snapshot({ featureGrants: actionGrants('VIEW_PERFORMANCE_EVALUATIONS'), authorityGrants: [] });
+  assert.equal(evaluateHrAuthorization(simpleHistory, {
+    actionPermissionCodes: ['VIEW_PERFORMANCE_EVALUATIONS'],
+  }, now).allowed, true, 'the simple performance-history grant authorizes only its own capability');
+  assert.equal(evaluateHrAuthorization(simpleHistory, {
     actionPermissionCodes: ['VIEW_NAMED_PERFORMANCE_RANKING'],
   }, now).allowed, false, 'history access must not imply named ranking access');
 
@@ -85,7 +89,7 @@ const actionGrants = (code: string, window = activeWindow) => expandHrActionPerm
   });
   assert.equal(evaluateHrAuthorization(systemAdmin, {
     actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'],
-  }, now).allowed, true, 'the existing system ADMIN baseline remains complete');
+  }, now).allowed, false, 'legacy performance writers remain retired for system administrators');
 }
 
 {

@@ -30,6 +30,7 @@ import type {
 interface Step8DigitalSignatureProps {
   wizardData: ContractWizardData;
   errors: Record<string, string>;
+  signatureErrorKind: 'error' | 'permission' | 'stale';
   sendingCode: boolean;
   onSendForConfirmation: () => void;
   onResendConfirmation: () => void;
@@ -133,6 +134,7 @@ const renderStatusBadge = (
 export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
   wizardData,
   errors,
+  signatureErrorKind,
   sendingCode,
   onSendForConfirmation,
   onResendConfirmation,
@@ -532,7 +534,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
             </div>
           )}
 
-          {errors.signature && <p className="text-[var(--sds-danger)] text-sm mt-3">{errors.signature}</p>}
+          {errors.signature && <ErpInlineState kind={signatureErrorKind} title={errors.signature} className="mt-3" />}
           {errors.verificationCode && <p className="text-[var(--sds-danger)] text-sm mt-3">{errors.verificationCode}</p>}
         </ErpNeumorphicCard>
       </div>

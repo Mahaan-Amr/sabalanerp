@@ -10,13 +10,17 @@ import {
   performanceReportingMonths,
   performancePeerFamilyKey,
   latestPerformancePeerFamilies,
+  performanceLevelForCode,
 } from '../personnelPerformanceDisclosure';
 import {
   decryptPerformanceExportArtifact,
   encryptPerformanceExportArtifact,
+  performancePdfPageCount,
   validatePerformanceExportKeyEnvironment,
   withinPerformanceExportDeadline,
 } from '../personnelPerformanceDisclosureStore';
+import { calculateCurrentPerformanceLevel } from '../personnelPerformanceCalculation';
+import { DEFAULT_LEVEL_POLICY_CONTENT, canonicalPerformanceHash } from '../personnelPerformancePolicy';
 
 const exportKey = Buffer.alloc(32, 9);
 const confidentialArtifact = Buffer.from('personnel,level\nپرسنل محرمانه,مطابق انتظار');
@@ -26,6 +30,11 @@ assert.deepEqual(decryptPerformanceExportArtifact(encryptedArtifact, exportKey),
 const tamperedArtifact = Buffer.from(encryptedArtifact);
 tamperedArtifact[tamperedArtifact.length - 1] ^= 1;
 assert.throws(() => decryptPerformanceExportArtifact(tamperedArtifact, exportKey));
+const rotatedExportKey = Buffer.alloc(32, 10);
+const rotatedArtifact = encryptPerformanceExportArtifact(confidentialArtifact, rotatedExportKey);
+assert.notDeepEqual(rotatedArtifact, encryptedArtifact, 'key rotation must create an independently authenticated artifact');
+assert.throws(() => decryptPerformanceExportArtifact(encryptedArtifact, rotatedExportKey),
+  'a rotated key must not silently decrypt an artifact from another key version');
 assert.throws(() => validatePerformanceExportKeyEnvironment({
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID: 'production-export-v1',
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64: Buffer.alloc(16).toString('base64'),
@@ -40,20 +49,25 @@ assert.throws(() => validatePerformanceExportKeyEnvironment({
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64: exportKey.toString('base64'),
 }), /مستقل/);
 let deadlineAborted = false;
+const invalidPdfCheck = assert.rejects(
+  () => performancePdfPageCount(Buffer.from('%PDF-1.4\n/Type /Page\n%%EOF')),
+  (error: { code?: string }) => error.code === 'PERFORMANCE_EXPORT_PDF_INVALID',
+  'raw page-like tokens are not valid PDF page-tree evidence',
+);
 const exportDeadlineCheck = assert.rejects(() => withinPerformanceExportDeadline((signal) => new Promise((_resolve) => {
   signal.addEventListener('abort', () => { deadlineAborted = true; }, { once: true });
 }), 5), /سقف مجاز/).then(() => assert.equal(deadlineAborted, true));
 
 const projected = buildPerformanceBadgeSummary({
   state: 'LEVEL',
-  levelCode: 'EXCEEDS_EXPECTATIONS',
+  levelCode: 'EXCEEDS',
   newestMeasurementTo: new Date('2026-08-22T20:29:59.999Z'),
   nextReviewAt: new Date('2026-11-21T20:30:00.000Z'),
   version: 7,
 });
 assert.deepEqual(projected, {
   state: 'LEVEL',
-  levelCode: 'EXCEEDS_EXPECTATIONS',
+  levelCode: 'EXCEEDS',
   labelFa: 'فراتر از انتظار',
   meaningFa: 'عملکرد مصوب در مجموع فراتر از انتظارهای نقش بوده است.',
   newestMeasurementTo: '2026-08-22T20:29:59.999Z',
@@ -62,7 +76,62 @@ assert.deepEqual(projected, {
 });
 assert.equal('score' in projected, false, 'Badge disclosure must never include a score');
 assert.equal('trend' in projected, false, 'Badge disclosure must never include a trend');
+for (const forbidden of ['subjectId', 'personnelId', 'eligibleCount', 'search', 'placeholder', 'cacheKey']) {
+  assert.equal(forbidden in projected, false, `badge disclosure must not leak ${forbidden}`);
+}
 assert.equal(buildPerformanceBadgeSummary({ state: 'TEMPORARILY_UNAVAILABLE', version: 8 }).labelFa, 'خلاصه عملکرد موقتاً در دسترس نیست');
+
+const compatibleLevels = [
+  ['URGENT_IMPROVEMENT', 'URGENT_IMPROVEMENT', 'نیازمند بهبود فوری'],
+  ['IMPROVEMENT', 'IMPROVEMENT', 'نیازمند بهبود'],
+  ['IMPROVEMENT_NEEDED', 'IMPROVEMENT', 'نیازمند بهبود'],
+  ['MEETS', 'MEETS', 'مطابق انتظار'],
+  ['MEETS_EXPECTATIONS', 'MEETS', 'مطابق انتظار'],
+  ['EXCEEDS', 'EXCEEDS', 'فراتر از انتظار'],
+  ['EXCEEDS_EXPECTATIONS', 'EXCEEDS', 'فراتر از انتظار'],
+  ['OUTSTANDING', 'OUTSTANDING', 'عملکرد برجسته'],
+] as const;
+for (const [inputCode, outputCode, labelFa] of compatibleLevels) {
+  const badge = buildPerformanceBadgeSummary({ state: 'LEVEL', levelCode: inputCode, version: 1 });
+  assert.equal(badge.state, 'LEVEL');
+  assert.equal(badge.levelCode, outputCode);
+  assert.equal(badge.labelFa, labelFa);
+  assert.equal(performanceLevelForCode(inputCode)?.code, outputCode);
+}
+assert.deepEqual(buildPerformanceBadgeSummary({
+  state: 'LEVEL', levelCode: 'INTERNAL_UNKNOWN_LEVEL',
+  newestMeasurementTo: new Date('2026-08-22T20:29:59.999Z'),
+  nextReviewAt: new Date('2026-11-21T20:30:00.000Z'), version: 4,
+}), {
+  state: 'TEMPORARILY_UNAVAILABLE',
+  labelFa: 'خلاصه عملکرد موقتاً در دسترس نیست',
+  meaningFa: 'عملیات منابع انسانی از اختلال آگاه شده و بازیابی در حال پیگیری است.',
+  version: 4,
+});
+
+const boundaryExpectations = [
+  ['0.000000', 'URGENT_IMPROVEMENT'], ['19.999999', 'URGENT_IMPROVEMENT'],
+  ['20.000000', 'IMPROVEMENT'], ['39.999999', 'IMPROVEMENT'],
+  ['40.000000', 'MEETS'], ['59.999999', 'MEETS'],
+  ['60.000000', 'EXCEEDS'], ['79.999999', 'EXCEEDS'],
+  ['80.000000', 'OUTSTANDING'], ['100.000000', 'OUTSTANDING'],
+] as const;
+for (const [exactScore, expectedCode] of boundaryExpectations) {
+  const calculated = calculateCurrentPerformanceLevel({
+    asOf: new Date('2026-09-01Z'),
+    policy: { versionId: 'approved-level-policy-v1', thresholds: DEFAULT_LEVEL_POLICY_CONTENT.thresholds },
+    results: [{ resultId: `accepted-${exactScore}`, exactScore, measurementTo: '2026-08-31T20:29:59.999Z', expiresAt: '2099-01-01Z', status: 'EFFECTIVE' }],
+  });
+  const immutableSourceHash = canonicalPerformanceHash(calculated);
+  const badge = buildPerformanceBadgeSummary({
+    state: calculated.state, levelCode: calculated.levelCode,
+    newestMeasurementTo: calculated.newestMeasurementTo ? new Date(calculated.newestMeasurementTo) : null,
+    nextReviewAt: calculated.nextReviewAt ? new Date(calculated.nextReviewAt) : null, version: 1,
+  });
+  assert.equal(calculated.levelCode, expectedCode, `exact boundary ${exactScore} uses the approved level`);
+  assert.equal(badge.levelCode, expectedCode, `calculated boundary ${exactScore} remains compatible in disclosure`);
+  assert.equal(canonicalPerformanceHash(calculated), immutableSourceHash, 'presentation must not mutate calculated lineage');
+}
 
 const people = Array.from({ length: 20 }, (_, index) => ({
   subjectId: `subject-${index + 1}`,
@@ -84,6 +153,30 @@ if (!('levelDistribution' in analytics)) throw new Error('aggregate analytics mi
 assert.equal(analytics.eligibleCount, 10);
 assert.deepEqual(analytics.levelDistribution.map((row) => row.count), [0, 0, 10, 0, 0]);
 assert.equal(analytics.exactScoreStatistics, null, 'mixed/absent exact-score signatures must not manufacture an average');
+const currentWriterPeople = people.map((person) => ({ ...person, levelCode: 'MEETS' }));
+const currentWriterAnalytics = buildPerformanceAnalytics({ population: currentWriterPeople, selected: currentWriterPeople.slice(0, 10) });
+assert.equal(currentWriterAnalytics.suppressed, false);
+if (!currentWriterAnalytics.suppressed && 'levelDistribution' in currentWriterAnalytics) {
+  assert.deepEqual(currentWriterAnalytics.levelDistribution.map((row) => [row.levelCode, row.count]), [
+    ['URGENT_IMPROVEMENT', 0], ['IMPROVEMENT', 0], ['MEETS', 10], ['EXCEEDS', 0], ['OUTSTANDING', 0],
+  ]);
+}
+assert.deepEqual(buildPerformanceAnalytics({
+  population: currentWriterPeople,
+  selected: currentWriterPeople.slice(0, 9).concat({ ...currentWriterPeople[9], levelCode: 'UNKNOWN_PRIVATE_CODE' }),
+}), {
+  suppressed: true,
+  reasonCode: 'PERFORMANCE_LEVEL_UNAVAILABLE',
+  messageFa: 'خلاصه عملکرد موقتاً در دسترس نیست.',
+});
+assert.deepEqual(buildPerformanceAnalytics({
+  population: currentWriterPeople.slice(0, 19).concat({ ...currentWriterPeople[19], levelCode: 'UNKNOWN_PRIVATE_CODE' }),
+  selected: currentWriterPeople.slice(0, 10),
+}), {
+  suppressed: true,
+  reasonCode: 'PERFORMANCE_LEVEL_UNAVAILABLE',
+  messageFa: 'خلاصه عملکرد موقتاً در دسترس نیست.',
+});
 
 const differencingAttempt = buildPerformanceAnalytics({ population: people, selected: people.slice(0, 12) });
 assert.deepEqual(differencingAttempt, {
@@ -148,4 +241,6 @@ assert.ok(validateConsequenceHandoff({
   independentEvidenceReferences: [],
 }).length >= 2);
 
-void exportDeadlineCheck.then(() => console.log('Personnel performance disclosure policy tests passed.'));
+void Promise.all([exportDeadlineCheck, invalidPdfCheck]).then(() => {
+  console.log('Personnel performance disclosure policy tests passed.');
+});

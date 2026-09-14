@@ -6,10 +6,18 @@ import {
   readRestoreJournal,
   removeRecoveryPackage,
   rollbackInterruptedRecovery,
+  withSystemRecoveryDatabaseClient,
 } from './systemRecoveryEngine';
 import { RECOVERY_FRESHNESS_MS } from './systemRecoveryPolicy';
 import { setRecoveryRuntimeState } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
+import { replayPerformanceErasureAfterRestore } from './personnelPerformanceErasureStore';
+
+const replayPerformanceErasureFromSafetyDatabase = async (prisma: PrismaClient, safetyDatabase: string) => {
+  // System Recovery deliberately reads its alternate pre-restore database and
+  // the engine-owned helper guarantees that temporary client closes in finally.
+  return withSystemRecoveryDatabaseClient(safetyDatabase, (safety) => replayPerformanceErasureAfterRestore(prisma, safety));
+};
 
 const recoverInterruptedRestore = async (prisma: PrismaClient) => {
   const journal = await readRestoreJournal();
@@ -28,7 +36,10 @@ const recoverInterruptedRestore = async (prisma: PrismaClient) => {
   );
   const names = new Set(databases.map((row) => row.datname));
   const promoted = journal.phase === 'DATABASE_PROMOTED' || (names.has(journal.safetyDatabase) && !names.has(journal.stagedDatabase));
-  if (promoted) await finalizePromotedRecovery(prisma, journal);
+  if (promoted) {
+    await replayPerformanceErasureFromSafetyDatabase(prisma, journal.safetyDatabase);
+    await finalizePromotedRecovery(prisma, journal);
+  }
   else await rollbackInterruptedRecovery(journal);
   await fs.promises.rm(INQUIRY_RESTART_MARKER, { force: true });
   setRecoveryRuntimeState('NORMAL');

@@ -51,6 +51,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 FROM builder AS local-dev
 
+ARG PERFORMANCE_SOURCE_COMMIT=unattested
+ARG PERFORMANCE_SOURCE_HASH=unattested
+LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
+  io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
+
 ENV NODE_ENV=development
 ENV NEXT_DIST_DIR=.next-local
 ENV PORT=3000
@@ -67,6 +72,11 @@ RUN npm prune --omit=dev
 FROM node:20-alpine AS runner
 
 WORKDIR /app
+
+ARG PERFORMANCE_SOURCE_COMMIT=unattested
+ARG PERFORMANCE_SOURCE_HASH=unattested
+LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
+  io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

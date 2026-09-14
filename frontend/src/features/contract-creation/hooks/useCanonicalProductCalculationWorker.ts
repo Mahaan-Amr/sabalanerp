@@ -1,6 +1,12 @@
 'use client';
 
 import React from 'react';
+import type { ContractProduct } from '../types/contract.types';
+import type {
+  RemainingStoneDraftField,
+  RemainingStoneDraftFieldErrors
+} from '../services/remainingStoneAllocationReplayService';
+import { getRemainingStoneDraftFieldErrors } from '../services/remainingStoneAllocationReplayService';
 import {
   calculateLongitudinalProduct,
   calculateSlab,
@@ -119,3 +125,75 @@ export const useSlabCalculationWorker = (
   input,
   fallback: calculateSlabInput
 });
+
+export const useRemainingStoneDraftValidationWorker = ({
+  products,
+  draftProduct,
+  lastEditedField
+}: {
+  products: readonly ContractProduct[];
+  draftProduct?: ContractProduct;
+  lastEditedField?: RemainingStoneDraftField;
+}): RemainingStoneDraftFieldErrors => {
+  const [errors, setErrors] = React.useState<RemainingStoneDraftFieldErrors>({});
+  const sequenceRef = React.useRef(0);
+
+  React.useEffect(() => {
+    const id = sequenceRef.current + 1;
+    sequenceRef.current = id;
+    setErrors({});
+    if (!draftProduct || !lastEditedField) return;
+
+    let worker: Worker | undefined;
+    const validateSynchronously = () => {
+      if (id !== sequenceRef.current) return;
+      setErrors(getRemainingStoneDraftFieldErrors({
+        products,
+        draftProduct,
+        lastEditedField
+      }));
+    };
+    const timer = window.setTimeout(() => {
+      if (typeof Worker === 'undefined') {
+        validateSynchronously();
+        return;
+      }
+      try {
+        worker = new Worker(
+          new URL(
+            '../workers/remainingStoneDraftValidation.worker.ts',
+            import.meta.url
+          )
+        );
+      } catch {
+        validateSynchronously();
+        return;
+      }
+      worker.onmessage = (event: MessageEvent<{
+        id: number;
+        errors: RemainingStoneDraftFieldErrors;
+      }>) => {
+        if (event.data.id === sequenceRef.current) setErrors(event.data.errors);
+        worker?.terminate();
+      };
+      worker.onerror = () => {
+        validateSynchronously();
+        worker?.terminate();
+      };
+      worker.postMessage({
+        id,
+        products: [...products],
+        draftProduct,
+        lastEditedField
+      });
+      return worker;
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timer);
+      worker?.terminate();
+    };
+  }, [draftProduct, lastEditedField, products]);
+
+  return errors;
+};

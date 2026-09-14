@@ -291,9 +291,16 @@ export const expirePerformanceResults = async (client: PrismaClient, input: {
   const now = input.now ?? new Date();
   return runPerformanceSerializableTransaction(client, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'performance-expiry:' + now.toISOString().slice(0, 10)}, 0))`;
-    const due = await tx.performanceAcceptedResult.findMany({
+    const dueCandidates = await tx.performanceAcceptedResult.findMany({
       where: { status: PerformanceResultStatus.EFFECTIVE, expiresAt: { lte: now } }, orderBy: { id: 'asc' },
     });
+    const corrections = dueCandidates.length > 0 ? await tx.performanceCorrection.findMany({
+      where: { status: 'OPEN', targetResultId: { in: dueCandidates.map(({ id }) => id) } },
+      select: { targetResultId: true },
+    }) : [];
+    const correctionTargets = new Set(corrections.map(({ targetResultId }) => targetResultId));
+    const due = dueCandidates.filter(({ id }) => !correctionTargets.has(id));
+    const deferredResultIds = dueCandidates.filter(({ id }) => correctionTargets.has(id)).map(({ id }) => id);
     for (const result of due) {
       await tx.performanceAcceptedResult.update({ where: { id: result.id }, data: { status: PerformanceResultStatus.EXPIRED } });
       await auditResultEvent(tx, {
@@ -312,7 +319,9 @@ export const expirePerformanceResults = async (client: PrismaClient, input: {
     const recomputation = due.length > 0 ? await recomputePerformanceProjectionsInTransaction(tx, {
       now, actorUserId: input.actorUserId, reason: 'انقضای روزانه نتیجه‌های عملکرد', keyring,
     }) : { subjectCount: 0, resultHash: canonicalPerformanceHash([]) };
-    return { expiredResultIds: due.map(({ id }) => id), recomputation };
+    return { expiredResultIds: due.map(({ id }) => id), deferredResultIds, recomputation,
+      businessCode: due.length > 0 ? 'PERFORMANCE_RESULTS_EXPIRED_AND_RECOMPUTED'
+        : deferredResultIds.length > 0 ? 'PERFORMANCE_RESULTS_DEFERRED_FOR_CORRECTION' : 'PERFORMANCE_NO_RESULTS_DUE' };
   });
 };
 

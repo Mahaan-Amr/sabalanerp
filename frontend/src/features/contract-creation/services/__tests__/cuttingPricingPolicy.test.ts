@@ -52,3 +52,24 @@ assert.deepEqual(getBillableCuttingBreakdown({ ...mandatoryMixed, isMandatory: f
 assert.equal(normalizeMandatoryLongitudinalCuttingPricing(ordinary), ordinary);
 
 console.log('cuttingPricingPolicy tests passed');
+
+// Verify the modal prices the physical split validated by the allocation planner.
+import { allocateRemainingStonePartitions } from '../remainingStonePartitionService';
+import { calculateRemainingChildCuttingBreakdown } from '../remainingStoneCuttingService';
+import type { RemainingStone, StonePartition } from '../../types/contract.types';
+for (const scenario of [
+  { stockWidth: 9, stockLength: 2, width: 3, length: 6, rate: 100, expected: 400 },
+  { stockWidth: 29, stockLength: 1, width: 29, length: 0.5, rate: 50, expected: 15 }
+]) {
+  const stock = { id: 'merge-stock', width: scenario.stockWidth, length: scenario.stockLength,
+    quantity: 1, squareMeters: scenario.stockWidth * scenario.stockLength / 100, isAvailable: true } as RemainingStone;
+  const row = { id: 'merge-row', width: scenario.width, length: scenario.length, quantity: 1,
+    squareMeters: scenario.width * scenario.length / 100 } as StonePartition;
+  const allocation = allocateRemainingStonePartitions([row], stock);
+  assert.equal(allocation.rowErrors.size, 0);
+  const breakdown = calculateRemainingChildCuttingBreakdown({ row, stock, rate: scenario.rate,
+    physicalPieces: allocation.physicalPiecesByRow.get(row.id),
+    sourcePieceQuantities: allocation.sourcePieceQuantitiesByRow.get(row.id) });
+  assert.ok(breakdown);
+  assert.equal(breakdown.reduce((sum, line) => sum + line.cost, 0), scenario.expected);
+}

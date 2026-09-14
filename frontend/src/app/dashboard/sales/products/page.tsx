@@ -1,15 +1,16 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FaBoxes, FaEye, FaEyeSlash, FaFileExcel, FaPlus, FaToggleOff, FaToggleOn, FaTrash } from 'react-icons/fa';
 import { Product } from '@/types/product';
 import { dashboardAPI, salesAPI } from '@/lib/api';
 import { canCreateProducts, canDeleteProducts, canEditProducts, canExportProducts, canImportProducts, User as PermissionUser } from '@/lib/permissions';
 import { formatDimensions, formatPrice } from '@/lib/numberFormat';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
-import ErrorModal from '@/components/ErrorModal';
 import ProductImportExportModal from '@/components/ProductImportExportModal';
 import SuccessModal from '@/components/SuccessModal';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpPagination, ErpToolbar } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpLoading, ErpPagination, ErpToolbar } from '@/components/erp';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 const generateFullProductName = (product: Product): string => {
   const parts = [
@@ -39,12 +40,35 @@ export default function ProductsPage() {
   const [totalProducts, setTotalProducts] = useState(0);
   const [currentUser, setCurrentUser] = useState<PermissionUser | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; product: Product | null }>({ show: false, product: null });
-  const [deleting, setDeleting] = useState(false);
+  const [pendingRowActions, setPendingRowActions] = useState<Set<string>>(() => new Set());
+  const setRowActionPending = (key: string, pending: boolean) => setPendingRowActions(current => {
+    const next = new Set(current);
+    if (pending) next.add(key); else next.delete(key);
+    return next;
+  });
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [showErrorModal, setShowErrorModal] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
-  const [modalDetails, setModalDetails] = useState('');
+  const [listError, setListError] = useState('');
+  const [listErrorKind, setListErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const [profileError, setProfileError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale' }>();
+  const [rowErrors, setRowErrors] = useState<Array<{ key: string; productId: string; message: string; kind: 'error' | 'permission' | 'stale'; order: number }>>([]);
   const [showImportExportModal, setShowImportExportModal] = useState(false);
+  const productRequestSequenceRef = useRef(0);
+  const rowActionTrackerRef = useRef(createLatestRequestTracker());
+  const beginRowAction = (key: string) => {
+    return rowActionTrackerRef.current.begin(key);
+  };
+  const isLatestRowAction = (key: string, sequence: number) =>
+    rowActionTrackerRef.current.isLatest(key, sequence);
+  const rowErrorSequenceRef = useRef(0);
+  const reportRowError = (key: string, value: Omit<(typeof rowErrors)[number], 'key' | 'order'>) => {
+    const order = ++rowErrorSequenceRef.current;
+    setRowErrors((current) => [...current.filter((item) => item.key !== key), { ...value, key, order }]);
+  };
+  const clearRowError = (key: string) => setRowErrors((current) => current.filter((item) => item.key !== key));
+  const latestProductError = (productId: string) => rowErrors
+    .filter((item) => item.productId === productId)
+    .sort((left, right) => right.order - left.order)[0];
 
   const itemsPerPage = 20;
 
@@ -58,13 +82,25 @@ export default function ProductsPage() {
       const response = await dashboardAPI.getProfile();
       if (response.data.success) {
         setCurrentUser(response.data.data);
+        setProfileError(undefined);
+      } else {
+        const failure = { response };
+        setProfileError({ kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
+          failedAction: 'دریافت دسترسی‌های کاتالوگ فروش',
+          nextStep: 'دوباره روی «دریافت دسترسی‌ها» بزنید.'
+        }) });
       }
     } catch (error) {
       console.error('Error loading user profile:', error);
+      setProfileError({ kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت دسترسی‌های کاتالوگ فروش',
+        nextStep: 'اتصال را بررسی کنید و دوباره روی «دریافت دسترسی‌ها» بزنید.'
+      }) });
     }
   };
 
   const fetchProducts = async () => {
+    const requestSequence = ++productRequestSequenceRef.current;
     try {
       setLoading(true);
       const params: any = { page: currentPage, limit: itemsPerPage };
@@ -76,16 +112,32 @@ export default function ProductsPage() {
       if (filterStatus !== 'all') params.isActive = filterStatus === 'active';
 
       const response = await salesAPI.getProducts(params);
+      if (requestSequence !== productRequestSequenceRef.current) return;
       if (response.data.success) {
         const pagination = response.data.pagination || {};
         setProducts(response.data.data || []);
         setTotalPages(pagination.pages || 1);
         setTotalProducts(pagination.total || 0);
+        setListError('');
+        setListErrorKind('error');
+      } else {
+        const failure = { response };
+        setListErrorKind(getSalesOperationalErrorKind(failure));
+        setListError(getSalesOperationalErrorMessage(failure, {
+          failedAction: 'دریافت فهرست محصولات',
+          nextStep: 'دوباره تلاش کنید.'
+        }));
       }
     } catch (error) {
+      if (requestSequence !== productRequestSequenceRef.current) return;
       console.error('Error fetching products:', error);
+      setListErrorKind(getSalesOperationalErrorKind(error));
+      setListError(getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت فهرست محصولات',
+        nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
+      }));
     } finally {
-      setLoading(false);
+      if (requestSequence === productRequestSequenceRef.current) setLoading(false);
     }
   };
 
@@ -100,52 +152,75 @@ export default function ProductsPage() {
 
   const handleDeleteConfirm = async () => {
     if (!deleteConfirm.product) return;
+    const product = deleteConfirm.product;
+    const errorKey = `${product.id}:delete`;
+    const requestSequence = beginRowAction(errorKey);
 
     try {
-      setDeleting(true);
-      const response = await salesAPI.deleteProduct(deleteConfirm.product.id);
+      setRowActionPending(errorKey, true);
+      const response = await salesAPI.deleteProduct(product.id);
+      if (!isLatestRowAction(errorKey, requestSequence)) return;
       if (response.data.success) {
+        clearRowError(errorKey);
         setModalMessage('محصول با موفقیت حذف شد');
         setShowSuccessModal(true);
         setDeleteConfirm({ show: false, product: null });
         fetchProducts();
       } else {
-        setModalMessage('خطا در حذف محصول');
-        setModalDetails(response.data.error);
-        setShowErrorModal(true);
+        const failure = { response };
+        setDeleteConfirm({ show: false, product: null });
+        reportRowError(errorKey, { productId: product.id, kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
+          failedAction: 'حذف محصول',
+          nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }) });
       }
     } catch (error: any) {
+      if (!isLatestRowAction(errorKey, requestSequence)) return;
       console.error('Error deleting product:', error);
-      setModalMessage('خطا در حذف محصول');
-      setModalDetails(error.response?.data?.error || 'خطای غیرمنتظره رخ داده است');
-      setShowErrorModal(true);
+      setDeleteConfirm({ show: false, product: null });
+      reportRowError(errorKey, { productId: product.id, kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
+        failedAction: 'حذف محصول',
+        nextStep: 'وضعیت استفاده از محصول را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }) });
     } finally {
-      setDeleting(false);
+      if (isLatestRowAction(errorKey, requestSequence)) setRowActionPending(errorKey, false);
     }
   };
 
   const handleToggleStatus = async (product: Product) => {
     if (!canEditProducts(currentUser)) return;
+    const errorKey = `${product.id}:toggle`;
+    const requestSequence = beginRowAction(errorKey);
 
-    setDeleting(true);
+    setRowActionPending(errorKey, true);
     try {
       const response = await salesAPI.updateProduct(product.id, { isActive: !product.isActive });
+      if (!isLatestRowAction(errorKey, requestSequence)) return;
       if (response.data.success) {
+        clearRowError(errorKey);
         setModalMessage(`وضعیت ${product.namePersian} با موفقیت تغییر کرد`);
         setShowSuccessModal(true);
         fetchProducts();
       } else {
-        setModalMessage('خطا در تغییر وضعیت');
-        setModalDetails(response.data.error || 'خطای غیرمنتظره رخ داده است');
-        setShowErrorModal(true);
+        const failure = { response };
+        reportRowError(errorKey, { productId: product.id, kind: getSalesOperationalErrorKind(failure), message: getSalesOperationalErrorMessage(failure, {
+          failedAction: 'تغییر وضعیت محصول',
+          nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }) });
       }
     } catch (error: any) {
+      if (!isLatestRowAction(errorKey, requestSequence)) return;
       console.error('Error toggling status:', error);
-      setModalMessage('خطا در تغییر وضعیت');
-      setModalDetails(error.response?.data?.error || 'خطای غیرمنتظره رخ داده است');
-      setShowErrorModal(true);
+      reportRowError(errorKey, { productId: product.id, kind: getSalesOperationalErrorKind(error), message: getSalesOperationalErrorMessage(error, {
+        failedAction: 'تغییر وضعیت محصول',
+        nextStep: 'وضعیت فعلی محصول را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }) });
     } finally {
-      setDeleting(false);
+      if (isLatestRowAction(errorKey, requestSequence)) setRowActionPending(errorKey, false);
     }
   };
 
@@ -180,12 +255,18 @@ export default function ProductsPage() {
             id: 'product',
             header: 'محصول',
             priority: 'primary',
-            cell: (product) => (
-              <div className="min-w-0">
-                <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{product.namePersian}</p>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{generateFullProductName(product)}</p>
-              </div>
-            ),
+            cell: (product) => {
+              const rowError = latestProductError(product.id);
+              return (
+                <div className="min-w-0">
+                  <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{product.namePersian}</p>
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{generateFullProductName(product)}</p>
+                  {rowError && (
+                    <ErpInlineState kind={rowError.kind} title={rowError.message} className="mt-2" />
+                  )}
+                </div>
+              );
+            },
           },
           { id: 'dimensions', header: 'ابعاد', mobileLabel: 'ابعاد', cell: (product) => formatDimensions(product.widthValue, product.thicknessValue, 'سانتی‌متر') },
           { id: 'mine', header: 'معدن', mobileLabel: 'معدن', cell: (product) => product.mineNamePersian || '-' },
@@ -207,7 +288,7 @@ export default function ProductsPage() {
         rowActions={(product) => [
           { label: 'مشاهده', href: `/dashboard/sales/products/${product.id}`, icon: FaEye, tone: 'neutral' },
           ...(canEditProducts(currentUser)
-            ? [{ label: product.isActive ? 'غیرفعال کردن' : 'فعال کردن', onClick: () => handleToggleStatus(product), icon: product.isActive ? FaToggleOn : FaToggleOff, tone: product.isActive ? 'success' as const : 'danger' as const, disabled: deleting }]
+            ? [{ label: product.isActive ? 'غیرفعال کردن' : 'فعال کردن', onClick: () => handleToggleStatus(product), icon: product.isActive ? FaToggleOn : FaToggleOff, tone: product.isActive ? 'success' as const : 'danger' as const, disabled: pendingRowActions.has(`${product.id}:toggle`) }]
             : []),
           ...(canDeleteProducts(currentUser)
             ? [{ label: 'حذف', onClick: () => setDeleteConfirm({ show: true, product }), icon: FaTrash, tone: 'danger' as const }]
@@ -223,6 +304,16 @@ export default function ProductsPage() {
         }
         footer={<ErpPagination currentPage={currentPage} totalPages={totalPages} totalItems={totalProducts} itemsPerPage={itemsPerPage} itemLabel="محصول" onPageChange={setCurrentPage} />}
       >
+        {profileError && (
+          <ErpInlineState kind={profileError.kind} title={profileError.message} action={{ label: 'دریافت دسترسی‌ها', onClick: loadCurrentUser, tone: 'primary' }} />
+        )}
+        {listError && (
+          <ErpInlineState
+            kind={products.length > 0 ? 'stale' : listErrorKind}
+            title={listError}
+            action={{ label: 'تلاش دوباره', onClick: fetchProducts, tone: 'primary' }}
+          />
+        )}
         <ErpToolbar
           title="فیلترها"
           search={{ value: searchTerm, onChange: resetToFirstPage(setSearchTerm), placeholder: 'جستجو در نام، کد یا توضیحات...' }}
@@ -261,15 +352,14 @@ export default function ProductsPage() {
               این عمل قابل بازگشت نیست و اگر محصول در قراردادها استفاده شده باشد، حذف آن امکان‌پذیر نخواهد بود.
             </p>
             <div className="mt-6 flex flex-wrap justify-end gap-2">
-              <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={() => setDeleteConfirm({ show: false, product: null })} disabled={deleting} />
-              <ErpButton label={deleting ? 'در حال حذف...' : 'حذف محصول'} icon={FaTrash} tone="danger" variant="solid" onClick={handleDeleteConfirm} disabled={deleting} />
+              <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={() => setDeleteConfirm({ show: false, product: null })} disabled={Boolean(deleteConfirm.product && pendingRowActions.has(`${deleteConfirm.product.id}:delete`))} />
+              <ErpButton label={deleteConfirm.product && pendingRowActions.has(`${deleteConfirm.product.id}:delete`) ? 'در حال حذف...' : 'حذف محصول'} icon={FaTrash} tone="danger" variant="solid" onClick={handleDeleteConfirm} disabled={Boolean(deleteConfirm.product && pendingRowActions.has(`${deleteConfirm.product.id}:delete`))} />
             </div>
           </ErpCard>
         </div>
       )}
 
       <SuccessModal isOpen={showSuccessModal} onClose={() => setShowSuccessModal(false)} title="عملیات موفق" message={modalMessage} buttonText="باشه" autoClose autoCloseDelay={2000} />
-      <ErrorModal isOpen={showErrorModal} onClose={() => setShowErrorModal(false)} title="خطا" message={modalMessage} details={modalDetails} buttonText="باشه" />
       <ProductImportExportModal
         isOpen={showImportExportModal}
         onClose={() => setShowImportExportModal(false)}
@@ -277,7 +367,6 @@ export default function ProductsPage() {
           fetchProducts();
           setShowSuccessModal(true);
           setModalMessage('محصولات با موفقیت همگام‌سازی شدند');
-          setModalDetails(`${results.summary.creates} ایجاد، ${results.summary.updates} به‌روزرسانی، ${results.summary.removals} حذف یا غیرفعال`);
         }}
         currentFilters={{
           search: searchTerm,

@@ -4,7 +4,9 @@ import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performanceSourceHash } from './performance-source-identity.mjs';
+import { capturePerformanceRuntimeSourceBinding } from './performance-runtime-source-binding.mjs';
 import { runPerformanceVerification } from './performance-local-verification.mjs';
+import { canonicalPerformanceEvidence as canonical } from './performance-evidence-canonical.mjs';
 
 export const performanceDatabaseChecks = (root, environment = process.env) => {
   const iterations = Number(environment.PERFORMANCE_RACE_ITERATIONS ?? '10');
@@ -17,6 +19,9 @@ export const performanceDatabaseChecks = (root, environment = process.env) => {
     ['policy', 'personnelPerformancePolicy'],
     ['workflow', 'personnelPerformanceWorkflow'],
     ['lineage', 'personnelPerformanceExportLineage'],
+    ['promotion-race', 'personnelPerformancePromotionEvidenceRace'],
+    ['erasure', 'personnelPerformanceErasure'],
+    ['erasure-recovery', 'personnelPerformanceErasureRecovery'],
     ['monitoring', 'personnelPerformanceMonitoring'],
     ['safety-races', 'personnelPerformanceSafetyRaces'],
   ];
@@ -30,6 +35,7 @@ export const performanceDatabaseChecks = (root, environment = process.env) => {
     env: {
       DATABASE_URL: name === 'lineage' ? source.replace('connection_limit=2', 'connection_limit=4') : source,
       NODE_ENV: 'test', PERFORMANCE_RACE_ITERATIONS: String(iterations),
+      PERFORMANCE_ERASURE_BULK_THRESHOLD: '100',
       PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID: 'local-development-v1',
       PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64: 'cGVyZi1sb2NhbC0wMTIzNDU2Nzg5YWJjZGVmLXYxISE=',
     },
@@ -64,11 +70,8 @@ const main = async () => {
   const captureIdentity = async () => {
     const identity = { commit: command('git', ['rev-parse', 'HEAD']), sourceHash: await performanceSourceHash() };
     if (mode === 'unit') return identity;
-    const images = {};
-    for (const service of ['backend', 'frontend', 'inquiry']) {
-      preflight();
-      images[service] = command('docker', ['inspect', '--format', '{{.Image}}', `sabalanerp-local-${service}-1`]);
-    }
+    preflight();
+    const runtime = capturePerformanceRuntimeSourceBinding({ ...identity, command });
     preflight();
     const metadata = JSON.parse(command('docker', [...composeArgs, 'exec', '-T', 'postgres', 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
       '--username', 'postgres', '--dbname', 'sabalanerp', '--tuples-only', '--no-align', '--command',
@@ -79,10 +82,9 @@ const main = async () => {
           (SELECT "policyKind", version, lifecycle, "effectiveFrom", "contentHash" FROM performance_policy_versions) p)
       )`,
     ]));
-    return { ...identity, images, sourceDatabaseAppliedMigrationHash: digest(JSON.stringify(metadata.migrations)),
-      policyMetadataHash: digest(JSON.stringify(metadata.policies)),
+    return { ...identity, ...runtime, appliedMigrationHash: digest(canonical(metadata.migrations)),
+      policyMetadataHash: digest(canonical(metadata.policies)),
       composeSourceHash: digest(await readFile('docker-compose.local.yml')),
-      runtimeSourceBinding: 'NOT_ATTESTED',
     };
   };
 

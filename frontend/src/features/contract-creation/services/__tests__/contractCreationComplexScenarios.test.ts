@@ -1298,9 +1298,11 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   }, total);
 
   assert.equal(underPaid.isValid, false);
-  assert.ok(underPaid.errors.some((error) => error.includes('نباید کمتر')));
+  assert.ok(underPaid.errors.some((error) =>
+    error.includes('کمتر از مبلغ قرارداد است') && error.includes('مبلغ پرداخت‌ها را به')
+  ));
   assert.equal(overPaidWithoutReason.isValid, false);
-  assert.ok(overPaidWithoutReason.errors.some((error) => error.includes('توضیحات')));
+  assert.ok(overPaidWithoutReason.errors.some((error) => error.includes('دلیل مبلغ اضافه را انتخاب کنید')));
   assert.equal(overPaidWithReason.isValid, true);
   assert.equal(customerBalance.isValid, true);
 }

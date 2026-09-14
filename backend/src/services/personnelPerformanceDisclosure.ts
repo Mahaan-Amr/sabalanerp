@@ -1,10 +1,31 @@
 export const PERFORMANCE_LEVELS = [
   { code: 'URGENT_IMPROVEMENT', labelFa: 'نیازمند بهبود فوری', meaningFa: 'عملکرد مصوب به‌طور جدی پایین‌تر از انتظارهای نقش بوده است.' },
-  { code: 'IMPROVEMENT_NEEDED', labelFa: 'نیازمند بهبود', meaningFa: 'عملکرد مصوب در بخشی از انتظارهای نقش نیازمند بهبود است.' },
-  { code: 'MEETS_EXPECTATIONS', labelFa: 'مطابق انتظار', meaningFa: 'عملکرد مصوب با انتظارهای نقش هم‌خوان است.' },
-  { code: 'EXCEEDS_EXPECTATIONS', labelFa: 'فراتر از انتظار', meaningFa: 'عملکرد مصوب در مجموع فراتر از انتظارهای نقش بوده است.' },
+  { code: 'IMPROVEMENT', labelFa: 'نیازمند بهبود', meaningFa: 'عملکرد مصوب در بخشی از انتظارهای نقش نیازمند بهبود است.' },
+  { code: 'MEETS', labelFa: 'مطابق انتظار', meaningFa: 'عملکرد مصوب با انتظارهای نقش هم‌خوان است.' },
+  { code: 'EXCEEDS', labelFa: 'فراتر از انتظار', meaningFa: 'عملکرد مصوب در مجموع فراتر از انتظارهای نقش بوده است.' },
   { code: 'OUTSTANDING', labelFa: 'عملکرد برجسته', meaningFa: 'عملکرد مصوب به‌شکلی پایدار و برجسته فراتر از انتظارهای نقش بوده است.' },
 ] as const;
+
+const PERFORMANCE_LEVEL_ALIASES = new Map<string, typeof PERFORMANCE_LEVELS[number]['code']>([
+  ['URGENT_IMPROVEMENT', 'URGENT_IMPROVEMENT'],
+  ['IMPROVEMENT', 'IMPROVEMENT'],
+  ['IMPROVEMENT_NEEDED', 'IMPROVEMENT'],
+  ['MEETS', 'MEETS'],
+  ['MEETS_EXPECTATIONS', 'MEETS'],
+  ['EXCEEDS', 'EXCEEDS'],
+  ['EXCEEDS_EXPECTATIONS', 'EXCEEDS'],
+  ['OUTSTANDING', 'OUTSTANDING'],
+]);
+
+export const performanceLevelForCode = (code: string | null | undefined) => {
+  const compatibleCode = code ? PERFORMANCE_LEVEL_ALIASES.get(code) : undefined;
+  return compatibleCode ? PERFORMANCE_LEVELS.find(({ code: candidate }) => candidate === compatibleCode) : undefined;
+};
+
+export const samePerformanceLevel = (left: string | null | undefined, right: string | null | undefined) => {
+  const leftLevel = performanceLevelForCode(left);
+  return leftLevel !== undefined && leftLevel.code === performanceLevelForCode(right)?.code;
+};
 
 type ProjectionState = 'UNEVALUATED' | 'NEEDS_NEW_EVALUATION' | 'LEVEL' | 'TEMPORARILY_UNAVAILABLE';
 
@@ -22,17 +43,19 @@ export const buildPerformanceBadgeSummary = (projection: {
   version: number;
 }) => {
   const level = projection.state === 'LEVEL'
-    ? PERFORMANCE_LEVELS.find(({ code }) => code === projection.levelCode)
+    ? performanceLevelForCode(projection.levelCode)
     : null;
-  const presentation = level ?? neutralProjection[projection.state as Exclude<ProjectionState, 'LEVEL'>]
+  const outputState = level ? 'LEVEL' as const
+    : projection.state === 'LEVEL' ? 'TEMPORARILY_UNAVAILABLE' as const : projection.state;
+  const presentation = level ?? neutralProjection[outputState as Exclude<ProjectionState, 'LEVEL'>]
     ?? neutralProjection.TEMPORARILY_UNAVAILABLE;
   return {
-    state: level ? 'LEVEL' as const : projection.state,
+    state: outputState,
     ...(level ? { levelCode: level.code } : {}),
     labelFa: presentation.labelFa,
     meaningFa: presentation.meaningFa,
-    ...(projection.newestMeasurementTo ? { newestMeasurementTo: projection.newestMeasurementTo.toISOString() } : {}),
-    ...(projection.nextReviewAt ? { nextReviewAt: projection.nextReviewAt.toISOString() } : {}),
+    ...(level && projection.newestMeasurementTo ? { newestMeasurementTo: projection.newestMeasurementTo.toISOString() } : {}),
+    ...(level && projection.nextReviewAt ? { nextReviewAt: projection.nextReviewAt.toISOString() } : {}),
     version: projection.version,
   };
 };
@@ -115,6 +138,9 @@ export const buildPerformanceAnalytics = (input: {
   mode?: 'AGGREGATE' | 'NAMED_RANKING';
 }): PerformanceAnalyticsResult => {
   const mode = input.mode ?? 'AGGREGATE';
+  if ([...input.population, ...input.selected].some(({ levelCode }) => !performanceLevelForCode(levelCode))) {
+    return suppressed('PERFORMANCE_LEVEL_UNAVAILABLE', 'خلاصه عملکرد موقتاً در دسترس نیست.');
+  }
   const minimum = mode === 'NAMED_RANKING' ? 5 : 10;
   if (input.selected.length < minimum) return suppressed(mode === 'NAMED_RANKING' ? 'NAMED_POPULATION_TOO_SMALL' : 'AGGREGATE_POPULATION_TOO_SMALL');
   const complement = input.population.length - input.selected.length;
@@ -132,7 +158,7 @@ export const buildPerformanceAnalytics = (input: {
         levelCode: level.code,
         labelFa: level.labelFa,
         members: members
-          .filter(({ levelCode }) => levelCode === level.code)
+          .filter(({ levelCode }) => samePerformanceLevel(levelCode, level.code))
           .map(({ personnelId, displayName, employmentRelationshipId, measurementTo }) => ({
             personnelId,
             displayName,
@@ -143,7 +169,7 @@ export const buildPerformanceAnalytics = (input: {
     };
   }
   if (PERFORMANCE_LEVELS.some((level) => {
-    const count = input.selected.filter(({ levelCode }) => levelCode === level.code).length;
+    const count = input.selected.filter(({ levelCode }) => samePerformanceLevel(levelCode, level.code)).length;
     return count > 0 && count < 10;
   })) return suppressed('LEVEL_CELL_TOO_SMALL', 'توزیع سطح‌ها برای حفاظت از گروه‌های کوچک قابل نمایش نیست.');
   const signatures = new Set(input.selected.map(({ comparabilitySignature }) => comparabilitySignature));
@@ -151,15 +177,19 @@ export const buildPerformanceAnalytics = (input: {
   const exactScoreStatistics = signatures.size === 1 && scores.length === input.selected.length
     ? { average: scores.reduce((sum, score) => sum + score, 0) / scores.length }
     : null;
+  const levelDistribution = PERFORMANCE_LEVELS.map((level) => {
+    const count = input.selected.filter(({ levelCode }) => samePerformanceLevel(levelCode, level.code)).length;
+    return {
+      levelCode: level.code,
+      labelFa: level.labelFa,
+      count,
+      percent: Number((count * 100 / input.selected.length).toFixed(2)),
+    };
+  });
   return {
     suppressed: false as const,
     eligibleCount: input.selected.length,
-    levelDistribution: PERFORMANCE_LEVELS.map((level) => ({
-      levelCode: level.code,
-      labelFa: level.labelFa,
-      count: input.selected.filter(({ levelCode }) => levelCode === level.code).length,
-      percent: Number((input.selected.filter(({ levelCode }) => levelCode === level.code).length * 100 / input.selected.length).toFixed(2)),
-    })),
+    levelDistribution,
     exactScoreStatistics,
   };
 };

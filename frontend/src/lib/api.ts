@@ -1500,6 +1500,21 @@ export const servicesAPI = {
 
 export const personnelPerformanceAPI = {
   capabilities: () => api.get('/hr/personnel-performance/capabilities'),
+  simpleWorkspace: () => api.get('/hr/personnel-performance/simple/workspace'),
+  simpleProfiles: () => api.get('/hr/personnel-performance/simple/profiles'),
+  simpleHistory: (personnelId: string, page = 1) => api.get(
+    `/hr/personnel-performance/simple/history/${encodeURIComponent(personnelId)}`, { params: { page } },
+  ),
+  createSimpleProfile: (input: unknown) => api.post('/hr/personnel-performance/simple/profiles', input),
+  assignSimpleProfile: (input: { personnelId: string; profileId: string }) => api.post('/hr/personnel-performance/simple/profile-assignments', input),
+  createSimpleEvaluation: (input: { personnelId: string; evaluationDate: string }) => api.post('/hr/personnel-performance/simple/evaluations', input),
+  saveSimpleEvaluation: (evaluationId: string, values: Array<{ indicatorId: string; actual: string }>) => api.put(
+    `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/draft`, { values },
+  ),
+  finalizeSimpleEvaluation: (evaluationId: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/finalize`),
+  correctSimpleEvaluation: (evaluationId: string, reason: string) => api.post(
+    `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/corrections`, { reason },
+  ),
   personalBadge: () => api.get('/hr/personnel-performance/badge/me'),
   badges: (personnelIds: string[]) => api.post('/hr/personnel-performance/badges', { personnelIds }),
   history: (personnelId: string) => api.get(`/hr/personnel-performance/history/${encodeURIComponent(personnelId)}`),
@@ -1542,6 +1557,7 @@ export const personnelPerformanceAPI = {
   cancelEvaluation: (evaluationId: string, reason: string) => api.post(`/hr/personnel-performance/evaluations/${encodeURIComponent(evaluationId)}/cancel`, { reason }),
   invalidateEvaluation: (evaluationId: string, reason: string) => api.post(`/hr/personnel-performance/evaluations/${encodeURIComponent(evaluationId)}/invalidate`, { reason }),
   runReminders: () => api.post('/hr/personnel-performance/reminders/run'),
+  ownerReferences: () => api.get('/hr/personnel-performance/owner-references'),
   criteria: () => api.get('/hr/personnel-performance/criteria'),
   createCriterion: (content: unknown) => api.post('/hr/personnel-performance/criteria', content),
   updateCriterion: (versionId: string, content: unknown) => api.put(`/hr/personnel-performance/criteria/${versionId}`, content),
@@ -1553,6 +1569,11 @@ export const personnelPerformanceAPI = {
   updateTemplate: (versionId: string, content: unknown) => api.put(`/hr/personnel-performance/templates/${versionId}`, content),
   scheduleTemplate: (versionId: string, input: { effectiveFrom: string; reason: string }) => (
     api.post(`/hr/personnel-performance/templates/${versionId}/schedule`, input)
+  ),
+  previewCatalogImport: (manifest: unknown) => api.post('/hr/personnel-performance/catalog-import/preview', manifest),
+  applyCatalogImport: (manifest: unknown) => api.post('/hr/personnel-performance/catalog-import/apply', manifest),
+  approveCatalogDraft: (artifactType: 'criteria' | 'templates', versionId: string, reason: string) => (
+    api.post(`/hr/personnel-performance/catalog-import/${artifactType}/${versionId}/approve`, { reason })
   ),
   policies: () => api.get('/hr/personnel-performance/policies'),
   createPolicy: (input: unknown) => api.post('/hr/personnel-performance/policies', input),

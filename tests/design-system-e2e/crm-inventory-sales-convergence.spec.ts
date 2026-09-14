@@ -217,7 +217,9 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
     });
     await page.goto('/dashboard/sales/products/create');
     await expect(page.getByRole('heading', { name: 'ایجاد محصول سنگ' })).toBeVisible();
-    await expect(page.getByRole('alert').filter({ hasText: 'دریافت داده‌های پایه محصول ناموفق بود' })).toBeVisible();
+    await expect(page.getByRole('alert').filter({
+      hasText: 'دریافت گزینه‌های ساخت محصول انجام نشد. اتصال را بررسی کنید و دوباره تلاش کنید.'
+    })).toBeVisible();
     await expect(page.getByRole('button', { name: 'تلاش دوباره' })).toBeVisible();
     await expect(page.getByText('هیچ آیتمی موجود نیست')).toBeVisible();
     await assertNoSeriousAxeViolations(page);

@@ -3,6 +3,19 @@ import type { FormErrorMap } from '@/lib/formErrors';
 export const CONTRACT_PRODUCT_GRAPH_ERROR_CODE =
   'contract-product-graph-validation-failed';
 
+export const getContractSubmissionRecovery = (
+  status: unknown,
+  isEditMode: boolean
+): { nextStep: string; uncertainMutation: boolean } => {
+  const isValidationResponse = [400, 422].includes(Number(status));
+  return {
+    nextStep: isEditMode || isValidationResponse
+      ? 'اطلاعات مشخص‌شده را بررسی کنید و دوباره تلاش کنید.'
+      : 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
+    uncertainMutation: !isValidationResponse
+  };
+};
+
 export const isContractProductValidationFailure = (
   error: any,
   mappedErrors: FormErrorMap

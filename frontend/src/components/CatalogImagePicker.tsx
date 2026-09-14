@@ -7,14 +7,17 @@ import { resolveBackendAssetUrl, salesAPI } from '@/lib/api';
 interface CatalogImagePickerProps {
   images?: string[];
   label?: string;
+  error?: string;
   onChange: (images: string[]) => void;
 }
 
 const CatalogImagePicker: React.FC<CatalogImagePickerProps> = ({
   images = [],
   label = 'تصاویر',
+  error,
   onChange
 }) => {
+  const errorId = React.useId();
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -57,9 +60,18 @@ const CatalogImagePicker: React.FC<CatalogImagePickerProps> = ({
         )}
         <label className="inline-flex h-16 w-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] transition hover:bg-[var(--sds-accent-surface)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
           <FaPlus className="h-5 w-5" />
-          <ErpInput aria-label={`افزودن ${label}`} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={handleUpload} />
+          <ErpInput
+            aria-label={`افزودن ${label}`}
+            aria-invalid={Boolean(error)}
+            aria-errormessage={error ? errorId : undefined}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="sr-only"
+            onChange={handleUpload}
+          />
         </label>
       </div>
+      {error && <p id={errorId} role="alert" className="mt-2 text-sm font-medium text-[var(--sds-danger)]">{error}</p>}
     </div>
   );
 };

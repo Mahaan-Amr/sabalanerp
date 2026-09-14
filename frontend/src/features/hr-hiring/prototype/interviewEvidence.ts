@@ -110,6 +110,7 @@ const kindByAnswerType: Record<string, InterviewCriterion["kind"]> = {
   ADDRESS: "address",
   STRENGTHS_WEAKNESSES: "strengthsWeaknesses",
   COMPANION: "companion",
+  PERSONALITY_TEST_SUMMARY: "personalityTestSummary",
 };
 
 const fiveTextAnswers = (value: unknown, fallback: string[]) => {
@@ -173,6 +174,7 @@ export const hydrateInterviewState = (
     if (!candidate) return [criterion.id, fallback];
     const strengths = fiveTextAnswers(candidate.strengths, fallback.strengths);
     const weaknesses = fiveTextAnswers(candidate.weaknesses, fallback.weaknesses);
+    const personalityTestSummary = record(candidate.personalityTestSummary);
     const answer: CriterionAnswer = {
       score: validLegacyScore(candidate.score) ? candidate.score : null,
       text: typeof candidate.text === "string" ? candidate.text : "",
@@ -187,6 +189,12 @@ export const hydrateInterviewState = (
         : null,
       strengths,
       weaknesses,
+      personalityTestSummary: {
+        discResult: typeof personalityTestSummary?.discResult === "string" ? personalityTestSummary.discResult : "",
+        discNotProvided: personalityTestSummary?.discNotProvided === true,
+        bigFiveResult: typeof personalityTestSummary?.bigFiveResult === "string" ? personalityTestSummary.bigFiveResult : "",
+        eqResult: typeof personalityTestSummary?.eqResult === "string" ? personalityTestSummary.eqResult : "",
+      },
       legacyScore: validLegacyScore(candidate.legacyScore) ? candidate.legacyScore : undefined,
       legacyNote: typeof candidate.legacyNote === "string" ? candidate.legacyNote : undefined,
     };

@@ -1,8 +1,9 @@
 'use client';
 import { ErpButton, ErpInlineState, ErpSegmentedControl, ErpSheet } from '@/components/erp';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { FaDownload, FaExclamationTriangle, FaFileExcel, FaUpload } from 'react-icons/fa';
 import ExcelFileUpload from './ExcelFileUpload';
+import { assertSuccessfulSalesDownload, assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 
 interface CatalogSyncPlan {
   importId: string;
@@ -83,14 +84,25 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [plan, setPlan] = useState<CatalogSyncPlan | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Array<{ source: string; message: string; kind: 'error' | 'permission' | 'stale'; order: number }>>([]);
+  const errorSequenceRef = useRef(0);
+  const visibleError = [...errors].sort((left, right) => right.order - left.order)[0];
+
+  const showError = (source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
+    const order = ++errorSequenceRef.current;
+    setErrors(current => [...current.filter(item => item.source !== source), { source, message, kind, order }]);
+  };
+
+  const clearError = (source: string) => {
+    setErrors(current => current.filter(item => item.source !== source));
+  };
 
   const reset = () => {
     setActiveTab('import');
     setSelectedFile(null);
     setPlan(null);
     setLoading(false);
-    setError(null);
+    setErrors([]);
   };
 
   const close = () => {
@@ -101,11 +113,16 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   const handleTemplate = async () => {
     try {
       setLoading(true);
-      setError(null);
       const response = await downloadTemplate();
+      await assertSuccessfulSalesDownload(response);
       downloadBlob(response, `${filenamePrefix}-template.xlsx`);
+      clearError('template');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'خطا در دانلود قالب اکسل');
+      const normalizedError = await normalizeSalesBlobError(err);
+      showError('template', getSalesOperationalErrorMessage(normalizedError, {
+        failedAction: 'دانلود قالب اکسل',
+        nextStep: 'دوباره روی «دانلود قالب» بزنید.',
+      }), getSalesOperationalErrorKind(normalizedError));
     } finally {
       setLoading(false);
     }
@@ -114,11 +131,16 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   const handleExport = async () => {
     try {
       setLoading(true);
-      setError(null);
       const response = await exportData();
+      await assertSuccessfulSalesDownload(response);
       downloadBlob(response, `${filenamePrefix}-export-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      clearError('export');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'خطا در خروجی اکسل');
+      const normalizedError = await normalizeSalesBlobError(err);
+      showError('export', getSalesOperationalErrorMessage(normalizedError, {
+        failedAction: 'دریافت خروجی اکسل',
+        nextStep: 'دوباره روی «دریافت خروجی» بزنید.',
+      }), getSalesOperationalErrorKind(normalizedError));
     } finally {
       setLoading(false);
     }
@@ -126,16 +148,20 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
 
   const handlePreview = async () => {
     if (!selectedFile) {
-      setError('لطفا فایل اکسل را انتخاب کنید');
+      showError('preview', 'فایل اکسل انتخاب نشده است. فایل موردنظر را انتخاب کنید و دوباره ادامه دهید.', 'error');
       return;
     }
     try {
       setLoading(true);
-      setError(null);
       const response = await previewImport(selectedFile);
+      assertSuccessfulSalesResponse(response);
       setPlan(response.data.data);
+      clearError('preview');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'خطا در بررسی فایل اکسل');
+      showError('preview', getSalesOperationalErrorMessage(err, {
+        failedAction: 'بررسی فایل اکسل',
+        nextStep: 'محتوای فایل را اصلاح کنید یا فایل دیگری انتخاب کنید.',
+      }), getSalesOperationalErrorKind(err));
     } finally {
       setLoading(false);
     }
@@ -145,13 +171,17 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
     if (!plan?.importId) return;
     try {
       setLoading(true);
-      setError(null);
       const response = await applyImport(plan.importId);
+      assertSuccessfulSalesResponse(response);
       const appliedPlan = response.data.data;
       onComplete?.(appliedPlan);
       close();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'خطا در اعمال تغییرات اکسل');
+      showError('apply', getSalesOperationalErrorMessage(err, {
+        failedAction: 'اعمال تغییرات اکسل',
+        nextStep: 'نتیجهٔ فعلی کاتالوگ را بررسی کنید؛ فقط اگر تغییرات اعمال نشده بود دوباره تلاش کنید.',
+        uncertainMutation: true,
+      }), getSalesOperationalErrorKind(err));
     } finally {
       setLoading(false);
     }
@@ -193,7 +223,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
               </div>
 
               <ExcelFileUpload
-                onFileSelect={(file) => { setSelectedFile(file); setPlan(null); setError(null); }}
+                onFileSelect={(file) => { setSelectedFile(file); setPlan(null); clearError('preview'); }}
                 onFileRemove={() => { setSelectedFile(null); setPlan(null); }}
                 selectedFile={selectedFile}
                 loading={loading}
@@ -246,7 +276,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
             </div>
           )}
 
-          {error ? <ErpInlineState kind="error" title={error} className="mt-4" /> : null}
+          {visibleError ? <ErpInlineState kind={visibleError.kind} title={visibleError.message} className="mt-4" /> : null}
         </div>
     </ErpSheet>
   );

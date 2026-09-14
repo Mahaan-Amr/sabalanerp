@@ -53,4 +53,35 @@ assert.equal(criterionIsComplete(selfView, {
   weaknesses: ["یک"],
 }), false);
 
+const personalityTests = interviewCriteria.find((criterion) => criterion.id === "personalityTestSummary")!;
+const personalityAnswer = createInitialInterviewState().answers.personalityTestSummary;
+assert.equal(criterionIsComplete(personalityTests, personalityAnswer), false);
+assert.equal(criterionIsComplete(personalityTests, {
+  ...personalityAnswer,
+  personalityTestSummary: {
+    discResult: "Di",
+    discNotProvided: false,
+    bigFiveResult: "",
+    eqResult: "",
+  },
+}), true);
+assert.equal(criterionIsComplete(personalityTests, {
+  ...personalityAnswer,
+  personalityTestSummary: {
+    discResult: "",
+    discNotProvided: true,
+    bigFiveResult: "",
+    eqResult: "",
+  },
+}), true);
+assert.equal(criterionIsComplete(personalityTests, {
+  ...personalityAnswer,
+  personalityTestSummary: {
+    discResult: "Di",
+    discNotProvided: true,
+    bigFiveResult: "",
+    eqResult: "",
+  },
+}), false);
+
 console.log("Guided HR interview state tests passed.");

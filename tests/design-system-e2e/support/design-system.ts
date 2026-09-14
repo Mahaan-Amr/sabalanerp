@@ -4,6 +4,13 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 export const loginAsAdmin = async (page: Page) => {
   const username = process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin';
   const password = process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123';
+  await page.route('**/api/hr/personnel-performance/badge/me', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, badge: null })
+    });
+  });
   await page.goto('/login');
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(username);
   await page.locator('input[type="password"]').fill(password);
@@ -52,6 +59,9 @@ export const setTheme = async (page: Page, theme: 'light' | 'dark') => {
 export const setViewportAndZoom = async (page: Page, viewport: { width: number; height: number }, zoom = 1) => {
   await page.setViewportSize(viewport);
   await page.waitForLoadState('domcontentloaded');
+  await page.addStyleTag({
+    content: 'nextjs-portal { display: none !important; }'
+  });
   await page.evaluate((nextZoom) => {
     document.documentElement.style.zoom = nextZoom === 1 ? '' : String(nextZoom);
   }, zoom);
@@ -68,6 +78,12 @@ export const assertNoSeriousAxeViolations = async (page: Page) => {
 
 export const assertMinimumTargetSize = async (locator: Locator, minimum = 44) => {
   const undersized = await locator.evaluateAll((elements, size) => elements
+    // Framework development controls are not part of the shipped application
+    // and must not satisfy or fail Sabalan's interaction contract.
+    .filter((element) => (
+      !element.closest('nextjs-portal')
+      && !element.hasAttribute('data-nextjs-dev-tools-button')
+    ))
     .filter((element) => {
       const target = element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)
         ? element.closest('label') || element

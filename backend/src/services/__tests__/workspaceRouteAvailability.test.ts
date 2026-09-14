@@ -25,6 +25,16 @@ const clientWith = (workspace: string) => ({
   },
 });
 
+const clientWithHrFeature = (featureCode: string) => ({
+  ...clientWith('hr'),
+  hrFeatureAccessGrant: {
+    findMany: async () => [{
+      id: 'hr-feature-grant', userId: 'operator', featureCode, level: 'ADMIN', status: 'ACTIVE',
+      effectiveFrom: new Date('2020-01-01'), effectiveTo: null, reason: 'explicit test grant',
+    }],
+  },
+});
+
 const run = async () => {
   const workspaces = ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics'];
   for (const workspace of workspaces) {
@@ -44,6 +54,22 @@ const run = async () => {
     userId: 'user', role: 'USER', path: '/dashboard/profile',
   });
   assert.equal(unrelated.allowed, true);
+  for (const featureCode of [
+    'SUBMIT_PERFORMANCE_EVALUATION',
+    'REVIEW_PERFORMANCE_EVALUATION',
+    'MANAGE_PERFORMANCE_CYCLE',
+  ]) {
+    const performance = await resolveWorkspaceRouteAvailability(clientWithHrFeature(featureCode) as never, {
+      userId: 'operator', role: 'USER', path: '/dashboard/hr/personnel/performance',
+    });
+    assert.equal(performance.allowed, true, `${featureCode} must admit its holder to the performance workspace`);
+  }
+  const personnelWithoutPersonnelGrant = await resolveWorkspaceRouteAvailability(
+    clientWithHrFeature('SUBMIT_PERFORMANCE_EVALUATION') as never,
+    { userId: 'operator', role: 'USER', path: '/dashboard/hr/personnel' },
+  );
+  assert.equal(personnelWithoutPersonnelGrant.allowed, false,
+    'a performance action grant must not broaden access to general personnel records');
   for (const [workspace, path, purposes] of [
     ['sales', '/dashboard/sales/partners', ['MANAGEMENT']],
     ['sales', '/dashboard/sales/partner-inquiries', ['RESPONDER']],

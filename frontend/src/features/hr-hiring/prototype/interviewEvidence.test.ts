@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   customCriteriaAreComplete,
+  hydrateInterviewState,
   initialInterviewScoreSummary,
   InterviewSnapshotError,
   normalizeInitialInterviewPayload,
@@ -19,6 +20,26 @@ assert.deepEqual(publishedCriteriaForInterview(snapshot).map(({ id, kind }) => (
   { id: "appearance", kind: "score" },
   { id: "motivation", kind: "text" },
 ]);
+
+const personalitySnapshot: PublishedInterviewCriterion[] = [
+  ...snapshot,
+  {
+    stableId: "personalityTestSummary",
+    title: "نتایج آزمون‌های DISC، BIG FIVE و EQ",
+    answerType: "PERSONALITY_TEST_SUMMARY",
+    isActive: true,
+    order: 3,
+    allowUnassessed: false,
+  },
+];
+const personalityCriteria = publishedCriteriaForInterview(personalitySnapshot);
+assert.equal(personalityCriteria[2].kind, "personalityTestSummary");
+assert.deepEqual(hydrateInterviewState(undefined, personalityCriteria).answers.personalityTestSummary.personalityTestSummary, {
+  discResult: "",
+  discNotProvided: false,
+  bigFiveResult: "",
+  eqResult: "",
+});
 
 const migrated = normalizeInitialInterviewPayload({
   version: 1,

@@ -38,6 +38,11 @@ RUN DATABASE_URL=file:/tmp/inquiry-build.db SESSION_SECRET=build-only-session-se
 RUN mkdir -p /data /app/recovery-coordination \
   && chmod +x /app/run-inquiry-with-recovery.sh
 
+ARG PERFORMANCE_SOURCE_COMMIT=unattested
+ARG PERFORMANCE_SOURCE_HASH=unattested
+LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
+  io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
+
 EXPOSE 3001
 
 CMD ["/app/run-inquiry-with-recovery.sh"]

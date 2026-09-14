@@ -5,6 +5,8 @@ import {
   ErpButton,
   ErpCard,
   ErpCheckbox,
+  ErpField,
+  ErpFieldView,
   ErpInput,
   ErpInlineState,
   ErpPage,
@@ -214,6 +216,69 @@ function FieldLabel({
   );
 }
 
+export function PersonalityTestSummaryEditor({
+  answer,
+  onChange,
+}: {
+  answer: CriterionAnswer;
+  onChange: (answer: CriterionAnswer) => void;
+}) {
+  const summary = answer.personalityTestSummary;
+  const update = (patch: Partial<typeof summary>) => onChange({
+    ...answer,
+    personalityTestSummary: { ...summary, ...patch },
+  });
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm leading-6 text-[var(--sds-text-secondary)]">
+        این موارد همان نتیجه‌ای هستند که متقاضی اعلام می‌کند و جای گزارش رسمی آزمون را نمی‌گیرند.
+      </p>
+      <ErpField
+        label="تیپ شخصیتی DISC"
+        required
+        hint="برای نمونه: Di یا SC"
+      >
+        <ErpInput
+          value={summary.discResult}
+          maxLength={100}
+          disabled={summary.discNotProvided}
+          onChange={(event) => update({ discResult: event.target.value })}
+          placeholder="تیپ اعلام‌شده توسط متقاضی"
+        />
+      </ErpField>
+      <ErpCheckbox
+        checked={summary.discNotProvided}
+        onChange={(event) => update({
+          discNotProvided: event.target.checked,
+          ...(event.target.checked ? { discResult: "" } : {}),
+        })}
+        label="متقاضی نتیجه DISC را ارائه نکرد"
+      />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ErpField label="خلاصه نتیجه BIG FIVE (اختیاری)">
+          <ErpTextarea
+            rows={4}
+            value={summary.bigFiveResult}
+            maxLength={1000}
+            onChange={(event) => update({ bigFiveResult: event.target.value })}
+            placeholder="خلاصه نتیجه اعلام‌شده"
+          />
+        </ErpField>
+        <ErpField label="خلاصه نتیجه EQ (اختیاری)">
+          <ErpTextarea
+            rows={4}
+            value={summary.eqResult}
+            maxLength={1000}
+            onChange={(event) => update({ eqResult: event.target.value })}
+            placeholder="خلاصه نتیجه اعلام‌شده"
+          />
+        </ErpField>
+      </div>
+    </div>
+  );
+}
+
 function CriterionEditor({
   criterion,
   answer,
@@ -407,6 +472,10 @@ function CriterionEditor({
           </div>
         </div>
       ) : null}
+
+      {criterion.kind === "personalityTestSummary" ? (
+        <PersonalityTestSummaryEditor answer={answer} onChange={onChange} />
+      ) : null}
     </div>
   );
 }
@@ -465,7 +534,7 @@ function ProgressSummary({ state, criteria = interviewCriteria }: { state: Inter
       <ErpCard className="p-3">
         <p className="text-xs text-[var(--sds-text-muted)]">تکمیل معیارها</p>
         <p className="mt-1 text-xl font-bold text-[var(--sds-text-primary)]">
-          {complete.toLocaleString("fa-IR")} از ۱۷
+          {complete.toLocaleString("fa-IR")} از {criteria.length.toLocaleString("fa-IR")}
         </p>
       </ErpCard>
       <ErpCard className="p-3">
@@ -634,6 +703,10 @@ const worksheetGroups = [
       "achievement",
       "companion",
     ],
+  },
+  {
+    title: "نتایج آزمون‌های اظهار‌شده",
+    ids: ["personalityTestSummary"],
   },
 ];
 
@@ -1625,7 +1698,7 @@ export function ProductionInterviewReport({
       <ErpInlineState kind="stale" title="این گزارش با ساختار نسخه قدیمی ثبت شده و بدون تغییر در داده‌های اصلی نمایش داده می‌شود." />
       {scoreSummaryCard}
       <div className="grid gap-3 md:grid-cols-2">
-        {interviewCriteria.map((criterion) => {
+        {interviewCriteria.filter((criterion) => criterion.id !== "personalityTestSummary").map((criterion) => {
           const answer = legacyById.get(criterion.id);
           return <ErpCard key={criterion.id} className="space-y-2 p-4">
             <b>{criterion.order.toLocaleString("fa-IR")}. {criterion.title}</b>
@@ -1670,6 +1743,23 @@ export function ProductionInterviewReport({
           {criterion.kind === "address" && <><p className="whitespace-pre-wrap">{answer.text}</p><p>{judgment(answer.judgment)}</p></>}
           {criterion.kind === "companion" && <p>{answer.companionPresent === "YES" ? "با همراه" : "بدون همراه"} · {judgment(answer.judgment)}</p>}
           {criterion.kind === "strengthsWeaknesses" && <div className="grid gap-2 sm:grid-cols-2"><div><b>نقاط قوت</b>{answer.strengths.map((item, index) => <p key={`s-${index}`}>{item}</p>)}</div><div><b>نقاط ضعف</b>{answer.weaknesses.map((item, index) => <p key={`w-${index}`}>{item}</p>)}</div></div>}
+          {criterion.kind === "personalityTestSummary" && <div className="space-y-3">
+            <p className="text-sm text-[var(--sds-text-secondary)]">اظهارشده توسط متقاضی؛ این اطلاعات نتیجه رسمی آزمون نیست.</p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <ErpFieldView
+                label="تیپ شخصیتی DISC"
+                value={answer.personalityTestSummary.discNotProvided ? "متقاضی ارائه نکرد" : answer.personalityTestSummary.discResult}
+              />
+              <ErpFieldView
+                label="خلاصه نتیجه BIG FIVE"
+                value={answer.personalityTestSummary.bigFiveResult.trim() || "ثبت نشده"}
+              />
+              <ErpFieldView
+                label="خلاصه نتیجه EQ"
+                value={answer.personalityTestSummary.eqResult.trim() || "ثبت نشده"}
+              />
+            </div>
+          </div>}
           {answer.note && <p className="whitespace-pre-wrap text-sm text-[var(--sds-text-secondary)]">یادداشت: {answer.note}</p>}
         </ErpCard>;
       })}

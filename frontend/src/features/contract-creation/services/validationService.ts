@@ -18,23 +18,23 @@ export const validateProduct = (product: Partial<ContractProduct>): { isValid: b
   const errors: string[] = [];
   
   if (!product.productId) {
-    errors.push('انتخاب محصول الزامی است');
+    errors.push('یک محصول انتخاب کنید.');
   }
   
   if (!product.quantity || product.quantity <= 0) {
-    errors.push('تعداد باید بزرگ‌تر از صفر باشد');
+    errors.push('تعداد را بیشتر از صفر وارد کنید.');
   }
   
   if (!product.pricePerSquareMeter || product.pricePerSquareMeter <= 0) {
-    errors.push('قیمت هر متر مربع الزامی است');
+    errors.push('قیمت هر متر مربع را بیشتر از صفر وارد کنید.');
   }
   
   if (product.productType === 'longitudinal' || product.productType === 'slab') {
     if (!product.length || product.length <= 0) {
-      errors.push('طول محصول الزامی است');
+      errors.push('طول محصول را بیشتر از صفر وارد کنید.');
     }
     if (!product.width || product.width <= 0) {
-      errors.push('عرض محصول الزامی است');
+      errors.push('عرض محصول را بیشتر از صفر وارد کنید.');
     }
   }
   
@@ -58,15 +58,15 @@ export const validateDelivery = (
   errors.push(...deliveryReferences.conflicts.map((conflict) => conflict.message));
   
   if (!delivery.deliveryDate) {
-    errors.push('تاریخ تحویل الزامی است');
+    errors.push('تاریخ تحویل را انتخاب کنید.');
   }
   
   if (!delivery.receiverName || delivery.receiverName.trim() === '') {
-    errors.push('نام تحویل‌گیرنده الزامی است');
+    errors.push('نام تحویل‌گیرنده را وارد کنید.');
   }
   
   if (!normalizedDelivery.products || normalizedDelivery.products.length === 0) {
-    errors.push('حداقل یک ردیف برای تحویل یا اجرا انتخاب کنید');
+    errors.push('حداقل یک محصول یا خدمت برای تحویل یا اجرا انتخاب کنید.');
   }
   
   // Validate product quantities don't exceed available quantities
@@ -80,7 +80,7 @@ export const validateDelivery = (
             .reduce((sum, p) => sum + toFiniteNumber(p.amount ?? p.quantity), 0);
 
           if (totalDelivered > toFiniteNumber(serviceRow.quantity)) {
-            errors.push(`مقدار زمان‌بندی برای ${serviceRow.title} بیشتر از مقدار خدمت است`);
+            errors.push(`مقدار زمان‌بندی «${serviceRow.title}» از مقدار ثبت‌شده خدمت بیشتر است؛ مقدار را به ${toFiniteNumber(serviceRow.quantity).toLocaleString('fa-IR')} یا کمتر کاهش دهید.`);
           }
         }
         continue;
@@ -96,7 +96,7 @@ export const validateDelivery = (
           .reduce((sum, p) => sum + toFiniteNumber(p.amount ?? p.quantity), 0);
         
         if (totalDelivered > getDeliveryTargetAmount(product)) {
-          errors.push(`تعداد تحویل برای ${product.stoneName} بیشتر از تعداد محصول است`);
+          errors.push(`مقدار تحویل «${product.stoneName}» از مقدار محصول بیشتر است؛ مقدار را به ${getDeliveryTargetAmount(product).toLocaleString('fa-IR')} یا کمتر کاهش دهید.`);
         }
       }
     }
@@ -118,7 +118,7 @@ export const validatePayment = (
   const errors: string[] = [];
   
   if (!payment.payments || payment.payments.length === 0) {
-    errors.push('حداقل یک روش پرداخت الزامی است');
+    errors.push('حداقل یک روش پرداخت اضافه کنید.');
   }
   
   if (payment.payments && payment.payments.length > 0) {
@@ -126,37 +126,38 @@ export const validatePayment = (
     const normalizedContractAmount = toFiniteNumber(totalContractAmount);
     
     if (totalPaymentAmount + 0.01 < normalizedContractAmount) {
-      errors.push(`جمع پرداخت‌ها (${totalPaymentAmount}) نباید کمتر از مبلغ کل قرارداد (${normalizedContractAmount}) باشد`);
+      const deficit = normalizedContractAmount - totalPaymentAmount;
+      errors.push(`جمع پرداخت‌ها ${deficit.toLocaleString('fa-IR')} کمتر از مبلغ قرارداد است؛ مبلغ پرداخت‌ها را به ${normalizedContractAmount.toLocaleString('fa-IR')} برسانید.`);
     }
 
     if (totalPaymentAmount - normalizedContractAmount > 0.01 && !payment.extraPaymentReason) {
-      errors.push('برای مبلغ اضافه باید توضیحات انتخاب شود');
+      errors.push('جمع پرداخت‌ها از مبلغ قرارداد بیشتر است؛ دلیل مبلغ اضافه را انتخاب کنید.');
     }
     
     // Validate individual payment entries (CASH_CARD | CASH_SHIBA | CHECK)
     for (const paymentEntry of payment.payments) {
       const method = (paymentEntry as { method?: string }).method;
       if (toFiniteNumber(paymentEntry.amount) <= 0) {
-        errors.push('مبلغ پرداخت باید بزرگ‌تر از صفر باشد');
+        errors.push('مبلغ پرداخت را بیشتر از صفر وارد کنید.');
       }
       if (method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE') {
         if (!paymentEntry.paymentDate || !String(paymentEntry.paymentDate).trim()) {
-          errors.push(method === 'CUSTOMER_BALANCE' ? 'تاریخ استفاده از مانده مشتری الزامی است' : 'تاریخ پرداخت برای پرداخت نقدی الزامی است');
+          errors.push(method === 'CUSTOMER_BALANCE' ? 'تاریخ استفاده از مانده مشتری را انتخاب کنید.' : 'تاریخ پرداخت نقدی را انتخاب کنید.');
         }
       }
       if (method === 'CHECK') {
         if (!paymentEntry.checkOwnerName || !String(paymentEntry.checkOwnerName).trim()) {
-          errors.push('نام صاحب چک الزامی است');
+          errors.push('نام صاحب چک را وارد کنید.');
         }
         if (!paymentEntry.handoverDate || !String(paymentEntry.handoverDate).trim()) {
-          errors.push('تاریخ تحویل چک الزامی است');
+          errors.push('تاریخ تحویل چک را انتخاب کنید.');
         }
         if (!paymentEntry.paymentDate || !String(paymentEntry.paymentDate).trim()) {
-          errors.push('تاریخ پاس شدن چک الزامی است');
+          errors.push('تاریخ پاس‌شدن چک را انتخاب کنید.');
         }
       }
       if (method === 'CASH' && !(paymentEntry as { cashType?: string }).cashType) {
-        errors.push('نوع پرداخت نقدی الزامی است');
+        errors.push('نوع پرداخت نقدی را انتخاب کنید.');
       }
     }
   }
@@ -179,16 +180,16 @@ export const validateWizardStep = (
   switch (step) {
     case 1: // Contract Date
       if (!wizardData.contractDate) {
-        errors.contractDate = 'تاریخ قرارداد الزامی است';
+        errors.contractDate = 'تاریخ قرارداد را انتخاب کنید.';
       }
       if (!wizardData.contractNumber) {
-        errors.contractNumber = 'شماره قرارداد الزامی است';
+        errors.contractNumber = 'شماره قرارداد مشخص نیست؛ صفحه را تازه‌سازی کنید.';
       }
       break;
       
     case 2: // Customer Selection
       if (!wizardData.customerId || !wizardData.customer) {
-        errors.customer = 'انتخاب مشتری الزامی است';
+        errors.customer = 'یک مشتری انتخاب کنید.';
       } else if (wizardData.customer.id !== wizardData.customerId) {
         errors.customerId = 'اطلاعات مشتری ناسازگار است؛ مشتری را دوباره انتخاب کنید.';
       }
@@ -196,7 +197,7 @@ export const validateWizardStep = (
       
     case 3: // Project Management
       if (!wizardData.projectId || !wizardData.project) {
-        errors.project = 'انتخاب پروژه الزامی است';
+        errors.project = 'یک پروژه انتخاب کنید.';
       } else {
         const identityError = validateContractPartyIdentity(wizardData);
         if (identityError) errors.projectId = identityError;
@@ -205,7 +206,7 @@ export const validateWizardStep = (
       
     case 4: // Product Selection
       if ((!wizardData.products || wizardData.products.length === 0) && (!wizardData.serviceRows || wizardData.serviceRows.length === 0)) {
-        errors.products = 'حداقل یک محصول یا خدمت به قرارداد اضافه کنید';
+        errors.products = 'حداقل یک محصول یا خدمت به قرارداد اضافه کنید.';
       } else {
         // Validate each product
         wizardData.products.forEach((product, index) => {
@@ -219,7 +220,7 @@ export const validateWizardStep = (
       
     case 5: // Delivery Schedule
       if (!wizardData.deliveries || wizardData.deliveries.length === 0) {
-        errors.deliveries = 'حداقل یک برنامه تحویل تعریف کنید';
+        errors.deliveries = 'حداقل یک برنامه تحویل یا اجرا اضافه کنید.';
       } else {
         const deliveryReferences = reconcileDeliveryProductReferences(wizardData.products, wizardData.deliveries);
         if (deliveryReferences.conflicts.length > 0) {
@@ -252,7 +253,7 @@ export const validateWizardStep = (
         for (const [rowKey, totalQuantity] of Object.entries({ ...totalProductQuantities, ...totalServiceQuantities })) {
           const delivered = deliveredQuantities[rowKey] || 0;
           if (delivered < totalQuantity && !errors.deliveries) {
-            errors.deliveries = `همه محصولات و خدمات باید در برنامه‌های تحویل/اجرا توزیع شوند`;
+            errors.deliveries = 'توزیع محصولات و خدمات کامل نیست؛ مقدار باقی‌مانده هر ردیف را در یک برنامه تحویل یا اجرا قرار دهید.';
             break;
           }
         }

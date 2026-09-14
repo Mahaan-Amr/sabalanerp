@@ -4,10 +4,12 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { CrmCustomer, CuttingType, Product, SubService, StoneFinishing } from '../types/contract.types';
 import { crmAPI, salesAPI, servicesAPI, dashboardAPI } from '@/lib/api';
+import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
+import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 interface UseDataLoadingOptions {
   autoLoad?: boolean;
-  onError?: (error: string) => void;
+  onError?: (error: string, kind: 'error' | 'permission' | 'stale') => void;
   onDataLoaded?: () => void;
 }
 
@@ -39,8 +41,19 @@ type StoneFinishingLoadState = 'idle' | 'available' | 'empty' | 'forbidden' | 'e
 
 type PermissionLevel = 'view' | 'edit' | 'admin';
 type CustomerLoadParams = { limit?: number; search?: string };
+type DataLoadError = {
+  message: string;
+  kind: 'error' | 'permission' | 'stale';
+  order: number;
+};
 
 const permissionLevels: PermissionLevel[] = ['view', 'edit', 'admin'];
+
+const loadErrorMessage = (err: unknown, resource: string) =>
+  getSalesOperationalErrorMessage(err, {
+    failedAction: `دریافت ${resource}`,
+    nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
+  });
 
 export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   const { autoLoad = true, onError, onDataLoaded } = options;
@@ -76,6 +89,43 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   const [error, setError] = useState<string | null>(null);
 
   const hasLoadedRef = useRef(false);
+  const errorSequenceRef = useRef(0);
+  const activeErrorsRef = useRef(new Map<string, DataLoadError>());
+  const requestTrackerRef = useRef(createLatestRequestTracker());
+  const beginRequest = useCallback((source: string) => requestTrackerRef.current.begin(source), []);
+  const isLatestRequest = useCallback((source: string, sequence: number) =>
+    requestTrackerRef.current.isLatest(source, sequence), []);
+
+  const publishLatestError = useCallback(() => {
+    const latest = Array.from(activeErrorsRef.current.values())
+      .sort((left, right) => right.order - left.order)[0];
+
+    if (latest) {
+      setError(latest.message);
+      onErrorRef.current?.(latest.message, latest.kind);
+      return;
+    }
+
+    setError(null);
+    onDataLoadedRef.current?.();
+  }, []);
+
+  const reportError = useCallback((source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
+    errorSequenceRef.current += 1;
+    activeErrorsRef.current.set(source, { message, kind, order: errorSequenceRef.current });
+    setError(message);
+    onErrorRef.current?.(message, kind);
+  }, []);
+
+  const recoverError = useCallback((source: string) => {
+    if (!activeErrorsRef.current.delete(source)) return;
+    publishLatestError();
+  }, [publishLatestError]);
+
+  const reportResponseFailure = useCallback((source: string, response: unknown, resource: string) => {
+    const failure = { response };
+    reportError(source, loadErrorMessage(failure, resource), getSalesOperationalErrorKind(failure));
+  }, [reportError]);
 
   const isForbiddenError = (err: any) => err?.response?.status === 403;
 
@@ -137,134 +187,161 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   );
 
   const loadCustomers = useCallback(async (params: CustomerLoadParams = {}) => {
+    const requestSequence = beginRequest('customers');
     try {
       const response = await crmAPI.getCustomers({
         limit: params.limit ?? 3,
         search: params.search?.trim() || undefined
       });
+      if (!isLatestRequest('customers', requestSequence)) return [];
       if (response.data.success) {
         const data = response.data.data || [];
         setCustomers(data);
+        recoverError('customers');
         return data;
       }
+      reportResponseFailure('customers', response, 'فهرست مشتریان');
       return [];
     } catch (err: any) {
+      if (!isLatestRequest('customers', requestSequence)) return [];
       if (isForbiddenError(err)) {
         const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
-        setError(message);
-        if (onErrorRef.current) onErrorRef.current(message);
+        reportError('customers', message, 'permission');
         setCustomers([]);
         return [];
       }
-      const errorMsg = err.response?.data?.error || 'Error loading customers';
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      const errorMsg = loadErrorMessage(err, 'فهرست مشتریان');
+      reportError('customers', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadProducts = useCallback(async (limit: number = 1000) => {
+    const requestSequence = beginRequest('products');
     try {
       const response = await salesAPI.getProducts({ limit });
+      if (!isLatestRequest('products', requestSequence)) return [];
       if (response.data.success) {
         setProducts(response.data.data);
+        recoverError('products');
         return response.data.data;
       }
+      reportResponseFailure('products', response, 'فهرست محصولات');
       return [];
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Error loading products';
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (!isLatestRequest('products', requestSequence)) return [];
+      const errorMsg = loadErrorMessage(err, 'فهرست محصولات');
+      reportError('products', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadDepartments = useCallback(async () => {
+    const requestSequence = beginRequest('departments');
     try {
       const response = await salesAPI.getDepartments();
+      if (!isLatestRequest('departments', requestSequence)) return [];
       if (response.data.success) {
         setDepartments(response.data.data);
+        recoverError('departments');
         return response.data.data;
       }
+      reportResponseFailure('departments', response, 'اطلاعات واحد فروش');
       return [];
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Error loading departments';
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (!isLatestRequest('departments', requestSequence)) return [];
+      const errorMsg = loadErrorMessage(err, 'اطلاعات واحد فروش');
+      reportError('departments', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadCuttingTypes = useCallback(async () => {
+    const requestSequence = beginRequest('cuttingTypes');
     try {
       const response = await servicesAPI.getCuttingTypes({ isActive: true });
+      if (!isLatestRequest('cuttingTypes', requestSequence)) return [];
       if (response.data.success) {
         setCuttingTypes(response.data.data);
+        recoverError('cuttingTypes');
         return response.data.data;
       }
+      reportResponseFailure('cuttingTypes', response, 'انواع برش');
       return [];
     } catch (err: any) {
+      if (!isLatestRequest('cuttingTypes', requestSequence)) return [];
       if (isForbiddenError(err)) {
+        recoverError('cuttingTypes');
         setCuttingTypes([]);
         return [];
       }
-      const errorMsg = err.response?.data?.error || 'Error loading cutting types';
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      const errorMsg = loadErrorMessage(err, 'انواع برش');
+      reportError('cuttingTypes', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadSubServices = useCallback(async (limit: number = 1000) => {
+    const requestSequence = beginRequest('subServices');
     try {
       const response = await servicesAPI.getSubServices({ isActive: true, limit });
+      if (!isLatestRequest('subServices', requestSequence)) return [];
       if (response.data.success) {
         setSubServices(response.data.data);
+        recoverError('subServices');
         return response.data.data;
       }
+      reportResponseFailure('subServices', response, 'فهرست ابزارها');
       return [];
     } catch (err: any) {
+      if (!isLatestRequest('subServices', requestSequence)) return [];
       if (isForbiddenError(err)) {
+        recoverError('subServices');
         setSubServices([]);
         return [];
       }
-      const errorMsg = err.response?.data?.error || 'Error loading tools';
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      const errorMsg = loadErrorMessage(err, 'فهرست ابزارها');
+      reportError('subServices', errorMsg, getSalesOperationalErrorKind(err));
       return [];
     }
-  }, []);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadStoneFinishings = useCallback(async (limit: number = 1000) => {
+    const requestSequence = beginRequest('stoneFinishings');
     try {
       const response = await servicesAPI.getStoneFinishings({ isActive: true, limit });
+      if (!isLatestRequest('stoneFinishings', requestSequence)) return [];
       if (response.data.success) {
         const data = response.data.data || [];
         setStoneFinishings(data);
         setStoneFinishingLoadState(data.length > 0 ? 'available' : 'empty');
+        recoverError('stoneFinishings');
         return data;
       }
-      setStoneFinishings([]);
-      setStoneFinishingLoadState('empty');
+      reportResponseFailure('stoneFinishings', response, 'روش‌های پرداخت سنگ');
+      setStoneFinishingLoadState('error');
       return [];
     } catch (err: any) {
+      if (!isLatestRequest('stoneFinishings', requestSequence)) return [];
       if (isForbiddenError(err)) {
+        recoverError('stoneFinishings');
         setStoneFinishings([]);
         setStoneFinishingLoadState('forbidden');
         return [];
       }
-      const errorMsg = err.response?.data?.error || 'Error loading stone finishings';
-      setError(errorMsg);
+      const errorMsg = loadErrorMessage(err, 'روش‌های پرداخت سنگ');
+      reportError('stoneFinishings', errorMsg, getSalesOperationalErrorKind(err));
       setStoneFinishings([]);
       setStoneFinishingLoadState('error');
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
       return [];
     }
-  }, []);
+  }, [beginRequest, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadUserProfile = useCallback(async () => {
+    const requestSequence = beginRequest('userProfile');
     try {
       const response = await dashboardAPI.getProfile();
+      if (!isLatestRequest('userProfile', requestSequence)) return null;
       if (response.data.success) {
         const userData: UserProfile = response.data.data;
         const features = (userData.permissions?.features || []).map((item) => item.feature);
@@ -282,23 +359,28 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
           lastName: userData.lastName || '',
           role: userData.role
         });
+        recoverError('userProfile');
         return userData;
       }
+      reportResponseFailure('userProfile', response, 'اطلاعات کاربر');
       return null;
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Error loading user profile';
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (!isLatestRequest('userProfile', requestSequence)) return null;
+      const errorMsg = loadErrorMessage(err, 'اطلاعات کاربر');
+      reportError('userProfile', errorMsg, getSalesOperationalErrorKind(err));
       return null;
     }
-  }, [buildCapabilities]);
+  }, [beginRequest, buildCapabilities, isLatestRequest, recoverError, reportError, reportResponseFailure]);
 
   const loadInitialData = useCallback(async () => {
+    const requestSequence = beginRequest('initial');
     setLoading(true);
-    setError(null);
+    const errorSequenceAtStart = errorSequenceRef.current;
 
     try {
       const profile = await loadUserProfile();
+      if (!isLatestRequest('initial', requestSequence)) return;
+      if (!profile) return;
       const features = (profile?.permissions?.features || []).map((item: any) => item.feature);
       const workspaces = profile?.permissions?.workspaces || [];
       const nextCapabilities = buildCapabilities(features, workspaces);
@@ -310,8 +392,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       } else {
         const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
         setCustomers([]);
-        setError(message);
-        if (onErrorRef.current) onErrorRef.current(message);
+        reportError('customers', message, 'permission');
       }
       if (nextCapabilities.canLoadCuttingTypes) tasks.push(loadCuttingTypes());
       if (nextCapabilities.canLoadSubServices) tasks.push(loadSubServices(1000));
@@ -323,18 +404,22 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       }
 
       await Promise.all(tasks);
+      if (!isLatestRequest('initial', requestSequence)) return;
+      const recoveredInitialError = activeErrorsRef.current.has('initial');
+      recoverError('initial');
 
-      if (onDataLoadedRef.current) {
+      if (!recoveredInitialError && errorSequenceRef.current === errorSequenceAtStart && activeErrorsRef.current.size === 0 && onDataLoadedRef.current) {
+        setError(null);
         onDataLoadedRef.current();
       }
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'Error loading initial data';
-      setError(errorMsg);
-      if (onErrorRef.current) onErrorRef.current(errorMsg);
+      if (!isLatestRequest('initial', requestSequence)) return;
+      const errorMsg = loadErrorMessage(err, 'اطلاعات اولیه قرارداد');
+      reportError('initial', errorMsg, getSalesOperationalErrorKind(err));
     } finally {
-      setLoading(false);
+      if (isLatestRequest('initial', requestSequence)) setLoading(false);
     }
-  }, [buildCapabilities, loadUserProfile, loadProducts, loadDepartments, loadCustomers, loadCuttingTypes, loadSubServices, loadStoneFinishings]);
+  }, [beginRequest, buildCapabilities, isLatestRequest, loadUserProfile, loadProducts, loadDepartments, loadCustomers, loadCuttingTypes, loadSubServices, loadStoneFinishings, recoverError, reportError]);
 
   useEffect(() => {
     if (autoLoad && !hasLoadedRef.current) {

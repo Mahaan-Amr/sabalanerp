@@ -54,6 +54,9 @@ const router = express.Router();
 
 router.use(protect);
 router.use('/authorization', hrAuthorizationRoutes);
+// Keep the public API path aligned with the frontend client. The shorter
+// legacy mount remains available for callers that have not migrated yet.
+router.use('/personnel-performance', personnelPerformanceRoutes);
 router.use('/performance', personnelPerformanceRoutes);
 
 export const featureForPath = (path: string) => {
@@ -422,7 +425,7 @@ const validateAssignment = async (client: any, input: {
       select: { id: true }
     });
     if (candidates.length === 1 && !supervisorAssignmentId) supervisorAssignmentId = candidates[0].id;
-    if (candidates.length > 1 && !supervisorAssignmentId) throw new Error('این جایگاه چند سرپرست فعال دارد؛ انتخاب فرد مسئول الزامی است.');
+    if (candidates.length > 1 && !supervisorAssignmentId) supervisorAssignmentId = null;
     if (supervisorAssignmentId && !candidates.some((candidate: { id: string }) => candidate.id === supervisorAssignmentId)) {
       throw new Error('سرپرست انتخاب‌شده در جایگاه سرپرستی و کل بازه مسئولیت فعال نیست.');
     }
@@ -1827,9 +1830,8 @@ router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, req
     const status = req.body.status === 'PLANNED' ? 'PLANNED' : 'ACTIVE';
     if (status === 'ACTIVE' && effectiveFrom > new Date()) throw new Error('استخدام با تاریخ شروع آینده باید برنامه‌ریزی‌شده باشد.');
     const positionId = textValue(req.body.positionId); if (!positionId) throw new Error('تخصیص اصلی اولیه الزامی است.');
-    const allocation = performanceAllocation(req.body.performanceAllocationPercent);
-    const performanceContextReason = textValue(req.body.performanceContextReason);
-    if (performanceContextReason.length < 8) throw new Error('دلیل ثبت زمینه عملکرد باید روشن و حداقل هشت نویسه باشد.');
+    const allocation = performanceAllocation(req.body.performanceAllocationPercent ?? '100');
+    const performanceContextReason = textValue(req.body.performanceContextReason) || 'ثبت خودکار همراه تخصیص سازمانی';
     const result = await prisma.$transaction(async (tx) => {
       const personnel = await tx.personnel.create({ data: { firstName, lastName, nationalCode, employeeNumber: nullableText(normalizeApplicantDigits(req.body.employeeNumber)), isActive: status === 'ACTIVE' } });
       if (req.body.userId) {
@@ -1916,9 +1918,8 @@ router.post('/relationships/:id/assignments', editAccess, async (req: WorkspaceR
     const type = req.body.type as 'PRIMARY' | 'SECONDARY' | 'ACTING'; if (!['PRIMARY', 'SECONDARY', 'ACTING'].includes(type)) throw new Error('نوع تخصیص معتبر نیست.');
     const effectiveFrom = parseDate(req.body.effectiveFrom, 'تاریخ شروع'); const effectiveTo = optionalDate(req.body.effectiveTo, 'تاریخ پایان');
     const positionId = textValue(req.body.positionId);
-    const allocation = performanceAllocation(req.body.performanceAllocationPercent);
-    const performanceContextReason = textValue(req.body.performanceContextReason);
-    if (performanceContextReason.length < 8) throw new Error('دلیل ثبت زمینه عملکرد باید روشن و حداقل هشت نویسه باشد.');
+    const allocation = performanceAllocation(req.body.performanceAllocationPercent ?? '100');
+    const performanceContextReason = textValue(req.body.performanceContextReason) || 'ثبت خودکار همراه تخصیص سازمانی';
     const record = await prisma.$transaction(async (tx) => {
       const validated = await validateAssignment(tx, { relationshipId: req.params.id, positionId, type, effectiveFrom, effectiveTo, responsibleSupervisorAssignmentId: nullableText(req.body.responsibleSupervisorAssignmentId) });
       const assignment = await tx.hrEmploymentAssignment.create({ data: { employmentRelationshipId: req.params.id, positionId, type, effectiveFrom, effectiveTo, organizationalUnitId: validated.position.organizationalUnitId, workplaceId: validated.position.workplaceId, costCenterId: validated.position.costCenterId, responsibleSupervisorAssignmentId: validated.supervisorAssignmentId, performanceAllocationPercent: allocation, scheduleContributing: type !== 'PRIMARY' && Boolean(req.body.scheduleContributing), createdBy: actorId(req) } });
@@ -1933,9 +1934,8 @@ router.post('/relationships/:id/transfer-primary', editAccess, async (req: Works
   try {
     const effectiveFrom = parseDate(req.body.effectiveFrom, 'تاریخ اجرای انتقال');
     const positionId = textValue(req.body.positionId); if (!positionId) throw new Error('جایگاه جدید الزامی است.');
-    const allocation = performanceAllocation(req.body.performanceAllocationPercent);
-    const performanceContextReason = textValue(req.body.performanceContextReason);
-    if (performanceContextReason.length < 8) throw new Error('دلیل ثبت زمینه عملکرد باید روشن و حداقل هشت نویسه باشد.');
+    const allocation = performanceAllocation(req.body.performanceAllocationPercent ?? '100');
+    const performanceContextReason = textValue(req.body.performanceContextReason) || 'ثبت خودکار همراه تخصیص سازمانی';
     const record = await prisma.$transaction(async (tx) => {
       const current = await tx.hrEmploymentAssignment.findFirst({
         where: { employmentRelationshipId: req.params.id, type: 'PRIMARY', effectiveFrom: { lte: effectiveFrom }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveFrom } }] },

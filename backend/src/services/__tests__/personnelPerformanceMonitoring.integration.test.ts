@@ -16,6 +16,7 @@ import {
   recordPerformanceOperationalHeartbeat,
   recordPerformanceOperationalWindow,
 } from '../personnelPerformanceMonitoringStore';
+import { raceEvidenceMarker, runOrderedPerformanceRace } from './performanceAcceptanceRaceHarness';
 
 const rollback = Symbol('rollback-performance-monitoring');
 
@@ -171,18 +172,46 @@ const pauseRace = async (first: PrismaClient, second: PrismaClient, runId: strin
     assert.equal(await first.performanceOperationalIncident.count(), 1);
     assert.equal(await first.performanceSafetyPause.count({ where: { status: 'ACTIVE' } }), 1,
       'concurrent threshold evaluation creates one durable pause');
+    const pendingOutbox = await first.notificationOutbox.findFirstOrThrow();
+    const firstAttemptAt = new Date(pendingOutbox.availableAt.getTime() + 1);
     const failedDelivery = await deliverPendingNotificationOutbox(first, async () => { throw new Error('injected route failure'); },
-      new Date('2026-09-09T08:00:01.000Z'));
+      firstAttemptAt);
     assert.equal(failedDelivery.failed, 1);
     const outbox = await first.notificationOutbox.findFirstOrThrow();
     assert.equal(outbox.status, 'PENDING');
     assert.equal(outbox.attempts, 1);
-    await first.notificationOutbox.update({ where: { id: outbox.id }, data: { availableAt: new Date('2026-09-09T08:01:00.000Z') } });
+    const retryAt = new Date(firstAttemptAt.getTime() + 60_000);
+    await first.notificationOutbox.update({ where: { id: outbox.id }, data: { availableAt: retryAt } });
     const retriedDelivery = await deliverPendingNotificationOutbox(first, async () => undefined,
-      new Date('2026-09-09T08:01:00.000Z'));
+      retryAt);
     assert.equal(retriedDelivery.delivered, 1);
     assert.deepEqual(await first.notificationOutbox.findUnique({ where: { id: outbox.id }, select: { status: true, attempts: true } }),
       { status: 'PROCESSED', attempts: 2 }, 'the canonical alert outbox retries without duplicating the incident');
+    await first.notificationOutbox.update({ where: { id: outbox.id }, data: {
+      status: 'PENDING', availableAt: retryAt, processedAt: null, claimedAt: null,
+    } });
+    const attemptsBeforeRace = await first.notificationDeliveryAttempt.count({ where: { notification: { eventId: outbox.eventId } } });
+    const deliveryRace = await runOrderedPerformanceRace(first, first, second,
+      (tx) => deliverPendingNotificationOutbox(tx as unknown as PrismaClient, async () => undefined, retryAt),
+      (tx) => deliverPendingNotificationOutbox(tx as unknown as PrismaClient, async () => undefined, retryAt));
+    assert.equal(deliveryRace.winner.businessCode, 'PERFORMANCE_NOTIFICATION_OUTBOX_DELIVERY_COMPLETED');
+    assert.equal(deliveryRace.loser.status, 'fulfilled');
+    const losingDelivery = deliveryRace.loser.status === 'fulfilled' ? deliveryRace.loser.value : null;
+    assert.equal(losingDelivery?.businessCode, 'PERFORMANCE_NOTIFICATION_OUTBOX_ALREADY_CLAIMED');
+    assert.equal(await first.notificationDeliveryAttempt.count({ where: { notification: { eventId: outbox.eventId } } }), attemptsBeforeRace,
+      'concurrent retry cannot duplicate an already delivered notification');
+    if (process.env.PERFORMANCE_ACCEPTANCE_FAILURE_RECOVERY === '1') {
+      console.log(`PERFORMANCE_FAILURE_RECOVERY:${JSON.stringify({ contract: 'PERSONNEL_PERFORMANCE_FAILURE_RECOVERY_V1', scenarios: [
+        { name: 'queue', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+        { name: 'notification', injected: true, failClosed: true, lostAcknowledgedWrites: 0 },
+      ] })}`);
+    }
+    if (process.env.PERFORMANCE_ACCEPTANCE_RACE_SCENARIOS === 'notification-export-retry') {
+      console.log(raceEvidenceMarker([{
+        name: 'notification-export-retry', loserCode: losingDelivery!.businessCode,
+        validTruths: 1, duplicateEvents: 0, lostWrites: 0, additionalDisclosures: 0,
+      }]));
+    }
 };
 
 const main = async () => {

@@ -122,6 +122,8 @@ import {
 } from '@/features/contract-creation/services/contractCreationDraftPolicy';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
+import { assertSuccessfulSalesDownload, assertSuccessfulSalesResponse, getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
+import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 // Import constants
 import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
@@ -740,6 +742,17 @@ export default function CreateContractWizard({
   // Use wizard state, but allow local overrides if needed
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [generalErrorKind, setGeneralErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const [dataLoadingError, setDataLoadingError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale' }>();
+
+  useEffect(() => {
+    if (!Object.values(errors).some(Boolean)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const firstInvalidField = document.querySelector<HTMLElement>('[aria-invalid="true"]');
+      firstInvalidField?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [currentStep, errors]);
   const [autosaveHydrated, setAutosaveHydrated] = useState(false);
   const [recoverableDraftOffer, setRecoverableDraftOffer] = useState<ContractAutosaveDraft | null>(null);
   const [confirmDiscardDraft, setConfirmDiscardDraft] = useState(false);
@@ -842,14 +855,19 @@ export default function CreateContractWizard({
   });
 
   // Memoized error handler to prevent infinite loop
-  const handleDataLoadingError = useCallback((error: string) => {
-    setErrors({ general: error });
+  const handleDataLoadingError = useCallback((error: string, kind: 'error' | 'permission' | 'stale') => {
+    setDataLoadingError({ message: error, kind });
+  }, []);
+
+  const handleDataLoaded = useCallback(() => {
+    setDataLoadingError(undefined);
   }, []);
 
   // Data loading is now provided by useDataLoading hook
   const dataLoading = useDataLoading({
     autoLoad: !stateRestored, // Only auto-load if not restoring from localStorage
-    onError: handleDataLoadingError
+    onError: handleDataLoadingError,
+    onDataLoaded: handleDataLoaded
   });
 
   // Extract data from dataLoading hook
@@ -1007,12 +1025,38 @@ export default function CreateContractWizard({
   const deliverySchedule = useDeliverySchedule(wizardData.products);
 
   // Digital Signature (Step 8) state is now provided by useDigitalSignature hook
-  const digitalSignature = useDigitalSignature({
-    onError: (error) => setErrors({ signature: error }),
-    onSuccess: () => undefined
-  });
   const [pdfActionLoading, setPdfActionLoading] = useState(false);
   const [printActionLoading, setPrintActionLoading] = useState(false);
+  const [signatureErrorKind, setSignatureErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const signatureErrorSequenceRef = useRef(0);
+  const signatureErrorsRef = useRef(new Map<string, { message: string; kind: 'error' | 'permission' | 'stale'; order: number }>());
+  const signatureOperationTrackerRef = useRef(createLatestRequestTracker());
+  const publishSignatureError = useCallback(() => {
+    const latest = Array.from(signatureErrorsRef.current.values()).sort((left, right) => right.order - left.order)[0];
+    setSignatureErrorKind(latest?.kind || 'error');
+    setErrors((previous) => ({ ...previous, signature: latest?.message || '' }));
+  }, []);
+  const reportSignatureError = useCallback((source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
+    const order = ++signatureErrorSequenceRef.current;
+    signatureErrorsRef.current.set(source, { message, kind, order });
+    setSignatureErrorKind(kind);
+    setErrors((previous) => ({ ...previous, signature: message }));
+  }, []);
+  const clearSignatureError = useCallback((source: string) => {
+    if (!signatureErrorsRef.current.delete(source)) return;
+    publishSignatureError();
+  }, [publishSignatureError]);
+  const beginSignatureOperation = useCallback((source: string) => {
+    return signatureOperationTrackerRef.current.begin(source);
+  }, []);
+  const isLatestSignatureOperation = useCallback((source: string, sequence: number) =>
+    signatureOperationTrackerRef.current.isLatest(source, sequence), []);
+  const digitalSignature = useDigitalSignature({
+    onError: (error) => {
+      reportSignatureError('digital-signature', error, 'error');
+    },
+    onSuccess: () => clearSignatureError('digital-signature')
+  });
 
   // NOTE: Layer session items sync is now handled internally by useStairSystemV2 hook
   // The hook has its own useEffect that syncs when drafts change
@@ -2688,6 +2732,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       ? (await editRecovery.release(), true)
       : await editRecovery.discard();
     if (!cleared) {
+      setGeneralErrorKind('error');
       setErrors({ general: 'کنار گذاشتن پیش‌نویس انجام نشد؛ دوباره تلاش کنید' });
       return;
     }
@@ -3549,7 +3594,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           );
         if (scopedStairResolution.resolution.status === 'conflict') {
           setErrors({
-            products: `${scopedStairResolution.resolution.message} (کد: ${scopedStairResolution.resolution.code})`
+            products: `${scopedStairResolution.resolution.message} تنظیمات بخش پله را بازبینی کنید.`
           });
           console.error('[stair-configuration-transaction]', {
             code: scopedStairResolution.resolution.code,
@@ -4260,6 +4305,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       wizardData
     });
     if (!persisted) {
+      setGeneralErrorKind('error');
       setErrors({ general: 'فضای ذخیرهٔ مرورگر پر است؛ پیش از خروج از قرارداد، همگام‌سازی را کامل کنید.' });
       return;
     }
@@ -4379,6 +4425,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   // Digital confirmation handlers
   const refreshConfirmationStatus = async () => {
+    const errorSource = 'confirmation-status';
+    const requestSequence = beginSignatureOperation(errorSource);
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
       return;
@@ -4386,9 +4434,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     try {
       const response = await salesAPI.getConfirmationStatus(signatureContractId);
-      if (!response.data.success) {
-        return;
-      }
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      assertSuccessfulSalesResponse(response);
 
       const statusData = response.data.data;
       const existingSignature = wizardData.signature;
@@ -4420,11 +4467,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           lastOpenedAt: statusData.lastOpenedAt || null
         }
       });
+      clearSignatureError(errorSource);
     } catch (error: any) {
-      setErrors(prev => ({
-        ...prev,
-        signature: error.response?.data?.error || 'خطا در دریافت وضعیت تایید'
-      }));
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
+          failedAction: 'دریافت وضعیت تأیید قرارداد',
+          nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.'
+        }), getSalesOperationalErrorKind(error));
     }
   };
 
@@ -4458,68 +4507,99 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   };
 
   const handleDownloadContractPdf = async () => {
+    const errorSource = 'download';
+    const requestSequence = beginSignatureOperation(errorSource);
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
-      setErrors(prev => ({ ...prev, signature: 'ابتدا قرارداد را ثبت کنید' }));
+      reportSignatureError(errorSource, 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.', 'error');
       return;
     }
 
     setPdfActionLoading(true);
-    setErrors(prev => ({ ...prev, signature: '' }));
     try {
       const response = await salesAPI.downloadContractPdf(signatureContractId, { fresh: false });
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      await assertSuccessfulSalesDownload(response);
       downloadBlobResponse(response, `sales_contract_${signatureContractId}.pdf`);
+      clearSignatureError(errorSource);
     } catch (error: any) {
-      setErrors(prev => ({ ...prev, signature: error.response?.data?.error || 'خطا در دانلود PDF قرارداد' }));
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      const normalizedError = await normalizeSalesBlobError(error);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(normalizedError, {
+        failedAction: 'دانلود PDF قرارداد',
+        nextStep: 'دوباره روی «دانلود PDF» بزنید.'
+      }), getSalesOperationalErrorKind(normalizedError));
     } finally {
-      setPdfActionLoading(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) setPdfActionLoading(false);
     }
   };
 
   const handlePrintContractPdf = async () => {
+    const errorSource = 'print';
+    const requestSequence = beginSignatureOperation(errorSource);
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
-      setErrors(prev => ({ ...prev, signature: 'ابتدا قرارداد را ثبت کنید' }));
+      reportSignatureError(errorSource, 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.', 'error');
       return;
     }
 
     setPrintActionLoading(true);
-    setErrors(prev => ({ ...prev, signature: '' }));
     try {
       const printResponse = await salesAPI.printContract(signatureContractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!printResponse.data?.success) {
-        setErrors(prev => ({ ...prev, signature: printResponse.data?.error || 'پرینت قرارداد ناموفق بود' }));
+        const failure = { response: printResponse };
+        reportSignatureError(errorSource, getSalesOperationalErrorMessage(failure, {
+          failedAction: 'آماده‌سازی پرینت قرارداد',
+          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }), getSalesOperationalErrorKind(failure));
         return;
       }
 
       const url = await getPrintablePdfUrl(signatureContractId, false);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!url) {
-        setErrors(prev => ({ ...prev, signature: 'فایل PDF برای پرینت در دسترس نیست' }));
+        reportSignatureError(errorSource, 'فایل PDF قرارداد آماده نشده است؛ دوباره روی «پرینت قرارداد» بزنید.', 'error');
         return;
       }
 
       await refreshConfirmationStatus();
       openPdfUrl(url, true);
+      clearSignatureError(errorSource);
     } catch (error: any) {
-      setErrors(prev => ({ ...prev, signature: error.response?.data?.error || 'خطا در پرینت قرارداد' }));
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
+        failedAction: 'آماده‌سازی پرینت قرارداد',
+        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }), getSalesOperationalErrorKind(error));
     } finally {
-      setPrintActionLoading(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) setPrintActionLoading(false);
     }
   };
 
   const handleSendForConfirmation = async () => {
+    const errorSource = 'send-confirmation';
+    const requestSequence = beginSignatureOperation(errorSource);
     const signatureContractId = wizardData.signature?.contractId;
     if (!signatureContractId) {
-      setErrors(prev => ({ ...prev, signature: 'ابتدا قرارداد را ثبت کنید' }));
+      reportSignatureError(errorSource, 'قرارداد هنوز ثبت نشده است؛ ابتدا ثبت قرارداد را کامل کنید.', 'error');
       return;
     }
 
     digitalSignature.setSendingCode(true);
-    setErrors(prev => ({ ...prev, signature: '' }));
     try {
       const response = await salesAPI.sendForConfirmation(signatureContractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!response.data.success) {
-        setErrors(prev => ({ ...prev, signature: response.data.error || 'ارسال تایید ناموفق بود' }));
+        const failure = { response };
+        reportSignatureError(errorSource, getSalesOperationalErrorMessage(failure, {
+          failedAction: 'ارسال پیام تأیید قرارداد',
+          nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }), getSalesOperationalErrorKind(failure));
         return;
       }
 
@@ -4549,33 +4629,55 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
       });
       await refreshConfirmationStatus();
+      clearSignatureError(errorSource);
     } catch (error: any) {
-      setErrors(prev => ({ ...prev, signature: error.response?.data?.error || 'خطا در ارسال پیامک تایید' }));
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
+        failedAction: 'ارسال پیام تأیید قرارداد',
+        nextStep: 'شماره تماس مشتری را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }), getSalesOperationalErrorKind(error));
     } finally {
-      digitalSignature.setSendingCode(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) digitalSignature.setSendingCode(false);
     }
   };
 
   const handleResendConfirmation = async () => {
+    const errorSource = 'resend-confirmation';
+    const requestSequence = beginSignatureOperation(errorSource);
     if (!wizardData.signature?.contractId) {
       return;
     }
     digitalSignature.setSendingCode(true);
     try {
       const response = await salesAPI.resendConfirmation(wizardData.signature.contractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!response.data.success) {
-        setErrors(prev => ({ ...prev, signature: response.data.error || 'ارسال مجدد ناموفق بود' }));
+        const failure = { response };
+        reportSignatureError(errorSource, getSalesOperationalErrorMessage(failure, {
+          failedAction: 'ارسال دوباره کد تأیید',
+          nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }), getSalesOperationalErrorKind(failure));
         return;
       }
       await refreshConfirmationStatus();
+      clearSignatureError(errorSource);
     } catch (error: any) {
-      setErrors(prev => ({ ...prev, signature: error.response?.data?.error || 'خطا در ارسال مجدد' }));
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
+        failedAction: 'ارسال دوباره کد تأیید',
+        nextStep: 'زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }), getSalesOperationalErrorKind(error));
     } finally {
-      digitalSignature.setSendingCode(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) digitalSignature.setSendingCode(false);
     }
   };
 
   const handleCancelContract = async () => {
+    const errorSource = 'cancel';
+    const requestSequence = beginSignatureOperation(errorSource);
     if (!wizardData.signature?.contractId) {
       return;
     }
@@ -4583,16 +4685,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     digitalSignature.setSendingCode(true);
     try {
       const response = await salesAPI.cancelContract(wizardData.signature.contractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!response.data.success) {
-        setErrors(prev => ({ ...prev, signature: response.data.error || 'لغو قرارداد ناموفق بود' }));
+        const failure = { response };
+        reportSignatureError(errorSource, getSalesOperationalErrorMessage(failure, {
+          failedAction: 'لغو قرارداد',
+          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }), getSalesOperationalErrorKind(failure));
         return;
       }
       await refreshConfirmationStatus();
+      clearSignatureError(errorSource);
       router.push('/dashboard/sales/contracts');
     } catch (error: any) {
-      setErrors(prev => ({ ...prev, signature: error.response?.data?.error || 'خطا در لغو قرارداد' }));
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
+        failedAction: 'لغو قرارداد',
+        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }), getSalesOperationalErrorKind(error));
     } finally {
-      digitalSignature.setSendingCode(false);
+      if (isLatestSignatureOperation(errorSource, requestSequence)) digitalSignature.setSendingCode(false);
     }
   };
 
@@ -5631,9 +5745,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           const extraPaymentAmount = paymentTotal - payableTotal;
 
           if (remainingPaymentAmount > 0.01) {
-            newErrors.paymentMethod = `مجموع پرداخت‌ها (${formatPrice(paymentTotal, wizardData.payment.currency)}) نباید کمتر از مبلغ قرارداد (${formatPrice(payableTotal, wizardData.payment.currency)}) باشد. مانده: ${formatPrice(remainingPaymentAmount, wizardData.payment.currency)}`;
+            newErrors.paymentMethod = `مجموع پرداخت‌ها ${formatPrice(paymentTotal, wizardData.payment.currency)} است و ${formatPrice(remainingPaymentAmount, wizardData.payment.currency)} از مبلغ قرارداد ${formatPrice(payableTotal, wizardData.payment.currency)} کمتر است؛ مبلغ پرداخت‌ها را به اندازه مانده افزایش دهید.`;
           } else if (extraPaymentAmount > 0.01 && !wizardData.payment.extraPaymentReason) {
-            newErrors.paymentMethod = `برای مبلغ اضافه (${formatPrice(extraPaymentAmount, wizardData.payment.currency)}) باید توضیحات انتخاب شود`;
+            newErrors.paymentMethod = `مجموع پرداخت‌ها ${formatPrice(extraPaymentAmount, wizardData.payment.currency)} بیشتر از مبلغ قرارداد است؛ دلیل مبلغ اضافه را انتخاب کنید.`;
           }
         }
         break;
@@ -5948,6 +6062,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           <Step8DigitalSignature
             wizardData={wizardData}
             errors={errors}
+            signatureErrorKind={signatureErrorKind}
             sendingCode={digitalSignature.sendingCode}
             onSendForConfirmation={handleSendForConfirmation}
             onResendConfirmation={handleResendConfirmation}
@@ -5985,6 +6100,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     updateWizardData,
     setCurrentStep,
     setErrors,
+    setGeneralErrorKind,
     setLoading: setWizardLoading,
     validateCurrentStep,
     validateAllSteps,
@@ -6010,6 +6126,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     if (!editRecovery.ready || !editRecovery.leaseToken || editRecovery.blocked) {
+      setGeneralErrorKind('stale');
       setErrors({ general: editRecovery.blockReason
         ? getContractEditRecoveryMessage(editRecovery.blockReason)
         : 'اتصال ایمن ویرایش هنوز آماده نیست' });
@@ -6257,14 +6374,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         />
 
         {/* Error Display */}
+        {getSalesErrorSummary(errors) && (
+          <ErpInlineState kind="error" title={getSalesErrorSummary(errors)} />
+        )}
         {editRecovery.checkpointError && (
           <ErpInlineState
             kind="stale"
             title="ذخیرهٔ بازیابی محلی محدود شده است؛ تا برقراری ذخیرهٔ امن سرور این صفحه را نبندید."
           />
         )}
+        {dataLoadingError && (
+          <ErpInlineState kind={dataLoadingError.kind} title={dataLoadingError.message} />
+        )}
         {errors.general && (
-          <ErpInlineState kind="error" title={errors.general} />
+          <ErpInlineState kind={generalErrorKind} title={errors.general} />
         )}
 
         {/* Product Configuration Modal */}
@@ -7505,7 +7628,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   )}
                                   {stairSystemV2.layerTypesStatus === 'empty' && (
                                     <p className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
-                                      هیچ نوع لایه فعالی ثبت نشده است؛ با مدیر انبار تماس بگیرید
+                                      هیچ نوع لایه فعالی ثبت نشده است؛ پس از فعال‌شدن نوع لایه دوباره تلاش کنید
                                     </p>
                                   )}
                                   {stairSystemV2.layerTypesStatus === 'error' && (
@@ -9009,7 +9132,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     }));
                     setErrors({
                       products:
-                        'لطفاً خطاهای مشخص‌شده را برطرف کنید (کد: STAIR_DRAFT_REQUIRED_FIELDS)'
+                        'اطلاعات این بخش پله کامل نیست؛ فیلدهای مشخص‌شده را تکمیل کنید.'
                     });
                     reportCurrentStairIssue({
                       code: 'STAIR_DRAFT_REQUIRED_FIELDS',
@@ -9079,7 +9202,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                      }));
                      setErrors({
                        products:
-                         'محاسبات بخش پله معتبر نیست (کد: STAIR_CALCULATION_CONFLICT)'
+                         'محاسبات این بخش پله کامل نیست؛ مقدارهای مشخص‌شده را اصلاح کنید.'
                      });
                      reportCurrentStairIssue({
                        code: 'STAIR_CALCULATION_CONFLICT',
@@ -9141,7 +9264,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                        }));
                        setErrors({
                          products:
-                           'تنظیمات لایه کامل نیست (کد: STAIR_LAYER_DRAFT_INVALID)'
+                           'تنظیمات لایه کامل نیست؛ فیلدهای مشخص‌شده را تکمیل کنید.'
                        });
                        reportCurrentStairIssue({
                          code: 'STAIR_LAYER_DRAFT_INVALID',
@@ -9181,7 +9304,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                    if (hasInvalidTool) {
                      setErrors({
                        products:
-                         'تنظیمات ابزار معتبر نیست (کد: STAIR_LEGACY_TOOL_INVALID)'
+                         'تنظیمات ابزار معتبر نیست؛ ابزارهای مشخص‌شده را دوباره انتخاب کنید.'
                      });
                      reportCurrentStairIssue({
                        code: 'STAIR_LEGACY_TOOL_INVALID',
@@ -9214,7 +9337,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                      if (!operationCalculation.ok) {
                        setErrors({
                          products:
-                           'عملیات ابزار یا پرداخت معتبر نیست (کد: STAIR_OPERATION_CONFLICT)'
+                           'مقدار ابزار یا پرداخت معتبر نیست؛ ردیف‌های مشخص‌شده را اصلاح کنید.'
                        });
                        reportCurrentStairIssue({
                          code: 'STAIR_OPERATION_CONFLICT',
@@ -9448,7 +9571,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                    if (!canonicalStairCalculationForRow.ok) {
                      setErrors({
                        products:
-                         'محاسبه نهایی شناسه‌های سنگ پله نامعتبر است (کد: STAIR_ROW_IDENTITY_RECALCULATION_FAILED)'
+                         'ارتباط سنگ‌های این پله کامل نیست؛ سنگ اصلی و لایه‌ها را دوباره انتخاب کنید.'
                      });
                      reportCurrentStairIssue({
                        code: 'STAIR_ROW_IDENTITY_RECALCULATION_FAILED',
@@ -10560,7 +10683,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     commitStagedStairSessionRef.current = false;
                     setErrors({
                       products:
-                        'ذخیره پیکربندی پله انجام نشد؛ اطلاعات واردشده حفظ شده است (کد: STAIR_TRANSACTION_UNEXPECTED)'
+                        'ذخیره پیکربندی پله انجام نشد؛ اطلاعات واردشده حفظ شده است. دوباره تلاش کنید.'
                     });
                     reportCurrentStairIssue({
                       code: 'STAIR_TRANSACTION_UNEXPECTED',
@@ -10588,7 +10711,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   if (!stairSystemV2.stairSessionItems.length) {
                     setErrors({
                       products:
-                        'حداقل یک بخش پله را کامل کنید (کد: STAIR_FINISH_EMPTY)'
+                        'هیچ بخش کاملی برای پله ثبت نشده است؛ حداقل یک بخش پله را تکمیل و اضافه کنید.'
                     });
                     requestAnimationFrame(() => {
                       document
@@ -10774,7 +10897,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   } catch {
                     setErrors({
                       products:
-                        'ثبت پیکربندی پله انجام نشد؛ اطلاعات واردشده حفظ شده است (کد: STAIR_COMMIT_UNEXPECTED)'
+                        'ثبت پیکربندی پله انجام نشد؛ اطلاعات واردشده حفظ شده است. دوباره تلاش کنید.'
                     });
                     reportCurrentStairIssue({
                       code: 'STAIR_COMMIT_UNEXPECTED',

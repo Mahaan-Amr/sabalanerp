@@ -1,6 +1,6 @@
 'use client';
 import { ErpBadge, ErpCard, ErpField as SalesAuthoringField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Product } from '@/types/product';
 import { resolveBackendAssetUrl, salesAPI } from '@/lib/api';
@@ -8,6 +8,7 @@ import { formatPrice } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
 import { SalesAuthoringPage, SalesAuthoringSection, hasSalesDraftChanged } from '@/features/sales/authoring/SalesAuthoringUi';
+import { getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, mapProductEditValidationErrors } from '@/features/sales/salesOperationalError';
 
 // Product name generation utilities
 const generateFullProductName = (product: Product): string => {
@@ -41,10 +42,13 @@ const ProductDetailPage: React.FC = () => {
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [loadErrorKind, setLoadErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
   const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; title: string }>();
+  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error' | 'permission' | 'stale'; title: string }>();
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState(false);
   const [savedFormSnapshot, setSavedFormSnapshot] = useState<ProductEditValues | null>(null);
+  const productRequestSequenceRef = useRef(0);
   const [formData, setFormData] = useState<ProductEditValues>({
     basePrice: '',
     motherLengthValue: '',
@@ -61,10 +65,11 @@ const ProductDetailPage: React.FC = () => {
   }, [productId]);
 
   const fetchProduct = async () => {
+    const requestSequence = ++productRequestSequenceRef.current;
     try {
       setLoading(true);
-      setLoadError('');
       const response = await salesAPI.getProduct(productId);
+      if (requestSequence !== productRequestSequenceRef.current) return;
 
       if (response.data.success && response.data.data) {
         const data = response.data;
@@ -79,24 +84,37 @@ const ProductDetailPage: React.FC = () => {
         };
         setFormData(nextFormData);
         setSavedFormSnapshot(nextFormData);
+        setLoadError('');
+        setLoadErrorKind('error');
       } else if (response.data.success) {
         setProduct(null);
         setSavedFormSnapshot(null);
+        setLoadError('');
+        setLoadErrorKind('error');
       } else {
-        setLoadError('دریافت اطلاعات محصول ناموفق بود. دوباره تلاش کنید.');
+        const failure = { response };
+        setLoadErrorKind(getSalesOperationalErrorKind(failure));
+        setLoadError(getSalesOperationalErrorMessage(failure, {
+          failedAction: 'دریافت اطلاعات محصول',
+          nextStep: 'به فهرست محصولات برگردید یا دوباره تلاش کنید.'
+        }));
       }
     } catch (error) {
+      if (requestSequence !== productRequestSequenceRef.current) return;
       console.error('Error fetching product:', error);
-      setLoadError('دریافت اطلاعات محصول ناموفق بود. دوباره تلاش کنید.');
+      setLoadErrorKind(getSalesOperationalErrorKind(error));
+      setLoadError(getSalesOperationalErrorMessage(error, {
+        failedAction: 'دریافت اطلاعات محصول',
+        nextStep: 'به فهرست محصولات برگردید یا دوباره تلاش کنید.'
+      }));
     } finally {
-      setLoading(false);
+      if (requestSequence === productRequestSequenceRef.current) setLoading(false);
     }
   };
 
   const handleSave = async () => {
     try {
       setSaving(true);
-      setFeedback(undefined);
       const response = await salesAPI.updateProduct(productId, {
         basePrice: formData.basePrice ? parseFloat(formData.basePrice) : null,
         motherLengthValue: formData.motherLengthValue
@@ -112,13 +130,35 @@ const ProductDetailPage: React.FC = () => {
         setProduct(response.data.data);
         setSavedFormSnapshot(formData);
         setEditing(false);
+        setFieldErrors({});
         setFeedback({ kind: 'success', title: 'محصول با موفقیت به‌روزرسانی شد.' });
       } else {
-        setFeedback({ kind: 'error', title: 'به‌روزرسانی محصول ناموفق بود.' });
+        const mapped = mapProductEditValidationErrors(response.data?.details || []);
+        setFieldErrors(mapped);
+        const failure = { response };
+        setFeedback({
+          kind: getSalesOperationalErrorKind(failure),
+          title: getSalesOperationalErrorMessage(failure, {
+            failedAction: 'به‌روزرسانی محصول',
+            nextStep: 'مقادیر مشخص‌شده را بررسی کنید و دوباره ذخیره کنید.',
+            preserveInput: true,
+            uncertainMutation: true
+          })
+        });
       }
     } catch (error) {
       console.error('Error updating product:', error);
-      setFeedback({ kind: 'error', title: 'به‌روزرسانی محصول ناموفق بود.' });
+      const mapped = mapProductEditValidationErrors((error as any)?.response?.data?.details || []);
+      setFieldErrors(mapped);
+      setFeedback({
+        kind: getSalesOperationalErrorKind(error),
+        title: getSalesOperationalErrorMessage(error, {
+          failedAction: 'به‌روزرسانی محصول',
+          nextStep: 'مقادیر مشخص‌شده را بررسی کنید و دوباره ذخیره کنید.',
+          preserveInput: true,
+          uncertainMutation: true
+        })
+      });
     } finally {
       setSaving(false);
     }
@@ -129,12 +169,12 @@ const ProductDetailPage: React.FC = () => {
     return new Intl.NumberFormat('fa-IR').format(price) + ' ریال';
   };
 
-  if (loading) return <ErpLoading />;
+  if (loading && !product) return <ErpLoading />;
 
-  if (loadError) {
+  if (loadError && !product) {
     return (
       <SalesAuthoringPage title="جزئیات محصول" backHref="/dashboard/sales/products">
-        <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: fetchProduct }} />
+        <ErpInlineState kind={loadErrorKind} title={loadError} action={{ label: 'تلاش دوباره', onClick: fetchProduct }} />
       </SalesAuthoringPage>
     );
   }
@@ -147,13 +187,29 @@ const ProductDetailPage: React.FC = () => {
     );
   }
 
+  const cancelEditing = () => {
+    if (savedFormSnapshot) setFormData(savedFormSnapshot);
+    setEditing(false);
+    setFieldErrors({});
+    setFeedback(undefined);
+  };
+
   return (
     <SalesAuthoringPage
       title="جزئیات محصول"
       description="مشاهده و ویرایش اطلاعات محصول"
       backHref="/dashboard/sales/products"
-      feedback={feedback ?? (editing && savedFormSnapshot && hasSalesDraftChanged(formData, savedFormSnapshot) ? { kind: 'stale', title: 'تغییرات این فرم تا زمان ذخیره نهایی نشده‌اند.' } : undefined)}
+      feedback={getSalesErrorSummary(fieldErrors)
+        ? { kind: 'error', title: getSalesErrorSummary(fieldErrors) }
+        : feedback ?? (editing && savedFormSnapshot && hasSalesDraftChanged(formData, savedFormSnapshot) ? { kind: 'stale', title: 'تغییرات این فرم تا زمان ذخیره نهایی نشده‌اند.' } : undefined)}
     >
+      {loadError && (
+        <ErpInlineState
+          kind="stale"
+          title={`آخرین اطلاعات موفق محصول نمایش داده می‌شود. ${loadError}`}
+          action={{ label: 'دریافت دوباره', onClick: fetchProduct }}
+        />
+      )}
       <SalesAuthoringSection title="مشخصات و قیمت‌گذاری محصول">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Product Information */}
@@ -164,7 +220,7 @@ const ProductDetailPage: React.FC = () => {
                   اطلاعات محصول
                 </h2>
                 <ErpPressable type="button"
-                  onClick={() => setEditing(!editing)}
+                  onClick={() => editing ? cancelEditing() : setEditing(true)}
                   tone="primary"
                   variant="solid"
                   className="px-4 py-2"
@@ -191,7 +247,7 @@ const ProductDetailPage: React.FC = () => {
 
                 {/* Mine */}
                 {editing ? (
-                  <SalesAuthoringField label="طول مادر">
+                  <SalesAuthoringField label="طول مادر" error={fieldErrors.motherLengthValue}>
                     <ErpInput
                       value={formData.motherLengthValue}
                       onChange={(event) => setFormData({
@@ -232,7 +288,7 @@ const ProductDetailPage: React.FC = () => {
               <div className="space-y-4">
                 {/* Base Price */}
                 {editing ? (
-                  <SalesAuthoringField label="قیمت پایه (ریال)">
+                  <SalesAuthoringField label="قیمت پایه (ریال)" error={fieldErrors.basePrice}>
                     <FormattedNumberInput
                       value={formData.basePrice ? parseFloat(formData.basePrice) : 0}
                       onChange={(value) => setFormData({ ...formData, basePrice: value.toString() })}
@@ -247,7 +303,7 @@ const ProductDetailPage: React.FC = () => {
 
                 {/* Lead Time */}
                 {editing ? (
-                  <SalesAuthoringField label="زمان تحویل (روز)">
+                  <SalesAuthoringField label="زمان تحویل (روز)" error={fieldErrors.leadTime}>
                     <FormattedNumberInput
                       value={formData.leadTime ? parseFloat(formData.leadTime) : 0}
                       onChange={(value) => setFormData({ ...formData, leadTime: value.toString() })}
@@ -268,7 +324,7 @@ const ProductDetailPage: React.FC = () => {
               <div className="space-y-4">
                 {/* Availability */}
                 {editing ? (
-                  <SalesAuthoringField label="وضعیت موجودی">
+                  <SalesAuthoringField label="وضعیت موجودی" error={fieldErrors.isAvailable}>
                     <ErpSelect
                       value={formData.isAvailable.toString()}
                       onChange={(e) => setFormData({ ...formData, isAvailable: e.target.value === 'true' })}
@@ -287,7 +343,7 @@ const ProductDetailPage: React.FC = () => {
             {/* Description */}
             <ErpCard className="p-5">
               {editing ? (
-                <SalesAuthoringField label="توضیحات">
+                <SalesAuthoringField label="توضیحات" error={fieldErrors.description}>
                 <ErpTextarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -300,10 +356,13 @@ const ProductDetailPage: React.FC = () => {
 
             <ErpCard className="p-5">
               {editing ? (
-                <CatalogImagePicker
-                  images={formData.images}
-                  onChange={(images) => setFormData({ ...formData, images })}
-                />
+                <div className="space-y-2">
+                  <CatalogImagePicker
+                    images={formData.images}
+                    onChange={(images) => setFormData({ ...formData, images })}
+                    error={fieldErrors.images}
+                  />
+                </div>
               ) : (
                 <>
                   <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">تصاویر</h3>
@@ -333,7 +392,7 @@ const ProductDetailPage: React.FC = () => {
                   {saving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}
                 </ErpPressable>
                 <ErpPressable type="button"
-                  onClick={() => setEditing(false)}
+                  onClick={cancelEditing}
                   variant="ghost"
                   className="flex-1 px-6 py-3"
                 >

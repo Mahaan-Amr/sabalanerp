@@ -2,7 +2,14 @@ export type NumericScore = 1 | 2 | 3 | 4 | 5;
 export type Score = NumericScore | "UNASSESSED" | null;
 export type Judgment = "POSITIVE" | "NEUTRAL" | "NEGATIVE" | null;
 export type CriterionKind =
-  "score" | "text" | "yesNo" | "address" | "strengthsWeaknesses" | "companion";
+  "score" | "text" | "yesNo" | "address" | "strengthsWeaknesses" | "companion" | "personalityTestSummary";
+
+export type ApplicantReportedPersonalityTestSummary = {
+  discResult: string;
+  discNotProvided: boolean;
+  bigFiveResult: string;
+  eqResult: string;
+};
 
 export type InterviewCriterion = {
   id: string;
@@ -21,6 +28,7 @@ export type CriterionAnswer = {
   companionPresent: "YES" | "NO" | null;
   strengths: string[];
   weaknesses: string[];
+  personalityTestSummary: ApplicantReportedPersonalityTestSummary;
   /** Preserved evidence from a version-1 draft whose criterion was score-only. */
   legacyScore?: Score;
   legacyNote?: string;
@@ -114,6 +122,12 @@ export const interviewCriteria: InterviewCriterion[] = [
     title: "حضور با همراه برای مصاحبه",
     kind: "companion",
   },
+  {
+    id: "personalityTestSummary",
+    order: 18,
+    title: "نتایج آزمون‌های DISC، BIG FIVE و EQ",
+    kind: "personalityTestSummary",
+  },
 ];
 
 const emptyAnswer = (): CriterionAnswer => ({
@@ -124,6 +138,12 @@ const emptyAnswer = (): CriterionAnswer => ({
   companionPresent: null,
   strengths: Array.from({ length: 5 }, () => ""),
   weaknesses: Array.from({ length: 5 }, () => ""),
+  personalityTestSummary: {
+    discResult: "",
+    discNotProvided: false,
+    bigFiveResult: "",
+    eqResult: "",
+  },
 });
 
 export const createInitialInterviewState = (criteria: InterviewCriterion[] = interviewCriteria): InterviewState => ({
@@ -220,6 +240,16 @@ export const criterionIsComplete = (
       answer.weaknesses.length === 5 &&
       answer.weaknesses.every((item) => item.trim().length > 0)
     );
+  }
+  if (criterion.kind === "personalityTestSummary") {
+    const summary = answer.personalityTestSummary;
+    const discResult = summary.discResult.trim();
+    const discIsComplete = summary.discNotProvided
+      ? discResult.length === 0
+      : discResult.length > 0 && discResult.length <= 100;
+    return discIsComplete
+      && summary.bigFiveResult.length <= 1000
+      && summary.eqResult.length <= 1000;
   }
   return answer.text.trim().length > 0;
 };

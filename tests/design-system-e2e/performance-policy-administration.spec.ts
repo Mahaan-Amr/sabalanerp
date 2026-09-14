@@ -7,12 +7,47 @@ import {
   setViewportAndZoom,
 } from './support/design-system';
 
+const representativeCatalogManifest = {
+  schemaVersion: 1,
+  catalog: {
+    stableKey: 'PERF_ROLE_CATALOG_E2E', versionCode: 'E2E_V1', lifecycle: 'DRAFT',
+    importIdentity: 'PERF-ROLE-CATALOG:E2E:V1', contentHash: 'a'.repeat(64),
+    contentHashMethod: 'SHA256_CANONICAL_JSON_EXCLUDING_CATALOG_CONTENT_HASH',
+  },
+  source: { provenanceCategory: 'LOCAL', asOf: '2026-09-09T00:00:00.000Z', references: ['e2e-controlled-source'], extractedFacts: true },
+  review: { contentOrigin: 'COMPANY_CONTROLLED_SOURCE', status: 'BUSINESS_REVIEW_PENDING' },
+  applicabilitySnapshotContract: {
+    schemaVersion: 1, container: '__applicability', snapshotVersion: 'PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1',
+    sourceVersions: 'REQUIRED_MAP_OF_FACT_TO_STABLE_SOURCE_VERSION', effectiveAt: 'REQUIRED_ISO_TIMESTAMP', unknown: 'BLOCK',
+  },
+  applicabilityDictionary: [{
+    fact: 'positionId', type: 'ID', operators: ['EQUALS', 'IN'], unknown: 'BLOCK',
+    source: 'PERIOD_EFFECTIVE_ASSIGNMENT', sourceVersion: 'PERF_APPLICABILITY_V1',
+  }],
+  evidenceDictionary: [], jobs: [], positions: [],
+};
+
 const mockPolicyApi = async (page: Page, canManage = true) => {
   await page.route('**/api/hr/personnel-performance/**', async (route) => {
     const url = new URL(route.request().url());
     const body = url.pathname.endsWith('/capabilities')
       ? { success: true, capabilities: canManage ? { MANAGE_PERFORMANCE_POLICY: true, VIEW_PERFORMANCE_HISTORY: true } : {} }
-      : url.pathname.endsWith('/criteria') ? { success: true, criteria: [] }
+      : url.pathname.endsWith('/owner-references') ? { success: true, references: {
+          jobs: [
+            { id: 'job-safe-1', title: 'کارشناس حسابداری', isActive: true },
+            { id: 'job-retired-1', title: 'شغل قدیمی', isActive: false },
+          ],
+          positions: [{ id: 'position-safe-1', title: 'کارشناس دریافتنی', isActive: true, jobId: 'job-safe-1' }],
+        } }
+      : url.pathname.endsWith('/catalog-import/preview') ? { success: true, preview: {
+          importIdentity: 'catalog-v1', contentHash: 'a'.repeat(64), importable: true, warnings: [],
+          criterionCount: 2, templateCount: 2, reviewStatus: 'BUSINESS_REVIEW_PENDING', publicationTriggered: false,
+          compositions: [{ jobReferenceCode: 'JOB-1', positionReferenceCode: 'POSITION-1', jobSharePercent: '80.00', addendumSharePercent: '20.00', basis: 'JOB_WITH_POSITION_ADDENDUM' }],
+        } }
+        : url.pathname.endsWith('/criteria') ? { success: true, criteria: [{
+            id: 'catalog-criterion-v1', version: 1, lifecycle: 'DRAFT', conceptCode: 'CATALOG_CRITERION',
+            content: { titleFa: 'معیار پیشنهادی کاتالوگ', catalogSource: { reviewStatus: 'BUSINESS_REVIEW_PENDING' } },
+          }] }
         : url.pathname.endsWith('/templates') ? { success: true, templates: [] }
           : url.pathname.endsWith('/policies') ? { success: true, policies: [] }
             : { success: true };
@@ -32,16 +67,35 @@ test('performance policy administration sheets are RTL, accessible, responsive, 
   await expect(criterionDialog).toBeVisible();
   await expect(criterionDialog.getByText('عنوان فارسی معیار الزامی است.')).toBeVisible();
   await expect(criterionDialog.getByRole('button', { name: 'ذخیره پیش‌نویس' })).toBeDisabled();
+  await criterionDialog.getByRole('combobox', { name: 'واقعیت کنترل‌شده کاربردپذیری' }).selectOption('hasSafetyDuty');
+  await expect(criterionDialog.getByRole('combobox', { name: 'مقدار بله/خیر' })).toHaveValue('true');
+  await criterionDialog.getByRole('combobox', { name: 'واقعیت کنترل‌شده کاربردپذیری' }).selectOption('jobId');
+  await expect(criterionDialog.getByRole('combobox', { name: 'شغل مجاز' })).toContainText('کارشناس حسابداری');
+  await expect(criterionDialog.getByRole('combobox', { name: 'شغل مجاز' })).toContainText('شغل قدیمی · بازنشسته/غیرفعال');
+  await criterionDialog.getByRole('combobox', { name: 'واقعیت کنترل‌شده کاربردپذیری' }).selectOption('responsibilityCodes');
+  await expect(criterionDialog.getByRole('textbox', { name: 'مقادیر مجاز' })).toBeVisible();
   await assertVisibleFocus(criterionDialog.getByRole('textbox', { name: 'عنوان فارسی' }));
   await assertNoSeriousAxeViolations(page);
   await setViewportAndZoom(page, { width: 390, height: 844 }, 2);
   await assertNoHorizontalOverflow(page);
   await page.keyboard.press('Escape');
   await expect(criterionDialog).toBeHidden();
+  await setViewportAndZoom(page, { width: 1440, height: 900 }, 1);
+  await page.getByRole('button', { name: 'ثبت تأیید کسب‌وکاری' }).click();
+  const approvalDialog = page.getByRole('dialog', { name: 'تأیید کسب‌وکاری محتوای کاتالوگ' });
+  await approvalDialog.getByRole('textbox', { name: 'دلیل قابل حسابرسی' }).fill('بازبینی کسب‌وکاری معیار پیشنهادی');
+  const approvalRequest = page.waitForRequest((request) => request.method() === 'POST'
+    && request.url().endsWith('/api/hr/personnel-performance/catalog-import/criteria/catalog-criterion-v1/approve'));
+  await approvalDialog.getByRole('button', { name: 'ثبت تأیید' }).click();
+  expect((await approvalRequest).postDataJSON()).toEqual({ reason: 'بازبینی کسب‌وکاری معیار پیشنهادی' });
+  await expect(approvalDialog).toBeHidden();
 
   await page.getByRole('button', { name: 'الگو و افزوده' }).click();
   await page.getByRole('button', { name: 'الگوی جدید' }).click();
   const templateDialog = page.getByRole('dialog', { name: 'ساخت پیش‌نویس الگو' });
+  await expect(templateDialog.getByRole('combobox', { name: 'شغل' })).toContainText('کارشناس حسابداری');
+  await expect(templateDialog.getByRole('combobox', { name: 'شغل' })).toContainText('شغل قدیمی · بازنشسته/غیرفعال');
+  await templateDialog.getByRole('combobox', { name: 'شغل' }).selectOption('job-safe-1');
   await expect(templateDialog.getByText('جمع وزن دسته‌ها: ۱۰۰٪')).toBeVisible();
   await templateDialog.getByRole('button', { name: 'افزودن معیار به دسته اصلی' }).click();
   await expect(templateDialog.getByText('جمع وزن معیارهای دسته اصلی: ۱۰۰٪')).toBeVisible();
@@ -50,6 +104,25 @@ test('performance policy administration sheets are RTL, accessible, responsive, 
   await expect(templateDialog.getByRole('button', { name: 'ساخت الگو' })).toBeDisabled();
   await page.keyboard.press('Escape');
   await expect(templateDialog).toBeHidden();
+  await page.getByRole('button', { name: 'درون‌ریزی کاتالوگ نقش' }).click();
+  const catalogDialog = page.getByRole('dialog', { name: 'پیش‌نمایش و درون‌ریزی کاتالوگ نقش' });
+  await expect(catalogDialog.getByText('این عملیات فقط DRAFT می‌سازد.')).toBeVisible();
+  await catalogDialog.getByRole('textbox', { name: 'manifest نسخه‌دار کاتالوگ' }).fill(JSON.stringify(representativeCatalogManifest));
+  const catalogPreviewRequest = page.waitForRequest((request) => request.method() === 'POST'
+    && request.url().endsWith('/api/hr/personnel-performance/catalog-import/preview'));
+  await catalogDialog.getByRole('button', { name: 'بررسی کاتالوگ' }).click();
+  const postedCatalog = (await catalogPreviewRequest).postDataJSON() as typeof representativeCatalogManifest;
+  expect(postedCatalog.schemaVersion).toBe(1);
+  expect(postedCatalog.catalog.lifecycle).toBe('DRAFT');
+  expect(postedCatalog.applicabilitySnapshotContract.snapshotVersion).toBe('PERSONNEL_PERFORMANCE_ASSIGNMENT_FACTS_V1');
+  expect(postedCatalog.applicabilityDictionary[0]).toMatchObject({ fact: 'positionId', sourceVersion: 'PERF_APPLICABILITY_V1' });
+  await expect(catalogDialog.getByText('شغل 80.00٪ · افزوده جایگاه 20.00٪')).toBeVisible();
+  await expect(catalogDialog.getByRole('button', { name: 'ساخت پیش‌نویس‌ها' })).toBeEnabled();
+  const catalogApplyRequest = page.waitForRequest((request) => request.method() === 'POST'
+    && request.url().endsWith('/api/hr/personnel-performance/catalog-import/apply'));
+  await catalogDialog.getByRole('button', { name: 'ساخت پیش‌نویس‌ها' }).click();
+  expect((await catalogApplyRequest).postDataJSON()).toEqual(representativeCatalogManifest);
+  await expect(catalogDialog).toBeHidden();
 
   await setViewportAndZoom(page, { width: 1440, height: 900 }, 1);
   await page.getByRole('button', { name: 'سیاست‌های سازمانی' }).click();

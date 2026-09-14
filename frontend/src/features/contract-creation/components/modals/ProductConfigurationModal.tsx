@@ -89,6 +89,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
       getCuttingTypePricePerMeter={getCuttingTypePricePerMeter}
       subServices={subServices}
       stoneFinishings={stoneFinishings}
+      products={wizardData.products}
       error={error}
     />
   );

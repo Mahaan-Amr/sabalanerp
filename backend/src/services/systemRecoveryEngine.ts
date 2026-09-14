@@ -151,6 +151,22 @@ const databaseUrlWithName = (databaseUrl: string, database: string) => {
   return parsed.toString();
 };
 
+const withRecoveryDatabaseClient = async <T>(databaseUrl: string, work: (client: PrismaClient) => Promise<T>) => {
+  const client = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  try {
+    await client.$connect();
+    return await work(client);
+  } finally {
+    await client.$disconnect();
+  }
+};
+
+export const withSystemRecoveryDatabaseClient = async <T>(database: string, work: (client: PrismaClient) => Promise<T>) => {
+  const configured = process.env.DATABASE_URL;
+  if (!configured) throw Object.assign(new Error('DATABASE_URL is required for recovery database access.'), { code: 'RECOVERY_DATABASE_URL_REQUIRED' });
+  return withRecoveryDatabaseClient(databaseUrlWithName(configured, database), work);
+};
+
 const dumpDatabase = async (databaseUrl: string, destination: string) => {
   const args = databaseArgs(databaseUrl);
   await execFileAsync('pg_dump', [...args.connection, '--format=custom', '--no-owner', '--no-privileges', '--file', destination], {
@@ -654,8 +670,7 @@ const findReadyPerformanceExports = async (client: PrismaClient) => {
 };
 
 const createSanitizedBootstrapAdmin = async (databaseUrl: string, password: string) => {
-  const client = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
-  try {
+  await withRecoveryDatabaseClient(databaseUrl, async (client) => {
     const hashed = await bcrypt.hash(password, 12);
     await client.user.deleteMany({ where: { OR: [{ username: 'local_recovery_admin' }, { email: 'local-recovery-admin@example.invalid' }] } });
     await client.user.create({
@@ -672,9 +687,7 @@ const createSanitizedBootstrapAdmin = async (databaseUrl: string, password: stri
         creatorAttributionKind: 'AUTOMATIC',
       },
     });
-  } finally {
-    await client.$disconnect();
-  }
+  });
 };
 
 const liveStoredFileReferenceCandidates = (
@@ -953,7 +966,6 @@ export const stageAndPromoteRecovery = async (input: {
     } else {
       await fs.promises.rm(SANITIZED_MARKER_PATH, { force: true });
     }
-    await resumeInquiryAfterRecovery();
     await input.onProgress(90);
     return { promoted: true, journal };
   } catch (error) {
@@ -961,7 +973,8 @@ export const stageAndPromoteRecovery = async (input: {
       ? JSON.parse(await fs.promises.readFile(RESTORE_JOURNAL_PATH, 'utf8')) as RestoreJournal
       : journal;
     if (currentJournal.phase === 'DATABASE_PROMOTED') {
-      await resumeInquiryAfterRecovery();
+      // The promoted database stays behind the inquiry restart marker until
+      // startup replays every post-checkpoint erasure and finalizes recovery.
       return { promoted: true, journal: currentJournal };
     }
     if (fs.existsSync(safetyFilesRoot)) {

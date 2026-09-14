@@ -1,7 +1,12 @@
 import Decimal from 'decimal.js';
 import { parseCanonicalDecimal as canonical } from './canonicalDecimal';
 import { parseStableIdentity } from './stableIdentity';
-import { replayRemainderAllocations, type PaidRemainderStock, type RemainderChildIntent } from './remainderPolicy';
+import {
+  parseRemainderChildPolicyInput,
+  replayRemainderAllocations,
+  type PaidRemainderStock,
+  type RemainderChildIntent
+} from './remainderPolicy';
 import type { CanonicalAllocation, CanonicalProductGraph, CanonicalProductRow } from './productGraph';
 import type { LegacyProductGraphConflict } from './legacyReadAdapter';
 
@@ -175,8 +180,11 @@ export const recoverLegacyRemainingChildren = (
       const s = source(p);
       const root = text(s.sourceProductRowId);
       const childRow = graph.rows.find(r => r.productRowId === affected);
+      const explicitPolicy = p.remainderChildPolicyInput === undefined
+        ? undefined
+        : parseRemainderChildPolicyInput(p.remainderChildPolicyInput);
       if (!childRow || p.parentProductRowId !== root || p.productId !== productsById.get(root)?.productId ||
-        p.longitudinalPolicyInput !== undefined || p.isMandatory === true) throw new Error('contradictory-source-ownership');
+        (p.longitudinalPolicyInput !== undefined && !explicitPolicy) || p.isMandatory === true) throw new Error('contradictory-source-ownership');
       if (!equal(p.originalTotalPrice, 0) || !equal(record(record(p.meta).pricing).materialCost, 0)) throw new Error('unproven-zero-material');
       for (const value of [p.pricePerSquareMeter, p.unitPrice, p.mandatoryPercentage]) {
         if (value !== undefined && !equal(value, 0)) throw new Error('conflicting-material-price');
@@ -199,8 +207,12 @@ export const recoverLegacyRemainingChildren = (
       if (quantity !== s.allocatedQuantity || p.lengthUnit !== 'm' || p.widthUnit !== 'cm') {
         throw new Error('unsupported-physical-layout');
       }
-      const lengthMeters = canonical(decimal(p.length).toFixed());
-      const widthMeters = canonical(decimal(p.width).div(100).toFixed());
+      const lengthMeters = explicitPolicy?.lengthMeters ?? canonical(decimal(p.length).toFixed());
+      const widthMeters = explicitPolicy?.widthMeters ?? canonical(decimal(p.width).div(100).toFixed());
+      if (
+        !sameGeometry(p.length, lengthMeters) ||
+        !sameGeometry(p.width, widthMeters, 100)
+      ) throw new Error('unsupported-physical-layout');
       const pieces = list(s.physicalPieces);
       const logicalPieceOrdinals = pieces.map((piece, index) => {
         if (piece.logicalPieceOrdinal !== undefined) {
@@ -221,7 +233,9 @@ export const recoverLegacyRemainingChildren = (
         throw new Error('physical-piece-evidence-mismatch');
       }
       if (p.sawKerfEnabled !== false && p.sawKerfEnabled !== true) throw new Error('missing-kerf-policy');
-      const kerfMeters = p.sawKerfEnabled ? canonical(decimal(p.sawKerfCm).div(100).toFixed()) : canonical('0');
+      const legacyKerfMeters = p.sawKerfEnabled ? canonical(decimal(p.sawKerfCm).div(100).toFixed()) : canonical('0');
+      const kerfMeters = explicitPolicy?.kerfMeters ?? legacyKerfMeters;
+      if (kerfMeters !== legacyKerfMeters) throw new Error('conflicting-kerf-policy');
       let distribution: number[];
       if (s.sourcePieceQuantities !== undefined) {
         if (!Array.isArray(s.sourcePieceQuantities)) throw new Error('invalid-physical-layout');
@@ -241,6 +255,7 @@ export const recoverLegacyRemainingChildren = (
         }
         distribution = uniqueSourceDistribution(consumed, generated, selected.widthMeters, widthMeters, kerfMeters, quantity);
       }
+      if (explicitPolicy?.sourcePieceQuantities && JSON.stringify(explicitPolicy.sourcePieceQuantities) !== JSON.stringify(distribution)) throw new Error('invalid-physical-layout');
       const breakdown = list(p.cuttingBreakdown);
       if (new Set(breakdown.map(b => b.type)).size !== breakdown.length ||
         breakdown.some(b => !['longitudinal', 'cross', 'calibration'].includes(String(b.type)))) throw new Error('invalid-cutting-evidence');
@@ -251,6 +266,28 @@ export const recoverLegacyRemainingChildren = (
       if (p.calibrationCutEnabled !== undefined && typeof p.calibrationCutEnabled !== 'boolean') throw new Error('missing-calibration-policy');
       const calibrationEnabled = p.calibrationCutEnabled === true || breakdown.some(b => b.type === 'calibration' && decimal(b.meters).gt(0));
       if (p.calibrationCutEnabled === false && calibrationEnabled) throw new Error('conflicting-calibration-evidence');
+      if (explicitPolicy && (
+        explicitPolicy.sourceProductRowId !== root ||
+        explicitPolicy.allocationId !== allocationId ||
+        (explicitPolicy.allocationOrder !== undefined && explicitPolicy.allocationOrder !== order) ||
+        explicitPolicy.quantity !== quantity ||
+        explicitPolicy.calibrationEnabled !== calibrationEnabled ||
+        aliases.get(explicitPolicy.selectedRemainingStoneId ?? '') !== selectedId
+      )) throw new Error('canonical-remainder-evidence-mismatch');
+      const explicitRate = (type: string) => type === 'longitudinal'
+        ? explicitPolicy?.longitudinalCutRateToman
+        : type === 'cross'
+          ? explicitPolicy?.crossCutRateToman
+          : explicitPolicy?.calibrationCutRateToman;
+      if (explicitPolicy) {
+        for (const type of ['longitudinal', 'cross', 'calibration']) {
+          const canonicalRate = explicitRate(type);
+          const legacyRate = rate(type);
+          if (canonicalRate !== legacyRate) {
+            throw new Error('cutting-rate-evidence-mismatch');
+          }
+        }
+      }
       const intent: RemainderChildIntent = {
         allocationId: parseStableIdentity('allocation', allocationId), allocationOrder: order,
         childProductRowId: childRow.productRowId, sourceProductRowId: parseStableIdentity('product-row', root),

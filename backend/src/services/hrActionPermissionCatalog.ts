@@ -5,7 +5,7 @@ export type HrActionPermissionDefinition = {
   prerequisites: readonly string[];
 };
 
-const PERFORMANCE_ACTION_PERMISSIONS = [
+const LEGACY_PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'REQUEST_PERFORMANCE_PRIVACY_CASE', labelFa: 'ثبت درخواست حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_PRIVACY_CASE', labelFa: 'مشاهده پرونده حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'ACKNOWLEDGE_PERFORMANCE_PRIVACY_CASE', labelFa: 'اعلام دریافت درخواست حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
@@ -25,6 +25,7 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'REVIEW_PERFORMANCE_EVALUATION', labelFa: 'بررسی ارزیابی عملکرد', level: 'EDIT', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_HISTORY', labelFa: 'مشاهده سابقه محرمانه عملکرد', level: 'VIEW', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_BADGE_LIST', labelFa: 'مشاهده سطح عملکرد در فهرست پرسنل', level: 'VIEW', prerequisites: [] },
+  { code: 'DELIVER_PERFORMANCE_PERSONAL_SUMMARY', labelFa: 'تحویل خلاصه شخصی عملکرد پس از احراز هویت', level: 'EDIT', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_ANALYTICS', labelFa: 'مشاهده تحلیل تجمیعی عملکرد', level: 'VIEW', prerequisites: [] },
   { code: 'VIEW_NAMED_PERFORMANCE_RANKING', labelFa: 'مشاهده تحلیل و رتبه‌بندی نام‌دار عملکرد', level: 'VIEW', prerequisites: [] },
   { code: 'VIEW_EVALUATOR_CALIBRATION', labelFa: 'مشاهده کالیبراسیون ارزیاب', level: 'VIEW', prerequisites: [] },
@@ -38,6 +39,7 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'MANAGE_PERFORMANCE_ROLLOUT', labelFa: 'مدیریت مرحله و جامعه فعال‌سازی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'PAUSE_PERFORMANCE_EVALUATION', labelFa: 'توقف ایمن ارزیابی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'RECORD_PERFORMANCE_TRAINING', labelFa: 'ثبت شاهد آموزش فعال‌سازی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'RECORD_PERFORMANCE_PROMOTION_EVIDENCE', labelFa: 'ثبت و ابطال بسته شواهد ارتقای عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'APPROVE_PERFORMANCE_COHORT_HR', labelFa: 'تصویب منابع انسانی جامعه عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'APPROVE_PERFORMANCE_COHORT_SECURITY', labelFa: 'تصویب امنیت و حریم خصوصی جامعه عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'APPROVE_PERFORMANCE_COHORT_SYSTEM', labelFa: 'تصویب مالک سامانه جامعه عملکرد', level: 'ADMIN', prerequisites: [] },
@@ -47,7 +49,19 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'APPROVE_PERFORMANCE_RESUME_SYSTEM', labelFa: 'تصویب مالک سامانه رفع توقف عملکرد', level: 'ADMIN', prerequisites: [] },
 ] as const;
 
+const PERFORMANCE_ACTION_PERMISSIONS = [
+  { code: 'VIEW_PERFORMANCE_EVALUATIONS', labelFa: 'مشاهده ارزیابی‌های عملکرد', level: 'VIEW', prerequisites: [] },
+  { code: 'EVALUATE_DIRECT_REPORTS', labelFa: 'ارزیابی افراد تحت سرپرستی', level: 'EDIT', prerequisites: [] },
+  { code: 'EVALUATE_ALL_PERSONNEL', labelFa: 'ارزیابی همه پرسنل', level: 'EDIT', prerequisites: [] },
+  { code: 'MANAGE_PERFORMANCE_PROFILES', labelFa: 'مدیریت الگوهای ارزیابی', level: 'ADMIN', prerequisites: [] },
+  { code: 'VIEW_PERFORMANCE_BADGE_LIST', labelFa: 'مشاهده نشان در فهرست پرسنل', level: 'VIEW', prerequisites: [] },
+] as const;
+
 export const PERFORMANCE_ACTION_PERMISSION_CODES = PERFORMANCE_ACTION_PERMISSIONS.map(({ code }) => code);
+export const INDEPENDENT_PERFORMANCE_ACTION_PERMISSION_CODES = [
+  ...LEGACY_PERFORMANCE_ACTION_PERMISSIONS.map(({ code }) => code),
+  ...PERFORMANCE_ACTION_PERMISSION_CODES,
+] as readonly string[];
 
 export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
   code: string;
@@ -93,6 +107,7 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
       { code: 'MANAGE_HR_WORK', labelFa: 'مدیریت کارهای منابع انسانی', level: 'EDIT', prerequisites: ['HR_WORK_MANAGEMENT'] },
       { code: 'MANAGE_COMPENSATION', labelFa: 'مدیریت پیشنهاد و جبران خدمت', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
       { code: 'MANAGE_PAYROLL', labelFa: 'ثبت و تأیید اطلاعات حقوق', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'MANAGE_COMPENSATION_AGREEMENTS', labelFa: 'انتشار توافق جبران خدمت', level: 'ADMIN', prerequisites: [] },
       { code: 'MANAGE_FINANCE_EVIDENCE', labelFa: 'مجوز قدیمی شواهد مالی (غیرفعال در استخدام)', level: 'EDIT', prerequisites: [] },
       { code: 'REVIEW_IDENTITY_DOCUMENTS', labelFa: 'دریافت و تطبیق اسناد هویتی', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
       { code: 'APPROVE_IDENTITY_CLEARANCE', labelFa: 'تأیید نهایی احراز هویت', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
@@ -115,7 +130,11 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
 ] as const;
 
 export const HR_ACTION_PERMISSIONS = HR_ACTION_PERMISSION_GROUPS.flatMap((group) => group.permissions);
-const definitions = new Map(HR_ACTION_PERMISSIONS.map((permission) => [permission.code, permission]));
+export const AUTHORIZABLE_HR_ACTION_PERMISSIONS = [...new Map([
+  ...LEGACY_PERFORMANCE_ACTION_PERMISSIONS,
+  ...HR_ACTION_PERMISSIONS,
+].map((permission) => [permission.code, permission])).values()];
+const definitions = new Map(AUTHORIZABLE_HR_ACTION_PERMISSIONS.map((permission) => [permission.code, permission]));
 
 export const getHrActionPermissionDefinition = (code: string) => definitions.get(code);
 

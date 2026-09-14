@@ -12,6 +12,7 @@ import {
   contractCorrectionCategoryLabel,
 } from '@/features/contract-creation/services/contractCorrectionPresentation';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
+import { assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 const CreateContractWizardClient = dynamic(
   () => import('@/features/contract-creation/CreateContractWizardClient'),
@@ -53,6 +54,9 @@ export default function SalesContractEditPage() {
   const [contract, setContract] = useState<ContractForEdit | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<'error' | 'permission' | 'stale'>('error');
+  const [retryLoad, setRetryLoad] = useState(false);
+  const [retrySequence, setRetrySequence] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -67,11 +71,15 @@ export default function SalesContractEditPage() {
 
         if (!mounted) return;
         if (!contractResponse.data.success || !contractResponse.data.data) {
-          setError('قرارداد یافت نشد');
+          setRetryLoad(false);
+          setError('قرارداد پیدا نشد. به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.');
+          setErrorKind('stale');
           return;
         }
 
         const nextContract = contractResponse.data.data as ContractForEdit;
+        assertSuccessfulSalesResponse(profileResponse);
+        setRetryLoad(false);
         const user = profileResponse.data?.data as User | undefined;
         const permissions = user ? getContractPermissions(user) : null;
 
@@ -82,30 +90,41 @@ export default function SalesContractEditPage() {
         }
 
         if (!permissions?.canEdit && nextContract.createdByUser?.id !== user?.id) {
-          setError('شما مجاز به ویرایش این قرارداد نیستید');
+          setError('ویرایش این قرارداد برای شما مجاز نیست. به صفحه مشاهده قرارداد برگردید.');
+          setErrorKind('permission');
           return;
         }
 
         if (nextContract.isInactive) {
-          setError('قرارداد غیرفعال فقط‌خواندنی است و قابل ویرایش نیست');
+          setError('این قرارداد غیرفعال و فقط‌خواندنی است. به صفحه مشاهده قرارداد برگردید.');
+          setErrorKind('stale');
           return;
         }
 
         if (nextContract.accountingEditLocked && !nextContract.canOpenCorrectionEdit) {
-          setError('این قرارداد پس از تایید مالی حسابداری قابل ویرایش نیست');
+          setError('این قرارداد پس از تأیید مالی قابل‌ویرایش نیست. از صفحه قرارداد، مسیر درخواست اصلاح را بررسی کنید.');
+          setErrorKind('stale');
           return;
         }
 
         if (!nextContract.contractData) {
-          setError('اطلاعات قابل ویرایش قرارداد موجود نیست');
+          setError('نسخهٔ قابل‌ویرایش این قرارداد موجود نیست. به صفحه مشاهده قرارداد برگردید.');
+          setErrorKind('stale');
           return;
         }
 
         setContract(nextContract);
+        setRetryLoad(false);
         setError(null);
+        setErrorKind('error');
       } catch (err: any) {
         if (!mounted) return;
-        setError(err.response?.data?.error || 'خطا در بارگذاری قرارداد');
+        setError(getSalesOperationalErrorMessage(err, {
+          failedAction: 'دریافت اطلاعات ویرایش قرارداد',
+          nextStep: 'به صفحه مشاهده قرارداد برگردید یا دوباره تلاش کنید.'
+        }));
+        setErrorKind(getSalesOperationalErrorKind(err));
+        setRetryLoad(true);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -116,7 +135,7 @@ export default function SalesContractEditPage() {
     return () => {
       mounted = false;
     };
-  }, [contractId]);
+  }, [contractId, retrySequence]);
 
   if (loading) {
     return (
@@ -130,11 +149,11 @@ export default function SalesContractEditPage() {
     return (
       <div className="sds-workspace py-8" dir="rtl">
         <ErpInlineState
-          kind="error"
-          title={error || 'قرارداد یافت نشد'}
+          kind={errorKind}
+          title={error || 'قرارداد پیدا نشد. به فهرست قراردادها برگردید.'}
           action={{
-            label: 'مشاهده قرارداد',
-            href: `/dashboard/sales/contracts/${contractId}`
+            label: retryLoad ? 'تلاش دوباره' : 'مشاهده قرارداد',
+            ...(retryLoad ? { onClick: () => setRetrySequence((current) => current + 1) } : { href: `/dashboard/sales/contracts/${contractId}` })
           }}
         />
       </div>
@@ -150,7 +169,7 @@ export default function SalesContractEditPage() {
   }
 
   if (!contract.contractData) {
-    return <ErpCard className="py-8"><ErpInlineState kind="error" title="اطلاعات قابل ویرایش قرارداد موجود نیست"
+    return <ErpCard className="py-8"><ErpInlineState kind="stale" title="نسخهٔ قابل‌ویرایش این قرارداد موجود نیست. به صفحه مشاهده قرارداد برگردید."
       action={{ label: 'مشاهده قرارداد', href: `/dashboard/sales/contracts/${contractId}` }} /></ErpCard>;
   }
 

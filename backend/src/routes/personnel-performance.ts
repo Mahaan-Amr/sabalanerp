@@ -1,14 +1,29 @@
 import { assessPerformanceEvaluationRetention } from '../services/personnelPerformanceRetentionStore';
 import {
+  approvePerformanceBulkErasure,
+  approvePerformanceErasureImpact,
+  executePerformanceErasureOperation,
+  listPerformanceErasureOperations,
+  recordPerformanceRecoverableCopy,
+} from '../services/personnelPerformanceErasureStore';
+import {
   activatePerformanceCohort,
   decidePerformanceRollout,
   proposePerformanceCohort,
   recordPerformanceTrainingEvidence,
+  recordPerformancePromotionEvidence,
+  revokePerformancePromotionEvidence,
   resumePersonnelPerformance,
 } from '../services/personnelPerformanceRolloutStore';
 import { placePerformanceLegalHold, decidePerformanceLegalHold, listPerformanceLegalHolds } from '../services/personnelPerformanceLegalHoldStore';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../services/personnelPerformanceOperationsStore';
-import { acknowledgePerformanceOperationalIncident, configurePerformanceOperationalRoute, getPerformanceOperationalDashboard, recordPerformanceIntegrityFailure, recordPerformanceRequestObservation } from '../services/personnelPerformanceMonitoringStore';
+import {
+  acknowledgePerformanceOperationalIncident,
+  configurePerformanceOperationalRoute,
+  getPerformanceOperationalDashboard,
+  recordPerformanceIntegrityFailure,
+  recordPerformanceRequestObservation,
+} from '../services/personnelPerformanceMonitoringStore';
 import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue } from '../services/personnelPerformancePrivacyStore';
 import { restrictPerformanceEvidence } from '../services/personnelPerformanceRestrictions';
 import { findApplicablePerformancePause } from '../services/personnelPerformanceRolloutPolicy';
@@ -20,17 +35,21 @@ import { requireHrAuthorization } from '../middleware/hrAuthorization';
 import { requirePersonnelPerformanceWriteGate } from '../middleware/personnelPerformanceRollout';
 import { PERFORMANCE_ACTION_PERMISSION_CODES } from '../services/hrActionPermissionCatalog';
 import { activeHrActionPermissionsForUser } from '../services/hrAuthorizationService';
+import { loadHrOperationalReference } from '../services/hrOperationalReferenceProjection';
 import {
   activateDuePerformanceArtifacts,
   activateDuePerformancePolicies,
+  approvePerformanceCatalogDraft,
   cancelScheduledPerformanceVersion,
   createPerformanceCriterionDraft,
   createPerformancePolicyDraft,
   createPerformanceTemplateDraft,
+  importPerformanceRoleCatalogDraft,
   listPerformanceCriteria,
   listPerformancePolicies,
   listPerformanceTemplates,
   previewPerformancePolicy,
+  previewPerformanceRoleCatalogImport,
   retirePerformanceArtifactVersion,
   schedulePerformanceCriterion,
   schedulePerformancePolicy,
@@ -42,6 +61,7 @@ import {
 import { reproduceAcceptedPerformanceResult, suspendAcceptedPerformanceResult } from '../services/personnelPerformanceResultStore';
 import { PerformancePolicyKind, PerformanceReviewDecision, PerformanceTemplateKind } from '@prisma/client';
 import {
+  getPerformanceReadinessCoverage,
   reconstructPerformanceReadiness,
   retryFailedPerformanceReadinessRecords,
 } from '../services/personnelPerformanceReadinessStore';
@@ -66,6 +86,7 @@ import {
   completePerformanceExportDownload,
   createPerformanceConsequenceHandoff,
   createPerformanceCorrection,
+  deliverPersonalPerformanceSummary,
   getEvaluatorCalibration,
   getPerformanceAnalytics,
   getPerformanceConsequenceHandoff,
@@ -77,6 +98,19 @@ import {
   getPersonnelPerformanceBadges,
   requestPerformanceExport,
 } from '../services/personnelPerformanceDisclosureStore';
+import {
+  assignSimplePerformanceProfile,
+  createSimplePerformanceCorrection,
+  createSimplePerformanceEvaluation,
+  createSimplePerformanceProfile,
+  finalizeSimplePerformanceEvaluation,
+  getSimplePerformanceBadges,
+  getSimplePerformanceHistory,
+  getSimplePerformanceWorkspace,
+  listSimplePerformanceProfiles,
+  saveSimplePerformanceDraft,
+  visibleSimplePerformancePersonnelIds,
+} from '../services/simplePersonnelPerformanceStore';
 
 const router = express.Router();
 router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
@@ -85,7 +119,8 @@ export const classifyPerformanceRequestMetric = (method: string, path: string) =
   if (method === 'GET' && path.startsWith('/traces/')) return 'RESULT_REPRODUCTION_LATENCY';
   if (method === 'PUT' && path.endsWith('/draft')) return 'DRAFT_SAVE_API_LATENCY';
   if (method === 'POST' && ['/analytics', '/ranking', '/calibration'].includes(path)) return 'ANALYTICS_API_LATENCY';
-  if (method === 'POST' && ['/submit', '/decision', '/not-evaluable', '/suspend', '/cancel', '/invalidate'].some((suffix) => path.endsWith(suffix))) return 'ATOMIC_TRANSITION_API_LATENCY';
+  if (method === 'POST' && ['/submit', '/decision', '/not-evaluable', '/suspend', '/cancel', '/invalidate']
+    .some((suffix) => path.endsWith(suffix))) return 'ATOMIC_TRANSITION_API_LATENCY';
   if (method === 'GET') return 'AUTHORIZED_READ_API_LATENCY';
   return null;
 };
@@ -102,8 +137,8 @@ router.use((req, res, next) => {
     recorded = true;
     if (!metricKey) return;
     const outcome = performanceRequestObservationOutcome(res.statusCode, completed);
-    void recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)), ...outcome })
-      .catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
+    void recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      ...outcome }).catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
   };
   res.once('finish', () => record(true));
   res.once('close', () => record(false));
@@ -131,6 +166,91 @@ router.get('/capabilities', async (req: AuthRequest, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+const requireAnySimplePerformancePermission = (codes: string[]) => async (req: AuthRequest, res: express.Response, next: express.NextFunction) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    const permissions = new Set(await activeHrActionPermissionsForUser(prisma, req.user.id));
+    if (!codes.some((code) => permissions.has(code))) return res.status(403).json({ success: false, message: 'اجازه این کار را ندارید.' });
+    return next();
+  } catch (error) { return next(error); }
+};
+
+const useSimplePerformance = requireAnySimplePerformancePermission([
+  'VIEW_PERFORMANCE_EVALUATIONS', 'EVALUATE_DIRECT_REPORTS', 'EVALUATE_ALL_PERSONNEL', 'MANAGE_PERFORMANCE_PROFILES',
+]);
+const manageSimpleProfiles = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_PROFILES'] });
+
+router.get('/simple/workspace', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await getSimplePerformanceWorkspace(prisma, req.user!.id)) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/simple/profiles', useSimplePerformance, async (_req, res, next) => {
+  try { return res.json({ success: true, profiles: await listSimplePerformanceProfiles(prisma) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/simple/history/:personnelId', requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_EVALUATIONS'] }), async (req: AuthRequest, res, next) => {
+  try {
+    const requestedPage = Number(req.query.page ?? 1);
+    const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1;
+    const [simple, legacy] = await Promise.all([
+      getSimplePerformanceHistory(prisma, {
+        actorUserId: req.user!.id, personnelId: req.params.personnelId,
+        page,
+      }),
+      getPerformanceHistory(prisma, {
+        actorUserId: req.user!.id, personnelId: req.params.personnelId,
+        page, pageSize: 50, includeHasMoreProbe: true, authorityCode: 'VIEW_PERFORMANCE_EVALUATIONS',
+      }),
+    ]);
+    return res.json({
+      success: true, ...simple,
+      legacyEvaluations: legacy.slice(0, 50), legacyHasMore: legacy.length > 50,
+    });
+  } catch (error) { return next(error); }
+});
+
+router.post('/simple/profiles', manageSimpleProfiles, async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, profile: await createSimplePerformanceProfile(prisma, { ...req.body, actorUserId: req.user!.id }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/profile-assignments', manageSimpleProfiles, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, assignment: await assignSimplePerformanceProfile(prisma, {
+    actorUserId: req.user!.id, personnelId: String(req.body.personnelId ?? ''), profileId: String(req.body.profileId ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, evaluation: await createSimplePerformanceEvaluation(prisma, {
+    actorUserId: req.user!.id, personnelId: String(req.body.personnelId ?? ''), evaluationDate: String(req.body.evaluationDate ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.put('/simple/evaluations/:evaluationId/draft', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await saveSimplePerformanceDraft(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId, values: Array.isArray(req.body.values) ? req.body.values : [],
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/finalize', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await finalizeSimplePerformanceEvaluation(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId,
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/corrections', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, evaluation: await createSimplePerformanceCorrection(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId, reason: String(req.body.reason ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
 });
 
 router.get('/rollout', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (_req, res, next) => {
@@ -203,7 +323,8 @@ router.get('/readiness/:runId', manageReadiness, async (req, res, next) => {
       where: { runId: run.id }, orderBy: { employmentAssignmentId: 'asc' },
       select: { employmentAssignmentId: true, status: true, blockerCode: true, attemptCount: true, lastErrorCode: true, processedAt: true },
     });
-    return res.json({ success: true, run, records });
+    const coverage = await getPerformanceReadinessCoverage(prisma, { runId: run.id });
+    return res.json({ success: true, run, records, coverage });
   } catch (error) { return next(error); }
 });
 
@@ -302,7 +423,7 @@ router.post('/reminders/run', manageLifecycle, requirePersonnelPerformanceWriteG
 });
 
 const viewBadgeList = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_BADGE_LIST'] });
-const viewHistory = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_HISTORY'] });
+const viewHistory = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_EVALUATIONS'] });
 const viewAnalytics = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_ANALYTICS'] });
 const viewNamedRanking = requireHrAuthorization({ actionPermissionCodes: ['VIEW_NAMED_PERFORMANCE_RANKING'] });
 const viewCalibration = requireHrAuthorization({ actionPermissionCodes: ['VIEW_EVALUATOR_CALIBRATION'] });
@@ -324,13 +445,50 @@ const subjectIdForHandoff = async (req: AuthRequest) => (
 router.get('/badge/me', async (req: AuthRequest, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { personnelId: true } });
+    if (user?.personnelId) {
+      const simple = await getSimplePerformanceBadges(prisma, [user.personnelId]);
+      if (simple[user.personnelId]) return res.json({ success: true, badge: simple[user.personnelId] });
+    }
     return res.json({ success: true, badge: await getPersonalPerformanceBadge(prisma, req.user.id) });
   } catch (error) { return next(error); }
 });
 
 router.post('/badges', viewBadgeList, async (req: AuthRequest, res, next) => {
-  try { return res.json({ success: true, badges: await getPersonnelPerformanceBadges(prisma, { actorUserId: req.user!.id, personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : [] }) }); }
+  try {
+    const requestedPersonnelIds = Array.isArray(req.body.personnelIds) ? req.body.personnelIds.map(String) : [];
+    const personnelIds = await visibleSimplePerformancePersonnelIds(prisma, {
+      actorUserId: req.user!.id, personnelIds: requestedPersonnelIds,
+    });
+    const [legacy, simple] = await Promise.all([
+      getPersonnelPerformanceBadges(prisma, { actorUserId: req.user!.id, personnelIds }),
+      getSimplePerformanceBadges(prisma, personnelIds),
+    ]);
+    const legacyByPersonnel = new Map(legacy.map((item) => [item.personnelId, item.badge]));
+    const badges = personnelIds.flatMap((personnelId) => {
+      const badge = simple[personnelId] ?? legacyByPersonnel.get(personnelId);
+      return badge ? [{ personnelId, badge }] : [];
+    });
+    return res.json({ success: true, badges });
+  }
   catch (error) { return next(error); }
+});
+
+router.post('/badge-deliveries', async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    const verification = req.body.identityVerification;
+    const delivery = await deliverPersonalPerformanceSummary(prisma, {
+      actorUserId: req.user.id,
+      personnelId: String(req.body.personnelId ?? ''),
+      identityVerification: verification && typeof verification === 'object' ? {
+        methodCode: verification.methodCode,
+        evidenceReference: verification.evidenceReference,
+        verifiedAt: new Date(verification.verifiedAt),
+      } : verification,
+    });
+    return res.status(201).json({ success: true, delivery });
+  } catch (error) { return next(error); }
 });
 
 router.get('/history/:personnelId', viewHistory, async (req: AuthRequest, res, next) => {
@@ -453,6 +611,15 @@ router.post('/evaluations/:evaluationId/corrections', reviewPerformance, require
 const managePolicy = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_POLICY'] });
 const policyWriteGate = requirePersonnelPerformanceWriteGate('MANAGE_POLICY');
 
+router.get('/owner-references', managePolicy, async (_req, res, next) => {
+  try {
+    return res.json({
+      success: true,
+      references: await loadHrOperationalReference(prisma, { includeAvailableCapacity: false }),
+    });
+  } catch (error) { return next(error); }
+});
+
 router.get('/criteria', managePolicy, async (_req, res, next) => {
   try {
     return res.json({ success: true, criteria: await listPerformanceCriteria(prisma) });
@@ -524,6 +691,36 @@ router.post('/templates/:versionId/schedule', managePolicy, policyWriteGate, asy
       effectiveFrom: new Date(req.body.effectiveFrom),
       reason: String(req.body.reason ?? ''),
       publishedByUserId: req.user!.id,
+    });
+    return res.json({ success: true, version });
+  } catch (error) { return next(error); }
+});
+
+router.post('/catalog-import/preview', managePolicy, async (req, res, next) => {
+  try {
+    return res.json({ success: true, preview: await previewPerformanceRoleCatalogImport(prisma, req.body) });
+  } catch (error) { return next(error); }
+});
+
+router.post('/catalog-import/apply', managePolicy, policyWriteGate, async (req: AuthRequest, res, next) => {
+  try {
+    const result = await importPerformanceRoleCatalogDraft(prisma, {
+      manifest: req.body,
+      createdByUserId: req.user!.id,
+    });
+    return res.status(201).json({ success: true, result });
+  } catch (error) { return next(error); }
+});
+
+router.post('/catalog-import/:artifactType/:versionId/approve', managePolicy, policyWriteGate, async (req: AuthRequest, res, next) => {
+  try {
+    const artifactType = ({ criteria: 'criterion', templates: 'template' } as const)[req.params.artifactType as 'criteria' | 'templates'];
+    if (!artifactType) return res.status(404).json({ success: false, message: 'نوع نسخه کاتالوگ پیدا نشد.' });
+    const version = await approvePerformanceCatalogDraft(prisma, {
+      artifactType,
+      versionId: req.params.versionId,
+      reason: String(req.body.reason ?? ''),
+      approvedByUserId: req.user!.id,
     });
     return res.json({ success: true, version });
   } catch (error) { return next(error); }
@@ -680,10 +877,16 @@ router.get('/operations/monitoring', requireHrAuthorization({ actionPermissionCo
   try { return res.json({ success: true, monitoring: await getPerformanceOperationalDashboard(prisma) }); } catch (error) { return next(error); }
 });
 router.post('/operations/monitoring/routes', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_ROLLOUT'] }), async (req: AuthRequest, res, next) => {
-  try { return res.json({ success: true, route: await configurePerformanceOperationalRoute(prisma, { actorUserId: req.user!.id, routeKey: req.body.routeKey, recipientUserId: req.body.recipientUserId, verifiedAt: new Date(req.body.verifiedAt), reason: req.body.reason }) }); } catch (error) { return next(error); }
+  try { return res.json({ success: true, route: await configurePerformanceOperationalRoute(prisma, {
+    actorUserId: req.user!.id, routeKey: req.body.routeKey, recipientUserId: req.body.recipientUserId,
+    verifiedAt: new Date(req.body.verifiedAt), reason: req.body.reason,
+  }) }); } catch (error) { return next(error); }
 });
 router.post('/operations/incidents/:incidentId/actions', async (req: AuthRequest, res, next) => {
-  try { return res.json({ success: true, incident: await acknowledgePerformanceOperationalIncident(prisma, { actorUserId: req.user!.id, incidentId: req.params.incidentId, action: req.body.action, reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash }) }); } catch (error) { return next(error); }
+  try { return res.json({ success: true, incident: await acknowledgePerformanceOperationalIncident(prisma, {
+    actorUserId: req.user!.id, incidentId: req.params.incidentId, action: req.body.action,
+    reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash,
+  }) }); } catch (error) { return next(error); }
 });
 router.post('/operations/pause', requireHrAuthorization({ actionPermissionCodes: ['PAUSE_PERFORMANCE_EVALUATION'] }), async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, pause: await pausePersonnelPerformance(prisma, {
@@ -704,13 +907,24 @@ router.post('/operations/training-evidence', async (req: AuthRequest, res, next)
 router.post('/operations/cohorts', async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, cohort: await proposePerformanceCohort(prisma, {
     actorUserId: req.user!.id, cohortKey: req.body.cohortKey, stage: req.body.stage, subjectIds: req.body.subjectIds,
-    readinessHash: req.body.readinessHash, reason: req.body.reason,
+    targetPhase: req.body.targetPhase, readinessHash: req.body.readinessHash, reason: req.body.reason,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/promotion-evidence', requireHrAuthorization({ actionPermissionCodes: ['RECORD_PERFORMANCE_PROMOTION_EVIDENCE'] }), async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, evidence: await recordPerformancePromotionEvidence(prisma, {
+    actorUserId: req.user!.id, report: req.body.report,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/operations/promotion-evidence/:promotionEvidenceId/revoke', requireHrAuthorization({ actionPermissionCodes: ['RECORD_PERFORMANCE_PROMOTION_EVIDENCE'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, revocation: await revokePerformancePromotionEvidence(prisma, {
+    actorUserId: req.user!.id, promotionEvidenceId: req.params.promotionEvidenceId, reasonCode: req.body.reasonCode,
   }) }); } catch (error) { return next(error); }
 });
 router.post('/operations/cohorts/:cohortVersionId/decisions', async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, decision: await decidePerformanceRollout(prisma, {
     actorUserId: req.user!.id, scopeType: 'COHORT', scopeId: req.params.cohortVersionId, ownerType: req.body.ownerType,
     action: req.body.action, reasonCode: req.body.reasonCode, evidenceHash: req.body.evidenceHash,
+    promotionEvidenceId: req.body.promotionEvidenceId,
   }) }); } catch (error) { return next(error); }
 });
 router.post('/operations/cohorts/:cohortVersionId/activate', async (req: AuthRequest, res, next) => {
@@ -735,6 +949,30 @@ router.post('/retention/evaluations/:evaluationId/assess', requireHrAuthorizatio
   try { return res.json({ success: true, assessment: await assessPerformanceEvaluationRetention(prisma, {
     actorUserId: req.user!.id, evaluationId: req.params.evaluationId,
   }) }); } catch (error) { return next(error); }
+});
+
+router.get('/retention/erasure', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await listPerformanceErasureOperations(prisma, req.user!.id)) }); } catch (error) { return next(error); }
+});
+router.post('/retention/erasure/policies/:policyVersionId/impact-approval', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, approval: await approvePerformanceErasureImpact(prisma, {
+    actorUserId: req.user!.id, policyVersionId: req.params.policyVersionId,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/retention/erasure/:operationId/bulk-approvals', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, approval: await approvePerformanceBulkErasure(prisma, {
+    actorUserId: req.user!.id, operationId: req.params.operationId, reasonCode: req.body.reasonCode,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/retention/erasure/:operationId/copies', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, copy: await recordPerformanceRecoverableCopy(prisma, {
+    actorUserId: req.user!.id, operationId: req.params.operationId, location: req.body.location,
+    copyKey: req.body.copyKey, status: req.body.status, recoverableUntil: req.body.recoverableUntil ? new Date(req.body.recoverableUntil) : undefined,
+    evidenceHash: req.body.evidenceHash,
+  }) }); } catch (error) { return next(error); }
+});
+router.post('/retention/erasure/:operationId/run', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, operation: await executePerformanceErasureOperation(prisma, req.params.operationId, new Date(), undefined, req.user!.id) }); } catch (error) { return next(error); }
 });
 
 router.get('/legal-holds', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_RETENTION'] }), async (req: AuthRequest, res, next) => {
@@ -762,7 +1000,7 @@ router.use(async (error: unknown, _req: import('express').Request, res: import('
   if (message.includes('PERFORMANCE_RELEASE_DISABLED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_RELEASE_DISABLED', message: 'انتشار ارزیابی عملکرد فعال نیست.' });
   if (message.includes('PERFORMANCE_FIX_FORWARD_REQUIRED')) return res.status(409).json({ success: false, code: 'PERFORMANCE_FIX_FORWARD_REQUIRED', message: 'پس از ثبت شواهد فقط توقف ایمن و اصلاح روبه‌جلو مجاز است.' });
   const status = detail.status ?? detail.statusCode;
-  if (typeof detail.code === 'string' && /^(PERFORMANCE|HR)_[A-Z0-9_]+$/.test(detail.code)
+  if (typeof detail.code === 'string' && /^(PERFORMANCE|HR|SIMPLE)_[A-Z0-9_]+$/.test(detail.code)
     && typeof status === 'number' && [400,403,404,409,410,422,429,503].includes(status)) {
     return res.status(status).json({ success: false, code: detail.code, message });
   }

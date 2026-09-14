@@ -206,7 +206,7 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
     ...historicalPersonnelIds.map(({ personnelId }) => personnelId),
     ...legacyHistoricalPersonnelIds.flatMap(({ personnelId }) => personnelId ? [personnelId] : []),
   ] : ids)];
-  const [assignments, evaluations, profiles, historyPersonnel, finalEvaluations, jobs] = await Promise.all([
+  const [assignments, evaluations, profiles, historyPersonnel, finalEvaluations, jobs, currentJobAssignments] = await Promise.all([
     Promise.all(ids.map(async (personnelId) => {
       const profile = await activeProfileForPersonnel(client, personnelId, now);
       return profile ? { id: `automatic:${personnelId}`, personnelId, profileId: profile.id, profile } : null;
@@ -235,6 +235,17 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
     permissions.has('MANAGE_PERFORMANCE_PROFILES') ? client.hrJob.findMany({
       where: { isActive: true }, select: { id: true, title: true }, orderBy: { title: 'asc' },
     }) : Promise.resolve([]),
+    permissions.has('MANAGE_PERFORMANCE_PROFILES') ? client.hrEmploymentAssignment.findMany({
+      where: {
+        type: 'PRIMARY', positionId: { not: null }, ...activeAt(now),
+        employmentRelationship: { personnelId: { in: ids }, status: 'ACTIVE', ...activeAt(now) },
+      },
+      select: {
+        employmentRelationship: { select: { personnelId: true } },
+        position: { select: { jobId: true } },
+      },
+      orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
+    }) : Promise.resolve([]),
   ]);
   const evaluatorIds = [...new Set(evaluations.map(({ evaluatorUserId }) => evaluatorUserId))];
   const evaluators = await client.user.findMany({
@@ -246,11 +257,16 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
     if (!evaluation.finalizedAt || latestFinalizedAtByPersonnel[evaluation.personnelId]) continue;
     latestFinalizedAtByPersonnel[evaluation.personnelId] = evaluation.finalizedAt.toISOString();
   }
+  const currentJobIdByPersonnel: Record<string, string> = {};
+  for (const assignment of currentJobAssignments) {
+    if (!assignment.position || currentJobIdByPersonnel[assignment.employmentRelationship.personnelId]) continue;
+    currentJobIdByPersonnel[assignment.employmentRelationship.personnelId] = assignment.position.jobId;
+  }
   return {
     currentUserId: actorUserId, personnel, historyPersonnel, assignments,
     currentPeriodKey: sellerPerformancePeriodFor(now).key,
     evaluations: evaluations.map((evaluation) => ({ ...evaluation, evaluatorNameFa: evaluatorNames.get(evaluation.evaluatorUserId) || 'نامشخص' })),
-    profiles, jobs,
+    profiles, jobs, currentJobIdByPersonnel,
     latestFinalizedAtByPersonnel,
     evaluablePersonnelIds: ((permissions.has('EVALUATE_ALL_PERSONNEL') || permissions.has('ENTER_PERFORMANCE_EVIDENCE'))
       ? ids : ids.filter((id) => directReportPersonnelIds.includes(id)))

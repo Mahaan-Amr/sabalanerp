@@ -22,6 +22,12 @@ import { personnelPerformanceAPI } from "@/lib/api";
 import { dateFa, dateTimeFa } from "@/features/hr/hrUi";
 import BehaviorSurveyAdministration from "@/features/hr/performance-survey/BehaviorSurveyAdministration";
 import { nextPerformancePeriodKey, type PerformancePeriodKey } from "./performancePeriod";
+import {
+  buildSellerProfileIndicators,
+  validateProfileDraft,
+  type ProfileDraftError,
+  type SellerPolicyFactor,
+} from "./performanceProfileDraftModel";
 
 type Indicator = {
   id: string; code: string; categoryFa?: string | null; titleFa: string; unitFa: string;
@@ -53,6 +59,7 @@ type Workspace = {
   latestFinalizedAtByPersonnel: Record<string, string>;
   personnel: Personnel[]; historyPersonnel: Personnel[]; profiles: Profile[]; assignments: Assignment[]; evaluations: Evaluation[];
   jobs: Array<{ id: string; title: string }>;
+  currentJobIdByPersonnel: Record<string, string>;
   capabilities: Record<string, boolean>;
 };
 type ProfileIndicatorDraft = Omit<Indicator, "id" | "sortOrder">;
@@ -85,6 +92,11 @@ const emptyIndicator = (): ProfileIndicatorDraft => ({
   code: "", categoryFa: "", titleFa: "", unitFa: "", target: "", direction: "HIGHER_IS_BETTER", weightPercent: "",
   familyCode: "", sourceKind: "SYSTEM", minimumSampleCount: 1,
 });
+const revealAndFocus = (element: HTMLElement | null | undefined) => {
+  if (!element) return;
+  element.scrollIntoView({ behavior: "smooth", block: "center" });
+  element.focus({ preventScroll: true });
+};
 const previewPerformance = (profile: Profile | undefined, values: Record<string, string>) => {
   if (!profile || !profile.indicators.every(({ id }) => values[id]?.trim())) return null;
   const score = profile.indicators.reduce((total, indicator) => {
@@ -109,6 +121,8 @@ export default function SimplePerformanceWorkspace() {
   const searchParams = useSearchParams();
   const requestedPersonnelId = searchParams.get("personnelId") || "";
   const directEvaluationOpened = useRef(false);
+  const errorSummaryRef = useRef<HTMLDivElement>(null);
+  const profileFieldRefs = useRef<Record<string, HTMLElement | null>>({});
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [tab, setTab] = useState<"evaluate" | "profiles" | "surveys" | "history">("evaluate");
   const [personnelId, setPersonnelId] = useState("");
@@ -130,6 +144,7 @@ export default function SimplePerformanceWorkspace() {
   const [profileEffectivePeriodKey, setProfileEffectivePeriodKey] = useState("");
   const [profileJobId, setProfileJobId] = useState("");
   const [profileIndicators, setProfileIndicators] = useState<ProfileIndicatorDraft[]>([emptyIndicator()]);
+  const [profileValidationAttempted, setProfileValidationAttempted] = useState(false);
   const [correctionReason, setCorrectionReason] = useState<Record<string, string>>({});
   const [appealResolution, setAppealResolution] = useState<Record<string, string>>({});
   const [publishEvaluationId, setPublishEvaluationId] = useState("");
@@ -200,6 +215,8 @@ export default function SimplePerformanceWorkspace() {
   const canManageSurveys = Boolean(workspace?.capabilities.MANAGE_PERFORMANCE_SURVEYS);
   const canViewHistory = Boolean(workspace?.capabilities.VIEW_PERFORMANCE_EVALUATIONS);
   const canFinalize = Boolean(workspace?.capabilities.FINALIZE_PERFORMANCE_RESULTS);
+  const profileHasExistingVersion = Boolean(profileStableKey
+    && workspace?.profiles.some(({ stableKey }) => stableKey === profileStableKey));
   const canEditSelected = canEvaluateSelected;
   const canEditIndicator = (indicator: Indicator) => canEditSelected && indicator.sourceKind !== "SURVEY" && (
     Boolean(workspace?.capabilities.EVALUATE_ALL_PERSONNEL)
@@ -219,6 +236,16 @@ export default function SimplePerformanceWorkspace() {
     && workspace.latestFinalizedAtByPersonnel[selectedEvaluation.personnelId] > selectedEvaluation.createdAt);
   const valuesSignature = JSON.stringify({ values, metadata: valueMetadata });
   const dirty = enteredValues.length > 0 && valuesSignature !== savedValuesSignature;
+  const profileValidationErrors = useMemo(() => validateProfileDraft({
+    nameFa: profileName, jobId: profileJobId, effectivePeriodKey: profileEffectivePeriodKey,
+    indicators: profileIndicators,
+  }), [profileEffectivePeriodKey, profileIndicators, profileJobId, profileName]);
+  const profileErrorByField = useMemo(() => Object.fromEntries(
+    (profileValidationAttempted ? profileValidationErrors : []).map(({ fieldId, message }) => [fieldId, message]),
+  ), [profileValidationAttempted, profileValidationErrors]);
+  const registerProfileField = (fieldId: string) => (element: HTMLElement | null) => {
+    profileFieldRefs.current[fieldId] = element;
+  };
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => event.preventDefault();
@@ -229,7 +256,10 @@ export default function SimplePerformanceWorkspace() {
   const run = async (work: () => Promise<void>, message: string) => {
     setPending(true); setError(""); setSuccess("");
     try { await work(); setSuccess(message); await load(); }
-    catch (cause) { setError(errorText(cause)); }
+    catch (cause) {
+      setError(errorText(cause));
+      requestAnimationFrame(() => revealAndFocus(errorSummaryRef.current));
+    }
     finally { setPending(false); }
   };
 
@@ -280,15 +310,25 @@ export default function SimplePerformanceWorkspace() {
     setPublishEvaluationId("");
   }, "نتیجه رسمی منتشر و Badge به‌روزرسانی شد.");
 
-  const saveProfile = () => run(async () => {
-    await personnelPerformanceAPI.createSimpleProfile({
-      ...(profileStableKey ? { stableKey: profileStableKey } : {}), nameFa: profileName,
-      effectivePeriodKey: profileEffectivePeriodKey || undefined,
-      jobId: profileJobId || undefined,
-      indicators: profileIndicators,
-    });
-    setProfileName(""); setProfileStableKey(undefined); setProfileEffectivePeriodKey(""); setProfileJobId(""); setProfileIndicators([emptyIndicator()]);
-  }, "الگو ذخیره شد.");
+  const saveProfile = () => {
+    setProfileValidationAttempted(true);
+    if (profileValidationErrors.length) {
+      const firstError = profileValidationErrors[0] as ProfileDraftError;
+      setSuccess("");
+      setError("لطفاً فیلدهای مشخص‌شده الگو را کامل کنید.");
+      requestAnimationFrame(() => revealAndFocus(profileFieldRefs.current[firstError.fieldId]));
+      return;
+    }
+    return run(async () => {
+      await personnelPerformanceAPI.createSimpleProfile({
+        ...(profileStableKey ? { stableKey: profileStableKey } : {}), nameFa: profileName,
+        effectivePeriodKey: profileEffectivePeriodKey || undefined,
+        jobId: profileJobId || undefined,
+        indicators: profileIndicators,
+      });
+      setProfileName(""); setProfileStableKey(undefined); setProfileEffectivePeriodKey(""); setProfileJobId(""); setProfileIndicators([emptyIndicator()]); setProfileValidationAttempted(false);
+    }, "الگو ذخیره شد.");
+  };
 
   const beginProfileVersion = (profile: Profile) => {
     setProfileStableKey(profile.stableKey); setProfileName(profile.nameFa);
@@ -298,6 +338,7 @@ export default function SimplePerformanceWorkspace() {
       code, categoryFa, titleFa, unitFa, target: String(target), direction, weightPercent: String(weightPercent),
       familyCode, sourceKind: sourceKind ?? "SYSTEM", minimumSampleCount: minimumSampleCount ?? 1,
     })));
+    setProfileValidationAttempted(false);
   };
 
   const loadSellerTemplate = () => run(async () => {
@@ -305,14 +346,10 @@ export default function SimplePerformanceWorkspace() {
     const existing = workspace?.profiles.find(({ stableKey }) => stableKey === "sales-seven-level");
     setProfileStableKey("sales-seven-level"); setProfileName("فروشندگان ـ ارزیابی هفت‌سطحی");
     setProfileEffectivePeriodKey(existing ? nextPerformancePeriodKey(workspace!.currentPeriodKey) : workspace?.currentPeriodKey || "");
-    setProfileJobId(existing?.jobId || "");
-    setProfileIndicators(response.data.factors.map((factor: any) => ({
-      code: factor.code, categoryFa: factor.familyCode, familyCode: factor.familyCode,
-      titleFa: factor.titleFa, unitFa: factor.unitFa, direction: factor.direction,
-      weightPercent: String(factor.weightPercent), sourceKind: factor.sourceKind,
-      minimumSampleCount: factor.minimumSampleCount, target: ["SUPERVISOR", "SURVEY"].includes(factor.sourceKind) ? "75" : "",
-    })));
-  }, "عوامل مصوب فروشندگان بارگذاری شد؛ هدف‌های کمی را پیش از ذخیره تعیین کنید.");
+    setProfileJobId(existing?.jobId || workspace?.currentJobIdByPersonnel[personnelId] || "");
+    setProfileIndicators(buildSellerProfileIndicators(response.data.factors as SellerPolicyFactor[]));
+    setProfileValidationAttempted(false);
+  }, "عوامل مصوب فروشندگان با هدف‌های اولیه بارگذاری شد؛ مدیر شرکت می‌تواند آن‌ها را تغییر دهد.");
 
   const beginCorrection = (evaluation: Evaluation) => run(async () => {
     const response = await personnelPerformanceAPI.correctSimpleEvaluation(evaluation.id, correctionReason[evaluation.id] || "");
@@ -326,7 +363,7 @@ export default function SimplePerformanceWorkspace() {
     description="مقدار واقعی را وارد کنید. امتیاز خودکار محاسبه می‌شود."
     backHref="/dashboard/hr/personnel"
   >
-    {error && <ErpInlineState kind="error" title={error} action={{ label: "تلاش دوباره", onClick: () => void load() }} />}
+    {error && <div ref={errorSummaryRef} tabIndex={-1}><ErpInlineState kind="error" title={error} action={{ label: "تلاش دوباره", onClick: () => void load() }} /></div>}
     {success && <ErpInlineState kind="success" title={success} />}
     {workspace && <>
       <ErpSegmentedControl value={tab} onChange={setTab} options={[
@@ -380,21 +417,21 @@ export default function SimplePerformanceWorkspace() {
       </div>}
 
       {tab === "profiles" && canManageProfiles && <div className="space-y-4">
-        <ErpSection title={profileStableKey ? "نسخه جدید الگو" : "الگوی تازه"}>
+        <ErpSection title={profileHasExistingVersion ? "نسخه جدید الگو" : "الگوی تازه"}>
           <div className="mb-4"><ErpButton label="بارگذاری عوامل مصوب فروشندگان" variant="soft" onClick={() => void loadSellerTemplate()} disabled={pending} /></div>
-          <ErpField label="نام الگو" required><ErpInput value={profileName} onChange={(event) => setProfileName(event.target.value)} /></ErpField>
-          <div className="mt-3"><ErpField label="شغل" required><ErpSelect value={profileJobId} onChange={(event) => setProfileJobId(event.target.value)}><option value="">انتخاب شغل</option>{workspace.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</ErpSelect></ErpField></div>
-          <div className="mt-3"><ErpField label="دوره شروع اثر هدف‌ها" required><ErpSelect value={profileEffectivePeriodKey} onChange={(event) => setProfileEffectivePeriodKey(event.target.value)}><option value={profileStableKey ? nextPerformancePeriodKey(workspace.currentPeriodKey) : workspace.currentPeriodKey}>{profileStableKey ? nextPerformancePeriodKey(workspace.currentPeriodKey) : workspace.currentPeriodKey}</option></ErpSelect></ErpField>{profileStableKey && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">نسخه جدید فقط برای یک دوره آینده پذیرفته می‌شود و هدف‌های دوره آغازشده را تغییر نمی‌دهد.</p>}</div>
+          <ErpField label="نام الگو" required error={profileErrorByField["profile-name"]}><ErpInput ref={registerProfileField("profile-name")} value={profileName} onChange={(event) => setProfileName(event.target.value)} /></ErpField>
+          <div className="mt-3"><ErpField label="شغل" required error={profileErrorByField["profile-job"]}><ErpSelect ref={registerProfileField("profile-job")} value={profileJobId} onChange={(event) => setProfileJobId(event.target.value)}><option value="">انتخاب شغل</option>{workspace.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</ErpSelect></ErpField></div>
+          <div className="mt-3"><ErpField label="دوره شروع اثر هدف‌ها" required error={profileErrorByField["profile-period"]}><ErpSelect ref={registerProfileField("profile-period")} value={profileEffectivePeriodKey} onChange={(event) => setProfileEffectivePeriodKey(event.target.value)}><option value={profileHasExistingVersion ? nextPerformancePeriodKey(workspace.currentPeriodKey) : workspace.currentPeriodKey}>{profileHasExistingVersion ? nextPerformancePeriodKey(workspace.currentPeriodKey) : workspace.currentPeriodKey}</option></ErpSelect></ErpField>{profileHasExistingVersion && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">نسخه جدید فقط برای یک دوره آینده پذیرفته می‌شود و هدف‌های دوره آغازشده را تغییر نمی‌دهد.</p>}</div>
           <div className="mt-4 space-y-3">{profileIndicators.map((indicator, index) => <ErpCard key={index} className="p-4">
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-              <ErpField label="کد" required><ErpInput value={indicator.code} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, code: event.target.value } : item))} /></ErpField>
-              <ErpField label="عنوان" required><ErpInput value={indicator.titleFa} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, titleFa: event.target.value } : item))} /></ErpField>
-              <ErpField label="واحد" required><ErpInput value={indicator.unitFa} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, unitFa: event.target.value } : item))} /></ErpField>
-              <ErpField label="هدف" required><ErpInput type="number" min="0" value={indicator.target} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, target: event.target.value } : item))} /></ErpField>
+              <ErpField label="کد" required error={profileErrorByField[`profile-indicator-${index}-code`]}><ErpInput ref={registerProfileField(`profile-indicator-${index}-code`)} value={indicator.code} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, code: event.target.value } : item))} /></ErpField>
+              <ErpField label="عنوان" required error={profileErrorByField[`profile-indicator-${index}-title`]}><ErpInput ref={registerProfileField(`profile-indicator-${index}-title`)} value={indicator.titleFa} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, titleFa: event.target.value } : item))} /></ErpField>
+              <ErpField label="واحد" required error={profileErrorByField[`profile-indicator-${index}-unit`]}><ErpInput ref={registerProfileField(`profile-indicator-${index}-unit`)} value={indicator.unitFa} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, unitFa: event.target.value } : item))} /></ErpField>
+              <ErpField label="هدف" required error={profileErrorByField[`profile-indicator-${index}-target`]}><ErpInput ref={registerProfileField(`profile-indicator-${index}-target`)} type="number" min="0" value={indicator.target} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, target: event.target.value } : item))} /></ErpField>
               <ErpField label="جهت"><ErpSelect value={indicator.direction} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, direction: event.target.value as ProfileIndicatorDraft["direction"] } : item))}><option value="HIGHER_IS_BETTER">بالاتر بهتر</option><option value="LOWER_IS_BETTER">پایین‌تر بهتر</option><option value="CAPPED_RATE">نرخ هدف تا سقف صد</option></ErpSelect></ErpField>
-              <ErpField label="وزن (درصد)" required><ErpInput type="number" min="0" max="100" value={indicator.weightPercent} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weightPercent: event.target.value } : item))} /></ErpField>
+              <ErpField label="وزن (درصد)" required error={profileErrorByField[`profile-indicator-${index}-weight`]}><ErpInput ref={registerProfileField(`profile-indicator-${index}-weight`)} type="number" min="0" max="100" value={indicator.weightPercent} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weightPercent: event.target.value } : item))} /></ErpField>
               <ErpField label="منبع"><ErpSelect value={indicator.sourceKind || "SYSTEM"} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, sourceKind: event.target.value as ProfileIndicatorDraft["sourceKind"] } : item))}><option value="SYSTEM">داده سیستمی / ورود منابع انسانی</option><option value="SUPERVISOR">قضاوت سرپرست</option><option value="SURVEY">تجمیع نظرسنجی</option></ErpSelect></ErpField>
-              <ErpField label="حداقل نمونه"><ErpInput type="number" min="1" value={String(indicator.minimumSampleCount || 1)} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, minimumSampleCount: Number(event.target.value) } : item))} /></ErpField>
+              <ErpField label="حداقل نمونه" error={profileErrorByField[`profile-indicator-${index}-sample`]}><ErpInput ref={registerProfileField(`profile-indicator-${index}-sample`)} type="number" min="1" value={String(indicator.minimumSampleCount || 1)} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, minimumSampleCount: Number(event.target.value) } : item))} /></ErpField>
             </div>
             {profileIndicators.length > 1 && <div className="mt-3"><ErpButton label="حذف معیار" tone="danger" variant="ghost" onClick={() => setProfileIndicators((items) => items.filter((_, itemIndex) => itemIndex !== index))} /></div>}
           </ErpCard>)}</div>

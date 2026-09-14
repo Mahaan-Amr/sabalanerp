@@ -63,6 +63,10 @@ try {
       stableKey: 'simple-performance-finalize-grant', userId: actor.id, featureCode: 'FINALIZE_PERFORMANCE_RESULTS',
       level: 'ADMIN', effectiveFrom: new Date(Date.now() - 60_000), reason: 'آزمون نهایی‌سازی ارزیابی',
     } });
+    await tx.hrFeatureAccessGrant.create({ data: {
+      stableKey: 'simple-performance-profile-management-grant', userId: actor.id, featureCode: 'MANAGE_PERFORMANCE_PROFILES',
+      level: 'ADMIN', effectiveFrom: new Date(Date.now() - 60_000), reason: 'آزمون مدیریت الگوی ارزیابی',
+    } });
     const profile = await tx.simplePerformanceProfile.update({
       where: { id: 'simple-profile-sales-v1' }, data: { jobId: job.id, isActive: true },
       include: { indicators: { orderBy: { sortOrder: 'asc' } } },
@@ -214,6 +218,8 @@ try {
       profile.id,
       'the evaluation form exposes the automatically selected job-scoped profile',
     );
+    assert.equal(automaticProfileWorkspace.currentJobIdByPersonnel[automaticProfilePersonnel.id], job.id,
+      'profile administration receives the selected personnel current job by structural identity');
     const hrUnit = await tx.hrOrganizationalUnit.create({ data: {
       code: 'SIMPLE-PERFORMANCE-HR-UNIT', name: 'واحد آزمایشی منابع انسانی', type: 'DEPARTMENT', createdBy: actor.id,
     } });

@@ -43,9 +43,17 @@ try {
     const targetRelationship = await tx.hrEmploymentRelationship.create({ data: {
       personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), createdBy: actor.id,
     } });
+    const unit = await tx.hrOrganizationalUnit.create({ data: {
+      code: 'SIMPLE-PERFORMANCE-UNIT', name: 'فروش', type: 'DEPARTMENT', createdBy: actor.id,
+    } });
+    const job = await tx.hrJob.create({ data: { code: 'SIMPLE-PERFORMANCE-JOB', title: 'شغل آزمون', createdBy: actor.id } });
+    const targetPosition = await tx.hrPosition.create({ data: {
+      code: 'SIMPLE-PERFORMANCE-TARGET', title: 'کارشناس آزمون', organizationalUnitId: unit.id, jobId: job.id, createdBy: actor.id,
+    } });
     await tx.hrEmploymentAssignment.create({ data: {
       employmentRelationshipId: targetRelationship.id, type: 'PRIMARY',
-      effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), performanceAllocationPercent: 100, createdBy: actor.id,
+      effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), performanceAllocationPercent: 100,
+      positionId: targetPosition.id, organizationalUnitId: unit.id, createdBy: actor.id,
     } });
     await tx.hrFeatureAccessGrant.create({ data: {
       stableKey: 'simple-performance-test-grant', userId: actor.id, featureCode: 'EVALUATE_ALL_PERSONNEL',
@@ -55,8 +63,9 @@ try {
       stableKey: 'simple-performance-finalize-grant', userId: actor.id, featureCode: 'FINALIZE_PERFORMANCE_RESULTS',
       level: 'ADMIN', effectiveFrom: new Date(Date.now() - 60_000), reason: 'آزمون نهایی‌سازی ارزیابی',
     } });
-    const profile = await tx.simplePerformanceProfile.findUniqueOrThrow({
-      where: { id: 'simple-profile-sales-v1' }, include: { indicators: { orderBy: { sortOrder: 'asc' } } },
+    const profile = await tx.simplePerformanceProfile.update({
+      where: { id: 'simple-profile-sales-v1' }, data: { jobId: job.id, isActive: true },
+      include: { indicators: { orderBy: { sortOrder: 'asc' } } },
     });
     await assignSimplePerformanceProfile(tx, { actorUserId: actor.id, personnelId: personnel.id, profileId: profile.id });
 
@@ -71,18 +80,22 @@ try {
     );
 
     const first = await createSimplePerformanceEvaluation(tx, { actorUserId: actor.id, personnelId: personnel.id, evaluationDate: completedEvaluationDay });
-    await saveSimplePerformanceDraft(tx, {
+    await assert.rejects(saveSimplePerformanceDraft(tx, {
       actorUserId: actor.id, evaluationId: first.id,
       values: profile.indicators.map((indicator) => ({ indicatorId: indicator.id, actual: indicator.target.toString() })),
+    }), (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'SIMPLE_SYSTEM_SOURCE_REQUIRED'));
+    await saveSimplePerformanceDraft(tx, {
+      actorUserId: actor.id, evaluationId: first.id,
+      values: profile.indicators.map((indicator) => ({ indicatorId: indicator.id, actual: indicator.target.toString(), sourceReference: `test-source:${indicator.code}` })),
     });
     assert.equal(await tx.simplePerformanceValueRevision.count({ where: { evaluationId: first.id } }), profile.indicators.length);
     await assert.rejects(saveSimplePerformanceDraft(tx, {
       actorUserId: actor.id, evaluationId: first.id,
-      values: profile.indicators.map((indicator, index) => ({ indicatorId: indicator.id, actual: index ? indicator.target.toString() : indicator.target.add(1).toString() })),
+      values: profile.indicators.map((indicator, index) => ({ indicatorId: indicator.id, actual: index ? indicator.target.toString() : indicator.target.add(1).toString(), sourceReference: `test-source:${indicator.code}` })),
     }), (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'SIMPLE_VALUE_CHANGE_REASON_REQUIRED'));
     await saveSimplePerformanceDraft(tx, {
       actorUserId: actor.id, evaluationId: first.id, reason: 'اصلاح مقدار بر پایه گزارش منبع',
-      values: profile.indicators.map((indicator) => ({ indicatorId: indicator.id, actual: indicator.target.toString() })),
+      values: profile.indicators.map((indicator) => ({ indicatorId: indicator.id, actual: indicator.target.toString(), sourceReference: `test-source:${indicator.code}` })),
     });
     const proposed = await finalizeSimplePerformanceEvaluation(tx, { actorUserId: actor.id, evaluationId: first.id, now: proposalNow });
     assert.equal(proposed.status, 'PENDING_APPEAL');
@@ -161,24 +174,13 @@ try {
     const supervisorRelationship = await tx.hrEmploymentRelationship.create({ data: {
       personnelId: supervisorPersonnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
     } });
-    const unit = await tx.hrOrganizationalUnit.create({ data: {
-      code: 'SIMPLE-PERFORMANCE-UNIT', name: 'فروش', type: 'DEPARTMENT', createdBy: actor.id,
-    } });
-    const job = await tx.hrJob.create({ data: { code: 'SIMPLE-PERFORMANCE-JOB', title: 'شغل آزمون', createdBy: actor.id } });
     const supervisorPosition = await tx.hrPosition.create({ data: {
       code: 'SIMPLE-PERFORMANCE-SUPERVISOR', title: 'سرپرست آزمون', capacity: 2,
       organizationalUnitId: unit.id, jobId: job.id, createdBy: actor.id,
     } });
-    const targetPosition = await tx.hrPosition.create({ data: {
-      code: 'SIMPLE-PERFORMANCE-TARGET', title: 'کارشناس آزمون',
-      organizationalUnitId: unit.id, jobId: job.id, supervisorPositionId: supervisorPosition.id, createdBy: actor.id,
-    } });
+    await tx.hrPosition.update({ where: { id: targetPosition.id }, data: { supervisorPositionId: supervisorPosition.id } });
     await tx.hrEmploymentAssignment.create({ data: {
       employmentRelationshipId: supervisorRelationship.id, positionId: supervisorPosition.id, type: 'PRIMARY',
-      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), organizationalUnitId: unit.id, createdBy: actor.id,
-    } });
-    await tx.hrEmploymentAssignment.create({ data: {
-      employmentRelationshipId: targetRelationship.id, positionId: targetPosition.id, type: 'PRIMARY',
       effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), organizationalUnitId: unit.id, createdBy: actor.id,
     } });
     assert.equal(await resolveSimpleEvaluationAuthority(tx, { actorUserId: supervisor.id, personnelId: personnel.id }), 'SUPERVISOR');
@@ -201,27 +203,15 @@ try {
       employmentRelationshipId: automaticProfileRelationship.id, positionId: targetPosition.id, type: 'PRIMARY',
       effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), organizationalUnitId: unit.id, createdBy: actor.id,
     } });
-    const jobScopedProfile = await createSimplePerformanceProfile(tx, {
-      actorUserId: actor.id, stableKey: 'simple-performance-job-scoped-test', nameFa: 'الگوی شغل آزمون',
-      effectivePeriodKey: currentPeriod.key, jobId: job.id,
-      indicators: profile.indicators.map((indicator) => ({
-        code: indicator.code, categoryFa: indicator.categoryFa ?? undefined,
-        familyCode: indicator.familyCode ?? undefined, sourceKind: indicator.sourceKind,
-        minimumSampleCount: indicator.minimumSampleCount, titleFa: indicator.titleFa,
-        unitFa: indicator.unitFa, target: indicator.target.toString(),
-        direction: indicator.direction as 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER',
-        weightPercent: indicator.weightPercent.toString(),
-      })),
-    });
     const automaticProfileEvaluation = await createSimplePerformanceEvaluation(tx, {
       actorUserId: actor.id, personnelId: automaticProfilePersonnel.id, evaluationDate: today,
     });
-    assert.equal(automaticProfileEvaluation.profileId, jobScopedProfile.id,
+    assert.equal(automaticProfileEvaluation.profileId, profile.id,
       'the active job-scoped profile applies without a personnel assignment');
     const automaticProfileWorkspace = await getSimplePerformanceWorkspace(tx, actor.id);
     assert.equal(
       automaticProfileWorkspace.assignments.find(({ personnelId }) => personnelId === automaticProfilePersonnel.id)?.profileId,
-      jobScopedProfile.id,
+      profile.id,
       'the evaluation form exposes the automatically selected job-scoped profile',
     );
     const hrUnit = await tx.hrOrganizationalUnit.create({ data: {
@@ -230,6 +220,19 @@ try {
     const hrJob = await tx.hrJob.create({ data: {
       code: 'SIMPLE-PERFORMANCE-HR-JOB', title: 'کارشناس منابع انسانی', createdBy: actor.id,
     } });
+    const hrProfile = await createSimplePerformanceProfile(tx, {
+      actorUserId: actor.id, stableKey: 'simple-performance-hr-job-test', nameFa: 'الگوی منابع انسانی',
+      effectivePeriodKey: currentPeriod.key, jobId: hrJob.id,
+      indicators: profile.indicators.map((indicator) => ({
+        code: indicator.code, categoryFa: indicator.categoryFa ?? undefined,
+        familyCode: indicator.familyCode ?? undefined,
+        sourceKind: indicator.sourceKind as 'SYSTEM' | 'SUPERVISOR' | 'SURVEY',
+        minimumSampleCount: indicator.minimumSampleCount, titleFa: indicator.titleFa,
+        unitFa: indicator.unitFa, target: indicator.target.toString(),
+        direction: indicator.direction as 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER',
+        weightPercent: indicator.weightPercent.toString(),
+      })),
+    });
     const hrPosition = await tx.hrPosition.create({ data: {
       code: 'SIMPLE-PERFORMANCE-HR-POSITION', title: 'کارشناس منابع انسانی',
       organizationalUnitId: hrUnit.id, jobId: hrJob.id, createdBy: actor.id,
@@ -245,8 +248,8 @@ try {
     const hrProfileEvaluation = await createSimplePerformanceEvaluation(tx, {
       actorUserId: actor.id, personnelId: hrPersonnel.id, evaluationDate: today,
     });
-    assert.equal(hrProfileEvaluation.profileId, 'simple-profile-hr-v1',
-      'common organizational-unit wording resolves to the matching workbook profile');
+    assert.equal(hrProfileEvaluation.profileId, hrProfile.id,
+      'the HR job resolves to its exact job-scoped profile');
     const secondSupervisorPersonnel = await tx.personnel.create({ data: { firstName: 'سرپرست', lastName: 'دوم' } });
     const secondSupervisor = await tx.user.create({ data: {
       email: 'simple-second-supervisor@example.invalid', username: 'simple_second_supervisor_test', password: 'not-used',

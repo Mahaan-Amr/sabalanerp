@@ -153,61 +153,20 @@ const activeProfileForPersonnel = async (client: Client, personnelId: string, no
     },
     orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
     select: {
-      organizationalUnit: { select: { name: true } },
-      position: { select: { id: true, jobId: true, title: true, organizationalUnit: { select: { name: true } } } },
+      position: { select: { jobId: true } },
     },
   });
   if (primaryAssignment?.position) {
     const scopedProfile = await client.simplePerformanceProfile.findFirst({
       where: {
         isActive: true, ...effectiveProfileWhere, jobId: primaryAssignment.position.jobId,
-        OR: [{ positionId: primaryAssignment.position.id }, { positionId: null }],
       },
-      include: { indicators: { orderBy: { sortOrder: 'asc' } } },
-      orderBy: [{ positionId: 'asc' }, { version: 'desc' }],
-    });
-    if (scopedProfile) return scopedProfile;
-  }
-  const unitName = primaryAssignment?.organizationalUnit?.name
-    ?? primaryAssignment?.position?.organizationalUnit.name;
-  const workContext = `${primaryAssignment?.position?.title ?? ''} ${unitName ?? ''}`;
-  if (unitName) {
-    const profiles = await client.simplePerformanceProfile.findMany({
-      where: {
-        isActive: true, ...effectiveProfileWhere,
-        OR: [{ nameFa: unitName }, { indicators: { some: { categoryFa: unitName } } }],
-      },
-      include: { indicators: { orderBy: { sortOrder: 'asc' } } },
-      orderBy: [{ version: 'desc' }, { nameFa: 'asc' }],
-    });
-    const exactName = profiles.find(({ nameFa }) => nameFa === unitName);
-    if (exactName) return exactName;
-    if (profiles.length === 1) return profiles[0];
-  }
-  const workbookProfileKey = [
-    [/حسابداری/, 'sales-accounting'], [/بازاریابی/, 'marketing-sales'], [/فروش/, 'sales'],
-    [/مالی/, 'finance-management'], [/منابع انسانی|اچ.?آر|برندینگ/, 'hr-branding'],
-    [/تأمین.*سنگ|خرید.*سنگ/, 'stone-procurement'], [/کارپرداز/, 'buyer'],
-    [/لجستیک/, 'logistics-supervisor'], [/کارگاه|انبار/, 'workshop-warehouse'],
-    [/انتظامات|نگهبان|حراست/, 'security'], [/خدمات|تشریفات/, 'services'],
-    [/برنامه.?نویس|ای.?تی|فناوری اطلاعات/, 'it'],
-  ].find(([pattern]) => (pattern as RegExp).test(workContext))?.[1] as string | undefined;
-  if (workbookProfileKey) {
-    const profile = await client.simplePerformanceProfile.findFirst({
-      where: { stableKey: workbookProfileKey, isActive: true, ...effectiveProfileWhere },
       include: { indicators: { orderBy: { sortOrder: 'asc' } } },
       orderBy: { version: 'desc' },
     });
-    if (profile) return profile;
+    if (scopedProfile) return scopedProfile;
   }
-  const legacyAssignment = await client.simplePerformanceProfileAssignment.findUnique({
-    where: { personnelId }, include: { profile: { include: { indicators: { orderBy: { sortOrder: 'asc' } } } } },
-  });
-  if (!legacyAssignment?.profile.isActive) return null;
-  return client.simplePerformanceProfile.findFirst({
-    where: { stableKey: legacyAssignment.profile.stableKey, isActive: true, ...effectiveProfileWhere },
-    include: { indicators: { orderBy: { sortOrder: 'asc' } } }, orderBy: { version: 'desc' },
-  });
+  return null;
 };
 
 export const getSimplePerformanceWorkspace = async (client: Client, actorUserId: string, now = new Date()) => {
@@ -247,7 +206,7 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
     ...historicalPersonnelIds.map(({ personnelId }) => personnelId),
     ...legacyHistoricalPersonnelIds.flatMap(({ personnelId }) => personnelId ? [personnelId] : []),
   ] : ids)];
-  const [assignments, evaluations, profiles, historyPersonnel, finalEvaluations, jobs, positions] = await Promise.all([
+  const [assignments, evaluations, profiles, historyPersonnel, finalEvaluations, jobs] = await Promise.all([
     Promise.all(ids.map(async (personnelId) => {
       const profile = await activeProfileForPersonnel(client, personnelId, now);
       return profile ? { id: `automatic:${personnelId}`, personnelId, profileId: profile.id, profile } : null;
@@ -276,9 +235,6 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
     permissions.has('MANAGE_PERFORMANCE_PROFILES') ? client.hrJob.findMany({
       where: { isActive: true }, select: { id: true, title: true }, orderBy: { title: 'asc' },
     }) : Promise.resolve([]),
-    permissions.has('MANAGE_PERFORMANCE_PROFILES') ? client.hrPosition.findMany({
-      where: { isActive: true }, select: { id: true, title: true, jobId: true }, orderBy: { title: 'asc' },
-    }) : Promise.resolve([]),
   ]);
   const evaluatorIds = [...new Set(evaluations.map(({ evaluatorUserId }) => evaluatorUserId))];
   const evaluators = await client.user.findMany({
@@ -294,7 +250,7 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
     currentUserId: actorUserId, personnel, historyPersonnel, assignments,
     currentPeriodKey: sellerPerformancePeriodFor(now).key,
     evaluations: evaluations.map((evaluation) => ({ ...evaluation, evaluatorNameFa: evaluatorNames.get(evaluation.evaluatorUserId) || 'نامشخص' })),
-    profiles, jobs, positions,
+    profiles, jobs,
     latestFinalizedAtByPersonnel,
     evaluablePersonnelIds: ((permissions.has('EVALUATE_ALL_PERSONNEL') || permissions.has('ENTER_PERFORMANCE_EVIDENCE'))
       ? ids : ids.filter((id) => directReportPersonnelIds.includes(id)))
@@ -344,8 +300,6 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
   stableKey?: string;
   effectivePeriodKey?: string;
   jobId?: string;
-  positionId?: string;
-  positionDifferenceReason?: string;
   nameFa: string;
   indicators: Array<{
     code: string; categoryFa?: string; familyCode?: string; sourceKind?: 'SYSTEM' | 'SUPERVISOR' | 'SURVEY';
@@ -382,23 +336,15 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
       throw simpleError('هدف‌های دوره آغازشده تغییر نمی‌کنند؛ نسخه جدید را برای دوره آینده ثبت کنید.', 'SIMPLE_PROFILE_STARTED_PERIOD_IMMUTABLE', 409);
     }
     const jobId = input.jobId?.trim() || previous?.jobId || null;
-    const positionId = input.positionId?.trim() || previous?.positionId || null;
-    const positionDifferenceReason = input.positionDifferenceReason?.trim() || null;
     if (!previous && !jobId) throw simpleError('برای الگوی جدید، شغل را انتخاب کنید.', 'SIMPLE_PROFILE_JOB_REQUIRED');
-    if (positionId && (!positionDifferenceReason || positionDifferenceReason.length < 8)) {
-      throw simpleError('دلیل تفاوت معیارهای این سمت را ثبت کنید.', 'SIMPLE_PROFILE_POSITION_REASON_REQUIRED');
-    }
     if (jobId) {
-      const [job, position] = await Promise.all([
-        tx.hrJob.findFirst({ where: { id: jobId, isActive: true }, select: { id: true } }),
-        positionId ? tx.hrPosition.findFirst({ where: { id: positionId, jobId, isActive: true }, select: { id: true } }) : Promise.resolve(null),
-      ]);
-      if (!job || (positionId && !position)) throw simpleError('شغل یا سمت انتخاب‌شده معتبر نیست.', 'SIMPLE_PROFILE_SCOPE_INVALID');
+      const job = await tx.hrJob.findFirst({ where: { id: jobId, isActive: true }, select: { id: true } });
+      if (!job) throw simpleError('شغل انتخاب‌شده معتبر نیست.', 'SIMPLE_PROFILE_SCOPE_INVALID');
     }
     const profile = await tx.simplePerformanceProfile.create({
       data: {
         stableKey, nameFa, version: (previous?.version ?? 0) + 1, effectivePeriodKey,
-        jobId, positionId, positionDifferenceReason, createdByUserId: input.actorUserId,
+        jobId, createdByUserId: input.actorUserId,
         indicators: { create: input.indicators.map((indicator, index) => ({
           code: indicator.code.trim(), categoryFa: indicator.categoryFa?.trim() || null,
           titleFa: indicator.titleFa.trim(), unitFa: indicator.unitFa.trim(), target: indicator.target,
@@ -411,7 +357,7 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
     });
     await tx.simplePerformanceAudit.create({ data: {
       actorUserId: input.actorUserId, eventType: 'PROFILE_VERSION_CREATED',
-      details: { stableKey, profileId: profile.id, version: profile.version, effectivePeriodKey, jobId, positionId, positionDifferenceReason, previousProfileId: previous?.id ?? null },
+      details: { stableKey, profileId: profile.id, version: profile.version, effectivePeriodKey, jobId, previousProfileId: previous?.id ?? null },
     } });
     return profile;
   });
@@ -527,10 +473,11 @@ const openEvaluationForFinalizer = async (client: Client, evaluationId: string, 
 const normalizedValues = (evaluation: Awaited<ReturnType<typeof ownOpenEvaluation>>, values: Array<{
   indicatorId: string; actual: string; sampleCount?: number; sourceReference?: string;
 }>) => {
-  const allowed = new Set(evaluation.profile.indicators.map(({ id }) => id));
+  const indicatorsById = new Map(evaluation.profile.indicators.map((indicator) => [indicator.id, indicator]));
   const unique = new Map<string, { actual: string; sampleCount: number; sourceReference: string | null }>();
   for (const value of values) {
-    if (!allowed.has(value.indicatorId) || unique.has(value.indicatorId)) throw simpleError('مقدار معیار معتبر نیست.', 'SIMPLE_VALUE_INVALID');
+    const indicator = indicatorsById.get(value.indicatorId);
+    if (!indicator || unique.has(value.indicatorId)) throw simpleError('مقدار معیار معتبر نیست.', 'SIMPLE_VALUE_INVALID');
     if (typeof value.actual !== 'string' || !/^\d+(?:\.\d{1,4})?$/.test(value.actual.trim())) {
       throw simpleError('مقدار واقعی معتبر نیست.', 'SIMPLE_VALUE_INVALID');
     }
@@ -539,6 +486,9 @@ const normalizedValues = (evaluation: Awaited<ReturnType<typeof ownOpenEvaluatio
     const sampleCount = value.sampleCount ?? 1;
     if (!Number.isInteger(sampleCount) || sampleCount < 0) throw simpleError('تعداد نمونه معتبر نیست.', 'SIMPLE_VALUE_INVALID');
     const sourceReference = typeof value.sourceReference === 'string' ? value.sourceReference.trim() || null : null;
+    if (indicator.sourceKind === 'SYSTEM' && !sourceReference) {
+      throw simpleError('برای داده سیستمی، شناسه گزارش یا رکورد مبنا را وارد کنید.', 'SIMPLE_SYSTEM_SOURCE_REQUIRED');
+    }
     unique.set(value.indicatorId, { actual: actual.toString(), sampleCount, sourceReference });
   }
   return [...unique].map(([indicatorId, value]) => ({ indicatorId, ...value }));
@@ -626,8 +576,14 @@ export const finalizeSimplePerformanceEvaluation = async (client: Client, input:
     if (segmentPositions.size > 1) {
       throw simpleError('تغییر شغل یا سمت باید پیش از نتیجه رسمی به بخش‌های مستقل ارزیابی تفکیک شود.', 'SIMPLE_SEGMENTED_EVALUATION_REQUIRED', 409);
     }
-    const surveyResponses = evaluation.periodKey ? await tx.personnelBehaviorSurveyResponse.findMany({
-      where: { targetPersonnelId: evaluation.personnelId, status: 'FINAL', campaign: { periodKey: evaluation.periodKey } },
+    const surveyPeriodEndExclusive = evaluation.measurementTo
+      ? new Date(evaluation.measurementTo.getTime() + 86_400_000) : null;
+    const surveyResponses = evaluation.periodKey && evaluation.measurementFrom && surveyPeriodEndExclusive
+      ? await tx.personnelBehaviorSurveyResponse.findMany({
+      where: { targetPersonnelId: evaluation.personnelId, status: 'FINAL', campaign: {
+        periodKey: evaluation.periodKey,
+        opensAt: { gte: evaluation.measurementFrom }, closesAt: { lt: surveyPeriodEndExclusive },
+      } },
       include: { answers: { include: { question: { select: { sectionCode: true } } } }, campaign: { select: { id: true } } },
     }) : [];
     const surveyAggregates = aggregateBehaviorSurveyScores(surveyResponses.flatMap((response) => {

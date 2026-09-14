@@ -28,7 +28,7 @@ type Indicator = {
   target: string; direction: "HIGHER_IS_BETTER" | "LOWER_IS_BETTER" | "CAPPED_RATE"; weightPercent: string; sortOrder: number;
   familyCode?: string | null; sourceKind?: "SYSTEM" | "SUPERVISOR" | "SURVEY"; minimumSampleCount?: number;
 };
-type Profile = { id: string; stableKey: string; nameFa: string; version: number; effectivePeriodKey?: string | null; jobId?: string | null; positionId?: string | null; positionDifferenceReason?: string | null; indicators: Indicator[] };
+type Profile = { id: string; stableKey: string; nameFa: string; version: number; effectivePeriodKey?: string | null; jobId?: string | null; indicators: Indicator[] };
 type Personnel = { id: string; firstName: string; lastName: string; employeeNumber?: string | null; department?: { name: string } | null };
 type Assignment = { personnelId: string; profileId: string; profile: Profile };
 type Value = { indicatorId: string; actual: string; score?: string | null; sampleCount?: number | null; sourceReference?: string | null };
@@ -53,7 +53,6 @@ type Workspace = {
   latestFinalizedAtByPersonnel: Record<string, string>;
   personnel: Personnel[]; historyPersonnel: Personnel[]; profiles: Profile[]; assignments: Assignment[]; evaluations: Evaluation[];
   jobs: Array<{ id: string; title: string }>;
-  positions: Array<{ id: string; title: string; jobId: string }>;
   capabilities: Record<string, boolean>;
 };
 type ProfileIndicatorDraft = Omit<Indicator, "id" | "sortOrder">;
@@ -130,8 +129,6 @@ export default function SimplePerformanceWorkspace() {
   const [profileStableKey, setProfileStableKey] = useState<string | undefined>();
   const [profileEffectivePeriodKey, setProfileEffectivePeriodKey] = useState("");
   const [profileJobId, setProfileJobId] = useState("");
-  const [profilePositionId, setProfilePositionId] = useState("");
-  const [profilePositionReason, setProfilePositionReason] = useState("");
   const [profileIndicators, setProfileIndicators] = useState<ProfileIndicatorDraft[]>([emptyIndicator()]);
   const [correctionReason, setCorrectionReason] = useState<Record<string, string>>({});
   const [appealResolution, setAppealResolution] = useState<Record<string, string>>({});
@@ -287,17 +284,16 @@ export default function SimplePerformanceWorkspace() {
     await personnelPerformanceAPI.createSimpleProfile({
       ...(profileStableKey ? { stableKey: profileStableKey } : {}), nameFa: profileName,
       effectivePeriodKey: profileEffectivePeriodKey || undefined,
-      jobId: profileJobId || undefined, positionId: profilePositionId || undefined,
-      positionDifferenceReason: profilePositionReason || undefined,
+      jobId: profileJobId || undefined,
       indicators: profileIndicators,
     });
-    setProfileName(""); setProfileStableKey(undefined); setProfileEffectivePeriodKey(""); setProfileJobId(""); setProfilePositionId(""); setProfilePositionReason(""); setProfileIndicators([emptyIndicator()]);
+    setProfileName(""); setProfileStableKey(undefined); setProfileEffectivePeriodKey(""); setProfileJobId(""); setProfileIndicators([emptyIndicator()]);
   }, "الگو ذخیره شد.");
 
   const beginProfileVersion = (profile: Profile) => {
     setProfileStableKey(profile.stableKey); setProfileName(profile.nameFa);
     setProfileEffectivePeriodKey(nextPerformancePeriodKey(workspace?.currentPeriodKey || "1405-H1"));
-    setProfileJobId(profile.jobId || ""); setProfilePositionId(profile.positionId || ""); setProfilePositionReason(profile.positionDifferenceReason || "");
+    setProfileJobId(profile.jobId || "");
     setProfileIndicators(profile.indicators.map(({ code, categoryFa, titleFa, unitFa, target, direction, weightPercent, familyCode, sourceKind, minimumSampleCount }) => ({
       code, categoryFa, titleFa, unitFa, target: String(target), direction, weightPercent: String(weightPercent),
       familyCode, sourceKind: sourceKind ?? "SYSTEM", minimumSampleCount: minimumSampleCount ?? 1,
@@ -309,7 +305,7 @@ export default function SimplePerformanceWorkspace() {
     const existing = workspace?.profiles.find(({ stableKey }) => stableKey === "sales-seven-level");
     setProfileStableKey("sales-seven-level"); setProfileName("فروشندگان ـ ارزیابی هفت‌سطحی");
     setProfileEffectivePeriodKey(existing ? nextPerformancePeriodKey(workspace!.currentPeriodKey) : workspace?.currentPeriodKey || "");
-    setProfileJobId(existing?.jobId || ""); setProfilePositionId(existing?.positionId || ""); setProfilePositionReason(existing?.positionDifferenceReason || "");
+    setProfileJobId(existing?.jobId || "");
     setProfileIndicators(response.data.factors.map((factor: any) => ({
       code: factor.code, categoryFa: factor.familyCode, familyCode: factor.familyCode,
       titleFa: factor.titleFa, unitFa: factor.unitFa, direction: factor.direction,
@@ -387,8 +383,7 @@ export default function SimplePerformanceWorkspace() {
         <ErpSection title={profileStableKey ? "نسخه جدید الگو" : "الگوی تازه"}>
           <div className="mb-4"><ErpButton label="بارگذاری عوامل مصوب فروشندگان" variant="soft" onClick={() => void loadSellerTemplate()} disabled={pending} /></div>
           <ErpField label="نام الگو" required><ErpInput value={profileName} onChange={(event) => setProfileName(event.target.value)} /></ErpField>
-          <div className="mt-3 grid gap-3 md:grid-cols-2"><ErpField label="شغل" required><ErpSelect value={profileJobId} onChange={(event) => { setProfileJobId(event.target.value); setProfilePositionId(""); }}><option value="">انتخاب شغل</option>{workspace.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</ErpSelect></ErpField><ErpField label="سمت (افزونه اختیاری)"><ErpSelect value={profilePositionId} onChange={(event) => setProfilePositionId(event.target.value)}><option value="">همه سمت‌های این شغل</option>{workspace.positions.filter(({ jobId }) => jobId === profileJobId).map((position) => <option key={position.id} value={position.id}>{position.title}</option>)}</ErpSelect></ErpField></div>
-          {profilePositionId && <div className="mt-3"><ErpField label="دلیل تفاوت معیارهای این سمت" required><ErpTextarea rows={2} value={profilePositionReason} onChange={(event) => setProfilePositionReason(event.target.value)} /></ErpField></div>}
+          <div className="mt-3"><ErpField label="شغل" required><ErpSelect value={profileJobId} onChange={(event) => setProfileJobId(event.target.value)}><option value="">انتخاب شغل</option>{workspace.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</ErpSelect></ErpField></div>
           <div className="mt-3"><ErpField label="دوره شروع اثر هدف‌ها" required><ErpSelect value={profileEffectivePeriodKey} onChange={(event) => setProfileEffectivePeriodKey(event.target.value)}><option value={profileStableKey ? nextPerformancePeriodKey(workspace.currentPeriodKey) : workspace.currentPeriodKey}>{profileStableKey ? nextPerformancePeriodKey(workspace.currentPeriodKey) : workspace.currentPeriodKey}</option></ErpSelect></ErpField>{profileStableKey && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">نسخه جدید فقط برای یک دوره آینده پذیرفته می‌شود و هدف‌های دوره آغازشده را تغییر نمی‌دهد.</p>}</div>
           <div className="mt-4 space-y-3">{profileIndicators.map((indicator, index) => <ErpCard key={index} className="p-4">
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">

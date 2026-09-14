@@ -9,6 +9,7 @@ import {
   saveBehaviorSurveyResponse,
   updateBehaviorSurveyDraft,
 } from '../personnelBehaviorSurveyStore';
+import { sellerPerformancePeriodFor } from '../sellerPerformancePolicy';
 
 const rollback = Symbol('rollback');
 const questions = [
@@ -33,18 +34,19 @@ const main = async () => {
         username: 'survey-target', email: 'survey-target@example.invalid', password: 'not-used',
         firstName: 'هدف', lastName: 'نظرسنجی', personnelId: target.id,
       } });
+      const now = new Date();
+      const periodKey = sellerPerformancePeriodFor(now).key;
       const campaign = await createBehaviorSurveyDraft(tx, {
-        actorUserId: people[0].user.id, titleFa: 'نظرسنجی نیم‌سال', periodKey: '1405-H2', questions,
+        actorUserId: people[0].user.id, titleFa: 'نظرسنجی نیم‌سال', periodKey, questions,
         targetPersonnelIds: [target.id], respondentPersonnelIds: people.map(({ personnel }) => personnel.id),
       });
       const disposableDraft = await createBehaviorSurveyDraft(tx, {
-        actorUserId: people[0].user.id, titleFa: 'پیش‌نویس قابل حذف', periodKey: '1405-H2', questions,
+        actorUserId: people[0].user.id, titleFa: 'پیش‌نویس قابل حذف', periodKey, questions,
         targetPersonnelIds: [target.id], respondentPersonnelIds: people.map(({ personnel }) => personnel.id),
       });
       await deleteBehaviorSurveyDraft(tx, { campaignId: disposableDraft.id, actorUserId: people[0].user.id });
       assert.equal(await tx.personnelBehaviorSurveyCampaign.count({ where: { id: disposableDraft.id } }), 0);
       assert.equal(await tx.personnelBehaviorSurveyAudit.count({ where: { campaignId: disposableDraft.id, eventType: 'DRAFT_DELETED' } }), 1);
-      const now = new Date();
       const active = await activateBehaviorSurvey(tx, {
         campaignId: campaign.id, actorUserId: people[0].user.id,
         opensAt: new Date(now.getTime() - 60_000), closesAt: new Date(now.getTime() + 60_000),

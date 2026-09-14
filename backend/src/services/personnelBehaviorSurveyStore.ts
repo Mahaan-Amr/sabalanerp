@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { aggregateBehaviorSurveyScores } from './sellerPerformancePolicy';
+import { aggregateBehaviorSurveyScores, sellerPerformancePeriodFor } from './sellerPerformancePolicy';
 
 type Client = PrismaClient | Prisma.TransactionClient;
 
@@ -118,6 +118,11 @@ export const activateBehaviorSurvey = (client: Client, input: {
   const campaign = await tx.personnelBehaviorSurveyCampaign.findUnique({ where: { id: input.campaignId }, include: campaignInclude });
   if (!campaign) throw surveyError('نظرسنجی پیدا نشد.', 'SURVEY_NOT_FOUND', 404);
   if (campaign.status !== 'DRAFT') throw surveyError('نظرسنجی قبلاً فعال شده است.', 'SURVEY_VERSION_LOCKED', 409);
+  const opensPeriodKey = sellerPerformancePeriodFor(input.opensAt).key;
+  const closesPeriodKey = sellerPerformancePeriodFor(new Date(input.closesAt.getTime() - 1)).key;
+  if (opensPeriodKey !== campaign.periodKey || closesPeriodKey !== campaign.periodKey) {
+    throw surveyError('بازه نظرسنجی باید به‌طور کامل داخل دوره انتخاب‌شده باشد.', 'SURVEY_PERIOD_WINDOW_MISMATCH');
+  }
   const updated = await tx.personnelBehaviorSurveyCampaign.update({ where: { id: campaign.id }, data: {
     status: 'ACTIVE', opensAt: input.opensAt, closesAt: input.closesAt,
     activatedAt: new Date(), activatedByUserId: input.actorUserId,

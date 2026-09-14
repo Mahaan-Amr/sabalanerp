@@ -12,6 +12,8 @@ import type { ResponseDrafts } from './responseDraft';
 
 const states = { PENDING: 'در انتظار پاسخ', APPROVED: 'تأییدشده', REJECTED: 'ردشده', EXPIRED: 'منقضی‌شده', SUPERSEDED: 'جایگزین‌شده', CANCELLED: 'لغوشده' };
 const tehranTime = (instant: string) => new Date(instant).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran', dateStyle: 'short', timeStyle: 'short' });
+const inquiryLabel = (inquiry: { partnerDisplayName: string; submittedAt: string; rows: readonly unknown[] }) =>
+  `${inquiry.partnerDisplayName} · ${tehranTime(inquiry.submittedAt)} · ${inquiry.rows.length.toLocaleString('fa-IR')} ردیف`;
 
 export function ResponderWorkspace({ queryPort, commandPort }: { queryPort: PartnerQueryV2Port; commandPort: PartnerCommandPort }) {
   const load = useCallback(async (cursor?: string) => {
@@ -54,7 +56,7 @@ export function ResponderWorkspace({ queryPort, commandPort }: { queryPort: Part
         {resource.view.nextCursor && <ErpButton label="صفحه بعد" disabled={locked || resource.loading} onClick={() => resource.next(resource.view!.nextCursor!)} />}
       </div>
       {resource.view.inquiries.length === 0 ? <ErpEmptyState title="استعلام منتسبی در دسترس نیست." /> : <ErpSection title="صف پاسخ">
-        <div className="flex flex-wrap gap-2">{resource.view.inquiries.map(item => <ErpButton key={item.inquiryId} label={item.partnerDisplayName}
+        <div className="flex flex-wrap gap-2">{resource.view.inquiries.map(item => <ErpButton key={item.inquiryId} label={inquiryLabel(item)}
           variant={inquiry?.inquiryId === item.inquiryId ? 'solid' : 'outline'} disabled={locked || resource.loading}
           onClick={() => setSelected(item.inquiryId)} />)}</div>
       </ErpSection>}

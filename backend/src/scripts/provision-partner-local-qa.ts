@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import { canonicalHash, type PartnerActivationCommandV3 } from '@sabalanerp/partner-sales-contracts';
 import { disconnectDatabase, prisma } from '../lib/prisma';
-import { grantScopedAction } from '../services/effectiveAuthorization/scopedActions';
 import { createPrismaPartnerActivationPackage } from '../services/partnerSales/activationPackage/prisma';
 import { acceptanceResponsibilities, readinessGates } from '../services/partnerSales/operations/readiness';
 import { PARTNER_OPERATIONS_CONTROL_ID } from '../services/partnerSales/authorization/technicalRollout';
@@ -15,8 +14,19 @@ export type LocalPartnerQaProvisioning = {
 };
 
 const identityId = (userId: string) => `partner-local-qa-identity-${userId}`;
-const commercialPolicyId = 'partner-local-qa-commercial-v1';
+const commercialPolicyId = 'partner-local-qa-commercial-v2';
 const creditPolicyId = 'partner-local-qa-credit-v1';
+export const LOCAL_QA_PRODUCT_BASE_PRICE_TOMAN = '10000000';
+export const LOCAL_QA_TECHNICAL_PRICING_POLICY = {
+  schemaVersion: 1 as const,
+  purpose: 'PARTNER_TECHNICAL_PRICING' as const,
+  calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
+  mandatoryPercentage: '0', mandatoryEnabled: false,
+  slabCuttingPricingMethod: 'lineBased' as const,
+  sawKerfMeters: '0.003', materialRateScale: '1', currency: 'IRT' as const,
+  rates: { longitudinalCutRateToman: '0', crossCutRateToman: '0', calibrationCutRateToman: '0',
+    verticalCutRateToman: '0', squareMeterCutRateToman: '0' },
+};
 
 export async function provisionLocalPartnerQa(database: PrismaClient, input: LocalPartnerQaProvisioning) {
   const [admin, subject, responder] = await Promise.all([
@@ -33,7 +43,7 @@ export async function provisionLocalPartnerQa(database: PrismaClient, input: Loc
     personType: 'NATURAL' as const, identifiers: { localQaReference: subject.username },
     phone: '09170000000', address: 'نشانی نمونه آزمون محلی؛ پیش از استفاده واقعی جایگزین شود' };
   const commercial = { purpose: 'PARTNER_TECHNICAL_PRICING' as const, label: 'شرایط استاندارد آزمون محلی',
-    effectiveDate: new Date('2026-01-01T00:00:00.000Z'), terms: { calculationPolicyVersion: 'partner-v1', localQa: true } };
+    effectiveDate: new Date('2026-01-01T00:00:00.000Z'), terms: LOCAL_QA_TECHNICAL_PRICING_POLICY };
   const credit = { purpose: 'PARTNER_CREDIT_TERMS' as const, label: 'تسویه نقدی آزمون محلی',
     effectiveDate: new Date('2026-01-01T00:00:00.000Z'), terms: { settlementDays: 0, localQa: true } };
   const [identityHash, commercialHash, creditHash] = await Promise.all([
@@ -42,6 +52,14 @@ export async function provisionLocalPartnerQa(database: PrismaClient, input: Loc
   ]);
 
   await database.$transaction(async tx => {
+    // The imported local catalog intentionally has no commercial rates. Give
+    // every selectable sample a conspicuous synthetic rate before any public
+    // catalog revision is captured. This command is restricted to the existing
+    // sabalanerp-local database by main() below.
+    await tx.product.updateMany({ where: { isActive: true, deletedAt: null, isAvailable: true, basePrice: null,
+      OR: [{ availableInLongitudinalContracts: true }, { availableInStairContracts: true },
+        { availableInSlabContracts: true }, { availableInVolumetricContracts: true }] },
+    data: { basePrice: LOCAL_QA_PRODUCT_BASE_PRICE_TOMAN } });
     await tx.partnerIdentityEvidence.upsert({ where: { id: identityId(subject.id) }, update: {}, create: {
       id: identityId(subject.id), userId: subject.id, ...identity, integrityHash: identityHash, issuedBy: admin.id,
     } });
@@ -51,13 +69,11 @@ export async function provisionLocalPartnerQa(database: PrismaClient, input: Loc
     await tx.partnerTermsPolicy.upsert({ where: { id: creditPolicyId }, update: {}, create: {
       id: creditPolicyId, ...credit, integrityHash: creditHash, issuedBy: admin.id,
     } });
-    const responderGrant = await tx.effectiveActionGrant.findFirst({ where: { principalKind: 'USER',
-      principalId: responder.id, domain: 'PARTNER', action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY',
-      purpose: 'RESPONDER', scope: 'ASSIGNED', effect: 'ALLOW', revokedAt: null } });
-    if (!responderGrant) await grantScopedAction(tx, { actorId: admin.id,
-      reason: 'اعطای مجوز پاسخ‌گویی فقط برای آزمون محلی فروش همکار', correlationId: randomUUID() },
-    { principal: { kind: 'USER', id: responder.id }, domain: 'PARTNER', action: 'INQUIRY_RESPOND',
-      rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED', effect: 'ALLOW' });
+    await tx.workspacePermission.upsert({
+      where: { userId_workspace: { userId: responder.id, workspace: 'sales' } },
+      create: { userId: responder.id, workspace: 'sales', permissionLevel: 'edit', grantedBy: admin.id },
+      update: { permissionLevel: 'edit', isActive: true, grantedBy: admin.id, grantedAt: new Date(), expiresAt: null },
+    });
   });
 
   const now = new Date(), verifiedPackageId = `partner-local-qa-${randomUUID()}`;

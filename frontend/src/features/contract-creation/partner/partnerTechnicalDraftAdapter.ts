@@ -130,6 +130,30 @@ export function removePartnerTechnicalProduct(draft: PartnerTechnicalDraft, prod
   return revise(draft, { rows, dependents, editingValues });
 }
 
+export function removePartnerTechnicalDependent(draft: PartnerTechnicalDraft, identity: string): PartnerTechnicalDraft {
+  const dependents = draft.dependents ?? [];
+  const target = dependents.find(item => item.kind === 'remainder' ? item.productRowId === identity || item.allocationId === identity
+    : item.layerConfigurationId === identity);
+  if (!target) return draft;
+  const removedProductIds = new Set(target.kind === 'remainder' ? [target.productRowId] : []);
+  const removed = new Set([target]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    dependents.forEach(item => {
+      if (removed.has(item)) return;
+      const cascade = item.kind === 'remainder' ? removedProductIds.has(item.sourceProductRowId)
+        : removedProductIds.has(item.parentProductRowId);
+      if (cascade) { removed.add(item); if (item.kind === 'remainder') removedProductIds.add(item.productRowId); changed = true; }
+    });
+  }
+  const entityIds = new Set<string>();
+  removed.forEach(item => { if (item.kind === 'remainder') { entityIds.add(item.productRowId); entityIds.add(item.allocationId); }
+    else entityIds.add(item.layerConfigurationId); });
+  return revise(draft, { dependents: dependents.filter(item => !removed.has(item)),
+    editingValues: (draft.editingValues ?? []).filter(value => !entityIds.has(value.entityId)) });
+}
+
 export function retainPartnerTechnicalFieldText(
   draft: PartnerTechnicalDraft,
   entityId: string,

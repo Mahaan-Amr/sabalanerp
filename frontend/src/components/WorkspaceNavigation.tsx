@@ -103,7 +103,8 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
     if (!currentUser) return;
     let active = true;
     const paths = ['/dashboard/sales/partners', '/dashboard/sales/contracts/create',
-      '/dashboard/sales/partner-inquiries', '/dashboard/sales/partner-cases'];
+      '/dashboard/sales/partner-inquiries', '/dashboard/sales/partner-cases',
+      '/dashboard/sales/partner-customers', '/dashboard/sales/partner-reports'];
     Promise.all(paths.map(async path => {
       try {
         const response = await dashboardAPI.getRouteAvailability(path);
@@ -186,8 +187,9 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
           icon: workspaceIcons[workspace.icon] || FaChartLine,
           show: true,
         }));
-        const firstPartnerPath = ['/dashboard/sales/partners', '/dashboard/sales/contracts/create', '/dashboard/sales/partner-inquiries',
-          '/dashboard/sales/partner-cases'].find(path => partnerRouteAccess[path] === true);
+        const firstPartnerPath = ['/dashboard/sales/contracts/create', '/dashboard/sales/partner-inquiries',
+          '/dashboard/sales/partner-cases', '/dashboard/sales/partner-customers',
+          '/dashboard/sales/partner-reports', '/dashboard/sales/partners'].find(path => partnerRouteAccess[path] === true);
         return firstPartnerPath ? [...workspaceItems, { name: 'PartnerSales', namePersian: 'فروش همکار',
           href: firstPartnerPath, icon: FaHandshake, show: true }] : workspaceItems;
       }
@@ -322,15 +324,18 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         { name: 'Create Partner Sale', namePersian: 'ایجاد فروش همکار',
           href: '/dashboard/sales/contracts/create', icon: FaPlus,
           show: partnerRouteAccess['/dashboard/sales/contracts/create'] === true },
-        { name: 'Partner Management', namePersian: 'مشتریان و مشخصات همکاری',
-          href: '/dashboard/sales/partners', icon: FaHandshake,
-          show: partnerRouteAccess['/dashboard/sales/partners'] === true },
-        { name: 'Partner Inquiries', namePersian: 'استعلام‌های قیمت من',
+        { name: 'Partner Inquiries', namePersian: 'استعلام‌های من',
           href: '/dashboard/sales/partner-inquiries', icon: FaClipboardList,
           show: partnerRouteAccess['/dashboard/sales/partner-inquiries'] === true },
-        { name: 'Partner Cases', namePersian: 'پرونده‌ها و حساب من',
+        { name: 'Partner Cases', namePersian: 'پرونده‌های من',
           href: '/dashboard/sales/partner-cases', icon: FaFileContract,
           show: partnerRouteAccess['/dashboard/sales/partner-cases'] === true },
+        { name: 'Partner Customers', namePersian: 'مشتریان من',
+          href: '/dashboard/sales/partner-customers', icon: FaUsers,
+          show: partnerRouteAccess['/dashboard/sales/partner-customers'] === true },
+        { name: 'Partner Reports', namePersian: 'گزارش و حساب من',
+          href: '/dashboard/sales/partner-reports', icon: FaChartLine,
+          show: partnerRouteAccess['/dashboard/sales/partner-reports'] === true },
       ];
     }
 

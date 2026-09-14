@@ -32,7 +32,7 @@ The Partner Seller remains the immutable creator, Responsible Seller, and realiz
 
 The product owner explicitly approved the Partner-specific exception in [Resolve the ADMIN and correction-rule conflict](https://github.com/Mahaan-Amr/sabalanerp/issues/312). General system-wide authorization and Accounting-originated correction work must preserve these domain restrictions for Partner resources:
 
-- An Admin may respond to a Price Inquiry only after an eligible, audited responder assignment, including a valid assignment to themselves; a general assignment override is insufficient.
+- Superseded by ADR-0058 for open Price Inquiries: an Admin or effective Sales workspace administrator may respond through an atomic, audited takeover to themselves; ordinary responders still require current assignment.
 - An Admin or Sales manager may perform named management and remediation actions under their own identity but may not author the Partner's Draft, retail price, customer payment plan, or other Partner-authored evidence on their behalf.
 - The requester of a Partner Accounting correction or voiding chain may neither process nor manager-approve that same chain, including when the requester is an Admin. Audit does not waive this separation.
 - Partner correction keeps the request and remediation paths defined above: retail-only correction remains Partner-requested and Sales-approved; shared, Sabalan-side, and voiding work keeps its Partner-specific authority and required Accounting and physical gates. Restoring Accounting-originated correction for ordinary Sales Contracts does not implicitly create that initiation right for Partner Cases.

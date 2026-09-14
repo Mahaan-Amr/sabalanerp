@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { IdSchema } from './primitives';
+import { IdSchema, InstantSchema } from './primitives';
 import { PartnerCaseViewSchema } from './projections';
 
 export const PartnerCaseRuntimeQuerySchema = z.object({ caseId: IdSchema.optional() }).strict();
@@ -33,6 +33,9 @@ export const PartnerCreationContextSchema = z.discriminatedUnion('kind', [
   z.object({ schemaVersion: z.literal(1), kind: z.literal('PARTNER'), actorId: IdSchema,
     profileId: IdSchema, writable: z.boolean(), blockedCode: z.string().optional(),
     sabalanTermsVersionId: IdSchema.optional(), latestInquiryId: IdSchema.optional(),
+    inquiryIds: z.array(IdSchema).max(100),
+    recoverableDraft: z.object({ recoveryId: IdSchema, baseRevision: z.number().int().nonnegative().safe(),
+      updatedAt: InstantSchema }).strict().optional(),
     customers: z.array(z.object({ id: IdSchema, displayName: z.string().min(1).max(240),
       address: z.string().min(1).max(2000) }).strict()),
   }).strict(),

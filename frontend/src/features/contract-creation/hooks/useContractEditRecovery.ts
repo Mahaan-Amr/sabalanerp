@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { salesAPI } from '@/lib/api';
 import {
+  createCoalescedContractCheckpointState,
   createContractRecoveryEnvelope,
+  flushCoalescedContractCheckpoint,
   getContractRecoveryStorageKey,
   parseContractRecoveryEnvelope,
   persistContractRecoveryEnvelope,
@@ -12,6 +14,7 @@ import {
 import {
   classifyContractEditRecoveryFailure,
   getContractEditRecoveryMessage,
+  isGenuineContractRevisionConflict,
   type ContractEditRecoveryBlockReason
 } from '../utils/contractEditRecoveryConflictPolicy';
 import { shouldRotateUnavailableCreationDraft } from '../services/contractCreationDraftPolicy';
@@ -19,7 +22,7 @@ import { shouldRotateUnavailableCreationDraft } from '../services/contractCreati
 const BROWSER_SESSION_STORAGE_KEY = 'sabalan-contract-browser-session-id';
 const CHECKPOINT_DELAY_MS = 250;
 const HEARTBEAT_INTERVAL_MS = 25_000;
-let activeDocumentBrowserSessionId: string | null = null;
+const ACTIVE_DOCUMENT_BROWSER_SESSION_KEY = '__sabalanContractBrowserSessionId';
 
 const createStableClientId = (prefix: string): string => {
   const randomId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -46,7 +49,10 @@ export const decideContractRecoveryDelivery = ({
 
 export const getOrCreateContractBrowserSessionId = (): string => {
   if (typeof window === 'undefined') return 'server-render';
-  if (activeDocumentBrowserSessionId) return activeDocumentBrowserSessionId;
+  const activeWindow = window as Window & { __sabalanContractBrowserSessionId?: string };
+  if (activeWindow[ACTIVE_DOCUMENT_BROWSER_SESSION_KEY]) {
+    return activeWindow[ACTIVE_DOCUMENT_BROWSER_SESSION_KEY];
+  }
   const existing = window.sessionStorage.getItem(BROWSER_SESSION_STORAGE_KEY);
   const navigation = typeof performance !== 'undefined'
     ? performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
@@ -55,13 +61,13 @@ export const getOrCreateContractBrowserSessionId = (): string => {
   // browsers also copy it when a tab is duplicated. A duplicated/new navigation
   // must receive a new editor identity so it cannot share the original lease.
   if (existing && (navigation?.type === 'reload' || navigation?.type === 'back_forward')) {
-    activeDocumentBrowserSessionId = existing;
-    return activeDocumentBrowserSessionId;
+    activeWindow[ACTIVE_DOCUMENT_BROWSER_SESSION_KEY] = existing;
+    return existing;
   }
   const created = createStableClientId('browser');
   window.sessionStorage.setItem(BROWSER_SESSION_STORAGE_KEY, created);
-  activeDocumentBrowserSessionId = created;
-  return activeDocumentBrowserSessionId;
+  activeWindow[ACTIVE_DOCUMENT_BROWSER_SESSION_KEY] = created;
+  return created;
 };
 
 export const getOrCreateContractDraftId = (
@@ -111,6 +117,7 @@ export const useContractEditRecovery = <Payload>({
   onRecoveryAvailable,
   onRestore
 }: UseContractEditRecoveryInput<Payload>) => {
+  const scopeKey = scope ? getContractRecoveryStorageKey(scope) : null;
   const [browserSessionId] = useState(getOrCreateContractBrowserSessionId);
   const [leaseToken, setLeaseToken] = useState<string | null>(null);
   const [blockReason, setBlockReason] = useState<ContractEditRecoveryBlockReason | null>(null);
@@ -118,7 +125,13 @@ export const useContractEditRecovery = <Payload>({
   const [checkpointError, setCheckpointError] = useState(false);
   const [takeoverPending, setTakeoverPending] = useState(false);
   const sequenceRef = useRef(0);
-  const pendingRef = useRef<ContractRecoveryEnvelope<Payload> | null>(null);
+  const checkpointState = useMemo(
+    () => ({
+      ...createCoalescedContractCheckpointState<ContractRecoveryEnvelope<Payload>>(),
+      scopeKey
+    }),
+    [scopeKey]
+  );
   const checkpointTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoredScopeRef = useRef<string | null>(null);
   const onRestoreRef = useRef(onRestore);
@@ -143,8 +156,6 @@ export const useContractEditRecovery = <Payload>({
   useEffect(() => {
     onCreationDraftUnavailableRef.current = onCreationDraftUnavailable;
   }, [onCreationDraftUnavailable]);
-
-  const scopeKey = scope ? getContractRecoveryStorageKey(scope) : null;
 
   const applyNewestRecovery = useCallback((
     local: ContractRecoveryEnvelope<Payload> | null,
@@ -206,7 +217,7 @@ export const useContractEditRecovery = <Payload>({
         takeover,
       })) {
         window.localStorage.removeItem(scopeKey);
-        pendingRef.current = null;
+        checkpointState.pending = null;
         setLeaseToken(null);
         setBlockReason(null);
         setReady(true);
@@ -217,7 +228,9 @@ export const useContractEditRecovery = <Payload>({
         const failure = classifyContractEditRecoveryFailure({
           status,
           code: conflict?.code,
-          phase: takeover ? 'takeover' : 'acquire'
+          phase: takeover ? 'takeover' : 'acquire',
+          currentBaseRevision: conflict?.currentBaseRevision,
+          expectedBaseRevision: scope.baseRevision
         });
         if (failure.applyRecovery) {
           applyNewestRecovery(local, conflict?.recovery);
@@ -235,7 +248,7 @@ export const useContractEditRecovery = <Payload>({
     } finally {
       if (takeover) setTakeoverPending(false);
     }
-  }, [applyNewestRecovery, browserSessionId, contractId, scope, scopeKey]);
+  }, [applyNewestRecovery, browserSessionId, checkpointState, contractId, scope, scopeKey]);
 
   useEffect(() => {
     if (!scope || !scopeKey) return;
@@ -288,33 +301,43 @@ export const useContractEditRecovery = <Payload>({
     scopeKey
   ]);
 
-  const flushCheckpoint = useCallback(async () => {
-    if (deactivatedRef.current || !scope || !leaseToken || blocked || !pendingRef.current) return;
-    const envelope = pendingRef.current;
-    try {
-      await salesAPI.checkpointContractRecovery(scope.draftId, {
+  const flushCheckpoint = useCallback((): Promise<void> => {
+    if (deactivatedRef.current || !scope || !leaseToken || blocked || checkpointState.pending === null) {
+      return Promise.resolve();
+    }
+    return flushCoalescedContractCheckpoint(checkpointState, envelope =>
+      salesAPI.checkpointContractRecovery(scope.draftId, {
         browserSessionId,
         leaseToken,
         schemaVersion: scope.schemaVersion,
         baseRevision: scope.baseRevision,
         recovery: envelope
-      });
-      if (pendingRef.current === envelope) pendingRef.current = null;
+      })
+    ).then(() => {
       setCheckpointError(false);
-    } catch (error: any) {
+    }).catch((error: any) => {
       if (error?.response?.status === 409) {
         const conflict = error.response?.data?.data;
-        const failure = classifyContractEditRecoveryFailure({
-          status: error.response.status,
+        const isRealRevisionConflict = isGenuineContractRevisionConflict({
           code: conflict?.code,
-          phase: 'checkpoint'
+          currentBaseRevision: conflict?.currentBaseRevision,
+          expectedBaseRevision: scope.baseRevision
         });
-        setLeaseToken(null);
-        setBlockReason(failure.reason);
+        if (conflict?.code !== 'revision-conflict' || isRealRevisionConflict) {
+          const failure = classifyContractEditRecoveryFailure({
+            status: error.response.status,
+            code: conflict?.code,
+            phase: 'checkpoint',
+            currentBaseRevision: conflict?.currentBaseRevision,
+            expectedBaseRevision: scope.baseRevision
+          });
+          setLeaseToken(null);
+          setBlockReason(failure.reason);
+        }
       }
       setCheckpointError(true);
-    }
-  }, [blocked, browserSessionId, leaseToken, scope]);
+    });
+  }, [blocked, browserSessionId, checkpointState, leaseToken, scope]);
 
   const queueRecovery = useCallback((payload: Payload) => {
     if (deactivatedRef.current || !scope || !scopeKey || blocked) return;
@@ -324,7 +347,7 @@ export const useContractEditRecovery = <Payload>({
       payload
     });
     sequenceRef.current = envelope.sequence;
-    pendingRef.current = envelope;
+    checkpointState.pending = envelope;
     const localRecoverySaved = persistContractRecoveryEnvelope(
       window.localStorage,
       scopeKey,
@@ -336,7 +359,7 @@ export const useContractEditRecovery = <Payload>({
       checkpointTimerRef.current = null;
       void flushCheckpoint();
     }, CHECKPOINT_DELAY_MS);
-  }, [blocked, flushCheckpoint, scope, scopeKey]);
+  }, [blocked, checkpointState, flushCheckpoint, scope, scopeKey]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -384,8 +407,8 @@ export const useContractEditRecovery = <Payload>({
 
   const clearLocalRecovery = useCallback(() => {
     if (scopeKey) window.localStorage.removeItem(scopeKey);
-    pendingRef.current = null;
-  }, [scopeKey]);
+    checkpointState.pending = null;
+  }, [checkpointState, scopeKey]);
 
   const finalizeCommitted = useCallback(() => {
     deactivatedRef.current = true;
@@ -450,16 +473,26 @@ export const useContractEditRecovery = <Payload>({
     const status = error?.response?.status;
     if (status !== 409 && status !== 403) return null;
     const conflict = error?.response?.data?.conflict;
+    if (conflict?.code === 'revision-conflict' && (!scope || !isGenuineContractRevisionConflict({
+      code: conflict.code,
+      currentBaseRevision: conflict.currentBaseRevision,
+      expectedBaseRevision: scope.baseRevision
+    }))) {
+      setCheckpointError(true);
+      return null;
+    }
     const failure = classifyContractEditRecoveryFailure({
       status,
       code: conflict?.code,
-      phase: 'checkpoint'
+      phase: 'checkpoint',
+      currentBaseRevision: conflict?.currentBaseRevision,
+      expectedBaseRevision: scope?.baseRevision
     });
     setLeaseToken(null);
     setBlockReason(failure.reason);
     setReady(true);
     return getContractEditRecoveryMessage(failure.reason);
-  }, []);
+  }, [scope]);
 
   return {
     ready,

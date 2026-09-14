@@ -36,6 +36,12 @@ export const calculatePaidRemainderFacts = (stock: PaidRemainderStock) => {
 export interface RemainderChildIntent {
   /** Witnessed distribution: replay consumption, never repack these sources together. */
   readonly sourcePieceQuantities?: readonly number[];
+  /** Physical segments when one logical child piece spans more than one source rectangle. */
+  readonly physicalPieces?: readonly {
+    readonly logicalPieceOrdinal: number;
+    readonly lengthMeters: CanonicalDecimal;
+    readonly widthMeters: CanonicalDecimal;
+  }[];
   readonly secondaryOwnerProductRowId?: StableIdentity<'product-row'>;
   readonly allocationId: StableIdentity<'allocation'>;
   readonly allocationOrder: number;
@@ -57,6 +63,11 @@ export interface RemainderChildPolicyInput {
   /** Preserve an existing draft's deterministic replay order on first graph import. */
   readonly allocationOrder?: number;
   readonly sourcePieceQuantities?: readonly number[];
+  readonly physicalPieces?: readonly {
+    readonly logicalPieceOrdinal: number;
+    readonly lengthMeters: CanonicalDecimal;
+    readonly widthMeters: CanonicalDecimal;
+  }[];
   readonly secondaryOwnerProductRowId?: StableIdentity<'product-row'>;
   readonly allocationId: StableIdentity<'allocation'>;
   readonly sourceProductRowId: StableIdentity<'product-row'>;
@@ -165,6 +176,25 @@ export const parseRemainderChildPolicyInput = (
         }),
     ...(record.sourcePieceQuantities === undefined ? {} : {
       sourcePieceQuantities: record.sourcePieceQuantities as readonly number[]
+    }),
+    ...(record.physicalPieces === undefined ? {} : {
+      physicalPieces: Array.isArray(record.physicalPieces)
+        ? record.physicalPieces.map((piece, index) => {
+            if (piece === null || typeof piece !== 'object' || Array.isArray(piece)) {
+              throw new TypeError(`physicalPieces.${index} must be an object.`);
+            }
+            const physical = piece as Record<string, unknown>;
+            if (!Number.isSafeInteger(physical.logicalPieceOrdinal) || Number(physical.logicalPieceOrdinal) <= 0 ||
+              typeof physical.lengthMeters !== 'string' || typeof physical.widthMeters !== 'string') {
+              throw new TypeError(`physicalPieces.${index} dimensions must be strings.`);
+            }
+            return {
+              logicalPieceOrdinal: Number(physical.logicalPieceOrdinal),
+              lengthMeters: parseCanonicalDecimal(physical.lengthMeters),
+              widthMeters: parseCanonicalDecimal(physical.widthMeters)
+            };
+          })
+        : (() => { throw new TypeError('physicalPieces must be an array.'); })()
     }),
     ...(record.secondaryOwnerProductRowId === undefined ? {} : {
       secondaryOwnerProductRowId: parseStableIdentity('product-row', requiredString('secondaryOwnerProductRowId'))

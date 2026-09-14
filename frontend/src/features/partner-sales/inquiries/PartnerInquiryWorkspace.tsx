@@ -21,13 +21,14 @@ export interface PartnerInquiryWorkspaceProps {
   mismatchedRowIds?: readonly string[];
   onEnterWizard: (inquiry: PartnerInquiryView) => Promise<void>;
   onOpenInquiry: (inquiryId: string) => void;
+  onCreateNewInquiry: () => void;
   /** Returns a newly saved technical recovery ref and a new inquiry row ID;
    * never guesses a product identity or mutates the predecessor. */
   prepareSuccessor: (row: PartnerInquiryRow, reason: string) => Promise<PartnerConfiguredInquiryRows[number]>;
 }
 
 export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
-  const { actorId, inquiryId, queries, commands, recovery, writable, configuredRows, configurationEditor, mismatchedRowIds, onEnterWizard, onOpenInquiry, prepareSuccessor } = props;
+  const { actorId, inquiryId, queries, commands, recovery, writable, configuredRows, configurationEditor, mismatchedRowIds, onEnterWizard, onOpenInquiry, onCreateNewInquiry, prepareSuccessor } = props;
   const reader = useMemo(() => createPartnerInquiryReader(queries, inquiryId), [queries, inquiryId]);
   const submission = useMemo(() => createPartnerInquirySubmission({ actorId, inquiryId, commands, recovery }), [actorId, inquiryId, commands, recovery]);
   const read = useSyncExternalStore(reader.subscribe, reader.getSnapshot, reader.getSnapshot);
@@ -66,7 +67,10 @@ export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
   };
   return <section dir="rtl" className="min-w-0 space-y-5">
     <fieldset disabled={blocked} className="min-w-0"><TechnicalProductConfiguration>{configurationEditor}</TechnicalProductConfiguration></fieldset>
-    <ErpButton label="ارسال استعلام محصولات" variant="outline" disabled={blocked || !configuredRows.length} onClick={() => void send(configuredRows)} />
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-sm sds-text-secondary">این استعلام مستقل باقی می‌ماند؛ برای محصولات یا مشتری دیگر لازم نیست منتظر پاسخ آن بمانید.</p>
+      <ErpButton label="ایجاد استعلام جدید" variant="outline" disabled={blocked} onClick={onCreateNewInquiry} />
+    </div>
     {!successor && submissionFeedback}
     {read.error && <ErpInlineState kind="error" title={read.error} action={{ label: 'تلاش مجدد', onClick: () => void reader.refresh() }} />}
     {!read.inquiry && read.pending && <ErpLoading />}

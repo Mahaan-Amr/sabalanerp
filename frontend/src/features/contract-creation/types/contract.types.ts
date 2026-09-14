@@ -129,6 +129,7 @@ export interface RemainingStone {
   /** Number of FIFO physical units already consumed from a batched record. */
   physicalUnitOffset?: number;
   physicalPieces?: Array<{
+    logicalPieceOrdinal?: number;
     width: number;
     length: number;
     quantity: number;
@@ -151,11 +152,13 @@ export interface SlabStandardDimensionEntry {
 
 export interface StonePartition {
   id: string;
+  logicalPieceOrdinal?: number;
   width: number; // ?? ?? (in cm)
   length: number; // ?? ?? (in meters)
   quantity: number; // partition piece count
   squareMeters: number; // area in square meters
   physicalPieces?: Array<{
+    logicalPieceOrdinal?: number;
     width: number;
     length: number;
     quantity: number;

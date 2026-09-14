@@ -59,10 +59,25 @@ export const validateStock = (stock: PaidRemainderStock, index: number) => {
 };
 
 export const validateIntent = (intent: RemainderTechnicalIntent, index: number) => {
+  const physicalPieceCount = intent.physicalPieces?.length ?? intent.quantity;
+  if (intent.physicalPieces !== undefined) {
+    const logicalOrdinals = new Set(intent.physicalPieces.map(piece => piece.logicalPieceOrdinal));
+    if (!Array.isArray(intent.physicalPieces) || !intent.physicalPieces.length ||
+      intent.physicalPieces.some(piece => decimal(piece.lengthMeters).lte(0) ||
+        decimal(piece.widthMeters).lte(0) || piece.widthMeters !== intent.widthMeters ||
+        !Number.isSafeInteger(piece.logicalPieceOrdinal) || piece.logicalPieceOrdinal <= 0 ||
+        piece.logicalPieceOrdinal > intent.quantity) ||
+      logicalOrdinals.size !== intent.quantity ||
+      Array.from({ length: intent.quantity }, (_, logicalIndex) => logicalIndex + 1).some(logicalOrdinal =>
+        !intent.physicalPieces!.filter(piece => piece.logicalPieceOrdinal === logicalOrdinal)
+          .reduce((sum, piece) => sum.plus(piece.lengthMeters), new Decimal(0)).eq(intent.lengthMeters))) {
+      throw new TypeError('Physical pieces must exactly preserve the logical child geometry.');
+    }
+  }
   if (intent.sourcePieceQuantities !== undefined) {
     if (!Array.isArray(intent.sourcePieceQuantities) || !intent.sourcePieceQuantities.length ||
       intent.sourcePieceQuantities.some(q => !Number.isSafeInteger(q) || q <= 0) ||
-      intent.sourcePieceQuantities.reduce((sum, q) => sum + q, 0) !== intent.quantity) {
+      intent.sourcePieceQuantities.reduce((sum, q) => sum + q, 0) !== physicalPieceCount) {
       throw new TypeError('Preserved source distribution must account for every requested piece.');
     }
   }
@@ -240,12 +255,19 @@ export const replayRemainderGeometry = (
           widthMeters: selected.widthMeters,
           quantity: selected.quantity
         }],
-        demands: [{
-          demandId: intent.childProductRowId,
-          lengthMeters: intent.lengthMeters,
-          widthMeters: intent.widthMeters,
-          quantity: intent.quantity
-        }]
+        demands: intent.physicalPieces
+          ? intent.physicalPieces.map((piece, pieceIndex) => ({
+              demandId: `${intent.childProductRowId}:physical:${pieceIndex + 1}`,
+              lengthMeters: piece.lengthMeters,
+              widthMeters: piece.widthMeters,
+              quantity: 1
+            }))
+          : [{
+              demandId: intent.childProductRowId,
+              lengthMeters: intent.lengthMeters,
+              widthMeters: intent.widthMeters,
+              quantity: intent.quantity
+            }]
       };
       const packed = intent.sourcePieceQuantities
         ? packPreservedSourceDistribution(packingRequest, intent.sourcePieceQuantities)

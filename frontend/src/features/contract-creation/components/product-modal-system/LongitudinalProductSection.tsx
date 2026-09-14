@@ -15,6 +15,7 @@ import {
   type LongitudinalManualField,
   type LongitudinalProductCalculation,
   type LongitudinalProductInput,
+  type LongitudinalTechnicalCalculation,
   type LongitudinalTechnicalInput
 } from '@sabalanerp/contract-product-graph';
 import {
@@ -28,6 +29,10 @@ const fieldClass =
 const errorClass = 'mt-1 min-h-4 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]';
 const isPricedInput = (input: LongitudinalProductInput | LongitudinalTechnicalInput): input is LongitudinalProductInput =>
   !('inputRevision' in input);
+const technicalCalculationRevision = (calculation: LongitudinalProductCalculation | LongitudinalTechnicalCalculation) =>
+  calculation.ok
+    ? ('inputRevision' in calculation.result ? calculation.result.inputRevision : undefined)
+    : ('inputRevision' in calculation ? calculation.inputRevision : undefined);
 const TechnicalEditing = React.createContext(false);
 
 const toDisplayUnit = (
@@ -167,14 +172,17 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
   input: Input;
   onChange: (input: Input) => void;
   showValidation?: boolean;
-  calculation?: LongitudinalProductCalculation | null;
+  calculation?: LongitudinalProductCalculation | LongitudinalTechnicalCalculation | null;
   calculating?: boolean;
 }) {
   const pricingVisible = useProductPricingVisibility();
   const pricedInput = isPricedInput(input) ? input : undefined;
   const showPricing = pricingVisible && pricedInput !== undefined;
+  const suppliedTechnicalCalculation = 'inputRevision' in input && workerCalculation !== undefined && workerCalculation !== null &&
+    technicalCalculationRevision(workerCalculation) === input.inputRevision
+    ? workerCalculation as LongitudinalTechnicalCalculation : undefined;
   const technicalCalculation = React.useMemo(() => 'inputRevision' in input
-    ? calculateLongitudinalTechnical(input) : null, [input]);
+    ? suppliedTechnicalCalculation ?? calculateLongitudinalTechnical(input) : null, [input, suppliedTechnicalCalculation]);
   const localCalculation = React.useMemo(
     () => pricedInput && workerCalculation === undefined && !calculating
       ? calculateLongitudinalProduct(pricedInput)

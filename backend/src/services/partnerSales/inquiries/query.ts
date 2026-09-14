@@ -18,7 +18,8 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
     const inquiryId = parsed.data.inquiryId;
     return dependencies.transaction(async tx => {
       const inquiry = await tx.partnerInquiry.findUnique({ where: { id: inquiryId }, select: {
-        id: true, profileId: true, profile: { select: { user: { select: { firstName: true, lastName: true } } } },
+        id: true, profileId: true, submittedAt: true,
+        profile: { select: { user: { select: { firstName: true, lastName: true } } } },
         assignments: { orderBy: { revision: 'desc' }, take: 1, select: { id: true, revision: true, responderId: true } },
         events: { orderBy: { revision: 'asc' }, select: { type: true, reason: true, evidence: true } },
         rows: { orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }], include: {
@@ -59,25 +60,37 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
       }
       if (responderPurpose) {
         const assignment = inquiry.assignments[0];
-        if (!assignment || assignment.responderId !== dependencies.actorId) return { ok: false, error: partnerError('NOT_ASSIGNED') } as never;
+        if (!assignment || (assignment.responderId !== dependencies.actorId && !allowed.value.managementOverride)) {
+          return { ok: false, error: partnerError('NOT_ASSIGNED') } as never;
+        }
+        const responseAuthority = await dependencies.authorize(tx, { actorId: dependencies.actorId,
+          action: 'INQUIRY_RESPOND', purpose: 'RESPONDER',
+          reason: 'Partner inquiry response availability projection; a command records the business reason.',
+          root: { kind: 'INQUIRY', id: inquiry.id } });
+        const responseAction = responseAuthority.ok
+          ? { action: 'INQUIRY_RESPOND' as const, enabled: true }
+          : responseAuthority.error.status === 404 ? null
+            : { action: 'INQUIRY_RESPOND' as const, enabled: false, disabledReason: responseAuthority.error };
         const responseRows = inquiry.rows.map(row => {
           const definition = parseInquiryDefinition(row.definition);
           if (!definition) return null;
           const currentState = state(row.outcome, row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
           return { rowId: row.id, revision: row.revision, identity: definition.identity,
+            description: definition.description, configuration: definition.configuration,
             ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
               approvedAt: row.approval.approvedAt.toISOString(), expiresAt: row.approval.expiresAt.toISOString(),
               ...(row.approval.note ? { noteOrReason: row.approval.note } : {}) } :
               reasons.get(row.id) ? { noteOrReason: reasons.get(row.id) } : {}),
             used: Boolean(row.approval?.usages.length), state: currentState,
-            actions: currentState === 'PENDING' ? [{ action: 'INQUIRY_RESPOND' as const, enabled: true }] : [],
+            actions: currentState === 'PENDING' && responseAction ? [responseAction] : [],
           };
         });
         if (responseRows.some(row => row === null)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
         const view = ResponderInquiryViewV2Schema.safeParse({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: inquiry.id,
+          submittedAt: inquiry.submittedAt?.toISOString(),
           partnerDisplayName: `${inquiry.profile.user.firstName} ${inquiry.profile.user.lastName}`.trim(),
           assignmentId: assignment.id, assignmentRevision: assignment.revision,
-          actions: responseRows.some(row => row?.state === 'PENDING') ? [{ action: 'INQUIRY_RESPOND', enabled: true }] : [], rows: responseRows });
+          actions: responseRows.some(row => row?.state === 'PENDING') && responseAction ? [responseAction] : [], rows: responseRows });
         return view.success ? { ok: true, value: view.data } as never : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
       }
       const rows = inquiry.rows.map(row => {

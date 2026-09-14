@@ -38,6 +38,33 @@ test('technical sales policy accepts only the latest effective append-only terms
   assert.equal(corrupted.error.code, 'INTEGRITY_CONFLICT');
 });
 
+test('technical sales policy accepts an integrity-checked bootstrap projection linked to its source policy', async () => {
+  const effectiveDate = new Date('2026-08-29T00:00:00.000Z');
+  const source = { id: 'bootstrap-policy', purpose: 'PARTNER_TECHNICAL_PRICING' as const,
+    label: 'شرایط شروع فروش همکار', effectiveDate, expiresAt: null,
+    issuedAt: new Date('2026-08-28T00:00:00.000Z'), revokedAt: null, terms, integrityHash: '' };
+  source.integrityHash = await canonicalHash({ purpose: source.purpose, label: source.label,
+    effectiveDate: '2026-08-29', terms: source.terms });
+  const projection = { id: 'projected-terms', accountId: 'account-1', version: 1, effectiveDate,
+    terms: { ...terms, policyId: source.id }, actorId: 'sales-manager', reason: 'شروع فروش همکار',
+    integrityHash: source.integrityHash };
+  const transaction = {
+    $queryRaw: async () => [{ now: new Date('2026-08-29T12:00:00.000Z') }],
+    partnerProfile: { findUnique: async () => ({ commercialAccount: { id: 'account-1' } }) },
+    partnerCommercialTerms: { findMany: async () => [projection] },
+    partnerTermsPolicy: { findUnique: async () => source },
+  } as any;
+  const result = await readPartnerTechnicalSalesPolicy(transaction, 'partner-1');
+  assert.ok(result.ok);
+  assert.equal(result.value.policyId, projection.id);
+
+  source.integrityHash = 'sha256-v1:' + '0'.repeat(64);
+  const corrupted = await readPartnerTechnicalSalesPolicy(transaction, 'partner-1');
+  assert.equal(corrupted.ok, false);
+  if (corrupted.ok) throw new Error('Corrupted bootstrap policy was accepted');
+  assert.equal(corrupted.error.code, 'INTEGRITY_CONFLICT');
+});
+
 test('technical configuration identity excludes requested quantity but changes with priced geometry', async () => {
   const row: PartnerTechnicalDraft['rows'][number] = {
     productRowId: 'row-1', catalogItemId: 'stone-1', catalogSnapshotVersion: '2026-08-29T08:00:00.000Z',

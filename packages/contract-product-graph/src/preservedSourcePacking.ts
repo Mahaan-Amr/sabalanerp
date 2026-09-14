@@ -11,15 +11,22 @@ export const packPreservedSourceDistribution = (
   const invalid = (): PackingResult => ({ ok: false, conflict: {
     code: 'invalid-packing-input', message: 'The witnessed physical source distribution is invalid.'
   } });
-  if (request.sources.length !== 1 || request.demands.length !== 1 ||
+  const physicalDemands = request.demands.flatMap(demand =>
+    Array.from({ length: demand.quantity }, (_, index) => ({
+      ...demand,
+      demandId: demand.quantity === 1 ? demand.demandId : `${demand.demandId}:unit:${index + 1}`,
+      quantity: 1
+    })));
+  if (request.sources.length !== 1 || !request.demands.length ||
     distribution.length > request.sources[0].quantity || !distribution.length ||
     distribution.some(q => !Number.isSafeInteger(q) || q <= 0) ||
-    distribution.reduce((s, q) => s + q, 0) !== request.demands[0].quantity) return invalid();
+    distribution.reduce((s, q) => s + q, 0) !== physicalDemands.length) return invalid();
   const plans: PackingPlan[] = [];
   let demandOffset = 0;
   for (const [index, quantity] of distribution.entries()) {
     const result = calculatePackingPlan({ ...request,
-      sources: [{ ...request.sources[0], quantity: 1 }], demands: [{ ...request.demands[0], quantity }] });
+      sources: [{ ...request.sources[0], quantity: 1 }],
+      demands: physicalDemands.slice(demandOffset, demandOffset + quantity) });
     if (!result.ok) return result;
     plans.push({ ...result.plan,
       consumedSources: result.plan.consumedSources.map(s => ({ ...s, sourceOrdinal: index })),

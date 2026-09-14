@@ -3,7 +3,8 @@ import { FEATURE_WORKSPACE_MAP, type Feature } from '../middleware/feature';
 import { HR_REDESIGN_CATALOG } from './hrRedesignDataContracts';
 import { HR_ACTION_PERMISSIONS } from './hrActionPermissionCatalog';
 // Explicit resource-scoped actions use the same central access entry point.
-// Legacy workspace/feature access does not imply a resource-scoped grant.
+// Domain adapters may translate reviewed effective workspace features into a
+// fixed resource scope; callers can never supply that scope themselves.
 export { grantScopedAction, readScopedActions, revokeScopedAction, resolveScopedActions } from './effectiveAuthorization/scopedActions';
 
 export type EffectiveWorkspacePermission = 'view' | 'edit' | 'admin';

@@ -7,7 +7,7 @@ import { prisma as applicationPrisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { createPrismaPartnerCaseService } from '../services/partnerSales/cases/aggregate';
 import { createPrismaPartnerCaseDependencies } from '../services/partnerSales/cases/prismaComposition';
-import { createPartnerCaseLifecycleService } from '../services/partnerSales/cases/lifecycle';
+import { createPartnerCaseLifecycleService, createPrismaPartnerCaseLifecycleService } from '../services/partnerSales/cases/lifecycle';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readAuthorizationDecisionByCorrelation } from '../services/effectiveAuthorization/audit';
 import { generateCustomerContractPdf } from '../utils/pdf';
@@ -40,7 +40,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const profile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: {
           id: true, state: true,
           commercialAccount: { select: { terms: { orderBy: [{ effectiveDate: 'desc' }, { version: 'desc' }] } } },
-          inquiries: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true } },
+          inquiries: { orderBy: { createdAt: 'desc' }, take: 100, select: { id: true } },
           customers: { where: { isActive: true }, orderBy: { createdAt: 'desc' }, select: {
             id: true, firstName: true, lastName: true, companyName: true,
             address: true, workAddress: true, homeAddress: true,
@@ -60,10 +60,16 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const writable = profile.state === 'ACTIVE' && Boolean(terms) && rollout.ok && permission.ok;
         const blockedCode = !terms ? 'STATE_CONFLICT' : !rollout.ok ? rollout.error.code
           : !permission.ok ? permission.error.code : profile.state !== 'ACTIVE' ? 'PARTNER_NOT_ACTIVE' : undefined;
+        const recoverableDraft = await tx.salesContractEditSession.findFirst({ where: { ownerUserId: request.user!.id,
+          contractId: null, recovery: { path: ['kind'], equals: 'PARTNER_TECHNICAL_RECOVERY_V1' } },
+          orderBy: { updatedAt: 'desc' }, select: { draftId: true, baseRevision: true, updatedAt: true } });
         const value = partnerContracts.PartnerCreationContextSchema.safeParse({ schemaVersion: 1, kind: 'PARTNER',
           actorId: request.user!.id, profileId: profile.id, writable, ...(blockedCode ? { blockedCode } : {}),
           ...(terms ? { sabalanTermsVersionId: terms.id } : {}),
           ...(profile.inquiries[0] ? { latestInquiryId: profile.inquiries[0].id } : {}),
+          inquiryIds: profile.inquiries.map(inquiry => inquiry.id),
+          ...(recoverableDraft ? { recoverableDraft: { recoveryId: recoverableDraft.draftId,
+            baseRevision: recoverableDraft.baseRevision, updatedAt: recoverableDraft.updatedAt.toISOString() } } : {}),
           customers: profile.customers.map(customer => ({ id: customer.id,
             displayName: customer.companyName || `${customer.firstName} ${customer.lastName}`.trim(),
             address: customer.address || customer.workAddress || customer.homeAddress || 'ثبت‌نشده' })),
@@ -88,6 +94,46 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
     } catch {
       respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') });
     }
+  });
+  router.post('/lifecycle/commands', async (request: AuthRequest, response) => {
+    if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+    const command = partnerContracts.PartnerCommandSchema.safeParse(request.body);
+    if (!command.success || command.data.type !== 'CASE_CANCEL') {
+      respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return;
+    }
+    const correlationId = correlation(request);
+    try {
+      const profile = await prisma.partnerProfile.findUnique({ where: { userId: request.user.id }, select: { id: true } });
+      const purpose = profile ? 'PARTNER' as const : 'MANAGEMENT' as const;
+      const service = createPrismaPartnerCaseLifecycleService({ database: prisma, actorId: request.user.id,
+        cancellationPurpose: purpose,
+        authorize: async (tx, input) => {
+          const decision = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id,
+            purpose: input.purpose, channel: 'API' }, { correlationId }).authorize(input.action, input.root);
+          if (!decision.ok) return decision;
+          const evidence = await readAuthorizationDecisionByCorrelation(tx, { domain: 'PARTNER', actorId: request.user!.id,
+            action: input.action, rootKind: 'CASE', rootId: input.root.id, purpose: input.purpose,
+            channel: 'API', correlationId, allowed: true });
+          return evidence ? { ok: true as const, value: { evidenceId: evidence.id } }
+            : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+        },
+        verifyOutputEvidence: async () => ({ ok: false as const, error: partnerError('STATE_CONFLICT') }),
+        cancelConfirmationSessions: async (tx, input) => {
+          const sessions = await tx.contractPublicConfirmation.findMany({ where: {
+            contract: { partnerCaseId: input.caseId }, status: 'PENDING' }, select: { id: true } });
+          if (sessions.length) await tx.contractPublicConfirmation.updateMany({ where: { id: { in: sessions.map(item => item.id) } },
+            data: { status: 'CANCELLED', cancelledAt: new Date() } });
+          return { ok: true as const, value: { invalidatedSessionIds: sessions.map(item => item.id), preservedSnapshotIds: [] } };
+        },
+        recordEvidenceReview: async (tx, review) => {
+          const id = randomUUID();
+          await tx.partnerCommandOutcome.create({ data: { id, actorId: request.user!.id,
+            operation: 'PARTNER_CASE_INTEGRITY_REVIEW', targetScope: review.caseId, key: id,
+            payloadHash: await canonicalHash(review.evidence), outcome: json(review) } });
+        },
+      });
+      respond(response, await service.execute(command.data));
+    } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
   });
   router.post('/query-v2', async (request: AuthRequest, response) => {
     if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }

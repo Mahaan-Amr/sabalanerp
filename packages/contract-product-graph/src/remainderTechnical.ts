@@ -29,13 +29,22 @@ export const replayRemainderTechnical = (input: RemainderTechnicalInput): Remain
     if (inputRevision === undefined || !Array.isArray(input.baseInventory) || !Array.isArray(input.childIntents)) throw new TypeError();
     input.baseInventory.forEach(technicalStock);
     for (const intent of input.childIntents) {
-      technicalShape(intent, ['sourcePieceQuantities', 'secondaryOwnerProductRowId', 'allocationId',
+      technicalShape(intent, ['sourcePieceQuantities', 'physicalPieces', 'secondaryOwnerProductRowId', 'allocationId',
         'allocationOrder', 'childProductRowId', 'sourceProductRowId', 'selectedRemainingStoneId',
         'catalogProductId', 'lengthMeters', 'widthMeters', 'quantity', 'kerfMeters', 'calibrationEnabled']);
       for (const value of [intent.allocationId, intent.childProductRowId, intent.sourceProductRowId, intent.catalogProductId]) technicalIdentity(value);
       if (intent.secondaryOwnerProductRowId !== undefined) technicalIdentity(intent.secondaryOwnerProductRowId);
       if (intent.selectedRemainingStoneId !== undefined) technicalIdentity(intent.selectedRemainingStoneId);
       for (const value of [intent.lengthMeters, intent.widthMeters, intent.kerfMeters]) technicalDecimal(value);
+      if (intent.physicalPieces !== undefined) {
+        if (!Array.isArray(intent.physicalPieces)) throw new TypeError();
+        for (const piece of intent.physicalPieces) {
+          technicalShape(piece, ['logicalPieceOrdinal', 'lengthMeters', 'widthMeters']);
+          if (!Number.isSafeInteger(piece.logicalPieceOrdinal) || piece.logicalPieceOrdinal <= 0) throw new TypeError();
+          technicalDecimal(piece.lengthMeters);
+          technicalDecimal(piece.widthMeters);
+        }
+      }
       if (typeof intent.calibrationEnabled !== 'boolean') throw new TypeError();
     }
   } catch {

@@ -10,6 +10,7 @@ const profile = { profileId: IdSchema, expectedRevision: RevisionSchema };
 export const PartnerManagementCommandV2Schema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('PROFILE_CREATE'), identityEvidenceId: IdSchema }).strict(),
   z.object({ ...envelope, ...profile, type: z.literal('IDENTITY_VERIFY'), evidenceId: IdSchema }).strict(),
+  z.object({ ...envelope, ...profile, type: z.literal('IDENTITY_VERSION_REGISTER'), evidenceId: IdSchema }).strict(),
   z.object({ ...envelope, ...profile, type: z.literal('COMMERCIAL_TERMS_SET'), termsVersionId: IdSchema }).strict(),
   z.object({ ...envelope, ...profile, type: z.literal('CREDIT_TERMS_SET'), termsVersionId: IdSchema }).strict(),
   z.object({ ...envelope, ...profile, type: z.literal('RESPONDER_ASSIGN'), responderId: IdSchema }).strict(),

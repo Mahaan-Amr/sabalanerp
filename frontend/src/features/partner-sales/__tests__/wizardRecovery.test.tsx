@@ -68,7 +68,9 @@ test('reloading an uncertain inquiry exposes a reachable retry without a new sub
   const html = renderToStaticMarkup(<PartnerInquiryWorkspace actorId={fixture.profile.partnerSellerId} inquiryId={fixture.inquiry.inquiryId}
     queries={{ query: async () => { throw new Error('not used during SSR'); } }} commands={commands} recovery={recovery} writable
     configuredRows={[]} configurationEditor={<p>preserved-configuration</p>} onEnterWizard={async () => undefined} onOpenInquiry={() => undefined}
+    onCreateNewInquiry={() => undefined}
     prepareSuccessor={async () => { throw new Error('not used'); }} />);
   assert.match(html, /بررسی نتیجه ارسال/);
   assert.match(html, /preserved-configuration/);
+  assert.match(html, /ایجاد استعلام جدید/);
 });

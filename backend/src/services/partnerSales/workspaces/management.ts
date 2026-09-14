@@ -12,7 +12,6 @@ import {
 } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { projectActionAvailabilityV2 } from '../authorization/availability';
-import { resolveEligibleResponder } from '../inquiries/adapters';
 import { createPrismaPartnerProfileManagementStore } from '../profiles/managementPrismaStore';
 import { createPrismaPartnerProfileStore } from '../profiles/prismaStore';
 
@@ -84,13 +83,21 @@ export function createPrismaManagementWorkspaceReader(input: {
 
   async function responderOptions(transaction: Transaction) {
     const users = await transaction.user.findMany({ where: { isActive: true, partnerProfile: null },
-      select: { id: true, firstName: true, lastName: true, username: true }, orderBy: { id: 'asc' } });
-    const eligible: Array<{ id: string; label: string }> = [];
-    for (const user of users) {
-      const result = await resolveEligibleResponder(transaction, { responderId: user.id });
-      if (result.ok) eligible.push({ id: user.id, label: label(user) });
-    }
-    return eligible;
+      select: { id: true, firstName: true, lastName: true, username: true, role: true }, orderBy: { id: 'asc' } });
+    const userIds = users.map(user => user.id);
+    const roles = [...new Set(users.map(user => user.role))];
+    const [direct, inherited] = await Promise.all([
+      transaction.workspacePermission.findMany({ where: { userId: { in: userIds }, workspace: 'sales',
+        isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+      select: { userId: true, permissionLevel: true } }),
+      transaction.roleWorkspacePermission.findMany({ where: { role: { in: roles }, workspace: 'sales', isActive: true },
+        select: { role: true, permissionLevel: true } }),
+    ]);
+    const directByUser = new Map(direct.map(item => [item.userId, item.permissionLevel.toLowerCase()]));
+    const inheritedByRole = new Map(inherited.map(item => [item.role, item.permissionLevel.toLowerCase()]));
+    const editCapable = (level?: string) => level === 'edit' || level === 'admin';
+    return users.filter(user => user.role === 'ADMIN' || editCapable(directByUser.has(user.id)
+      ? directByUser.get(user.id) : inheritedByRole.get(user.role))).map(user => ({ id: user.id, label: label(user) }));
   }
 
   return async function readManagementWorkspace(transaction: Transaction, page: Page):
@@ -104,7 +111,7 @@ export function createPrismaManagementWorkspaceReader(input: {
         user: { select: { firstName: true, lastName: true, username: true } },
         commercialAccount: { select: {
           identities: { orderBy: { version: 'desc' }, take: 1, select: {
-            legalName: true, phone: true, address: true, identifiers: true,
+            legalName: true, phone: true, address: true, identifiers: true, integrityHash: true,
           } },
           terms: { orderBy: { version: 'desc' }, select: { id: true, terms: true } },
         } },
@@ -121,10 +128,15 @@ export function createPrismaManagementWorkspaceReader(input: {
       },
     });
     const [clock] = await transaction.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-    const policies = await transaction.partnerTermsPolicy.findMany({ where: {
-      revokedAt: null, issuedAt: { lte: clock.now }, effectiveDate: { lte: clock.now },
-      OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }],
-    }, select: { id: true, purpose: true, label: true }, orderBy: [{ effectiveDate: 'desc' }, { id: 'asc' }] });
+    const [policies, identityEvidence] = await Promise.all([
+      transaction.partnerTermsPolicy.findMany({ where: {
+        revokedAt: null, issuedAt: { lte: clock.now }, effectiveDate: { lte: clock.now },
+        OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }],
+      }, select: { id: true, purpose: true, label: true }, orderBy: [{ effectiveDate: 'desc' }, { id: 'asc' }] }),
+      transaction.partnerIdentityEvidence.findMany({ where: { userId: { in: profiles.map(profile => profile.userId) } },
+        select: { id: true, userId: true, legalName: true, personType: true, phone: true, address: true,
+          integrityHash: true, issuedAt: true, expiresAt: true, revokedAt: true }, orderBy: [{ issuedAt: 'desc' }, { id: 'asc' }] }),
+    ]);
     const eligibleResponders = await responderOptions(transaction);
     const projected: PartnerManagementWorkspaceViewV2['profiles'] = [];
     let scannedCursor: string | undefined;
@@ -142,6 +154,23 @@ export function createPrismaManagementWorkspaceReader(input: {
       const gates = await profileStore.readActivationGates(transaction, profile);
       const identity = profile.commercialAccount?.identities[0];
       const identitySource = identity ? object(identity.identifiers) : undefined;
+      const currentEvidence = typeof identitySource?.evidenceId === 'string'
+        ? identityEvidence.find(item => item.id === identitySource.evidenceId) : undefined;
+      const identityRevisionOptions = currentEvidence ? identityEvidence.filter(candidate =>
+        candidate.userId === profile.userId && candidate.id !== currentEvidence.id && candidate.issuedAt > currentEvidence.issuedAt &&
+        candidate.issuedAt <= clock.now && !candidate.revokedAt && (!candidate.expiresAt || candidate.expiresAt > clock.now))
+        .flatMap(candidate => {
+          if (!identity || candidate.integrityHash === identity.integrityHash) return [];
+          const changes = [
+            candidate.legalName !== identity.legalName ? `نام قانونی: «${identity.legalName}» ← «${candidate.legalName}»` : null,
+            candidate.personType !== (identitySource?.personType === 'LEGAL' ? 'LEGAL' : 'NATURAL')
+              ? `نوع شخص: «${identitySource?.personType === 'LEGAL' ? 'حقوقی' : 'حقیقی'}» ← «${candidate.personType === 'LEGAL' ? 'حقوقی' : 'حقیقی'}»` : null,
+            candidate.phone !== identity.phone ? `تلفن: «${identity.phone}» ← «${candidate.phone}»` : null,
+            candidate.address !== identity.address ? `نشانی: «${identity.address}» ← «${candidate.address}»` : null,
+          ].filter((change): change is string => Boolean(change));
+          if (!changes.length) changes.push('شناسه‌ها یا مدارک هویتی تغییر کرده‌اند.');
+          return [{ id: candidate.id, label: `شواهد هویت ${candidate.issuedAt.toLocaleDateString('fa-IR')}`, changes }];
+        }) : [];
       const termsByPurpose = new Map<string, { id: string; terms: Prisma.JsonValue }>();
       for (const term of profile.commercialAccount?.terms ?? []) {
         const kind = purpose(term.terms);
@@ -168,21 +197,28 @@ export function createPrismaManagementWorkspaceReader(input: {
         for (const inquiry of profile.inquiries) {
           const current = inquiry.assignments[0];
           if (!current) continue;
-          const inquiryActions = await projectActionAvailabilityV2(authorization(transaction, 'MANAGEMENT'),
+          const inquiryActions = await projectActionAvailabilityV2(authorization(transaction, 'MANAGEMENT',
+            'Partner inquiry reassignment availability projection; command requires an explicit actor reason.'),
             { kind: 'INQUIRY', id: inquiry.id }, ['RESPONDER_REASSIGN']);
           if (inquiryActions.length) pendingInquiries.push({ inquiryId: inquiry.id,
             assignmentRevision: current.revision, label: 'استعلام در انتظار پاسخ', actions: inquiryActions });
         }
       }
+      const visibleActions = gates.identityVerified && identityRevisionOptions.length === 0
+        ? actions.filter(item => item.action !== 'IDENTITY_VERIFY')
+        : actions;
       projected.push({
         profile: profileView.data,
         displayName: label(profile.user),
-        actions,
+        actions: visibleActions,
         ...(gates.identityVerified && identity && typeof identitySource?.evidenceId === 'string' &&
-          (can('IDENTITY_VERIFY') || can('PROFILE_ACTIVATE')) ? { identity: {
+          profileVisibility.visible ? { identity: {
             evidenceId: identitySource.evidenceId, legalName: identity.legalName, phone: identity.phone,
             address: identity.address, personType: identitySource.personType === 'LEGAL' ? 'LEGAL' as const : 'NATURAL' as const,
           } } : {}),
+        ...(gates.identityVerified && identityRevisionOptions.length ? { identityRevision: {
+          options: identityRevisionOptions,
+        } } : {}),
         ...(can('COMMERCIAL_TERMS_MANAGE') ? { commercialTerms: {
           ...(commercial ? { currentVersionId: policyId(commercial.terms) ?? commercial.id } : {}),
           summary: commercial ? 'شرایط تجاری جاری ثبت شده است.' : 'شرایط تجاری هنوز ثبت نشده است.',

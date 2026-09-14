@@ -7,6 +7,7 @@ import { createPartnerResponderAssignmentService } from '../partnerSales/managem
 import { resolveEligibleResponder, resolveProfileResponder } from '../partnerSales/inquiries/adapters';
 import { grantScopedAction } from '../effectiveAuthorization/scopedActions';
 import { createPartnerInquiryService } from '../partnerSales/inquiries/service';
+import { resolvePartnerWorkspaceAuthority } from '../partnerSales/authorization/workspaceAuthority';
 
 function localDatabaseUrl(): string {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -30,7 +31,8 @@ test('profile responder assignment is append-only, CAS protected and exactly rep
     await database.$transaction(async tx => {
       const suffix = randomUUID(), actorId = `manager-${suffix}`, partnerId = `partner-${suffix}`;
       const responderA = `responder-a-${suffix}`, responderB = `responder-b-${suffix}`;
-      await tx.user.createMany({ data: [actorId, partnerId, responderA, responderB].map((id, index) => ({ id,
+      const viewerId = `sales-viewer-${suffix}`, salesAdminId = `sales-admin-${suffix}`;
+      await tx.user.createMany({ data: [actorId, partnerId, responderA, responderB, viewerId, salesAdminId].map((id, index) => ({ id,
         username: id, email: `${id}@example.invalid`, password: 'not-a-login', firstName: `User${index}`, lastName: 'Fixture',
         ...(id === actorId ? { role: 'ADMIN' as const } : {}) })) });
       await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
@@ -41,8 +43,20 @@ test('profile responder assignment is append-only, CAS protected and exactly rep
       await tx.partnerCohortMembership.create({ data: { id: partnerId, profileId: partnerId, cohortId: partnerId,
         actorId, eligibilityEvidence: { fixture: true } } });
       const adminResponder = await resolveEligibleResponder(tx, { responderId: actorId });
-      assert.equal(adminResponder.ok ? null : adminResponder.error.code, 'NOT_ASSIGNED',
-        'مدیر سیستم پاسخ‌دهنده عادی قیمت نیست');
+      assert.equal(adminResponder.ok, true, 'مدیر سیستم در محدوده ضمنی فروش، پاسخ‌دهنده واجد شرایط است');
+      await tx.workspacePermission.createMany({ data: [
+        ...[responderA, responderB].map(userId => ({ userId, workspace: 'sales', permissionLevel: 'edit' as const, grantedBy: actorId })),
+        { userId: viewerId, workspace: 'sales', permissionLevel: 'view' as const, grantedBy: actorId },
+        { userId: salesAdminId, workspace: 'sales', permissionLevel: 'admin' as const, grantedBy: actorId },
+      ] });
+      const viewerAuthority = await resolvePartnerWorkspaceAuthority(tx, viewerId);
+      assert.deepEqual([viewerAuthority.canViewAssigned, viewerAuthority.canRespondAssigned, viewerAuthority.canManageInquiries],
+        [true, false, false]);
+      assert.equal((await resolveEligibleResponder(tx, { responderId: viewerId })).ok, false,
+        'دسترسی View فروش نباید کاربر را پاسخ‌دهنده واجد شرایط کند');
+      const salesAdminAuthority = await resolvePartnerWorkspaceAuthority(tx, salesAdminId);
+      assert.deepEqual([salesAdminAuthority.canViewAssigned, salesAdminAuthority.canRespondAssigned,
+        salesAdminAuthority.canManageInquiries], [true, true, true]);
       for (const responderId of [responderA, responderB]) await grantScopedAction(tx,
         { actorId, reason: 'مجوز پاسخ استعلام برای تست', correlationId: `grant-${responderId}` },
         { principal: { kind: 'USER', id: responderId }, domain: 'PARTNER', action: 'INQUIRY_RESPOND',
@@ -66,7 +80,7 @@ test('profile responder assignment is append-only, CAS protected and exactly rep
         assert.equal(initial.value.assignedByActorId, actorId);
         assert.equal(initial.value.profileAssignmentRevision, 1);
         assert.equal((initial.value.eligibilityEvidence.currentEligibility as { source?: string }).source,
-          'CURRENT_RESPONDER_AUTHORITY');
+          'SALES_WORKSPACE_AUTHORITY');
       }
       await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: false } });
       const rows = [{ rowId: `${partnerId}-inquiry-row`, configuration: { recoveryId: `${partnerId}-recovery`,

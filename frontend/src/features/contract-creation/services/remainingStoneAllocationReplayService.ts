@@ -1,4 +1,5 @@
 import type { ContractProduct, RemainingStone, StonePartition } from '../types/contract.types';
+import { calculatePricing, parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 import { recalculateUsedRemainingDimensions } from '../utils/dimensionUtils';
 import { ensureContractProductRowIds } from '../utils/contractProductIdentity';
 import {
@@ -10,7 +11,6 @@ import {
 import { allocateRemainingStonePartitions } from './remainingStonePartitionService';
 import { recalculateRemainingChildAddOns } from './remainingStoneChildAddOnService';
 import { calculateSlabRemainingStones, calculateSmartLongitudinalCutPlan } from './remainingStoneService';
-import { calculateRemainingChildCuttingBreakdown } from './remainingStoneCuttingService';
 
 export interface RemainingStoneReplayConflict {
   childRowId: string;
@@ -335,13 +335,28 @@ export const replayRemainingStoneAllocations = ({
 
     const stock = successfulAllocation.stockInfo.sanitized;
     const physicalPieces = successfulAllocation.physicalPiecesByRow.get(row.id) || [];
-    const widthCut = row.width < stock.width;
-    const lengthCut = row.length < stock.length;
-    const cuttingBreakdown = calculateRemainingChildCuttingBreakdown({
-      row,
-      stock,
-      rate: Number(recalculatedChild.cuttingCostPerMeter || 0)
+    const widthCut = successfulAllocation.longitudinalCutMeters > 0;
+    const lengthCut = successfulAllocation.crossCutMeters > 0;
+    const cuttingRate = Math.max(0, Number(recalculatedChild.cuttingCostPerMeter || 0) || 0);
+    const cuttingQuantities = ([
+      ['longitudinal', successfulAllocation.longitudinalCutMeters],
+      ['cross', successfulAllocation.crossCutMeters]
+    ] as const).filter(([, meters]) => meters > 0);
+    const canonicalCutting = calculatePricing({
+      policyVersion: 'pricing-v1',
+      roundingPolicyVersion: 'rounding-v2',
+      lines: cuttingQuantities.map(([type, meters]) => ({
+        lineId: `${row.id}:${type}-cut`,
+        quantity: parseCanonicalDecimal(String(meters)),
+        rateToman: parseCanonicalDecimal(String(cuttingRate))
+      }))
     });
+    const cuttingBreakdown = cuttingQuantities.map(([type, meters]) => ({
+      type,
+      meters,
+      rate: cuttingRate,
+      cost: Number(canonicalCutting.lines.find(line => line.lineId === `${row.id}:${type}-cut`)?.amountToman ?? 0)
+    }));
     const cuttingCost = cuttingBreakdown.reduce((total, entry) => total + entry.cost, 0);
     const allocationOrder = getAllocationOrder(recalculatedChild, replayIndex);
     let generatedRemainingStoneIds =
@@ -413,6 +428,7 @@ export const replayRemainingStoneAllocations = ({
           generatedRemainingStoneIds,
           sourceGroupKey: successfulGroupKey || undefined,
           consumedSourceStoneIds,
+          sourcePieceQuantities: successfulAllocation.sourcePieceQuantitiesByRow.get(row.id),
           physicalPieces
         },
         pricing: {

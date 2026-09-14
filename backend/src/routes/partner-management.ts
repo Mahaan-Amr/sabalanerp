@@ -57,7 +57,8 @@ function authorizeFor(request: AuthRequest, correlationId: string) {
     const evidence = await readAuthorizationDecisionByCorrelation(tx, { domain: 'PARTNER', actorId: request.user!.id,
       action: input.action, rootKind: input.root.kind, rootId: input.root.id, purpose: input.purpose,
       channel: 'API', correlationId, allowed: true });
-    return evidence ? { ok: true as const, value: { evidenceId: evidence.id } }
+    return evidence ? { ok: true as const, value: { evidenceId: evidence.id,
+      managementOverride: result.value.isAdmin || result.value.scope === 'COMPANY' } }
       : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
   };
 }

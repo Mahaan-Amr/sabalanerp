@@ -92,6 +92,94 @@ assert.equal(pricedCut.ok, true);
 if (!pricedCut.ok) throw new Error('Expected remainder cut pricing.');
 assert.equal(pricedCut.result.allocations[0]?.cuttingAmountToman, '300');
 
+const splitLogicalPiece = replayRemainderAllocations({
+  policyVersion: 'packing-v1',
+  pricingPolicyVersion: 'pricing-v1',
+  roundingPolicyVersion: 'rounding-v1',
+  baseInventory: [stock('split', {
+    remainingStoneId: id('remaining-stone', 'stock-split'),
+    lengthMeters: c('2'),
+    widthMeters: c('0.09'),
+    quantity: 1
+  })],
+  childIntents: [child('split', {
+    selectedRemainingStoneId: id('remaining-stone', 'stock-split'),
+    lengthMeters: c('6'),
+    widthMeters: c('0.03'),
+    quantity: 1,
+    sourcePieceQuantities: [3],
+    physicalPieces: Array.from({ length: 3 }, () => ({
+      logicalPieceOrdinal: 1,
+      lengthMeters: c('2'),
+      widthMeters: c('0.03')
+    }))
+  })]
+});
+assert.equal(splitLogicalPiece.ok, true);
+if (!splitLogicalPiece.ok) throw new Error('Expected a witnessed logical piece split across physical segments.');
+assert.equal(splitLogicalPiece.result.allocations[0].consumedSourcePieces, 1);
+assert.equal(splitLogicalPiece.result.allocations[0].packingPlan.placements.length, 3);
+assert.equal(splitLogicalPiece.result.inventory.length, 0);
+
+const heterogeneousSegments = replayRemainderAllocations({
+  policyVersion: 'packing-v1',
+  pricingPolicyVersion: 'pricing-v1',
+  roundingPolicyVersion: 'rounding-v1',
+  baseInventory: [stock('heterogeneous', {
+    remainingStoneId: id('remaining-stone', 'stock-heterogeneous'),
+    lengthMeters: c('2'),
+    widthMeters: c('0.03'),
+    quantity: 2
+  })],
+  childIntents: [child('heterogeneous', {
+    selectedRemainingStoneId: id('remaining-stone', 'stock-heterogeneous'),
+    lengthMeters: c('3'),
+    widthMeters: c('0.03'),
+    quantity: 1,
+    sourcePieceQuantities: [1, 1],
+    physicalPieces: [
+      { logicalPieceOrdinal: 1, lengthMeters: c('2'), widthMeters: c('0.03') },
+      { logicalPieceOrdinal: 1, lengthMeters: c('1'), widthMeters: c('0.03') }
+    ]
+  })]
+});
+assert.equal(heterogeneousSegments.ok, true);
+if (!heterogeneousSegments.ok) throw new Error('Expected heterogeneous physical segments to preserve their sources.');
+assert.equal(heterogeneousSegments.result.allocations[0].consumedSourcePieces, 2);
+assert.deepEqual(
+  heterogeneousSegments.result.inventory.map(item => [item.lengthMeters, item.widthMeters, item.quantity]),
+  [['1', '0.03', 1]]
+);
+
+const invalidSplitEvidence = replayRemainderAllocations({
+  policyVersion: 'packing-v1',
+  pricingPolicyVersion: 'pricing-v1',
+  roundingPolicyVersion: 'rounding-v1',
+  baseInventory: [stock('main')],
+  childIntents: [child('invalid-split', {
+    sourcePieceQuantities: [1],
+    physicalPieces: [{ logicalPieceOrdinal: 1, lengthMeters: c('1'), widthMeters: c('0.12') }]
+  })]
+});
+assert.equal(invalidSplitEvidence.ok, false);
+if (!invalidSplitEvidence.ok) assert.equal(invalidSplitEvidence.conflicts[0].code, 'invalid-remainder-input');
+
+const mergedLogicalPieces = replayRemainderAllocations({
+  policyVersion: 'packing-v1',
+  pricingPolicyVersion: 'pricing-v1',
+  roundingPolicyVersion: 'rounding-v1',
+  baseInventory: [stock('main')],
+  childIntents: [child('merged-logical', {
+    lengthMeters: c('3'),
+    widthMeters: c('0.04'),
+    quantity: 2,
+    sourcePieceQuantities: [1],
+    physicalPieces: [{ logicalPieceOrdinal: 1, lengthMeters: c('6'), widthMeters: c('0.04') }]
+  })]
+});
+assert.equal(mergedLogicalPieces.ok, false);
+if (!mergedLogicalPieces.ok) assert.equal(mergedLogicalPieces.conflicts[0].code, 'invalid-remainder-input');
+
 const missingCutRate = replayRemainderAllocations({
   policyVersion: 'packing-v1',
   pricingPolicyVersion: 'pricing-v1',

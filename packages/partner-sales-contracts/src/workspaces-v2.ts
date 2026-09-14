@@ -32,6 +32,8 @@ export const PartnerManagementProfileViewV2Schema = z.object({
   profile: PartnerProfileViewSchema, displayName: TextSchema, actions,
   identity: z.object({ evidenceId: IdSchema, legalName: TextSchema, phone: TextSchema,
     address: TextSchema, personType: z.enum(['NATURAL', 'LEGAL']) }).strict().optional(),
+  identityRevision: z.object({ options: z.array(z.object({ id: IdSchema, label: TextSchema,
+    changes: z.array(TextSchema).min(1) }).strict()) }).strict().optional(),
   commercialTerms: terms.optional(), creditTerms: terms.optional(),
   responder: z.object({ currentId: IdSchema.optional(), displayName: TextSchema.optional(), eligibleOptions: options,
     pendingInquiries: z.array(z.object({ inquiryId: IdSchema, assignmentRevision: RevisionSchema, label: TextSchema, actions }).strict())
@@ -64,6 +66,8 @@ export const PartnerManagementWorkspaceViewV2Schema = z.object({
 export type PartnerManagementWorkspaceViewV2 = z.infer<typeof PartnerManagementWorkspaceViewV2Schema>;
 
 const responderRow = ResponderInquiryViewSchema.shape.rows.element.extend({
+  description: TextSchema,
+  configuration: z.array(z.object({ label: TextSchema, value: TextSchema }).strict()).min(1),
   state: InquiryRowStateV2Schema, approvedAt: InstantSchema.optional(), expiresAt: InstantSchema.optional(),
   noteOrReason: TextSchema.optional(), actions,
 }).strict().superRefine((row, context) => {
@@ -81,7 +85,7 @@ const responderRow = ResponderInquiryViewSchema.shape.rows.element.extend({
   }
 });
 export const ResponderInquiryViewV2Schema = ResponderInquiryViewSchema.extend({
-  schemaVersion: z.literal(2), actions,
+  schemaVersion: z.literal(2), submittedAt: InstantSchema, actions,
   rows: z.array(responderRow).refine(rows => new Set(rows.map(row => row.rowId)).size === rows.length, 'Duplicate inquiry row'),
 }).strict();
 export type ResponderInquiryViewV2 = z.infer<typeof ResponderInquiryViewV2Schema>;

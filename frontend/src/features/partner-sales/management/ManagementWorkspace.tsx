@@ -38,6 +38,7 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
     : choice?.profile?.actions || choice?.transfer?.actions || resource.view?.actions || [];
   const availability = choice && actionPresentation(availabilitySource, choice.action, now);
   const options = choice?.action === 'PROFILE_CREATE' ? resource.view?.identityCandidates?.map(item => ({ id: item.identityEvidenceId, label: item.displayName })) || []
+    : choice?.action === 'IDENTITY_VERIFY' && choice.profile?.identityRevision ? choice.profile.identityRevision.options
     : choice?.action === 'COMMERCIAL_TERMS_MANAGE' ? choice.profile?.commercialTerms?.options || []
       : choice?.action === 'CREDIT_TERMS_MANAGE' ? choice.profile?.creditTerms?.options || []
         : choice?.action === 'RESPONDER_ASSIGN' || choice?.action === 'RESPONDER_REASSIGN' ? choice.profile?.responder?.eligibleOptions || [] : null;
@@ -66,6 +67,8 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
       else if (choice!.action === 'PROFILE_CREATE') outcome = await session.submitManagement({ type: 'PROFILE_CREATE', identityEvidenceId: option, reason }, option);
       else if (choice!.action === 'CUSTOMER_TRANSFER_DECIDE' && choice!.transfer && choice!.outcome) outcome = await session.submit({ type: 'CUSTOMER_TRANSFER_DECIDE',
         transferId: choice!.transfer.transferId, expectedRevision: choice!.transfer.revision, outcome: choice!.outcome, reason }, choice!.transfer.transferId);
+      else if (target && choice!.action === 'IDENTITY_VERIFY' && choice!.profile!.identityRevision) outcome = await session.submitManagement({
+        type: 'IDENTITY_VERSION_REGISTER', ...target, evidenceId: option }, target.profileId);
       else if (target && choice!.action === 'IDENTITY_VERIFY' && choice!.profile!.identity) outcome = await session.submitManagement({ type: 'IDENTITY_VERIFY', ...target,
         evidenceId: choice!.profile!.identity.evidenceId }, target.profileId);
       else if (target && (choice!.action === 'COMMERCIAL_TERMS_MANAGE' || choice!.action === 'CREDIT_TERMS_MANAGE')) outcome = await session.submitManagement({
@@ -107,7 +110,7 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
       <ManagementView view={resource.view} now={now} disabled={locked || resource.loading || Boolean(resource.error)} onChoose={choose} />
     </>}
     {choice && <PartnerDecision key={`${choice.action}:${choice.profile?.profile.profileId || choice.transfer?.transferId || 'create'}:${choice.outcome || ''}`}
-      title={actionLabels[choice.action] || 'ثبت تصمیم'} consequence={consequence} open pending={locked} danger={choice.action === 'PROFILE_TERMINATE'}
+      title={choice.action === 'IDENTITY_VERIFY' && choice.profile?.identityRevision ? 'ثبت نسخه جدید هویت' : actionLabels[choice.action] || 'ثبت تصمیم'} consequence={consequence} open pending={locked} danger={choice.action === 'PROFILE_TERMINATE'}
       disabled={!availability?.enabled || mustReview || resource.loading || Boolean(resource.error)} onClose={() => setChoice(null)} onConfirm={reason => void submit(reason)}
       feedback={<CommandFeedbackView feedback={feedback} pending={pending} onRetry={() => void submit('', true)} onRefresh={() => void refreshDecision()} />}>
       {availability?.reason && <ErpInlineState kind="permission" title={availability.reason} />}
@@ -116,6 +119,8 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
           <option value="">انتخاب کنید</option>{options.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
         </ErpSelect>
       </ErpField>}
+      {choice.action === 'IDENTITY_VERIFY' && choice.profile?.identityRevision && option && <ErpInlineState kind="empty"
+        title={`تغییرات نسخه جدید: ${choice.profile.identityRevision.options.find(item => item.id === option)?.changes.join('؛ ') || '—'}`} />}
       {choice.action === 'RESPONDER_REASSIGN' && <ErpField label="استعلام منتظر پاسخ" required error={fieldError}>
         <ErpSelect value={inquiryId} disabled={locked || mustReview} onChange={event => setInquiryId(event.target.value)}><option value="">انتخاب کنید</option>
           {inquiryOptions.map(item => <option key={item.inquiryId} value={item.inquiryId} disabled={!actionPresentation(item.actions, 'RESPONDER_REASSIGN', now)?.enabled}>{item.label}</option>)}

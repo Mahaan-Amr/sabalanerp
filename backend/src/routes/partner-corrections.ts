@@ -21,6 +21,17 @@ function respond(response: Response, result: Result<unknown>) {
     error: result.error.message, supportReference: randomUUID() });
 }
 
+function tehranDate(value: Date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
+}
+
+function editableInstallmentIds(state: Awaited<ReturnType<typeof readRetailCorrectionState>>, now: Date) {
+  const current = state?.outcome.effective.customerPaymentPlan;
+  const date = tehranDate(now);
+  return current?.installments.filter(installment => installment.dueDate > date)
+    .map(installment => installment.installmentId) ?? [];
+}
+
 export function createPartnerCorrectionRouter(input: { database?: PrismaClient; authenticate?: RequestHandler } = {}) {
   const prisma = input.database ?? applicationPrisma;
   const router = Router();
@@ -47,13 +58,14 @@ export function createPartnerCorrectionRouter(input: { database?: PrismaClient; 
         ]);
         const serialized = state?.outcome as { correction?: { correctionId: string; status: string;
           opportunity?: { opportunityId: string; expiresAt: string }; successor?: unknown } } | undefined;
+        const editableCustomerInstallmentIds = editableInstallmentIds(state, clock[0].now);
         if (serialized?.correction) {
           const correction = serialized.correction;
           return { ok: true as const, value: { opportunityId: correction.opportunity?.opportunityId ?? correction.correctionId,
             scope: 'RETAIL_ONLY', status: correction.status === 'SCOPE_APPROVED' ? 'APPROVED_TO_EDIT'
               : correction.status === 'AWAITING_CUSTOMER_CONFIRMATION' ? 'SAVED' : correction.status,
             expiresAt: correction.opportunity?.expiresAt, saved: Boolean(correction.successor),
-            editableCustomerInstallmentIds: [] } };
+            editableCustomerInstallmentIds } };
         }
         if (!opportunity) return { ok: true as const, value: null };
         const rejected = opportunity.gates.some(gate => gate.outcome === 'REJECT');
@@ -63,7 +75,7 @@ export function createPartnerCorrectionRouter(input: { database?: PrismaClient; 
             : opportunity.approvedBy === 'PENDING_SCOPE' ? 'REQUESTED'
               : opportunity.expiresAt <= clock[0].now ? 'EXPIRED' : 'APPROVED_TO_EDIT',
           expiresAt: opportunity.expiresAt.toISOString(), saved: Boolean(opportunity.save),
-          editableCustomerInstallmentIds: [] } };
+          editableCustomerInstallmentIds } };
       });
       respond(response, result);
     } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }

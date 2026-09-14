@@ -6121,12 +6121,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           <ErpInlineState
             kind={editRecovery.blockReason === 'permission'
               ? 'permission'
-              : editRecovery.blockReason === 'takeover-failed'
+              : editRecovery.blockReason === 'takeover-failed' ||
+                  editRecovery.blockReason === 'recovery-conflict'
                 ? 'error'
                 : 'stale'}
             title={getContractEditRecoveryMessage(editRecovery.blockReason)}
             className="mb-4"
-            action={editRecovery.blockReason === 'permission'
+            action={editRecovery.blockReason === 'permission' ||
+              editRecovery.blockReason === 'recovery-conflict'
               ? undefined
               : editRecovery.blockReason === 'revision-conflict'
                 ? {
@@ -6143,7 +6145,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     variant: 'solid'
                   }}
             actions={editRecovery.blockReason === 'permission' ||
-              editRecovery.blockReason === 'revision-conflict'
+              editRecovery.blockReason === 'revision-conflict' ||
+              editRecovery.blockReason === 'recovery-conflict'
               ? []
               : [{
                   label: 'ایجاد قرارداد جدید',

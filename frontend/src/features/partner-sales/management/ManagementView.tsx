@@ -52,7 +52,10 @@ export function ManagementView({ view, now, disabled, onChoose }: {
             {item.identity && <ErpCard className="space-y-4 p-4"><h3 className="font-bold">هویت همکاری</h3>
               <ErpSummaryGrid items={[{ label: 'نام قانونی', value: item.identity.legalName }, { label: 'نوع شخص', value: item.identity.personType === 'LEGAL' ? 'حقوقی' : 'حقیقی' },
                 { label: 'تلفن', value: item.identity.phone }, { label: 'نشانی', value: item.identity.address }]} />
-              {action('IDENTITY_VERIFY')}
+              {item.identityRevision
+                ? <ProjectedAction action="IDENTITY_VERIFY" label="ثبت نسخه جدید هویت" actions={item.actions} now={now}
+                  disabled={disabled} onClick={() => onChoose({ action: 'IDENTITY_VERIFY', profile: item })} />
+                : action('IDENTITY_VERIFY')}
             </ErpCard>}
             {item.commercialTerms && <ErpCard className="space-y-3 p-4"><ErpFieldView label="شرایط تجاری" value={item.commercialTerms.summary} />{action('COMMERCIAL_TERMS_MANAGE')}</ErpCard>}
             {item.creditTerms && <ErpCard className="space-y-3 p-4"><ErpFieldView label="اعتبار و پرداخت به سبلان" value={item.creditTerms.summary} />{action('CREDIT_TERMS_MANAGE')}</ErpCard>}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { FaBell, FaCalendarAlt, FaKey, FaRedo, FaShieldAlt, FaUser } from 'react-icons/fa';
+import { FaBell, FaCalendarAlt, FaClipboardCheck, FaKey, FaRedo, FaShieldAlt } from 'react-icons/fa';
 import { dashboardAPI, notificationsAPI } from '@/lib/api';
 import {
   ErpActionGrid,
@@ -76,6 +76,7 @@ export default function PersonalHubPage() {
             </ErpSection>
             <ErpActionGrid columns={4} compact items={[
               { title: 'مرخصی‌های من', href: '/dashboard/personal/leave', icon: FaCalendarAlt, tone: 'primary' },
+              { title: 'نظرسنجی همکاران', href: '/dashboard/personal/performance-surveys', icon: FaClipboardCheck, tone: 'info' },
               { title: 'امنیت و نشست‌ها', href: '/dashboard/personal/security', icon: FaShieldAlt, tone: securityAlerts ? 'warning' : 'neutral', badge: securityAlerts ? <ErpBadge tone="warning">{securityAlerts.toLocaleString('fa-IR')}</ErpBadge> : undefined },
               { title: 'اعلان‌ها', href: '/dashboard/personal/notifications', icon: FaBell, tone: 'info' },
               { title: 'تغییر رمز عبور', href: '/change-password', icon: FaKey, tone: 'neutral' },

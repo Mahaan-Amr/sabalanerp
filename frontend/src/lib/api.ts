@@ -1511,9 +1511,25 @@ export const personnelPerformanceAPI = {
   saveSimpleEvaluation: (evaluationId: string, values: Array<{ indicatorId: string; actual: string }>) => api.put(
     `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/draft`, { values },
   ),
-  finalizeSimpleEvaluation: (evaluationId: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/finalize`),
+  finalizeSimpleEvaluation: (evaluationId: string, input?: { confirmedSeriousViolation?: boolean }) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/finalize`, input ?? {}),
   correctSimpleEvaluation: (evaluationId: string, reason: string) => api.post(
     `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/corrections`, { reason },
+  ),
+  sellerPerformancePolicy: () => api.get('/hr/personnel-performance/seller-policy'),
+  behaviorSurveys: () => api.get('/hr/personnel-performance/behavior-surveys'),
+  createBehaviorSurvey: (input: unknown) => api.post('/hr/personnel-performance/behavior-surveys', input),
+  updateBehaviorSurvey: (campaignId: string, input: unknown) => api.put(
+    `/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}`, input,
+  ),
+  activateBehaviorSurvey: (campaignId: string, input: { opensAt: string; closesAt: string }) => api.post(
+    `/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}/activate`, input,
+  ),
+  assignedBehaviorSurveys: () => api.get('/hr/personnel-performance/behavior-surveys/assigned'),
+  saveBehaviorSurveyResponse: (campaignId: string, targetPersonnelId: string, input: unknown) => api.put(
+    `/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}/responses/${encodeURIComponent(targetPersonnelId)}`, input,
+  ),
+  behaviorSurveyAggregate: (campaignId: string) => api.get(
+    `/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}/aggregate`,
   ),
   personalBadge: () => api.get('/hr/personnel-performance/badge/me'),
   badges: (personnelIds: string[]) => api.post('/hr/personnel-performance/badges', { personnelIds }),

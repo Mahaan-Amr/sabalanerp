@@ -19,8 +19,8 @@ export function PerformanceBadge({ badge }: { badge: PerformanceBadgeSummary; co
       className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 py-1 text-right dark:border-[var(--sds-border-strong)]"
     >
       <span className="relative block h-9 w-9 shrink-0" aria-hidden="true">
-        <Image src={presentation.lightAsset} alt="" fill sizes="36px" className="object-contain dark:hidden" unoptimized />
-        <Image src={presentation.darkAsset} alt="" fill sizes="36px" className="hidden object-contain dark:block" unoptimized />
+        <Image src={presentation.lightAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="object-contain dark:hidden" unoptimized />
+        <Image src={presentation.darkAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="hidden object-contain dark:block" unoptimized />
       </span>
       <span className="text-xs font-bold text-[var(--sds-text-primary)]">{presentation.labelFa}</span>
       <span className="sr-only">{presentation.meaningFa}</span>
@@ -29,11 +29,18 @@ export function PerformanceBadge({ badge }: { badge: PerformanceBadgeSummary; co
       <div className="space-y-4" dir="rtl">
         <ErpCard className="flex items-center gap-4 p-4">
           <span className="relative block h-20 w-20 shrink-0" aria-hidden="true">
-            <Image src={presentation.lightAsset} alt="" fill sizes="80px" className="object-contain dark:hidden" unoptimized />
-            <Image src={presentation.darkAsset} alt="" fill sizes="80px" className="hidden object-contain dark:block" unoptimized />
+            <Image src={presentation.lightAsset} alt="" fill sizes="80px" style={{ filter: presentation.imageFilter }} className="object-contain dark:hidden" unoptimized />
+            <Image src={presentation.darkAsset} alt="" fill sizes="80px" style={{ filter: presentation.imageFilter }} className="hidden object-contain dark:block" unoptimized />
           </span>
           <div><ErpBadge tone={presentation.tone}>{presentation.labelFa}</ErpBadge><p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">{presentation.meaningFa}</p></div>
         </ErpCard>
+        {badge.officialResult === false && <ErpCard className="p-4"><p className="font-bold">بدون نتیجه رسمی</p><p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">نشان «همراه» تا ثبت نخستین نتیجه معتبر نمایش داده می‌شود و در تصمیم‌های رسمی یا تحلیل رقابتی محاسبه نمی‌شود.</p></ErpCard>}
+        {badge.details && <>
+          <dl className="grid gap-3 sm:grid-cols-3">
+            {[['امتیاز کل', badge.details.score], ['رفتاری', badge.details.behavioralScore], ['عملکردی', badge.details.performanceScore]].map(([label, value]) => <ErpCard key={label} className="p-3"><dt className="text-xs text-[var(--sds-text-muted)]">{label}</dt><dd className="mt-1 text-lg font-black">{value ?? '—'}</dd></ErpCard>)}
+          </dl>
+          <div className="space-y-2"><p className="font-bold">جزئیات عوامل</p>{badge.details.factors.map((factor) => <ErpCard key={factor.code} className="p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-bold">{factor.titleFa}</p><p className="mt-1 text-xs text-[var(--sds-text-muted)]">مقدار: {factor.actual} {factor.unitFa} · هدف: {factor.target} · نمونه: {(factor.sampleCount ?? 1).toLocaleString('fa-IR')}</p>{factor.sourceReference && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">مرجع: {factor.sourceReference}</p>}</div><ErpBadge tone="neutral">{factor.score ?? '—'}</ErpBadge></div></ErpCard>)}</div>
+        </>}
         {(badge.newestMeasurementTo || badge.nextReviewAt) && <dl className="grid gap-3 sm:grid-cols-2">
           {badge.newestMeasurementTo && <ErpCard className="p-3"><dt className="text-xs text-[var(--sds-text-muted)]">پایان تازه‌ترین بازه سنجش</dt><dd className="mt-1 text-sm font-bold">{dateFa(badge.newestMeasurementTo)}</dd></ErpCard>}
           {badge.nextReviewAt && <ErpCard className="p-3"><dt className="text-xs text-[var(--sds-text-muted)]">بازبینی بعدی محاسبه</dt><dd className="mt-1 text-sm font-bold">{dateFa(badge.nextReviewAt)}</dd></ErpCard>}

@@ -34,6 +34,10 @@ try {
       stableKey: 'simple-performance-test-grant', userId: actor.id, featureCode: 'EVALUATE_ALL_PERSONNEL',
       level: 'EDIT', effectiveFrom: new Date(Date.now() - 60_000), reason: 'آزمون ارزیابی ساده',
     } });
+    await tx.hrFeatureAccessGrant.create({ data: {
+      stableKey: 'simple-performance-finalize-grant', userId: actor.id, featureCode: 'FINALIZE_PERFORMANCE_RESULTS',
+      level: 'ADMIN', effectiveFrom: new Date(Date.now() - 60_000), reason: 'آزمون نهایی‌سازی ارزیابی',
+    } });
     const profile = await tx.simplePerformanceProfile.findUniqueOrThrow({
       where: { id: 'simple-profile-sales-v1' }, include: { indicators: { orderBy: { sortOrder: 'asc' } } },
     });
@@ -56,8 +60,8 @@ try {
     });
     const finalized = await finalizeSimplePerformanceEvaluation(tx, { actorUserId: actor.id, evaluationId: first.id });
     assert.equal(finalized.employmentRelationshipId, targetRelationship.id);
-    assert.equal(finalized.score?.toString(), '100');
-    assert.equal(finalized.levelCode, 'OUTSTANDING');
+    assert.equal(finalized.score?.toString(), '75');
+    assert.equal(finalized.levelCode, 'CAPABLE');
 
     const second = await createSimplePerformanceEvaluation(tx, { actorUserId: actor.id, personnelId: personnel.id, evaluationDate: today });
     assert.notEqual(second.id, first.id, 'more than one evaluation is allowed on the same day');
@@ -69,7 +73,7 @@ try {
     assert.equal(second.status, 'DRAFT', 'an independent evaluation is not replaced by a correction');
 
     const badges = await getSimplePerformanceBadges(tx, [personnel.id]);
-    assert.equal((badges[personnel.id] as { levelCode: string }).levelCode, 'OUTSTANDING');
+    assert.equal((badges[personnel.id] as { levelCode: string }).levelCode, 'CAPABLE');
     assert.ok(!(badges[personnel.id] as { meaningFa: string }).meaningFa.includes('100'));
 
     const evaluatorOnlyWorkspace = await getSimplePerformanceWorkspace(tx, actor.id);
@@ -241,8 +245,10 @@ try {
     await tx.hrEmploymentRelationship.create({ data: {
       personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date(), createdBy: actor.id,
     } });
-    assert.equal((await getSimplePerformanceBadges(tx, [personnel.id]))[personnel.id], undefined,
-      'a badge from a previous employment relationship must not transfer to a new relationship');
+    assert.deepEqual((await getSimplePerformanceBadges(tx, [personnel.id]))[personnel.id], {
+      state: 'LEVEL', levelCode: 'COMPANION', labelFa: 'همراه',
+      meaningFa: 'هنوز نتیجه رسمی هفت‌سطحی ثبت نشده است.', version: 2, officialResult: false,
+    }, 'a rehire starts at the visible companion level without transferring the former result');
     throw rollback;
   });
 } catch (error) {

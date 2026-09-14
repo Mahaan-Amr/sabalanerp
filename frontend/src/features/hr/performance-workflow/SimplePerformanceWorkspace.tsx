@@ -6,6 +6,7 @@ import {
   ErpBadge,
   ErpButton,
   ErpCard,
+  ErpCheckbox,
   ErpField,
   ErpInlineState,
   ErpInput,
@@ -19,15 +20,17 @@ import {
 } from "@/components/erp";
 import { personnelPerformanceAPI } from "@/lib/api";
 import { dateFa, dateTimeFa } from "@/features/hr/hrUi";
+import BehaviorSurveyAdministration from "@/features/hr/performance-survey/BehaviorSurveyAdministration";
 
 type Indicator = {
   id: string; code: string; categoryFa?: string | null; titleFa: string; unitFa: string;
-  target: string; direction: "HIGHER_IS_BETTER" | "LOWER_IS_BETTER"; weightPercent: string; sortOrder: number;
+  target: string; direction: "HIGHER_IS_BETTER" | "LOWER_IS_BETTER" | "CAPPED_RATE"; weightPercent: string; sortOrder: number;
+  familyCode?: string | null; sourceKind?: "SYSTEM" | "SUPERVISOR" | "SURVEY"; minimumSampleCount?: number;
 };
 type Profile = { id: string; stableKey: string; nameFa: string; version: number; indicators: Indicator[] };
 type Personnel = { id: string; firstName: string; lastName: string; employeeNumber?: string | null; department?: { name: string } | null };
 type Assignment = { personnelId: string; profileId: string; profile: Profile };
-type Value = { indicatorId: string; actual: string; score?: string | null };
+type Value = { indicatorId: string; actual: string; score?: string | null; sampleCount?: number | null; sourceReference?: string | null };
 type Evaluation = {
   id: string; personnelId: string; evaluationDate: string; status: "DRAFT" | "FINAL";
   createdAt: string;
@@ -50,15 +53,12 @@ type Workspace = {
 type ProfileIndicatorDraft = Omit<Indicator, "id" | "sortOrder">;
 
 const levelLabels: Record<string, string> = {
-  URGENT_IMPROVEMENT: "نیازمند بهبود فوری",
-  NEEDS_IMPROVEMENT: "نیازمند بهبود",
-  MEETS_EXPECTATIONS: "مطابق انتظار",
-  EXCEEDS_EXPECTATIONS: "فراتر از انتظار",
-  OUTSTANDING: "عملکرد برجسته",
+  COMPANION: "همراه", DILIGENT: "کوشا", WORTHY: "شایسته", CAPABLE: "توانمند",
+  SUPERIOR: "برتر", EXCELLENT: "سرآمد", ROLE_MODEL: "الگو",
 };
-const levelTones: Record<string, "danger" | "warning" | "success" | "primary" | "purple"> = {
-  URGENT_IMPROVEMENT: "danger", NEEDS_IMPROVEMENT: "warning", MEETS_EXPECTATIONS: "success",
-  EXCEEDS_EXPECTATIONS: "primary", OUTSTANDING: "purple",
+const levelTones: Record<string, "neutral" | "warning" | "success" | "primary" | "purple"> = {
+  COMPANION: "neutral", DILIGENT: "warning", WORTHY: "success", CAPABLE: "success",
+  SUPERIOR: "primary", EXCELLENT: "purple", ROLE_MODEL: "purple",
 };
 const todayInTehran = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
@@ -78,24 +78,26 @@ const errorText = (error: unknown) => {
 };
 const emptyIndicator = (): ProfileIndicatorDraft => ({
   code: "", categoryFa: "", titleFa: "", unitFa: "", target: "", direction: "HIGHER_IS_BETTER", weightPercent: "",
+  familyCode: "", sourceKind: "SYSTEM", minimumSampleCount: 1,
 });
 const previewPerformance = (profile: Profile | undefined, values: Record<string, string>) => {
   if (!profile || !profile.indicators.every(({ id }) => values[id]?.trim())) return null;
-  let allTargetsReached = true;
   const score = profile.indicators.reduce((total, indicator) => {
     const target = Number(indicator.target);
     const actual = Number(values[indicator.id]);
-    const reached = indicator.direction === "HIGHER_IS_BETTER" ? actual >= target : actual <= target;
-    allTargetsReached = allTargetsReached && reached;
-    const indicatorScore = indicator.direction === "HIGHER_IS_BETTER"
-      ? Math.min(100, actual / target * 100)
-      : target === 0 ? (actual === 0 ? 100 : 0) : Math.min(100, actual === 0 ? 100 : target / actual * 100);
+    let indicatorScore: number;
+    if (indicator.direction === "HIGHER_IS_BETTER") {
+      indicatorScore = actual <= target ? actual / target * 75 : 75 + ((actual / target - 1) / 0.2 * 25);
+    } else if (indicator.direction === "CAPPED_RATE") {
+      indicatorScore = actual <= target ? actual / target * 75 : 75 + ((actual - target) / (100 - target) * 25);
+    } else if (target === 0) indicatorScore = actual === 0 ? 100 : 0;
+    else indicatorScore = actual <= target ? 100 - actual / target * 25 : 75 - (actual / target - 1) * 75;
+    indicatorScore = Math.max(0, Math.min(100, indicatorScore));
     return total + indicatorScore * Number(indicator.weightPercent) / 100;
   }, 0);
-  const safeScore = !allTargetsReached && score >= 100 ? 99.9999 : score;
-  const level = allTargetsReached ? "OUTSTANDING" : safeScore >= 90 ? "EXCEEDS_EXPECTATIONS"
-    : safeScore >= 75 ? "MEETS_EXPECTATIONS" : safeScore >= 60 ? "NEEDS_IMPROVEMENT" : "URGENT_IMPROVEMENT";
-  return { score: safeScore.toFixed(2), level };
+  const level = score >= 97 ? "ROLE_MODEL" : score >= 90 ? "EXCELLENT" : score >= 80 ? "SUPERIOR"
+    : score >= 70 ? "CAPABLE" : score >= 60 ? "WORTHY" : score >= 50 ? "DILIGENT" : "COMPANION";
+  return { score: score.toFixed(2), level };
 };
 
 export default function SimplePerformanceWorkspace() {
@@ -103,14 +105,16 @@ export default function SimplePerformanceWorkspace() {
   const requestedPersonnelId = searchParams.get("personnelId") || "";
   const directEvaluationOpened = useRef(false);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [tab, setTab] = useState<"evaluate" | "profiles" | "history">("evaluate");
+  const [tab, setTab] = useState<"evaluate" | "profiles" | "surveys" | "history">("evaluate");
   const [personnelId, setPersonnelId] = useState("");
   const [evaluationId, setEvaluationId] = useState("");
   const [newEvaluationOpen, setNewEvaluationOpen] = useState(false);
   const [confirmFinalize, setConfirmFinalize] = useState(false);
+  const [confirmedSeriousViolation, setConfirmedSeriousViolation] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [evaluationDate, setEvaluationDate] = useState(todayInTehran());
   const [values, setValues] = useState<Record<string, string>>({});
+  const [valueMetadata, setValueMetadata] = useState<Record<string, { sampleCount: string; sourceReference: string }>>({});
   const [savedValuesSignature, setSavedValuesSignature] = useState("{}");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -159,7 +163,10 @@ export default function SimplePerformanceWorkspace() {
   useEffect(() => {
     if (!selectedEvaluation) return;
     const nextValues = Object.fromEntries(selectedEvaluation.values.map((value) => [value.indicatorId, String(value.actual)]));
-    setValues(nextValues); setSavedValuesSignature(JSON.stringify(nextValues));
+    const nextMetadata = Object.fromEntries(selectedEvaluation.values.map((value) => [value.indicatorId, {
+      sampleCount: String(value.sampleCount ?? 1), sourceReference: value.sourceReference || "",
+    }]));
+    setValues(nextValues); setValueMetadata(nextMetadata); setSavedValuesSignature(JSON.stringify({ values: nextValues, metadata: nextMetadata }));
   }, [selectedEvaluation]);
   const selectedPersonnel = workspace?.personnel.find(({ id }) => id === personnelId);
   const assignment = workspace?.assignments.find((item) => item.personnelId === personnelId);
@@ -172,21 +179,27 @@ export default function SimplePerformanceWorkspace() {
     }
     return Array.from(groups.entries());
   }, [history]);
-  const openDrafts = (workspace?.evaluations ?? []).filter(({ status, evaluatorUserId }) => status === "DRAFT" && evaluatorUserId === workspace?.currentUserId);
-  const canEvaluate = Boolean(workspace?.capabilities.EVALUATE_DIRECT_REPORTS || workspace?.capabilities.EVALUATE_ALL_PERSONNEL);
+  const openDrafts = (workspace?.evaluations ?? []).filter(({ status, evaluatorUserId }) => status === "DRAFT"
+    && (evaluatorUserId === workspace?.currentUserId || workspace?.capabilities.FINALIZE_PERFORMANCE_RESULTS));
+  const canEvaluate = Boolean(workspace?.capabilities.EVALUATE_DIRECT_REPORTS || workspace?.capabilities.EVALUATE_ALL_PERSONNEL
+    || workspace?.capabilities.ENTER_PERFORMANCE_EVIDENCE);
   const canEvaluateSelected = Boolean(workspace?.evaluablePersonnelIds.includes(personnelId));
   const canManageProfiles = Boolean(workspace?.capabilities.MANAGE_PERFORMANCE_PROFILES);
+  const canManageSurveys = Boolean(workspace?.capabilities.MANAGE_PERFORMANCE_SURVEYS);
   const canViewHistory = Boolean(workspace?.capabilities.VIEW_PERFORMANCE_EVALUATIONS);
+  const canFinalize = Boolean(workspace?.capabilities.FINALIZE_PERFORMANCE_RESULTS);
+  const canEditSelected = !selectedEvaluation || selectedEvaluation.evaluatorUserId === workspace?.currentUserId;
   const enteredValues = activeProfile?.indicators.flatMap((indicator) => {
     const actual = values[indicator.id]?.trim();
-    return actual ? [{ indicatorId: indicator.id, actual }] : [];
+    const metadata = valueMetadata[indicator.id];
+    return actual ? [{ indicatorId: indicator.id, actual, sampleCount: Number(metadata?.sampleCount || 1), sourceReference: metadata?.sourceReference || "" }] : [];
   }) ?? [];
   const draftComplete = Boolean(activeProfile?.indicators.every((indicator) => values[indicator.id]?.trim()));
   const preview = useMemo(() => previewPerformance(activeProfile, values), [activeProfile, values]);
   const newerFinalExists = Boolean(selectedEvaluation
     && workspace?.latestFinalizedAtByPersonnel[selectedEvaluation.personnelId]
     && workspace.latestFinalizedAtByPersonnel[selectedEvaluation.personnelId] > selectedEvaluation.createdAt);
-  const valuesSignature = JSON.stringify(values);
+  const valuesSignature = JSON.stringify({ values, metadata: valueMetadata });
   const dirty = enteredValues.length > 0 && valuesSignature !== savedValuesSignature;
   useEffect(() => {
     if (!dirty) return;
@@ -203,14 +216,14 @@ export default function SimplePerformanceWorkspace() {
   };
 
   const beginEvaluation = () => {
-    setEvaluationId(""); setValues({}); setSavedValuesSignature("{}"); setNewEvaluationOpen(true); setError(""); setSuccess("");
+    setEvaluationId(""); setValues({}); setValueMetadata({}); setSavedValuesSignature("{}"); setNewEvaluationOpen(true); setError(""); setSuccess("");
   };
   const closeEvaluation = () => {
     if (dirty) return setConfirmDiscard(true);
-    setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setSavedValuesSignature("{}");
+    setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setValueMetadata({}); setSavedValuesSignature("{}");
   };
   const discardEvaluation = () => {
-    setConfirmDiscard(false); setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setSavedValuesSignature("{}");
+    setConfirmDiscard(false); setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setValueMetadata({}); setSavedValuesSignature("{}");
   };
 
   const saveDraft = () => dirty && run(async () => {
@@ -230,9 +243,11 @@ export default function SimplePerformanceWorkspace() {
       const response = await personnelPerformanceAPI.createSimpleEvaluation({ personnelId, evaluationDate });
       id = response.data.evaluation.id;
     }
-    await personnelPerformanceAPI.saveSimpleEvaluation(id, enteredValues);
-    await personnelPerformanceAPI.finalizeSimpleEvaluation(id);
-    setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setSavedValuesSignature("{}"); setConfirmFinalize(false);
+    if (!selectedEvaluation || selectedEvaluation.evaluatorUserId === workspace?.currentUserId) {
+      await personnelPerformanceAPI.saveSimpleEvaluation(id, enteredValues);
+    }
+    await personnelPerformanceAPI.finalizeSimpleEvaluation(id, { confirmedSeriousViolation });
+    setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setValueMetadata({}); setSavedValuesSignature("{}"); setConfirmFinalize(false); setConfirmedSeriousViolation(false);
   }, "ارزیابی نهایی شد.");
 
   const saveProfile = () => run(async () => {
@@ -245,10 +260,22 @@ export default function SimplePerformanceWorkspace() {
 
   const beginProfileVersion = (profile: Profile) => {
     setProfileStableKey(profile.stableKey); setProfileName(profile.nameFa);
-    setProfileIndicators(profile.indicators.map(({ code, categoryFa, titleFa, unitFa, target, direction, weightPercent }) => ({
+    setProfileIndicators(profile.indicators.map(({ code, categoryFa, titleFa, unitFa, target, direction, weightPercent, familyCode, sourceKind, minimumSampleCount }) => ({
       code, categoryFa, titleFa, unitFa, target: String(target), direction, weightPercent: String(weightPercent),
+      familyCode, sourceKind: sourceKind ?? "SYSTEM", minimumSampleCount: minimumSampleCount ?? 1,
     })));
   };
+
+  const loadSellerTemplate = () => run(async () => {
+    const response = await personnelPerformanceAPI.sellerPerformancePolicy();
+    setProfileStableKey("sales-seven-level"); setProfileName("فروشندگان ـ ارزیابی هفت‌سطحی");
+    setProfileIndicators(response.data.factors.map((factor: any) => ({
+      code: factor.code, categoryFa: factor.familyCode, familyCode: factor.familyCode,
+      titleFa: factor.titleFa, unitFa: factor.unitFa, direction: factor.direction,
+      weightPercent: String(factor.weightPercent), sourceKind: factor.sourceKind,
+      minimumSampleCount: factor.minimumSampleCount, target: ["SUPERVISOR", "SURVEY"].includes(factor.sourceKind) ? "75" : "",
+    })));
+  }, "عوامل مصوب فروشندگان بارگذاری شد؛ هدف‌های کمی را پیش از ذخیره تعیین کنید.");
 
   const beginCorrection = (evaluation: Evaluation) => run(async () => {
     const response = await personnelPerformanceAPI.correctSimpleEvaluation(evaluation.id, correctionReason[evaluation.id] || "");
@@ -268,13 +295,14 @@ export default function SimplePerformanceWorkspace() {
       <ErpSegmentedControl value={tab} onChange={setTab} options={[
         { value: "evaluate", label: "ارزیابی" },
         { value: "profiles", label: "فرم‌ها", disabled: !canManageProfiles },
+        { value: "surveys", label: "نظرسنجی", disabled: !canManageSurveys },
         { value: "history", label: "سابقه", disabled: !canViewHistory },
       ]} />
 
       {tab === "evaluate" && <div className="space-y-4">
         <ErpSection title="انتخاب پرسنل">
           <div className="grid gap-3 md:grid-cols-2">
-            <ErpField label="پرسنل"><ErpSelect value={personnelId} onChange={(event) => { setPersonnelId(event.target.value); setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setSavedValuesSignature("{}"); }}>
+            <ErpField label="پرسنل"><ErpSelect value={personnelId} onChange={(event) => { setPersonnelId(event.target.value); setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setValueMetadata({}); setSavedValuesSignature("{}"); }}>
               {workspace.personnel.map((person) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName}</option>)}
             </ErpSelect></ErpField>
             <ErpField label="تاریخ ارزیابی"><ErpInput type="date" max={todayInTehran()} value={evaluationDate} onChange={(event) => setEvaluationDate(event.target.value)} /></ErpField>
@@ -294,17 +322,20 @@ export default function SimplePerformanceWorkspace() {
 
         {activeProfile && <ErpSection title={`ارزیابی ${activeProfile.nameFa}`} actions={[{ label: "بستن", onClick: closeEvaluation }]}>
           <div className="space-y-3">{activeProfile.indicators.map((indicator) => <ErpCard key={indicator.id} className="p-4">
-            <div className="grid gap-3 md:grid-cols-[1fr_12rem] md:items-end">
-              <div><p className="font-semibold">{indicator.titleFa}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">هدف: {String(indicator.target)} {indicator.unitFa} · وزن: {String(indicator.weightPercent)}٪</p></div>
-              <ErpField label={`مقدار واقعی (${indicator.unitFa})`} required><ErpInput type="number" min="0" inputMode="decimal" value={values[indicator.id] || ""} onChange={(event) => setValues((current) => ({ ...current, [indicator.id]: event.target.value }))} /></ErpField>
+            <div className="grid gap-3 md:grid-cols-[1fr_12rem_10rem] md:items-end">
+              <div><p className="font-semibold">{indicator.titleFa}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">هدف: {String(indicator.target)} {indicator.unitFa} · وزن: {String(indicator.weightPercent)}٪ · حداقل نمونه: {(indicator.minimumSampleCount || 1).toLocaleString("fa-IR")}</p></div>
+              <ErpField label={`مقدار واقعی (${indicator.unitFa})`} required><ErpInput type="number" min="0" inputMode="decimal" disabled={!canEditSelected} value={values[indicator.id] || ""} onChange={(event) => setValues((current) => ({ ...current, [indicator.id]: event.target.value }))} /></ErpField>
+              <ErpField label="تعداد نمونه"><ErpInput type="number" min="0" disabled={!canEditSelected} value={valueMetadata[indicator.id]?.sampleCount || "1"} onChange={(event) => setValueMetadata((current) => ({ ...current, [indicator.id]: { sampleCount: event.target.value, sourceReference: current[indicator.id]?.sourceReference || "" } }))} /></ErpField>
             </div>
+            <div className="mt-3"><ErpField label="مرجع داده"><ErpInput disabled={!canEditSelected} value={valueMetadata[indicator.id]?.sourceReference || ""} placeholder={indicator.sourceKind === "SURVEY" ? "شناسه نظرسنجی" : "شناسه گزارش یا رکورد مبنا"} onChange={(event) => setValueMetadata((current) => ({ ...current, [indicator.id]: { sampleCount: current[indicator.id]?.sampleCount || "1", sourceReference: event.target.value } }))} /></ErpField></div>
           </ErpCard>)}</div>
-          <div className="mt-4 flex flex-wrap gap-2"><ErpButton label="ذخیره" variant="soft" onClick={() => void saveDraft()} disabled={pending || !dirty} /><ErpButton label="ثبت نهایی" onClick={() => setConfirmFinalize(true)} disabled={pending || !draftComplete} /></div>
+          <div className="mt-4 flex flex-wrap gap-2">{canEditSelected && <ErpButton label="ذخیره" variant="soft" onClick={() => void saveDraft()} disabled={pending || !dirty} />}{canFinalize && <ErpButton label="ثبت نهایی" onClick={() => setConfirmFinalize(true)} disabled={pending || !draftComplete} />}</div>
         </ErpSection>}
       </div>}
 
       {tab === "profiles" && canManageProfiles && <div className="space-y-4">
         <ErpSection title={profileStableKey ? "نسخه جدید الگو" : "الگوی تازه"}>
+          <div className="mb-4"><ErpButton label="بارگذاری عوامل مصوب فروشندگان" variant="soft" onClick={() => void loadSellerTemplate()} disabled={pending} /></div>
           <ErpField label="نام الگو" required><ErpInput value={profileName} onChange={(event) => setProfileName(event.target.value)} /></ErpField>
           <div className="mt-4 space-y-3">{profileIndicators.map((indicator, index) => <ErpCard key={index} className="p-4">
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -312,8 +343,10 @@ export default function SimplePerformanceWorkspace() {
               <ErpField label="عنوان" required><ErpInput value={indicator.titleFa} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, titleFa: event.target.value } : item))} /></ErpField>
               <ErpField label="واحد" required><ErpInput value={indicator.unitFa} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, unitFa: event.target.value } : item))} /></ErpField>
               <ErpField label="هدف" required><ErpInput type="number" min="0" value={indicator.target} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, target: event.target.value } : item))} /></ErpField>
-              <ErpField label="جهت"><ErpSelect value={indicator.direction} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, direction: event.target.value as ProfileIndicatorDraft["direction"] } : item))}><option value="HIGHER_IS_BETTER">بالاتر بهتر</option><option value="LOWER_IS_BETTER">پایین‌تر بهتر</option></ErpSelect></ErpField>
+              <ErpField label="جهت"><ErpSelect value={indicator.direction} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, direction: event.target.value as ProfileIndicatorDraft["direction"] } : item))}><option value="HIGHER_IS_BETTER">بالاتر بهتر</option><option value="LOWER_IS_BETTER">پایین‌تر بهتر</option><option value="CAPPED_RATE">نرخ هدف تا سقف صد</option></ErpSelect></ErpField>
               <ErpField label="وزن (درصد)" required><ErpInput type="number" min="0" max="100" value={indicator.weightPercent} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weightPercent: event.target.value } : item))} /></ErpField>
+              <ErpField label="منبع"><ErpSelect value={indicator.sourceKind || "SYSTEM"} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, sourceKind: event.target.value as ProfileIndicatorDraft["sourceKind"] } : item))}><option value="SYSTEM">داده سیستمی / ورود منابع انسانی</option><option value="SUPERVISOR">قضاوت سرپرست</option><option value="SURVEY">تجمیع نظرسنجی</option></ErpSelect></ErpField>
+              <ErpField label="حداقل نمونه"><ErpInput type="number" min="1" value={String(indicator.minimumSampleCount || 1)} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, minimumSampleCount: Number(event.target.value) } : item))} /></ErpField>
             </div>
             {profileIndicators.length > 1 && <div className="mt-3"><ErpButton label="حذف معیار" tone="danger" variant="ghost" onClick={() => setProfileIndicators((items) => items.filter((_, itemIndex) => itemIndex !== index))} /></div>}
           </ErpCard>)}</div>
@@ -323,6 +356,8 @@ export default function SimplePerformanceWorkspace() {
           <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{profile.nameFa}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">نسخه {profile.version.toLocaleString("fa-IR")} · {profile.indicators.length.toLocaleString("fa-IR")} معیار</p></div><ErpButton label="نسخه جدید" variant="soft" onClick={() => beginProfileVersion(profile)} /></div>
         </ErpCard>)}</div></ErpSection>
       </div>}
+
+      {tab === "surveys" && canManageSurveys && <BehaviorSurveyAdministration personnel={workspace.personnel} />}
 
       {tab === "history" && canViewHistory && <ErpSection title="سابقه ارزیابی">
         <ErpField label="پرسنل"><ErpSelect value={personnelId} onChange={(event) => setPersonnelId(event.target.value)}>{workspace.historyPersonnel.map((person) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName}</option>)}</ErpSelect></ErpField>
@@ -348,6 +383,7 @@ export default function SimplePerformanceWorkspace() {
           <p>{selectedPersonnel?.firstName} {selectedPersonnel?.lastName}</p>
           <p>تاریخ: {dateFa(selectedEvaluation?.evaluationDate || evaluationDate)}</p>
           {preview && <p>امتیاز: {scoreFa(preview.score)} · نشان: {levelLabels[preview.level]}</p>}
+          <ErpCheckbox checked={confirmedSeriousViolation} onChange={(event) => setConfirmedSeriousViolation(event.target.checked)} label="تخلف جدی این دوره پس از تکمیل رسیدگی و حق اعتراض، قطعی شده است." />
           {newerFinalExists && <p className="text-[var(--sds-warning)]">بعد از این پیش‌نویس، نتیجه جدیدتری ثبت شده است. با ثبت این ارزیابی، جدیدترین نتیجه نشان داده می‌شود.</p>}
         </div>
       </ErpSheet>

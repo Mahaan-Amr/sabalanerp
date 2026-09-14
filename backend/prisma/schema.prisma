@@ -8247,18 +8247,21 @@ model SimplePerformanceProfile {
 }
 
 model SimplePerformanceIndicator {
-  id            String                   @id @default(cuid())
-  profileId     String
-  code          String
-  categoryFa    String?
-  titleFa       String
-  unitFa        String
-  target        Decimal                  @db.Decimal(18, 4)
-  direction     String
-  weightPercent Decimal                  @db.Decimal(7, 4)
-  sortOrder     Int
-  profile       SimplePerformanceProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
-  values        SimplePerformanceValue[]
+  id                 String                   @id @default(cuid())
+  profileId          String
+  code               String
+  categoryFa         String?
+  titleFa            String
+  unitFa             String
+  target             Decimal                  @db.Decimal(18, 4)
+  direction          String
+  weightPercent      Decimal                  @db.Decimal(7, 4)
+  familyCode         String?
+  sourceKind         String                   @default("SYSTEM")
+  minimumSampleCount Int                      @default(1)
+  sortOrder          Int
+  profile            SimplePerformanceProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  values             SimplePerformanceValue[]
 
   @@unique([profileId, code])
   @@index([profileId, sortOrder])
@@ -8278,26 +8281,27 @@ model SimplePerformanceProfileAssignment {
 }
 
 model SimplePerformanceEvaluation {
-  id                       String                    @id @default(cuid())
-  personnelId              String
-  employmentRelationshipId String?
-  employmentBindingStatus  String                    @default("BOUND")
-  profileId                String
-  evaluationDate           DateTime                  @db.Date
-  status                   String                    @default("DRAFT")
-  evaluatorUserId          String
-  evaluatorAuthority       String
-  score                    Decimal?                  @db.Decimal(38, 18)
-  levelCode                String?
-  finalizedAt              DateTime?
-  correctionOfId           String?
-  correctionReason         String?
-  supersededAt             DateTime?
-  createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
-  profile                  SimplePerformanceProfile  @relation(fields: [profileId], references: [id], onDelete: Restrict)
-  employmentRelationship   HrEmploymentRelationship? @relation(fields: [employmentRelationshipId, personnelId], references: [id, personnelId], onDelete: Restrict)
-  values                   SimplePerformanceValue[]
+  id                        String                    @id @default(cuid())
+  personnelId               String
+  employmentRelationshipId  String?
+  employmentBindingStatus   String                    @default("BOUND")
+  profileId                 String
+  evaluationDate            DateTime                  @db.Date
+  status                    String                    @default("DRAFT")
+  evaluatorUserId           String
+  evaluatorAuthority        String
+  score                     Decimal?                  @db.Decimal(38, 18)
+  levelCode                 String?
+  confirmedSeriousViolation Boolean                   @default(false)
+  finalizedAt               DateTime?
+  correctionOfId            String?
+  correctionReason          String?
+  supersededAt              DateTime?
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  profile                   SimplePerformanceProfile  @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  employmentRelationship    HrEmploymentRelationship? @relation(fields: [employmentRelationshipId, personnelId], references: [id, personnelId], onDelete: Restrict)
+  values                    SimplePerformanceValue[]
 
   @@index([personnelId, status, finalizedAt])
   @@index([employmentRelationshipId, status, finalizedAt])
@@ -8306,13 +8310,17 @@ model SimplePerformanceEvaluation {
 }
 
 model SimplePerformanceValue {
-  id           String                      @id @default(cuid())
-  evaluationId String
-  indicatorId  String
-  actual       Decimal                     @db.Decimal(18, 4)
-  score        Decimal?                    @db.Decimal(38, 18)
-  evaluation   SimplePerformanceEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
-  indicator    SimplePerformanceIndicator  @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
+  id              String                      @id @default(cuid())
+  evaluationId    String
+  indicatorId     String
+  actual          Decimal                     @db.Decimal(18, 4)
+  score           Decimal?                    @db.Decimal(38, 18)
+  sampleCount     Int?
+  sourceReference String?
+  enteredByUserId String?
+  updatedAt       DateTime                    @updatedAt
+  evaluation      SimplePerformanceEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  indicator       SimplePerformanceIndicator  @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
 
   @@unique([evaluationId, indicatorId])
   @@index([indicatorId])
@@ -8333,6 +8341,113 @@ model SimplePerformanceAudit {
   @@index([evaluationId, createdAt])
   @@index([personnelId, createdAt])
   @@map("simple_performance_audits")
+}
+
+model PersonnelBehaviorSurveyCampaign {
+  id                String                              @id @default(cuid())
+  titleFa           String
+  periodKey         String
+  version           Int                                 @default(1)
+  status            String                              @default("DRAFT")
+  opensAt           DateTime?
+  closesAt          DateTime?
+  createdByUserId   String
+  activatedByUserId String?
+  activatedAt       DateTime?
+  createdAt         DateTime                            @default(now())
+  updatedAt         DateTime                            @updatedAt
+  questions         PersonnelBehaviorSurveyQuestion[]
+  targets           PersonnelBehaviorSurveyTarget[]
+  respondents       PersonnelBehaviorSurveyRespondent[]
+  responses         PersonnelBehaviorSurveyResponse[]
+
+  @@index([status, opensAt, closesAt])
+  @@index([periodKey, version])
+  @@map("personnel_behavior_survey_campaigns")
+}
+
+model PersonnelBehaviorSurveyQuestion {
+  id          String                          @id @default(cuid())
+  campaignId  String
+  sectionCode String
+  promptFa    String
+  sortOrder   Int
+  campaign    PersonnelBehaviorSurveyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  answers     PersonnelBehaviorSurveyAnswer[]
+
+  @@unique([campaignId, sortOrder])
+  @@index([campaignId, sectionCode])
+  @@map("personnel_behavior_survey_questions")
+}
+
+model PersonnelBehaviorSurveyTarget {
+  id          String                          @id @default(cuid())
+  campaignId  String
+  personnelId String
+  campaign    PersonnelBehaviorSurveyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, personnelId])
+  @@index([personnelId, campaignId])
+  @@map("personnel_behavior_survey_targets")
+}
+
+model PersonnelBehaviorSurveyRespondent {
+  id          String                          @id @default(cuid())
+  campaignId  String
+  personnelId String
+  campaign    PersonnelBehaviorSurveyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, personnelId])
+  @@index([personnelId, campaignId])
+  @@map("personnel_behavior_survey_respondents")
+}
+
+model PersonnelBehaviorSurveyResponse {
+  id                    String                          @id @default(cuid())
+  campaignId            String
+  targetPersonnelId     String
+  respondentPersonnelId String
+  status                String                          @default("DRAFT")
+  version               Int                             @default(1)
+  commentText           String?
+  submittedAt           DateTime?
+  createdAt             DateTime                        @default(now())
+  updatedAt             DateTime                        @updatedAt
+  campaign              PersonnelBehaviorSurveyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  answers               PersonnelBehaviorSurveyAnswer[]
+
+  @@unique([campaignId, targetPersonnelId, respondentPersonnelId])
+  @@index([targetPersonnelId, campaignId, status])
+  @@index([respondentPersonnelId, campaignId, status])
+  @@map("personnel_behavior_survey_responses")
+}
+
+model PersonnelBehaviorSurveyAnswer {
+  id           String                          @id @default(cuid())
+  responseId   String
+  questionId   String
+  optionCode   String
+  numericScore Int?
+  response     PersonnelBehaviorSurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  question     PersonnelBehaviorSurveyQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([responseId, questionId])
+  @@index([questionId, optionCode])
+  @@map("personnel_behavior_survey_answers")
+}
+
+model PersonnelBehaviorSurveyAudit {
+  id          String   @id @default(cuid())
+  campaignId  String?
+  responseId  String?
+  actorUserId String
+  eventType   String
+  details     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([campaignId, createdAt])
+  @@index([responseId, createdAt])
+  @@map("personnel_behavior_survey_audits")
 }
 
 model PerformanceAuditEvent {

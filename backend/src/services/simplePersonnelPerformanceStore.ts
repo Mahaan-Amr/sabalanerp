@@ -9,6 +9,7 @@ import {
   type SimpleEvaluatorAuthority,
   type SimplePerformanceDirection,
 } from './simplePersonnelPerformance';
+import { applySellerPerformanceGates, redistributeSellerFactorWeights } from './sellerPerformancePolicy';
 
 type Client = PrismaClient | Prisma.TransactionClient;
 
@@ -104,6 +105,7 @@ export const resolveSimpleEvaluationAuthority = async (
   const authority = canEvaluatePersonnel({
     hasEvaluateAll: permissions.has('EVALUATE_ALL_PERSONNEL'),
     hasEvaluateDirectReports: permissions.has('EVALUATE_DIRECT_REPORTS'),
+    hasEnterEvidence: permissions.has('ENTER_PERFORMANCE_EVIDENCE'),
     isResponsibleSupervisor: directReportPersonnelIds.includes(input.personnelId),
     isSelf: actor?.personnelId === input.personnelId,
   });
@@ -175,7 +177,9 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
   const actor = await client.user.findUnique({ where: { id: actorUserId }, select: { personnelId: true } });
   const canSeeReports = permissions.has('EVALUATE_DIRECT_REPORTS');
   const canSeeAll = permissions.has('EVALUATE_ALL_PERSONNEL')
+    || permissions.has('ENTER_PERFORMANCE_EVIDENCE')
     || permissions.has('MANAGE_PERFORMANCE_PROFILES')
+    || permissions.has('MANAGE_PERFORMANCE_SURVEYS')
     || (permissions.has('VIEW_PERFORMANCE_EVALUATIONS') && !canSeeReports);
   if (!canSeeAll && !canSeeReports) throw simpleError('اجازه مشاهده ارزیابی‌ها را ندارید.', 'SIMPLE_PERFORMANCE_VIEW_FORBIDDEN', 403);
 
@@ -194,7 +198,8 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
   });
   const ids = personnel.map(({ id }) => id);
   const canViewHistory = permissions.has('VIEW_PERFORMANCE_EVALUATIONS');
-  const canEvaluate = permissions.has('EVALUATE_ALL_PERSONNEL') || permissions.has('EVALUATE_DIRECT_REPORTS');
+  const canEvaluate = permissions.has('EVALUATE_ALL_PERSONNEL') || permissions.has('EVALUATE_DIRECT_REPORTS')
+    || permissions.has('ENTER_PERFORMANCE_EVIDENCE');
   const [historicalPersonnelIds, legacyHistoricalPersonnelIds] = canViewHistory ? await Promise.all([
     client.simplePerformanceEvaluation.findMany({ where: { status: 'FINAL' }, distinct: ['personnelId'], select: { personnelId: true } }),
     client.performanceSubject.findMany({ where: { personnelId: { not: null }, identityDetachedAt: null }, distinct: ['personnelId'], select: { personnelId: true } }),
@@ -209,9 +214,10 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
       const profile = await activeProfileForPersonnel(client, personnelId, now);
       return profile ? { id: `automatic:${personnelId}`, personnelId, profileId: profile.id, profile } : null;
     })).then((items) => items.filter((item): item is NonNullable<typeof item> => Boolean(item))),
-    canEvaluate ? client.simplePerformanceEvaluation.findMany({
+    (canEvaluate || permissions.has('FINALIZE_PERFORMANCE_RESULTS')) ? client.simplePerformanceEvaluation.findMany({
       where: {
-        personnelId: { in: ids }, status: 'DRAFT', evaluatorUserId: actorUserId,
+        personnelId: { in: ids }, status: 'DRAFT',
+        ...(permissions.has('FINALIZE_PERFORMANCE_RESULTS') ? {} : { evaluatorUserId: actorUserId }),
       }, include: evaluationInclude,
       orderBy: [{ finalizedAt: 'desc' }, { createdAt: 'desc' }],
     }) : Promise.resolve([]),
@@ -242,7 +248,8 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
     evaluations: evaluations.map((evaluation) => ({ ...evaluation, evaluatorNameFa: evaluatorNames.get(evaluation.evaluatorUserId) || 'نامشخص' })),
     profiles,
     latestFinalizedAtByPersonnel,
-    evaluablePersonnelIds: (permissions.has('EVALUATE_ALL_PERSONNEL') ? ids : ids.filter((id) => directReportPersonnelIds.includes(id)))
+    evaluablePersonnelIds: ((permissions.has('EVALUATE_ALL_PERSONNEL') || permissions.has('ENTER_PERFORMANCE_EVIDENCE'))
+      ? ids : ids.filter((id) => directReportPersonnelIds.includes(id)))
       .filter((id) => id !== actor?.personnelId),
     capabilities: Object.fromEntries([...permissions].map((code) => [code, true])),
   };
@@ -288,7 +295,11 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
   actorUserId: string;
   stableKey?: string;
   nameFa: string;
-  indicators: Array<{ code: string; categoryFa?: string; titleFa: string; unitFa: string; target: string; direction: SimplePerformanceDirection; weightPercent: string }>;
+  indicators: Array<{
+    code: string; categoryFa?: string; familyCode?: string; sourceKind?: 'SYSTEM' | 'SUPERVISOR' | 'SURVEY';
+    minimumSampleCount?: number; titleFa: string; unitFa: string; target: string;
+    direction: SimplePerformanceDirection; weightPercent: string;
+  }>;
 }) => {
   const nameFa = typeof input.nameFa === 'string' ? input.nameFa.trim() : '';
   if (!nameFa) throw simpleError('نام الگو را وارد کنید.', 'SIMPLE_PROFILE_NAME_REQUIRED');
@@ -300,7 +311,9 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
     || typeof indicator.titleFa !== 'string' || !indicator.titleFa.trim()
     || typeof indicator.unitFa !== 'string' || !indicator.unitFa.trim()
     || !validNumber(indicator.target) || !validNumber(indicator.weightPercent)
-    || !['HIGHER_IS_BETTER', 'LOWER_IS_BETTER'].includes(indicator.direction)
+    || !['HIGHER_IS_BETTER', 'LOWER_IS_BETTER', 'CAPPED_RATE'].includes(indicator.direction)
+    || (indicator.sourceKind && !['SYSTEM', 'SUPERVISOR', 'SURVEY'].includes(indicator.sourceKind))
+    || (indicator.minimumSampleCount !== undefined && (!Number.isInteger(indicator.minimumSampleCount) || indicator.minimumSampleCount < 1))
   ))) throw simpleError('معیارهای الگو کامل نیست.', 'SIMPLE_PROFILE_INDICATORS_INVALID');
   calculateSimplePerformance(input.indicators.map((indicator, index) => ({
     indicatorId: indicator.code || String(index), direction: indicator.direction, target: indicator.target,
@@ -317,6 +330,8 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
           code: indicator.code.trim(), categoryFa: indicator.categoryFa?.trim() || null,
           titleFa: indicator.titleFa.trim(), unitFa: indicator.unitFa.trim(), target: indicator.target,
           direction: indicator.direction, weightPercent: indicator.weightPercent, sortOrder: index + 1,
+          familyCode: indicator.familyCode?.trim() || null, sourceKind: indicator.sourceKind ?? 'SYSTEM',
+          minimumSampleCount: indicator.minimumSampleCount ?? 1,
         })) },
       },
       include: { indicators: { orderBy: { sortOrder: 'asc' } } },
@@ -406,9 +421,29 @@ const ownOpenEvaluation = async (client: Client, evaluationId: string, actorUser
   return evaluation;
 };
 
-const normalizedValues = (evaluation: Awaited<ReturnType<typeof ownOpenEvaluation>>, values: Array<{ indicatorId: string; actual: string }>) => {
+const openEvaluationForFinalizer = async (client: Client, evaluationId: string, actorUserId: string) => {
+  const evaluation = await client.simplePerformanceEvaluation.findUnique({ where: { id: evaluationId }, include: evaluationInclude });
+  if (!evaluation) throw simpleError('ارزیابی پیدا نشد.', 'SIMPLE_EVALUATION_NOT_FOUND', 404);
+  if (evaluation.status !== 'DRAFT') throw simpleError('این نتیجه نهایی شده است.', 'SIMPLE_EVALUATION_LOCKED', 409);
+  if (!evaluation.employmentRelationshipId || evaluation.employmentBindingStatus !== 'BOUND') {
+    throw simpleError('این پیش‌نویس قدیمی قابل ادامه نیست.', 'SIMPLE_EVALUATION_EMPLOYMENT_UNRESOLVED', 409);
+  }
+  const permissions = new Set(await activeHrActionPermissionsForUser(client, actorUserId));
+  if (!permissions.has('FINALIZE_PERFORMANCE_RESULTS')) {
+    throw simpleError('فقط مسئول مجاز منابع انسانی می‌تواند نتیجه را نهایی کند.', 'SIMPLE_FINALIZE_FORBIDDEN', 403);
+  }
+  const actor = await client.user.findUnique({ where: { id: actorUserId }, select: { personnelId: true } });
+  if (actor?.personnelId === evaluation.personnelId) {
+    throw simpleError('نهایی‌سازی نتیجه خودتان مجاز نیست.', 'SIMPLE_FINALIZE_SELF_FORBIDDEN', 403);
+  }
+  return evaluation;
+};
+
+const normalizedValues = (evaluation: Awaited<ReturnType<typeof ownOpenEvaluation>>, values: Array<{
+  indicatorId: string; actual: string; sampleCount?: number; sourceReference?: string;
+}>) => {
   const allowed = new Set(evaluation.profile.indicators.map(({ id }) => id));
-  const unique = new Map<string, string>();
+  const unique = new Map<string, { actual: string; sampleCount: number; sourceReference: string | null }>();
   for (const value of values) {
     if (!allowed.has(value.indicatorId) || unique.has(value.indicatorId)) throw simpleError('مقدار معیار معتبر نیست.', 'SIMPLE_VALUE_INVALID');
     if (typeof value.actual !== 'string' || !/^\d+(?:\.\d{1,4})?$/.test(value.actual.trim())) {
@@ -416,20 +451,27 @@ const normalizedValues = (evaluation: Awaited<ReturnType<typeof ownOpenEvaluatio
     }
     const actual = new Prisma.Decimal(value.actual);
     if (actual.lt(0)) throw simpleError('مقدار واقعی نمی‌تواند منفی باشد.', 'SIMPLE_VALUE_INVALID');
-    unique.set(value.indicatorId, actual.toString());
+    const sampleCount = value.sampleCount ?? 1;
+    if (!Number.isInteger(sampleCount) || sampleCount < 0) throw simpleError('تعداد نمونه معتبر نیست.', 'SIMPLE_VALUE_INVALID');
+    const sourceReference = typeof value.sourceReference === 'string' ? value.sourceReference.trim() || null : null;
+    unique.set(value.indicatorId, { actual: actual.toString(), sampleCount, sourceReference });
   }
-  return [...unique].map(([indicatorId, actual]) => ({ indicatorId, actual }));
+  return [...unique].map(([indicatorId, value]) => ({ indicatorId, ...value }));
 };
 
 export const saveSimplePerformanceDraft = async (client: Client, input: {
-  actorUserId: string; evaluationId: string; values: Array<{ indicatorId: string; actual: string }>;
+  actorUserId: string; evaluationId: string; values: Array<{
+    indicatorId: string; actual: string; sampleCount?: number; sourceReference?: string;
+  }>;
 }) => {
   return runTransaction(client, async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "simple_performance_evaluations" WHERE "id" = ${input.evaluationId} FOR UPDATE`;
     const evaluation = await ownOpenEvaluation(tx, input.evaluationId, input.actorUserId);
     const values = normalizedValues(evaluation, input.values);
     await tx.simplePerformanceValue.deleteMany({ where: { evaluationId: evaluation.id } });
-    if (values.length) await tx.simplePerformanceValue.createMany({ data: values.map((value) => ({ ...value, evaluationId: evaluation.id })) });
+    if (values.length) await tx.simplePerformanceValue.createMany({ data: values.map((value) => ({
+      ...value, evaluationId: evaluation.id, enteredByUserId: input.actorUserId,
+    })) });
     await tx.simplePerformanceAudit.create({ data: {
       evaluationId: evaluation.id, personnelId: evaluation.personnelId, actorUserId: input.actorUserId,
       authoritySource: evaluation.evaluatorAuthority, eventType: 'DRAFT_SAVED', details: { valueCount: values.length },
@@ -438,19 +480,50 @@ export const saveSimplePerformanceDraft = async (client: Client, input: {
   });
 };
 
-export const finalizeSimplePerformanceEvaluation = async (client: Client, input: { actorUserId: string; evaluationId: string }) => {
+export const finalizeSimplePerformanceEvaluation = async (client: Client, input: {
+  actorUserId: string; evaluationId: string; confirmedSeriousViolation?: boolean;
+}) => {
   return runTransaction(client, async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "simple_performance_evaluations" WHERE "id" = ${input.evaluationId} FOR UPDATE`;
-    const evaluation = await ownOpenEvaluation(tx, input.evaluationId, input.actorUserId);
-    const byIndicator = new Map(evaluation.values.map((value) => [value.indicatorId, value.actual.toString()]));
-    const calculation = calculateSimplePerformance(evaluation.profile.indicators.map((indicator) => ({
-      indicatorId: indicator.id, direction: indicator.direction as SimplePerformanceDirection,
-      target: indicator.target.toString(), actual: byIndicator.get(indicator.id) ?? null,
-      weightPercent: indicator.weightPercent.toString(),
-    })));
+    const evaluation = await openEvaluationForFinalizer(tx, input.evaluationId, input.actorUserId);
+    const byIndicator = new Map(evaluation.values.map((value) => [value.indicatorId, value]));
+    const effectiveWeights = new Map(redistributeSellerFactorWeights(evaluation.profile.indicators.map((indicator) => {
+      const value = byIndicator.get(indicator.id);
+      return {
+        factorCode: indicator.id, familyCode: indicator.familyCode ?? indicator.categoryFa ?? indicator.id,
+        weightPercent: indicator.weightPercent.toString(), minimumSampleCount: indicator.minimumSampleCount,
+        sampleCount: value?.sampleCount ?? (value ? 1 : null), actual: value?.actual.toString() ?? null,
+      };
+    })).map(({ factorCode, effectiveWeightPercent }) => [factorCode, effectiveWeightPercent]));
+    const calculationInputs = evaluation.profile.indicators.flatMap((indicator) => {
+      const value = byIndicator.get(indicator.id);
+      const weightPercent = effectiveWeights.get(indicator.id);
+      return value && weightPercent ? [{
+        indicatorId: indicator.id, direction: indicator.direction as SimplePerformanceDirection,
+        target: indicator.target.toString(), actual: value.actual.toString(), weightPercent,
+      }] : [];
+    });
+    const calculation = calculateSimplePerformance(calculationInputs);
+    const scoreByIndicator = new Map(calculation.indicators.map(({ indicatorId, score }) => [indicatorId, new Prisma.Decimal(score)]));
+    const familyScore = (familyCode: string) => {
+      const members = evaluation.profile.indicators.filter((indicator) => indicator.familyCode === familyCode && effectiveWeights.has(indicator.id));
+      if (!members.length) return new Prisma.Decimal(100);
+      const familyWeight = members.reduce((sum, indicator) => sum.add(effectiveWeights.get(indicator.id)!), new Prisma.Decimal(0));
+      return members.reduce((sum, indicator) => sum.add(
+        scoreByIndicator.get(indicator.id)!.mul(effectiveWeights.get(indicator.id)!),
+      ), new Prisma.Decimal(0)).div(familyWeight);
+    };
+    const primaryFamilyCodes = [...new Set(evaluation.profile.indicators
+      .map(({ familyCode }) => familyCode).filter((code): code is string => Boolean(code) && code !== 'BEHAVIOR'))];
+    const gatedLevel = applySellerPerformanceGates({
+      score: calculation.score, behavioralScore: familyScore('BEHAVIOR'),
+      collectionScore: familyScore('COLLECTION'), qualityScore: familyScore('CONTRACT_QUALITY'),
+      sufficientEvidence: true, confirmedSeriousViolation: Boolean(input.confirmedSeriousViolation),
+      primaryFamilyScores: primaryFamilyCodes.map(familyScore),
+    });
     const finalizedAt = new Date();
     const claimed = await tx.simplePerformanceEvaluation.updateMany({
-      where: { id: evaluation.id, status: 'DRAFT', evaluatorUserId: input.actorUserId },
+      where: { id: evaluation.id, status: 'DRAFT' },
       data: { status: 'FINALIZING' },
     });
     if (claimed.count !== 1) throw simpleError('این ارزیابی قبلاً نهایی شده است.', 'SIMPLE_EVALUATION_LOCKED', 409);
@@ -465,13 +538,19 @@ export const finalizeSimplePerformanceEvaluation = async (client: Client, input:
     }
     const result = await tx.simplePerformanceEvaluation.update({
       where: { id: evaluation.id },
-      data: { status: 'FINAL', score: calculation.score, levelCode: calculation.level, finalizedAt },
+      data: {
+        status: 'FINAL', score: calculation.score, levelCode: gatedLevel, finalizedAt,
+        confirmedSeriousViolation: Boolean(input.confirmedSeriousViolation),
+      },
       include: evaluationInclude,
     });
     await tx.simplePerformanceAudit.create({ data: {
       evaluationId: evaluation.id, personnelId: evaluation.personnelId, actorUserId: input.actorUserId,
-      authoritySource: evaluation.evaluatorAuthority, eventType: 'FINALIZED',
-      details: { score: calculation.score, levelCode: calculation.level },
+      authoritySource: 'HR_MANAGER', eventType: 'FINALIZED',
+      details: {
+        score: calculation.score, levelCode: gatedLevel, rawLevelCode: calculation.level,
+        confirmedSeriousViolation: Boolean(input.confirmedSeriousViolation),
+      },
     } });
     return result;
   });
@@ -499,7 +578,10 @@ export const createSimplePerformanceCorrection = async (client: Client, input: {
         profileId: target.profileId, evaluationDate: target.evaluationDate,
         evaluatorUserId: input.actorUserId, evaluatorAuthority: authority, correctionOfId: target.id,
         correctionReason: reason,
-        values: { create: target.values.map((value) => ({ indicatorId: value.indicatorId, actual: value.actual })) },
+        values: { create: target.values.map((value) => ({
+          indicatorId: value.indicatorId, actual: value.actual, sampleCount: value.sampleCount,
+          sourceReference: value.sourceReference, enteredByUserId: value.enteredByUserId,
+        })) },
       },
       include: evaluationInclude,
     });
@@ -525,24 +607,68 @@ export const getSimplePerformanceBadges = async (client: Client, personnelIds: s
   const currentRelationshipByPersonnel = new Map<string, string>();
   const badges: Record<string, unknown> = {};
   for (const [personnelId, relationshipIds] of relationshipsByPersonnel) {
-    if (relationshipIds.length === 1) currentRelationshipByPersonnel.set(personnelId, relationshipIds[0]);
+    if (relationshipIds.length === 1) {
+      currentRelationshipByPersonnel.set(personnelId, relationshipIds[0]);
+      badges[personnelId] = {
+        state: 'LEVEL', levelCode: 'COMPANION', labelFa: 'همراه',
+        meaningFa: 'هنوز نتیجه رسمی هفت‌سطحی ثبت نشده است.', version: 2, officialResult: false,
+      };
+    }
     else if (relationshipIds.length > 1) badges[personnelId] = {
-      state: 'UNASSESSED', labelFa: 'ارزیابی‌نشده', meaningFa: 'اطلاعات استخدام نیاز به بررسی دارد.', version: 1,
+      state: 'LEVEL', levelCode: 'COMPANION', labelFa: 'همراه',
+      meaningFa: 'اطلاعات استخدام برای صدور نتیجه رسمی نیاز به بررسی دارد.', version: 2, officialResult: false,
     };
   }
   const evaluations = await client.simplePerformanceEvaluation.findMany({
     where: { employmentRelationshipId: { in: [...currentRelationshipByPersonnel.values()] }, status: 'FINAL', supersededAt: null },
     orderBy: [{ finalizedAt: 'desc' }, { createdAt: 'desc' }],
   });
+  const resolvedPersonnelIds = new Set<string>();
   for (const evaluation of evaluations) {
-    if (badges[evaluation.personnelId] || !evaluation.levelCode
+    if (resolvedPersonnelIds.has(evaluation.personnelId) || !evaluation.levelCode
       || currentRelationshipByPersonnel.get(evaluation.personnelId) !== evaluation.employmentRelationshipId) continue;
     const levelCode = evaluation.levelCode as keyof typeof SIMPLE_PERFORMANCE_LEVEL_LABELS;
+    if (!SIMPLE_PERFORMANCE_LEVEL_LABELS[levelCode]) continue;
     badges[evaluation.personnelId] = {
       state: 'LEVEL', levelCode, labelFa: SIMPLE_PERFORMANCE_LEVEL_LABELS[levelCode],
       meaningFa: 'آخرین نتیجه نهایی عملکرد.',
-      newestMeasurementTo: evaluation.evaluationDate.toISOString(), version: 1,
+      newestMeasurementTo: evaluation.evaluationDate.toISOString(), version: 2, officialResult: true,
     };
+    resolvedPersonnelIds.add(evaluation.personnelId);
   }
   return badges;
+};
+
+export const getSimplePersonalPerformanceDetails = async (client: Client, personnelId: string, now = new Date()) => {
+  const relationship = await client.hrEmploymentRelationship.findFirst({
+    where: { personnelId, status: { in: ['ACTIVE', 'SUSPENDED'] }, ...activeAt(now) },
+    orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }], select: { id: true },
+  });
+  if (!relationship) return null;
+  const evaluation = await client.simplePerformanceEvaluation.findFirst({
+    where: { personnelId, employmentRelationshipId: relationship.id, status: 'FINAL', supersededAt: null },
+    include: evaluationInclude, orderBy: [{ finalizedAt: 'desc' }, { createdAt: 'desc' }],
+  });
+  if (!evaluation?.levelCode || !SIMPLE_PERFORMANCE_LEVEL_LABELS[evaluation.levelCode as keyof typeof SIMPLE_PERFORMANCE_LEVEL_LABELS]) return null;
+  const weightedAverage = (behavior: boolean) => {
+    const members = evaluation.values.filter(({ indicator }) => (indicator.familyCode === 'BEHAVIOR') === behavior && indicator.weightPercent.gt(0));
+    if (!members.length) return null;
+    const weight = members.reduce((sum, value) => sum.add(value.indicator.weightPercent), new Prisma.Decimal(0));
+    return members.reduce((sum, value) => sum.add(
+      (value.score ?? new Prisma.Decimal(0)).mul(value.indicator.weightPercent),
+    ), new Prisma.Decimal(0)).div(weight).toDecimalPlaces(2).toString();
+  };
+  return {
+    score: evaluation.score?.toDecimalPlaces(2).toString() ?? null,
+    behavioralScore: weightedAverage(true), performanceScore: weightedAverage(false),
+    evaluationDate: evaluation.evaluationDate.toISOString(),
+    factors: evaluation.values.map((value) => ({
+      code: value.indicator.code, titleFa: value.indicator.titleFa,
+      familyCode: value.indicator.familyCode, sourceKind: value.indicator.sourceKind,
+      weightPercent: value.indicator.weightPercent.toString(), actual: value.actual.toString(),
+      target: value.indicator.target.toString(), unitFa: value.indicator.unitFa,
+      sampleCount: value.sampleCount, sourceReference: value.sourceReference,
+      score: value.score?.toDecimalPlaces(2).toString() ?? null,
+    })),
+  };
 };

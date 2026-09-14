@@ -134,4 +134,3 @@ export const validateProductionEnvironment = (environment: NodeJS.ProcessEnv = p
     throw new Error(`Invalid production environment. ${details.join(" ")}`);
   }
 };
-

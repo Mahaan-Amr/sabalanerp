@@ -582,7 +582,7 @@ export const finalizeSimplePerformanceEvaluation = async (client: Client, input:
       ? await tx.personnelBehaviorSurveyResponse.findMany({
       where: { targetPersonnelId: evaluation.personnelId, status: 'FINAL', campaign: {
         periodKey: evaluation.periodKey,
-        opensAt: { gte: evaluation.measurementFrom }, closesAt: { lt: surveyPeriodEndExclusive },
+        opensAt: { gte: evaluation.measurementFrom }, closesAt: { lte: surveyPeriodEndExclusive },
       } },
       include: { answers: { include: { question: { select: { sectionCode: true } } } }, campaign: { select: { id: true } } },
     }) : [];

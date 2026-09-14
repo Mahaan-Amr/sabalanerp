@@ -124,5 +124,11 @@ export const buildAccountingContractSourceSnapshot = <T extends SnapshotRecord>(
       ? projectCustomerSnapshot(contract.customer)
       : contract.customer;
 
-  return { ...contract, customer: frozenCustomer, contractData };
+  // Prisma returns nullable Partner ownership columns on every SalesContract.
+  // A null owner is ordinary relational shape and must not be frozen as private
+  // Partner provenance in the Accounting source snapshot.
+  const { partnerCaseId, ...withoutNullPartnerOwner } = contract;
+  const source = partnerCaseId === null ? withoutNullPartnerOwner : contract;
+
+  return { ...source, customer: frozenCustomer, contractData };
 };

@@ -11,3 +11,34 @@ export function hasPartnerAccountingEvidence(value: unknown): boolean {
     (key === 'sourceKind' && ['PARTNER_INTERNAL_RECORD', 'SABALAN_TO_PARTNER'].includes(String(child))) ||
     hasPartnerAccountingEvidence(child));
 }
+
+/** Historical ordinary Contract snapshots copied Prisma's nullable ownership
+ * column at their root. That null is relational schema shape, not private
+ * Partner evidence. Remove only that one known root field; retained/nested null
+ * markers and every non-null owner remain fail-closed. */
+export function hasPartnerAccountingEvidenceInOrdinaryContractSnapshot(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      !Object.prototype.hasOwnProperty.call(value, 'partnerCaseId') ||
+      (value as Record<string, unknown>).partnerCaseId !== null) {
+    return hasPartnerAccountingEvidence(value);
+  }
+  const { partnerCaseId: _ordinaryNullOwner, ...snapshot } = value as Record<string, unknown>;
+  return hasPartnerAccountingEvidence(snapshot);
+}
+
+type FinancialSourceEvidence = {
+  sourceKind?: string | null;
+  sourceId?: string | null;
+  contractId?: string | null;
+  metadata?: unknown;
+  sourceSnapshot?: unknown;
+};
+
+export function hasConflictingPartnerAccountingEvidence(source: FinancialSourceEvidence | null | undefined): boolean {
+  if (!source) return false;
+  const ordinaryContractSource = source.sourceKind === 'SALES_CONTRACT' &&
+    typeof source.contractId === 'string' && source.sourceId === source.contractId;
+  return hasPartnerAccountingEvidence(source.metadata) || (ordinaryContractSource
+    ? hasPartnerAccountingEvidenceInOrdinaryContractSnapshot(source.sourceSnapshot)
+    : hasPartnerAccountingEvidence(source.sourceSnapshot));
+}

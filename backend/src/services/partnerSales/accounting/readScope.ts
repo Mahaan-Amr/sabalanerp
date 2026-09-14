@@ -72,7 +72,12 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   // private evidence at any nested JSON depth also prevents ordinary fallback.
   const markedRows = await database.$queryRaw<Array<{ kind: ListKind; id: string }>>`
     SELECT 'FINANCIAL' AS kind, id FROM accounting_financial_records
-      WHERE metadata @? ${markerPath} OR "sourceSnapshot" @? ${markerPath}
+      WHERE metadata @? ${markerPath} OR CASE
+        WHEN "sourceKind" = 'SALES_CONTRACT' AND "contractId" IS NOT NULL AND "sourceId" = "contractId"
+          AND "sourceSnapshot" -> 'partnerCaseId' = 'null'::jsonb
+        THEN ("sourceSnapshot" - 'partnerCaseId') @? ${markerPath}
+        ELSE "sourceSnapshot" @? ${markerPath}
+      END
     UNION ALL SELECT 'RECEIVABLE', id FROM accounting_receivables WHERE metadata @? ${markerPath}
     UNION ALL SELECT 'PAYMENT', id FROM accounting_payment_statuses WHERE metadata @? ${markerPath}
     UNION ALL SELECT 'TAX', id FROM accounting_tax_records WHERE metadata @? ${markerPath}

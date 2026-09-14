@@ -10,7 +10,7 @@ import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, prepar
 import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from './errors';
 import { partnerCheckTransitions } from './paymentPolicy';
 import { readPartnerAccountingCapabilities } from './capabilities';
-import { hasPartnerAccountingEvidence } from './provenance';
+import { hasConflictingPartnerAccountingEvidence, hasPartnerAccountingEvidence } from './provenance';
 import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { readPartnerInvoiceSource } from './invoiceSource';
 
@@ -55,8 +55,8 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
     const target = receivableId ? await tx.accountingReceivable.findUnique({ where: { id: receivableId },
       include: { invoiceRecord: true } }) : null;
     if (target?.invoiceRecord?.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
-      if (hasPartnerAccountingEvidence([targetPayment?.metadata, target?.metadata,
-        target?.invoiceRecord?.metadata, target?.invoiceRecord?.sourceSnapshot])) throw conflict();
+      if (hasPartnerAccountingEvidence([targetPayment?.metadata, target?.metadata]) ||
+          hasConflictingPartnerAccountingEvidence(target?.invoiceRecord)) throw conflict();
       return null;
     }
     partnerTarget = true;

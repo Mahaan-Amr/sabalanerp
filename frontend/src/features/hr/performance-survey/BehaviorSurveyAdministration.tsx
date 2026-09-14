@@ -15,12 +15,13 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { personnelPerformanceAPI } from "@/lib/api";
+import { nextPerformancePeriodKey, type PerformancePeriodKey } from "@/features/hr/performance-workflow/performancePeriod";
 
 type Personnel = { id: string; firstName: string; lastName: string; employeeNumber?: string | null };
 type Question = { sectionCode: string; promptFa: string };
 type CampaignStatus = "DRAFT" | "ACTIVE" | "CLOSED";
 type Campaign = {
-  id: string; titleFa: string; periodKey: string; version: number; status: CampaignStatus;
+  id: string; titleFa: string; periodKey: PerformancePeriodKey; version: number; status: CampaignStatus;
   questions: Array<Question & { id: string }>;
   targets: Array<{ personnelId: string }>;
   respondents: Array<{ personnelId: string }>;
@@ -33,12 +34,12 @@ const sections = [
 ] as const;
 const initialQuestions: Question[] = [
   { sectionCode: "RESPECT", promptFa: "این همکار با مشتریان و همکاران محترمانه و آرام رفتار می‌کند." },
-  { sectionCode: "RESPECT", promptFa: "این همکار هنگام اختلاف‌نظر از رفتار نامناسب خودداری می‌کند." },
-  { sectionCode: "TEAMWORK", promptFa: "این همکار اطلاعات لازم را به‌موقع با اعضای مرتبط تیم به اشتراک می‌گذارد." },
+  { sectionCode: "RESPECT", promptFa: "این همکار هنگام اختلاف‌نظر از پرخاشگری، تحقیر و رفتار نامناسب خودداری می‌کند." },
+  { sectionCode: "TEAMWORK", promptFa: "این همکار اطلاعات لازم را در زمان مناسب با اعضای مرتبط تیم به اشتراک می‌گذارد." },
   { sectionCode: "TEAMWORK", promptFa: "این همکار در انجام تعهدهای مشترک با تیم همکاری می‌کند." },
   { sectionCode: "ACCOUNTABILITY", promptFa: "این همکار کاری را که پذیرفته است تا رسیدن به نتیجه پیگیری می‌کند." },
-  { sectionCode: "ACCOUNTABILITY", promptFa: "این همکار تأخیر، اشتباه یا مانع را به‌موقع اعلام می‌کند." },
-  { sectionCode: "COMMUNICATION", promptFa: "این همکار منظور و اطلاعات لازم را روشن و قابل‌فهم بیان می‌کند." },
+  { sectionCode: "ACCOUNTABILITY", promptFa: "این همکار تأخیر، اشتباه یا مانع را به‌موقع اعلام می‌کند و آن را پنهان نمی‌کند." },
+  { sectionCode: "COMMUNICATION", promptFa: "این همکار منظور، درخواست و اطلاعات لازم را روشن و قابل‌فهم بیان می‌کند." },
   { sectionCode: "COMMUNICATION", promptFa: "این همکار به صحبت دیگران گوش می‌دهد و از درک درست موضوع مطمئن می‌شود." },
   { sectionCode: "LEARNING", promptFa: "این همکار بازخورد حرفه‌ای را می‌پذیرد و برای اصلاح عملکرد استفاده می‌کند." },
   { sectionCode: "LEARNING", promptFa: "این همکار برای یادگیری روش‌ها و جلوگیری از تکرار اشتباه تلاش می‌کند." },
@@ -52,7 +53,7 @@ const campaignStatusPresentation: Record<CampaignStatus, { label: string; tone: 
   DRAFT: { label: "پیش‌نویس", tone: "warning" },
 };
 
-export default function BehaviorSurveyAdministration({ personnel, currentPeriodKey }: { personnel: Personnel[]; currentPeriodKey: string }) {
+export default function BehaviorSurveyAdministration({ personnel, currentPeriodKey }: { personnel: Personnel[]; currentPeriodKey: PerformancePeriodKey }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [editingId, setEditingId] = useState("");
   const [titleFa, setTitleFa] = useState("");
@@ -112,7 +113,7 @@ export default function BehaviorSurveyAdministration({ personnel, currentPeriodK
   return <div className="space-y-4" dir="rtl">
     {error && <ErpInlineState kind="error" title={error} />}{message && <ErpInlineState kind="success" title={message} />}
     <ErpSection title={editingId ? "ویرایش پیش‌نویس نظرسنجی" : "نظرسنجی رفتاری جدید"} description="شش بخش رفتاری ثابت‌اند؛ پرسش‌های هر بخش را می‌توانید آزادانه ویرایش، جابه‌جا، حذف یا اضافه کنید.">
-      <div className="grid gap-3 md:grid-cols-2"><ErpField label="عنوان" required><ErpInput value={titleFa} onChange={(event) => setTitleFa(event.target.value)} /></ErpField><ErpField label="دوره" required><ErpInput value={periodKey} onChange={(event) => setPeriodKey(event.target.value)} placeholder="1405-H2" /></ErpField></div>
+      <div className="grid gap-3 md:grid-cols-2"><ErpField label="عنوان" required><ErpInput value={titleFa} onChange={(event) => setTitleFa(event.target.value)} /></ErpField><ErpField label="دوره" required><ErpSelect value={periodKey} onChange={(event) => setPeriodKey(event.target.value as PerformancePeriodKey)}><option value={currentPeriodKey}>{currentPeriodKey}</option><option value={nextPerformancePeriodKey(currentPeriodKey)}>{nextPerformancePeriodKey(currentPeriodKey)}</option></ErpSelect></ErpField></div>
       <div className="mt-4 space-y-3">{questions.map((question, index) => <ErpCard key={index} className="p-4">
         <div className="grid gap-3 md:grid-cols-[14rem_1fr]"><ErpField label="بخش"><ErpSelect value={question.sectionCode} onChange={(event) => setQuestions((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, sectionCode: event.target.value } : item))}>{sections.map(([code, label]) => <option key={code} value={code}>{label}</option>)}</ErpSelect></ErpField><ErpField label="متن پرسش" required><ErpTextarea rows={2} value={question.promptFa} onChange={(event) => setQuestions((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, promptFa: event.target.value } : item))} /></ErpField></div>
         <div className="mt-3 flex flex-wrap gap-2"><ErpButton label="بالاتر" variant="ghost" disabled={index === 0} onClick={() => setQuestions((items) => { const next = [...items]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; })} /><ErpButton label="پایین‌تر" variant="ghost" disabled={index === questions.length - 1} onClick={() => setQuestions((items) => { const next = [...items]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; return next; })} /><ErpButton label="حذف" tone="danger" variant="ghost" onClick={() => setQuestions((items) => items.filter((_, itemIndex) => itemIndex !== index))} /></div>

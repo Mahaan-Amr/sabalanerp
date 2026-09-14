@@ -5387,6 +5387,7 @@ model HrJob {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
   positions        HrPosition[]
+  simplePerformanceProfiles SimplePerformanceProfile[]
 
   @@map("hr_jobs")
 }
@@ -5416,6 +5417,7 @@ model HrPosition {
   hiringApplications                 HrJobApplication[]
   capacityChanges                    HrPositionCapacityChange[]
   recruitmentRequests                HrRecruitmentRequest[]
+  simplePerformanceProfiles          SimplePerformanceProfile[]
   recruitmentEvaluationEligibilities HrRecruitmentEvaluationPositionEligibility[]
 
   @@index([organizationalUnitId, isActive])
@@ -8235,16 +8237,22 @@ model SimplePerformanceProfile {
   nameFa          String
   version         Int
   effectivePeriodKey String?
+  jobId           String?
+  positionId      String?
+  positionDifferenceReason String?
   isActive        Boolean                              @default(true)
   createdByUserId String
   createdAt       DateTime                             @default(now())
   indicators      SimplePerformanceIndicator[]
   assignments     SimplePerformanceProfileAssignment[]
   evaluations     SimplePerformanceEvaluation[]
+  job             HrJob?                               @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  position        HrPosition?                          @relation(fields: [positionId], references: [id], onDelete: Restrict)
 
   @@unique([stableKey, version])
   @@index([isActive, nameFa])
   @@index([stableKey, effectivePeriodKey, version])
+  @@index([jobId, positionId, effectivePeriodKey, version])
   @@map("simple_performance_profiles")
 }
 

@@ -201,23 +201,38 @@ try {
       employmentRelationshipId: automaticProfileRelationship.id, positionId: targetPosition.id, type: 'PRIMARY',
       effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), organizationalUnitId: unit.id, createdBy: actor.id,
     } });
+    const jobScopedProfile = await createSimplePerformanceProfile(tx, {
+      actorUserId: actor.id, stableKey: 'simple-performance-job-scoped-test', nameFa: 'الگوی شغل آزمون',
+      effectivePeriodKey: currentPeriod.key, jobId: job.id,
+      indicators: profile.indicators.map((indicator) => ({
+        code: indicator.code, categoryFa: indicator.categoryFa ?? undefined,
+        familyCode: indicator.familyCode ?? undefined, sourceKind: indicator.sourceKind,
+        minimumSampleCount: indicator.minimumSampleCount, titleFa: indicator.titleFa,
+        unitFa: indicator.unitFa, target: indicator.target.toString(),
+        direction: indicator.direction as 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER',
+        weightPercent: indicator.weightPercent.toString(),
+      })),
+    });
     const automaticProfileEvaluation = await createSimplePerformanceEvaluation(tx, {
       actorUserId: actor.id, personnelId: automaticProfilePersonnel.id, evaluationDate: today,
     });
-    assert.equal(automaticProfileEvaluation.profileId, profile.id,
-      'the active workbook profile matching the organizational unit applies without a personnel assignment');
+    assert.equal(automaticProfileEvaluation.profileId, jobScopedProfile.id,
+      'the active job-scoped profile applies without a personnel assignment');
     const automaticProfileWorkspace = await getSimplePerformanceWorkspace(tx, actor.id);
     assert.equal(
       automaticProfileWorkspace.assignments.find(({ personnelId }) => personnelId === automaticProfilePersonnel.id)?.profileId,
-      profile.id,
-      'the evaluation form exposes the automatically selected workbook profile',
+      jobScopedProfile.id,
+      'the evaluation form exposes the automatically selected job-scoped profile',
     );
     const hrUnit = await tx.hrOrganizationalUnit.create({ data: {
       code: 'SIMPLE-PERFORMANCE-HR-UNIT', name: 'واحد آزمایشی منابع انسانی', type: 'DEPARTMENT', createdBy: actor.id,
     } });
+    const hrJob = await tx.hrJob.create({ data: {
+      code: 'SIMPLE-PERFORMANCE-HR-JOB', title: 'کارشناس منابع انسانی', createdBy: actor.id,
+    } });
     const hrPosition = await tx.hrPosition.create({ data: {
       code: 'SIMPLE-PERFORMANCE-HR-POSITION', title: 'کارشناس منابع انسانی',
-      organizationalUnitId: hrUnit.id, jobId: job.id, createdBy: actor.id,
+      organizationalUnitId: hrUnit.id, jobId: hrJob.id, createdBy: actor.id,
     } });
     const hrPersonnel = await tx.personnel.create({ data: { firstName: 'منابع', lastName: 'انسانی' } });
     const hrRelationship = await tx.hrEmploymentRelationship.create({ data: {

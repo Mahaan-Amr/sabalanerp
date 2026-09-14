@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 const script = fs.readFileSync(path.resolve(process.cwd(), '../deploy/scripts/deploy.sh'), 'utf8');
 const start = script.indexOf('# Reclaim disposable build records');
-const end = script.indexOf('PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH=', start);
+const end = script.indexOf('DEPLOYMENT_TARGET_BACKEND_IMAGE=', start);
 assert.ok(start > script.indexOf('compose build "${release_service}"'));
 assert.ok(end < script.indexOf('\ncontrol prepare\n'));
 const block = script.slice(start, end);

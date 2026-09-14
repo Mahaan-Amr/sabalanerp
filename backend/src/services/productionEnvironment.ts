@@ -1,6 +1,8 @@
 import { isSupportedHiringInvitationTemplate } from './hiringSmsTemplate';
 import { validatePerformanceVaultEnvironment } from './personnelPerformancePayloadStore';
 import { validatePerformanceExportKeyEnvironment } from './personnelPerformanceDisclosureStore';
+import { createPublicKey } from 'node:crypto';
+import { performancePromotionAttestationKeyFromEnvironment, performanceRuntimeReleaseIdentityFromEnvironment } from './personnelPerformancePromotionEvidence';
 export const validateProductionEnvironment = (environment: NodeJS.ProcessEnv = process.env) => {
   if (environment.NODE_ENV !== "production") return;
 
@@ -46,7 +48,7 @@ export const validateProductionEnvironment = (environment: NodeJS.ProcessEnv = p
     "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID",
     "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64",
   ];
-  const missingVars = requiredVars.filter((key) => !process.env[key]);
+  const missingVars = requiredVars.filter((key) => !environment[key]);
   const hiringTemplateId =
     environment.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || "";
   const hasInvalidHiringTemplate =
@@ -90,6 +92,20 @@ export const validateProductionEnvironment = (environment: NodeJS.ProcessEnv = p
   } catch {
     hasInvalidPerformanceVault = true;
   }
+  let hasInvalidPerformanceAttestation = false;
+  try {
+    performancePromotionAttestationKeyFromEnvironment(environment);
+    performanceRuntimeReleaseIdentityFromEnvironment(environment);
+    const keyId = environment.PERFORMANCE_MEASUREMENT_ATTESTATION_KEY_ID?.trim() ?? '';
+    const encoded = environment.PERFORMANCE_MEASUREMENT_ATTESTATION_PUBLIC_KEY_BASE64?.trim() ?? '';
+    const bytes = Buffer.from(encoded, 'base64');
+    if (!keyId || /^(change|replace|example|placeholder|local)/i.test(keyId)
+      || bytes.toString('base64') !== encoded || createPublicKey({ key: bytes, type: 'spki', format: 'der' }).asymmetricKeyType !== 'ed25519') {
+      throw new Error('Invalid measurement trust configuration.');
+    }
+  } catch {
+    hasInvalidPerformanceAttestation = true;
+  }
 
   if (
     missingVars.length > 0 ||
@@ -101,7 +117,8 @@ export const validateProductionEnvironment = (environment: NodeJS.ProcessEnv = p
     hasInvalidSmsEnvironment ||
     hasInvalidDispatchTemplates ||
     hasInvalidPublicAppUrl ||
-    hasInvalidPerformanceVault
+    hasInvalidPerformanceVault ||
+    hasInvalidPerformanceAttestation
   ) {
     const details = [
       missingVars.length > 0 ? `Missing vars: ${missingVars.join(", ")}` : "",
@@ -129,6 +146,9 @@ export const validateProductionEnvironment = (environment: NodeJS.ProcessEnv = p
         : "",
       hasInvalidPerformanceVault
         ? "Personnel performance encryption key id and exact 32-byte base64 key must be production-ready."
+        : "",
+      hasInvalidPerformanceAttestation
+        ? "Performance attestation keys and measured runtime release identity must be valid and consistent."
         : "",
     ].filter(Boolean);
     throw new Error(`Invalid production environment. ${details.join(" ")}`);

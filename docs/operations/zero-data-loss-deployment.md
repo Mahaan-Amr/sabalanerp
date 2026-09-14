@@ -19,6 +19,8 @@ The target normal maintenance duration is under five minutes. The ordinary hard 
 
 ## Deployment lease
 
+Before preparing a maintenance session, the built backend runs the same production-environment validator used at application startup. Missing runtime settings, including personnel-performance attestation configuration and release identity, abort while the current release remains online. Provision the approved attestation configuration and bind release identity to the measured candidate before retrying; do not fill these settings with placeholders or weaken startup validation.
+
 A host lock prevents concurrent local processes. A renewable PostgreSQL lease records the deployment ID, release ID, target commit, owner, phase, start time, heartbeat, and expiry. A second deployment reports the active lease and exits without changing state. An expired lease can be claimed only after recovery preflight proves the journaled state. Rollback remains owned by the same lease.
 
 If database sessions are already saturated and even the durable lease cannot be written, the host lock and checksum-chained host journal own a pre-mutation drain: Nginx enters maintenance, the old backend and Inquiry stop gracefully, and the PostgreSQL advisory lease plus durable database lease are then acquired. No checkpoint or mutation is permitted until both database leases are proven. This path exists specifically to recover connection headroom automatically without accepting a write during the drain boundary.

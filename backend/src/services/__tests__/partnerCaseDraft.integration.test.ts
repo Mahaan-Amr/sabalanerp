@@ -159,7 +159,7 @@ async function resolved(ids: Record<string, string>, caseId: string, revision = 
         quantity: '2', unit: 'count', configurationChange: revision === 1 ? 'NEW' : 'UNCHANGED',
       }] },
     rows: [{ productRowId, configurationHash, quantity: '2', unit: 'count',
-      precisionPolicyVersion: 'canonical-count-v1', description: 'سنگ آماده پرونده' }],
+      precisionPolicyVersion: 'canonical-count-v1', description: 'سنگ آماده پرونده', wholesaleUnitPriceAmount: '100' }],
     partner: { displayName: 'فروشنده همکار تست', phone: '09120000000', address: 'تهران، فروشنده تست' },
     customer: { displayName: customerId === ids.customerId ? 'مشتری تست' : 'مشتری بازنگری',
       phone: '09120000001', address: 'تهران، مشتری تست' },

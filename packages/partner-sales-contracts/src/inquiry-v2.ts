@@ -6,7 +6,7 @@ import { PersianReasonSchema } from './primitives';
 const inquiryV1 = PartnerInquiryViewSchema.innerType();
 const rowV1 = inquiryV1.shape.rows.element.innerType();
 export const InquiryRowStateV2Schema = rowV1.shape.state;
-export const InquiryPredecessorV2Schema = ApprovedRowBindingSchema.extend({ reason: PersianReasonSchema }).strict();
+export const InquiryPredecessorV2Schema = ApprovedRowBindingSchema.extend({ reason: PersianReasonSchema.optional() }).strict();
 export const InquirySuccessorV2Schema = ApprovedRowBindingSchema.extend({ state: InquiryRowStateV2Schema }).strict();
 
 export const PartnerInquiryViewV2Schema = inquiryV1.extend({

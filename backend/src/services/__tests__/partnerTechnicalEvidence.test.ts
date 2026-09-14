@@ -65,7 +65,25 @@ test('technical sales policy accepts an integrity-checked bootstrap projection l
   assert.equal(corrupted.error.code, 'INTEGRITY_CONFLICT');
 });
 
-test('technical configuration identity excludes requested quantity but changes with priced geometry', async () => {
+test('directly activated Partner uses the current central technical policy without account terms', async () => {
+  const effectiveDate = new Date('2026-08-29T00:00:00.000Z');
+  const source = { id: 'central-policy', purpose: 'PARTNER_TECHNICAL_PRICING' as const,
+    label: 'سیاست فنی سراسری', effectiveDate, expiresAt: null,
+    issuedAt: new Date('2026-08-28T00:00:00.000Z'), revokedAt: null, terms, integrityHash: '' };
+  source.integrityHash = await canonicalHash({ purpose: source.purpose, label: source.label,
+    effectiveDate: '2026-08-29', terms: source.terms });
+  const transaction = {
+    $queryRaw: async () => [{ now: new Date('2026-08-29T12:00:00.000Z') }],
+    partnerProfile: { findUnique: async () => ({ commercialAccount: { id: 'account-1' } }) },
+    partnerCommercialTerms: { findMany: async () => [] },
+    partnerTermsPolicy: { findMany: async () => [source] },
+  } as any;
+  const result = await readPartnerTechnicalSalesPolicy(transaction, 'partner-1');
+  assert.ok(result.ok);
+  assert.equal(result.value.policyId, source.id);
+});
+
+test('main-stone inquiry identity survives quantity, dimension and operation changes', async () => {
   const row: PartnerTechnicalDraft['rows'][number] = {
     productRowId: 'row-1', catalogItemId: 'stone-1', catalogSnapshotVersion: '2026-08-29T08:00:00.000Z',
     family: 'longitudinal', configuration: { sourceBatchId: 'stock-1', lengthMeters: '2', widthMeters: '0.4',
@@ -74,7 +92,8 @@ test('technical configuration identity excludes requested quantity but changes w
   };
   const initial = await technicalConfigurationHash(row);
   assert.equal(await technicalConfigurationHash({ ...row, configuration: { ...row.configuration, quantity: 7 } }), initial);
-  assert.notEqual(await technicalConfigurationHash({ ...row, configuration: { ...row.configuration, widthMeters: '0.5' } }), initial);
+  assert.equal(await technicalConfigurationHash({ ...row, configuration: { ...row.configuration, widthMeters: '0.5' } }), initial);
+  assert.notEqual(await technicalConfigurationHash({ ...row, catalogItemId: 'stone-2' }), initial);
 });
 
 test('real evidence resolver binds current private rates and reuses frozen identity for quantity-only successors', async () => {

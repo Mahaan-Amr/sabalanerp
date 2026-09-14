@@ -8,7 +8,7 @@ const envelope = { schemaVersion: z.literal(1), commandId: IdSchema, correlation
 const expected = { expected: RevisionRefSchema, expectedState: CaseStateSchema };
 export const PartnerDraftSubmissionRefSchema = z.object({
   customerId: IdSchema, recoveryId: IdSchema, recoveryRevision: RevisionSchema,
-  graphHash: HashSchema, sabalanTermsVersionId: IdSchema,
+  graphHash: HashSchema, sabalanTermsVersionId: IdSchema.optional(),
 }).strict();
 export const CaseDraftIntentSchema = PartnerDraftSubmissionRefSchema.extend({
   projectId: IdSchema.optional(), contractDate: DateSchema,
@@ -30,7 +30,7 @@ export const PartnerCommandSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, ...expected, type: z.literal('CUSTOMER_CONFIRMATION_SEND'), normalizedRecipient: TextSchema }).strict(),
   z.object({ ...envelope, type: z.literal('INQUIRY_SUBMIT'), partnerSellerId: IdSchema,
     rows: z.array(z.object({ rowId: IdSchema, configuration: PartnerConfigurationRefSchema,
-      predecessor: z.object({ rowId: IdSchema, revision: RevisionSchema, reason: PersianReasonSchema }).strict().optional(),
+      predecessor: z.object({ rowId: IdSchema, revision: RevisionSchema, reason: PersianReasonSchema.optional() }).strict().optional(),
     }).strict()).min(1) }).strict(),
   z.object({ ...envelope, type: z.literal('INQUIRY_DECIDE'), inquiryId: IdSchema, expectedAssignmentRevision: RevisionSchema, decisions: z.array(decision).min(1) }).strict(),
   z.object({ ...envelope, type: z.literal('INQUIRY_CANCEL'), inquiryId: IdSchema, expectedRevision: RevisionSchema, reason: PersianReasonSchema }).strict(),

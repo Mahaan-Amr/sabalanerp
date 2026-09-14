@@ -41,7 +41,7 @@ export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinqu
           {row.expiresAt && <p className="text-sm text-[var(--sds-text-secondary)]">اعتبار تا {new Date(row.expiresAt).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' })}</p>}
           {row.noteOrReason && <p className="break-words text-sm">{row.noteOrReason}</p>}
           {row.predecessor && <div className="space-y-1 text-sm text-[var(--sds-text-secondary)]">
-            <p>استعلام مجدد: {row.predecessor.reason}</p>
+            {row.predecessor.reason && <p>استعلام مجدد: {row.predecessor.reason}</p>}
             {onOpenInquiry && <ErpButton label="مشاهده استعلام قبلی" variant="ghost" onClick={() => onOpenInquiry(row.predecessor!.inquiryId)} />}
           </div>}
           {row.successor && <div className="space-y-1 text-sm text-[var(--sds-text-secondary)]">

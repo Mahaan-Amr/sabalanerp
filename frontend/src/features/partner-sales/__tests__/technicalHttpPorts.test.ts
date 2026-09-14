@@ -61,7 +61,8 @@ test('technical HTTP ports collapse hidden 404 errors, reject malformed success 
     put: async () => { throw new Error('offline'); },
   });
   const denied = await hidden.recovery.read(access);
-  assert.deepEqual(denied, { ok: false, error: { code: 'NOT_FOUND', status: 404, message: 'مورد در دسترس نیست.' } });
+  assert.deepEqual(denied, { ok: false, error: { code: 'NOT_FOUND', status: 404,
+    message: 'مورد پیدا نشد؛ به فهرست برگردید و مورد دیگری را انتخاب کنید.' } });
   await assert.rejects(() => hidden.recovery.checkpoint({ ...access, expectedRecoveryRevision: 0,
     idempotencyKey: 'checkpoint-1', draft: { schemaVersion: 1, inputRevision: 1, rows: [] } }), /offline/);
 

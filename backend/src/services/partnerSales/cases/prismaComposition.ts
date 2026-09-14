@@ -10,6 +10,7 @@ import {
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { readAuthorizationDecisionByCorrelation } from '../../effectiveAuthorization/audit';
 import { decodeTechnicalRecovery } from './technicalRecoveryRecords';
+import { calculatePartnerCanonicalWholesale } from './canonicalWholesale';
 import { decodeTechnicalSavedSnapshot } from './technicalSavedRecords';
 import { SUBMISSION_EVIDENCE_OPERATION } from './submissionEvidence';
 import type { PartnerCaseDependencies } from './aggregate';
@@ -32,12 +33,6 @@ function phone(values: unknown[]): string | undefined {
     if (/^09\d{9}$/.test(normalized)) return normalized;
   }
   return undefined;
-}
-
-function addDays(date: string, days: number) {
-  const value = new Date(`${date}T00:00:00.000Z`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
 }
 
 /** Resolves the opaque technical recovery and every mutable business identity
@@ -70,13 +65,11 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
 
-  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
   const profile = await tx.partnerProfile.findUnique({ where: { userId: actorId }, select: {
     id: true, state: true,
     user: { select: { departmentId: true } },
     commercialAccount: { select: { id: true,
       identities: { orderBy: { version: 'desc' }, take: 1 },
-      terms: { where: { effectiveDate: { lte: clock.now } }, orderBy: { version: 'desc' } },
     } },
   } });
   const account = profile?.commercialAccount;
@@ -84,17 +77,6 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   if (!profile || profile.state !== 'ACTIVE' || !account || !identity || !profile.user.departmentId) {
     return { ok: false, error: partnerError('PARTNER_NOT_ACTIVE') };
   }
-  const credit = account.terms.find(candidate => object(candidate.terms)?.purpose === 'PARTNER_CREDIT_TERMS');
-  const creditTerms = object(credit?.terms);
-  const legalText = creditTerms?.legalText;
-  const paymentMethod = creditTerms?.paymentMethod;
-  const dueDays = creditTerms?.dueDays;
-  if (!credit || credit.id !== command.intent.sabalanTermsVersionId || typeof legalText !== 'string' || !legalText.trim() ||
-      !['CASH', 'BANK_TRANSFER', 'CHECK'].includes(String(paymentMethod)) ||
-      typeof dueDays !== 'number' || !Number.isSafeInteger(dueDays) || dueDays < 0 || dueDays > 3650) {
-    return { ok: false, error: partnerError('STATE_CONFLICT') };
-  }
-
   const customer = await tx.crmCustomer.findUnique({ where: { id: command.intent.customerId }, select: {
     id: true, firstName: true, lastName: true, companyName: true, address: true, homeAddress: true, workAddress: true,
     homeNumber: true, workNumber: true, projectManagerNumber: true, partnerOwnerProfileId: true,
@@ -108,7 +90,8 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   if (!customer || customer.partnerOwnerProfileId !== profile.id || !customerPhone) {
     return { ok: false, error: partnerError('NOT_FOUND') };
   }
-  if (command.intent.projectId) {
+  if (!command.intent.projectId) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
+  {
     const project = await tx.crmPotentialProject.findUnique({ where: { id: command.intent.projectId },
       select: { customerId: true, responsibleSellerId: true, wonSalesContractId: true, partnerRevision: true } });
     if (!project || project.customerId !== customer.id || project.responsibleSellerId !== actorId ||
@@ -123,7 +106,6 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   if (approvals.length !== command.intent.rows.length || new Set(approvals.map(item => item.rowId)).size !== approvals.length) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
-  let sabalanTotal = new Prisma.Decimal(0);
   const rows: ResolvedCaseDraft['rows'] = [];
   const catalog = object(saved.context)?.catalog;
   const catalogProducts = Array.isArray(object(catalog)?.products) ? object(catalog)!.products as unknown[] : [];
@@ -137,9 +119,14 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     if (!view || !hash || !identityRow || typeof product?.name !== 'string' || !approval || approval.currency !== 'IRT') {
       return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     }
-    sabalanTotal = sabalanTotal.add(new Prisma.Decimal(view.quantity).mul(approval.wholesaleUnitPrice));
+    let wholesale;
+    try { wholesale = calculatePartnerCanonicalWholesale(row, approval.wholesaleUnitPrice.toString()); }
+    catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
+    const commercialQuantity = new Prisma.Decimal(view.quantity);
+    if (commercialQuantity.lte(0)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     rows.push({ productRowId: row.productRowId, configurationHash: hash, quantity: view.quantity,
-      unit: view.unit, precisionPolicyVersion: identityRow.roundingPolicyVersion, description: product.name });
+      unit: view.unit, precisionPolicyVersion: identityRow.roundingPolicyVersion, description: product.name,
+      wholesaleUnitPriceAmount: new Prisma.Decimal(wholesale.totalAmount).div(commercialQuantity).toString() });
   }
   const planVersion = command.type === 'CASE_DRAFT_REVISE' ? command.expected.revision + 1 : 1;
   const caseId = command.idempotency.targetId;
@@ -147,19 +134,17 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     planId: `${caseId}-sabalan-plan-${planVersion}`, version: planVersion,
     ...(planVersion > 1 ? { predecessorPlanId: `${caseId}-sabalan-plan-${planVersion - 1}` } : {}),
     effectiveDate: command.intent.contractDate,
-    installments: [{ installmentId: `${caseId}-sabalan-installment-${planVersion}`,
-      dueDate: addDays(command.intent.contractDate, dueDays),
-      amount: { amount: sabalanTotal.toString(), currency: 'IRT' }, method: paymentMethod as 'CASH' | 'BANK_TRANSFER' | 'CHECK' }],
+    installments: [],
   });
   return { ok: true, value: {
     profileId: profile.id, partnerSellerId: actorId, customerId: customer.id,
     ...(command.intent.projectId ? { projectId: command.intent.projectId } : {}),
     commercialAccountId: account.id, departmentId: profile.user.departmentId,
-    sabalanTermsVersionId: credit.id, graph: saved.graph, technicalSnapshot: saved.view, rows,
+    sabalanTermsVersionId: 'ACCOUNTING_PENDING_V1', graph: saved.graph, technicalSnapshot: saved.view, rows,
     partner: { displayName: identity.tradeName || identity.legalName, phone: identity.phone, address: identity.address },
     customer: { displayName: customer.companyName || `${customer.firstName} ${customer.lastName}`.trim(),
       phone: customerPhone, address: customer.address || customer.workAddress || customer.homeAddress || 'ثبت‌نشده' },
-    legalText: legalText.trim(), sabalanPaymentPlan,
+    legalText: 'قرارداد فروش کالا و خدمات مطابق مشخصات، برنامه پرداخت و برنامه تحویل ثبت‌شده است.', sabalanPaymentPlan,
   } };
 }
 

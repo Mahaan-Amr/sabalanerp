@@ -19,5 +19,5 @@ test('v2 inquiry survives reload with exact safe configuration and successor lin
   assert.equal(PartnerInquiryViewV2Schema.safeParse({ ...input, internalRate: '800' }).success, false);
   assert.equal(PartnerInquiryViewV2Schema.safeParse({ ...input, rows: [{ ...input.rows[0],
     predecessor: { inquiryId: 'old-inquiry', rowId: 'old-row', revision: 1 },
-  }] }).success, false);
+  }] }).success, true);
 });

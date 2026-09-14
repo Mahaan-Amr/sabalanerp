@@ -18,7 +18,7 @@ test('responder workspace is assembled from currently authorized inquiry project
       if (inquiryId === 'inquiry-hidden') return { ok: false, error: partnerError('NOT_FOUND') };
       return { ok: true, value: {
         schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId, partnerDisplayName: 'فروشنده همکار', assignmentId: `assignment-${inquiryId}`,
-        assignmentRevision: 1, actions: [], rows: [],
+        assignmentRevision: 1, submittedAt: '2026-09-14T08:00:00.000Z', actions: [], rows: [],
       } };
     },
     readManagementWorkspace: async () => ({ ok: false, error: partnerError('FORBIDDEN') }),
@@ -38,7 +38,8 @@ test('workspace query rejects malformed producer projections instead of widening
     listResponderInquiryIds: async () => ({ inquiryIds: ['inquiry-corrupt'] }),
     readResponderInquiry: async () => ({ ok: true, value: {
       schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: 'inquiry-corrupt', partnerDisplayName: 'فروشنده همکار',
-      assignmentId: 'assignment-corrupt', assignmentRevision: 1, actions: [], rows: [], privateRate: '1000',
+      assignmentId: 'assignment-corrupt', assignmentRevision: 1, submittedAt: '2026-09-14T08:00:00.000Z',
+      actions: [], rows: [], privateRate: '1000',
     } as never }),
     readManagementWorkspace: async () => ({ ok: false, error: partnerError('FORBIDDEN') }),
   });

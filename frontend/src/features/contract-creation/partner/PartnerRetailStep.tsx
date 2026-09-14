@@ -2,8 +2,7 @@
 
 import React from 'react';
 import type { Money } from '@sabalanerp/partner-sales-contracts';
-import { ErpCard, ErpCheckboxControl, ErpField, ErpInlineState, ErpInput } from '@/components/erp';
-import { normalizeDigits } from '@/lib/numberFormat';
+import { ErpCard, ErpCheckboxControl, ErpField, ErpInlineState, ErpRialInput } from '@/components/erp';
 import { partnerMoneyText, partnerRetailSummary, type PartnerRetailRow } from './partnerRetail';
 
 export interface PartnerRetailStepProps {
@@ -24,17 +23,17 @@ export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled
       <p className="text-sm text-[var(--sds-text-secondary)]">قیمت فروش سبلان به شما: {row.inquiryRow.approvedPrice && partnerMoneyText(row.inquiryRow.approvedPrice.amount, row.inquiryRow.approvedPrice.currency)}</p>
       <ErpField label={`قیمت فروش به مشتری — ${row.inquiryRow.description}`}
         error={!summary.valid && summary.field === 'price' && summary.productRowId === row.productRowId ? summary.message : undefined}>
-        <ErpInput inputMode="decimal" dir="ltr" disabled={disabled} value={row.retailUnitPrice.amount} onChange={event => {
+        <ErpRialInput dir="ltr" disabled={disabled} value={row.retailUnitPrice.amount} onValueChange={amount => {
           onConfirmLoss(false);
-          onRowsChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, retailUnitPrice: { ...item.retailUnitPrice, amount: normalizeDigits(event.target.value) } } : item));
+          onRowsChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, retailUnitPrice: { ...item.retailUnitPrice, amount } } : item));
         }} />
       </ErpField>
     </ErpCard>)}
     <ErpField label={`تخفیف فروش به مشتری (${discount.currency === 'IRR' ? 'ریال' : 'تومان'})`}
       error={!summary.valid && summary.field === 'discount' ? summary.message : undefined}>
-      <ErpInput inputMode="decimal" dir="ltr" value={discount.amount} disabled={disabled} onChange={event => {
+      <ErpRialInput dir="ltr" value={discount.amount} disabled={disabled} onValueChange={amount => {
         onConfirmLoss(false);
-        onDiscountChange({ ...discount, amount: normalizeDigits(event.target.value) });
+        onDiscountChange({ ...discount, amount });
       }} />
     </ErpField>
     {!summary.valid ? <ErpInlineState kind="error" title={summary.message} /> : <>

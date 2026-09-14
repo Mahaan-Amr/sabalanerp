@@ -19,10 +19,19 @@ export async function lockPartnerOperationsControl(tx: Prisma.TransactionClient)
  * commit have one winner. */
 export async function authorizePartnerTechnicalRollout(tx: Prisma.TransactionClient, profileId: string,
   operation: 'READ' | 'MUTATE' | 'CONTROL' | 'COMMITTED_FULFILLMENT'): Promise<Result<void>> {
+  const direct = tx.partnerConversionDisposition && await tx.partnerConversionDisposition.findFirst({ where: {
+    profileId, sourceType: 'PARTNER_ACTIVATION', disposition: 'DIRECT_V4',
+  }, select: { id: true } });
   const control = operation === 'READ'
     ? await tx.partnerOperationsControl.findUnique({ where: { id: PARTNER_OPERATIONS_CONTROL_ID },
       select: { cohortId: true, operationalPaused: true } })
     : await lockPartnerOperationsControl(tx);
+  // Directly converted sellers are system-wide immediately. Cohorts remain
+  // readable only as historical rollout evidence for older profiles.
+  if (direct) {
+    if (operation === 'MUTATE' && control?.operationalPaused) return { ok: false, error: partnerError('OPERATIONAL_PAUSE') };
+    return { ok: true, value: undefined };
+  }
   if (!control) return { ok: false, error: partnerError('COHORT_NOT_READY') };
   // A committed Case is already a durable Sabalan obligation. Its fulfillment
   // remains available during emergency pause and after rollout cohort changes;

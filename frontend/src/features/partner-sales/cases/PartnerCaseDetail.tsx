@@ -76,7 +76,7 @@ export function PartnerCaseDetailContent({ view, actions }: { view: PartnerCaseV
       </ErpSection>}
       <ErpSection title="خروجی مشتری" description="پیش‌نمایش هیچ تعهدی ایجاد نمی‌کند؛ صدور نهایی می‌تواند پرونده را قطعی کند.">
         <div className="grid gap-2"><ErpButton label="پیش‌نمایش" icon={FaEye} variant="outline" disabled={!actions.canPreview} onClick={actions.onPreview} />
-          {actions.canSendConfirmation && <ErpButton label="ارسال دوباره کد تأیید" icon={FaSms} tone="info" variant="outline" onClick={actions.onSendConfirmation} />}
+          {actions.canSendConfirmation && <ErpButton label={view.state === 'DRAFT' ? 'ارسال پیامک تأیید' : 'ارسال دوباره پیامک تأیید'} icon={FaSms} tone="info" variant="outline" onClick={actions.onSendConfirmation} />}
           <ErpButton label="صدور نهایی و چاپ" icon={FaPrint} tone="success" disabled={!actions.canIssue} onClick={actions.onIssue} /></div>
       </ErpSection>
     </>} />
@@ -85,6 +85,7 @@ export function PartnerCaseDetailContent({ view, actions }: { view: PartnerCaseV
 
 function PaymentPlan({ plan }: { plan: PartnerCaseView['customerPaymentPlan'] }) {
   return <div className="space-y-3"><div className="flex items-center justify-between"><span className="text-sm text-[var(--sds-text-secondary)]">نسخه {plan.version.toLocaleString('fa-IR')}</span><ErpBadge tone="neutral">از {plan.effectiveDate}</ErpBadge></div>
+    {!plan.installments.length && <ErpBadge tone="warning">در انتظار ثبت حسابداری</ErpBadge>}
     {plan.installments.map(item => <ErpCard key={item.installmentId} className="p-3"><strong>{formatPartnerMoney(item.amount.amount, item.amount.currency)}</strong>
       <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{partnerPaymentMethodCopy[item.method]} · سررسید {item.dueDate}</p></ErpCard>)}</div>;
 }

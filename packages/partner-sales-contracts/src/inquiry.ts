@@ -27,7 +27,7 @@ export const ApprovedInquirySchema = z.object({
   decision: z.object({ actorId: IdSchema, assignmentId: IdSchema, assignmentRevision: RevisionSchema,
     authorizationEvidenceId: IdSchema, commandId: IdSchema }).strict(),
 }).strict().refine(row => Date.parse(row.expiresAt) - Date.parse(row.approvedAt) === PRICE_APPROVAL_VALIDITY_MS, 'Approval window must be exactly 48 hours')
-  .refine(row => Boolean(row.predecessorApprovalId) === Boolean(row.supersessionReason), 'Successor decision preserves its mandatory supersession reason');
+  .refine(row => !row.supersessionReason || Boolean(row.predecessorApprovalId), 'A supersession note requires its predecessor');
 export type ApprovedInquiry = z.infer<typeof ApprovedInquirySchema>;
 export type InquiryIdentity = z.infer<typeof InquiryIdentitySchema>;
 

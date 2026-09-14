@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import type { Prisma } from '@prisma/client';
-import { PartnerActivationCommandV3Schema, partnerError, type PartnerActivationPackageV3Port,
+import { PartnerActivationCommandV3Schema, PartnerDirectActivationCommandV4Schema,
+  PartnerDirectActivationQueryV4Schema, PartnerDirectActivationRevertCommandV4Schema, partnerError,
+  type PartnerActivationPackageV3Port, type PartnerDirectActivationV4Port,
   type Result } from '@sabalanerp/partner-sales-contracts';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readAuthorizationDecisionByCorrelation } from '../services/effectiveAuthorization/audit';
 import { createPrismaPartnerActivationPackage } from '../services/partnerSales/activationPackage/prisma';
+import { createPrismaPartnerDirectActivation } from '../services/partnerSales/activationPackage/directPrisma';
 import { resolveDeploymentReadiness } from '../services/partnerSales/activationPackage/releaseEvidence';
 
 function correlation(request: Request) {
@@ -25,6 +28,7 @@ function reply(response: Response, result: Result<unknown>) {
 
 export function createPartnerActivationRouter(dependencies: {
   portFor(request: AuthRequest): PartnerActivationPackageV3Port;
+  directPortFor?: (request: AuthRequest) => PartnerDirectActivationV4Port;
   authenticate?: RequestHandler;
 }) {
   const router = Router();
@@ -43,6 +47,25 @@ export function createPartnerActivationRouter(dependencies: {
     const parsed = PartnerActivationCommandV3Schema.safeParse(request.body);
     if (!parsed.success) return reply(response, { ok: false, error: partnerError('INVALID_PAYLOAD') });
     return reply(response, await dependencies.portFor(request).execute(parsed.data));
+  });
+  router.post('/query-v4', async (request: AuthRequest, response) => {
+    const parsed = PartnerDirectActivationQueryV4Schema.safeParse(request.body);
+    if (!dependencies.directPortFor || !parsed.success) {
+      return reply(response, { ok: false, error: partnerError('INVALID_PAYLOAD') });
+    }
+    return reply(response, await dependencies.directPortFor(request).query(parsed.data));
+  });
+  router.post('/commands-v4', async (request: AuthRequest, response) => {
+    if (!dependencies.directPortFor) return reply(response, { ok: false, error: partnerError('INVALID_PAYLOAD') });
+    const parsed = PartnerDirectActivationCommandV4Schema.safeParse(request.body);
+    if (!parsed.success) return reply(response, { ok: false, error: partnerError('INVALID_PAYLOAD') });
+    return reply(response, await dependencies.directPortFor(request).execute(parsed.data));
+  });
+  router.post('/revert-v4', async (request: AuthRequest, response) => {
+    if (!dependencies.directPortFor) return reply(response, { ok: false, error: partnerError('INVALID_PAYLOAD') });
+    const parsed = PartnerDirectActivationRevertCommandV4Schema.safeParse(request.body);
+    if (!parsed.success) return reply(response, { ok: false, error: partnerError('INVALID_PAYLOAD') });
+    return reply(response, await dependencies.directPortFor(request).revert(parsed.data));
   });
   return router;
 }
@@ -67,6 +90,22 @@ export default createPartnerActivationRouter({ portFor(request) {
         action: authorization.action, rootKind: authorization.root.kind, rootId: authorization.root.id,
         purpose: authorization.purpose, channel: 'API', correlationId, allowed: true });
       return evidence ? { ok: true as const, value: { evidenceId: evidence.id, isAdmin: result.value.isAdmin } }
+        : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+    } });
+}, directPortFor(request) {
+  if (!request.user) throw new Error('Authentication required');
+  const correlationId = correlation(request), actorId = request.user.id;
+  return createPrismaPartnerDirectActivation({ database: prisma, actorId,
+    authorize: async (tx, authorization) => {
+      const policy = createAuditedPartnerAuthorization(tx, { actorId, purpose: authorization.purpose, channel: 'API' },
+        { correlationId, reason: authorization.reason }, authorization.prospectiveOwnerId
+          ? { prospectiveProfileOwnerId: authorization.prospectiveOwnerId } : undefined);
+      const result = await policy.authorize(authorization.action, authorization.root);
+      if (!result.ok) return result;
+      const evidence = await readAuthorizationDecisionByCorrelation(tx, { domain: 'PARTNER', actorId,
+        action: authorization.action, rootKind: authorization.root.kind, rootId: authorization.root.id,
+        purpose: authorization.purpose, channel: 'API', correlationId, allowed: true });
+      return evidence ? { ok: true as const, value: { evidenceId: evidence.id } }
         : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
     } });
 } });

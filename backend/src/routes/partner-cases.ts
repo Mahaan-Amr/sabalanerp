@@ -44,35 +44,36 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           customers: { where: { isActive: true }, orderBy: { createdAt: 'desc' }, select: {
             id: true, firstName: true, lastName: true, companyName: true,
             address: true, workAddress: true, homeAddress: true,
+            phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }], take: 1 },
           } },
+          user: { select: { responsibleCrmPotentialProjects: { where: { isActive: true, wonSalesContractId: null,
+            partnerRevision: { not: null } }, orderBy: { updatedAt: 'desc' }, select: {
+              id: true, customerId: true, title: true,
+            } } } },
         } });
         if (!profile) return { ok: true as const, value: partnerContracts.PartnerCreationContextSchema.parse({
           schemaVersion: 1, kind: 'ORDINARY_SALES' }) };
-        const terms = profile.commercialAccount?.terms.find(item => {
-          const value = item.terms;
-          return value && typeof value === 'object' && !Array.isArray(value) &&
-            (value as Prisma.JsonObject).purpose === 'PARTNER_CREDIT_TERMS';
-        });
         const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'MUTATE');
         const permission = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id,
           purpose: 'PARTNER', channel: 'API' }, { correlationId: correlation(request) })
           .authorize('CASE_DRAFT_WRITE', { kind: 'PROFILE', id: profile.id });
-        const writable = profile.state === 'ACTIVE' && Boolean(terms) && rollout.ok && permission.ok;
-        const blockedCode = !terms ? 'STATE_CONFLICT' : !rollout.ok ? rollout.error.code
+        const writable = profile.state === 'ACTIVE' && rollout.ok && permission.ok;
+        const blockedCode = !rollout.ok ? rollout.error.code
           : !permission.ok ? permission.error.code : profile.state !== 'ACTIVE' ? 'PARTNER_NOT_ACTIVE' : undefined;
         const recoverableDraft = await tx.salesContractEditSession.findFirst({ where: { ownerUserId: request.user!.id,
           contractId: null, recovery: { path: ['kind'], equals: 'PARTNER_TECHNICAL_RECOVERY_V1' } },
           orderBy: { updatedAt: 'desc' }, select: { draftId: true, baseRevision: true, updatedAt: true } });
         const value = partnerContracts.PartnerCreationContextSchema.safeParse({ schemaVersion: 1, kind: 'PARTNER',
           actorId: request.user!.id, profileId: profile.id, writable, ...(blockedCode ? { blockedCode } : {}),
-          ...(terms ? { sabalanTermsVersionId: terms.id } : {}),
           ...(profile.inquiries[0] ? { latestInquiryId: profile.inquiries[0].id } : {}),
           inquiryIds: profile.inquiries.map(inquiry => inquiry.id),
           ...(recoverableDraft ? { recoverableDraft: { recoveryId: recoverableDraft.draftId,
             baseRevision: recoverableDraft.baseRevision, updatedAt: recoverableDraft.updatedAt.toISOString() } } : {}),
           customers: profile.customers.map(customer => ({ id: customer.id,
             displayName: customer.companyName || `${customer.firstName} ${customer.lastName}`.trim(),
-            address: customer.address || customer.workAddress || customer.homeAddress || 'ثبت‌نشده' })),
+            address: customer.address || customer.workAddress || customer.homeAddress || 'ثبت‌نشده',
+            ...(customer.phoneNumbers[0]?.number ? { phone: customer.phoneNumbers[0].number } : {}) })),
+          projects: profile.user.responsibleCrmPotentialProjects,
         });
         return value.success ? { ok: true as const, value: value.data }
           : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };

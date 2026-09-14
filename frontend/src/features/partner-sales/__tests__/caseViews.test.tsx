@@ -20,7 +20,7 @@ test('Partner case detail separates retail, wholesale and margin without exposin
   assert.match(html, /سود بازفروش/);
   assert.match(html, /پیش‌نمایش/);
   assert.match(html, /صدور نهایی/);
-  assert.match(html, /ارسال دوباره کد تأیید/);
+  assert.match(html, /ارسال پیامک تأیید/);
   assert.doesNotMatch(html, /FIXTURE-INTERNAL-313|شماره سند داخلی|approvalEvidenceId|commercialAccountId/);
 });
 

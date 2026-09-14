@@ -18,7 +18,7 @@ test('Partner constructs inquiry and Case submissions solely from safe query/dra
   assert.equal(PartnerCommandSchema.safeParse(inquiry).success, true);
   const successor = { ...inquiry, rows: [{ ...inquiry.rows[0], predecessor: { rowId: binding.rowId, revision: binding.revision, reason: 'درخواست قیمت جدید' } }] };
   assert.equal(PartnerCommandSchema.safeParse(successor).success, true);
-  assert.equal(PartnerCommandSchema.safeParse({ ...successor, rows: [{ ...successor.rows[0], predecessor: { rowId: binding.rowId, revision: binding.revision } }] }).success, false);
+  assert.equal(PartnerCommandSchema.safeParse({ ...successor, rows: [{ ...successor.rows[0], predecessor: { rowId: binding.rowId, revision: binding.revision } }] }).success, true);
   const submit = { ...envelope('CASE_SUBMIT'), type: 'CASE_SUBMIT', intent: {
     ...fixture.draftSubmissionReference, contractDate: fixture.customer.contractDate,
     rows: [{ productRowId: fixture.partner.products[0].productRowId,
@@ -27,6 +27,6 @@ test('Partner constructs inquiry and Case submissions solely from safe query/dra
     retailDiscount: { amount: '0', currency: 'IRR' }, belowCostConfirmed: false, deliveries: fixture.partner.deliveries,
   } };
   assert.equal(PartnerCommandSchema.safeParse(submit).success, true);
-  assert.equal(ApprovedInquirySchema.safeParse({ ...fixture.approval, predecessorApprovalId: 'previous' }).success, false);
+  assert.equal(ApprovedInquirySchema.safeParse({ ...fixture.approval, predecessorApprovalId: 'previous' }).success, true);
   assert.equal(ApprovedInquirySchema.safeParse({ ...fixture.approval, predecessorApprovalId: 'previous', supersessionReason: 'قیمت تازه تأیید شد' }).success, true);
 });

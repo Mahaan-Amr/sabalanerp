@@ -13,7 +13,7 @@ export type ResolvedCaseDraft = {
   graph: CanonicalProductGraph;
   technicalSnapshot: PartnerTechnicalSavedView;
   rows: Array<{ productRowId: string; configurationHash: string; quantity: string; unit: string;
-    precisionPolicyVersion: string; description: string }>;
+    precisionPolicyVersion: string; description: string; wholesaleUnitPriceAmount: string }>;
   partner: DisplayParty; customer: DisplayParty; legalText: string;
   sabalanPaymentPlan: ReturnType<typeof PaymentPlanSchema.parse>;
 };
@@ -25,7 +25,7 @@ export async function validateResolvedDraft(command: Extract<PartnerCommand, { t
   resolved: ResolvedCaseDraft): Promise<Result<{ graph: CanonicalProductGraph; graphHash: string }>> {
   const parsed = CaseDraftIntentSchema.safeParse(command.intent);
   if (!parsed.success || resolved.partnerSellerId !== command.idempotency.actorId || resolved.customerId !== command.intent.customerId ||
-      resolved.sabalanTermsVersionId !== command.intent.sabalanTermsVersionId || resolved.projectId !== command.intent.projectId) {
+      resolved.projectId !== command.intent.projectId) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
   let graph: CanonicalProductGraph;
@@ -64,11 +64,11 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
   }
   const products = input.rows.map(row => ({ productRowId: row.productRowId, description: row.description,
-    quantity: row.quantity, unit: row.unit, wholesaleUnitPrice: row.approval.wholesaleUnitPrice.amount,
+    quantity: row.quantity, unit: row.unit, wholesaleUnitPrice: row.wholesaleUnitPriceAmount,
     retailUnitPrice: row.retailUnitPrice.amount, approvalEvidenceId: row.approval.approvalId,
     configurationHash: row.configurationHash }));
   const retailNet = sum(input.rows.map(row => multiply(row.quantity, row.retailUnitPrice.amount)));
-  const wholesaleNet = sum(input.rows.map(row => multiply(row.quantity, row.approval.wholesaleUnitPrice.amount)));
+  const wholesaleNet = sum(input.rows.map(row => multiply(row.quantity, row.wholesaleUnitPriceAmount)));
   const discount = input.command.intent.retailDiscount.amount;
   if (input.command.intent.retailDiscount.currency !== currency || subtract(retailNet, discount).startsWith('-')) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
@@ -78,7 +78,7 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
   const sabalanPlanTotal = sum(input.resolved.sabalanPaymentPlan.installments.map(item => item.amount.amount));
   if (input.command.intent.customerPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
       input.resolved.sabalanPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
-      planTotal !== retailPayable || sabalanPlanTotal !== wholesaleNet) {
+      planTotal !== retailPayable || (input.resolved.sabalanPaymentPlan.installments.length > 0 && sabalanPlanTotal !== wholesaleNet)) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
   }
   const quantities = new Map(input.rows.map(row => [row.productRowId, row.quantity]));

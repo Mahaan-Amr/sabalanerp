@@ -37,7 +37,8 @@ export const PartnerCreationContextSchema = z.discriminatedUnion('kind', [
     recoverableDraft: z.object({ recoveryId: IdSchema, baseRevision: z.number().int().nonnegative().safe(),
       updatedAt: InstantSchema }).strict().optional(),
     customers: z.array(z.object({ id: IdSchema, displayName: z.string().min(1).max(240),
-      address: z.string().min(1).max(2000) }).strict()),
+      address: z.string().min(1).max(2000), phone: z.string().min(1).max(30).optional() }).strict()),
+    projects: z.array(z.object({ id: IdSchema, customerId: IdSchema, title: z.string().min(1).max(500) }).strict()),
   }).strict(),
 ]);
 export type PartnerCreationContext = z.infer<typeof PartnerCreationContextSchema>;

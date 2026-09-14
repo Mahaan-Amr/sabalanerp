@@ -9,7 +9,7 @@ import {
   type DuplicateCustomerMatch, type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpCard, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpSelect, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpCard, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpSelect, ErpTextarea } from '@/components/erp';
 import api from '@/lib/api';
 import { createPartnerTechnicalHttpPorts } from './partnerTechnicalHttpPorts';
 import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/partnerInquiryHttpPorts';
@@ -32,7 +32,7 @@ type PersistedRuntime = { actorId: string; inquiryId: string; access: Access;
 
 const ports = createPartnerTechnicalHttpPorts();
 const inquiryPorts = createPartnerInquiryHttpPorts();
-const runtimeKey = (actorId: string) => `partner-creation-runtime:${actorId}`;
+const runtimeKey = (actorId: string, inquiryId: string) => `partner-creation-runtime:${actorId}:${inquiryId}`;
 const inquiryPendingKey = (actorId: string) => `partner-inquiry-pending:${actorId}`;
 const casePendingKey = (actorId: string) => `partner-case-pending:${actorId}`;
 const emptyTechnicalDraft = (inputRevision = 0): PartnerTechnicalDraft => ({
@@ -132,13 +132,15 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
       if (parsed.data.kind === 'PARTNER') {
         const startFresh = searchParams.get('newInquiry') === '1';
         freshInquiryRef.current = startFresh;
-        const saved = startFresh ? null : readStored<PersistedRuntime>(runtimeKey(parsed.data.actorId));
+        const requestedInquiry = searchParams.get('inquiryId') || parsed.data.latestInquiryId || '';
+        const saved = startFresh || !requestedInquiry ? null
+          : readStored<PersistedRuntime>(runtimeKey(parsed.data.actorId, requestedInquiry));
         if (saved?.actorId === parsed.data.actorId) { setRuntime(saved); setCustomerId(saved.customerId); }
         else {
           const requestedCustomer = searchParams.get('customerId');
           setCustomerId(parsed.data.customers.some(customer => customer.id === requestedCustomer) ? requestedCustomer! : parsed.data.customers[0]?.id || '');
         }
-        setShowCustomerForm(searchParams.get('newCustomer') === '1' || parsed.data.customers.length === 0);
+        setShowCustomerForm(searchParams.get('newCustomer') === '1');
       }
     }).catch(() => active && setError('تشخیص مسیر ایجاد قرارداد انجام نشد. دوباره تلاش کنید.'));
     return () => { active = false; };
@@ -291,15 +293,15 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
   const persistRuntime = useCallback((value: PersistedRuntime | null) => {
     setRuntime(value);
     if (!contextActorId) return;
-    if (value) window.localStorage.setItem(runtimeKey(contextActorId), JSON.stringify(value));
-    else window.localStorage.removeItem(runtimeKey(contextActorId));
+    if (value) window.localStorage.setItem(runtimeKey(contextActorId, value.inquiryId), JSON.stringify(value));
+    else if (runtimeRef.current) window.localStorage.removeItem(runtimeKey(contextActorId, runtimeRef.current.inquiryId));
   }, [contextActorId]);
 
   const beginNewInquiry = useCallback(async (partner: PartnerContext) => {
     if (pending || recoveryStarting.current) return;
     setPending(true); setError(null);
     freshInquiryRef.current = true;
-    persistRuntime(null); setWizard(null); setDraftAccess(null); setRecoveryRevision(0); setRecoveryBlocked(false);
+    setRuntime(null); setWizard(null); setDraftAccess(null); setRecoveryRevision(0); setRecoveryBlocked(false);
     recoveryRevisionRef.current = 0; checkpointedInputRevision.current = 0; inquiryHydrationFlight.current = false;
     setTechnicalDraft(emptyTechnicalDraft());
     router.replace('/dashboard/sales/contracts/create?newInquiry=1');
@@ -336,7 +338,7 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
   }, [persistRuntime]);
 
   const startInquiry = async (partner: PartnerContext) => {
-    if (pending || !partner.sabalanTermsVersionId || !customerId || !technicalReady || !draftAccess || checkpointFlight.current) return;
+    if (pending || !technicalReady || !draftAccess || checkpointFlight.current) return;
     setPending(true); setError(null);
     try {
       const saved = await ports.saved.save({ ...draftAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
@@ -355,7 +357,7 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
       window.localStorage.setItem(inquiryPendingKey(partner.actorId), JSON.stringify(command));
       const submitted = await inquiryPorts.commands.execute(command);
       if (!submitted.ok) { window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); setError(submitted.error.message); return; }
-      const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value, configuredRows, customerId };
+      const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value, configuredRows, customerId: '' };
       window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); persistRuntime(value);
       freshInquiryRef.current = false;
       router.replace('/dashboard/sales/contracts/create');
@@ -383,26 +385,28 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
       clearPending: async () => { window.localStorage.removeItem(casePendingKey(submissionActorId)); },
       finalizeCommitted: async () => {
         window.localStorage.removeItem(casePendingKey(submissionActorId));
-        window.localStorage.removeItem(runtimeKey(submissionActorId));
+        const active = runtimeRef.current;
+        if (active) window.localStorage.removeItem(runtimeKey(submissionActorId, active.inquiryId));
       },
     } });
   }, [reacquireRuntime, submissionActorId, submissionRecoveryId]);
 
   const enterWizard = async (inquiry: PartnerInquiryView) => {
-    if (!runtime || !context || context.kind !== 'PARTNER' || !context.sabalanTermsVersionId) return;
+    if (!runtime || !context || context.kind !== 'PARTNER') return;
     setError(null);
     const refreshed = await reacquireRuntime(runtime);
     if (!refreshed) return;
     const validated = await ports.saved.readSaved({ ...refreshed.access, recoveryRevision: refreshed.saved.recoveryRevision });
     if (!validated.ok) { setError(validated.error.message); return; }
-    const customer = context.customers.find(item => item.id === customerId);
+    const customer = context.customers.find(item => item.id === customerId) ?? context.customers[0];
     const approved = inquiry.rows.filter(row => row.state === 'APPROVED' && row.approvedPrice);
     const currency = approved[0]?.approvedPrice?.currency;
-    if (!customer || !currency) { setError('مشتری و پاسخ معتبر استعلام را بررسی کنید.'); return; }
+    if (!customer) { setShowCustomerForm(true); setError('برای ایجاد قرارداد، مشتری را ثبت یا انتخاب کنید.'); return; }
+    if (!currency) { setError('پاسخ معتبر استعلام را بررسی کنید.'); return; }
     const contractDate = today();
     const draft = enterPartnerWizard({ inquiry, now: Date.now(), validated: validated.value,
-      base: { customerId, recoveryId: runtime.saved.recoveryId, recoveryRevision: runtime.saved.recoveryRevision,
-        sabalanTermsVersionId: context.sabalanTermsVersionId, contractDate,
+      base: { customerId: customer.id, recoveryId: runtime.saved.recoveryId, recoveryRevision: runtime.saved.recoveryRevision,
+        contractDate,
         customerPaymentPlan: { planId: `partner-customer-plan-${crypto.randomUUID()}`, version: 1,
           effectiveDate: contractDate, installments: [{ installmentId: `partner-installment-${crypto.randomUUID()}`,
             dueDate: addDays(contractDate, 30), amount: { amount: '0', currency }, method: 'BANK_TRANSFER' }] },
@@ -426,11 +430,22 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
         amount: { amount: summary.retail, currency: installments[0].amount.currency } }, ...installments.slice(1)] } } } : next);
   };
 
-  const renderSection = (step: Exclude<PartnerWizardStep, 'retail'>, draft: PartnerWizardDraft) => {
+  const renderSection = (step: Exclude<PartnerWizardStep, 'products'>, draft: PartnerWizardDraft) => {
     if (!context || context.kind !== 'PARTNER') return null;
-    if (step === 'customer') return <ErpField label="مشتری"><ErpSelect value={draft.intent.customerId}
-      onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, customerId: event.target.value } })}>
-      {context.customers.map(customer => <option key={customer.id} value={customer.id}>{customer.displayName}</option>)}</ErpSelect></ErpField>;
+    if (step === 'date') return <ErpField label="تاریخ قرارداد" required><ErpInput type="date" value={draft.intent.contractDate}
+      onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, contractDate: event.target.value } })} /></ErpField>;
+    if (step === 'customer') return <ErpCombobox label="مشتری" value={draft.intent.customerId}
+      options={context.customers.map(customer => ({ value: customer.id, label: customer.displayName }))}
+      onChange={value => updateWizard({ ...draft, intent: { ...draft.intent, customerId: value,
+        projectId: context.projects.some(project => project.id === draft.intent.projectId && project.customerId === value)
+          ? draft.intent.projectId : undefined } })} />;
+    if (step === 'project') return <div className="space-y-4">
+      <ErpCombobox label="پروژه" value={draft.intent.projectId ?? ''}
+        options={context.projects.filter(project => project.customerId === draft.intent.customerId)
+          .map(project => ({ value: project.id, label: project.title }))}
+        onChange={value => updateWizard({ ...draft, intent: { ...draft.intent, projectId: value } })} />
+      <ErpButton label="ثبت پروژه جدید" variant="outline" href={`/dashboard/crm/potential-projects/create?customerId=${encodeURIComponent(draft.intent.customerId)}`} />
+    </div>;
     if (step === 'delivery') return <div className="space-y-3">{draft.intent.deliveries.map((delivery, index) => <ErpCard key={delivery.deliveryId} className="space-y-3 p-4">
       <ErpField label={`تاریخ تحویل ${(index + 1).toLocaleString('fa-IR')}`}><ErpInput type="date" value={delivery.date}
         onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, deliveries: draft.intent.deliveries.map(item => item.deliveryId === delivery.deliveryId ? { ...item, date: event.target.value } : item) } })} /></ErpField>
@@ -443,8 +458,11 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
           installments: draft.intent.customerPaymentPlan.installments.map((item, index) => index ? item : { ...item, method: event.target.value as 'CASH' | 'BANK_TRANSFER' | 'CHECK' }) } } })}>
         <option value="BANK_TRANSFER">واریز بانکی</option><option value="CASH">نقدی</option><option value="CHECK">چک</option>
       </ErpSelect></ErpField></ErpCard>;
-    return <div className="space-y-2"><p>مشتری: {context.customers.find(item => item.id === draft.intent.customerId)?.displayName}</p>
-      <p>تعداد ردیف‌ها: {draft.rows.length.toLocaleString('fa-IR')}</p><p>تعداد تحویل‌ها: {draft.intent.deliveries.length.toLocaleString('fa-IR')}</p></div>;
+    const customer = context.customers.find(item => item.id === draft.intent.customerId);
+    return <div className="space-y-2"><p>مشتری: {customer?.displayName}</p>
+      {customer?.phone && <p>شماره همراه: {customer.phone}</p>}
+      <p>تعداد ردیف‌ها: {draft.rows.length.toLocaleString('fa-IR')}</p>
+      <p>پس از ثبت، پیامک تأیید با همان لینک و کد قرارداد عادی قابل ارسال است.</p></div>;
   };
 
   if (!context) return error ? <ErpInlineState kind="error" title={error} /> : <ErpLoading />;
@@ -458,7 +476,9 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
     {error && <ErpInlineState kind="error" title={error} />}</section>;
   if (wizard && submission) return <PartnerContractWizard draft={wizard} onChange={updateWizard} recovery={{ state: 'writable' }}
     submission={submission} now={Date.now()} renderSection={renderSection}
-    validateStep={(step, draft) => step === 'customer' && !draft.intent.customerId ? 'مشتری را انتخاب کنید.'
+    validateStep={(step, draft) => step === 'date' && !draft.intent.contractDate ? 'تاریخ قرارداد را وارد کنید.'
+      : step === 'customer' && !draft.intent.customerId ? 'مشتری را انتخاب کنید.'
+      : step === 'project' && !draft.intent.projectId ? 'پروژه را انتخاب کنید.'
       : step === 'delivery' && draft.intent.deliveries.some(item => !item.date || !item.destination.trim()) ? 'برنامه تحویل را کامل کنید.'
         : null}
     onReinquire={() => setWizard(null)} onOpenCase={caseId => router.push(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(caseId)}`)} />;
@@ -471,7 +491,7 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
     onEnterWizard={enterWizard} onOpenInquiry={() => undefined} onCreateNewInquiry={() => void beginNewInquiry(context)}
     prepareSuccessor={async row => ({ rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: row.configurationRef })} />
     {error && <ErpInlineState kind="error" title={error} />}</div>;
-  if (showCustomerForm || !context.customers.length) return <section dir="rtl" className="mx-auto min-w-0 max-w-4xl space-y-5">
+  if (showCustomerForm) return <section dir="rtl" className="mx-auto min-w-0 max-w-4xl space-y-5">
     <h1 className="text-2xl font-bold">ثبت مشتری فروش همکار</h1>
     <ErpInlineState kind="empty" title="برای شروع فروش، ابتدا مشتری خود را ثبت کنید. این مشتری فقط در حساب فروش همکار شما قرار می‌گیرد." />
     <ErpCard className="space-y-4 p-4 sm:p-6">
@@ -515,12 +535,9 @@ export function PartnerCreationRuntime({ ordinary }: { ordinary: React.ReactNode
     <h1 className="text-2xl font-bold">ایجاد فروش همکار</h1>
     {customerNotice && <ErpInlineState kind="success" title={customerNotice} />}
     <ErpCard className="space-y-4 p-4 sm:p-6">
-      <ErpField label="مشتری" required><ErpSelect value={customerId} onChange={event => setCustomerId(event.target.value)}>
-        {context.customers.map(customer => <option key={customer.id} value={customer.id}>{customer.displayName}</option>)}</ErpSelect></ErpField>
-      <ErpButton label="ثبت مشتری جدید" variant="outline" disabled={pending} onClick={() => { setError(null); setCustomerNotice(null); setShowCustomerForm(true); }} />
       <PartnerTechnicalDraftEditor draft={technicalDraft} products={catalog} operations={operations}
         preview={technicalPreview} onChange={setTechnicalDraft} />
-      <ErpButton label="ذخیره مشخصات و ارسال استعلام" disabled={pending || !technicalReady || !customerId || !draftAccess || checkpointFlight.current} onClick={() => void startInquiry(context)} />
+      <ErpButton label="ارسال استعلام" disabled={pending || !technicalReady || !draftAccess || checkpointFlight.current} onClick={() => void startInquiry(context)} />
     </ErpCard>
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;

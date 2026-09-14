@@ -115,13 +115,17 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
             }
           }
           const inquiry = InquiryIdentitySchema.safeParse(identities.find(item => item.productRowId === row.productRowId)?.identity);
+          const mainStoneRate = inquiry.success && inquiry.data.configuration.some(item => item.key === 'pricingSubjectHash') &&
+            inquiry.data.calculationPolicyVersion === 'partner-main-stone-rate-v2' &&
+            inquiry.data.roundingPolicyVersion === 'partner-main-stone-rate-v2';
           if (!inquiry.success || inquiry.data.partnerSellerId !== dependencies.actorId || inquiry.data.catalogProductId !== row.catalogProductId ||
-              inquiry.data.family !== row.productType || inquiry.data.calculationPolicyVersion !== graph.calculationPolicy.calculation ||
-              inquiry.data.roundingPolicyVersion !== graph.calculationPolicy.rounding) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+              inquiry.data.family !== row.productType || (!mainStoneRate &&
+                (inquiry.data.calculationPolicyVersion !== graph.calculationPolicy.calculation ||
+                 inquiry.data.roundingPolicyVersion !== graph.calculationPolicy.rounding))) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           // Canonical compiler owns the quantity; the evidence producer cannot
           // replace it with a quantity inferred from a price or catalog match.
           const measure = compiled.value.measures.find(item => item.productRowId === row.productRowId);
-          if (!measure || measure.unit !== inquiry.data.unit) {
+          if (!measure || (!mainStoneRate && measure.unit !== inquiry.data.unit)) {
             return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           }
           const old = previous?.identities.find(item => item.productRowId === row.productRowId);

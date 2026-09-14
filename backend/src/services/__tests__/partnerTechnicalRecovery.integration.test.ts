@@ -169,12 +169,14 @@ test('real database policy and private catalog evidence produce a validated safe
     if (inquiryConfiguration.ok) {
       assert.equal(inquiryConfiguration.value.description, 'سنگ تست فنی');
       assert.equal(inquiryConfiguration.value.identity.catalogProductId, product.id);
-      assert.deepEqual(inquiryConfiguration.value.configuration.filter(item => ['خانواده محصول', 'کد محصول', 'نوع درخواست', 'مقدار درخواستی'].includes(item.label)), [
+      assert.deepEqual(inquiryConfiguration.value.configuration.filter(item => ['خانواده محصول', 'کد محصول', 'ابعاد کاتالوگی', 'طول', 'عرض'].includes(item.label)), [
         { label: 'خانواده محصول', value: 'آماده' },
         { label: 'کد محصول', value: product.code },
-        { label: 'نوع درخواست', value: 'قطعه آماده' },
-        { label: 'مقدار درخواستی', value: '2 عدد' },
+        { label: 'ابعاد کاتالوگی', value: 'فنی' },
+        { label: 'طول', value: '2 متر' },
+        { label: 'عرض', value: '40 سانتی‌متر' },
       ]);
+      assert.equal(inquiryConfiguration.value.configuration.some(item => item.label.includes('تعداد') || item.label.includes('مقدار')), false);
       assert.equal(JSON.stringify(inquiryConfiguration.value).includes('12000000'), false);
       assert.equal(JSON.stringify(inquiryConfiguration.value).includes('mandatoryPercentage'), false);
     }

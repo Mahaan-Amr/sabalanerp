@@ -12,7 +12,7 @@ import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from
 
 const fixture = createPartnerFixtures();
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
-const draft: PartnerWizardDraft = { step: 'retail', rows, intent: {
+const draft: PartnerWizardDraft = { step: 'products', rows, intent: {
   ...fixture.draftSubmissionReference, contractDate: '2026-08-27',
   rows: rows.map(row => ({ productRowId: row.productRowId, approvedRowBinding: row.inquiryRow.approvedRowBinding!, retailUnitPrice: row.retailUnitPrice })),
   customerPaymentPlan: fixture.partner.customerPaymentPlan, deliveries: fixture.partner.deliveries,
@@ -50,12 +50,13 @@ test('expiry during the wizard retains entered retail data and exposes inline re
 });
 
 test('a changed technical row keeps the wizard inputs but blocks final submission', () => {
-  const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'review' }} onChange={() => undefined}
+  const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'confirmation' }} onChange={() => undefined}
     recovery={{ state: 'writable' }} submission={submission()} now={Date.parse('2026-08-27T09:00:00.000Z')}
     mismatchedRowIds={[fixture.inquiry.rows[0].rowId]} renderSection={() => <p>preserved-review</p>}
     validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /preserved-review/);
-  assert.match(html, /disabled=""[^>]*><span>ثبت پرونده/);
+  assert.match(html, /disabled=""/);
+  assert.match(html, /ثبت پرونده/);
   assert.match(html, /استعلام مجدد/);
 });
 

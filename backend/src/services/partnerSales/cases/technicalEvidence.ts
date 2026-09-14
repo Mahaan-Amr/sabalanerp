@@ -146,6 +146,25 @@ async function readTechnicalPolicyForAccount(tx: Prisma.TransactionClient, accou
     const policy = parsePartnerTechnicalSalesPolicySnapshot(policyTerms, candidate);
     return policy ? { ok: true, value: { policy, accountVersion } } : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
+  // Direct activation deliberately creates no Partner-specific commercial
+  // terms. In that case the ordinary, centrally issued pricing policy is the
+  // authority for cuts, tools and finishing. It is read, verified and frozen
+  // into the recovery snapshot exactly like an account projection.
+  const sources = await tx.partnerTermsPolicy.findMany({ where: {
+    purpose: 'PARTNER_TECHNICAL_PRICING', issuedAt: { lte: now }, effectiveDate: { lte: now },
+    revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+  }, orderBy: [{ effectiveDate: 'desc' }, { issuedAt: 'desc' }], select: {
+    id: true, purpose: true, label: true, effectiveDate: true, expiresAt: true,
+    issuedAt: true, revokedAt: true, terms: true, integrityHash: true,
+  } });
+  for (const source of sources) {
+    const sourceHash = await canonicalHash({ purpose: source.purpose, label: source.label,
+      effectiveDate: source.effectiveDate.toISOString().slice(0, 10), terms: source.terms });
+    if (source.integrityHash !== sourceHash) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    const policy = parsePartnerTechnicalSalesPolicySnapshot({ ...(record(source.terms) ?? {}), purpose: source.purpose },
+      { id: source.id, version: 1, effectiveDate: source.effectiveDate, integrityHash: source.integrityHash });
+    if (policy) return { ok: true, value: { policy, accountVersion } };
+  }
   return { ok: false, error: partnerError('STATE_CONFLICT') };
 }
 
@@ -153,23 +172,13 @@ async function readTechnicalPolicyForAccount(tx: Prisma.TransactionClient, accou
  * preferences. Geometry, sources, technical operations and pricing-affecting
  * overrides remain part of the identity. */
 export async function technicalConfigurationHash(row: PartnerTechnicalDraft['rows'][number]): Promise<string> {
-  const value = JSON.parse(JSON.stringify(row)) as Record<string, any>;
-  const configuration = value.configuration as Record<string, any>;
-  delete configuration.quantity;
-  delete configuration.quantityMode;
-  delete configuration.lastManualField;
-  delete configuration.lastManualDimension;
-  delete configuration.lengthDisplayUnit;
-  delete configuration.widthDisplayUnit;
-  delete configuration.crossDimensionDisplayUnit;
-  delete configuration.motherLengthDisplayUnit;
-  return canonicalHash(value);
+  return canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE',
+    catalogItemId: row.catalogItemId, family: row.family, unit: identityUnit(row) });
 }
 
 async function technicalDraftRowConfigurationHash(row: PartnerTechnicalDraft['rows'][number], draft: PartnerTechnicalDraft) {
-  const rowHash = await technicalConfigurationHash(row);
-  const layers = (draft.dependents ?? []).filter(dependent => dependent.kind === 'layer' && dependent.parentProductRowId === row.productRowId);
-  return layers.length ? canonicalHash({ rowHash, layers }) : rowHash;
+  void draft;
+  return technicalConfigurationHash(row);
 }
 
 export type PartnerTechnicalDatabase = Pick<PrismaClient, '$transaction'>;
@@ -204,19 +213,14 @@ function productReferences(draft: PartnerTechnicalDraft): Array<{ catalogItemId:
 
 function identityUnit(row: PartnerTechnicalDraft['rows'][number] | Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'remainder' }>)
   : InquiryIdentity['unit'] {
-  if (!('family' in row)) return 'meter';
+  if (!('family' in row)) return 'squareMeter';
   if (row.family === 'prepared' || row.family === 'volumetric') return row.configuration.unit;
-  if (row.family === 'slab') return 'squareMeter';
-  if (row.family === 'stair') return 'count';
-  return 'meter';
+  return 'squareMeter';
 }
 
 async function dependentConfigurationHash(row: Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'remainder' }>) {
-  const value = JSON.parse(JSON.stringify(row)) as Record<string, any>;
-  delete value.quantity;
-  delete value.lengthDisplayUnit;
-  delete value.widthDisplayUnit;
-  return canonicalHash(value);
+  return canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE',
+    catalogItemId: row.catalogItemId, family: 'longitudinal', unit: identityUnit(row) });
 }
 
 /** Real private evidence producer. Every source revision must equal the public
@@ -246,7 +250,7 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
         const configurationHash = await row.hash;
         return prior?.identity.catalogProductId === row.catalogItemId && prior.identity.family === row.family &&
           prior.identity.unit === row.unit && prior.identity.configuration.some(item =>
-            item.key === 'technicalConfigurationHash' && item.value === configurationHash);
+            item.key === 'pricingSubjectHash' && item.value === configurationHash);
       }));
       // A protected, integrity-checked prior snapshot is the owner evidence for
       // an unchanged technical identity. Do not turn a later catalog edit into
@@ -338,7 +342,7 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
     for (const row of identityRows) {
       const prior = input.previous?.identities.find(item => item.productRowId === row.productRowId);
       const configurationHash = await row.hash;
-      if (prior?.identity.configuration.some(item => item.key === 'technicalConfigurationHash' && item.value === configurationHash)) {
+      if (prior?.identity.configuration.some(item => item.key === 'pricingSubjectHash' && item.value === configurationHash)) {
         identities.push(prior);
         continue;
       }
@@ -346,43 +350,15 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
       const privateProductEvidence = context.products.find(item => item.catalogItemId === row.catalogItemId &&
         item.catalogSnapshotVersion === product.updatedAt.toISOString());
       if (!privateProductEvidence) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-      const materialRateHash = await canonicalHash({ policyId: frozenPolicy.policyId, productId: product.id,
-        productRevision: product.updatedAt.toISOString(), evidence: privateProductEvidence, currency: frozenPolicy.currency });
-      const { policyId: _policyIdentity, ...policySnapshot } = frozenPolicy;
-      const rowIntent = input.draft.rows.find(item => item.productRowId === row.productRowId);
-      const remainderIntent = (input.draft.dependents ?? []).find(item => item.kind === 'remainder' && item.productRowId === row.productRowId);
-      const ownOperations = rowIntent && 'operations' in rowIntent ? rowIntent.operations : remainderIntent?.kind === 'remainder' ? remainderIntent.operations : undefined;
-      const attachedLayers = (input.draft.dependents ?? []).filter((item): item is Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'layer' }> =>
-        item.kind === 'layer' && item.parentProductRowId === row.productRowId);
-      const selectedOperationIds = new Set([
-        ...(ownOperations?.tools.map(item => `TOOL\0${item.catalogItemId}`) ?? []),
-        ...(ownOperations?.finishings.map(item => `FINISHING\0${item.catalogItemId}`) ?? []),
-        ...attachedLayers.flatMap(layer => (layer.sideOperations ?? []).flatMap(side => [
-          ...side.operations.tools.map(item => `TOOL\0${item.catalogItemId}`),
-          ...side.operations.finishings.map(item => `FINISHING\0${item.catalogItemId}`),
-        ])),
-      ]);
-      const privateComponents = {
-        operations: (context.operations ?? []).filter(item => selectedOperationIds.has(`${item.kind}\0${item.catalogItemId}`)),
-        layers: (context.layers ?? []).filter(item => attachedLayers.some(layer => layer.catalogItemId === item.catalogItemId &&
-          layer.catalogSnapshotVersion === item.catalogSnapshotVersion)),
-        layerMaterials: context.products.filter(item => attachedLayers.some(layer => layer.source && layer.source.kind !== 'paid-remainder' &&
-          layer.source.catalogItemId === item.catalogItemId && layer.source.catalogSnapshotVersion === item.catalogSnapshotVersion)),
-      };
-      const components = [{ componentId: `technical-policy:${frozenPolicy.policyId}`,
-        evidenceHash: await canonicalHash(policySnapshot) },
-      ...(privateComponents.operations.length || privateComponents.layers.length || privateComponents.layerMaterials.length
-        ? [{ componentId: `technical-components:${row.productRowId}`, evidenceHash: canonicalHash(privateComponents) }] : [])];
-      const resolvedComponents: Array<{ componentId: string; evidenceHash: string }> = [];
-      for (const component of components) resolvedComponents.push({ componentId: component.componentId,
-        evidenceHash: typeof component.evidenceHash === 'string' ? component.evidenceHash : await component.evidenceHash });
+      const materialRateHash = await canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE',
+        productId: product.id, family: row.family, unit: row.unit, currency: frozenPolicy.currency });
       const identity = InquiryIdentitySchema.safeParse({ schemaVersion: 1, partnerSellerId: input.actorId,
         catalogProductId: row.catalogItemId, family: row.family, unit: row.unit,
-        configuration: [{ key: 'technicalConfigurationHash', value: configurationHash }],
-        materialRateEvidenceId: `partner-terms:${frozenPolicy.policyId}:${product.id}`, materialRateHash,
-        components: resolvedComponents, currency: frozenPolicy.currency,
-        calculationPolicyVersion: frozenPolicy.calculationPolicy.calculation,
-        roundingPolicyVersion: frozenPolicy.calculationPolicy.rounding });
+        configuration: [{ key: 'pricingSubjectHash', value: configurationHash }],
+        materialRateEvidenceId: `catalog-product:${product.id}`, materialRateHash,
+        components: [], currency: frozenPolicy.currency,
+        calculationPolicyVersion: 'partner-main-stone-rate-v2',
+        roundingPolicyVersion: 'partner-main-stone-rate-v2' });
       if (!identity.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
       identities.push({ productRowId: row.productRowId, identity: identity.data });
     }

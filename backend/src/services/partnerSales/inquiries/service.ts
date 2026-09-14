@@ -121,7 +121,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
       const definition = parseInquiryDefinition(row.definition);
       if (!definition) return false;
       if (decision.outcome === 'APPROVED' && decision.wholesaleUnitPrice.currency !== definition.identity.currency) return false;
-      return !row.predecessorId || Boolean(row.predecessor?.approval?.id && definition.predecessorReason);
+      return !row.predecessorId || Boolean(row.predecessor?.approval?.id);
     });
     let managementTakeover: { previousResponderId: string; assignmentId: string; assignmentRevision: number; reason: string } | undefined;
     if (assignment.responderId !== dependencies.actorId && hasActionableDecision) {
@@ -156,7 +156,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
           assignmentRevision: assignment.revision, authorizationEvidenceId: authorization.value.evidenceId,
           ...(row.predecessorId ? { predecessorApprovalId: row.predecessor?.approval?.id,
             supersessionReason: definition.predecessorReason } : {}) });
-        if (row.predecessorId && (!row.predecessor?.approval?.id || !definition.predecessorReason)) {
+        if (row.predecessorId && !row.predecessor?.approval?.id) {
           outcomes.push({ ok: false, rowId: row.id, error: partnerError('INTEGRITY_CONFLICT') }); continue;
         }
         await tx.partnerInquiryApproval.create({ data: { id: outcomeId, rowId: row.id, assignmentId: assignment.id,

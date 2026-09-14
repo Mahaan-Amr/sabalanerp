@@ -84,12 +84,13 @@ export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
         await onEnterWizard(latest);
       })} />}
     <ErpSheet open={Boolean(successor)} onClose={() => setSuccessor(null)} title="استعلام مجدد" presentation="modal" pending={actionPending || submit.phase === 'submitting' || submit.phase === 'uncertain'}
-      footer={<ErpButton label="ارسال استعلام مجدد" disabled={blocked || !/[\u0600-\u06ff]/.test(reason) || !reason.trim()} onClick={() => void act(async () => {
+      footer={<ErpButton label="ارسال استعلام مجدد" disabled={blocked} onClick={() => void act(async () => {
         if (!successor) return;
         const next = await prepareSuccessor(successor, reason.trim());
-        await send([{ ...next, predecessor: { rowId: successor.rowId, revision: successor.revision, reason: reason.trim() } }]);
+        await send([{ ...next, predecessor: { rowId: successor.rowId, revision: successor.revision,
+          ...(reason.trim() ? { reason: reason.trim() } : {}) } }]);
       })} />}>
-      <ErpField label="دلیل استعلام مجدد" required><ErpTextarea value={reason} maxLength={4000} onChange={event => setReason(event.target.value)} disabled={blocked} /></ErpField>
+      <ErpField label="یادداشت"><ErpTextarea value={reason} maxLength={4000} onChange={event => setReason(event.target.value)} disabled={blocked} /></ErpField>
       {submissionFeedback}
       {error && <ErpInlineState kind="error" title={error} />}
     </ErpSheet>

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalHash, partnerError } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerActivationHttpPort } from '../activation/partnerActivationHttpPort';
+import { createPartnerDirectActivationHttpPort } from '../activation/partnerDirectActivationHttpPort';
 import { createPartnerOperationsHttpPort } from '../activation/partnerOperationsHttpPort';
 import { activationOperationAvailability } from '../activation/activationUiPolicy';
 
@@ -25,6 +26,32 @@ test('activation HTTP port validates v3 query and command receipts', async () =>
   assert.equal((await port.execute(command)).ok, true);
   assert.equal(calls.length, 2);
   assert.equal((await port.execute({ ...command, unexpected: true } as typeof command)).ok, false);
+});
+
+test('direct activation HTTP port rejects legacy onboarding fields and validates the receipt', async () => {
+  const calls: Array<[string, unknown]> = [];
+  const client = { post: async (path: string, body: unknown) => {
+    calls.push([path, body]);
+    return path.endsWith('query-v4') ? { data: { success: true, data: { schemaVersion: 4,
+      purpose: 'PARTNER_DIRECT_ACTIVATION', actorId: 'admin-1', subject: { userId: 'fariba-1',
+        displayName: 'فریبا پورشهید', active: true, role: 'SALES', userUpdatedAt: '2026-09-14T08:00:00.000Z',
+        partnerState: 'NONE', canActivate: true, canRevert: false, customerCount: 0, inquiryCount: 0, caseCount: 0,
+        priorResponsibilityCount: 2 }, responders: [{ id: 'responder-1', label: 'پاسخ‌دهنده' }] } } }
+      : { data: { success: true, data: { schemaVersion: 4, commandId: 'activate-1', replayed: false,
+        userId: 'fariba-1', profileId: 'profile-1', profileRevision: 1, responderAssignmentId: 'assignment-1',
+        commercialAccountId: 'account-1', eventIds: ['event-1'], removedAccessCount: 3,
+        preservedResponsibilityCount: 2 } } };
+  } };
+  const port = createPartnerDirectActivationHttpPort(client);
+  assert.equal((await port.query({ schemaVersion: 4, purpose: 'PARTNER_DIRECT_ACTIVATION', userId: 'fariba-1' })).ok, true);
+  const intent = { schemaVersion: 4 as const, type: 'PROFILE_DIRECT_ACTIVATE' as const, userId: 'fariba-1',
+    responderId: 'responder-1', expectedUserUpdatedAt: '2026-09-14T08:00:00.000Z', consequenceConfirmed: true as const };
+  const command = { ...intent, commandId: 'activate-1', correlationId: 'activate-1', idempotency: {
+    actorId: 'admin-1', operation: intent.type, targetId: intent.userId, key: 'activate-1',
+    payloadHash: await canonicalHash(intent) } };
+  assert.equal((await port.execute(command)).ok, true);
+  assert.deepEqual(calls.map(([path]) => path), ['/partner/activation/query-v4', '/partner/activation/commands-v4']);
+  assert.equal((await port.execute({ ...command, cohortId: 'legacy' } as typeof command)).ok, false);
 });
 
 test('activation UI advances from independent enrollment to operational resume without a dead end', () => {

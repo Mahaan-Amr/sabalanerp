@@ -33,5 +33,5 @@ export function enterPartnerWizard({ inquiry, now, base, validated, mismatchedRo
   const intent = { ...base, graphHash: saved.data.graphHash, belowCostConfirmed: false,
     rows: partnerRetailIntentRows(rows),
   };
-  return { intent, rows, step: 'customer' };
+  return { intent, rows, step: 'date' };
 }

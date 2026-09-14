@@ -41,6 +41,10 @@ test('activation package bootstraps and activates one converted seller from immu
       action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED', effect: 'ALLOW' });
     await database.workspacePermission.create({ data: { id: `${run}-sales-access`, userId,
       workspace: 'sales', permissionLevel: 'EDIT', grantedBy: actorId } });
+    await database.workspacePermission.create({ data: { id: `${run}-responder-sales-access`, userId: responderId,
+      workspace: 'sales', permissionLevel: 'EDIT', grantedBy: actorId } });
+    await database.featurePermission.create({ data: { id: `${run}-responder-feature`, userId: responderId,
+      workspace: 'sales', feature: 'sales_partner_inquiries_respond', permissionLevel: 'EDIT', grantedBy: actorId } });
     await database.partnerIdentityEvidence.create({ data: { id: identityEvidenceId, userId,
       legalName: 'فریبا پورشهید', personType: 'NATURAL', identifiers: { nationalCode: '0013547899' },
       phone: '09170000000', address: 'نشانی نمونه آزمون محلی', integrityHash: `sha256-v1:${'1'.repeat(64)}`,

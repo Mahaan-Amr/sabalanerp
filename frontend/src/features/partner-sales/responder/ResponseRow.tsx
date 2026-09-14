@@ -2,7 +2,7 @@
 
 import React from 'react';
 import type { PartnerQueryV2Results } from '@sabalanerp/partner-sales-contracts';
-import { ErpBadge, ErpCard, ErpCheckbox, ErpField, ErpInput, ErpSegmentedControl, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpCard, ErpCheckbox, ErpField, ErpRialInput, ErpSegmentedControl, ErpTextarea } from '@/components/erp';
 import type { ResponseDraft } from './responseDraft';
 
 const families = { longitudinal: 'سنگ طولی', stair: 'پله', slab: 'اسلب', prepared: 'سنگ آماده', volumetric: 'سنگ حجمی' };
@@ -40,8 +40,8 @@ export function ResponseRow({ row, number, canRespond, status, draft, pending, e
       <ErpSegmentedControl value={draft.outcome} onChange={outcome => onChange({ ...draft, outcome })}
         options={[{ value: 'APPROVED', label: 'تأیید قیمت', disabled: pending }, { value: 'REJECTED', label: 'رد ردیف', disabled: pending }]} />
       {draft.outcome === 'APPROVED' && <ErpField label={`قیمت هر واحد ردیف ${number} (${currency})`} required error={error}>
-        <ErpInput inputMode="decimal" dir="ltr" value={draft.amount} maxLength={80} disabled={pending}
-          onChange={event => onChange({ ...draft, amount: event.target.value })} />
+        <ErpRialInput dir="ltr" value={draft.amount} maxDigits={18} disabled={pending}
+          onValueChange={amount => onChange({ ...draft, amount })} />
       </ErpField>}
       <ErpField label={draft.outcome === 'REJECTED' ? `دلیل رد ردیف ${number}` : `یادداشت ردیف ${number} (اختیاری)`}
         required={draft.outcome === 'REJECTED'} error={draft.outcome === 'REJECTED' ? error : undefined}>

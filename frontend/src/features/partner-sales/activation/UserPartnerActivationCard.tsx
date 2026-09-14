@@ -1,0 +1,113 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { canonicalHash, type PartnerDirectActivationViewV4 } from '@sabalanerp/partner-sales-contracts';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpInlineState, ErpSection,
+  ErpSheet, ErpSummaryGrid } from '@/components/erp';
+import { createPartnerDirectActivationHttpPort } from './partnerDirectActivationHttpPort';
+
+const port = createPartnerDirectActivationHttpPort();
+
+export function UserPartnerActivationSection({ userId }: { userId: string }) {
+  const [view, setView] = useState<PartnerDirectActivationViewV4>();
+  const [responderId, setResponderId] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string }>();
+  const load = useCallback(async () => {
+    const result = await port.query({ schemaVersion: 4, purpose: 'PARTNER_DIRECT_ACTIVATION', userId });
+    if (!result.ok) { if (result.error.code !== 'FORBIDDEN') setMessage({ kind: 'error', text: result.error.message }); return; }
+    setView(result.value);
+    setResponderId(result.value.subject.responderId ?? result.value.responders[0]?.id ?? '');
+  }, [userId]);
+  useEffect(() => { void load(); }, [load]);
+
+  async function activate() {
+    if (!view || !responderId || !confirmed || pending) return;
+    setPending(true); setMessage(undefined);
+    try {
+      const intent = { schemaVersion: 4 as const, type: 'PROFILE_DIRECT_ACTIVATE' as const,
+        userId, responderId, expectedUserUpdatedAt: view.subject.userUpdatedAt, consequenceConfirmed: true as const };
+      const commandId = crypto.randomUUID();
+      const result = await port.execute({ ...intent, commandId, correlationId: commandId,
+        idempotency: { actorId: view.actorId, operation: intent.type, targetId: userId,
+          key: crypto.randomUUID(), payloadHash: await canonicalHash(intent) } });
+      if (!result.ok) { setMessage({ kind: 'error', text: result.error.message }); return; }
+      setOpen(false); setConfirmed(false);
+      setMessage({ kind: 'success', text: 'حساب به فروشنده همکار فعال تبدیل شد.' });
+      await load();
+    } finally { setPending(false); }
+  }
+
+  async function revertActivation() {
+    if (!view?.subject.profileId || !view.subject.profileRevision || !confirmed || pending) return;
+    setPending(true); setMessage(undefined);
+    try {
+      const intent = { schemaVersion: 4 as const, type: 'PROFILE_DIRECT_ACTIVATION_REVERT' as const,
+        userId, profileId: view.subject.profileId, expectedProfileRevision: view.subject.profileRevision,
+        consequenceConfirmed: true as const };
+      const commandId = crypto.randomUUID();
+      const result = await port.revert({ ...intent, commandId, correlationId: commandId,
+        idempotency: { actorId: view.actorId, operation: intent.type, targetId: intent.profileId,
+          key: crypto.randomUUID(), payloadHash: await canonicalHash(intent) } });
+      if (!result.ok) { setMessage({ kind: 'error', text: result.error.message }); return; }
+      setRevertOpen(false); setConfirmed(false);
+      setMessage({ kind: 'success', text: 'تبدیل بازگردانده شد و دسترسی‌های قبلی بازیابی شدند.' });
+      await load();
+    } finally { setPending(false); }
+  }
+
+  if (!view) return message ? <ErpInlineState kind={message.kind} title={message.text} /> : null;
+  const { subject } = view;
+  const active = subject.partnerState === 'ACTIVE';
+  return <ErpSection title="فروشنده همکار">
+    <ErpCard className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <ErpBadge tone={active ? 'success' : subject.partnerState === 'SUSPENDED' ? 'warning' : 'neutral'}>
+          {active ? 'فروشنده همکار فعال' : subject.partnerState === 'PENDING' ? 'در انتظار تبدیل' :
+            subject.partnerState === 'SUSPENDED' ? 'تعلیق‌شده' : subject.partnerState === 'TERMINATED' ? 'خاتمه‌یافته' : 'کاربر عادی'}
+        </ErpBadge>
+        {subject.canActivate && <ErpButton label="تبدیل به فروشنده همکار" onClick={() => setOpen(true)} />}
+        {active && subject.profileId && <ErpButton label="تغییر پاسخ‌دهنده" variant="outline"
+          href={`/dashboard/sales/partners?profileId=${encodeURIComponent(subject.profileId)}`} />}
+        {subject.canRevert && <ErpButton label="بازگردانی تبدیل" tone="danger" variant="outline"
+          onClick={() => { setConfirmed(false); setRevertOpen(true); }} />}
+      </div>
+      {(active || subject.partnerState === 'SUSPENDED' || subject.partnerState === 'TERMINATED') &&
+        <ErpSummaryGrid items={[
+          { label: 'مشتریان', value: subject.customerCount.toLocaleString('fa-IR') },
+          { label: 'استعلام‌ها', value: subject.inquiryCount.toLocaleString('fa-IR') },
+          { label: 'پرونده‌ها', value: subject.caseCount.toLocaleString('fa-IR') },
+          { label: 'تاریخ تبدیل', value: subject.convertedAt ? new Date(subject.convertedAt).toLocaleString('fa-IR') : '—' },
+        ]} />}
+      {message && <ErpInlineState kind={message.kind} title={message.text} />}
+      {!subject.canActivate && subject.partnerState === 'NONE' && subject.blocker &&
+        <ErpInlineState kind="stale" title={subject.blocker.message} />}
+    </ErpCard>
+    <ErpSheet open={open} onClose={() => { if (!pending) setOpen(false); }} title="تبدیل به فروشنده همکار"
+      presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2">
+        <ErpButton label="انصراف" variant="ghost" disabled={pending} onClick={() => setOpen(false)} />
+        <ErpButton label="تأیید و فعال‌سازی" disabled={pending || !confirmed || !responderId} onClick={() => void activate()} />
+      </div>}>
+      <div className="space-y-4" dir="rtl">
+        <ErpCombobox label="پاسخ‌دهنده قیمت" value={responderId} onChange={setResponderId}
+          options={view.responders.map(row => ({ value: row.id, label: row.label }))} disabled={pending} />
+        {subject.priorResponsibilityCount > 0 && <ErpInlineState kind="stale"
+          title={`${subject.priorResponsibilityCount.toLocaleString('fa-IR')} مسئولیت قبلی فقط برای مشاهده و درخواست انتقال باقی می‌ماند.`} />}
+        <ErpCheckbox checked={confirmed} disabled={pending} onChange={event => setConfirmed(event.target.checked)}
+          label="حذف دسترسی‌های داخلی ناسازگار را تأیید می‌کنم." />
+      </div>
+    </ErpSheet>
+    <ErpSheet open={revertOpen} onClose={() => { if (!pending) setRevertOpen(false); }}
+      title="بازگردانی تبدیل" presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2">
+        <ErpButton label="انصراف" variant="ghost" disabled={pending} onClick={() => setRevertOpen(false)} />
+        <ErpButton label="تأیید بازگردانی" tone="danger" disabled={pending || !confirmed}
+          onClick={() => void revertActivation()} />
+      </div>}>
+      <ErpCheckbox checked={confirmed} disabled={pending} onChange={event => setConfirmed(event.target.checked)}
+        label="بازگردانی حساب و دسترسی‌های قبلی را تأیید می‌کنم." />
+    </ErpSheet>
+  </ErpSection>;
+}

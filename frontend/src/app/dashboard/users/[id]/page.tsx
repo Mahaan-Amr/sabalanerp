@@ -4,6 +4,7 @@ import { useEffect, useState, use } from 'react';
 import { FaDesktop, FaEdit, FaKey, FaShieldAlt, FaTrash, FaUser } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSummaryGrid } from '@/components/erp';
 import { authAPI, usersAPI } from '@/lib/api';
+import { UserPartnerActivationSection } from '@/features/partner-sales/activation/UserPartnerActivationCard';
 
 export default function UserDetailsPage(props: { params: Promise<{ id: string }> }) {
   const params = use(props.params);
@@ -131,6 +132,8 @@ export default function UserDetailsPage(props: { params: Promise<{ id: string }>
       { label: 'زمان انتساب', value: user.creatorAttributedAt ? new Date(user.creatorAttributedAt).toLocaleString('fa-IR') : '—' },
       { label: 'دلیل انتساب دستی', value: user.creatorAttributionReason || '—' },
     ]} />{currentRole === 'ADMIN' && user.creatorAttributionKind === 'UNKNOWN' && <div className="mt-4"><ErpButton label="ثبت ایجادکننده تاریخی" variant="outline" onClick={() => setAccountAction({ kind: 'attribute-creator' })} /></div>}</ErpSection>
+
+    <UserPartnerActivationSection userId={user.id} />
 
     {currentRole === 'ADMIN' && <ErpSection title="امنیت حساب و دستگاه‌ها">
       <p className="mb-4 text-sm leading-6 text-[var(--sds-text-secondary)]">نشست‌ها، تاریخچه ورود و تلاش‌های ناموفق فقط برای مدیر سیستم قابل مشاهده است.</p>

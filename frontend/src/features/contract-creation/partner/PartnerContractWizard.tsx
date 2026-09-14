@@ -2,12 +2,15 @@
 
 import React, { useRef, useState, useSyncExternalStore } from 'react';
 import { ErpButton, ErpCard, ErpInlineState, ErpLoading, ErpSheet } from '@/components/erp';
+import { FaBuilding, FaCalendarAlt, FaCreditCard, FaSignature, FaTruck, FaUser, FaWarehouse } from 'react-icons/fa';
+import { WizardProgressBar, type WizardStep } from '../components/shared/WizardProgressBar';
+import { WizardNavigation } from '../components/shared/WizardNavigation';
 import { PartnerRetailStep } from './PartnerRetailStep';
 import { partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
 import type { PartnerDraftIntent, createPartnerCaseSubmission } from './partnerCaseSubmission';
 import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 
-export type PartnerWizardStep = 'customer' | 'retail' | 'delivery' | 'payment' | 'review';
+export type PartnerWizardStep = 'date' | 'customer' | 'project' | 'products' | 'delivery' | 'payment' | 'confirmation';
 export interface PartnerWizardDraft {
   intent: PartnerDraftIntent;
   rows: PartnerRetailRow[];
@@ -20,9 +23,14 @@ export type PartnerRecoverySurface =
   | { state: 'takeover'; takeover: () => Promise<void>; discard: () => Promise<void> }
   | { state: 'blocked'; message: string };
 
-const steps: Array<{ id: PartnerWizardStep; label: string }> = [
-  { id: 'customer', label: 'مشتری' }, { id: 'retail', label: 'قیمت فروش' },
-  { id: 'delivery', label: 'تحویل' }, { id: 'payment', label: 'پرداخت' }, { id: 'review', label: 'بازبینی' },
+const steps: Array<{ id: PartnerWizardStep; label: string; icon: WizardStep['icon'] }> = [
+  { id: 'date', label: 'تاریخ قرارداد', icon: FaCalendarAlt },
+  { id: 'customer', label: 'انتخاب مشتری', icon: FaUser },
+  { id: 'project', label: 'مدیریت پروژه', icon: FaBuilding },
+  { id: 'products', label: 'انتخاب محصولات', icon: FaWarehouse },
+  { id: 'delivery', label: 'برنامه تحویل', icon: FaTruck },
+  { id: 'payment', label: 'روش پرداخت', icon: FaCreditCard },
+  { id: 'confirmation', label: 'تأیید دیجیتال', icon: FaSignature },
 ];
 
 /** Host-supplied sections reuse the existing customer/delivery/payment editors
@@ -36,7 +44,7 @@ export interface PartnerContractWizardProps {
   submission: ReturnType<typeof createPartnerCaseSubmission>;
   now: number;
   mismatchedRowIds?: readonly string[];
-  renderSection: (step: Exclude<PartnerWizardStep, 'retail'>, draft: PartnerWizardDraft) => React.ReactNode;
+  renderSection: (step: Exclude<PartnerWizardStep, 'products'>, draft: PartnerWizardDraft) => React.ReactNode;
   validateStep: (step: PartnerWizardStep, draft: PartnerWizardDraft) => string | null;
   onReinquire: (row: PartnerRetailRow) => void;
   onOpenCase: (caseId: string) => Promise<void> | void;
@@ -101,10 +109,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     if (disabled || stepIndex < 0) return;
     const failure = validateStep(draft.step, draft);
     if (failure) { setError(failure); return; }
-    if (draft.step === 'retail' || draft.step === 'review') {
+    if (draft.step === 'products' || draft.step === 'confirmation') {
       if (!summary.valid) { setError(summary.message); return; }
       if (summary.loss && !draft.intent.belowCostConfirmed) {
-        onChange({ ...draft, step: 'retail' }); setError('زیان فروش را بررسی و تأیید کنید.'); return;
+        onChange({ ...draft, step: 'products' }); setError('زیان فروش را بررسی و تأیید کنید.'); return;
       }
     }
     if (stepIndex < steps.length - 1) { move(stepIndex + 1); return; }
@@ -118,9 +126,8 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     void submission.submit({ ...draft.intent, rows: partnerRetailIntentRows(draft.rows) });
   };
   return <section dir="rtl" aria-label="ایجاد پرونده فروش همکار" className="min-w-0 space-y-4">
-    <ol aria-label="مراحل ایجاد پرونده" className="flex flex-wrap gap-3 text-sm text-[var(--sds-text-secondary)]">
-      {steps.map((step, index) => <li key={step.id} aria-current={step.id === draft.step ? 'step' : undefined} className={step.id === draft.step ? 'font-bold text-[var(--sds-accent)]' : ''}>{(index + 1).toLocaleString('fa-IR')} · {step.label}</li>)}
-    </ol>
+    <WizardProgressBar currentStep={stepIndex + 1} steps={steps.map((step, index) => ({ id: index + 1,
+      title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))} />
     {unusable.map(row => <ErpInlineState key={row.productRowId} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
       action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row) }} />)}
     {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
@@ -128,15 +135,16 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     <ErpCard className="min-w-0 space-y-4 p-4 sm:p-6">
       <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{steps[stepIndex]?.label}</h2>
       <fieldset disabled={disabled} className="min-w-0 space-y-4">
-        {draft.step === 'retail' ? <PartnerRetailStep rows={draft.rows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
+        {draft.step === 'products' ? <PartnerRetailStep rows={draft.rows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
           onRowsChange={updateRetail} onDiscountChange={retailDiscount => onChange({ ...draft, intent: { ...draft.intent, retailDiscount, belowCostConfirmed: false } })}
           onConfirmLoss={belowCostConfirmed => onChange({ ...draft, intent: { ...draft.intent, belowCostConfirmed } })} /> : renderSection(draft.step, draft)}
       </fieldset>
     </ErpCard>
     {error && <ErpInlineState kind="error" title={error} />}
-    <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-[var(--sds-radius-card)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-4">
-      <ErpButton label="قبلی" variant="outline" disabled={disabled || stepIndex <= 0} onClick={() => move(stepIndex - 1)} />
-      <ErpButton label={stepIndex === steps.length - 1 ? 'ثبت پرونده' : 'ادامه'} variant="solid" disabled={disabled || (stepIndex === steps.length - 1 && unusable.length > 0)} onClick={next} />
-    </div>
+    <WizardNavigation currentStep={stepIndex + 1} totalSteps={steps.length}
+      onPrevious={() => move(stepIndex - 1)} onNext={next} onSubmit={next} loading={mutatePending}
+      canGoPrevious={!disabled && stepIndex > 0}
+      canGoNext={!disabled && !(stepIndex === steps.length - 1 && unusable.length > 0)}
+      labels={{ submit: 'ثبت پرونده' }} />
   </section>;
 }

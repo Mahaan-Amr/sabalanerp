@@ -107,7 +107,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
           ...(!row.approval && definition.predecessorReason ? { noteOrReason: definition.predecessorReason } : {}),
           usedCaseNumbers: row.approval?.usages.map(usage => usage.binding.caseRevision.case.caseNumber) ?? [],
           ...(row.predecessor ? { predecessor: { inquiryId: inquiry.id, rowId: row.predecessor.id,
-            revision: row.predecessor.revision, reason: definition.predecessorReason! } } : {}),
+            revision: row.predecessor.revision, ...(definition.predecessorReason ? { reason: definition.predecessorReason } : {}) } } : {}),
           ...(successor ? { successor: { inquiryId: inquiry.id, rowId: successor.id, revision: successor.revision,
             state: state(successor.outcome, successor.approval?.expiresAt) } } : {}),
         };

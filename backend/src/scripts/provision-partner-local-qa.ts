@@ -5,6 +5,7 @@ import { disconnectDatabase, prisma } from '../lib/prisma';
 import { createPrismaPartnerActivationPackage } from '../services/partnerSales/activationPackage/prisma';
 import { acceptanceResponsibilities, readinessGates } from '../services/partnerSales/operations/readiness';
 import { PARTNER_OPERATIONS_CONTROL_ID } from '../services/partnerSales/authorization/technicalRollout';
+import { grantScopedAction } from '../services/effectiveAuthorization/scopedActions';
 
 export type LocalPartnerQaProvisioning = {
   subjectUsername: string;
@@ -74,6 +75,20 @@ export async function provisionLocalPartnerQa(database: PrismaClient, input: Loc
       create: { userId: responder.id, workspace: 'sales', permissionLevel: 'edit', grantedBy: admin.id },
       update: { permissionLevel: 'edit', isActive: true, grantedBy: admin.id, grantedAt: new Date(), expiresAt: null },
     });
+    await tx.featurePermission.upsert({
+      where: { userId_workspace_feature: { userId: responder.id, workspace: 'sales',
+        feature: 'sales_partner_inquiries_respond' } },
+      create: { userId: responder.id, workspace: 'sales', feature: 'sales_partner_inquiries_respond',
+        permissionLevel: 'edit', grantedBy: admin.id },
+      update: { permissionLevel: 'edit', isActive: true, grantedBy: admin.id, grantedAt: new Date(), expiresAt: null },
+    });
+    const existingResponderGrant = await tx.effectiveActionGrant.findFirst({ where: { principalKind: 'USER',
+      principalId: responder.id, domain: 'PARTNER', action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY',
+      purpose: 'RESPONDER', scope: 'ASSIGNED', effect: 'ALLOW', revokedAt: null } });
+    if (!existingResponderGrant) await grantScopedAction(tx, { actorId: admin.id,
+      reason: 'مجوز پاسخ استعلام برای آزمون محلی فروشنده همکار', correlationId: `local-qa-${responder.id}` },
+    { principal: { kind: 'USER', id: responder.id }, domain: 'PARTNER', action: 'INQUIRY_RESPOND',
+      rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED', effect: 'ALLOW' });
   });
 
   const now = new Date(), verifiedPackageId = `partner-local-qa-${randomUUID()}`;

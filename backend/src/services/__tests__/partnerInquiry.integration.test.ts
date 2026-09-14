@@ -346,7 +346,7 @@ test('missing active responder fails with the actionable message and creates one
     });
     const first = await service.execute(await submit(ids.actorId, ids.inquiryId));
     assert.deepEqual(first, { ok: false, error: { code: 'RESPONDER_UNAVAILABLE', status: 409,
-      message: 'برای حساب شما پاسخ‌دهنده قیمت فعال تعیین نشده است.' } });
+      message: 'برای حساب شما پاسخ‌دهنده قیمت فعال تعیین نشده است؛ تا تعیین پاسخ‌دهنده، ثبت استعلام را متوقف کنید.' } });
     assert.equal((await tx.supportTicket.count({ where: { reporterId: ids.actorId } })), 1);
     assert.equal((await service.execute(await submit(ids.actorId, ids.inquiryId))).ok, false);
     assert.equal((await tx.supportTicket.count({ where: { reporterId: ids.actorId } })), 1);

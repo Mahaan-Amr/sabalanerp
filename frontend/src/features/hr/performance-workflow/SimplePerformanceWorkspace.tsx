@@ -32,11 +32,13 @@ type Personnel = { id: string; firstName: string; lastName: string; employeeNumb
 type Assignment = { personnelId: string; profileId: string; profile: Profile };
 type Value = { indicatorId: string; actual: string; score?: string | null; sampleCount?: number | null; sourceReference?: string | null };
 type Evaluation = {
-  id: string; personnelId: string; evaluationDate: string; status: "DRAFT" | "FINAL";
+  id: string; personnelId: string; evaluationDate: string; status: "DRAFT" | "PENDING_APPEAL" | "FINAL";
   createdAt: string;
   evaluatorUserId: string; evaluatorAuthority: "SUPERVISOR" | "HR_MANAGER"; score?: string | null;
   levelCode?: string | null; finalizedAt?: string | null; correctionOfId?: string | null;
   correctionReason?: string | null; supersededAt?: string | null; profile: Profile; values: Value[];
+  periodLabelFa?: string | null; proposedAt?: string | null; appealDeadline?: string | null;
+  appealText?: string | null; appealedAt?: string | null; appealResolution?: string | null; appealResolvedAt?: string | null;
   evaluatorNameFa: string;
 };
 type LegacyEvaluation = {
@@ -45,6 +47,7 @@ type LegacyEvaluation = {
 };
 type Workspace = {
   currentUserId: string;
+  currentPeriodKey: string;
   evaluablePersonnelIds: string[];
   latestFinalizedAtByPersonnel: Record<string, string>;
   personnel: Personnel[]; historyPersonnel: Personnel[]; profiles: Profile[]; assignments: Assignment[]; evaluations: Evaluation[];
@@ -115,6 +118,7 @@ export default function SimplePerformanceWorkspace() {
   const [evaluationDate, setEvaluationDate] = useState(todayInTehran());
   const [values, setValues] = useState<Record<string, string>>({});
   const [valueMetadata, setValueMetadata] = useState<Record<string, { sampleCount: string; sourceReference: string }>>({});
+  const [evidenceChangeReason, setEvidenceChangeReason] = useState("");
   const [savedValuesSignature, setSavedValuesSignature] = useState("{}");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -123,6 +127,8 @@ export default function SimplePerformanceWorkspace() {
   const [profileStableKey, setProfileStableKey] = useState<string | undefined>();
   const [profileIndicators, setProfileIndicators] = useState<ProfileIndicatorDraft[]>([emptyIndicator()]);
   const [correctionReason, setCorrectionReason] = useState<Record<string, string>>({});
+  const [appealResolution, setAppealResolution] = useState<Record<string, string>>({});
+  const [publishEvaluationId, setPublishEvaluationId] = useState("");
   const [history, setHistory] = useState<Evaluation[]>([]);
   const [legacyHistory, setLegacyHistory] = useState<LegacyEvaluation[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
@@ -181,6 +187,7 @@ export default function SimplePerformanceWorkspace() {
   }, [history]);
   const openDrafts = (workspace?.evaluations ?? []).filter(({ status, evaluatorUserId }) => status === "DRAFT"
     && (evaluatorUserId === workspace?.currentUserId || workspace?.capabilities.FINALIZE_PERFORMANCE_RESULTS));
+  const pendingResults = (workspace?.evaluations ?? []).filter(({ status }) => status === "PENDING_APPEAL");
   const canEvaluate = Boolean(workspace?.capabilities.EVALUATE_DIRECT_REPORTS || workspace?.capabilities.EVALUATE_ALL_PERSONNEL
     || workspace?.capabilities.ENTER_PERFORMANCE_EVIDENCE);
   const canEvaluateSelected = Boolean(workspace?.evaluablePersonnelIds.includes(personnelId));
@@ -216,14 +223,14 @@ export default function SimplePerformanceWorkspace() {
   };
 
   const beginEvaluation = () => {
-    setEvaluationId(""); setValues({}); setValueMetadata({}); setSavedValuesSignature("{}"); setNewEvaluationOpen(true); setError(""); setSuccess("");
+    setEvaluationId(""); setValues({}); setValueMetadata({}); setEvidenceChangeReason(""); setSavedValuesSignature("{}"); setNewEvaluationOpen(true); setError(""); setSuccess("");
   };
   const closeEvaluation = () => {
     if (dirty) return setConfirmDiscard(true);
-    setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setValueMetadata({}); setSavedValuesSignature("{}");
+    setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setValueMetadata({}); setEvidenceChangeReason(""); setSavedValuesSignature("{}");
   };
   const discardEvaluation = () => {
-    setConfirmDiscard(false); setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setValueMetadata({}); setSavedValuesSignature("{}");
+    setConfirmDiscard(false); setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setValueMetadata({}); setEvidenceChangeReason(""); setSavedValuesSignature("{}");
   };
 
   const saveDraft = () => dirty && run(async () => {
@@ -233,7 +240,8 @@ export default function SimplePerformanceWorkspace() {
       id = response.data.evaluation.id;
       setEvaluationId(id); setNewEvaluationOpen(false);
     }
-    await personnelPerformanceAPI.saveSimpleEvaluation(id, enteredValues);
+    await personnelPerformanceAPI.saveSimpleEvaluation(id, enteredValues, evidenceChangeReason);
+    setEvidenceChangeReason("");
     setSavedValuesSignature(valuesSignature);
   }, "پیش‌نویس ذخیره شد.");
 
@@ -244,11 +252,21 @@ export default function SimplePerformanceWorkspace() {
       id = response.data.evaluation.id;
     }
     if (!selectedEvaluation || selectedEvaluation.evaluatorUserId === workspace?.currentUserId) {
-      await personnelPerformanceAPI.saveSimpleEvaluation(id, enteredValues);
+      await personnelPerformanceAPI.saveSimpleEvaluation(id, enteredValues, evidenceChangeReason);
+      setEvidenceChangeReason("");
     }
     await personnelPerformanceAPI.finalizeSimpleEvaluation(id, { confirmedSeriousViolation });
     setEvaluationId(""); setNewEvaluationOpen(false); setValues({}); setValueMetadata({}); setSavedValuesSignature("{}"); setConfirmFinalize(false); setConfirmedSeriousViolation(false);
-  }, "ارزیابی نهایی شد.");
+  }, "نتیجه پیشنهادی ثبت شد و پس از فرصت اعتراض قابل انتشار رسمی است.");
+
+  const resolveAppeal = (evaluationId: string) => run(async () => {
+    await personnelPerformanceAPI.resolveSimpleEvaluationAppeal(evaluationId, appealResolution[evaluationId] || "");
+  }, "رسیدگی به اعتراض ثبت شد.");
+
+  const publishResult = () => run(async () => {
+    await personnelPerformanceAPI.publishSimpleEvaluation(publishEvaluationId);
+    setPublishEvaluationId("");
+  }, "نتیجه رسمی منتشر و Badge به‌روزرسانی شد.");
 
   const saveProfile = () => run(async () => {
     await personnelPerformanceAPI.createSimpleProfile({
@@ -320,6 +338,14 @@ export default function SimplePerformanceWorkspace() {
           </ErpCard>)}
         </div></ErpSection>}
 
+        {canFinalize && pendingResults.length > 0 && <ErpSection title="نتیجه‌های پیشنهادی و اعتراض‌ها"><div className="space-y-3">
+          {pendingResults.map((evaluation) => <ErpCard key={evaluation.id} className="p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{workspace?.personnel.find(({ id }) => id === evaluation.personnelId)?.firstName} {workspace?.personnel.find(({ id }) => id === evaluation.personnelId)?.lastName}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{evaluation.periodLabelFa || dateFa(evaluation.evaluationDate)} · امتیاز {scoreFa(evaluation.score)} · {levelLabels[evaluation.levelCode || ""] || "—"}</p>{evaluation.appealDeadline && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">مهلت اعتراض: {dateTimeFa(evaluation.appealDeadline)}</p>}</div><ErpBadge tone={evaluation.appealedAt ? "warning" : "neutral"}>{evaluation.appealedAt ? "دارای اعتراض" : "در مهلت بازبینی"}</ErpBadge></div>
+            {evaluation.appealText && <div className="mt-3 space-y-2"><p className="text-sm leading-7">متن اعتراض: {evaluation.appealText}</p>{!evaluation.appealResolvedAt && <><ErpField label="نتیجه رسیدگی" required><ErpTextarea rows={3} value={appealResolution[evaluation.id] || ""} onChange={(event) => setAppealResolution((items) => ({ ...items, [evaluation.id]: event.target.value }))} /></ErpField><ErpButton label="ثبت رسیدگی" variant="soft" disabled={pending || (appealResolution[evaluation.id] || "").trim().length < 8} onClick={() => void resolveAppeal(evaluation.id)} /></>}</div>}
+            <div className="mt-3"><ErpButton label="انتشار نتیجه رسمی" disabled={pending || Boolean(evaluation.appealedAt && !evaluation.appealResolvedAt)} onClick={() => setPublishEvaluationId(evaluation.id)} /></div>
+          </ErpCard>)}
+        </div></ErpSection>}
+
         {activeProfile && <ErpSection title={`ارزیابی ${activeProfile.nameFa}`} actions={[{ label: "بستن", onClick: closeEvaluation }]}>
           <div className="space-y-3">{activeProfile.indicators.map((indicator) => <ErpCard key={indicator.id} className="p-4">
             <div className="grid gap-3 md:grid-cols-[1fr_12rem_10rem] md:items-end">
@@ -329,7 +355,8 @@ export default function SimplePerformanceWorkspace() {
             </div>
             <div className="mt-3"><ErpField label="مرجع داده"><ErpInput disabled={!canEditSelected} value={valueMetadata[indicator.id]?.sourceReference || ""} placeholder={indicator.sourceKind === "SURVEY" ? "شناسه نظرسنجی" : "شناسه گزارش یا رکورد مبنا"} onChange={(event) => setValueMetadata((current) => ({ ...current, [indicator.id]: { sampleCount: current[indicator.id]?.sampleCount || "1", sourceReference: event.target.value } }))} /></ErpField></div>
           </ErpCard>)}</div>
-          <div className="mt-4 flex flex-wrap gap-2">{canEditSelected && <ErpButton label="ذخیره" variant="soft" onClick={() => void saveDraft()} disabled={pending || !dirty} />}{canFinalize && <ErpButton label="ثبت نهایی" onClick={() => setConfirmFinalize(true)} disabled={pending || !draftComplete} />}</div>
+          {selectedEvaluation?.values.length ? <div className="mt-4"><ErpField label="دلیل اصلاح شواهد" required><ErpTextarea rows={2} value={evidenceChangeReason} onChange={(event) => setEvidenceChangeReason(event.target.value)} placeholder="علت تغییر مقدار، تعداد نمونه یا مرجع داده را ثبت کنید." /></ErpField></div> : null}
+          <div className="mt-4 flex flex-wrap gap-2">{canEditSelected && <ErpButton label="ذخیره" variant="soft" onClick={() => void saveDraft()} disabled={pending || !dirty || Boolean(selectedEvaluation?.values.length && !evidenceChangeReason.trim())} />}{canFinalize && <ErpButton label="ثبت نتیجه پیشنهادی" onClick={() => setConfirmFinalize(true)} disabled={pending || !draftComplete || Boolean(dirty && selectedEvaluation?.values.length && !evidenceChangeReason.trim())} />}</div>
         </ErpSection>}
       </div>}
 
@@ -357,7 +384,7 @@ export default function SimplePerformanceWorkspace() {
         </ErpCard>)}</div></ErpSection>
       </div>}
 
-      {tab === "surveys" && canManageSurveys && <BehaviorSurveyAdministration personnel={workspace.personnel} />}
+      {tab === "surveys" && canManageSurveys && <BehaviorSurveyAdministration personnel={workspace.personnel} currentPeriodKey={workspace.currentPeriodKey} />}
 
       {tab === "history" && canViewHistory && <ErpSection title="سابقه ارزیابی">
         <ErpField label="پرسنل"><ErpSelect value={personnelId} onChange={(event) => setPersonnelId(event.target.value)}>{workspace.historyPersonnel.map((person) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName}</option>)}</ErpSelect></ErpField>
@@ -378,7 +405,7 @@ export default function SimplePerformanceWorkspace() {
           </div>}
         </div>
       </ErpSection>}
-      <ErpSheet open={confirmFinalize} onClose={() => setConfirmFinalize(false)} title="ثبت نهایی ارزیابی؟" presentation="modal" footer={<div className="flex justify-end gap-2"><ErpButton label="بازگشت" variant="ghost" onClick={() => setConfirmFinalize(false)} /><ErpButton label="تأیید و ثبت" onClick={() => void finalize()} disabled={pending} /></div>}>
+      <ErpSheet open={confirmFinalize} onClose={() => setConfirmFinalize(false)} title="ثبت نتیجه پیشنهادی؟" presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2"><ErpButton label="بازگشت" variant="ghost" onClick={() => setConfirmFinalize(false)} /><ErpButton label="تأیید و ارسال برای بازبینی" onClick={() => void finalize()} disabled={pending} /></div>}>
         <div className="space-y-2 text-sm text-[var(--sds-text-secondary)]">
           <p>{selectedPersonnel?.firstName} {selectedPersonnel?.lastName}</p>
           <p>تاریخ: {dateFa(selectedEvaluation?.evaluationDate || evaluationDate)}</p>
@@ -389,6 +416,9 @@ export default function SimplePerformanceWorkspace() {
       </ErpSheet>
       <ErpSheet open={confirmDiscard} onClose={() => setConfirmDiscard(false)} title="بستن بدون ذخیره؟" presentation="modal" footer={<div className="flex justify-end gap-2"><ErpButton label="ادامه ویرایش" variant="ghost" onClick={() => setConfirmDiscard(false)} /><ErpButton label="بستن" tone="danger" onClick={discardEvaluation} /></div>}>
         <p className="text-sm text-[var(--sds-text-secondary)]">مقدارهای واردشده ذخیره نشده‌اند.</p>
+      </ErpSheet>
+      <ErpSheet open={Boolean(publishEvaluationId)} onClose={() => !pending && setPublishEvaluationId("")} title="انتشار نتیجه رسمی؟" presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2"><ErpButton label="بازگشت" variant="ghost" disabled={pending} onClick={() => setPublishEvaluationId("")} /><ErpButton label="تأیید و انتشار" disabled={pending} onClick={() => void publishResult()} /></div>}>
+        <p className="text-sm leading-7 text-[var(--sds-text-secondary)]">پس از انتشار، نتیجه در Badge و تصمیم‌های رسمی قابل استفاده است. اگر مهلت اعتراض باز باشد یا اعتراض رسیدگی‌نشده وجود داشته باشد، سامانه انتشار را متوقف می‌کند.</p>
       </ErpSheet>
     </>}
   </ErpPage>;

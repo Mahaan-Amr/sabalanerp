@@ -9,7 +9,7 @@ import {
   type SimpleEvaluatorAuthority,
   type SimplePerformanceDirection,
 } from './simplePersonnelPerformance';
-import { applySellerPerformanceGates, redistributeSellerFactorWeights } from './sellerPerformancePolicy';
+import { applySellerPerformanceGates, redistributeSellerFactorWeights, sellerPerformancePeriodFor, sellerPerformancePeriodWindowFor } from './sellerPerformancePolicy';
 
 type Client = PrismaClient | Prisma.TransactionClient;
 
@@ -20,6 +20,25 @@ const runTransaction = <T>(client: Client, work: (tx: Prisma.TransactionClient) 
 );
 
 const simpleError = (message: string, code: string, status = 422) => Object.assign(new Error(message), { code, status });
+type AssignmentSegmentSnapshot = {
+  assignmentId?: unknown; positionId?: unknown; jobId?: unknown; from?: unknown; to?: unknown; allocationPercent?: unknown;
+};
+const assignmentCoverageDays = (from: Date, to: Date, segments: AssignmentSegmentSnapshot[]) => {
+  let coveredDays = 0;
+  let invalidAllocation = false;
+  for (let cursor = from.getTime(); cursor <= to.getTime(); cursor += 86_400_000) {
+    const active = segments.filter((segment) => typeof segment.from === 'string' && typeof segment.to === 'string'
+      && new Date(segment.from).getTime() <= cursor && new Date(segment.to).getTime() >= cursor);
+    if (!active.length) continue;
+    const allocations = active.map(({ allocationPercent }) => Number(allocationPercent));
+    if (allocations.some((value) => !Number.isFinite(value)) || Math.abs(allocations.reduce((sum, value) => sum + value, 0) - 100) > 0.001) {
+      invalidAllocation = true;
+      continue;
+    }
+    coveredDays += 1;
+  }
+  return { coveredDays, invalidAllocation };
+};
 const activeAt = (now: Date) => ({ effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] });
 const activeEmploymentForEvaluationDay = async (client: Client, personnelId: string, date: string) => {
   const dayFrom = new Date(`${date}T00:00:00.000+03:30`);
@@ -30,7 +49,7 @@ const activeEmploymentForEvaluationDay = async (client: Client, personnelId: str
       OR: [{ effectiveTo: null }, { effectiveTo: { gte: dayFrom } }],
     },
   orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
-  select: { id: true }, take: 2,
+  select: { id: true, effectiveFrom: true, effectiveTo: true }, take: 2,
   });
   if (relationships.length > 1) throw simpleError('رابطه استخدامی نیاز به بررسی دارد.', 'SIMPLE_EMPLOYMENT_AMBIGUOUS', 409);
   return relationships[0] ?? null;
@@ -216,8 +235,11 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
     })).then((items) => items.filter((item): item is NonNullable<typeof item> => Boolean(item))),
     (canEvaluate || permissions.has('FINALIZE_PERFORMANCE_RESULTS')) ? client.simplePerformanceEvaluation.findMany({
       where: {
-        personnelId: { in: ids }, status: 'DRAFT',
-        ...(permissions.has('FINALIZE_PERFORMANCE_RESULTS') ? {} : { evaluatorUserId: actorUserId }),
+        personnelId: { in: ids },
+        OR: [
+          { status: 'DRAFT', ...(permissions.has('FINALIZE_PERFORMANCE_RESULTS') ? {} : { evaluatorUserId: actorUserId }) },
+          ...(permissions.has('FINALIZE_PERFORMANCE_RESULTS') ? [{ status: 'PENDING_APPEAL' }] : []),
+        ],
       }, include: evaluationInclude,
       orderBy: [{ finalizedAt: 'desc' }, { createdAt: 'desc' }],
     }) : Promise.resolve([]),
@@ -245,6 +267,7 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
   }
   return {
     currentUserId: actorUserId, personnel, historyPersonnel, assignments,
+    currentPeriodKey: sellerPerformancePeriodFor(now).key,
     evaluations: evaluations.map((evaluation) => ({ ...evaluation, evaluatorNameFa: evaluatorNames.get(evaluation.evaluatorUserId) || 'نامشخص' })),
     profiles,
     latestFinalizedAtByPersonnel,
@@ -391,19 +414,45 @@ export const createSimplePerformanceEvaluation = async (client: Client, input: {
     const evaluationDate = new Date(`${input.evaluationDate}T00:00:00.000Z`);
     const relationship = await activeEmploymentForEvaluationDay(tx, input.personnelId, input.evaluationDate);
     if (!relationship) throw simpleError('رابطه استخدامی فعال پیدا نشد.', 'SIMPLE_EMPLOYMENT_REQUIRED');
-    const profile = await activeProfileForPersonnel(tx, input.personnelId);
+    const profile = await activeProfileForPersonnel(tx, input.personnelId, evaluationDate);
     if (!profile) throw simpleError('فرم ارزیابی آماده نیست.', 'SIMPLE_PROFILE_REQUIRED');
+    const period = sellerPerformancePeriodWindowFor(evaluationDate);
+    const assignments = await tx.hrEmploymentAssignment.findMany({
+      where: {
+        employmentRelationshipId: relationship.id, type: { in: ['PRIMARY', 'ACTING'] },
+        effectiveFrom: { lte: new Date(period.to.getTime() + 86_399_999) },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: period.from } }],
+      },
+      select: {
+        id: true, positionId: true, effectiveFrom: true, effectiveTo: true, performanceAllocationPercent: true,
+        position: { select: { jobId: true, title: true } },
+      }, orderBy: { effectiveFrom: 'asc' },
+    });
+    const effectiveFrom = new Date(Math.max(period.from.getTime(), relationship.effectiveFrom.getTime()));
+    const effectiveTo = new Date(Math.min(period.to.getTime(), relationship.effectiveTo?.getTime() ?? period.to.getTime()));
+    const effectiveDays = Math.max(0, Math.floor((effectiveTo.getTime() - effectiveFrom.getTime()) / 86_400_000) + 1);
+    const assignmentSegments = assignments.map((assignment) => ({
+      assignmentId: assignment.id, positionId: assignment.positionId, jobId: assignment.position?.jobId ?? null,
+      positionTitle: assignment.position?.title ?? null,
+      from: new Date(Math.max(period.from.getTime(), assignment.effectiveFrom.getTime())).toISOString(),
+      to: new Date(Math.min(period.to.getTime(), assignment.effectiveTo?.getTime() ?? period.to.getTime())).toISOString(),
+      allocationPercent: assignment.performanceAllocationPercent?.toString() ?? (assignments.length === 1 ? '100' : null),
+    }));
     const evaluation = await tx.simplePerformanceEvaluation.create({
       data: {
         personnelId: input.personnelId, employmentRelationshipId: relationship.id, profileId: profile.id,
         evaluationDate, evaluatorUserId: input.actorUserId,
-        evaluatorAuthority: authority,
+        evaluatorAuthority: authority, periodKey: period.key, periodLabelFa: period.labelFa,
+        measurementFrom: period.from, measurementTo: period.to, effectiveDays,
+        assignmentSegments,
       },
       include: evaluationInclude,
     });
     await tx.simplePerformanceAudit.create({ data: {
       evaluationId: evaluation.id, personnelId: input.personnelId, actorUserId: input.actorUserId,
-      authoritySource: authority, eventType: 'CREATED', details: { evaluationDate: input.evaluationDate },
+      authoritySource: authority, eventType: 'CREATED', details: {
+        evaluationDate: input.evaluationDate, periodKey: period.key, effectiveDays, assignmentSegments,
+      },
     } });
     return evaluation;
   });
@@ -462,30 +511,74 @@ const normalizedValues = (evaluation: Awaited<ReturnType<typeof ownOpenEvaluatio
 export const saveSimplePerformanceDraft = async (client: Client, input: {
   actorUserId: string; evaluationId: string; values: Array<{
     indicatorId: string; actual: string; sampleCount?: number; sourceReference?: string;
-  }>;
+  }>; reason?: string;
 }) => {
   return runTransaction(client, async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "simple_performance_evaluations" WHERE "id" = ${input.evaluationId} FOR UPDATE`;
     const evaluation = await ownOpenEvaluation(tx, input.evaluationId, input.actorUserId);
     const values = normalizedValues(evaluation, input.values);
+    const previousByIndicator = new Map(evaluation.values.map((value) => [value.indicatorId, value]));
+    if (evaluation.values.some((value) => !values.some(({ indicatorId }) => indicatorId === value.indicatorId))) {
+      throw simpleError('شاهد ثبت‌شده حذف نمی‌شود؛ مقدار اصلاحی و دلیل آن را ثبت کنید.', 'SIMPLE_VALUE_REMOVAL_FORBIDDEN', 409);
+    }
+    const changedValues = values.filter((value) => {
+      const previous = previousByIndicator.get(value.indicatorId);
+      return !previous || !previous.actual.eq(value.actual) || previous.sampleCount !== value.sampleCount
+        || previous.sourceReference !== value.sourceReference;
+    });
+    const reason = input.reason?.trim() || (evaluation.values.length ? '' : 'ثبت اولیه شواهد');
+    if (changedValues.length && evaluation.values.length && !reason) {
+      throw simpleError('برای اصلاح شواهد، دلیل تغییر را وارد کنید.', 'SIMPLE_VALUE_CHANGE_REASON_REQUIRED');
+    }
+    for (const value of changedValues) {
+      const previous = previousByIndicator.get(value.indicatorId);
+      const latest = await tx.simplePerformanceValueRevision.findFirst({
+        where: { evaluationId: evaluation.id, indicatorId: value.indicatorId }, orderBy: { version: 'desc' }, select: { version: true },
+      });
+      await tx.simplePerformanceValueRevision.create({ data: {
+        evaluationId: evaluation.id, indicatorId: value.indicatorId, version: (latest?.version ?? 0) + 1,
+        oldActual: previous?.actual, newActual: value.actual,
+        oldSampleCount: previous?.sampleCount, newSampleCount: value.sampleCount,
+        oldSourceReference: previous?.sourceReference, newSourceReference: value.sourceReference,
+        reason, actorUserId: input.actorUserId,
+      } });
+    }
     await tx.simplePerformanceValue.deleteMany({ where: { evaluationId: evaluation.id } });
     if (values.length) await tx.simplePerformanceValue.createMany({ data: values.map((value) => ({
       ...value, evaluationId: evaluation.id, enteredByUserId: input.actorUserId,
     })) });
     await tx.simplePerformanceAudit.create({ data: {
       evaluationId: evaluation.id, personnelId: evaluation.personnelId, actorUserId: input.actorUserId,
-      authoritySource: evaluation.evaluatorAuthority, eventType: 'DRAFT_SAVED', details: { valueCount: values.length },
+      authoritySource: evaluation.evaluatorAuthority, eventType: 'DRAFT_SAVED', reason: reason || null,
+      details: { valueCount: values.length, changedIndicatorIds: changedValues.map(({ indicatorId }) => indicatorId) },
     } });
     return tx.simplePerformanceEvaluation.findUniqueOrThrow({ where: { id: evaluation.id }, include: evaluationInclude });
   });
 };
 
 export const finalizeSimplePerformanceEvaluation = async (client: Client, input: {
-  actorUserId: string; evaluationId: string; confirmedSeriousViolation?: boolean;
+  actorUserId: string; evaluationId: string; confirmedSeriousViolation?: boolean; now?: Date;
 }) => {
   return runTransaction(client, async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "simple_performance_evaluations" WHERE "id" = ${input.evaluationId} FOR UPDATE`;
     const evaluation = await openEvaluationForFinalizer(tx, input.evaluationId, input.actorUserId);
+    const now = input.now ?? new Date();
+    if (!evaluation.measurementTo || evaluation.measurementTo.getTime() >= now.getTime()) {
+      throw simpleError('نتیجه رسمی فقط پس از پایان دوره شش‌ماهه قابل پیشنهاد است.', 'SIMPLE_PERIOD_NOT_CLOSED', 409);
+    }
+    if ((evaluation.effectiveDays ?? 0) < 90) {
+      throw simpleError('برای نتیجه رسمی حداقل ۹۰ روز مأموریت مؤثر لازم است.', 'SIMPLE_EFFECTIVE_DAYS_INSUFFICIENT', 409);
+    }
+    const segments = Array.isArray(evaluation.assignmentSegments) ? evaluation.assignmentSegments as AssignmentSegmentSnapshot[] : [];
+    if (!segments.length) throw simpleError('انتساب شغلی دوره کامل نیست.', 'SIMPLE_ASSIGNMENT_SEGMENT_REQUIRED', 409);
+    const segmentPositions = new Set(segments.map((segment) => `${segment.jobId ?? ''}:${segment.positionId ?? ''}`));
+    const coverage = assignmentCoverageDays(evaluation.measurementFrom!, evaluation.measurementTo, segments);
+    if (coverage.invalidAllocation || coverage.coveredDays < (evaluation.effectiveDays ?? 0)) {
+      throw simpleError('درصد تخصیص عملکرد برای تمام روزهای مؤثر دوره باید دقیقاً ۱۰۰ باشد.', 'SIMPLE_ASSIGNMENT_ALLOCATION_INVALID', 409);
+    }
+    if (segmentPositions.size > 1) {
+      throw simpleError('تغییر شغل یا سمت باید پیش از نتیجه رسمی به بخش‌های مستقل ارزیابی تفکیک شود.', 'SIMPLE_SEGMENTED_EVALUATION_REQUIRED', 409);
+    }
     const byIndicator = new Map(evaluation.values.map((value) => [value.indicatorId, value]));
     const effectiveWeights = new Map(redistributeSellerFactorWeights(evaluation.profile.indicators.map((indicator) => {
       const value = byIndicator.get(indicator.id);
@@ -521,7 +614,8 @@ export const finalizeSimplePerformanceEvaluation = async (client: Client, input:
       sufficientEvidence: true, confirmedSeriousViolation: Boolean(input.confirmedSeriousViolation),
       primaryFamilyScores: primaryFamilyCodes.map(familyScore),
     });
-    const finalizedAt = new Date();
+    const proposedAt = now;
+    const appealDeadline = new Date(now.getTime() + 7 * 86_400_000);
     const claimed = await tx.simplePerformanceEvaluation.updateMany({
       where: { id: evaluation.id, status: 'DRAFT' },
       data: { status: 'FINALIZING' },
@@ -533,28 +627,99 @@ export const finalizeSimplePerformanceEvaluation = async (client: Client, input:
         data: { score: indicator.score },
       });
     }
-    if (evaluation.correctionOfId) {
-      await tx.simplePerformanceEvaluation.update({ where: { id: evaluation.correctionOfId }, data: { supersededAt: finalizedAt } });
-    }
     const result = await tx.simplePerformanceEvaluation.update({
       where: { id: evaluation.id },
       data: {
-        status: 'FINAL', score: calculation.score, levelCode: gatedLevel, finalizedAt,
+        status: 'PENDING_APPEAL', score: calculation.score, levelCode: gatedLevel, proposedAt, appealDeadline,
         confirmedSeriousViolation: Boolean(input.confirmedSeriousViolation),
       },
       include: evaluationInclude,
     });
     await tx.simplePerformanceAudit.create({ data: {
       evaluationId: evaluation.id, personnelId: evaluation.personnelId, actorUserId: input.actorUserId,
-      authoritySource: 'HR_MANAGER', eventType: 'FINALIZED',
+      authoritySource: 'HR_MANAGER', eventType: 'RESULT_PROPOSED',
       details: {
         score: calculation.score, levelCode: gatedLevel, rawLevelCode: calculation.level,
         confirmedSeriousViolation: Boolean(input.confirmedSeriousViolation),
+        appealDeadline: appealDeadline.toISOString(),
       },
     } });
     return result;
   });
 };
+
+const pendingEvaluationForFinalizer = async (client: Client, evaluationId: string, actorUserId: string) => {
+  const evaluation = await client.simplePerformanceEvaluation.findUnique({ where: { id: evaluationId }, include: evaluationInclude });
+  if (!evaluation) throw simpleError('ارزیابی پیدا نشد.', 'SIMPLE_EVALUATION_NOT_FOUND', 404);
+  if (evaluation.status !== 'PENDING_APPEAL') throw simpleError('نتیجه در مرحله بازبینی نیست.', 'SIMPLE_RESULT_NOT_PENDING', 409);
+  const permissions = new Set(await activeHrActionPermissionsForUser(client, actorUserId));
+  if (!permissions.has('FINALIZE_PERFORMANCE_RESULTS')) throw simpleError('اجازه انتشار نتیجه را ندارید.', 'SIMPLE_FINALIZE_FORBIDDEN', 403);
+  const actor = await client.user.findUnique({ where: { id: actorUserId }, select: { personnelId: true } });
+  if (actor?.personnelId === evaluation.personnelId) throw simpleError('انتشار نتیجه خودتان مجاز نیست.', 'SIMPLE_FINALIZE_SELF_FORBIDDEN', 403);
+  return evaluation;
+};
+
+export const appealSimplePerformanceEvaluation = (client: Client, input: {
+  actorUserId: string; evaluationId: string; text: string; now?: Date;
+}) => runTransaction(client, async (tx) => {
+  const now = input.now ?? new Date();
+  const text = input.text.trim();
+  if (text.length < 8) throw simpleError('متن اعتراض را کامل‌تر وارد کنید.', 'SIMPLE_APPEAL_TEXT_REQUIRED');
+  await tx.$queryRaw`SELECT "id" FROM "simple_performance_evaluations" WHERE "id" = ${input.evaluationId} FOR UPDATE`;
+  const evaluation = await tx.simplePerformanceEvaluation.findUnique({ where: { id: input.evaluationId } });
+  const personnelId = (await tx.user.findUnique({ where: { id: input.actorUserId }, select: { personnelId: true } }))?.personnelId;
+  if (!evaluation || evaluation.status !== 'PENDING_APPEAL' || evaluation.personnelId !== personnelId) {
+    throw simpleError('این نتیجه برای اعتراض شما در دسترس نیست.', 'SIMPLE_APPEAL_FORBIDDEN', 403);
+  }
+  if (!evaluation.appealDeadline || now > evaluation.appealDeadline) throw simpleError('مهلت اعتراض پایان یافته است.', 'SIMPLE_APPEAL_DEADLINE_PASSED', 409);
+  if (evaluation.appealedAt) throw simpleError('اعتراض قبلاً ثبت شده است.', 'SIMPLE_APPEAL_ALREADY_SUBMITTED', 409);
+  const result = await tx.simplePerformanceEvaluation.update({ where: { id: evaluation.id }, data: { appealText: text, appealedAt: now } });
+  await tx.simplePerformanceAudit.create({ data: {
+    evaluationId: evaluation.id, personnelId: evaluation.personnelId, actorUserId: input.actorUserId,
+    eventType: 'APPEAL_SUBMITTED', reason: text,
+  } });
+  return result;
+});
+
+export const resolveSimplePerformanceAppeal = (client: Client, input: {
+  actorUserId: string; evaluationId: string; resolution: string; now?: Date;
+}) => runTransaction(client, async (tx) => {
+  await tx.$queryRaw`SELECT "id" FROM "simple_performance_evaluations" WHERE "id" = ${input.evaluationId} FOR UPDATE`;
+  const evaluation = await pendingEvaluationForFinalizer(tx, input.evaluationId, input.actorUserId);
+  if (!evaluation.appealedAt) throw simpleError('اعتراضی برای رسیدگی ثبت نشده است.', 'SIMPLE_APPEAL_NOT_SUBMITTED', 409);
+  const resolution = input.resolution.trim();
+  if (resolution.length < 8) throw simpleError('نتیجه رسیدگی را کامل‌تر وارد کنید.', 'SIMPLE_APPEAL_RESOLUTION_REQUIRED');
+  const now = input.now ?? new Date();
+  const result = await tx.simplePerformanceEvaluation.update({ where: { id: evaluation.id }, data: {
+    appealResolution: resolution, appealResolvedAt: now, appealResolvedByUserId: input.actorUserId,
+  } });
+  await tx.simplePerformanceAudit.create({ data: {
+    evaluationId: evaluation.id, personnelId: evaluation.personnelId, actorUserId: input.actorUserId,
+    authoritySource: 'HR_MANAGER', eventType: 'APPEAL_RESOLVED', reason: resolution,
+  } });
+  return result;
+});
+
+export const publishSimplePerformanceEvaluation = (client: Client, input: {
+  actorUserId: string; evaluationId: string; now?: Date;
+}) => runTransaction(client, async (tx) => {
+  await tx.$queryRaw`SELECT "id" FROM "simple_performance_evaluations" WHERE "id" = ${input.evaluationId} FOR UPDATE`;
+  const evaluation = await pendingEvaluationForFinalizer(tx, input.evaluationId, input.actorUserId);
+  const now = input.now ?? new Date();
+  if (evaluation.appealedAt && !evaluation.appealResolvedAt) throw simpleError('اعتراض ثبت‌شده باید ابتدا رسیدگی شود.', 'SIMPLE_APPEAL_UNRESOLVED', 409);
+  if (!evaluation.appealedAt && evaluation.appealDeadline && now < evaluation.appealDeadline) {
+    throw simpleError('مهلت اعتراض هنوز پایان نیافته است.', 'SIMPLE_APPEAL_WINDOW_OPEN', 409);
+  }
+  if (evaluation.correctionOfId) {
+    await tx.simplePerformanceEvaluation.update({ where: { id: evaluation.correctionOfId }, data: { supersededAt: now } });
+  }
+  const result = await tx.simplePerformanceEvaluation.update({ where: { id: evaluation.id }, data: { status: 'FINAL', finalizedAt: now }, include: evaluationInclude });
+  await tx.simplePerformanceAudit.create({ data: {
+    evaluationId: evaluation.id, personnelId: evaluation.personnelId, actorUserId: input.actorUserId,
+    authoritySource: 'HR_MANAGER', eventType: 'PUBLISHED', details: { score: evaluation.score, levelCode: evaluation.levelCode },
+  } });
+  return result;
+});
 
 export const createSimplePerformanceCorrection = async (client: Client, input: {
   actorUserId: string; evaluationId: string; reason: string;
@@ -578,6 +743,9 @@ export const createSimplePerformanceCorrection = async (client: Client, input: {
         profileId: target.profileId, evaluationDate: target.evaluationDate,
         evaluatorUserId: input.actorUserId, evaluatorAuthority: authority, correctionOfId: target.id,
         correctionReason: reason,
+        periodKey: target.periodKey, periodLabelFa: target.periodLabelFa,
+        measurementFrom: target.measurementFrom, measurementTo: target.measurementTo,
+        effectiveDays: target.effectiveDays, assignmentSegments: target.assignmentSegments ?? undefined,
         values: { create: target.values.map((value) => ({
           indicatorId: value.indicatorId, actual: value.actual, sampleCount: value.sampleCount,
           sourceReference: value.sourceReference, enteredByUserId: value.enteredByUserId,
@@ -594,10 +762,15 @@ export const createSimplePerformanceCorrection = async (client: Client, input: {
 };
 
 export const getSimplePerformanceBadges = async (client: Client, personnelIds: string[], now = new Date()) => {
-  const relationships = await client.hrEmploymentRelationship.findMany({
-    where: { personnelId: { in: personnelIds }, status: { in: ['ACTIVE', 'SUSPENDED'] }, ...activeAt(now) },
-    orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }], select: { id: true, personnelId: true },
-  });
+  const [activePersonnel, relationships] = await Promise.all([
+    client.personnel.findMany({
+      where: { id: { in: personnelIds }, isActive: true, archivedAt: null }, select: { id: true },
+    }),
+    client.hrEmploymentRelationship.findMany({
+      where: { personnelId: { in: personnelIds }, status: { in: ['ACTIVE', 'SUSPENDED'] }, ...activeAt(now) },
+      orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }], select: { id: true, personnelId: true },
+    }),
+  ]);
   const relationshipsByPersonnel = new Map<string, string[]>();
   for (const relationship of relationships) {
     relationshipsByPersonnel.set(relationship.personnelId, [
@@ -605,7 +778,10 @@ export const getSimplePerformanceBadges = async (client: Client, personnelIds: s
     ]);
   }
   const currentRelationshipByPersonnel = new Map<string, string>();
-  const badges: Record<string, unknown> = {};
+  const badges: Record<string, unknown> = Object.fromEntries(activePersonnel.map(({ id }) => [id, {
+    state: 'LEVEL', levelCode: 'COMPANION', labelFa: 'همراه',
+    meaningFa: 'هنوز نتیجه رسمی هفت‌سطحی ثبت نشده است.', version: 2, officialResult: false,
+  }]));
   for (const [personnelId, relationshipIds] of relationshipsByPersonnel) {
     if (relationshipIds.length === 1) {
       currentRelationshipByPersonnel.set(personnelId, relationshipIds[0]);
@@ -632,7 +808,7 @@ export const getSimplePerformanceBadges = async (client: Client, personnelIds: s
     badges[evaluation.personnelId] = {
       state: 'LEVEL', levelCode, labelFa: SIMPLE_PERFORMANCE_LEVEL_LABELS[levelCode],
       meaningFa: 'آخرین نتیجه نهایی عملکرد.',
-      newestMeasurementTo: evaluation.evaluationDate.toISOString(), version: 2, officialResult: true,
+      newestMeasurementTo: (evaluation.measurementTo ?? evaluation.evaluationDate).toISOString(), version: 2, officialResult: true,
     };
     resolvedPersonnelIds.add(evaluation.personnelId);
   }
@@ -646,8 +822,8 @@ export const getSimplePersonalPerformanceDetails = async (client: Client, person
   });
   if (!relationship) return null;
   const evaluation = await client.simplePerformanceEvaluation.findFirst({
-    where: { personnelId, employmentRelationshipId: relationship.id, status: 'FINAL', supersededAt: null },
-    include: evaluationInclude, orderBy: [{ finalizedAt: 'desc' }, { createdAt: 'desc' }],
+    where: { personnelId, employmentRelationshipId: relationship.id, status: { in: ['PENDING_APPEAL', 'FINAL'] }, supersededAt: null },
+    include: evaluationInclude, orderBy: [{ proposedAt: 'desc' }, { finalizedAt: 'desc' }, { createdAt: 'desc' }],
   });
   if (!evaluation?.levelCode || !SIMPLE_PERFORMANCE_LEVEL_LABELS[evaluation.levelCode as keyof typeof SIMPLE_PERFORMANCE_LEVEL_LABELS]) return null;
   const weightedAverage = (behavior: boolean) => {
@@ -658,10 +834,33 @@ export const getSimplePersonalPerformanceDetails = async (client: Client, person
       (value.score ?? new Prisma.Decimal(0)).mul(value.indicator.weightPercent),
     ), new Prisma.Decimal(0)).div(weight).toDecimalPlaces(2).toString();
   };
+  const scoredFactors = evaluation.values.filter((value) => value.score !== null)
+    .sort((left, right) => Number(right.score) - Number(left.score));
+  const surveyMembers = evaluation.values.filter(({ indicator, score }) => indicator.sourceKind === 'SURVEY' && score !== null);
+  const surveyAggregateScore = surveyMembers.length
+    ? new Prisma.Decimal(surveyMembers.reduce((sum, value) => sum + Number(value.score), 0) / surveyMembers.length).toDecimalPlaces(2).toString()
+    : null;
   return {
+    status: evaluation.status,
+    evaluationId: evaluation.id,
     score: evaluation.score?.toDecimalPlaces(2).toString() ?? null,
     behavioralScore: weightedAverage(true), performanceScore: weightedAverage(false),
     evaluationDate: evaluation.evaluationDate.toISOString(),
+    periodKey: evaluation.periodKey, periodLabelFa: evaluation.periodLabelFa,
+    measurementFrom: evaluation.measurementFrom?.toISOString() ?? null,
+    measurementTo: evaluation.measurementTo?.toISOString() ?? null,
+    nextReviewAt: evaluation.measurementTo ? new Date(evaluation.measurementTo.getTime() + 183 * 86_400_000).toISOString() : null,
+    surveyAggregateScore,
+    strength: scoredFactors[0] ? { titleFa: scoredFactors[0].indicator.titleFa, score: scoredFactors[0].score?.toDecimalPlaces(2).toString() } : null,
+    improvement: scoredFactors.at(-1) ? { titleFa: scoredFactors.at(-1)!.indicator.titleFa, score: scoredFactors.at(-1)!.score?.toDecimalPlaces(2).toString() } : null,
+    appeal: evaluation.status === 'PENDING_APPEAL' ? {
+      deadline: evaluation.appealDeadline?.toISOString() ?? null,
+      submittedAt: evaluation.appealedAt?.toISOString() ?? null,
+      text: evaluation.appealText,
+      resolution: evaluation.appealResolution,
+      canSubmit: !evaluation.appealedAt && Boolean(evaluation.appealDeadline && now <= evaluation.appealDeadline),
+      endpoint: `/hr/personnel-performance/simple/evaluations/${evaluation.id}/appeal`,
+    } : null,
     factors: evaluation.values.map((value) => ({
       code: value.indicator.code, titleFa: value.indicator.titleFa,
       familyCode: value.indicator.familyCode, sourceKind: value.indicator.sourceKind,

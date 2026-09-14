@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { prisma } from '../../lib/prisma';
 import {
   assignSimplePerformanceProfile,
+  appealSimplePerformanceEvaluation,
   createSimplePerformanceCorrection,
   createSimplePerformanceEvaluation,
   createSimplePerformanceProfile,
@@ -10,6 +11,8 @@ import {
   getSimplePerformanceHistory,
   getSimplePerformanceWorkspace,
   resolveSimpleEvaluationAuthority,
+  resolveSimplePerformanceAppeal,
+  publishSimplePerformanceEvaluation,
   saveSimplePerformanceDraft,
   visibleSimplePerformancePersonnelIds,
 } from '../simplePersonnelPerformanceStore';
@@ -18,6 +21,9 @@ const rollback = Symbol('rollback');
 const today = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(new Date());
+const completedEvaluationDay = '2026-03-20';
+const proposalNow = new Date('2026-03-21T12:00:00.000Z');
+const publicationNow = new Date('2026-03-29T12:00:00.000Z');
 
 const main = async () => {
 try {
@@ -27,8 +33,16 @@ try {
       firstName: 'مدیر', lastName: 'آزمون',
     } });
     const personnel = await tx.personnel.create({ data: { firstName: 'پرسنل', lastName: 'آزمون' } });
+    const personnelUser = await tx.user.create({ data: {
+      email: 'simple-performance-target@example.invalid', username: 'simple_performance_target', password: 'not-used',
+      firstName: 'پرسنل', lastName: 'آزمون', personnelId: personnel.id,
+    } });
     const targetRelationship = await tx.hrEmploymentRelationship.create({ data: {
-      personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: actor.id,
+      personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), createdBy: actor.id,
+    } });
+    await tx.hrEmploymentAssignment.create({ data: {
+      employmentRelationshipId: targetRelationship.id, type: 'PRIMARY',
+      effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), createdBy: actor.id,
     } });
     await tx.hrFeatureAccessGrant.create({ data: {
       stableKey: 'simple-performance-test-grant', userId: actor.id, featureCode: 'EVALUATE_ALL_PERSONNEL',
@@ -53,21 +67,42 @@ try {
       (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'SIMPLE_EVALUATION_EMPLOYMENT_UNRESOLVED'),
     );
 
-    const first = await createSimplePerformanceEvaluation(tx, { actorUserId: actor.id, personnelId: personnel.id, evaluationDate: today });
+    const first = await createSimplePerformanceEvaluation(tx, { actorUserId: actor.id, personnelId: personnel.id, evaluationDate: completedEvaluationDay });
     await saveSimplePerformanceDraft(tx, {
       actorUserId: actor.id, evaluationId: first.id,
       values: profile.indicators.map((indicator) => ({ indicatorId: indicator.id, actual: indicator.target.toString() })),
     });
-    const finalized = await finalizeSimplePerformanceEvaluation(tx, { actorUserId: actor.id, evaluationId: first.id });
+    assert.equal(await tx.simplePerformanceValueRevision.count({ where: { evaluationId: first.id } }), profile.indicators.length);
+    await assert.rejects(saveSimplePerformanceDraft(tx, {
+      actorUserId: actor.id, evaluationId: first.id,
+      values: profile.indicators.map((indicator, index) => ({ indicatorId: indicator.id, actual: index ? indicator.target.toString() : indicator.target.add(1).toString() })),
+    }), (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'SIMPLE_VALUE_CHANGE_REASON_REQUIRED'));
+    await saveSimplePerformanceDraft(tx, {
+      actorUserId: actor.id, evaluationId: first.id, reason: 'اصلاح مقدار بر پایه گزارش منبع',
+      values: profile.indicators.map((indicator) => ({ indicatorId: indicator.id, actual: indicator.target.toString() })),
+    });
+    const proposed = await finalizeSimplePerformanceEvaluation(tx, { actorUserId: actor.id, evaluationId: first.id, now: proposalNow });
+    assert.equal(proposed.status, 'PENDING_APPEAL');
+    await appealSimplePerformanceEvaluation(tx, {
+      actorUserId: personnelUser.id, evaluationId: first.id, text: 'این نتیجه نیاز به بازبینی شواهد وصول دارد.', now: proposalNow,
+    });
+    await assert.rejects(publishSimplePerformanceEvaluation(tx, {
+      actorUserId: actor.id, evaluationId: first.id, now: publicationNow,
+    }), (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'SIMPLE_APPEAL_UNRESOLVED'));
+    await resolveSimplePerformanceAppeal(tx, {
+      actorUserId: actor.id, evaluationId: first.id, resolution: 'شواهد بررسی و نتیجه پیشنهادی تأیید شد.', now: publicationNow,
+    });
+    const finalized = await publishSimplePerformanceEvaluation(tx, { actorUserId: actor.id, evaluationId: first.id, now: publicationNow });
     assert.equal(finalized.employmentRelationshipId, targetRelationship.id);
     assert.equal(finalized.score?.toString(), '75');
     assert.equal(finalized.levelCode, 'CAPABLE');
 
-    const second = await createSimplePerformanceEvaluation(tx, { actorUserId: actor.id, personnelId: personnel.id, evaluationDate: today });
+    const second = await createSimplePerformanceEvaluation(tx, { actorUserId: actor.id, personnelId: personnel.id, evaluationDate: completedEvaluationDay });
     assert.notEqual(second.id, first.id, 'more than one evaluation is allowed on the same day');
 
     const correction = await createSimplePerformanceCorrection(tx, { actorUserId: actor.id, evaluationId: first.id, reason: 'اصلاح مقدار فروش' });
-    await finalizeSimplePerformanceEvaluation(tx, { actorUserId: actor.id, evaluationId: correction.id });
+    await finalizeSimplePerformanceEvaluation(tx, { actorUserId: actor.id, evaluationId: correction.id, now: proposalNow });
+    await publishSimplePerformanceEvaluation(tx, { actorUserId: actor.id, evaluationId: correction.id, now: publicationNow });
     const replaced = await tx.simplePerformanceEvaluation.findUniqueOrThrow({ where: { id: first.id } });
     assert.ok(replaced.supersededAt, 'a finalized correction replaces only its source result');
     assert.equal(second.status, 'DRAFT', 'an independent evaluation is not replaced by a correction');

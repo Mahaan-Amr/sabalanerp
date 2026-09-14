@@ -1508,10 +1508,13 @@ export const personnelPerformanceAPI = {
   createSimpleProfile: (input: unknown) => api.post('/hr/personnel-performance/simple/profiles', input),
   assignSimpleProfile: (input: { personnelId: string; profileId: string }) => api.post('/hr/personnel-performance/simple/profile-assignments', input),
   createSimpleEvaluation: (input: { personnelId: string; evaluationDate: string }) => api.post('/hr/personnel-performance/simple/evaluations', input),
-  saveSimpleEvaluation: (evaluationId: string, values: Array<{ indicatorId: string; actual: string }>) => api.put(
-    `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/draft`, { values },
+  saveSimpleEvaluation: (evaluationId: string, values: Array<{ indicatorId: string; actual: string }>, reason?: string) => api.put(
+    `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/draft`, { values, reason },
   ),
   finalizeSimpleEvaluation: (evaluationId: string, input?: { confirmedSeriousViolation?: boolean }) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/finalize`, input ?? {}),
+  publishSimpleEvaluation: (evaluationId: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/publish`),
+  appealSimpleEvaluation: (evaluationId: string, text: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/appeal`, { text }),
+  resolveSimpleEvaluationAppeal: (evaluationId: string, resolution: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/resolve-appeal`, { resolution }),
   correctSimpleEvaluation: (evaluationId: string, reason: string) => api.post(
     `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/corrections`, { reason },
   ),

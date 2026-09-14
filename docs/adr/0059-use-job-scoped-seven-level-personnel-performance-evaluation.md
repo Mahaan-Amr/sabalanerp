@@ -4,6 +4,8 @@ status: accepted
 
 # Use job-scoped seven-level personnel performance evaluation
 
+The accepted product specification is tracked in GitHub Issue [#374](https://github.com/Mahaan-Amr/sabalanerp/issues/374).
+
 New Personnel performance evaluations use a versioned Job profile plus an optional Position addendum, bind every result to the effective employment assignment and fixed six-month period, and combine common behavioral factors with Job-specific performance factors. The first evaluated Job is Seller: thirty percent of its result is behavioral and seventy percent is performance-based, with seventy-two percent of the total result coming from validated system data; the initial manual workflow records sourced quantitative values and the later automated workflow changes only their ingestion, not their meaning or calculation.
 
 The seven prospective levels are `همراه`, `کوشا`, `شایسته`, `توانمند`, `برتر`, `سرآمد`, and `الگو`, represented by the existing elongated-stone badge design using agate, amber, turquoise, emerald, sapphire, ruby, and diamond. Activation resets every active Personnel's current visible badge to the label `همراه` with an internal `no official result` state that is excluded from analytics and formal decisions; former five-level results remain unchanged in history, and only a valid new seven-level result replaces the current badge.

@@ -8293,6 +8293,19 @@ model SimplePerformanceEvaluation {
   score                     Decimal?                  @db.Decimal(38, 18)
   levelCode                 String?
   confirmedSeriousViolation Boolean                   @default(false)
+  periodKey                 String?
+  periodLabelFa             String?
+  measurementFrom           DateTime?                 @db.Date
+  measurementTo             DateTime?                 @db.Date
+  effectiveDays             Int?
+  proposedAt                DateTime?
+  appealDeadline            DateTime?
+  appealText                String?
+  appealedAt                DateTime?
+  appealResolution          String?
+  appealResolvedAt          DateTime?
+  appealResolvedByUserId    String?
+  assignmentSegments       Json?
   finalizedAt               DateTime?
   correctionOfId            String?
   correctionReason          String?
@@ -8302,11 +8315,33 @@ model SimplePerformanceEvaluation {
   profile                   SimplePerformanceProfile  @relation(fields: [profileId], references: [id], onDelete: Restrict)
   employmentRelationship    HrEmploymentRelationship? @relation(fields: [employmentRelationshipId, personnelId], references: [id, personnelId], onDelete: Restrict)
   values                    SimplePerformanceValue[]
+  valueRevisions            SimplePerformanceValueRevision[]
 
   @@index([personnelId, status, finalizedAt])
   @@index([employmentRelationshipId, status, finalizedAt])
   @@index([correctionOfId])
   @@map("simple_performance_evaluations")
+}
+
+model SimplePerformanceValueRevision {
+  id                 String                      @id @default(cuid())
+  evaluationId       String
+  indicatorId        String
+  version            Int
+  oldActual          Decimal?                    @db.Decimal(18, 4)
+  newActual          Decimal                     @db.Decimal(18, 4)
+  oldSampleCount     Int?
+  newSampleCount     Int?
+  oldSourceReference String?
+  newSourceReference String?
+  reason             String
+  actorUserId        String
+  createdAt          DateTime                    @default(now())
+  evaluation         SimplePerformanceEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@unique([evaluationId, indicatorId, version])
+  @@index([evaluationId, createdAt])
+  @@map("simple_performance_value_revisions")
 }
 
 model SimplePerformanceValue {
@@ -8415,11 +8450,28 @@ model PersonnelBehaviorSurveyResponse {
   updatedAt             DateTime                        @updatedAt
   campaign              PersonnelBehaviorSurveyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   answers               PersonnelBehaviorSurveyAnswer[]
+  revisions             PersonnelBehaviorSurveyResponseRevision[]
 
   @@unique([campaignId, targetPersonnelId, respondentPersonnelId])
   @@index([targetPersonnelId, campaignId, status])
   @@index([respondentPersonnelId, campaignId, status])
   @@map("personnel_behavior_survey_responses")
+}
+
+model PersonnelBehaviorSurveyResponseRevision {
+  id            String                          @id @default(cuid())
+  responseId    String
+  version       Int
+  status        String
+  commentText   String?
+  answers       Json
+  actorUserId   String
+  createdAt     DateTime                        @default(now())
+  response      PersonnelBehaviorSurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@unique([responseId, version])
+  @@index([responseId, createdAt])
+  @@map("personnel_behavior_survey_response_revisions")
 }
 
 model PersonnelBehaviorSurveyAnswer {

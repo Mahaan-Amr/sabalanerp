@@ -5,6 +5,7 @@ import {
   calculateSellerPerformance,
   redistributeSellerFactorWeights,
   sellerPerformancePeriodFor,
+  sellerPerformancePeriodWindowFor,
 } from '../sellerPerformancePolicy';
 
 const atTarget = calculateSellerPerformance([{
@@ -46,6 +47,11 @@ assert.deepEqual(sellerPerformancePeriodFor(new Date('2026-04-21T08:00:00.000Z')
 });
 assert.deepEqual(sellerPerformancePeriodFor(new Date('2026-09-23T08:00:00.000Z')), {
   persianYear: 1405, half: 2, key: '1405-H2', labelFa: 'مهر تا اسفند ۱۴۰۵',
+});
+assert.deepEqual(sellerPerformancePeriodWindowFor(new Date('2026-06-01T08:00:00.000Z')), {
+  ...sellerPerformancePeriodFor(new Date('2026-06-01T08:00:00.000Z')),
+  from: new Date('2026-03-21T00:00:00.000Z'),
+  to: new Date('2026-09-22T00:00:00.000Z'),
 });
 
 assert.deepEqual(redistributeSellerFactorWeights([

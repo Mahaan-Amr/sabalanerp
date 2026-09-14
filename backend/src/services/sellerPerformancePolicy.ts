@@ -150,6 +150,21 @@ export const sellerPerformancePeriodFor = (date: Date) => {
   } as const;
 };
 
+const utcDay = (date: Date) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+
+export const sellerPerformancePeriodWindowFor = (date: Date) => {
+  const period = sellerPerformancePeriodFor(date);
+  let from = utcDay(date);
+  let to = utcDay(date);
+  while (sellerPerformancePeriodFor(new Date(from.getTime() - 86_400_000)).key === period.key) {
+    from = new Date(from.getTime() - 86_400_000);
+  }
+  while (sellerPerformancePeriodFor(new Date(to.getTime() + 86_400_000)).key === period.key) {
+    to = new Date(to.getTime() + 86_400_000);
+  }
+  return { ...period, from, to };
+};
+
 const higherIsBetter = (actual: Prisma.Decimal, target: Prisma.Decimal) => {
   if (target.lte(ZERO)) throw new Error('هدف باید بیشتر از صفر باشد.');
   if (actual.lte(target)) return actual.div(target).mul(SEVENTY_FIVE);

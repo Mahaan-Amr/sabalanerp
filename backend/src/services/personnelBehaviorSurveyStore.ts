@@ -205,6 +205,14 @@ export const saveBehaviorSurveyResponse = (client: Client, input: {
       campaignId: campaign.id, targetPersonnelId: input.targetPersonnelId, respondentPersonnelId,
     } }, include: { answers: true },
   });
+  if (previous) {
+    await tx.personnelBehaviorSurveyResponseRevision.createMany({ data: [{
+      responseId: previous.id, version: previous.version, status: previous.status,
+      commentText: previous.commentText,
+      answers: previous.answers.map(({ questionId, optionCode, numericScore }) => ({ questionId, optionCode, numericScore })),
+      actorUserId: input.actorUserId,
+    }], skipDuplicates: true });
+  }
   const response = previous
     ? await tx.personnelBehaviorSurveyResponse.update({ where: { id: previous.id }, data: {
       status: input.submit ? 'FINAL' : 'DRAFT', version: { increment: 1 }, commentText,
@@ -218,6 +226,11 @@ export const saveBehaviorSurveyResponse = (client: Client, input: {
   if (answers.size) await tx.personnelBehaviorSurveyAnswer.createMany({ data: [...answers].map(([questionId, optionCode]) => ({
     responseId: response.id, questionId, optionCode, numericScore: optionScore.get(optionCode) ?? null,
   })) });
+  await tx.personnelBehaviorSurveyResponseRevision.create({ data: {
+    responseId: response.id, version: response.version, status: response.status, commentText: response.commentText,
+    answers: [...answers].map(([questionId, optionCode]) => ({ questionId, optionCode, numericScore: optionScore.get(optionCode) ?? null })),
+    actorUserId: input.actorUserId,
+  } });
   await tx.personnelBehaviorSurveyAudit.create({ data: {
     campaignId: campaign.id, responseId: response.id, actorUserId: input.actorUserId,
     eventType: input.submit ? 'RESPONSE_SUBMITTED' : 'RESPONSE_DRAFT_SAVED',

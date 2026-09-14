@@ -11,6 +11,7 @@ import {
   ErpInput,
   ErpSection,
   ErpSelect,
+  ErpSheet,
   ErpTextarea,
 } from "@/components/erp";
 import { personnelPerformanceAPI } from "@/lib/api";
@@ -44,18 +45,17 @@ const initialQuestions: Question[] = [
   { sectionCode: "WORKPLACE_STANDARD", promptFa: "این همکار نظافت شخصی و نظم فضای کاری مرتبط با مسئولیتش را رعایت می‌کند." },
 ];
 
-const currentPeriodKey = () => {
-  const parts = new Intl.DateTimeFormat("en-US-u-ca-persian-nu-latn", { timeZone: "Asia/Tehran", year: "numeric", month: "numeric" }).formatToParts(new Date());
-  const year = parts.find(({ type }) => type === "year")?.value;
-  const month = Number(parts.find(({ type }) => type === "month")?.value);
-  return `${year}-H${month <= 6 ? 1 : 2}`;
+const campaignStatusPresentation: Record<string, { label: string; tone: "success" | "neutral" | "warning" }> = {
+  ACTIVE: { label: "فعال", tone: "success" },
+  CLOSED: { label: "بسته", tone: "neutral" },
+  DRAFT: { label: "پیش‌نویس", tone: "warning" },
 };
 
-export default function BehaviorSurveyAdministration({ personnel }: { personnel: Personnel[] }) {
+export default function BehaviorSurveyAdministration({ personnel, currentPeriodKey }: { personnel: Personnel[]; currentPeriodKey: string }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [editingId, setEditingId] = useState("");
   const [titleFa, setTitleFa] = useState("");
-  const [periodKey, setPeriodKey] = useState(currentPeriodKey());
+  const [periodKey, setPeriodKey] = useState(currentPeriodKey);
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
   const [targets, setTargets] = useState<string[]>([]);
   const [respondents, setRespondents] = useState<string[]>([]);
@@ -64,6 +64,7 @@ export default function BehaviorSurveyAdministration({ personnel }: { personnel:
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [activationCampaignId, setActivationCampaignId] = useState("");
 
   const load = useCallback(async () => {
     try { setCampaigns((await personnelPerformanceAPI.behaviorSurveys()).data.campaigns); }
@@ -72,7 +73,7 @@ export default function BehaviorSurveyAdministration({ personnel }: { personnel:
   useEffect(() => { void load(); }, [load]);
 
   const reset = () => {
-    setEditingId(""); setTitleFa(""); setPeriodKey(currentPeriodKey()); setQuestions(initialQuestions);
+    setEditingId(""); setTitleFa(""); setPeriodKey(currentPeriodKey); setQuestions(initialQuestions);
     setTargets([]); setRespondents([]); setOpensAt(""); setClosesAt("");
   };
   const edit = (campaign: Campaign) => {
@@ -95,7 +96,7 @@ export default function BehaviorSurveyAdministration({ personnel }: { personnel:
     setPending(true); setError(""); setMessage("");
     try {
       await personnelPerformanceAPI.activateBehaviorSurvey(campaignId, { opensAt: new Date(opensAt).toISOString(), closesAt: new Date(closesAt).toISOString() });
-      setMessage("نسخه نظرسنجی فعال و قفل شد."); await load();
+      setMessage("نسخه نظرسنجی فعال و قفل شد."); setActivationCampaignId(""); await load();
     } catch (requestError: any) { setError(requestError.response?.data?.message || "فعال‌سازی انجام نشد."); }
     finally { setPending(false); }
   };
@@ -112,6 +113,12 @@ export default function BehaviorSurveyAdministration({ personnel }: { personnel:
       <div className="mt-5 grid gap-4 lg:grid-cols-2"><ErpCard className="p-4"><p className="font-bold">افراد مورد ارزیابی</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{personnel.map((person) => <ErpCheckbox key={person.id} label={`${person.firstName} ${person.lastName}`} checked={targets.includes(person.id)} onChange={(event) => setTargets((items) => event.target.checked ? [...items, person.id] : items.filter((id) => id !== person.id))} />)}</div></ErpCard><ErpCard className="p-4"><p className="font-bold">پاسخ‌دهندگان</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{personnel.map((person) => <ErpCheckbox key={person.id} label={`${person.firstName} ${person.lastName}`} checked={respondents.includes(person.id)} onChange={(event) => setRespondents((items) => event.target.checked ? [...items, person.id] : items.filter((id) => id !== person.id))} />)}</div></ErpCard></div>
       <div className="mt-4 flex flex-wrap gap-2"><ErpButton label="ذخیره پیش‌نویس" disabled={pending} onClick={() => void save()} />{editingId && <ErpButton label="انصراف" variant="ghost" onClick={reset} />}</div>
     </ErpSection>
-    <ErpSection title="نسخه‌های نظرسنجی"><div className="space-y-3">{campaigns.map((campaign) => <ErpCard key={campaign.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold">{campaign.titleFa}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{campaign.periodKey} · نسخه {campaign.version.toLocaleString("fa-IR")} · {campaign.questions.length.toLocaleString("fa-IR")} پرسش</p></div><ErpBadge tone={campaign.status === "ACTIVE" ? "success" : campaign.status === "CLOSED" ? "neutral" : "warning"}>{campaign.status === "ACTIVE" ? "فعال" : campaign.status === "CLOSED" ? "بسته" : "پیش‌نویس"}</ErpBadge></div>{campaign.status === "DRAFT" && <><div className="mt-4 grid gap-3 md:grid-cols-2"><ErpField label="شروع"><ErpInput type="datetime-local" value={opensAt} onChange={(event) => setOpensAt(event.target.value)} /></ErpField><ErpField label="پایان"><ErpInput type="datetime-local" value={closesAt} onChange={(event) => setClosesAt(event.target.value)} /></ErpField></div><div className="mt-3 flex flex-wrap gap-2"><ErpButton label="ویرایش" variant="soft" onClick={() => edit(campaign)} /><ErpButton label="فعال‌سازی و قفل نسخه" disabled={pending || !opensAt || !closesAt} onClick={() => void activate(campaign.id)} /></div></>}</ErpCard>)}</div></ErpSection>
+    <ErpSection title="نسخه‌های نظرسنجی"><div className="space-y-3">{campaigns.map((campaign) => {
+      const presentation = campaignStatusPresentation[campaign.status] ?? campaignStatusPresentation.DRAFT;
+      return <ErpCard key={campaign.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold">{campaign.titleFa}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{campaign.periodKey} · نسخه {campaign.version.toLocaleString("fa-IR")} · {campaign.questions.length.toLocaleString("fa-IR")} پرسش</p></div><ErpBadge tone={presentation.tone}>{presentation.label}</ErpBadge></div>{campaign.status === "DRAFT" && <><div className="mt-4 grid gap-3 md:grid-cols-2"><ErpField label="شروع"><ErpInput type="datetime-local" value={opensAt} onChange={(event) => setOpensAt(event.target.value)} /></ErpField><ErpField label="پایان"><ErpInput type="datetime-local" value={closesAt} onChange={(event) => setClosesAt(event.target.value)} /></ErpField></div><div className="mt-3 flex flex-wrap gap-2"><ErpButton label="ویرایش" variant="soft" onClick={() => edit(campaign)} /><ErpButton label="فعال‌سازی و قفل نسخه" disabled={pending || !opensAt || !closesAt} onClick={() => setActivationCampaignId(campaign.id)} /></div></>}</ErpCard>;
+    })}</div></ErpSection>
+    <ErpSheet open={Boolean(activationCampaignId)} onClose={() => !pending && setActivationCampaignId("")} title="فعال‌سازی و قفل نسخه؟" presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2"><ErpButton label="بازگشت" variant="ghost" disabled={pending} onClick={() => setActivationCampaignId("")} /><ErpButton label="تأیید و فعال‌سازی" disabled={pending} onClick={() => void activate(activationCampaignId)} /></div>}>
+      <p className="text-sm text-[var(--sds-text-secondary)]">پس از فعال‌سازی، متن و ترتیب پرسش‌ها و فهرست شرکت‌کنندگان این نسخه قابل ویرایش نیست. برای تغییرات بعدی باید نسخه تازه‌ای بسازید.</p>
+    </ErpSheet>
   </div>;
 }

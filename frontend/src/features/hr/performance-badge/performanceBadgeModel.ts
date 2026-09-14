@@ -12,7 +12,12 @@ export type PerformanceBadgeSummary = {
   version: number;
   officialResult?: boolean;
   details?: {
-    score: string | null; behavioralScore: string | null; performanceScore: string | null; evaluationDate: string;
+    evaluationId?: string; status?: 'PENDING_APPEAL' | 'FINAL'; score: string | null; behavioralScore: string | null; performanceScore: string | null; evaluationDate: string;
+    periodLabelFa?: string | null; measurementFrom?: string | null; measurementTo?: string | null; nextReviewAt?: string | null;
+    surveyAggregateScore?: string | null;
+    strength?: { titleFa: string; score?: string | null } | null;
+    improvement?: { titleFa: string; score?: string | null } | null;
+    appeal?: { deadline: string | null; submittedAt: string | null; text?: string | null; resolution?: string | null; canSubmit: boolean; endpoint: string } | null;
     factors: Array<{
       code: string; titleFa: string; familyCode?: string | null; sourceKind: string;
       weightPercent: string; actual: string; target: string; unitFa: string;

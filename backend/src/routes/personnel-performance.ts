@@ -100,6 +100,7 @@ import {
 } from '../services/personnelPerformanceDisclosureStore';
 import {
   assignSimplePerformanceProfile,
+  appealSimplePerformanceEvaluation,
   createSimplePerformanceCorrection,
   createSimplePerformanceEvaluation,
   createSimplePerformanceProfile,
@@ -109,6 +110,8 @@ import {
   getSimplePerformanceHistory,
   getSimplePerformanceWorkspace,
   listSimplePerformanceProfiles,
+  publishSimplePerformanceEvaluation,
+  resolveSimplePerformanceAppeal,
   saveSimplePerformanceDraft,
   visibleSimplePerformancePersonnelIds,
 } from '../services/simplePersonnelPerformanceStore';
@@ -252,6 +255,7 @@ router.post('/simple/evaluations', useSimplePerformance, async (req: AuthRequest
 router.put('/simple/evaluations/:evaluationId/draft', useSimplePerformance, async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, evaluation: await saveSimplePerformanceDraft(prisma, {
     actorUserId: req.user!.id, evaluationId: req.params.evaluationId, values: Array.isArray(req.body.values) ? req.body.values : [],
+    reason: typeof req.body.reason === 'string' ? req.body.reason : undefined,
   }) }); }
   catch (error) { return next(error); }
 });
@@ -260,6 +264,29 @@ router.post('/simple/evaluations/:evaluationId/finalize', useSimplePerformance, 
   try { return res.json({ success: true, evaluation: await finalizeSimplePerformanceEvaluation(prisma, {
     actorUserId: req.user!.id, evaluationId: req.params.evaluationId,
     confirmedSeriousViolation: req.body.confirmedSeriousViolation === true,
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/publish', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await publishSimplePerformanceEvaluation(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId,
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/appeal', async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    return res.json({ success: true, evaluation: await appealSimplePerformanceEvaluation(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId, text: String(req.body.text ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/resolve-appeal', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await resolveSimplePerformanceAppeal(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId, resolution: String(req.body.resolution ?? ''),
   }) }); }
   catch (error) { return next(error); }
 });

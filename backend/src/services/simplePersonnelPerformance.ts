@@ -1,7 +1,6 @@
 import {
   calculateSellerPerformance,
   SELLER_PERFORMANCE_LEVEL_LABELS,
-  sellerPerformancePeriodFor,
   type SellerPerformanceLevelCode,
 } from './sellerPerformancePolicy';
 
@@ -57,9 +56,6 @@ export const validateSimpleEvaluationDate = (value: string, now = new Date()): {
   }
   const today = dateInTehran(now);
   if (value > today) return { valid: false, message: 'تاریخ آینده مجاز نیست.' };
-  if (sellerPerformancePeriodFor(parsed).key !== sellerPerformancePeriodFor(now).key) {
-    return { valid: false, message: 'تاریخ باید در دوره شش‌ماهه جاری باشد.' };
-  }
   return { valid: true };
 };
 

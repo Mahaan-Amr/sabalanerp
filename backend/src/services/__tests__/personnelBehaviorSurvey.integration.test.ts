@@ -52,9 +52,21 @@ const main = async () => {
         commentText: 'توضیح محرمانه', now,
         answers: active.questions.map(({ id }) => ({ questionId: id, optionCode: 'AGREE' })),
       });
+      await saveBehaviorSurveyResponse(tx, {
+        campaignId: active.id, targetPersonnelId: target.id, actorUserId: people[0].user.id, submit: true,
+        commentText: 'توضیح محرمانه اصلاح‌شده', now,
+        answers: active.questions.map(({ id }) => ({ questionId: id, optionCode: 'STRONGLY_AGREE' })),
+      });
+      const revisedResponse = await tx.personnelBehaviorSurveyResponse.findUniqueOrThrow({
+        where: { campaignId_targetPersonnelId_respondentPersonnelId: {
+          campaignId: active.id, targetPersonnelId: target.id, respondentPersonnelId: people[0].personnel.id,
+        } }, include: { revisions: { orderBy: { version: 'asc' } } },
+      });
+      assert.equal(revisedResponse.revisions.length, 2, 'prior answers and comments remain available as immutable versions');
+      assert.equal(revisedResponse.revisions[0].commentText, 'توضیح محرمانه');
       const aggregate = await aggregateBehaviorSurveyCampaign(tx, active.id);
       assert.equal(aggregate.length, 6);
-      assert.ok(aggregate.every(({ score, respondentCount, sufficient }) => score === 75 && respondentCount === 3 && sufficient));
+      assert.ok(aggregate.every(({ score, respondentCount, sufficient }) => Math.abs(score - (250 / 3)) < 0.001 && respondentCount === 3 && sufficient));
 
       await assert.rejects(inspectRawBehaviorSurveyResponses(tx, {
         campaignId: active.id, targetPersonnelId: target.id, actorUserId: targetUser.id,

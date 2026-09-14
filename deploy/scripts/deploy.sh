@@ -576,6 +576,15 @@ DEPLOYMENT_FRONTEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYME
 DEPLOYMENT_INQUIRY_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_INQUIRY_IMAGE}")"
 DEPLOYMENT_NGINX_IMAGE="$(docker image inspect --format '{{.Id}}' nginx:1.27-alpine)"
 export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE
+# Reclaim disposable build records only after every image export has finished.
+# Otherwise a low-space checkpoint may spend its maintenance window verifying
+# old remote archives for retention even though build cache can supply the space.
+docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
+docker_available_bytes=$((docker_available_kb * 1024))
+if [ "${docker_available_bytes}" -lt "${docker_required_bytes}" ]; then
+  echo "Reclaiming unused build cache before maintenance; release images and checkpoints remain protected."
+  docker builder prune --all --force >"${REPO_ROOT}/.deploy-state/post-build-cache-prune.log"
+fi
 PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH="$(compose config | grep -v -e 'PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH:' -e 'PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH:' | node -e "const c=require('node:crypto');let b='';process.stdin.on('data',d=>b+=d);process.stdin.on('end',()=>process.stdout.write(c.createHash('sha256').update(b).digest('hex')))")"
 PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH="${PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH}"
 export PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH

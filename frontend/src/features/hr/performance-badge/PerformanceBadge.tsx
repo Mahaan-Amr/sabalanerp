@@ -28,7 +28,7 @@ export function PerformanceBadge({ badge, onAppeal }: { badge: PerformanceBadgeS
       <span className="text-xs font-bold text-[var(--sds-text-primary)]">{presentation.labelFa}</span>
       <span className="sr-only">{presentation.meaningFa}</span>
     </ErpPressable>
-    <ErpSheet open={open} onClose={() => setOpen(false)} title="خلاصه سطح عملکرد" presentation="modal">
+    <ErpSheet open={open} onClose={() => !appealPending && setOpen(false)} title="خلاصه سطح عملکرد" presentation="modal" pending={appealPending}>
       <div className="space-y-4" dir="rtl">
         <ErpCard className="flex items-center gap-4 p-4">
           <span className="relative block h-20 w-20 shrink-0" aria-hidden="true">

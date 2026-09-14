@@ -8234,6 +8234,7 @@ model SimplePerformanceProfile {
   stableKey       String
   nameFa          String
   version         Int
+  effectivePeriodKey String?
   isActive        Boolean                              @default(true)
   createdByUserId String
   createdAt       DateTime                             @default(now())
@@ -8243,6 +8244,7 @@ model SimplePerformanceProfile {
 
   @@unique([stableKey, version])
   @@index([isActive, nameFa])
+  @@index([stableKey, effectivePeriodKey, version])
   @@map("simple_performance_profiles")
 }
 

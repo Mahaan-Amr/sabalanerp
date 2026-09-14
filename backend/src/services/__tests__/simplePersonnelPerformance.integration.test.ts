@@ -16,6 +16,7 @@ import {
   saveSimplePerformanceDraft,
   visibleSimplePerformancePersonnelIds,
 } from '../simplePersonnelPerformanceStore';
+import { sellerPerformancePeriodFor } from '../sellerPerformancePolicy';
 
 const rollback = Symbol('rollback');
 const today = new Intl.DateTimeFormat('en-CA', {
@@ -24,6 +25,8 @@ const today = new Intl.DateTimeFormat('en-CA', {
 const completedEvaluationDay = '2026-03-20';
 const proposalNow = new Date('2026-03-21T12:00:00.000Z');
 const publicationNow = new Date('2026-03-29T12:00:00.000Z');
+const currentPeriod = sellerPerformancePeriodFor(new Date());
+const nextEffectivePeriodKey = currentPeriod.half === 1 ? `${currentPeriod.persianYear}-H2` : `${currentPeriod.persianYear + 1}-H1`;
 
 const main = async () => {
 try {
@@ -42,7 +45,7 @@ try {
     } });
     await tx.hrEmploymentAssignment.create({ data: {
       employmentRelationshipId: targetRelationship.id, type: 'PRIMARY',
-      effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), createdBy: actor.id,
+      effectiveFrom: new Date('2025-01-01T00:00:00.000Z'), performanceAllocationPercent: 100, createdBy: actor.id,
     } });
     await tx.hrFeatureAccessGrant.create({ data: {
       stableKey: 'simple-performance-test-grant', userId: actor.id, featureCode: 'EVALUATE_ALL_PERSONNEL',
@@ -125,7 +128,7 @@ try {
     assert.equal(firstHistoryPage.hasMore, true);
 
     const nextProfile = await createSimplePerformanceProfile(tx, {
-      actorUserId: actor.id, stableKey: profile.stableKey, nameFa: profile.nameFa,
+      actorUserId: actor.id, stableKey: profile.stableKey, nameFa: profile.nameFa, effectivePeriodKey: nextEffectivePeriodKey,
       indicators: profile.indicators.map((indicator) => ({
         code: indicator.code, categoryFa: indicator.categoryFa ?? undefined, titleFa: indicator.titleFa,
         unitFa: indicator.unitFa, target: indicator.target.toString(),
@@ -133,14 +136,14 @@ try {
       })),
     });
     const movedAssignment = await tx.simplePerformanceProfileAssignment.findUniqueOrThrow({ where: { personnelId: personnel.id } });
-    assert.equal(movedAssignment.profileId, nextProfile.id, 'a new profile version applies only to future evaluations');
+    assert.equal(movedAssignment.profileId, profile.id, 'a future profile version does not reassign the started period');
     assert.equal(finalized.profileId, profile.id, 'a finalized evaluation keeps its original profile version');
     assert.equal(await tx.simplePerformanceAudit.count({ where: {
       actorUserId: actor.id, eventType: 'PROFILE_VERSION_CREATED',
     } }), 1, 'profile version creation is audited');
     assert.equal(await tx.simplePerformanceAudit.count({ where: {
       actorUserId: actor.id, personnelId: personnel.id, eventType: 'PROFILE_REASSIGNED',
-    } }), 1, 'automatic profile reassignment is audited');
+    } }), 0, 'future target versions do not rewrite current assignments');
 
     const supervisorPersonnel = await tx.personnel.create({ data: { firstName: 'سرپرست', lastName: 'آزمون' } });
     const supervisor = await tx.user.create({ data: {
@@ -201,12 +204,12 @@ try {
     const automaticProfileEvaluation = await createSimplePerformanceEvaluation(tx, {
       actorUserId: actor.id, personnelId: automaticProfilePersonnel.id, evaluationDate: today,
     });
-    assert.equal(automaticProfileEvaluation.profileId, nextProfile.id,
+    assert.equal(automaticProfileEvaluation.profileId, profile.id,
       'the active workbook profile matching the organizational unit applies without a personnel assignment');
     const automaticProfileWorkspace = await getSimplePerformanceWorkspace(tx, actor.id);
     assert.equal(
       automaticProfileWorkspace.assignments.find(({ personnelId }) => personnelId === automaticProfilePersonnel.id)?.profileId,
-      nextProfile.id,
+      profile.id,
       'the evaluation form exposes the automatically selected workbook profile',
     );
     const hrUnit = await tx.hrOrganizationalUnit.create({ data: {

@@ -32,6 +32,7 @@ assert.deepEqual(registeredRoutes, [
   'GET /seller-policy',
   'GET /behavior-surveys',
   'POST /behavior-surveys',
+  'DELETE /behavior-surveys/:campaignId',
   'PUT /behavior-surveys/:campaignId',
   'POST /behavior-surveys/:campaignId/activate',
   'GET /behavior-surveys/assigned',

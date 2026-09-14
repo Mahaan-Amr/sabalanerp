@@ -9,7 +9,7 @@ import {
   type SimpleEvaluatorAuthority,
   type SimplePerformanceDirection,
 } from './simplePersonnelPerformance';
-import { applySellerPerformanceGates, redistributeSellerFactorWeights, sellerPerformancePeriodFor, sellerPerformancePeriodWindowFor } from './sellerPerformancePolicy';
+import { aggregateBehaviorSurveyScores, applySellerPerformanceGates, redistributeSellerFactorWeights, sellerPerformancePeriodFor, sellerPerformancePeriodWindowFor } from './sellerPerformancePolicy';
 
 type Client = PrismaClient | Prisma.TransactionClient;
 
@@ -142,6 +142,10 @@ export const listSimplePerformanceProfiles = (client: Client) => client.simplePe
 });
 
 const activeProfileForPersonnel = async (client: Client, personnelId: string, now = new Date()) => {
+  const periodKey = sellerPerformancePeriodFor(now).key;
+  const effectiveProfileWhere: Prisma.SimplePerformanceProfileWhereInput = {
+    AND: [{ OR: [{ effectivePeriodKey: null }, { effectivePeriodKey: { lte: periodKey } }] }],
+  };
   const primaryAssignment = await client.hrEmploymentAssignment.findFirst({
     where: {
       type: 'PRIMARY', ...activeAt(now),
@@ -159,7 +163,7 @@ const activeProfileForPersonnel = async (client: Client, personnelId: string, no
   if (unitName) {
     const profiles = await client.simplePerformanceProfile.findMany({
       where: {
-        isActive: true,
+        isActive: true, ...effectiveProfileWhere,
         OR: [{ nameFa: unitName }, { indicators: { some: { categoryFa: unitName } } }],
       },
       include: { indicators: { orderBy: { sortOrder: 'asc' } } },
@@ -179,7 +183,7 @@ const activeProfileForPersonnel = async (client: Client, personnelId: string, no
   ].find(([pattern]) => (pattern as RegExp).test(workContext))?.[1] as string | undefined;
   if (workbookProfileKey) {
     const profile = await client.simplePerformanceProfile.findFirst({
-      where: { stableKey: workbookProfileKey, isActive: true },
+      where: { stableKey: workbookProfileKey, isActive: true, ...effectiveProfileWhere },
       include: { indicators: { orderBy: { sortOrder: 'asc' } } },
       orderBy: { version: 'desc' },
     });
@@ -188,7 +192,11 @@ const activeProfileForPersonnel = async (client: Client, personnelId: string, no
   const legacyAssignment = await client.simplePerformanceProfileAssignment.findUnique({
     where: { personnelId }, include: { profile: { include: { indicators: { orderBy: { sortOrder: 'asc' } } } } },
   });
-  return legacyAssignment?.profile.isActive ? legacyAssignment.profile : null;
+  if (!legacyAssignment?.profile.isActive) return null;
+  return client.simplePerformanceProfile.findFirst({
+    where: { stableKey: legacyAssignment.profile.stableKey, isActive: true, ...effectiveProfileWhere },
+    include: { indicators: { orderBy: { sortOrder: 'asc' } } }, orderBy: { version: 'desc' },
+  });
 };
 
 export const getSimplePerformanceWorkspace = async (client: Client, actorUserId: string, now = new Date()) => {
@@ -317,6 +325,7 @@ export const getSimplePerformanceHistory = async (client: Client, input: {
 export const createSimplePerformanceProfile = async (client: Client, input: {
   actorUserId: string;
   stableKey?: string;
+  effectivePeriodKey?: string;
   nameFa: string;
   indicators: Array<{
     code: string; categoryFa?: string; familyCode?: string; sourceKind?: 'SYSTEM' | 'SUPERVISOR' | 'SURVEY';
@@ -345,10 +354,16 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
   const stableKey = typeof input.stableKey === 'string' && input.stableKey.trim() ? input.stableKey.trim() : `profile-${randomUUID()}`;
   return runTransaction(client, async (tx) => {
     const previous = await tx.simplePerformanceProfile.findFirst({ where: { stableKey }, orderBy: { version: 'desc' } });
-    if (previous) await tx.simplePerformanceProfile.updateMany({ where: { stableKey, isActive: true }, data: { isActive: false } });
+    const currentPeriodKey = sellerPerformancePeriodFor(new Date()).key;
+    const effectivePeriodKey = input.effectivePeriodKey?.trim() || (previous ? '' : currentPeriodKey);
+    if (!/^\d{4}-H[12]$/.test(effectivePeriodKey)) throw simpleError('دوره اثر نسخه هدف معتبر نیست.', 'SIMPLE_PROFILE_EFFECTIVE_PERIOD_INVALID');
+    const periodOrdinal = (key: string) => Number(key.slice(0, 4)) * 2 + Number(key.at(-1));
+    if (previous && periodOrdinal(effectivePeriodKey) <= periodOrdinal(currentPeriodKey)) {
+      throw simpleError('هدف‌های دوره آغازشده تغییر نمی‌کنند؛ نسخه جدید را برای دوره آینده ثبت کنید.', 'SIMPLE_PROFILE_STARTED_PERIOD_IMMUTABLE', 409);
+    }
     const profile = await tx.simplePerformanceProfile.create({
       data: {
-        stableKey, nameFa, version: (previous?.version ?? 0) + 1, createdByUserId: input.actorUserId,
+        stableKey, nameFa, version: (previous?.version ?? 0) + 1, effectivePeriodKey, createdByUserId: input.actorUserId,
         indicators: { create: input.indicators.map((indicator, index) => ({
           code: indicator.code.trim(), categoryFa: indicator.categoryFa?.trim() || null,
           titleFa: indicator.titleFa.trim(), unitFa: indicator.unitFa.trim(), target: indicator.target,
@@ -361,21 +376,8 @@ export const createSimplePerformanceProfile = async (client: Client, input: {
     });
     await tx.simplePerformanceAudit.create({ data: {
       actorUserId: input.actorUserId, eventType: 'PROFILE_VERSION_CREATED',
-      details: { stableKey, profileId: profile.id, version: profile.version, previousProfileId: previous?.id ?? null },
+      details: { stableKey, profileId: profile.id, version: profile.version, effectivePeriodKey, previousProfileId: previous?.id ?? null },
     } });
-    if (previous) {
-      const affectedAssignments = await tx.simplePerformanceProfileAssignment.findMany({
-        where: { profileId: previous.id }, select: { personnelId: true },
-      });
-      await tx.simplePerformanceProfileAssignment.updateMany({
-        where: { profileId: previous.id },
-        data: { profileId: profile.id, assignedByUserId: input.actorUserId, assignedAt: new Date() },
-      });
-      if (affectedAssignments.length) await tx.simplePerformanceAudit.createMany({ data: affectedAssignments.map(({ personnelId }) => ({
-        personnelId, actorUserId: input.actorUserId, eventType: 'PROFILE_REASSIGNED',
-        details: { previousProfileId: previous.id, profileId: profile.id },
-      })) });
-    }
     return profile;
   });
 };
@@ -436,7 +438,7 @@ export const createSimplePerformanceEvaluation = async (client: Client, input: {
       positionTitle: assignment.position?.title ?? null,
       from: new Date(Math.max(period.from.getTime(), assignment.effectiveFrom.getTime())).toISOString(),
       to: new Date(Math.min(period.to.getTime(), assignment.effectiveTo?.getTime() ?? period.to.getTime())).toISOString(),
-      allocationPercent: assignment.performanceAllocationPercent?.toString() ?? (assignments.length === 1 ? '100' : null),
+      allocationPercent: assignment.performanceAllocationPercent?.toString() ?? null,
     }));
     const evaluation = await tx.simplePerformanceEvaluation.create({
       data: {
@@ -465,9 +467,8 @@ const ownOpenEvaluation = async (client: Client, evaluationId: string, actorUser
   if (!evaluation.employmentRelationshipId || evaluation.employmentBindingStatus !== 'BOUND') {
     throw simpleError('این پیش‌نویس قدیمی قابل ادامه نیست.', 'SIMPLE_EVALUATION_EMPLOYMENT_UNRESOLVED', 409);
   }
-  if (evaluation.evaluatorUserId !== actorUserId) throw simpleError('این پیش‌نویس متعلق به شما نیست.', 'SIMPLE_EVALUATION_DRAFT_OWNER', 403);
-  await resolveSimpleEvaluationAuthority(client, { actorUserId, personnelId: evaluation.personnelId });
-  return evaluation;
+  const actorAuthority = await resolveSimpleEvaluationAuthority(client, { actorUserId, personnelId: evaluation.personnelId });
+  return Object.assign(evaluation, { actorAuthority });
 };
 
 const openEvaluationForFinalizer = async (client: Client, evaluationId: string, actorUserId: string) => {
@@ -526,6 +527,17 @@ export const saveSimplePerformanceDraft = async (client: Client, input: {
       return !previous || !previous.actual.eq(value.actual) || previous.sampleCount !== value.sampleCount
         || previous.sourceReference !== value.sourceReference;
     });
+    const indicatorsById = new Map(evaluation.profile.indicators.map((indicator) => [indicator.id, indicator]));
+    for (const value of changedValues) {
+      const sourceKind = indicatorsById.get(value.indicatorId)?.sourceKind;
+      if (sourceKind === 'SURVEY') throw simpleError('امتیاز نظرسنجی فقط از پاسخ‌های محرمانه همان دوره محاسبه می‌شود.', 'SIMPLE_SURVEY_VALUE_SYSTEM_OWNED', 403);
+      if (evaluation.actorAuthority === 'HR_PROCESSOR' && sourceKind !== 'SYSTEM') {
+        throw simpleError('کارشناس منابع انسانی فقط می‌تواند شواهد کمی سیستمی را ثبت کند.', 'SIMPLE_EVIDENCE_SOURCE_FORBIDDEN', 403);
+      }
+      if (evaluation.actorAuthority === 'SUPERVISOR' && sourceKind !== 'SUPERVISOR') {
+        throw simpleError('سرپرست فقط می‌تواند عوامل قضاوتی سرپرست را ثبت کند.', 'SIMPLE_EVIDENCE_SOURCE_FORBIDDEN', 403);
+      }
+    }
     const reason = input.reason?.trim() || (evaluation.values.length ? '' : 'ثبت اولیه شواهد');
     if (changedValues.length && evaluation.values.length && !reason) {
       throw simpleError('برای اصلاح شواهد، دلیل تغییر را وارد کنید.', 'SIMPLE_VALUE_CHANGE_REASON_REQUIRED');
@@ -579,7 +591,36 @@ export const finalizeSimplePerformanceEvaluation = async (client: Client, input:
     if (segmentPositions.size > 1) {
       throw simpleError('تغییر شغل یا سمت باید پیش از نتیجه رسمی به بخش‌های مستقل ارزیابی تفکیک شود.', 'SIMPLE_SEGMENTED_EVALUATION_REQUIRED', 409);
     }
-    const byIndicator = new Map(evaluation.values.map((value) => [value.indicatorId, value]));
+    const surveyResponses = evaluation.periodKey ? await tx.personnelBehaviorSurveyResponse.findMany({
+      where: { targetPersonnelId: evaluation.personnelId, status: 'FINAL', campaign: { periodKey: evaluation.periodKey } },
+      include: { answers: { include: { question: { select: { sectionCode: true } } } }, campaign: { select: { id: true } } },
+    }) : [];
+    const surveyAggregates = aggregateBehaviorSurveyScores(surveyResponses.flatMap((response) => {
+      const bySection = new Map<string, number[]>();
+      for (const answer of response.answers) {
+        if (answer.numericScore === null) continue;
+        const scores = bySection.get(answer.question.sectionCode) ?? [];
+        scores.push(answer.numericScore); bySection.set(answer.question.sectionCode, scores);
+      }
+      return [...bySection].map(([factorCode, scores]) => ({
+        respondentPersonnelId: response.respondentPersonnelId, targetPersonnelId: response.targetPersonnelId,
+        factorCode, score: scores.reduce((sum, score) => sum + score, 0) / scores.length,
+      }));
+    }));
+    for (const aggregate of surveyAggregates.filter(({ targetPersonnelId }) => targetPersonnelId === evaluation.personnelId && aggregate.sufficient)) {
+      const indicator = evaluation.profile.indicators.find(({ code }) => code === `SURVEY_${aggregate.factorCode}`);
+      if (!indicator) continue;
+      await tx.simplePerformanceValue.upsert({
+        where: { evaluationId_indicatorId: { evaluationId: evaluation.id, indicatorId: indicator.id } },
+        create: {
+          evaluationId: evaluation.id, indicatorId: indicator.id, actual: aggregate.score,
+          sampleCount: aggregate.respondentCount, sourceReference: `period:${evaluation.periodKey}`, enteredByUserId: input.actorUserId,
+        },
+        update: { actual: aggregate.score, sampleCount: aggregate.respondentCount, sourceReference: `period:${evaluation.periodKey}`, enteredByUserId: input.actorUserId },
+      });
+    }
+    const refreshedValues = await tx.simplePerformanceValue.findMany({ where: { evaluationId: evaluation.id }, include: { indicator: true } });
+    const byIndicator = new Map(refreshedValues.map((value) => [value.indicatorId, value]));
     const effectiveWeights = new Map(redistributeSellerFactorWeights(evaluation.profile.indicators.map((indicator) => {
       const value = byIndicator.get(indicator.id);
       return {
@@ -593,7 +634,12 @@ export const finalizeSimplePerformanceEvaluation = async (client: Client, input:
       const weightPercent = effectiveWeights.get(indicator.id);
       return value && weightPercent ? [{
         indicatorId: indicator.id, direction: indicator.direction as SimplePerformanceDirection,
-        target: indicator.target.toString(), actual: value.actual.toString(), weightPercent,
+        target: (() => {
+          const proratedCodes = new Set(['NET_CONTRACT_VALUE', 'ACTUAL_RECEIVED_CASH', 'VALID_NEW_CUSTOMERS']);
+          if (!proratedCodes.has(indicator.code) || !evaluation.measurementFrom || !evaluation.measurementTo) return indicator.target.toString();
+          const periodDays = Math.floor((evaluation.measurementTo.getTime() - evaluation.measurementFrom.getTime()) / 86_400_000) + 1;
+          return indicator.target.mul(evaluation.effectiveDays ?? periodDays).div(periodDays).toString();
+        })(), actual: value.actual.toString(), weightPercent,
       }] : [];
     });
     const calculation = calculateSimplePerformance(calculationInputs);

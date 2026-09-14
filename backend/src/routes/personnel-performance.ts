@@ -119,6 +119,7 @@ import {
   activateBehaviorSurvey,
   aggregateBehaviorSurveyCampaign,
   createBehaviorSurveyDraft,
+  deleteBehaviorSurveyDraft,
   inspectRawBehaviorSurveyResponses,
   listAssignedBehaviorSurveys,
   listBehaviorSurveyCampaigns,
@@ -315,6 +316,13 @@ router.get('/behavior-surveys', manageBehaviorSurveys, async (_req, res, next) =
 
 router.post('/behavior-surveys', manageBehaviorSurveys, async (req: AuthRequest, res, next) => {
   try { return res.status(201).json({ success: true, campaign: await createBehaviorSurveyDraft(prisma, { ...req.body, actorUserId: req.user!.id }) }); }
+  catch (error) { return next(error); }
+});
+
+router.delete('/behavior-surveys/:campaignId', manageBehaviorSurveys, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, deleted: await deleteBehaviorSurveyDraft(prisma, {
+    campaignId: req.params.campaignId, actorUserId: req.user!.id,
+  }) }); }
   catch (error) { return next(error); }
 });
 

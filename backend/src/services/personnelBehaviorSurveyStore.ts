@@ -133,6 +133,19 @@ export const listBehaviorSurveyCampaigns = (client: Client) => client.personnelB
   include: campaignInclude, orderBy: [{ createdAt: 'desc' }],
 });
 
+export const deleteBehaviorSurveyDraft = (client: Client, input: { campaignId: string; actorUserId: string }) => runTransaction(client, async (tx) => {
+  await tx.$queryRaw`SELECT "id" FROM "personnel_behavior_survey_campaigns" WHERE "id" = ${input.campaignId} FOR UPDATE`;
+  const campaign = await tx.personnelBehaviorSurveyCampaign.findUnique({ where: { id: input.campaignId } });
+  if (!campaign) throw surveyError('نظرسنجی پیدا نشد.', 'SURVEY_NOT_FOUND', 404);
+  if (campaign.status !== 'DRAFT') throw surveyError('فقط پیش‌نویس نظرسنجی قابل حذف است.', 'SURVEY_VERSION_LOCKED', 409);
+  await tx.personnelBehaviorSurveyAudit.create({ data: {
+    campaignId: campaign.id, actorUserId: input.actorUserId, eventType: 'DRAFT_DELETED',
+    details: { titleFa: campaign.titleFa, periodKey: campaign.periodKey, version: campaign.version },
+  } });
+  await tx.personnelBehaviorSurveyCampaign.delete({ where: { id: campaign.id } });
+  return { id: campaign.id };
+});
+
 const actorPersonnelId = async (client: Client, actorUserId: string) => (
   await client.user.findUnique({ where: { id: actorUserId }, select: { personnelId: true } })
 )?.personnelId ?? null;

@@ -1521,6 +1521,7 @@ export const personnelPerformanceAPI = {
   sellerPerformancePolicy: () => api.get('/hr/personnel-performance/seller-policy'),
   behaviorSurveys: () => api.get('/hr/personnel-performance/behavior-surveys'),
   createBehaviorSurvey: (input: unknown) => api.post('/hr/personnel-performance/behavior-surveys', input),
+  deleteBehaviorSurvey: (campaignId: string) => api.delete(`/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}`),
   updateBehaviorSurvey: (campaignId: string, input: unknown) => api.put(
     `/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}`, input,
   ),

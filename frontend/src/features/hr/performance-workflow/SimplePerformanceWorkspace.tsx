@@ -27,7 +27,7 @@ type Indicator = {
   target: string; direction: "HIGHER_IS_BETTER" | "LOWER_IS_BETTER" | "CAPPED_RATE"; weightPercent: string; sortOrder: number;
   familyCode?: string | null; sourceKind?: "SYSTEM" | "SUPERVISOR" | "SURVEY"; minimumSampleCount?: number;
 };
-type Profile = { id: string; stableKey: string; nameFa: string; version: number; indicators: Indicator[] };
+type Profile = { id: string; stableKey: string; nameFa: string; version: number; effectivePeriodKey?: string | null; indicators: Indicator[] };
 type Personnel = { id: string; firstName: string; lastName: string; employeeNumber?: string | null; department?: { name: string } | null };
 type Assignment = { personnelId: string; profileId: string; profile: Profile };
 type Value = { indicatorId: string; actual: string; score?: string | null; sampleCount?: number | null; sourceReference?: string | null };
@@ -66,6 +66,10 @@ const levelTones: Record<string, "neutral" | "warning" | "success" | "primary" |
 const todayInTehran = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
 }).format(new Date());
+const nextPeriodKey = (key: string) => {
+  const [year, half] = key.split("-H").map(Number);
+  return half === 1 ? `${year}-H2` : `${year + 1}-H1`;
+};
 const monthFa = (value: string) => new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
   year: "numeric", month: "long", timeZone: "Asia/Tehran",
 }).format(new Date(value));
@@ -125,10 +129,12 @@ export default function SimplePerformanceWorkspace() {
   const [success, setSuccess] = useState("");
   const [profileName, setProfileName] = useState("");
   const [profileStableKey, setProfileStableKey] = useState<string | undefined>();
+  const [profileEffectivePeriodKey, setProfileEffectivePeriodKey] = useState("");
   const [profileIndicators, setProfileIndicators] = useState<ProfileIndicatorDraft[]>([emptyIndicator()]);
   const [correctionReason, setCorrectionReason] = useState<Record<string, string>>({});
   const [appealResolution, setAppealResolution] = useState<Record<string, string>>({});
   const [publishEvaluationId, setPublishEvaluationId] = useState("");
+  const [resolveAppealId, setResolveAppealId] = useState("");
   const [history, setHistory] = useState<Evaluation[]>([]);
   const [legacyHistory, setLegacyHistory] = useState<LegacyEvaluation[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
@@ -195,13 +201,19 @@ export default function SimplePerformanceWorkspace() {
   const canManageSurveys = Boolean(workspace?.capabilities.MANAGE_PERFORMANCE_SURVEYS);
   const canViewHistory = Boolean(workspace?.capabilities.VIEW_PERFORMANCE_EVALUATIONS);
   const canFinalize = Boolean(workspace?.capabilities.FINALIZE_PERFORMANCE_RESULTS);
-  const canEditSelected = !selectedEvaluation || selectedEvaluation.evaluatorUserId === workspace?.currentUserId;
+  const canEditSelected = canEvaluateSelected;
+  const canEditIndicator = (indicator: Indicator) => canEditSelected && indicator.sourceKind !== "SURVEY" && (
+    Boolean(workspace?.capabilities.EVALUATE_ALL_PERSONNEL)
+    || (indicator.sourceKind === "SYSTEM" && Boolean(workspace?.capabilities.ENTER_PERFORMANCE_EVIDENCE))
+    || (indicator.sourceKind === "SUPERVISOR" && Boolean(workspace?.capabilities.EVALUATE_DIRECT_REPORTS))
+  );
   const enteredValues = activeProfile?.indicators.flatMap((indicator) => {
+    if (indicator.sourceKind === "SURVEY") return [];
     const actual = values[indicator.id]?.trim();
     const metadata = valueMetadata[indicator.id];
     return actual ? [{ indicatorId: indicator.id, actual, sampleCount: Number(metadata?.sampleCount || 1), sourceReference: metadata?.sourceReference || "" }] : [];
   }) ?? [];
-  const draftComplete = Boolean(activeProfile?.indicators.every((indicator) => values[indicator.id]?.trim()));
+  const draftComplete = Boolean(activeProfile?.indicators.every((indicator) => indicator.sourceKind === "SURVEY" || values[indicator.id]?.trim()));
   const preview = useMemo(() => previewPerformance(activeProfile, values), [activeProfile, values]);
   const newerFinalExists = Boolean(selectedEvaluation
     && workspace?.latestFinalizedAtByPersonnel[selectedEvaluation.personnelId]
@@ -261,6 +273,7 @@ export default function SimplePerformanceWorkspace() {
 
   const resolveAppeal = (evaluationId: string) => run(async () => {
     await personnelPerformanceAPI.resolveSimpleEvaluationAppeal(evaluationId, appealResolution[evaluationId] || "");
+    setResolveAppealId("");
   }, "رسیدگی به اعتراض ثبت شد.");
 
   const publishResult = () => run(async () => {
@@ -271,13 +284,15 @@ export default function SimplePerformanceWorkspace() {
   const saveProfile = () => run(async () => {
     await personnelPerformanceAPI.createSimpleProfile({
       ...(profileStableKey ? { stableKey: profileStableKey } : {}), nameFa: profileName,
+      effectivePeriodKey: profileEffectivePeriodKey || undefined,
       indicators: profileIndicators,
     });
-    setProfileName(""); setProfileStableKey(undefined); setProfileIndicators([emptyIndicator()]);
+    setProfileName(""); setProfileStableKey(undefined); setProfileEffectivePeriodKey(""); setProfileIndicators([emptyIndicator()]);
   }, "الگو ذخیره شد.");
 
   const beginProfileVersion = (profile: Profile) => {
     setProfileStableKey(profile.stableKey); setProfileName(profile.nameFa);
+    setProfileEffectivePeriodKey(nextPeriodKey(workspace?.currentPeriodKey || "1405-H1"));
     setProfileIndicators(profile.indicators.map(({ code, categoryFa, titleFa, unitFa, target, direction, weightPercent, familyCode, sourceKind, minimumSampleCount }) => ({
       code, categoryFa, titleFa, unitFa, target: String(target), direction, weightPercent: String(weightPercent),
       familyCode, sourceKind: sourceKind ?? "SYSTEM", minimumSampleCount: minimumSampleCount ?? 1,
@@ -287,6 +302,7 @@ export default function SimplePerformanceWorkspace() {
   const loadSellerTemplate = () => run(async () => {
     const response = await personnelPerformanceAPI.sellerPerformancePolicy();
     setProfileStableKey("sales-seven-level"); setProfileName("فروشندگان ـ ارزیابی هفت‌سطحی");
+    setProfileEffectivePeriodKey(workspace?.profiles.some(({ stableKey }) => stableKey === "sales-seven-level") ? nextPeriodKey(workspace.currentPeriodKey) : workspace?.currentPeriodKey || "");
     setProfileIndicators(response.data.factors.map((factor: any) => ({
       code: factor.code, categoryFa: factor.familyCode, familyCode: factor.familyCode,
       titleFa: factor.titleFa, unitFa: factor.unitFa, direction: factor.direction,
@@ -341,7 +357,7 @@ export default function SimplePerformanceWorkspace() {
         {canFinalize && pendingResults.length > 0 && <ErpSection title="نتیجه‌های پیشنهادی و اعتراض‌ها"><div className="space-y-3">
           {pendingResults.map((evaluation) => <ErpCard key={evaluation.id} className="p-4">
             <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{workspace?.personnel.find(({ id }) => id === evaluation.personnelId)?.firstName} {workspace?.personnel.find(({ id }) => id === evaluation.personnelId)?.lastName}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{evaluation.periodLabelFa || dateFa(evaluation.evaluationDate)} · امتیاز {scoreFa(evaluation.score)} · {levelLabels[evaluation.levelCode || ""] || "—"}</p>{evaluation.appealDeadline && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">مهلت اعتراض: {dateTimeFa(evaluation.appealDeadline)}</p>}</div><ErpBadge tone={evaluation.appealedAt ? "warning" : "neutral"}>{evaluation.appealedAt ? "دارای اعتراض" : "در مهلت بازبینی"}</ErpBadge></div>
-            {evaluation.appealText && <div className="mt-3 space-y-2"><p className="text-sm leading-7">متن اعتراض: {evaluation.appealText}</p>{!evaluation.appealResolvedAt && <><ErpField label="نتیجه رسیدگی" required><ErpTextarea rows={3} value={appealResolution[evaluation.id] || ""} onChange={(event) => setAppealResolution((items) => ({ ...items, [evaluation.id]: event.target.value }))} /></ErpField><ErpButton label="ثبت رسیدگی" variant="soft" disabled={pending || (appealResolution[evaluation.id] || "").trim().length < 8} onClick={() => void resolveAppeal(evaluation.id)} /></>}</div>}
+            {evaluation.appealText && <div className="mt-3 space-y-2"><p className="text-sm leading-7">متن اعتراض: {evaluation.appealText}</p>{!evaluation.appealResolvedAt && <><ErpField label="نتیجه رسیدگی" required><ErpTextarea rows={3} value={appealResolution[evaluation.id] || ""} onChange={(event) => setAppealResolution((items) => ({ ...items, [evaluation.id]: event.target.value }))} /></ErpField><ErpButton label="ثبت رسیدگی" variant="soft" disabled={pending || (appealResolution[evaluation.id] || "").trim().length < 8} onClick={() => setResolveAppealId(evaluation.id)} /></>}</div>}
             <div className="mt-3"><ErpButton label="انتشار نتیجه رسمی" disabled={pending || Boolean(evaluation.appealedAt && !evaluation.appealResolvedAt)} onClick={() => setPublishEvaluationId(evaluation.id)} /></div>
           </ErpCard>)}
         </div></ErpSection>}
@@ -350,10 +366,10 @@ export default function SimplePerformanceWorkspace() {
           <div className="space-y-3">{activeProfile.indicators.map((indicator) => <ErpCard key={indicator.id} className="p-4">
             <div className="grid gap-3 md:grid-cols-[1fr_12rem_10rem] md:items-end">
               <div><p className="font-semibold">{indicator.titleFa}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">هدف: {String(indicator.target)} {indicator.unitFa} · وزن: {String(indicator.weightPercent)}٪ · حداقل نمونه: {(indicator.minimumSampleCount || 1).toLocaleString("fa-IR")}</p></div>
-              <ErpField label={`مقدار واقعی (${indicator.unitFa})`} required><ErpInput type="number" min="0" inputMode="decimal" disabled={!canEditSelected} value={values[indicator.id] || ""} onChange={(event) => setValues((current) => ({ ...current, [indicator.id]: event.target.value }))} /></ErpField>
-              <ErpField label="تعداد نمونه"><ErpInput type="number" min="0" disabled={!canEditSelected} value={valueMetadata[indicator.id]?.sampleCount || "1"} onChange={(event) => setValueMetadata((current) => ({ ...current, [indicator.id]: { sampleCount: event.target.value, sourceReference: current[indicator.id]?.sourceReference || "" } }))} /></ErpField>
+              <ErpField label={`مقدار واقعی (${indicator.unitFa})`} required={indicator.sourceKind !== "SURVEY"}><ErpInput type="number" min="0" inputMode="decimal" disabled={!canEditIndicator(indicator)} value={values[indicator.id] || ""} placeholder={indicator.sourceKind === "SURVEY" ? "از نظرسنجی محاسبه می‌شود" : undefined} onChange={(event) => setValues((current) => ({ ...current, [indicator.id]: event.target.value }))} /></ErpField>
+              <ErpField label="تعداد نمونه"><ErpInput type="number" min="0" disabled={!canEditIndicator(indicator)} value={valueMetadata[indicator.id]?.sampleCount || (indicator.sourceKind === "SURVEY" ? "" : "1")} onChange={(event) => setValueMetadata((current) => ({ ...current, [indicator.id]: { sampleCount: event.target.value, sourceReference: current[indicator.id]?.sourceReference || "" } }))} /></ErpField>
             </div>
-            <div className="mt-3"><ErpField label="مرجع داده"><ErpInput disabled={!canEditSelected} value={valueMetadata[indicator.id]?.sourceReference || ""} placeholder={indicator.sourceKind === "SURVEY" ? "شناسه نظرسنجی" : "شناسه گزارش یا رکورد مبنا"} onChange={(event) => setValueMetadata((current) => ({ ...current, [indicator.id]: { sampleCount: current[indicator.id]?.sampleCount || "1", sourceReference: event.target.value } }))} /></ErpField></div>
+            <div className="mt-3"><ErpField label="مرجع داده"><ErpInput disabled={!canEditIndicator(indicator)} value={valueMetadata[indicator.id]?.sourceReference || ""} placeholder={indicator.sourceKind === "SURVEY" ? "کمپین‌های معتبر همین دوره" : "شناسه گزارش یا رکورد مبنا"} onChange={(event) => setValueMetadata((current) => ({ ...current, [indicator.id]: { sampleCount: current[indicator.id]?.sampleCount || "1", sourceReference: event.target.value } }))} /></ErpField></div>
           </ErpCard>)}</div>
           {selectedEvaluation?.values.length ? <div className="mt-4"><ErpField label="دلیل اصلاح شواهد" required><ErpTextarea rows={2} value={evidenceChangeReason} onChange={(event) => setEvidenceChangeReason(event.target.value)} placeholder="علت تغییر مقدار، تعداد نمونه یا مرجع داده را ثبت کنید." /></ErpField></div> : null}
           <div className="mt-4 flex flex-wrap gap-2">{canEditSelected && <ErpButton label="ذخیره" variant="soft" onClick={() => void saveDraft()} disabled={pending || !dirty || Boolean(selectedEvaluation?.values.length && !evidenceChangeReason.trim())} />}{canFinalize && <ErpButton label="ثبت نتیجه پیشنهادی" onClick={() => setConfirmFinalize(true)} disabled={pending || !draftComplete || Boolean(dirty && selectedEvaluation?.values.length && !evidenceChangeReason.trim())} />}</div>
@@ -364,6 +380,7 @@ export default function SimplePerformanceWorkspace() {
         <ErpSection title={profileStableKey ? "نسخه جدید الگو" : "الگوی تازه"}>
           <div className="mb-4"><ErpButton label="بارگذاری عوامل مصوب فروشندگان" variant="soft" onClick={() => void loadSellerTemplate()} disabled={pending} /></div>
           <ErpField label="نام الگو" required><ErpInput value={profileName} onChange={(event) => setProfileName(event.target.value)} /></ErpField>
+          <div className="mt-3"><ErpField label="دوره شروع اثر هدف‌ها" required><ErpInput value={profileEffectivePeriodKey} onChange={(event) => setProfileEffectivePeriodKey(event.target.value)} placeholder={workspace.currentPeriodKey} /></ErpField>{profileStableKey && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">نسخه جدید فقط برای یک دوره آینده پذیرفته می‌شود و هدف‌های دوره آغازشده را تغییر نمی‌دهد.</p>}</div>
           <div className="mt-4 space-y-3">{profileIndicators.map((indicator, index) => <ErpCard key={index} className="p-4">
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               <ErpField label="کد" required><ErpInput value={indicator.code} onChange={(event) => setProfileIndicators((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, code: event.target.value } : item))} /></ErpField>
@@ -419,6 +436,9 @@ export default function SimplePerformanceWorkspace() {
       </ErpSheet>
       <ErpSheet open={Boolean(publishEvaluationId)} onClose={() => !pending && setPublishEvaluationId("")} title="انتشار نتیجه رسمی؟" presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2"><ErpButton label="بازگشت" variant="ghost" disabled={pending} onClick={() => setPublishEvaluationId("")} /><ErpButton label="تأیید و انتشار" disabled={pending} onClick={() => void publishResult()} /></div>}>
         <p className="text-sm leading-7 text-[var(--sds-text-secondary)]">پس از انتشار، نتیجه در Badge و تصمیم‌های رسمی قابل استفاده است. اگر مهلت اعتراض باز باشد یا اعتراض رسیدگی‌نشده وجود داشته باشد، سامانه انتشار را متوقف می‌کند.</p>
+      </ErpSheet>
+      <ErpSheet open={Boolean(resolveAppealId)} onClose={() => !pending && setResolveAppealId("")} title="ثبت نتیجه رسیدگی به اعتراض؟" presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2"><ErpButton label="بازگشت" variant="ghost" disabled={pending} onClick={() => setResolveAppealId("")} /><ErpButton label="تأیید و ثبت رسیدگی" disabled={pending} onClick={() => void resolveAppeal(resolveAppealId)} /></div>}>
+        <div className="space-y-2 text-sm leading-7 text-[var(--sds-text-secondary)]"><p>این پاسخ در سابقه رسمی اعتراض ثبت می‌شود و پس از آن نتیجه برای انتشار رسمی آماده خواهد بود.</p><p>{appealResolution[resolveAppealId]}</p></div>
       </ErpSheet>
     </>}
   </ErpPage>;

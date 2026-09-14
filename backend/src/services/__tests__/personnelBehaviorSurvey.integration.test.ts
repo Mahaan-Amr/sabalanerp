@@ -4,6 +4,7 @@ import {
   activateBehaviorSurvey,
   aggregateBehaviorSurveyCampaign,
   createBehaviorSurveyDraft,
+  deleteBehaviorSurveyDraft,
   inspectRawBehaviorSurveyResponses,
   saveBehaviorSurveyResponse,
   updateBehaviorSurveyDraft,
@@ -36,6 +37,13 @@ const main = async () => {
         actorUserId: people[0].user.id, titleFa: 'نظرسنجی نیم‌سال', periodKey: '1405-H2', questions,
         targetPersonnelIds: [target.id], respondentPersonnelIds: people.map(({ personnel }) => personnel.id),
       });
+      const disposableDraft = await createBehaviorSurveyDraft(tx, {
+        actorUserId: people[0].user.id, titleFa: 'پیش‌نویس قابل حذف', periodKey: '1405-H2', questions,
+        targetPersonnelIds: [target.id], respondentPersonnelIds: people.map(({ personnel }) => personnel.id),
+      });
+      await deleteBehaviorSurveyDraft(tx, { campaignId: disposableDraft.id, actorUserId: people[0].user.id });
+      assert.equal(await tx.personnelBehaviorSurveyCampaign.count({ where: { id: disposableDraft.id } }), 0);
+      assert.equal(await tx.personnelBehaviorSurveyAudit.count({ where: { campaignId: disposableDraft.id, eventType: 'DRAFT_DELETED' } }), 1);
       const now = new Date();
       const active = await activateBehaviorSurvey(tx, {
         campaignId: campaign.id, actorUserId: people[0].user.id,

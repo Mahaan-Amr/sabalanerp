@@ -18,8 +18,9 @@ import { personnelPerformanceAPI } from "@/lib/api";
 
 type Personnel = { id: string; firstName: string; lastName: string; employeeNumber?: string | null };
 type Question = { sectionCode: string; promptFa: string };
+type CampaignStatus = "DRAFT" | "ACTIVE" | "CLOSED";
 type Campaign = {
-  id: string; titleFa: string; periodKey: string; version: number; status: string;
+  id: string; titleFa: string; periodKey: string; version: number; status: CampaignStatus;
   questions: Array<Question & { id: string }>;
   targets: Array<{ personnelId: string }>;
   respondents: Array<{ personnelId: string }>;
@@ -45,7 +46,7 @@ const initialQuestions: Question[] = [
   { sectionCode: "WORKPLACE_STANDARD", promptFa: "این همکار نظافت شخصی و نظم فضای کاری مرتبط با مسئولیتش را رعایت می‌کند." },
 ];
 
-const campaignStatusPresentation: Record<string, { label: string; tone: "success" | "neutral" | "warning" }> = {
+const campaignStatusPresentation: Record<CampaignStatus, { label: string; tone: "success" | "neutral" | "warning" }> = {
   ACTIVE: { label: "فعال", tone: "success" },
   CLOSED: { label: "بسته", tone: "neutral" },
   DRAFT: { label: "پیش‌نویس", tone: "warning" },
@@ -65,6 +66,7 @@ export default function BehaviorSurveyAdministration({ personnel, currentPeriodK
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [activationCampaignId, setActivationCampaignId] = useState("");
+  const [deletionCampaignId, setDeletionCampaignId] = useState("");
 
   const load = useCallback(async () => {
     try { setCampaigns((await personnelPerformanceAPI.behaviorSurveys()).data.campaigns); }
@@ -100,6 +102,12 @@ export default function BehaviorSurveyAdministration({ personnel, currentPeriodK
     } catch (requestError: any) { setError(requestError.response?.data?.message || "فعال‌سازی انجام نشد."); }
     finally { setPending(false); }
   };
+  const removeDraft = async () => {
+    setPending(true); setError(""); setMessage("");
+    try { await personnelPerformanceAPI.deleteBehaviorSurvey(deletionCampaignId); setDeletionCampaignId(""); setMessage("پیش‌نویس نظرسنجی حذف شد."); await load(); }
+    catch (requestError: any) { setError(requestError.response?.data?.message || "حذف پیش‌نویس انجام نشد."); }
+    finally { setPending(false); }
+  };
 
   return <div className="space-y-4" dir="rtl">
     {error && <ErpInlineState kind="error" title={error} />}{message && <ErpInlineState kind="success" title={message} />}
@@ -114,11 +122,14 @@ export default function BehaviorSurveyAdministration({ personnel, currentPeriodK
       <div className="mt-4 flex flex-wrap gap-2"><ErpButton label="ذخیره پیش‌نویس" disabled={pending} onClick={() => void save()} />{editingId && <ErpButton label="انصراف" variant="ghost" onClick={reset} />}</div>
     </ErpSection>
     <ErpSection title="نسخه‌های نظرسنجی"><div className="space-y-3">{campaigns.map((campaign) => {
-      const presentation = campaignStatusPresentation[campaign.status] ?? campaignStatusPresentation.DRAFT;
-      return <ErpCard key={campaign.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold">{campaign.titleFa}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{campaign.periodKey} · نسخه {campaign.version.toLocaleString("fa-IR")} · {campaign.questions.length.toLocaleString("fa-IR")} پرسش</p></div><ErpBadge tone={presentation.tone}>{presentation.label}</ErpBadge></div>{campaign.status === "DRAFT" && <><div className="mt-4 grid gap-3 md:grid-cols-2"><ErpField label="شروع"><ErpInput type="datetime-local" value={opensAt} onChange={(event) => setOpensAt(event.target.value)} /></ErpField><ErpField label="پایان"><ErpInput type="datetime-local" value={closesAt} onChange={(event) => setClosesAt(event.target.value)} /></ErpField></div><div className="mt-3 flex flex-wrap gap-2"><ErpButton label="ویرایش" variant="soft" onClick={() => edit(campaign)} /><ErpButton label="فعال‌سازی و قفل نسخه" disabled={pending || !opensAt || !closesAt} onClick={() => setActivationCampaignId(campaign.id)} /></div></>}</ErpCard>;
+      const presentation = campaignStatusPresentation[campaign.status];
+      return <ErpCard key={campaign.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold">{campaign.titleFa}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{campaign.periodKey} · نسخه {campaign.version.toLocaleString("fa-IR")} · {campaign.questions.length.toLocaleString("fa-IR")} پرسش</p></div><ErpBadge tone={presentation.tone}>{presentation.label}</ErpBadge></div>{campaign.status === "DRAFT" && <><div className="mt-4 grid gap-3 md:grid-cols-2"><ErpField label="شروع"><ErpInput type="datetime-local" value={opensAt} onChange={(event) => setOpensAt(event.target.value)} /></ErpField><ErpField label="پایان"><ErpInput type="datetime-local" value={closesAt} onChange={(event) => setClosesAt(event.target.value)} /></ErpField></div><div className="mt-3 flex flex-wrap gap-2"><ErpButton label="ویرایش" variant="soft" onClick={() => edit(campaign)} /><ErpButton label="فعال‌سازی و قفل نسخه" disabled={pending || !opensAt || !closesAt} onClick={() => setActivationCampaignId(campaign.id)} /><ErpButton label="حذف پیش‌نویس" tone="danger" variant="ghost" disabled={pending} onClick={() => setDeletionCampaignId(campaign.id)} /></div></>}</ErpCard>;
     })}</div></ErpSection>
     <ErpSheet open={Boolean(activationCampaignId)} onClose={() => !pending && setActivationCampaignId("")} title="فعال‌سازی و قفل نسخه؟" presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2"><ErpButton label="بازگشت" variant="ghost" disabled={pending} onClick={() => setActivationCampaignId("")} /><ErpButton label="تأیید و فعال‌سازی" disabled={pending} onClick={() => void activate(activationCampaignId)} /></div>}>
       <p className="text-sm text-[var(--sds-text-secondary)]">پس از فعال‌سازی، متن و ترتیب پرسش‌ها و فهرست شرکت‌کنندگان این نسخه قابل ویرایش نیست. برای تغییرات بعدی باید نسخه تازه‌ای بسازید.</p>
+    </ErpSheet>
+    <ErpSheet open={Boolean(deletionCampaignId)} onClose={() => !pending && setDeletionCampaignId("")} title="حذف پیش‌نویس نظرسنجی؟" presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2"><ErpButton label="بازگشت" variant="ghost" disabled={pending} onClick={() => setDeletionCampaignId("")} /><ErpButton label="تأیید حذف" tone="danger" disabled={pending} onClick={() => void removeDraft()} /></div>}>
+      <p className="text-sm text-[var(--sds-text-secondary)]">پرسش‌ها و فهرست مخاطبان این پیش‌نویس حذف می‌شوند. نسخه‌های فعال و پاسخ‌های ثبت‌شده قابل حذف نیستند.</p>
     </ErpSheet>
   </div>;
 }

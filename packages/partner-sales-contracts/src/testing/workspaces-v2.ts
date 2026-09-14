@@ -12,11 +12,14 @@ export function createPartnerWorkspaceFixturesV2() {
       successor: { inquiryId: 'fixture-v2-successor-inquiry', rowId: 'fixture-v2-successor-row', revision: 1, state: 'PENDING' },
     })),
   });
-  const responder = ResponderInquiryViewV2Schema.parse({ ...v1.responder, schemaVersion: 2, actions: [],
+  const responder = ResponderInquiryViewV2Schema.parse({ ...v1.responder, schemaVersion: 2,
+    submittedAt: '2026-08-27T07:45:00.000Z', actions: [],
     rows: [
-      ...v1.responder.rows.map(row => ({ ...row, state: 'APPROVED', approvedAt: v1.approval.approvedAt,
+      ...v1.responder.rows.map(row => ({ ...row, description: v1.inquiry.rows[0].description,
+        configuration: v1.inquiry.rows[0].configuration, state: 'APPROVED', approvedAt: v1.approval.approvedAt,
         expiresAt: v1.approval.expiresAt, actions: [] })),
       { rowId: 'fixture-v2-pending-row', revision: 1, identity: v1.responder.rows[0].identity, used: false,
+        description: 'سنگ طولی آزمایشی دوم', configuration: [{ label: 'عرض', value: '۵۰ سانتی‌متر' }],
         state: 'PENDING', actions: [{ action: 'INQUIRY_RESPOND', enabled: true }] },
     ],
   });

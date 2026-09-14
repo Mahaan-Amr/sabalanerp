@@ -40,17 +40,14 @@ test('durable operations control starts without a cohort and persists define, en
         { id: sellerId, username: sellerId, email: `${sellerId}@example.invalid`, password: 'not-a-login',
           firstName: 'Partner', lastName: 'Fixture' },
       ] });
-      await tx.partnerProfile.create({ data: { id: profileId, userId: sellerId, state: 'ACTIVE' } });
       await tx.effectiveActionGrant.create({ data: { id: `${run}-grant`, principalKind: 'USER', principalId: operatorId,
         subjectUserId: operatorId, domain: 'PARTNER', action: 'OPERATIONS_MANAGE', rootKind: 'PROFILE',
         purpose: 'OPERATIONS', scope: 'COMPANY', effect: 'ALLOW', grantedBy: operatorId,
         reason: 'isolated operations integration fixture', correlationId: run } });
     });
     const service = createOperationsService(contracts, createPrismaPartnerOperationsStore({ database,
-      actorId: operatorId, correlationId: run }));
-    const defined = await service.defineCohort({ id: cohortId, name: 'گروه آزمون عملیات', expectedRevision: 1,
-      reason: 'تعریف گروه آزمون عملیات' });
-    assert.equal(defined.ok && defined.value.revision, 2);
+      actorId: operatorId, correlationId: run,
+      runtimeIdentity: { releaseId: cohortId, schemaId: 'partner-schema-v1' } }));
     const now = new Date(), expiresAt = new Date(now.getTime() + 3_600_000);
     await database.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { readinessEvidence: {
       source: 'DATABASE_VERIFIED', evidenceId: `${run}-evidence`, releaseId: cohortId, schemaId: 'partner-schema-v1',
@@ -58,6 +55,11 @@ test('durable operations control starts without a cohort and persists define, en
       gates: Object.fromEntries(readinessGates.map(gate => [gate, true])),
       acceptedBy: Object.fromEntries(acceptanceResponsibilities.map(role => [role, `${run}-${role}`])),
     } } });
+    const defined = await service.defineCohort({ id: cohortId, name: 'گروه آزمون عملیات', expectedRevision: 1,
+      reason: 'تعریف گروه آزمون عملیات' });
+    assert.equal(defined.ok && defined.value.revision, 2);
+    assert.equal(await database.partnerProfile.count(), 0,
+      'تعریف نخستین cohort نباید به وجود پروفایل Partner قبلی وابسته باشد');
     const command = async (kind: 'ENROLLMENT' | 'OPERATIONAL', expectedRevision: number, paused = false) => {
       const intent = { kind, paused, expectedRevision, reason: 'تغییر کنترل‌شده وضعیت آزمون' };
       return { schemaVersion: 1 as const, type: 'OPERATIONS_PAUSE' as const, commandId: `${run}-${kind}-${paused}`,
@@ -66,6 +68,7 @@ test('durable operations control starts without a cohort and persists define, en
     };
     assert.equal((await service.pause(await command('ENROLLMENT', 2))).ok, true);
     assert.equal((await service.pause(await command('OPERATIONAL', 3))).ok, true);
+    await database.partnerProfile.create({ data: { id: profileId, userId: sellerId, state: 'ACTIVE' } });
     const enrolled = await service.enroll({ sellerId, expectedRevision: 4, reason: 'پذیرش فروشنده واجد شرایط' });
     assert.deepEqual(enrolled.ok && enrolled.value.cohort?.sellerIds, [sellerId]);
     const paused = await service.pause(await command('OPERATIONAL', 5, true));

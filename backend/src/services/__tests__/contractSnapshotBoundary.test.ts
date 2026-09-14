@@ -75,6 +75,7 @@ assert.equal(customerWithCrmHistory.salesContracts.length, 1, 'the caller-owned 
 const source = buildAccountingContractSourceSnapshot({
   id: 'contract-1',
   contractNumber: '100285',
+  partnerCaseId: null,
   customerId: 'customer-1',
   contractData,
   items: [{ id: 'item-1', productRowId: 'row-1', totalPrice: 100 }],
@@ -83,10 +84,18 @@ const source = buildAccountingContractSourceSnapshot({
 });
 
 assert.equal(source.id, 'contract-1');
+assert.equal(Object.prototype.hasOwnProperty.call(source, 'partnerCaseId'), false);
 assert.deepEqual(source.items, [{ id: 'item-1', productRowId: 'row-1', totalPrice: 100 }]);
 assert.deepEqual(source.deliveries, [{ id: 'persisted-delivery-1', products: [{ productRowId: 'row-1', quantity: 1 }] }]);
 assert.deepEqual(source.payments, [{ id: 'payment-1', totalAmount: 100 }]);
 assert.equal((source.contractData as any).customer.salesContracts, undefined);
 assert.deepEqual((source.contractData as any).products, contractData.products);
+
+const partnerOwnedSource = buildAccountingContractSourceSnapshot({
+  id: 'partner-customer-contract',
+  partnerCaseId: 'partner-case-1',
+  contractData,
+});
+assert.equal((partnerOwnedSource as any).partnerCaseId, 'partner-case-1', 'non-null Partner ownership must remain visible');
 
 console.log('contract and accounting snapshots exclude recursive CRM navigation data: ok');

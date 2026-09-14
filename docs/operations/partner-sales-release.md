@@ -140,6 +140,45 @@ archived without editing history; keep both pauses enabled, activation disabled,
 real SMS disabled and traffic unchanged. Resolve the owning blocker, freeze a new
 package, and rerun affected acceptance.
 
+After the exact release has completed, publish its verified `GO` receipt as an
+immutable, append-only record linked to the completed deployment. Run the
+publisher from the ephemeral `deployment` service. The
+long-running backend has no access to the release files or trusted-claims mount;
+it can consume only this database-bound receipt. `trusted-claims.json` must be a
+`sabalan-partner-trusted-claims-envelope` v1 envelope whose base64 payload is
+signed by the offline Ed25519 key whose SPKI DER public key is mounted read-only
+at `/run/deployment-secrets/partner-release-trust-public.der`. The envelope key ID
+is the `sha256:` digest of those exact public-key bytes, and its signed payload
+must bind `packageSha256` to the exact release-package bytes. A claims file in the
+writable report mount cannot establish trust without that signature.
+
+Resolve the commit and tree from the immutable deployment report instead of the
+current checkout (replace `<deployment-id>` with the completed operation ID):
+
+```sh
+DEPLOYMENT_ID="<deployment-id>"
+DEPLOYMENT_TARGET_COMMIT="$(jq -r .targetCommit "reports/deploy/${DEPLOYMENT_ID}.json")"
+DEPLOYMENT_RELEASE_ID="$(jq -r .releaseId "reports/deploy/${DEPLOYMENT_ID}.json")"
+DEPLOYMENT_TARGET_TREE="$(git rev-parse "${DEPLOYMENT_TARGET_COMMIT}^{tree}")"
+export DEPLOYMENT_ID DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_TARGET_TREE
+```
+
+The deployment ID, package, signed trust envelope, and independently resolved Git
+tree are all mandatory:
+
+```sh
+docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml run -T --rm --no-deps \
+  deployment node dist/scripts/publish-partner-release-readiness.js \
+  --deployment-id="${DEPLOYMENT_ID}" \
+  --package=/app/deployment-reports/partner-release/pending/package.json \
+  --trusted-claims=/app/deployment-reports/partner-release/pending/trusted-claims.json \
+  --expected-tree="${DEPLOYMENT_TARGET_TREE}"
+```
+
+The publisher is append-only and fails closed for a non-completed deployment,
+identity drift, `NO_GO`, expiry, missing approval, or a second publication. Its
+deployment ID is the `verifiedPackageId` supplied to the Admin activation action.
+
 Only a fresh `GO` package may be handed to an authorized production operator for
 a separate deployment instruction. That operator must still execute the complete
 zero-data-loss deployment state machine. The package never opens traffic itself,

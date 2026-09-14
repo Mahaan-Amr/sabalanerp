@@ -219,6 +219,50 @@ test('same-lease same-millisecond concurrent checkpoints cannot both replace one
   }
 });
 
+test('same-lease concurrent recovery envelopes converge on the newest sequence without a false conflict', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: localDatabaseUrl() } } });
+  const store = new PrismaContractEditSessionStore(database);
+  const draftId = `recovery-sequence-${randomUUID()}`;
+  try {
+    const lease = await acquireContractEditSession(store, {
+      draftId, contractId: null, userId: draftId, browserSessionId: 'browser-a',
+      schemaVersion: 2, baseRevision: 0, takeover: false,
+    });
+    if (!lease.ok) throw new Error(lease.code);
+    const owner = {
+      draftId, userId: draftId, browserSessionId: 'browser-a',
+      leaseToken: lease.session.leaseToken, schemaVersion: 2, baseRevision: 0,
+    };
+    const recoveryTimestamp = Date.now();
+    const envelope = (sequence: number) => ({
+      scope: { userId: draftId, draftId, schemaVersion: 2, baseRevision: 0 },
+      sequence,
+      updatedAt: recoveryTimestamp + sequence,
+      payload: { sequence },
+    });
+
+    for (let trial = 0; trial < 12; trial += 1) {
+      const olderSequence = trial * 2 + 1;
+      const newerSequence = olderSequence + 1;
+      const results = await Promise.all([
+        checkpointContractRecovery(store, { ...owner, recovery: envelope(olderSequence) }),
+        checkpointContractRecovery(store, { ...owner, recovery: envelope(newerSequence) }),
+      ]);
+      assert.ok(results.every(result => result.ok),
+        `same-owner monotonic checkpoints must both resolve safely (trial ${trial + 1})`);
+      assert.deepEqual((await store.load(draftId))?.recovery, envelope(newerSequence));
+    }
+
+    const staleRetry = await checkpointContractRecovery(store, { ...owner, recovery: envelope(1) });
+    assert.equal(staleRetry.ok, true, 'an older retried sequence is an idempotent no-op');
+    assert.deepEqual((await store.load(draftId))?.recovery, envelope(24),
+      'an older sequence must never overwrite the newest recovery');
+  } finally {
+    try { await database.salesContractEditSession.deleteMany({ where: { draftId } }); }
+    finally { await database.$disconnect(); }
+  }
+});
+
 test('a live owner can checkpoint while heartbeats run without losing the saved draft or falsely losing ownership', async () => {
   const database = new PrismaClient({ datasources: { db: { url: localDatabaseUrl() } } });
   const store = new PrismaContractEditSessionStore(database);

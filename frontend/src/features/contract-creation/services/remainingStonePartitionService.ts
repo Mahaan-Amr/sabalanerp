@@ -1,4 +1,9 @@
 import type { RemainingStone, StonePartition } from '../types/contract.types';
+import {
+  calculatePackingPlan,
+  parseCanonicalDecimal,
+  parseStableIdentity
+} from '@sabalanerp/contract-product-graph';
 import { calculateRemainingAreasAfterPartitions } from './stoneCuttingService';
 import { calculatePartitionPositions } from './partitionPositioningService';
 import {
@@ -6,10 +11,6 @@ import {
   sanitizeRemainingStoneEntry
 } from '../utils/remainingStoneGuards';
 import { resolveSawKerfCm } from '../utils/sawKerf';
-
-type ExpandedPartition = StonePartition & {
-  sourceRowId: string;
-};
 
 export interface RemainingStockInfo {
   sanitized: RemainingStone;
@@ -26,7 +27,9 @@ export interface RemainingPartitionAllocation {
   remainingAreas: RemainingStone[];
   remainingAreaSheetIndexes: Map<string, number>;
   physicalPiecesByRow: Map<string, StonePartition[]>;
-  sourcePieceQuantities?: number[];
+  sourcePieceQuantitiesByRow: Map<string, number[]>;
+  longitudinalCutMeters: number;
+  crossCutMeters: number;
 }
 
 interface RemainingPartitionAllocationOptions {
@@ -34,26 +37,101 @@ interface RemainingPartitionAllocationOptions {
   sawKerfCm?: number | null;
 }
 
+type ExpandedPartition = StonePartition & {
+  sourceRowId: string;
+  requestedWidth: number;
+  requestedLength: number;
+};
+
 const getQuantity = (quantity: number): number => Math.max(1, Math.floor(Number(quantity) || 1));
+const normalizeGeometryNumber = (value: number): number => Number(value.toFixed(12));
+const canonicalGeometry = (value: number) => parseCanonicalDecimal(String(normalizeGeometryNumber(value)));
+const centimetersFromMeters = (value: string): number => normalizeGeometryNumber(Number(value) * 100);
 
-const getConsumedPartition = (
-  row: StonePartition,
-  stockWidth: number,
-  stockLength: number,
+const allocateMixedPreviewPartitions = (
+  rows: StonePartition[],
+  stockInfo: RemainingStockInfo,
   options: RemainingPartitionAllocationOptions
-): StonePartition => {
+): RemainingPartitionAllocation => {
+  const rowErrors = new Map<string, string>();
   const kerfCm = resolveSawKerfCm(options.sawKerfEnabled, options.sawKerfCm);
-  const widthCut = options.sawKerfEnabled && row.width > 0 && row.width < stockWidth;
-  const lengthCut = options.sawKerfEnabled && row.length > 0 && row.length < stockLength;
-  const consumedWidth = widthCut ? row.width + kerfCm : row.width;
-  const consumedLength = lengthCut ? row.length + kerfCm / 100 : row.length;
-
-  return {
-    ...row,
-    width: consumedWidth,
-    length: consumedLength,
-    squareMeters: (consumedWidth * consumedLength * getQuantity(row.quantity)) / 100
-  };
+  const sheets: ExpandedPartition[][] = [];
+  const physicalPiecesByRow = new Map<string, StonePartition[]>();
+  const expandedRows = rows.filter(row => row.width > 0 && row.length > 0).flatMap(row => {
+    const pieces: ExpandedPartition[] = [];
+    for (let logicalIndex = 0; logicalIndex < getQuantity(row.quantity); logicalIndex += 1) {
+      const segmentCount = Math.max(1, Math.ceil(
+        normalizeGeometryNumber(row.length / stockInfo.sanitized.length) - 0.000000000001
+      ));
+      for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+        const rawLength = Math.min(stockInfo.sanitized.length,
+          normalizeGeometryNumber(row.length - stockInfo.sanitized.length * segmentIndex));
+        const width = options.sawKerfEnabled && row.width < stockInfo.sanitized.width
+          ? normalizeGeometryNumber(row.width + kerfCm) : row.width;
+        const length = options.sawKerfEnabled && rawLength < stockInfo.sanitized.length
+          ? normalizeGeometryNumber(rawLength + kerfCm / 100) : rawLength;
+        pieces.push({ ...row, id: `${row.id}__piece_${logicalIndex}_${segmentIndex}`,
+          sourceRowId: row.id, requestedWidth: row.width, requestedLength: rawLength,
+          logicalPieceOrdinal: logicalIndex + 1, width, length, quantity: 1,
+          squareMeters: normalizeGeometryNumber(width * length / 100), position: undefined,
+          validationError: undefined });
+      }
+    }
+    return pieces;
+  });
+  for (const piece of expandedRows) {
+    let placed = false;
+    for (let sheetIndex = 0; sheetIndex < sheets.length; sheetIndex += 1) {
+      const positioned = calculatePartitionPositions(
+        [...sheets[sheetIndex], piece], stockInfo.sanitized.width, stockInfo.sanitized.length
+      ) as ExpandedPartition[];
+      if (!positioned.some(item => item.validationError || !item.position)) {
+        sheets[sheetIndex] = positioned;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed && sheets.length < stockInfo.quantity) {
+      const positioned = calculatePartitionPositions(
+        [piece], stockInfo.sanitized.width, stockInfo.sanitized.length
+      ) as ExpandedPartition[];
+      if (!positioned.some(item => item.validationError || !item.position)) {
+        sheets.push(positioned);
+        placed = true;
+      }
+    }
+    if (!placed) rowErrors.set(piece.sourceRowId, 'این تعداد و ابعاد در فضای باقی‌مانده جا نمی‌شود.');
+  }
+  sheets.flat().forEach(piece => {
+    physicalPiecesByRow.set(piece.sourceRowId, [
+      ...(physicalPiecesByRow.get(piece.sourceRowId) ?? []),
+      { id: piece.id, logicalPieceOrdinal: piece.logicalPieceOrdinal,
+        width: piece.requestedWidth,
+        length: piece.requestedLength,
+        quantity: 1,
+        squareMeters: normalizeGeometryNumber(piece.requestedWidth * piece.requestedLength / 100),
+        position: piece.position }
+    ]);
+  });
+  const sourcePieceQuantitiesByRow = new Map<string, number[]>();
+  rows.forEach(row => sourcePieceQuantitiesByRow.set(row.id, sheets
+    .map(sheet => sheet.filter(piece => piece.sourceRowId === row.id).length)
+    .filter(quantity => quantity > 0)));
+  if (rowErrors.size) return { stockInfo, rowErrors,
+    summaryError: `${rowErrors.size} پارتیشن دارای مشکل است. لطفاً ابعاد را بررسی و اصلاح کنید.`,
+    consumedSourcePieces: sheets.length, remainingAreas: [], remainingAreaSheetIndexes: new Map(),
+    physicalPiecesByRow, sourcePieceQuantitiesByRow, longitudinalCutMeters: 0, crossCutMeters: 0 };
+  const remainingAreaSheetIndexes = new Map<string, number>();
+  const remainingAreas = sheets.flatMap((sheet, sheetIndex) =>
+    calculateRemainingAreasAfterPartitions(sheet, stockInfo.sanitized.width, stockInfo.sanitized.length)
+      .map((area, areaIndex) => {
+        const id = `remaining_partition_${Date.now()}_${sheetIndex}_${areaIndex}`;
+        remainingAreaSheetIndexes.set(id, sheetIndex);
+        return { ...area, id, quantity: 1 };
+      }));
+  return { stockInfo, rowErrors, summaryError: '', consumedSourcePieces: sheets.length,
+    remainingAreas, remainingAreaSheetIndexes, physicalPiecesByRow,
+    sourcePieceQuantitiesByRow, longitudinalCutMeters: 0, crossCutMeters: 0 };
 };
 
 export const normalizeRemainingStock = (remainingStone: RemainingStone): RemainingStockInfo => {
@@ -69,12 +147,6 @@ export const normalizeRemainingStock = (remainingStone: RemainingStone): Remaini
     pieceArea,
     totalSquareMeters: quantity > 0 ? pieceArea * quantity : 0
   };
-};
-
-const sheetFits = (sheet: ExpandedPartition[], piece: ExpandedPartition, width: number, length: number): ExpandedPartition[] | null => {
-  const positioned = calculatePartitionPositions([...sheet, piece], width, length) as ExpandedPartition[];
-  const hasErrors = positioned.some((partition) => partition.validationError || !partition.position);
-  return hasErrors ? null : positioned;
 };
 
 export const allocateRemainingStonePartitions = (
@@ -97,22 +169,28 @@ export const allocateRemainingStonePartitions = (
       consumedSourcePieces: 0,
       remainingAreas: [],
       remainingAreaSheetIndexes: new Map(),
-      physicalPiecesByRow: new Map()
+      physicalPiecesByRow: new Map(),
+      sourcePieceQuantitiesByRow: new Map(),
+      longitudinalCutMeters: 0,
+      crossCutMeters: 0
     };
   }
 
-  const validRows = rows.filter((row) => row.width > 0 && row.length > 0);
-  const consumedRows = validRows.map((row) =>
-    getConsumedPartition(row, stockInfo.sanitized.width, stockInfo.sanitized.length, options)
-  );
+  // Modal previews may contain heterogeneous sibling rows. Keep their bounded greedy
+  // placement here; each committed child is replayed individually by the canonical engine below.
+  if (rows.length > 1) return allocateMixedPreviewPartitions(rows, stockInfo, options);
 
-  consumedRows.forEach((row) => {
+  const validRows = rows.filter((row) => row.width > 0 && row.length > 0);
+  validRows.forEach((row) => {
     if (row.width > stockInfo.sanitized.width) {
       rowErrors.set(row.id, `عرض (${row.width}) از عرض باقی‌مانده (${stockInfo.sanitized.width}) بیشتر است.`);
     }
   });
 
-  const totalRequestedSquareMeters = consumedRows.reduce((sum, row) => sum + row.squareMeters, 0);
+  const totalRequestedSquareMeters = validRows.reduce(
+    (sum, row) => sum + (row.width * row.length * getQuantity(row.quantity)) / 100,
+    0
+  );
   if (totalRequestedSquareMeters > stockInfo.totalSquareMeters + 0.0001) {
     validRows.forEach((row) => {
       if (!rowErrors.has(row.id)) {
@@ -132,114 +210,138 @@ export const allocateRemainingStonePartitions = (
       consumedSourcePieces: 0,
       remainingAreas: [],
       remainingAreaSheetIndexes: new Map(),
-      physicalPiecesByRow: new Map()
+      physicalPiecesByRow: new Map(),
+      sourcePieceQuantitiesByRow: new Map(),
+      longitudinalCutMeters: 0,
+      crossCutMeters: 0
     };
   }
 
-  const sheets: ExpandedPartition[][] = [];
-  const physicalPiecesByRow = new Map<string, StonePartition[]>();
-  const expandedRows = consumedRows.flatMap((row) => {
-    const quantity = getQuantity(row.quantity);
-    const pieces: ExpandedPartition[] = [];
-
-    for (let quantityIndex = 0; quantityIndex < quantity; quantityIndex += 1) {
-      let remainingLength = row.length;
-      let segmentIndex = 0;
-
-      while (remainingLength > 0.000001) {
-        const segmentLength = Math.min(stockInfo.sanitized.length, remainingLength);
-        pieces.push({
-          ...row,
-          id: `${row.id}__piece_${quantityIndex}_${segmentIndex}`,
-          sourceRowId: row.id,
-          quantity: 1,
-          length: segmentLength,
-          squareMeters: (row.width * segmentLength) / 100,
-          validationError: undefined,
-          position: undefined
+  const kerfMeters = options.sawKerfEnabled
+    ? resolveSawKerfCm(true, options.sawKerfCm) / 100
+    : 0;
+  const demandSourceRows = new Map<string, string>();
+  const demandLogicalOrdinals = new Map<string, number>();
+  const physicalDemands = validRows.flatMap((row) => {
+    const demands: Array<{
+      demandId: string;
+      lengthMeters: ReturnType<typeof parseCanonicalDecimal>;
+      widthMeters: ReturnType<typeof parseCanonicalDecimal>;
+      quantity: number;
+    }> = [];
+    for (let logicalIndex = 0; logicalIndex < getQuantity(row.quantity); logicalIndex += 1) {
+      const segmentCount = Math.max(1, Math.ceil(
+        normalizeGeometryNumber(row.length / stockInfo.sanitized.length) - 0.000000000001
+      ));
+      for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+        const consumedBefore = normalizeGeometryNumber(stockInfo.sanitized.length * segmentIndex);
+        const segmentLength = Math.min(
+          stockInfo.sanitized.length,
+          normalizeGeometryNumber(row.length - consumedBefore)
+        );
+        const demandId = `${row.id}:physical:${logicalIndex + 1}:${segmentIndex + 1}`;
+        demandSourceRows.set(demandId, row.id);
+        demandLogicalOrdinals.set(demandId, logicalIndex + 1);
+        demands.push({
+          demandId,
+          lengthMeters: canonicalGeometry(segmentLength),
+          widthMeters: canonicalGeometry(row.width / 100),
+          quantity: 1
         });
-        remainingLength = Math.max(0, remainingLength - segmentLength);
-        segmentIndex += 1;
       }
     }
-
-    physicalPiecesByRow.set(
-      row.id,
-      pieces.map((piece) => ({
-        id: piece.id,
-        width: piece.width,
-        length: piece.length,
-        quantity: 1,
-        squareMeters: piece.squareMeters,
-        position: piece.position
-      }))
-    );
-
-    return pieces;
+    return demands;
+  });
+  const packing = calculatePackingPlan({
+    policyVersion: 'packing-v1',
+    kerfMeters: canonicalGeometry(kerfMeters),
+    sources: [{
+      sourceBatchId: parseStableIdentity('source-batch', `remaining-source:${stockInfo.sanitized.id}`),
+      lengthMeters: canonicalGeometry(stockInfo.sanitized.length),
+      widthMeters: canonicalGeometry(stockInfo.sanitized.width / 100),
+      quantity: stockInfo.quantity
+    }],
+    demands: physicalDemands
   });
 
-  for (const piece of expandedRows) {
-    let placed = false;
-
-    for (let sheetIndex = 0; sheetIndex < sheets.length; sheetIndex += 1) {
-      const positionedSheet = sheetFits(sheets[sheetIndex], piece, stockInfo.sanitized.width, stockInfo.sanitized.length);
-      if (positionedSheet) {
-        sheets[sheetIndex] = positionedSheet;
-        placed = true;
-        break;
-      }
-    }
-
-    if (!placed && sheets.length < stockInfo.quantity) {
-      const positionedSheet = sheetFits([], piece, stockInfo.sanitized.width, stockInfo.sanitized.length);
-      if (positionedSheet) {
-        sheets.push(positionedSheet);
-        placed = true;
-      }
-    }
-
-    if (!placed) {
-      rowErrors.set(piece.sourceRowId, 'این تعداد و ابعاد در فضای باقی‌مانده جا نمی‌شود.');
-    }
-  }
-
-  if (rowErrors.size > 0) {
+  if (!packing.ok) {
+    validRows.forEach((row) => rowErrors.set(row.id, 'این تعداد و ابعاد در فضای باقی‌مانده جا نمی‌شود.'));
     return {
       stockInfo,
       rowErrors,
       summaryError: `${rowErrors.size} پارتیشن دارای مشکل است. لطفاً ابعاد را بررسی و اصلاح کنید.`,
-      consumedSourcePieces: sheets.length,
+      consumedSourcePieces: 0,
       remainingAreas: [],
       remainingAreaSheetIndexes: new Map(),
-      physicalPiecesByRow
+      physicalPiecesByRow: new Map(),
+      sourcePieceQuantitiesByRow: new Map(),
+      longitudinalCutMeters: 0,
+      crossCutMeters: 0
     };
   }
 
+  const plan = packing.plan;
+  const physicalPiecesByRow = new Map<string, StonePartition[]>();
+  validRows.forEach((row) => {
+    physicalPiecesByRow.set(row.id, plan.placements
+      .filter((placement) => demandSourceRows.get(placement.demandId) === row.id)
+      .sort((left, right) => left.sourceOrdinal - right.sourceOrdinal ||
+        left.demandId.localeCompare(right.demandId) || left.demandOrdinal - right.demandOrdinal)
+      .map((placement, pieceIndex) => ({
+        id: `${row.id}__piece_${pieceIndex}`,
+        logicalPieceOrdinal: demandLogicalOrdinals.get(placement.demandId),
+        width: centimetersFromMeters(placement.widthMeters),
+        length: normalizeGeometryNumber(Number(placement.lengthMeters)),
+        quantity: 1,
+        squareMeters: normalizeGeometryNumber(Number(placement.widthMeters) * Number(placement.lengthMeters)),
+        position: {
+          startWidth: centimetersFromMeters(placement.xMeters),
+          startLength: normalizeGeometryNumber(Number(placement.yMeters))
+        }
+      })));
+  });
+
   const remainingAreaSheetIndexes = new Map<string, number>();
-  const remainingAreas = sheets.flatMap((sheet, sheetIndex) =>
-    calculateRemainingAreasAfterPartitions(sheet, stockInfo.sanitized.width, stockInfo.sanitized.length)
-      .map((area, areaIndex) => {
-        const id = `remaining_partition_${Date.now()}_${sheetIndex}_${areaIndex}`;
-        remainingAreaSheetIndexes.set(id, sheetIndex);
-        return {
-          ...area,
-          id,
-          quantity: 1
-        };
-      })
-  );
+  const sourcePieceQuantitiesByRow = new Map<string, number[]>();
+  validRows.forEach((row) => {
+    const counts = new Map<number, number>();
+    plan.placements.filter((placement) => demandSourceRows.get(placement.demandId) === row.id).forEach((placement) => {
+      counts.set(placement.sourceOrdinal, (counts.get(placement.sourceOrdinal) ?? 0) + 1);
+    });
+    sourcePieceQuantitiesByRow.set(row.id, Array.from(counts.entries())
+      .sort(([left], [right]) => left - right)
+      .map(([, quantity]) => quantity));
+  });
+  const remainingAreas = plan.remainders.map((remainder, areaIndex) => {
+    const id = `remaining_partition_${Date.now()}_${remainder.sourceOrdinal}_${areaIndex}`;
+    remainingAreaSheetIndexes.set(id, remainder.sourceOrdinal - 1);
+    const width = centimetersFromMeters(remainder.widthMeters);
+    const length = normalizeGeometryNumber(Number(remainder.lengthMeters));
+    return {
+      id,
+      width,
+      length,
+      squareMeters: (width * length) / 100,
+      isAvailable: true,
+      sourceCutId: stockInfo.sanitized.sourceCutId,
+      quantity: 1,
+      position: {
+        startWidth: centimetersFromMeters(remainder.xMeters),
+        startLength: normalizeGeometryNumber(Number(remainder.yMeters))
+      }
+    };
+  });
 
   return {
     stockInfo,
     rowErrors,
     summaryError: '',
-    consumedSourcePieces: sheets.length,
+    consumedSourcePieces: plan.consumedSources.length,
     remainingAreas,
     remainingAreaSheetIndexes,
     physicalPiecesByRow,
-    sourcePieceQuantities:
-      expandedRows.length === validRows.reduce((sum, row) => sum + getQuantity(row.quantity), 0)
-        ? sheets.map(sheet => sheet.length)
-        : undefined
+    sourcePieceQuantitiesByRow,
+    longitudinalCutMeters: normalizeGeometryNumber(Number(plan.longitudinalCutMeters)),
+    crossCutMeters: normalizeGeometryNumber(Number(plan.crossCutMeters))
   };
 };

@@ -210,23 +210,55 @@ export const recoverLegacyRemainingChildren = (
       const lengthMeters = explicitPolicy?.lengthMeters ?? canonical(decimal(p.length).toFixed());
       const widthMeters = explicitPolicy?.widthMeters ?? canonical(decimal(p.width).div(100).toFixed());
       if (
-        (explicitPolicy === undefined && !sameGeometry(p.length, selected.lengthMeters)) ||
         !sameGeometry(p.length, lengthMeters) ||
         !sameGeometry(p.width, widthMeters, 100)
       ) throw new Error('unsupported-physical-layout');
       const pieces = list(s.physicalPieces);
-      if (pieces.length !== quantity || pieces.some(piece => piece.quantity !== 1 ||
-        !equal(piece.length, p.length) || !equal(piece.width, p.width)) ||
-        !equal(p.squareMeters, decimal(p.length).times(decimal(p.width)).times(quantity).div(100).toFixed())) {
+      const logicalPieceOrdinals = pieces.map((piece, index) => {
+        if (piece.logicalPieceOrdinal !== undefined) {
+          const ordinal = integer(piece.logicalPieceOrdinal);
+          if (ordinal > quantity) throw new Error('physical-piece-evidence-mismatch');
+          return ordinal;
+        }
+        if (quantity === 1) return 1;
+        if (pieces.length === quantity && equal(piece.length, p.length)) return index + 1;
+        throw new Error('physical-piece-evidence-mismatch');
+      });
+      if (!pieces.length || pieces.some(piece => piece.quantity !== 1 || !equal(piece.width, p.width) ||
+        !sameGeometry(piece.squareMeters, decimal(piece.length).times(decimal(piece.width)).div(100).toFixed())) ||
+        Array.from({ length: quantity }, (_, logicalIndex) => logicalIndex + 1).some(logicalOrdinal =>
+          !equal(pieces.reduce((sum, piece, pieceIndex) => logicalPieceOrdinals[pieceIndex] === logicalOrdinal
+            ? sum.plus(decimal(piece.length)) : sum, new Decimal(0)).toFixed(), p.length)) ||
+        !sameGeometry(p.squareMeters, decimal(p.length).times(decimal(p.width)).times(quantity).div(100).toFixed())) {
         throw new Error('physical-piece-evidence-mismatch');
       }
       if (p.sawKerfEnabled !== false && p.sawKerfEnabled !== true) throw new Error('missing-kerf-policy');
       const legacyKerfMeters = p.sawKerfEnabled ? canonical(decimal(p.sawKerfCm).div(100).toFixed()) : canonical('0');
       const kerfMeters = explicitPolicy?.kerfMeters ?? legacyKerfMeters;
       if (kerfMeters !== legacyKerfMeters) throw new Error('conflicting-kerf-policy');
-      const distribution = explicitPolicy
-        ? explicitPolicy.sourcePieceQuantities
-        : uniqueSourceDistribution(consumed, generated, selected.widthMeters, widthMeters, kerfMeters, quantity);
+      let witnessedDistribution: number[];
+      if (s.sourcePieceQuantities !== undefined) {
+        if (!Array.isArray(s.sourcePieceQuantities)) throw new Error('invalid-physical-layout');
+        witnessedDistribution = s.sourcePieceQuantities.map(integer);
+        if (witnessedDistribution.length !== consumed.length || witnessedDistribution.reduce((sum, value) => sum + value, 0) !== pieces.length) {
+          throw new Error('invalid-physical-layout');
+        }
+      } else if (pieces.length === consumed.length) {
+        // Existing drafts can prove a one-piece-per-source layout from their physical-piece ledger.
+        // Canonical replay below remains authoritative for whether the two-dimensional cut fits.
+        witnessedDistribution = consumed.map(() => 1);
+      } else if (consumed.length === 1) {
+        witnessedDistribution = [pieces.length];
+      } else {
+        if (pieces.length !== quantity || !sameGeometry(p.length, selected.lengthMeters)) {
+          throw new Error('unsupported-physical-layout');
+        }
+        witnessedDistribution = uniqueSourceDistribution(consumed, generated, selected.widthMeters, widthMeters, kerfMeters, quantity);
+      }
+      const distribution = explicitPolicy?.sourcePieceQuantities ?? witnessedDistribution;
+      if (explicitPolicy && JSON.stringify(distribution) !== JSON.stringify(witnessedDistribution)) {
+        throw new Error('canonical-remainder-evidence-mismatch');
+      }
       const breakdown = list(p.cuttingBreakdown);
       if (new Set(breakdown.map(b => b.type)).size !== breakdown.length ||
         breakdown.some(b => !['longitudinal', 'cross', 'calibration'].includes(String(b.type)))) throw new Error('invalid-cutting-evidence');
@@ -265,7 +297,12 @@ export const recoverLegacyRemainingChildren = (
         secondaryOwnerProductRowId: parseStableIdentity('product-row', root),
         selectedRemainingStoneId: selected.remainingStoneId, catalogProductId: childRow.catalogProductId,
         lengthMeters, widthMeters, quantity, kerfMeters, calibrationEnabled,
-        ...(distribution === undefined ? {} : { sourcePieceQuantities: distribution }),
+        sourcePieceQuantities: distribution,
+        physicalPieces: pieces.map((piece, pieceIndex) => ({
+          logicalPieceOrdinal: logicalPieceOrdinals[pieceIndex],
+          lengthMeters: canonical(decimal(piece.length).toFixed()),
+          widthMeters: canonical(decimal(piece.width).div(100).toFixed())
+        })),
         ...(rate('longitudinal') !== undefined ? { longitudinalCutRateToman: rate('longitudinal') } : {}),
         ...(rate('cross') !== undefined ? { crossCutRateToman: rate('cross') } : {}),
         ...(rate('calibration') !== undefined ? { calibrationCutRateToman: rate('calibration') } : {})

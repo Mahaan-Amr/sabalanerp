@@ -6,6 +6,26 @@ export type DeploymentGateResult = {
   error?: string;
 };
 
+export const mandatoryReleaseDeploymentGateNames = [
+  'postgres-query-and-isolated-write', 'migration-history', 'shipment-statement-runtime-state',
+  'contract-financial-evidence', 'inquiry-sqlite-integrity', 'backend-readiness', 'frontend-health',
+  'inquiry-health', 'nginx-health', 'contracts-storage', 'hr-storage', 'accounting-storage',
+  'support-storage', 'performance-export-storage', 'uploads-storage', 'database-file-references',
+  'checkpoint-manifest', 'database-connection-capacity',
+] as const;
+
+export function completeReleaseDeploymentGateReport(report: unknown) {
+  if (!report || typeof report !== 'object' || Array.isArray(report)) return false;
+  const row = report as Record<string, unknown>;
+  if (row.format !== 'sabalan-deployment-report' || row.version !== 1 || row.mode !== 'RELEASE'
+      || !Array.isArray(row.gates) || row.gates.length !== mandatoryReleaseDeploymentGateNames.length) return false;
+  const gates = row.gates.map(gate => gate && typeof gate === 'object' && !Array.isArray(gate)
+    ? gate as Record<string, unknown> : null);
+  return gates.every(gate => gate?.passed === true && typeof gate.name === 'string')
+    && new Set(gates.map(gate => gate!.name)).size === mandatoryReleaseDeploymentGateNames.length
+    && mandatoryReleaseDeploymentGateNames.every(name => gates.some(gate => gate!.name === name));
+}
+
 export const runMandatoryDeploymentGates = async (
   gates: Array<{ name: string; run: () => Promise<Record<string, unknown> | void> }>,
 ): Promise<DeploymentGateResult[]> => {

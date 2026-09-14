@@ -10,7 +10,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
-import { executeAccountingAction } from '../accountingService';
+import { executeAccountingAction, listFinancialRecords } from '../accountingService';
 
 const token = `snapshot-boundary-${Date.now()}`;
 let contractId: string | null = null;
@@ -121,7 +121,7 @@ const run = async () => {
       items: {
         create: source.items.map((item, index) => ({
           productId: item.productId,
-          productRowId: `${token}-row-${index}`,
+          productRowId: item.productRowId || `${token}-row-${index}`,
           productType: item.productType,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
@@ -151,7 +151,7 @@ const run = async () => {
           products: {
             create: {
               productId: source.items[0].productId,
-              productRowId: `${token}-row-0`,
+              productRowId: source.items[0].productRowId || `${token}-row-0`,
               quantity: new Prisma.Decimal(1),
               notes: 'QA delivery evidence',
             },
@@ -190,6 +190,50 @@ const run = async () => {
   assert(initialId);
   const initialRecord = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: initialId } });
   assertBoundedSnapshot(initialRecord.sourceSnapshot);
+  assert.equal(Object.prototype.hasOwnProperty.call(record(initialRecord.sourceSnapshot), 'partnerCaseId'), false);
+
+  const historicalSnapshot = { ...record(initialRecord.sourceSnapshot), partnerCaseId: null };
+  await prisma.accountingFinancialRecord.update({ where: { id: initialId }, data: {
+    sourceSnapshot: historicalSnapshot as Prisma.InputJsonValue,
+  } });
+  const compatibleRead = await listFinancialRecords({ contractId, page: 1, pageSize: 50 });
+  assert.equal(compatibleRead.items.some(item => item.id === initialId), true,
+    'historical ordinary snapshots with a root null owner remain in ordinary Accounting');
+  await prisma.accountingFinancialRecord.update({ where: { id: initialId }, data: {
+    sourceSnapshot: { ...historicalSnapshot, retained: { partnerCaseId: null } } as Prisma.InputJsonValue,
+  } });
+  const protectedRead = await listFinancialRecords({ contractId, page: 1, pageSize: 50 });
+  assert.equal(protectedRead.items.some(item => item.id === initialId), false,
+    'nested incomplete Partner evidence remains outside ordinary Accounting');
+  await prisma.accountingFinancialRecord.update({ where: { id: initialId }, data: {
+    sourceSnapshot: historicalSnapshot as Prisma.InputJsonValue,
+  } });
+
+  try {
+    await executeAccountingAction({
+      kind: 'APPROVE_FINANCIAL_INVOICE',
+      invoiceId: initialId,
+      systemInvoiceNumber: `${token}:system-invoice`,
+      systemInvoiceDate: new Date().toISOString(),
+      sepidarAmount: initialRecord.amount.toString(),
+      idempotencyKey: `${token}:approve`,
+      correlationId: `${token}:approve`,
+    }, {
+      ...actor,
+      effectiveAuthority: {
+        actorRole: actor.role,
+        workspace: 'accounting',
+        workspacePermission: 'admin',
+        feature: 'accounting_records_approve_void',
+        featurePermission: 'edit',
+      },
+    });
+  } catch (error) {
+    assert.notEqual((error as Error).message,
+      'منبع صورتحساب همکار معتبر نیست؛ بررسی پرونده در حسابداری لازم است.');
+    assert.equal((error as { code?: string }).code, 'FINANCIAL_EVIDENCE_CONFLICT',
+      'the inherited pricing fixture may fail later, but ordinary provenance must pass the Partner guard');
+  }
 
   await prisma.accountingFinancialRecord.update({
     where: { id: initialId },

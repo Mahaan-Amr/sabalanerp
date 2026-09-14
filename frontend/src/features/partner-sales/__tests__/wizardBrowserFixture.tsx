@@ -74,7 +74,7 @@ function ReinquiryFixture() {
     <p role="status">تعداد ارسال: {calls}</p>
     <PartnerInquiryWorkspace {...composition} commands={composition.commands as React.ComponentProps<typeof PartnerInquiryWorkspace>['commands']}
       writable configuredRows={[]} configurationEditor={<p>مشخصات فنی محفوظ</p>}
-      onEnterWizard={async () => undefined} onOpenInquiry={() => undefined} />
+      onEnterWizard={async () => undefined} onOpenInquiry={() => undefined} onCreateNewInquiry={() => undefined} />
   </main>;
 }
 

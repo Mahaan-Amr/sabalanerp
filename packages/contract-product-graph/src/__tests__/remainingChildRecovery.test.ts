@@ -8,6 +8,7 @@ import { executeProductGraphCommand } from '../productGraph';
 import { parseStableIdentity } from '../stableIdentity';
 import { readLegacyProductGraph } from '../legacyReadAdapter';
 import { calculateStairLayerConfiguration } from '../stairLayerPolicy';
+import { parseCanonicalDecimal } from '../canonicalDecimal';
 
 const products = JSON.parse(readFileSync(`${__dirname}/fixtures/remaining-child-chain.json`, 'utf8'));
 const policy = { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v2' };
@@ -193,6 +194,222 @@ const blocked = (name: string, mutate: (p: any[]) => void, cause?: string) => {
   if (!result.ok && cause) assert.ok(result.conflicts.some(c => 'causeCode' in c && c.causeCode === cause), `${name}: ${JSON.stringify(result.conflicts)}`);
   assert.equal(JSON.stringify(changed), snapshot, `${name}: draft preserved`);
 };
+
+{
+  const twoAxis = structuredClone([products[0], products[1]]);
+  const [root, child] = twoAxis;
+  const consumed = [...child.meta.remainingSource.consumedSourceStoneIds];
+  const sourcePieceQuantities = consumed.map(() => 1);
+  const selected = plan.graph.sourceBatches
+    .flatMap(batch => batch.initialRemainders ?? [])
+    .find(stock => stock.widthMeters === '0.12' && stock.lengthMeters === '1.25');
+  assert.ok(selected, 'Two-axis recovery source exists');
+  const intent = {
+    ...plan.graph.allocations[0].intentSnapshot!,
+    selectedRemainingStoneId: selected.remainingStoneId,
+    lengthMeters: parseCanonicalDecimal('1.15'),
+    widthMeters: parseCanonicalDecimal('0.06'),
+    quantity: 5,
+    crossCutRateToman: parseCanonicalDecimal('20000'),
+    sourcePieceQuantities,
+    physicalPieces: sourcePieceQuantities.map((_, index) => ({
+      logicalPieceOrdinal: index + 1,
+      lengthMeters: parseCanonicalDecimal('1.15'),
+      widthMeters: parseCanonicalDecimal('0.06')
+    }))
+  };
+  const expected = replayRemainderAllocations({
+    policyVersion: policy.packing,
+    pricingPolicyVersion: policy.pricing,
+    roundingPolicyVersion: policy.rounding,
+    baseInventory: plan.graph.sourceBatches.flatMap(batch => batch.initialRemainders ?? []),
+    childIntents: [intent]
+  });
+  assert.ok(expected.ok, JSON.stringify(expected));
+  if (!expected.ok) throw new Error('Two-axis canonical replay failed');
+  const allocation = expected.result.allocations[0];
+  const sequenceBySource = new Map<number, number>();
+  const generatedWitnesses = allocation.packingPlan.remainders.map(remainder => {
+    const sequence = (sequenceBySource.get(remainder.sourceOrdinal) ?? 0) + 1;
+    sequenceBySource.set(remainder.sourceOrdinal, sequence);
+    return {
+      id: `${consumed[remainder.sourceOrdinal]}:secondary:${sequence}`,
+      width: Number(remainder.widthMeters) * 100,
+      length: Number(remainder.lengthMeters),
+      sourceCutId: root.remainingStoneSourceInventory[0].sourceCutId
+    };
+  });
+  const groupedWitnesses = new Map<string, any[]>();
+  generatedWitnesses.forEach(witness => {
+    const key = `${witness.length}x${witness.width}`;
+    groupedWitnesses.set(key, [...(groupedWitnesses.get(key) ?? []), witness]);
+  });
+  root.remainingStones = [
+    root.remainingStoneSourceInventory[1],
+    ...[...groupedWitnesses.values()].map(witnesses => ({
+      ...witnesses[0],
+      quantity: witnesses.length,
+      isAvailable: true,
+      squareMeters: witnesses[0].width * witnesses[0].length * witnesses.length / 100
+    }))
+  ];
+  const physicalPieces = child.meta.remainingSource.physicalPieces.map((piece: any) => ({
+    ...piece,
+    length: 1.15,
+    squareMeters: piece.width * 1.15 / 100
+  }));
+  const cuttingBreakdown = allocation.cuttingPricingLines.map(line => ({
+    type: line.lineId.includes('longitudinal') ? 'longitudinal' :
+      line.lineId.includes('cross') ? 'cross' : 'calibration',
+    meters: Number(line.quantity),
+    rate: Number(line.rateToman),
+    cost: Number(line.amountToman)
+  }));
+  const cuttingCost = Number(allocation.cuttingAmountToman);
+  Object.assign(child, {
+    length: 1.15,
+    squareMeters: 0.345,
+    totalPrice: cuttingCost,
+    cuttingCost,
+    physicalCuttingCost: cuttingCost,
+    cuttingBreakdown,
+    originalLength: 1.25,
+    cutType: 'cross'
+  });
+  Object.assign(child.meta.pricing, {
+    cuttingCost,
+    totalPrice: cuttingCost
+  });
+  Object.assign(child.meta.remainingSource, {
+    sourcePieceQuantities,
+    generatedRemainingStoneIds: generatedWitnesses.map(witness => witness.id),
+    physicalPieces
+  });
+  root.usedRemainingStones = [{
+    ...root.usedRemainingStones[0],
+    length: 1.15,
+    squareMeters: 0.345,
+    cuttingCost,
+    cutType: 'cross',
+    physicalPieces
+  }];
+
+  const recovered = planLegacyProductGraphMigration({ ...input, products: twoAxis });
+  assert.ok(recovered.ok, JSON.stringify(recovered));
+  if (recovered.ok) {
+    assert.equal(recovered.graph.allocations[0].packingPlan.longitudinalCutMeters, '5.75');
+    assert.equal(recovered.graph.allocations[0].packingPlan.crossCutMeters, '0.6');
+    assert.deepEqual(recovered.graph.allocations[0].intentSnapshot?.sourcePieceQuantities, sourcePieceQuantities);
+    assert.deepEqual(recovered.graph.remainingStones
+      .filter(stock => recovered.graph.allocations[0].generatedRemainingStoneIds.includes(stock.remainingStoneId))
+      .map(stock => [stock.lengthMeters, stock.widthMeters, stock.quantity])
+      .sort(), [['0.1', '0.12', 5], ['1.15', '0.06', 5]].sort());
+  }
+
+  const preCanonicalDraft = structuredClone(twoAxis);
+  delete preCanonicalDraft[1].meta.remainingSource.sourcePieceQuantities;
+  const recoveredPreCanonicalDraft = planLegacyProductGraphMigration({ ...input, products: preCanonicalDraft });
+  assert.ok(recoveredPreCanonicalDraft.ok, JSON.stringify(recoveredPreCanonicalDraft));
+  if (recoveredPreCanonicalDraft.ok) {
+    assert.deepEqual(
+      recoveredPreCanonicalDraft.graph.allocations[0].intentSnapshot?.sourcePieceQuantities,
+      sourcePieceQuantities,
+      'one physical child piece per consumed source safely upgrades an existing two-axis draft'
+    );
+  }
+}
+
+{
+  const splitDraft = structuredClone([products[0], products[1]]);
+  const [root, child] = splitDraft;
+  const selected = plan.graph.sourceBatches
+    .flatMap(batch => batch.initialRemainders ?? [])
+    .find(stock => stock.widthMeters === '0.12' && stock.lengthMeters === '1.25');
+  assert.ok(selected, 'Split recovery source exists');
+  const consumed = [child.meta.remainingSource.consumedSourceStoneIds[0]];
+  const physicalPieces = Array.from({ length: 3 }, (_, index) => ({
+    id: `${child.meta.remainingSource.allocationId}__piece_0_${index}`,
+    width: 4,
+    length: 1.25,
+    quantity: 1,
+    squareMeters: 0.05
+  }));
+  const intent = {
+    ...plan.graph.allocations[0].intentSnapshot!,
+    selectedRemainingStoneId: selected.remainingStoneId,
+    lengthMeters: parseCanonicalDecimal('3.75'),
+    widthMeters: parseCanonicalDecimal('0.04'),
+    quantity: 1,
+    sourcePieceQuantities: [3],
+    physicalPieces: physicalPieces.map(piece => ({
+      logicalPieceOrdinal: 1,
+      lengthMeters: parseCanonicalDecimal(String(piece.length)),
+      widthMeters: parseCanonicalDecimal(String(piece.width / 100))
+    }))
+  };
+  const expected = replayRemainderAllocations({
+    policyVersion: policy.packing,
+    pricingPolicyVersion: policy.pricing,
+    roundingPolicyVersion: policy.rounding,
+    baseInventory: plan.graph.sourceBatches.flatMap(batch => batch.initialRemainders ?? []),
+    childIntents: [intent]
+  });
+  assert.ok(expected.ok, JSON.stringify(expected));
+  if (!expected.ok) throw new Error('Split canonical replay failed');
+  const allocation = expected.result.allocations[0];
+  const cuttingBreakdown = allocation.cuttingPricingLines.map(line => ({
+    type: line.lineId.includes('longitudinal') ? 'longitudinal' :
+      line.lineId.includes('cross') ? 'cross' : 'calibration',
+    meters: Number(line.quantity),
+    rate: Number(line.rateToman),
+    cost: Number(line.amountToman)
+  }));
+  const cuttingCost = Number(allocation.cuttingAmountToman);
+  Object.assign(child, {
+    width: 4,
+    diameterOrWidth: 4,
+    length: 3.75,
+    quantity: 1,
+    squareMeters: 0.15,
+    totalPrice: cuttingCost,
+    cuttingCost,
+    physicalCuttingCost: cuttingCost,
+    cuttingBreakdown,
+    originalWidth: 12,
+    originalLength: 1.25,
+    cutType: 'longitudinal'
+  });
+  Object.assign(child.meta.pricing, { cuttingCost, totalPrice: cuttingCost });
+  Object.assign(child.meta.remainingSource, {
+    allocatedQuantity: 1,
+    consumedSourceStoneIds: consumed,
+    generatedRemainingStoneIds: [],
+    sourcePieceQuantities: [3],
+    physicalPieces
+  });
+  root.usedRemainingStones = [{
+    ...root.usedRemainingStones[0],
+    width: 4,
+    length: 3.75,
+    quantity: 1,
+    squareMeters: 0.15,
+    cuttingCost,
+    cutType: 'longitudinal',
+    physicalPieces
+  }];
+  root.remainingStones = [
+    { ...root.remainingStoneSourceInventory[0], quantity: 4, squareMeters: 0.6 },
+    root.remainingStoneSourceInventory[1]
+  ];
+
+  const recovered = planLegacyProductGraphMigration({ ...input, products: splitDraft });
+  assert.ok(recovered.ok, JSON.stringify(recovered));
+  if (recovered.ok) {
+    assert.equal(recovered.graph.allocations[0].consumedSourcePieces, 1);
+    assert.equal(recovered.graph.allocations[0].packingPlan.placements.length, 3);
+    assert.deepEqual(recovered.graph.allocations[0].intentSnapshot?.sourcePieceQuantities, [3]);
+  }
+}
 blocked('missing allocation order', p => delete p[1].meta.remainingSource.allocationOrder, 'missing-allocation-order');
 blocked('duplicate order', p => { p[2].meta.remainingSource.allocationOrder = 0; p[2].remainingStoneAllocationOrder = 0; }, 'duplicate-allocation-order');
 blocked('nonzero material is not coerced', p => p[1].originalTotalPrice = 1, 'unproven-zero-material');
@@ -201,6 +418,7 @@ blocked('unknown cutting rate is not guessed', p => delete p[1].cuttingBreakdown
 blocked('changed rate cannot silently reprice', p => p[1].cuttingBreakdown[0].rate = 21000, 'cutting-price-or-geometry-drift');
 blocked('missing lineage', p => delete p[2].meta.remainingSource.consumedSourceStoneIds, 'missing-physical-lineage');
 blocked('duplicate physical consumption', p => p[1].meta.remainingSource.consumedSourceStoneIds[1] = p[1].meta.remainingSource.consumedSourceStoneIds[0], 'duplicate-physical-lineage');
+blocked('invalid explicit source distribution', p => p[1].meta.remainingSource.sourcePieceQuantities = [5], 'invalid-physical-layout');
 blocked('already consumed primary source', p => p[2].meta.remainingSource.consumedSourceStoneIds[0] = p[1].meta.remainingSource.consumedSourceStoneIds[0], 'missing-or-already-consumed-source');
 blocked('unknown generated identity', p => p[1].meta.remainingSource.generatedRemainingStoneIds[0] = 'invented-stone', 'secondary-lineage-mismatch');
 blocked('resurrected consumed stock', p => p[0].remainingStones.push(p[0].remainingStoneSourceInventory[0]), 'final-inventory-mismatch');

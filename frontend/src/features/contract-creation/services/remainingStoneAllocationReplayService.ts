@@ -398,13 +398,13 @@ export const replayRemainingStoneAllocations = ({
 
     const stock = successfulAllocation.stockInfo.sanitized;
     const physicalPieces = successfulAllocation.physicalPiecesByRow.get(row.id) || [];
-    const widthCut = row.width < stock.width;
-    const lengthCut = row.length < stock.length;
     const calculatedCuttingBreakdown = calculateRemainingChildCuttingBreakdown({
       row,
       stock,
       rate: Number(recalculatedChild.cuttingCostPerMeter || 0),
-      sourcePieceQuantities: successfulAllocation.sourcePieceQuantities,
+      sourcePieceQuantities: successfulAllocation.sourcePieceQuantitiesByRow.get(row.id),
+      longitudinalCutMeters: successfulAllocation.longitudinalCutMeters,
+      crossCutMeters: successfulAllocation.crossCutMeters,
       sawKerfCm: recalculatedChild.sawKerfEnabled
         ? Number(recalculatedChild.sawKerfCm || 0)
         : 0
@@ -420,6 +420,8 @@ export const replayRemainingStoneAllocations = ({
       return;
     }
     const cuttingBreakdown = calculatedCuttingBreakdown || [];
+    const widthCut = cuttingBreakdown.some(entry => entry.type === 'longitudinal' && entry.meters > 0);
+    const lengthCut = cuttingBreakdown.some(entry => entry.type === 'cross' && entry.meters > 0);
     const cuttingCost = cuttingBreakdown.reduce((total, entry) => total + entry.cost, 0);
     const allocationOrder = getAllocationOrder(recalculatedChild, replayIndex);
     let generatedRemainingStoneIds =
@@ -466,7 +468,7 @@ export const replayRemainingStoneAllocations = ({
         allocationOrder,
         row,
         cuttingBreakdown,
-        sourcePieceQuantities: successfulAllocation.sourcePieceQuantities
+        sourcePieceQuantities: successfulAllocation.sourcePieceQuantitiesByRow.get(row.id)
       }),
       parentProductIndex: sourceIndex,
       parentProductRowId: sourceRowId,
@@ -501,6 +503,7 @@ export const replayRemainingStoneAllocations = ({
           generatedRemainingStoneIds,
           sourceGroupKey: successfulGroupKey || undefined,
           consumedSourceStoneIds,
+          sourcePieceQuantities: successfulAllocation.sourcePieceQuantitiesByRow.get(row.id),
           physicalPieces
         },
         pricing: {

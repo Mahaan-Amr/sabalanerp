@@ -757,27 +757,49 @@ model RecoveryAuditEvent {
 }
 
 model DeploymentOperation {
-  id             String    @id
-  activeKey      String?   @unique
-  releaseId      String
-  targetCommit   String
-  owner          String
-  phase          String
-  leaseToken     String    @unique
-  leaseExpiresAt DateTime
-  heartbeatAt    DateTime
-  startedAt      DateTime
-  completedAt    DateTime?
-  errorCode      String?
-  errorMessage   String?
-  checkpointJson Json?
-  reportJson     Json?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                      String                              @id
+  activeKey               String?                             @unique
+  releaseId               String
+  targetCommit            String
+  owner                   String
+  phase                   String
+  leaseToken              String                              @unique
+  leaseExpiresAt          DateTime
+  heartbeatAt             DateTime
+  startedAt               DateTime
+  completedAt             DateTime?
+  errorCode               String?
+  errorMessage            String?
+  checkpointJson          Json?
+  reportJson              Json?
+  createdAt               DateTime                            @default(now())
+  updatedAt               DateTime                            @updatedAt
+  partnerReleaseReadiness PartnerReleaseReadinessPublication?
 
   @@index([phase, leaseExpiresAt])
   @@index([startedAt])
   @@map("deployment_operations")
+}
+
+model PartnerReleaseReadinessPublication {
+  id                       String              @id
+  deploymentId             String              @unique
+  releaseId                String
+  targetCommit             String
+  schemaId                 String
+  checkedAt                DateTime
+  expiresAt                DateTime
+  packageSha256            String
+  trustEnvelopeSha256      String
+  trustKeyId               String
+  packageBytesBase64       String
+  trustEnvelopeBytesBase64 String
+  evidenceJson             Json
+  createdAt                DateTime            @default(now())
+  deployment               DeploymentOperation @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
+
+  @@index([releaseId, expiresAt])
+  @@map("partner_release_readiness_publications")
 }
 
 model Personnel {

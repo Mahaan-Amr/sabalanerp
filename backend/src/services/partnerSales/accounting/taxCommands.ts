@@ -6,7 +6,7 @@ import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE } from './source';
 import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from './errors';
 import { readPartnerAccountingCapabilities } from './capabilities';
-import { hasPartnerAccountingEvidence } from './provenance';
+import { hasConflictingPartnerAccountingEvidence, hasPartnerAccountingEvidence } from './provenance';
 import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvidence';
 import { readPartnerInvoiceSource } from './invoiceSource';
 
@@ -28,7 +28,7 @@ export async function runPartnerAwareTaxMutation(database: PrismaClient, command
     const target = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId! } });
     if (target?.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
       const children = await tx.accountingTaxRecord.findMany({ where: { invoiceRecordId: invoiceId! }, select: { metadata: true } });
-      if (hasPartnerAccountingEvidence([target?.sourceSnapshot, target?.metadata, children])) throw conflict();
+      if (hasConflictingPartnerAccountingEvidence(target) || hasPartnerAccountingEvidence(children)) throw conflict();
       const tax = await apply(tx, { partner: false });
       if (hasPartnerAccountingEvidence(tax.metadata)) throw conflict();
       return tax;

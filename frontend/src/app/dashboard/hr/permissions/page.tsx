@@ -70,7 +70,7 @@ const HR_BASE_FEATURE_LABELS_FA: Record<string, string> = {
 };
 
 const userName = (user: User) => `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username;
-const recommendedLevel = (feature: string): AccessLevel => /_(create|edit|delete|approve|reject|sign|import|export|update|toggle|start|end|assign|verify|validate|send)$/.test(feature) ? 'edit' : 'view';
+const recommendedLevel = (feature: string): AccessLevel => /_(create|edit|delete|approve|reject|sign|import|export|update|toggle|start|end|assign|verify|validate|send|respond|manage)$/.test(feature) ? 'edit' : 'view';
 const normalizeLegacyDefinition = (definition: any): FeatureDefinition => ({
   key: definition.key,
   workspace: definition.workspace,

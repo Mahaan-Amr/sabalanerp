@@ -60,9 +60,9 @@ test('submission binds owner-issued configuration evidence, replays exactly and 
       transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
       authorize: async (_database, request) => request.actorId === ids.actorId ? { ok: true, value: { evidenceId: 'authorization-fixture' } } : { ok: false, error: { code: 'NOT_FOUND', status: 404, message: 'مورد در دسترس نیست.' } },
       resolveInitialResponder: async () => ({ ok: true, value: { responderId: ids.responderId, eligibilityEvidence: { source: 'fixture' } } }),
-      resolveConfiguration: async (_database, request) => request.reference.productRowId === 'row-1'
-        ? { ok: true, value: { identity: identity(ids.actorId), description: 'سنگ آماده تست', configuration: [{ label: 'تعداد', value: '۲' }] } }
-        : { ok: false, error: { code: 'NOT_FOUND', status: 404, message: 'مورد در دسترس نیست.' } },
+      resolveConfiguration: async (_database, request) => ({ ok: true, value: { identity: identity(ids.actorId),
+        description: `سنگ آماده تست ${request.reference.productRowId}`,
+        configuration: [{ label: 'تعداد', value: request.reference.productRowId === 'row-1' ? '۲' : '۳' }] } }),
       publishCommittedEvents: async eventIds => { published.push(...eventIds); throw new Error('simulated delivery outage'); },
     });
     const command = await submit(ids.actorId, ids.inquiryId);
@@ -84,6 +84,12 @@ test('submission binds owner-issued configuration evidence, replays exactly and 
     assert.equal(await tx.partnerInquiry.count({ where: { id: ids.inquiryId } }), 1);
     assert.equal(await tx.partnerInquiryRow.count({ where: { inquiryId: ids.inquiryId } }), 1);
     assert.equal(await tx.partnerInquiryAssignment.count({ where: { inquiryId: ids.inquiryId } }), 1);
+    const parallelInquiryId = `parallel-${ids.inquiryId}`;
+    const parallel = await service.execute(await submit(ids.actorId, parallelInquiryId, 'parallel-row'));
+    assert.equal(parallel.ok, true, 'a pending inquiry never blocks a separate new inquiry');
+    assert.equal(await tx.partnerInquiry.count({ where: { profileId: ids.actorId } }), 2);
+    assert.equal((await service.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY',
+      inquiryId: ids.inquiryId })).ok, true, 'the original pending inquiry remains independently readable');
   });
 });
 
@@ -164,6 +170,10 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     const responderView = await responder.query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: ids.inquiryId });
     assert.equal(responderView.ok, true);
     if (responderView.ok && responderView.value.purpose === 'RESPONDER_INQUIRY') {
+      assert.equal(responderView.value.rows.find(row => row.rowId === 'row-1')?.description, 'row-1');
+      assert.deepEqual(responderView.value.rows.find(row => row.rowId === 'row-2')?.configuration,
+        [{ label: 'ردیف', value: 'row-2' }]);
+      assert.equal(typeof responderView.value.submittedAt, 'string');
       assert.equal(responderView.value.rows.find(row => row.rowId === 'row-1')?.state, 'APPROVED');
       assert.deepEqual(responderView.value.rows.find(row => row.rowId === 'row-2')?.actions,
         [{ action: 'INQUIRY_RESPOND', enabled: true }]);
@@ -195,6 +205,61 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     const terminated = await resolveApprovalForUse(tx, { binding: { inquiryId: ids.inquiryId, rowId: 'row-1', revision: 2 },
       partnerSellerId: ids.actorId, configurationHash: (await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-1' } })).configurationHash });
     assert.equal(terminated.ok ? null : terminated.error.code, 'PARTNER_NOT_ACTIVE');
+  });
+});
+
+test('sales management response atomically takes over an open inquiry and preserves the prior responder evidence', async () => {
+  await fixture(async (tx, ids) => {
+    const managerId = `sales-manager-${randomUUID()}`;
+    await tx.user.create({ data: { id: managerId, username: managerId, email: `${managerId}@example.invalid`,
+      password: 'not-a-login', firstName: 'Sales', lastName: 'Manager', role: 'MANAGER' } });
+    const shared = {
+      transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      resolveInitialResponder: async () => ({ ok: true as const, value: {
+        responderId: ids.responderId, eligibilityEvidence: { source: 'fixture' },
+      } }),
+      resolveConfiguration: async (_database: Prisma.TransactionClient, request: { reference: { productRowId: string } }) =>
+        ({ ok: true as const, value: { identity: identity(ids.actorId), description: request.reference.productRowId,
+          configuration: [{ label: 'ردیف', value: request.reference.productRowId }] } }),
+    };
+    const partner = createPartnerInquiryService({ actorId: ids.actorId, ...shared,
+      authorize: async () => ({ ok: true as const, value: { evidenceId: 'partner-fixture' } }) });
+    assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId))).ok, true);
+    const manager = createPartnerInquiryService({ actorId: managerId, ...shared,
+      authorize: async () => ({ ok: true as const, value: {
+        evidenceId: 'management-override-fixture', managementOverride: true,
+      } }) });
+    const query = await manager.query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: ids.inquiryId });
+    assert.equal(query.ok, true);
+    const staleIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions: [{ rowId: 'row-1', expectedRevision: 99,
+        outcome: 'REJECTED' as const, reason: 'رد آزمایشی نسخه منقضی' }] };
+    const stale = await manager.execute({ ...staleIntent, commandId: 'management-stale-decision',
+      correlationId: 'management-stale-decision', idempotency: { actorId: managerId,
+        operation: 'INQUIRY_DECIDE', targetId: ids.inquiryId, key: 'management-stale-decision',
+        payloadHash: await canonicalHash(staleIntent) } });
+    assert.equal(stale.ok, true);
+    if (stale.ok) assert.equal(stale.value.batch?.outcomes[0]?.ok, false);
+    assert.equal(await tx.partnerInquiryAssignment.count({ where: { inquiryId: ids.inquiryId } }), 1,
+      'a stale management decision must not take over the assignment');
+    const decisions = [{ rowId: 'row-1', expectedRevision: 1, outcome: 'APPROVED' as const,
+      wholesaleUnitPrice: { amount: '1450000', currency: 'IRT' as const }, note: 'پاسخ مدیریتی' }];
+    const intent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions };
+    const result = await manager.execute({ ...intent, commandId: 'management-takeover-decision',
+      correlationId: 'management-takeover-decision', idempotency: { actorId: managerId,
+        operation: 'INQUIRY_DECIDE', targetId: ids.inquiryId, key: 'management-takeover-decision',
+        payloadHash: await canonicalHash(intent) } });
+    assert.equal(result.ok, true);
+    const assignments = await tx.partnerInquiryAssignment.findMany({ where: { inquiryId: ids.inquiryId },
+      orderBy: { revision: 'asc' } });
+    assert.deepEqual(assignments.map(row => [row.revision, row.responderId]),
+      [[1, ids.responderId], [2, managerId]]);
+    assert.equal(assignments[1].reason, 'تصاحب مدیریتی اتمیک برای ثبت پاسخ استعلام باز');
+    const event = await tx.partnerInquiryEvent.findFirstOrThrow({ where: { inquiryId: ids.inquiryId,
+      type: 'INQUIRY_DECIDED' }, orderBy: { revision: 'desc' } });
+    const evidence = event.evidence as { managementTakeover?: { previousResponderId?: string } };
+    assert.equal(evidence.managementTakeover?.previousResponderId, ids.responderId);
   });
 });
 

@@ -79,7 +79,10 @@ export function checkOperationsGate(contract: ContractRuntime, state: Operations
   if (committedOperation && (input.caseState === 'COMMITTED' || input.caseState === 'VOIDED')) {
     return input.integrityVerified === true ? null : contract.partnerError('INTEGRITY_CONFLICT');
   }
-  if (state.operationalPaused) return contract.partnerError('OPERATIONAL_PAUSE');
+  // Enrollment and operational traffic have independent controls. A vetted
+  // pending profile may join an open cohort while commercial operations stay
+  // paused; every actual Partner mutation remains blocked until resume.
+  if (state.operationalPaused && input.operation !== 'COHORT_ENROLL') return contract.partnerError('OPERATIONAL_PAUSE');
   if (category !== 'ENROLL' && input.permission.partnerStatus !== 'ACTIVE') return contract.partnerError('PARTNER_NOT_ACTIVE');
   if (!state.cohort?.name.trim() || (input.operation !== 'COHORT_ENROLL' && !state.cohort.sellerIds.includes(input.permission.partnerSellerId))) return contract.partnerError('COHORT_NOT_READY');
   if (requiresReadiness(input.operation)) {

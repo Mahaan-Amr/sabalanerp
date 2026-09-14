@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { planLegacyProductGraphMigration } from '@sabalanerp/contract-product-graph';
 import {
   formatRemainingStoneReplayConflicts,
   getRemainingStoneDraftFieldErrors,
@@ -241,7 +243,7 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
 
   assert.deepEqual(
     available.map((stone) => [Number(stone.width.toFixed(6)), Number(stone.length.toFixed(6))]),
-    [[7, 0.2], [7, 0.8]]
+    [[7, 0.6], [14, 0.2]]
   );
   assert.equal(Number(available.reduce((sum, stone) => sum + stone.squareMeters, 0).toFixed(6)), 0.07);
   assert.deepEqual(replayedChild.cuttingBreakdown, [
@@ -265,6 +267,149 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
     longitudinalCutRateToman: '20000',
     crossCutRateToman: '20000'
   }, 'the validated modal replay must carry its exact allocation into persistence');
+  assert.deepEqual(replayedChild.meta?.remainingSource?.sourcePieceQuantities, [1]);
+}
+
+{
+  const fixture = JSON.parse(readFileSync(
+    '../packages/contract-product-graph/src/__tests__/fixtures/remaining-child-chain.json',
+    'utf8'
+  ));
+  const parent = structuredClone(fixture[0]) as ContractProduct;
+  const allocatedChild = structuredClone(fixture[1]) as ContractProduct;
+  allocatedChild.width = 6;
+  allocatedChild.diameterOrWidth = 6;
+  allocatedChild.length = 1.15;
+  allocatedChild.quantity = 5;
+  allocatedChild.squareMeters = 0.345;
+  allocatedChild.cuttingCostPerMeter = 20_000;
+  allocatedChild.meta.remainingSource.sourceGroupKey =
+    getRemainingStoneInventoryGroupKey(parent.remainingStoneSourceInventory![0]);
+
+  const frontendReplay = replayRemainingStoneAllocations({
+    products: [parent, allocatedChild],
+    sourceRowId: parent.rowId as string
+  });
+  assert.equal(frontendReplay.ok, true);
+
+  const backendPlan = planLegacyProductGraphMigration({
+    contractId: 'frontend-backend-boundary',
+    revision: 1,
+    calculationPolicy: {
+      calculation: 'calculation-v1',
+      packing: 'packing-v1',
+      pricing: 'pricing-v1',
+      rounding: 'rounding-v2'
+    },
+    products: JSON.parse(JSON.stringify(frontendReplay.products)),
+    recoverRemainingChildrenOnWrite: true
+  });
+  assert.ok(backendPlan.ok, JSON.stringify(backendPlan));
+  if (!backendPlan.ok) throw new Error('Expected the untouched frontend allocation to cross the backend write boundary.');
+  const replayedChild = frontendReplay.products[1];
+  assert.deepEqual(replayedChild.meta.remainingSource.sourcePieceQuantities, [2, 2, 1]);
+  assert.equal(
+    backendPlan.graph.allocations[0].packingPlan.longitudinalCutMeters,
+    String(replayedChild.cuttingBreakdown?.find(line => line.type === 'longitudinal')?.meters)
+  );
+  assert.equal(
+    backendPlan.graph.allocations[0].packingPlan.crossCutMeters,
+    String(replayedChild.cuttingBreakdown?.find(line => line.type === 'cross')?.meters)
+  );
+  assert.equal(backendPlan.graph.allocations[0].cuttingAmountToman, String(replayedChild.cuttingCost));
+  assert.deepEqual(
+    backendPlan.graph.remainingStones
+      .map(stock => [stock.lengthMeters, stock.widthMeters, stock.quantity])
+      .sort(),
+    getAvailableRemainingStoneInventory(frontendReplay.products[0])
+      .map(stock => [String(stock.length), String(stock.width / 100), stock.quantity ?? 1])
+      .sort()
+  );
+}
+
+{
+  const inventory = [stock(10, 1.36, 160)];
+  const parent = source('source-screenshot-regression', inventory);
+  const allocatedChild = child('child-screenshot-regression', parent.rowId as string, 0);
+  allocatedChild.width = 10;
+  allocatedChild.diameterOrWidth = 10;
+  allocatedChild.length = 1.26;
+  allocatedChild.quantity = 160;
+  allocatedChild.squareMeters = 20.16;
+  allocatedChild.cuttingCostPerMeter = 20_000;
+  allocatedChild.meta.remainingSource.sourceGroupKey =
+    getRemainingStoneInventoryGroupKey(inventory[0]);
+
+  const result = replayRemainingStoneAllocations({
+    products: [parent, allocatedChild],
+    sourceRowId: parent.rowId as string
+  });
+
+  assert.equal(result.ok, true);
+  const replayedParent = result.products[0];
+  const replayedChild = result.products[1];
+  assert.deepEqual(replayedChild.meta?.remainingSource?.sourcePieceQuantities, Array(160).fill(1));
+  assert.equal(replayedChild.meta?.remainingSource?.consumedSourceStoneIds?.length, 160);
+  assert.deepEqual(replayedChild.cuttingBreakdown, [
+    { type: 'cross', meters: 16, rate: 20_000, cost: 320_000 }
+  ]);
+  assert.equal(replayedChild.cuttingCost, 320_000);
+  assert.deepEqual(
+    getAvailableRemainingStoneInventory(replayedParent).map(stone => [
+      Number(stone.width.toFixed(6)),
+      Number(stone.length.toFixed(6)),
+      stone.quantity
+    ]),
+    [[10, 0.1, 160]]
+  );
+}
+
+{
+  const inventory = [stock(29, 1)];
+  const parent = source('source-half-toman-rounding', inventory);
+  const allocatedChild = child('child-half-toman-rounding', parent.rowId as string, 0);
+  allocatedChild.width = 29;
+  allocatedChild.diameterOrWidth = 29;
+  allocatedChild.length = 0.5;
+  allocatedChild.squareMeters = 0.145;
+  allocatedChild.cuttingCostPerMeter = 50;
+
+  const result = replayRemainingStoneAllocations({
+    products: [parent, allocatedChild],
+    sourceRowId: parent.rowId as string
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.products[1].cuttingBreakdown, [
+    { type: 'cross', meters: 0.29, rate: 50, cost: 15 }
+  ]);
+  assert.equal(result.products[1].cuttingCost, 15);
+  assert.equal(result.products[1].isCut, true);
+  assert.equal(result.products[1].cutType, 'cross');
+}
+
+{
+  const inventory = [stock(9, 2)];
+  const parent = source('source-logical-split', inventory);
+  const allocatedChild = child('child-logical-split', parent.rowId as string, 0);
+  allocatedChild.width = 3;
+  allocatedChild.diameterOrWidth = 3;
+  allocatedChild.length = 6;
+  allocatedChild.quantity = 1;
+  allocatedChild.squareMeters = 0.18;
+  allocatedChild.cuttingCostPerMeter = 100;
+
+  const result = replayRemainingStoneAllocations({
+    products: [parent, allocatedChild],
+    sourceRowId: parent.rowId as string
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.products[1].meta.remainingSource.physicalPieces.length, 3);
+  assert.deepEqual(result.products[1].meta.remainingSource.sourcePieceQuantities, [3]);
+  assert.deepEqual(result.products[1].cuttingBreakdown, [
+    { type: 'longitudinal', meters: 4, rate: 100, cost: 400 }
+  ]);
+  assert.equal(result.products[1].isCut, true);
+  assert.equal(result.products[1].cutType, 'longitudinal');
 }
 
 {

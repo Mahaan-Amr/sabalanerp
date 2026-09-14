@@ -45,6 +45,7 @@ import { NotificationCenter } from "@/components/NotificationCenter";
 import { readContractSubmissionDiagnostic } from "@/features/contract-creation/utils/contractSubmissionDiagnostics";
 import { hasHrFeature, type HrBaseFeature } from '@/features/hr/hrAccessNavigation';
 import { PersonalPerformanceBadge } from '@/features/hr/performance-badge/PerformanceBadge';
+import { deniesDashboardWorkspaceRoute } from './dashboardRouteGuard';
 
 interface User {
   id: string;
@@ -185,12 +186,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const effectiveHrFeatures = user?.permissions?.features || [];
   const deniesHrRoute = Boolean(isHrWorkspace && routeAvailability?.allowed === false);
   const isTaskScopedDutyRoute = /\/duties(?:\/|$)/.test(pathname);
-  const deniesWorkspaceRoute = Boolean(
-    !workspaceAccessLoading
-      && currentWorkspace
-      && !isTaskScopedDutyRoute
-      && !accessibleWorkspaces.some((workspace) => workspace.id === currentWorkspace),
-  );
+  const deniesWorkspaceRoute = deniesDashboardWorkspaceRoute({
+    workspaceAccessLoading,
+    currentWorkspace,
+    taskScopedDutyRoute: isTaskScopedDutyRoute,
+    accessibleWorkspaceIds: accessibleWorkspaces.map((workspace) => workspace.id),
+    routeAllowed: routeAvailability?.allowed ?? null,
+  });
   const deniesFeatureRoute = Boolean(!isHrWorkspace && routeAvailability?.allowed === false);
 
   useEffect(() => {

@@ -4,6 +4,31 @@ import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testi
 import { preparePartnerFinancialSource } from '../partnerSales/accounting/source';
 import { createPartnerAccountingAdapter } from '../partnerSales/accounting/adapter';
 import { PartnerAccountingFixture } from './partnerAccountingFixture';
+import {
+  hasConflictingPartnerAccountingEvidence,
+  hasPartnerAccountingEvidence,
+} from '../partnerSales/accounting/provenance';
+
+test('ordinary Contract snapshot null ownership is not private Partner evidence', () => {
+  const ordinary = {
+    sourceKind: 'SALES_CONTRACT', sourceId: 'contract-1', contractId: 'contract-1',
+    metadata: { mode: 'FROM_CONTRACT_TOTAL' }, sourceSnapshot: { id: 'contract-1', partnerCaseId: null },
+  };
+  assert.equal(hasConflictingPartnerAccountingEvidence(ordinary), false);
+  assert.equal(hasConflictingPartnerAccountingEvidence({
+    ...ordinary, sourceSnapshot: { id: 'contract-1', retained: { partnerCaseId: null } },
+  }), true, 'nested incomplete Partner evidence must remain fail-closed');
+  assert.equal(hasConflictingPartnerAccountingEvidence({
+    ...ordinary, metadata: { partnerCaseId: null },
+  }), true, 'command metadata is never ordinary Contract schema shape');
+  assert.equal(hasConflictingPartnerAccountingEvidence({
+    ...ordinary, sourceId: 'another-contract',
+  }), true, 'the compatibility rule requires a coherent ordinary source identity');
+  assert.equal(hasConflictingPartnerAccountingEvidence({
+    ...ordinary, sourceSnapshot: { id: 'contract-1', partnerCaseId: 'partner-case-1' },
+  }), true, 'a non-null Partner owner remains private evidence');
+  assert.equal(hasPartnerAccountingEvidence({ retained: { financialEvidenceHash: null } }), true);
+});
 
 test('financial preparation keeps the Partner debtor, approved wholesale and Sabalan terms', async () => {
   const fixture = createPartnerFixtures();

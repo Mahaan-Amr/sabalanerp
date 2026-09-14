@@ -47,14 +47,20 @@ test('response review keeps different prices and mixed rejection visible before 
 
 test('an unavailable responder row shows evidence but no editable price or decision controls', () => {
   const html = renderToStaticMarkup(<ResponseRow number={1} row={{ rowId: 'fixture-row', revision: 2,
+    description: 'گرانیت نهبندان ممتاز',
+    configuration: [{ label: 'عرض قطعه', value: '۶۰ سانتی‌متر' }, { label: 'تعداد قطعه', value: '۱۲ عدد' }],
     identity: { schemaVersion: 1, partnerSellerId: 'fixture-partner', catalogProductId: 'fixture-stone', family: 'slab',
-      unit: 'متر مربع', configuration: [{ key: 'width', value: '۶۰ سانتی‌متر' }], materialRateEvidenceId: 'internal-rate',
+      unit: 'count', configuration: [{ key: 'private-fingerprint', value: `sha256-v1:${'1'.repeat(64)}` }], materialRateEvidenceId: 'internal-rate',
       materialRateHash: `sha256-v1:${'0'.repeat(64)}`, components: [], currency: 'IRR', calculationPolicyVersion: 'v1', roundingPolicyVersion: 'v1' },
-    approvedPrice: { amount: '120000', currency: 'IRR' }, used: true }} canRespond={false}
+    approvedPrice: { amount: '120000', currency: 'IRR' }, used: true, state: 'APPROVED',
+    approvedAt: '2026-08-27T08:00:00.000Z', expiresAt: '2026-08-29T08:00:00.000Z', actions: [] }} canRespond={false}
     status="پاسخ این استعلام به شما واگذار نشده است." draft={{ selected: false, amount: '', outcome: 'APPROVED', note: '' }}
     pending={false} onChange={() => undefined} />);
   assert.match(html, /۶۰ سانتی‌متر/);
+  assert.match(html, /گرانیت نهبندان ممتاز/);
+  assert.match(html, /تعداد قطعه/);
+  assert.match(html, /واحد قیمت: عدد/);
   assert.match(html, /120000/);
   assert.match(html, /واگذار نشده/);
-  assert.doesNotMatch(html, /<input|<textarea|<select|internal-rate|sha256|قیمت مشتری|حاشیه سود/);
+  assert.doesNotMatch(html, /<input|<textarea|<select|internal-rate|sha256|private-fingerprint|قیمت مشتری|حاشیه سود|>count</);
 });

@@ -15,6 +15,38 @@ export interface ContractRecoveryEnvelope<Payload = unknown> {
   payload: Payload;
 }
 
+export interface CoalescedContractCheckpointState<Value> {
+  pending: Value | null;
+  inFlight: Promise<void> | null;
+}
+
+export const createCoalescedContractCheckpointState = <Value>():
+CoalescedContractCheckpointState<Value> => ({
+  pending: null,
+  inFlight: null
+});
+
+export const flushCoalescedContractCheckpoint = <Value>(
+  state: CoalescedContractCheckpointState<Value>,
+  write: (value: Value) => Promise<unknown>
+): Promise<void> => {
+  if (state.inFlight) return state.inFlight;
+  if (state.pending === null) return Promise.resolve();
+
+  let running: Promise<void>;
+  running = (async () => {
+    while (state.pending !== null) {
+      const current = state.pending;
+      await write(current);
+      if (state.pending === current) state.pending = null;
+    }
+  })().finally(() => {
+    if (state.inFlight === running) state.inFlight = null;
+  });
+  state.inFlight = running;
+  return running;
+};
+
 interface ContractRecoveryStorageWriter {
   setItem: (key: string, value: string) => unknown;
 }

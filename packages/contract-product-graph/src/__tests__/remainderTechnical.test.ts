@@ -29,11 +29,38 @@ test('rate-free remainder replay consumes two sources and links new residual sto
   assert.deepEqual(graph.replayRemainderTechnical(input), replay);
 });
 
+test('technical replay accepts explicit physical segments while preserving their logical-piece boundary', () => {
+  const replay = graph.replayRemainderTechnical({
+    inputRevision: 4,
+    baseInventory: [{ ...stock(), lengthMeters: c('2'), widthMeters: c('0.09'), quantity: 1 }],
+    childIntents: [{
+      ...child(),
+      lengthMeters: c('6'),
+      widthMeters: c('0.03'),
+      quantity: 1,
+      sourcePieceQuantities: [3],
+      physicalPieces: Array.from({ length: 3 }, () => ({
+        logicalPieceOrdinal: 1,
+        lengthMeters: c('2'),
+        widthMeters: c('0.03')
+      }))
+    }]
+  });
+
+  assert.ok(replay.ok);
+  assert.equal(replay.result.allocations[0].packingPlan.placements.length, 3);
+  assert.equal(replay.result.allocations[0].consumedSourcePieces, 1);
+  assert.equal(replay.result.allocations[0].packingPlan.longitudinalCutMeters, '4');
+});
+
 test('remainder previews reject private extensions and malformed correlation before returning inventory', () => {
   for (const input of [
     { inputRevision: 1, baseInventory: [stock()], childIntents: [{ ...child(), longitudinalCutRateToman: 'private-rate' }] },
     { inputRevision: 1, baseInventory: [{ ...stock(), cost: 'private-cost' }], childIntents: [child()] },
     { inputRevision: 1, baseInventory: [stock()], childIntents: [{ ...child(), widthMeters: 'private-width' }] },
+    { inputRevision: 1, baseInventory: [stock()], childIntents: [{ ...child(), physicalPieces: [{
+      logicalPieceOrdinal: 1, lengthMeters: c('1.5'), widthMeters: c('0.12'), cost: 'private-cost'
+    }] }] },
     { inputRevision: -1, baseInventory: [stock()], childIntents: [child()] },
   ]) {
     const result = graph.replayRemainderTechnical(input as graph.RemainderTechnicalInput);

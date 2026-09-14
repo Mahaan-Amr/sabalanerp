@@ -22,8 +22,11 @@ test('Prisma profile gates re-read current identity, terms, responder, cohort an
       const ids = { partner: `${prefix}-partner`, responder: `${prefix}-responder`, actor: `${prefix}-actor`,
         profile: `${prefix}-profile`, account: `${prefix}-account`, cohort: `${prefix}-cohort` };
       await tx.user.createMany({ data: [ids.partner, ids.responder, ids.actor].map(id => ({ id, username: id,
-        email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Profile', lastName: 'Fixture',
-        ...(id === ids.responder ? { role: 'ADMIN' as const } : {}) })) });
+        email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Profile', lastName: 'Fixture' })) });
+      await tx.effectiveActionGrant.create({ data: { id: `${prefix}-responder-grant`, principalKind: 'USER',
+        principalId: ids.responder, subjectUserId: ids.responder, domain: 'PARTNER', action: 'INQUIRY_RESPOND',
+        rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED', effect: 'ALLOW', grantedBy: ids.actor,
+        reason: 'مجوز پاسخ‌دهنده تست پروفایل', correlationId: `${prefix}-responder-grant` } });
       await tx.partnerProfile.create({ data: { id: ids.profile, userId: ids.partner } });
       await tx.partnerIdentityEvidence.create({ data: { id: `${prefix}-evidence`, userId: ids.partner,
         legalName: 'فروشنده همکار تست', personType: 'NATURAL', identifiers: { fixture: true },

@@ -5,6 +5,7 @@ import type { PartnerInquiryDependencies } from '../inquiries/service';
 import { createPrismaManagementWorkspaceReader } from './management';
 import { createPartnerWorkspaceQuery } from './query';
 import { readPartnerSnapshot } from '../authorization/readSnapshot';
+import { resolvePartnerWorkspaceAuthority } from '../authorization/workspaceAuthority';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -22,6 +23,17 @@ export function createPrismaPartnerWorkspaceQuery(input: {
     transaction: work => readPartnerSnapshot(input.database, work),
     async listResponderInquiryIds(transaction, page) {
       const take = Math.min(page.limit * 4 + 1, 401);
+      const workspaceAuthority = await resolvePartnerWorkspaceAuthority(transaction, input.actorId);
+      if (workspaceAuthority.canManageInquiries) {
+        const inquiries = await transaction.partnerInquiry.findMany({
+          where: {
+            ...(page.cursor ? { id: { gt: page.cursor } } : {}),
+            rows: { some: { outcome: 'PENDING' } },
+          },
+          select: { id: true }, orderBy: { id: 'asc' }, take,
+        });
+        return { inquiryIds: inquiries.slice(0, take - 1).map(row => row.id), hasMore: inquiries.length === take };
+      }
       const rows = page.cursor
         ? await transaction.$queryRaw<Array<{ inquiryId: string }>>`
           SELECT a."inquiryId"

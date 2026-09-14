@@ -127,6 +127,32 @@ const isOwner = (
   session.browserSessionId === browserSessionId &&
   (leaseToken === undefined || session.leaseToken === leaseToken);
 
+interface MonotonicContractRecoveryEnvelope {
+  readonly sequence: number;
+}
+
+const monotonicRecoveryEnvelope = (
+  recovery: unknown,
+  input: CheckpointContractRecoveryInput
+): MonotonicContractRecoveryEnvelope | null => {
+  if (!recovery || typeof recovery !== 'object' || Array.isArray(recovery)) return null;
+  const candidate = recovery as Record<string, unknown>;
+  const scope = candidate.scope;
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return null;
+  const typedScope = scope as Record<string, unknown>;
+  if (
+    typedScope.userId !== input.userId ||
+    typedScope.draftId !== input.draftId ||
+    typedScope.schemaVersion !== input.schemaVersion ||
+    typedScope.baseRevision !== input.baseRevision ||
+    !Number.isSafeInteger(candidate.sequence) ||
+    Number(candidate.sequence) < 0 ||
+    !Number.isFinite(candidate.updatedAt) ||
+    !Object.prototype.hasOwnProperty.call(candidate, 'payload')
+  ) return null;
+  return { sequence: Number(candidate.sequence) };
+};
+
 const protectedBindingConflict = (session: ContractEditSessionRecord, input: AcquireContractEditSessionInput):
   Extract<AcquireContractEditSessionResult, { ok: false }> | null => {
   if (!isProtectedContractRecovery(session.recovery) ||
@@ -346,10 +372,20 @@ const checkpointContractRecoveryInternal = async (
     return { ok: false, code: 'revision-conflict', recovery: null,
       currentBaseRevision: ownership.session.baseRevision };
   }
+  const incomingEnvelope = monotonicRecoveryEnvelope(input.recovery, input);
   const initial = ownership.session;
-  // Heartbeats change presence, not recovery. Retry only that benign conflict;
-  // a different recovery checkpoint must never be overwritten automatically.
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  // Ordinary browser journals are scoped and monotonic. A same-lease loser may
+  // retry a newer sequence, while an older/equal retry is an idempotent no-op.
+  // Legacy and protected recovery values retain the stricter conflict policy.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    if (isProtectedContractRecovery(ownership.session.recovery)) {
+      return { ok: false, code: 'revision-conflict', recovery: null,
+        currentBaseRevision: ownership.session.baseRevision };
+    }
+    const currentEnvelope = monotonicRecoveryEnvelope(ownership.session.recovery, input);
+    if (incomingEnvelope && currentEnvelope && currentEnvelope.sequence >= incomingEnvelope.sequence) {
+      return { ok: true, session: ownership.session };
+    }
     const next: ContractEditSessionRecord = {
       ...ownership.session,
       schemaVersion: input.schemaVersion,
@@ -360,8 +396,12 @@ const checkpointContractRecoveryInternal = async (
     if (replaced) return { ok: true, session: replaced };
     ownership = await assertContractEditOwnershipInternal(store, input);
     if (!ownership.ok) return ownership;
-    if (ownership.session.schemaVersion !== initial.schemaVersion ||
-        !isDeepStrictEqual(ownership.session.recovery, initial.recovery)) {
+    const updatedEnvelope = monotonicRecoveryEnvelope(ownership.session.recovery, input);
+    const isMonotonicSameScopeRace = Boolean(incomingEnvelope && updatedEnvelope);
+    if (!isMonotonicSameScopeRace && (
+      ownership.session.schemaVersion !== initial.schemaVersion ||
+      !isDeepStrictEqual(ownership.session.recovery, initial.recovery)
+    )) {
       break;
     }
   }

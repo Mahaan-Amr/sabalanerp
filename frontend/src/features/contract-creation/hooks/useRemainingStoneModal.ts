@@ -368,7 +368,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         row,
         stock: stockInfo.sanitized,
         rate: cuttingCostPerMeter,
-        sourcePieceQuantities: validation.sourcePieceQuantities,
+        sourcePieceQuantities: validation.sourcePieceQuantitiesByRow.get(row.id),
         sawKerfCm: remainingStoneSawKerfEnabled ? SAW_KERF_CM : 0
       });
       if (!cuttingBreakdown) {

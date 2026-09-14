@@ -17,7 +17,10 @@ type AuthorizationRequest = { actorId: string; action: 'INQUIRY_READ' | 'INQUIRY
 export interface PartnerInquiryDependencies {
   actorId: string;
   transaction<T>(run: (tx: Transaction) => Promise<T>): Promise<T>;
-  authorize(tx: Transaction, request: AuthorizationRequest): Promise<Result<{ evidenceId: string }>>;
+  authorize(tx: Transaction, request: AuthorizationRequest): Promise<Result<{
+    evidenceId: string;
+    managementOverride?: boolean;
+  }>>;
   resolveInitialResponder(tx: Transaction, input: { profileId: string }): Promise<Result<{
     responderId: string; eligibilityEvidence: Prisma.JsonObject;
     profileAssignmentId?: string; profileAssignmentRevision?: number; assignedByActorId?: string;
@@ -101,9 +104,10 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
     if (!authorization.ok) return authorization;
     const rollout = await authorizePartnerTechnicalRollout(tx, inquiry.profileId, 'MUTATE');
     if (!rollout.ok) return rollout;
-    const assignment = await tx.partnerInquiryAssignment.findFirst({ where: { inquiryId: inquiry.id },
+    let assignment = await tx.partnerInquiryAssignment.findFirst({ where: { inquiryId: inquiry.id },
       orderBy: { revision: 'desc' }, select: { id: true, revision: true, responderId: true } });
-    if (!assignment || assignment.revision !== command.expectedAssignmentRevision || assignment.responderId !== dependencies.actorId) {
+    if (!assignment || assignment.revision !== command.expectedAssignmentRevision ||
+        (assignment.responderId !== dependencies.actorId && !authorization.value.managementOverride)) {
       return { ok: false, error: partnerError(assignment ? 'ROW_STALE' : 'NOT_ASSIGNED') } as const;
     }
     const rows = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id,
@@ -111,6 +115,27 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
       id: true, revision: true, outcome: true, definition: true, predecessorId: true,
       predecessor: { select: { approval: { select: { id: true } } } },
     } });
+    const hasActionableDecision = command.decisions.some(decision => {
+      const row = rows.find(item => item.id === decision.rowId);
+      if (!row || row.revision !== decision.expectedRevision || row.outcome !== 'PENDING') return false;
+      const definition = parseInquiryDefinition(row.definition);
+      if (!definition) return false;
+      if (decision.outcome === 'APPROVED' && decision.wholesaleUnitPrice.currency !== definition.identity.currency) return false;
+      return !row.predecessorId || Boolean(row.predecessor?.approval?.id && definition.predecessorReason);
+    });
+    let managementTakeover: { previousResponderId: string; assignmentId: string; assignmentRevision: number; reason: string } | undefined;
+    if (assignment.responderId !== dependencies.actorId && hasActionableDecision) {
+      const previousResponderId = assignment.responderId;
+      const reason = 'تصاحب مدیریتی اتمیک برای ثبت پاسخ استعلام باز';
+      assignment = await tx.partnerInquiryAssignment.create({ data: {
+        id: randomUUID(), inquiryId: inquiry.id, revision: assignment.revision + 1,
+        responderId: dependencies.actorId, actorId: dependencies.actorId, reason,
+        eligibilityEvidence: { version: 2, source: 'MANAGEMENT_RESPONSE_OVERRIDE',
+          authorizationEvidenceId: authorization.value.evidenceId, previousResponderId },
+      }, select: { id: true, revision: true, responderId: true } });
+      managementTakeover = { previousResponderId, assignmentId: assignment.id,
+        assignmentRevision: assignment.revision, reason };
+    }
     const outcomes: Array<{ ok: true; rowId: string; outcomeId: string; revision: number; outcome: 'APPROVED' | 'REJECTED' } |
       { ok: false; rowId: string; error: ReturnType<typeof partnerError> }> = [];
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
@@ -154,7 +179,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,
         type: outcomes.every(outcome => outcome.ok) ? 'INQUIRY_DECIDED' : 'INQUIRY_PARTIALLY_DECIDED',
         evidence: { version: 1, assignmentId: assignment.id, assignmentRevision: assignment.revision,
-          batch, decisions: command.decisions } } });
+          ...(managementTakeover ? { managementTakeover } : {}), batch, decisions: command.decisions } } });
     }
     const receipt = { version: 1, commandId: command.commandId, eventIds, batch };
     await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...identity, payloadHash: expectedHash, outcome: receipt } });

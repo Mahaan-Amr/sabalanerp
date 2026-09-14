@@ -27,7 +27,8 @@ test('management gives authorized identity creation a safe evidence selection wi
 
 test('responder workspace preserves explicit outcomes and exact validity without retail economics', () => {
   const fixture = createPartnerFixtures();
-  const inquiry = { ...fixture.responder, schemaVersion: 2, actions: [], rows: [{ ...fixture.responder.rows[0],
+  const inquiry = { ...fixture.responder, schemaVersion: 2, submittedAt: '2026-08-27T07:45:00.000Z', actions: [], rows: [{ ...fixture.responder.rows[0],
+    description: fixture.inquiry.rows[0].description, configuration: fixture.inquiry.rows[0].configuration,
     state: 'APPROVED', approvedAt: fixture.approval.approvedAt, expiresAt: fixture.approval.expiresAt, actions: [],
   }] };
   const input = { schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', actorId: 'responder-actor', inquiries: [inquiry] };

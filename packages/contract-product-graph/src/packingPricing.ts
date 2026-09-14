@@ -375,22 +375,23 @@ const searchBestPackingState = ({
 /*
  * Mixed paid/fresh stair-layer sources have a strict commercial order: use
  * already-paid material whenever it can satisfy the next physical piece, then
- * use fresh material only for the shortage. Running the exhaustive optimizer
- * across dozens of equivalent remainder pieces creates factorial branches
- * without changing that commercial answer. This deterministic fast path keeps
- * the exact solver as a fallback when its first-fit guillotine placements
- * cannot complete the request.
+ * use fresh material only for the shortage. Large segmented strips with one
+ * width, full-source segments and one tail length also create factorially equivalent branches.
+ * This deterministic fast path handles those bounded cases and keeps the exact
+ * solver as a fallback when first-fit guillotine placement cannot complete them.
  */
 const calculatePriorityFirstFitState = ({
   sources,
   pieces,
-  kerf
+  kerf,
+  allowUniformPriority = false
 }: {
   sources: SourcePiece[];
   pieces: DemandPiece[];
   kerf: Decimal;
+  allowUniformPriority?: boolean;
 }): SearchState | undefined => {
-  if (new Set(sources.map(source => source.allocationPriority)).size < 2) {
+  if (!allowUniformPriority && new Set(sources.map(source => source.allocationPriority)).size < 2) {
     return undefined;
   }
 
@@ -869,9 +870,19 @@ export const calculatePackingPlan = (request: PackingRequest): PackingResult => 
     const uniformStripPlan = calculateUniformStripPlan({ request, sources, pieces, kerf });
     if (uniformStripPlan) return { ok: true, plan: uniformStripPlan };
 
+    const sourceLength = sources[0]?.free[0]?.length;
+    const sourceWidth = sources[0]?.free[0]?.width;
+    const distinctSegmentLengths = new Set(pieces.map(piece => piece.length.toFixed()));
+    const isLargeSegmentedStripSet = pieces.length > 12 && sourceLength !== undefined && sourceWidth !== undefined &&
+      sources.every(source => source.free.length === 1 && source.free[0].length.eq(sourceLength) &&
+        source.free[0].width.eq(sourceWidth)) &&
+      new Set(pieces.map(piece => piece.width.toFixed())).size === 1 &&
+      distinctSegmentLengths.size === 2 &&
+      pieces.some(piece => piece.length.eq(sourceLength));
     const bestState =
       calculateUniformGridState({ sources, pieces, kerf }) ??
-      calculatePriorityFirstFitState({ sources, pieces, kerf }) ??
+      calculatePriorityFirstFitState({ sources, pieces, kerf,
+        allowUniformPriority: isLargeSegmentedStripSet }) ??
       searchBestPackingState({ sources, pieces, kerf });
     if (!bestState) return {
       ok: false,

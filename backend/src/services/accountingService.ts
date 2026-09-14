@@ -87,7 +87,7 @@ import { executePartnerCollectionAction } from './partnerSales/accounting/paymen
 import { withAccountingReadScope, type AccountingReadActor, type AccountingReadScope } from './partnerSales/accounting/readScope';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend, accountingCurrencyTotals } from './partnerSales/accounting/history';
 import { partnerTaxTransitions } from './partnerSales/accounting/taxPolicy';
-import { hasPartnerAccountingEvidence } from './partnerSales/accounting/provenance';
+import { hasConflictingPartnerAccountingEvidence } from './partnerSales/accounting/provenance';
 import { PartnerAccountingCommandError } from './partnerSales/accounting/errors';
 import { runPartnerAwareTaxMutation } from './partnerSales/accounting/taxCommands';
 
@@ -1705,7 +1705,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     let partnerAuthorization: PartnerFinancialApprovalAuthorization | undefined;
     const unlockedSource = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
     if (unlockedSource?.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE &&
-        hasPartnerAccountingEvidence([unlockedSource?.metadata, unlockedSource?.sourceSnapshot])) {
+        hasConflictingPartnerAccountingEvidence(unlockedSource)) {
       throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'منبع صورتحساب همکار معتبر نیست؛ بررسی پرونده در حسابداری لازم است.');
     }
     if (unlockedSource?.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
@@ -2762,7 +2762,7 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
     if (source?.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
       throw new Error('ابطال این صورتحساب فقط از گردش اصلاح پرونده همکار امکان‌پذیر است.');
     }
-    if (hasPartnerAccountingEvidence([source?.metadata, source?.sourceSnapshot])) {
+    if (hasConflictingPartnerAccountingEvidence(source)) {
       throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'شواهد منبع پرونده همکار قابل ابطال از مسیر عمومی نیست.');
     }
     return voidAccountingRecordInTransaction(tx, {
@@ -2796,7 +2796,7 @@ const deleteDraftAccountingRecord = async (command: AccountingActionRequest, act
     if (before.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
       throw new Error('سوابق این صورتحساب در گردش اصلاح پرونده همکار نگهداری می‌شود و قابل حذف نیست.');
     }
-    if (hasPartnerAccountingEvidence([before.metadata, before.sourceSnapshot])) {
+    if (hasConflictingPartnerAccountingEvidence(before)) {
       throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'شواهد منبع پرونده همکار قابل حذف از مسیر عمومی نیست.');
     }
     if (before.status !== AccountingRecordStatus.DRAFT || before.financiallyApprovedAt || before.systemInvoiceNumber || before.postedAt) {

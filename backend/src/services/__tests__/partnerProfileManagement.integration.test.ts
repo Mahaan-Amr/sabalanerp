@@ -17,7 +17,7 @@ function localDatabase() {
 }
 
 type CommandInput = { type: 'PROFILE_CREATE'; identityEvidenceId: string } |
-  { type: 'IDENTITY_VERIFY'; profileId: string; expectedRevision: number; evidenceId: string } |
+  { type: 'IDENTITY_VERIFY' | 'IDENTITY_VERSION_REGISTER'; profileId: string; expectedRevision: number; evidenceId: string } |
   { type: 'COMMERCIAL_TERMS_SET' | 'CREDIT_TERMS_SET'; profileId: string; expectedRevision: number; termsVersionId: string } |
   { type: 'PROFILE_CONVERSION'; profileId: string; expectedRevision: number; transition: 'START' | 'ABANDON' | 'RESOLVE';
     dispositionEvidenceIds: string[] };
@@ -34,14 +34,20 @@ test('Prisma profile management persists owner evidence and independently effect
   try {
     await database.$transaction(async tx => {
       const suffix = randomUUID(), actorId = `profile-manager-${suffix}`, userId = `partner-candidate-${suffix}`;
-      const identityId = `partner-identity-${suffix}`, commercialId = `partner-commercial-${suffix}`;
+      const identityId = `partner-identity-${suffix}`, newerIdentityId = `partner-identity-new-${suffix}`;
+      const commercialId = `partner-commercial-${suffix}`;
       const creditId = `partner-credit-${suffix}`, expiredId = `partner-expired-${suffix}`;
       await tx.user.createMany({ data: [actorId, userId].map((id, index) => ({ id, username: id,
         email: `${id}@example.invalid`, password: 'not-a-login', firstName: index ? 'Partner' : 'Manager',
         lastName: 'Fixture', ...(index ? {} : { role: 'ADMIN' as const }) })) });
       await tx.partnerIdentityEvidence.create({ data: { id: identityId, userId, legalName: 'شخص همکار تست',
         personType: 'NATURAL', identifiers: { nationalIdentityEvidence: 'masked-fixture' }, phone: '+989120000000',
-        address: 'تهران، نشانی معتبر تست', integrityHash: `sha256-v1:${'1'.repeat(64)}`, issuedBy: actorId } });
+        address: 'تهران، نشانی معتبر تست', integrityHash: `sha256-v1:${'1'.repeat(64)}`, issuedBy: actorId,
+        issuedAt: new Date('2026-09-01T00:00:00.000Z') } });
+      await tx.partnerIdentityEvidence.create({ data: { id: newerIdentityId, userId, legalName: 'شخص همکار تست جدید',
+        personType: 'NATURAL', identifiers: { nationalIdentityEvidence: 'masked-fixture' }, phone: '+989120000001',
+        address: 'تهران، نشانی جدید تست', integrityHash: `sha256-v1:${'5'.repeat(64)}`, issuedBy: actorId,
+        issuedAt: new Date('2026-09-02T00:00:00.000Z') } });
       await tx.partnerTermsPolicy.createMany({ data: [
         { id: commercialId, purpose: 'PARTNER_TECHNICAL_PRICING', label: 'شرایط تجاری تست',
           effectiveDate: new Date('2026-01-01'), terms: { calculationPolicyVersion: 'partner-test-v1' },
@@ -70,8 +76,11 @@ test('Prisma profile management persists owner evidence and independently effect
         (profile.commercialAccount.identities[0].identifiers as { evidenceId?: string }).evidenceId, identityId);
       assert.equal((profile.events[0].evidence as { authorizationEvidenceId?: string }).authorizationEvidenceId,
         'auth-PROFILE_CREATE');
-      assert.equal((await service.execute(await command(actorId, { type: 'IDENTITY_VERIFY', profileId,
-        expectedRevision: 1, evidenceId: identityId }, `identity-${suffix}`))).ok, true);
+      const duplicateIdentity = await service.execute(await command(actorId, { type: 'IDENTITY_VERIFY', profileId,
+        expectedRevision: 1, evidenceId: identityId }, `identity-${suffix}`));
+      assert.equal(duplicateIdentity.ok ? null : duplicateIdentity.error.code, 'STATE_CONFLICT');
+      assert.equal((await service.execute(await command(actorId, { type: 'IDENTITY_VERSION_REGISTER', profileId,
+        expectedRevision: 1, evidenceId: newerIdentityId }, `identity-version-${suffix}`))).ok, true);
       assert.equal((await service.execute(await command(actorId, { type: 'COMMERCIAL_TERMS_SET', profileId,
         expectedRevision: 2, termsVersionId: commercialId }, `commercial-${suffix}`))).ok, true);
       const credit = await service.execute(await command(actorId, { type: 'CREDIT_TERMS_SET', profileId,

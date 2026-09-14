@@ -359,4 +359,25 @@ fc.assert(fc.property(
   }
 ), { numRuns: 30 });
 
+{
+  const startedAt = performance.now();
+  const segmented = calculatePackingPlan({
+    policyVersion: 'packing-v1',
+    kerfMeters: decimal('0'),
+    sources: [{
+      sourceBatchId,
+      lengthMeters: decimal('0.1'),
+      widthMeters: decimal('0.2'),
+      quantity: 20
+    }],
+    demands: [
+      { demandId: 'full-segment', lengthMeters: decimal('0.1'), widthMeters: decimal('0.07'), quantity: 20 },
+      { demandId: 'tail-segment', lengthMeters: decimal('0.05'), widthMeters: decimal('0.07'), quantity: 10 }
+    ]
+  });
+  assert.ok(segmented.ok);
+  assert.equal(segmented.plan.placements.length, 30);
+  assert.ok(performance.now() - startedAt < 2000, 'large segmented strips must avoid factorial search');
+}
+
 console.log('packing and pricing tests passed');

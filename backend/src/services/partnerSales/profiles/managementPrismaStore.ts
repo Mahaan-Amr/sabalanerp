@@ -170,7 +170,17 @@ export function createPrismaPartnerProfileManagementStore(database: PrismaClient
       return { id: evidence.id, userId: evidence.userId, legalName: evidence.legalName,
         ...(evidence.tradeName ? { tradeName: evidence.tradeName } : {}), personType: evidence.personType,
         identifiers: evidence.identifiers as Record<string, unknown>, phone: evidence.phone,
-        address: evidence.address, integrityHash: evidence.integrityHash };
+        address: evidence.address, integrityHash: evidence.integrityHash, issuedAt: evidence.issuedAt };
+    },
+    async readCurrentIdentityEvidence(tx, profileId) {
+      const current = await tx.partnerCommercialIdentity.findFirst({ where: { account: { profileId } },
+        orderBy: { version: 'desc' }, select: { identifiers: true, integrityHash: true } });
+      const identifiers = current?.identifiers && typeof current.identifiers === 'object' && !Array.isArray(current.identifiers)
+        ? current.identifiers as Prisma.JsonObject : null;
+      const evidenceId = typeof identifiers?.evidenceId === 'string' ? identifiers.evidenceId : null;
+      if (!evidenceId) return null;
+      const evidence = await tx.partnerIdentityEvidence.findUnique({ where: { id: evidenceId }, select: { issuedAt: true } });
+      return evidence ? { evidenceId, issuedAt: evidence.issuedAt, integrityHash: current!.integrityHash } : null;
     },
     async resolveTermsPolicy(tx, policyId, purpose) {
       await tx.$queryRaw`SELECT id FROM partner_terms_policies WHERE id = ${policyId} FOR UPDATE`;
@@ -221,7 +231,7 @@ export function createPrismaPartnerProfileManagementStore(database: PrismaClient
       const revision = input.profile.revision + 1, eventId = randomUUID();
       await tx.partnerProfileEvent.create({ data: { id: eventId, profileId: input.profile.id, revision,
         fromState: input.profile.state, toState: input.profile.state, actorId: input.actorId, reason: input.reason,
-        commandId: input.commandId, evidence: json({ schemaVersion: 2, type: 'IDENTITY_VERIFY',
+        commandId: input.commandId, evidence: json({ schemaVersion: 2, type: input.eventType,
           identityEvidenceId: input.evidence.id, commercialIdentityId: identity.id,
           authorizationEvidenceId: input.authorizationEvidenceId }) } });
       return { revision, eventId };

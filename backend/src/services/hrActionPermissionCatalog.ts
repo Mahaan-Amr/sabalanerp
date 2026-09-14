@@ -69,6 +69,11 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
   permissions: readonly HrActionPermissionDefinition[];
 }> = [
   {
+    code: 'PARTNER_SELLER', labelFa: 'فروشنده همکار', permissions: [
+      { code: 'VERIFY_PARTNER_IDENTITY', labelFa: 'تأیید هویت همکاری', level: 'EDIT', prerequisites: [] },
+    ],
+  },
+  {
     code: 'CASE_EVIDENCE', labelFa: 'مشاهده پرونده و شواهد', permissions: [
       { code: 'VIEW_INITIAL_INTERVIEW_REPORT', labelFa: 'مشاهده گزارش مصاحبه اولیه', level: 'VIEW', prerequisites: ['RECRUITMENT_CASES'] },
       { code: 'VIEW_FULL_APPLICANT_INFORMATION', labelFa: 'مشاهده اطلاعات کامل متقاضی', level: 'VIEW', prerequisites: ['RECRUITMENT_CASES'] },

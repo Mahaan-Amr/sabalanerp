@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import type { PartnerCommand, PartnerQueryResults } from '@sabalanerp/partner-sales-contracts';
+import type { PartnerCommand, PartnerQueryV2Results } from '@sabalanerp/partner-sales-contracts';
 import { ErpButton, ErpInlineState, ErpSheet } from '@/components/erp';
 import { PartnerCommandSession, type CommandFeedback } from '../management/commandSession';
 import { CommandFeedbackView } from '../management/CommandFeedbackView';
@@ -10,7 +10,7 @@ import { ResponseRow } from './ResponseRow';
 import { ResponseReview } from './ResponseReview';
 import { responseDecisions, settleResponseDrafts, type ResponseDrafts } from './responseDraft';
 
-type InquiryDisplay = Pick<PartnerQueryResults['RESPONDER_INQUIRY'], 'inquiryId' | 'assignmentRevision' | 'partnerDisplayName' | 'rows'>;
+type InquiryDisplay = Pick<PartnerQueryV2Results['RESPONDER_INQUIRY'], 'inquiryId' | 'assignmentRevision' | 'partnerDisplayName' | 'submittedAt' | 'rows'>;
 type Decisions = Extract<PartnerCommand, { type: 'INQUIRY_DECIDE' }>['decisions'];
 
 /** UI props are derived from the server projection by the workspace, never from a role title. */
@@ -63,7 +63,10 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
   }
   const rowNumbers = Object.fromEntries(inquiry.rows.map((row, index) => [row.rowId, index + 1]));
   return <section className="min-w-0 space-y-4" aria-label={`استعلام ${inquiry.partnerDisplayName}`} aria-busy={pending}>
-    <h2 className="text-xl font-bold">{inquiry.partnerDisplayName}</h2>
+    <div className="space-y-1">
+      <h2 className="text-xl font-bold">{inquiry.partnerDisplayName}</h2>
+      <p className="text-sm sds-text-secondary">ارسال‌شده در {new Date(inquiry.submittedAt).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran', dateStyle: 'long', timeStyle: 'short' })} · {inquiry.rows.length.toLocaleString('fa-IR')} ردیف</p>
+    </div>
     <CommandFeedbackView feedback={feedback} pending={pending} onRetry={() => void send(true)} onRefresh={() => void reload()} />
     {needsRefresh && <ErpInlineState kind="stale" className="flex-col items-start" title="وضعیت تازه دریافت نشد؛ پیش از اقدام بعدی دوباره دریافت کنید."
       action={{ label: 'دریافت وضعیت تازه', onClick: () => void reload(), disabled: pending }} />}

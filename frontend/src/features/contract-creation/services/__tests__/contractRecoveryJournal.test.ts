@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {
+  createCoalescedContractCheckpointState,
   createContractRecoveryEnvelope,
+  flushCoalescedContractCheckpoint,
   getContractRecoveryStorageKey,
   parseContractRecoveryEnvelope,
   persistContractRecoveryEnvelope,
@@ -57,4 +59,38 @@ assert.equal(
   'browser quota errors must disable only the local fallback, not crash the wizard'
 );
 
-console.log('contractRecoveryJournal tests passed');
+const testCoalescedCheckpointDrain = async () => {
+  const checkpointState = createCoalescedContractCheckpointState<number>();
+  const checkpointWrites: number[] = [];
+  let activeWrites = 0;
+  let maximumActiveWrites = 0;
+  let releaseFirstWrite: (() => void) | undefined;
+  const firstWriteBlocked = new Promise<void>(resolve => {
+    releaseFirstWrite = resolve;
+  });
+  const writeCheckpoint = async (sequence: number) => {
+    activeWrites += 1;
+    maximumActiveWrites = Math.max(maximumActiveWrites, activeWrites);
+    checkpointWrites.push(sequence);
+    if (sequence === 1) await firstWriteBlocked;
+    activeWrites -= 1;
+  };
+  checkpointState.pending = 1;
+  const firstFlush = flushCoalescedContractCheckpoint(checkpointState, writeCheckpoint);
+  await Promise.resolve();
+  checkpointState.pending = 2;
+  checkpointState.pending = 3;
+  const overlappingFlush = flushCoalescedContractCheckpoint(checkpointState, writeCheckpoint);
+  assert.equal(overlappingFlush, firstFlush, 'overlapping flushes must share one in-flight drain');
+  releaseFirstWrite?.();
+  await firstFlush;
+  assert.deepEqual(checkpointWrites, [1, 3], 'queued changes must coalesce to the newest pending checkpoint');
+  assert.equal(maximumActiveWrites, 1, 'checkpoint requests must never overlap');
+};
+
+testCoalescedCheckpointDrain()
+  .then(() => console.log('contractRecoveryJournal tests passed'))
+  .catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  });

@@ -2,14 +2,14 @@ import { canonicalHash, PartnerManagementCommandV2Schema, partnerError,
   type PartnerManagementCommandV2Port, type Result } from '@sabalanerp/partner-sales-contracts';
 
 type Command = ReturnType<typeof PartnerManagementCommandV2Schema.parse>;
-type Supported = Extract<Command, { type: 'PROFILE_CREATE' | 'IDENTITY_VERIFY' |
+type Supported = Extract<Command, { type: 'PROFILE_CREATE' | 'IDENTITY_VERIFY' | 'IDENTITY_VERSION_REGISTER' |
   'COMMERCIAL_TERMS_SET' | 'CREDIT_TERMS_SET' | 'PROFILE_CONVERSION' }>;
 type Profile = { id: string; userId: string; state: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'TERMINATED'; revision: number };
 type OutcomeKey = { actorId: string; operation: string; targetScope: string; key: string };
 type Receipt = { commandId: string; profileId: string; revision: number; eventIds: string[] };
 
 export type PartnerIdentityEvidence = { id: string; userId: string; legalName: string; tradeName?: string;
-  personType: string; identifiers: Record<string, unknown>; phone: string; address: string; integrityHash: string };
+  personType: string; identifiers: Record<string, unknown>; phone: string; address: string; integrityHash: string; issuedAt: Date };
 export type PartnerTermsPolicy = { id: string; purpose: 'PARTNER_TECHNICAL_PRICING' | 'PARTNER_CREDIT_TERMS';
   effectiveDate: Date; terms: Record<string, unknown>; integrityHash: string };
 
@@ -20,13 +20,15 @@ export interface PartnerProfileManagementStore<Transaction = unknown> {
   verifyCreationReceipt(tx: Transaction, input: { profileId: string; identityEvidenceId: string;
     commandId: string; revision: number }): Promise<boolean>;
   resolveIdentityEvidence(tx: Transaction, evidenceId: string): Promise<PartnerIdentityEvidence | null>;
+  readCurrentIdentityEvidence(tx: Transaction, profileId: string): Promise<{ evidenceId: string; issuedAt: Date; integrityHash: string } | null>;
   resolveTermsPolicy(tx: Transaction, policyId: string, purpose: PartnerTermsPolicy['purpose']): Promise<PartnerTermsPolicy | null>;
   lockProfile(tx: Transaction, profileId: string): Promise<Profile | null>;
   findProfileByUser(tx: Transaction, userId: string): Promise<Profile | null>;
   createProfile(tx: Transaction, input: { profileId: string; evidence: PartnerIdentityEvidence; actorId: string;
     commandId: string; reason: string; authorizationEvidenceId: string }): Promise<{ profile: Profile; eventId: string }>;
   appendIdentity(tx: Transaction, input: { profile: Profile; evidence: PartnerIdentityEvidence; actorId: string;
-    commandId: string; reason: string; authorizationEvidenceId: string }): Promise<{ revision: number; eventId: string }>;
+    commandId: string; reason: string; authorizationEvidenceId: string;
+    eventType: 'IDENTITY_VERIFY' | 'IDENTITY_VERSION_REGISTER' }): Promise<{ revision: number; eventId: string }>;
   appendTerms(tx: Transaction, input: { profile: Profile; policy: PartnerTermsPolicy; actorId: string;
     commandId: string; reason: string; authorizationEvidenceId: string }): Promise<{ revision: number; eventId: string }>;
   readConversion(tx: Transaction, profile: Profile): Promise<{ started: boolean; irreversible: boolean;
@@ -62,7 +64,9 @@ function decodeReceipt(value: unknown): Receipt | undefined {
 
 function authorization(command: Supported) {
   if (command.type === 'PROFILE_CREATE') return { action: 'PROFILE_CREATE' as const, purpose: 'ONBOARDING' as const };
-  if (command.type === 'IDENTITY_VERIFY') return { action: 'IDENTITY_VERIFY' as const, purpose: 'ONBOARDING' as const };
+  if (command.type === 'IDENTITY_VERIFY' || command.type === 'IDENTITY_VERSION_REGISTER') {
+    return { action: 'IDENTITY_VERIFY' as const, purpose: 'ONBOARDING' as const };
+  }
   if (command.type === 'COMMERCIAL_TERMS_SET') return { action: 'COMMERCIAL_TERMS_MANAGE' as const, purpose: 'MANAGEMENT' as const };
   if (command.type === 'CREDIT_TERMS_SET') return { action: 'CREDIT_TERMS_MANAGE' as const, purpose: 'ACCOUNTING' as const };
   return { action: 'PROFILE_CONVERSION_MANAGE' as const, purpose: 'MANAGEMENT' as const };
@@ -75,7 +79,7 @@ export function createPartnerProfileManagementService<Transaction = unknown>(
   dependencies: PartnerProfileManagementDependencies<Transaction>): PartnerManagementCommandV2Port {
   return { async execute(input) {
     const parsed = PartnerManagementCommandV2Schema.safeParse(input);
-    if (!parsed.success || !['PROFILE_CREATE', 'IDENTITY_VERIFY', 'COMMERCIAL_TERMS_SET', 'CREDIT_TERMS_SET', 'PROFILE_CONVERSION']
+    if (!parsed.success || !['PROFILE_CREATE', 'IDENTITY_VERIFY', 'IDENTITY_VERSION_REGISTER', 'COMMERCIAL_TERMS_SET', 'CREDIT_TERMS_SET', 'PROFILE_CONVERSION']
       .includes(parsed.data.type)) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
     const command = parsed.data as Supported;
     const payloadHash = await canonicalHash(intent(command));
@@ -161,12 +165,22 @@ export function createPartnerProfileManagementService<Transaction = unknown>(
           dispositionEvidenceIds: command.dispositionEvidenceIds, actorId: dependencies.actorId,
           commandId: command.commandId, reason: command.reason,
           authorizationEvidenceId: authorized.value.evidenceId });
-      } else if (command.type === 'IDENTITY_VERIFY') {
+      } else if (command.type === 'IDENTITY_VERIFY' || command.type === 'IDENTITY_VERSION_REGISTER') {
         const evidence = await dependencies.store.resolveIdentityEvidence(tx, command.evidenceId);
         if (!evidence) return { ok: false, error: partnerError('NOT_FOUND') };
         if (evidence.userId !== profile.userId) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+        const currentIdentity = await dependencies.store.readCurrentIdentityEvidence(tx, profile.id);
+        if (command.type === 'IDENTITY_VERIFY' && currentIdentity) return { ok: false, error: partnerError('STATE_CONFLICT') };
+        if (command.type === 'IDENTITY_VERSION_REGISTER' && (!currentIdentity || currentIdentity.evidenceId === evidence.id ||
+            currentIdentity.integrityHash === evidence.integrityHash)) {
+          return { ok: false, error: partnerError('STATE_CONFLICT') };
+        }
+        if (command.type === 'IDENTITY_VERSION_REGISTER' && evidence.issuedAt <= currentIdentity!.issuedAt) {
+          return { ok: false, error: partnerError('STATE_CONFLICT') };
+        }
         written = await dependencies.store.appendIdentity(tx, { profile, evidence, actorId: dependencies.actorId,
-          commandId: command.commandId, reason: command.reason, authorizationEvidenceId: authorized.value.evidenceId });
+          commandId: command.commandId, reason: command.reason, authorizationEvidenceId: authorized.value.evidenceId,
+          eventType: command.type });
       } else {
         const purpose = command.type === 'COMMERCIAL_TERMS_SET' ? 'PARTNER_TECHNICAL_PRICING' : 'PARTNER_CREDIT_TERMS';
         const policy = await dependencies.store.resolveTermsPolicy(tx, command.termsVersionId, purpose);

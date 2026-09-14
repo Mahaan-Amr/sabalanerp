@@ -111,9 +111,10 @@ export function createOperationsService(contract: ContractRuntime, store: Operat
       const state = await tx.readState();
       if (state.revision !== input.expectedRevision) throw new OperationsError('ROW_STALE');
       if (!state.enrollmentPaused || state.cohort) throw new OperationsError('STATE_CONFLICT');
+      const readiness = await requireReadiness(tx, state);
       const next = { ...state, revision: state.revision + 1, cohort: { id: input.id, name: input.name.trim(), sellerIds: [] } };
       await tx.writeState(next);
-      await audit(tx, actor, next, 'COHORT_DEFINED', input.reason);
+      await audit(tx, actor, next, 'COHORT_DEFINED', input.reason, readiness.evidenceId);
       return next;
     }),
     enroll: (input: { sellerId: string; expectedRevision: number; reason: string }) => transact(async tx => {

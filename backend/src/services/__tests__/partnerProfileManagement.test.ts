@@ -9,6 +9,7 @@ function fixture() {
   const profiles = new Map<string, Profile>();
   const outcomes = new Map<string, { payloadHash: string; receipt: unknown }>();
   const events: Array<{ kind: string; profileId: string; referenceId: string }> = [];
+  const currentIdentity = new Map<string, { evidenceId: string; issuedAt: Date; integrityHash: string }>();
   const conversion = new Map<string, { started: boolean; irreversible: boolean; blockerIds: string[];
     requiredBlockerIds: string[]; evidenceIds: string[] }>();
   const store: PartnerProfileManagementStore<object> = {
@@ -18,11 +19,13 @@ function fixture() {
     verifyCreationReceipt: async (_tx, input) => profiles.has(input.profileId) &&
       events.some(event => event.kind === 'PROFILE_CREATE' && event.profileId === input.profileId &&
         event.referenceId === input.identityEvidenceId),
-    resolveIdentityEvidence: async (_tx, evidenceId) => evidenceId === 'identity-1' ? {
-      id: evidenceId, userId: 'partner-user', legalName: 'فروشنده همکار', personType: 'NATURAL',
+    resolveIdentityEvidence: async (_tx, evidenceId) => ['identity-1', 'identity-2'].includes(evidenceId) ? {
+      id: evidenceId, userId: 'partner-user', legalName: evidenceId === 'identity-2' ? 'فروشنده همکار جدید' : 'فروشنده همکار', personType: 'NATURAL',
       identifiers: { nationalId: 'masked' }, phone: '+989120000000', address: 'تهران، نشانی معتبر',
-      integrityHash: `sha256-v1:${'1'.repeat(64)}`,
+      integrityHash: `sha256-v1:${(evidenceId === 'identity-2' ? '2' : '1').repeat(64)}`,
+      issuedAt: new Date(evidenceId === 'identity-2' ? '2026-09-02' : '2026-09-01'),
     } : null,
+    readCurrentIdentityEvidence: async (_tx, profileId) => currentIdentity.get(profileId) ?? null,
     resolveTermsPolicy: async (_tx, policyId, purpose) => policyId === `${purpose}-v1` ? {
       id: policyId, purpose, effectiveDate: new Date('2026-08-29'), terms: { purpose, policyId },
       integrityHash: `sha256-v1:${'2'.repeat(64)}`,
@@ -31,12 +34,16 @@ function fixture() {
     findProfileByUser: async (_tx, userId) => [...profiles.values()].find(profile => profile.userId === userId) ?? null,
     createProfile: async (_tx, input) => {
       const profile = { id: input.profileId, userId: input.evidence.userId, state: 'PENDING' as const, revision: 1 };
+      currentIdentity.set(profile.id, { evidenceId: input.evidence.id, issuedAt: input.evidence.issuedAt,
+        integrityHash: input.evidence.integrityHash });
       profiles.set(profile.id, profile); events.push({ kind: 'PROFILE_CREATE', profileId: profile.id, referenceId: input.evidence.id });
       return { profile, eventId: `event-${events.length}` };
     },
     appendIdentity: async (_tx, input) => {
       const profile = profiles.get(input.profile.id)!; profile.revision += 1;
-      events.push({ kind: 'IDENTITY_VERIFY', profileId: profile.id, referenceId: input.evidence.id });
+      currentIdentity.set(profile.id, { evidenceId: input.evidence.id, issuedAt: input.evidence.issuedAt,
+        integrityHash: input.evidence.integrityHash });
+      events.push({ kind: input.eventType, profileId: profile.id, referenceId: input.evidence.id });
       return { revision: profile.revision, eventId: `event-${events.length}` };
     },
     appendTerms: async (_tx, input) => {
@@ -58,11 +65,11 @@ function fixture() {
       return { revision: profile.revision, eventId: `event-${events.length}` };
     },
   };
-  return { store, profiles, events, conversion, outcomes };
+  return { store, profiles, events, conversion, outcomes, currentIdentity };
 }
 
 type CommandInput = { type: 'PROFILE_CREATE'; identityEvidenceId: string } |
-  { type: 'IDENTITY_VERIFY'; profileId: string; expectedRevision: number; evidenceId: string } |
+  { type: 'IDENTITY_VERIFY' | 'IDENTITY_VERSION_REGISTER'; profileId: string; expectedRevision: number; evidenceId: string } |
   { type: 'COMMERCIAL_TERMS_SET' | 'CREDIT_TERMS_SET'; profileId: string; expectedRevision: number; termsVersionId: string } |
   { type: 'PROFILE_CONVERSION'; profileId: string; expectedRevision: number; transition: 'START' | 'ABANDON' | 'RESOLVE';
     dispositionEvidenceIds: string[] };
@@ -98,13 +105,18 @@ test('identity and effective commercial/credit policies append evidence and adva
     authorize: async (_tx, input) => { actions.push(input.action); return { ok: true, value: { evidenceId: `auth-${input.action}` } }; } });
   assert.equal((await service.execute(await command('manager', { type: 'IDENTITY_VERIFY', profileId: 'profile-1',
     expectedRevision: 1, evidenceId: 'identity-1' }, 'identity-command'))).ok, true);
+  assert.equal((await service.execute(await command('manager', { type: 'IDENTITY_VERSION_REGISTER', profileId: 'profile-1',
+    expectedRevision: 2, evidenceId: 'identity-2' }, 'identity-version-command'))).ok, true);
+  const olderIdentity = await service.execute(await command('manager', { type: 'IDENTITY_VERSION_REGISTER', profileId: 'profile-1',
+    expectedRevision: 3, evidenceId: 'identity-1' }, 'older-identity-version-command'));
+  assert.equal(olderIdentity.ok ? null : olderIdentity.error.code, 'STATE_CONFLICT');
   assert.equal((await service.execute(await command('manager', { type: 'COMMERCIAL_TERMS_SET', profileId: 'profile-1',
-    expectedRevision: 2, termsVersionId: 'PARTNER_TECHNICAL_PRICING-v1' }, 'commercial-command'))).ok, true);
+    expectedRevision: 3, termsVersionId: 'PARTNER_TECHNICAL_PRICING-v1' }, 'commercial-command'))).ok, true);
   const credit = await service.execute(await command('manager', { type: 'CREDIT_TERMS_SET', profileId: 'profile-1',
-    expectedRevision: 3, termsVersionId: 'PARTNER_CREDIT_TERMS-v1' }, 'credit-command'));
-  assert.equal(credit.ok, true); if (credit.ok) assert.equal(credit.value.revision, 4);
-  assert.deepEqual(actions, ['IDENTITY_VERIFY', 'COMMERCIAL_TERMS_MANAGE', 'CREDIT_TERMS_MANAGE']);
-  assert.deepEqual(events.map(event => event.kind), ['IDENTITY_VERIFY', 'PARTNER_TECHNICAL_PRICING', 'PARTNER_CREDIT_TERMS']);
+    expectedRevision: 4, termsVersionId: 'PARTNER_CREDIT_TERMS-v1' }, 'credit-command'));
+  assert.equal(credit.ok, true); if (credit.ok) assert.equal(credit.value.revision, 5);
+  assert.deepEqual(actions, ['IDENTITY_VERIFY', 'IDENTITY_VERIFY', 'IDENTITY_VERIFY', 'COMMERCIAL_TERMS_MANAGE', 'CREDIT_TERMS_MANAGE']);
+  assert.deepEqual(events.map(event => event.kind), ['IDENTITY_VERIFY', 'IDENTITY_VERSION_REGISTER', 'PARTNER_TECHNICAL_PRICING', 'PARTNER_CREDIT_TERMS']);
 });
 
 test('profile management rejects stale revisions, unknown evidence, actor spoofing and second profile for one user', async () => {

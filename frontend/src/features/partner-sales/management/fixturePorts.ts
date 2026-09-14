@@ -104,7 +104,8 @@ export function createManagementFixture(persona: ManagementPersona) {
     const previous = managementLedger.get(command.idempotency.key);
     if (previous) return previous.hash === command.idempotency.payloadHash ? structuredClone(previous.result) : { ok: false, error: partnerError('IDEMPOTENCY_CONFLICT') };
     const action: PartnerActionV2 = command.type === 'COMMERCIAL_TERMS_SET' ? 'COMMERCIAL_TERMS_MANAGE'
-      : command.type === 'CREDIT_TERMS_SET' ? 'CREDIT_TERMS_MANAGE' : command.type === 'PROFILE_CONVERSION' ? 'PROFILE_CONVERSION_MANAGE' : command.type;
+      : command.type === 'CREDIT_TERMS_SET' ? 'CREDIT_TERMS_MANAGE' : command.type === 'PROFILE_CONVERSION' ? 'PROFILE_CONVERSION_MANAGE'
+        : command.type === 'IDENTITY_VERSION_REGISTER' ? 'IDENTITY_VERIFY' : command.type;
     let result: ManagementResult = { ok: false, error: partnerError('FORBIDDEN') };
     let changed = false;
     let item = 'profileId' in command ? profiles.find(item => item.profile.profileId === command.profileId) : undefined;
@@ -116,6 +117,9 @@ export function createManagementFixture(persona: ManagementPersona) {
       else if ('expectedRevision' in command && item.profile.revision !== command.expectedRevision) result = { ok: false, error: partnerError('ROW_STALE') };
       else {
         if (command.type === 'IDENTITY_VERIFY' && command.evidenceId === item.identity?.evidenceId) item.profile.identityVerified = true;
+        else if (command.type === 'IDENTITY_VERSION_REGISTER' && item.identityRevision?.options.some(option => option.id === command.evidenceId)) {
+          item.identity!.evidenceId = command.evidenceId; item.identityRevision = undefined;
+        }
         else if (command.type === 'COMMERCIAL_TERMS_SET' && item.commercialTerms?.options.some(option => option.id === command.termsVersionId)) {
           item.commercialTerms.currentVersionId = command.termsVersionId; item.commercialTerms.summary = 'شرایط مصوب فروش همکار ثبت شده است.'; item.profile.commercialTermsReady = true;
         } else if (command.type === 'CREDIT_TERMS_SET' && item.creditTerms?.options.some(option => option.id === command.termsVersionId)) {

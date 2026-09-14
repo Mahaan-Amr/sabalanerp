@@ -23,14 +23,14 @@ test('Partner policy consumes central persisted grants, not an injected fixture 
       principal: { kind: 'USER', id: actor }, domain: 'PARTNER', action: 'COMMERCIAL_TERMS_MANAGE',
       rootKind: 'PROFILE', purpose: 'MANAGEMENT', scope: 'COMPANY', effect: 'ALLOW',
     });
-    await tx.user.update({ where: { id: actor }, data: { role: 'MANAGER' } });
+    await tx.user.update({ where: { id: actor }, data: { role: 'USER' } });
     const port = createPrismaPartnerAuthorizationV2(tx, { actorId: actor, purpose: 'MANAGEMENT', channel: 'API' }, resolvePartnerScopedAuthority);
     const root = { kind: 'PROFILE' as const, id: partner };
     assert.equal((await port.authorize('COMMERCIAL_TERMS_MANAGE', root)).ok, true);
     assert.equal((await port.authorize('PROFILE_CONVERSION_MANAGE', root)).ok, false);
     await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
     await revokeScopedAction(tx, { actorId: actor, reason: 'لغو اختیار', correlationId: randomUUID() }, receipt.id);
-    await tx.user.update({ where: { id: actor }, data: { role: 'MANAGER' } });
+    await tx.user.update({ where: { id: actor }, data: { role: 'USER' } });
     assert.equal((await port.authorize('COMMERCIAL_TERMS_MANAGE', root)).ok, false);
   });
 });
@@ -495,7 +495,7 @@ test('a responder deactivated by a competing transaction cannot pass authorizati
   }
 });
 
-test('persisted v2 management uses the same current Profile and grant source without HR or workspace fallback', async () => {
+test('persisted v2 management consumes the current Profile and injected effective grant source', async () => {
   await fixture(async (tx, partner, actor) => {
     await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'PENDING' } });
     const grant = await tx.featurePermission.create({ data: { userId: actor, workspace: 'sales',

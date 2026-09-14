@@ -114,11 +114,36 @@ async function readTechnicalPolicyForAccount(tx: Prisma.TransactionClient, accou
     if (candidate.effectiveDate.getTime() > now.getTime()) continue;
     const raw = record(candidate.terms);
     if (raw?.purpose !== 'PARTNER_TECHNICAL_PRICING') continue;
-    const expectedHash = await canonicalHash({ accountId: candidate.accountId, version: candidate.version,
-      effectiveDate: candidate.effectiveDate.toISOString().slice(0, 10), terms: candidate.terms,
-      actorId: candidate.actorId, reason: candidate.reason });
-    if (candidate.integrityHash !== expectedHash) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-    const policy = parsePartnerTechnicalSalesPolicySnapshot(candidate.terms, candidate);
+    let policyTerms: unknown = candidate.terms;
+    if (typeof raw.policyId === 'string') {
+      // Bootstrap projects an immutable, centrally issued terms policy into the
+      // Partner account and deliberately retains the source policy hash. Later
+      // account-local policy publications use the account-stream hash below.
+      // Accepting only one hash convention here made every correctly bootstrapped
+      // Partner fail their first validated technical save.
+      const source = await tx.partnerTermsPolicy.findUnique({ where: { id: raw.policyId }, select: {
+        id: true, purpose: true, label: true, effectiveDate: true, expiresAt: true, issuedAt: true, revokedAt: true,
+        terms: true, integrityHash: true,
+      } });
+      const sourceDate = source?.effectiveDate.toISOString().slice(0, 10);
+      const sourceHash = source && await canonicalHash({ purpose: source.purpose, label: source.label,
+        effectiveDate: sourceDate, terms: source.terms });
+      const sourceTerms = source && record(source.terms);
+      const projected = sourceTerms && { ...sourceTerms, purpose: source!.purpose, policyId: source!.id };
+      if (!source || !sourceTerms || source.purpose !== 'PARTNER_TECHNICAL_PRICING' || source.revokedAt || source.issuedAt > now ||
+          (source.expiresAt && source.expiresAt <= now) || source.effectiveDate.getTime() !== candidate.effectiveDate.getTime() ||
+          source.integrityHash !== sourceHash || candidate.integrityHash !== source.integrityHash ||
+          await canonicalHash(projected) !== await canonicalHash(candidate.terms)) {
+        return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+      }
+      policyTerms = { ...sourceTerms, purpose: source.purpose };
+    } else {
+      const expectedHash = await canonicalHash({ accountId: candidate.accountId, version: candidate.version,
+        effectiveDate: candidate.effectiveDate.toISOString().slice(0, 10), terms: candidate.terms,
+        actorId: candidate.actorId, reason: candidate.reason });
+      if (candidate.integrityHash !== expectedHash) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    }
+    const policy = parsePartnerTechnicalSalesPolicySnapshot(policyTerms, candidate);
     return policy ? { ok: true, value: { policy, accountVersion } } : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
   return { ok: false, error: partnerError('STATE_CONFLICT') };

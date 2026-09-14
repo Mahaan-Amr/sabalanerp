@@ -42,10 +42,13 @@ function createAuthorization(source: AuthorizationSource<PartnerActionV2>, bindi
         (grant.scope === 'ASSIGNED' && binding.purpose === 'RESPONDER' && resource.assignment?.actorId === actor.id && resource.assignment.eligible) ||
         (grant.scope === 'PURPOSE_BOUND' && ['ACCOUNTING', 'FULFILLMENT'].includes(binding.purpose) && grant.boundRootId === root.id)));
     if (!partner && !admin && !grants.length) return { ok: false, error: partnerError('NOT_FOUND') };
-    if (binding.purpose === 'RESPONDER' && (!resource.assignment?.eligible || resource.assignment.actorId !== actor.id)) {
+    const actionGrant = grants.find(grant => grant.action === action);
+    const companyResponderOverride = binding.purpose === 'RESPONDER' &&
+      (admin || actionGrant?.scope === 'COMPANY');
+    if (binding.purpose === 'RESPONDER' && !companyResponderOverride &&
+        (!resource.assignment?.eligible || resource.assignment.actorId !== actor.id)) {
       return { ok: false, error: partnerError('NOT_ASSIGNED') };
     }
-    const actionGrant = grants.find(grant => grant.action === action);
     const capabilities: typeof internalCapabilitiesV2 = partner
       ? (version === 1 ? partnerCapabilities : partnerCapabilitiesV2) : internal;
     const context: PermissionContext = {

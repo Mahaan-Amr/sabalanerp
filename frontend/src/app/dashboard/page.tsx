@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -116,6 +116,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { accessibleWorkspaces, loading: workspaceLoading } = useWorkspace();
+  const partnerLandingChecked = useRef(false);
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -161,7 +162,20 @@ export default function DashboardPage() {
       }
     }
     if (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER') void fetchDashboardData();
-    else setLoading(false);
+    else if (accessibleWorkspaces.length === 0 && !partnerLandingChecked.current) {
+      partnerLandingChecked.current = true;
+      void (async () => {
+        const paths = ['/dashboard/sales/partners', '/dashboard/sales/contracts/create',
+          '/dashboard/sales/partner-inquiries', '/dashboard/sales/partner-cases'];
+        for (const path of paths) {
+          try {
+            const response = await dashboardAPI.getRouteAvailability(path);
+            if (response.data.data.allowed === true) { router.replace(path); return; }
+          } catch { /* fail closed and try the next Partner route */ }
+        }
+        setLoading(false);
+      })();
+    } else if (accessibleWorkspaces.length > 0) setLoading(false);
   }, [accessibleWorkspaces, currentUser, fetchDashboardData, router, workspaceLoading]);
 
   if (loading && !stats) return <ErpLoading />;

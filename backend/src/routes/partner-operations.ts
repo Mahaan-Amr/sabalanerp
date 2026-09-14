@@ -33,7 +33,9 @@ export function createPrismaPartnerOperationsRouter() {
     const supplied = authenticated.get('X-Correlation-Id');
     const correlationId = supplied && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(supplied) ? supplied : randomUUID();
     return { ok: true, value: createOperationsService(runtime,
-      createPrismaPartnerOperationsStore({ database: prisma, actorId: authenticated.user.id, correlationId })) };
+      createPrismaPartnerOperationsStore({ database: prisma, actorId: authenticated.user.id, correlationId,
+        runtimeIdentity: { releaseId: String(process.env.DEPLOYMENT_RELEASE_ID || '').trim(),
+          schemaId: String(process.env.PARTNER_SCHEMA_ID || '').trim() } })) };
   });
   router.use(composed);
   return router;

@@ -1,7 +1,7 @@
 # Partner fulfillment adapter
 
 Issue #323 owns this adapter. It consumes
-`@sabalanerp/partner-sales-contracts@1.9.0` (the current compatible package on
+`@sabalanerp/partner-sales-contracts@1.10.0` (the current compatible package on
 `origin/main`), original wire schema `1`, and
 `sha256-v1`. Runtime transport and the real Case/Prisma composition remain the
 integration responsibility of #334; this module is accepted through its

@@ -128,6 +128,9 @@ export const FEATURES = {
   SALES_LEGACY_CONTRACTS_REJECT: 'sales_legacy_contracts_reject',
   SALES_LEGACY_CONTRACTS_SIGN: 'sales_legacy_contracts_sign',
   SALES_LEGACY_CONTRACTS_PRINT: 'sales_legacy_contracts_print',
+  SALES_PARTNER_INQUIRIES_VIEW: 'sales_partner_inquiries_view',
+  SALES_PARTNER_INQUIRIES_RESPOND: 'sales_partner_inquiries_respond',
+  SALES_PARTNER_SELLERS_MANAGE: 'sales_partner_sellers_manage',
 
   // Inventory Features
   INVENTORY_CUT_TYPES_VIEW: 'inventory_cut_types_view',
@@ -207,9 +210,11 @@ export const FEATURES = {
   ACCOUNTING_DISPATCH_CANDIDATES_VIEW: 'accounting_dispatch_candidates_view',
   ACCOUNTING_DISPATCH_CANDIDATES_MANAGE: 'accounting_dispatch_candidates_manage',
   ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE: 'accounting_dispatch_confirmation_manage',
+  ACCOUNTING_PARTNER_TERMS_MANAGE: 'accounting_partner_terms_manage',
 
   // BI Features
   BI_DASHBOARD_VIEW: 'bi_dashboard_view',
+  BI_PARTNER_REPORTS_VIEW: 'bi_partner_reports_view',
 
   // Logistics Features
   LOGISTICS_DASHBOARD_VIEW: 'logistics_dashboard_view',
@@ -408,6 +413,9 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.SALES_LEGACY_CONTRACTS_REJECT]: 'sales',
   [FEATURES.SALES_LEGACY_CONTRACTS_SIGN]: 'sales',
   [FEATURES.SALES_LEGACY_CONTRACTS_PRINT]: 'sales',
+  [FEATURES.SALES_PARTNER_INQUIRIES_VIEW]: 'sales',
+  [FEATURES.SALES_PARTNER_INQUIRIES_RESPOND]: 'sales',
+  [FEATURES.SALES_PARTNER_SELLERS_MANAGE]: 'sales',
 
   // Inventory Features
   [FEATURES.INVENTORY_CUT_TYPES_VIEW]: 'inventory',
@@ -487,9 +495,11 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_VIEW]: 'accounting',
   [FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE]: 'accounting',
   [FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_PARTNER_TERMS_MANAGE]: 'accounting',
 
   // BI Features
   [FEATURES.BI_DASHBOARD_VIEW]: 'bi',
+  [FEATURES.BI_PARTNER_REPORTS_VIEW]: 'bi',
 
   // Logistics Features
   [FEATURES.LOGISTICS_DASHBOARD_VIEW]: 'logistics',
@@ -594,6 +604,8 @@ const FEATURE_SUBJECT_LABELS_FA: Record<string, string> = {
   sales_products: 'محصولات فروش',
   sales_customers: 'مشتریان فروش',
   sales_legacy_contracts: 'قراردادهای قدیمی',
+  sales_partner_inquiries: 'استعلام‌های همکار',
+  sales_partner_sellers: 'فروشندگان و پاسخ‌دهندگان همکار',
   inventory_cut_types: 'انواع برش',
   inventory_stone_materials: 'جنس‌های سنگ',
   inventory_cut_widths: 'عرض‌های برش',
@@ -620,7 +632,9 @@ const FEATURE_SUBJECT_LABELS_FA: Record<string, string> = {
   accounting_biometric_diagnostics: 'عیب‌یابی اتصال زیست‌سنجی حسابداری',
   accounting_dispatch_candidates: 'گزینه‌های ارسال اسناد حسابداری',
   accounting_dispatch_confirmation: 'تأیید ارسال اسناد حسابداری',
+  accounting_partner_terms: 'شرایط تجاری و اعتبار فروشنده همکار',
   bi_dashboard: 'داشبورد هوش تجاری',
+  bi_partner_reports: 'گزارش‌ها و حساب‌های فروشنده همکار',
   logistics_dashboard: 'داشبورد لجستیک',
   logistics_loadings: 'بارگیری‌ها',
   logistics_corrections: 'اصلاحات لجستیک',
@@ -696,6 +710,7 @@ const FEATURE_ACTION_LABELS_FA: ReadonlyArray<readonly [string, string]> = [
   ['end', 'پایان'],
   ['exception', 'ثبت استثنای'],
   ['request', 'درخواست'],
+  ['respond', 'پاسخ‌گویی به'],
   ['assign', 'تخصیص'],
   ['update', 'به‌روزرسانی'],
   ['validate', 'اعتبارسنجی'],

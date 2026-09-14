@@ -567,7 +567,10 @@ export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMA
 
 compose config --quiet
 echo "Building immutable release ${DEPLOYMENT_RELEASE_ID} before maintenance..."
-compose build backend frontend inquiry
+# Keep compiler heaps from competing with the live release on the production host.
+for release_service in backend frontend inquiry; do
+  compose build "${release_service}"
+done
 DEPLOYMENT_BACKEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_BACKEND_IMAGE}")"
 DEPLOYMENT_FRONTEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_FRONTEND_IMAGE}")"
 DEPLOYMENT_INQUIRY_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_INQUIRY_IMAGE}")"

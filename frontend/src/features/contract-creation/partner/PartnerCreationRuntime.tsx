@@ -20,7 +20,7 @@ import { isUsableInquiryRow, type PartnerInquiryView, type PartnerInquiryRow } f
 import { PartnerContractWizard, partnerWizardSteps, type PartnerWizardDraft, type PartnerWizardStep } from './PartnerContractWizard';
 import { WizardProgressBar } from '../components/shared/WizardProgressBar';
 import { createPartnerCaseSubmission, type PartnerSubmitCommand } from './partnerCaseSubmission';
-import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit } from './partnerWizardEntry';
+import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, shouldPreferLocalPartnerWizard } from './partnerWizardEntry';
 import { partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
 import { buildPartnerCustomerCreateCommand, emptyPartnerCustomerDraft, validatePartnerCustomerDraft,
@@ -149,7 +149,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   useEffect(() => {
     if (!wizardRecoveryId || !runtime) return;
     window.localStorage.setItem(wizardDraftKey(runtime.actorId, wizard.intent.recoveryId), JSON.stringify({
-      savedAt: Date.now(), draft: wizard,
+      savedAt: Date.now(), serverRevision: wizardServerRevision.current, draft: wizard,
     }));
   }, [runtime, wizard, wizardRecoveryId]);
 
@@ -578,7 +578,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       setCustomerId(nextCustomerId);
       setWizard({ ...draft, step: 'products', rows, intent: nextIntent });
     };
-    const stored = readStored<{ savedAt: number; draft: PartnerWizardDraft }>(wizardDraftKey(runtime.actorId, draft.intent.recoveryId));
+    const stored = readStored<{ savedAt: number; serverRevision?: number; draft: PartnerWizardDraft }>(
+      wizardDraftKey(runtime.actorId, draft.intent.recoveryId));
     const storedIntent = stored && Date.now() - stored.savedAt <= 7 * 24 * 60 * 60 * 1000
       ? CaseDraftIntentSchema.safeParse(stored.draft?.intent) : undefined;
     try {
@@ -586,7 +587,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       const savedWizard = PartnerWizardRecoverySnapshotSchema.safeParse((response.data as { data?: unknown })?.data);
       if (savedWizard.success) {
         wizardServerRevision.current = savedWizard.data.wizardRevision;
-        if (storedIntent?.success && stored && stored.savedAt > Date.parse(savedWizard.data.updatedAt)) {
+        if (stored && storedIntent?.success && shouldPreferLocalPartnerWizard(stored.serverRevision, savedWizard.data.wizardRevision)) {
           const sameLocalRows = stored.draft.rows.length === draft.rows.length &&
             stored.draft.rows.every(row => draft.rows.some(current => current.productRowId === row.productRowId));
           if (sameLocalRows && storedIntent.data.recoveryRevision === draft.intent.recoveryRevision &&

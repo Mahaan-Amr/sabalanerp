@@ -5,6 +5,9 @@ import { defaultPartnerRetailRows, partnerRetailIntentRows } from './partnerReta
 import type { PartnerWizardDraft } from './PartnerContractWizard';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
+export const shouldPreferLocalPartnerWizard = (localServerRevision: number | undefined, currentServerRevision: number) =>
+  localServerRevision === currentServerRevision;
+
 export function preservePartnerDeliveriesAcrossProductEdit(
   previous: PartnerDraftIntent['deliveries'],
   defaults: PartnerDraftIntent['deliveries'],

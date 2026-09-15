@@ -9,7 +9,7 @@ import { defaultPartnerRetailRows } from '../../contract-creation/partner/partne
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
 import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
 import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
-import { preservePartnerDeliveriesAcrossProductEdit } from '../../contract-creation/partner/partnerWizardEntry';
+import { preservePartnerDeliveriesAcrossProductEdit, shouldPreferLocalPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
 
 const fixture = createPartnerFixtures();
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
@@ -23,6 +23,12 @@ const draft: PartnerWizardDraft = { step: 'products', rows, intent: {
 const submission = () => createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
   commands: { execute: async () => { throw new Error('not used'); } },
   recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined, finalizeCommitted: async () => undefined },
+});
+
+test('local recovery freshness follows the shared server revision instead of either machine clock', () => {
+  assert.equal(shouldPreferLocalPartnerWizard(7, 7), true);
+  assert.equal(shouldPreferLocalPartnerWizard(6, 7), false);
+  assert.equal(shouldPreferLocalPartnerWizard(undefined, 7), false);
 });
 
 test('product editing preserves split and grouped deliveries while adding only new product defaults', () => {

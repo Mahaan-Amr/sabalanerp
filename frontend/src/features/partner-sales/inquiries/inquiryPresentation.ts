@@ -33,5 +33,5 @@ export function inquirySummary(inquiry: PartnerInquiryView): string {
 
 export const persianCount = (value: number): string => value.toLocaleString('fa-IR');
 export const inquiryMoney = (row: PartnerInquiryRow): string => row.approvedPrice
-  ? `${row.approvedPrice.amount.replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} ${row.approvedPrice.currency === 'IRR' ? 'ریال' : 'تومان'}`
+  ? `${BigInt(row.approvedPrice.amount).toLocaleString('fa-IR')} ${row.approvedPrice.currency === 'IRR' ? 'ریال' : 'تومان'}`
   : '—';

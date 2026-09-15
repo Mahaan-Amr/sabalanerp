@@ -148,7 +148,12 @@ function LayerEditor({ draft, products, operations, previewRows, inventory, onCh
           creationOrder: (draft.dependents?.length ?? 0) + 1 })); }}
       onRemove={id => onChange(removePartnerTechnicalDependent(draft, id))}
       onChange={(id, value) => { const current = layers.find(item => item.layerConfigurationId === id); if (!current) return;
-        const product = products.find(item => item.catalogItemId === parent.catalogItemId); let next = draft;
+        const parentProduct = products.find(item => item.catalogItemId === parent.catalogItemId);
+        const currentNewMaterial = current.source?.kind === 'new-material' ? current.source : undefined;
+        const product = value.source === 'new-material' && currentNewMaterial
+          ? products.find(item => item.catalogItemId === currentNewMaterial.catalogItemId) ?? parentProduct
+          : parentProduct;
+        let next = draft;
         next = commitText(next, id, 'layersPerParentPiece', value.layersPerParentPiece);
         const width = (() => { try { return convertCompactLengthUnit(parseCanonicalDecimal(value.width), value.widthUnit, 'm'); } catch { return value.width; } })();
         next = commitText(next, id, 'widthMeters', width);
@@ -167,6 +172,21 @@ function LayerEditor({ draft, products, operations, previewRows, inventory, onCh
           dependents: next.dependents?.map(item => item === updated ? { ...updated, widthDisplayUnit: value.widthUnit,
             targetSides: [...value.targetSides], description: value.description, ...(source ? { source } : {}) } : item) }));
       }} />
+    {layers.filter(layer => layer.parentProductRowId === parent.productRowId && layer.source?.kind === 'new-material').map(layer =>
+      <ErpCombobox key={`layer-stone:${layer.layerConfigurationId}`} label="سنگ اصلی لایه" value={layer.source?.kind === 'new-material' ? layer.source.catalogItemId : ''}
+        options={products.map(product => ({ value: product.catalogItemId, label: `${product.name} · ${product.code}` }))}
+        onChange={catalogItemId => { const product = products.find(item => item.catalogItemId === catalogItemId);
+          const source = layer.source;
+          if (!product || source?.kind !== 'new-material') return;
+          const lengthMeters = product.dimensions.motherLengthMeters ?? source.sourceRows[0]?.lengthMeters;
+          const widthMeters = product.dimensions.motherWidthCentimeters
+            ? String(Number(product.dimensions.motherWidthCentimeters) / 100) : source.sourceRows[0]?.widthMeters;
+          if (!lengthMeters || !widthMeters) return;
+          onChange(PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1,
+            dependents: (draft.dependents ?? []).map(item => item === layer ? { ...item, source: { ...source,
+              catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
+              sourceRows: source.sourceRows.map(row => ({ ...row, lengthMeters, widthMeters })) } } : item) }));
+        }} />)}
     {layers.filter(layer => layer.parentProductRowId === parent.productRowId && layer.source?.kind === 'paid-remainder').map(layer =>
       <ErpField key={`paid-stock:${layer.layerConfigurationId}`} label="قطعات باقی‌مانده برای لایه" required
         hint="یک یا چند قطعه از موجودی canonical همین فروش را انتخاب کنید.">

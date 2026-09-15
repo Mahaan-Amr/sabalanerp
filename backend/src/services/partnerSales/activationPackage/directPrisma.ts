@@ -51,8 +51,9 @@ async function responsibilityCount(tx: Tx, userId: string) {
   return duties + sessions + contracts + projects + corrections;
 }
 
-async function eligibleResponders(tx: Tx) {
-  const candidates = await tx.user.findMany({ where: { isActive: true, partnerProfile: null },
+async function eligibleResponders(tx: Tx, excludedUserIds: readonly string[] = []) {
+  const candidates = await tx.user.findMany({ where: { isActive: true, partnerProfile: null,
+    ...(excludedUserIds.length ? { id: { notIn: [...excludedUserIds] } } : {}) },
     orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }, { id: 'asc' }], take: 100,
     select: { id: true, firstName: true, lastName: true, username: true } });
   const eligible = await Promise.all(candidates.map(async user => ({ user,
@@ -93,7 +94,7 @@ export function createPrismaPartnerDirectActivation(input: {
             ...(!profileId ? { prospectiveOwnerId: user.id } : {}) });
           if (!authorization.ok) return authorization;
           const [responders, priorResponsibilityCount] = await Promise.all([
-            eligibleResponders(tx), responsibilityCount(tx, user.id),
+            eligibleResponders(tx, [user.id, input.actorId]), responsibilityCount(tx, user.id),
           ]);
           const state = user.partnerProfile?.state ?? 'NONE';
           const canActivate = user.isActive && input.actorId !== user.id && !['ADMIN', 'MANAGER'].includes(user.role) &&
@@ -133,7 +134,15 @@ export function createPrismaPartnerDirectActivation(input: {
       }
       try {
         return await input.database.$transaction(async tx => {
-          await tx.$queryRaw`SELECT id FROM users WHERE id = ${command.userId} FOR UPDATE`;
+          const lockTarget = await tx.user.findUnique({ where: { id: command.userId },
+            select: { partnerProfile: { select: { id: true } } } });
+          if (!lockTarget) return { ok: false as const, error: partnerError('NOT_FOUND') };
+          if (lockTarget.partnerProfile?.id) {
+            await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${lockTarget.partnerProfile.id} FOR UPDATE`;
+          }
+          for (const id of [...new Set([input.actorId, command.userId])].sort()) {
+            await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
+          }
           const prior = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: {
             actorId: input.actorId, operation: command.type, targetScope: command.userId, key: command.idempotency.key,
           } } });
@@ -152,7 +161,8 @@ export function createPrismaPartnerDirectActivation(input: {
               responderAssignments: { orderBy: { revision: 'desc' }, take: 1, select: { revision: true } } } },
           } });
           if (!user) return { ok: false as const, error: partnerError('NOT_FOUND') };
-          if (input.actorId === user.id || !user.isActive || ['ADMIN', 'MANAGER'].includes(user.role) ||
+          if (input.actorId === user.id || command.responderId === user.id || command.responderId === input.actorId ||
+              !user.isActive || ['ADMIN', 'MANAGER'].includes(user.role) ||
               (user.partnerProfile && user.partnerProfile.state !== 'PENDING') ||
               user.updatedAt.toISOString() !== command.expectedUserUpdatedAt) {
             return { ok: false as const, error: user.updatedAt.toISOString() !== command.expectedUserUpdatedAt
@@ -229,9 +239,9 @@ export function createPrismaPartnerDirectActivation(input: {
             ...(roleChanged ? [{ sourceType: 'USER_ROLE', sourceId: user.id, disposition: 'RESET',
               evidence: { previousRole: user.role } }] : []),
             ...workspace.map(row => ({ sourceType: 'WORKSPACE_PERMISSION', sourceId: row.id, disposition: 'REVOKED',
-              evidence: { workspace: row.workspace, permissionLevel: row.permissionLevel } })),
+              evidence: row })),
             ...features.map(row => ({ sourceType: 'FEATURE_PERMISSION', sourceId: row.id, disposition: 'REVOKED',
-              evidence: { workspace: row.workspace, feature: row.feature, permissionLevel: row.permissionLevel } })),
+              evidence: row })),
             ...grants.map(row => ({ sourceType: 'ACTION_GRANT', sourceId: row.id, disposition: 'REVOKED', evidence: row })),
           ];
           if (roleChanged) await tx.user.update({ where: { id: user.id }, data: { role: 'USER' } });

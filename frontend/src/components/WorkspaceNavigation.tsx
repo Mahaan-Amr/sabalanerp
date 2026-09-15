@@ -189,7 +189,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         }));
         const firstPartnerPath = ['/dashboard/sales/contracts/create', '/dashboard/sales/partner-inquiries',
           '/dashboard/sales/partner-cases', '/dashboard/sales/partner-customers',
-          '/dashboard/sales/partner-reports', '/dashboard/sales/partners'].find(path => partnerRouteAccess[path] === true);
+          '/dashboard/sales/partner-reports'].find(path => partnerRouteAccess[path] === true);
         return firstPartnerPath ? [...workspaceItems, { name: 'PartnerSales', namePersian: 'فروش همکار',
           href: firstPartnerPath, icon: FaHandshake, show: true }] : workspaceItems;
       }
@@ -431,13 +431,6 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
                 show: true,
               },
             ],
-          },
-          {
-            name: "Partner Management",
-            namePersian: "مدیریت فروشندگان همکار",
-            href: "/dashboard/sales/partners",
-            icon: FaHandshake,
-            show: partnerRouteAccess['/dashboard/sales/partners'] === true,
           },
           {
             name: "Partner Inquiries",

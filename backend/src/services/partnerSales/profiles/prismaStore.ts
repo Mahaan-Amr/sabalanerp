@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PartnerActivationGates, PartnerProfileRecord, PartnerProfileStore } from './service';
 import { resolveEligibleResponder } from '../inquiries/adapters';
 import { validatePartnerConversionDispositions } from './managementPrismaStore';
+import { reassignIndividualDuty } from '../../crossWorkspaceDutyReassignment';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
@@ -190,6 +191,65 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
       await tx.$executeRaw`SELECT set_config('sabalan.partner_remediation_profile', ${profileId}, true)`;
     },
     async terminatePendingWork(tx, input) {
+      const profile = await tx.partnerProfile.findUniqueOrThrow({ where: { id: input.profileId },
+        select: { userId: true } });
+      const replacement = await tx.user.findUnique({ where: { id: input.actorId },
+        select: { id: true, isActive: true, partnerProfile: { select: { id: true } } } });
+      if (!replacement?.isActive || replacement.partnerProfile || replacement.id === profile.userId) {
+        throw new Error('Partner termination requires an active internal responsibility owner');
+      }
+      const transferEvidenceIds: string[] = [];
+      const duties = await tx.crossWorkspaceDuty.findMany({ where: { currentAssigneeUserId: profile.userId, status: 'OPEN' },
+        orderBy: { id: 'asc' }, select: { id: true } });
+      for (const duty of duties) {
+        await reassignIndividualDuty(tx, { dutyId: duty.id, actorUserId: input.actorId,
+          expectedAssigneeUserId: profile.userId, targetUserId: input.actorId,
+          reason: input.reason, policyVersion: 1 }, async () => undefined);
+        transferEvidenceIds.push(duty.id);
+      }
+      const sessions = await tx.salesContractEditSession.findMany({ where: { ownerUserId: profile.userId, purpose: 'STANDARD' },
+        orderBy: { id: 'asc' }, select: { id: true, draftId: true } });
+      for (const session of sessions) {
+        await tx.salesContractEditSession.update({ where: { id: session.id }, data: { ownerUserId: input.actorId } });
+        const audit = await tx.salesContractDraftAudit.create({ data: { draftId: session.draftId,
+          ownerUserId: input.actorId, action: 'PARTNER_TERMINATION_TRANSFER' } });
+        transferEvidenceIds.push(audit.id);
+      }
+      const contracts = await tx.salesContract.findMany({ where: { responsibleSellerId: profile.userId, isInactive: false,
+        status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED', 'PRINTED'] } }, orderBy: { id: 'asc' },
+        select: { id: true } });
+      for (const contract of contracts) {
+        await tx.salesContract.update({ where: { id: contract.id }, data: { responsibleSellerId: input.actorId } });
+        const audit = await tx.salesContractSellerAudit.create({ data: { contractId: contract.id,
+          previousSellerId: profile.userId, nextSellerId: input.actorId, changedBy: input.actorId,
+          changeType: 'PARTNER_TERMINATION_TRANSFER', reason: input.reason,
+          metadata: json({ profileId: input.profileId, correlationId: input.correlationId }) } });
+        transferEvidenceIds.push(audit.id);
+      }
+      const projects = await tx.crmPotentialProject.findMany({ where: { responsibleSellerId: profile.userId,
+        partnerRevision: null, isActive: true }, orderBy: { id: 'asc' }, select: { id: true, customerId: true } });
+      for (const project of projects) {
+        await tx.crmPotentialProject.update({ where: { id: project.id }, data: { responsibleSellerId: input.actorId } });
+        const audit = await tx.crmTimelineEvent.create({ data: { customerId: project.customerId,
+          potentialProjectId: project.id, actorId: input.actorId, eventType: 'PARTNER_TERMINATION_TRANSFER',
+          title: 'انتقال مسئول پروژه پس از خاتمه همکاری', description: input.reason,
+          metadata: json({ previousSellerId: profile.userId, nextSellerId: input.actorId,
+            profileId: input.profileId, correlationId: input.correlationId }) } });
+        transferEvidenceIds.push(audit.id);
+      }
+      const corrections = await tx.accountingCorrectionRequest.findMany({ where: {
+        assignedToUserId: profile.userId, status: 'OPEN' }, orderBy: { id: 'asc' }, select: { id: true } });
+      if (corrections.length) {
+        await tx.accountingCorrectionRequest.updateMany({ where: { id: { in: corrections.map(row => row.id) },
+          assignedToUserId: profile.userId, status: 'OPEN' }, data: { assignedToUserId: input.actorId } });
+        for (const correction of corrections) {
+          const audit = await tx.accountingAuditLog.create({ data: { action: 'PARTNER_TERMINATION_TRANSFER',
+            actorId: input.actorId, entityType: 'AccountingCorrectionRequest', entityId: correction.id,
+            afterState: json({ previousAssigneeUserId: profile.userId, nextAssigneeUserId: input.actorId,
+              profileId: input.profileId, reason: input.reason, correlationId: input.correlationId }) } });
+          transferEvidenceIds.push(audit.id);
+        }
+      }
       const inquiries = await tx.partnerInquiry.findMany({ where: { profileId: input.profileId,
         rows: { some: { outcome: 'PENDING' } } }, orderBy: { id: 'asc' }, select: { id: true } });
       const events: string[] = [];
@@ -209,7 +269,7 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
           evidence: json({ schemaVersion: 1, profileId: input.profileId, cancelledPendingRows: changed.count }) } });
         events.push(id);
       }
-      return events;
+      return [...transferEvidenceIds, ...events];
     },
   };
 }

@@ -37,7 +37,7 @@ export function PartnerMyInquiriesRuntime() {
     {pending && !rows.length ? <ErpLoading /> : error ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: () => void load() }} />
       : !rows.length ? <ErpEmptyState icon={FaClipboardList} title="هنوز استعلامی ثبت نشده است" action={{ label: 'ایجاد استعلام', onClick: () => router.push('/dashboard/sales/partner-inquiries?newInquiry=1') }} />
         : <div className="space-y-8">{rows.map(inquiry => { const recoveryId = inquiry.rows[0]?.configurationRef.recoveryId;
-          const saleHref = `/dashboard/sales/contracts/create?inquiryId=${encodeURIComponent(inquiry.inquiryId)}${recoveryId ? `&draftId=${encodeURIComponent(recoveryId)}` : ''}`;
+          const saleHref = `/dashboard/sales/contracts/create?configure=1&inquiryId=${encodeURIComponent(inquiry.inquiryId)}${recoveryId ? `&draftId=${encodeURIComponent(recoveryId)}` : ''}`;
           return <PartnerInquiryPanel key={inquiry.inquiryId} inquiry={inquiry} now={Date.now()} pending={false}
           onRefresh={() => void load()} onReinquire={() => router.push(saleHref)}
           onEnterWizard={() => router.push(saleHref)}

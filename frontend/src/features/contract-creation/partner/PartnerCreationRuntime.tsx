@@ -190,7 +190,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         const startFresh = searchParams.get('newInquiry') === '1';
         freshInquiryRef.current = startFresh;
         const requestedInquiry = searchParams.get('inquiryId') || parsed.data.latestInquiryId || '';
-        const saved = startFresh || !requestedInquiry ? null
+        const configureForSale = mode === 'sale' && searchParams.get('configure') === '1';
+        const saved = startFresh || configureForSale || !requestedInquiry ? null
           : readStored<PersistedRuntime>(runtimeKey(parsed.data.actorId, requestedInquiry));
         if (saved?.actorId === parsed.data.actorId) { setRuntime(saved); setCustomerId(saved.customerId); }
         else {
@@ -201,7 +202,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       }
     }).catch(() => active && setError('تشخیص مسیر ایجاد قرارداد انجام نشد. دوباره تلاش کنید.'));
     return () => { active = false; };
-  }, [searchParams]);
+  }, [mode, searchParams]);
 
   const createCustomer = async (partner: PartnerContext) => {
     if (pending || !validatePartnerCustomerDraft(customerDraft)) return;
@@ -372,7 +373,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   }, [mode, openDraftRecovery, pending, router]);
 
   useEffect(() => {
-    if (context?.kind !== 'PARTNER' || runtime || freshInquiryRef.current || !draftAccess || recoveryRevision < 1 || inquiryHydrationFlight.current) return;
+    if (context?.kind !== 'PARTNER' || runtime || freshInquiryRef.current || !draftAccess || recoveryRevision < 1 ||
+        inquiryHydrationFlight.current || (mode === 'sale' && searchParams.get('configure') === '1')) return;
     const inquiryId = searchParams.get('inquiryId') || context.latestInquiryId;
     if (!inquiryId) return;
     inquiryHydrationFlight.current = true;
@@ -386,7 +388,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       persistRuntime({ actorId: context.actorId, inquiryId, access: draftAccess, saved: { ...saved.value, replayed: true },
         configuredRows, customerId: customerId || context.customers[0]?.id || '' });
     }).catch(() => setError('بازیابی استعلام ذخیره‌شده انجام نشد.')).finally(() => { inquiryHydrationFlight.current = false; });
-  }, [context, customerId, draftAccess, persistRuntime, recoveryRevision, runtime, searchParams]);
+  }, [context, customerId, draftAccess, mode, persistRuntime, recoveryRevision, runtime, searchParams]);
 
   const reacquireRuntime = useCallback(async (value: PersistedRuntime): Promise<PersistedRuntime | null> => {
     const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: value.access.recoveryId,
@@ -491,7 +493,14 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     let inquiryRows: readonly PartnerInquiryRow[] = inquiry.rows;
     try {
       const matches = await readApprovalMatches(refreshed.saved);
-      if (!matches.missingPricingSubjectIds.length) inquiryRows = matches.rows;
+      if (matches.missingPricingSubjectIds.length) {
+        persistRuntime(null);
+        setWizard(null);
+        setError('برای ادامه با پاسخ‌های آماده، ردیف‌های در انتظار را از این فروش حذف کنید. استعلام آن‌ها در تاریخچه باقی می‌ماند.');
+        router.replace(`/dashboard/sales/contracts/create?configure=1&draftId=${encodeURIComponent(refreshed.saved.recoveryId)}`);
+        return;
+      }
+      inquiryRows = matches.rows;
     } catch { /* The exact inquiry view remains a safe fallback for older records. */ }
     const customer = context.customers.find(item => item.id === customerId) ?? context.customers[0];
     const approved = inquiryRows.filter(row => row.state === 'APPROVED' && row.approvedPrice);

@@ -15,7 +15,7 @@ export function ResponseReview({ decisions, rowNumbers }: {
         <ErpBadge tone={decision.outcome === 'APPROVED' ? 'success' : 'danger'}>{decision.outcome === 'APPROVED' ? 'تأیید' : 'رد'}</ErpBadge>
       </div>
       {decision.outcome === 'APPROVED'
-        ? <><p>قیمت هر واحد: <b dir="ltr">{decision.wholesaleUnitPrice.amount}</b> {decision.wholesaleUnitPrice.currency === 'IRR' ? 'ریال' : 'تومان'}</p>{decision.note && <p className="break-words">{decision.note}</p>}</>
+        ? <><p>قیمت هر واحد: <b>{BigInt(decision.wholesaleUnitPrice.amount).toLocaleString('fa-IR')}</b> {decision.wholesaleUnitPrice.currency === 'IRR' ? 'ریال' : 'تومان'}</p>{decision.note && <p className="break-words">{decision.note}</p>}</>
         : <p className="break-words">{decision.reason}</p>}
     </ErpCard>)}
   </div>;

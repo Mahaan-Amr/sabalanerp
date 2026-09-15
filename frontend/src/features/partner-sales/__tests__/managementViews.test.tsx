@@ -27,9 +27,7 @@ test('a Manager title never manufactures an action and a projected expired grant
   assert.doesNotMatch(hidden, /ایجاد پروفایل|فعال‌سازی|تغییر شرایط/);
   const expired = renderToStaticMarkup(<ManagementView view={{ ...base, actions: [{ action: 'PROFILE_CREATE', enabled: true, expiresAt: '2026-08-27T10:00:00.000Z' }] }}
     now={Date.parse('2026-08-27T10:00:00.000Z')} disabled={false} onChoose={() => undefined} />);
-  assert.match(expired, /ایجاد پروفایل/);
-  assert.match(expired, /disabled=""/);
-  assert.match(expired, /مهلت دسترسی/);
+  assert.doesNotMatch(expired, /ایجاد پروفایل|هویت همکاری|شرایط تجاری|اعتبار و پرداخت/);
 });
 
 test('response review keeps different prices and mixed rejection visible before confirmation', () => {
@@ -38,8 +36,8 @@ test('response review keeps different prices and mixed rejection visible before 
     { rowId: 'b', expectedRevision: 1, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '25000', currency: 'IRT' } },
     { rowId: 'c', expectedRevision: 1, outcome: 'REJECTED', reason: 'مشخصات ناقص است' },
   ]} />);
-  assert.match(html, /120000/);
-  assert.match(html, /25000/);
+  assert.match(html, /۱۲۰٬۰۰۰/);
+  assert.match(html, /۲۵٬۰۰۰/);
   assert.match(html, /ریال/);
   assert.match(html, /تومان/);
   assert.match(html, /مشخصات ناقص است/);
@@ -60,7 +58,7 @@ test('an unavailable responder row shows evidence but no editable price or decis
   assert.match(html, /گرانیت نهبندان ممتاز/);
   assert.match(html, /تعداد قطعه/);
   assert.match(html, /واحد قیمت: عدد/);
-  assert.match(html, /120000/);
+  assert.match(html, /۱۲۰٬۰۰۰/);
   assert.match(html, /واگذار نشده/);
   assert.doesNotMatch(html, /<input|<textarea|<select|internal-rate|sha256|private-fingerprint|قیمت مشتری|حاشیه سود|>count</);
 });

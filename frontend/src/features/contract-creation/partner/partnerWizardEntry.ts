@@ -5,6 +5,24 @@ import { defaultPartnerRetailRows, partnerRetailIntentRows } from './partnerReta
 import type { PartnerWizardDraft } from './PartnerContractWizard';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
+export function preservePartnerDeliveriesAcrossProductEdit(
+  previous: PartnerDraftIntent['deliveries'],
+  defaults: PartnerDraftIntent['deliveries'],
+  currentProductRowIds: readonly string[],
+): PartnerDraftIntent['deliveries'] {
+  const currentIds = new Set(currentProductRowIds);
+  const preserved = previous.flatMap(delivery => {
+    const items = delivery.items.filter(item => currentIds.has(item.productRowId));
+    return items.length > 0 ? [{ ...delivery, items }] : [];
+  });
+  const represented = new Set(preserved.flatMap(delivery => delivery.items.map(item => item.productRowId)));
+  const additions = defaults.flatMap(delivery => {
+    const items = delivery.items.filter(item => currentIds.has(item.productRowId) && !represented.has(item.productRowId));
+    return items.length > 0 ? [{ ...delivery, items }] : [];
+  });
+  return [...preserved, ...additions];
+}
+
 /** Quantity is supplied by the canonical graph's display projection; it is not
  * an inquiry fingerprint. No catalog-ID or array-position matching is allowed.
  */

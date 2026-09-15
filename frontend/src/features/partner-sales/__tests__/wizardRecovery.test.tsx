@@ -9,6 +9,7 @@ import { defaultPartnerRetailRows } from '../../contract-creation/partner/partne
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
 import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
 import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
+import { preservePartnerDeliveriesAcrossProductEdit } from '../../contract-creation/partner/partnerWizardEntry';
 
 const fixture = createPartnerFixtures();
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
@@ -22,6 +23,26 @@ const draft: PartnerWizardDraft = { step: 'products', rows, intent: {
 const submission = () => createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
   commands: { execute: async () => { throw new Error('not used'); } },
   recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined, finalizeCommitted: async () => undefined },
+});
+
+test('product editing preserves split and grouped deliveries while adding only new product defaults', () => {
+  const previous = [
+    { deliveryId: 'delivery-a', date: '2026-09-01', destination: 'مقصد اول', items: [
+      { productRowId: 'row-a', quantity: '1' }, { productRowId: 'row-b', quantity: '2' },
+    ] },
+    { deliveryId: 'delivery-b', date: '2026-09-02', destination: 'مقصد دوم', items: [
+      { productRowId: 'row-a', quantity: '3' }, { productRowId: 'removed-row', quantity: '1' },
+    ] },
+  ];
+  const defaults = [
+    { deliveryId: 'default-a', date: '2026-09-10', destination: 'پیش‌فرض', items: [{ productRowId: 'row-a', quantity: '4' }] },
+    { deliveryId: 'default-c', date: '2026-09-11', destination: 'پیش‌فرض جدید', items: [{ productRowId: 'row-c', quantity: '5' }] },
+  ];
+  assert.deepEqual(preservePartnerDeliveriesAcrossProductEdit(previous, defaults, ['row-a', 'row-b', 'row-c']), [
+    { ...previous[0] },
+    { ...previous[1], items: [{ productRowId: 'row-a', quantity: '3' }] },
+    defaults[1],
+  ]);
 });
 
 test('a centrally blocked Partner entry never mounts the ordinary Sales wizard', () => {

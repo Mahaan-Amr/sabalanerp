@@ -20,7 +20,7 @@ import { isUsableInquiryRow, type PartnerInquiryView, type PartnerInquiryRow } f
 import { PartnerContractWizard, partnerWizardSteps, type PartnerWizardDraft, type PartnerWizardStep } from './PartnerContractWizard';
 import { WizardProgressBar } from '../components/shared/WizardProgressBar';
 import { createPartnerCaseSubmission, type PartnerSubmitCommand } from './partnerCaseSubmission';
-import { enterPartnerWizard } from './partnerWizardEntry';
+import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit } from './partnerWizardEntry';
 import { partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
 import { buildPartnerCustomerCreateCommand, emptyPartnerCustomerDraft, validatePartnerCustomerDraft,
@@ -126,7 +126,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const [transferReason, setTransferReason] = useState('');
   const [wizard, setWizard] = useState<PartnerWizardDraft | null>(null);
   const wizardServerRevision = useRef(0);
-  const wizardSaveFlight = useRef(false);
+  const wizardSaveFlight = useRef<Promise<boolean> | null>(null);
   const wizardSavePending = useRef<PartnerWizardDraft | null>(null);
   const [draftTitles, setDraftTitles] = useState<Record<string, string>>({});
   const [draftDeleteTarget, setDraftDeleteTarget] = useState<string>();
@@ -154,26 +154,31 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   }, [runtime, wizard, wizardRecoveryId]);
 
   const persistWizardServer = useCallback(async (next: PartnerWizardDraft) => {
-    if (!runtime || next.intent.recoveryId !== runtime.saved.recoveryId) return;
+    if (!runtime || next.intent.recoveryId !== runtime.saved.recoveryId) return false;
     wizardSavePending.current = next;
-    if (wizardSaveFlight.current) return;
-    wizardSaveFlight.current = true;
-    try {
-      while (wizardSavePending.current) {
-        const current = wizardSavePending.current;
-        wizardSavePending.current = null;
-        const response = await api.put(`/partner/cases/drafts/${encodeURIComponent(current.intent.recoveryId)}/wizard`, {
-          schemaVersion: 1, expectedWizardRevision: wizardServerRevision.current,
-          step: current.step, intent: current.intent,
-        });
-        const parsed = PartnerWizardRecoverySnapshotSchema.safeParse((response.data as { data?: unknown })?.data);
-        if (!parsed.success) throw new Error('Invalid wizard recovery');
-        wizardServerRevision.current = parsed.data.wizardRevision;
-      }
-    } catch {
-      wizardSavePending.current = null;
-      setError('ذخیره خودکار پیش‌نویس قرارداد انجام نشد؛ اطلاعات این صفحه حفظ شده است.');
-    } finally { wizardSaveFlight.current = false; }
+    if (!wizardSaveFlight.current) {
+      wizardSaveFlight.current = (async () => {
+        try {
+          while (wizardSavePending.current) {
+            const current = wizardSavePending.current;
+            wizardSavePending.current = null;
+            const response = await api.put(`/partner/cases/drafts/${encodeURIComponent(current.intent.recoveryId)}/wizard`, {
+              schemaVersion: 1, expectedWizardRevision: wizardServerRevision.current,
+              step: current.step, intent: current.intent,
+            });
+            const parsed = PartnerWizardRecoverySnapshotSchema.safeParse((response.data as { data?: unknown })?.data);
+            if (!parsed.success) throw new Error('Invalid wizard recovery');
+            wizardServerRevision.current = parsed.data.wizardRevision;
+          }
+          return true;
+        } catch {
+          wizardSavePending.current = null;
+          setError('ذخیره خودکار پیش‌نویس قرارداد انجام نشد؛ اطلاعات این صفحه حفظ شده است.');
+          return false;
+        } finally { wizardSaveFlight.current = null; }
+      })();
+    }
+    return wizardSaveFlight.current;
   }, [runtime]);
 
   useEffect(() => {
@@ -559,11 +564,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         return previous?.retailUnitPrice.currency === row.retailUnitPrice.currency
           ? { ...row, retailUnitPrice: previous.retailUnitPrice } : row;
       });
-      const deliveries = draft.intent.deliveries.map(current => {
-        const productIds = new Set(current.items.map(item => item.productRowId));
-        const previous = intent.deliveries.find(delivery => delivery.items.some(item => productIds.has(item.productRowId)));
-        return previous ? { ...current, date: previous.date, destination: previous.destination } : current;
-      });
+      const deliveries = preservePartnerDeliveriesAcrossProductEdit(intent.deliveries, draft.intent.deliveries,
+        rows.map(row => row.productRowId));
       const paymentPlan = intent.customerPaymentPlan.installments.every(item => item.amount.currency === currency)
         ? intent.customerPaymentPlan : draft.intent.customerPaymentPlan;
       const retailDiscount = intent.retailDiscount.currency === currency ? intent.retailDiscount : draft.intent.retailDiscount;
@@ -576,11 +578,22 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       setCustomerId(nextCustomerId);
       setWizard({ ...draft, step: 'products', rows, intent: nextIntent });
     };
+    const stored = readStored<{ savedAt: number; draft: PartnerWizardDraft }>(wizardDraftKey(runtime.actorId, draft.intent.recoveryId));
+    const storedIntent = stored && Date.now() - stored.savedAt <= 7 * 24 * 60 * 60 * 1000
+      ? CaseDraftIntentSchema.safeParse(stored.draft?.intent) : undefined;
     try {
       const response = await api.get(`/partner/cases/drafts/${encodeURIComponent(draft.intent.recoveryId)}/wizard`);
       const savedWizard = PartnerWizardRecoverySnapshotSchema.safeParse((response.data as { data?: unknown })?.data);
       if (savedWizard.success) {
         wizardServerRevision.current = savedWizard.data.wizardRevision;
+        if (storedIntent?.success && stored && stored.savedAt > Date.parse(savedWizard.data.updatedAt)) {
+          const sameLocalRows = stored.draft.rows.length === draft.rows.length &&
+            stored.draft.rows.every(row => draft.rows.some(current => current.productRowId === row.productRowId));
+          if (sameLocalRows && storedIntent.data.recoveryRevision === draft.intent.recoveryRevision &&
+              storedIntent.data.graphHash === draft.intent.graphHash && restoreIntent(storedIntent.data, stored.draft.step)) return;
+          restoreAcrossProductEdit(storedIntent.data);
+          return;
+        }
         if (restoreIntent(savedWizard.data.intent, savedWizard.data.step)) return;
         restoreAcrossProductEdit(savedWizard.data.intent);
         return;
@@ -589,9 +602,6 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       const status = (caught as { response?: { status?: number } })?.response?.status;
       if (status !== 404) setError('بازیابی پیش‌نویس قرارداد انجام نشد؛ نسخه محلی بررسی می‌شود.');
     }
-    const stored = readStored<{ savedAt: number; draft: PartnerWizardDraft }>(wizardDraftKey(runtime.actorId, draft.intent.recoveryId));
-    const storedIntent = stored && Date.now() - stored.savedAt <= 7 * 24 * 60 * 60 * 1000
-      ? CaseDraftIntentSchema.safeParse(stored.draft?.intent) : undefined;
     const sameRows = storedIntent?.success && stored!.draft.rows.length === draft.rows.length &&
       stored!.draft.rows.every(row => draft.rows.some(current => current.productRowId === row.productRowId));
     if (sameRows && storedIntent?.success && storedIntent.data.recoveryRevision === draft.intent.recoveryRevision &&
@@ -855,7 +865,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         : null}
     onReinquire={row => void reinquireFromWizard(row)} onEditProducts={() => {
       const current = wizard;
-      void persistWizardServer(current).finally(() => {
+      void persistWizardServer(current).then(saved => {
+        if (!saved) return;
         setWizard(null); persistRuntime(null);
         router.replace(`/dashboard/sales/contracts/create?configure=1&draftId=${encodeURIComponent(current.intent.recoveryId)}`);
       });

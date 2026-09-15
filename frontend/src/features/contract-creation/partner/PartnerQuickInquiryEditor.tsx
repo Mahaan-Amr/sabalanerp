@@ -64,6 +64,12 @@ export function PartnerQuickInquiryEditor({ draft, products, dimensions, onDimen
       if (!product) return <ErpInlineState key={row.productRowId} kind="stale" title="این سنگ دیگر در کاتالوگ در دسترس نیست." />;
       const value = dimensions[row.productRowId] ?? {};
       const acceptsInquiryDimensions = row.family === 'longitudinal' || row.family === 'slab' || row.family === 'stair';
+      const dimensionFields: Array<{ key: keyof PartnerInquiryDimensions; label: string }> = acceptsInquiryDimensions ? [
+        ...((row.family === 'slab' || Boolean(product.dimensions.motherLengthMeters))
+          ? [{ key: 'lengthMeters' as const, label: 'طول (متر)' }] : []),
+        { key: 'widthMeters', label: 'عرض (متر)' },
+        { key: 'thicknessCentimeters', label: 'ضخامت (سانتی‌متر)' },
+      ] : [];
       const catalogDimensions = [
         product.dimensions.motherLengthMeters && `طول ${product.dimensions.motherLengthMeters} متر`,
         product.dimensions.motherWidthCentimeters && `عرض ${product.dimensions.motherWidthCentimeters} سانتی‌متر`,
@@ -76,12 +82,9 @@ export function PartnerQuickInquiryEditor({ draft, products, dimensions, onDimen
           <ErpButton label="حذف" tone="danger" variant="ghost" onClick={() => remove(row.productRowId)} />
         </div>
         {acceptsInquiryDimensions ? <div className="grid gap-3 sm:grid-cols-3">
-          <ErpField label="طول (متر)"><ErpInput inputMode="decimal" value={value.lengthMeters ?? ''}
-            onChange={event => setDimension(row.productRowId, 'lengthMeters', event.target.value)} /></ErpField>
-          <ErpField label="عرض (متر)"><ErpInput inputMode="decimal" value={value.widthMeters ?? ''}
-            onChange={event => setDimension(row.productRowId, 'widthMeters', event.target.value)} /></ErpField>
-          <ErpField label="ضخامت (سانتی‌متر)"><ErpInput inputMode="decimal" value={value.thicknessCentimeters ?? ''}
-            onChange={event => setDimension(row.productRowId, 'thicknessCentimeters', event.target.value)} /></ErpField>
+          {dimensionFields.map(field => <ErpField key={field.key} label={field.label}><ErpInput inputMode="decimal"
+            value={value[field.key] ?? ''} onChange={event => setDimension(row.productRowId, field.key, event.target.value)} />
+          </ErpField>)}
         </div> : <ErpFieldView label="ابعاد کاتالوگ" value={catalogDimensions || '—'} />}
       </ErpCard>;
     })}

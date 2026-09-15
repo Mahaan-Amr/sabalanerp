@@ -125,17 +125,26 @@ async function readTechnicalPolicyForAccount(tx: Prisma.TransactionClient, accou
         id: true, purpose: true, label: true, effectiveDate: true, expiresAt: true, issuedAt: true, revokedAt: true,
         terms: true, integrityHash: true,
       } });
-      const sourceDate = source?.effectiveDate.toISOString().slice(0, 10);
-      const sourceHash = source && await canonicalHash({ purpose: source.purpose, label: source.label,
-        effectiveDate: sourceDate, terms: source.terms });
       const sourceTerms = source && record(source.terms);
-      const projected = sourceTerms && { ...sourceTerms, purpose: source!.purpose, policyId: source!.id };
       if (!source || !sourceTerms || source.purpose !== 'PARTNER_TECHNICAL_PRICING' || source.revokedAt || source.issuedAt > now ||
-          (source.expiresAt && source.expiresAt <= now) || source.effectiveDate.getTime() !== candidate.effectiveDate.getTime() ||
-          source.integrityHash !== sourceHash || candidate.integrityHash !== source.integrityHash ||
+          (source.expiresAt && source.expiresAt <= now) || source.effectiveDate.getTime() !== candidate.effectiveDate.getTime()) {
+        return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+      }
+      const sourceHash = await canonicalHash({ purpose: source.purpose, label: source.label,
+        effectiveDate: source.effectiveDate.toISOString().slice(0, 10), terms: source.terms });
+      const projected = { ...sourceTerms, purpose: source.purpose, policyId: source.id };
+      if (source.integrityHash !== sourceHash || candidate.integrityHash !== source.integrityHash ||
           await canonicalHash(projected) !== await canonicalHash(candidate.terms)) {
         return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
       }
+      // The retired v1 local-QA bootstrap carried only an activation marker,
+      // not a calculable pricing policy. Keep its append-only history, but do
+      // not let that authenticated marker shadow a valid account or central policy.
+      const obsoleteLocalQaPlaceholder = raw.policyId === 'partner-local-qa-commercial-v1' &&
+        exactKeys(raw, ['localQa', 'purpose', 'policyId', 'calculationPolicyVersion']) && raw.localQa === true &&
+        raw.calculationPolicyVersion === 'partner-v1' && exactKeys(sourceTerms, ['localQa', 'calculationPolicyVersion']) &&
+        sourceTerms.localQa === true && sourceTerms.calculationPolicyVersion === 'partner-v1';
+      if (obsoleteLocalQaPlaceholder) continue;
       policyTerms = { ...sourceTerms, purpose: source.purpose };
     } else {
       const expectedHash = await canonicalHash({ accountId: candidate.accountId, version: candidate.version,

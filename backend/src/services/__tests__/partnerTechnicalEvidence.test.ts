@@ -65,6 +65,32 @@ test('technical sales policy accepts an integrity-checked bootstrap projection l
   assert.equal(corrupted.error.code, 'INTEGRITY_CONFLICT');
 });
 
+test('obsolete local-QA pricing placeholders cannot shadow a newer-schema valid account policy', async () => {
+  const effectiveDate = new Date('2026-08-29T00:00:00.000Z');
+  const valid = { id: 'terms-v3', accountId: 'account-1', version: 3, effectiveDate, terms,
+    actorId: 'sales-manager', reason: 'سیاست فنی معتبر', integrityHash: '' };
+  valid.integrityHash = await canonicalHash({ accountId: valid.accountId, version: valid.version,
+    effectiveDate: '2026-08-29', terms: valid.terms, actorId: valid.actorId, reason: valid.reason });
+  const legacySourceTerms = { localQa: true, calculationPolicyVersion: 'partner-v1' };
+  const legacySource = { id: 'partner-local-qa-commercial-v1', purpose: 'PARTNER_TECHNICAL_PRICING' as const,
+    label: 'شرایط استاندارد آزمون محلی', effectiveDate, expiresAt: null,
+    issuedAt: new Date('2026-08-28T00:00:00.000Z'), revokedAt: null, terms: legacySourceTerms, integrityHash: '' };
+  legacySource.integrityHash = await canonicalHash({ purpose: legacySource.purpose, label: legacySource.label,
+    effectiveDate: '2026-08-29', terms: legacySource.terms });
+  const legacyProjection = { id: 'legacy-terms-v4', accountId: valid.accountId, version: 4, effectiveDate,
+    terms: { ...legacySourceTerms, purpose: legacySource.purpose, policyId: legacySource.id },
+    actorId: 'sales-manager', reason: 'legacy local QA bootstrap', integrityHash: legacySource.integrityHash };
+  const transaction = {
+    $queryRaw: async () => [{ now: new Date('2026-08-29T12:00:00.000Z') }],
+    partnerProfile: { findUnique: async () => ({ commercialAccount: { id: valid.accountId } }) },
+    partnerCommercialTerms: { findMany: async () => [legacyProjection, valid] },
+    partnerTermsPolicy: { findUnique: async () => legacySource },
+  } as any;
+  const result = await readPartnerTechnicalSalesPolicy(transaction, 'partner-1');
+  assert.ok(result.ok);
+  assert.equal(result.value.policyId, valid.id);
+});
+
 test('directly activated Partner uses the current central technical policy without account terms', async () => {
   const effectiveDate = new Date('2026-08-29T00:00:00.000Z');
   const source = { id: 'central-policy', purpose: 'PARTNER_TECHNICAL_PRICING' as const,
@@ -108,7 +134,8 @@ test('real evidence resolver binds current private rates and reuses frozen ident
     stoneTypeNamePersian: 'تراورتن', mineNamePersian: 'معدن', finishNamePersian: 'سابیده', colorNamePersian: 'کرم',
     qualityNamePersian: 'درجه یک', cuttingDimensionNamePersian: 'طولی', isActive: true, deletedAt: null,
     isAvailable: true, availableInLongitudinalContracts: true, availableInStairContracts: true,
-    availableInSlabContracts: true, availableInVolumetricContracts: true, basePrice: new Prisma.Decimal('12000000'), currency: 'ریال' };
+    availableInSlabContracts: true, availableInVolumetricContracts: true, preparedSalesUnit: 'count', volumetricSalesUnit: 'ton',
+    basePrice: new Prisma.Decimal('12000000'), currency: 'ریال' };
   const transaction = {
     $queryRaw: async () => [{ now: new Date('2026-08-29T12:00:00.000Z') }],
     partnerProfile: { findUnique: async () => ({ commercialAccount: { id: 'account-1' } }) },

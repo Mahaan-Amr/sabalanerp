@@ -16,7 +16,7 @@ import { StairLayersSection, type StairLayerConfigurationDraft } from '../compon
 import { convertCompactLengthUnit } from '../components/product-modal-system/productModalState';
 import type { ContractProduct, Product } from '../types/contract.types';
 import { addPartnerTechnicalDependent, addPartnerTechnicalProduct, commitPartnerTechnicalField, removePartnerTechnicalDependent, removePartnerTechnicalProduct,
-  retainPartnerTechnicalFieldText } from './partnerTechnicalDraftAdapter';
+  confirmPartnerContractConfiguration, retainPartnerTechnicalFieldText } from './partnerTechnicalDraftAdapter';
 import { TechnicalProductConfiguration } from './TechnicalProductConfiguration';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
@@ -112,6 +112,10 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
         {!['prepared', 'volumetric'].includes(row.family) && calculation?.ok && <OperationsEditor draft={draft} row={row as Extract<typeof row, { family: 'longitudinal' | 'slab' | 'stair' }>}
           calculation={calculation.result as unknown as Record<string, unknown>} catalog={operations} onChange={onChange} />}
         {calculation && !calculation.ok && <ErpInlineState kind="stale" title={`مشخصات این ردیف کامل نیست. ${calculation.conflicts[0]?.message ?? ''}`} />}
+        {(draft.contractConfigurationRequiredProductRowIds ?? []).includes(row.productRowId) && <ErpCheckbox
+          checked={(draft.contractConfiguredProductRowIds ?? []).includes(row.productRowId)}
+          label="مشخصات واقعی قرارداد تأیید شد"
+          onChange={event => onChange(confirmPartnerContractConfiguration(draft, row.productRowId, event.target.checked))} />}
       </ErpCard>;
     })}
     {preview.ok && preview.value.conflicts.length > 0 && <ErpInlineState kind="stale" title={`پیش از ارسال، تعارض‌های مشخصات فنی را برطرف کنید. ${preview.value.conflicts[0]?.message ?? ''}`} />}

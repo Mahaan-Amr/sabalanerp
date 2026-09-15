@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { previewPartnerTechnicalDraft, type PartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
+import { PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft, type PartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import {
   addPartnerTechnicalDependent,
   addPartnerTechnicalProduct,
   addPartnerQuickInquiryProduct,
-  capturePartnerQuickConfigurationBaseline,
   commitPartnerTechnicalField,
+  confirmPartnerContractConfiguration,
   isPartnerContractConfigurationComplete,
   removePartnerTechnicalProduct,
   retainPartnerTechnicalFieldText,
@@ -61,14 +61,14 @@ test('every retained quick-inquiry row must receive real contract configuration'
   const product = catalog.products[0];
   let draft = addPartnerQuickInquiryProduct(empty, product, 'prepared', 'quick-a');
   draft = addPartnerQuickInquiryProduct(draft, product, 'prepared', 'quick-b');
-  const baseline = capturePartnerQuickConfigurationBaseline(draft);
-  assert.equal(isPartnerContractConfigurationComplete(draft, baseline), false);
-  let configured = commitPartnerTechnicalField(draft, 'quick-a', 'quantity', '2');
-  assert.equal(isPartnerContractConfigurationComplete(configured, baseline), false);
-  configured = commitPartnerTechnicalField(configured, 'quick-b', 'quantity', '3');
-  assert.equal(isPartnerContractConfigurationComplete(configured, baseline), true);
+  assert.equal(isPartnerContractConfigurationComplete(draft), false);
+  let configured = confirmPartnerContractConfiguration(draft, 'quick-a', true);
+  assert.equal(isPartnerContractConfigurationComplete(configured), false);
+  configured = confirmPartnerContractConfiguration(configured, 'quick-b', true);
+  assert.equal(isPartnerContractConfigurationComplete(configured), true);
   const replaced = removePartnerTechnicalProduct(configured, 'quick-b');
-  assert.equal(isPartnerContractConfigurationComplete(replaced, baseline), true);
+  assert.equal(isPartnerContractConfigurationComplete(replaced), true);
+  assert.equal(isPartnerContractConfigurationComplete(PartnerTechnicalDraftSchema.parse(JSON.parse(JSON.stringify(replaced)))), true);
 });
 
 test('remainder and layer adapters bind stable parent identity and cascade only with that parent', () => {

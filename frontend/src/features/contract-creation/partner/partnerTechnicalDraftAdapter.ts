@@ -11,19 +11,22 @@ import { normalizeNumericText } from '@/lib/numberFormat';
 type Row = PartnerTechnicalDraft['rows'][number];
 type EditingValue = NonNullable<PartnerTechnicalDraft['editingValues']>[number];
 
-export type PartnerQuickConfigurationBaseline = ReadonlyMap<string, string>;
-
-export function capturePartnerQuickConfigurationBaseline(draft: PartnerTechnicalDraft): PartnerQuickConfigurationBaseline {
-  return new Map(draft.rows.map(row => [row.productRowId, JSON.stringify(row.configuration)]));
-}
-
-export function isPartnerContractConfigurationComplete(draft: PartnerTechnicalDraft,
-  baseline: PartnerQuickConfigurationBaseline | null): boolean {
-  return baseline === null || draft.rows.every(row => baseline.get(row.productRowId) !== JSON.stringify(row.configuration));
-}
-
 const revise = (draft: PartnerTechnicalDraft, changes: Partial<PartnerTechnicalDraft>) =>
   PartnerTechnicalDraftSchema.parse({ ...draft, ...changes, inputRevision: draft.inputRevision + 1 });
+
+export function isPartnerContractConfigurationComplete(draft: PartnerTechnicalDraft): boolean {
+  const required = new Set(draft.contractConfigurationRequiredProductRowIds ?? []);
+  const configured = new Set(draft.contractConfiguredProductRowIds ?? []);
+  return draft.rows.every(row => !required.has(row.productRowId) || configured.has(row.productRowId));
+}
+
+export function confirmPartnerContractConfiguration(draft: PartnerTechnicalDraft, productRowId: string,
+  confirmed: boolean): PartnerTechnicalDraft {
+  if (!draft.rows.some(row => row.productRowId === productRowId)) throw new Error('Product row is unavailable');
+  const configured = new Set(draft.contractConfiguredProductRowIds ?? []);
+  if (confirmed) configured.add(productRowId); else configured.delete(productRowId);
+  return revise(draft, { contractConfiguredProductRowIds: Array.from(configured) });
+}
 
 export type PartnerTechnicalProductInput =
   | { family: 'prepared' | 'volumetric'; productRowId: string }
@@ -93,7 +96,8 @@ export function addPartnerQuickInquiryProduct(draft: PartnerTechnicalDraft, prod
     return { ...row, configuration: { ...row.configuration, lengthMeters,
       crossDimensionMeters: widthMeters, motherLengthMeters: lengthMeters, quantity: 1, quantityMode: 'manual' as const } };
   });
-  return PartnerTechnicalDraftSchema.parse({ ...added, inputRevision: added.inputRevision + 1, rows });
+  return PartnerTechnicalDraftSchema.parse({ ...added, inputRevision: added.inputRevision + 1, rows,
+    contractConfigurationRequiredProductRowIds: [...(added.contractConfigurationRequiredProductRowIds ?? []), productRowId] });
 }
 
 type DependentInput =
@@ -173,7 +177,11 @@ export function removePartnerTechnicalProduct(draft: PartnerTechnicalDraft, prod
     item.sideOperations?.forEach(side => { removedEntityIds.add(side.operationCollectionId); collectOperations(side.operations); });
   });
   const editingValues = (draft.editingValues ?? []).filter(value => !removedEntityIds.has(value.entityId));
-  return revise(draft, { rows, dependents, editingValues });
+  return revise(draft, { rows, dependents, editingValues,
+    contractConfigurationRequiredProductRowIds: (draft.contractConfigurationRequiredProductRowIds ?? [])
+      .filter(id => !removedProductRowIds.has(id)),
+    contractConfiguredProductRowIds: (draft.contractConfiguredProductRowIds ?? [])
+      .filter(id => !removedProductRowIds.has(id)) });
 }
 
 export function removePartnerTechnicalDependent(draft: PartnerTechnicalDraft, identity: string): PartnerTechnicalDraft {

@@ -55,6 +55,10 @@ export const PartnerTechnicalDraftSchema = z.object({
     z.object({ ...rowIdentity, family: z.literal('slab'), configuration: slabConfiguration, operations: PartnerTechnicalOperationsIntentSchema.optional() }).strict(),
     z.object({ ...rowIdentity, family: z.literal('stair'), configuration: stairConfiguration, operations: PartnerTechnicalOperationsIntentSchema.optional() }).strict(),
   ])),
+  contractConfigurationRequiredProductRowIds: z.array(IdSchema)
+    .refine(ids => new Set(ids).size === ids.length).optional(),
+  contractConfiguredProductRowIds: z.array(IdSchema)
+    .refine(ids => new Set(ids).size === ids.length).optional(),
   dependents: z.array(PartnerTechnicalDependentSchema).optional(),
   stairSystems: z.array(PartnerTechnicalStairSystemSchema).optional(),
   // A control retains text until its normal unit-aware parsing commits a new

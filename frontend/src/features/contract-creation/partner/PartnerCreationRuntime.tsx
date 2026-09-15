@@ -27,8 +27,7 @@ import { buildPartnerCustomerCreateCommand, emptyPartnerCustomerDraft, validateP
   type PartnerCustomerDraft } from './partnerCustomerCreation';
 import { sendPartnerConfirmation } from '../../partner-sales/cases/partnerCaseHttpPort';
 import { PartnerQuickInquiryEditor, type PartnerInquiryDimensions } from './PartnerQuickInquiryEditor';
-import { capturePartnerQuickConfigurationBaseline, isPartnerContractConfigurationComplete,
-  removePartnerTechnicalProduct, type PartnerQuickConfigurationBaseline } from './partnerTechnicalDraftAdapter';
+import { isPartnerContractConfigurationComplete, removePartnerTechnicalProduct } from './partnerTechnicalDraftAdapter';
 import { normalizeNumericText } from '@/lib/numberFormat';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 
@@ -118,7 +117,6 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const recoveryStarting = useRef(false);
   const checkpointFlight = useRef(false);
   const checkpointedInputRevision = useRef(0);
-  const contractConfigurationBaseline = useRef<PartnerQuickConfigurationBaseline | null>(null);
   const inquiryHydrationFlight = useRef(false);
   const [customerId, setCustomerId] = useState('');
   const [customerDraft, setCustomerDraft] = useState<PartnerCustomerDraft>(emptyPartnerCustomerDraft);
@@ -139,7 +137,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     { products: catalog, operations, sawKerfMeters: '0.003' }), [catalog, operations, technicalDraft]);
   const technicalReady = technicalPreview.ok && technicalDraft.rows.length > 0 && technicalPreview.value.conflicts.length === 0
     && technicalPreview.value.rows.every(row => row.calculation.ok);
-  const contractConfigurationReady = isPartnerContractConfigurationComplete(technicalDraft, contractConfigurationBaseline.current);
+  const contractConfigurationReady = isPartnerContractConfigurationComplete(technicalDraft);
   const normalizedQuickDimensions = (productRowId: string) => Object.fromEntries(Object.entries(quickDimensions[productRowId] ?? {})
     .filter((entry): entry is [keyof PartnerInquiryDimensions, string] => Boolean(entry[1]?.trim()))
     .map(([key, value]) => [key, parseCanonicalDecimal(normalizeNumericText(value))])) as PartnerInquiryDimensions;
@@ -299,9 +297,6 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       if (!recovered.ok) { setError(recovered.error.message); return; }
       setDraftAccess(access); setRecoveryRevision(recovered.value.recoveryRevision);
       checkpointedInputRevision.current = recovered.value.draft?.inputRevision ?? 0;
-      contractConfigurationBaseline.current = mode === 'sale' && searchParams.get('configure') === '1'
-        && Boolean(searchParams.get('inquiryId')) && recovered.value.draft
-        ? capturePartnerQuickConfigurationBaseline(recovered.value.draft) : null;
       if (fresh) setTechnicalDraft(emptyTechnicalDraft());
       else if (recovered.value.draft) setTechnicalDraft(recovered.value.draft);
       setRecoveryBlocked(false);
@@ -373,7 +368,6 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     freshInquiryRef.current = true;
     setRuntime(null); setWizard(null); setDraftAccess(null); setRecoveryRevision(0); setRecoveryBlocked(false);
     recoveryRevisionRef.current = 0; checkpointedInputRevision.current = 0; inquiryHydrationFlight.current = false;
-    contractConfigurationBaseline.current = null;
     setTechnicalDraft(emptyTechnicalDraft());
     router.replace(mode === 'inquiry' ? '/dashboard/sales/partner-inquiries?newInquiry=1'
       : '/dashboard/sales/contracts/create?newInquiry=1');
@@ -555,12 +549,41 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         additionalMaterialApprovals: draft.intent.additionalMaterialApprovals } });
       return true;
     };
+    const restoreAcrossProductEdit = (intent: typeof draft.intent) => {
+      const preservedCustomer = context.customers.find(item => item.id === intent.customerId);
+      const nextCustomerId = preservedCustomer?.id ?? draft.intent.customerId;
+      const preservedProject = context.projects.find(item => item.id === intent.projectId
+        && item.customerId === nextCustomerId);
+      const rows = draft.rows.map(row => {
+        const previous = intent.rows.find(item => item.productRowId === row.productRowId);
+        return previous?.retailUnitPrice.currency === row.retailUnitPrice.currency
+          ? { ...row, retailUnitPrice: previous.retailUnitPrice } : row;
+      });
+      const deliveries = draft.intent.deliveries.map(current => {
+        const productIds = new Set(current.items.map(item => item.productRowId));
+        const previous = intent.deliveries.find(delivery => delivery.items.some(item => productIds.has(item.productRowId)));
+        return previous ? { ...current, date: previous.date, destination: previous.destination } : current;
+      });
+      const paymentPlan = intent.customerPaymentPlan.installments.every(item => item.amount.currency === currency)
+        ? intent.customerPaymentPlan : draft.intent.customerPaymentPlan;
+      const retailDiscount = intent.retailDiscount.currency === currency ? intent.retailDiscount : draft.intent.retailDiscount;
+      const nextIntent = { ...draft.intent, contractDate: intent.contractDate, customerId: nextCustomerId,
+        ...(preservedProject ? { projectId: preservedProject.id } : {}), deliveries, customerPaymentPlan: paymentPlan,
+        retailDiscount, belowCostConfirmed: false,
+        rows: rows.map(row => ({ productRowId: row.productRowId,
+          approvedRowBinding: row.inquiryRow.approvedRowBinding!, retailUnitPrice: row.retailUnitPrice })),
+        additionalMaterialApprovals: draft.intent.additionalMaterialApprovals };
+      setCustomerId(nextCustomerId);
+      setWizard({ ...draft, step: 'products', rows, intent: nextIntent });
+    };
     try {
       const response = await api.get(`/partner/cases/drafts/${encodeURIComponent(draft.intent.recoveryId)}/wizard`);
       const savedWizard = PartnerWizardRecoverySnapshotSchema.safeParse((response.data as { data?: unknown })?.data);
       if (savedWizard.success) {
         wizardServerRevision.current = savedWizard.data.wizardRevision;
         if (restoreIntent(savedWizard.data.intent, savedWizard.data.step)) return;
+        restoreAcrossProductEdit(savedWizard.data.intent);
+        return;
       }
     } catch (caught) {
       const status = (caught as { response?: { status?: number } })?.response?.status;
@@ -575,6 +598,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         storedIntent.data.graphHash === draft.intent.graphHash) {
       if (restoreIntent(storedIntent.data, stored!.draft.step)) return;
     }
+    if (storedIntent?.success) { restoreAcrossProductEdit(storedIntent.data); return; }
     wizardServerRevision.current = 0;
     setWizard(draft);
   };
@@ -830,9 +854,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       })() ? 'جمع اقساط باید با مبلغ فروش برابر باشد.'
         : null}
     onReinquire={row => void reinquireFromWizard(row)} onEditProducts={() => {
-      const recoveryId = wizard.intent.recoveryId;
-      setWizard(null); persistRuntime(null);
-      router.replace(`/dashboard/sales/contracts/create?configure=1&draftId=${encodeURIComponent(recoveryId)}`);
+      const current = wizard;
+      void persistWizardServer(current).finally(() => {
+        setWizard(null); persistRuntime(null);
+        router.replace(`/dashboard/sales/contracts/create?configure=1&draftId=${encodeURIComponent(current.intent.recoveryId)}`);
+      });
     }} onSendConfirmation={caseId => sendPartnerConfirmation(caseId).then(() => undefined)}
     onOpenCase={caseId => router.push(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(caseId)}`)} />;
   if (runtime) return <div className="min-w-0 space-y-4"><PartnerInquiryWorkspace actorId={runtime.actorId} inquiryId={runtime.inquiryId}

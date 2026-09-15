@@ -8,6 +8,10 @@ import type { PartnerDraftIntent } from './partnerCaseSubmission';
 export const shouldPreferLocalPartnerWizard = (localServerRevision: number | undefined, currentServerRevision: number) =>
   localServerRevision === currentServerRevision;
 
+export function rebasePartnerWizardSnapshot<T extends { serverRevision?: number }>(snapshot: T, serverRevision: number): T {
+  return { ...snapshot, serverRevision };
+}
+
 export function preservePartnerDeliveriesAcrossProductEdit(
   previous: PartnerDraftIntent['deliveries'],
   defaults: PartnerDraftIntent['deliveries'],

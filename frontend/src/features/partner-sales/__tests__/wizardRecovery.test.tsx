@@ -9,7 +9,8 @@ import { defaultPartnerRetailRows } from '../../contract-creation/partner/partne
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
 import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
 import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
-import { preservePartnerDeliveriesAcrossProductEdit, shouldPreferLocalPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
+import { preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
+  shouldPreferLocalPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
 
 const fixture = createPartnerFixtures();
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
@@ -29,6 +30,14 @@ test('local recovery freshness follows the shared server revision instead of eit
   assert.equal(shouldPreferLocalPartnerWizard(7, 7), true);
   assert.equal(shouldPreferLocalPartnerWizard(6, 7), false);
   assert.equal(shouldPreferLocalPartnerWizard(undefined, 7), false);
+});
+
+test('an acknowledged earlier save rebases the newer queued local snapshot before its retry', () => {
+  const queued = { savedAt: 99, serverRevision: 4, draft: { marker: 'newer-B' } };
+  const rebased = rebasePartnerWizardSnapshot(queued, 5);
+  assert.deepEqual(rebased, { ...queued, serverRevision: 5 });
+  assert.equal(shouldPreferLocalPartnerWizard(rebased.serverRevision, 5), true);
+  assert.equal(rebased.draft.marker, 'newer-B');
 });
 
 test('product editing preserves split and grouped deliveries while adding only new product defaults', () => {

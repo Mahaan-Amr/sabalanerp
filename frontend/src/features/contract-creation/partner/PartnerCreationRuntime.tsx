@@ -20,7 +20,8 @@ import { isUsableInquiryRow, type PartnerInquiryView, type PartnerInquiryRow } f
 import { PartnerContractWizard, partnerWizardSteps, type PartnerWizardDraft, type PartnerWizardStep } from './PartnerContractWizard';
 import { WizardProgressBar } from '../components/shared/WizardProgressBar';
 import { createPartnerCaseSubmission, type PartnerSubmitCommand } from './partnerCaseSubmission';
-import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, shouldPreferLocalPartnerWizard } from './partnerWizardEntry';
+import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
+  shouldPreferLocalPartnerWizard } from './partnerWizardEntry';
 import { partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
 import { buildPartnerCustomerCreateCommand, emptyPartnerCustomerDraft, validatePartnerCustomerDraft,
@@ -169,6 +170,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
             const parsed = PartnerWizardRecoverySnapshotSchema.safeParse((response.data as { data?: unknown })?.data);
             if (!parsed.success) throw new Error('Invalid wizard recovery');
             wizardServerRevision.current = parsed.data.wizardRevision;
+            const key = wizardDraftKey(runtime.actorId, current.intent.recoveryId);
+            const local = readStored<{ savedAt: number; serverRevision?: number; draft: PartnerWizardDraft }>(key);
+            if (local?.draft.intent.recoveryId === current.intent.recoveryId) {
+              window.localStorage.setItem(key, JSON.stringify(rebasePartnerWizardSnapshot(local, parsed.data.wizardRevision)));
+            }
           }
           return true;
         } catch {

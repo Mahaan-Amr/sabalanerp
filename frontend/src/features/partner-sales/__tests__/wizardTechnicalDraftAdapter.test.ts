@@ -12,6 +12,7 @@ import {
   removePartnerTechnicalProduct,
   retainPartnerTechnicalFieldText,
 } from '../../contract-creation/partner/partnerTechnicalDraftAdapter';
+import { canSubmitPartnerTechnicalAction } from '../../contract-creation/partner/partnerCreationFlow';
 
 const catalog = createPartnerTechnicalCatalogFixtures();
 const empty: PartnerTechnicalDraft = { schemaVersion: 1, inputRevision: 0, rows: [] };
@@ -50,6 +51,10 @@ test('quick inquiry rows stay calculation-ready without asking for contract quan
   if (!preview.ok) return;
   assert.equal(preview.value.conflicts.length, 0);
   assert.equal(preview.value.rows.every(row => row.calculation.ok), true);
+  assert.equal(canSubmitPartnerTechnicalAction({ mode: 'inquiry', pending: false,
+    technicalReady: preview.value.rows.every(row => row.calculation.ok),
+    contractConfigurationReady: isPartnerContractConfigurationComplete(draft),
+    quickDimensionsValid: true, hasDraftAccess: true }), true);
   assert.equal(draft.rows.some(row => 'operations' in row && row.operations !== undefined), false);
   const prepared = draft.rows.find(row => row.family === 'prepared');
   const volumetric = draft.rows.find(row => row.family === 'volumetric');

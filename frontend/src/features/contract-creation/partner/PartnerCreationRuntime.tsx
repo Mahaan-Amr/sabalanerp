@@ -33,12 +33,16 @@ import { normalizeNumericText } from '@/lib/numberFormat';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 import { commitPartnerTechnicalDraft } from './partnerTechnicalCommit';
 import { getPartnerBrowserSessionId } from './partnerBrowserSession';
+import { canSubmitPartnerTechnicalAction, showPartnerContractConfigurationWarning } from './partnerCreationFlow';
+import { PartnerPreparationNavigation } from './PartnerPreparationNavigation';
+import { readPartnerCreationContext } from './partnerCreationContext';
 
 type PartnerContext = Extract<PartnerCreationContext, { kind: 'PARTNER' }>;
 type Access = { schemaVersion: 1; recoveryId: string; browserSessionId: string;
   leaseToken: string; baseRevision: number };
 type PersistedRuntime = { actorId: string; inquiryId: string; access: Access;
-  saved: PartnerTechnicalSaveReceipt; configuredRows: PartnerConfiguredInquiryRows; customerId: string };
+  saved: PartnerTechnicalSaveReceipt; configuredRows: PartnerConfiguredInquiryRows; customerId: string;
+  contractDate?: string; projectId?: string };
 
 const ports = createPartnerTechnicalHttpPorts();
 const inquiryPorts = createPartnerInquiryHttpPorts();
@@ -123,6 +127,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const checkpointedInputRevision = useRef(0);
   const inquiryHydrationFlight = useRef(false);
   const [customerId, setCustomerId] = useState('');
+  const [contractDate, setContractDate] = useState(today);
+  const [projectId, setProjectId] = useState('');
+  const [preparationStep, setPreparationStep] = useState(1);
+  const [showProjectForm, setShowProjectForm] = useState(false);
+  const [projectTitle, setProjectTitle] = useState('');
+  const [projectAddress, setProjectAddress] = useState('');
   const [customerDraft, setCustomerDraft] = useState<PartnerCustomerDraft>(emptyPartnerCustomerDraft);
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [customerNotice, setCustomerNotice] = useState<string | null>(null);
@@ -148,6 +158,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const quickDimensionsValid = mode !== 'inquiry' || technicalDraft.rows.every(row => {
     try { normalizedQuickDimensions(row.productRowId); return true; } catch { return false; }
   });
+  const technicalActionReady = canSubmitPartnerTechnicalAction({ mode, pending, technicalReady,
+    contractConfigurationReady, quickDimensionsValid, hasDraftAccess: Boolean(draftAccess) });
 
   const wizardRecoveryId = wizard?.intent.recoveryId;
   useEffect(() => {
@@ -198,11 +210,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
 
   useEffect(() => {
     let active = true;
-    void api.get('/partner/cases/creation-context').then(response => {
+    void readPartnerCreationContext(() => api.get('/partner/cases/creation-context')).then(response => {
       const parsed = PartnerCreationContextSchema.safeParse((response.data as { data?: unknown })?.data);
       if (!active) return;
       if (!parsed.success) throw new Error('Invalid Partner creation context');
       setContext(parsed.data);
+      setError(null);
       if (parsed.data.kind === 'PARTNER') {
         const startFresh = searchParams.get('newInquiry') === '1';
         freshInquiryRef.current = startFresh;
@@ -210,7 +223,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         const configureForSale = mode === 'sale' && searchParams.get('configure') === '1';
         const saved = startFresh || configureForSale || !requestedInquiry ? null
           : readStored<PersistedRuntime>(runtimeKey(parsed.data.actorId, requestedInquiry));
-        if (saved?.actorId === parsed.data.actorId) { setRuntime(saved); setCustomerId(saved.customerId); }
+        if (saved?.actorId === parsed.data.actorId) {
+          setRuntime(saved); setCustomerId(saved.customerId);
+          if (saved.contractDate) setContractDate(saved.contractDate);
+          if (saved.projectId) setProjectId(saved.projectId);
+        }
         else {
           const requestedCustomer = searchParams.get('customerId');
           setCustomerId(parsed.data.customers.some(customer => customer.id === requestedCustomer) ? requestedCustomer! : parsed.data.customers[0]?.id || '');
@@ -244,6 +261,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       const created = { id: customer.customerId, displayName: customer.displayName, address: customerDraft.address.trim() };
       setContext({ ...partner, customers: [created, ...partner.customers] });
       setCustomerId(created.id);
+      setProjectId('');
       setCustomerDraft(emptyPartnerCustomerDraft);
       setShowCustomerForm(false);
       setCustomerNotice('مشتری با موفقیت ثبت و برای فروش همکار انتخاب شد.');
@@ -273,6 +291,33 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       setDuplicateMatch(null); setTransferReason('');
       setCustomerNotice('درخواست انتقال مشتری ثبت شد و پس از تصمیم مسئول مجاز قابل استفاده خواهد بود.');
     } catch { setError('ثبت درخواست انتقال مشتری انجام نشد. شاهد ممکن است منقضی شده باشد.'); }
+    finally { setPending(false); }
+  };
+
+  const createProject = async (partner: PartnerContext, selectedCustomerId = customerId) => {
+    if (pending || !selectedCustomerId || !projectTitle.trim()) return;
+    setPending(true); setError(null);
+    try {
+      const intent = { schemaVersion: 1 as const, customerId: selectedCustomerId, title: projectTitle.trim(),
+        workType: 'فروش سنگ پروژه ساختمانی', status: 'جدید',
+        ...(projectAddress.trim() ? { address: projectAddress.trim() } : {}),
+        reason: 'ثبت پروژه توسط فروشنده همکار' };
+      const payloadHash = await canonicalHash(intent);
+      const commandId = `partner-project-${crypto.randomUUID()}`;
+      const response = await api.post(`/crm/partner/customers/${encodeURIComponent(selectedCustomerId)}/projects`, {
+        ...intent, commandId, correlationId: `partner-project-correlation-${crypto.randomUUID()}`,
+        idempotencyKey: commandId, payloadHash,
+      });
+      const value = (response.data as { data?: unknown })?.data;
+      const project = value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as { project?: { projectId?: unknown; title?: unknown } }).project : undefined;
+      if (typeof project?.projectId !== 'string' || typeof project.title !== 'string') throw new Error('Invalid project response');
+      const created = { id: project.projectId, customerId: selectedCustomerId, title: project.title };
+      setContext({ ...partner, projects: [created, ...partner.projects] });
+      setProjectId(created.id); setProjectTitle(''); setProjectAddress(''); setShowProjectForm(false);
+      setCustomerNotice('پروژه ثبت و انتخاب شد.');
+      return created;
+    } catch { setError('ثبت پروژه انجام نشد. اطلاعات را بررسی و دوباره تلاش کنید.'); }
     finally { setPending(false); }
   };
 
@@ -414,9 +459,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       const configuredRows: PartnerConfiguredInquiryRows = result.value.rows.map(row => ({ rowId: row.rowId,
         configuration: row.configurationRef }));
       persistRuntime({ actorId: context.actorId, inquiryId, access: draftAccess, saved: { ...saved.value, replayed: true },
-        configuredRows, customerId: customerId || context.customers[0]?.id || '' });
+        configuredRows, customerId: customerId || context.customers[0]?.id || '',
+        ...(mode === 'sale' ? { contractDate, projectId } : {}) });
     }).catch(() => setError('بازیابی استعلام ذخیره‌شده انجام نشد.')).finally(() => { inquiryHydrationFlight.current = false; });
-  }, [context, customerId, draftAccess, mode, persistRuntime, recoveryRevision, runtime, searchParams]);
+  }, [context, contractDate, customerId, draftAccess, mode, persistRuntime, projectId, recoveryRevision, runtime, searchParams]);
 
   const reacquireRuntime = useCallback(async (value: PersistedRuntime): Promise<PersistedRuntime | null> => {
     const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: value.access.recoveryId,
@@ -439,7 +485,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   };
 
   const startInquiry = async (partner: PartnerContext) => {
-    if (pending || !technicalReady || !contractConfigurationReady || !draftAccess) return;
+    if (!technicalActionReady || !draftAccess || (mode === 'sale' && (!contractDate || !customerId || !projectId))) return;
     setPending(true); setError(null);
     technicalCommitFlight.current = true;
     try {
@@ -463,7 +509,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       if (!configuredRows.length && matches?.rows.length) {
         const inquiryId = matches.rows[0].approvedRowBinding!.inquiryId;
         persistRuntime({ actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
-          configuredRows: matches.rows.map(row => ({ rowId: row.rowId, configuration: row.configurationRef })), customerId: '' });
+          configuredRows: matches.rows.map(row => ({ rowId: row.rowId, configuration: row.configurationRef })),
+          customerId, contractDate, projectId });
         freshInquiryRef.current = false;
         router.replace('/dashboard/sales/contracts/create');
         return;
@@ -478,7 +525,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       window.localStorage.setItem(inquiryPendingKey(partner.actorId), JSON.stringify(command));
       const submitted = await inquiryPorts.commands.execute(command);
       if (!submitted.ok) { window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); setError(submitted.error.message); return; }
-      const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value, configuredRows, customerId: '' };
+      const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value, configuredRows,
+        customerId, ...(mode === 'sale' ? { contractDate, projectId } : {}) };
       window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); persistRuntime(value);
       freshInquiryRef.current = false;
       router.replace(mode === 'inquiry'
@@ -549,24 +597,28 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       }
       inquiryRows = matches.rows;
     } catch { /* The exact inquiry view remains a safe fallback for older records. */ }
-    const customer = context.customers.find(item => item.id === customerId) ?? context.customers[0];
+    const selectedCustomerId = runtime.customerId || customerId || context.customers[0]?.id || '';
+    const customer = context.customers.find(item => item.id === selectedCustomerId);
+    const selectedProject = context.projects.find(item => item.id === runtime.projectId && item.customerId === selectedCustomerId);
     const approved = inquiryRows.filter(row => row.state === 'APPROVED' && row.approvedPrice);
     const currency = approved[0]?.approvedPrice?.currency;
     if (!customer) { setShowCustomerForm(true); setError('برای ایجاد قرارداد، مشتری را ثبت یا انتخاب کنید.'); return; }
+    if (!selectedProject) { setPreparationStep(3); setError('برای ایجاد قرارداد، پروژه را انتخاب کنید.'); return; }
     if (!currency) { setError('پاسخ معتبر استعلام را بررسی کنید.'); return; }
-    const contractDate = today();
+    const selectedContractDate = runtime.contractDate || contractDate || today();
     const draft = enterPartnerWizard({ inquiryRows, now: Date.now(), validated: validated.value,
       base: { customerId: customer.id, recoveryId: runtime.saved.recoveryId, recoveryRevision: runtime.saved.recoveryRevision,
-        contractDate,
+        contractDate: selectedContractDate, projectId: selectedProject.id,
         customerPaymentPlan: { planId: `partner-customer-plan-${crypto.randomUUID()}`, version: 1,
-          effectiveDate: contractDate, installments: [{ installmentId: `partner-installment-${crypto.randomUUID()}`,
-            dueDate: addDays(contractDate, 30), amount: { amount: '0', currency }, method: 'BANK_TRANSFER' }] },
+          effectiveDate: selectedContractDate, installments: [{ installmentId: `partner-installment-${crypto.randomUUID()}`,
+            dueDate: addDays(selectedContractDate, 30), amount: { amount: '0', currency }, method: 'BANK_TRANSFER' }] },
         deliveries: runtime.saved.rows.map((row, index) => ({ deliveryId: `partner-delivery-${crypto.randomUUID()}`,
-          date: addDays(contractDate, 7 + index), destination: customer.address,
+          date: addDays(selectedContractDate, 7 + index), destination: customer.address,
           items: [{ productRowId: row.configurationRef.productRowId, quantity: row.quantity }] })),
         retailDiscount: { amount: '0', currency },
       } });
     if (!draft) { setError('همه ردیف‌های فنی باید پاسخ معتبر و جاری داشته باشند.'); return; }
+    draft.step = 'products';
     const restoreIntent = (intent: typeof draft.intent, step: PartnerWizardStep) => {
       if (intent.recoveryRevision !== draft.intent.recoveryRevision || intent.graphHash !== draft.intent.graphHash ||
           intent.rows.length !== draft.rows.length || intent.rows.some(row => !draft.rows.some(current => current.productRowId === row.productRowId))) {
@@ -782,7 +834,19 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         options={context.projects.filter(project => project.customerId === draft.intent.customerId)
           .map(project => ({ value: project.id, label: project.title }))}
         onChange={value => updateWizard({ ...draft, intent: { ...draft.intent, projectId: value } })} />
-      <ErpButton label="ثبت پروژه جدید" variant="outline" href={`/dashboard/crm/potential-projects/create?customerId=${encodeURIComponent(draft.intent.customerId)}`} />
+      <ErpButton label="ثبت پروژه جدید" variant="outline" disabled={!draft.intent.customerId}
+        onClick={() => setShowProjectForm(true)} />
+      <ErpSheet open={showProjectForm} onClose={() => setShowProjectForm(false)} title="ثبت پروژه جدید"
+        presentation="modal" pending={pending} footer={<ErpButton label="ثبت و انتخاب پروژه"
+          disabled={pending || !projectTitle.trim()} onClick={() => void createProject(context, draft.intent.customerId)
+            .then(created => created && updateWizard({ ...draft, intent: { ...draft.intent, projectId: created.id } }))} />}>
+        <div className="space-y-4">
+          <ErpField label="عنوان پروژه" required><ErpInput value={projectTitle} maxLength={300}
+            onChange={event => setProjectTitle(event.target.value)} /></ErpField>
+          <ErpField label="نشانی پروژه"><ErpTextarea value={projectAddress} maxLength={1000}
+            onChange={event => setProjectAddress(event.target.value)} /></ErpField>
+        </div>
+      </ErpSheet>
     </div>;
     if (step === 'delivery') return <div className="space-y-3">{draft.intent.deliveries.map((delivery, index) => <ErpCard key={delivery.deliveryId} className="space-y-3 p-4">
       <ErpField label={`تاریخ تحویل ${(index + 1).toLocaleString('fa-IR')}`}><ErpInput type="date" value={delivery.date}
@@ -950,22 +1014,63 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   </section>;
   return <section dir="rtl" className="mx-auto min-w-0 max-w-4xl space-y-5">
     <h1 className="text-2xl font-bold">{mode === 'inquiry' ? 'استعلام قیمت جدید' : 'ایجاد فروش همکار'}</h1>
-    {mode === 'sale' && <WizardProgressBar currentStep={4} steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
+    {mode === 'sale' && <WizardProgressBar currentStep={preparationStep} steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
       title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))} />}
     {customerNotice && <ErpInlineState kind="success" title={customerNotice} />}
     <ErpCard className="space-y-4 p-4 sm:p-6">
-      {mode === 'inquiry'
-        ? <PartnerQuickInquiryEditor draft={technicalDraft} products={catalog} dimensions={quickDimensions}
-            onDimensionsChange={setQuickDimensions} onChange={setTechnicalDraft} />
-        : <PartnerTechnicalDraftEditor draft={technicalDraft} products={catalog} operations={operations}
-            preview={technicalPreview} onChange={setTechnicalDraft} />}
-      <ErpField label="یادداشت (اختیاری)"><ErpTextarea value={inquiryNote} maxLength={2000}
-        onChange={event => setInquiryNote(event.target.value)} /></ErpField>
-      <ErpButton label={mode === 'inquiry' ? 'ارسال همه ردیف‌ها' : 'بررسی قیمت‌ها و ادامه'}
-        disabled={pending || !technicalReady || !contractConfigurationReady || !quickDimensionsValid || !draftAccess}
-        onClick={() => void startInquiry(context)} />
+      {mode === 'sale' && preparationStep === 1 && <ErpField label="تاریخ قرارداد" required>
+        <ErpInput type="date" value={contractDate} onChange={event => setContractDate(event.target.value)} />
+      </ErpField>}
+      {mode === 'sale' && preparationStep === 2 && <div className="space-y-4">
+        <ErpCombobox label="مشتری" value={customerId}
+          options={context.customers.map(customer => ({ value: customer.id, label: customer.displayName }))}
+          onChange={value => { setCustomerId(value); setProjectId(current => context.projects.some(project =>
+            project.id === current && project.customerId === value) ? current : ''); }} />
+        <ErpButton label="ثبت مشتری جدید" variant="outline" onClick={() => setShowCustomerForm(true)} />
+      </div>}
+      {mode === 'sale' && preparationStep === 3 && <div className="space-y-4">
+        <ErpCombobox label="پروژه" value={projectId}
+          options={context.projects.filter(project => project.customerId === customerId)
+            .map(project => ({ value: project.id, label: project.title }))}
+          onChange={setProjectId} />
+        <ErpButton label="ثبت پروژه جدید" variant="outline" disabled={!customerId}
+          onClick={() => setShowProjectForm(true)} />
+        <ErpSheet open={showProjectForm} onClose={() => setShowProjectForm(false)} title="ثبت پروژه جدید"
+          presentation="modal" pending={pending} footer={<ErpButton label="ثبت و انتخاب پروژه"
+            disabled={pending || !projectTitle.trim()} onClick={() => void createProject(context)} />}>
+          <div className="space-y-4">
+            <ErpField label="عنوان پروژه" required><ErpInput value={projectTitle} maxLength={300}
+              onChange={event => setProjectTitle(event.target.value)} /></ErpField>
+            <ErpField label="نشانی پروژه"><ErpTextarea value={projectAddress} maxLength={1000}
+              onChange={event => setProjectAddress(event.target.value)} /></ErpField>
+          </div>
+        </ErpSheet>
+      </div>}
+      {(mode === 'inquiry' || preparationStep === 4) && <>
+        {mode === 'inquiry'
+          ? <PartnerQuickInquiryEditor draft={technicalDraft} products={catalog} dimensions={quickDimensions}
+              onDimensionsChange={setQuickDimensions} onChange={setTechnicalDraft} />
+          : <PartnerTechnicalDraftEditor draft={technicalDraft} products={catalog} operations={operations}
+              preview={technicalPreview} onChange={setTechnicalDraft} />}
+        <ErpField label="یادداشت (اختیاری)"><ErpTextarea value={inquiryNote} maxLength={2000}
+          onChange={event => setInquiryNote(event.target.value)} /></ErpField>
+        {mode === 'inquiry' && <ErpButton label="ارسال همه ردیف‌ها" disabled={!technicalActionReady}
+          onClick={() => void startInquiry(context)} />}
+      </>}
     </ErpCard>
-    {!contractConfigurationReady && <ErpInlineState kind="stale" title="مشخصات و مقدار واقعی این قرارداد را تکمیل کنید." />}
+    {mode === 'sale' && <PartnerPreparationNavigation step={preparationStep}
+      pending={pending} technicalReady={technicalActionReady}
+      onPrevious={() => { setError(null); setPreparationStep(step => Math.max(1, step - 1)); }}
+      onNext={() => {
+        setError(null);
+        if (preparationStep === 1 && !contractDate) { setError('تاریخ قرارداد را وارد کنید.'); return; }
+        if (preparationStep === 2 && !customerId) { setError('مشتری را انتخاب کنید.'); return; }
+        if (preparationStep === 3 && !projectId) { setError('پروژه را انتخاب کنید.'); return; }
+        if (preparationStep < 4) { setPreparationStep(step => step + 1); return; }
+        void startInquiry(context);
+      }} />}
+    {showPartnerContractConfigurationWarning(mode, contractConfigurationReady) && preparationStep === 4
+      && <ErpInlineState kind="stale" title="مشخصات و مقدار واقعی این قرارداد را تکمیل کنید." />}
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
 }

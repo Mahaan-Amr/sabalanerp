@@ -31,6 +31,8 @@ import { PartnerQuickInquiryEditor, type PartnerInquiryDimensions } from './Part
 import { isPartnerContractConfigurationComplete, removePartnerTechnicalProduct } from './partnerTechnicalDraftAdapter';
 import { normalizeNumericText } from '@/lib/numberFormat';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
+import { commitPartnerTechnicalDraft } from './partnerTechnicalCommit';
+import { getPartnerBrowserSessionId } from './partnerBrowserSession';
 
 type PartnerContext = Extract<PartnerCreationContext, { kind: 'PARTNER' }>;
 type Access = { schemaVersion: 1; recoveryId: string; browserSessionId: string;
@@ -116,7 +118,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const recoveryRevisionRef = useRef(0);
   recoveryRevisionRef.current = recoveryRevision;
   const recoveryStarting = useRef(false);
-  const checkpointFlight = useRef(false);
+  const checkpointFlight = useRef<Promise<boolean> | null>(null);
+  const technicalCommitFlight = useRef(false);
   const checkpointedInputRevision = useRef(0);
   const inquiryHydrationFlight = useRef(false);
   const [customerId, setCustomerId] = useState('');
@@ -298,7 +301,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       const candidate = fresh ? undefined : partner.recoverableDrafts?.find(item => item.recoveryId === requestedDraft)
         ?? partner.recoverableDraft;
       const recoveryId = candidate?.recoveryId ?? `partner-recovery-${crypto.randomUUID()}`;
-      const browserSessionId = `partner-browser-${crypto.randomUUID()}`;
+      const browserSessionId = getPartnerBrowserSessionId(window.sessionStorage, partner.actorId);
       const baseRevision = candidate?.baseRevision ?? 0;
       const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId, browserSessionId, baseRevision, takeover });
       if (!lease.ok) { setRecoveryBlocked(Boolean(candidate)); setError(lease.error.message); return; }
@@ -315,13 +318,33 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     finally { recoveryStarting.current = false; }
   }, [mode, runtime, searchParams]);
 
+  const checkpointTechnicalDraft = useCallback((draft: PartnerTechnicalDraft, access: Access): Promise<boolean> => {
+    if (checkpointFlight.current) return checkpointFlight.current;
+    const expectedRecoveryRevision = recoveryRevisionRef.current;
+    checkpointFlight.current = (async () => {
+      try {
+        const result = await ports.recovery.checkpoint({ ...access, expectedRecoveryRevision,
+          idempotencyKey: `partner-checkpoint-${crypto.randomUUID()}`, draft });
+        if (!result.ok) { setRecoveryBlocked(true); setError(result.error.message); return false; }
+        checkpointedInputRevision.current = result.value.inputRevision;
+        recoveryRevisionRef.current = result.value.recoveryRevision;
+        setRecoveryRevision(result.value.recoveryRevision);
+        return true;
+      } catch {
+        setError('ذخیره خودکار پیش‌نویس نامطمئن است؛ پیش از ادامه دوباره تلاش کنید.');
+        return false;
+      } finally { checkpointFlight.current = null; }
+    })();
+    return checkpointFlight.current;
+  }, []);
+
   const discardDraftRecovery = useCallback(async (partner: PartnerContext) => {
     const requestedDraft = searchParams.get('draftId');
     const candidate = partner.recoverableDrafts?.find(item => item.recoveryId === requestedDraft) ?? partner.recoverableDraft;
     if (!candidate || recoveryStarting.current) return;
     recoveryStarting.current = true; setError(null);
     try {
-      const browserSessionId = `partner-browser-${crypto.randomUUID()}`;
+      const browserSessionId = getPartnerBrowserSessionId(window.sessionStorage, partner.actorId);
       const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: candidate.recoveryId,
         browserSessionId, baseRevision: candidate.baseRevision, takeover: true });
       if (!lease.ok) { setError(lease.error.message); return; }
@@ -350,20 +373,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (!draftAccess || runtime || recoveryBlocked || technicalDraft.inputRevision === 0
         || technicalDraft.inputRevision <= checkpointedInputRevision.current) return;
     const timer = window.setTimeout(async () => {
-      if (checkpointFlight.current) return;
-      checkpointFlight.current = true;
-      const expectedRecoveryRevision = recoveryRevisionRef.current;
-      try {
-        const result = await ports.recovery.checkpoint({ ...draftAccess, expectedRecoveryRevision,
-          idempotencyKey: `partner-checkpoint-${crypto.randomUUID()}`, draft: technicalDraft });
-        if (!result.ok) { setRecoveryBlocked(true); setError(result.error.message); return; }
-        checkpointedInputRevision.current = result.value.inputRevision;
-        setRecoveryRevision(result.value.recoveryRevision);
-      } catch { setError('ذخیره خودکار پیش‌نویس نامطمئن است؛ پیش از ادامه دوباره تلاش کنید.'); }
-      finally { checkpointFlight.current = false; }
+      if (technicalCommitFlight.current) return;
+      await checkpointTechnicalDraft(technicalDraft, draftAccess);
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [draftAccess, recoveryBlocked, recoveryRevision, runtime, technicalDraft]);
+  }, [checkpointTechnicalDraft, draftAccess, recoveryBlocked, recoveryRevision, runtime, technicalDraft]);
 
   const contextActorId = context?.kind === 'PARTNER' ? context.actorId : null;
   const persistRuntime = useCallback((value: PersistedRuntime | null) => {
@@ -425,11 +439,17 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   };
 
   const startInquiry = async (partner: PartnerContext) => {
-    if (pending || !technicalReady || !contractConfigurationReady || !draftAccess || checkpointFlight.current) return;
+    if (pending || !technicalReady || !contractConfigurationReady || !draftAccess) return;
     setPending(true); setError(null);
+    technicalCommitFlight.current = true;
     try {
-      const saved = await ports.saved.save({ ...draftAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
-        idempotencyKey: `partner-save-${crypto.randomUUID()}`, draft: technicalDraft });
+      const saved = await commitPartnerTechnicalDraft({
+        checkpointRequired: technicalDraft.inputRevision > checkpointedInputRevision.current,
+        checkpoint: () => checkpointTechnicalDraft(technicalDraft, draftAccess),
+        save: () => ports.saved.save({ ...draftAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
+          idempotencyKey: `partner-save-${crypto.randomUUID()}`, draft: technicalDraft }),
+      });
+      if (!saved) return;
       if (!saved.ok) { setError(saved.error.message); return; }
       setRecoveryRevision(saved.value.recoveryRevision);
       const subjects = saved.value.pricingSubjects ?? saved.value.rows.map(row => ({ configurationRef: row.configurationRef,
@@ -465,7 +485,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         ? `/dashboard/sales/partner-inquiries?inquiryId=${encodeURIComponent(inquiryId)}`
         : '/dashboard/sales/contracts/create');
     } catch { setError('ذخیره مشخصات یا ارسال استعلام کامل نشد؛ ورودی‌ها حفظ شده‌اند.'); }
-    finally { setPending(false); }
+    finally { technicalCommitFlight.current = false; setPending(false); }
   };
 
   const submissionActorId = runtime?.actorId;
@@ -942,7 +962,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       <ErpField label="یادداشت (اختیاری)"><ErpTextarea value={inquiryNote} maxLength={2000}
         onChange={event => setInquiryNote(event.target.value)} /></ErpField>
       <ErpButton label={mode === 'inquiry' ? 'ارسال همه ردیف‌ها' : 'بررسی قیمت‌ها و ادامه'}
-        disabled={pending || !technicalReady || !contractConfigurationReady || !quickDimensionsValid || !draftAccess || checkpointFlight.current}
+        disabled={pending || !technicalReady || !contractConfigurationReady || !quickDimensionsValid || !draftAccess}
         onClick={() => void startInquiry(context)} />
     </ErpCard>
     {!contractConfigurationReady && <ErpInlineState kind="stale" title="مشخصات و مقدار واقعی این قرارداد را تکمیل کنید." />}

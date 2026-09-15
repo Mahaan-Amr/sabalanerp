@@ -3,6 +3,8 @@ import test from 'node:test';
 import { PartnerTechnicalDraftSchema, type PartnerTechnicalCheckpoint,
   type PartnerTechnicalCheckpointReceipt, type PartnerTechnicalSave, type Result, partnerError } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalSession, openPartnerTechnicalSession } from '../../contract-creation/partner/partnerTechnicalSession';
+import { commitPartnerTechnicalDraft } from '../../contract-creation/partner/partnerTechnicalCommit';
+import { getPartnerBrowserSessionId } from '../../contract-creation/partner/partnerBrowserSession';
 
 const access = { schemaVersion: 1 as const, recoveryId: 'technical-session',
   browserSessionId: 'browser-session', leaseToken: 'writer-token', baseRevision: 0 };
@@ -10,6 +12,33 @@ const graphHash = `sha256-v1:${'a'.repeat(64)}`;
 const draft = (inputRevision: number, text: string) => PartnerTechnicalDraftSchema.parse({
   schemaVersion: 1, inputRevision, rows: [],
   editingValues: [{ entityId: 'unfinished-product', field: 'quantity', text }],
+});
+
+test('explicit technical save waits for the pending checkpoint revision', async () => {
+  let acknowledgeCheckpoint!: (saved: boolean) => void;
+  let saveCalls = 0;
+  const result = commitPartnerTechnicalDraft({ checkpointRequired: true,
+    checkpoint: () => new Promise(resolve => { acknowledgeCheckpoint = resolve; }),
+    save: async () => { saveCalls += 1; return 'saved'; } });
+  await Promise.resolve();
+  assert.equal(saveCalls, 0, 'save must not race a checkpoint with the same expected recovery revision');
+  acknowledgeCheckpoint(true);
+  assert.equal(await result, 'saved');
+  assert.equal(saveCalls, 1);
+});
+
+test('the same browser tab keeps one editor location across inquiry and contract routes', () => {
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); } };
+  let created = 0;
+  const first = getPartnerBrowserSessionId(storage, 'partner-user', () => `partner-browser-${++created}`);
+  const afterNavigation = getPartnerBrowserSessionId(storage, 'partner-user', () => `partner-browser-${++created}`);
+  assert.equal(first, afterNavigation);
+  assert.equal(created, 1);
+  assert.notEqual(getPartnerBrowserSessionId(storage, 'another-user', () => `partner-browser-${++created}`), first);
+  values.set('sabalan-partner-editor-location:invalid-user', 'partner-browser-invalid value');
+  assert.equal(getPartnerBrowserSessionId(storage, 'invalid-user', () => 'partner-browser-replaced'), 'partner-browser-replaced');
 });
 
 test('checkpoint acknowledges only the submitted revision and never overwrites newer visible editing text', async () => {

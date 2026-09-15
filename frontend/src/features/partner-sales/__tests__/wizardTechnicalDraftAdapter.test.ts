@@ -6,7 +6,9 @@ import {
   addPartnerTechnicalDependent,
   addPartnerTechnicalProduct,
   addPartnerQuickInquiryProduct,
+  capturePartnerQuickConfigurationBaseline,
   commitPartnerTechnicalField,
+  isPartnerContractConfigurationComplete,
   removePartnerTechnicalProduct,
   retainPartnerTechnicalFieldText,
 } from '../../contract-creation/partner/partnerTechnicalDraftAdapter';
@@ -49,6 +51,24 @@ test('quick inquiry rows stay calculation-ready without asking for contract quan
   assert.equal(preview.value.conflicts.length, 0);
   assert.equal(preview.value.rows.every(row => row.calculation.ok), true);
   assert.equal(draft.rows.some(row => 'operations' in row && row.operations !== undefined), false);
+  const prepared = draft.rows.find(row => row.family === 'prepared');
+  const volumetric = draft.rows.find(row => row.family === 'volumetric');
+  assert.equal(prepared?.configuration.unit, catalog.products[0].salesUnits.prepared);
+  assert.equal(volumetric?.configuration.unit, catalog.products[0].salesUnits.volumetric);
+});
+
+test('every retained quick-inquiry row must receive real contract configuration', () => {
+  const product = catalog.products[0];
+  let draft = addPartnerQuickInquiryProduct(empty, product, 'prepared', 'quick-a');
+  draft = addPartnerQuickInquiryProduct(draft, product, 'prepared', 'quick-b');
+  const baseline = capturePartnerQuickConfigurationBaseline(draft);
+  assert.equal(isPartnerContractConfigurationComplete(draft, baseline), false);
+  let configured = commitPartnerTechnicalField(draft, 'quick-a', 'quantity', '2');
+  assert.equal(isPartnerContractConfigurationComplete(configured, baseline), false);
+  configured = commitPartnerTechnicalField(configured, 'quick-b', 'quantity', '3');
+  assert.equal(isPartnerContractConfigurationComplete(configured, baseline), true);
+  const replaced = removePartnerTechnicalProduct(configured, 'quick-b');
+  assert.equal(isPartnerContractConfigurationComplete(replaced, baseline), true);
 });
 
 test('remainder and layer adapters bind stable parent identity and cascade only with that parent', () => {

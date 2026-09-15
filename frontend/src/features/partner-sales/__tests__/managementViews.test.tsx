@@ -33,11 +33,12 @@ test('a Manager title never manufactures an action and a projected expired grant
 test('response review keeps different prices and mixed rejection visible before confirmation', () => {
   const html = renderToStaticMarkup(<ResponseReview rowNumbers={{ a: 1, b: 2, c: 3 }} decisions={[
     { rowId: 'a', expectedRevision: 1, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '120000', currency: 'IRR' } },
-    { rowId: 'b', expectedRevision: 1, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '25000', currency: 'IRT' } },
+    { rowId: 'b', expectedRevision: 1, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '25000.50', currency: 'IRT' } },
     { rowId: 'c', expectedRevision: 1, outcome: 'REJECTED', reason: 'مشخصات ناقص است' },
   ]} />);
   assert.match(html, /۱۲۰٬۰۰۰/);
   assert.match(html, /۲۵٬۰۰۰/);
+  assert.match(html, /٫۵ تومان/);
   assert.match(html, /ریال/);
   assert.match(html, /تومان/);
   assert.match(html, /مشخصات ناقص است/);

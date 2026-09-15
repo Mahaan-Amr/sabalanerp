@@ -10,6 +10,7 @@ const stone = {
   isActive: true, deletedAt: null, isAvailable: true,
   availableInLongitudinalContracts: true, availableInStairContracts: false,
   availableInSlabContracts: true, availableInVolumetricContracts: true,
+  preparedSalesUnit: 'squareMeter', volumetricSalesUnit: 'ton',
   basePrice: 'private-rate', financialEvidence: { hash: 'private-hash' },
 };
 
@@ -20,6 +21,7 @@ test('inventory product projection retains units and eligibility but never seria
     motherWidthCentimeters: '40.25', motherLengthMeters: '3', thicknessCentimeters: '2',
   });
   assert.deepEqual(result.value.families, ['longitudinal', 'slab', 'prepared', 'volumetric']);
+  assert.deepEqual(result.value.salesUnits, { prepared: 'squareMeter', volumetric: 'ton' });
   assert.equal(result.value.catalogSnapshotVersion, '2026-08-27T10:00:00.000Z');
   assert.equal(JSON.stringify(result).includes('private-'), false);
   assert.equal(JSON.stringify(result).includes('basePrice'), false);

@@ -17,7 +17,8 @@ import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/par
 import { PartnerInquiryWorkspace } from '../../partner-sales/inquiries/PartnerInquiryWorkspace';
 import type { PartnerConfiguredInquiryRows } from '../../partner-sales/inquiries/partnerInquirySubmission';
 import { isUsableInquiryRow, type PartnerInquiryView, type PartnerInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
-import { PartnerContractWizard, type PartnerWizardDraft, type PartnerWizardStep } from './PartnerContractWizard';
+import { PartnerContractWizard, partnerWizardSteps, type PartnerWizardDraft, type PartnerWizardStep } from './PartnerContractWizard';
+import { WizardProgressBar } from '../components/shared/WizardProgressBar';
 import { createPartnerCaseSubmission, type PartnerSubmitCommand } from './partnerCaseSubmission';
 import { enterPartnerWizard } from './partnerWizardEntry';
 import { partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
@@ -26,6 +27,8 @@ import { buildPartnerCustomerCreateCommand, emptyPartnerCustomerDraft, validateP
   type PartnerCustomerDraft } from './partnerCustomerCreation';
 import { sendPartnerConfirmation } from '../../partner-sales/cases/partnerCaseHttpPort';
 import { PartnerQuickInquiryEditor, type PartnerInquiryDimensions } from './PartnerQuickInquiryEditor';
+import { capturePartnerQuickConfigurationBaseline, isPartnerContractConfigurationComplete,
+  removePartnerTechnicalProduct, type PartnerQuickConfigurationBaseline } from './partnerTechnicalDraftAdapter';
 import { normalizeNumericText } from '@/lib/numberFormat';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 
@@ -115,6 +118,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const recoveryStarting = useRef(false);
   const checkpointFlight = useRef(false);
   const checkpointedInputRevision = useRef(0);
+  const contractConfigurationBaseline = useRef<PartnerQuickConfigurationBaseline | null>(null);
   const inquiryHydrationFlight = useRef(false);
   const [customerId, setCustomerId] = useState('');
   const [customerDraft, setCustomerDraft] = useState<PartnerCustomerDraft>(emptyPartnerCustomerDraft);
@@ -135,6 +139,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     { products: catalog, operations, sawKerfMeters: '0.003' }), [catalog, operations, technicalDraft]);
   const technicalReady = technicalPreview.ok && technicalDraft.rows.length > 0 && technicalPreview.value.conflicts.length === 0
     && technicalPreview.value.rows.every(row => row.calculation.ok);
+  const contractConfigurationReady = isPartnerContractConfigurationComplete(technicalDraft, contractConfigurationBaseline.current);
   const normalizedQuickDimensions = (productRowId: string) => Object.fromEntries(Object.entries(quickDimensions[productRowId] ?? {})
     .filter((entry): entry is [keyof PartnerInquiryDimensions, string] => Boolean(entry[1]?.trim()))
     .map(([key, value]) => [key, parseCanonicalDecimal(normalizeNumericText(value))])) as PartnerInquiryDimensions;
@@ -294,12 +299,15 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       if (!recovered.ok) { setError(recovered.error.message); return; }
       setDraftAccess(access); setRecoveryRevision(recovered.value.recoveryRevision);
       checkpointedInputRevision.current = recovered.value.draft?.inputRevision ?? 0;
+      contractConfigurationBaseline.current = mode === 'sale' && searchParams.get('configure') === '1'
+        && Boolean(searchParams.get('inquiryId')) && recovered.value.draft
+        ? capturePartnerQuickConfigurationBaseline(recovered.value.draft) : null;
       if (fresh) setTechnicalDraft(emptyTechnicalDraft());
       else if (recovered.value.draft) setTechnicalDraft(recovered.value.draft);
       setRecoveryBlocked(false);
     } catch { setError('بازیابی پیش‌نویس فنی انجام نشد.'); }
     finally { recoveryStarting.current = false; }
-  }, [runtime, searchParams]);
+  }, [mode, runtime, searchParams]);
 
   const discardDraftRecovery = useCallback(async (partner: PartnerContext) => {
     const requestedDraft = searchParams.get('draftId');
@@ -365,6 +373,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     freshInquiryRef.current = true;
     setRuntime(null); setWizard(null); setDraftAccess(null); setRecoveryRevision(0); setRecoveryBlocked(false);
     recoveryRevisionRef.current = 0; checkpointedInputRevision.current = 0; inquiryHydrationFlight.current = false;
+    contractConfigurationBaseline.current = null;
     setTechnicalDraft(emptyTechnicalDraft());
     router.replace(mode === 'inquiry' ? '/dashboard/sales/partner-inquiries?newInquiry=1'
       : '/dashboard/sales/contracts/create?newInquiry=1');
@@ -411,7 +420,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   };
 
   const startInquiry = async (partner: PartnerContext) => {
-    if (pending || !technicalReady || !draftAccess || checkpointFlight.current) return;
+    if (pending || !technicalReady || !contractConfigurationReady || !draftAccess || checkpointFlight.current) return;
     setPending(true); setError(null);
     try {
       const saved = await ports.saved.save({ ...draftAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
@@ -494,6 +503,19 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     try {
       const matches = await readApprovalMatches(refreshed.saved);
       if (matches.missingPricingSubjectIds.length) {
+        const missing = new Set(matches.missingPricingSubjectIds);
+        const pendingPrimaryIds = validated.value.rows
+          .map(row => row.configurationRef.productRowId)
+          .filter(productRowId => missing.has(productRowId));
+        if (pendingPrimaryIds.length > 0 && pendingPrimaryIds.length < validated.value.rows.length) {
+          const subset = pendingPrimaryIds.reduce(removePartnerTechnicalProduct, technicalDraft);
+          setTechnicalDraft(subset);
+          persistRuntime(null);
+          setWizard(null);
+          setError('ردیف‌های در انتظار از این قرارداد کنار گذاشته شدند؛ استعلام آن‌ها در تاریخچه باقی می‌ماند. محصولات آماده را بررسی و ادامه دهید.');
+          router.replace(`/dashboard/sales/contracts/create?configure=1&draftId=${encodeURIComponent(refreshed.saved.recoveryId)}`);
+          return;
+        }
         persistRuntime(null);
         setWizard(null);
         setError('برای ادامه با پاسخ‌های آماده، ردیف‌های در انتظار را از این فروش حذف کنید. استعلام آن‌ها در تاریخچه باقی می‌ماند.');
@@ -807,7 +829,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           draft.intent.customerPaymentPlan.installments.map(item => item.amount.amount)) !== '0';
       })() ? 'جمع اقساط باید با مبلغ فروش برابر باشد.'
         : null}
-    onReinquire={row => void reinquireFromWizard(row)} onSendConfirmation={caseId => sendPartnerConfirmation(caseId).then(() => undefined)}
+    onReinquire={row => void reinquireFromWizard(row)} onEditProducts={() => {
+      const recoveryId = wizard.intent.recoveryId;
+      setWizard(null); persistRuntime(null);
+      router.replace(`/dashboard/sales/contracts/create?configure=1&draftId=${encodeURIComponent(recoveryId)}`);
+    }} onSendConfirmation={caseId => sendPartnerConfirmation(caseId).then(() => undefined)}
     onOpenCase={caseId => router.push(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(caseId)}`)} />;
   if (runtime) return <div className="min-w-0 space-y-4"><PartnerInquiryWorkspace actorId={runtime.actorId} inquiryId={runtime.inquiryId}
     queries={inquiryPorts.queries} commands={inquiryPorts.commands} recovery={{
@@ -860,6 +886,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   </section>;
   return <section dir="rtl" className="mx-auto min-w-0 max-w-4xl space-y-5">
     <h1 className="text-2xl font-bold">{mode === 'inquiry' ? 'استعلام قیمت جدید' : 'ایجاد فروش همکار'}</h1>
+    {mode === 'sale' && <WizardProgressBar currentStep={4} steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
+      title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))} />}
     {customerNotice && <ErpInlineState kind="success" title={customerNotice} />}
     <ErpCard className="space-y-4 p-4 sm:p-6">
       {mode === 'inquiry'
@@ -870,9 +898,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       <ErpField label="یادداشت (اختیاری)"><ErpTextarea value={inquiryNote} maxLength={2000}
         onChange={event => setInquiryNote(event.target.value)} /></ErpField>
       <ErpButton label={mode === 'inquiry' ? 'ارسال همه ردیف‌ها' : 'بررسی قیمت‌ها و ادامه'}
-        disabled={pending || !technicalReady || !quickDimensionsValid || !draftAccess || checkpointFlight.current}
+        disabled={pending || !technicalReady || !contractConfigurationReady || !quickDimensionsValid || !draftAccess || checkpointFlight.current}
         onClick={() => void startInquiry(context)} />
     </ErpCard>
+    {!contractConfigurationReady && <ErpInlineState kind="stale" title="مشخصات و مقدار واقعی این قرارداد را تکمیل کنید." />}
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
 }

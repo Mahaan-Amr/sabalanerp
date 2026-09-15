@@ -1,5 +1,5 @@
 'use client';
-import { ErpCard, ErpCheckbox, ErpField as SalesAuthoringField, ErpFieldView, ErpInput, ErpPressable } from '@/components/erp';
+import { ErpCard, ErpCheckbox, ErpField as SalesAuthoringField, ErpFieldView, ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -285,6 +285,8 @@ interface StoneProductWizardData {
   // Contract visibility
   contractVisibility: Record<ContractVisibilityOption, boolean>;
   motherLengthValue: string;
+  preparedSalesUnit: 'count' | 'squareMeter' | 'ton';
+  volumetricSalesUnit: 'count' | 'squareMeter' | 'ton';
 }
 
 export default function CreateStoneProductWizard() {
@@ -351,7 +353,9 @@ export default function CreateStoneProductWizard() {
     colorId: '',
   color: null,
   contractVisibility: { ...EMPTY_CONTRACT_VISIBILITY },
-  motherLengthValue: ''
+  motherLengthValue: '',
+  preparedSalesUnit: 'count',
+  volumetricSalesUnit: 'ton'
   });
 
   // Load master data
@@ -651,7 +655,9 @@ export default function CreateStoneProductWizard() {
         availableInLongitudinalContracts: wizardData.contractVisibility.longitudinal,
         availableInStairContracts: wizardData.contractVisibility.stair,
         availableInSlabContracts: wizardData.contractVisibility.slab,
-        availableInVolumetricContracts: wizardData.contractVisibility.volumetric
+        availableInVolumetricContracts: wizardData.contractVisibility.volumetric,
+        preparedSalesUnit: wizardData.preparedSalesUnit,
+        volumetricSalesUnit: wizardData.volumetricSalesUnit
       };
 
       console.log('Sending product data:', JSON.stringify(productData, null, 2));
@@ -869,6 +875,20 @@ export default function CreateStoneProductWizard() {
                 <p id="contract-visibility-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-2">{errors.contractVisibility}</p>
               )}
             </ErpCard>
+            <div className="grid gap-4 md:grid-cols-2">
+              <SalesAuthoringField label="واحد فروش محصول آماده">
+                <ErpSelect value={wizardData.preparedSalesUnit}
+                  onChange={event => updateWizardData('preparedSalesUnit', event.target.value as StoneProductWizardData['preparedSalesUnit'])}>
+                  <option value="count">عدد</option><option value="squareMeter">مترمربع</option><option value="ton">تن</option>
+                </ErpSelect>
+              </SalesAuthoringField>
+              <SalesAuthoringField label="واحد فروش محصول حجمی">
+                <ErpSelect value={wizardData.volumetricSalesUnit}
+                  onChange={event => updateWizardData('volumetricSalesUnit', event.target.value as StoneProductWizardData['volumetricSalesUnit'])}>
+                  <option value="count">عدد</option><option value="squareMeter">مترمربع</option><option value="ton">تن</option>
+                </ErpSelect>
+              </SalesAuthoringField>
+            </div>
           </div>
         );
 

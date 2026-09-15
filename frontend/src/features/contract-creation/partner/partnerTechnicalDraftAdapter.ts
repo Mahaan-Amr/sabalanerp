@@ -11,6 +11,17 @@ import { normalizeNumericText } from '@/lib/numberFormat';
 type Row = PartnerTechnicalDraft['rows'][number];
 type EditingValue = NonNullable<PartnerTechnicalDraft['editingValues']>[number];
 
+export type PartnerQuickConfigurationBaseline = ReadonlyMap<string, string>;
+
+export function capturePartnerQuickConfigurationBaseline(draft: PartnerTechnicalDraft): PartnerQuickConfigurationBaseline {
+  return new Map(draft.rows.map(row => [row.productRowId, JSON.stringify(row.configuration)]));
+}
+
+export function isPartnerContractConfigurationComplete(draft: PartnerTechnicalDraft,
+  baseline: PartnerQuickConfigurationBaseline | null): boolean {
+  return baseline === null || draft.rows.every(row => baseline.get(row.productRowId) !== JSON.stringify(row.configuration));
+}
+
 const revise = (draft: PartnerTechnicalDraft, changes: Partial<PartnerTechnicalDraft>) =>
   PartnerTechnicalDraftSchema.parse({ ...draft, ...changes, inputRevision: draft.inputRevision + 1 });
 
@@ -71,8 +82,8 @@ export function addPartnerQuickInquiryProduct(draft: PartnerTechnicalDraft, prod
   const areaSquareMeters = parseCanonicalDecimal(String(Number(lengthMeters) * Number(widthMeters)));
   const rows = added.rows.map(row => {
     if (row.productRowId !== productRowId) return row;
-    if (row.family === 'prepared') return { ...row, configuration: { ...row.configuration, unit: 'count' as const, quantity: '1' } };
-    if (row.family === 'volumetric') return { ...row, configuration: { ...row.configuration, unit: 'ton' as const, quantity: '1' } };
+    if (row.family === 'prepared') return { ...row, configuration: { ...row.configuration, unit: product.salesUnits.prepared, quantity: '1' } };
+    if (row.family === 'volumetric') return { ...row, configuration: { ...row.configuration, unit: product.salesUnits.volumetric, quantity: '1' } };
     if (row.family === 'longitudinal') return { ...row, configuration: { ...row.configuration,
       lengthMeters, widthMeters, requestedAreaSquareMeters: areaSquareMeters, quantity: 1 } };
     if (row.family === 'slab') return { ...row, configuration: { ...row.configuration,
@@ -244,7 +255,9 @@ export function commitPartnerTechnicalField(
       };
       if (!supported[row.family].includes(field)) throw new Error('Technical field is unavailable for this family');
       committed = true;
-      return { ...row, configuration: { ...row.configuration, [field]: value } } as Row;
+      const rowValue = field === 'quantity' && (row.family === 'prepared' || row.family === 'volumetric')
+        ? parseCanonicalDecimal(normalizedText) : value;
+      return { ...row, configuration: { ...row.configuration, [field]: rowValue } } as Row;
     }
     if (row.family === 'slab' && ['lengthMeters', 'widthMeters', 'quantity'].includes(field)) {
       const sourceRows = row.configuration.sourceRows.map(source => {

@@ -277,7 +277,8 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
         thicknessValue: true, stoneTypeNamePersian: true, mineNamePersian: true, finishNamePersian: true,
         colorNamePersian: true, qualityNamePersian: true, cuttingDimensionNamePersian: true, isActive: true,
         deletedAt: true, isAvailable: true, availableInLongitudinalContracts: true, availableInStairContracts: true,
-        availableInSlabContracts: true, availableInVolumetricContracts: true, basePrice: true, currency: true } });
+        availableInSlabContracts: true, availableInVolumetricContracts: true,
+        preparedSalesUnit: true, volumetricSalesUnit: true, basePrice: true, currency: true } });
     if (products.length !== references.length) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     const publicProducts: PartnerTechnicalProduct[] = [];
     for (const source of products) {

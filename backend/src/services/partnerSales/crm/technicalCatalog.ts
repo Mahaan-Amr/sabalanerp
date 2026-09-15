@@ -14,6 +14,7 @@ export interface TechnicalProductSource {
   isActive: boolean; deletedAt: Date | null; isAvailable: boolean;
   availableInLongitudinalContracts: boolean; availableInStairContracts: boolean;
   availableInSlabContracts: boolean; availableInVolumetricContracts: boolean;
+  preparedSalesUnit: string; volumetricSalesUnit: string;
 }
 
 type TechnicalOperationSource = { id: string; updatedAt: Date; isActive: boolean } & (
@@ -59,6 +60,7 @@ export function projectPartnerTechnicalProduct(source: TechnicalProductSource): 
     return { ok: true, value: PartnerTechnicalProductSchema.parse({
       catalogItemId: source.id, catalogSnapshotVersion: source.updatedAt.toISOString(),
       code: source.code, name: source.namePersian, families,
+      salesUnits: { prepared: source.preparedSalesUnit, volumetric: source.volumetricSalesUnit },
       dimensions: {
         motherWidthCentimeters: dimension(source.widthValue),
         motherLengthMeters: dimension(source.motherLengthValue),

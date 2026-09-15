@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { PartnerTechnicalDraft, PartnerTechnicalFamily, PartnerTechnicalProduct } from '@sabalanerp/partner-sales-contracts';
-import { ErpBadge, ErpButton, ErpCard, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpSelect } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCombobox, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpSelect } from '@/components/erp';
 import { addPartnerQuickInquiryProduct, removePartnerTechnicalProduct } from './partnerTechnicalDraftAdapter';
 
 export type PartnerInquiryDimensions = {
@@ -63,20 +63,26 @@ export function PartnerQuickInquiryEditor({ draft, products, dimensions, onDimen
         item.catalogSnapshotVersion === row.catalogSnapshotVersion);
       if (!product) return <ErpInlineState key={row.productRowId} kind="stale" title="این سنگ دیگر در کاتالوگ در دسترس نیست." />;
       const value = dimensions[row.productRowId] ?? {};
+      const acceptsInquiryDimensions = row.family === 'longitudinal' || row.family === 'slab' || row.family === 'stair';
+      const catalogDimensions = [
+        product.dimensions.motherLengthMeters && `طول ${product.dimensions.motherLengthMeters} متر`,
+        product.dimensions.motherWidthCentimeters && `عرض ${product.dimensions.motherWidthCentimeters} سانتی‌متر`,
+        product.dimensions.thicknessCentimeters && `ضخامت ${product.dimensions.thicknessCentimeters} سانتی‌متر`,
+      ].filter(Boolean).join(' · ');
       return <ErpCard key={row.productRowId} className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2"><ErpBadge>{(index + 1).toLocaleString('fa-IR')}</ErpBadge>
             <strong>{product.name}</strong><ErpBadge tone="info">{units[row.family]}</ErpBadge></div>
           <ErpButton label="حذف" tone="danger" variant="ghost" onClick={() => remove(row.productRowId)} />
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        {acceptsInquiryDimensions ? <div className="grid gap-3 sm:grid-cols-3">
           <ErpField label="طول (متر)"><ErpInput inputMode="decimal" value={value.lengthMeters ?? ''}
             onChange={event => setDimension(row.productRowId, 'lengthMeters', event.target.value)} /></ErpField>
           <ErpField label="عرض (متر)"><ErpInput inputMode="decimal" value={value.widthMeters ?? ''}
             onChange={event => setDimension(row.productRowId, 'widthMeters', event.target.value)} /></ErpField>
           <ErpField label="ضخامت (سانتی‌متر)"><ErpInput inputMode="decimal" value={value.thicknessCentimeters ?? ''}
             onChange={event => setDimension(row.productRowId, 'thicknessCentimeters', event.target.value)} /></ErpField>
-        </div>
+        </div> : <ErpFieldView label="ابعاد کاتالوگ" value={catalogDimensions || '—'} />}
       </ErpCard>;
     })}
   </section>;

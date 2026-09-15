@@ -12,7 +12,8 @@ const productSelect = { id: true, code: true, namePersian: true, updatedAt: true
   widthValue: true, motherLengthValue: true, thicknessValue: true, stoneTypeNamePersian: true,
   mineNamePersian: true, finishNamePersian: true, colorNamePersian: true, qualityNamePersian: true, cuttingDimensionNamePersian: true,
   isActive: true, deletedAt: true, isAvailable: true, availableInLongitudinalContracts: true,
-  availableInStairContracts: true, availableInSlabContracts: true, availableInVolumetricContracts: true } satisfies Prisma.ProductSelect;
+  availableInStairContracts: true, availableInSlabContracts: true, availableInVolumetricContracts: true,
+  preparedSalesUnit: true, volumetricSalesUnit: true } satisfies Prisma.ProductSelect;
 const familyFilter: Record<PartnerTechnicalFamily, Prisma.ProductWhereInput> = {
   longitudinal: { availableInLongitudinalContracts: true }, stair: { availableInStairContracts: true },
   slab: { availableInSlabContracts: true }, prepared: { availableInVolumetricContracts: true }, volumetric: { availableInVolumetricContracts: true },

@@ -32,6 +32,8 @@ type ProductEditValues = {
   leadTime: string;
   description: string;
   images: string[];
+  preparedSalesUnit: 'count' | 'squareMeter' | 'ton';
+  volumetricSalesUnit: 'count' | 'squareMeter' | 'ton';
 };
 
 const ProductDetailPage: React.FC = () => {
@@ -56,6 +58,8 @@ const ProductDetailPage: React.FC = () => {
     leadTime: '',
     description: '',
     images: [] as string[],
+    preparedSalesUnit: 'count',
+    volumetricSalesUnit: 'ton',
   });
 
   useEffect(() => {
@@ -81,6 +85,8 @@ const ProductDetailPage: React.FC = () => {
           leadTime: data.data.leadTime?.toString() || '',
           description: data.data.description || '',
           images: data.data.images || [],
+          preparedSalesUnit: data.data.preparedSalesUnit || 'count',
+          volumetricSalesUnit: data.data.volumetricSalesUnit || 'ton',
         };
         setFormData(nextFormData);
         setSavedFormSnapshot(nextFormData);
@@ -124,6 +130,8 @@ const ProductDetailPage: React.FC = () => {
         leadTime: formData.leadTime ? parseInt(formData.leadTime) : null,
         description: formData.description || null,
         images: formData.images,
+        preparedSalesUnit: formData.preparedSalesUnit,
+        volumetricSalesUnit: formData.volumetricSalesUnit,
       });
 
       if (response.data.success) {
@@ -300,6 +308,24 @@ const ProductDetailPage: React.FC = () => {
 
                 {/* Currency */}
                 <ErpFieldView label="واحد پول" value={<>{product.currency}</>} />
+
+                {editing ? <>
+                  <SalesAuthoringField label="واحد فروش محصول آماده">
+                    <ErpSelect value={formData.preparedSalesUnit} onChange={event => setFormData({ ...formData,
+                      preparedSalesUnit: event.target.value as ProductEditValues['preparedSalesUnit'] })}>
+                      <option value="count">عدد</option><option value="squareMeter">مترمربع</option><option value="ton">تن</option>
+                    </ErpSelect>
+                  </SalesAuthoringField>
+                  <SalesAuthoringField label="واحد فروش محصول حجمی">
+                    <ErpSelect value={formData.volumetricSalesUnit} onChange={event => setFormData({ ...formData,
+                      volumetricSalesUnit: event.target.value as ProductEditValues['volumetricSalesUnit'] })}>
+                      <option value="count">عدد</option><option value="squareMeter">مترمربع</option><option value="ton">تن</option>
+                    </ErpSelect>
+                  </SalesAuthoringField>
+                </> : <>
+                  <ErpFieldView label="واحد فروش محصول آماده" value={{ count: 'عدد', squareMeter: 'مترمربع', ton: 'تن' }[product.preparedSalesUnit || 'count']} />
+                  <ErpFieldView label="واحد فروش محصول حجمی" value={{ count: 'عدد', squareMeter: 'مترمربع', ton: 'تن' }[product.volumetricSalesUnit || 'ton']} />
+                </>}
 
                 {/* Lead Time */}
                 {editing ? (

@@ -53,6 +53,8 @@ export interface Product {
   availableInStairContracts: boolean;
   availableInSlabContracts: boolean;
   availableInVolumetricContracts: boolean;
+  preparedSalesUnit?: 'count' | 'squareMeter' | 'ton';
+  volumetricSalesUnit?: 'count' | 'squareMeter' | 'ton';
   deletedAt: string | null;
   
   createdAt: string;
@@ -109,6 +111,8 @@ export interface ProductCreateData {
   availableInStairContracts?: boolean;
   availableInSlabContracts?: boolean;
   availableInVolumetricContracts?: boolean;
+  preparedSalesUnit?: 'count' | 'squareMeter' | 'ton';
+  volumetricSalesUnit?: 'count' | 'squareMeter' | 'ton';
 }
 
 export interface ProductUpdateData {
@@ -124,4 +128,6 @@ export interface ProductUpdateData {
   availableInStairContracts?: boolean;
   availableInSlabContracts?: boolean;
   availableInVolumetricContracts?: boolean;
+  preparedSalesUnit?: 'count' | 'squareMeter' | 'ton';
+  volumetricSalesUnit?: 'count' | 'squareMeter' | 'ton';
 }

@@ -33,7 +33,10 @@ test('concurrent delivery is durable, private, and stale notification links cann
       async canRead() { return authorized; },
       async resolveAction() { return authorized ? '/dashboard/sales/partner-inquiries' : null; },
     };
-    const gateway = createPartnerInAppGateway(contract, database, access);
+    // Break a TypeScript structural-comparison explosion between the isolated
+    // datasource client and the application client's generated option type.
+    const applicationDatabase = database as unknown as PrismaClient;
+    const gateway = createPartnerInAppGateway(contract, applicationDatabase, access);
     const attempts = await Promise.all(Array.from({ length: 8 }, () => gateway.enqueue(notification)));
     assert.ok(attempts.every(result => result.ok));
     assert.equal(new Set(attempts.map(result => result.ok && result.value.deliveryId)).size, 1);
@@ -42,22 +45,22 @@ test('concurrent delivery is durable, private, and stale notification links cann
     assert.equal(rows[0].referenceId, null);
     assert.equal(rows[0].actionUrl, '/dashboard/personal/notifications');
     assert.equal(rows[0].message, 'یک استعلام برای پاسخ‌گویی به شما ارجاع شد.');
-    assert.deepEqual(await filterCurrentlyAuthorizedNotifications(database, user, rows), []);
+    assert.deepEqual(await filterCurrentlyAuthorizedNotifications(applicationDatabase, user, rows), []);
     registerPartnerNotificationAccess(access);
-    assert.equal((await filterCurrentlyAuthorizedNotifications(database, user, rows)).length, 1);
-    assert.equal(await resolvePartnerNotificationAction(database, user.id, rows[0].id), '/dashboard/sales/partner-inquiries');
+    assert.equal((await filterCurrentlyAuthorizedNotifications(applicationDatabase, user, rows)).length, 1);
+    assert.equal(await resolvePartnerNotificationAction(applicationDatabase, user.id, rows[0].id), '/dashboard/sales/partner-inquiries');
     const changedIntent = await gateway.enqueue({ ...notification, correlationId: 'another-cause' });
     assert.equal(changedIntent.ok ? '' : changedIntent.error.code, 'IDEMPOTENCY_CONFLICT');
     for (const reason of ['reassigned', 'grant-revoked', 'customer-transferred']) {
       authorized = false;
-      assert.deepEqual(await filterCurrentlyAuthorizedNotifications(database, user, rows), [], reason);
-      assert.equal(await resolvePartnerNotificationAction(database, user.id, rows[0].id), null, reason);
+      assert.deepEqual(await filterCurrentlyAuthorizedNotifications(applicationDatabase, user, rows), [], reason);
+      assert.equal(await resolvePartnerNotificationAction(applicationDatabase, user.id, rows[0].id), null, reason);
       assert.equal((await gateway.enqueue(notification)).ok, false, reason);
     }
     assert.equal(await database.notification.count({ where: { userId } }), 1);
     authorized = true;
     await database.user.update({ where: { id: userId }, data: { isActive: false } });
-    assert.equal(await resolvePartnerNotificationAction(database, user.id, rows[0].id), null, 'DB user deactivation overrides a stale authenticated principal');
+    assert.equal(await resolvePartnerNotificationAction(applicationDatabase, user.id, rows[0].id), null, 'DB user deactivation overrides a stale authenticated principal');
     assert.equal((await gateway.enqueue(notification)).ok, false);
   } finally {
     if (userId) {

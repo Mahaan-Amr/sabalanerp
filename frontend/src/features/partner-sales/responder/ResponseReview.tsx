@@ -3,6 +3,7 @@
 import React from 'react';
 import type { PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 import { ErpBadge, ErpCard } from '@/components/erp';
+import { formatPartnerMoney } from '../presentation';
 
 export function ResponseReview({ decisions, rowNumbers }: {
   decisions: Extract<PartnerCommand, { type: 'INQUIRY_DECIDE' }>['decisions']; rowNumbers: Record<string, number>;
@@ -15,7 +16,7 @@ export function ResponseReview({ decisions, rowNumbers }: {
         <ErpBadge tone={decision.outcome === 'APPROVED' ? 'success' : 'danger'}>{decision.outcome === 'APPROVED' ? 'تأیید' : 'رد'}</ErpBadge>
       </div>
       {decision.outcome === 'APPROVED'
-        ? <><p>قیمت هر واحد: <b>{BigInt(decision.wholesaleUnitPrice.amount).toLocaleString('fa-IR')}</b> {decision.wholesaleUnitPrice.currency === 'IRR' ? 'ریال' : 'تومان'}</p>{decision.note && <p className="break-words">{decision.note}</p>}</>
+        ? <><p>قیمت هر واحد: <b>{formatPartnerMoney(decision.wholesaleUnitPrice.amount, decision.wholesaleUnitPrice.currency)}</b></p>{decision.note && <p className="break-words">{decision.note}</p>}</>
         : <p className="break-words">{decision.reason}</p>}
     </ErpCard>)}
   </div>;

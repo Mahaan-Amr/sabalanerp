@@ -12,6 +12,7 @@ export function createPartnerTechnicalCatalogFixtures() {
     products: [PartnerTechnicalProductSchema.parse({
       catalogItemId: 'fixture-technical-stone', catalogSnapshotVersion, code: 'FIXTURE-STONE', name: 'سنگ آزمایشی',
       families: ['longitudinal', 'stair', 'slab', 'prepared', 'volumetric'],
+      salesUnits: { prepared: 'count', volumetric: 'ton' },
       dimensions: { motherWidthCentimeters: '40', motherLengthMeters: '3', thicknessCentimeters: '2' },
       attributes: { stoneType: 'تراورتن', mine: 'معدن آزمایشی', finish: 'صیقلی', color: 'سفید', quality: 'ممتاز', cuttingDimension: 'طولی' },
       isAvailable: true,

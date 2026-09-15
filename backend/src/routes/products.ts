@@ -704,6 +704,8 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
   body('availableInStairContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد پله معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
   body('availableInSlabContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد اسلب معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
   body('availableInVolumetricContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد حجمی معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
+  body('preparedSalesUnit').optional().isIn(['count', 'squareMeter', 'ton']).withMessage('واحد فروش محصول آماده معتبر نیست.'),
+  body('volumetricSalesUnit').optional().isIn(['count', 'squareMeter', 'ton']).withMessage('واحد فروش محصول حجمی معتبر نیست.'),
 ], async (req: any, res: Response) => {
   try {
     if (DEBUG_LOGS) {
@@ -781,6 +783,8 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
         availableInStairContracts: req.body.availableInStairContracts !== undefined ? req.body.availableInStairContracts : defaultContractVisibility.availableInStairContracts,
         availableInSlabContracts: req.body.availableInSlabContracts !== undefined ? req.body.availableInSlabContracts : defaultContractVisibility.availableInSlabContracts,
         availableInVolumetricContracts: req.body.availableInVolumetricContracts !== undefined ? req.body.availableInVolumetricContracts : defaultContractVisibility.availableInVolumetricContracts,
+        preparedSalesUnit: req.body.preparedSalesUnit ?? 'count',
+        volumetricSalesUnit: req.body.volumetricSalesUnit ?? 'ton',
       }
     });
 
@@ -815,6 +819,8 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
   body('availableInStairContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد پله معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
   body('availableInSlabContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد اسلب معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
   body('availableInVolumetricContracts').optional().isBoolean().withMessage('انتخاب نمایش در قرارداد حجمی معتبر نیست؛ گزینه را دوباره انتخاب کنید.').toBoolean(),
+  body('preparedSalesUnit').optional().isIn(['count', 'squareMeter', 'ton']).withMessage('واحد فروش محصول آماده معتبر نیست.'),
+  body('volumetricSalesUnit').optional().isIn(['count', 'squareMeter', 'ton']).withMessage('واحد فروش محصول حجمی معتبر نیست.'),
 ], async (req: any, res: Response) => {
   try {
     console.log('Product update request:', {
@@ -861,6 +867,8 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
       availableInStairContracts: req.body.availableInStairContracts !== undefined ? req.body.availableInStairContracts : product.availableInStairContracts,
       availableInSlabContracts: req.body.availableInSlabContracts !== undefined ? req.body.availableInSlabContracts : product.availableInSlabContracts,
       availableInVolumetricContracts: req.body.availableInVolumetricContracts !== undefined ? req.body.availableInVolumetricContracts : product.availableInVolumetricContracts,
+      preparedSalesUnit: req.body.preparedSalesUnit ?? product.preparedSalesUnit,
+      volumetricSalesUnit: req.body.volumetricSalesUnit ?? product.volumetricSalesUnit,
     };
     
     console.log('Updating product with data:', updateData);

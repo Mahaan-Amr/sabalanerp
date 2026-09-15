@@ -1,4 +1,5 @@
 import type { PartnerInquiryViewV2 } from '@sabalanerp/partner-sales-contracts';
+import { formatPartnerMoney } from '../presentation';
 
 export type PartnerInquiryView = PartnerInquiryViewV2;
 export type PartnerInquiryRow = PartnerInquiryView['rows'][number];
@@ -33,5 +34,5 @@ export function inquirySummary(inquiry: PartnerInquiryView): string {
 
 export const persianCount = (value: number): string => value.toLocaleString('fa-IR');
 export const inquiryMoney = (row: PartnerInquiryRow): string => row.approvedPrice
-  ? `${BigInt(row.approvedPrice.amount).toLocaleString('fa-IR')} ${row.approvedPrice.currency === 'IRR' ? 'ریال' : 'تومان'}`
+  ? formatPartnerMoney(row.approvedPrice.amount, row.approvedPrice.currency)
   : '—';

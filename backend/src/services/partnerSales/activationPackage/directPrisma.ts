@@ -143,6 +143,11 @@ export function createPrismaPartnerDirectActivation(input: {
           for (const id of [...new Set([input.actorId, command.userId])].sort()) {
             await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
           }
+          const profileAfterUserLock = await tx.partnerProfile.findUnique({ where: { userId: command.userId },
+            select: { id: true } });
+          if ((profileAfterUserLock?.id ?? null) !== (lockTarget.partnerProfile?.id ?? null)) {
+            return { ok: false as const, error: partnerError('ROW_STALE') };
+          }
           const prior = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: {
             actorId: input.actorId, operation: command.type, targetScope: command.userId, key: command.idempotency.key,
           } } });

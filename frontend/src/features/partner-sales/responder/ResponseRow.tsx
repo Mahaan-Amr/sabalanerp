@@ -3,6 +3,7 @@
 import React from 'react';
 import type { PartnerQueryV2Results } from '@sabalanerp/partner-sales-contracts';
 import { ErpBadge, ErpCard, ErpCheckbox, ErpField, ErpRialInput, ErpSegmentedControl, ErpTextarea } from '@/components/erp';
+import { formatPartnerMoney } from '../presentation';
 import type { ResponseDraft } from './responseDraft';
 
 const families = { longitudinal: 'سنگ طولی', stair: 'پله', slab: 'اسلب', prepared: 'سنگ آماده', volumetric: 'سنگ حجمی' };
@@ -32,7 +33,7 @@ export function ResponseRow({ row, number, canRespond, status, draft, pending, e
       </div>)}
     </dl>
     {row.sellerNote && <p className="rounded-xl bg-[var(--sds-surface-subtle)] p-3 text-sm">یادداشت فروشنده: {row.sellerNote}</p>}
-    {row.approvedPrice && <p>قیمت مصوب هر واحد: <b>{BigInt(row.approvedPrice.amount).toLocaleString('fa-IR')}</b> {row.approvedPrice.currency === 'IRR' ? 'ریال' : 'تومان'}</p>}
+    {row.approvedPrice && <p>قیمت مصوب هر واحد: <b>{formatPartnerMoney(row.approvedPrice.amount, row.approvedPrice.currency)}</b></p>}
     <div className="sds-text-secondary text-sm" role="status">{status}</div>
     {canRespond && <div className="space-y-4 rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4">
       <p className="font-bold text-[var(--sds-text-primary)]">پاسخ قیمت این ردیف</p>

@@ -7,6 +7,7 @@ test('technical catalog preserves family eligibility and exact physical dimensio
   const product = {
     catalogItemId: 'stone-1', catalogSnapshotVersion: '2026-08-27T10:00:00.000Z',
     code: 'STONE-1', name: 'سنگ سفید', families: ['longitudinal', 'stair', 'slab', 'prepared', 'volumetric'],
+    salesUnits: { prepared: 'count', volumetric: 'ton' },
     dimensions: { motherWidthCentimeters: '40.25', thicknessCentimeters: '2' },
     attributes: { stoneType: 'تراورتن', mine: 'عباس‌آباد', finish: 'صیقلی', color: 'سفید', quality: 'ممتاز', cuttingDimension: 'طولی' },
     isAvailable: true,
@@ -18,6 +19,7 @@ test('technical catalog preserves family eligibility and exact physical dimensio
     dimensions: { ...product.dimensions, motherLengthMeters: '3' },
   }).dimensions.motherLengthMeters, '3');
   assert.deepEqual(decoded.families, product.families);
+  assert.deepEqual(decoded.salesUnits, product.salesUnits);
   for (const extra of [{ basePrice: 'secret-rate' }, { pricingHash: 'secret-hash' }]) {
     assert.equal(PartnerTechnicalProductSchema.safeParse({ ...product, ...extra }).success, false);
   }

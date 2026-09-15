@@ -16,6 +16,10 @@ export const PartnerTechnicalProductSchema = z.object({
   name: TextSchema,
   families: z.array(PartnerTechnicalFamilySchema).min(1)
     .refine(values => new Set(values).size === values.length),
+  salesUnits: z.object({
+    prepared: z.enum(['count', 'squareMeter', 'ton']),
+    volumetric: z.enum(['count', 'squareMeter', 'ton']),
+  }).strict(),
   dimensions: z.object({
     motherWidthCentimeters: positiveDimension.optional(),
     motherLengthMeters: positiveDimension.optional(),

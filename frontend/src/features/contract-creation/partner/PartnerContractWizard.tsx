@@ -24,7 +24,7 @@ export type PartnerRecoverySurface =
   | { state: 'takeover'; takeover: () => Promise<void>; discard: () => Promise<void> }
   | { state: 'blocked'; message: string };
 
-const steps: Array<{ id: PartnerWizardStep; label: string; icon: WizardStep['icon'] }> = [
+export const partnerWizardSteps: Array<{ id: PartnerWizardStep; label: string; icon: WizardStep['icon'] }> = [
   { id: 'date', label: 'تاریخ قرارداد', icon: FaCalendarAlt },
   { id: 'customer', label: 'انتخاب مشتری', icon: FaUser },
   { id: 'project', label: 'مدیریت پروژه', icon: FaBuilding },
@@ -48,11 +48,12 @@ export interface PartnerContractWizardProps {
   renderSection: (step: Exclude<PartnerWizardStep, 'products'>, draft: PartnerWizardDraft) => React.ReactNode;
   validateStep: (step: PartnerWizardStep, draft: PartnerWizardDraft) => string | null;
   onReinquire: (row: PartnerRetailRow['inquiryRow']) => void;
+  onEditProducts?: () => void;
   onSendConfirmation?: (caseId: string) => Promise<void> | void;
   onOpenCase: (caseId: string) => Promise<void> | void;
 }
 
-export function PartnerContractWizard({ draft, onChange, recovery, submission, now, mismatchedRowIds = [], renderSection, validateStep, onReinquire, onSendConfirmation, onOpenCase }: PartnerContractWizardProps) {
+export function PartnerContractWizard({ draft, onChange, recovery, submission, now, mismatchedRowIds = [], renderSection, validateStep, onReinquire, onEditProducts, onSendConfirmation, onOpenCase }: PartnerContractWizardProps) {
   const result = useSyncExternalStore(submission.subscribe, submission.getSnapshot, submission.getSnapshot);
   const [error, setError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -60,7 +61,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const [confirmationSent, setConfirmationSent] = useState(false);
   const recoveryFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
-  const stepIndex = steps.findIndex(step => step.id === draft.step);
+  const stepIndex = partnerWizardSteps.findIndex(step => step.id === draft.step);
   const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
   const unusable = [...draft.rows.map(row => ({ id: row.productRowId, inquiryRow: row.inquiryRow })),
     ...(draft.materialInquiryRows ?? []).map(row => ({ id: row.pricingSubjectId, inquiryRow: row.inquiryRow }))]
@@ -112,7 +113,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     rows: partnerRetailIntentRows(rows),
   } });
   const move = (index: number) => {
-    setError(null); onChange({ ...draft, step: steps[index].id });
+    setError(null); onChange({ ...draft, step: partnerWizardSteps[index].id });
     requestAnimationFrame(() => heading.current?.focus());
   };
   const next = () => {
@@ -125,8 +126,8 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         onChange({ ...draft, step: 'products' }); setError('زیان فروش را بررسی و تأیید کنید.'); return;
       }
     }
-    if (stepIndex < steps.length - 1) { move(stepIndex + 1); return; }
-    const invalid = steps.map(step => ({ step, failure: validateStep(step.id, draft) })).find(item => item.failure);
+    if (stepIndex < partnerWizardSteps.length - 1) { move(stepIndex + 1); return; }
+    const invalid = partnerWizardSteps.map(step => ({ step, failure: validateStep(step.id, draft) })).find(item => item.failure);
     if (invalid) { onChange({ ...draft, step: invalid.step.id }); setError(invalid.failure); return; }
     if (!draft.rows.length || unusable.length || new Set(draft.rows.map(row => row.productRowId)).size !== draft.rows.length) {
       setError('اعتبار قیمت ردیف‌ها را با استعلام مجدد تکمیل کنید.'); return;
@@ -136,18 +137,20 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     void submission.submit({ ...draft.intent, rows: partnerRetailIntentRows(draft.rows) });
   };
   return <section dir="rtl" aria-label="ایجاد پرونده فروش همکار" className="min-w-0 space-y-4">
-    <WizardProgressBar currentStep={stepIndex + 1} steps={steps.map((step, index) => ({ id: index + 1,
+    <WizardProgressBar currentStep={stepIndex + 1} steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
       title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))} />
     {unusable.map(row => <ErpInlineState key={row.id} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
       action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row.inquiryRow) }} />)}
     {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
     {result.phase === 'editing' && result.message && <ErpInlineState kind="error" title={result.message} />}
     <ErpCard className="min-w-0 space-y-4 p-4 sm:p-6">
-      <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{steps[stepIndex]?.label}</h2>
+      <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{partnerWizardSteps[stepIndex]?.label}</h2>
       <fieldset disabled={disabled} className="min-w-0 space-y-4">
         {draft.step === 'products' ? <div className="space-y-4"><PartnerRetailStep rows={draft.rows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
           onRowsChange={updateRetail} onDiscountChange={retailDiscount => onChange({ ...draft, intent: { ...draft.intent, retailDiscount, belowCostConfirmed: false } })}
           onConfirmLoss={belowCostConfirmed => onChange({ ...draft, intent: { ...draft.intent, belowCostConfirmed } })} />
+          {onEditProducts && <ErpButton label="ویرایش محصولات و استعلام قیمت" variant="outline" disabled={disabled}
+            onClick={onEditProducts} />}
           <div className="flex flex-wrap gap-2">{draft.rows.map(row => <ErpButton key={row.productRowId}
             label={`استعلام مجدد ${row.inquiryRow.description}`} variant="outline"
             disabled={disabled || row.inquiryRow.successor?.state === 'PENDING'} onClick={() => onReinquire(row.inquiryRow)} />)}</div>
@@ -158,10 +161,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       </fieldset>
     </ErpCard>
     {error && <ErpInlineState kind="error" title={error} />}
-    <WizardNavigation currentStep={stepIndex + 1} totalSteps={steps.length}
+    <WizardNavigation currentStep={stepIndex + 1} totalSteps={partnerWizardSteps.length}
       onPrevious={() => move(stepIndex - 1)} onNext={next} onSubmit={next} loading={mutatePending}
       canGoPrevious={!disabled && stepIndex > 0}
-      canGoNext={!disabled && !(stepIndex === steps.length - 1 && unusable.length > 0)}
+      canGoNext={!disabled && !(stepIndex === partnerWizardSteps.length - 1 && unusable.length > 0)}
       labels={{ submit: 'ثبت پرونده' }} />
   </section>;
 }

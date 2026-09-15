@@ -194,9 +194,10 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
       const profile = await tx.partnerProfile.findUniqueOrThrow({ where: { id: input.profileId },
         select: { userId: true } });
       const replacement = await tx.user.findUnique({ where: { id: input.actorId },
-        select: { id: true, isActive: true, partnerProfile: { select: { id: true } } } });
-      if (!replacement?.isActive || replacement.partnerProfile || replacement.id === profile.userId) {
-        throw new Error('Partner termination requires an active internal responsibility owner');
+        select: { id: true, role: true, isActive: true, partnerProfile: { select: { id: true } } } });
+      if (!replacement?.isActive || replacement.role !== 'ADMIN' || replacement.partnerProfile
+          || replacement.id === profile.userId) {
+        throw new Error('Partner termination requires an active system administrator as responsibility owner');
       }
       const transferEvidenceIds: string[] = [];
       const duties = await tx.crossWorkspaceDuty.findMany({ where: { currentAssigneeUserId: profile.userId, status: 'OPEN' },
@@ -210,7 +211,9 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
       const sessions = await tx.salesContractEditSession.findMany({ where: { ownerUserId: profile.userId, purpose: 'STANDARD' },
         orderBy: { id: 'asc' }, select: { id: true, draftId: true } });
       for (const session of sessions) {
-        await tx.salesContractEditSession.update({ where: { id: session.id }, data: { ownerUserId: input.actorId } });
+        const changed = await tx.salesContractEditSession.updateMany({ where: { id: session.id,
+          ownerUserId: profile.userId, purpose: 'STANDARD' }, data: { ownerUserId: input.actorId } });
+        if (changed.count !== 1) throw new Error('Partner draft transfer conflict');
         const audit = await tx.salesContractDraftAudit.create({ data: { draftId: session.draftId,
           ownerUserId: input.actorId, action: 'PARTNER_TERMINATION_TRANSFER' } });
         transferEvidenceIds.push(audit.id);
@@ -219,7 +222,11 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
         status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED', 'PRINTED'] } }, orderBy: { id: 'asc' },
         select: { id: true } });
       for (const contract of contracts) {
-        await tx.salesContract.update({ where: { id: contract.id }, data: { responsibleSellerId: input.actorId } });
+        const changed = await tx.salesContract.updateMany({ where: { id: contract.id,
+          responsibleSellerId: profile.userId, isInactive: false,
+          status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED', 'PRINTED'] } },
+        data: { responsibleSellerId: input.actorId } });
+        if (changed.count !== 1) throw new Error('Partner contract transfer conflict');
         const audit = await tx.salesContractSellerAudit.create({ data: { contractId: contract.id,
           previousSellerId: profile.userId, nextSellerId: input.actorId, changedBy: input.actorId,
           changeType: 'PARTNER_TERMINATION_TRANSFER', reason: input.reason,
@@ -229,7 +236,10 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
       const projects = await tx.crmPotentialProject.findMany({ where: { responsibleSellerId: profile.userId,
         partnerRevision: null, isActive: true }, orderBy: { id: 'asc' }, select: { id: true, customerId: true } });
       for (const project of projects) {
-        await tx.crmPotentialProject.update({ where: { id: project.id }, data: { responsibleSellerId: input.actorId } });
+        const changed = await tx.crmPotentialProject.updateMany({ where: { id: project.id,
+          responsibleSellerId: profile.userId, partnerRevision: null, isActive: true },
+        data: { responsibleSellerId: input.actorId } });
+        if (changed.count !== 1) throw new Error('Partner project transfer conflict');
         const audit = await tx.crmTimelineEvent.create({ data: { customerId: project.customerId,
           potentialProjectId: project.id, actorId: input.actorId, eventType: 'PARTNER_TERMINATION_TRANSFER',
           title: 'انتقال مسئول پروژه پس از خاتمه همکاری', description: input.reason,
@@ -240,8 +250,9 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
       const corrections = await tx.accountingCorrectionRequest.findMany({ where: {
         assignedToUserId: profile.userId, status: 'OPEN' }, orderBy: { id: 'asc' }, select: { id: true } });
       if (corrections.length) {
-        await tx.accountingCorrectionRequest.updateMany({ where: { id: { in: corrections.map(row => row.id) },
+        const changed = await tx.accountingCorrectionRequest.updateMany({ where: { id: { in: corrections.map(row => row.id) },
           assignedToUserId: profile.userId, status: 'OPEN' }, data: { assignedToUserId: input.actorId } });
+        if (changed.count !== corrections.length) throw new Error('Partner correction transfer conflict');
         for (const correction of corrections) {
           const audit = await tx.accountingAuditLog.create({ data: { action: 'PARTNER_TERMINATION_TRANSFER',
             actorId: input.actorId, entityType: 'AccountingCorrectionRequest', entityId: correction.id,

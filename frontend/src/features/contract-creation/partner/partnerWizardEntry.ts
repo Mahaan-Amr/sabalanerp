@@ -1,6 +1,6 @@
 import { PartnerTechnicalSavedViewSchema, type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
-import type { PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
-import { usableInquiryRows } from '../../partner-sales/inquiries/inquiryPresentation';
+import type { PartnerInquiryRow, PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
+import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import { defaultPartnerRetailRows, partnerRetailIntentRows } from './partnerRetail';
 import type { PartnerWizardDraft } from './PartnerContractWizard';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
@@ -8,8 +8,9 @@ import type { PartnerDraftIntent } from './partnerCaseSubmission';
 /** Quantity is supplied by the canonical graph's display projection; it is not
  * an inquiry fingerprint. No catalog-ID or array-position matching is allowed.
  */
-export function enterPartnerWizard({ inquiry, now, base, validated, mismatchedRowIds = [] }: {
-  inquiry: PartnerInquiryView;
+export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated, mismatchedRowIds = [] }: {
+  inquiry?: PartnerInquiryView;
+  inquiryRows?: readonly PartnerInquiryRow[];
   now: number;
   base: Omit<PartnerDraftIntent, 'rows' | 'belowCostConfirmed' | 'graphHash'>;
   validated: PartnerTechnicalSavedView;
@@ -18,10 +19,17 @@ export function enterPartnerWizard({ inquiry, now, base, validated, mismatchedRo
   const saved = PartnerTechnicalSavedViewSchema.safeParse(validated);
   if (!saved.success || saved.data.recoveryId !== base.recoveryId ||
       saved.data.recoveryRevision !== base.recoveryRevision) return null;
-  const approved = usableInquiryRows(inquiry, now).filter(row => !mismatchedRowIds.includes(row.rowId));
+  const availableRows = inquiryRows ?? inquiry?.rows ?? [];
+  const approved = availableRows.filter(row => isUsableInquiryRow(row, now))
+    .filter(row => !mismatchedRowIds.includes(row.rowId));
   if (!approved.length) return null;
+  const subjects = saved.data.pricingSubjects ?? saved.data.rows.map(row => ({ configurationRef: row.configurationRef,
+    role: 'PRIMARY' as const }));
+  if (approved.length !== subjects.length || subjects.some(subject => !approved.some(row =>
+    row.configurationRef.productRowId === subject.configurationRef.productRowId))) return null;
   const configured = [];
-  for (const row of approved) {
+  for (const row of approved.filter(item => subjects.some(subject => subject.role === 'PRIMARY' &&
+    subject.configurationRef.productRowId === item.configurationRef.productRowId))) {
     const technical = saved.data.rows.find(item => item.configurationRef.productRowId === row.configurationRef.productRowId);
     if (!technical || technical.configurationRef.recoveryId !== row.configurationRef.recoveryId ||
         technical.configurationRef.recoveryRevision !== row.configurationRef.recoveryRevision) return null;
@@ -30,8 +38,14 @@ export function enterPartnerWizard({ inquiry, now, base, validated, mismatchedRo
   }
   if (configured.length !== saved.data.rows.length || new Set(configured.map(row => row.productRowId)).size !== configured.length) return null;
   const rows = defaultPartnerRetailRows(configured);
-  const intent = { ...base, graphHash: saved.data.graphHash, belowCostConfirmed: false,
+  const additionalMaterialApprovals = approved.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&
+    subject.configurationRef.productRowId === row.configurationRef.productRowId) && row.approvedRowBinding
+    ? [{ pricingSubjectId: row.configurationRef.productRowId, approvedRowBinding: row.approvedRowBinding }] : []);
+  const intent = { ...base, graphHash: saved.data.graphHash, belowCostConfirmed: false, additionalMaterialApprovals,
     rows: partnerRetailIntentRows(rows),
   };
-  return { intent, rows, step: 'date' };
+  const materialInquiryRows = approved.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&
+    subject.configurationRef.productRowId === row.configurationRef.productRowId)
+    ? [{ pricingSubjectId: row.configurationRef.productRowId, inquiryRow: row }] : []);
+  return { intent, rows, materialInquiryRows, step: 'date' };
 }

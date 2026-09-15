@@ -13,6 +13,7 @@ import { PartnerAccountingCommandError } from './errors';
 import { readPartnerAccountingCapabilities } from './capabilities';
 import { partnerError } from '@sabalanerp/partner-sales-contracts';
 import { readPartnerInvoiceSource } from './invoiceSource';
+import { withCurrentSabalanPlan } from './sabalanPlan';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -113,8 +114,9 @@ export async function approvePartnerFinancialSourceWithinTransaction(
       view.data.owner.integrityHash !== row.integrityHash || !commitment.success ||
       commitment.data.type !== 'CASE_COMMITTED') throw new Error('Partner financial source integrity conflict');
 
+  const currentView = await withCurrentSabalanPlan(tx, view.data);
   const prepared = await prepareCommittedAccountingSource({
-    view: { ...view.data, state: row.state }, partnerSellerId: row.profile.userId, commitment: commitment.data,
+    view: { ...currentView, state: row.state }, partnerSellerId: row.profile.userId, commitment: commitment.data,
   }, view.data.owner);
   if (!prepared.ok || !matchesFinancialPreparation(prepared.value, historical) ||
       historical.evidenceHash !== prepared.value.evidenceHash ||

@@ -13,6 +13,7 @@ import { createPartnerProfileService } from '../services/partnerSales/profiles/s
 import { createPrismaPartnerProfileStore } from '../services/partnerSales/profiles/prismaStore';
 import { createPartnerProfileManagementService } from '../services/partnerSales/profiles/management';
 import { createPrismaPartnerProfileManagementStore } from '../services/partnerSales/profiles/managementPrismaStore';
+import { dispatchPartnerInquiryEvents, inquiryNotificationAccess } from '../services/partnerSales/notifications/inquiryDelivery';
 
 function correlation(request: Request): string {
   const supplied = request.get('X-Correlation-Id');
@@ -68,7 +69,8 @@ export default createPartnerManagementRouter({ serviceFor(request) {
   const correlationId = correlation(request);
   const responder = createPrismaPartnerResponderAssignmentService({ database: prisma, actorId: request.user.id,
     resolveResponder: resolveEligibleResponder,
-    authorize: authorizeFor(request, correlationId) });
+    authorize: authorizeFor(request, correlationId),
+    publishCommittedEvents: eventIds => dispatchPartnerInquiryEvents(prisma, eventIds, inquiryNotificationAccess) });
   const profile = createPartnerProfileManagementService({ actorId: request.user.id,
     store: createPrismaPartnerProfileManagementStore(prisma), newId: randomUUID,
     authorize: authorizeFor(request, correlationId) });

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { HashSchema, IdSchema, InstantSchema, MoneySchema, PersianReasonSchema, RevisionSchema, TextSchema } from './primitives';
 import { PartnerError, partnerError } from './errors';
+import { canonicalHash } from './integrity';
 
 export const PRICE_APPROVAL_VALIDITY_MS = 48 * 60 * 60 * 1000;
 // Opaque owner-private technical recovery reference; the server resolves the full
@@ -30,6 +31,18 @@ export const ApprovedInquirySchema = z.object({
   .refine(row => !row.supersessionReason || Boolean(row.predecessorApprovalId), 'A supersession note requires its predecessor');
 export type ApprovedInquiry = z.infer<typeof ApprovedInquirySchema>;
 export type InquiryIdentity = z.infer<typeof InquiryIdentitySchema>;
+
+/** Main-stone approvals belong to the catalog stone/family/unit pricing
+ * subject, not to quantity, geometry, catalog base-rate evidence, or service
+ * components. Legacy identities keep their original full hash. */
+export async function inquiryConfigurationHash(identity: InquiryIdentity): Promise<string> {
+  const parsed = InquiryIdentitySchema.parse(identity);
+  const subject = parsed.configuration.length === 1 && parsed.configuration[0]?.key === 'pricingSubjectHash'
+    ? HashSchema.safeParse(parsed.configuration[0].value) : undefined;
+  return parsed.calculationPolicyVersion === 'partner-main-stone-rate-v2' &&
+    parsed.roundingPolicyVersion === 'partner-main-stone-rate-v2' && subject?.success
+    ? subject.data : canonicalHash(parsed);
+}
 
 export function checkApprovalUse(approval: ApprovedInquiry, use: {
   partnerSellerId: string; configurationHash: string; superseded: boolean; terminated: boolean;

@@ -31,6 +31,7 @@ export function ResponseRow({ row, number, canRespond, status, draft, pending, e
         <dd className="mt-1 break-words font-medium text-[var(--sds-text-primary)]">{item.value}</dd>
       </div>)}
     </dl>
+    {row.sellerNote && <p className="rounded-xl bg-[var(--sds-surface-subtle)] p-3 text-sm">یادداشت فروشنده: {row.sellerNote}</p>}
     {row.approvedPrice && <p>قیمت مصوب هر واحد: <b dir="ltr">{row.approvedPrice.amount}</b> {row.approvedPrice.currency === 'IRR' ? 'ریال' : 'تومان'}</p>}
     <div className="sds-text-secondary text-sm" role="status">{status}</div>
     {canRespond && <div className="space-y-4 rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4">

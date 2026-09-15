@@ -33,13 +33,15 @@ export function PartnerMyInquiriesRuntime() {
   }, [selectedId]);
   useEffect(() => { void load(); }, [load]);
   return <ErpWorkspacePage title="استعلام‌های من" context="قیمت‌های دریافتی از سبلان برای محصولات انتخاب‌شده"
-    primaryAction={{ label: 'استعلام جدید', icon: FaPlus, onClick: () => router.push('/dashboard/sales/contracts/create?newInquiry=1') }}>
+    primaryAction={{ label: 'استعلام جدید', icon: FaPlus, onClick: () => router.push('/dashboard/sales/partner-inquiries?newInquiry=1') }}>
     {pending && !rows.length ? <ErpLoading /> : error ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: () => void load() }} />
-      : !rows.length ? <ErpEmptyState icon={FaClipboardList} title="هنوز استعلامی ثبت نشده است" description="از مسیر ایجاد فروش، محصولات را انتخاب و استعلام را ارسال کنید." action={{ label: 'ایجاد استعلام', onClick: () => router.push('/dashboard/sales/contracts/create?newInquiry=1') }} />
-        : <div className="space-y-8">{rows.map(inquiry => <PartnerInquiryPanel key={inquiry.inquiryId} inquiry={inquiry} now={Date.now()} pending={false}
-          onRefresh={() => void load()} onReinquire={() => router.push(`/dashboard/sales/contracts/create?inquiryId=${encodeURIComponent(inquiry.inquiryId)}`)}
-          onEnterWizard={() => router.push(`/dashboard/sales/contracts/create?inquiryId=${encodeURIComponent(inquiry.inquiryId)}`)}
-          onOpenInquiry={inquiryId => router.push(`/dashboard/sales/partner-inquiries?inquiryId=${encodeURIComponent(inquiryId)}`)} />)}</div>}
+      : !rows.length ? <ErpEmptyState icon={FaClipboardList} title="هنوز استعلامی ثبت نشده است" action={{ label: 'ایجاد استعلام', onClick: () => router.push('/dashboard/sales/partner-inquiries?newInquiry=1') }} />
+        : <div className="space-y-8">{rows.map(inquiry => { const recoveryId = inquiry.rows[0]?.configurationRef.recoveryId;
+          const saleHref = `/dashboard/sales/contracts/create?inquiryId=${encodeURIComponent(inquiry.inquiryId)}${recoveryId ? `&draftId=${encodeURIComponent(recoveryId)}` : ''}`;
+          return <PartnerInquiryPanel key={inquiry.inquiryId} inquiry={inquiry} now={Date.now()} pending={false}
+          onRefresh={() => void load()} onReinquire={() => router.push(saleHref)}
+          onEnterWizard={() => router.push(saleHref)}
+          onOpenInquiry={inquiryId => router.push(`/dashboard/sales/partner-inquiries?inquiryId=${encodeURIComponent(inquiryId)}`)} />; })}</div>}
     {error && rows.length > 0 && <ErpInlineState kind="error" title={error} />}
   </ErpWorkspacePage>;
 }

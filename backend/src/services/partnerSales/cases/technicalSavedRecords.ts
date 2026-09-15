@@ -43,10 +43,11 @@ export async function decodeTechnicalSavedSnapshot(value: unknown): Promise<Tech
     const view = PartnerTechnicalSavedViewSchema.parse({ ...rawView, graphHash: rawView.graphHash ?? graphHash });
     if (view.graphHash !== graphHash) return undefined;
     const identities = payload.identities.map(item => ({ productRowId: item.productRowId, identity: InquiryIdentitySchema.parse(item.identity) }));
-    if (draft.inputRevision !== view.inputRevision || graph.rows.length !== view.rows.length || identities.length !== graph.rows.length ||
+    if (draft.inputRevision !== view.inputRevision || graph.rows.length !== view.rows.length || identities.length < graph.rows.length ||
         new Set(identities.map(item => item.productRowId)).size !== identities.length ||
         graph.rows.some(row => !view.rows.some(item => item.configurationRef.productRowId === row.productRowId) ||
-          !identities.some(item => item.productRowId === row.productRowId))) return undefined;
+          !identities.some(item => item.productRowId === row.productRowId)) ||
+        (view.pricingSubjects ?? []).some(subject => !identities.some(item => item.productRowId === subject.configurationRef.productRowId))) return undefined;
     return { version: 1, sessionId: payload.sessionId, view, draft, graph, context: payload.context, identities };
   } catch { return undefined; }
 }

@@ -6,6 +6,7 @@ import {
   type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
+import { normalizeNumericText } from '@/lib/numberFormat';
 
 type Row = PartnerTechnicalDraft['rows'][number];
 type EditingValue = NonNullable<PartnerTechnicalDraft['editingValues']>[number];
@@ -48,6 +49,40 @@ export function addPartnerTechnicalProduct(
     throw new Error('Product family is unavailable');
   }
   return revise(draft, { rows: [...draft.rows, row] });
+}
+
+/** A standalone rate inquiry needs a canonical stone identity but must not ask
+ * for contract quantities, cuts, tools, payment, customer, or project. Minimal
+ * geometry is therefore generated only for the protected calculation record;
+ * the optional dimensions shown to the responder travel separately on the
+ * inquiry command and never affect approval validity. */
+export function addPartnerQuickInquiryProduct(draft: PartnerTechnicalDraft, product: PartnerTechnicalProduct,
+  family: PartnerTechnicalFamily, productRowId: string): PartnerTechnicalDraft {
+  const sourceBatchId = `source-batch:${crypto.randomUUID()}`;
+  const stairSystemId = `stair-system:${crypto.randomUUID()}`;
+  const added = family === 'prepared' || family === 'volumetric'
+    ? addPartnerTechnicalProduct(draft, product, { family, productRowId })
+    : family === 'stair'
+      ? addPartnerTechnicalProduct(draft, product, { family, productRowId, sourceBatchId, stairSystemId })
+      : addPartnerTechnicalProduct(draft, product, { family, productRowId, sourceBatchId });
+  const lengthMeters = product.dimensions.motherLengthMeters ?? '1';
+  const widthMeters = product.dimensions.motherWidthCentimeters
+    ? parseCanonicalDecimal(String(Number(product.dimensions.motherWidthCentimeters) / 100)) : '1';
+  const areaSquareMeters = parseCanonicalDecimal(String(Number(lengthMeters) * Number(widthMeters)));
+  const rows = added.rows.map(row => {
+    if (row.productRowId !== productRowId) return row;
+    if (row.family === 'prepared') return { ...row, configuration: { ...row.configuration, unit: 'count' as const, quantity: '1' } };
+    if (row.family === 'volumetric') return { ...row, configuration: { ...row.configuration, unit: 'ton' as const, quantity: '1' } };
+    if (row.family === 'longitudinal') return { ...row, configuration: { ...row.configuration,
+      lengthMeters, widthMeters, requestedAreaSquareMeters: areaSquareMeters, quantity: 1 } };
+    if (row.family === 'slab') return { ...row, configuration: { ...row.configuration,
+      lengthMeters, widthMeters, areaSquareMeters, quantity: 1,
+      sourceRows: [{ sourceRowId: `slab-source-row:${crypto.randomUUID()}`, lengthMeters, widthMeters, quantity: 1,
+        lengthDisplayUnit: 'm' as const, widthDisplayUnit: 'm' as const }] } };
+    return { ...row, configuration: { ...row.configuration, lengthMeters,
+      crossDimensionMeters: widthMeters, motherLengthMeters: lengthMeters, quantity: 1, quantityMode: 'manual' as const } };
+  });
+  return PartnerTechnicalDraftSchema.parse({ ...added, inputRevision: added.inputRevision + 1, rows });
 }
 
 type DependentInput =
@@ -171,15 +206,16 @@ export function commitPartnerTechnicalField(
   field: EditingValue['field'],
   text: string,
 ): PartnerTechnicalDraft {
+  const normalizedText = normalizeNumericText(text);
   let value: number | ReturnType<typeof parseCanonicalDecimal>;
   const integerFields: readonly EditingValue['field'][] = ['quantity', 'layersPerParentPiece',
     'totalSteps', 'numberOfStaircases', 'stepsPerStaircase'];
   if (integerFields.includes(field)) {
-    const quantity = Number(text);
+    const quantity = Number(normalizedText);
     if (!Number.isSafeInteger(quantity) || quantity < 0) throw new Error('Quantity must be an integer');
     value = quantity;
   } else {
-    value = parseCanonicalDecimal(text);
+    value = parseCanonicalDecimal(normalizedText);
   }
   let committed = false;
   const commitOperations = <T extends { groups: Array<{ operationGroupId: string; scope: string }>;

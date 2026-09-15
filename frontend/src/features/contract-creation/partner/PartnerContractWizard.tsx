@@ -14,6 +14,7 @@ export type PartnerWizardStep = 'date' | 'customer' | 'project' | 'products' | '
 export interface PartnerWizardDraft {
   intent: PartnerDraftIntent;
   rows: PartnerRetailRow[];
+  materialInquiryRows?: Array<{ pricingSubjectId: string; inquiryRow: PartnerRetailRow['inquiryRow'] }>;
   step: PartnerWizardStep;
 }
 export type PartnerRecoverySurface =
@@ -46,22 +47,26 @@ export interface PartnerContractWizardProps {
   mismatchedRowIds?: readonly string[];
   renderSection: (step: Exclude<PartnerWizardStep, 'products'>, draft: PartnerWizardDraft) => React.ReactNode;
   validateStep: (step: PartnerWizardStep, draft: PartnerWizardDraft) => string | null;
-  onReinquire: (row: PartnerRetailRow) => void;
+  onReinquire: (row: PartnerRetailRow['inquiryRow']) => void;
+  onSendConfirmation?: (caseId: string) => Promise<void> | void;
   onOpenCase: (caseId: string) => Promise<void> | void;
 }
 
-export function PartnerContractWizard({ draft, onChange, recovery, submission, now, mismatchedRowIds = [], renderSection, validateStep, onReinquire, onOpenCase }: PartnerContractWizardProps) {
+export function PartnerContractWizard({ draft, onChange, recovery, submission, now, mismatchedRowIds = [], renderSection, validateStep, onReinquire, onSendConfirmation, onOpenCase }: PartnerContractWizardProps) {
   const result = useSyncExternalStore(submission.subscribe, submission.getSnapshot, submission.getSnapshot);
   const [error, setError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [recoveryPending, setRecoveryPending] = useState(false);
+  const [confirmationSent, setConfirmationSent] = useState(false);
   const recoveryFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const stepIndex = steps.findIndex(step => step.id === draft.step);
   const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
-  const unusable = draft.rows.filter(row => !isUsableInquiryRow(row.inquiryRow, now)
+  const unusable = [...draft.rows.map(row => ({ id: row.productRowId, inquiryRow: row.inquiryRow })),
+    ...(draft.materialInquiryRows ?? []).map(row => ({ id: row.pricingSubjectId, inquiryRow: row.inquiryRow }))]
+    .filter(row => !isUsableInquiryRow(row.inquiryRow, now)
     || mismatchedRowIds.includes(row.inquiryRow.rowId)
-    || row.inquiryRow.configurationRef.productRowId !== row.productRowId
+    || row.inquiryRow.configurationRef.productRowId !== row.id
     || row.inquiryRow.configurationRef.recoveryId !== draft.intent.recoveryId);
   const mutatePending = result.phase === 'submitting' || result.phase === 'uncertain';
   const disabled = recovery.state !== 'writable' || mutatePending;
@@ -77,7 +82,12 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   if (result.phase === 'created' && result.case) return <section dir="rtl" className="space-y-4">
     <ErpInlineState kind="success" title={`پرونده ${result.case.caseNumber} ثبت شد.`} />
     {result.message && <ErpInlineState kind="stale" title={result.message} action={{ label: 'تلاش مجدد برای پاک‌سازی بازیابی', onClick: () => void submission.retry() }} />}
-    <ErpButton variant="solid" label="باز کردن پرونده" onClick={() => {
+    {onSendConfirmation && (confirmationSent ? <ErpInlineState kind="success" title="پیامک تأیید قرارداد برای مشتری ارسال شد." />
+      : <ErpButton variant="solid" label="ارسال پیامک تأیید" onClick={() => {
+        setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
+          .then(() => setConfirmationSent(true)).catch(() => setError('ارسال پیامک انجام نشد؛ پرونده ثبت شده و می‌توانید دوباره تلاش کنید.'));
+      }} />)}
+    <ErpButton variant="outline" label="باز کردن پرونده" onClick={() => {
       void Promise.resolve().then(() => onOpenCase(result.case!.owner.caseId))
         .catch(() => setError('پرونده ثبت شده است؛ باز کردن جزئیات را دوباره امتحان کنید.'));
     }} />
@@ -128,16 +138,23 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   return <section dir="rtl" aria-label="ایجاد پرونده فروش همکار" className="min-w-0 space-y-4">
     <WizardProgressBar currentStep={stepIndex + 1} steps={steps.map((step, index) => ({ id: index + 1,
       title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))} />
-    {unusable.map(row => <ErpInlineState key={row.productRowId} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
-      action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row) }} />)}
+    {unusable.map(row => <ErpInlineState key={row.id} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
+      action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row.inquiryRow) }} />)}
     {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
     {result.phase === 'editing' && result.message && <ErpInlineState kind="error" title={result.message} />}
     <ErpCard className="min-w-0 space-y-4 p-4 sm:p-6">
       <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{steps[stepIndex]?.label}</h2>
       <fieldset disabled={disabled} className="min-w-0 space-y-4">
-        {draft.step === 'products' ? <PartnerRetailStep rows={draft.rows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
+        {draft.step === 'products' ? <div className="space-y-4"><PartnerRetailStep rows={draft.rows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
           onRowsChange={updateRetail} onDiscountChange={retailDiscount => onChange({ ...draft, intent: { ...draft.intent, retailDiscount, belowCostConfirmed: false } })}
-          onConfirmLoss={belowCostConfirmed => onChange({ ...draft, intent: { ...draft.intent, belowCostConfirmed } })} /> : renderSection(draft.step, draft)}
+          onConfirmLoss={belowCostConfirmed => onChange({ ...draft, intent: { ...draft.intent, belowCostConfirmed } })} />
+          <div className="flex flex-wrap gap-2">{draft.rows.map(row => <ErpButton key={row.productRowId}
+            label={`استعلام مجدد ${row.inquiryRow.description}`} variant="outline"
+            disabled={disabled || row.inquiryRow.successor?.state === 'PENDING'} onClick={() => onReinquire(row.inquiryRow)} />)}</div>
+          {(draft.materialInquiryRows?.length ?? 0) > 0 && <div className="flex flex-wrap gap-2">{draft.materialInquiryRows!.map(row => <ErpButton key={row.pricingSubjectId}
+            label={`استعلام مجدد ${row.inquiryRow.description}`} variant="outline"
+            disabled={disabled || row.inquiryRow.successor?.state === 'PENDING'} onClick={() => onReinquire(row.inquiryRow)} />)}</div>}
+        </div> : renderSection(draft.step, draft)}
       </fieldset>
     </ErpCard>
     {error && <ErpInlineState kind="error" title={error} />}

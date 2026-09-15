@@ -100,7 +100,8 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         const graph = compiled.value.graph;
         const graphHash = await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph });
         const identities = evidence.value.identities;
-        if (identities.length !== graph.rows.length || new Set(identities.map(item => item.productRowId)).size !== identities.length) {
+        if (identities.length < graph.rows.length || new Set(identities.map(item => item.productRowId)).size !== identities.length ||
+            graph.rows.some(row => !identities.some(item => item.productRowId === row.productRowId))) {
           return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         }
         const rows: PartnerTechnicalSavedView['rows'] = [];
@@ -134,9 +135,12 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
             quantity: measure.quantity, unit: measure.unit, configurationChange });
         }
         const updatedAt = recovery && technicalDraftContent(recovery.draft) === technicalDraftContent(command.draft) ? recovery.updatedAt : now.getTime();
+        const pricingSubjects = identities.map(identity => ({ configurationRef: { recoveryId: session.draftId,
+          recoveryRevision: savedRevision, productRowId: identity.productRowId },
+          role: graph.rows.some(row => row.productRowId === identity.productRowId) ? 'PRIMARY' as const : 'ADDITIONAL_MATERIAL' as const }));
         const view = PartnerTechnicalSavedViewSchema.safeParse({ schemaVersion: 1, recoveryId: session.draftId,
           recoveryRevision: savedRevision, inputRevision: command.draft.inputRevision, graphHash,
-          updatedAt: new Date(updatedAt).toISOString(), rows });
+          updatedAt: new Date(updatedAt).toISOString(), rows, pricingSubjects });
         if (!view.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         const snapshot = await encodeTechnicalSavedSnapshot({ version: 1, sessionId: session.id, view: view.data, draft: command.draft,
           graph, context: evidence.value.context, identities });

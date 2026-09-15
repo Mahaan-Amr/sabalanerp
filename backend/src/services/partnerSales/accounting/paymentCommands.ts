@@ -13,6 +13,7 @@ import { readPartnerAccountingCapabilities } from './capabilities';
 import { hasConflictingPartnerAccountingEvidence, hasPartnerAccountingEvidence } from './provenance';
 import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { readPartnerInvoiceSource } from './invoiceSource';
+import { withCurrentSabalanPlan } from './sabalanPlan';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -98,7 +99,8 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
         !purchase.covered || !official || official.receivable.id !== receivable.id || command.contractId ||
         view.data.owner.revision !== row.headRevision || view.data.owner.integrityHash !== row.integrityHash ||
         receivable.status === 'VOIDED' || !['ISSUED', 'POSTED'].includes(receivable.invoiceRecord!.status)) throw conflict();
-    const prepared = await prepareCommittedAccountingSource({ view: { ...view.data, state: row.state },
+    const currentView = await withCurrentSabalanPlan(tx, view.data);
+    const prepared = await prepareCommittedAccountingSource({ view: { ...currentView, state: row.state },
       partnerSellerId: row.profile.userId, commitment }, { caseId, revision: row.headRevision, integrityHash: row.integrityHash });
     if (!prepared.ok || !matchesFinancialPreparation(prepared.value, official.invoice.preparation) ||
         official.receivable.partnerSellerId !== row.profile.userId ||

@@ -77,6 +77,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
           const currentState = state(row.outcome, row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
           return { rowId: row.id, revision: row.revision, identity: definition.identity,
             description: definition.description, configuration: definition.configuration,
+            ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
             ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
               approvedAt: row.approval.approvedAt.toISOString(), expiresAt: row.approval.expiresAt.toISOString(),
               ...(row.approval.note ? { noteOrReason: row.approval.note } : {}) } :
@@ -100,6 +101,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         const successor = row.successor;
         return { rowId: row.id, revision: row.revision, description: definition.description,
           state: currentState, configuration: definition.configuration, configurationRef: definition.configurationRef,
+          ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
           ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
             approvedAt: row.approval.approvedAt.toISOString(), expiresAt: row.approval.expiresAt.toISOString(),
             ...(row.approval.note ? { noteOrReason: row.approval.note } : {}),

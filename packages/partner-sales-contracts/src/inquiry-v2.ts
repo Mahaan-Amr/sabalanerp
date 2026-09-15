@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ApprovedRowBindingSchema, PartnerConfigurationRefSchema, PartnerInquiryViewSchema } from './inquiry';
-import { PersianReasonSchema } from './primitives';
+import { PersianReasonSchema, TextSchema } from './primitives';
 
 // Companion wire version: the original strict v1 reader and its output stay intact.
 const inquiryV1 = PartnerInquiryViewSchema.innerType();
@@ -9,17 +9,20 @@ export const InquiryRowStateV2Schema = rowV1.shape.state;
 export const InquiryPredecessorV2Schema = ApprovedRowBindingSchema.extend({ reason: PersianReasonSchema.optional() }).strict();
 export const InquirySuccessorV2Schema = ApprovedRowBindingSchema.extend({ state: InquiryRowStateV2Schema }).strict();
 
+export const PartnerInquiryRowV2Schema = rowV1.extend({
+  // Resolved by the owner; never inferred from inquiry/catalog IDs by the browser.
+  configurationRef: PartnerConfigurationRefSchema,
+  sellerNote: TextSchema.optional(),
+  predecessor: InquiryPredecessorV2Schema.optional(),
+  successor: InquirySuccessorV2Schema.optional(),
+}).strict();
+
 export const PartnerInquiryViewV2Schema = inquiryV1.extend({
   schemaVersion: z.literal(2),
-  rows: z.array(rowV1.extend({
-    // Resolved by the owner; never inferred from inquiry/catalog IDs by the browser.
-    configurationRef: PartnerConfigurationRefSchema,
-    predecessor: InquiryPredecessorV2Schema.optional(),
-    successor: InquirySuccessorV2Schema.optional(),
-  }).strict()),
+  rows: z.array(PartnerInquiryRowV2Schema),
 }).strict().superRefine((view, context) => {
   const oldReader = PartnerInquiryViewSchema.safeParse({ ...view, schemaVersion: 1,
-    rows: view.rows.map(({ configurationRef, predecessor, successor, ...row }) => row),
+    rows: view.rows.map(({ configurationRef, sellerNote, predecessor, successor, ...row }) => row),
   });
   if (!oldReader.success) for (const issue of oldReader.error.issues) context.addIssue(issue);
   const seen = new Set<string>();
@@ -35,4 +38,5 @@ export const PartnerInquiryViewV2Schema = inquiryV1.extend({
   });
 });
 export type PartnerInquiryViewV2 = z.infer<typeof PartnerInquiryViewV2Schema>;
+export type PartnerInquiryRowV2 = z.infer<typeof PartnerInquiryRowV2Schema>;
 export type InquiryRowStateV2 = z.infer<typeof InquiryRowStateV2Schema>;

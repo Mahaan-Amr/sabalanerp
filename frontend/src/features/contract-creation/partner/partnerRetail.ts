@@ -8,6 +8,7 @@ export interface PartnerRetailRow {
   unit: string;
   inquiryRow: PartnerInquiryRow;
   retailUnitPrice: Money;
+  wholesaleUnitPrice?: Money;
 }
 
 export function defaultPartnerRetailRows(rows: Omit<PartnerRetailRow, 'retailUnitPrice'>[]): PartnerRetailRow[] {
@@ -52,8 +53,10 @@ function display(value: Decimal): string {
 export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) {
   let wholesale = decimal('0'); let retail = decimal('0');
   for (const row of rows) {
-    const approved = row.inquiryRow.approvedPrice;
-    if (!approved || approved.currency !== discount.currency || row.retailUnitPrice.currency !== discount.currency) {
+    const approved = row.wholesaleUnitPrice;
+    if (!approved) return { valid: false as const, field: 'quote' as const,
+      productRowId: row.productRowId, message: 'محاسبه قیمت خرید این ردیف هنوز کامل نشده است.' };
+    if (approved.currency !== discount.currency || row.retailUnitPrice.currency !== discount.currency) {
       return { valid: false as const, field: 'price' as const, productRowId: row.productRowId, message: 'واحد پول ردیف‌ها یکسان نیست؛ قیمت تأییدشده را بررسی کنید.' };
     }
     if (!DecimalSchema.safeParse(row.retailUnitPrice.amount).success) return {
@@ -74,5 +77,24 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) 
   return { valid: true as const, wholesale: display(wholesale), retail: display(retail), difference: display(difference), loss: difference.digits < BigInt(0) };
 }
 
+export function partnerRetailRowSummary(row: PartnerRetailRow) {
+  if (!row.wholesaleUnitPrice || row.wholesaleUnitPrice.currency !== row.retailUnitPrice.currency) return null;
+  try {
+    const wholesale = product(row.quantity, row.wholesaleUnitPrice.amount);
+    const retail = product(row.quantity, row.retailUnitPrice.amount);
+    const difference = add(retail, wholesale, true);
+    return { wholesale: display(wholesale), retail: display(retail), difference: display(difference),
+      loss: difference.digits < BigInt(0) };
+  } catch { return null; }
+}
+
 export const partnerMoneyText = (amount: string, currency: Money['currency']) =>
   `${amount.replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} ${currency === 'IRR' ? 'ریال' : 'تومان'}`;
+
+export function remainingPartnerAmount(total: string, allocated: readonly string[]): string | null {
+  try {
+    let value = decimal(total);
+    for (const amount of allocated) value = add(value, decimal(amount), true);
+    return value.digits < BigInt(0) ? null : display(value);
+  } catch { return null; }
+}

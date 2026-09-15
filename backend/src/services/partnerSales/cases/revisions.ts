@@ -16,6 +16,8 @@ export type ResolvedCaseDraft = {
     precisionPolicyVersion: string; description: string; wholesaleUnitPriceAmount: string }>;
   partner: DisplayParty; customer: DisplayParty; legalText: string;
   sabalanPaymentPlan: ReturnType<typeof PaymentPlanSchema.parse>;
+  additionalMaterialApprovals?: Array<{ pricingSubjectId: string; configurationHash: string;
+    catalogProductId: string; wholesaleUnitPriceAmount: string }>;
 };
 export type ApprovedCaseRow = ResolvedCaseDraft['rows'][number] & {
   retailUnitPrice: { amount: string; currency: 'IRR' | 'IRT' }; approval: ApprovedInquiry; frozen?: boolean;

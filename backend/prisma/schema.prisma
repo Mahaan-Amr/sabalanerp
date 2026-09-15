@@ -9166,22 +9166,23 @@ model PartnerInquiryRow {
 }
 
 model PartnerInquiryApproval {
-  id                      String                   @id @default(cuid())
-  rowId                   String                   @unique
+  id                      String                        @id @default(cuid())
+  rowId                   String                        @unique
   assignmentId            String
   actorId                 String
-  commandId               String                   @unique
+  commandId               String                        @unique
   authorizationEvidenceId String
-  wholesaleUnitPrice      Decimal                  @db.Decimal
+  wholesaleUnitPrice      Decimal                       @db.Decimal
   currency                String
   evidenceHash            String
   note                    String?
   supersessionReason      String?
-  approvedAt              DateTime                 @default(now()) @db.Timestamptz(3)
-  expiresAt               DateTime                 @default(dbgenerated("(CURRENT_TIMESTAMP + '48:00:00'::interval)")) @db.Timestamptz(3)
-  row                     PartnerInquiryRow        @relation(fields: [rowId], references: [id], onDelete: Restrict)
-  assignment              PartnerInquiryAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  approvedAt              DateTime                      @default(now()) @db.Timestamptz(3)
+  expiresAt               DateTime                      @default(dbgenerated("(CURRENT_TIMESTAMP + '48:00:00'::interval)")) @db.Timestamptz(3)
+  row                     PartnerInquiryRow             @relation(fields: [rowId], references: [id], onDelete: Restrict)
+  assignment              PartnerInquiryAssignment      @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
   usages                  PartnerInquiryUsage[]
+  materialUsages          PartnerMaterialInquiryUsage[]
 
   @@map("partner_inquiry_approvals")
 }
@@ -9327,6 +9328,7 @@ model PartnerCaseRevision {
   correctionSaves         PartnerCorrectionSave[]
   adjustments             PartnerFinancialAdjustment[]
   rowBindings             PartnerCaseRowBinding[]
+  materialInquiryUsages   PartnerMaterialInquiryUsage[]
   deliveries              PartnerCaseDelivery[]
   fulfillmentLineages     PartnerFulfillmentLineage[]
   shipmentEvidence        ShipmentQuantityEvidence[]
@@ -9383,6 +9385,22 @@ model PartnerInquiryUsage {
 
   @@unique([caseId, caseRevision, productRowId])
   @@map("partner_inquiry_usages")
+}
+
+model PartnerMaterialInquiryUsage {
+  id               String                 @id
+  caseId           String
+  caseRevision     Int
+  pricingSubjectId String
+  approvalId       String
+  approvalSnapshot Json
+  evidenceHash     String
+  usedAt           DateTime               @default(now()) @db.Timestamptz(3)
+  caseRevisionRow  PartnerCaseRevision    @relation(fields: [caseId, caseRevision], references: [caseId, revision], onDelete: Restrict, onUpdate: NoAction)
+  approval         PartnerInquiryApproval @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+
+  @@unique([caseId, caseRevision, pricingSubjectId])
+  @@map("partner_material_inquiry_usages")
 }
 
 model PartnerCaseDelivery {

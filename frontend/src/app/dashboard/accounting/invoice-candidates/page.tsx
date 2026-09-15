@@ -1,8 +1,8 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { FaCheckCircle, FaEye, FaFileInvoice, FaSync, FaTrashAlt } from 'react-icons/fa';
-import { ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
+import { FaCheckCircle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
+import { ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpListPage, ErpPagination, ErpRialInput, ErpSelect, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import { emptyAccountingPagination, FinancialInvoiceApprovalForm, type FinancialInvoiceApprovalPayload,
@@ -57,6 +57,11 @@ export default function AccountingInvoiceCandidatesPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [planCandidates, setPlanCandidates] = useState<any[]>([]);
+  const [planTarget, setPlanTarget] = useState<any | null>(null);
+  const [planEffectiveDate, setPlanEffectiveDate] = useState('');
+  const [planInstallments, setPlanInstallments] = useState<Array<{ id: string; dueDate: string; amount: string;
+    method: 'CASH' | 'BANK_TRANSFER' | 'CHECK'; checkNumber?: string; checkBank?: string }>>([]);
   const requestVersion = useRef(0);
 
   const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeInvoiceCandidatesQuery>) => {
@@ -85,7 +90,7 @@ export default function AccountingInvoiceCandidatesPage() {
     setRows([]); setDeleteTarget(null); setApprovalTarget(null); setLoadError(null);
     try {
       setLoading(true);
-      const response = await accountingAPI.getFinancialRecords({
+      const [response, candidatesResponse] = await Promise.all([accountingAPI.getFinancialRecords({
         kind: 'INVOICE_CANDIDATE',
         view: query.view || undefined,
         period: query.period || undefined,
@@ -95,7 +100,7 @@ export default function AccountingInvoiceCandidatesPage() {
         status: query.status,
         page: query.page,
         pageSize: pagination.pageSize,
-      });
+      }), accountingAPI.getPartnerSabalanPlanCandidates().catch(() => null)]);
       if (version !== requestVersion.current) return;
       if (!response.data.success) throw new Error('Accounting read failed');
       if (response.data.success) {
@@ -103,6 +108,7 @@ export default function AccountingInvoiceCandidatesPage() {
         setRows(data.items);
         setPagination({ page: data.page, pageSize: data.pageSize, total: data.total });
       }
+      setPlanCandidates(candidatesResponse?.data.success ? candidatesResponse.data.data : []);
     } catch (error) {
       if (version !== requestVersion.current) return;
       setPagination(current => ({ ...current, total: 0 }));
@@ -111,6 +117,30 @@ export default function AccountingInvoiceCandidatesPage() {
       if (version === requestVersion.current) setLoading(false);
     }
   }, [pagination.pageSize, query.cutoff, query.date, query.page, query.period, query.search, query.status, query.view]);
+
+  const openPlan = (candidate: any) => {
+    const today = new Date().toISOString().slice(0, 10);
+    setActionError(null); setPlanTarget(candidate); setPlanEffectiveDate(today);
+    setPlanInstallments([{ id: crypto.randomUUID(), dueDate: today, amount: candidate.payable.amount, method: 'BANK_TRANSFER' }]);
+  };
+
+  const savePlan = async () => {
+    if (!planTarget) return;
+    setActionError(null); setActionLoading(`plan:${planTarget.expected.caseId}`);
+    try {
+      await accountingAPI.setPartnerSabalanPaymentPlan({ expected: planTarget.expected,
+        idempotencyKey: `partner-plan-${crypto.randomUUID()}`,
+        plan: { effectiveDate: planEffectiveDate, installments: planInstallments.map(item => ({
+          installmentId: `partner-sabalan-installment-${item.id}`, dueDate: item.dueDate,
+          amount: { amount: item.amount, currency: planTarget.payable.currency }, method: item.method,
+          ...(item.method === 'CHECK' ? { check: { number: item.checkNumber, bank: item.checkBank, dueDate: item.dueDate } } : {}),
+        })) } });
+      setPlanTarget(null); setActionSuccess('برنامه پرداخت ثبت و پیش‌نویس صورتحساب ساخته شد.');
+      await loadRows();
+    } catch (error) {
+      setActionError((error as any)?.response?.data?.error || 'ثبت برنامه پرداخت انجام نشد.');
+    } finally { setActionLoading(null); }
+  };
 
   useEffect(() => {
     loadRows();
@@ -220,6 +250,13 @@ export default function AccountingInvoiceCandidatesPage() {
       footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="رکورد" />}
       emptyState={<ErpEmptyState icon={FaFileInvoice} title="صورتحسابی در این فیلتر وجود ندارد" description="این نتیجه خالی، جمعیت انتخاب‌شده در داشبورد یا فیلترهای فعلی را نشان می‌دهد." />}
     >
+      {planCandidates.length > 0 && <div className="space-y-3">
+        {planCandidates.map(candidate => <ErpCard key={candidate.expected.caseId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="font-semibold">{candidate.caseNumber} · {candidate.partnerDisplayName}</p>
+            <p className="sds-text-muted text-sm">{money(candidate.payable.amount, candidate.payable.currency)}</p></div>
+          <ErpButton label="ثبت برنامه پرداخت به سبلان" icon={FaPlus} onClick={() => openPlan(candidate)} />
+        </ErpCard>)}
+      </div>}
       {actionSuccess && <ErpInlineState kind="success" title={actionSuccess} />}
       {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadRows }} />}
       {actionError && !deleteTarget && !approvalTarget && <ErpInlineState kind="error" title={actionError} />}
@@ -228,6 +265,35 @@ export default function AccountingInvoiceCandidatesPage() {
         {actionError && <ErpInlineState kind="error" title={actionError} />}
         <FinancialInvoiceApprovalForm invoice={approvalTarget} busy={Boolean(actionLoading)} compact
           onApprove={approveFinancialInvoice} />
+      </ErpSheet>
+      <ErpSheet open={Boolean(planTarget)} onClose={() => setPlanTarget(null)} title="برنامه پرداخت فروشنده به سبلان"
+        presentation="modal" pending={Boolean(actionLoading)} footer={<ErpButton label="ثبت برنامه پرداخت" icon={FaSave}
+          disabled={!planEffectiveDate || !planInstallments.length || planInstallments.some(item => !item.dueDate || !item.amount ||
+            (item.method === 'CHECK' && (!item.checkNumber?.trim() || !item.checkBank?.trim())))} onClick={() => void savePlan()} />}>
+        <div className="space-y-4">
+          {actionError && <ErpInlineState kind="error" title={actionError} />}
+          <ErpField label="تاریخ شروع" required><ErpInput type="date" value={planEffectiveDate} onChange={event => setPlanEffectiveDate(event.target.value)} /></ErpField>
+          {planInstallments.map((item, index) => <ErpCard key={item.id} className="space-y-3 p-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <ErpField label={`سررسید ${(index + 1).toLocaleString('fa-IR')}`} required><ErpInput type="date" value={item.dueDate}
+                onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, dueDate: event.target.value } : row))} /></ErpField>
+              <ErpField label="مبلغ" required><ErpRialInput value={item.amount}
+                onValueChange={amount => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, amount } : row))} /></ErpField>
+              <ErpField label="روش"><ErpSelect value={item.method} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id
+                ? { ...row, method: event.target.value as typeof item.method } : row))}>
+                <option value="BANK_TRANSFER">واریز بانکی</option><option value="CASH">نقدی</option><option value="CHECK">چک</option>
+              </ErpSelect></ErpField>
+            </div>
+            {item.method === 'CHECK' && <div className="grid gap-3 sm:grid-cols-2">
+              <ErpField label="شماره چک" required><ErpInput value={item.checkNumber ?? ''} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, checkNumber: event.target.value } : row))} /></ErpField>
+              <ErpField label="بانک" required><ErpInput value={item.checkBank ?? ''} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, checkBank: event.target.value } : row))} /></ErpField>
+            </div>}
+            {planInstallments.length > 1 && <ErpButton label="حذف قسط" icon={FaTrashAlt} tone="danger" variant="outline"
+              onClick={() => setPlanInstallments(rows => rows.filter(row => row.id !== item.id))} />}
+          </ErpCard>)}
+          <ErpButton label="افزودن قسط" icon={FaPlus} variant="outline" onClick={() => setPlanInstallments(rows => [...rows,
+            { id: crypto.randomUUID(), dueDate: planEffectiveDate, amount: '', method: 'BANK_TRANSFER' }])} />
+        </div>
       </ErpSheet>
       <AccountingActionModal
         open={Boolean(deleteTarget)}

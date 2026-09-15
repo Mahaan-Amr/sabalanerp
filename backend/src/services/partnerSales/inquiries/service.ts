@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   PartnerCommandSchema, InquiryBatchResultSchema,
-  canonicalHash, partnerError,
+  canonicalHash, inquiryConfigurationHash, partnerError,
   type InquiryIdentity, type PartnerCommand, type PartnerCommandPort, type PartnerQueryV2Port, type Result,
 } from '@sabalanerp/partner-sales-contracts';
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
@@ -336,12 +336,22 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
             if (predecessor.successor) return { ok: false, error: partnerError('STATE_CONFLICT') };
             predecessorId = predecessor.id; version = predecessor.version + 1;
           }
+          const dimensionLabels = new Set(['طول', 'عرض', 'ضخامت', 'ابعاد کاتالوگی']);
+          const requestedDimensions = row.dimensions === undefined ? resolved.value.configuration : [
+            ...(row.dimensions.lengthMeters ? [{ label: 'طول', value: `${row.dimensions.lengthMeters} متر` }] : []),
+            ...(row.dimensions.widthMeters ? [{ label: 'عرض', value: `${row.dimensions.widthMeters} متر` }] : []),
+            ...(row.dimensions.thicknessCentimeters ? [{ label: 'ضخامت', value: `${row.dimensions.thicknessCentimeters} سانتی‌متر` }] : []),
+          ];
+          const configuration = row.dimensions === undefined ? resolved.value.configuration : [
+            ...resolved.value.configuration.filter(item => !dimensionLabels.has(item.label)), ...requestedDimensions,
+          ];
           const definition = parseInquiryDefinition({ version: 1, configurationRef: row.configuration,
             identity: resolved.value.identity, description: resolved.value.description,
-            configuration: resolved.value.configuration, ...(row.predecessor ? { predecessorReason: row.predecessor.reason } : {}) });
+            configuration, ...(row.sellerNote ? { sellerNote: row.sellerNote } : {}),
+            ...(row.predecessor ? { predecessorReason: row.predecessor.reason } : {}) });
           if (!definition) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           definitions.push({ rowId: row.rowId, version, ...(predecessorId ? { predecessorId } : {}), definition,
-            configurationHash: await canonicalHash(resolved.value.identity) });
+            configurationHash: await inquiryConfigurationHash(resolved.value.identity) });
         }
         if (new Set(definitions.map(row => row.rowId)).size !== definitions.length ||
             await tx.partnerInquiryRow.count({ where: { id: { in: definitions.map(row => row.rowId) } } })) {

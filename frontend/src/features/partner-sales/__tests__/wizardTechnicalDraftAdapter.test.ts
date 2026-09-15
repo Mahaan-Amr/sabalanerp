@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { PartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
+import { previewPartnerTechnicalDraft, type PartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import {
   addPartnerTechnicalDependent,
   addPartnerTechnicalProduct,
+  addPartnerQuickInquiryProduct,
   commitPartnerTechnicalField,
   removePartnerTechnicalProduct,
   retainPartnerTechnicalFieldText,
@@ -32,6 +33,22 @@ test('all Partner product families enter one revisioned canonical draft', () => 
   assert.equal(draft.inputRevision, families.length);
   assert.deepEqual(draft.rows.map(row => row.productRowId), families.map((_, index) => `product-row-${index}`));
   assert.equal(draft.rows.some(row => 'baseRateToman' in row.configuration), false);
+});
+
+test('quick inquiry rows stay calculation-ready without asking for contract quantities or operations', () => {
+  let draft = empty;
+  const families = ['prepared', 'volumetric', 'longitudinal', 'slab', 'stair'] as const;
+  families.forEach((family, index) => {
+    const product = catalog.products.find(item => item.families.includes(family))!;
+    draft = addPartnerQuickInquiryProduct(draft, product, family, `quick-row-${index}`);
+  });
+  const preview = previewPartnerTechnicalDraft(draft, { products: catalog.products,
+    operations: catalog.operations, sawKerfMeters: '0.003' });
+  assert.equal(preview.ok, true);
+  if (!preview.ok) return;
+  assert.equal(preview.value.conflicts.length, 0);
+  assert.equal(preview.value.rows.every(row => row.calculation.ok), true);
+  assert.equal(draft.rows.some(row => 'operations' in row && row.operations !== undefined), false);
 });
 
 test('remainder and layer adapters bind stable parent identity and cascade only with that parent', () => {
@@ -77,7 +94,7 @@ test('invalid field text blocks save until the same entity field commits canonic
   });
   draft = retainPartnerTechnicalFieldText(draft, 'row-1', 'lengthMeters', '۱٫۲x');
   assert.deepEqual(draft.editingValues, [{ entityId: 'row-1', field: 'lengthMeters', text: '۱٫۲x' }]);
-  const committed = commitPartnerTechnicalField(draft, 'row-1', 'lengthMeters', '1.2');
+  const committed = commitPartnerTechnicalField(draft, 'row-1', 'lengthMeters', '۱٫۲');
   assert.equal(committed.editingValues?.length ?? 0, 0);
   const row = committed.rows[0];
   assert.equal(row.family === 'longitudinal' ? row.configuration.lengthMeters : null, '1.2');

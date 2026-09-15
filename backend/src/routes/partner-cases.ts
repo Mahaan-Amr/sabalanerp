@@ -13,6 +13,12 @@ import { readAuthorizationDecisionByCorrelation } from '../services/effectiveAut
 import { generateCustomerContractPdf } from '../utils/pdf';
 import { contractConfirmationService } from '../services/contractConfirmationService';
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../services/partnerSales/authorization/technicalRollout';
+import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../services/contractRecoveryProtection';
+import { decodeTechnicalRecovery } from '../services/partnerSales/cases/technicalRecoveryRecords';
+import { resolvePrismaPartnerCaseDraft } from '../services/partnerSales/cases/prismaComposition';
+import { resolveApprovalForUse } from '../services/partnerSales/inquiries/approvalUsage';
+import { decodeTechnicalSavedSnapshot } from '../services/partnerSales/cases/technicalSavedRecords';
+import { parseInquiryDefinition } from '../services/partnerSales/inquiries/definition';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
@@ -60,15 +66,29 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const writable = profile.state === 'ACTIVE' && rollout.ok && permission.ok;
         const blockedCode = !rollout.ok ? rollout.error.code
           : !permission.ok ? permission.error.code : profile.state !== 'ACTIVE' ? 'PARTNER_NOT_ACTIVE' : undefined;
-        const recoverableDraft = await tx.salesContractEditSession.findFirst({ where: { ownerUserId: request.user!.id,
-          contractId: null, recovery: { path: ['kind'], equals: 'PARTNER_TECHNICAL_RECOVERY_V1' } },
-          orderBy: { updatedAt: 'desc' }, select: { draftId: true, baseRevision: true, updatedAt: true } });
+        const rawDrafts = await tx.salesContractEditSession.findMany({ where: { ownerUserId: request.user!.id,
+          contractId: null,
+          recovery: { path: ['kind'], equals: PARTNER_TECHNICAL_RECOVERY_KIND } },
+          orderBy: { updatedAt: 'desc' }, take: 200, select: { draftId: true, baseRevision: true, recovery: true } });
+        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        const recoverableDrafts = rawDrafts.flatMap(item => {
+          const recovery = decodeTechnicalRecovery(item.recovery);
+          return recovery && recovery.archived !== true && recovery.updatedAt <= clock.now.getTime() &&
+              clock.now.getTime() - recovery.updatedAt <= 7 * 24 * 60 * 60 * 1000
+            ? [{ ...item, updatedAt: new Date(recovery.updatedAt),
+              ...(typeof recovery.draftTitle === 'string' && recovery.draftTitle.trim()
+                ? { title: recovery.draftTitle.trim().slice(0, 200) } : {}) }] : [];
+        }).sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime()).slice(0, 50);
+        const recoverableDraft = recoverableDrafts[0];
         const value = partnerContracts.PartnerCreationContextSchema.safeParse({ schemaVersion: 1, kind: 'PARTNER',
           actorId: request.user!.id, profileId: profile.id, writable, ...(blockedCode ? { blockedCode } : {}),
           ...(profile.inquiries[0] ? { latestInquiryId: profile.inquiries[0].id } : {}),
           inquiryIds: profile.inquiries.map(inquiry => inquiry.id),
           ...(recoverableDraft ? { recoverableDraft: { recoveryId: recoverableDraft.draftId,
-            baseRevision: recoverableDraft.baseRevision, updatedAt: recoverableDraft.updatedAt.toISOString() } } : {}),
+            baseRevision: recoverableDraft.baseRevision, updatedAt: recoverableDraft.updatedAt.toISOString(),
+            ...(recoverableDraft.title ? { title: recoverableDraft.title } : {}) } } : {}),
+          recoverableDrafts: recoverableDrafts.map(item => ({ recoveryId: item.draftId,
+            baseRevision: item.baseRevision, updatedAt: item.updatedAt.toISOString(), ...(item.title ? { title: item.title } : {}) })),
           customers: profile.customers.map(customer => ({ id: customer.id,
             displayName: customer.companyName || `${customer.firstName} ${customer.lastName}`.trim(),
             address: customer.address || customer.workAddress || customer.homeAddress || 'ثبت‌نشده',
@@ -77,6 +97,239 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         });
         return value.success ? { ok: true as const, value: value.data }
           : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+      });
+      respond(response, result);
+    } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+  });
+  router.patch('/drafts/:recoveryId', async (request: AuthRequest, response) => {
+    if (!request.user || typeof request.body?.title !== 'string' || !request.body.title.trim() ||
+        request.body.title.trim().length > 200) {
+      respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return;
+    }
+    try {
+      const result = await prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM sales_contract_edit_sessions WHERE "draftId" = ${request.params.recoveryId} FOR UPDATE`;
+        const session = await tx.salesContractEditSession.findUnique({ where: { draftId: request.params.recoveryId },
+          select: { id: true, ownerUserId: true, purpose: true, recovery: true } });
+        const recovery = decodeTechnicalRecovery(session?.recovery);
+        if (!session || session.ownerUserId !== request.user!.id || session.purpose !== 'PARTNER_TECHNICAL' || !recovery) {
+          return { ok: false as const, error: partnerError('NOT_FOUND') };
+        }
+        await tx.salesContractEditSession.update({ where: { id: session.id }, data: {
+          recovery: json({ ...recovery, draftTitle: request.body.title.trim() }) } });
+        return { ok: true as const, value: { recoveryId: request.params.recoveryId, title: request.body.title.trim() } };
+      });
+      respond(response, result);
+    } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+  });
+  router.delete('/drafts/:recoveryId', async (request: AuthRequest, response) => {
+    if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+    try {
+      const result = await prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM sales_contract_edit_sessions WHERE "draftId" = ${request.params.recoveryId} FOR UPDATE`;
+        const session = await tx.salesContractEditSession.findUnique({ where: { draftId: request.params.recoveryId },
+          select: { id: true, ownerUserId: true, purpose: true, recovery: true } });
+        const recovery = decodeTechnicalRecovery(session?.recovery);
+        if (!session || session.ownerUserId !== request.user!.id || session.purpose !== 'PARTNER_TECHNICAL' || !recovery) {
+          return { ok: false as const, error: partnerError('NOT_FOUND') };
+        }
+        const inquiryEvidence = await tx.partnerInquiryRow.count({ where: {
+          definition: { path: ['configurationRef', 'recoveryId'], equals: request.params.recoveryId } } });
+        if (inquiryEvidence === 0) await tx.salesContractEditSession.delete({ where: { id: session.id } });
+        else await tx.salesContractEditSession.update({ where: { id: session.id }, data: {
+          recovery: json({ ...recovery, archived: true }) } });
+        return { ok: true as const, value: { recoveryId: request.params.recoveryId } };
+      });
+      respond(response, result);
+    } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+  });
+  router.get('/drafts/:recoveryId/wizard', async (request: AuthRequest, response) => {
+    if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+    try {
+      const session = await prisma.salesContractEditSession.findUnique({ where: { draftId: request.params.recoveryId },
+        select: { ownerUserId: true, purpose: true, recovery: true } });
+      const recovery = decodeTechnicalRecovery(session?.recovery);
+      const wizard = recovery && partnerContracts.PartnerWizardRecoverySnapshotSchema.safeParse(recovery.wizardDraft);
+      respond(response, !session || session.ownerUserId !== request.user.id || session.purpose !== 'PARTNER_TECHNICAL'
+        ? { ok: false, error: partnerError('NOT_FOUND') }
+        : wizard?.success ? { ok: true, value: wizard.data }
+          : { ok: false, error: partnerError(wizard ? 'INTEGRITY_CONFLICT' : 'NOT_FOUND') });
+    } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+  });
+  router.put('/drafts/:recoveryId/wizard', async (request: AuthRequest, response) => {
+    if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+    const parsed = partnerContracts.PartnerWizardRecoverySaveSchema.safeParse(request.body);
+    if (!parsed.success || parsed.data.intent.recoveryId !== request.params.recoveryId) {
+      respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return;
+    }
+    try {
+      const result = await prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM sales_contract_edit_sessions WHERE "draftId" = ${request.params.recoveryId} FOR UPDATE`;
+        const session = await tx.salesContractEditSession.findUnique({ where: { draftId: request.params.recoveryId },
+          select: { id: true, ownerUserId: true, purpose: true, recovery: true } });
+        const recovery = decodeTechnicalRecovery(session?.recovery);
+        if (!session || session.ownerUserId !== request.user!.id || session.purpose !== 'PARTNER_TECHNICAL' || !recovery) {
+          return { ok: false as const, error: partnerError('NOT_FOUND') };
+        }
+        const profile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: { id: true, state: true } });
+        if (!profile || profile.state !== 'ACTIVE') return { ok: false as const, error: partnerError('PARTNER_NOT_ACTIVE') };
+        const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'MUTATE');
+        if (!rollout.ok) return rollout;
+        const permission = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id,
+          purpose: 'PARTNER', channel: 'API' }, { correlationId: correlation(request) })
+          .authorize('CASE_DRAFT_WRITE', { kind: 'PROFILE', id: profile.id });
+        if (!permission.ok) return permission;
+        const previous = partnerContracts.PartnerWizardRecoverySnapshotSchema.safeParse(recovery.wizardDraft);
+        if (recovery.wizardDraft !== undefined && !previous.success) {
+          return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+        }
+        const currentRevision = previous.success ? previous.data.wizardRevision : 0;
+        if (currentRevision !== parsed.data.expectedWizardRevision) {
+          return { ok: false as const, error: partnerError('ROW_STALE') };
+        }
+        const records = Array.isArray(recovery.validatedSnapshots) ? recovery.validatedSnapshots : [];
+        let saved: Awaited<ReturnType<typeof decodeTechnicalSavedSnapshot>> = undefined;
+        for (const record of records) {
+          const candidate = await decodeTechnicalSavedSnapshot(record);
+          if (candidate?.view.recoveryRevision === parsed.data.intent.recoveryRevision) saved = candidate;
+        }
+        const primaryIds = saved?.view.rows.map(row => row.configurationRef.productRowId) ?? [];
+        const intentIds = parsed.data.intent.rows.map(row => row.productRowId);
+        const materialIds = (saved?.view.pricingSubjects ?? []).filter(subject => subject.role === 'ADDITIONAL_MATERIAL')
+          .map(subject => subject.configurationRef.productRowId);
+        const intentMaterialIds = (parsed.data.intent.additionalMaterialApprovals ?? []).map(item => item.pricingSubjectId);
+        if (!saved || saved.view.recoveryId !== request.params.recoveryId || saved.view.graphHash !== parsed.data.intent.graphHash ||
+            primaryIds.length !== intentIds.length || primaryIds.some(id => !intentIds.includes(id)) ||
+            materialIds.length !== intentMaterialIds.length || materialIds.some(id => !intentMaterialIds.includes(id))) {
+          return { ok: false as const, error: partnerError('CONFIG_MISMATCH') };
+        }
+        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        const snapshot = partnerContracts.PartnerWizardRecoverySnapshotSchema.parse({ schemaVersion: 1,
+          wizardRevision: currentRevision + 1, step: parsed.data.step, intent: parsed.data.intent,
+          updatedAt: clock.now.toISOString() });
+        await tx.salesContractEditSession.update({ where: { id: session.id }, data: { updatedAt: clock.now,
+          recovery: json({ ...recovery, updatedAt: clock.now.getTime(), wizardDraft: snapshot }) } });
+        return { ok: true as const, value: snapshot };
+      });
+      respond(response, result);
+    } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+  });
+  router.post('/approval-matches', async (request: AuthRequest, response) => {
+    if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+    const parsed = partnerContracts.PartnerApprovalMatchRequestSchema.safeParse(request.body);
+    if (!parsed.success) { respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return; }
+    try {
+      const result = await prisma.$transaction(async tx => {
+        const profile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id },
+          select: { id: true, state: true } });
+        if (!profile) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        if (profile.state !== 'ACTIVE') return { ok: false as const, error: partnerError('PARTNER_NOT_ACTIVE') };
+        const session = await tx.salesContractEditSession.findUnique({ where: { draftId: parsed.data.recoveryId },
+          select: { ownerUserId: true, purpose: true, recovery: true } });
+        const recovery = decodeTechnicalRecovery(session?.recovery);
+        if (!session || session.ownerUserId !== request.user!.id || session.purpose !== 'PARTNER_TECHNICAL' || !recovery) {
+          return { ok: false as const, error: partnerError('NOT_FOUND') };
+        }
+        let saved: Awaited<ReturnType<typeof decodeTechnicalSavedSnapshot>> = undefined;
+        for (const record of Array.isArray(recovery.validatedSnapshots) ? recovery.validatedSnapshots : []) {
+          const candidate = await decodeTechnicalSavedSnapshot(record);
+          if (candidate?.view.recoveryRevision === parsed.data.recoveryRevision) saved = candidate;
+        }
+        if (!saved || saved.view.recoveryId !== parsed.data.recoveryId) {
+          return { ok: false as const, error: partnerError('NOT_FOUND') };
+        }
+        const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'READ');
+        if (!rollout.ok) return rollout;
+        const allowed = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id,
+          purpose: 'PARTNER', channel: 'API' }, { correlationId: correlation(request) })
+          .authorize('CASE_DRAFT_WRITE', { kind: 'PROFILE', id: profile.id });
+        if (!allowed.ok) return allowed;
+        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        const candidates = await tx.partnerInquiryRow.findMany({ where: { inquiry: { profileId: profile.id },
+          outcome: 'APPROVED', approval: { expiresAt: { gt: clock.now } } },
+          orderBy: [{ approval: { approvedAt: 'desc' } }, { id: 'desc' }], take: 500,
+          select: { id: true, revision: true, configurationHash: true, definition: true,
+            successor: { select: { outcome: true } }, approval: { select: { wholesaleUnitPrice: true, currency: true,
+              approvedAt: true, expiresAt: true, note: true, usages: { include: { binding: { include: {
+                caseRevision: { include: { case: { select: { caseNumber: true } } } },
+              } } } } } }, inquiryId: true } });
+        const rows: partnerContracts.PartnerApprovalMatchSet['rows'] = [];
+        const missingPricingSubjectIds: string[] = [];
+        for (const identityRow of saved.identities) {
+          const subjectHash = await partnerContracts.inquiryConfigurationHash(identityRow.identity);
+          let matched: typeof candidates[number] | undefined;
+          let definition: ReturnType<typeof parseInquiryDefinition>;
+          for (const candidate of candidates) {
+            if (!candidate.approval || candidate.successor?.outcome === 'APPROVED') continue;
+            const decoded = parseInquiryDefinition(candidate.definition);
+            if (!decoded || decoded.identity.partnerSellerId !== request.user!.id ||
+                await partnerContracts.inquiryConfigurationHash(decoded.identity) !== subjectHash) continue;
+            const usable = await resolveApprovalForUse(tx, { binding: { inquiryId: candidate.inquiryId,
+              rowId: candidate.id, revision: candidate.revision }, partnerSellerId: request.user!.id,
+              configurationHash: candidate.configurationHash });
+            if (usable.ok) { matched = candidate; definition = decoded; break; }
+          }
+          if (!matched?.approval || !definition) { missingPricingSubjectIds.push(identityRow.productRowId); continue; }
+          rows.push({ rowId: matched.id, revision: matched.revision, description: definition.description,
+            state: 'APPROVED', configuration: definition.configuration,
+            configurationRef: { recoveryId: saved.view.recoveryId, recoveryRevision: saved.view.recoveryRevision,
+              productRowId: identityRow.productRowId },
+            ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
+            approvedPrice: { amount: matched.approval.wholesaleUnitPrice.toString(), currency: matched.approval.currency as 'IRR' | 'IRT' },
+            approvedAt: matched.approval.approvedAt.toISOString(), expiresAt: matched.approval.expiresAt.toISOString(),
+            ...(matched.approval.note ? { noteOrReason: matched.approval.note } : {}),
+            usedCaseNumbers: matched.approval.usages.map(usage => usage.binding.caseRevision.case.caseNumber),
+            approvedRowBinding: { inquiryId: matched.inquiryId, rowId: matched.id, revision: matched.revision } });
+        }
+        const view = partnerContracts.PartnerApprovalMatchSetSchema.safeParse({ schemaVersion: 1,
+          recoveryId: saved.view.recoveryId, recoveryRevision: saved.view.recoveryRevision,
+          rows, missingPricingSubjectIds });
+        return view.success ? { ok: true as const, value: view.data }
+          : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+      });
+      respond(response, result);
+    } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+  });
+  router.post('/quote', async (request: AuthRequest, response) => {
+    if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+    const parsed = partnerContracts.PartnerCommandSchema.safeParse(request.body);
+    if (!parsed.success || parsed.data.type !== 'CASE_SUBMIT' ||
+        parsed.data.idempotency.actorId !== request.user.id ||
+        parsed.data.idempotency.targetId !== parsed.data.intent.recoveryId) {
+      respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return;
+    }
+    const command = parsed.data as Extract<partnerContracts.PartnerCommand, { type: 'CASE_SUBMIT' }>;
+    try {
+      const result = await prisma.$transaction(async tx => {
+        const profile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: { id: true } });
+        if (!profile) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'MUTATE');
+        if (!rollout.ok) return rollout;
+        const allowed = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id,
+          purpose: 'PARTNER', channel: 'API' }, { correlationId: correlation(request) })
+          .authorize('CASE_DRAFT_WRITE', { kind: 'PROFILE', id: profile.id });
+        if (!allowed.ok) return allowed;
+        const resolved = await resolvePrismaPartnerCaseDraft(tx, { actorId: request.user!.id, command });
+        if (!resolved.ok) return resolved;
+        for (const row of resolved.value.rows) {
+          const binding = command.intent.rows.find(item => item.productRowId === row.productRowId)?.approvedRowBinding;
+          if (!binding) return { ok: false as const, error: partnerError('CONFIG_MISMATCH') };
+          const approval = await resolveApprovalForUse(tx, { binding, partnerSellerId: request.user!.id,
+            configurationHash: row.configurationHash });
+          if (!approval.ok) return approval;
+        }
+        for (const material of resolved.value.additionalMaterialApprovals ?? []) {
+          const binding = command.intent.additionalMaterialApprovals?.find(item =>
+            item.pricingSubjectId === material.pricingSubjectId)?.approvedRowBinding;
+          if (!binding) return { ok: false as const, error: partnerError('CONFIG_MISMATCH') };
+          const approval = await resolveApprovalForUse(tx, { binding, partnerSellerId: request.user!.id,
+            configurationHash: material.configurationHash });
+          if (!approval.ok) return approval;
+        }
+        return { ok: true as const, value: partnerContracts.PartnerWholesaleQuoteSchema.parse({ schemaVersion: 1,
+          recoveryId: command.intent.recoveryId, recoveryRevision: command.intent.recoveryRevision,
+          graphHash: command.intent.graphHash, rows: resolved.value.rows.map(row => ({ productRowId: row.productRowId,
+            wholesaleUnitPrice: { amount: row.wholesaleUnitPriceAmount, currency: 'IRT' as const } })) }) };
       });
       respond(response, result);
     } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }

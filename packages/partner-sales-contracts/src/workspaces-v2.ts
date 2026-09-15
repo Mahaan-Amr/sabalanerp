@@ -67,6 +67,7 @@ export type PartnerManagementWorkspaceViewV2 = z.infer<typeof PartnerManagementW
 
 const responderRow = ResponderInquiryViewSchema.shape.rows.element.extend({
   description: TextSchema,
+  sellerNote: TextSchema.optional(),
   configuration: z.array(z.object({ label: TextSchema, value: TextSchema }).strict()).min(1),
   state: InquiryRowStateV2Schema, approvedAt: InstantSchema.optional(), expiresAt: InstantSchema.optional(),
   noteOrReason: TextSchema.optional(), actions,

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response, type RequestHandler } from 'express';
-import { PartnerEventSchema, RevisionRefSchema, SabalanInternalRecordViewSchema, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
+import { PartnerEventSchema, RevisionRefSchema, SabalanInternalRecordViewSchema, SabalanPaymentPlanSetSchema, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { createPartnerAccountingAdapter } from '../services/partnerSales/accounting/adapter';
 import { createPrismaPartnerAccountingRepository } from '../services/partnerSales/accounting/prismaRepository';
 import { PartnerAccountingTechnicalError } from '../services/partnerSales/accounting/errors';
+import { listSabalanPlanCandidates, setSabalanPaymentPlan } from '../services/partnerSales/accounting/sabalanPlan';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -43,6 +44,17 @@ router.use(protect);
 router.get('/account', guarded(async (request, response) => {
   if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
   respond(response, await serviceFor(request).readOwnAccount(request.user.id));
+}));
+router.get('/sabalan-plan-candidates', guarded(async (request, response) => {
+  if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+  respond(response, await listSabalanPlanCandidates(prisma, request.user.id, correlation(request)));
+}));
+router.post('/sabalan-payment-plan', guarded(async (request, response) => {
+  if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+  const parsed = SabalanPaymentPlanSetSchema.safeParse(request.body);
+  respond(response, parsed.success
+    ? await setSabalanPaymentPlan(prisma, request.user.id, correlation(request), parsed.data)
+    : { ok: false, error: partnerError('INVALID_PAYLOAD') });
 }));
 router.post('/prepare', guarded(async (request, response) => {
   if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }

@@ -19,6 +19,7 @@ import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { readCurrentPartnerCaseViews } from '../cases/lifecycle';
 import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from './errors';
 import { PartnerCollectionIntegrityError } from './collections';
+import { withCurrentSabalanPlan } from './sabalanPlan';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -90,7 +91,8 @@ export function createPrismaPartnerAccountingRepository(input: {
           if (action === 'QUEUE' && await partnerPredecessorIsFrozen(tx, row.id, row.headRevision)) {
             return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
           }
-          return { ok: true, value: { view: { ...view.data, state: row.state },
+          const currentView = await withCurrentSabalanPlan(tx, view.data);
+          return { ok: true, value: { view: { ...currentView, state: row.state },
             partnerSellerId: row.profile.userId, commitment: event.data } };
         };
         const appendPublicEvent = async (event: PartnerEvent) => {
@@ -178,7 +180,8 @@ export function createPrismaPartnerAccountingRepository(input: {
                     integrityHash: commitmentRow.integrityHash }) || commitment.data.internalRecordId !== row.internalRecordId) {
                 return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
               }
-              const source = { view: { ...view.data, state: row.state }, partnerSellerId: row.profile.userId };
+              const currentView = await withCurrentSabalanPlan(tx, view.data);
+              const source = { view: { ...currentView, state: row.state }, partnerSellerId: row.profile.userId };
               const { official, covered } = await readPartnerOfficialPurchase(tx, { internalRecordId: view.data.recordId,
                 approval: latestPartnerFinancialApproval(visibleEvents(partnerContracts, events, {
                   from: '0001-01-01', to: '9999-12-31', asOf: clock.now.toISOString() })),

@@ -5,14 +5,14 @@ import {
 
 export type ConfigurationRef = { recoveryId: string; recoveryRevision: number; productRowId: string };
 export type InquiryDefinition = { version: 1; configurationRef: ConfigurationRef; identity: InquiryIdentity;
-  description: string; configuration: Array<{ label: string; value: string }>; predecessorReason?: string };
+  description: string; configuration: Array<{ label: string; value: string }>; sellerNote?: string; predecessorReason?: string };
 
 /** Strict private persistence decoder. Unknown fields never flow into either
  * public inquiry projection. */
 export function parseInquiryDefinition(value: unknown): InquiryDefinition | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const row = value as Record<string, unknown>;
-  if (Object.keys(row).some(key => !['version', 'configurationRef', 'identity', 'description', 'configuration', 'predecessorReason'].includes(key)) ||
+  if (Object.keys(row).some(key => !['version', 'configurationRef', 'identity', 'description', 'configuration', 'sellerNote', 'predecessorReason'].includes(key)) ||
       row.version !== 1 || !Array.isArray(row.configuration)) return undefined;
   const reference = PartnerConfigurationRefSchema.safeParse(row.configurationRef);
   const identity = InquiryIdentitySchema.safeParse(row.identity);
@@ -26,7 +26,9 @@ export function parseInquiryDefinition(value: unknown): InquiryDefinition | unde
     configuration.push({ label: label.data, value: fieldValue.data });
   }
   const reason = row.predecessorReason === undefined ? undefined : PersianReasonSchema.safeParse(row.predecessorReason);
-  if (!reference.success || !identity.success || !description.success || (reason && !reason.success)) return undefined;
+  const sellerNote = row.sellerNote === undefined ? undefined : TextSchema.safeParse(row.sellerNote);
+  if (!reference.success || !identity.success || !description.success || (sellerNote && !sellerNote.success) || (reason && !reason.success)) return undefined;
   return { version: 1, configurationRef: reference.data, identity: identity.data,
-    description: description.data, configuration, ...(reason?.success ? { predecessorReason: reason.data } : {}) };
+    description: description.data, configuration, ...(sellerNote?.success ? { sellerNote: sellerNote.data } : {}),
+    ...(reason?.success ? { predecessorReason: reason.data } : {}) };
 }

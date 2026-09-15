@@ -8,7 +8,8 @@ type Profile = { id: string; userId: string; state: 'PENDING' | 'ACTIVE' | 'SUSP
 
 function harness(input: { state?: Profile['state']; gates?: Partial<Awaited<ReturnType<PartnerProfileStore['readActivationGates']>>> } = {}) {
   const profile: Profile = { id: 'profile-316', userId: 'partner-316', state: input.state ?? 'PENDING', revision: 1,
-    firstActivatedAt: null, irreversibleAt: null };
+    firstActivatedAt: input.state && input.state !== 'PENDING' ? new Date('2026-01-01T00:00:00.000Z') : null,
+    irreversibleAt: input.state && input.state !== 'PENDING' ? new Date('2026-01-01T00:00:00.000Z') : null };
   const outcomes = new Map<string, { payloadHash: string; receipt: unknown }>();
   const events: unknown[] = [];
   const remediationStates: Profile['state'][] = [];
@@ -37,6 +38,13 @@ async function transition(to: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED', reason = 'Ø
   return { ...intent, commandId: `command-${to}`, correlationId: `correlation-${to}`,
     idempotency: { actorId: 'hr-316', operation: 'PROFILE_TRANSITION', targetId: 'profile-316',
       key: `key-${to}`, payloadHash: await canonicalHash(intent) } } satisfies PartnerCommand;
+}
+
+async function reactivate() {
+  const command = await transition('ACTIVE');
+  const intent = { schemaVersion: command.schemaVersion, type: command.type, profileId: command.profileId,
+    expectedRevision: command.expectedRevision, to: command.to, reason: command.reason, gateEvidenceIds: [] };
+  return { ...command, gateEvidenceIds: [], idempotency: { ...command.idempotency, payloadHash: await canonicalHash(intent) } };
 }
 
 test('profile activation commits once only after every independent gate is current', async () => {
@@ -77,9 +85,10 @@ test('suspension preserves approval evidence while termination runs owner remedi
   assert.equal(result.ok, true);
   assert.equal(suspended.profile.state, 'SUSPENDED');
   assert.equal(suspended.events.length, 1);
-  const reactivated = harness({ state: 'SUSPENDED' });
-  assert.equal((await reactivated.service.execute(await transition('ACTIVE'))).ok, true,
-    'a suspended profile can reactivate after current gates pass');
+  const reactivated = harness({ state: 'SUSPENDED', gates: { identityVerified: false,
+    commercialTermsReady: false, creditTermsReady: false, cohortReady: false } });
+  assert.equal((await reactivated.service.execute(await reactivate())).ok, true,
+    'a converted suspended profile reactivates without obsolete onboarding gates');
   const inactive = harness({ state: 'SUSPENDED', gates: { userActive: false } });
   const terminated = await inactive.service.execute(await transition('TERMINATED'));
   assert.equal(terminated.ok, true, 'inactive login never prevents HR termination remediation');

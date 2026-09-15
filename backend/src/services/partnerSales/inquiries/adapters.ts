@@ -145,6 +145,16 @@ export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['res
       operations?: PartnerTechnicalOperation[] } };
     const product = context.catalog?.products?.find(row => row.catalogItemId === identity?.catalogProductId);
     const draftRow = snapshot.draft.rows.find(row => row.productRowId === input.reference.productRowId);
+    if (input.reference.productRowId.startsWith('layer-material:')) {
+      const layerId = input.reference.productRowId.slice('layer-material:'.length);
+      const layer = snapshot.draft.dependents?.find(item => item.kind === 'layer' && item.layerConfigurationId === layerId);
+      if (!identity || !layer || layer.kind !== 'layer' || layer.source?.kind !== 'new-material' ||
+          layer.source.catalogItemId !== identity.catalogProductId || typeof product?.name !== 'string' || typeof product.code !== 'string') {
+        return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+      }
+      return { ok: true, value: { identity, description: product.name,
+        configuration: [{ label: 'کد سنگ', value: product.code }, { label: 'کاربرد', value: 'سنگ جدید لایه' }] } };
+    }
     if (!saved || !identity || !graphRow || saved.configurationRef.recoveryId !== input.reference.recoveryId ||
         saved.configurationRef.recoveryRevision !== input.reference.recoveryRevision || typeof product?.name !== 'string' ||
         typeof product.code !== 'string') return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };

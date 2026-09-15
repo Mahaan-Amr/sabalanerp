@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   ApprovedInquirySchema, PartnerCaseViewSchema, PartnerCommandSchema, canonicalHash, partnerError,
-  type PartnerCommandPort, type Result,
+  type ApprovedInquiry, type PartnerCommandPort, type Result,
 } from '@sabalanerp/partner-sales-contracts';
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
-import { bindApprovalUsage, bindFrozenApprovalUsage, resolveApprovalForUse } from '../inquiries/approvalUsage';
+import { bindApprovalUsage, bindFrozenApprovalUsage, bindFrozenMaterialApprovalUsage, bindMaterialApprovalUsage, resolveApprovalForUse } from '../inquiries/approvalUsage';
 import { buildCaseProjections } from './projections';
 import { buildRevisionEvidence, validateResolvedDraft, type ApprovedCaseRow, type ResolvedCaseDraft } from './revisions';
 
@@ -20,6 +20,48 @@ type CaseExecutionResult = Awaited<ReturnType<PartnerCommandPort['execute']>>;
 
 class RollbackCaseResult extends Error {
   constructor(readonly result: CaseExecutionResult) { super('rollback Partner Case result'); }
+}
+
+async function resolveAdditionalMaterialApprovals(tx: Transaction, command: DraftCommand, resolved: ResolvedCaseDraft,
+  previous: Array<{ pricingSubjectId: string; approvalId: string; approvalSnapshot: Prisma.JsonValue; evidenceHash: string }> = [],
+  previousRevision?: number) {
+  const bindings = command.intent.additionalMaterialApprovals ?? [];
+  const materials = resolved.additionalMaterialApprovals ?? [];
+  if (bindings.length !== materials.length) {
+    return { ok: false as const, error: partnerError('CONFIG_MISMATCH') };
+  }
+  const approvals: Array<{ material: NonNullable<ResolvedCaseDraft['additionalMaterialApprovals']>[number];
+    binding: { inquiryId: string; rowId: string; revision: number }; approval: ApprovedInquiry; frozen: boolean }> = [];
+  for (const material of materials) {
+    const binding = bindings.find(item => item.pricingSubjectId === material.pricingSubjectId)?.approvedRowBinding;
+    if (!binding) return { ok: false as const, error: partnerError('CONFIG_MISMATCH') };
+    const frozen = ApprovedInquirySchema.safeParse(previous.find(item =>
+      item.pricingSubjectId === material.pricingSubjectId)?.approvalSnapshot);
+    const priorUsage = previous.find(item => item.pricingSubjectId === material.pricingSubjectId);
+    const frozenEvidenceHash = frozen.success && previousRevision !== undefined ? await canonicalHash({ schemaVersion: 1,
+      caseId: command.type === 'CASE_DRAFT_REVISE' ? command.expected.caseId : command.idempotency.targetId,
+      caseRevision: previousRevision,
+      pricingSubjectId: material.pricingSubjectId, approval: frozen.data }) : undefined;
+    if (frozen.success && priorUsage?.approvalId === frozen.data.approvalId && priorUsage.evidenceHash === frozenEvidenceHash &&
+        frozen.data.configurationHash === material.configurationHash &&
+        frozen.data.inquiryId === binding.inquiryId && frozen.data.rowId === binding.rowId &&
+        frozen.data.revision === binding.revision && frozen.data.partnerSellerId === resolved.partnerSellerId &&
+        frozen.data.wholesaleUnitPrice.currency === 'IRT' &&
+        frozen.data.wholesaleUnitPrice.amount === material.wholesaleUnitPriceAmount) {
+      approvals.push({ material, binding, approval: frozen.data, frozen: true });
+      continue;
+    }
+    if (frozen.success && frozen.data.configurationHash === material.configurationHash) {
+      return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+    }
+    const approval = await resolveApprovalForUse(tx, { binding, partnerSellerId: resolved.partnerSellerId,
+      configurationHash: material.configurationHash });
+    if (!approval.ok) return approval;
+    if (approval.value.wholesaleUnitPrice.amount !== material.wholesaleUnitPriceAmount ||
+        approval.value.wholesaleUnitPrice.currency !== 'IRT') return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+    approvals.push({ material, binding, approval: approval.value, frozen: false });
+  }
+  return { ok: true as const, value: approvals };
 }
 
 export interface PartnerCaseDependencies {
@@ -97,7 +139,9 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     id: true, caseNumber: true, profileId: true, customerId: true, internalRecordId: true,
     customerContractId: true, headRevision: true, integrityHash: true, state: true, stateRevision: true,
     head: { select: { customerContent: true, rowBindings: { select: { productRowId: true,
-      configurationHash: true, inquiryUsages: { select: { approvalSnapshot: true } } } } } },
+      configurationHash: true, inquiryUsages: { select: { approvalSnapshot: true } } } },
+      materialInquiryUsages: { select: { pricingSubjectId: true, approvalId: true,
+        approvalSnapshot: true, evidenceHash: true } } } },
     internalRecord: { select: { recordNumber: true } },
     customerContract: { select: { contractNumber: true } },
   } });
@@ -154,6 +198,9 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     return validated;
   }
   const approvedRows: ApprovedCaseRow[] = [];
+  const materialApprovals = await resolveAdditionalMaterialApprovals(tx, command, resolved.value,
+    current.head.materialInquiryUsages, current.headRevision);
+  if (!materialApprovals.ok) return materialApprovals;
   for (const row of command.intent.rows) {
     const saved = resolved.value.rows.find(item => item.productRowId === row.productRowId);
     if (!saved) {
@@ -254,6 +301,15 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       configurationHash: row.configurationHash, caseId, caseRevision: revision, productRowId: row.productRowId,
       approval: row.approval }) : await bindApprovalUsage(tx, { binding, partnerSellerId: dependencies.actorId,
       configurationHash: row.configurationHash, caseId, caseRevision: revision, productRowId: row.productRowId });
+    if (!usage.ok) return usage;
+  }
+  for (const item of materialApprovals.value) {
+    const usage = await (item.frozen ? bindFrozenMaterialApprovalUsage(tx, { binding: item.binding,
+      partnerSellerId: dependencies.actorId, configurationHash: item.material.configurationHash,
+      caseId, caseRevision: revision, pricingSubjectId: item.material.pricingSubjectId, approval: item.approval })
+      : bindMaterialApprovalUsage(tx, { binding: item.binding,
+      partnerSellerId: dependencies.actorId, configurationHash: item.material.configurationHash,
+      caseId, caseRevision: revision, pricingSubjectId: item.material.pricingSubjectId }));
     if (!usage.ok) return usage;
   }
   for (const delivery of command.intent.deliveries) {
@@ -399,6 +455,8 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         return validated;
       }
       const approvedRows: ApprovedCaseRow[] = [];
+      const materialApprovals = await resolveAdditionalMaterialApprovals(tx, command, resolved.value);
+      if (!materialApprovals.ok) return materialApprovals;
       for (const row of command.intent.rows) {
         const saved = resolved.value.rows.find(item => item.productRowId === row.productRowId);
         if (!saved) {
@@ -480,6 +538,12 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         const binding = command.intent.rows.find(item => item.productRowId === row.productRowId)!.approvedRowBinding;
         const usage = await bindApprovalUsage(tx, { binding, partnerSellerId: dependencies.actorId,
           configurationHash: row.configurationHash, caseId, caseRevision: 1, productRowId: row.productRowId });
+        if (!usage.ok) return usage;
+      }
+      for (const item of materialApprovals.value) {
+        const usage = await bindMaterialApprovalUsage(tx, { binding: item.binding,
+          partnerSellerId: dependencies.actorId, configurationHash: item.material.configurationHash,
+          caseId, caseRevision: 1, pricingSubjectId: item.material.pricingSubjectId });
         if (!usage.ok) return usage;
       }
       for (const delivery of command.intent.deliveries) {

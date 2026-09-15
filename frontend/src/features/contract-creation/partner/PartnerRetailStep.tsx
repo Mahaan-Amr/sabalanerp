@@ -3,7 +3,7 @@
 import React from 'react';
 import type { Money } from '@sabalanerp/partner-sales-contracts';
 import { ErpCard, ErpCheckboxControl, ErpField, ErpInlineState, ErpRialInput } from '@/components/erp';
-import { partnerMoneyText, partnerRetailSummary, type PartnerRetailRow } from './partnerRetail';
+import { partnerMoneyText, partnerRetailRowSummary, partnerRetailSummary, type PartnerRetailRow } from './partnerRetail';
 
 export interface PartnerRetailStepProps {
   rows: PartnerRetailRow[];
@@ -18,9 +18,10 @@ export interface PartnerRetailStepProps {
 export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled, onRowsChange, onDiscountChange, onConfirmLoss }: PartnerRetailStepProps) {
   const summary = partnerRetailSummary(rows, discount);
   return <section aria-label="قیمت فروش به مشتری" className="min-w-0 space-y-4" dir="rtl">
-    {rows.map((row, index) => <ErpCard key={row.productRowId} className="space-y-3 p-4">
+    {rows.map((row, index) => { const rowSummary = partnerRetailRowSummary(row); return <ErpCard key={row.productRowId} className="space-y-3 p-4">
       <h3 className="break-words font-semibold">{row.inquiryRow.description}</h3>
-      <p className="text-sm text-[var(--sds-text-secondary)]">قیمت فروش سبلان به شما: {row.inquiryRow.approvedPrice && partnerMoneyText(row.inquiryRow.approvedPrice.amount, row.inquiryRow.approvedPrice.currency)}</p>
+      <p className="text-sm text-[var(--sds-text-secondary)]">قیمت خرید شما از سبلان: {rowSummary
+        ? partnerMoneyText(rowSummary.wholesale, row.retailUnitPrice.currency) : 'در حال محاسبه'}</p>
       <ErpField label={`قیمت فروش به مشتری — ${row.inquiryRow.description}`}
         error={!summary.valid && summary.field === 'price' && summary.productRowId === row.productRowId ? summary.message : undefined}>
         <ErpRialInput dir="ltr" disabled={disabled} value={row.retailUnitPrice.amount} onValueChange={amount => {
@@ -28,7 +29,12 @@ export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled
           onRowsChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, retailUnitPrice: { ...item.retailUnitPrice, amount } } : item));
         }} />
       </ErpField>
-    </ErpCard>)}
+      {rowSummary && <dl className="grid gap-2 text-sm sm:grid-cols-2">
+        <div><dt className="text-[var(--sds-text-secondary)]">فروش این ردیف</dt><dd className="font-semibold">{partnerMoneyText(rowSummary.retail, row.retailUnitPrice.currency)}</dd></div>
+        <div><dt className="text-[var(--sds-text-secondary)]">سود/زیان این ردیف</dt><dd className="font-semibold">{partnerMoneyText(rowSummary.difference, row.retailUnitPrice.currency)}</dd></div>
+      </dl>}
+      {rowSummary?.loss && <ErpInlineState kind="stale" title="قیمت فروش این ردیف از قیمت خرید شما کمتر است." />}
+    </ErpCard>; })}
     <ErpField label={`تخفیف فروش به مشتری (${discount.currency === 'IRR' ? 'ریال' : 'تومان'})`}
       error={!summary.valid && summary.field === 'discount' ? summary.message : undefined}>
       <ErpRialInput dir="ltr" value={discount.amount} disabled={disabled} onValueChange={amount => {

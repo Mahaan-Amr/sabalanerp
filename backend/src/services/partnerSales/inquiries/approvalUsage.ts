@@ -82,6 +82,38 @@ export async function bindApprovalUsage(tx: Prisma.TransactionClient, input: Use
     usedAt: usage.usedAt.toISOString(), replayed: false } };
 }
 
+/** Records approval use for a material pricing subject that is embedded in a
+ * canonical product row (for example a different stone used by a stair layer).
+ * It deliberately does not invent a sellable product row or delivery quantity. */
+export async function bindMaterialApprovalUsage(tx: Prisma.TransactionClient, input: UseInput & {
+  caseId: string; caseRevision: number; pricingSubjectId: string;
+}): Promise<Result<{ usageId: string; approval: ApprovedInquiry }>> {
+  const prior = await tx.partnerMaterialInquiryUsage.findUnique({ where: {
+    caseId_caseRevision_pricingSubjectId: { caseId: input.caseId, caseRevision: input.caseRevision,
+      pricingSubjectId: input.pricingSubjectId },
+  } });
+  if (prior) {
+    const snapshot = ApprovedInquirySchema.safeParse(prior.approvalSnapshot);
+    const replayHash = snapshot.success ? await canonicalHash({ schemaVersion: 1, caseId: input.caseId,
+      caseRevision: input.caseRevision, pricingSubjectId: input.pricingSubjectId, approval: snapshot.data }) : undefined;
+    return snapshot.success && snapshot.data.inquiryId === input.binding.inquiryId && snapshot.data.rowId === input.binding.rowId &&
+      snapshot.data.revision === input.binding.revision && snapshot.data.configurationHash === input.configurationHash
+      && snapshot.data.partnerSellerId === input.partnerSellerId && prior.approvalId === snapshot.data.approvalId
+      && prior.evidenceHash === replayHash
+      ? { ok: true, value: { usageId: prior.id, approval: snapshot.data } }
+      : { ok: false, error: partnerError('IDEMPOTENCY_CONFLICT') };
+  }
+  const approval = await resolveApprovalForUse(tx, input);
+  if (!approval.ok) return approval;
+  const evidenceHash = await canonicalHash({ schemaVersion: 1, caseId: input.caseId, caseRevision: input.caseRevision,
+    pricingSubjectId: input.pricingSubjectId, approval: approval.value });
+  const usageId = randomUUID();
+  await tx.partnerMaterialInquiryUsage.create({ data: { id: usageId, caseId: input.caseId,
+    caseRevision: input.caseRevision, pricingSubjectId: input.pricingSubjectId, approvalId: approval.value.approvalId,
+    approvalSnapshot: approval.value as Prisma.InputJsonValue, evidenceHash } });
+  return { ok: true, value: { usageId, approval: approval.value } };
+}
+
 /** Appends a new Case-revision usage from the preceding immutable snapshot.
  * Draft edits with unchanged price-bearing configuration retain that exact
  * wholesale truth even after inquiry expiry or supersession. */
@@ -108,4 +140,25 @@ export async function bindFrozenApprovalUsage(tx: Prisma.TransactionClient, inpu
     caseRevision: input.caseRevision, productRowId: input.productRowId, approvalId: approval.data.approvalId,
     approvalSnapshot: approval.data as Prisma.InputJsonValue, evidenceHash, usedAt: clock.now } });
   return { ok: true, value: { usageId, approval: approval.data, usedAt: clock.now.toISOString(), replayed: false } };
+}
+
+/** Carries an immutable supplemental-material approval into a later Case
+ * revision. This mirrors the primary-row freeze without inventing a product
+ * row for material that is embedded inside another configured product. */
+export async function bindFrozenMaterialApprovalUsage(tx: Prisma.TransactionClient, input: UseInput & {
+  caseId: string; caseRevision: number; pricingSubjectId: string; approval: ApprovedInquiry;
+}): Promise<Result<{ usageId: string; approval: ApprovedInquiry }>> {
+  const approval = ApprovedInquirySchema.safeParse(input.approval);
+  if (!approval.success || approval.data.partnerSellerId !== input.partnerSellerId ||
+      approval.data.configurationHash !== input.configurationHash || approval.data.inquiryId !== input.binding.inquiryId ||
+      approval.data.rowId !== input.binding.rowId || approval.data.revision !== input.binding.revision) {
+    return { ok: false, error: partnerError('CONFIG_MISMATCH') };
+  }
+  const evidenceHash = await canonicalHash({ schemaVersion: 1, caseId: input.caseId,
+    caseRevision: input.caseRevision, pricingSubjectId: input.pricingSubjectId, approval: approval.data });
+  const usageId = randomUUID();
+  await tx.partnerMaterialInquiryUsage.create({ data: { id: usageId, caseId: input.caseId,
+    caseRevision: input.caseRevision, pricingSubjectId: input.pricingSubjectId, approvalId: approval.data.approvalId,
+    approvalSnapshot: approval.data as Prisma.InputJsonValue, evidenceHash } });
+  return { ok: true, value: { usageId, approval: approval.data } };
 }

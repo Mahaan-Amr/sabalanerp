@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   PaymentPlanSchema,
   canonicalHash,
+  inquiryConfigurationHash,
   partnerError,
   type PartnerCommand,
   type Result,
@@ -15,6 +16,7 @@ import { decodeTechnicalSavedSnapshot } from './technicalSavedRecords';
 import { SUBMISSION_EVIDENCE_OPERATION } from './submissionEvidence';
 import type { PartnerCaseDependencies } from './aggregate';
 import type { ResolvedCaseDraft } from './revisions';
+import { parseInquiryDefinition } from '../inquiries/definition';
 
 type Transaction = Prisma.TransactionClient;
 type DraftCommand = Extract<PartnerCommand, { type: 'CASE_SUBMIT' | 'CASE_DRAFT_REVISE' }>;
@@ -101,10 +103,40 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     }
   }
 
-  const approvals = await tx.partnerInquiryApproval.findMany({ where: { rowId: { in: command.intent.rows.map(row => row.approvedRowBinding.rowId) } },
-    select: { rowId: true, wholesaleUnitPrice: true, currency: true } });
-  if (approvals.length !== command.intent.rows.length || new Set(approvals.map(item => item.rowId)).size !== approvals.length) {
+  const materialBindings = command.intent.additionalMaterialApprovals ?? [];
+  const approvalRowIds = [...command.intent.rows.map(row => row.approvedRowBinding.rowId),
+    ...materialBindings.map(row => row.approvedRowBinding.rowId)];
+  const approvals = await tx.partnerInquiryApproval.findMany({ where: { rowId: { in: approvalRowIds } },
+    select: { rowId: true, wholesaleUnitPrice: true, currency: true,
+      row: { select: { configurationHash: true, definition: true } } } });
+  if (approvals.length !== approvalRowIds.length || new Set(approvals.map(item => item.rowId)).size !== approvals.length) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+  }
+  const graphIds = new Set<string>(saved.graph.rows.map(row => row.productRowId));
+  const supplemental = saved.identities.filter(item => !graphIds.has(item.productRowId));
+  if (materialBindings.length !== supplemental.length || supplemental.some(item => !materialBindings.some(binding =>
+      binding.pricingSubjectId === item.productRowId))) return { ok: false, error: partnerError('CONFIG_MISMATCH') };
+  const additionalMaterialApprovals: ResolvedCaseDraft['additionalMaterialApprovals'] = [];
+  const additionalRates = new Map<string, string>();
+  for (const identity of supplemental) {
+    const binding = materialBindings.find(item => item.pricingSubjectId === identity.productRowId)!;
+    const approval = approvals.find(item => item.rowId === binding.approvedRowBinding.rowId);
+    const definition = approval && parseInquiryDefinition(approval.row.definition);
+    const currentSubjectHash = await inquiryConfigurationHash(identity.identity);
+    const approvedSubjectHash = definition && await inquiryConfigurationHash(definition.identity);
+    const approvedLegacyHash = definition && await canonicalHash(definition.identity);
+    if (!approval || approval.currency !== 'IRT' || !definition || definition.identity.partnerSellerId !== actorId ||
+        approvedSubjectHash !== currentSubjectHash ||
+        (approval.row.configurationHash !== approvedSubjectHash && approval.row.configurationHash !== approvedLegacyHash)) {
+      return { ok: false, error: partnerError('CONFIG_MISMATCH') };
+    }
+    const configurationHash = approval.row.configurationHash;
+    const rate = approval.wholesaleUnitPrice.toString();
+    const previousRate = additionalRates.get(identity.identity.catalogProductId);
+    if (previousRate && previousRate !== rate) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    additionalRates.set(identity.identity.catalogProductId, rate);
+    additionalMaterialApprovals.push({ pricingSubjectId: identity.productRowId, configurationHash,
+      catalogProductId: identity.identity.catalogProductId, wholesaleUnitPriceAmount: rate });
   }
   const rows: ResolvedCaseDraft['rows'] = [];
   const catalog = object(saved.context)?.catalog;
@@ -112,15 +144,22 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   for (const row of saved.graph.rows) {
     const view = saved.view.rows.find(item => item.configurationRef.productRowId === row.productRowId);
     const identityRow = saved.identities.find(item => item.productRowId === row.productRowId)?.identity;
-    const hash = identityRow ? await canonicalHash(identityRow) : undefined;
-    const product = catalogProducts.map(object).find(item => item?.catalogItemId === identityRow?.catalogProductId);
     const approval = approvals.find(item => item.rowId === command.intent.rows
       .find(item => item.productRowId === row.productRowId)?.approvedRowBinding.rowId);
-    if (!view || !hash || !identityRow || typeof product?.name !== 'string' || !approval || approval.currency !== 'IRT') {
+    const definition = approval && parseInquiryDefinition(approval.row.definition);
+    const currentSubjectHash = identityRow && await inquiryConfigurationHash(identityRow);
+    const approvedSubjectHash = definition && await inquiryConfigurationHash(definition.identity);
+    const approvedLegacyHash = definition && await canonicalHash(definition.identity);
+    const hash = approval?.row.configurationHash;
+    const product = catalogProducts.map(object).find(item => item?.catalogItemId === identityRow?.catalogProductId);
+    if (!view || !hash || !identityRow || typeof product?.name !== 'string' || !approval || approval.currency !== 'IRT' ||
+        !definition || definition.identity.partnerSellerId !== actorId || approvedSubjectHash !== currentSubjectHash ||
+        (hash !== approvedSubjectHash && hash !== approvedLegacyHash)) {
       return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     }
     let wholesale;
-    try { wholesale = calculatePartnerCanonicalWholesale(row, approval.wholesaleUnitPrice.toString()); }
+    try { wholesale = calculatePartnerCanonicalWholesale(row, approval.wholesaleUnitPrice.toString(),
+      saved.graph.layerConfigurations, additionalRates); }
     catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
     const commercialQuantity = new Prisma.Decimal(view.quantity);
     if (commercialQuantity.lte(0)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
@@ -145,6 +184,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     customer: { displayName: customer.companyName || `${customer.firstName} ${customer.lastName}`.trim(),
       phone: customerPhone, address: customer.address || customer.workAddress || customer.homeAddress || 'ثبت‌نشده' },
     legalText: 'قرارداد فروش کالا و خدمات مطابق مشخصات، برنامه پرداخت و برنامه تحویل ثبت‌شده است.', sabalanPaymentPlan,
+    additionalMaterialApprovals,
   } };
 }
 

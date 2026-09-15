@@ -50,7 +50,7 @@ export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinqu
           </div>}
           {mismatchedRowIds.includes(row.rowId) && <ErpInlineState kind="stale" title="مشخصات محصول تغییر کرده است؛ قیمت جدید استعلام بگیرید." />}
           {expiring && <ErpInlineState kind="stale" title="کمتر از شش ساعت تا پایان اعتبار قیمت باقی مانده است." />}
-          {(['REJECTED', 'EXPIRED', 'SUPERSEDED', 'CANCELLED'].includes(state) || mismatchedRowIds.includes(row.rowId)) && <ErpButton label="استعلام مجدد" variant="outline" disabled={pending || row.successor?.state === 'PENDING'} onClick={() => onReinquire(row)} />}
+          {(['APPROVED', 'REJECTED', 'EXPIRED', 'SUPERSEDED', 'CANCELLED'].includes(state) || mismatchedRowIds.includes(row.rowId)) && <ErpButton label="استعلام مجدد" variant="outline" disabled={pending || row.successor?.state === 'PENDING'} onClick={() => onReinquire(row)} />}
         </ErpCard>;
       })}
     </div>

@@ -9,6 +9,7 @@ import { defaultPartnerRetailRows, partnerRetailSummary } from '../../contract-c
 test('retail defaults to approval but a retail-only discount can create a confirmable loss', () => {
   const { inquiry, configurationDraft } = createPartnerFixtures();
   const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '2.000', unit: 'm', inquiryRow: inquiry.rows[0] }]);
+  rows[0].wholesaleUnitPrice = { amount: '800', currency: 'IRR' };
   assert.equal(rows[0].retailUnitPrice.amount, '800');
   const discount = { amount: '100', currency: 'IRR' as const };
   const summary = partnerRetailSummary(rows, discount);
@@ -26,6 +27,7 @@ test('retail preview keeps sub-unit differences exact above the safe integer ran
   const { inquiry, configurationDraft } = createPartnerFixtures();
   inquiry.rows[0].approvedPrice = { amount: '9007199254740993.01', currency: 'IRR' };
   const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '0.1', unit: 'm', inquiryRow: inquiry.rows[0] }]);
+  rows[0].wholesaleUnitPrice = { amount: '9007199254740993.01', currency: 'IRR' };
   rows[0].retailUnitPrice.amount = '9007199254740993.02';
   const summary = partnerRetailSummary(rows, { amount: '0', currency: 'IRR' });
   assert.equal(summary.wholesale, '900719925474099.301');
@@ -38,6 +40,7 @@ test('retail preview keeps sub-unit differences exact above the safe integer ran
 test('invalid retail and discount values are associated with the offending field', () => {
   const { inquiry, configurationDraft } = createPartnerFixtures();
   const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: inquiry.rows[0] }]);
+  rows[0].wholesaleUnitPrice = { amount: '800', currency: 'IRR' };
   const render = (amount: string) => renderToStaticMarkup(<PartnerRetailStep rows={rows} discount={{ amount, currency: 'IRR' }} belowCostConfirmed={false}
     disabled={false} onRowsChange={() => undefined} onDiscountChange={() => undefined} onConfirmLoss={() => undefined} />);
   rows[0].retailUnitPrice.amount = '';

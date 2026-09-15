@@ -7,11 +7,13 @@ test('v2 inquiry survives reload with exact safe configuration and successor lin
   const fixture = createPartnerFixtures();
   const input = { ...fixture.inquiry, schemaVersion: 2, rows: [{ ...fixture.inquiry.rows[0],
     configurationRef: fixture.configurationDraft,
+    sellerNote: 'جهت بررسی نمای پروژه',
     successor: { inquiryId: 'next-inquiry', rowId: 'next-row', revision: 1, state: 'PENDING' },
   }] };
   const view = PartnerInquiryViewV2Schema.parse(JSON.parse(JSON.stringify(input)));
   assert.equal(view.rows[0].configurationRef.productRowId, 'fixture-313-row');
   assert.equal(view.rows[0].successor?.rowId, 'next-row');
+  assert.equal(view.rows[0].sellerNote, 'جهت بررسی نمای پروژه');
   // An open successor does not retroactively invalidate its approved predecessor.
   assert.equal(view.rows[0].state, 'APPROVED');
   assert.equal(PartnerInquiryViewSchema.safeParse(fixture.inquiry).success, true);

@@ -108,8 +108,12 @@ export function createPartnerProfileService<Transaction = unknown>(
         action, purpose: 'ONBOARDING', reason: command.reason, root: { kind: 'PROFILE', id: profile.id } });
       if (!authorized.ok) return authorized;
       const gates = await dependencies.store.readActivationGates(transaction, profile);
-      if (command.to === 'ACTIVE' && (!activationReady(gates) || !sameEvidence(command.gateEvidenceIds, gates.evidenceIds))) {
-        return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
+      if (command.to === 'ACTIVE') {
+        const reactivation = profile.state === 'SUSPENDED' && Boolean(profile.firstActivatedAt);
+        const ready = reactivation
+          ? gates.responderReady && gates.userActive && !gates.conflictingInternalAuthority && command.gateEvidenceIds.length === 0
+          : activationReady(gates) && sameEvidence(command.gateEvidenceIds, gates.evidenceIds);
+        if (!ready) return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
       }
       const now = new Date();
       const revision = profile.revision + 1;

@@ -17,6 +17,8 @@ const saved = z.object({
     // Comparison with the preceding validated save, not an approval decision.
     configurationChange: z.enum(['NEW', 'UNCHANGED', 'CHANGED']),
   }).strict().refine(row => row.unit !== 'count' || /^[0-9]+(?:\.0+)?$/.test(row.quantity), 'Piece count must be integral')).min(1),
+  pricingSubjects: z.array(z.object({ configurationRef: PartnerConfigurationRefSchema,
+    role: z.enum(['PRIMARY', 'ADDITIONAL_MATERIAL']) }).strict()).optional(),
 }).strict();
 const coherent = (value: z.infer<typeof saved>, context: z.RefinementCtx) => {
   const ids = new Set<string>();
@@ -25,6 +27,18 @@ const coherent = (value: z.infer<typeof saved>, context: z.RefinementCtx) => {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'Saved rows must uniquely identify this exact recovery revision' });
     }
     ids.add(ref.productRowId);
+  }
+  const subjectIds = new Set<string>();
+  for (const subject of value.pricingSubjects ?? []) {
+    const ref = subject.configurationRef;
+    if (ref.recoveryId !== value.recoveryId || ref.recoveryRevision !== value.recoveryRevision ||
+        subjectIds.has(ref.productRowId)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Pricing subjects must identify this exact recovery revision' });
+    }
+    subjectIds.add(ref.productRowId);
+    if (subject.role === 'PRIMARY' && !ids.has(ref.productRowId)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Primary pricing subjects must belong to a saved product row' });
+    }
   }
 };
 export const PartnerTechnicalSavedViewSchema = saved.superRefine(coherent);

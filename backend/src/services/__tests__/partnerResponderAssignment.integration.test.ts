@@ -104,12 +104,19 @@ test('profile responder assignment is append-only, CAS protected and exactly rep
       assert.equal(inquiryAssignment.actorId, actorId, 'Admin assignment actor is preserved; Partner submitter is not substituted');
       assert.equal((inquiryAssignment.eligibilityEvidence as { profileAssignmentRevision?: number }).profileAssignmentRevision, 1);
       assert.equal((await service.execute(firstCommand)).ok, true);
+      const unchanged = await service.execute(await command(actorId, partnerId, responderA, 2));
+      assert.equal(unchanged.ok ? null : unchanged.error.code, 'STATE_CONFLICT');
       const stale = await service.execute(await command(actorId, partnerId, responderB, 1));
       assert.equal(stale.ok ? null : stale.error.code, 'ROW_STALE');
       const second = await service.execute(await command(actorId, partnerId, responderB, 2));
       assert.equal(second.ok, true);
       const assignments = await tx.partnerProfileResponderAssignment.findMany({ where: { profileId: partnerId }, orderBy: { revision: 'asc' } });
       assert.deepEqual(assignments.map(row => [row.revision, row.responderId]), [[1, responderA], [2, responderB]]);
+      const inquiryAssignments = await tx.partnerInquiryAssignment.findMany({ where: { inquiryId: `${partnerId}-inquiry` },
+        orderBy: { revision: 'asc' } });
+      assert.deepEqual(inquiryAssignments.map(row => [row.revision, row.responderId]), [[1, responderA], [2, responderB]]);
+      assert.equal((await tx.partnerInquiry.findUniqueOrThrow({ where: { id: `${partnerId}-inquiry` } })).revision, 2);
+      assert.equal(await tx.partnerInquiryEvent.count({ where: { inquiryId: `${partnerId}-inquiry`, type: 'INQUIRY_REASSIGNED' } }), 1);
       assert.equal((await tx.partnerProfile.findUniqueOrThrow({ where: { id: partnerId } })).revision, 3);
       throw rollback;
     }, { timeout: 20_000 });

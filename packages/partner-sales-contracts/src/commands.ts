@@ -15,6 +15,8 @@ export const CaseDraftIntentSchema = PartnerDraftSubmissionRefSchema.extend({
   // The Case writer resolves this immutable private recovery graph; no second graph owner.
   rows: z.array(z.object({ productRowId: IdSchema, approvedRowBinding: ApprovedRowBindingSchema,
     retailUnitPrice: MoneySchema }).strict()).min(1),
+  additionalMaterialApprovals: z.array(z.object({ pricingSubjectId: IdSchema,
+    approvedRowBinding: ApprovedRowBindingSchema }).strict()).optional(),
   customerPaymentPlan: PaymentPlanSchema,
   retailDiscount: MoneySchema, belowCostConfirmed: z.boolean(), deliveries: z.array(DeliverySchema),
 }).strict();
@@ -22,6 +24,10 @@ const decision = z.discriminatedUnion('outcome', [
   z.object({ rowId: IdSchema, expectedRevision: RevisionSchema, outcome: z.literal('APPROVED'), wholesaleUnitPrice: MoneySchema, note: TextSchema.optional() }).strict(),
   z.object({ rowId: IdSchema, expectedRevision: RevisionSchema, outcome: z.literal('REJECTED'), reason: PersianReasonSchema }).strict(),
 ]);
+const inquiryDimensions = z.object({
+  lengthMeters: DecimalSchema.optional(), widthMeters: DecimalSchema.optional(),
+  thicknessCentimeters: DecimalSchema.optional(),
+}).strict();
 export const PartnerCommandSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('CASE_SUBMIT'), intent: CaseDraftIntentSchema }).strict(),
   z.object({ ...envelope, ...expected, type: z.literal('CASE_DRAFT_REVISE'), intent: CaseDraftIntentSchema }).strict(),
@@ -30,6 +36,8 @@ export const PartnerCommandSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, ...expected, type: z.literal('CUSTOMER_CONFIRMATION_SEND'), normalizedRecipient: TextSchema }).strict(),
   z.object({ ...envelope, type: z.literal('INQUIRY_SUBMIT'), partnerSellerId: IdSchema,
     rows: z.array(z.object({ rowId: IdSchema, configuration: PartnerConfigurationRefSchema,
+      sellerNote: TextSchema.optional(),
+      dimensions: inquiryDimensions.optional(),
       predecessor: z.object({ rowId: IdSchema, revision: RevisionSchema, reason: PersianReasonSchema.optional() }).strict().optional(),
     }).strict()).min(1) }).strict(),
   z.object({ ...envelope, type: z.literal('INQUIRY_DECIDE'), inquiryId: IdSchema, expectedAssignmentRevision: RevisionSchema, decisions: z.array(decision).min(1) }).strict(),

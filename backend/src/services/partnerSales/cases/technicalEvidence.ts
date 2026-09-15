@@ -243,6 +243,14 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
       ...(input.draft.dependents ?? []).filter((item): item is Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'remainder' }> => item.kind === 'remainder')
         .map(row => ({ productRowId: row.productRowId, catalogItemId: row.catalogItemId,
           family: 'longitudinal' as const, unit: identityUnit(row), hash: dependentConfigurationHash(row) })),
+      ...(input.draft.dependents ?? []).filter((item): item is Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'layer' }> => {
+        if (item.kind !== 'layer' || item.source?.kind !== 'new-material') return false;
+        const parent = input.draft.rows.find(row => row.productRowId === item.parentProductRowId);
+        return Boolean(parent && parent.catalogItemId !== item.source.catalogItemId);
+      }).map(row => ({ productRowId: `layer-material:${row.layerConfigurationId}`,
+        catalogItemId: row.source?.kind === 'new-material' ? row.source.catalogItemId : '', family: 'stair' as const,
+        unit: 'squareMeter' as const, hash: canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE',
+          catalogItemId: row.source?.kind === 'new-material' ? row.source.catalogItemId : '', family: 'stair', unit: 'squareMeter' }) })),
     ];
     if (parsedPriorPolicy && previousContext && input.previous?.identities.length === identityRows.length) {
       const unchanged = await Promise.all(identityRows.map(async row => {

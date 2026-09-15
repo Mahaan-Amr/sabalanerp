@@ -33,7 +33,14 @@ export const PaymentPlanSchema = z.object({
     subtype: TextSchema.optional(), check: z.object({ number: TextSchema, bank: TextSchema, dueDate: DateSchema }).strict().optional(),
     notes: TextSchema.optional(),
   }).strict()),
-}).strict();
+}).strict().superRefine((plan, context) => {
+  plan.installments.forEach((installment, index) => {
+    if (installment.method === 'CHECK' && (!installment.check || installment.check.dueDate !== installment.dueDate)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['installments', index, 'check'],
+        message: 'Check evidence and installment due date must match' });
+    }
+  });
+});
 export const DisplayPartySchema = z.object({ displayName: TextSchema, phone: TextSchema, address: TextSchema }).strict();
 export const ProductDisplaySchema = z.object({ productRowId: IdSchema, description: TextSchema, quantity: QuantitySchema, unit: TextSchema }).strict();
 export const DeliverySchema = z.object({ deliveryId: IdSchema, date: DateSchema, destination: TextSchema,

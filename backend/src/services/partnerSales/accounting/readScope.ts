@@ -15,6 +15,7 @@ import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { PARTNER_ACCOUNTING_MARKER_JSON_PATH } from './provenance';
 import { assertPartnerAccountingWitnesses as assertWitnesses, readPartnerReceivableEvidence } from './receivableEvidence';
 import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvidence';
+import { withCurrentSabalanPlan } from './sabalanPlan';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -159,7 +160,8 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
       }
       const views = await readPartnerRevisionProjections(database, owner.data);
       if (!views) throw conflict();
-      const prepared = await preparePartnerFinancialSource({ view: { ...views.accounting, state: 'COMMITTED' },
+      const accountingView = await withCurrentSabalanPlan(database, views.accounting);
+      const prepared = await preparePartnerFinancialSource({ view: { ...accountingView, state: 'COMMITTED' },
         partnerSellerId: row.profile.userId }, owner.data);
       if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||
           invoice.currency !== prepared.value.amount.currency || subtract(invoice.amount.toString(), prepared.value.amount.amount) !== '0') throw conflict();

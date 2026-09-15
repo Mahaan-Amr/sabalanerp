@@ -12,6 +12,7 @@ import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from
 
 const fixture = createPartnerFixtures();
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
+rows[0].wholesaleUnitPrice = { amount: '800', currency: 'IRR' };
 const draft: PartnerWizardDraft = { step: 'products', rows, intent: {
   ...fixture.draftSubmissionReference, contractDate: '2026-08-27',
   rows: rows.map(row => ({ productRowId: row.productRowId, approvedRowBinding: row.inquiryRow.approvedRowBinding!, retailUnitPrice: row.retailUnitPrice })),

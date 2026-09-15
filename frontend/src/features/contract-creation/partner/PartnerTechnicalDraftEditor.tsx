@@ -6,7 +6,7 @@ import {
   type PartnerTechnicalDraft, type PartnerTechnicalFamily, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
 import { parseCanonicalDecimal, parseStableIdentity, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
-import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpSelect } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpSelect } from '@/components/erp';
 import { PreparedProductSection } from '../components/product-modal-system/PreparedProductSection';
 import { LongitudinalProductSection } from '../components/product-modal-system/LongitudinalProductSection';
 import { SlabProductSection } from '../components/product-modal-system/SlabProductSection';
@@ -68,8 +68,8 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
       <h2 className="font-bold">افزودن محصول</h2>
       <div className="grid gap-4 sm:grid-cols-2"><ErpField label="خانواده محصول" required><ErpSelect value={family} onChange={event => { setFamily(event.target.value as PartnerTechnicalFamily); setProductId(''); }}>
         {(Object.keys(labels) as PartnerTechnicalFamily[]).map(value => <option key={value} value={value}>{labels[value]}</option>)}</ErpSelect></ErpField>
-        <ErpField label="محصول فنی" required><ErpSelect value={selectedId} onChange={event => setProductId(event.target.value)}>
-          {available.map(product => <option key={product.catalogItemId} value={product.catalogItemId}>{product.name}</option>)}</ErpSelect></ErpField></div>
+        <ErpCombobox label="محصول فنی" value={selectedId} onChange={setProductId}
+          options={available.map(product => ({ value: product.catalogItemId, label: product.name }))} /></div>
       <ErpButton label="افزودن به فروش" disabled={!selectedId} onClick={add} />
     </ErpCard>
     {!draft.rows.length && <ErpInlineState kind="empty" title="حداقل یک محصول به فروش اضافه کنید." />}

@@ -14,8 +14,11 @@ test('Partner constructs inquiry and Case submissions solely from safe query/dra
     idempotency: { actorId: fixture.profile.partnerSellerId, operation: type, targetId: fixture.configurationDraft.recoveryId,
       key: 'fixture-key', payloadHash: 'sha256-v1:' + 'b'.repeat(64) } });
   const inquiry = { ...envelope('INQUIRY_SUBMIT'), type: 'INQUIRY_SUBMIT', partnerSellerId: fixture.profile.partnerSellerId,
-    rows: [{ rowId: 'new-inquiry-row', configuration: fixture.configurationDraft }] };
+    rows: [{ rowId: 'new-inquiry-row', configuration: fixture.configurationDraft, sellerNote: 'برای نمای بیرونی ساختمان',
+      dimensions: { lengthMeters: '2.4', widthMeters: '0.4', thicknessCentimeters: '2' } }] };
   assert.equal(PartnerCommandSchema.safeParse(inquiry).success, true);
+  assert.equal(PartnerCommandSchema.safeParse({ ...inquiry, rows: [{ ...inquiry.rows[0], dimensions: { lengthMeters: '۲.۴' } }] }).success, false);
+  assert.equal(PartnerCommandSchema.safeParse({ ...inquiry, rows: [{ ...inquiry.rows[0], sellerNote: '' }] }).success, false);
   const successor = { ...inquiry, rows: [{ ...inquiry.rows[0], predecessor: { rowId: binding.rowId, revision: binding.revision, reason: 'درخواست قیمت جدید' } }] };
   assert.equal(PartnerCommandSchema.safeParse(successor).success, true);
   assert.equal(PartnerCommandSchema.safeParse({ ...successor, rows: [{ ...successor.rows[0], predecessor: { rowId: binding.rowId, revision: binding.revision } }] }).success, true);

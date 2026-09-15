@@ -946,6 +946,8 @@ export const inventoryAPI = {
 
 // Accounting Workspace API
 export const accountingAPI = {
+    getPartnerSabalanPlanCandidates: () => api.get('/partner-accounting/sabalan-plan-candidates'),
+    setPartnerSabalanPaymentPlan: (data: any) => api.post('/partner-accounting/sabalan-payment-plan', data),
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),

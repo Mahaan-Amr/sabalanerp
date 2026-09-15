@@ -52,11 +52,7 @@ async function responsibilityCount(tx: Tx, userId: string) {
 }
 
 async function eligibleResponders(tx: Tx) {
-  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-  const candidates = await tx.user.findMany({ where: { isActive: true, role: { not: 'ADMIN' }, partnerProfile: null,
-    scopedActionGrants: { some: { principalKind: 'USER', domain: 'PARTNER', action: 'INQUIRY_RESPOND',
-      rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED', effect: 'ALLOW', revokedAt: null,
-      effectiveFrom: { lte: clock.now }, OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] } } },
+  const candidates = await tx.user.findMany({ where: { isActive: true, partnerProfile: null },
     orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }, { id: 'asc' }], take: 100,
     select: { id: true, firstName: true, lastName: true, username: true } });
   const eligible = await Promise.all(candidates.map(async user => ({ user,
@@ -100,7 +96,7 @@ export function createPrismaPartnerDirectActivation(input: {
             eligibleResponders(tx), responsibilityCount(tx, user.id),
           ]);
           const state = user.partnerProfile?.state ?? 'NONE';
-          const canActivate = user.isActive && input.actorId !== user.id && user.role !== 'ADMIN' &&
+          const canActivate = user.isActive && input.actorId !== user.id && !['ADMIN', 'MANAGER'].includes(user.role) &&
             (state === 'NONE' || state === 'PENDING') && responders.length > 0;
           const blocker = canActivate ? undefined : partnerError(!user.isActive ? 'PARTNER_NOT_ACTIVE'
             : responders.length === 0 ? 'RESPONDER_UNAVAILABLE' : 'STATE_CONFLICT');
@@ -151,12 +147,12 @@ export function createPrismaPartnerDirectActivation(input: {
           const user = await tx.user.findUnique({ where: { id: command.userId }, select: {
             id: true, email: true, username: true, firstName: true, lastName: true, role: true, isActive: true,
             updatedAt: true, profile: { select: { phone: true, address: true } },
-            partnerProfile: { select: { id: true, state: true, revision: true,
+            partnerProfile: { select: { id: true, state: true, revision: true, firstActivatedAt: true,
               commercialAccount: { select: { id: true } },
               responderAssignments: { orderBy: { revision: 'desc' }, take: 1, select: { revision: true } } } },
           } });
           if (!user) return { ok: false as const, error: partnerError('NOT_FOUND') };
-          if (input.actorId === user.id || !user.isActive || user.role === 'ADMIN' ||
+          if (input.actorId === user.id || !user.isActive || ['ADMIN', 'MANAGER'].includes(user.role) ||
               (user.partnerProfile && user.partnerProfile.state !== 'PENDING') ||
               user.updatedAt.toISOString() !== command.expectedUserUpdatedAt) {
             return { ok: false as const, error: user.updatedAt.toISOString() !== command.expectedUserUpdatedAt
@@ -180,12 +176,13 @@ export function createPrismaPartnerDirectActivation(input: {
           if (!responder.ok) return responder;
           const [workspace, features, grants, preservedResponsibilityCount] = await Promise.all([
             tx.workspacePermission.findMany({ where: { userId: user.id, isActive: true },
-              select: { id: true, workspace: true, permissionLevel: true } }),
+              select: { id: true, workspace: true, permissionLevel: true, grantedBy: true, grantedAt: true, expiresAt: true } }),
             tx.featurePermission.findMany({ where: { userId: user.id, isActive: true },
-              select: { id: true, workspace: true, feature: true, permissionLevel: true } }),
+              select: { id: true, workspace: true, feature: true, permissionLevel: true,
+                grantedBy: true, grantedAt: true, expiresAt: true } }),
             tx.effectiveActionGrant.findMany({ where: { subjectUserId: user.id, domain: { not: 'PARTNER' },
               effect: 'ALLOW', revokedAt: null }, select: { id: true, domain: true, action: true, rootKind: true,
-              purpose: true, scope: true } }),
+              purpose: true, scope: true, effect: true, effectiveFrom: true, expiresAt: true } }),
             responsibilityCount(tx, user.id),
           ]);
           const roleChanged = user.role !== 'USER';
@@ -210,7 +207,7 @@ export function createPrismaPartnerDirectActivation(input: {
           } else {
             profileRevision = user.partnerProfile.revision + 1;
             await tx.partnerProfile.update({ where: { id: profileId }, data: { state: 'ACTIVE', revision: profileRevision,
-              firstActivatedAt: now } });
+              ...(!user.partnerProfile.firstActivatedAt ? { firstActivatedAt: now } : {}) } });
             if (!user.partnerProfile.commercialAccount) {
               const identity = { legalName: label(user), phone: user.profile?.phone || 'ثبت‌نشده', address: user.profile?.address || 'ثبت‌نشده',
                 email: user.email, source: 'USER_PROFILE' };
@@ -247,6 +244,7 @@ export function createPrismaPartnerDirectActivation(input: {
             id: randomUUID(), profileId, sourceType: row.sourceType, sourceId: row.sourceId,
             disposition: row.disposition, actorId: input.actorId,
             evidence: json({ schemaVersion: 4, ...row.evidence as object,
+              conversionCorrelationId: command.correlationId,
               authorizationEvidenceId: authorizations.get('PROFILE_CONVERSION_MANAGE') }),
           })) });
           const assignmentId = randomUUID();
@@ -290,6 +288,7 @@ export function createPrismaPartnerDirectActivation(input: {
           }
           const profile = await tx.partnerProfile.findUnique({ where: { id: command.profileId }, select: {
             id: true, userId: true, state: true, revision: true, irreversibleAt: true,
+            user: { select: { role: true } },
             _count: { select: { customers: true, inquiries: true, saleCases: true } },
             conversionDispositions: { where: { OR: [
               { sourceType: 'PARTNER_ACTIVATION', disposition: 'DIRECT_V4' },
@@ -303,7 +302,8 @@ export function createPrismaPartnerDirectActivation(input: {
           const direct = profile.conversionDispositions.some(row =>
             row.sourceType === 'PARTNER_ACTIVATION' && row.disposition === 'DIRECT_V4');
           if (profile.state !== 'ACTIVE' || profile.revision !== command.expectedProfileRevision ||
-              profile.irreversibleAt || evidenceCount > 0 || !direct || input.actorId === profile.userId) {
+              profile.irreversibleAt || evidenceCount > 0 || !direct || input.actorId === profile.userId ||
+              profile.user.role !== 'USER') {
             return { ok: false as const, error: profile.revision !== command.expectedProfileRevision
               ? partnerError('ROW_STALE') : partnerError('STATE_CONFLICT') };
           }
@@ -321,23 +321,70 @@ export function createPrismaPartnerDirectActivation(input: {
             row.sourceType === 'USER_ROLE' && row.disposition === 'RESET');
           const previousRole = roleDisposition && typeof roleDisposition.evidence === 'object' && roleDisposition.evidence
             ? (roleDisposition.evidence as Record<string, unknown>).previousRole : undefined;
-          if (typeof previousRole === 'string' && Object.values(UserRole).includes(previousRole as UserRole)) {
-            const changed = await tx.user.updateMany({ where: { id: profile.userId, role: 'USER' },
-              data: { role: previousRole as UserRole } });
-            restoredAccessCount += changed.count;
-          }
+          const restorableRole = typeof previousRole === 'string' && Object.values(UserRole).includes(previousRole as UserRole)
+            ? previousRole as UserRole : undefined;
           const workspaceIds = activationDispositions.filter(row =>
             row.sourceType === 'WORKSPACE_PERMISSION' && row.disposition === 'REVOKED').map(row => row.sourceId);
+          const featureIds = activationDispositions.filter(row =>
+            row.sourceType === 'FEATURE_PERMISSION' && row.disposition === 'REVOKED').map(row => row.sourceId);
+          const actionDispositions = activationDispositions.filter(row =>
+            row.sourceType === 'ACTION_GRANT' && row.disposition === 'REVOKED');
+          const [workspaceRows, featureRows, actionRows] = await Promise.all([
+            tx.workspacePermission.findMany({ where: { id: { in: workspaceIds } }, select: {
+              id: true, userId: true, workspace: true, permissionLevel: true, grantedBy: true,
+              grantedAt: true, expiresAt: true, isActive: true } }),
+            tx.featurePermission.findMany({ where: { id: { in: featureIds } }, select: {
+              id: true, userId: true, workspace: true, feature: true, permissionLevel: true, grantedBy: true,
+              grantedAt: true, expiresAt: true, isActive: true } }),
+            tx.effectiveActionGrant.findMany({ where: { id: { in: actionDispositions.map(row => row.sourceId) } }, select: {
+              id: true, subjectUserId: true, domain: true, action: true, rootKind: true, purpose: true, scope: true,
+              effect: true, effectiveFrom: true, expiresAt: true,
+              revokedAt: true, revokedBy: true, revocationReason: true, revocationCorrelationId: true } }),
+          ]);
+          const evidence = (row: typeof activationDispositions[number]) =>
+            row.evidence && typeof row.evidence === 'object' && !Array.isArray(row.evidence)
+              ? row.evidence as Record<string, unknown> : {};
+          const workspaceExact = workspaceIds.every(id => {
+            const disposition = activationDispositions.find(row => row.sourceType === 'WORKSPACE_PERMISSION' && row.sourceId === id)!;
+            const row = workspaceRows.find(item => item.id === id); const saved = evidence(disposition);
+            return row?.userId === profile.userId && !row.isActive && row.workspace === saved.workspace &&
+              row.permissionLevel === saved.permissionLevel && row.grantedBy === (saved.grantedBy ?? null) &&
+              row.grantedAt.toISOString() === saved.grantedAt &&
+              (row.expiresAt?.toISOString() ?? null) === (saved.expiresAt ?? null);
+          });
+          const featureExact = featureIds.every(id => {
+            const disposition = activationDispositions.find(row => row.sourceType === 'FEATURE_PERMISSION' && row.sourceId === id)!;
+            const row = featureRows.find(item => item.id === id); const saved = evidence(disposition);
+            return row?.userId === profile.userId && !row.isActive && row.workspace === saved.workspace &&
+              row.feature === saved.feature && row.permissionLevel === saved.permissionLevel &&
+              row.grantedBy === (saved.grantedBy ?? null) && row.grantedAt.toISOString() === saved.grantedAt &&
+              (row.expiresAt?.toISOString() ?? null) === (saved.expiresAt ?? null);
+          });
+          const actionsExact = actionDispositions.every(disposition => {
+            const row = actionRows.find(item => item.id === disposition.sourceId); const saved = evidence(disposition);
+            return row?.subjectUserId === profile.userId && row.domain === saved.domain && row.action === saved.action &&
+              row.rootKind === saved.rootKind && row.purpose === saved.purpose && row.scope === saved.scope &&
+              row.effect === saved.effect && row.effectiveFrom.toISOString() === saved.effectiveFrom &&
+              (row.expiresAt?.toISOString() ?? null) === (saved.expiresAt ?? null) &&
+              row.revokedAt !== null && row.revokedBy === disposition.actorId && row.revocationReason === STANDARD_REASON &&
+              row.revocationCorrelationId === saved.conversionCorrelationId;
+          });
+          if (!workspaceExact || !featureExact || !actionsExact) {
+            return { ok: false as const, error: partnerError('STATE_CONFLICT') };
+          }
+          if (restorableRole) {
+            const changed = await tx.user.updateMany({ where: { id: profile.userId, role: 'USER' },
+              data: { role: restorableRole } });
+            if (changed.count !== 1) return { ok: false as const, error: partnerError('STATE_CONFLICT') };
+            restoredAccessCount += changed.count;
+          }
           if (workspaceIds.length) restoredAccessCount += (await tx.workspacePermission.updateMany({
             where: { id: { in: workspaceIds }, userId: profile.userId, isActive: false }, data: { isActive: true },
           })).count;
-          const featureIds = activationDispositions.filter(row =>
-            row.sourceType === 'FEATURE_PERMISSION' && row.disposition === 'REVOKED').map(row => row.sourceId);
           if (featureIds.length) restoredAccessCount += (await tx.featurePermission.updateMany({
             where: { id: { in: featureIds }, userId: profile.userId, isActive: false }, data: { isActive: true },
           })).count;
-          for (const disposition of activationDispositions.filter(row =>
-            row.sourceType === 'ACTION_GRANT' && row.disposition === 'REVOKED')) {
+          for (const disposition of actionDispositions) {
             restoredAccessCount += (await tx.effectiveActionGrant.updateMany({ where: { id: disposition.sourceId,
               subjectUserId: profile.userId, revokedAt: { not: null }, revokedBy: disposition.actorId,
               revocationReason: STANDARD_REASON }, data: { revokedAt: null, revokedBy: null,

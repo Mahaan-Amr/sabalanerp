@@ -2,9 +2,8 @@
 // Delivery schedule management
 
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { ErpInput, ErpNeumorphicCard, ErpPressable, ErpTextarea } from '@/components/erp';
+import { ErpNeumorphicCard, ErpPressable } from '@/components/erp';
 import { FaPlus, FaTrash, FaChevronUp, FaChevronDown } from 'react-icons/fa';
-import PersianCalendarComponent from '@/components/PersianCalendar';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { formatDisplayNumber } from '@/lib/numberFormat';
 import type { ContractWizardData, DeliverySchedule, DeliveryProductItem } from '../../types/contract.types';
@@ -25,6 +24,7 @@ import {
   syncDeliveryDefaults
 } from '../../utils/deliveryScheduleController';
 import { getServiceRowUnitLabel } from '../../utils/contractServiceRows';
+import { ContractDeliveryDetailsFields } from '../shared/ContractWizardStepViews';
 
 interface Step6DeliveryScheduleProps {
   wizardData: ContractWizardData;
@@ -240,80 +240,19 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                   </ErpPressable>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
-                      تاریخ تحویل
-                    </label>
-                    <PersianCalendarComponent
-                      value={delivery.deliveryDate}
-                      onChange={(date: string) => handleUpdateDelivery(index, { deliveryDate: date })}
-                      className="w-full"
-                      disablePastDates
-                    />
-                    {errors[`delivery_${index}_date`] && (
-                      <p className="text-[var(--sds-danger)] text-xs mt-1">{errors[`delivery_${index}_date`]}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
-                      آدرس تحویل
-                    </label>
-                    <ErpInput
-                      type="text"
-                      value={delivery.deliveryAddress}
-                      onChange={(e) => handleUpdateDelivery(index, { deliveryAddress: e.target.value })}
-                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
-                      placeholder="آدرس تحویل"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
-                      نام مدیر پروژه
-                    </label>
-                    <ErpInput
-                      type="text"
-                      value={delivery.projectManagerName || ''}
-                      onChange={(e) => handleUpdateDelivery(index, { projectManagerName: e.target.value })}
-                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
-                      placeholder="نام مدیر پروژه"
-                    />
-                    {errors[`delivery_${index}_projectManager`] && (
-                      <p className="text-[var(--sds-danger)] text-xs mt-1">{errors[`delivery_${index}_projectManager`]}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
-                      نام تحویل‌گیرنده
-                    </label>
-                    <ErpInput
-                      type="text"
-                      value={delivery.receiverName || ''}
-                      onChange={(e) => handleUpdateDelivery(index, { receiverName: e.target.value })}
-                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
-                      placeholder="نام تحویل‌گیرنده"
-                    />
-                    {errors[`delivery_${index}_receiver`] && (
-                      <p className="text-[var(--sds-danger)] text-xs mt-1">{errors[`delivery_${index}_receiver`]}</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
-                    توضیحات (اختیاری)
-                  </label>
-                  <ErpTextarea
-                    value={delivery.notes || ''}
-                    onChange={(e) => handleUpdateDelivery(index, { notes: e.target.value })}
-                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
-                    rows={3}
-                    placeholder="توضیحات مربوط به این تحویل"
-                  />
-                </div>
+                <ContractDeliveryDetailsFields value={{ date: delivery.deliveryDate,
+                  address: delivery.deliveryAddress ?? '', projectManagerName: delivery.projectManagerName ?? '',
+                  receiverName: delivery.receiverName ?? '', notes: delivery.notes ?? '' }}
+                  errors={{ date: errors[`delivery_${index}_date`],
+                    projectManagerName: errors[`delivery_${index}_projectManager`],
+                    receiverName: errors[`delivery_${index}_receiver`] }}
+                  onChange={updates => handleUpdateDelivery(index, {
+                    ...(updates.date !== undefined ? { deliveryDate: updates.date } : {}),
+                    ...(updates.address !== undefined ? { deliveryAddress: updates.address } : {}),
+                    ...(updates.projectManagerName !== undefined ? { projectManagerName: updates.projectManagerName } : {}),
+                    ...(updates.receiverName !== undefined ? { receiverName: updates.receiverName } : {}),
+                    ...(updates.notes !== undefined ? { notes: updates.notes } : {}),
+                  })} />
 
                 {(deliverableProductEntries.length > 0 || schedulableServiceEntries.length > 0) && (
                   <ErpNeumorphicCard className="mt-4 p-4">

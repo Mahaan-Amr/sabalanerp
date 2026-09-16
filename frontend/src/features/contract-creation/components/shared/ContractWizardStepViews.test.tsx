@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import {
   ContractCustomerStepView,
   ContractDateStepView,
+  ContractDeliveryDetailsFields,
   ContractProjectStepView,
 } from './ContractWizardStepViews';
 
@@ -42,4 +43,18 @@ test('shared contract step views expose the same date, customer, and project voc
   assert.match(projectHtml, /پروژه انتخاب شده/);
   assert.match(projectHtml, /پروژه‌های مشتری نمونه/);
   assert.match(projectHtml, /aria-pressed="true"/);
+});
+
+test('shared delivery details expose the ordinary contract fields to every contract adapter', () => {
+  const html = renderToStaticMarkup(<ContractDeliveryDetailsFields
+    value={{ date: '2026-09-20', address: 'تهران', projectManagerName: 'مدیر پروژه',
+      receiverName: 'تحویل گیرنده', notes: 'تماس پیش از ارسال' }}
+    onChange={() => undefined}
+  />);
+
+  assert.match(html, /تاریخ تحویل/);
+  assert.match(html, /آدرس تحویل/);
+  assert.match(html, /نام مدیر پروژه/);
+  assert.match(html, /نام تحویل‌گیرنده/);
+  assert.match(html, /توضیحات \(اختیاری\)/);
 });

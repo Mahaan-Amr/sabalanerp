@@ -20,8 +20,9 @@ import { isUsableInquiryRow, type PartnerInquiryView, type PartnerInquiryRow } f
 import { PartnerContractWizard, partnerWizardPresentationSteps, type PartnerWizardDraft,
   type PartnerWizardStep } from './PartnerContractWizard';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
-import { ContractCustomerStepView, ContractDateStepView, ContractProjectStepView,
+import { ContractCustomerStepView, ContractDateStepView, ContractDeliveryDetailsFields, ContractProjectStepView,
   type ContractCustomerOption, type ContractProjectOption } from '../components/shared/ContractWizardStepViews';
+import { ContractPaymentMethodSelect } from '../components/shared/ContractPaymentMethodSelect';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { createPartnerCaseSubmission, type PartnerSubmitCommand } from './partnerCaseSubmission';
 import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
@@ -39,6 +40,7 @@ import { commitPartnerTechnicalDraft } from './partnerTechnicalCommit';
 import { getPartnerBrowserSessionId } from './partnerBrowserSession';
 import { canSubmitPartnerTechnicalAction, showPartnerContractConfigurationWarning } from './partnerCreationFlow';
 import { readPartnerCreationContext } from './partnerCreationContext';
+import { partnerPaymentChoice, partnerPaymentMethodUpdate } from './partnerPaymentMethodAdapter';
 
 type PartnerContext = Extract<PartnerCreationContext, { kind: 'PARTNER' }>;
 type PartnerCustomer = PartnerContext['customers'][number];
@@ -649,9 +651,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         contractDate: selectedContractDate, projectId: selectedProject.id,
         customerPaymentPlan: { planId: `partner-customer-plan-${crypto.randomUUID()}`, version: 1,
           effectiveDate: selectedContractDate, installments: [{ installmentId: `partner-installment-${crypto.randomUUID()}`,
-            dueDate: addDays(selectedContractDate, 30), amount: { amount: '0', currency }, method: 'BANK_TRANSFER' }] },
+            dueDate: addDays(selectedContractDate, 30), amount: { amount: '0', currency }, method: 'BANK_TRANSFER', subtype: 'SHIBA' }] },
         deliveries: runtime.saved.rows.map((row, index) => ({ deliveryId: `partner-delivery-${crypto.randomUUID()}`,
           date: addDays(selectedContractDate, 7 + index), destination: customer.address,
+          receiverName: customer.displayName,
           items: [{ productRowId: row.configurationRef.productRowId, quantity: row.quantity }] })),
         retailDiscount: { amount: '0', currency },
       } });
@@ -895,10 +898,20 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       </div>;
     }
     if (step === 'delivery') return <div className="space-y-3">{draft.intent.deliveries.map((delivery, index) => <ErpCard key={delivery.deliveryId} className="space-y-3 p-4">
-      <ErpField label={`تاریخ تحویل ${(index + 1).toLocaleString('fa-IR')}`}><ErpInput type="date" value={delivery.date}
-        onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, deliveries: draft.intent.deliveries.map(item => item.deliveryId === delivery.deliveryId ? { ...item, date: event.target.value } : item) } })} /></ErpField>
-      <ErpField label="مقصد"><ErpInput value={delivery.destination} onChange={event => updateWizard({ ...draft,
-        intent: { ...draft.intent, deliveries: draft.intent.deliveries.map(item => item.deliveryId === delivery.deliveryId ? { ...item, destination: event.target.value } : item) } })} /></ErpField>
+      <h3 className="font-semibold">تحویل {(index + 1).toLocaleString('fa-IR')}</h3>
+      <ContractDeliveryDetailsFields value={{ date: delivery.date, address: delivery.destination,
+        projectManagerName: delivery.projectManagerName ?? '', receiverName: delivery.receiverName ?? '',
+        notes: delivery.notes ?? '' }} onChange={updates => updateWizard({ ...draft, intent: { ...draft.intent,
+          deliveries: draft.intent.deliveries.map(item => item.deliveryId === delivery.deliveryId ? {
+            ...item,
+            ...(updates.date !== undefined ? { date: updates.date } : {}),
+            ...(updates.address !== undefined ? { destination: updates.address } : {}),
+            ...(updates.projectManagerName !== undefined
+              ? { projectManagerName: updates.projectManagerName.trim() || undefined } : {}),
+            ...(updates.receiverName !== undefined ? { receiverName: updates.receiverName.trim() || undefined } : {}),
+            ...(updates.notes !== undefined ? { notes: updates.notes.trim() || undefined } : {}),
+          } : item),
+        } })} />
       <div className="grid gap-3 sm:grid-cols-2">{delivery.items.map(item => <ErpField key={item.productRowId}
         label={`مقدار ${draft.rows.find(row => row.productRowId === item.productRowId)?.inquiryRow.description ?? 'محصول'}`}>
         <ErpInput inputMode="decimal" value={item.quantity} onChange={event => updateWizard({ ...draft, intent: { ...draft.intent,
@@ -911,6 +924,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     </ErpCard>)}<ErpButton label="افزودن برنامه تحویل" variant="outline" onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
       deliveries: [...draft.intent.deliveries, { deliveryId: `partner-delivery-${crypto.randomUUID()}`,
         date: addDays(draft.intent.contractDate, 7), destination: context.customers.find(item => item.id === draft.intent.customerId)?.address ?? '',
+        receiverName: context.customers.find(item => item.id === draft.intent.customerId)?.displayName,
         items: draft.rows.map(row => ({ productRowId: row.productRowId, quantity: row.quantity })) }] } })} /></div>;
     if (step === 'payment') return <div className="space-y-3">{draft.intent.customerPaymentPlan.installments.map((installment, installmentIndex) => <ErpCard key={installment.installmentId} className="space-y-3 p-4">
       <div className="grid gap-3 sm:grid-cols-3"><ErpField label={`مبلغ قسط ${(installmentIndex + 1).toLocaleString('fa-IR')}`}><ErpRialInput
@@ -921,14 +935,13 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       <ErpField label="سررسید"><ErpInput type="date" value={installment.dueDate} onChange={event => updateWizard({ ...draft, intent: { ...draft.intent,
         customerPaymentPlan: { ...draft.intent.customerPaymentPlan, installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
           ? { ...item, dueDate: event.target.value, ...(item.check ? { check: { ...item.check, dueDate: event.target.value } } : {}) } : item) } } })} /></ErpField>
-      <ErpField label="روش پرداخت"><ErpSelect value={installment.method}
-        onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
+      <ErpField label="روش پرداخت"><ContractPaymentMethodSelect value={partnerPaymentChoice(installment)}
+        onChange={value => updateWizard({ ...draft, intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
           installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId ? (() => {
-            const method = event.target.value as 'CASH' | 'BANK_TRANSFER' | 'CHECK' | 'CREDIT';
-            return { ...item, method, ...(method === 'CHECK' ? { check: item.check ?? { number: '', bank: '', dueDate: item.dueDate } } : { check: undefined }) };
-          })() : item) } } })}>
-        <option value="BANK_TRANSFER">واریز بانکی</option><option value="CASH">نقدی</option><option value="CHECK">چک</option><option value="CREDIT">اعتباری</option>
-      </ErpSelect></ErpField></div>
+            const method = partnerPaymentMethodUpdate(value, item.dueDate);
+            return { ...item, ...method, ...(value === 'CHECK' && item.check ? { check: item.check } : {}) };
+          })() : item) } } })} />
+      </ErpField></div>
       {installment.method === 'CHECK' && <div className="grid gap-3 sm:grid-cols-2">
         <ErpField label="شماره چک" required><ErpInput value={installment.check?.number ?? ''} onChange={event => updateWizard({ ...draft,
           intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
@@ -945,7 +958,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     </ErpCard>)}<ErpButton label="افزودن قسط" variant="outline" onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
       customerPaymentPlan: { ...draft.intent.customerPaymentPlan, installments: [...draft.intent.customerPaymentPlan.installments,
         { installmentId: `partner-installment-${crypto.randomUUID()}`, dueDate: addDays(draft.intent.contractDate, 30),
-          amount: { amount: '0', currency: draft.intent.customerPaymentPlan.installments[0].amount.currency }, method: 'BANK_TRANSFER' }] } } })} /></div>;
+          amount: { amount: '0', currency: draft.intent.customerPaymentPlan.installments[0].amount.currency },
+          method: 'BANK_TRANSFER', subtype: 'SHIBA' }] } } })} /></div>;
     const customer = context.customers.find(item => item.id === draft.intent.customerId);
     return <div className="space-y-2"><p>مشتری: {customer?.displayName}</p>
       {customer?.phone && <p>شماره همراه: {customer.phone}</p>}
@@ -988,7 +1002,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     validateStep={(step, draft) => step === 'date' && !draft.intent.contractDate ? 'تاریخ قرارداد را وارد کنید.'
       : step === 'customer' && !draft.intent.customerId ? 'مشتری را انتخاب کنید.'
       : step === 'project' && !draft.intent.projectId ? 'پروژه را انتخاب کنید.'
-      : step === 'delivery' && draft.intent.deliveries.some(item => !item.date || !item.destination.trim()) ? 'برنامه تحویل را کامل کنید.'
+      : step === 'delivery' && draft.intent.deliveries.some(item => !item.date || !item.destination.trim()
+        || !item.projectManagerName?.trim() || !item.receiverName?.trim()) ? 'برنامه تحویل را کامل کنید.'
       : step === 'delivery' && draft.rows.some(row => remainingPartnerAmount(row.quantity,
         draft.intent.deliveries.flatMap(delivery => delivery.items.filter(item => item.productRowId === row.productRowId).map(item => item.quantity))) !== '0')
         ? 'مقدار تحویل هر محصول باید دقیقاً با مقدار قرارداد برابر باشد.'

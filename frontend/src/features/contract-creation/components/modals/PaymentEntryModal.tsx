@@ -1,11 +1,12 @@
 ﻿// Payment Entry Modal — minimal, compact overlay for adding/editing a payment
 
 import React from 'react';
-import { ErpInput, ErpSelect } from '@/components/erp';
+import { ErpInput } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import type { PaymentEntry, PaymentEntryMethod } from '../../types/contract.types';
 import { CentralProductModalShell } from '../product-modal-system';
+import { ContractPaymentMethodSelect } from '../shared/ContractPaymentMethodSelect';
 
 interface PaymentEntryModalProps {
   isOpen: boolean;
@@ -24,13 +25,6 @@ interface PaymentEntryModalProps {
   } | null;
   onContinueNationalCodeConflict?: () => void;
 }
-
-const METHOD_OPTIONS: { value: PaymentEntryMethod; label: string }[] = [
-  { value: 'CASH_CARD', label: 'نقدی (کارت‌خوان)' },
-  { value: 'CASH_SHIBA', label: 'نقدی (شبا)' },
-  { value: 'CHECK', label: 'چک' },
-  { value: 'CUSTOMER_BALANCE', label: 'استفاده از باقی مانده مشتری' }
-];
 
 const inputClass =
   'w-full px-3 py-2 text-sm border border-[var(--sds-border-default)] rounded-md bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]';
@@ -73,15 +67,9 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
           <div className="space-y-3">
             <div>
               <label className={labelClass}>نوع پرداخت</label>
-              <ErpSelect
-                value={method}
-                onChange={(e) => onFormChange({ method: e.target.value as PaymentEntryMethod })}
-                className={`${inputClass} cursor-pointer`}
-              >
-                {METHOD_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </ErpSelect>
+              <ContractPaymentMethodSelect value={method}
+                onChange={value => onFormChange({ method: value })}
+                className={`${inputClass} cursor-pointer`} />
             </div>
 
             {isCustomerBalance && (

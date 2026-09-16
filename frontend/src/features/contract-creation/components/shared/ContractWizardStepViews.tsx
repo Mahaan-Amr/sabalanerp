@@ -8,7 +8,9 @@ import {
   ErpNeumorphicCard,
   ErpNeumorphicInteractiveCard,
   ErpNeumorphicSelectedSummary,
+  ErpTextarea,
 } from '@/components/erp';
+import PersianCalendarComponent from '@/components/PersianCalendar';
 
 export function ContractDateStepView({ creatorName, dateControl, error, numberPreview, numberNotice }: {
   creatorName?: string;
@@ -37,6 +39,45 @@ export function ContractDateStepView({ creatorName, dateControl, error, numberPr
       </>}
       {numberPreview === undefined && <p className="text-xs text-[var(--sds-text-muted)]">{numberNotice}</p>}
     </div>
+  </div>;
+}
+
+export type ContractDeliveryDetails = {
+  date: string;
+  address: string;
+  projectManagerName: string;
+  receiverName: string;
+  notes: string;
+};
+
+export function ContractDeliveryDetailsFields({ value, onChange, errors = {} }: {
+  value: ContractDeliveryDetails;
+  onChange: (updates: Partial<ContractDeliveryDetails>) => void;
+  errors?: Partial<Record<'date' | 'projectManagerName' | 'receiverName', string>>;
+}) {
+  return <div className="space-y-4">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <ErpField label="تاریخ تحویل" error={errors.date} required>
+        <PersianCalendarComponent value={value.date} onChange={date => onChange({ date })}
+          className="w-full" disablePastDates />
+      </ErpField>
+      <ErpField label="آدرس تحویل" required>
+        <ErpInput value={value.address} onChange={event => onChange({ address: event.target.value })}
+          placeholder="آدرس تحویل" />
+      </ErpField>
+      <ErpField label="نام مدیر پروژه" error={errors.projectManagerName} required>
+        <ErpInput value={value.projectManagerName} onChange={event => onChange({ projectManagerName: event.target.value })}
+          placeholder="نام مدیر پروژه" />
+      </ErpField>
+      <ErpField label="نام تحویل‌گیرنده" error={errors.receiverName} required>
+        <ErpInput value={value.receiverName} onChange={event => onChange({ receiverName: event.target.value })}
+          placeholder="نام تحویل‌گیرنده" />
+      </ErpField>
+    </div>
+    <ErpField label="توضیحات (اختیاری)">
+      <ErpTextarea value={value.notes} onChange={event => onChange({ notes: event.target.value })}
+        rows={3} placeholder="توضیحات مربوط به این تحویل" />
+    </ErpField>
   </div>;
 }
 

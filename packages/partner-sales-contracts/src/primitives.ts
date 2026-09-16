@@ -44,5 +44,6 @@ export const PaymentPlanSchema = z.object({
 export const DisplayPartySchema = z.object({ displayName: TextSchema, phone: TextSchema, address: TextSchema }).strict();
 export const ProductDisplaySchema = z.object({ productRowId: IdSchema, description: TextSchema, quantity: QuantitySchema, unit: TextSchema }).strict();
 export const DeliverySchema = z.object({ deliveryId: IdSchema, date: DateSchema, destination: TextSchema,
+  projectManagerName: TextSchema.optional(), receiverName: TextSchema.optional(), notes: TextSchema.optional(),
   items: z.array(z.object({ productRowId: IdSchema, quantity: QuantitySchema }).strict()).min(1),
 }).strict();

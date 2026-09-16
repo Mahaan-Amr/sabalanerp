@@ -8,7 +8,7 @@ import { createPartnerInquiryReader } from '../inquiries/partnerInquiryReader';
 import type { PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
 import { enterPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
 import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
-import { buildPartnerInquiryBulkRows } from '../inquiries/partnerInquiryBulk';
+import { buildPartnerInquiryBulkRows, resolveLatestPartnerInquiryRow } from '../inquiries/partnerInquiryBulk';
 
 test('bulk inquiry model distinguishes reusable, missing, pending, rejected, expired and re-inquiry rows', () => {
   const fixture = createPartnerFixtures();
@@ -25,14 +25,29 @@ test('bulk inquiry model distinguishes reusable, missing, pending, rejected, exp
     { ...base, rowId: 'expired', expiresAt: '2026-08-27T08:00:00.000Z',
       configurationRef: { ...base.configurationRef, productRowId: 'expired-product' } },
     { ...base, rowId: 'changed', configurationRef: { ...base.configurationRef, productRowId: 'changed-product' } },
-    { ...base, rowId: 'successor', successor: { inquiryId: 'next', rowId: 'next-row', revision: 1, state: 'PENDING' },
+    { ...base, rowId: 'successor', approvedRowBinding: { ...base.approvedRowBinding!, rowId: 'successor' },
+      successor: { inquiryId: 'next', rowId: 'next-row', revision: 1, state: 'PENDING' },
       configurationRef: { ...base.configurationRef, productRowId: 'successor-product' } },
   ];
   const rows = buildPartnerInquiryBulkRows({ configuredRows: configured, inquiry,
     now: Date.parse('2026-08-27T09:00:00.000Z'), mismatchedRowIds: ['changed'] });
   assert.deepEqual(rows.map(row => row.status), ['USABLE', 'MISSING', 'PENDING', 'REJECTED', 'EXPIRED',
-    'REINQUIRY_REQUIRED', 'REINQUIRY_PENDING']);
+    'REINQUIRY_REQUIRED', 'USABLE']);
   assert.deepEqual(rows.map(row => row.selectable), [false, true, false, true, true, true, false]);
+  assert.match(rows.at(-1)?.detail ?? '', /قیمت فعلی معتبر/);
+});
+
+test('re-inquiry continues from the latest rejected successor instead of resubmitting its predecessor', async () => {
+  const fixture = createPartnerFixtures();
+  const predecessor = { ...fixture.inquiry.rows[0], state: 'REJECTED' as const, approvedPrice: undefined,
+    approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined,
+    successor: { inquiryId: 'successor-inquiry', rowId: 'successor-row', revision: 2, state: 'REJECTED' as const } };
+  const successor = { ...predecessor, rowId: 'successor-row', revision: 2, successor: undefined };
+  const latest = await resolveLatestPartnerInquiryRow({ query: async () => ({ ok: true, value: {
+    ...fixture.inquiry, inquiryId: 'successor-inquiry', rows: [successor],
+  } }) }, predecessor);
+  assert.equal(latest.rowId, 'successor-row');
+  assert.equal(latest.revision, 2);
 });
 
 test('partial inquiry shows each outcome and only one Dock progression for usable approvals', () => {

@@ -8,7 +8,7 @@ import { PartnerInquiryPanel } from './PartnerInquiryPanel';
 import { createPartnerInquiryReader } from './partnerInquiryReader';
 import { createPartnerInquirySubmission, type PartnerConfiguredInquiryRows, type PartnerInquiryRecovery } from './partnerInquirySubmission';
 import type { PartnerInquiryRow, PartnerInquiryView } from './inquiryPresentation';
-import { buildPartnerInquiryBulkRows, partnerInquiryBulkStatusLabel } from './partnerInquiryBulk';
+import { buildPartnerInquiryBulkRows, partnerInquiryBulkStatusLabel, resolveLatestPartnerInquiryRow } from './partnerInquiryBulk';
 
 export interface PartnerInquiryWorkspaceProps {
   actorId: string;
@@ -18,6 +18,7 @@ export interface PartnerInquiryWorkspaceProps {
   recovery: PartnerInquiryRecovery;
   writable: boolean;
   configuredRows: PartnerConfiguredInquiryRows;
+  knownInquiryRows?: readonly PartnerInquiryRow[];
   configuredRowLabels?: Readonly<Record<string, string>>;
   configurationEditor: React.ReactNode;
   mismatchedRowIds?: readonly string[];
@@ -30,7 +31,7 @@ export interface PartnerInquiryWorkspaceProps {
 }
 
 export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
-  const { actorId, inquiryId, queries, commands, recovery, writable, configuredRows, configuredRowLabels = {}, configurationEditor, mismatchedRowIds, onEnterWizard, onOpenInquiry, onCreateNewInquiry, prepareSuccessor } = props;
+  const { actorId, inquiryId, queries, commands, recovery, writable, configuredRows, knownInquiryRows = [], configuredRowLabels = {}, configurationEditor, mismatchedRowIds, onEnterWizard, onOpenInquiry, onCreateNewInquiry, prepareSuccessor } = props;
   const reader = useMemo(() => createPartnerInquiryReader(queries, inquiryId), [queries, inquiryId]);
   const submission = useMemo(() => createPartnerInquirySubmission({ actorId, inquiryId, commands, recovery }), [actorId, inquiryId, commands, recovery]);
   const read = useSyncExternalStore(reader.subscribe, reader.getSnapshot, reader.getSnapshot);
@@ -44,8 +45,11 @@ export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
   const [actionPending, setActionPending] = useState(false);
   const actionFlight = useRef(false);
   const blocked = !writable || actionPending || submit.phase === 'submitting' || submit.phase === 'uncertain';
-  const bulkRows = useMemo(() => buildPartnerInquiryBulkRows({ configuredRows, inquiry: read.inquiry ?? undefined, now,
-    mismatchedRowIds }), [configuredRows, mismatchedRowIds, now, read.inquiry]);
+  const bulkInquiry = useMemo(() => read.inquiry ? { ...read.inquiry, rows: [...knownInquiryRows.filter(known =>
+    !read.inquiry!.rows.some(current => current.configurationRef.productRowId === known.configurationRef.productRowId)),
+    ...read.inquiry.rows] } : undefined, [knownInquiryRows, read.inquiry]);
+  const bulkRows = useMemo(() => buildPartnerInquiryBulkRows({ configuredRows, inquiry: bulkInquiry, now,
+    mismatchedRowIds }), [bulkInquiry, configuredRows, mismatchedRowIds, now]);
 
   useEffect(() => { void reader.refresh(); }, [reader]);
   useEffect(() => {
@@ -97,8 +101,9 @@ export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
     <ErpSheet open={Boolean(successor)} onClose={() => setSuccessor(null)} title="استعلام مجدد" presentation="modal" pending={actionPending || submit.phase === 'submitting' || submit.phase === 'uncertain'}
       footer={<ErpButton label="ارسال استعلام مجدد" disabled={blocked} onClick={() => void act(async () => {
         if (!successor) return;
-        const next = await prepareSuccessor(successor, reason.trim());
-        await send([{ ...next, predecessor: { rowId: successor.rowId, revision: successor.revision,
+        const latest = await resolveLatestPartnerInquiryRow(queries, successor);
+        const next = await prepareSuccessor(latest, reason.trim());
+        await send([{ ...next, predecessor: { rowId: latest.rowId, revision: latest.revision,
           ...(reason.trim() ? { reason: reason.trim() } : {}) } }]);
       })} />}>
       <ErpField label="یادداشت"><ErpTextarea value={reason} maxLength={4000} onChange={event => setReason(event.target.value)} disabled={blocked} /></ErpField>
@@ -112,8 +117,9 @@ export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
           const selected = bulkRows.filter(row => row.selectable && bulkSelected.has(row.key));
           const rows = await Promise.all(selected.map(async row => {
             if (!row.inquiryRow) return row.configured;
-            const next = await prepareSuccessor(row.inquiryRow, reason.trim());
-            return { ...next, predecessor: { rowId: row.inquiryRow.rowId, revision: row.inquiryRow.revision,
+            const latest = await resolveLatestPartnerInquiryRow(queries, row.inquiryRow);
+            const next = await prepareSuccessor(latest, reason.trim());
+            return { ...next, predecessor: { rowId: latest.rowId, revision: latest.revision,
               ...(reason.trim() ? { reason: reason.trim() } : {}) } };
           }));
           if (await send(rows)) setBulkOpen(false);
@@ -127,6 +133,7 @@ export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
               if (event.target.checked) next.add(row.key); else next.delete(row.key); return next; })} />
           <ErpBadge tone={row.status === 'USABLE' ? 'success' : row.status.includes('PENDING') ? 'info' : 'warning'}>
             {partnerInquiryBulkStatusLabel[row.status]}</ErpBadge>
+          {row.detail && <p className="basis-full text-xs text-[var(--sds-text-secondary)]">{row.detail}</p>}
         </div></ErpCard>)}
         {!bulkRows.some(row => row.selectable) && <ErpInlineState kind="empty" title="همه ردیف‌ها استعلام معتبر یا در حال بررسی دارند." />}
         <ErpField label="یادداشت استعلام مجدد (اختیاری)"><ErpTextarea value={reason} maxLength={4000}

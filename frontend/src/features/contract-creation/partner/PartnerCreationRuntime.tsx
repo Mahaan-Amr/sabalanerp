@@ -6,11 +6,11 @@ import {
   CaseDraftIntentSchema, DuplicateCustomerMatchSchema, PartnerCaseViewSchema, PartnerCommandSchema, PartnerCreationContextSchema,
   PartnerApprovalMatchSetSchema, PartnerWholesaleQuoteSchema, PartnerWizardRecoverySnapshotSchema,
   PartnerTechnicalCatalogPageSchema, PaymentPlanSchema, canonicalHash, partnerError, previewPartnerTechnicalDraft,
-  type PartnerCaseView, type PartnerCommand, type PartnerCommandPort,
+  type PartnerCaseView, type PartnerCommand, type PartnerCommandPort, type PartnerApprovalMatchSet,
   type DuplicateCustomerMatch, type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
 import api from '@/lib/api';
 import { createPartnerTechnicalHttpPorts } from './partnerTechnicalHttpPorts';
 import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/partnerInquiryHttpPorts';
@@ -23,6 +23,7 @@ import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
 import { ContractCustomerStepView, ContractDateStepView, ContractDeliveryDetailsFields, ContractProjectStepView,
   type ContractCustomerOption, type ContractProjectOption } from '../components/shared/ContractWizardStepViews';
 import { ContractPaymentInstallmentFields } from '../components/shared/ContractPaymentInstallmentFields';
+import { ContractPaymentCheckFields } from '../components/shared/ContractPaymentCheckFields';
 import { ContractDiscountEditor } from '../components/shared/ContractDiscountEditor';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { createPartnerCaseSubmission, type PartnerSubmitCommand } from './partnerCaseSubmission';
@@ -42,6 +43,7 @@ import { getPartnerBrowserSessionId } from './partnerBrowserSession';
 import { canSubmitPartnerTechnicalAction, showPartnerContractConfigurationWarning } from './partnerCreationFlow';
 import { readPartnerCreationContext } from './partnerCreationContext';
 import { partnerPaymentChoice, partnerPaymentMethodUpdate } from './partnerPaymentMethodAdapter';
+import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment } from './partnerPaymentValidation';
 
 type PartnerContext = Extract<PartnerCreationContext, { kind: 'PARTNER' }>;
 type PartnerCustomer = PartnerContext['customers'][number];
@@ -50,6 +52,7 @@ type Access = { schemaVersion: 1; recoveryId: string; browserSessionId: string;
   leaseToken: string; baseRevision: number };
 type PersistedRuntime = { actorId: string; inquiryId: string; access: Access;
   saved: PartnerTechnicalSaveReceipt; configuredRows: PartnerConfiguredInquiryRows; customerId: string;
+  knownInquiryRows?: PartnerInquiryRow[];
   contractDate?: string; projectId?: string };
 
 const ports = createPartnerTechnicalHttpPorts();
@@ -184,6 +187,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const autoTitledDrafts = useRef(new Set<string>());
   const [pending, setPending] = useState(false);
   const [initialInquiryOpen, setInitialInquiryOpen] = useState(false);
+  const [initialInquiryMatches, setInitialInquiryMatches] = useState<PartnerApprovalMatchSet | null>(null);
   const [initialInquirySelection, setInitialInquirySelection] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const contextActorId = context?.kind === 'PARTNER' ? context.actorId : null;
@@ -550,10 +554,15 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: row.configurationRef,
         ...(mode === 'inquiry' ? { dimensions: normalizedQuickDimensions(row.configurationRef.productRowId) } : {}),
         ...(inquiryNote.trim() ? { sellerNote: inquiryNote.trim() } : {}) }));
+      const configuredByProductRowId = new Map(availableRows.map(row => [row.configuration.productRowId, row]));
+      for (const row of matches?.rows ?? []) configuredByProductRowId.set(row.configurationRef.productRowId,
+        { rowId: row.rowId, configuration: row.configurationRef });
+      const allConfiguredRows = subjects.map(subject => configuredByProductRowId.get(subject.configurationRef.productRowId)!)
+        .filter(Boolean);
       if (!availableRows.length && matches?.rows.length) {
         const inquiryId = matches.rows[0].approvedRowBinding!.inquiryId;
         persistRuntime({ actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
-          configuredRows: matches.rows.map(row => ({ rowId: row.rowId, configuration: row.configurationRef })),
+          configuredRows: allConfiguredRows, knownInquiryRows: matches.rows,
           customerId, contractDate, projectId });
         setInitialInquiryOpen(false);
         freshInquiryRef.current = false;
@@ -574,7 +583,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       const submitted = await inquiryPorts.commands.execute(command);
       if (!submitted.ok) { window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); setError(submitted.error.message); return; }
       const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
-        configuredRows: selectedProductRowIds ? availableRows : configuredRows,
+        configuredRows: allConfiguredRows, knownInquiryRows: matches?.rows,
         customerId, ...(mode === 'sale' ? { contractDate, projectId } : {}) };
       window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); persistRuntime(value);
       setInitialInquiryOpen(false);
@@ -872,7 +881,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     } catch { setError('ارسال استعلام مجدد انجام نشد؛ اطلاعات Wizard حفظ شده است.'); }
   };
 
-  const renderSection = (step: Exclude<PartnerWizardStep, 'products'>, draft: PartnerWizardDraft) => {
+  const renderSection = (step: Exclude<PartnerWizardStep, 'products'>, draft: PartnerWizardDraft,
+    showValidationErrors: boolean) => {
     if (!context || context.kind !== 'PARTNER') return null;
     if (step === 'date') return <ContractDateStepView creatorName={context.actorDisplayName}
       dateControl={<PersianCalendarComponent value={draft.intent.contractDate} className="w-full"
@@ -912,7 +922,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       <h3 className="font-semibold">تحویل {(index + 1).toLocaleString('fa-IR')}</h3>
       <ContractDeliveryDetailsFields value={{ date: delivery.date, address: delivery.destination,
         projectManagerName: delivery.projectManagerName ?? '', receiverName: delivery.receiverName ?? '',
-        notes: delivery.notes ?? '' }} onChange={updates => updateWizard({ ...draft, intent: { ...draft.intent,
+        notes: delivery.notes ?? '' }} errors={showValidationErrors ? {
+          ...(!delivery.date ? { date: 'تاریخ تحویل الزامی است.' } : {}),
+          ...(!delivery.destination.trim() ? { address: 'آدرس تحویل الزامی است.' } : {}),
+          ...(!delivery.projectManagerName?.trim() ? { projectManagerName: 'نام مدیر پروژه الزامی است.' } : {}),
+          ...(!delivery.receiverName?.trim() ? { receiverName: 'نام تحویل‌گیرنده الزامی است.' } : {}),
+        } : {}} onChange={updates => updateWizard({ ...draft, intent: { ...draft.intent,
           deliveries: draft.intent.deliveries.map(item => item.deliveryId === delivery.deliveryId ? {
             ...item,
             ...(updates.date !== undefined ? { date: updates.date } : {}),
@@ -924,7 +939,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           } : item),
         } })} />
       <div className="grid gap-3 sm:grid-cols-2">{delivery.items.map(item => <ErpField key={item.productRowId}
-        label={`مقدار ${draft.rows.find(row => row.productRowId === item.productRowId)?.inquiryRow.description ?? 'محصول'}`}>
+        label={`مقدار ${draft.rows.find(row => row.productRowId === item.productRowId)?.inquiryRow.description ?? 'محصول'}`}
+        error={showValidationErrors && remainingPartnerAmount(draft.rows.find(row => row.productRowId === item.productRowId)?.quantity ?? '0',
+          draft.intent.deliveries.flatMap(entry => entry.items.filter(product => product.productRowId === item.productRowId)
+            .map(product => product.quantity))) !== '0' ? 'جمع مقدارهای تحویل باید دقیقاً با مقدار قرارداد برابر باشد.' : undefined}>
         <ErpInput inputMode="decimal" value={item.quantity} onChange={event => updateWizard({ ...draft, intent: { ...draft.intent,
           deliveries: draft.intent.deliveries.map(row => row.deliveryId === delivery.deliveryId ? { ...row,
             items: row.items.map(product => product.productRowId === item.productRowId ? { ...product, quantity: event.target.value } : product) } : row) } })} />
@@ -952,10 +970,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       {retailSummary.valid && retailSummary.loss && <ErpCheckbox label="زیان را بررسی کرده‌ام و ادامه می‌دهم"
         checked={draft.intent.belowCostConfirmed}
         onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, belowCostConfirmed: event.target.checked } })} />}
-      {draft.intent.customerPaymentPlan.installments.map((installment, installmentIndex) => <ErpCard key={installment.installmentId} className="space-y-3 p-4">
+      {draft.intent.customerPaymentPlan.installments.map((installment, installmentIndex) => { const paymentErrors = showValidationErrors
+        ? validatePartnerPaymentInstallment(installment, today()) : {}; const nationalCodeRequired = installment.method !== 'CREDIT'
+          && Boolean(installment.dueDate) && installment.dueDate !== today(); return <ErpCard key={installment.installmentId} className="space-y-3 p-4">
       <ContractPaymentInstallmentFields method={partnerPaymentChoice(installment)} amount={installment.amount.amount}
         amountLabel={`مبلغ قسط ${(installmentIndex + 1).toLocaleString('fa-IR')} (تومان)`} date={installment.dueDate}
-        dateLabel="سررسید" disabledAmount={installmentIndex === 0}
+        dateLabel="سررسید" disabledAmount={installmentIndex === 0} amountError={paymentErrors.amount} dateError={paymentErrors.date}
         onAmountChange={amount => updateWizard({ ...draft, intent: { ...draft.intent,
           customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
             installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
@@ -968,20 +988,25 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
             const method = partnerPaymentMethodUpdate(value, item.dueDate);
             return { ...item, ...method, ...(value === 'CHECK' && item.check ? { check: item.check } : {}) };
           })() : item) } } })} />
-      {installment.method === 'CHECK' && <div className="grid gap-3 sm:grid-cols-2">
-        <ErpField label="شماره چک" required><ErpInput value={installment.check?.number ?? ''} onChange={event => updateWizard({ ...draft,
-          intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
+      {(installment.method === 'CHECK' || nationalCodeRequired) && <ContractPaymentCheckFields
+        showCheckFields={installment.method === 'CHECK'} showBank numberRequired nationalCodeRequired={nationalCodeRequired}
+        value={{ number: installment.check?.number ?? '', bank: installment.check?.bank ?? '',
+          ownerName: installment.check?.ownerName ?? '', handoverDate: installment.check?.handoverDate ?? '',
+          nationalCode: installment.nationalCode ?? '' }} errors={paymentErrors}
+        onChange={updates => updateWizard({ ...draft, intent: { ...draft.intent,
+          customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
             installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
-              ? { ...item, check: { number: event.target.value, bank: item.check?.bank ?? '', dueDate: item.dueDate } } : item) } } })} /></ErpField>
-        <ErpField label="بانک" required><ErpInput value={installment.check?.bank ?? ''} onChange={event => updateWizard({ ...draft,
-          intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
-            installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
-              ? { ...item, check: { number: item.check?.number ?? '', bank: event.target.value, dueDate: item.dueDate } } : item) } } })} /></ErpField>
-      </div>}
+              ? { ...item, ...(updates.nationalCode !== undefined ? { nationalCode: updates.nationalCode } : {}),
+                ...(item.method === 'CHECK' ? { check: { number: updates.number ?? item.check?.number ?? '',
+                  bank: updates.bank ?? item.check?.bank ?? '', dueDate: item.dueDate,
+                  ...(updates.ownerName !== undefined || item.check?.ownerName !== undefined
+                    ? { ownerName: updates.ownerName ?? item.check?.ownerName ?? '' } : {}),
+                  ...(updates.handoverDate !== undefined || item.check?.handoverDate !== undefined
+                    ? { handoverDate: updates.handoverDate ?? item.check?.handoverDate ?? '' } : {}) } } : {}) } : item) } } })} />}
       {installmentIndex > 0 && <ErpButton label="حذف قسط" tone="danger" variant="outline" onClick={() => updateWizard({ ...draft,
         intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
           installments: draft.intent.customerPaymentPlan.installments.filter(item => item.installmentId !== installment.installmentId) } } })} />}
-    </ErpCard>)}<ErpButton label="افزودن قسط" variant="outline" onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
+    </ErpCard>; })}<ErpButton label="افزودن قسط" variant="outline" onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
       customerPaymentPlan: { ...draft.intent.customerPaymentPlan, installments: [...draft.intent.customerPaymentPlan.installments,
         { installmentId: `partner-installment-${crypto.randomUUID()}`, dueDate: addDays(draft.intent.contractDate, 30),
           amount: { amount: '0', currency: draft.intent.customerPaymentPlan.installments[0].amount.currency },
@@ -1035,6 +1060,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         ? 'مقدار تحویل هر محصول باید دقیقاً با مقدار قرارداد برابر باشد.'
       : step === 'payment' && !PaymentPlanSchema.safeParse(draft.intent.customerPaymentPlan).success
         ? 'برنامه پرداخت را کامل کنید.'
+      : step === 'payment' && firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today())
+        ? firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today())
       : step === 'payment' && (() => {
         const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
         return remainingPartnerAmount(summary.valid && summary.retail ? summary.retail : '0',
@@ -1055,7 +1082,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       pending: () => readStored(inquiryPendingKey(runtime.actorId)),
       savePending: async command => window.localStorage.setItem(inquiryPendingKey(runtime.actorId), JSON.stringify(command)),
       clearPending: async () => window.localStorage.removeItem(inquiryPendingKey(runtime.actorId)),
-    }} writable configuredRows={runtime.configuredRows} configuredRowLabels={Object.fromEntries(technicalDraft.rows.map(row => [
+    }} writable configuredRows={runtime.configuredRows} knownInquiryRows={runtime.knownInquiryRows}
+    configuredRowLabels={Object.fromEntries(technicalDraft.rows.map(row => [
       row.productRowId, catalog.find(product => product.catalogItemId === row.catalogItemId)?.name ?? row.productRowId,
     ]))} configurationEditor={<p>مشخصات فنی ذخیره‌شده برای {runtime.saved.rows.length.toLocaleString('fa-IR')} ردیف</p>}
     onEnterWizard={enterWizard} onOpenInquiry={() => undefined} onCreateNewInquiry={() => void beginNewInquiry(context)}
@@ -1129,6 +1157,28 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
   const saleStepIndex = partnerSaleEntrySteps.indexOf(saleStep);
+  const openInitialInquiry = async () => {
+    if (!technicalActionReady || !draftAccess) return;
+    setPending(true); setError(null); technicalCommitFlight.current = true;
+    try {
+      const saved = await commitPartnerTechnicalDraft({
+        checkpointRequired: technicalDraft.inputRevision > checkpointedInputRevision.current,
+        checkpoint: () => checkpointTechnicalDraft(technicalDraft, draftAccess),
+        save: () => ports.saved.save({ ...draftAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
+          idempotencyKey: `partner-save-${crypto.randomUUID()}`, draft: technicalDraft }),
+      });
+      if (!saved) return;
+      if (!saved.ok) { setError(saved.error.message); return; }
+      setRecoveryRevision(saved.value.recoveryRevision);
+      const matches = await readApprovalMatches(saved.value);
+      setInitialInquiryMatches(matches);
+      const missing = new Set(matches.missingPricingSubjectIds);
+      setInitialInquirySelection(new Set(technicalDraft.rows.filter(row => missing.has(row.productRowId))
+        .map(row => row.productRowId)));
+      setInitialInquiryOpen(true);
+    } catch { setError('وضعیت استعلام ردیف‌ها دریافت نشد؛ اطلاعات شما حفظ شده است.'); }
+    finally { technicalCommitFlight.current = false; setPending(false); }
+  };
   const advanceSale = () => {
     setError(null);
     if (saleStep === 'date' && !contractDate) { setError('تاریخ قرارداد را وارد کنید.'); return; }
@@ -1137,8 +1187,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (saleStepIndex < partnerSaleEntrySteps.length - 1) {
       setSaleStep(partnerSaleEntrySteps[saleStepIndex + 1]); return;
     }
-    setInitialInquirySelection(new Set(technicalDraft.rows.map(row => row.productRowId)));
-    setInitialInquiryOpen(true);
+    void openInitialInquiry();
   };
   return <ContractWizardFrame
     title="ایجاد فروش همکار"
@@ -1201,19 +1250,21 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           onChange={event => setInquiryNote(event.target.value)} /></ErpField>
       </>}
       <ErpSheet open={initialInquiryOpen} onClose={() => setInitialInquiryOpen(false)} title="استعلام جدید"
-        presentation="modal" pending={pending} footer={<ErpButton label="ارسال ردیف‌های انتخاب‌شده"
-          disabled={pending || initialInquirySelection.size === 0}
+        presentation="modal" pending={pending} footer={<ErpButton
+          label={initialInquiryMatches?.missingPricingSubjectIds.length === 0 ? 'ادامه با قیمت‌های معتبر' : 'ارسال ردیف‌های انتخاب‌شده'}
+          disabled={pending || (Boolean(initialInquiryMatches?.missingPricingSubjectIds.length) && initialInquirySelection.size === 0)}
           onClick={() => void startInquiry(context, initialInquirySelection)} />}>
         <div className="space-y-3">
-          {technicalDraft.rows.map(row => <ErpCard key={row.productRowId} className="p-3">
+          {technicalDraft.rows.map(row => { const reusable = initialInquiryMatches?.rows.find(match =>
+            match.configurationRef.productRowId === row.productRowId); return <ErpCard key={row.productRowId} className="p-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <ErpCheckbox label={catalog.find(product => product.catalogItemId === row.catalogItemId)?.name ?? row.productRowId}
-                checked={initialInquirySelection.has(row.productRowId)} disabled={pending}
+                checked={initialInquirySelection.has(row.productRowId)} disabled={pending || Boolean(reusable)}
                 onChange={event => setInitialInquirySelection(current => { const next = new Set(current);
                   if (event.target.checked) next.add(row.productRowId); else next.delete(row.productRowId); return next; })} />
-              <span className="text-sm text-[var(--sds-text-secondary)]">استعلام ارسال نشده</span>
+              <ErpBadge tone={reusable ? 'success' : 'warning'}>{reusable ? 'استعلام معتبر' : 'استعلام ارسال نشده'}</ErpBadge>
             </div>
-          </ErpCard>)}
+          </ErpCard>; })}
         </div>
       </ErpSheet>
     </div>

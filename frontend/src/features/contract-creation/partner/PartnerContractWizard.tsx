@@ -52,7 +52,8 @@ export interface PartnerContractWizardProps {
   submission: ReturnType<typeof createPartnerCaseSubmission>;
   now: number;
   mismatchedRowIds?: readonly string[];
-  renderSection: (step: Exclude<PartnerWizardStep, 'products'>, draft: PartnerWizardDraft) => React.ReactNode;
+  renderSection: (step: Exclude<PartnerWizardStep, 'products'>, draft: PartnerWizardDraft,
+    showValidationErrors: boolean) => React.ReactNode;
   validateStep: (step: PartnerWizardStep, draft: PartnerWizardDraft) => string | null;
   onReinquire: (row: PartnerRetailRow['inquiryRow']) => void;
   onEditProducts?: () => void;
@@ -177,7 +178,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
           {(draft.materialInquiryRows?.length ?? 0) > 0 && <div className="flex flex-wrap gap-2">{draft.materialInquiryRows!.map(row => <ErpButton key={row.pricingSubjectId}
             label={`استعلام مجدد ${row.inquiryRow.description}`} variant="outline"
             disabled={disabled || row.inquiryRow.successor?.state === 'PENDING'} onClick={() => onReinquire(row.inquiryRow)} />)}</div>}
-        </div> : renderSection(draft.step, draft)}
+        </div> : renderSection(draft.step, draft, Boolean(error))}
       </fieldset>
     </div>
   </ContractWizardFrame>;

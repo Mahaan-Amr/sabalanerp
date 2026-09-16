@@ -30,7 +30,9 @@ export const PaymentPlanSchema = z.object({
   installments: z.array(z.object({
     installmentId: IdSchema, dueDate: DateSchema, amount: MoneySchema,
     method: z.enum(['CASH', 'BANK_TRANSFER', 'CHECK', 'CREDIT']),
-    subtype: TextSchema.optional(), check: z.object({ number: TextSchema, bank: TextSchema, dueDate: DateSchema }).strict().optional(),
+    subtype: TextSchema.optional(), check: z.object({ number: TextSchema, bank: TextSchema, dueDate: DateSchema,
+      ownerName: TextSchema.optional(), handoverDate: DateSchema.optional() }).strict().optional(),
+    nationalCode: z.string().regex(/^\d{10}$/).optional(),
     notes: TextSchema.optional(),
   }).strict()),
 }).strict().superRefine((plan, context) => {
@@ -41,6 +43,7 @@ export const PaymentPlanSchema = z.object({
     }
   });
 });
+export type PaymentPlan = z.infer<typeof PaymentPlanSchema>;
 export const DisplayPartySchema = z.object({ displayName: TextSchema, phone: TextSchema, address: TextSchema }).strict();
 export const ProductDisplaySchema = z.object({ productRowId: IdSchema, description: TextSchema, quantity: QuantitySchema, unit: TextSchema }).strict();
 export const DeliverySchema = z.object({ deliveryId: IdSchema, date: DateSchema, destination: TextSchema,

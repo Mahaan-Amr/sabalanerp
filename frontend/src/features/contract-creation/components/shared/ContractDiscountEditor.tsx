@@ -25,10 +25,7 @@ export function ContractDiscountEditor({ mode, value, label, max, disabled = fal
 }) {
   const maximum = max === undefined ? undefined : Number(max);
   return <ErpNeumorphicCard className="space-y-3 p-4">
-    <div>
-      <h4 className="text-lg font-medium text-[var(--sds-text-primary)]">تخفیف</h4>
-      {description && <p className="text-sm text-[var(--sds-text-muted)]">{description}</p>}
-    </div>
+    {description && <p className="text-sm text-[var(--sds-text-muted)]">{description}</p>}
     {summaryItems.length > 0 && <dl className="grid gap-2 text-sm sm:grid-cols-3">
       {summaryItems.map(item => <div key={item.label}><dt className="text-[var(--sds-text-secondary)]">{item.label}</dt>
         <dd className="font-medium text-[var(--sds-text-primary)]">{item.value}</dd></div>)}

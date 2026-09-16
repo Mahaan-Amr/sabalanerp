@@ -53,7 +53,7 @@ export type ContractDeliveryDetails = {
 export function ContractDeliveryDetailsFields({ value, onChange, errors = {} }: {
   value: ContractDeliveryDetails;
   onChange: (updates: Partial<ContractDeliveryDetails>) => void;
-  errors?: Partial<Record<'date' | 'projectManagerName' | 'receiverName', string>>;
+  errors?: Partial<Record<'date' | 'address' | 'projectManagerName' | 'receiverName', string>>;
 }) {
   return <div className="space-y-4">
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -61,7 +61,7 @@ export function ContractDeliveryDetailsFields({ value, onChange, errors = {} }: 
         <PersianCalendarComponent value={value.date} onChange={date => onChange({ date })}
           className="w-full" disablePastDates />
       </ErpField>
-      <ErpField label="آدرس تحویل" required>
+      <ErpField label="آدرس تحویل" error={errors.address} required>
         <ErpInput value={value.address} onChange={event => onChange({ address: event.target.value })}
           placeholder="آدرس تحویل" />
       </ErpField>

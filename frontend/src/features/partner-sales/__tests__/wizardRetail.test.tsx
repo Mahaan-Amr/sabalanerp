@@ -17,7 +17,7 @@ test('retail defaults to approval but a retail-only discount can create a confir
   assert.equal(summary.retail, '1500');
   assert.equal(summary.difference, '-100');
   const html = renderToStaticMarkup(<PartnerRetailStep rows={rows} discount={discount} belowCostConfirmed={false}
-    disabled={false} onRowsChange={() => undefined} onDiscountChange={() => undefined} onConfirmLoss={() => undefined} />);
+    disabled={false} onRowsChange={() => undefined} onConfirmLoss={() => undefined} />);
   assert.match(html, /فروش با زیان/);
   assert.match(html, /زیان را بررسی کرده‌ام/);
   assert.equal(inquiry.rows[0].approvedPrice?.amount, '800');
@@ -45,17 +45,13 @@ test('retail preview keeps sub-unit differences exact above the safe integer ran
   assert.equal(partnerRetailSummary(rows, { amount: '1', currency: 'IRT' }).valid, false);
 });
 
-test('invalid retail and discount values are associated with the offending field', () => {
+test('invalid retail values are associated with the offending product field', () => {
   const { inquiry, configurationDraft } = createPartnerFixtures();
   const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: inquiry.rows[0] }]);
   rows[0].wholesaleUnitPrice = { amount: '800', currency: 'IRR' };
   const render = (amount: string) => renderToStaticMarkup(<PartnerRetailStep rows={rows} discount={{ amount, currency: 'IRR' }} belowCostConfirmed={false}
-    disabled={false} onRowsChange={() => undefined} onDiscountChange={() => undefined} onConfirmLoss={() => undefined} />);
+    disabled={false} onRowsChange={() => undefined} onConfirmLoss={() => undefined} />);
   rows[0].retailUnitPrice.amount = '';
   assert.match(render('0'), /aria-invalid="true"/);
   assert.match(render('0'), /aria-describedby="[^"]+-error"/);
-  rows[0].retailUnitPrice.amount = '800';
-  const discount = render('2000');
-  assert.match(discount, /aria-invalid="true"/);
-  assert.match(discount, /تخفیف نمی‌تواند/);
 });

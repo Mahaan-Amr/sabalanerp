@@ -5,8 +5,8 @@ import React from 'react';
 import { ErpNeumorphicCard, ErpPressable, ErpSelect } from '@/components/erp';
 import { FaPlus, FaTrash, FaEdit, FaCheck } from 'react-icons/fa';
 import { formatPrice, formatDisplayNumber, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
-import FormattedNumberInput from '@/components/FormattedNumberInput';
 import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../../types/contract.types';
+import { ContractDiscountEditor } from '../shared/ContractDiscountEditor';
 
 function getPaymentMethodLabel(payment: PaymentEntry): string {
   const m = (payment as PaymentEntry & { method?: string }).method;
@@ -85,43 +85,17 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
       </p>
       
       <div className="max-w-4xl mx-auto space-y-4">
-        <ErpNeumorphicCard className="p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div className="space-y-1">
-              <h4 className="text-lg font-medium text-[var(--sds-text-primary)]">تخفیف</h4>
-              <p className="text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
-                تخفیف فقط روی جمع پایه محصولات سنگی اعمال می‌شود.
-              </p>
-              <div className="grid grid-cols-1 gap-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] sm:grid-cols-3">
-                <span>جمع پایه: {formatPrice(baseSubtotal, wizardData.payment.currency)}</span>
-                <span>جمع قبل از تخفیف: {formatPrice(productsTotal, wizardData.payment.currency)}</span>
-                <span>سقف مجاز: {formatDisplayNumber(maxDiscountPercent)}٪</span>
-              </div>
-            </div>
-            <div className="w-full md:w-44">
-              <label className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">درصد تخفیف</label>
-              <FormattedNumberInput
-                value={discountPercent}
-                onChange={(value) => onDiscountPercentChange(Math.min(Math.max(value || 0, 0), maxDiscountPercent))}
-                min={0}
-                max={maxDiscountPercent}
-                step={0.1}
-                disabled={!hasMatchingDiscountRange || baseSubtotal <= 0}
-                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2.5 text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
-              />
-            </div>
-          </div>
-          {!hasMatchingDiscountRange && baseSubtotal > 0 && (
-            <p className="mt-3 rounded border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-2 text-sm text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
-              برای این مبلغ پایه، بازه تخفیف فعالی تعریف نشده است.
-            </p>
-          )}
-          {discountAmount > 0 && (
-            <div className="mt-3 rounded border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
-              مبلغ تخفیف: {formatPrice(discountAmount, wizardData.payment.currency)}
-            </div>
-          )}
-        </ErpNeumorphicCard>
+        <ContractDiscountEditor mode="percent" value={String(discountPercent)} label="درصد تخفیف"
+          max={String(maxDiscountPercent)} disabled={!hasMatchingDiscountRange || baseSubtotal <= 0}
+          description="تخفیف فقط روی جمع پایه محصولات سنگی اعمال می‌شود."
+          summaryItems={[
+            { label: 'جمع پایه', value: formatPrice(baseSubtotal, wizardData.payment.currency) },
+            { label: 'جمع قبل از تخفیف', value: formatPrice(productsTotal, wizardData.payment.currency) },
+            { label: 'سقف مجاز', value: `${formatDisplayNumber(maxDiscountPercent)}٪` },
+          ]}
+          warning={!hasMatchingDiscountRange && baseSubtotal > 0 ? 'برای این مبلغ پایه، بازه تخفیف فعالی تعریف نشده است.' : undefined}
+          result={discountAmount > 0 ? `مبلغ تخفیف: ${formatPrice(discountAmount, wizardData.payment.currency)}` : undefined}
+          onValueChange={value => onDiscountPercentChange(Math.min(Math.max(Number(value) || 0, 0), maxDiscountPercent))} />
 
         {/* Summary Section */}
         <ErpNeumorphicCard className="p-4">

@@ -11,11 +11,10 @@ export interface PartnerRetailStepProps {
   belowCostConfirmed: boolean;
   disabled: boolean;
   onRowsChange: (rows: PartnerRetailRow[]) => void;
-  onDiscountChange: (discount: Money) => void;
   onConfirmLoss: (confirmed: boolean) => void;
 }
 
-export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled, onRowsChange, onDiscountChange, onConfirmLoss }: PartnerRetailStepProps) {
+export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled, onRowsChange, onConfirmLoss }: PartnerRetailStepProps) {
   const summary = partnerRetailSummary(rows, discount);
   return <section aria-label="قیمت فروش به مشتری" className="min-w-0 space-y-4" dir="rtl">
     {rows.map((row, index) => { const rowSummary = partnerRetailRowSummary(row); return <ErpCard key={row.productRowId} className="space-y-3 p-4">
@@ -35,13 +34,6 @@ export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled
       </dl>}
       {rowSummary?.loss && <ErpInlineState kind="stale" title="قیمت فروش این ردیف از قیمت خرید شما کمتر است." />}
     </ErpCard>; })}
-    <ErpField label={`تخفیف فروش به مشتری (${discount.currency === 'IRR' ? 'ریال' : 'تومان'})`}
-      error={!summary.valid && summary.field === 'discount' ? summary.message : undefined}>
-      <ErpRialInput dir="ltr" value={discount.amount} disabled={disabled} onValueChange={amount => {
-        onConfirmLoss(false);
-        onDiscountChange({ ...discount, amount });
-      }} />
-    </ErpField>
     {!summary.valid ? <ErpInlineState kind="error" title={summary.message} /> : <>
       <dl className="grid gap-3 sm:grid-cols-2">
         <div><dt className="text-sm text-[var(--sds-text-secondary)]">جمع فروش پس از تخفیف</dt><dd className="mt-1 font-bold">{partnerMoneyText(summary.retail, discount.currency)}</dd></div>

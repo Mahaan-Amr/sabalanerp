@@ -23,11 +23,12 @@ import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
 import { ContractCustomerStepView, ContractDateStepView, ContractDeliveryDetailsFields, ContractProjectStepView,
   type ContractCustomerOption, type ContractProjectOption } from '../components/shared/ContractWizardStepViews';
 import { ContractPaymentInstallmentFields } from '../components/shared/ContractPaymentInstallmentFields';
+import { ContractDiscountEditor } from '../components/shared/ContractDiscountEditor';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { createPartnerCaseSubmission, type PartnerSubmitCommand } from './partnerCaseSubmission';
 import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
   shouldPreferLocalPartnerWizard } from './partnerWizardEntry';
-import { partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
+import { partnerMoneyText, partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
 import { buildPartnerCustomerCreateCommand, emptyPartnerCustomerDraft, validatePartnerCustomerDraft,
   type PartnerCustomerDraft } from './partnerCustomerCreation';
@@ -936,7 +937,22 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         date: addDays(draft.intent.contractDate, 7), destination: context.customers.find(item => item.id === draft.intent.customerId)?.address ?? '',
         receiverName: context.customers.find(item => item.id === draft.intent.customerId)?.displayName,
         items: draft.rows.map(row => ({ productRowId: row.productRowId, quantity: row.quantity })) }] } })} /></div>;
-    if (step === 'payment') return <div className="space-y-3">{draft.intent.customerPaymentPlan.installments.map((installment, installmentIndex) => <ErpCard key={installment.installmentId} className="space-y-3 p-4">
+    if (step === 'payment') { const retailSummary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount); return <div className="space-y-3">
+      <ContractDiscountEditor mode="amount" value={draft.intent.retailDiscount.amount}
+        label={`تخفیف فروش به مشتری (${draft.intent.retailDiscount.currency === 'IRR' ? 'ریال' : 'تومان'})`}
+        summaryItems={retailSummary.valid ? [
+          { label: 'جمع فروش پس از تخفیف', value: partnerMoneyText(retailSummary.retail, draft.intent.retailDiscount.currency) },
+          { label: 'سود/زیان', value: partnerMoneyText(retailSummary.difference, draft.intent.retailDiscount.currency) },
+        ] : []}
+        error={!retailSummary.valid && retailSummary.field === 'discount' ? retailSummary.message : undefined}
+        onValueChange={amount => updateWizard({ ...draft, intent: { ...draft.intent,
+          retailDiscount: { ...draft.intent.retailDiscount, amount }, belowCostConfirmed: false } })} />
+      {retailSummary.valid && retailSummary.loss && <ErpInlineState kind="stale"
+        title="پس از تخفیف، مبلغ فروش به مشتری از مبلغ خرید شما کمتر است." />}
+      {retailSummary.valid && retailSummary.loss && <ErpCheckbox label="زیان را بررسی کرده‌ام و ادامه می‌دهم"
+        checked={draft.intent.belowCostConfirmed}
+        onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, belowCostConfirmed: event.target.checked } })} />}
+      {draft.intent.customerPaymentPlan.installments.map((installment, installmentIndex) => <ErpCard key={installment.installmentId} className="space-y-3 p-4">
       <ContractPaymentInstallmentFields method={partnerPaymentChoice(installment)} amount={installment.amount.amount}
         amountLabel={`مبلغ قسط ${(installmentIndex + 1).toLocaleString('fa-IR')} (تومان)`} date={installment.dueDate}
         dateLabel="سررسید" disabledAmount={installmentIndex === 0}
@@ -969,7 +985,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       customerPaymentPlan: { ...draft.intent.customerPaymentPlan, installments: [...draft.intent.customerPaymentPlan.installments,
         { installmentId: `partner-installment-${crypto.randomUUID()}`, dueDate: addDays(draft.intent.contractDate, 30),
           amount: { amount: '0', currency: draft.intent.customerPaymentPlan.installments[0].amount.currency },
-          method: 'BANK_TRANSFER', subtype: 'SHIBA' }] } } })} /></div>;
+          method: 'BANK_TRANSFER', subtype: 'SHIBA' }] } } })} /></div>; }
     const customer = context.customers.find(item => item.id === draft.intent.customerId);
     return <div className="space-y-2"><p>مشتری: {customer?.displayName}</p>
       {customer?.phone && <p>شماره همراه: {customer.phone}</p>}

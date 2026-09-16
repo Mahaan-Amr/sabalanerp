@@ -168,8 +168,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{partnerWizardSteps[stepIndex]?.label}</h2>
       <fieldset disabled={disabled} className="min-w-0 space-y-4">
         {draft.step === 'products' ? <div className="space-y-4"><PartnerRetailStep rows={draft.rows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
-          onRowsChange={updateRetail} onDiscountChange={retailDiscount => onChange({ ...draft, intent: { ...draft.intent, retailDiscount, belowCostConfirmed: false } })}
-          onConfirmLoss={belowCostConfirmed => onChange({ ...draft, intent: { ...draft.intent, belowCostConfirmed } })} />
+          onRowsChange={updateRetail} onConfirmLoss={belowCostConfirmed => onChange({ ...draft, intent: { ...draft.intent, belowCostConfirmed } })} />
           {onEditProducts && <ErpButton label="ویرایش محصولات و استعلام قیمت" variant="outline" disabled={disabled}
             onClick={onEditProducts} />}
           <div className="flex flex-wrap gap-2">{draft.rows.map(row => <ErpButton key={row.productRowId}

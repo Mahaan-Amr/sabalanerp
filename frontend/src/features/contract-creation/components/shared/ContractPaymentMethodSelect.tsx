@@ -9,12 +9,13 @@ export const contractPaymentMethodOptions: ReadonlyArray<{ value: PaymentEntryMe
   { value: 'CUSTOMER_BALANCE', label: 'استفاده از باقی مانده مشتری' },
 ];
 
-export function ContractPaymentMethodSelect({ value, onChange, className }: {
+export function ContractPaymentMethodSelect({ value, onChange, className, disabled }: {
   value: PaymentEntryMethod;
   onChange: (value: PaymentEntryMethod) => void;
   className?: string;
+  disabled?: boolean;
 }) {
-  return <ErpSelect aria-label="نوع پرداخت" value={value}
+  return <ErpSelect aria-label="نوع پرداخت" value={value} disabled={disabled}
     onChange={event => onChange(event.target.value as PaymentEntryMethod)} className={className}>
     {contractPaymentMethodOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
   </ErpSelect>;

@@ -3,10 +3,9 @@
 import React from 'react';
 import { ErpInput } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
-import FormattedNumberInput from '@/components/FormattedNumberInput';
 import type { PaymentEntry, PaymentEntryMethod } from '../../types/contract.types';
 import { CentralProductModalShell } from '../product-modal-system';
-import { ContractPaymentMethodSelect } from '../shared/ContractPaymentMethodSelect';
+import { ContractPaymentInstallmentFields } from '../shared/ContractPaymentInstallmentFields';
 
 interface PaymentEntryModalProps {
   isOpen: boolean;
@@ -47,7 +46,6 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   if (!isOpen) return null;
 
   const method = (form.method || 'CASH_CARD') as PaymentEntryMethod;
-  const isCash = method === 'CASH_CARD' || method === 'CASH_SHIBA';
   const isCheck = method === 'CHECK';
   const isCustomerBalance = method === 'CUSTOMER_BALANCE';
 
@@ -65,46 +63,14 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
     >
         <div className="mx-auto w-full max-w-sm px-0 py-0">
           <div className="space-y-3">
-            <div>
-              <label className={labelClass}>نوع پرداخت</label>
-              <ContractPaymentMethodSelect value={method}
-                onChange={value => onFormChange({ method: value })}
-                className={`${inputClass} cursor-pointer`} />
-            </div>
-
-            {isCustomerBalance && (
-              <div className="rounded-md border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 text-xs leading-6 text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
-                در صورت مغایرت با حسابداری قرارداد منقضی میشود
-              </div>
-            )}
-
-            {(isCash || isCustomerBalance) && (
-              <>
-                <div>
-                  <label className={labelClass}>{isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : 'مبلغ (تومان)'}</label>
-                  <FormattedNumberInput
-                    value={form.amount ?? 0}
-                    onChange={(v) => onFormChange({ amount: v })}
-                    min={0}
-                    formatWhileTyping
-                    className={`${inputClass} ${fieldErrors.amount ? 'border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]' : ''}`}
-                  />
-                  {fieldErrors.amount && <p className="mt-1 text-xs text-[var(--sds-danger)]">{fieldErrors.amount}</p>}
-                </div>
-                <div>
-                  <label className={labelClass}>{isCustomerBalance ? 'تاریخ استفاده از مانده' : 'تاریخ پرداخت'}</label>
-                  <div className={`${inputClass} flex items-center min-h-[38px] ${fieldErrors.paymentDate ? 'border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]' : ''}`}>
-                    <PersianCalendarComponent
-                      value={form.paymentDate ?? ''}
-                      onChange={(d: string) => onFormChange({ paymentDate: d })}
-                      className="w-full"
-                      disablePastDates
-                    />
-                  </div>
-                  {fieldErrors.paymentDate && <p className="mt-1 text-xs text-[var(--sds-danger)]">{fieldErrors.paymentDate}</p>}
-                </div>
-              </>
-            )}
+            <ContractPaymentInstallmentFields method={method} amount={String(form.amount ?? '')}
+              date={form.paymentDate ?? ''}
+              amountLabel={isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : isCheck ? 'مبلغ چک (تومان)' : 'مبلغ (تومان)'}
+              dateLabel={isCustomerBalance ? 'تاریخ استفاده از مانده' : isCheck ? 'تاریخ سررسید چک' : 'تاریخ پرداخت'}
+              amountError={fieldErrors.amount} dateError={fieldErrors.paymentDate}
+              onMethodChange={value => onFormChange({ method: value })}
+              onAmountChange={value => onFormChange({ amount: Number(value || 0) })}
+              onDateChange={value => onFormChange({ paymentDate: value })} />
 
             {isCheck && (
               <>
@@ -131,17 +97,6 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                   {fieldErrors.checkOwnerName && <p className="mt-1 text-xs text-[var(--sds-danger)]">{fieldErrors.checkOwnerName}</p>}
                 </div>
                 <div>
-                  <label className={labelClass}>مبلغ چک (تومان)</label>
-                  <FormattedNumberInput
-                    value={form.amount ?? 0}
-                    onChange={(v) => onFormChange({ amount: v })}
-                    min={0}
-                    formatWhileTyping
-                    className={`${inputClass} ${fieldErrors.amount ? 'border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]' : ''}`}
-                  />
-                  {fieldErrors.amount && <p className="mt-1 text-xs text-[var(--sds-danger)]">{fieldErrors.amount}</p>}
-                </div>
-                <div>
                   <label className={labelClass}>تاریخ تحویل چک</label>
                   <div className={`${inputClass} flex items-center min-h-[38px] ${fieldErrors.handoverDate ? 'border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]' : ''}`}>
                     <PersianCalendarComponent
@@ -152,18 +107,6 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                     />
                   </div>
                   {fieldErrors.handoverDate && <p className="mt-1 text-xs text-[var(--sds-danger)]">{fieldErrors.handoverDate}</p>}
-                </div>
-                <div>
-                  <label className={labelClass}>تاریخ سررسید چک</label>
-                  <div className={`${inputClass} flex items-center min-h-[38px] ${fieldErrors.paymentDate ? 'border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]' : ''}`}>
-                    <PersianCalendarComponent
-                      value={form.paymentDate ?? ''}
-                      onChange={(d: string) => onFormChange({ paymentDate: d })}
-                      className="w-full"
-                      disablePastDates
-                    />
-                  </div>
-                  {fieldErrors.paymentDate && <p className="mt-1 text-xs text-[var(--sds-danger)]">{fieldErrors.paymentDate}</p>}
                 </div>
               </>
             )}

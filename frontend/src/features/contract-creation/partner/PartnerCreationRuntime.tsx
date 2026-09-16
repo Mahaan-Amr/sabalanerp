@@ -22,7 +22,7 @@ import { PartnerContractWizard, partnerWizardPresentationSteps, type PartnerWiza
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
 import { ContractCustomerStepView, ContractDateStepView, ContractDeliveryDetailsFields, ContractProjectStepView,
   type ContractCustomerOption, type ContractProjectOption } from '../components/shared/ContractWizardStepViews';
-import { ContractPaymentMethodSelect } from '../components/shared/ContractPaymentMethodSelect';
+import { ContractPaymentInstallmentFields } from '../components/shared/ContractPaymentInstallmentFields';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { createPartnerCaseSubmission, type PartnerSubmitCommand } from './partnerCaseSubmission';
 import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
@@ -937,21 +937,21 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         receiverName: context.customers.find(item => item.id === draft.intent.customerId)?.displayName,
         items: draft.rows.map(row => ({ productRowId: row.productRowId, quantity: row.quantity })) }] } })} /></div>;
     if (step === 'payment') return <div className="space-y-3">{draft.intent.customerPaymentPlan.installments.map((installment, installmentIndex) => <ErpCard key={installment.installmentId} className="space-y-3 p-4">
-      <div className="grid gap-3 sm:grid-cols-3"><ErpField label={`مبلغ قسط ${(installmentIndex + 1).toLocaleString('fa-IR')}`}><ErpRialInput
-        value={installment.amount.amount} disabled={installmentIndex === 0} onValueChange={amount => updateWizard({ ...draft,
-          intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
+      <ContractPaymentInstallmentFields method={partnerPaymentChoice(installment)} amount={installment.amount.amount}
+        amountLabel={`مبلغ قسط ${(installmentIndex + 1).toLocaleString('fa-IR')} (تومان)`} date={installment.dueDate}
+        dateLabel="سررسید" disabledAmount={installmentIndex === 0}
+        onAmountChange={amount => updateWizard({ ...draft, intent: { ...draft.intent,
+          customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
             installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
-              ? { ...item, amount: { ...item.amount, amount } } : item) } } })} /></ErpField>
-      <ErpField label="سررسید"><ErpInput type="date" value={installment.dueDate} onChange={event => updateWizard({ ...draft, intent: { ...draft.intent,
-        customerPaymentPlan: { ...draft.intent.customerPaymentPlan, installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
-          ? { ...item, dueDate: event.target.value, ...(item.check ? { check: { ...item.check, dueDate: event.target.value } } : {}) } : item) } } })} /></ErpField>
-      <ErpField label="روش پرداخت"><ContractPaymentMethodSelect value={partnerPaymentChoice(installment)}
-        onChange={value => updateWizard({ ...draft, intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
+              ? { ...item, amount: { ...item.amount, amount } } : item) } } })}
+        onDateChange={date => updateWizard({ ...draft, intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
+          installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
+            ? { ...item, dueDate: date, ...(item.check ? { check: { ...item.check, dueDate: date } } : {}) } : item) } } })}
+        onMethodChange={value => updateWizard({ ...draft, intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
           installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId ? (() => {
             const method = partnerPaymentMethodUpdate(value, item.dueDate);
             return { ...item, ...method, ...(value === 'CHECK' && item.check ? { check: item.check } : {}) };
           })() : item) } } })} />
-      </ErpField></div>
       {installment.method === 'CHECK' && <div className="grid gap-3 sm:grid-cols-2">
         <ErpField label="شماره چک" required><ErpInput value={installment.check?.number ?? ''} onChange={event => updateWizard({ ...draft,
           intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,

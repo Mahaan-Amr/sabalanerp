@@ -41,6 +41,7 @@ import { readPartnerCreationContext } from './partnerCreationContext';
 
 type PartnerContext = Extract<PartnerCreationContext, { kind: 'PARTNER' }>;
 type PartnerCustomer = PartnerContext['customers'][number];
+const partnerSaleEntrySteps: PartnerWizardStep[] = ['date', 'customer', 'project', 'products'];
 type Access = { schemaVersion: 1; recoveryId: string; browserSessionId: string;
   leaseToken: string; baseRevision: number };
 type PersistedRuntime = { actorId: string; inquiryId: string; access: Access;
@@ -161,7 +162,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
   const [contractDate, setContractDate] = useState(today);
   const [projectId, setProjectId] = useState('');
-  const [preparationStep, setPreparationStep] = useState(1);
+  const [saleStep, setSaleStep] = useState<PartnerWizardStep>('date');
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [projectTitle, setProjectTitle] = useState('');
   const [projectAddress, setProjectAddress] = useState('');
@@ -257,6 +258,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           : readStored<PersistedRuntime>(runtimeKey(parsed.data.actorId, requestedInquiry));
         if (saved?.actorId === parsed.data.actorId) {
           setRuntime(saved); setCustomerId(saved.customerId);
+          setSaleStep('products');
           if (saved.contractDate) setContractDate(saved.contractDate);
           if (saved.projectId) setProjectId(saved.projectId);
         }
@@ -635,7 +637,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     const approved = inquiryRows.filter(row => row.state === 'APPROVED' && row.approvedPrice);
     const currency = approved[0]?.approvedPrice?.currency;
     if (!customer) { setShowCustomerForm(true); setError('برای ایجاد قرارداد، مشتری را ثبت یا انتخاب کنید.'); return; }
-    if (!selectedProject) { setPreparationStep(3); setError('برای ایجاد قرارداد، پروژه را انتخاب کنید.'); return; }
+    if (!selectedProject) { setSaleStep('project'); setError('برای ایجاد قرارداد، پروژه را انتخاب کنید.'); return; }
     if (!currency) { setError('پاسخ معتبر استعلام را بررسی کنید.'); return; }
     const selectedContractDate = runtime.contractDate || contractDate || today();
     const draft = enterPartnerWizard({ inquiryRows, now: Date.now(), validated: validated.value,
@@ -1003,14 +1005,30 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       });
     }} onSendConfirmation={caseId => sendPartnerConfirmation(caseId).then(() => undefined)}
     onOpenCase={caseId => router.push(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(caseId)}`)} />;
-  if (runtime) return <div className="min-w-0 space-y-4"><PartnerInquiryWorkspace actorId={runtime.actorId} inquiryId={runtime.inquiryId}
+  const inquiryWorkspace = runtime && <PartnerInquiryWorkspace actorId={runtime.actorId} inquiryId={runtime.inquiryId}
     queries={inquiryPorts.queries} commands={inquiryPorts.commands} recovery={{
       pending: () => readStored(inquiryPendingKey(runtime.actorId)),
       savePending: async command => window.localStorage.setItem(inquiryPendingKey(runtime.actorId), JSON.stringify(command)),
       clearPending: async () => window.localStorage.removeItem(inquiryPendingKey(runtime.actorId)),
     }} writable configuredRows={runtime.configuredRows} configurationEditor={<p>مشخصات فنی ذخیره‌شده برای {runtime.saved.rows.length.toLocaleString('fa-IR')} ردیف</p>}
     onEnterWizard={enterWizard} onOpenInquiry={() => undefined} onCreateNewInquiry={() => void beginNewInquiry(context)}
-    prepareSuccessor={async row => ({ rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: row.configurationRef })} />
+    prepareSuccessor={async row => ({ rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: row.configurationRef })} />;
+  if (runtime && mode === 'sale' && saleStep === 'products') return <ContractWizardFrame
+    title="ایجاد فروش همکار"
+    currentStep={partnerSaleEntrySteps.indexOf('products') + 1}
+    steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
+      title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))}
+    notices={error && <div className="mb-4"><ErpInlineState kind="error" title={error} /></div>}
+    navigation={{
+      onPrevious: () => { setError(null); setSaleStep('project'); },
+      onNext: () => undefined,
+      canGoPrevious: !pending,
+      canGoNext: false,
+      labels: { next: 'در انتظار تکمیل استعلام' },
+    }}>
+    <div className="min-w-0 space-y-4">{inquiryWorkspace}</div>
+  </ContractWizardFrame>;
+  if (runtime && mode === 'inquiry') return <div className="min-w-0 space-y-4">{inquiryWorkspace}
     {error && <ErpInlineState kind="error" title={error} />}</div>;
   if (showCustomerForm) return <section dir="rtl" className="mx-auto min-w-0 max-w-4xl space-y-5">
     <h1 className="text-2xl font-bold">ثبت مشتری فروش همکار</h1>
@@ -1064,53 +1082,64 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     </ErpCard>
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
-  const advancePreparation = () => {
+  const saleStepIndex = partnerSaleEntrySteps.indexOf(saleStep);
+  const advanceSale = () => {
     setError(null);
-    if (preparationStep === 1 && !contractDate) { setError('تاریخ قرارداد را وارد کنید.'); return; }
-    if (preparationStep === 2 && !customerId) { setError('مشتری را انتخاب کنید.'); return; }
-    if (preparationStep === 3 && !projectId) { setError('پروژه را انتخاب کنید.'); return; }
-    if (preparationStep < 4) { setPreparationStep(step => step + 1); return; }
+    if (saleStep === 'date' && !contractDate) { setError('تاریخ قرارداد را وارد کنید.'); return; }
+    if (saleStep === 'customer' && !customerId) { setError('مشتری را انتخاب کنید.'); return; }
+    if (saleStep === 'project' && !projectId) { setError('پروژه را انتخاب کنید.'); return; }
+    if (saleStepIndex < partnerSaleEntrySteps.length - 1) {
+      setSaleStep(partnerSaleEntrySteps[saleStepIndex + 1]); return;
+    }
     void startInquiry(context);
   };
   return <ContractWizardFrame
     title="ایجاد فروش همکار"
-    currentStep={preparationStep}
+    currentStep={saleStepIndex + 1}
     steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
       title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))}
     notices={<div className="mb-4 space-y-3">
       {customerNotice && <ErpInlineState kind="success" title={customerNotice} />}
-      {showPartnerContractConfigurationWarning(mode, contractConfigurationReady) && preparationStep === 4
+      {showPartnerContractConfigurationWarning(mode, contractConfigurationReady) && saleStep === 'products'
         && <ErpInlineState kind="stale" title="مشخصات و مقدار واقعی این قرارداد را تکمیل کنید." />}
       {error && <ErpInlineState kind="error" title={error} />}
     </div>}
     navigation={{
-      onPrevious: () => { setError(null); setPreparationStep(step => Math.max(1, step - 1)); },
-      onNext: advancePreparation,
+      onPrevious: () => { setError(null); setSaleStep(partnerSaleEntrySteps[Math.max(0, saleStepIndex - 1)]); },
+      onNext: advanceSale,
       loading: pending,
-      canGoPrevious: !pending && preparationStep > 1,
-      canGoNext: !pending && (preparationStep !== 4 || technicalActionReady),
-      labels: { next: preparationStep === 4 ? 'بررسی قیمت‌ها و ادامه' : 'بعدی' }
+      canGoPrevious: !pending && saleStepIndex > 0,
+      canGoNext: !pending && (saleStep !== 'products' || technicalActionReady),
+      labels: { next: saleStep === 'products' ? 'بررسی قیمت‌ها و ادامه' : 'بعدی' }
     }}
   >
     <div className="space-y-4">
-      {preparationStep === 1 && <ContractDateStepView creatorName={context.actorDisplayName}
-        dateControl={<PersianCalendarComponent value={contractDate} onChange={setContractDate} className="w-full" />}
+      {saleStep === 'date' && <ContractDateStepView creatorName={context.actorDisplayName}
+        dateControl={<PersianCalendarComponent value={contractDate} onChange={value => {
+          setContractDate(value); if (runtime) persistRuntime({ ...runtime, contractDate: value });
+        }} className="w-full" />}
         numberNotice="شماره پس از ثبت موفق قرارداد تخصیص داده می‌شود." />}
-      {preparationStep === 2 && <ContractCustomerStepView
+      {saleStep === 'customer' && <ContractCustomerStepView
         customers={partnerCustomerOptions(context, customerSearchTerm)}
         selectedCustomer={selectedPartnerCustomer(context, customerId)}
         selectedCustomerId={customerId} searchTerm={customerSearchTerm} totalCount={context.customers.length}
         searchPlaceholder="جستجو با نام یا شماره تلفن"
         onSearchChange={setCustomerSearchTerm} onCreate={() => setShowCustomerForm(true)}
-        onSelect={value => { setCustomerId(value); setProjectId(current => context.projects.some(project =>
-          project.id === current && project.customerId === value) ? current : ''); }} />}
-      {preparationStep === 3 && (() => { const selection = partnerProjectSelection(context, customerId); return <div className="space-y-4">
+        onSelect={value => { const nextProjectId = context.projects.some(project =>
+          project.id === projectId && project.customerId === value) ? projectId : '';
+          setCustomerId(value); setProjectId(nextProjectId);
+          if (runtime) persistRuntime({ ...runtime, customerId: value, projectId: nextProjectId }); }} />}
+      {saleStep === 'project' && (() => { const selection = partnerProjectSelection(context, customerId); return <div className="space-y-4">
         <ContractProjectStepView customerName={selection.customerName}
           projects={selection.projects}
-          selectedProjectId={projectId} onSelect={setProjectId} onCreate={() => setShowProjectForm(true)} />
+          selectedProjectId={projectId} onSelect={value => {
+            setProjectId(value); if (runtime) persistRuntime({ ...runtime, projectId: value });
+          }} onCreate={() => setShowProjectForm(true)} />
         <ErpSheet open={showProjectForm} onClose={() => setShowProjectForm(false)} title="ثبت پروژه جدید"
           presentation="modal" pending={pending} footer={<ErpButton label="ثبت و انتخاب پروژه"
-            disabled={pending || !projectTitle.trim()} onClick={() => void createProject(context)} />}>
+            disabled={pending || !projectTitle.trim()} onClick={() => void createProject(context).then(created => {
+              if (created && runtime) persistRuntime({ ...runtime, projectId: created.id });
+            })} />}>
           <div className="space-y-4">
             <ErpField label="عنوان پروژه" required><ErpInput value={projectTitle} maxLength={300}
               onChange={event => setProjectTitle(event.target.value)} /></ErpField>
@@ -1119,7 +1148,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           </div>
         </ErpSheet>
       </div>; })()}
-      {preparationStep === 4 && <>
+      {saleStep === 'products' && <>
         <PartnerTechnicalDraftEditor draft={technicalDraft} products={catalog} operations={operations}
           preview={technicalPreview} onChange={setTechnicalDraft} />
         <ErpField label="یادداشت (اختیاری)"><ErpTextarea value={inquiryNote} maxLength={2000}

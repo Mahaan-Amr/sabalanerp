@@ -52,7 +52,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             address: true, workAddress: true, homeAddress: true,
             phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }], take: 1 },
           } },
-          user: { select: { responsibleCrmPotentialProjects: { where: { isActive: true, wonSalesContractId: null,
+          user: { select: { firstName: true, lastName: true, username: true,
+            responsibleCrmPotentialProjects: { where: { isActive: true, wonSalesContractId: null,
             partnerRevision: { not: null } }, orderBy: { updatedAt: 'desc' }, select: {
               id: true, customerId: true, title: true,
             } } } },
@@ -81,7 +82,9 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         }).sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime()).slice(0, 50);
         const recoverableDraft = recoverableDrafts[0];
         const value = partnerContracts.PartnerCreationContextSchema.safeParse({ schemaVersion: 1, kind: 'PARTNER',
-          actorId: request.user!.id, profileId: profile.id, writable, ...(blockedCode ? { blockedCode } : {}),
+          actorId: request.user!.id,
+          actorDisplayName: `${profile.user.firstName} ${profile.user.lastName}`.trim() || profile.user.username,
+          profileId: profile.id, writable, ...(blockedCode ? { blockedCode } : {}),
           ...(profile.inquiries[0] ? { latestInquiryId: profile.inquiries[0].id } : {}),
           inquiryIds: profile.inquiries.map(inquiry => inquiry.id),
           ...(recoverableDraft ? { recoverableDraft: { recoveryId: recoverableDraft.draftId,

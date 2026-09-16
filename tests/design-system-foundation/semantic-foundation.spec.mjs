@@ -48,6 +48,8 @@ const focusedProductOverlaySources = [
 const contractWizardSources = [
   ['CreateContractWizardClient.tsx', read('frontend/src/features/contract-creation/CreateContractWizardClient.tsx')],
   ['PaymentEntryModal.tsx', read('frontend/src/features/contract-creation/components/modals/PaymentEntryModal.tsx')],
+  ['ContractWizardFrame.tsx', read('frontend/src/features/contract-creation/components/shared/ContractWizardFrame.tsx')],
+  ['ContractWizardStepViews.tsx', read('frontend/src/features/contract-creation/components/shared/ContractWizardStepViews.tsx')],
   ['WizardNavigation.tsx', read('frontend/src/features/contract-creation/components/shared/WizardNavigation.tsx')],
   ['WizardProgressBar.tsx', read('frontend/src/features/contract-creation/components/shared/WizardProgressBar.tsx')],
   ...[
@@ -472,16 +474,15 @@ test('focused Product Selection workflows use one semantic dialog and control in
 });
 
 test('Sales contract visual regressions keep compact alignment, contrast, spacing, and finishing focus', () => {
-  const customerStep = contractWizardSources.find(([path]) => path === 'Step2CustomerSelection.tsx')[1];
-  const projectStep = contractWizardSources.find(([path]) => path === 'Step3ProjectManagement.tsx')[1];
+  const stepViews = contractWizardSources.find(([path]) => path === 'ContractWizardStepViews.tsx')[1];
   const workflow = read('frontend/src/components/erp/index.tsx');
   const primitives = focusedProductSources.find(([path]) => path === 'productModalPrimitives.tsx')[1];
   const longitudinal = focusedProductSources.find(([path]) => path === 'LongitudinalProductSection.tsx')[1];
   const operations = focusedProductSources.find(([path]) => path === 'OperationCollectionsSection.tsx')[1];
 
-  assert.match(customerStep, /<ErpButton[\s\S]{0,180}label="ایجاد مشتری"/);
-  assert.match(projectStep, /<ErpButton[\s\S]{0,180}label="ایجاد پروژه"/);
-  assert.doesNotMatch(customerStep, /dark:text-\[var\(--sds-text-inverse\)\]/);
+  assert.match(stepViews, /<ErpButton[\s\S]{0,180}label="ایجاد مشتری"/);
+  assert.match(stepViews, /<ErpButton[\s\S]{0,180}label="ایجاد پروژه"/);
+  assert.doesNotMatch(stepViews, /dark:text-\[var\(--sds-text-inverse\)\]/);
   assert.match(workflow, /<nav aria-label=\{ariaLabel\} className="mb-/);
   assert.match(primitives, /h-11[^\n]+!min-h-11[^\n]+w-\[51px\]/);
   assert.match(primitives, /data-switch-track[\s\S]{0,180}h-\[31px\][^\n]+w-\[51px\]/);
@@ -516,7 +517,7 @@ test('the complete Contract Creation wizard uses the shared semantic and accessi
   const inaccessibleClickTarget = /<(?:div|span|li)\b[^>]*\bonClick\s*=/;
 
   for (const [path, source] of contractWizardSources) {
-    assert.match(source, /from '@\/components\/erp'/, `${path} must cross the canonical seam`);
+    assert.match(source, /from '@\/components\/erp'|\.\.\/shared\/ContractWizardStepViews/, `${path} must cross the canonical seam`);
     assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
     assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
     assert.doesNotMatch(source, inaccessibleClickTarget, `${path} must use semantic controls`);
@@ -524,13 +525,15 @@ test('the complete Contract Creation wizard uses the shared semantic and accessi
   }
 
   const wizard = contractWizardSources.find(([path]) => path === 'CreateContractWizardClient.tsx')[1];
+  const frame = contractWizardSources.find(([path]) => path === 'ContractWizardFrame.tsx')[1];
   const paymentDialog = contractWizardSources.find(([path]) => path === 'PaymentEntryModal.tsx')[1];
   const progress = contractWizardSources.find(([path]) => path === 'WizardProgressBar.tsx')[1];
   const navigation = contractWizardSources.find(([path]) => path === 'WizardNavigation.tsx')[1];
   const erpPrimitives = read('frontend/src/components/erp/index.tsx');
   const neumorphicPrimitives = read('frontend/src/components/erp/NeumorphicPrimitives.tsx');
 
-  assert.match(wizard, /<ErpNeumorphicWorkflowLayout/);
+  assert.match(wizard, /<ContractWizardStage/);
+  assert.match(frame, /<ErpNeumorphicWorkflowLayout/);
   assert.match(wizard, /contractSubmission\.isSubmitting/);
   assert.match(wizard, /editRecovery\.blocked/);
   assert.match(wizard, /inert: ''/);

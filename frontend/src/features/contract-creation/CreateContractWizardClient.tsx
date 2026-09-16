@@ -41,7 +41,6 @@ import {
   ErpInput,
   ErpButton,
   ErpInlineState,
-  ErpNeumorphicCard,
   ErpNeumorphicDialog,
   ErpNeumorphicWorkflowLayout,
   ErpPressable,
@@ -59,8 +58,8 @@ import { Step7PaymentMethod } from '@/features/contract-creation/components/step
 import { Step8DigitalSignature } from '@/features/contract-creation/components/steps/Step8DigitalSignature';
 
 // Import shared components
-import { WizardProgressBar, type WizardStep } from '@/features/contract-creation/components/shared/WizardProgressBar';
-import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
+import type { WizardStep } from '@/features/contract-creation/components/shared/WizardProgressBar';
+import { ContractWizardStage } from '@/features/contract-creation/components/shared/ContractWizardFrame';
 import { consumeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
 import { persistContractLocalValue } from '@/features/contract-creation/utils/contractRecoveryJournal';
 
@@ -6332,46 +6331,39 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           className={editRecovery.blocked && !isContractCreationComplete ? 'pointer-events-none select-none opacity-70' : ''}
         >
 
-        {/* Progress Bar */}
-        <WizardProgressBar
+        <ContractWizardStage
           currentStep={currentStep}
+          navigationStep={visibleCurrentStep}
           steps={visibleWizardSteps as WizardStep[]}
-          clickable={isContractEditMode}
+          clickableSteps={isContractEditMode}
           onStepClick={(step) => {
             setCurrentStep(step);
             setErrors({});
           }}
-        />
-
-        {/* Step Content */}
-        <ErpNeumorphicCard className="step-content-card relative z-0 mb-6 p-4 sm:mb-8 sm:p-6 lg:p-8">
-          {renderStepContent()}
-        </ErpNeumorphicCard>
-
-        {/* Navigation */}
-        <WizardNavigation
-          currentStep={visibleCurrentStep}
-          totalSteps={visibleWizardSteps.length}
-          onPrevious={goToPreviousStep}
-          onNext={goToNextStep}
-          onSubmit={handleWizardSubmit}
-          loading={contractCreationPrimaryPending({
-            creationComplete: isContractCreationComplete,
-            mutationPending: loading || wizardLoading || contractSubmission.isSubmitting,
-            recoveryReady: editRecovery.ready
-          })}
-          canGoNext={true}
-          canGoPrevious={visibleCurrentStep > 1}
-          showSubmitOnEveryStep={isContractEditMode}
-          labels={{
-            submit: isContractEditMode
-              ? 'ذخیره تغییرات'
-              : isContractCreationComplete
-                ? 'اتمام و بازگشت به قراردادها'
-                : 'ثبت قرارداد',
-            submitting: isContractEditMode ? 'در حال ذخیره...' : 'در حال ثبت...'
+          navigation={{
+            onPrevious: goToPreviousStep,
+            onNext: goToNextStep,
+            onSubmit: handleWizardSubmit,
+            loading: contractCreationPrimaryPending({
+              creationComplete: isContractCreationComplete,
+              mutationPending: loading || wizardLoading || contractSubmission.isSubmitting,
+              recoveryReady: editRecovery.ready
+            }),
+            canGoNext: true,
+            canGoPrevious: visibleCurrentStep > 1,
+            showSubmitOnEveryStep: isContractEditMode,
+            labels: {
+              submit: isContractEditMode
+                ? 'ذخیره تغییرات'
+                : isContractCreationComplete
+                  ? 'اتمام و بازگشت به قراردادها'
+                  : 'ثبت قرارداد',
+              submitting: isContractEditMode ? 'در حال ذخیره...' : 'در حال ثبت...'
+            }
           }}
-        />
+        >
+          {renderStepContent()}
+        </ContractWizardStage>
 
         {/* Error Display */}
         {getSalesErrorSummary(errors) && (

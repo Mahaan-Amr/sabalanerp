@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useRef, useState, useSyncExternalStore } from 'react';
-import { ErpButton, ErpCard, ErpInlineState, ErpLoading, ErpSheet } from '@/components/erp';
+import { ErpButton, ErpInlineState, ErpLoading, ErpSheet } from '@/components/erp';
 import { FaBuilding, FaCalendarAlt, FaCreditCard, FaSignature, FaTruck, FaUser, FaWarehouse } from 'react-icons/fa';
-import { WizardProgressBar, type WizardStep } from '../components/shared/WizardProgressBar';
-import { WizardNavigation } from '../components/shared/WizardNavigation';
+import type { WizardStep } from '../components/shared/WizardProgressBar';
+import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
 import { PartnerRetailStep } from './PartnerRetailStep';
 import { partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
 import type { PartnerDraftIntent, createPartnerCaseSubmission } from './partnerCaseSubmission';
@@ -136,14 +136,29 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     // must never submit stale hidden prices or approval bindings.
     void submission.submit({ ...draft.intent, rows: partnerRetailIntentRows(draft.rows) });
   };
-  return <section dir="rtl" aria-label="ایجاد پرونده فروش همکار" className="min-w-0 space-y-4">
-    <WizardProgressBar currentStep={stepIndex + 1} steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
-      title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))} />
-    {unusable.map(row => <ErpInlineState key={row.id} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
-      action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row.inquiryRow) }} />)}
-    {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
-    {result.phase === 'editing' && result.message && <ErpInlineState kind="error" title={result.message} />}
-    <ErpCard className="min-w-0 space-y-4 p-4 sm:p-6">
+  return <ContractWizardFrame
+    title="ایجاد فروش همکار"
+    currentStep={stepIndex + 1}
+    steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
+      title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))}
+    notices={<div className="mb-4 space-y-3">
+      {unusable.map(row => <ErpInlineState key={row.id} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
+        action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row.inquiryRow) }} />)}
+      {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
+      {result.phase === 'editing' && result.message && <ErpInlineState kind="error" title={result.message} />}
+      {error && <ErpInlineState kind="error" title={error} />}
+    </div>}
+    navigation={{
+      onPrevious: () => move(stepIndex - 1),
+      onNext: next,
+      onSubmit: next,
+      loading: mutatePending,
+      canGoPrevious: !disabled && stepIndex > 0,
+      canGoNext: !disabled && !(stepIndex === partnerWizardSteps.length - 1 && unusable.length > 0),
+      labels: { submit: 'ثبت پرونده' }
+    }}
+  >
+    <div className="min-w-0 space-y-4" aria-label="ایجاد پرونده فروش همکار">
       <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{partnerWizardSteps[stepIndex]?.label}</h2>
       <fieldset disabled={disabled} className="min-w-0 space-y-4">
         {draft.step === 'products' ? <div className="space-y-4"><PartnerRetailStep rows={draft.rows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
@@ -159,12 +174,6 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
             disabled={disabled || row.inquiryRow.successor?.state === 'PENDING'} onClick={() => onReinquire(row.inquiryRow)} />)}</div>}
         </div> : renderSection(draft.step, draft)}
       </fieldset>
-    </ErpCard>
-    {error && <ErpInlineState kind="error" title={error} />}
-    <WizardNavigation currentStep={stepIndex + 1} totalSteps={partnerWizardSteps.length}
-      onPrevious={() => move(stepIndex - 1)} onNext={next} onSubmit={next} loading={mutatePending}
-      canGoPrevious={!disabled && stepIndex > 0}
-      canGoNext={!disabled && !(stepIndex === partnerWizardSteps.length - 1 && unusable.length > 0)}
-      labels={{ submit: 'ثبت پرونده' }} />
-  </section>;
+    </div>
+  </ContractWizardFrame>;
 }

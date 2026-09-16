@@ -1084,14 +1084,7 @@ export function ErpWorkspacePage({
   secondaryActions?: ErpAction[];
   backHref?: string;
 }) {
-  const router = useRouter();
   const reduceMotion = useReducedMotion();
-
-  const handleBack = React.useCallback(() => {
-    if (!backHref) return;
-    if (typeof window !== 'undefined' && window.history.length > 1) router.back();
-    else router.push(backHref);
-  }, [backHref, router]);
 
   return (
     <motion.main
@@ -1102,7 +1095,7 @@ export function ErpWorkspacePage({
     >
       <header className="flex min-h-14 items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2.5">
-          {backHref && <ErpIconButton label="بازگشت" onClick={handleBack} icon={FaArrowRight} tone="neutral" />}
+          {backHref && <ErpWorkspaceBackButton backHref={backHref} />}
           <div className="min-w-0 py-0.5">
             <h1 className="sds-text-primary truncate text-2xl font-black tracking-tight">{title}</h1>
             {context && <div className="sds-text-muted mt-1 text-xs font-medium">{context}</div>}
@@ -1118,6 +1111,15 @@ export function ErpWorkspacePage({
       {children}
     </motion.main>
   );
+}
+
+function ErpWorkspaceBackButton({ backHref }: { backHref: string }) {
+  const router = useRouter();
+  const handleBack = React.useCallback(() => {
+    if (typeof window !== 'undefined' && window.history.length > 1) router.back();
+    else router.push(backHref);
+  }, [backHref, router]);
+  return <ErpIconButton label="بازگشت" onClick={handleBack} icon={FaArrowRight} tone="neutral" />;
 }
 
 export type ErpNeumorphicWorkflowStep = {

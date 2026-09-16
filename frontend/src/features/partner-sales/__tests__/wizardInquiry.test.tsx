@@ -8,6 +8,32 @@ import { createPartnerInquiryReader } from '../inquiries/partnerInquiryReader';
 import type { PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
 import { enterPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
 import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
+import { buildPartnerInquiryBulkRows } from '../inquiries/partnerInquiryBulk';
+
+test('bulk inquiry model distinguishes reusable, missing, pending, rejected, expired and re-inquiry rows', () => {
+  const fixture = createPartnerFixtures();
+  const base = fixture.inquiry.rows[0];
+  const configured = [base, ...(['missing', 'pending', 'rejected', 'expired', 'changed', 'successor'] as const).map(id => ({
+    ...base, rowId: id, configurationRef: { ...base.configurationRef, productRowId: `${id}-product` },
+  }))].map(row => ({ rowId: row.rowId, configuration: row.configurationRef }));
+  const inquiry = structuredClone(fixture.inquiry);
+  inquiry.rows = [base,
+    { ...base, rowId: 'pending', state: 'PENDING', approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
+      approvedRowBinding: undefined, configurationRef: { ...base.configurationRef, productRowId: 'pending-product' } },
+    { ...base, rowId: 'rejected', state: 'REJECTED', approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
+      approvedRowBinding: undefined, configurationRef: { ...base.configurationRef, productRowId: 'rejected-product' } },
+    { ...base, rowId: 'expired', expiresAt: '2026-08-27T08:00:00.000Z',
+      configurationRef: { ...base.configurationRef, productRowId: 'expired-product' } },
+    { ...base, rowId: 'changed', configurationRef: { ...base.configurationRef, productRowId: 'changed-product' } },
+    { ...base, rowId: 'successor', successor: { inquiryId: 'next', rowId: 'next-row', revision: 1, state: 'PENDING' },
+      configurationRef: { ...base.configurationRef, productRowId: 'successor-product' } },
+  ];
+  const rows = buildPartnerInquiryBulkRows({ configuredRows: configured, inquiry,
+    now: Date.parse('2026-08-27T09:00:00.000Z'), mismatchedRowIds: ['changed'] });
+  assert.deepEqual(rows.map(row => row.status), ['USABLE', 'MISSING', 'PENDING', 'REJECTED', 'EXPIRED',
+    'REINQUIRY_REQUIRED', 'REINQUIRY_PENDING']);
+  assert.deepEqual(rows.map(row => row.selectable), [false, true, false, true, true, true, false]);
+});
 
 test('partial inquiry shows each outcome and only one Dock progression for usable approvals', () => {
   const { inquiry } = createPartnerFixtures();

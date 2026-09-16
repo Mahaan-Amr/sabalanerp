@@ -10,7 +10,7 @@ import {
   type DuplicateCustomerMatch, type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpCard, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
 import api from '@/lib/api';
 import { createPartnerTechnicalHttpPorts } from './partnerTechnicalHttpPorts';
 import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/partnerInquiryHttpPorts';
@@ -182,6 +182,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const [draftDeleteTarget, setDraftDeleteTarget] = useState<string>();
   const autoTitledDrafts = useRef(new Set<string>());
   const [pending, setPending] = useState(false);
+  const [initialInquiryOpen, setInitialInquiryOpen] = useState(false);
+  const [initialInquirySelection, setInitialInquirySelection] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const contextActorId = context?.kind === 'PARTNER' ? context.actorId : null;
   const persistRuntime = useCallback((value: PersistedRuntime | null) => {
@@ -201,7 +203,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const quickDimensionsValid = mode !== 'inquiry' || technicalDraft.rows.every(row => {
     try { normalizedQuickDimensions(row.productRowId); return true; } catch { return false; }
   });
-  const technicalActionReady = canSubmitPartnerTechnicalAction({ mode, pending, technicalReady,
+  const retailPricesReady = mode === 'inquiry' || technicalDraft.rows.every(row => Boolean(row.retailUnitPrice?.amount));
+  const technicalActionReady = retailPricesReady && canSubmitPartnerTechnicalAction({ mode, pending, technicalReady,
     contractConfigurationReady, quickDimensionsValid, hasDraftAccess: Boolean(draftAccess) });
 
   const wizardRecoveryId = wizard?.intent.recoveryId;
@@ -524,7 +527,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     return parsed.data;
   };
 
-  const startInquiry = async (partner: PartnerContext) => {
+  const startInquiry = async (partner: PartnerContext, selectedProductRowIds?: ReadonlySet<string>) => {
     if (!technicalActionReady || !draftAccess || (mode === 'sale' && (!contractDate || !customerId || !projectId))) return;
     setPending(true); setError(null);
     technicalCommitFlight.current = true;
@@ -542,19 +545,23 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         role: 'PRIMARY' as const }));
       const matches = mode === 'sale' ? await readApprovalMatches(saved.value) : null;
       const missing = new Set(matches?.missingPricingSubjectIds ?? subjects.map(row => row.configurationRef.productRowId));
-      const configuredRows: PartnerConfiguredInquiryRows = subjects.filter(row => missing.has(row.configurationRef.productRowId)).map(row => ({
+      const availableRows: PartnerConfiguredInquiryRows = subjects.filter(row => missing.has(row.configurationRef.productRowId)).map(row => ({
         rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: row.configurationRef,
         ...(mode === 'inquiry' ? { dimensions: normalizedQuickDimensions(row.configurationRef.productRowId) } : {}),
         ...(inquiryNote.trim() ? { sellerNote: inquiryNote.trim() } : {}) }));
-      if (!configuredRows.length && matches?.rows.length) {
+      if (!availableRows.length && matches?.rows.length) {
         const inquiryId = matches.rows[0].approvedRowBinding!.inquiryId;
         persistRuntime({ actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
           configuredRows: matches.rows.map(row => ({ rowId: row.rowId, configuration: row.configurationRef })),
           customerId, contractDate, projectId });
+        setInitialInquiryOpen(false);
         freshInquiryRef.current = false;
         router.replace('/dashboard/sales/contracts/create');
         return;
       }
+      const configuredRows = selectedProductRowIds
+        ? availableRows.filter(row => selectedProductRowIds.has(row.configuration.productRowId)) : availableRows;
+      if (!configuredRows.length) { setError('حداقل یک ردیف نیازمند استعلام را انتخاب کنید.'); return; }
       const inquiryId = `partner-inquiry-${crypto.randomUUID()}`;
       const intent = { schemaVersion: 1 as const, type: 'INQUIRY_SUBMIT' as const,
         partnerSellerId: partner.actorId, rows: configuredRows };
@@ -565,9 +572,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       window.localStorage.setItem(inquiryPendingKey(partner.actorId), JSON.stringify(command));
       const submitted = await inquiryPorts.commands.execute(command);
       if (!submitted.ok) { window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); setError(submitted.error.message); return; }
-      const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value, configuredRows,
+      const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
+        configuredRows: selectedProductRowIds ? availableRows : configuredRows,
         customerId, ...(mode === 'sale' ? { contractDate, projectId } : {}) };
       window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); persistRuntime(value);
+      setInitialInquiryOpen(false);
       freshInquiryRef.current = false;
       router.replace(mode === 'inquiry'
         ? `/dashboard/sales/partner-inquiries?inquiryId=${encodeURIComponent(inquiryId)}`
@@ -1030,7 +1039,9 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       pending: () => readStored(inquiryPendingKey(runtime.actorId)),
       savePending: async command => window.localStorage.setItem(inquiryPendingKey(runtime.actorId), JSON.stringify(command)),
       clearPending: async () => window.localStorage.removeItem(inquiryPendingKey(runtime.actorId)),
-    }} writable configuredRows={runtime.configuredRows} configurationEditor={<p>مشخصات فنی ذخیره‌شده برای {runtime.saved.rows.length.toLocaleString('fa-IR')} ردیف</p>}
+    }} writable configuredRows={runtime.configuredRows} configuredRowLabels={Object.fromEntries(technicalDraft.rows.map(row => [
+      row.productRowId, catalog.find(product => product.catalogItemId === row.catalogItemId)?.name ?? row.productRowId,
+    ]))} configurationEditor={<p>مشخصات فنی ذخیره‌شده برای {runtime.saved.rows.length.toLocaleString('fa-IR')} ردیف</p>}
     onEnterWizard={enterWizard} onOpenInquiry={() => undefined} onCreateNewInquiry={() => void beginNewInquiry(context)}
     prepareSuccessor={async row => ({ rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: row.configurationRef })} />;
   if (runtime && mode === 'sale' && saleStep === 'products') return <ContractWizardFrame
@@ -1110,7 +1121,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (saleStepIndex < partnerSaleEntrySteps.length - 1) {
       setSaleStep(partnerSaleEntrySteps[saleStepIndex + 1]); return;
     }
-    void startInquiry(context);
+    setInitialInquirySelection(new Set(technicalDraft.rows.map(row => row.productRowId)));
+    setInitialInquiryOpen(true);
   };
   return <ContractWizardFrame
     title="ایجاد فروش همکار"
@@ -1120,6 +1132,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       {customerNotice && <ErpInlineState kind="success" title={customerNotice} />}
       {showPartnerContractConfigurationWarning(mode, contractConfigurationReady) && saleStep === 'products'
         && <ErpInlineState kind="stale" title="مشخصات و مقدار واقعی این قرارداد را تکمیل کنید." />}
+      {!retailPricesReady && saleStep === 'products'
+        && <ErpInlineState kind="stale" title="قیمت فروش به مشتری را برای همه محصولات وارد کنید." />}
       {error && <ErpInlineState kind="error" title={error} />}
     </div>}
     navigation={{
@@ -1128,7 +1142,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       loading: pending,
       canGoPrevious: !pending && saleStepIndex > 0,
       canGoNext: !pending && (saleStep !== 'products' || technicalActionReady),
-      labels: { next: saleStep === 'products' ? 'بررسی قیمت‌ها و ادامه' : 'بعدی' }
+      labels: { next: saleStep === 'products' ? 'استعلام جدید' : 'بعدی' }
     }}
   >
     <div className="space-y-4">
@@ -1170,6 +1184,22 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         <ErpField label="یادداشت (اختیاری)"><ErpTextarea value={inquiryNote} maxLength={2000}
           onChange={event => setInquiryNote(event.target.value)} /></ErpField>
       </>}
+      <ErpSheet open={initialInquiryOpen} onClose={() => setInitialInquiryOpen(false)} title="استعلام جدید"
+        presentation="modal" pending={pending} footer={<ErpButton label="ارسال ردیف‌های انتخاب‌شده"
+          disabled={pending || initialInquirySelection.size === 0}
+          onClick={() => void startInquiry(context, initialInquirySelection)} />}>
+        <div className="space-y-3">
+          {technicalDraft.rows.map(row => <ErpCard key={row.productRowId} className="p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <ErpCheckbox label={catalog.find(product => product.catalogItemId === row.catalogItemId)?.name ?? row.productRowId}
+                checked={initialInquirySelection.has(row.productRowId)} disabled={pending}
+                onChange={event => setInitialInquirySelection(current => { const next = new Set(current);
+                  if (event.target.checked) next.add(row.productRowId); else next.delete(row.productRowId); return next; })} />
+              <span className="text-sm text-[var(--sds-text-secondary)]">استعلام ارسال نشده</span>
+            </div>
+          </ErpCard>)}
+        </div>
+      </ErpSheet>
     </div>
   </ContractWizardFrame>;
 }

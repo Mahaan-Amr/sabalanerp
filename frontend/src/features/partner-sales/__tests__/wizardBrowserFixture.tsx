@@ -41,13 +41,14 @@ function Fixture() {
           { rowId: 'pending-330', revision: 1, description: 'اسلب در انتظار پاسخ', state: 'PENDING', configuration: [], configurationRef: { ...fixture.configurationDraft, productRowId: 'pending-product' }, usedCaseNumbers: [] },
           { rowId: 'rejected-330', revision: 1, description: 'پله ردشده', state: 'REJECTED', configuration: [], configurationRef: { ...fixture.configurationDraft, productRowId: 'rejected-product' }, usedCaseNumbers: [], noteOrReason: 'این سنگ موجود نیست' },
         ] }} now={now} pending={false} onRefresh={() => undefined} onReinquire={() => undefined}
-        onEnterWizard={() => setDraft(enterPartnerWizard({ inquiry: fixture.inquiry, now,
+        onEnterWizard={() => { const entered = enterPartnerWizard({ inquiry: fixture.inquiry, now,
           base: { customerId: fixture.draftSubmissionReference.customerId, recoveryId: fixture.draftSubmissionReference.recoveryId,
             recoveryRevision: fixture.draftSubmissionReference.recoveryRevision, sabalanTermsVersionId: fixture.draftSubmissionReference.sabalanTermsVersionId,
             contractDate: fixture.customer.contractDate, customerPaymentPlan: fixture.partner.customerPaymentPlan,
             deliveries: fixture.partner.deliveries, retailDiscount: { amount: '0', currency: 'IRR' } },
           validated: fixture.technicalSaved,
-        }))} />}
+        }); setDraft(entered ? { ...entered, rows: entered.rows.map(row => ({ ...row,
+          wholesaleUnitPrice: row.inquiryRow.approvedPrice })) } : null); }} />}
   </main>;
 }
 
@@ -68,12 +69,14 @@ function ReinquiryFixture() {
       } },
       recovery: { pending: () => pending, savePending: async (command: PartnerInquirySubmitCommand) => { pending = command; }, clearPending: async () => { pending = null; } },
       prepareSuccessor: async () => ({ rowId: 'new-successor', configuration: fixture.configurationDraft }),
+      configuredRows: [{ rowId: inquiry.rows[0].rowId, configuration: fixture.configurationDraft }],
+      configuredRowLabels: { [fixture.configurationDraft.productRowId]: 'سنگ طولی آزمایشی' },
     };
   }, []);
   return <main className="mx-auto max-w-5xl p-4" dir="rtl">
     <p role="status">تعداد ارسال: {calls}</p>
     <PartnerInquiryWorkspace {...composition} commands={composition.commands as React.ComponentProps<typeof PartnerInquiryWorkspace>['commands']}
-      writable configuredRows={[]} configurationEditor={<p>مشخصات فنی محفوظ</p>}
+      writable configurationEditor={<p>مشخصات فنی محفوظ</p>}
       onEnterWizard={async () => undefined} onOpenInquiry={() => undefined} onCreateNewInquiry={() => undefined} />
   </main>;
 }

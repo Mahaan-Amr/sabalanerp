@@ -110,5 +110,5 @@ test('reloading an uncertain inquiry exposes a reachable retry without a new sub
     prepareSuccessor={async () => { throw new Error('not used'); }} />);
   assert.match(html, /بررسی نتیجه ارسال/);
   assert.match(html, /preserved-configuration/);
-  assert.match(html, /ایجاد استعلام جدید/);
+  assert.match(html, /استعلام جدید/);
 });

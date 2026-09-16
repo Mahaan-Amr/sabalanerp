@@ -933,9 +933,9 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
             ...(updates.date !== undefined ? { date: updates.date } : {}),
             ...(updates.address !== undefined ? { destination: updates.address } : {}),
             ...(updates.projectManagerName !== undefined
-              ? { projectManagerName: updates.projectManagerName.trim() || undefined } : {}),
-            ...(updates.receiverName !== undefined ? { receiverName: updates.receiverName.trim() || undefined } : {}),
-            ...(updates.notes !== undefined ? { notes: updates.notes.trim() || undefined } : {}),
+              ? { projectManagerName: updates.projectManagerName || undefined } : {}),
+            ...(updates.receiverName !== undefined ? { receiverName: updates.receiverName || undefined } : {}),
+            ...(updates.notes !== undefined ? { notes: updates.notes || undefined } : {}),
           } : item),
         } })} />
       <div className="grid gap-3 sm:grid-cols-2">{delivery.items.map(item => <ErpField key={item.productRowId}

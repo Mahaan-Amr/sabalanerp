@@ -1,12 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft,
   type PartnerTechnicalDraft, type PartnerTechnicalFamily, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
 import { parseCanonicalDecimal, parseStableIdentity, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
-import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpSelect } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpRialInput, ErpSelect } from '@/components/erp';
 import { PreparedProductSection } from '../components/product-modal-system/PreparedProductSection';
 import { LongitudinalProductSection } from '../components/product-modal-system/LongitudinalProductSection';
 import { SlabProductSection } from '../components/product-modal-system/SlabProductSection';
@@ -17,6 +17,7 @@ import { convertCompactLengthUnit } from '../components/product-modal-system/pro
 import type { ContractProduct, Product } from '../types/contract.types';
 import { addPartnerTechnicalDependent, addPartnerTechnicalProduct, commitPartnerTechnicalField, removePartnerTechnicalDependent, removePartnerTechnicalProduct,
   confirmPartnerContractConfiguration, retainPartnerTechnicalFieldText } from './partnerTechnicalDraftAdapter';
+import { setPartnerTechnicalRetailUnitPrice } from './partnerTechnicalDraftAdapter';
 import { TechnicalProductConfiguration } from './TechnicalProductConfiguration';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
@@ -112,6 +113,11 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
         {!['prepared', 'volumetric'].includes(row.family) && calculation?.ok && <OperationsEditor draft={draft} row={row as Extract<typeof row, { family: 'longitudinal' | 'slab' | 'stair' }>}
           calculation={calculation.result as unknown as Record<string, unknown>} catalog={operations} onChange={onChange} />}
         {calculation && !calculation.ok && <ErpInlineState kind="stale" title={`مشخصات این ردیف کامل نیست. ${calculation.conflicts[0]?.message ?? ''}`} />}
+        <div className="max-w-sm"><ErpField label="قیمت فروش به مشتری (فی واحد، تومان)" required
+          hint="پاسخ استعلام این مبلغ را بازنویسی نمی‌کند."><ErpRialInput dir="ltr"
+            value={row.retailUnitPrice?.amount ?? ''}
+            onValueChange={amount => onChange(setPartnerTechnicalRetailUnitPrice(draft, row.productRowId, amount))} />
+        </ErpField></div>
         {(draft.contractConfigurationRequiredProductRowIds ?? []).includes(row.productRowId) && <ErpCheckbox
           checked={(draft.contractConfiguredProductRowIds ?? []).includes(row.productRowId)}
           label="مشخصات واقعی قرارداد تأیید شد"

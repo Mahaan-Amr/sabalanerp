@@ -1,7 +1,7 @@
 'use client';
 
 import { ErpInput, ErpPressable, useErpOverlayPortalContainer } from '@/components/erp';
-import { useState, useRef, useEffect, useMemo, useId } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { FaChevronDown, FaSearch, FaCheck } from 'react-icons/fa';
 

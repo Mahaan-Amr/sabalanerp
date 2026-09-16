@@ -5,7 +5,7 @@ import {
   type PreparedTechnicalCalculation, type LongitudinalTechnicalCalculation, type SlabTechnicalCalculation,
   type StairPartTechnicalCalculation, materializePaidRemainderStocks, type PaidRemainderStock,
 } from '@sabalanerp/contract-product-graph';
-import { IdSchema, InstantSchema } from './primitives';
+import { IdSchema, InstantSchema, MoneySchema } from './primitives';
 import { PartnerTechnicalProductSchema, PartnerTechnicalOperationSchema,
   type PartnerTechnicalProduct, type PartnerTechnicalOperation } from './technical-catalog';
 import { partnerError, type Result } from './errors';
@@ -16,7 +16,10 @@ import { inspectTechnicalIdentities, collectGeneratedTechnicalIdentities, type T
 import type { TechnicalLayerParent } from './technical-layers';
 import { PartnerTechnicalStairSystemSchema, previewTechnicalStairSystems, type TechnicalStairSystemConflict } from './technical-stair-systems';
 
-const rowIdentity = { productRowId: IdSchema, catalogItemId: IdSchema, catalogSnapshotVersion: InstantSchema };
+const rowIdentity = { productRowId: IdSchema, catalogItemId: IdSchema, catalogSnapshotVersion: InstantSchema,
+  // Customer-facing commercial intent belongs to Partner recovery, but is
+  // deliberately excluded from technical previews and inquiry identity.
+  retailUnitPrice: MoneySchema.optional() };
 const preparedConfiguration = z.object({
   kind: z.enum(['cubic', 'readyPiece']), unit: z.enum(['squareMeter', 'ton', 'count']), quantity: decimal.optional(),
 }).strict();

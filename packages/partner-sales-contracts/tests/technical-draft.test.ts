@@ -21,6 +21,20 @@ test('generated no-operation groups cannot collide with another product explicit
   assert.deepEqual(preview.value.inventory.map(stock => stock.ownerProductRowId), ['unaffected']);
 });
 
+test('technical draft retains an optional customer retail unit price without exposing it in the technical preview', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 2,
+    rows: [{ productRowId: 'retail-priced-row', catalogItemId: catalog.products[0].catalogItemId,
+      catalogSnapshotVersion: catalog.products[0].catalogSnapshotVersion, family: 'prepared',
+      retailUnitPrice: { amount: '1250000', currency: 'IRT' },
+      configuration: { kind: 'readyPiece', unit: 'squareMeter', quantity: '3' } }],
+  });
+  assert.deepEqual(draft.rows[0].retailUnitPrice, { amount: '1250000', currency: 'IRT' });
+  const preview = previewPartnerTechnicalDraft(draft, catalog);
+  assert.ok(preview.ok);
+  assert.doesNotMatch(JSON.stringify(preview.value), /retailUnitPrice|1250000/);
+});
+
 test('independent layer sides receive canonical scope-specific no-operation identities', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
   const version = catalog.products[0].catalogSnapshotVersion;

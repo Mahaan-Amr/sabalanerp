@@ -11,10 +11,10 @@ export interface PartnerRetailRow {
   wholesaleUnitPrice?: Money;
 }
 
-export function defaultPartnerRetailRows(rows: Omit<PartnerRetailRow, 'retailUnitPrice'>[]): PartnerRetailRow[] {
+export function defaultPartnerRetailRows(rows: (Omit<PartnerRetailRow, 'retailUnitPrice'> & { retailUnitPrice?: Money })[]): PartnerRetailRow[] {
   return rows.map(row => {
     if (!row.inquiryRow.approvedPrice || !row.inquiryRow.approvedRowBinding) throw new Error('Approved row required');
-    return { ...row, retailUnitPrice: { ...row.inquiryRow.approvedPrice } };
+    return { ...row, retailUnitPrice: row.retailUnitPrice ?? { ...row.inquiryRow.approvedPrice } };
   });
 }
 

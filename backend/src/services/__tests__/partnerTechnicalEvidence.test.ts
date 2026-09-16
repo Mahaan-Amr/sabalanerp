@@ -38,6 +38,17 @@ test('technical sales policy accepts only the latest effective append-only terms
   assert.equal(corrupted.error.code, 'INTEGRITY_CONFLICT');
 });
 
+test('customer retail price does not participate in the Sabalan inquiry identity', async () => {
+  const base = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 1,
+    rows: [{ productRowId: 'retail-identity-row', catalogItemId: 'catalog-row',
+      catalogSnapshotVersion: '2026-08-29T00:00:00.000Z', family: 'prepared',
+      configuration: { kind: 'readyPiece', unit: 'squareMeter', quantity: '1' } }],
+  });
+  const priced = PartnerTechnicalDraftSchema.parse({ ...base, inputRevision: 2,
+    rows: [{ ...base.rows[0], retailUnitPrice: { amount: '2500000', currency: 'IRT' } }] });
+  assert.equal(await technicalConfigurationHash(base.rows[0]), await technicalConfigurationHash(priced.rows[0]));
+});
+
 test('technical sales policy accepts an integrity-checked bootstrap projection linked to its source policy', async () => {
   const effectiveDate = new Date('2026-08-29T00:00:00.000Z');
   const source = { id: 'bootstrap-policy', purpose: 'PARTNER_TECHNICAL_PRICING' as const,

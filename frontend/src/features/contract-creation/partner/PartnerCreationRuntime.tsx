@@ -647,6 +647,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (!currency) { setError('پاسخ معتبر استعلام را بررسی کنید.'); return; }
     const selectedContractDate = runtime.contractDate || contractDate || today();
     const draft = enterPartnerWizard({ inquiryRows, now: Date.now(), validated: validated.value,
+      retailUnitPrices: new Map(technicalDraft.rows.flatMap(row => row.retailUnitPrice
+        ? [[row.productRowId, row.retailUnitPrice] as const] : [])),
       base: { customerId: customer.id, recoveryId: runtime.saved.recoveryId, recoveryRevision: runtime.saved.recoveryRevision,
         contractDate: selectedContractDate, projectId: selectedProject.id,
         customerPaymentPlan: { planId: `partner-customer-plan-${crypto.randomUUID()}`, version: 1,
@@ -798,8 +800,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
             current.intent.recoveryRevision !== quote.data.recoveryRevision) return current;
         const rows = current.rows.map(row => {
           const price = quote.data.rows.find(item => item.productRowId === row.productRowId)?.wholesaleUnitPrice;
-          return price ? { ...row, wholesaleUnitPrice: price,
-            retailUnitPrice: row.wholesaleUnitPrice ? row.retailUnitPrice : price } : row;
+          return price ? { ...row, wholesaleUnitPrice: price } : row;
         });
         const summary = partnerRetailSummary(rows, current.intent.retailDiscount);
         const installments = current.intent.customerPaymentPlan.installments;

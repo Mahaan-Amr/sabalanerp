@@ -16,6 +16,7 @@ import type { ProductOperationsTechnicalInput, LongitudinalTechnicalInput, SlabT
 import { PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { CanonicalStairLayerSummary } from '../../contract-creation/components/product-modal-system/CanonicalStairLayerSummary';
+import { PartnerTechnicalDraftEditor } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
 
 test('layer summary consumes canonical rate-free strips and rejects a preview from an older edit', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
@@ -100,6 +101,21 @@ test('Partner reuses the prepared form with geometry and unit choices but no int
   assert.match(partner, /مقدار/);
   assert.match(partner, /واحد/);
   assert.doesNotMatch(partner, /قیمت واحد|خلاصه محاسبه|987654321|۹۸۷/);
+});
+
+test('Partner product configuration includes one compact customer unit-price field without a Sabalan purchase price', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 1,
+    rows: [{ productRowId: 'retail-ui-row', catalogItemId: catalog.products[0].catalogItemId,
+      catalogSnapshotVersion: catalog.products[0].catalogSnapshotVersion, family: 'prepared',
+      retailUnitPrice: { amount: '1250000', currency: 'IRT' },
+      configuration: { kind: 'readyPiece', unit: 'squareMeter', quantity: '2' } }],
+  });
+  const html = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft} products={catalog.products}
+    operations={catalog.operations} onChange={() => undefined} />);
+  assert.match(html, /قیمت فروش به مشتری \(فی واحد، تومان\)/);
+  assert.match(html, /1,250,000/);
+  assert.doesNotMatch(html, /قیمت خرید شما از سبلان/);
 });
 
 test('Partner layer and operation forms retain source, edge, and processing choices without catalog rates', () => {

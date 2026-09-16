@@ -37,6 +37,10 @@ test('exact product-row references own entry; quantity and delivery changes do n
   assert.equal(draft?.rows[0].quantity, '250');
   assert.equal(draft?.intent.graphHash, fixture.technicalSaved.graphHash);
   assert.equal(draft?.intent.rows[0].retailUnitPrice.amount, '800');
+  const explicitlyPriced = enterPartnerWizard({ ...input, retailUnitPrices: new Map([
+    [fixture.configurationDraft.productRowId, { amount: '1250', currency: 'IRR' as const }],
+  ]) });
+  assert.equal(explicitlyPriced?.intent.rows[0].retailUnitPrice.amount, '1250');
   assert.equal(enterPartnerWizard({ ...input, validated: { ...input.validated,
     recoveryRevision: input.validated.recoveryRevision + 1 } }), null);
   assert.equal(enterPartnerWizard({ ...input, mismatchedRowIds: [fixture.inquiry.rows[0].rowId] }), null);

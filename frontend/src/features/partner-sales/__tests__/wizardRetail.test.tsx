@@ -23,6 +23,14 @@ test('retail defaults to approval but a retail-only discount can create a confir
   assert.equal(inquiry.rows[0].approvedPrice?.amount, '800');
 });
 
+test('retail preserves an explicit customer unit price instead of replacing it with the Sabalan approval', () => {
+  const { inquiry, configurationDraft } = createPartnerFixtures();
+  const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '2.000', unit: 'm',
+    inquiryRow: inquiry.rows[0], retailUnitPrice: { amount: '1250', currency: 'IRR' as const } }]);
+  assert.equal(rows[0].retailUnitPrice.amount, '1250');
+  assert.equal(rows[0].inquiryRow.approvedPrice?.amount, '800');
+});
+
 test('retail preview keeps sub-unit differences exact above the safe integer range', () => {
   const { inquiry, configurationDraft } = createPartnerFixtures();
   inquiry.rows[0].approvedPrice = { amount: '9007199254740993.01', currency: 'IRR' };

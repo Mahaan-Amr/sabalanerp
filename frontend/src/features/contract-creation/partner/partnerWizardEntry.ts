@@ -33,13 +33,14 @@ export function preservePartnerDeliveriesAcrossProductEdit(
 /** Quantity is supplied by the canonical graph's display projection; it is not
  * an inquiry fingerprint. No catalog-ID or array-position matching is allowed.
  */
-export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated, mismatchedRowIds = [] }: {
+export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated, mismatchedRowIds = [], retailUnitPrices }: {
   inquiry?: PartnerInquiryView;
   inquiryRows?: readonly PartnerInquiryRow[];
   now: number;
   base: Omit<PartnerDraftIntent, 'rows' | 'belowCostConfirmed' | 'graphHash'>;
   validated: PartnerTechnicalSavedView;
   mismatchedRowIds?: readonly string[];
+  retailUnitPrices?: ReadonlyMap<string, { amount: string; currency: 'IRR' | 'IRT' }>;
 }): PartnerWizardDraft | null {
   const saved = PartnerTechnicalSavedViewSchema.safeParse(validated);
   if (!saved.success || saved.data.recoveryId !== base.recoveryId ||
@@ -59,7 +60,8 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
     if (!technical || technical.configurationRef.recoveryId !== row.configurationRef.recoveryId ||
         technical.configurationRef.recoveryRevision !== row.configurationRef.recoveryRevision) return null;
     configured.push({ productRowId: technical.configurationRef.productRowId,
-      quantity: technical.quantity, unit: technical.unit, inquiryRow: row });
+      quantity: technical.quantity, unit: technical.unit, inquiryRow: row,
+      retailUnitPrice: retailUnitPrices?.get(technical.configurationRef.productRowId) });
   }
   if (configured.length !== saved.data.rows.length || new Set(configured.map(row => row.productRowId)).size !== configured.length) return null;
   const rows = defaultPartnerRetailRows(configured);

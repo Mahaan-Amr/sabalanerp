@@ -28,6 +28,15 @@ export function confirmPartnerContractConfiguration(draft: PartnerTechnicalDraft
   return revise(draft, { contractConfiguredProductRowIds: Array.from(configured) });
 }
 
+export function setPartnerTechnicalRetailUnitPrice(draft: PartnerTechnicalDraft, productRowId: string,
+  amount: string): PartnerTechnicalDraft {
+  if (!draft.rows.some(row => row.productRowId === productRowId)) throw new Error('Product row is unavailable');
+  const rows = draft.rows.map(row => row.productRowId !== productRowId ? row : amount
+    ? { ...row, retailUnitPrice: { amount, currency: 'IRT' as const } }
+    : Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'retailUnitPrice')) as typeof row);
+  return revise(draft, { rows });
+}
+
 export type PartnerTechnicalProductInput =
   | { family: 'prepared' | 'volumetric'; productRowId: string }
   | { family: 'longitudinal' | 'slab'; productRowId: string; sourceBatchId: string }

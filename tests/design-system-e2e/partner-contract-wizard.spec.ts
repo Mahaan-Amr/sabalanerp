@@ -93,6 +93,13 @@ test('a resumed Partner inquiry stays inside the same seven-step contract wizard
     contentType: 'application/json',
     body: JSON.stringify({ code: 'STATE_CONFLICT', status: 409, message: 'fixture inquiry remains pending' }),
   }));
+  await page.route('**/api/crm/partner/customers', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: {
+      customer: { customerId: 'partner-customer-created', displayName: 'مشتری تازه همکار' },
+    } }),
+  }));
 
   await page.goto('/dashboard/sales/contracts/create');
   await setTheme(page, 'light');
@@ -104,6 +111,19 @@ test('a resumed Partner inquiry stays inside the same seven-step contract wizard
   await expect(previous).toBeEnabled();
   await previous.click();
   await expect(workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ })).toHaveAttribute('aria-pressed', 'true');
+  await previous.click();
+  await workflow.getByRole('button', { name: 'ایجاد مشتری', exact: true }).first().click();
+  await page.getByRole('textbox', { name: 'نام', exact: true }).fill('مشتری');
+  await page.getByRole('textbox', { name: 'نام خانوادگی', exact: true }).fill('تازه');
+  await page.getByRole('textbox', { name: 'شماره تماس', exact: true }).fill('09121111111');
+  await page.getByRole('textbox', { name: 'نشانی تحویل', exact: true }).fill('تهران');
+  await page.getByRole('button', { name: 'ثبت مشتری و ادامه', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(window.localStorage
+    .getItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e') || '{}')))
+    .toMatchObject({ customerId: 'partner-customer-created' });
+  await workflow.getByRole('button', { name: /مشتری همکار آزمایشی/ }).click();
+  await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ }).click();
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
   await expect(workflow.getByText('مشخصات فنی ذخیره‌شده برای ۰ ردیف', { exact: true })).toBeVisible();
   await setTheme(page, 'dark');

@@ -33,6 +33,13 @@ export const partnerWizardSteps: Array<{ id: PartnerWizardStep; label: string; i
   { id: 'payment', label: 'روش پرداخت', icon: FaCreditCard },
   { id: 'confirmation', label: 'تأیید دیجیتال', icon: FaSignature },
 ];
+export const partnerWizardPresentationSteps: WizardStep[] = partnerWizardSteps.map((step, index) => ({
+  id: index + 1,
+  title: step.label,
+  titleEn: step.id,
+  icon: step.icon,
+  description: step.label,
+}));
 
 /** Host-supplied sections reuse the existing customer/delivery/payment editors
  * and their validation. They receive the recovery-owned draft, never internal
@@ -139,8 +146,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   return <ContractWizardFrame
     title="ایجاد فروش همکار"
     currentStep={stepIndex + 1}
-    steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
-      title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))}
+    steps={partnerWizardPresentationSteps}
     notices={<div className="mb-4 space-y-3">
       {unusable.map(row => <ErpInlineState key={row.id} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
         action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row.inquiryRow) }} />)}

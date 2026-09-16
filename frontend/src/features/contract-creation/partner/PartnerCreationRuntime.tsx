@@ -17,7 +17,8 @@ import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/par
 import { PartnerInquiryWorkspace } from '../../partner-sales/inquiries/PartnerInquiryWorkspace';
 import type { PartnerConfiguredInquiryRows } from '../../partner-sales/inquiries/partnerInquirySubmission';
 import { isUsableInquiryRow, type PartnerInquiryView, type PartnerInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
-import { PartnerContractWizard, partnerWizardSteps, type PartnerWizardDraft, type PartnerWizardStep } from './PartnerContractWizard';
+import { PartnerContractWizard, partnerWizardPresentationSteps, type PartnerWizardDraft,
+  type PartnerWizardStep } from './PartnerContractWizard';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
 import { ContractCustomerStepView, ContractDateStepView, ContractProjectStepView,
   type ContractCustomerOption, type ContractProjectOption } from '../components/shared/ContractWizardStepViews';
@@ -180,6 +181,13 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const autoTitledDrafts = useRef(new Set<string>());
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const contextActorId = context?.kind === 'PARTNER' ? context.actorId : null;
+  const persistRuntime = useCallback((value: PersistedRuntime | null) => {
+    setRuntime(value);
+    if (!contextActorId) return;
+    if (value) window.localStorage.setItem(runtimeKey(contextActorId, value.inquiryId), JSON.stringify(value));
+    else if (runtimeRef.current) window.localStorage.removeItem(runtimeKey(contextActorId, runtimeRef.current.inquiryId));
+  }, [contextActorId]);
   const technicalPreview = useMemo(() => previewPartnerTechnicalDraft(technicalDraft,
     { products: catalog, operations, sawKerfMeters: '0.003' }), [catalog, operations, technicalDraft]);
   const technicalReady = technicalPreview.ok && technicalDraft.rows.length > 0 && technicalPreview.value.conflicts.length === 0
@@ -296,6 +304,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       setContext({ ...partner, customers: [created, ...partner.customers] });
       setCustomerId(created.id);
       setProjectId('');
+      const activeRuntime = runtimeRef.current;
+      if (activeRuntime) persistRuntime({ ...activeRuntime, customerId: created.id, projectId: undefined });
       setCustomerDraft(emptyPartnerCustomerDraft);
       setShowCustomerForm(false);
       setCustomerNotice('مشتری با موفقیت ثبت و برای فروش همکار انتخاب شد.');
@@ -349,6 +359,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       const created = { id: project.projectId, customerId: selectedCustomerId, title: project.title };
       setContext({ ...partner, projects: [created, ...partner.projects] });
       setProjectId(created.id); setProjectTitle(''); setProjectAddress(''); setShowProjectForm(false);
+      const activeRuntime = runtimeRef.current;
+      if (activeRuntime) persistRuntime({ ...activeRuntime, customerId: selectedCustomerId, projectId: created.id });
       setCustomerNotice('پروژه ثبت و انتخاب شد.');
       return created;
     } catch { setError('ثبت پروژه انجام نشد. اطلاعات را بررسی و دوباره تلاش کنید.'); }
@@ -457,14 +469,6 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     }, 600);
     return () => window.clearTimeout(timer);
   }, [checkpointTechnicalDraft, draftAccess, recoveryBlocked, recoveryRevision, runtime, technicalDraft]);
-
-  const contextActorId = context?.kind === 'PARTNER' ? context.actorId : null;
-  const persistRuntime = useCallback((value: PersistedRuntime | null) => {
-    setRuntime(value);
-    if (!contextActorId) return;
-    if (value) window.localStorage.setItem(runtimeKey(contextActorId, value.inquiryId), JSON.stringify(value));
-    else if (runtimeRef.current) window.localStorage.removeItem(runtimeKey(contextActorId, runtimeRef.current.inquiryId));
-  }, [contextActorId]);
 
   const beginNewInquiry = useCallback(async (partner: PartnerContext) => {
     if (pending || recoveryStarting.current) return;
@@ -1016,8 +1020,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   if (runtime && mode === 'sale' && saleStep === 'products') return <ContractWizardFrame
     title="ایجاد فروش همکار"
     currentStep={partnerSaleEntrySteps.indexOf('products') + 1}
-    steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
-      title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))}
+    steps={partnerWizardPresentationSteps}
     notices={error && <div className="mb-4"><ErpInlineState kind="error" title={error} /></div>}
     navigation={{
       onPrevious: () => { setError(null); setSaleStep('project'); },
@@ -1096,8 +1099,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   return <ContractWizardFrame
     title="ایجاد فروش همکار"
     currentStep={saleStepIndex + 1}
-    steps={partnerWizardSteps.map((step, index) => ({ id: index + 1,
-      title: step.label, titleEn: step.id, icon: step.icon, description: step.label }))}
+    steps={partnerWizardPresentationSteps}
     notices={<div className="mb-4 space-y-3">
       {customerNotice && <ErpInlineState kind="success" title={customerNotice} />}
       {showPartnerContractConfigurationWarning(mode, contractConfigurationReady) && saleStep === 'products'
@@ -1137,9 +1139,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           }} onCreate={() => setShowProjectForm(true)} />
         <ErpSheet open={showProjectForm} onClose={() => setShowProjectForm(false)} title="ثبت پروژه جدید"
           presentation="modal" pending={pending} footer={<ErpButton label="ثبت و انتخاب پروژه"
-            disabled={pending || !projectTitle.trim()} onClick={() => void createProject(context).then(created => {
-              if (created && runtime) persistRuntime({ ...runtime, projectId: created.id });
-            })} />}>
+            disabled={pending || !projectTitle.trim()} onClick={() => void createProject(context)} />}>
           <div className="space-y-4">
             <ErpField label="عنوان پروژه" required><ErpInput value={projectTitle} maxLength={300}
               onChange={event => setProjectTitle(event.target.value)} /></ErpField>

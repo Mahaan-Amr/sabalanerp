@@ -444,6 +444,9 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
           expected: input.expected, snapshotId: input.snapshotId, ...(input.verifiedAt ? { verifiedAt: input.verifiedAt } : {}) });
         const row = await lockCase(tx, input.expected.caseId);
         if (!row) return { ok: false, error: partnerError('NOT_FOUND') };
+        if (kind === 'AWAITING' && row.pricingState !== 'READY_TO_FINALIZE') {
+          return { ok: false, error: partnerError('STATE_CONFLICT') };
+        }
         const views = await parseViews(tx, row);
         if (!views) {
           await dependencies.recordEvidenceReview(tx, { caseId: row.id, correlationId: input.correlationId,

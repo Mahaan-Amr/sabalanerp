@@ -446,6 +446,18 @@ test('an immutable priced revision remains readable after current pricing return
     assert.ok(historical.accounting, 'a historically priced revision must retain its canonical Accounting projection');
   }));
 
+test('customer confirmation fails closed under the locked lifecycle check when pricing is not ready', () =>
+  fixture(async (tx, ids, owner) => {
+    await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+    await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: { pricingState: 'AWAITING_INQUIRY' } });
+    const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
+    const sent = await service.markAwaitingCustomerConfirmation({ expected: owner,
+      commandId: `${ids.caseId}-unpriced-send`, correlationId: `${ids.caseId}-unpriced-send`,
+      snapshotId: `${ids.caseId}-unpriced-snapshot` });
+    assert.equal(sent.ok ? null : sent.error.code, 'STATE_CONFLICT');
+    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).state, 'DRAFT');
+  }));
+
 test('operational pause blocks commitment but support cancellation remains atomic and retained', () => fixture(async (tx, ids, owner) => {
   const cancelled: string[] = [];
   const service = createPartnerCaseLifecycleService(dependencies(tx, ids, cancelled));

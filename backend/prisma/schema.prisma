@@ -9256,7 +9256,7 @@ model PartnerSaleCase {
   headRevision        Int
   integrityHash       String
   state               PartnerCaseState                @default(DRAFT)
-  pricingState        PartnerPricingState             @default(READY_TO_FINALIZE)
+  pricingState        PartnerPricingState             @default(INCOMPLETE)
   customerConfirmationState PartnerCustomerConfirmationState @default(NOT_SENT)
   stateRevision       Int                             @default(1)
   committedAt         DateTime?                       @db.Timestamptz(3)
@@ -9296,7 +9296,7 @@ model SabalanToPartnerSaleRecord {
   commercialAccountId String
   expectedRevision    Int
   integrityHash       String
-  pricingState        PartnerPricingState                @default(READY_TO_FINALIZE)
+  pricingState        PartnerPricingState                @default(INCOMPLETE)
   case                PartnerSaleCase                    @relation("PartnerInternalOwner", fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   caseLink            PartnerSaleCase?                   @relation("PartnerInternalLink")
   fulfillmentLineages PartnerFulfillmentLineage[]
@@ -9323,7 +9323,7 @@ model PartnerCaseRevision {
   predecessorRevision     Int?
   schemaVersion           Int                                @default(1)
   integrityHash           String
-  pricingState            PartnerPricingState                  @default(READY_TO_FINALIZE)
+  pricingState            PartnerPricingState                  @default(INCOMPLETE)
   graphHash               String
   graph                   Json
   partySnapshots          Json

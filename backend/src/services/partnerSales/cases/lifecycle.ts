@@ -203,8 +203,10 @@ export async function readPartnerRevisionProjections(tx: Transaction, owner: Rev
   const revision = await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: {
     caseId: owner.caseId, revision: owner.revision } } });
   if (!row || !revision || revision.integrityHash !== owner.integrityHash) return undefined;
-  return parseViews(tx, { ...row, headRevision: owner.revision, integrityHash: owner.integrityHash, state: 'DRAFT', head: revision,
-    internalRecord: { ...row.internalRecord, expectedRevision: owner.revision, integrityHash: owner.integrityHash },
+  return parseViews(tx, { ...row, headRevision: owner.revision, integrityHash: owner.integrityHash,
+    pricingState: revision.pricingState, state: 'DRAFT', head: revision,
+    internalRecord: { ...row.internalRecord, pricingState: revision.pricingState,
+      expectedRevision: owner.revision, integrityHash: owner.integrityHash },
     customerContract: { ...row.customerContract, partnerRevision: owner.revision, partnerIntegrityHash: owner.integrityHash } });
 }
 

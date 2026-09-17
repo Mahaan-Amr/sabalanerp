@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { parseCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { canonicalHash, type PartnerCommand } from '@sabalanerp/partner-sales-contracts';
-import { createPartnerCaseService, type PartnerCaseDependencies } from '../partnerSales/cases/aggregate';
+import { createPartnerCaseService, createPrismaPartnerCaseService, type PartnerCaseDependencies } from '../partnerSales/cases/aggregate';
 import { createPartnerCaseLifecycleService } from '../partnerSales/cases/lifecycle';
 import { buildRevisionEvidence, validateResolvedDraft, type ResolvedCaseDraft } from '../partnerSales/cases/revisions';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
+import { createPartnerLifecycleDatabase } from './partnerCaseLifecycleDatabase';
+import { consumePrismaPartnerTechnicalRecovery } from '../partnerSales/cases/prismaComposition';
 
 function databaseUrl() {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -274,6 +277,74 @@ test('customer-complete save creates one numbered unpriced Case without operatio
     assert.equal(retained.events[0]?.reason, reason);
     assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
   });
+});
+
+test('concurrent first-save retries create one numbered unpriced Case and one durable outcome', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()),
+    sourceDatabaseUrl: databaseUrl() });
+  const setup = temporary.client(), firstClient = temporary.client(), secondClient = temporary.client();
+  const prefix = `partner-case-concurrent-${temporary.runId}`;
+  const ids = { partnerId: `${prefix}-partner`, departmentId: `${prefix}-department`, customerId: `${prefix}-customer`,
+    profileId: `${prefix}-profile`, accountId: `${prefix}-account`, caseId: `${prefix}-case`,
+    inquiryId: `${prefix}-unused-inquiry`, inquiryRowId: `${prefix}-unused-row` };
+  try {
+    await setup.$transaction(async tx => {
+      await tx.user.create({ data: { id: ids.partnerId, username: ids.partnerId,
+        email: `${ids.partnerId}@example.invalid`, password: 'not-a-login', firstName: 'Partner', lastName: 'Concurrent' } });
+      await tx.department.create({ data: { id: ids.departmentId, name: ids.departmentId, namePersian: 'فروش هم‌زمان' } });
+      await tx.partnerProfile.create({ data: { id: ids.profileId, userId: ids.partnerId, state: 'ACTIVE' } });
+      await tx.partnerCommercialAccount.create({ data: { id: ids.accountId, profileId: ids.profileId } });
+      await tx.partnerReleaseCohort.create({ data: { id: ids.profileId, name: ids.profileId,
+        activationEnabled: true, enrollmentPaused: false, operationalPaused: false } });
+      await tx.partnerOperationsControl.create({ data: { id: 'partner-operations', cohortId: ids.profileId,
+        enrollmentPaused: false, operationalPaused: false } });
+      await tx.partnerCohortMembership.create({ data: { id: ids.profileId, profileId: ids.profileId,
+        cohortId: ids.profileId, actorId: ids.partnerId, eligibilityEvidence: { fixture: true } } });
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${ids.profileId}, true)`;
+      await tx.crmCustomer.create({ data: { id: ids.customerId, firstName: 'Customer', lastName: 'Concurrent',
+        ownerUserId: ids.partnerId, createdBy: ids.partnerId, partnerOwnerProfileId: ids.profileId, partnerRevision: 1 } });
+    });
+    const priced = await command(ids);
+    const intent = { ...priced.intent, rows: priced.intent.rows.map(({ approvedRowBinding: _binding, ...row }) => row) };
+    const input = { ...priced, intent, idempotency: { ...priced.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent }) } };
+    const createService = (database: PrismaClient) => createPrismaPartnerCaseService({ database, actorId: ids.partnerId,
+      authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
+      authorizeProject: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } }),
+      recordEvidenceReview: async () => undefined,
+      resolveDraft: async () => ({ ok: true, value: await resolved(ids, ids.caseId) }),
+      consumeRecovery: async () => ({ ok: true, value: undefined }),
+    });
+    const [first, second] = await Promise.all([createService(firstClient).execute(input), createService(secondClient).execute(input)]);
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(second.ok, true, JSON.stringify(second));
+    if (first.ok && second.ok) assert.deepEqual([first.value.replayed, second.value.replayed].sort(), [false, true]);
+    assert.equal(await setup.partnerSaleCase.count({ where: { id: ids.caseId } }), 1);
+    assert.equal(await setup.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
+    assert.equal(await setup.partnerCommandOutcome.count({ where: { actorId: ids.partnerId,
+      operation: 'CASE_SUBMIT', targetScope: ids.caseId } }), 1);
+
+    const recoveryId = `${prefix}-recovery`;
+    await setup.salesContractEditSession.create({ data: { draftId: recoveryId, ownerUserId: ids.partnerId,
+      browserSessionId: `${prefix}-browser`, leaseToken: randomUUID(), schemaVersion: 2, baseRevision: 0,
+      purpose: 'PARTNER_TECHNICAL', recovery: { kind: 'partner-technical-recovery', version: 1,
+        recoveryRevision: 1, updatedAt: Date.now(), draft: { schemaVersion: 1, inputRevision: 1, rows: [] },
+        validatedSnapshots: [] } } });
+    const contractId = (await setup.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId },
+      select: { customerContractId: true } })).customerContractId;
+    const binding = { actorId: ids.partnerId, recoveryId, recoveryRevision: 1, customerContractId: contractId };
+    const bound = await setup.$transaction(tx => consumePrismaPartnerTechnicalRecovery(tx, binding));
+    const reused = await setup.$transaction(tx => consumePrismaPartnerTechnicalRecovery(tx, binding));
+    assert.equal(bound.ok, true, JSON.stringify(bound));
+    assert.equal(reused.ok, true, JSON.stringify(reused));
+    assert.equal((await setup.salesContractEditSession.findUniqueOrThrow({ where: { draftId: recoveryId } })).contractId,
+      contractId, 'first save binds rather than deletes immutable recovery evidence needed by later revisions');
+    assert.equal(await setup.partnerCommandOutcome.count({ where: { actorId: ids.partnerId,
+      operation: 'PARTNER_SUBMITTED_TECHNICAL_EVIDENCE_V1', targetScope: recoveryId } }), 1);
+  } finally {
+    await Promise.all([setup.$disconnect(), firstClient.$disconnect(), secondClient.$disconnect()]);
+    await temporary.cleanup();
+  }
 });
 
 async function reviseCommand(ids: Record<string, string>, submitted: Extract<PartnerCommand, { type: 'CASE_SUBMIT' }>,

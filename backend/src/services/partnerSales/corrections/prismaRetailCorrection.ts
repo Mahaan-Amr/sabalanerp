@@ -90,6 +90,7 @@ async function stageNormalized(tx: Tx, before: RetailCorrectionRecord, after: Re
     const { partner, accounting, fulfillment, customer } = prepared.projections;
     await tx.partnerCaseRevision.create({ data: { caseId: after.caseId, revision: owner.revision,
       predecessorRevision: correction!.predecessor.revision, integrityHash: owner.integrityHash,
+      pricingState: predecessor.pricingState,
       graphHash: predecessor.graphHash, graph: json(predecessor.graph), partySnapshots: json(prepared.fields.partySnapshots),
       wholesaleEnvelope: json(prepared.fields.wholesaleEnvelope), retailEnvelope: json(prepared.fields.retailEnvelope),
       paymentEvidence: json(prepared.fields.paymentEvidence), customerContent: json(prepared.fields.customerContent),

@@ -272,13 +272,14 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
     ownerUserId: ids.partnerId, createdBy: ids.partnerId } });
   await tx.partnerSaleCase.create({ data: { id: ids.caseId, caseNumber: partner.caseNumber, profileId: ids.profileId,
     customerId: ids.customerId, internalRecordId: ids.internalId, customerContractId: ids.contractId,
-    headRevision: 1, integrityHash } });
+    headRevision: 1, integrityHash, pricingState: 'READY_TO_FINALIZE' } });
   await tx.partnerCaseRevision.create({ data: { caseId: ids.caseId, revision: 1, integrityHash, graphHash,
     graph: storedGraph, partySnapshots, wholesaleEnvelope, retailEnvelope, paymentEvidence, customerContent: revisionCustomerContent,
-    internalProjection: { partner, accounting: storedAccounting, fulfillment }, customerProjection: customer,
+    pricingState: 'READY_TO_FINALIZE', internalProjection: { partner, accounting: storedAccounting, fulfillment }, customerProjection: customer,
     actorId: ids.partnerId, commandId: `${ids.caseId}-create` } });
   await tx.sabalanToPartnerSaleRecord.create({ data: { id: ids.internalId, recordNumber: accounting.recordNumber,
-    caseId: ids.caseId, commercialAccountId: ids.accountId, expectedRevision: 1, integrityHash } });
+    caseId: ids.caseId, commercialAccountId: ids.accountId, expectedRevision: 1, integrityHash,
+    pricingState: 'READY_TO_FINALIZE' } });
   await tx.salesContract.create({ data: { id: ids.contractId, contractNumber: customer.contractNumber, title: 'Partner customer sale',
     titlePersian: 'قرارداد فروش مشتری همکار', content: 'متن تست', customerId: ids.customerId, departmentId: ids.departmentId,
     createdBy: ids.partnerId, responsibleSellerId: ids.partnerId, partnerKind: 'PARTNER_CUSTOMER', partnerCaseId: ids.caseId,
@@ -427,6 +428,19 @@ test('projection content that is not derived from canonical revision evidence fa
     assert.deepEqual(reviews, ['INTEGRITY_CONFLICT']);
     assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).state, 'DRAFT');
   }, true));
+
+test('an immutable priced revision remains readable after current pricing returns to awaiting inquiry', () =>
+  fixture(async (tx, ids, owner) => {
+    await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+    await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: { pricingState: 'AWAITING_INQUIRY' } });
+    await tx.sabalanToPartnerSaleRecord.update({ where: { id: ids.internalId },
+      data: { pricingState: 'AWAITING_INQUIRY' } });
+
+    const historical = await readPartnerRevisionProjections(tx, owner);
+    assert.ok(historical, 'historical reads must use the immutable revision pricing state, not the mutable current state');
+    assert.equal(historical.partner.pricingState, 'READY_TO_FINALIZE');
+    assert.ok(historical.accounting, 'a historically priced revision must retain its canonical Accounting projection');
+  }));
 
 test('operational pause blocks commitment but support cancellation remains atomic and retained', () => fixture(async (tx, ids, owner) => {
   const cancelled: string[] = [];

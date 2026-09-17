@@ -279,6 +279,7 @@ async function stageShared(tx: Transaction, candidate: PartnerCorrectionCandidat
   const payload = candidate.payload;
   await tx.partnerCaseRevision.create({ data: { caseId: input.snapshot.caseId, revision: candidate.owner.revision,
     predecessorRevision: input.snapshot.owner.revision, integrityHash: candidate.owner.integrityHash,
+    pricingState: 'READY_TO_FINALIZE',
     graphHash: payload.evidence.graphHash, graph: payload.evidence.graph, partySnapshots: payload.evidence.partySnapshots,
     wholesaleEnvelope: payload.evidence.wholesaleEnvelope, retailEnvelope: payload.evidence.retailEnvelope,
     paymentEvidence: payload.evidence.paymentEvidence, customerContent: payload.evidence.customerContent,

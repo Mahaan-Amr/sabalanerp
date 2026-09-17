@@ -25,6 +25,44 @@ const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringif
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
+/** Atomically binds immutable technical evidence to the customer contract on
+ * first save, while allowing later Draft revisions to reuse that exact bound
+ * evidence. The editable lease remains unavailable through the recovery API. */
+export async function consumePrismaPartnerTechnicalRecovery(tx: Transaction, input: {
+  actorId: string;
+  recoveryId: string;
+  recoveryRevision: number;
+  customerContractId: string;
+}): Promise<Result<void>> {
+  const current = await tx.salesContractEditSession.findUnique({ where: { draftId: input.recoveryId },
+    select: { id: true, ownerUserId: true, purpose: true, contractId: true, recovery: true } });
+  const recovery = decodeTechnicalRecovery(current?.recovery);
+  if (!current || current.ownerUserId !== input.actorId || current.purpose !== 'PARTNER_TECHNICAL') {
+    return { ok: false, error: partnerError('NOT_FOUND') };
+  }
+  if ((current.contractId !== null && current.contractId !== input.customerContractId) ||
+      recovery?.recoveryRevision !== input.recoveryRevision) {
+    return { ok: false, error: partnerError('ROW_STALE') };
+  }
+  const evidence = { schemaVersion: 1, customerContractId: input.customerContractId,
+    recoveryRevision: input.recoveryRevision, validatedSnapshots: recovery.validatedSnapshots };
+  const payloadHash = await canonicalHash(evidence);
+  const prior = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: {
+    actorId: input.actorId, operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key: 'v1' } } });
+  if (prior && (prior.payloadHash !== payloadHash || await canonicalHash(prior.outcome) !== prior.payloadHash)) {
+    return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+  }
+  if (!prior) await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: input.actorId,
+    operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key: 'v1',
+    payloadHash, outcome: json(evidence) } });
+  if (current.contractId === input.customerContractId) return { ok: true, value: undefined };
+  const updated = await tx.salesContractEditSession.updateMany({ where: { id: current.id, contractId: null,
+    ownerUserId: input.actorId, purpose: 'PARTNER_TECHNICAL', recovery: { equals: json(current.recovery) } },
+    data: { contractId: input.customerContractId } });
+  return updated.count === 1 ? { ok: true, value: undefined }
+    : { ok: false, error: partnerError('ROW_STALE') };
+}
+
 function phone(values: unknown[]): string | undefined {
   for (const value of values) {
     if (typeof value !== 'string') continue;
@@ -229,27 +267,8 @@ export function createPrismaPartnerCaseDependencies(input: {
         outcome: json({ schemaVersion: 1, correlationId: review.correlationId, code: review.code, evidence: review.evidence }) } });
     },
     resolveDraft: (tx, request) => resolvePrismaPartnerCaseDraft(tx, request),
-    consumeRecovery: async (tx, request) => {
-      if (request.actorId !== input.actorId) return { ok: false, error: partnerError('NOT_FOUND') };
-      const current = await tx.salesContractEditSession.findUnique({ where: { draftId: request.recoveryId },
-        select: { id: true, ownerUserId: true, purpose: true, contractId: true, recovery: true } });
-      const recovery = decodeTechnicalRecovery(current?.recovery);
-      if (!current || current.ownerUserId !== input.actorId || current.purpose !== 'PARTNER_TECHNICAL') {
-        return { ok: false, error: partnerError('NOT_FOUND') };
-      }
-      if (current.contractId !== null || recovery?.recoveryRevision !== request.recoveryRevision) {
-        return { ok: false, error: partnerError('ROW_STALE') };
-      }
-      const evidence = { schemaVersion: 1, customerContractId: request.customerContractId,
-        recoveryRevision: request.recoveryRevision, validatedSnapshots: recovery.validatedSnapshots };
-      await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: input.actorId,
-        operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: request.recoveryId, key: 'v1',
-        payloadHash: await canonicalHash(evidence), outcome: json(evidence) } });
-      const updated = await tx.salesContractEditSession.deleteMany({ where: { id: current.id, contractId: null,
-        ownerUserId: input.actorId, purpose: 'PARTNER_TECHNICAL', recovery: { equals: json(current.recovery) } },
-      });
-      return updated.count === 1 ? { ok: true, value: undefined }
-        : { ok: false, error: partnerError('ROW_STALE') };
-    },
+    consumeRecovery: (tx, request) => request.actorId === input.actorId
+      ? consumePrismaPartnerTechnicalRecovery(tx, request)
+      : Promise.resolve({ ok: false as const, error: partnerError('NOT_FOUND') }),
   };
 }

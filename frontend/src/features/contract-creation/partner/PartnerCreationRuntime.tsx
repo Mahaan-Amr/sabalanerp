@@ -618,10 +618,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         if (!active || active.actorId !== submissionActorId || active.access.recoveryId !== submissionRecoveryId) {
           throw new Error('Recovery changed');
         }
-        const refreshed = await reacquireRuntime(active);
-        if (!refreshed) throw new Error('Recovery lease unavailable');
-        const current = await ports.saved.readSaved({ ...refreshed.access, recoveryRevision: refreshed.saved.recoveryRevision });
-        if (!current.ok || current.value.graphHash !== refreshed.saved.graphHash) throw new Error('Recovery changed');
+        if (command.type === 'CASE_SUBMIT') {
+          const refreshed = await reacquireRuntime(active);
+          if (!refreshed) throw new Error('Recovery lease unavailable');
+          const current = await ports.saved.readSaved({ ...refreshed.access, recoveryRevision: refreshed.saved.recoveryRevision });
+          if (!current.ok || current.value.graphHash !== refreshed.saved.graphHash) throw new Error('Recovery changed');
+        }
         window.localStorage.setItem(casePendingKey(submissionActorId), JSON.stringify(command));
       },
       clearPending: async () => { window.localStorage.removeItem(casePendingKey(submissionActorId)); },

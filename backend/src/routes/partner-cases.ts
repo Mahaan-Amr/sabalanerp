@@ -454,7 +454,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             actions: { canPreview: output && Boolean(row.outputs[0]),
               canIssue: output && commit && row.pricingState === 'READY_TO_FINALIZE' && Boolean(row.outputs[0]) &&
                 ['CUSTOMER_APPROVED', 'COMMITTED'].includes(row.state),
-              canSendConfirmation: output && ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION'].includes(row.state),
+              canSendConfirmation: output && row.pricingState === 'READY_TO_FINALIZE' &&
+                ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION'].includes(row.state),
               canRequestCorrection: correction && row.state === 'COMMITTED',
               canCancel: cancel && ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(row.state),
               canRequestVoid: voidRequest && row.state === 'COMMITTED' } });
@@ -472,8 +473,11 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return;
     }
     const row = await prisma.partnerSaleCase.findUnique({ where: { id: request.params.caseId },
-      select: { customerContractId: true } });
+      select: { customerContractId: true, pricingState: true } });
     if (!row) { respond(response, { ok: false, error: partnerError('NOT_FOUND') }); return; }
+    if (row.pricingState !== 'READY_TO_FINALIZE') {
+      respond(response, { ok: false, error: partnerError('STATE_CONFLICT') }); return;
+    }
     const result = await contractConfirmationService.sendForConfirmation({ contractId: row.customerContractId,
       requestedBy: request.user.id, resend: true, meta: { ipAddress: request.ip,
         userAgent: request.get('user-agent') } });

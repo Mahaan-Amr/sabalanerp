@@ -150,7 +150,8 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     notices={<div className="mb-4 space-y-3">
       {result.phase === 'created' && result.case && <div className="flex flex-wrap items-center gap-2">
         <ErpInlineState kind="success" title={`پرونده ${result.case.caseNumber} ذخیره شد و در همین Wizard قابل مشاهده است.`} />
-        {onSendConfirmation && (confirmationSent ? <ErpInlineState kind="success" title="پیامک تأیید قرارداد برای مشتری ارسال شد." />
+        {onSendConfirmation && result.case.pricingState === 'READY_TO_FINALIZE' &&
+          (confirmationSent ? <ErpInlineState kind="success" title="پیامک تأیید قرارداد برای مشتری ارسال شد." />
           : <ErpButton variant="solid" label="ارسال برای مشتری" onClick={() => {
             setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
               .then(() => setConfirmationSent(true)).catch(() => setError('ارسال پیامک انجام نشد؛ پرونده ذخیره شده و می‌توانید دوباره تلاش کنید.'));

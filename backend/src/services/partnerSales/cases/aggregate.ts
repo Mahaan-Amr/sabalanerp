@@ -210,6 +210,10 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       return { ok: false, error: partnerError('CONFIG_MISMATCH') } as const;
     }
     const previous = current.head.rowBindings.find(item => item.productRowId === row.productRowId);
+    if (!row.approvedRowBinding) {
+      approvedRows.push({ ...saved, wholesaleUnitPriceAmount: undefined, retailUnitPrice: row.retailUnitPrice });
+      continue;
+    }
     const frozen = previous?.configurationHash === saved.configurationHash
       ? ApprovedInquirySchema.safeParse(previous.inquiryUsages[0]?.approvalSnapshot) : undefined;
     if (frozen?.success && frozen.data.inquiryId === row.approvedRowBinding.inquiryId &&
@@ -271,19 +275,23 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   const maximum = await tx.partnerCaseEvent.aggregate({ where: { caseId }, _max: { sequence: true } });
   markMutated();
   await tx.partnerCaseRevision.create({ data: { caseId, revision, predecessorRevision: current.headRevision, integrityHash,
+    pricingState: evidence.value.pricingState,
     graphHash: evidence.value.graphHash, graph: json(evidence.value.graph), partySnapshots: json(evidence.value.partySnapshots),
     wholesaleEnvelope: json(evidence.value.wholesaleEnvelope), retailEnvelope: json(evidence.value.retailEnvelope),
     paymentEvidence: json(evidence.value.paymentEvidence), customerContent: json(evidence.value.customerContent),
-    internalProjection: json({ partner: projections.value.partner, accounting: projections.value.accounting,
-      fulfillment: projections.value.fulfillment }), customerProjection: json(projections.value.customer),
+    internalProjection: json({ partner: projections.value.partner,
+      ...(projections.value.accounting ? { accounting: projections.value.accounting } : {}),
+      ...(projections.value.fulfillment ? { fulfillment: projections.value.fulfillment } : {}) }),
+    customerProjection: json(projections.value.customer),
     actorId: dependencies.actorId, commandId: command.commandId } });
   const updated = await tx.partnerSaleCase.updateMany({ where: { id: caseId, headRevision: current.headRevision,
     integrityHash: current.integrityHash, state: 'DRAFT', stateRevision: current.stateRevision },
     data: { headRevision: revision, integrityHash, customerId: resolved.value.customerId,
+      pricingState: evidence.value.pricingState,
       stateRevision: { increment: 1 } } });
   if (updated.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
   await tx.sabalanToPartnerSaleRecord.update({ where: { id: current.internalRecordId },
-    data: { expectedRevision: revision, integrityHash } });
+    data: { expectedRevision: revision, integrityHash, pricingState: evidence.value.pricingState } });
   await tx.salesContract.update({ where: { id: current.customerContractId }, data: {
     partnerRevision: revision, partnerIntegrityHash: integrityHash, customerId: resolved.value.customerId,
     totalAmount: evidence.value.retailEnvelope.totals.payable, content: resolved.value.legalText,
@@ -297,6 +305,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     unit: row.unit, precisionPolicyVersion: row.precisionPolicyVersion })) });
   for (const row of approvedRows) {
     const binding = command.intent.rows.find(item => item.productRowId === row.productRowId)!.approvedRowBinding;
+    if (!binding || !row.approval) continue;
     const usage = row.frozen ? await bindFrozenApprovalUsage(tx, { binding, partnerSellerId: dependencies.actorId,
       configurationHash: row.configurationHash, caseId, caseRevision: revision, productRowId: row.productRowId,
       approval: row.approval }) : await bindApprovalUsage(tx, { binding, partnerSellerId: dependencies.actorId,
@@ -465,6 +474,10 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
             evidence: { recoveryRevision: command.intent.recoveryRevision, productRowId: row.productRowId } });
           return { ok: false, error: partnerError('CONFIG_MISMATCH') };
         }
+        if (!row.approvedRowBinding) {
+          approvedRows.push({ ...saved, wholesaleUnitPriceAmount: undefined, retailUnitPrice: row.retailUnitPrice });
+          continue;
+        }
         const approval = await resolveApprovalForUse(tx, { binding: row.approvedRowBinding,
           partnerSellerId: dependencies.actorId, configurationHash: saved.configurationHash });
         if (!approval.ok) {
@@ -504,18 +517,22 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
       mutated = true;
       await tx.partnerSaleCase.create({ data: { id: caseId, caseNumber: ids.caseNumber, profileId: resolved.value.profileId,
         customerId: resolved.value.customerId, internalRecordId: ids.internalRecordId,
-        customerContractId: ids.customerContractId, headRevision: 1, integrityHash } });
+        customerContractId: ids.customerContractId, headRevision: 1, integrityHash,
+        pricingState: evidence.value.pricingState } });
       dependencies.failpoint?.('AFTER_CASE_ROOT');
       await tx.partnerCaseRevision.create({ data: { caseId, revision: 1, integrityHash,
+        pricingState: evidence.value.pricingState,
         graphHash: evidence.value.graphHash, graph: json(evidence.value.graph), partySnapshots: json(evidence.value.partySnapshots),
         wholesaleEnvelope: json(evidence.value.wholesaleEnvelope), retailEnvelope: json(evidence.value.retailEnvelope),
         paymentEvidence: json(evidence.value.paymentEvidence), customerContent: json(evidence.value.customerContent),
-        internalProjection: json({ partner: projections.value.partner, accounting: projections.value.accounting,
-          fulfillment: projections.value.fulfillment }), customerProjection: json(projections.value.customer),
+        internalProjection: json({ partner: projections.value.partner,
+          ...(projections.value.accounting ? { accounting: projections.value.accounting } : {}),
+          ...(projections.value.fulfillment ? { fulfillment: projections.value.fulfillment } : {}) }),
+        customerProjection: json(projections.value.customer),
         actorId: dependencies.actorId, commandId: command.commandId } });
       await tx.sabalanToPartnerSaleRecord.create({ data: { id: ids.internalRecordId,
         recordNumber: ids.internalRecordNumber, caseId, commercialAccountId: resolved.value.commercialAccountId,
-        expectedRevision: 1, integrityHash } });
+        expectedRevision: 1, integrityHash, pricingState: evidence.value.pricingState } });
       await tx.salesContract.create({ data: { id: ids.customerContractId, contractNumber: ids.customerContractNumber,
         title: 'Partner customer sale', titlePersian: 'قرارداد فروش مشتری همکار', content: resolved.value.legalText,
         customerId: resolved.value.customerId, departmentId: resolved.value.departmentId,
@@ -536,6 +553,7 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         unit: row.unit, precisionPolicyVersion: row.precisionPolicyVersion })) });
       for (const row of approvedRows) {
         const binding = command.intent.rows.find(item => item.productRowId === row.productRowId)!.approvedRowBinding;
+        if (!binding || !row.approval) continue;
         const usage = await bindApprovalUsage(tx, { binding, partnerSellerId: dependencies.actorId,
           configurationHash: row.configurationHash, caseId, caseRevision: 1, productRowId: row.productRowId });
         if (!usage.ok) return usage;

@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
+  CustomerPaymentPlanSchema,
   PartnerCaseViewSchema,
   PartnerEventSchema,
   canonicalJson,
@@ -81,7 +82,7 @@ export function createPrismaRetailCollectionRepository(input: {
           if (!authorization.ok) return authorization;
           const permission = authorization.value as PermissionContext;
           const planHistory = row.paymentPlans.filter(item => item.caseRevision <= row.headRevision).map(item => item.evidence);
-          const parsedPlans = planHistory.map(item => PartnerCaseViewSchema.shape.customerPaymentPlan.safeParse(item));
+          const parsedPlans = planHistory.map(item => CustomerPaymentPlanSchema.safeParse(item));
           if (!parsedPlans.length || parsedPlans.some(item => !item.success)) {
             return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           }

@@ -48,13 +48,16 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
   const availableRows = inquiryRows ?? inquiry?.rows ?? [];
   const approved = availableRows.filter(row => isUsableInquiryRow(row, now))
     .filter(row => !mismatchedRowIds.includes(row.rowId));
-  if (!approved.length) return null;
   const subjects = saved.data.pricingSubjects ?? saved.data.rows.map(row => ({ configurationRef: row.configurationRef,
     role: 'PRIMARY' as const }));
-  if (approved.length !== subjects.length || subjects.some(subject => !approved.some(row =>
-    row.configurationRef.productRowId === subject.configurationRef.productRowId))) return null;
+  const subjectRows: PartnerInquiryRow[] = subjects.map((subject, index) => approved.find(row =>
+    row.configurationRef.productRowId === subject.configurationRef.productRowId) ?? {
+      rowId: `${subject.configurationRef.productRowId}-awaiting-inquiry`, revision: 1,
+      description: `محصول ${index + 1}`, state: 'PENDING', configuration: [], usedCaseNumbers: [],
+      configurationRef: subject.configurationRef,
+    });
   const configured = [];
-  for (const row of approved.filter(item => subjects.some(subject => subject.role === 'PRIMARY' &&
+  for (const row of subjectRows.filter(item => subjects.some(subject => subject.role === 'PRIMARY' &&
     subject.configurationRef.productRowId === item.configurationRef.productRowId))) {
     const technical = saved.data.rows.find(item => item.configurationRef.productRowId === row.configurationRef.productRowId);
     if (!technical || technical.configurationRef.recoveryId !== row.configurationRef.recoveryId ||
@@ -65,13 +68,13 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
   }
   if (configured.length !== saved.data.rows.length || new Set(configured.map(row => row.productRowId)).size !== configured.length) return null;
   const rows = defaultPartnerRetailRows(configured);
-  const additionalMaterialApprovals = approved.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&
+  const additionalMaterialApprovals = subjectRows.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&
     subject.configurationRef.productRowId === row.configurationRef.productRowId) && row.approvedRowBinding
     ? [{ pricingSubjectId: row.configurationRef.productRowId, approvedRowBinding: row.approvedRowBinding }] : []);
   const intent = { ...base, graphHash: saved.data.graphHash, belowCostConfirmed: false, additionalMaterialApprovals,
     rows: partnerRetailIntentRows(rows),
   };
-  const materialInquiryRows = approved.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&
+  const materialInquiryRows = subjectRows.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&
     subject.configurationRef.productRowId === row.configurationRef.productRowId)
     ? [{ pricingSubjectId: row.configurationRef.productRowId, inquiryRow: row }] : []);
   return { intent, rows, materialInquiryRows, step: 'date' };

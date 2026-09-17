@@ -7,7 +7,8 @@ const ref = { caseId: 'case-313', revision: 1, integrityHash: hash };
 export const caseFixture = {
   schemaVersion: 1, caseId: 'case-313', caseNumber: 'CASE-313', partnerSellerId: 'partner-313',
   creatorId: 'partner-313', responsibleSellerId: 'partner-313', salesCreditOwnerId: 'partner-313',
-  customerId: 'customer-313', state: 'DRAFT', head: ref,
+  customerId: 'customer-313', state: 'DRAFT', pricingState: 'AWAITING_INQUIRY',
+  customerConfirmationState: 'NOT_SENT', head: ref,
   graph: { owner: ref, schemaVersion: 1, graphHash: hash, productRowIds: ['row-313'] },
   internalRecord: { kind: 'SABALAN_TO_PARTNER', recordId: 'internal-313', recordNumber: 'INTERNAL-313', owner: ref, commercialAccountId: 'account-313' },
   customerContract: { kind: 'PARTNER_CUSTOMER', contractId: 'contract-313', contractNumber: 'CUSTOMER-313', owner: ref },
@@ -23,4 +24,13 @@ test('Case owns an exact pair, graph and immutable Partner attribution', () => {
   ]) assert.equal(PartnerSaleCaseSchema.safeParse({ ...caseFixture, ...mutation }).success, false);
   assert.equal(checkExpectedRevision(ref, { ...ref, revision: 2 })?.code, 'ROW_STALE');
   assert.equal(checkExpectedRevision(ref, { ...ref, integrityHash: 'sha256-v1:' + 'b'.repeat(64) })?.code, 'INTEGRITY_CONFLICT');
+});
+
+test('commercial, Sabalan pricing and customer confirmation states are independent', () => {
+  const parsed = PartnerSaleCaseSchema.parse(caseFixture);
+  assert.equal(parsed.state, 'DRAFT');
+  assert.equal(parsed.pricingState, 'AWAITING_INQUIRY');
+  assert.equal(parsed.customerConfirmationState, 'NOT_SENT');
+  assert.equal(PartnerSaleCaseSchema.safeParse({ ...caseFixture, pricingState: 'READY_TO_FINALIZE',
+    customerConfirmationState: 'REJECTED' }).success, true);
 });

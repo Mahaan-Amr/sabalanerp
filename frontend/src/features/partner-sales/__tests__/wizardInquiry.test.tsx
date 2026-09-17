@@ -84,8 +84,13 @@ test('exact product-row references own entry; quantity and delivery changes do n
   assert.equal(explicitlyPriced?.intent.rows[0].retailUnitPrice.amount, '1250');
   assert.equal(enterPartnerWizard({ ...input, validated: { ...input.validated,
     recoveryRevision: input.validated.recoveryRevision + 1 } }), null);
-  assert.equal(enterPartnerWizard({ ...input, mismatchedRowIds: [fixture.inquiry.rows[0].rowId] }), null);
-  assert.equal(enterPartnerWizard({ ...input, now: Date.parse(fixture.approval.expiresAt) }), null);
+  const mismatched = enterPartnerWizard({ ...input, mismatchedRowIds: [fixture.inquiry.rows[0].rowId],
+    retailUnitPrices: new Map([[fixture.configurationDraft.productRowId, { amount: '1250', currency: 'IRR' as const }]]) });
+  assert.equal(mismatched?.intent.rows[0].approvedRowBinding, undefined);
+  assert.equal(mismatched?.intent.rows[0].retailUnitPrice.amount, '1250');
+  const expired = enterPartnerWizard({ ...input, now: Date.parse(fixture.approval.expiresAt),
+    retailUnitPrices: new Map([[fixture.configurationDraft.productRowId, { amount: '1250', currency: 'IRR' as const }]]) });
+  assert.equal(expired?.intent.rows[0].approvedRowBinding, undefined);
 });
 
 test('a pending successor remains visible while its valid predecessor is still usable', () => {
@@ -119,7 +124,7 @@ test('bulk inquiry retry replays safe recovery references and the original succe
   assert.equal(submit.getSnapshot().phase, 'submitted');
 });
 
-test('expiry at the exact boundary removes an approval from the Dock without removing its evidence', () => {
+test('expiry removes approval readiness but still permits an unpriced Case save', () => {
   const { inquiry } = createPartnerFixtures();
   const html = renderToStaticMarkup(<PartnerInquiryPanel inquiry={inquiry}
     now={Date.parse(inquiry.rows[0].expiresAt!)} pending={false}
@@ -127,7 +132,8 @@ test('expiry at the exact boundary removes an approval from the Dock without rem
   assert.match(html, /۰ ردیف آماده/);
   assert.match(html, /پایان اعتبار/);
   assert.match(html, /۸۰۰ ریال/);
-  assert.match(html, /disabled=""[^>]*><span>ساخت پرونده و ورود به Wizard/);
+  assert.match(html, /ساخت پرونده و ورود به Wizard/);
+  assert.doesNotMatch(html, /disabled=""[^>]*><span>ساخت پرونده و ورود به Wizard/);
 });
 
 test('a late earlier refresh cannot replace the latest partial response', async () => {

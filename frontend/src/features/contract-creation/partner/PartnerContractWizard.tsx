@@ -101,20 +101,6 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     finally { recoveryFlight.current = false; setRecoveryPending(false); }
   };
 
-  if (result.phase === 'created' && result.case) return <section dir="rtl" className="space-y-4">
-    <ErpInlineState kind="success" title={`پرونده ${result.case.caseNumber} ثبت شد.`} />
-    {result.message && <ErpInlineState kind="stale" title={result.message} action={{ label: 'تلاش مجدد برای پاک‌سازی بازیابی', onClick: () => void submission.retry() }} />}
-    {onSendConfirmation && (confirmationSent ? <ErpInlineState kind="success" title="پیامک تأیید قرارداد برای مشتری ارسال شد." />
-      : <ErpButton variant="solid" label="ارسال پیامک تأیید" onClick={() => {
-        setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
-          .then(() => setConfirmationSent(true)).catch(() => setError('ارسال پیامک انجام نشد؛ پرونده ثبت شده و می‌توانید دوباره تلاش کنید.'));
-      }} />)}
-    <ErpButton variant="outline" label="باز کردن پرونده" onClick={() => {
-      void Promise.resolve().then(() => onOpenCase(result.case!.owner.caseId))
-        .catch(() => setError('پرونده ثبت شده است؛ باز کردن جزئیات را دوباره امتحان کنید.'));
-    }} />
-    {error && <ErpInlineState kind="error" title={error} />}
-  </section>;
   if (recovery.state === 'loading') return <ErpLoading />;
   if (recovery.state === 'blocked') return <ErpInlineState kind="permission" title={recovery.message} />;
   if (recovery.state === 'offer' || recovery.state === 'takeover') return <section dir="rtl" className="space-y-4">
@@ -150,8 +136,8 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     if (stepIndex < visibleSteps.length - 1) { move(stepIndex + 1); return; }
     const invalid = visibleSteps.map(step => ({ step, failure: validateStep(step.id, draft) })).find(item => item.failure);
     if (invalid) { onChange({ ...draft, step: invalid.step.id }); setError(invalid.failure); return; }
-    if (!draft.rows.length || unusable.length || new Set(draft.rows.map(row => row.productRowId)).size !== draft.rows.length) {
-      setError('اعتبار قیمت ردیف‌ها را با استعلام مجدد تکمیل کنید.'); return;
+    if (!draft.rows.length || new Set(draft.rows.map(row => row.productRowId)).size !== draft.rows.length) {
+      setError('حداقل یک محصول کامل و بدون ردیف تکراری لازم است.'); return;
     }
     // The visible rows own retail intent. A recovered or updated projection
     // must never submit stale hidden prices or approval bindings.
@@ -162,6 +148,20 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     currentStep={stepIndex + 1}
     steps={visiblePresentationSteps}
     notices={<div className="mb-4 space-y-3">
+      {result.phase === 'created' && result.case && <div className="flex flex-wrap items-center gap-2">
+        <ErpInlineState kind="success" title={`پرونده ${result.case.caseNumber} ذخیره شد و در همین Wizard قابل مشاهده است.`} />
+        {onSendConfirmation && (confirmationSent ? <ErpInlineState kind="success" title="پیامک تأیید قرارداد برای مشتری ارسال شد." />
+          : <ErpButton variant="solid" label="ارسال برای مشتری" onClick={() => {
+            setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
+              .then(() => setConfirmationSent(true)).catch(() => setError('ارسال پیامک انجام نشد؛ پرونده ذخیره شده و می‌توانید دوباره تلاش کنید.'));
+          }} />)}
+        <ErpButton variant="outline" label="باز کردن پرونده" onClick={() => {
+          void Promise.resolve().then(() => onOpenCase(result.case!.owner.caseId))
+            .catch(() => setError('پرونده ذخیره شده است؛ باز کردن جزئیات را دوباره امتحان کنید.'));
+        }} />
+      </div>}
+      {result.phase === 'created' && result.message && <ErpInlineState kind="stale" title={result.message}
+        action={{ label: 'تلاش مجدد برای پاک‌سازی بازیابی', onClick: () => void submission.retry() }} />}
       {unusable.map(row => <ErpInlineState key={row.id} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
         action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row.inquiryRow) }} />)}
       {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
@@ -174,8 +174,8 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       onSubmit: next,
       loading: mutatePending,
       canGoPrevious: !disabled && stepIndex > 0,
-      canGoNext: !disabled && !(stepIndex === visibleSteps.length - 1 && unusable.length > 0),
-      labels: { submit: 'ثبت پرونده' }
+      canGoNext: !disabled,
+      labels: { submit: 'ذخیره قرارداد' }
     }}
   >
     <div className="min-w-0 space-y-4" aria-label="ایجاد پرونده فروش همکار">

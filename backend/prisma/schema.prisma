@@ -9231,6 +9231,21 @@ enum PartnerCaseState {
   VOIDED
 }
 
+enum PartnerPricingState {
+  INCOMPLETE
+  AWAITING_INQUIRY
+  READY_TO_FINALIZE
+  EXPIRED
+}
+
+enum PartnerCustomerConfirmationState {
+  NOT_SENT
+  SENT
+  APPROVED
+  REJECTED
+  RECONFIRMATION_REQUIRED
+}
+
 model PartnerSaleCase {
   id                  String                          @id
   caseNumber          String                          @unique
@@ -9241,6 +9256,8 @@ model PartnerSaleCase {
   headRevision        Int
   integrityHash       String
   state               PartnerCaseState                @default(DRAFT)
+  pricingState        PartnerPricingState             @default(READY_TO_FINALIZE)
+  customerConfirmationState PartnerCustomerConfirmationState @default(NOT_SENT)
   stateRevision       Int                             @default(1)
   committedAt         DateTime?                       @db.Timestamptz(3)
   commitmentTrigger   String?
@@ -9279,6 +9296,7 @@ model SabalanToPartnerSaleRecord {
   commercialAccountId String
   expectedRevision    Int
   integrityHash       String
+  pricingState        PartnerPricingState                @default(READY_TO_FINALIZE)
   case                PartnerSaleCase                    @relation("PartnerInternalOwner", fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   caseLink            PartnerSaleCase?                   @relation("PartnerInternalLink")
   fulfillmentLineages PartnerFulfillmentLineage[]
@@ -9305,6 +9323,7 @@ model PartnerCaseRevision {
   predecessorRevision     Int?
   schemaVersion           Int                                @default(1)
   integrityHash           String
+  pricingState            PartnerPricingState                  @default(READY_TO_FINALIZE)
   graphHash               String
   graph                   Json
   partySnapshots          Json

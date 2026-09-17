@@ -42,7 +42,7 @@ export async function prepareRetailSuccessor(tx: Prisma.TransactionClient, input
   const owner = { caseId: previous.caseId, revision: previous.revision + 1,
     integrityHash: await canonicalHash({ purpose: 'PARTNER_CASE_REVISION', schemaVersion: 1,
       predecessor: { revision: previous.revision, integrityHash: previous.integrityHash }, ...fields }) };
-  const evidence = { ...fields, products: wholesale.products.map(raw => {
+  const evidence = { ...fields, pricingState: 'READY_TO_FINALIZE' as const, products: wholesale.products.map(raw => {
     const row = object(raw), price = prices.get(String(row.productRowId));
     if (!price) throw new Error('Wholesale and retail row identity conflict');
     return { ...row, retailUnitPrice: price.amount };

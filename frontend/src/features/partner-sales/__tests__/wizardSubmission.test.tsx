@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures';
 import type { PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
-import { createPartnerCaseSubmission, type PartnerSubmitCommand } from '../../contract-creation/partner/partnerCaseSubmission';
+import { createPartnerCaseSubmission, type PartnerDraftCommand } from '../../contract-creation/partner/partnerCaseSubmission';
 
 const fixture = createPartnerFixtures();
 const intent = () => ({
@@ -16,12 +16,12 @@ const intent = () => ({
 });
 
 test('lost final-submit response retains one durable command, and retry discovers the same Case', async () => {
-  let pending: PartnerSubmitCommand | null = null;
-  const commands: PartnerSubmitCommand[] = [];
+  let pending: PartnerDraftCommand | null = null;
+  const commands: PartnerDraftCommand[] = [];
   let clears = 0;
   const port: PartnerCommandPort = { execute: async command => {
     assert.equal(command.type, 'CASE_SUBMIT');
-    commands.push(command as PartnerSubmitCommand);
+    commands.push(command as PartnerDraftCommand);
     if (commands.length === 1) throw new Error('connection lost after commit');
     return { ok: true, value: { commandId: command.commandId, replayed: true, case: fixture.partner, eventIds: [] } };
   } };
@@ -47,18 +47,20 @@ test('lost final-submit response retains one durable command, and retry discover
   assert.deepEqual(original, intent());
 });
 
-test('double click checkpoints and submits once, and a failed checkpoint sends nothing', async () => {
+test('double click checkpoints once and a later explicit save uses the draft revision command', async () => {
   let release!: () => void;
+  let gate = true;
   let calls = 0;
-  let pending: PartnerSubmitCommand | null = null;
+  const commandTypes: string[] = [];
+  let pending: PartnerDraftCommand | null = null;
   const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
     commands: { execute: async command => {
-      calls++;
+      calls++; commandTypes.push(command.type);
       return { ok: true, value: { commandId: command.commandId, replayed: false, case: fixture.partner, eventIds: [] } };
     } },
     recovery: {
       pending: () => pending,
-      savePending: async command => { await new Promise<void>(resolve => { release = resolve; }); pending = command; },
+      savePending: async command => { if (gate) { gate = false; await new Promise<void>(resolve => { release = resolve; }); } pending = command; },
       clearPending: async () => { pending = null; }, finalizeCommitted: async () => { pending = null; },
     },
   });
@@ -70,7 +72,8 @@ test('double click checkpoints and submits once, and a failed checkpoint sends n
   await first;
   assert.equal(calls, 1);
   await submission.submit(intent());
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
+  assert.deepEqual(commandTypes, ['CASE_SUBMIT', 'CASE_DRAFT_REVISE']);
 
   const blocked = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
     commands: { execute: async () => { assert.fail('a revoked writer must not submit'); } },
@@ -81,7 +84,7 @@ test('double click checkpoints and submits once, and a failed checkpoint sends n
 });
 
 test('expiry rejection preserves the draft and a successful Case remains successful if local cleanup fails', async () => {
-  let pending: PartnerSubmitCommand | null = null;
+  let pending: PartnerDraftCommand | null = null;
   let expires = true;
   const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
     commands: { execute: async command => expires
@@ -101,8 +104,8 @@ test('expiry rejection preserves the draft and a successful Case remains success
 });
 
 test('recovery replay refuses a different actor or changed intent without clearing evidence', async () => {
-  let pending: PartnerSubmitCommand | null = null;
-  const recovery = { pending: () => pending, savePending: async (command: PartnerSubmitCommand) => { pending = command; },
+  let pending: PartnerDraftCommand | null = null;
+  const recovery = { pending: () => pending, savePending: async (command: PartnerDraftCommand) => { pending = command; },
     clearPending: async () => { assert.fail('invalid replay must retain evidence'); }, finalizeCommitted: async () => undefined };
   const original = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
     recovery, commands: { execute: async () => { throw new Error('offline'); } } });

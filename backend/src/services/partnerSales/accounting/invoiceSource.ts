@@ -22,7 +22,7 @@ export async function readPartnerInvoiceSource(tx: Prisma.TransactionClient, inv
   const current = await readCurrentPartnerCaseViews(tx, caseId);
   if (!current || current.row.internalRecordId !== invoice.sourceId) throw conflict();
   const historical = await readPartnerRevisionProjections(tx, owner.data);
-  if (!historical) throw conflict();
+  if (!historical?.accounting) throw conflict();
   const prepared = await preparePartnerFinancialSource({ view: { ...historical.accounting, state: 'COMMITTED' },
     partnerSellerId: current.row.profile.userId }, owner.data);
   if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||

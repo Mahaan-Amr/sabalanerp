@@ -17,12 +17,16 @@ export const QuantitySchema = DecimalSchema.refine(value => /[1-9]/.test(value))
 export const HashSchema = z.string().regex(/^sha256-v1:[a-f0-9]{64}$/);
 export const RevisionSchema = z.number().int().positive().safe();
 export const CaseStateSchema = z.enum(['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED', 'COMMITTED', 'CANCELLED', 'VOIDED']);
+export const PartnerPricingStateSchema = z.enum(['INCOMPLETE', 'AWAITING_INQUIRY', 'READY_TO_FINALIZE', 'EXPIRED']);
+export const PartnerCustomerConfirmationStateSchema = z.enum(['NOT_SENT', 'SENT', 'APPROVED', 'REJECTED', 'RECONFIRMATION_REQUIRED']);
 export const RevisionRefSchema = z.object({ caseId: IdSchema, revision: RevisionSchema, integrityHash: HashSchema }).strict();
 export const MoneySchema = z.object({ amount: DecimalSchema, currency: z.enum(['IRR', 'IRT']) }).strict();
 export const TotalsSchema = z.object({ net: DecimalSchema, discount: DecimalSchema, tax: DecimalSchema, charges: DecimalSchema, payable: DecimalSchema, currency: z.enum(['IRR', 'IRT']) }).strict();
 export type RevisionRef = z.infer<typeof RevisionRefSchema>;
 export type Money = z.infer<typeof MoneySchema>;
 export type CaseState = z.infer<typeof CaseStateSchema>;
+export type PartnerPricingState = z.infer<typeof PartnerPricingStateSchema>;
+export type PartnerCustomerConfirmationState = z.infer<typeof PartnerCustomerConfirmationStateSchema>;
 
 const paymentPlanSchema = (checkSchema: z.ZodTypeAny) => z.object({
   planId: IdSchema, version: RevisionSchema, effectiveDate: DateSchema,

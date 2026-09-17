@@ -12,6 +12,7 @@ export function caseComparableAmount(raw: unknown): string {
 }
 
 export function comparableRevision(view: PartnerCaseView, envelopes: { wholesaleEnvelope: unknown; retailEnvelope: unknown }) {
+  if (!view.sabalanTotals) throw new Error('Partner Sabalan pricing is not ready for comparison');
   for (const [raw, projected] of [[envelopes.wholesaleEnvelope, view.sabalanTotals],
     [envelopes.retailEnvelope, view.retailTotals]] as const) {
     const envelope = raw as { schemaVersion?: number; totals?: unknown } | null;

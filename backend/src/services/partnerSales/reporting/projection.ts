@@ -4,7 +4,7 @@ import { negate, subtract, sum } from './money';
 import { projectSabalanRevenue, visibleEvents } from './revenue';
 import { caseHistory, collectionHistory } from './history';
 
-const conflict = () => { throw new ReportingError('INTEGRITY_CONFLICT'); };
+const conflict = (): never => { throw new ReportingError('INTEGRITY_CONFLICT'); };
 const inPeriod = (event: PartnerEvent, period: Period) => event.effectiveDate >= period.from;
 
 function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: PartnerEvent[], period: Period, history: ReturnType<typeof caseHistory>) {
@@ -14,9 +14,11 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
     const retail = runtime.MoneySchema.parse(candidate.comparable.retail);
     const sabalan = runtime.MoneySchema.parse(candidate.comparable.sabalan);
     runtime.IdSchema.parse(candidate.comparable.evidenceId);
+    const sabalanTotals = view.sabalanTotals;
+    if (!sabalanTotals) conflict();
     if (view.owner.caseId !== data.root.caseId || revisions.has(view.owner.revision)
       || retail.currency !== sabalan.currency || retail.currency !== data.internal.totals.currency
-      || view.retailTotals.currency !== retail.currency || view.sabalanTotals.currency !== sabalan.currency) conflict();
+      || view.retailTotals.currency !== retail.currency || sabalanTotals!.currency !== sabalan.currency) conflict();
     revisions.set(view.owner.revision, { view, comparable: { retail, sabalan, evidenceId: candidate.comparable.evidenceId } });
   }
   const current = revisions.get(data.internal.owner.revision);

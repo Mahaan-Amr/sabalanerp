@@ -5,6 +5,7 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { parseCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { canonicalHash, type PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerCaseService, type PartnerCaseDependencies } from '../partnerSales/cases/aggregate';
+import { createPartnerCaseLifecycleService } from '../partnerSales/cases/lifecycle';
 import { buildRevisionEvidence, validateResolvedDraft, type ResolvedCaseDraft } from '../partnerSales/cases/revisions';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 
@@ -215,6 +216,63 @@ test('final submit atomically creates the exact pair, binds reusable approval an
     const second = await service(tx, ids).execute(await command(ids, secondCaseId, 'second'));
     assert.equal(second.ok, true, 'one approval remains reusable across independent valid intents');
     assert.equal(await tx.partnerInquiryUsage.count({ where: { approvalId: ids.approvalId } }), 2);
+  });
+});
+
+test('customer-complete save creates one numbered unpriced Case without operational projections', async () => {
+  await fixture(async (tx, ids) => {
+    const priced = await command(ids);
+    const intent = { ...priced.intent, rows: priced.intent.rows.map(({ approvedRowBinding: _binding, ...row }) => row) };
+    const input = { ...priced, intent, idempotency: { ...priced.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent }) } };
+    const first = await service(tx, ids).execute(input);
+    assert.equal(first.ok, true, JSON.stringify(first));
+    if (!first.ok || !first.value.case) return;
+    assert.equal(first.value.case.pricingState, 'AWAITING_INQUIRY');
+    assert.equal(first.value.case.customerConfirmationState, 'NOT_SENT');
+    assert.equal(first.value.case.products[0].wholesaleUnitPrice, undefined);
+    assert.equal(first.value.case.sabalanTotals, undefined);
+    const persisted = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, select: {
+      state: true, pricingState: true, customerConfirmationState: true,
+      internalRecord: { select: { pricingState: true } },
+      head: { select: { pricingState: true, internalProjection: true } },
+    } });
+    assert.equal(persisted.state, 'DRAFT');
+    assert.equal(persisted.pricingState, 'AWAITING_INQUIRY');
+    assert.equal(persisted.customerConfirmationState, 'NOT_SENT');
+    assert.equal(persisted.internalRecord.pricingState, 'AWAITING_INQUIRY');
+    assert.equal(persisted.head.pricingState, 'AWAITING_INQUIRY');
+    const projection = persisted.head.internalProjection as Record<string, unknown>;
+    assert.equal('accounting' in projection, false);
+    assert.equal('fulfillment' in projection, false);
+    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
+    assert.equal(await tx.partnerInquiryUsage.count({ where: { caseId: ids.caseId } }), 0);
+    const replay = await service(tx, ids).execute(input);
+    assert.equal(replay.ok && replay.value.replayed, true);
+    assert.equal(await tx.partnerSaleCase.count({ where: { id: ids.caseId } }), 1);
+    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
+
+    const reason = 'لغو پرونده پیش از تکمیل استعلام';
+    const payloadHash = await canonicalHash({ schemaVersion: 1, type: 'CASE_CANCEL', reason });
+    const cancelled = await createPartnerCaseLifecycleService({ actorId: ids.partnerId,
+      cancellationPurpose: 'PARTNER', transaction: work => work(tx),
+      authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-cancel-authorization` } }),
+      verifyOutputEvidence: async () => ({ ok: false, error: { code: 'STATE_CONFLICT', status: 409,
+        message: 'وضعیت پرونده اجازه این اقدام را نمی‌دهد.' } }),
+      cancelConfirmationSessions: async () => ({ ok: true, value: { invalidatedSessionIds: [], preservedSnapshotIds: [] } }),
+      recordEvidenceReview: async () => undefined,
+    }).execute({ schemaVersion: 1, type: 'CASE_CANCEL', commandId: `${ids.caseId}-cancel-command`,
+      correlationId: `${ids.caseId}-cancel-correlation`, expected: first.value.case.owner, expectedState: 'DRAFT', reason,
+      idempotency: { actorId: ids.partnerId, operation: 'CASE_CANCEL', targetId: ids.caseId,
+        key: `${ids.caseId}-cancel-key`, payloadHash } });
+    assert.equal(cancelled.ok, true, JSON.stringify(cancelled));
+    const retained = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, select: {
+      state: true, caseNumber: true, internalRecordId: true, customerContractId: true,
+      events: { where: { type: 'CASE_CANCELLED' }, select: { reason: true } },
+    } });
+    assert.equal(retained.state, 'CANCELLED');
+    assert.equal(retained.events[0]?.reason, reason);
+    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
   });
 });
 

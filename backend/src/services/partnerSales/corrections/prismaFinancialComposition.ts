@@ -105,8 +105,11 @@ Promise<Result<PreparedPrismaSharedSuccessor>> {
     if (!intentRow) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     const frozen = previous?.configurationHash === row.configurationHash
       ? ApprovedInquirySchema.safeParse(previous.inquiryUsages[0]?.approvalSnapshot) : undefined;
+    if (!frozen?.success && !intentRow.approvedRowBinding) {
+      return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
+    }
     const approvalResult = frozen?.success ? { ok: true as const, value: frozen.data }
-      : await resolveApprovalForUse(tx, { binding: intentRow.approvedRowBinding,
+      : await resolveApprovalForUse(tx, { binding: intentRow.approvedRowBinding!,
         partnerSellerId: command.idempotency.actorId, configurationHash: row.configurationHash });
     if (!approvalResult.ok) return approvalResult;
     const approval = approvalResult.value;
@@ -122,6 +125,9 @@ Promise<Result<PreparedPrismaSharedSuccessor>> {
   const evidence = buildRevisionEvidence({ command: synthetic, resolved: resolved.value,
     graph: validated.value.graph, graphHash: validated.value.graphHash, rows: approvedRows });
   if (!evidence.ok) return evidence;
+  if (evidence.value.pricingState !== 'READY_TO_FINALIZE' || !evidence.value.paymentEvidence.sabalanPaymentPlan) {
+    return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
+  }
   const dependencies = await dependencySnapshot(tx, { caseId: snapshot.caseId,
     contractId: sale.customerContractId, predecessorRevision: snapshot.owner.revision,
     predecessorGraph: predecessor.graph, successorGraph: evidence.value.graph,

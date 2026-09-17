@@ -12,17 +12,14 @@ export interface PartnerRetailRow {
 }
 
 export function defaultPartnerRetailRows(rows: (Omit<PartnerRetailRow, 'retailUnitPrice'> & { retailUnitPrice?: Money })[]): PartnerRetailRow[] {
-  return rows.map(row => {
-    if (!row.inquiryRow.approvedPrice || !row.inquiryRow.approvedRowBinding) throw new Error('Approved row required');
-    return { ...row, retailUnitPrice: row.retailUnitPrice ?? { ...row.inquiryRow.approvedPrice } };
-  });
+  return rows.map(row => ({ ...row, retailUnitPrice: row.retailUnitPrice ??
+    (row.inquiryRow.approvedPrice ? { ...row.inquiryRow.approvedPrice } : { amount: '', currency: 'IRT' }) }));
 }
 
 export function partnerRetailIntentRows(rows: PartnerRetailRow[]): PartnerDraftIntent['rows'] {
-  return rows.map(row => {
-    if (!row.inquiryRow.approvedRowBinding) throw new Error('Approved row required');
-    return { productRowId: row.productRowId, approvedRowBinding: row.inquiryRow.approvedRowBinding, retailUnitPrice: row.retailUnitPrice };
-  });
+  return rows.map(row => ({ productRowId: row.productRowId,
+    ...(row.inquiryRow.approvedRowBinding ? { approvedRowBinding: row.inquiryRow.approvedRowBinding } : {}),
+    retailUnitPrice: row.retailUnitPrice }));
 }
 
 // Only a preview of net commercial difference. The Case writer owns final
@@ -51,12 +48,10 @@ function display(value: Decimal): string {
 }
 
 export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) {
-  let wholesale = decimal('0'); let retail = decimal('0');
+  let wholesale = decimal('0'); let retail = decimal('0'); let pricingReady = true;
   for (const row of rows) {
     const approved = row.wholesaleUnitPrice;
-    if (!approved) return { valid: false as const, field: 'quote' as const,
-      productRowId: row.productRowId, message: 'محاسبه قیمت خرید این ردیف هنوز کامل نشده است.' };
-    if (approved.currency !== discount.currency || row.retailUnitPrice.currency !== discount.currency) {
+    if (row.retailUnitPrice.currency !== discount.currency || (approved && approved.currency !== discount.currency)) {
       return { valid: false as const, field: 'price' as const, productRowId: row.productRowId, message: 'واحد پول ردیف‌ها یکسان نیست؛ قیمت تأییدشده را بررسی کنید.' };
     }
     if (!DecimalSchema.safeParse(row.retailUnitPrice.amount).success) return {
@@ -64,7 +59,8 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) 
     };
     try {
       QuantitySchema.parse(row.quantity);
-      wholesale = add(wholesale, product(row.quantity, approved.amount));
+      if (approved) wholesale = add(wholesale, product(row.quantity, approved.amount));
+      else pricingReady = false;
       retail = add(retail, product(row.quantity, row.retailUnitPrice.amount));
     } catch {
       return { valid: false as const, field: 'quantity' as const, productRowId: row.productRowId, message: 'مقدار و قیمت تأییدشده را بررسی کنید.' };
@@ -74,7 +70,9 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) 
   catch { return { valid: false as const, field: 'discount' as const, message: 'مبلغ تخفیف را کامل وارد کنید.' }; }
   if (retail.digits < BigInt(0)) return { valid: false as const, field: 'discount' as const, message: 'تخفیف نمی‌تواند از جمع فروش بیشتر باشد.' };
   const difference = add(retail, wholesale, true);
-  return { valid: true as const, wholesale: display(wholesale), retail: display(retail), difference: display(difference), loss: difference.digits < BigInt(0) };
+  return { valid: true as const, pricingReady, wholesale: pricingReady ? display(wholesale) : undefined,
+    retail: display(retail), difference: pricingReady ? display(difference) : undefined,
+    loss: pricingReady && difference.digits < BigInt(0) };
 }
 
 export function partnerRetailRowSummary(row: PartnerRetailRow) {

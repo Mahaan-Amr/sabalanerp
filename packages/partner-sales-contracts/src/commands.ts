@@ -13,7 +13,7 @@ export const PartnerDraftSubmissionRefSchema = z.object({
 export const CaseDraftIntentSchema = PartnerDraftSubmissionRefSchema.extend({
   projectId: IdSchema.optional(), contractDate: DateSchema,
   // The Case writer resolves this immutable private recovery graph; no second graph owner.
-  rows: z.array(z.object({ productRowId: IdSchema, approvedRowBinding: ApprovedRowBindingSchema,
+  rows: z.array(z.object({ productRowId: IdSchema, approvedRowBinding: ApprovedRowBindingSchema.optional(),
     retailUnitPrice: MoneySchema }).strict()).min(1),
   additionalMaterialApprovals: z.array(z.object({ pricingSubjectId: IdSchema,
     approvedRowBinding: ApprovedRowBindingSchema }).strict()).optional(),

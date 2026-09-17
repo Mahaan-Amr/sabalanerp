@@ -159,7 +159,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         healthyCases.add(row.id);
       }
       const views = await readPartnerRevisionProjections(database, owner.data);
-      if (!views) throw conflict();
+      if (!views?.accounting) throw conflict();
       const accountingView = await withCurrentSabalanPlan(database, views.accounting);
       const prepared = await preparePartnerFinancialSource({ view: { ...accountingView, state: 'COMMITTED' },
         partnerSellerId: row.profile.userId }, owner.data);

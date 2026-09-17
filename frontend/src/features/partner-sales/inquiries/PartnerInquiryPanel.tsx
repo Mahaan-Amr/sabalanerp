@@ -56,7 +56,8 @@ export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinqu
     </div>
     <div aria-label="آمادگی پرونده" className="sticky bottom-0 z-10 flex flex-col gap-3 rounded-[var(--sds-radius-card)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-4 sm:flex-row sm:items-center sm:justify-between">
       <div><p className="font-bold">{persianCount(usable.length)} ردیف آماده</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">قیمت فروش به مشتری پیش از ثبت قابل تغییر است.</p></div>
-      <ErpButton label="ساخت پرونده و ورود به Wizard" variant="solid" disabled={pending || usable.length === 0} onClick={() => onEnterWizard(usable)} className="w-full sm:w-auto" />
+      <ErpButton label="ساخت پرونده و ورود به Wizard" variant="solid" disabled={pending || inquiry.rows.length === 0}
+        onClick={() => onEnterWizard(inquiry.rows)} className="w-full sm:w-auto" />
     </div>
   </section>;
 }

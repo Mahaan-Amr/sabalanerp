@@ -23,3 +23,23 @@ test('hashing rejects sparse arrays instead of colliding with complete array sha
   assert.equal(canonicalJson([]), '[]');
   assert.equal(canonicalJson([null]), '[null]');
 });
+
+test('a customer-complete Case draft may be saved before Sabalan inquiry approval', async () => {
+  const intent = {
+    customerId: 'customer-378', recoveryId: 'recovery-378', recoveryRevision: 1,
+    graphHash: `sha256-v1:${'a'.repeat(64)}`, projectId: 'project-378', contractDate: '2026-09-17',
+    rows: [{ productRowId: 'product-378', retailUnitPrice: { amount: '250000', currency: 'IRT' as const } }],
+    customerPaymentPlan: { planId: 'customer-plan-378', version: 1, effectiveDate: '2026-09-17', installments: [{
+      installmentId: 'customer-installment-378', dueDate: '2026-09-17',
+      amount: { amount: '250000', currency: 'IRT' as const }, method: 'CASH' as const,
+    }] },
+    retailDiscount: { amount: '0', currency: 'IRT' as const }, belowCostConfirmed: false, deliveries: [],
+  };
+  const payloadHash = await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent });
+  const parsed = PartnerCommandSchema.parse({ schemaVersion: 1, type: 'CASE_SUBMIT', intent,
+    commandId: 'command-378', correlationId: 'correlation-378', idempotency: {
+      actorId: 'partner-378', operation: 'CASE_SUBMIT', targetId: 'case-378', key: 'save-378', payloadHash,
+    } });
+  assert.equal(parsed.type, 'CASE_SUBMIT');
+  assert.equal(parsed.intent.rows[0].approvedRowBinding, undefined);
+});

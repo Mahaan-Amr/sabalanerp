@@ -42,10 +42,11 @@ export function PartnerCaseDetail({ view, actions, children }: { view: PartnerCa
 }
 
 export function partnerCaseMetrics(view: PartnerCaseView, status = stateCopy[view.state]): ErpMetric[] {
+  const pricingReady = view.pricingState === 'READY_TO_FINALIZE' && view.sabalanTotals && view.resaleDifference !== undefined;
   return [
       { label: 'فروش به مشتری', value: formatPartnerMoney(view.retailTotals.payable, view.retailTotals.currency), icon: FaMoneyBillWave, tone: 'primary' },
-      { label: 'خرید از سبلان', value: formatPartnerMoney(view.sabalanTotals.payable, view.sabalanTotals.currency), icon: FaFileContract, tone: 'info' },
-      { label: 'سود بازفروش', value: formatPartnerMoney(view.resaleDifference, view.retailTotals.currency), icon: FaCalculator, tone: Number(view.resaleDifference) >= 0 ? 'success' : 'danger' },
+      { label: 'خرید از سبلان', value: pricingReady ? formatPartnerMoney(view.sabalanTotals!.payable, view.sabalanTotals!.currency) : 'در انتظار استعلام', icon: FaFileContract, tone: 'info' },
+      { label: 'سود بازفروش', value: pricingReady ? formatPartnerMoney(view.resaleDifference!, view.retailTotals.currency) : 'پس از تکمیل استعلام', icon: FaCalculator, tone: pricingReady && Number(view.resaleDifference) < 0 ? 'danger' : 'success' },
       { label: 'وضعیت پرونده', value: status.label, icon: FaFileContract, tone: status.tone },
     ];
 }
@@ -58,7 +59,8 @@ export function PartnerCaseDetailContent({ view, actions }: { view: PartnerCaseV
           <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-bold text-[var(--sds-text-primary)]">{product.description}</h3>
             <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{product.quantity} {product.unit}</p></div><ErpBadge tone="neutral">ردیف {product.productRowId}</ErpBadge></div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2"><ErpFieldView label="قیمت فروش مشتری" value={formatPartnerMoney(product.retailUnitPrice, view.retailTotals.currency)} tone="primary" />
-            <ErpFieldView label="قیمت تأییدشده سبلان" value={formatPartnerMoney(product.wholesaleUnitPrice, view.sabalanTotals.currency)} tone="info" /></div>
+            <ErpFieldView label="قیمت تأییدشده سبلان" value={product.wholesaleUnitPrice && view.sabalanTotals
+              ? formatPartnerMoney(product.wholesaleUnitPrice, view.sabalanTotals.currency) : 'در انتظار استعلام'} tone="info" /></div>
         </ErpCard>)}</div>
       </ErpSection>
       <ErpSection title="برنامه تحویل"><div className="space-y-3">{view.deliveries.map(delivery => <ErpCard key={delivery.deliveryId} className="p-4">
@@ -66,7 +68,8 @@ export function PartnerCaseDetailContent({ view, actions }: { view: PartnerCaseV
         <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{delivery.destination}</p></ErpCard>)}</div></ErpSection>
     </>} aside={<>
       <ErpSection title="پرداخت مشتری"><PaymentPlan plan={view.customerPaymentPlan} /></ErpSection>
-      <ErpSection title="پرداخت به سبلان"><PaymentPlan plan={view.sabalanPaymentPlan} /></ErpSection>
+      <ErpSection title="پرداخت به سبلان">{view.sabalanPaymentPlan
+        ? <PaymentPlan plan={view.sabalanPaymentPlan} /> : <ErpBadge tone="warning">پس از تکمیل استعلام</ErpBadge>}</ErpSection>
       {(actions.canRequestCorrection || actions.canCancel || actions.canRequestVoid) && <ErpSection title="اقدام‌های پرونده">
         <ErpActionGrid columns={1} items={[
           ...(actions.canRequestCorrection ? [{ title: 'درخواست اصلاح', description: 'دامنه اصلاح و دلیل ثبت می‌شود.', icon: FaEdit, tone: 'warning' as const, onClick: actions.onRequestCorrection }] : []),

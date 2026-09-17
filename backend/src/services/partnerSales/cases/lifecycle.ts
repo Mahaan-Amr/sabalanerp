@@ -70,17 +70,18 @@ function projectionEvidence(input: { graphHash: string; graph: Prisma.JsonValue;
     const parsed = object(row);
     return parsed && typeof parsed.productRowId === 'string' ? [[parsed.productRowId, parsed] as const] : [];
   }));
-  const products = wholesale.products.map(row => {
+  const pricingState = wholesale.status === 'UNPRICED' ? 'AWAITING_INQUIRY' as const : 'READY_TO_FINALIZE' as const;
+  const products = (pricingState === 'AWAITING_INQUIRY' ? retail.products : wholesale.products).map(row => {
     const parsed = object(row);
-    const retailRow = parsed && typeof parsed.productRowId === 'string' ? retailRows.get(parsed.productRowId) : undefined;
+    const retailRow = parsed && typeof parsed.productRowId === 'string' ? retailRows.get(parsed.productRowId) : parsed;
     return parsed && retailRow ? { ...parsed, retailUnitPrice: retailRow.retailUnitPrice } : undefined;
   });
   const wholesaleTotals = object(wholesale.totals), retailTotals = object(retail.totals);
-  if (products.some(row => !row) || !wholesaleTotals || !retailTotals ||
-      typeof wholesaleTotals.payable !== 'string' || typeof retailTotals.payable !== 'string') return undefined;
+  if (products.some(row => !row) || !retailTotals || typeof retailTotals.payable !== 'string' ||
+      (pricingState === 'READY_TO_FINALIZE' && (!wholesaleTotals || typeof wholesaleTotals.payable !== 'string'))) return undefined;
   try {
-    return { ...input, products, resaleDifference: subtract(retailTotals.payable,
-      wholesaleTotals.payable) } as unknown as CaseRevisionProjectionEvidence;
+    return { ...input, pricingState, products, ...(pricingState === 'READY_TO_FINALIZE'
+      ? { resaleDifference: subtract(retailTotals.payable, wholesaleTotals!.payable as string) } : {}) } as unknown as CaseRevisionProjectionEvidence;
   } catch { return undefined; }
 }
 
@@ -104,11 +105,12 @@ async function clock(tx: Transaction) {
 async function readCase(tx: Transaction, caseId: string) {
   return tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
     id: true, caseNumber: true, profileId: true, headRevision: true, integrityHash: true, state: true,
+    pricingState: true, customerConfirmationState: true,
     stateRevision: true, internalRecordId: true, customerContractId: true, commitmentEventId: true,
     profile: { select: { userId: true } },
-    internalRecord: { select: { recordNumber: true, commercialAccountId: true,
+    internalRecord: { select: { recordNumber: true, commercialAccountId: true, pricingState: true,
       expectedRevision: true, integrityHash: true } },
-    head: { select: { predecessorRevision: true, integrityHash: true, graphHash: true, graph: true,
+    head: { select: { predecessorRevision: true, integrityHash: true, pricingState: true, graphHash: true, graph: true,
       partySnapshots: true, wholesaleEnvelope: true, retailEnvelope: true, paymentEvidence: true,
       customerContent: true, internalProjection: true, customerProjection: true } },
     customerContract: { select: { contractNumber: true, partnerRevision: true, partnerIntegrityHash: true,
@@ -146,8 +148,13 @@ async function parseViews(tx: Transaction, row: LockedCase) {
     paymentEvidence: row.head.paymentEvidence, customerContent: row.head.customerContent,
   };
   const computedRevisionHash = await canonicalHash(revisionEvidence);
-  if (!partner.success || !accounting.success || !fulfillment.success || !customer.success ||
+  const pricingReady = row.pricingState === 'READY_TO_FINALIZE';
+  if (!partner.success || !customer.success ||
+      (pricingReady && (!accounting.success || !fulfillment.success)) ||
+      (!pricingReady && ('accounting' in source || 'fulfillment' in source)) ||
       computedRevisionHash !== row.integrityHash || row.head.integrityHash !== row.integrityHash ||
+      row.head.pricingState !== row.pricingState || row.internalRecord.pricingState !== row.pricingState ||
+      partner.data.pricingState !== row.pricingState ||
       row.internalRecord.expectedRevision !== row.headRevision || row.internalRecord.integrityHash !== row.integrityHash ||
       row.customerContract.partnerRevision !== row.headRevision || row.customerContract.partnerIntegrityHash !== row.integrityHash) return undefined;
   const evidence = projectionEvidence({ graphHash: row.head.graphHash, graph: row.head.graph,
@@ -160,22 +167,22 @@ async function parseViews(tx: Transaction, row: LockedCase) {
     internalRecordNumber: row.internalRecord.recordNumber, customerContractNumber: row.customerContract.contractNumber,
     commercialAccountId: row.internalRecord.commercialAccountId, state: 'DRAFT', evidence });
   if (!rebuilt.ok) return undefined;
-  const projectionHashes = await Promise.all([
-    canonicalHash(partner.data), canonicalHash(accounting.data), canonicalHash(fulfillment.data), canonicalHash(customer.data),
-    canonicalHash(rebuilt.value.partner), canonicalHash(rebuilt.value.accounting),
-    canonicalHash(rebuilt.value.fulfillment), canonicalHash(rebuilt.value.customer),
-  ]);
-  if (projectionHashes.some((stored, index) => index < 4 && stored !== projectionHashes[index + 4])) return undefined;
+  if (await canonicalHash(partner.data) !== await canonicalHash(rebuilt.value.partner) ||
+      await canonicalHash(customer.data) !== await canonicalHash(rebuilt.value.customer)) return undefined;
+  if (pricingReady && (await canonicalHash(accounting.data) !== await canonicalHash(rebuilt.value.accounting) ||
+      await canonicalHash(fulfillment.data) !== await canonicalHash(rebuilt.value.fulfillment))) return undefined;
   const owner = expectedOwner(row);
   const owns = (candidate: RevisionRef) => candidate.caseId === owner.caseId && candidate.revision === owner.revision &&
     candidate.integrityHash === owner.integrityHash;
   const { outputHash, ...customerContent } = customer.data;
   const computedOutputHash = await canonicalHash({ purpose: 'PARTNER_CUSTOMER_OUTPUT', owner, content: customerContent });
-  if (!owns(partner.data.owner) || !owns(accounting.data.owner) || !owns(fulfillment.data.owner) ||
-      accounting.data.recordId !== row.internalRecordId || fulfillment.data.recordId !== row.internalRecordId ||
+  if (!owns(partner.data.owner) || (pricingReady && (!accounting.success || !fulfillment.success ||
+      !owns(accounting.data.owner) || !owns(fulfillment.data.owner) ||
+      accounting.data.recordId !== row.internalRecordId || fulfillment.data.recordId !== row.internalRecordId)) ||
       customer.data.revision !== row.headRevision || customer.data.contractNumber !== row.customerContract.contractNumber ||
       computedOutputHash !== outputHash) return undefined;
-  return { partner: { ...partner.data, state: row.state }, accounting: { ...accounting.data, state: row.state } };
+  return { partner: { ...partner.data, state: row.state },
+    ...(accounting.success ? { accounting: { ...accounting.data, state: row.state } } : {}) };
 }
 
 /** Read-only consumer seam. It performs the same hash/provenance rebuild as the
@@ -333,6 +340,9 @@ Promise<ExecutionResult> {
   }
 
   if (row.state !== 'CUSTOMER_APPROVED' && row.state !== 'COMMITTED') {
+    return { ok: false, error: partnerError('STATE_CONFLICT') };
+  }
+  if (row.pricingState !== 'READY_TO_FINALIZE' || !views.accounting) {
     return { ok: false, error: partnerError('STATE_CONFLICT') };
   }
   if (row.state === 'CUSTOMER_APPROVED' && command.expectedState !== 'CUSTOMER_APPROVED') {

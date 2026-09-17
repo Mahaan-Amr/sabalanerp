@@ -45,6 +45,20 @@ test('retail preview keeps sub-unit differences exact above the safe integer ran
   assert.equal(partnerRetailSummary(rows, { amount: '1', currency: 'IRT' }).valid, false);
 });
 
+test('customer retail totals remain valid while Sabalan inquiry pricing is pending', () => {
+  const { inquiry, configurationDraft } = createPartnerFixtures();
+  const pending = { ...inquiry.rows[0], state: 'PENDING' as const, approvedPrice: undefined,
+    approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined };
+  const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '2', unit: 'm',
+    inquiryRow: pending, retailUnitPrice: { amount: '1250', currency: 'IRR' as const } }]);
+  const summary = partnerRetailSummary(rows, { amount: '100', currency: 'IRR' });
+  assert.equal(summary.valid, true);
+  assert.equal(summary.retail, '2400');
+  assert.equal(summary.pricingReady, false);
+  assert.equal(summary.wholesale, undefined);
+  assert.equal(summary.difference, undefined);
+});
+
 test('invalid retail values are associated with the offending product field', () => {
   const { inquiry, configurationDraft } = createPartnerFixtures();
   const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: inquiry.rows[0] }]);

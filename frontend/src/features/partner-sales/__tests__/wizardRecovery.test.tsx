@@ -92,14 +92,13 @@ test('expiry during the wizard retains entered retail data and exposes inline re
   assert.match(html, /value="800"/);
 });
 
-test('a changed technical row keeps the wizard inputs but blocks final submission', () => {
+test('a changed technical row keeps the wizard inputs and permits an unpriced numbered save', () => {
   const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'confirmation' }} onChange={() => undefined}
     recovery={{ state: 'writable' }} submission={submission()} now={Date.parse('2026-08-27T09:00:00.000Z')}
     mismatchedRowIds={[fixture.inquiry.rows[0].rowId]} renderSection={() => <p>preserved-review</p>}
     validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /preserved-review/);
-  assert.match(html, /disabled=""/);
-  assert.match(html, /ثبت پرونده/);
+  assert.match(html, /ذخیره قرارداد/);
   assert.match(html, /استعلام مجدد/);
 });
 

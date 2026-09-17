@@ -13,14 +13,14 @@ export type ResolvedCaseDraft = {
   graph: CanonicalProductGraph;
   technicalSnapshot: PartnerTechnicalSavedView;
   rows: Array<{ productRowId: string; configurationHash: string; quantity: string; unit: string;
-    precisionPolicyVersion: string; description: string; wholesaleUnitPriceAmount: string }>;
+    precisionPolicyVersion: string; description: string; wholesaleUnitPriceAmount?: string }>;
   partner: DisplayParty; customer: DisplayParty; legalText: string;
   sabalanPaymentPlan: ReturnType<typeof PaymentPlanSchema.parse>;
   additionalMaterialApprovals?: Array<{ pricingSubjectId: string; configurationHash: string;
     catalogProductId: string; wholesaleUnitPriceAmount: string }>;
 };
 export type ApprovedCaseRow = ResolvedCaseDraft['rows'][number] & {
-  retailUnitPrice: { amount: string; currency: 'IRR' | 'IRT' }; approval: ApprovedInquiry; frozen?: boolean;
+  retailUnitPrice: { amount: string; currency: 'IRR' | 'IRT' }; approval?: ApprovedInquiry; frozen?: boolean;
 };
 
 export async function validateResolvedDraft(command: Extract<PartnerCommand, { type: 'CASE_SUBMIT' | 'CASE_DRAFT_REVISE' }>,
@@ -61,16 +61,20 @@ export async function validateResolvedDraft(command: Extract<PartnerCommand, { t
 
 export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, { type: 'CASE_SUBMIT' | 'CASE_DRAFT_REVISE' }>;
   resolved: ResolvedCaseDraft; graph: CanonicalProductGraph; graphHash: string; rows: ApprovedCaseRow[] }) {
-  const currency = input.rows[0]?.approval.wholesaleUnitPrice.currency;
-  if (!currency || input.rows.some(row => row.retailUnitPrice.currency !== currency || row.approval.wholesaleUnitPrice.currency !== currency)) {
+  const currency = input.rows[0]?.retailUnitPrice.currency;
+  const pricingReady = input.rows.length > 0 && input.rows.every(row => row.approval && row.wholesaleUnitPriceAmount !== undefined);
+  if (!currency || input.rows.some(row => row.retailUnitPrice.currency !== currency ||
+      (row.approval && row.approval.wholesaleUnitPrice.currency !== currency))) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
   }
   const products = input.rows.map(row => ({ productRowId: row.productRowId, description: row.description,
-    quantity: row.quantity, unit: row.unit, wholesaleUnitPrice: row.wholesaleUnitPriceAmount,
-    retailUnitPrice: row.retailUnitPrice.amount, approvalEvidenceId: row.approval.approvalId,
+    quantity: row.quantity, unit: row.unit, ...(row.wholesaleUnitPriceAmount !== undefined
+      ? { wholesaleUnitPrice: row.wholesaleUnitPriceAmount } : {}),
+    retailUnitPrice: row.retailUnitPrice.amount, ...(row.approval ? { approvalEvidenceId: row.approval.approvalId } : {}),
     configurationHash: row.configurationHash }));
   const retailNet = sum(input.rows.map(row => multiply(row.quantity, row.retailUnitPrice.amount)));
-  const wholesaleNet = sum(input.rows.map(row => multiply(row.quantity, row.wholesaleUnitPriceAmount)));
+  const wholesaleNet = pricingReady
+    ? sum(input.rows.map(row => multiply(row.quantity, row.wholesaleUnitPriceAmount!))) : undefined;
   const discount = input.command.intent.retailDiscount.amount;
   if (input.command.intent.retailDiscount.currency !== currency || subtract(retailNet, discount).startsWith('-')) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
@@ -80,7 +84,7 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
   const sabalanPlanTotal = sum(input.resolved.sabalanPaymentPlan.installments.map(item => item.amount.amount));
   if (input.command.intent.customerPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
       input.resolved.sabalanPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
-      planTotal !== retailPayable || (input.resolved.sabalanPaymentPlan.installments.length > 0 && sabalanPlanTotal !== wholesaleNet)) {
+      planTotal !== retailPayable || (pricingReady && input.resolved.sabalanPaymentPlan.installments.length > 0 && sabalanPlanTotal !== wholesaleNet)) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
   }
   const quantities = new Map(input.rows.map(row => [row.productRowId, row.quantity]));
@@ -97,17 +101,20 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
   return { ok: true, value: {
     graph: input.graph, graphHash: input.graphHash,
     partySnapshots: { partner: input.resolved.partner, customer: input.resolved.customer },
-    wholesaleEnvelope: { schemaVersion: 1, products: products.map(({ retailUnitPrice: _retail, ...row }) => row),
-      totals: totals(wholesaleNet, '0'), termsVersionId: input.resolved.sabalanTermsVersionId },
+    pricingState: pricingReady ? 'READY_TO_FINALIZE' as const : 'AWAITING_INQUIRY' as const,
+    wholesaleEnvelope: pricingReady ? { schemaVersion: 1, status: 'PRICED' as const,
+      products: products.map(({ retailUnitPrice: _retail, ...row }) => row),
+      totals: totals(wholesaleNet!, '0'), termsVersionId: input.resolved.sabalanTermsVersionId }
+      : { schemaVersion: 1, status: 'UNPRICED' as const, products: [] },
     retailEnvelope: { schemaVersion: 1, products: products.map(({ wholesaleUnitPrice: _wholesale, approvalEvidenceId: _approval,
       configurationHash: _configuration, ...row }) => row), totals: totals(retailNet, discount),
       belowCostConfirmed: input.command.intent.belowCostConfirmed },
     paymentEvidence: { customerPaymentPlan: input.command.intent.customerPaymentPlan,
-      sabalanPaymentPlan: input.resolved.sabalanPaymentPlan },
+      ...(pricingReady ? { sabalanPaymentPlan: input.resolved.sabalanPaymentPlan } : {}) },
     customerContent: { contractDate: input.command.intent.contractDate, legalText: input.resolved.legalText,
       ...(input.resolved.projectId ? { projectId: input.resolved.projectId } : {}),
       deliveries: input.command.intent.deliveries, confirmation: 'NOT_SENT', signatures: [] },
     products,
-    resaleDifference: subtract(retailPayable, wholesaleNet),
+    ...(pricingReady ? { resaleDifference: subtract(retailPayable, wholesaleNet!) } : {}),
   } } as const;
 }

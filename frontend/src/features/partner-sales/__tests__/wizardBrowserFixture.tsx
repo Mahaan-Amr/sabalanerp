@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { ErpButton } from '@/components/erp';
 import { PartnerInquiryPanel } from '../inquiries/PartnerInquiryPanel';
 import { PartnerContractWizard, type PartnerWizardDraft } from '../../contract-creation/partner/PartnerContractWizard';
-import { createPartnerCaseSubmission, type PartnerSubmitCommand } from '../../contract-creation/partner/partnerCaseSubmission';
+import { createPartnerCaseSubmission, type PartnerDraftCommand } from '../../contract-creation/partner/partnerCaseSubmission';
 import { enterPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
 import { createWizardFixtures } from './wizardFixtures';
 import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
@@ -20,7 +20,7 @@ function Fixture() {
   const [takeover, setTakeover] = useState(false);
   const [opened, setOpened] = useState(false);
   const submission = useMemo(() => {
-    let pending: PartnerSubmitCommand | null = null;
+    let pending: PartnerDraftCommand | null = null;
     return createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
       commands: { execute: async command => ({ ok: true, value: { commandId: command.commandId, replayed: false, case: fixture.partner, eventIds: [] } }) },
       recovery: { pending: () => pending, savePending: async command => { pending = command; }, clearPending: async () => { pending = null; }, finalizeCommitted: async () => { pending = null; } },

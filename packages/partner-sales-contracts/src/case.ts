@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CaseStateSchema, HashSchema, IdSchema, InstantSchema, RevisionRefSchema } from './primitives';
+import { CaseStateSchema, HashSchema, IdSchema, InstantSchema, PartnerCustomerConfirmationStateSchema, PartnerPricingStateSchema, RevisionRefSchema } from './primitives';
 
 export const CaseGraphRefSchema = z.object({
   owner: RevisionRefSchema, schemaVersion: z.literal(1), graphHash: HashSchema,
@@ -8,7 +8,8 @@ export const CaseGraphRefSchema = z.object({
 export const PartnerSaleCaseSchema = z.object({
   schemaVersion: z.literal(1), caseId: IdSchema, caseNumber: IdSchema,
   partnerSellerId: IdSchema, creatorId: IdSchema, responsibleSellerId: IdSchema, salesCreditOwnerId: IdSchema,
-  customerId: IdSchema, state: CaseStateSchema, head: RevisionRefSchema, graph: CaseGraphRefSchema,
+  customerId: IdSchema, state: CaseStateSchema, pricingState: PartnerPricingStateSchema,
+  customerConfirmationState: PartnerCustomerConfirmationStateSchema, head: RevisionRefSchema, graph: CaseGraphRefSchema,
   internalRecord: z.object({ kind: z.literal('SABALAN_TO_PARTNER'), recordId: IdSchema,
     recordNumber: IdSchema, owner: RevisionRefSchema, commercialAccountId: IdSchema }).strict(),
   customerContract: z.object({ kind: z.literal('PARTNER_CUSTOMER'), contractId: IdSchema,

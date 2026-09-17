@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CaseStateSchema, CustomerPaymentPlanSchema, DateSchema, DecimalSchema, DeliverySchema, DisplayPartySchema, HashSchema, IdSchema, InstantSchema, MoneySchema, PaymentPlanSchema, ProductDisplaySchema, RevisionRefSchema, RevisionSchema, SignedDecimalSchema, TextSchema, TotalsSchema } from './primitives';
+import { CaseStateSchema, CustomerPaymentPlanSchema, DateSchema, DecimalSchema, DeliverySchema, DisplayPartySchema, HashSchema, IdSchema, InstantSchema, MoneySchema, PartnerCustomerConfirmationStateSchema, PartnerPricingStateSchema, PaymentPlanSchema, ProductDisplaySchema, RevisionRefSchema, RevisionSchema, SignedDecimalSchema, TextSchema, TotalsSchema } from './primitives';
 
 // Positive, recursively strict DTOs. Never spread a Prisma entity into these views.
 // The internal Case hash is intentionally absent from the public output.
@@ -25,10 +25,17 @@ export const CustomerOutputSnapshotSchema = z.object({
 export const PartnerCaseViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('PARTNER_CASE'), owner: RevisionRefSchema,
   caseNumber: IdSchema, customerContractNumber: IdSchema, state: CaseStateSchema,
-  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema, retailUnitPrice: DecimalSchema }).strict()),
-  retailTotals: TotalsSchema, sabalanTotals: TotalsSchema, resaleDifference: SignedDecimalSchema,
-  customerPaymentPlan: CustomerPaymentPlanSchema, sabalanPaymentPlan: PaymentPlanSchema, deliveries: z.array(DeliverySchema),
-}).strict();
+  pricingState: PartnerPricingStateSchema.default('READY_TO_FINALIZE'),
+  customerConfirmationState: PartnerCustomerConfirmationStateSchema.default('NOT_SENT'),
+  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema.optional(), retailUnitPrice: DecimalSchema }).strict()),
+  retailTotals: TotalsSchema, sabalanTotals: TotalsSchema.optional(), resaleDifference: SignedDecimalSchema.optional(),
+  customerPaymentPlan: CustomerPaymentPlanSchema, sabalanPaymentPlan: PaymentPlanSchema.optional(), deliveries: z.array(DeliverySchema),
+}).strict().superRefine((value, context) => {
+  const hasCompletePricing = value.products.every(product => product.wholesaleUnitPrice !== undefined) &&
+    value.sabalanTotals !== undefined && value.resaleDifference !== undefined && value.sabalanPaymentPlan !== undefined;
+  if ((value.pricingState === 'READY_TO_FINALIZE') !== hasCompletePricing) context.addIssue({ code: z.ZodIssueCode.custom,
+    message: 'Ready Partner pricing requires complete Sabalan economics; unpriced drafts must not expose them' });
+});
 export const SabalanInternalRecordViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('ACCOUNTING'), sourceKind: z.literal('SABALAN_TO_PARTNER'),
   owner: RevisionRefSchema, recordId: IdSchema, recordNumber: IdSchema, caseNumber: IdSchema, customerContractNumber: IdSchema,

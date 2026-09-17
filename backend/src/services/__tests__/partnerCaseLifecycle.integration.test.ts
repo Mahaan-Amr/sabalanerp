@@ -191,14 +191,14 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
   deliveryPlan?: partnerContracts.FulfillmentView['deliveries']) {
   const base = createPartnerFixtures();
   if (passThrough) {
-    for (const totals of [base.partner.sabalanTotals, base.accounting.totals]) {
+    for (const totals of [base.partner.sabalanTotals!, base.accounting.totals]) {
       totals.tax = '100'; totals.payable = '1700';
     }
     for (const totals of [base.partner.retailTotals, base.customer.totals]) {
       totals.tax = '50'; totals.charges = '10'; totals.payable = '2060';
     }
     base.accounting.sabalanPaymentPlan.installments[0].amount.amount = '1700';
-    base.partner.sabalanPaymentPlan.installments[0].amount.amount = '1700';
+    base.partner.sabalanPaymentPlan!.installments[0].amount.amount = '1700';
     for (const view of [base.customer, base.partner]) view.customerPaymentPlan.installments[0].amount.amount = '2060';
     base.partner.resaleDifference = '360';
   }
@@ -649,7 +649,7 @@ test('durable Accounting queue replay returns the original Partner record withou
         const projections = await buildCaseProjections({ ...changedTax.owner, caseNumber: changedTax.caseNumber,
           internalRecordId: changedTax.recordId, internalRecordNumber: changedTax.recordNumber,
           customerContractNumber: changedTax.customerContractNumber, commercialAccountId: changedTax.commercialAccountId,
-          state: 'DRAFT', evidence: { ...fields, products: wholesaleProducts.map(row => ({ ...row,
+          state: 'DRAFT', evidence: { ...fields, pricingState: 'READY_TO_FINALIZE', products: wholesaleProducts.map(row => ({ ...row,
             retailUnitPrice: retailProducts.find(retailRow => retailRow.productRowId === row.productRowId)!.retailUnitPrice })),
           resaleDifference: subtract(String(((fields.retailEnvelope as Prisma.JsonObject).totals as Prisma.JsonObject).payable), changedTax.totals.payable),
           } as unknown as CaseRevisionProjectionEvidence });

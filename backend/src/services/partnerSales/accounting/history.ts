@@ -74,7 +74,7 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
       // invoice. Compare the canonical commercial evidence, not revision equality.
       const historical = object(object(predecessor.sourceSnapshot)?.partnerPreparation) as PartnerFinancialPreparation | undefined;
       const predecessorViews = await readPartnerRevisionProjections(tx, effect.predecessor);
-      if (!historical || !predecessorViews) throw conflict();
+      if (!historical || !predecessorViews?.accounting) throw conflict();
       const prepared = await preparePartnerFinancialSource({ view: { ...predecessorViews.accounting, state: 'COMMITTED' },
         partnerSellerId: historical.debtor.partnerSellerId }, effect.predecessor);
       if (!prepared.ok || !matchesFinancialPreparation(prepared.value, historical)) throw conflict();

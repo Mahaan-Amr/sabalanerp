@@ -37,7 +37,8 @@ export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled
     {!summary.valid ? <ErpInlineState kind="error" title={summary.message} /> : <>
       <dl className="grid gap-3 sm:grid-cols-2">
         <div><dt className="text-sm text-[var(--sds-text-secondary)]">جمع فروش پس از تخفیف</dt><dd className="mt-1 font-bold">{partnerMoneyText(summary.retail, discount.currency)}</dd></div>
-        <div><dt className="text-sm text-[var(--sds-text-secondary)]">اختلاف بازفروش، بدون مالیات و هزینه عبوری</dt><dd className="mt-1 font-bold">{partnerMoneyText(summary.difference, discount.currency)}</dd></div>
+        <div><dt className="text-sm text-[var(--sds-text-secondary)]">اختلاف بازفروش، بدون مالیات و هزینه عبوری</dt><dd className="mt-1 font-bold">{summary.pricingReady
+          ? partnerMoneyText(summary.difference!, discount.currency) : 'پس از تکمیل استعلام'}</dd></div>
       </dl>
       {summary.loss && <>
         <ErpInlineState kind="stale" title="فروش با زیان: مبلغ خالص فروش به مشتری کمتر از مبلغ خرید شماست. می‌توانید با تأیید زیان ادامه دهید." />

@@ -25,6 +25,15 @@ const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringif
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
+export function requireCompleteCustomerParty(input: { displayName: string; phone?: string; address?: string }):
+Result<{ displayName: string; phone: string; address: string }> {
+  const displayName = input.displayName.trim();
+  if (!displayName || !input.phone || !input.address) {
+    return { ok: false, error: partnerError('INVALID_PAYLOAD') };
+  }
+  return { ok: true, value: { displayName, phone: input.phone, address: input.address } };
+}
+
 /** Atomically binds immutable technical evidence to the customer contract on
  * first save, while allowing later Draft revisions to reuse that exact bound
  * evidence. The editable lease remains unavailable through the recovery API. */
@@ -218,14 +227,18 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     effectiveDate: command.intent.contractDate,
     installments: [],
   });
+  const customerDisplayName = customer.companyName || `${customer.firstName} ${customer.lastName}`.trim();
+  const customerAddress = customer.address || customer.workAddress || customer.homeAddress;
+  const customerParty = requireCompleteCustomerParty({ displayName: customerDisplayName,
+    ...(customerPhone ? { phone: customerPhone } : {}), ...(customerAddress ? { address: customerAddress } : {}) });
+  if (!customerParty.ok) return customerParty;
   return { ok: true, value: {
     profileId: profile.id, partnerSellerId: actorId, customerId: customer.id,
     ...(command.intent.projectId ? { projectId: command.intent.projectId } : {}),
     commercialAccountId: account.id, departmentId: profile.user.departmentId,
     sabalanTermsVersionId: 'ACCOUNTING_PENDING_V1', graph: saved.graph, technicalSnapshot: saved.view, rows,
     partner: { displayName: identity.tradeName || identity.legalName, phone: identity.phone, address: identity.address },
-    customer: { displayName: customer.companyName || `${customer.firstName} ${customer.lastName}`.trim(),
-      phone: customerPhone, address: customer.address || customer.workAddress || customer.homeAddress || 'ثبت‌نشده' },
+    customer: customerParty.value,
     legalText: 'قرارداد فروش کالا و خدمات مطابق مشخصات، برنامه پرداخت و برنامه تحویل ثبت‌شده است.', sabalanPaymentPlan,
     additionalMaterialApprovals,
   } };

@@ -46,7 +46,7 @@ export function partnerCaseMetrics(view: PartnerCaseView, status = stateCopy[vie
   return [
       { label: 'فروش به مشتری', value: formatPartnerMoney(view.retailTotals.payable, view.retailTotals.currency), icon: FaMoneyBillWave, tone: 'primary' },
       { label: 'خرید از سبلان', value: pricingReady ? formatPartnerMoney(view.sabalanTotals!.payable, view.sabalanTotals!.currency) : 'در انتظار استعلام', icon: FaFileContract, tone: 'info' },
-      { label: 'سود بازفروش', value: pricingReady ? formatPartnerMoney(view.resaleDifference!, view.retailTotals.currency) : 'پس از تکمیل استعلام', icon: FaCalculator, tone: pricingReady && Number(view.resaleDifference) < 0 ? 'danger' : 'success' },
+      { label: 'سود بازفروش', value: pricingReady ? formatPartnerMoney(view.resaleDifference!, view.retailTotals.currency) : 'پس از تکمیل استعلام', icon: FaCalculator, tone: !pricingReady ? 'info' : Number(view.resaleDifference) < 0 ? 'danger' : 'success' },
       { label: 'وضعیت پرونده', value: status.label, icon: FaFileContract, tone: status.tone },
     ];
 }

@@ -10,7 +10,7 @@ import { createPartnerCaseLifecycleService } from '../partnerSales/cases/lifecyc
 import { buildRevisionEvidence, validateResolvedDraft, type ResolvedCaseDraft } from '../partnerSales/cases/revisions';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { createPartnerLifecycleDatabase } from './partnerCaseLifecycleDatabase';
-import { consumePrismaPartnerTechnicalRecovery } from '../partnerSales/cases/prismaComposition';
+import { consumePrismaPartnerTechnicalRecovery, requireCompleteCustomerParty } from '../partnerSales/cases/prismaComposition';
 
 function databaseUrl() {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -28,6 +28,14 @@ const graphFor = (productRowId: string) => parseCanonicalProductGraph({ schemaVe
   sourceBatches: [], remainingStones: [], allocations: [], operationGroups: [], toolSelections: [], finishingSelections: [] });
 const configurationHash = `sha256-v1:${'1'.repeat(64)}`;
 const approvalEvidenceHash = `sha256-v1:${'2'.repeat(64)}`;
+
+test('numbered Case customer data rejects a missing visible address or SMS recipient', () => {
+  assert.equal(requireCompleteCustomerParty({ displayName: 'مشتری', phone: '09121234567' }).ok, false);
+  assert.equal(requireCompleteCustomerParty({ displayName: 'مشتری', address: 'تهران' }).ok, false);
+  assert.deepEqual(requireCompleteCustomerParty({ displayName: ' مشتری ', phone: '09121234567', address: 'تهران' }), {
+    ok: true, value: { displayName: 'مشتری', phone: '09121234567', address: 'تهران' },
+  });
+});
 
 test('revision commercial evidence preserves significant fractional digits beyond ambient Decimal precision', async () => {
   const ids = { caseId: 'exact-case', partnerId: 'exact-partner', customerId: 'exact-customer', profileId: 'exact-profile',

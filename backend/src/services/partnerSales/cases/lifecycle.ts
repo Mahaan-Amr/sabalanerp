@@ -34,9 +34,9 @@ type TransitionResult = Result<{ commandId: string; replayed: boolean;
 
 const customerTransitions = {
   AWAITING: { operation: 'CUSTOMER_CONFIRMATION_SEND', from: 'DRAFT', to: 'AWAITING_CUSTOMER_CONFIRMATION',
-    status: 'PENDING_APPROVAL', eventType: 'CASE_AWAITING_CUSTOMER_CONFIRMATION' },
+    status: 'PENDING_APPROVAL', confirmationState: 'SENT', eventType: 'CASE_AWAITING_CUSTOMER_CONFIRMATION' },
   APPROVED: { operation: 'CUSTOMER_CONFIRMATION_VERIFY', from: 'AWAITING_CUSTOMER_CONFIRMATION', to: 'CUSTOMER_APPROVED',
-    status: 'APPROVED', eventType: 'CASE_CUSTOMER_APPROVED' },
+    status: 'APPROVED', confirmationState: 'APPROVED', eventType: 'CASE_CUSTOMER_APPROVED' },
 } as const;
 
 export interface PartnerCaseLifecycleDependencies {
@@ -181,7 +181,8 @@ async function parseViews(tx: Transaction, row: LockedCase) {
       accounting.data.recordId !== row.internalRecordId || fulfillment.data.recordId !== row.internalRecordId)) ||
       customer.data.revision !== row.headRevision || customer.data.contractNumber !== row.customerContract.contractNumber ||
       computedOutputHash !== outputHash) return undefined;
-  return { partner: { ...partner.data, state: row.state },
+  return { partner: { ...partner.data, state: row.state,
+    customerConfirmationState: row.customerConfirmationState },
     ...(accounting.success ? { accounting: { ...accounting.data, state: row.state } } : {}) };
 }
 
@@ -464,7 +465,7 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
             return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           }
           return { ok: true, value: { commandId: input.commandId, replayed: true,
-            case: historical, eventIds: saved.eventIds } };
+            case: { ...historical, customerConfirmationState: transition.confirmationState }, eventIds: saved.eventIds } };
         }
         const expectedError = checkExpectedRevision(input.expected, expectedOwner(row));
         if (expectedError) return { ok: false, error: expectedError };
@@ -476,7 +477,7 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
             key: input.commandId, payloadHash, commandId: input.commandId, owner: expectedOwner(row),
             state: row.state, eventIds: [] });
           return { ok: true, value: { commandId: input.commandId, replayed: false,
-            case: views.partner, eventIds: [] } };
+            case: { ...views.partner, customerConfirmationState: row.customerConfirmationState }, eventIds: [] } };
         }
         if (row.state !== transition.from) return { ok: false, error: partnerError('STATE_CONFLICT') };
         const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CUSTOMER_OUTPUT',
@@ -487,7 +488,8 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
         const at = await clock(tx), eventId = randomUUID(), sequence = await nextSequence(tx, row.id);
         const updated = await tx.partnerSaleCase.updateMany({ where: { id: row.id, state: transition.from,
           stateRevision: row.stateRevision, headRevision: row.headRevision, integrityHash: row.integrityHash },
-          data: { state: transition.to, stateRevision: { increment: 1 } } });
+          data: { state: transition.to, customerConfirmationState: transition.confirmationState,
+            stateRevision: { increment: 1 } } });
         if (updated.count !== 1) throw new RollbackLifecycleResult({ ok: false, error: partnerError('ROW_STALE') });
         await tx.salesContract.update({ where: { id: row.customerContractId }, data: { status: transition.status } });
         await tx.partnerCaseEvent.create({ data: { id: eventId, caseId: row.id, caseRevision: row.headRevision,
@@ -502,7 +504,8 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
           key: input.commandId, payloadHash, commandId: input.commandId, owner: expectedOwner(row),
           state: transition.to, eventIds: [eventId] });
         return { ok: true, value: { commandId: input.commandId, replayed: false,
-          case: { ...views.partner, state: transition.to }, eventIds: [eventId] } };
+          case: { ...views.partner, state: transition.to,
+            customerConfirmationState: transition.confirmationState }, eventIds: [eventId] } };
       });
     } catch (error) {
       if (error instanceof RollbackLifecycleResult) return error.result as TransitionResult;

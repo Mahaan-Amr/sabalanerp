@@ -404,7 +404,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       const result = await prisma.$transaction(async tx => {
         const actorProfile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: { id: true } });
         const rows = await tx.partnerSaleCase.findMany({ where: body.caseId ? { id: body.caseId } : undefined,
-          orderBy: { createdAt: 'desc' }, select: { id: true, state: true, headRevision: true, integrityHash: true,
+          orderBy: { createdAt: 'desc' }, select: { id: true, state: true, pricingState: true,
+            customerConfirmationState: true, headRevision: true, integrityHash: true,
             head: { select: { internalProjection: true } }, outputs: { orderBy: { recordedAt: 'desc' }, take: 1,
               select: { id: true } } } });
         // A list can span several cases belonging to one profile. Acquire every
@@ -447,9 +448,12 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           const correction = await authorized('CORRECTION_REQUEST', casePurpose, 'API');
           const cancel = await authorized('CASE_CANCEL', casePurpose, 'API');
           const voidRequest = await authorized('VOID_REQUEST', casePurpose, 'API');
-          cases.push({ view: { ...view.data, state: row.state }, snapshotId: row.outputs[0]?.id || null,
+          cases.push({ view: { ...view.data, state: row.state,
+            pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
+            snapshotId: row.outputs[0]?.id || null,
             actions: { canPreview: output && Boolean(row.outputs[0]),
-              canIssue: output && commit && Boolean(row.outputs[0]) && ['CUSTOMER_APPROVED', 'COMMITTED'].includes(row.state),
+              canIssue: output && commit && row.pricingState === 'READY_TO_FINALIZE' && Boolean(row.outputs[0]) &&
+                ['CUSTOMER_APPROVED', 'COMMITTED'].includes(row.state),
               canSendConfirmation: output && ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION'].includes(row.state),
               canRequestCorrection: correction && row.state === 'COMMITTED',
               canCancel: cancel && ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(row.state),
@@ -489,7 +493,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const snapshotRecord = await tx.partnerCustomerOutputSnapshot.findUnique({ where: { id: snapshotIdValue } });
         const snapshot = CustomerOutputSnapshotSchema.safeParse(snapshotRecord?.content);
         const row = await tx.partnerSaleCase.findUnique({ where: { id: request.params.caseId }, select: {
-          id: true, state: true, headRevision: true, integrityHash: true,
+          id: true, state: true, pricingState: true, headRevision: true, integrityHash: true,
           customerContractId: true, profile: { select: { userId: true } },
         } });
         if (!snapshotRecord || !snapshot.success || !row || snapshotRecord.caseId !== row.id ||
@@ -497,7 +501,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const allowed = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id,
           purpose: 'CUSTOMER_OUTPUT', channel: 'PDF' }, { correlationId }).authorize('CUSTOMER_OUTPUT', { kind: 'CASE', id: row.id });
         if (!allowed.ok) return allowed;
-        if (mode === 'FINAL' && row.state !== 'CUSTOMER_APPROVED' && row.state !== 'COMMITTED') {
+        if (mode === 'FINAL' && (row.pricingState !== 'READY_TO_FINALIZE' ||
+            (row.state !== 'CUSTOMER_APPROVED' && row.state !== 'COMMITTED'))) {
           return { ok: false as const, error: partnerError('STATE_CONFLICT') };
         }
         if (mode === 'FINAL') {

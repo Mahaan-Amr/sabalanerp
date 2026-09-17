@@ -24,6 +24,17 @@ test('Partner case detail separates retail, wholesale and margin without exposin
   assert.doesNotMatch(html, /FIXTURE-INTERNAL-313|شماره سند داخلی|approvalEvidenceId|commercialAccountId/);
 });
 
+test('unpriced margin uses an informational tone instead of claiming success', () => {
+  const fixture = createPartnerFixtures();
+  const { sabalanTotals: _sabalanTotals, resaleDifference: _difference,
+    sabalanPaymentPlan: _sabalanPlan, ...visible } = fixture.partner;
+  const unpriced = { ...visible, pricingState: 'AWAITING_INQUIRY' as const,
+    products: visible.products.map(({ wholesaleUnitPrice: _wholesale, ...product }) => product) };
+  const margin = partnerCaseMetrics(unpriced).find(metric => metric.label === 'سود بازفروش');
+  assert.equal(margin?.tone, 'info');
+  assert.equal(margin?.value, 'پس از تکمیل استعلام');
+});
+
 test('private retail collection keeps historical plans visible and explains independent debt', () => {
   const fixture = createPartnerFixtures();
   const history: RetailCollectionHistory = {

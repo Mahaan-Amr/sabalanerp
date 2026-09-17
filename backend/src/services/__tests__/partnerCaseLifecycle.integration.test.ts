@@ -355,14 +355,17 @@ test('confirmation, approval and both issuance facts create one commitment witho
     correlationId: `${ids.caseId}-send`, snapshotId: `${ids.caseId}-snapshot` };
   const awaiting = await service.markAwaitingCustomerConfirmation(awaitingInput);
   assert.equal(awaiting.ok && awaiting.value.case.state, 'AWAITING_CUSTOMER_CONFIRMATION');
+  assert.equal(awaiting.ok && awaiting.value.case.customerConfirmationState, 'SENT');
   const awaitingReplay = await service.markAwaitingCustomerConfirmation(awaitingInput);
   assert.equal(awaitingReplay.ok && awaitingReplay.value.replayed, true);
+  assert.equal(awaitingReplay.ok && awaitingReplay.value.case.customerConfirmationState, 'SENT');
   const changedAwaiting = await service.markAwaitingCustomerConfirmation({ ...awaitingInput,
     snapshotId: `${ids.caseId}-different-snapshot` });
   assert.equal(changedAwaiting.ok ? null : changedAwaiting.error.code, 'IDEMPOTENCY_CONFLICT');
   const approved = await service.markCustomerApproved({ expected: owner, commandId: `${ids.caseId}-approve`,
     correlationId: `${ids.caseId}-approve`, snapshotId: `${ids.caseId}-snapshot`, verifiedAt: '2026-08-30T07:30:00.000Z' });
   assert.equal(approved.ok && approved.value.case.state, 'CUSTOMER_APPROVED');
+  assert.equal(approved.ok && approved.value.case.customerConfirmationState, 'APPROVED');
 
   const signedCommand = await commitCommand(ids, owner, 'SIGNED');
   const signed = await service.execute(signedCommand);
@@ -380,6 +383,7 @@ test('confirmation, approval and both issuance facts create one commitment witho
 
   const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, include: { customerContract: true } });
   assert.equal(root.state, 'COMMITTED'); assert.equal(root.customerContract.status, 'PRINTED');
+  assert.equal(root.customerConfirmationState, 'APPROVED');
   assert.equal(root.commitmentTrigger, 'SIGNED');
   assert.equal(await tx.partnerCaseEvent.count({ where: { caseId: ids.caseId, type: 'CASE_COMMITTED' } }), 1);
   assert.equal(await tx.partnerCaseEvent.count({ where: { caseId: ids.caseId, type: { in: ['CASE_SIGNED', 'CASE_PRINTED'] } } }), 2);

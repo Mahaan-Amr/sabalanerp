@@ -27,4 +27,12 @@ test('initial inquiry options include primary and additional-material pricing su
   assert.deepEqual(options.map(option => option.role), ['PRIMARY', 'ADDITIONAL_MATERIAL']);
   assert.equal(options[0].label, 'سنگ اصلی');
   assert.match(options[1].label, /جزء جانبی/);
+
+  const withoutCatalog = buildPartnerInquirySubjectOptions({
+    saved: { ...fixture.technicalSaved, pricingSubjects: [{ configurationRef: primary, role: 'PRIMARY' }] },
+    draft: { schemaVersion: 1, inputRevision: 1, rows: [], dependents: [], stairSystems: [], editingValues: [] },
+    catalog: [],
+  });
+  assert.equal(withoutCatalog[0].label, 'محصول اصلی ۱');
+  assert.doesNotMatch(withoutCatalog[0].label, new RegExp(primary.productRowId));
 });

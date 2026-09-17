@@ -25,7 +25,7 @@ test('customer check plan keeps ordinary optional number and bank without weaken
   const customerPlan = { planId: 'customer-plan', version: 1, effectiveDate: '2026-09-14',
     installments: [{ installmentId: 'customer-check', dueDate: '2026-10-14',
       amount: { amount: '1200000', currency: 'IRT' as const }, method: 'CHECK' as const,
-      check: { number: '', bank: '', dueDate: '2026-10-14', ownerName: 'علی رضایی', handoverDate: '2026-09-20' } }] };
+      check: { dueDate: '2026-10-14', ownerName: 'علی رضایی', handoverDate: '2026-09-20' } }] };
   assert.equal(CustomerPaymentPlanSchema.safeParse(customerPlan).success, true);
   assert.equal(SabalanPaymentPlanSetSchema.safeParse({ ...valid, plan: { ...valid.plan,
     installments: customerPlan.installments } }).success, false);

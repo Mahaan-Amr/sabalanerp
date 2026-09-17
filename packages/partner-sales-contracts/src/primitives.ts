@@ -44,7 +44,7 @@ const paymentPlanSchema = (checkSchema: z.ZodTypeAny) => z.object({
 });
 const SabalanCheckEvidenceSchema = z.object({ number: TextSchema, bank: TextSchema, dueDate: DateSchema,
   ownerName: TextSchema.optional(), handoverDate: DateSchema.optional() }).strict();
-const CustomerCheckEvidenceSchema = z.object({ number: z.string().trim().max(4000), bank: z.string().trim().max(4000),
+const CustomerCheckEvidenceSchema = z.object({ number: z.string().trim().max(4000).optional(), bank: z.string().trim().max(4000).optional(),
   dueDate: DateSchema, ownerName: TextSchema.optional(), handoverDate: DateSchema.optional() }).strict();
 export const PaymentPlanSchema = paymentPlanSchema(SabalanCheckEvidenceSchema);
 export const CustomerPaymentPlanSchema = paymentPlanSchema(CustomerCheckEvidenceSchema);

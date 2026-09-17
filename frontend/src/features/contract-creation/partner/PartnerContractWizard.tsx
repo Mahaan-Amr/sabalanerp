@@ -33,13 +33,14 @@ export const partnerWizardSteps: Array<{ id: PartnerWizardStep; label: string; i
   { id: 'payment', label: 'روش پرداخت', icon: FaCreditCard },
   { id: 'confirmation', label: 'تأیید دیجیتال', icon: FaSignature },
 ];
-export const partnerWizardPresentationSteps: WizardStep[] = partnerWizardSteps.map((step, index) => ({
+const presentPartnerWizardSteps = (steps: typeof partnerWizardSteps): WizardStep[] => steps.map((step, index) => ({
   id: index + 1,
   title: step.label,
   titleEn: step.id,
   icon: step.icon,
   description: step.label,
 }));
+export const partnerWizardPresentationSteps = presentPartnerWizardSteps(partnerWizardSteps);
 
 export const partnerWizardStepsForDraft = (draft: PartnerWizardDraft) => {
   const hasDeliverableAllocation = draft.intent.deliveries.some(delivery => delivery.items.length > 0);
@@ -77,9 +78,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const visibleSteps = partnerWizardStepsForDraft(draft);
   const requestedStepIndex = visibleSteps.findIndex(step => step.id === draft.step);
   const stepIndex = requestedStepIndex >= 0 ? requestedStepIndex : visibleSteps.findIndex(step => step.id === 'payment');
-  const visiblePresentationSteps: WizardStep[] = visibleSteps.map((step, index) => ({
-    id: index + 1, title: step.label, titleEn: step.id, icon: step.icon, description: step.label,
-  }));
+  const visiblePresentationSteps = presentPartnerWizardSteps(visibleSteps);
   const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
   const unusable = [...draft.rows.map(row => ({ id: row.productRowId, inquiryRow: row.inquiryRow })),
     ...(draft.materialInquiryRows ?? []).map(row => ({ id: row.pricingSubjectId, inquiryRow: row.inquiryRow }))]

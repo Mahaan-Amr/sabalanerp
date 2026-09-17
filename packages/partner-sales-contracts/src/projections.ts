@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CaseStateSchema, DateSchema, DecimalSchema, DeliverySchema, DisplayPartySchema, HashSchema, IdSchema, InstantSchema, MoneySchema, PaymentPlanSchema, ProductDisplaySchema, RevisionRefSchema, RevisionSchema, SignedDecimalSchema, TextSchema, TotalsSchema } from './primitives';
+import { CaseStateSchema, CustomerPaymentPlanSchema, DateSchema, DecimalSchema, DeliverySchema, DisplayPartySchema, HashSchema, IdSchema, InstantSchema, MoneySchema, PaymentPlanSchema, ProductDisplaySchema, RevisionRefSchema, RevisionSchema, SignedDecimalSchema, TextSchema, TotalsSchema } from './primitives';
 
 // Positive, recursively strict DTOs. Never spread a Prisma entity into these views.
 // The internal Case hash is intentionally absent from the public output.
@@ -9,7 +9,7 @@ export const CustomerContractOutputSchema = z.object({
   status: z.enum(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED', 'PRINTED', 'CANCELLED']),
   contractDate: DateSchema, seller: DisplayPartySchema, customer: DisplayPartySchema,
   products: z.array(ProductDisplaySchema.extend({ retailUnitPrice: DecimalSchema }).strict()).min(1),
-  totals: TotalsSchema, customerPaymentPlan: PaymentPlanSchema, deliveries: z.array(DeliverySchema),
+  totals: TotalsSchema, customerPaymentPlan: CustomerPaymentPlanSchema, deliveries: z.array(DeliverySchema),
   legalText: TextSchema, signatures: z.array(z.object({ name: TextSchema, signedAt: TextSchema }).strict()),
   confirmation: z.enum(['NOT_SENT', 'PENDING', 'VERIFIED', 'INVALIDATED']),
 }).strict();
@@ -27,7 +27,7 @@ export const PartnerCaseViewSchema = z.object({
   caseNumber: IdSchema, customerContractNumber: IdSchema, state: CaseStateSchema,
   products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema, retailUnitPrice: DecimalSchema }).strict()),
   retailTotals: TotalsSchema, sabalanTotals: TotalsSchema, resaleDifference: SignedDecimalSchema,
-  customerPaymentPlan: PaymentPlanSchema, sabalanPaymentPlan: PaymentPlanSchema, deliveries: z.array(DeliverySchema),
+  customerPaymentPlan: CustomerPaymentPlanSchema, sabalanPaymentPlan: PaymentPlanSchema, deliveries: z.array(DeliverySchema),
 }).strict();
 export const SabalanInternalRecordViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('ACCOUNTING'), sourceKind: z.literal('SABALAN_TO_PARTNER'),

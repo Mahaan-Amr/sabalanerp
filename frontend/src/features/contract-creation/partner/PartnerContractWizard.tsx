@@ -41,6 +41,11 @@ export const partnerWizardPresentationSteps: WizardStep[] = partnerWizardSteps.m
   description: step.label,
 }));
 
+export const partnerWizardStepsForDraft = (draft: PartnerWizardDraft) => {
+  const hasDeliverableAllocation = draft.intent.deliveries.some(delivery => delivery.items.length > 0);
+  return hasDeliverableAllocation ? partnerWizardSteps : partnerWizardSteps.filter(step => step.id !== 'delivery');
+};
+
 /** Host-supplied sections reuse the existing customer/delivery/payment editors
  * and their validation. They receive the recovery-owned draft, never internal
  * price inputs. The integration owner supplies authenticated adapters; no fixture is a fallback.
@@ -69,7 +74,12 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const [confirmationSent, setConfirmationSent] = useState(false);
   const recoveryFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
-  const stepIndex = partnerWizardSteps.findIndex(step => step.id === draft.step);
+  const visibleSteps = partnerWizardStepsForDraft(draft);
+  const requestedStepIndex = visibleSteps.findIndex(step => step.id === draft.step);
+  const stepIndex = requestedStepIndex >= 0 ? requestedStepIndex : visibleSteps.findIndex(step => step.id === 'payment');
+  const visiblePresentationSteps: WizardStep[] = visibleSteps.map((step, index) => ({
+    id: index + 1, title: step.label, titleEn: step.id, icon: step.icon, description: step.label,
+  }));
   const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
   const unusable = [...draft.rows.map(row => ({ id: row.productRowId, inquiryRow: row.inquiryRow })),
     ...(draft.materialInquiryRows ?? []).map(row => ({ id: row.pricingSubjectId, inquiryRow: row.inquiryRow }))]
@@ -79,6 +89,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     || row.inquiryRow.configurationRef.recoveryId !== draft.intent.recoveryId);
   const mutatePending = result.phase === 'submitting' || result.phase === 'uncertain';
   const disabled = recovery.state !== 'writable' || mutatePending;
+
+  React.useEffect(() => {
+    if (requestedStepIndex < 0 && draft.step === 'delivery') onChange({ ...draft, step: 'payment' });
+  }, [draft, onChange, requestedStepIndex]);
 
   const recover = async (operation: () => Promise<void>) => {
     if (recoveryFlight.current) return;
@@ -121,7 +135,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     rows: partnerRetailIntentRows(rows),
   } });
   const move = (index: number) => {
-    setError(null); onChange({ ...draft, step: partnerWizardSteps[index].id });
+    setError(null); onChange({ ...draft, step: visibleSteps[index].id });
     requestAnimationFrame(() => heading.current?.focus());
   };
   const next = () => {
@@ -134,8 +148,8 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         onChange({ ...draft, step: 'products' }); setError('زیان فروش را بررسی و تأیید کنید.'); return;
       }
     }
-    if (stepIndex < partnerWizardSteps.length - 1) { move(stepIndex + 1); return; }
-    const invalid = partnerWizardSteps.map(step => ({ step, failure: validateStep(step.id, draft) })).find(item => item.failure);
+    if (stepIndex < visibleSteps.length - 1) { move(stepIndex + 1); return; }
+    const invalid = visibleSteps.map(step => ({ step, failure: validateStep(step.id, draft) })).find(item => item.failure);
     if (invalid) { onChange({ ...draft, step: invalid.step.id }); setError(invalid.failure); return; }
     if (!draft.rows.length || unusable.length || new Set(draft.rows.map(row => row.productRowId)).size !== draft.rows.length) {
       setError('اعتبار قیمت ردیف‌ها را با استعلام مجدد تکمیل کنید.'); return;
@@ -147,7 +161,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   return <ContractWizardFrame
     title="ایجاد فروش همکار"
     currentStep={stepIndex + 1}
-    steps={partnerWizardPresentationSteps}
+    steps={visiblePresentationSteps}
     notices={<div className="mb-4 space-y-3">
       {unusable.map(row => <ErpInlineState key={row.id} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
         action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row.inquiryRow) }} />)}
@@ -161,12 +175,12 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       onSubmit: next,
       loading: mutatePending,
       canGoPrevious: !disabled && stepIndex > 0,
-      canGoNext: !disabled && !(stepIndex === partnerWizardSteps.length - 1 && unusable.length > 0),
+      canGoNext: !disabled && !(stepIndex === visibleSteps.length - 1 && unusable.length > 0),
       labels: { submit: 'ثبت پرونده' }
     }}
   >
     <div className="min-w-0 space-y-4" aria-label="ایجاد پرونده فروش همکار">
-      <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{partnerWizardSteps[stepIndex]?.label}</h2>
+      <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{visibleSteps[stepIndex]?.label}</h2>
       <fieldset disabled={disabled} className="min-w-0 space-y-4">
         {draft.step === 'products' ? <div className="space-y-4"><PartnerRetailStep rows={draft.rows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
           onRowsChange={updateRetail} onConfirmLoss={belowCostConfirmed => onChange({ ...draft, intent: { ...draft.intent, belowCostConfirmed } })} />

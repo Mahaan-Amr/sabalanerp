@@ -7,7 +7,7 @@ import {
   MoneySchema,
   PartnerCommandSchema,
   PartnerEventSchema,
-  PaymentPlanSchema,
+  CustomerPaymentPlanSchema,
   PersianReasonSchema,
   RevisionRefSchema,
   canonicalHash,
@@ -32,7 +32,7 @@ import {
 type CorrectionCommand = Extract<PartnerCommand, {
   type: 'CORRECTION_REQUEST' | 'RETAIL_CORRECTION_SAVE' | 'CORRECTION_GATE';
 }>;
-type PaymentPlan = ReturnType<typeof PaymentPlanSchema.parse>;
+type PaymentPlan = ReturnType<typeof CustomerPaymentPlanSchema.parse>;
 type RetailPrice = { productRowId: string; retailUnitPrice: ReturnType<typeof MoneySchema.parse> };
 /** Opaque evidence owned and hashed by #324 retail collections. Correction
  * preserves the complete versioned projection without redefining its events. */
@@ -154,8 +154,8 @@ function validateRevision(revision: RetailCorrectionRevision, caseId: string): b
       || !HashSchema.safeParse(revision.graphHash).success
       || !HashSchema.safeParse(revision.wholesaleCommercialHash).success
       || !HashSchema.safeParse(revision.receivableHash).success
-      || !PaymentPlanSchema.safeParse(revision.customerPaymentPlan).success
-      || revision.planHistory.some(plan => !PaymentPlanSchema.safeParse(plan).success)
+      || !CustomerPaymentPlanSchema.safeParse(revision.customerPaymentPlan).success
+      || revision.planHistory.some(plan => !CustomerPaymentPlanSchema.safeParse(plan).success)
       || revision.retailPrices.some(price => !IdSchema.safeParse(price.productRowId).success
         || !MoneySchema.safeParse(price.retailUnitPrice).success)
       || new Set(revision.retailPrices.map(price => price.productRowId)).size !== revision.retailPrices.length
@@ -439,7 +439,7 @@ export function createPartnerRetailCorrectionService(
             const saved = await saveRecord(tx, record, expired);
             return saved.ok ? failure('STATE_CONFLICT') : saved;
           }
-          const plan = PaymentPlanSchema.safeParse(command.customerPaymentPlan);
+          const plan = CustomerPaymentPlanSchema.safeParse(command.customerPaymentPlan);
           const submittedPrices = new Map(command.retailPrices.map(price => [price.productRowId, price]));
           const prices = record.effective.retailPrices.flatMap(current => {
             const submitted = submittedPrices.get(current.productRowId);

@@ -7,7 +7,7 @@ test('Partner check validation matches ordinary owner, handover, due-date and da
     amount: { amount: '100', currency: 'IRT' }, method: 'CHECK',
     check: { number: '', bank: '', dueDate: '2026-09-17' } }, '2026-09-16');
   assert.deepEqual(errors, {
-    number: 'شماره چک الزامی است.', bank: 'بانک الزامی است.', ownerName: 'نام صاحب چک الزامی است.',
+    ownerName: 'نام صاحب چک الزامی است.',
     handoverDate: 'تاریخ تحویل چک الزامی است.', nationalCode: 'کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است.',
   });
 });

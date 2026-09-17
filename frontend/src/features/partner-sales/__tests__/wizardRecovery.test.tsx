@@ -3,7 +3,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures';
-import { PartnerContractWizard, type PartnerWizardDraft } from '../../contract-creation/partner/PartnerContractWizard';
+import { PartnerContractWizard, partnerWizardStepsForDraft, type PartnerWizardDraft } from '../../contract-creation/partner/PartnerContractWizard';
 import { createPartnerCaseSubmission } from '../../contract-creation/partner/partnerCaseSubmission';
 import { defaultPartnerRetailRows } from '../../contract-creation/partner/partnerRetail';
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
@@ -58,6 +58,12 @@ test('product editing preserves split and grouped deliveries while adding only n
     { ...previous[1], items: [{ productRowId: 'row-a', quantity: '3' }] },
     defaults[1],
   ]);
+});
+
+test('delivery step is omitted when the contract has no deliverable allocations', () => {
+  assert.deepEqual(partnerWizardStepsForDraft({ ...draft, intent: { ...draft.intent, deliveries: [] } })
+    .map(step => step.id), ['date', 'customer', 'project', 'products', 'payment', 'confirmation']);
+  assert.equal(partnerWizardStepsForDraft(draft).some(step => step.id === 'delivery'), true);
 });
 
 test('a centrally blocked Partner entry never mounts the ordinary Sales wizard', () => {

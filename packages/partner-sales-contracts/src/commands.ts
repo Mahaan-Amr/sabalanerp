@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CaseStateSchema, DateSchema, DecimalSchema, DeliverySchema, HashSchema, IdSchema, MoneySchema, PaymentPlanSchema, PersianReasonSchema, RevisionRefSchema, RevisionSchema, TextSchema } from './primitives';
+import { CaseStateSchema, CustomerPaymentPlanSchema, DateSchema, DecimalSchema, DeliverySchema, HashSchema, IdSchema, MoneySchema, PersianReasonSchema, RevisionRefSchema, RevisionSchema, TextSchema } from './primitives';
 import { IdempotencySchema } from './integrity';
 import { ApprovedRowBindingSchema, PartnerConfigurationRefSchema } from './inquiry';
 import { PartnerErrorSchema } from './errors';
@@ -17,7 +17,7 @@ export const CaseDraftIntentSchema = PartnerDraftSubmissionRefSchema.extend({
     retailUnitPrice: MoneySchema }).strict()).min(1),
   additionalMaterialApprovals: z.array(z.object({ pricingSubjectId: IdSchema,
     approvedRowBinding: ApprovedRowBindingSchema }).strict()).optional(),
-  customerPaymentPlan: PaymentPlanSchema,
+  customerPaymentPlan: CustomerPaymentPlanSchema,
   retailDiscount: MoneySchema, belowCostConfirmed: z.boolean(), deliveries: z.array(DeliverySchema),
 }).strict();
 const decision = z.discriminatedUnion('outcome', [
@@ -45,7 +45,7 @@ export const PartnerCommandSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('INQUIRY_REASSIGN'), inquiryId: IdSchema, expectedAssignmentRevision: RevisionSchema, responderId: IdSchema, reason: PersianReasonSchema }).strict(),
   z.object({ ...envelope, ...expected, type: z.literal('CORRECTION_REQUEST'), scope: z.enum(['RETAIL_ONLY', 'SHARED', 'SABALAN_TERMS', 'VOID']), reason: PersianReasonSchema }).strict(),
   z.object({ ...envelope, ...expected, type: z.literal('RETAIL_CORRECTION_SAVE'), opportunityId: IdSchema,
-    retailPrices: z.array(z.object({ productRowId: IdSchema, retailUnitPrice: MoneySchema }).strict()), customerPaymentPlan: PaymentPlanSchema }).strict(),
+    retailPrices: z.array(z.object({ productRowId: IdSchema, retailUnitPrice: MoneySchema }).strict()), customerPaymentPlan: CustomerPaymentPlanSchema }).strict(),
   z.object({ ...envelope, ...expected, type: z.literal('SHARED_CORRECTION_SAVE'), opportunityId: IdSchema, intent: CaseDraftIntentSchema, dependencyEvidenceIds: z.array(IdSchema) }).strict(),
   z.object({ ...envelope, ...expected, type: z.literal('VOID_REMEDIATION_REQUEST'), reason: PersianReasonSchema }).strict(),
   z.object({ ...envelope, ...expected, type: z.literal('CORRECTION_GATE'), correctionId: IdSchema,

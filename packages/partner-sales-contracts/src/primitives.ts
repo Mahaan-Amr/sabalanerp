@@ -24,14 +24,13 @@ export type RevisionRef = z.infer<typeof RevisionRefSchema>;
 export type Money = z.infer<typeof MoneySchema>;
 export type CaseState = z.infer<typeof CaseStateSchema>;
 
-export const PaymentPlanSchema = z.object({
+const paymentPlanSchema = (checkSchema: z.ZodTypeAny) => z.object({
   planId: IdSchema, version: RevisionSchema, effectiveDate: DateSchema,
   predecessorPlanId: IdSchema.optional(),
   installments: z.array(z.object({
     installmentId: IdSchema, dueDate: DateSchema, amount: MoneySchema,
     method: z.enum(['CASH', 'BANK_TRANSFER', 'CHECK', 'CREDIT']),
-    subtype: TextSchema.optional(), check: z.object({ number: TextSchema, bank: TextSchema, dueDate: DateSchema,
-      ownerName: TextSchema.optional(), handoverDate: DateSchema.optional() }).strict().optional(),
+    subtype: TextSchema.optional(), check: checkSchema.optional(),
     nationalCode: z.string().regex(/^\d{10}$/).optional(),
     notes: TextSchema.optional(),
   }).strict()),
@@ -43,7 +42,14 @@ export const PaymentPlanSchema = z.object({
     }
   });
 });
+const SabalanCheckEvidenceSchema = z.object({ number: TextSchema, bank: TextSchema, dueDate: DateSchema,
+  ownerName: TextSchema.optional(), handoverDate: DateSchema.optional() }).strict();
+const CustomerCheckEvidenceSchema = z.object({ number: z.string().trim().max(4000), bank: z.string().trim().max(4000),
+  dueDate: DateSchema, ownerName: TextSchema.optional(), handoverDate: DateSchema.optional() }).strict();
+export const PaymentPlanSchema = paymentPlanSchema(SabalanCheckEvidenceSchema);
+export const CustomerPaymentPlanSchema = paymentPlanSchema(CustomerCheckEvidenceSchema);
 export type PaymentPlan = z.infer<typeof PaymentPlanSchema>;
+export type CustomerPaymentPlan = z.infer<typeof CustomerPaymentPlanSchema>;
 export const DisplayPartySchema = z.object({ displayName: TextSchema, phone: TextSchema, address: TextSchema }).strict();
 export const ProductDisplaySchema = z.object({ productRowId: IdSchema, description: TextSchema, quantity: QuantitySchema, unit: TextSchema }).strict();
 export const DeliverySchema = z.object({ deliveryId: IdSchema, date: DateSchema, destination: TextSchema,

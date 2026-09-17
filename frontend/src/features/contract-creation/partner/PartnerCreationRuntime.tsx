@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   CaseDraftIntentSchema, DuplicateCustomerMatchSchema, PartnerCaseViewSchema, PartnerCommandSchema, PartnerCreationContextSchema,
   PartnerApprovalMatchSetSchema, PartnerWholesaleQuoteSchema, PartnerWizardRecoverySnapshotSchema,
-  PartnerTechnicalCatalogPageSchema, PaymentPlanSchema, canonicalHash, partnerError, previewPartnerTechnicalDraft,
+  PartnerTechnicalCatalogPageSchema, CustomerPaymentPlanSchema, canonicalHash, partnerError, previewPartnerTechnicalDraft,
   type PartnerCaseView, type PartnerCommand, type PartnerCommandPort, type PartnerApprovalMatchSet,
   type DuplicateCustomerMatch, type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
@@ -44,6 +44,7 @@ import { canSubmitPartnerTechnicalAction, showPartnerContractConfigurationWarnin
 import { readPartnerCreationContext } from './partnerCreationContext';
 import { partnerPaymentChoice, partnerPaymentMethodUpdate } from './partnerPaymentMethodAdapter';
 import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment } from './partnerPaymentValidation';
+import { buildPartnerInquirySubjectOptions, type PartnerInquirySubjectOption } from './partnerInquirySubjectOptions';
 
 type PartnerContext = Extract<PartnerCreationContext, { kind: 'PARTNER' }>;
 type PartnerCustomer = PartnerContext['customers'][number];
@@ -188,6 +189,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const [pending, setPending] = useState(false);
   const [initialInquiryOpen, setInitialInquiryOpen] = useState(false);
   const [initialInquiryMatches, setInitialInquiryMatches] = useState<PartnerApprovalMatchSet | null>(null);
+  const [initialInquirySubjects, setInitialInquirySubjects] = useState<PartnerInquirySubjectOption[]>([]);
   const [initialInquirySelection, setInitialInquirySelection] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const contextActorId = context?.kind === 'PARTNER' ? context.actorId : null;
@@ -989,7 +991,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
             return { ...item, ...method, ...(value === 'CHECK' && item.check ? { check: item.check } : {}) };
           })() : item) } } })} />
       {(installment.method === 'CHECK' || nationalCodeRequired) && <ContractPaymentCheckFields
-        showCheckFields={installment.method === 'CHECK'} showBank numberRequired nationalCodeRequired={nationalCodeRequired}
+        showCheckFields={installment.method === 'CHECK'} nationalCodeRequired={nationalCodeRequired}
         value={{ number: installment.check?.number ?? '', bank: installment.check?.bank ?? '',
           ownerName: installment.check?.ownerName ?? '', handoverDate: installment.check?.handoverDate ?? '',
           nationalCode: installment.nationalCode ?? '' }} errors={paymentErrors}
@@ -1058,7 +1060,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       : step === 'delivery' && draft.rows.some(row => remainingPartnerAmount(row.quantity,
         draft.intent.deliveries.flatMap(delivery => delivery.items.filter(item => item.productRowId === row.productRowId).map(item => item.quantity))) !== '0')
         ? 'مقدار تحویل هر محصول باید دقیقاً با مقدار قرارداد برابر باشد.'
-      : step === 'payment' && !PaymentPlanSchema.safeParse(draft.intent.customerPaymentPlan).success
+      : step === 'payment' && !CustomerPaymentPlanSchema.safeParse(draft.intent.customerPaymentPlan).success
         ? 'برنامه پرداخت را کامل کنید.'
       : step === 'payment' && firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today())
         ? firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today())
@@ -1172,9 +1174,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       setRecoveryRevision(saved.value.recoveryRevision);
       const matches = await readApprovalMatches(saved.value);
       setInitialInquiryMatches(matches);
+      const subjects = buildPartnerInquirySubjectOptions({ saved: saved.value, draft: technicalDraft, catalog });
+      setInitialInquirySubjects(subjects);
       const missing = new Set(matches.missingPricingSubjectIds);
-      setInitialInquirySelection(new Set(technicalDraft.rows.filter(row => missing.has(row.productRowId))
-        .map(row => row.productRowId)));
+      setInitialInquirySelection(new Set(subjects.filter(subject => missing.has(subject.productRowId))
+        .map(subject => subject.productRowId)));
       setInitialInquiryOpen(true);
     } catch { setError('وضعیت استعلام ردیف‌ها دریافت نشد؛ اطلاعات شما حفظ شده است.'); }
     finally { technicalCommitFlight.current = false; setPending(false); }
@@ -1255,13 +1259,13 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           disabled={pending || (Boolean(initialInquiryMatches?.missingPricingSubjectIds.length) && initialInquirySelection.size === 0)}
           onClick={() => void startInquiry(context, initialInquirySelection)} />}>
         <div className="space-y-3">
-          {technicalDraft.rows.map(row => { const reusable = initialInquiryMatches?.rows.find(match =>
-            match.configurationRef.productRowId === row.productRowId); return <ErpCard key={row.productRowId} className="p-3">
+          {initialInquirySubjects.map(subject => { const reusable = initialInquiryMatches?.rows.find(match =>
+            match.configurationRef.productRowId === subject.productRowId); return <ErpCard key={subject.productRowId} className="p-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <ErpCheckbox label={catalog.find(product => product.catalogItemId === row.catalogItemId)?.name ?? row.productRowId}
-                checked={initialInquirySelection.has(row.productRowId)} disabled={pending || Boolean(reusable)}
+              <ErpCheckbox label={subject.label}
+                checked={initialInquirySelection.has(subject.productRowId)} disabled={pending || Boolean(reusable)}
                 onChange={event => setInitialInquirySelection(current => { const next = new Set(current);
-                  if (event.target.checked) next.add(row.productRowId); else next.delete(row.productRowId); return next; })} />
+                  if (event.target.checked) next.add(subject.productRowId); else next.delete(subject.productRowId); return next; })} />
               <ErpBadge tone={reusable ? 'success' : 'warning'}>{reusable ? 'استعلام معتبر' : 'استعلام ارسال نشده'}</ErpBadge>
             </div>
           </ErpCard>; })}

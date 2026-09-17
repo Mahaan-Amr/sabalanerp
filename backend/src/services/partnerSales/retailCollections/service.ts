@@ -40,10 +40,10 @@ function validateSource(source: RetailCollectionSource, expected: RevisionRef, c
   const owner = contracts.RevisionRefSchema.safeParse(source.owner);
   const payable = contracts.MoneySchema.safeParse(source.retailPayable);
   const permission = contracts.PermissionContextSchema.safeParse(source.permission);
-  const current = contracts.PaymentPlanSchema.safeParse(source.customerPaymentPlan);
-  const customerOutput = contracts.PaymentPlanSchema.safeParse(source.customerOutputPaymentPlan);
-  const privateReport = contracts.PaymentPlanSchema.safeParse(source.privateReportPaymentPlan);
-  const plans = source.planHistory.map(plan => contracts.PaymentPlanSchema.safeParse(plan));
+  const current = contracts.CustomerPaymentPlanSchema.safeParse(source.customerPaymentPlan);
+  const customerOutput = contracts.CustomerPaymentPlanSchema.safeParse(source.customerOutputPaymentPlan);
+  const privateReport = contracts.CustomerPaymentPlanSchema.safeParse(source.privateReportPaymentPlan);
+  const plans = source.planHistory.map(plan => contracts.CustomerPaymentPlanSchema.safeParse(plan));
   if (!owner.success || !payable.success || !permission.success || !current.success || !customerOutput.success
       || !privateReport.success || plans.some(plan => !plan.success)) return failure('INTEGRITY_CONFLICT');
   const conflict = contracts.checkExpectedRevision(expected, owner.data);

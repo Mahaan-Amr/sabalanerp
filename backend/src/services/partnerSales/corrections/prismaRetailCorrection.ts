@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
-  CustomerContractOutputSchema, PartnerCaseViewSchema, PartnerEventSchema, PaymentPlanSchema,
+  CustomerContractOutputSchema, CustomerPaymentPlanSchema, PartnerCaseViewSchema, PartnerEventSchema,
   canonicalHash, canonicalJson, partnerError,
   type PartnerAction, type Result, type TehranWorkingCalendar,
 } from '@sabalanerp/partner-sales-contracts';
@@ -34,8 +34,8 @@ async function initialRecord(tx: Tx, caseId: string): Promise<RetailCorrectionRe
   } });
   if (!row || row.state !== 'COMMITTED') return null;
   const partner = PartnerCaseViewSchema.safeParse(object(row.head.internalProjection)?.partner);
-  const currentPlan = PaymentPlanSchema.safeParse(object(row.head.paymentEvidence)?.customerPaymentPlan);
-  const history = row.paymentPlans.map(item => PaymentPlanSchema.safeParse(item.evidence));
+  const currentPlan = CustomerPaymentPlanSchema.safeParse(object(row.head.paymentEvidence)?.customerPaymentPlan);
+  const history = row.paymentPlans.map(item => CustomerPaymentPlanSchema.safeParse(item.evidence));
   if (!partner.success || !currentPlan.success || history.some(item => !item.success)) return null;
   const receipts = await tx.partnerRetailReceipt.findMany({ where: { caseId }, orderBy: { recordedAt: 'asc' },
     select: { id: true, kind: true, amount: true, currency: true, effectiveDate: true } });

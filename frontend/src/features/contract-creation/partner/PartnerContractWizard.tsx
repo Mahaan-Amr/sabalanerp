@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useSyncExternalStore } from 'react';
-import { ErpButton, ErpInlineState, ErpLoading, ErpSheet } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpInlineState, ErpLoading, ErpSheet } from '@/components/erp';
 import { FaBuilding, FaCalendarAlt, FaCreditCard, FaSignature, FaTruck, FaUser, FaWarehouse } from 'react-icons/fa';
 import type { WizardStep } from '../components/shared/WizardProgressBar';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
@@ -9,6 +9,7 @@ import { PartnerRetailStep } from './PartnerRetailStep';
 import { partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
 import type { PartnerDraftIntent, createPartnerCaseSubmission } from './partnerCaseSubmission';
 import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
+import type { PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 
 export type PartnerWizardStep = 'date' | 'customer' | 'project' | 'products' | 'delivery' | 'payment' | 'confirmation';
 export interface PartnerWizardDraft {
@@ -46,6 +47,20 @@ export const partnerWizardStepsForDraft = (draft: PartnerWizardDraft) => {
   const hasDeliverableAllocation = draft.intent.deliveries.some(delivery => delivery.items.length > 0);
   return hasDeliverableAllocation ? partnerWizardSteps : partnerWizardSteps.filter(step => step.id !== 'delivery');
 };
+
+export function partnerWizardCompactStatus(view: PartnerCaseView) {
+  const contract = view.state === 'DRAFT' ? 'پیش‌نویس'
+    : view.state === 'AWAITING_CUSTOMER_CONFIRMATION' ? 'در انتظار مشتری'
+      : view.state === 'CUSTOMER_APPROVED' ? 'تأییدشده مشتری' : view.state;
+  const pricing = view.pricingState === 'READY_TO_FINALIZE' ? 'آماده نهایی‌سازی'
+    : view.pricingState === 'AWAITING_INQUIRY' ? 'در انتظار استعلام'
+      : view.pricingState === 'EXPIRED' ? 'منقضی' : 'ناقص';
+  const customer = view.customerConfirmationState === 'NOT_SENT' ? 'ارسال‌نشده'
+    : view.customerConfirmationState === 'SENT' ? 'ارسال‌شده، بدون پاسخ'
+      : view.customerConfirmationState === 'APPROVED' ? 'تأییدشده'
+        : view.customerConfirmationState === 'REJECTED' ? 'ردشده' : 'نیازمند تأیید نسخه جدید';
+  return { contract, pricing, customer };
+}
 
 /** Host-supplied sections reuse the existing customer/delivery/payment editors
  * and their validation. They receive the recovery-owned draft, never internal
@@ -88,6 +103,9 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     || row.inquiryRow.configurationRef.recoveryId !== draft.intent.recoveryId);
   const mutatePending = result.phase === 'submitting' || result.phase === 'uncertain';
   const disabled = recovery.state !== 'writable' || mutatePending;
+  const compactStatus = result.case ? partnerWizardCompactStatus(result.case) : null;
+  const customerNotSent = result.case && ['NOT_SENT', 'RECONFIRMATION_REQUIRED']
+    .includes(result.case.customerConfirmationState) && !confirmationSent;
 
   React.useEffect(() => {
     if (requestedStepIndex < 0 && draft.step === 'delivery') onChange({ ...draft, step: 'payment' });
@@ -148,15 +166,21 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     currentStep={stepIndex + 1}
     steps={visiblePresentationSteps}
     notices={<div className="mb-4 space-y-3">
-      {result.phase === 'created' && result.case && <div className="flex flex-wrap items-center gap-2">
-        <ErpInlineState kind="success" title={`پرونده ${result.case.caseNumber} ذخیره شد و در همین Wizard قابل مشاهده است.`} />
-        {onSendConfirmation && result.case.pricingState === 'READY_TO_FINALIZE' &&
-          (confirmationSent ? <ErpInlineState kind="success" title="پیامک تأیید قرارداد برای مشتری ارسال شد." />
-          : <ErpButton variant="solid" label="ارسال برای مشتری" onClick={() => {
+      {result.phase === 'created' && result.case && compactStatus && <div className="flex flex-wrap items-center gap-2 rounded-[var(--sds-radius-card)] border border-[var(--sds-border-default)] p-2">
+        <span className="text-sm font-bold">{result.case.caseNumber}</span>
+        <ErpBadge tone="neutral">قرارداد: {compactStatus.contract}</ErpBadge>
+        <ErpBadge tone={result.case.pricingState === 'READY_TO_FINALIZE' ? 'success' : 'warning'}>قیمت سبلان: {compactStatus.pricing}</ErpBadge>
+        <ErpBadge tone={result.case.customerConfirmationState === 'APPROVED' ? 'success'
+          : result.case.customerConfirmationState === 'REJECTED' ? 'danger' : 'info'}>مشتری: {compactStatus.customer}</ErpBadge>
+        {onSendConfirmation && result.case.customerConfirmationState !== 'REJECTED' &&
+          (customerNotSent ? <ErpButton variant="solid" label="ارسال برای مشتری" onClick={() => {
             setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
               .then(() => setConfirmationSent(true)).catch(() => setError('ارسال پیامک انجام نشد؛ پرونده ذخیره شده و می‌توانید دوباره تلاش کنید.'));
+          }} /> : <ErpButton variant="outline" label="ارسال مجدد برای مشتری" onClick={() => {
+            setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
+              .then(() => setConfirmationSent(true)).catch(() => setError('ارسال مجدد پیامک انجام نشد؛ پرونده ذخیره شده است.'));
           }} />)}
-        <ErpButton variant="outline" label="باز کردن پرونده" onClick={() => {
+        <ErpButton variant={customerNotSent ? 'outline' : 'solid'} label="باز کردن پرونده" onClick={() => {
           void Promise.resolve().then(() => onOpenCase(result.case!.owner.caseId))
             .catch(() => setError('پرونده ذخیره شده است؛ باز کردن جزئیات را دوباره امتحان کنید.'));
         }} />
@@ -176,7 +200,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       loading: mutatePending,
       canGoPrevious: !disabled && stepIndex > 0,
       canGoNext: !disabled,
-      labels: { submit: 'ذخیره قرارداد' }
+      labels: { submit: result.phase === 'created' ? 'ذخیره تغییرات' : 'ذخیره قرارداد' }
     }}
   >
     <div className="min-w-0 space-y-4" aria-label="ایجاد پرونده فروش همکار">

@@ -10,6 +10,7 @@ import { PartnerReportContent, partnerReportPrimaryAction, type PartnerReportPre
 import { RetailCollectionsPanel, type RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import { PartnerCorrectionPanel } from '../cases/PartnerCorrectionPanel';
 import ConfirmationContractView from '../../../app/contracts/confirm/ConfirmationContractView';
+import { partnerWizardCompactStatus } from '../../contract-creation/partner/PartnerContractWizard';
 
 test('Partner case detail separates retail, wholesale and margin without exposing the internal record', () => {
   const fixture = createPartnerFixtures();
@@ -146,4 +147,20 @@ test('a rejected customer revision is read-only and never appears approved', () 
 
   assert.match(html, /رد این نسخه توسط مشتری ثبت شده است/);
   assert.doesNotMatch(html, /تایید شده در تاریخ|ثبت کد تایید|تایید قرارداد|ارسال مجدد کد/);
+});
+
+test('Partner wizard compact status keeps commercial, pricing and customer axes independent', () => {
+  const fixture = createPartnerFixtures();
+  assert.deepEqual(partnerWizardCompactStatus({ ...fixture.partner,
+    pricingState: 'AWAITING_INQUIRY',
+    customerConfirmationState: 'SENT',
+    sabalanTotals: undefined,
+    resaleDifference: undefined,
+    sabalanPaymentPlan: undefined,
+    products: fixture.partner.products.map(({ wholesaleUnitPrice: _wholesale, ...product }) => product),
+  }), {
+    contract: 'پیش‌نویس',
+    pricing: 'در انتظار استعلام',
+    customer: 'ارسال‌شده، بدون پاسخ',
+  });
 });

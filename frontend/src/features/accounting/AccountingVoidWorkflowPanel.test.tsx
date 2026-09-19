@@ -12,6 +12,9 @@ const workflow: AccountingVoidWorkflowView = {
   reason: 'صدور تکراری فاکتور ۱۴۰۶',
   effectiveAt: '2026-09-19T00:00:00.000Z',
   retainedRecordId: 'invoice-1405',
+  startedAt: '2026-09-19T00:00:00.000Z',
+  startedByName: 'مدیر حسابداری',
+  events: [{ id: 'event-1', action: 'START_ACCOUNTING_VOID_CASE', occurredAt: '2026-09-19T00:00:00.000Z', actorName: 'مدیر حسابداری', note: 'صدور تکراری' }],
   blockers: [{ code: 'ACTIVE_RECEIPT', messageFa: 'ابتدا دریافت ثبت‌شده را برگشت بزنید.', responsibleRoleFa: 'مدیر حسابداری' }],
   nextAction: { kind: 'REVERSE_RECEIPT', targetId: 'payment-1', href: '/dashboard/accounting/payments?recordId=payment-1', labelFa: 'برگشت دریافت' },
   canCancel: true,
@@ -34,4 +37,7 @@ test('shows a simple resolution step, responsible role, and direct action for a 
   assert.match(html, /مسئول انجام: مدیر حسابداری/);
   assert.match(html, /href="\/dashboard\/accounting\/payments\?recordId=payment-1"/);
   assert.match(html, /برگشت دریافت/);
+  assert.match(html, /تاریخچه اقدامات/);
+  assert.match(html, /شروع پرونده ابطال/);
+  assert.match(html, /مدیر حسابداری/);
 });

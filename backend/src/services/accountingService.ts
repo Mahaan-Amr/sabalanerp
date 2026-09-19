@@ -1338,18 +1338,46 @@ export const getAccountingContractDetail = async (contractId: string) => {
     tax,
     correctionRequests
   );
+  const voidActors = await getActorMap(voidCases.flatMap(voidCase => [
+    voidCase.startedBy,
+    voidCase.cancelledBy || '',
+    voidCase.completedBy || '',
+  ]).concat(auditTrail.map(event => event.actorId)));
+  const voidActorLabel = (actorId?: string | null) => {
+    if (!actorId) return null;
+    const actor = voidActors.get(actorId);
+    return actor?.displayName || actor?.username || 'کاربر ثبت‌شده یا حذف‌شده';
+  };
   const voidWorkflows = voidCases.flatMap(voidCase => {
     const sourceRecord = financialRecords.find(record => record.id === voidCase.sourceRecordId);
     if (!sourceRecord) return [];
     const linkedReceivables = receivables.filter(item => item.invoiceRecordId === sourceRecord.id);
     const linkedReceivableIds = new Set(linkedReceivables.map(item => item.id));
-    return [buildAccountingVoidWorkflow({
+    const workflow = buildAccountingVoidWorkflow({
       voidCase,
       sourceRecord,
       receivables: linkedReceivables,
       payments: paymentEvents.filter(item => item.receivableId && linkedReceivableIds.has(item.receivableId)),
       taxRecords: tax.filter(item => item.invoiceRecordId === sourceRecord.id),
-    })];
+    });
+    const events = auditTrail.filter(event => {
+      if (event.entityType === 'AccountingFinancialVoidCase' && event.entityId === voidCase.id) return true;
+      const stateMetadata = metadataObject(metadataObject(event.afterState).metadata);
+      return stateMetadata.voidCaseId === voidCase.id;
+    }).map(event => ({
+      id: event.id,
+      action: event.action,
+      occurredAt: event.createdAt,
+      actorName: voidActorLabel(event.actorId),
+      note: event.note,
+    })).reverse();
+    return [{
+      ...workflow,
+      startedByName: voidActorLabel(voidCase.startedBy),
+      cancelledByName: voidActorLabel(voidCase.cancelledBy),
+      completedByName: voidActorLabel(voidCase.completedBy),
+      events,
+    }];
   });
   const reviewActors = await getActorMap(flags.flatMap(flag => [
     flag.createdBy,
@@ -1458,6 +1486,12 @@ export class AccountingVoidBlockedError extends Error {
 const accountingVoidInputError = (message: string, actionUrl?: string) =>
   new AccountingVoidBlockedError(message, undefined, actionUrl, 400);
 
+const lockAccountingContract = async (tx: Prisma.TransactionClient, contractId?: string | null) => {
+  if (!contractId) return;
+  await tx.$queryRaw`SELECT 1::int AS "locked"
+    FROM (SELECT pg_advisory_xact_lock(hashtextextended(${`accounting-void:${contractId}`}, 0))) AS acquired`;
+};
+
 const requiredAccountingEffectiveAt = (value: string | undefined, actionUrl?: string) => {
   if (!value) throw accountingVoidInputError('تاریخ مؤثر را وارد کنید.', actionUrl);
   const parsed = new Date(value);
@@ -1469,7 +1503,9 @@ const loadAccountingVoidWorkflow = async (
   tx: Prisma.TransactionClient | PrismaClient,
   voidCase: {
     id: string; status: AccountingVoidCaseStatus; sourceRecordId: string; reasonKind: AccountingVoidReasonKind;
-    reason: string; effectiveAt: Date; retainedRecordId: string | null; startedAt: Date;
+    reason: string; effectiveAt: Date; retainedRecordId: string | null; startedBy: string; startedAt: Date;
+    cancelledBy: string | null; cancelledAt: Date | null; cancellationReason: string | null;
+    completedBy: string | null; completedAt: Date | null;
   },
 ) => {
   const sourceRecord = await tx.accountingFinancialRecord.findUnique({ where: { id: voidCase.sourceRecordId } });
@@ -1491,7 +1527,10 @@ const startAccountingVoidCase = async (command: AccountingActionRequest, actor: 
   const reason = String(command.reason || command.note || '').trim();
   const effectiveAt = requiredAccountingEffectiveAt(command.effectiveAt || command.occurredAt, '/dashboard/accounting/invoice-candidates');
   const result = await prisma.$transaction(async tx => {
-    const sourceRecord = await tx.accountingFinancialRecord.findUnique({ where: { id: sourceRecordId } });
+    let sourceRecord = await tx.accountingFinancialRecord.findUnique({ where: { id: sourceRecordId } });
+    if (!sourceRecord) throw accountingVoidInputError('رکورد مالی پیدا نشد. فهرست رکوردهای مالی را تازه‌سازی و دوباره انتخاب کنید.', '/dashboard/accounting/invoice-candidates');
+    await lockAccountingContract(tx, sourceRecord.contractId);
+    sourceRecord = await tx.accountingFinancialRecord.findUnique({ where: { id: sourceRecordId } });
     if (!sourceRecord) throw accountingVoidInputError('رکورد مالی پیدا نشد. فهرست رکوردهای مالی را تازه‌سازی و دوباره انتخاب کنید.', '/dashboard/accounting/invoice-candidates');
     if (sourceRecord.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
       throw accountingVoidInputError('این رکورد از مسیر فروش همکار ساخته شده است. مدیر حسابداری باید آن را در همان پرونده فروش تعیین‌تکلیف کند.');
@@ -1539,7 +1578,10 @@ const cancelAccountingVoidCase = async (command: AccountingActionRequest, actor:
   const reason = String(command.cancellationReason || command.reason || command.note || '').trim();
   if (!reason) throw accountingVoidInputError('دلیل لغو پرونده ابطال را وارد کنید.');
   const result = await prisma.$transaction(async tx => {
-    const before = await tx.accountingFinancialVoidCase.findUnique({ where: { id: command.voidCaseId } });
+    let before = await tx.accountingFinancialVoidCase.findUnique({ where: { id: command.voidCaseId } });
+    if (!before) throw accountingVoidInputError('پرونده ابطال پیدا نشد. صفحه قرارداد را تازه‌سازی کنید.');
+    await lockAccountingContract(tx, before.contractId);
+    before = await tx.accountingFinancialVoidCase.findUnique({ where: { id: command.voidCaseId } });
     if (!before) throw accountingVoidInputError('پرونده ابطال پیدا نشد. صفحه قرارداد را تازه‌سازی کنید.');
     if (before.status === AccountingVoidCaseStatus.CANCELLED) return before;
     if (before.status !== AccountingVoidCaseStatus.OPEN) throw new Error('این پرونده ابطال دیگر قابل لغو نیست.');
@@ -1997,6 +2039,14 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     if (duplicateRecords.length > 0) {
       throw accountingVoidInputError('این شماره فاکتور قبلاً استفاده شده است. برای رکورد جدید یک شماره تازه وارد کنید.');
     }
+    const invoiceNumberClaim = await tx.accountingInvoiceNumberClaim.upsert({
+      where: { number: systemInvoiceNumber },
+      create: { number: systemInvoiceNumber, financialRecordId: before.id },
+      update: {},
+    });
+    if (invoiceNumberClaim.financialRecordId !== before.id) {
+      throw accountingVoidInputError('این شماره فاکتور قبلاً استفاده شده است. برای رکورد جدید یک شماره تازه وارد کنید.');
+    }
 
     const approvedAt = new Date();
     let updated = await tx.accountingFinancialRecord.update({
@@ -2115,6 +2165,14 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       id: `partner-accounting:${(await canonicalHash(partnerCommand)).slice(10)}`, ...partnerCommand, outcome: { invoiceId: updated.id },
     } });
     return updated;
+  }).catch((error: unknown) => {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const target = Array.isArray(error.meta?.target) ? error.meta.target.map(String) : [String(error.meta?.target || '')];
+      if (target.some(field => field.includes('systemInvoiceNumber') || field.includes('number') || field.includes('financialRecordId'))) {
+        throw accountingVoidInputError('این شماره فاکتور هم‌زمان توسط رکورد دیگری استفاده شد. یک شماره تازه وارد کنید.');
+      }
+    }
+    throw error;
   });
 
   if ('partnerDenied' in result) throw new PartnerAccountingCommandError('FORBIDDEN',
@@ -2207,27 +2265,6 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
 const registerReceipt = async (command: AccountingActionRequest, actor: Actor, notificationHook?: AccountingActionNotificationHook) => {
   if (!command.contractId) throw new Error('contractId is required');
   const contract = await ensureContractForReceipt(command.contractId, command.receivableId);
-  let lockedVoidCase: AccountingFinancialVoidCase | null = null;
-  if (command.receivableId) {
-    const receivable = await prisma.accountingReceivable.findUnique({ where: { id: command.receivableId },
-      select: { invoiceRecordId: true } });
-    if (receivable?.invoiceRecordId) {
-      lockedVoidCase = await prisma.accountingFinancialVoidCase.findFirst({ where: {
-        sourceRecordId: receivable.invoiceRecordId, status: AccountingVoidCaseStatus.OPEN,
-      } });
-    }
-  } else {
-    lockedVoidCase = await prisma.accountingFinancialVoidCase.findFirst({ where: {
-      contractId: command.contractId,
-      status: AccountingVoidCaseStatus.OPEN,
-    }, orderBy: { startedAt: 'desc' } });
-  }
-  if (lockedVoidCase) {
-    throw new AccountingVoidBlockedError(
-      'این زنجیره در حال ابطال است و دریافت جدید نمی‌پذیرد. مدیر حسابداری باید مراحل پرونده ابطال را ادامه دهد.', undefined,
-      `/dashboard/accounting/contracts/${lockedVoidCase.contractId}#financial-void-cases`,
-    );
-  }
   const method = command.method && command.method in AccountingPaymentMethod
     ? AccountingPaymentMethod[command.method as keyof typeof AccountingPaymentMethod]
     : AccountingPaymentMethod.CASH;
@@ -2237,6 +2274,16 @@ const registerReceipt = async (command: AccountingActionRequest, actor: Actor, n
   const checkStatus = method === AccountingPaymentMethod.CHECK ? CheckAccountingStatus.RECEIVED : undefined;
 
   const payment = await prisma.$transaction(async (tx) => {
+    await lockAccountingContract(tx, contract.id);
+    const receivable = command.receivableId ? await tx.accountingReceivable.findUnique({ where: { id: command.receivableId },
+      select: { invoiceRecordId: true } }) : null;
+    const lockedVoidCase = await tx.accountingFinancialVoidCase.findFirst({ where: command.receivableId && receivable?.invoiceRecordId
+      ? { sourceRecordId: receivable.invoiceRecordId, status: AccountingVoidCaseStatus.OPEN }
+      : { contractId: contract.id, status: AccountingVoidCaseStatus.OPEN }, orderBy: { startedAt: 'desc' } });
+    if (lockedVoidCase) throw new AccountingVoidBlockedError(
+      'این زنجیره در حال ابطال است و دریافت جدید نمی‌پذیرد. مدیر حسابداری باید مراحل پرونده ابطال را ادامه دهد.', undefined,
+      `/dashboard/accounting/contracts/${lockedVoidCase.contractId}#financial-void-cases`,
+    );
     const event = await tx.accountingPaymentStatus.create({
       data: {
         contractId: contract.id,
@@ -2288,6 +2335,9 @@ const registerReceipt = async (command: AccountingActionRequest, actor: Actor, n
 const applyReceivablePayment = async (tx: Prisma.TransactionClient, receivableId: string, amount: Prisma.Decimal) => {
   const receivable = await tx.accountingReceivable.findUnique({ where: { id: receivableId } });
   if (!receivable) return;
+  if (receivable.status === ReceivableStatus.VOIDED) {
+    throw new AccountingVoidBlockedError('دریافتنی باطل‌شده قابل تغییر نیست. مدیر حسابداری باید از گردش اصلاح مستقل استفاده کند.');
+  }
   const paidAmount = receivable.paidAmount.plus(amount);
   const remainingAmount = Prisma.Decimal.max(receivable.originalAmount.minus(paidAmount), new Prisma.Decimal(0));
   await tx.accountingReceivable.update({
@@ -2328,7 +2378,10 @@ const reverseReceipt = async (command: AccountingActionRequest, actor: Actor) =>
   const reason = String(command.reason || command.note || '').trim();
   if (!reason) throw accountingVoidInputError('دلیل برگشت دریافت را وارد کنید.');
   const result = await prisma.$transaction(async tx => {
-    const before = await tx.accountingPaymentStatus.findUnique({ where: { id: command.paymentEventId } });
+    let before = await tx.accountingPaymentStatus.findUnique({ where: { id: command.paymentEventId } });
+    if (!before) throw accountingVoidInputError('دریافت پیدا نشد. فهرست دریافت‌ها را تازه‌سازی کنید.', '/dashboard/accounting/payments');
+    await lockAccountingContract(tx, before.contractId);
+    before = await tx.accountingPaymentStatus.findUnique({ where: { id: command.paymentEventId } });
     if (!before) throw accountingVoidInputError('دریافت پیدا نشد. فهرست دریافت‌ها را تازه‌سازی کنید.', '/dashboard/accounting/payments');
     if (before.method === AccountingPaymentMethod.CHECK) throw accountingVoidInputError('برای این مورد، مدیر حسابداری باید گزینه «عودت چک» یا «برگشت خورد» را انتخاب کند.', `/dashboard/accounting/payments?recordId=${before.id}`);
     if (before.status === PaymentAccountingStatus.REVERSED) return before;
@@ -2378,8 +2431,18 @@ const updateCheckStatus = async (command: AccountingActionRequest, actor: Actor)
   }
 
   const result = await prisma.$transaction(async (tx) => {
-    const before = await tx.accountingPaymentStatus.findUnique({ where: { id: command.paymentEventId } });
+    let before = await tx.accountingPaymentStatus.findUnique({ where: { id: command.paymentEventId } });
     if (!before) throw accountingVoidInputError('چک پیدا نشد. فهرست دریافت‌ها را تازه‌سازی کنید.', '/dashboard/accounting/payments');
+    await lockAccountingContract(tx, before.contractId);
+    before = await tx.accountingPaymentStatus.findUnique({ where: { id: command.paymentEventId } });
+    if (!before) throw accountingVoidInputError('چک پیدا نشد. فهرست دریافت‌ها را تازه‌سازی کنید.', '/dashboard/accounting/payments');
+    if (before.checkStatus && ([CheckAccountingStatus.BOUNCED, CheckAccountingStatus.RETURNED, CheckAccountingStatus.REPLACED] as CheckAccountingStatus[])
+      .includes(before.checkStatus) && checkStatus !== before.checkStatus) {
+      throw new AccountingVoidBlockedError(
+        'این چک قبلاً به وضعیت پایانی رسیده است. بازگرداندن اثر آن فقط از گردش اصلاح مستقل انجام می‌شود.', undefined,
+        `/dashboard/accounting/payments?recordId=${before.id}`,
+      );
+    }
     try {
       validateFinancialEventDate(occurredAt, before.occurredAt || before.createdAt);
     } catch (error) {
@@ -2471,7 +2534,12 @@ const resolveTaxForVoid = async (command: AccountingActionRequest, actor: Actor)
   if (!reason) throw accountingVoidInputError('دلیل تعیین‌تکلیف مالیات را وارد کنید.');
   const effectiveAt = requiredAccountingEffectiveAt(command.effectiveAt || command.occurredAt);
   const result = await prisma.$transaction(async tx => {
-    const before = await tx.accountingTaxRecord.findUnique({ where: { id: command.taxRecordId } });
+    let before = await tx.accountingTaxRecord.findUnique({ where: { id: command.taxRecordId } });
+    if (!before || !before.invoiceRecordId) {
+      throw accountingVoidInputError('سابقه مالیاتی مرتبط پیدا نشد. صفحه قرارداد را تازه‌سازی کنید.');
+    }
+    await lockAccountingContract(tx, before.contractId);
+    before = await tx.accountingTaxRecord.findUnique({ where: { id: command.taxRecordId } });
     if (!before || !before.invoiceRecordId) {
       throw accountingVoidInputError('سابقه مالیاتی مرتبط پیدا نشد. صفحه قرارداد را تازه‌سازی کنید.');
     }
@@ -2973,7 +3041,11 @@ const voidAccountingReceivable = async (command: AccountingActionRequest, actor:
   const reason = String(command.reason || command.note || '').trim();
   if (!reason) throw accountingVoidInputError('دلیل ابطال دریافتنی را وارد کنید.');
   const result = await prisma.$transaction(async tx => {
-    const before = await tx.accountingReceivable.findUnique({ where: { id: command.receivableId },
+    let before = await tx.accountingReceivable.findUnique({ where: { id: command.receivableId },
+      include: { paymentStatuses: true } });
+    if (!before) throw accountingVoidInputError('دریافتنی پیدا نشد. فهرست دریافتنی‌ها را تازه‌سازی کنید.', '/dashboard/accounting/receivables');
+    await lockAccountingContract(tx, before.contractId);
+    before = await tx.accountingReceivable.findUnique({ where: { id: command.receivableId },
       include: { paymentStatuses: true } });
     if (!before) throw accountingVoidInputError('دریافتنی پیدا نشد. فهرست دریافتنی‌ها را تازه‌سازی کنید.', '/dashboard/accounting/receivables');
     if (before.status === ReceivableStatus.VOIDED) return before;
@@ -3144,8 +3216,11 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
   const recordId = command.recordId || command.invoiceId;
   if (!recordId) throw new Error('رکورد مالی برای ابطال مشخص نشده است.');
   const result = await prisma.$transaction(async tx => {
-    const source = await tx.accountingFinancialRecord.findUnique({ where: { id: recordId },
-      select: { sourceKind: true, metadata: true, sourceSnapshot: true } });
+    let source = await tx.accountingFinancialRecord.findUnique({ where: { id: recordId },
+      select: { sourceKind: true, metadata: true, sourceSnapshot: true, contractId: true } });
+    await lockAccountingContract(tx, source?.contractId);
+    source = await tx.accountingFinancialRecord.findUnique({ where: { id: recordId },
+      select: { sourceKind: true, metadata: true, sourceSnapshot: true, contractId: true } });
     if (source?.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
       throw new Error('ابطال این صورتحساب فقط از گردش اصلاح پرونده همکار امکان‌پذیر است.');
     }

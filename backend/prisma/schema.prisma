@@ -4430,6 +4430,7 @@ model AccountingFinancialRecord {
   approvedPricingVersions ContractApprovedPricingVersion[]
   pricingReadinessResults ContractPricingReadinessResult[]
   partnerShipmentPricing  PartnerAllocationRevisionPricing[]
+  invoiceNumberClaim      AccountingInvoiceNumberClaim?
 
   @@index([kind, status])
   @@index([sourceKind, sourceId])
@@ -4437,6 +4438,15 @@ model AccountingFinancialRecord {
   @@index([customerId])
   @@index([systemInvoiceNumber])
   @@map("accounting_financial_records")
+}
+
+model AccountingInvoiceNumberClaim {
+  number            String                    @id
+  financialRecordId String                    @unique
+  claimedAt         DateTime                  @default(now())
+  financialRecord   AccountingFinancialRecord @relation(fields: [financialRecordId], references: [id], onDelete: Restrict)
+
+  @@map("accounting_invoice_number_claims")
 }
 
 model AccountingInvoiceCandidateItem {

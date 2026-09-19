@@ -152,7 +152,8 @@ export default function AccountingPaymentsPage() {
     { id: 'status', header: 'وضعیت', mobileLabel: 'وضعیت', priority: 'secondary', cell: (row) => <StatusBadge status={row.checkStatus || row.status} /> },
   ];
 
-  const rowActions = (row: any): ErpAction[] => row.sourceKind === 'PARTNER_INTERNAL_RECORD'
+  const rowActions = (row: any): ErpAction[] => row.method === 'CHECK' && ['BOUNCED', 'RETURNED', 'REPLACED'].includes(row.checkStatus)
+    ? [] : row.sourceKind === 'PARTNER_INTERNAL_RECORD'
     ? [
       ...(row.partnerActions?.checkStatuses || []).map((status: string): ErpAction => ({
         label: ({ RECEIVED: 'دریافت شد', DEPOSITED: 'واگذار شد', CLEARED: 'وصول شد', BOUNCED: 'برگشت خورد', RETURNED: 'عودت چک' } as Record<string, string>)[status],

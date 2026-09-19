@@ -9,7 +9,13 @@ type VoidCaseView = {
   reason: string;
   effectiveAt: Date;
   retainedRecordId?: string | null;
+  startedBy?: string;
   startedAt: Date;
+  cancelledBy?: string | null;
+  cancelledAt?: Date | null;
+  cancellationReason?: string | null;
+  completedBy?: string | null;
+  completedAt?: Date | null;
 };
 
 type ReceivableView = {
@@ -229,6 +235,13 @@ export const buildAccountingVoidWorkflow = (input: {
     reason: input.voidCase.reason,
     effectiveAt: input.voidCase.effectiveAt,
     retainedRecordId: input.voidCase.retainedRecordId || null,
+    startedBy: input.voidCase.startedBy || null,
+    startedAt: input.voidCase.startedAt,
+    cancelledBy: input.voidCase.cancelledBy || null,
+    cancelledAt: input.voidCase.cancelledAt || null,
+    cancellationReason: input.voidCase.cancellationReason || null,
+    completedBy: input.voidCase.completedBy || null,
+    completedAt: input.voidCase.completedAt || null,
     steps,
     blockers,
     nextAction,

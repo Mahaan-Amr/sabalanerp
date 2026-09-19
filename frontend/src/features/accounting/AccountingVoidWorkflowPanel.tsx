@@ -21,6 +21,14 @@ export type AccountingVoidWorkflowView = {
   reason: string;
   effectiveAt: string;
   retainedRecordId?: string | null;
+  startedAt?: string;
+  startedByName?: string | null;
+  cancelledAt?: string | null;
+  cancelledByName?: string | null;
+  cancellationReason?: string | null;
+  completedAt?: string | null;
+  completedByName?: string | null;
+  events?: Array<{ id: string; action: string; occurredAt: string; actorName?: string | null; note?: string | null }>;
   steps: VoidStep[];
   blockers: Array<{ code: string; messageFa: string; responsibleRoleFa: string }>;
   nextAction?: VoidAction | null;
@@ -30,6 +38,16 @@ export type AccountingVoidWorkflowView = {
 const stateLabel = (state: VoidStep['state']) => ({
   DONE: 'انجام شده', ACTIONABLE: 'اقدام بعدی', WAITING: 'منتظر مرحله قبل', BLOCKED: 'مسدود',
 }[state]);
+const eventLabel = (action: string) => ({
+  START_ACCOUNTING_VOID_CASE: 'شروع پرونده ابطال',
+  REVERSE_RECEIPT: 'برگشت دریافت',
+  UPDATE_CHECK_STATUS: 'تعیین‌تکلیف چک',
+  RESOLVE_TAX_FOR_VOID: 'تعیین‌تکلیف مالیات',
+  VOID_ACCOUNTING_RECEIVABLE: 'ابطال دریافتنی',
+  VOID_ACCOUNTING_RECORD: 'ابطال رکورد مالی',
+  COMPLETE_ACCOUNTING_VOID_CASE: 'تکمیل پرونده ابطال',
+  CANCEL_ACCOUNTING_VOID_CASE: 'لغو پرونده ابطال',
+}[action] || action);
 
 export default function AccountingVoidWorkflowPanel({ workflows, busy, onResolveTax, onVoidReceivable, onVoidRecord, onCancel }: {
   workflows: AccountingVoidWorkflowView[];
@@ -50,6 +68,26 @@ export default function AccountingVoidWorkflowPanel({ workflows, busy, onResolve
                 {workflow.reasonKind === 'DUPLICATE_ISSUE' ? 'ابطال رکورد تکراری' : 'پرونده ابطال رکورد مالی'}
               </h3>
               <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{workflow.reason} · تاریخ مؤثر {dateFa(workflow.effectiveAt)}</p>
+              <p className="mt-1 text-xs text-[var(--sds-text-muted)]">
+                رکورد مبدأ: {workflow.sourceRecordId}
+                {workflow.retainedRecordId ? ` · رکورد معتبر باقی‌مانده: ${workflow.retainedRecordId}` : ''}
+              </p>
+              {workflow.startedAt && (
+                <p className="mt-1 text-xs text-[var(--sds-text-muted)]">
+                  شروع: {dateFa(workflow.startedAt)} · {workflow.startedByName || 'کاربر ثبت‌شده'}
+                </p>
+              )}
+              {workflow.completedAt && (
+                <p className="mt-1 text-xs text-[var(--sds-text-muted)]">
+                  تکمیل: {dateFa(workflow.completedAt)} · {workflow.completedByName || 'کاربر ثبت‌شده'}
+                </p>
+              )}
+              {workflow.cancelledAt && (
+                <p className="mt-1 text-xs text-[var(--sds-text-muted)]">
+                  لغو: {dateFa(workflow.cancelledAt)} · {workflow.cancelledByName || 'کاربر ثبت‌شده'}
+                  {workflow.cancellationReason ? ` · دلیل: ${workflow.cancellationReason}` : ''}
+                </p>
+              )}
             </div>
             <ErpBadge tone={workflow.status === 'OPEN' ? 'warning' : workflow.status === 'COMPLETED' ? 'success' : 'neutral'}>
               {workflow.status === 'OPEN' ? 'در حال انجام' : workflow.status === 'COMPLETED' ? 'تکمیل شده' : 'لغو شده'}
@@ -99,6 +137,17 @@ export default function AccountingVoidWorkflowPanel({ workflows, busy, onResolve
               );
             })}
           </ol>
+          {Boolean(workflow.events?.length) && (
+            <div className="mt-4 border-t border-[var(--sds-border-subtle)] pt-3">
+              <p className="text-sm font-semibold text-[var(--sds-text-primary)]">تاریخچه اقدامات</p>
+              <ul className="mt-2 space-y-1 text-xs text-[var(--sds-text-secondary)]">
+                {workflow.events!.map(event => (
+                  <li key={event.id}>{dateFa(event.occurredAt)} · {eventLabel(event.action)} · {event.actorName || 'کاربر ثبت‌شده'}
+                    {event.note ? ` · ${event.note}` : ''}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {workflow.status === 'OPEN' && workflow.canCancel && (
             <div className="mt-4 flex justify-end">
               <ErpButton label="لغو پرونده ابطال" icon={FaBan} tone="neutral" variant="outline" disabled={busy}

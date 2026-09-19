@@ -19,6 +19,7 @@ import {
 } from '../utils/salesContractPdf';
 import {
   executeAccountingAction,
+  AccountingVoidBlockedError,
   getAccountantPerformanceReport,
   getAccountingSettings,
   getAccountingContractDetail,
@@ -83,6 +84,8 @@ const router = express.Router();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
 
 const accountingActionFeature: Record<string, string[]> = {
+  START_ACCOUNTING_VOID_CASE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
+  CANCEL_ACCOUNTING_VOID_CASE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   CREATE_INVOICE: [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE],
   CREATE_REPLACEMENT_INVOICE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   CREATE_RECEIVABLE: [FEATURES.ACCOUNTING_RECEIVABLES_MANAGE],
@@ -99,6 +102,7 @@ const accountingActionFeature: Record<string, string[]> = {
   RESOLVE_CONTRACT_FLAG: [FEATURES.ACCOUNTING_ACTIONS_MANAGE],
   CANCEL_CONTRACT_FLAG: [FEATURES.ACCOUNTING_ACTIONS_MANAGE],
   VOID_ACCOUNTING_RECORD: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
+  VOID_ACCOUNTING_RECEIVABLE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   DELETE_DRAFT_ACCOUNTING_RECORD: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
 };
 
@@ -242,9 +246,13 @@ const dispatchAuthority = (req: WorkspaceRequest & FeatureRequest) => ({ actorRo
   feature: FEATURES.ACCOUNTING_CORRECTIONS_MANAGE, featurePermission: req.featurePermission || FEATURE_PERMISSIONS.EDIT });
 
 const managerReviewActions = new Set([
+  'START_ACCOUNTING_VOID_CASE',
+  'CANCEL_ACCOUNTING_VOID_CASE',
   'APPROVE_CORRECTION_FOR_SALES_EDIT',
   'DECLINE_CORRECTION',
   'VOID_ACCOUNTING_RECORD',
+  'VOID_ACCOUNTING_RECEIVABLE',
+  'REVERSE_RECEIPT',
   'CREATE_REPLACEMENT_INVOICE',
   'APPROVE_FINANCIAL_INVOICE',
   'RESOLVE_CORRECTION',
@@ -1072,8 +1080,10 @@ export const createAccountingActionHandler = (
           message: 'درخواست اصلاح را از دکمه «درخواست اصلاح» در پرونده حسابداری قرارداد دوباره ثبت کنید.',
         });
       }
+      const requiresManagerReview = managerReviewActions.has(req.body.kind) ||
+        (req.body.kind === 'UPDATE_CHECK_STATUS' && ['BOUNCED', 'RETURNED'].includes(req.body.status));
       if (
-        managerReviewActions.has(req.body.kind) &&
+        requiresManagerReview &&
         req.user!.role !== 'ADMIN' &&
         (req as any).workspacePermission !== WORKSPACE_PERMISSIONS.ADMIN
       ) {
@@ -1125,6 +1135,13 @@ export const createAccountingActionHandler = (
         console.error('Partner Accounting technical failure:', { trackingId, diagnostic: error.diagnostic });
         return res.status(500).json({ success: false, error: error.message, trackingId });
       }
+      if (error instanceof AccountingVoidBlockedError) return res.status(error.status).json({
+        success: false,
+        code: 'ACCOUNTING_VOID_BLOCKED',
+        message: error.message,
+        workflow: error.workflow,
+        actionUrl: error.actionUrl,
+      });
       if (error instanceof FinancialEvidenceConflictError && (req.body.invoiceId || req.body.recordId)) {
         const reviewCase = await recordFinancialEvidenceReviewCase({
           invoiceId: req.body.invoiceId || req.body.recordId,
@@ -1191,7 +1208,12 @@ router.post(
     body('correctionRequestId').optional().isString(),
     body('flagId').optional().isString(),
     body('reviewCaseId').optional().isString(),
+    body('voidCaseId').optional().isString(),
     body('replacesRecordId').optional().isString(),
+    body('retainedRecordId').optional().isString(),
+    body('reasonKind').optional().isString(),
+    body('effectiveAt').optional().isISO8601(),
+    body('cancellationReason').optional().isString(),
     body('externalReference').optional().isString(),
     body('downstreamNote').optional().isString(),
     body('note').optional().isString(),

@@ -4598,6 +4598,32 @@ model AccountingCorrectionRequest {
   @@map("accounting_correction_requests")
 }
 
+model AccountingFinancialVoidCase {
+  id                 String                   @id @default(cuid())
+  contractId         String
+  sourceRecordId     String
+  retainedRecordId   String?
+  status             AccountingVoidCaseStatus @default(OPEN)
+  reasonKind         AccountingVoidReasonKind
+  reason             String
+  effectiveAt        DateTime
+  startedBy          String
+  startedAt          DateTime                 @default(now())
+  cancelledBy        String?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  completedBy        String?
+  completedAt        DateTime?
+  metadata           Json?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@index([contractId, createdAt])
+  @@index([sourceRecordId, status])
+  @@index([status, startedAt])
+  @@map("accounting_financial_void_cases")
+}
+
 model ContractLifecycleRequest {
   id                     String                         @id @default(cuid())
   contractId             String
@@ -5066,6 +5092,19 @@ enum AccountingRecordStatus {
   POSTED
   VOIDED
   NEEDS_CORRECTION
+}
+
+enum AccountingVoidCaseStatus {
+  OPEN
+  CANCELLED
+  COMPLETED
+}
+
+enum AccountingVoidReasonKind {
+  DUPLICATE_ISSUE
+  ENTRY_ERROR
+  SALE_CANCELLED
+  OTHER
 }
 
 enum ReceivableStatus {

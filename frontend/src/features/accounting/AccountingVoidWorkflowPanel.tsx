@@ -16,11 +16,13 @@ type VoidStep = {
 export type AccountingVoidWorkflowView = {
   id: string;
   sourceRecordId: string;
+  sourceRecordLabel?: string;
   status: 'OPEN' | 'CANCELLED' | 'COMPLETED';
   reasonKind: string;
   reason: string;
   effectiveAt: string;
   retainedRecordId?: string | null;
+  retainedRecordLabel?: string | null;
   startedAt?: string;
   startedByName?: string | null;
   cancelledAt?: string | null;
@@ -69,8 +71,8 @@ export default function AccountingVoidWorkflowPanel({ workflows, busy, onResolve
               </h3>
               <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{workflow.reason} · تاریخ مؤثر {dateFa(workflow.effectiveAt)}</p>
               <p className="mt-1 text-xs text-[var(--sds-text-muted)]">
-                رکورد مبدأ: {workflow.sourceRecordId}
-                {workflow.retainedRecordId ? ` · رکورد معتبر باقی‌مانده: ${workflow.retainedRecordId}` : ''}
+                رکورد مبدأ: {workflow.sourceRecordLabel || 'رکورد مالی'}
+                {workflow.retainedRecordId ? ` · رکورد معتبر باقی‌مانده: ${workflow.retainedRecordLabel || 'فاکتور معتبر انتخاب‌شده'}` : ''}
               </p>
               {workflow.startedAt && (
                 <p className="mt-1 text-xs text-[var(--sds-text-muted)]">

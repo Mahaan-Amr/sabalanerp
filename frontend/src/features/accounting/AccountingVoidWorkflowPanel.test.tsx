@@ -7,11 +7,13 @@ import AccountingVoidWorkflowPanel, { type AccountingVoidWorkflowView } from './
 const workflow: AccountingVoidWorkflowView = {
   id: 'void-case-1',
   sourceRecordId: 'invoice-1406',
+  sourceRecordLabel: 'فاکتور ۱۴۰۶',
   status: 'OPEN',
   reasonKind: 'DUPLICATE_ISSUE',
   reason: 'صدور تکراری فاکتور ۱۴۰۶',
   effectiveAt: '2026-09-19T00:00:00.000Z',
   retainedRecordId: 'invoice-1405',
+  retainedRecordLabel: 'فاکتور ۱۴۰۵',
   startedAt: '2026-09-19T00:00:00.000Z',
   startedByName: 'مدیر حسابداری',
   events: [{ id: 'event-1', action: 'START_ACCOUNTING_VOID_CASE', occurredAt: '2026-09-19T00:00:00.000Z', actorName: 'مدیر حسابداری', note: 'صدور تکراری' }],
@@ -40,4 +42,6 @@ test('shows a simple resolution step, responsible role, and direct action for a 
   assert.match(html, /تاریخچه اقدامات/);
   assert.match(html, /شروع پرونده ابطال/);
   assert.match(html, /مدیر حسابداری/);
+  assert.match(html, /فاکتور ۱۴۰۶/);
+  assert.doesNotMatch(html, /invoice-1406/);
 });

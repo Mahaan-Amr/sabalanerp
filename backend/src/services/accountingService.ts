@@ -1351,6 +1351,9 @@ export const getAccountingContractDetail = async (contractId: string) => {
   const voidWorkflows = voidCases.flatMap(voidCase => {
     const sourceRecord = financialRecords.find(record => record.id === voidCase.sourceRecordId);
     if (!sourceRecord) return [];
+    const retainedRecord = voidCase.retainedRecordId
+      ? financialRecords.find(record => record.id === voidCase.retainedRecordId)
+      : null;
     const linkedReceivables = receivables.filter(item => item.invoiceRecordId === sourceRecord.id);
     const linkedReceivableIds = new Set(linkedReceivables.map(item => item.id));
     const workflow = buildAccountingVoidWorkflow({
@@ -1364,15 +1367,26 @@ export const getAccountingContractDetail = async (contractId: string) => {
       if (event.entityType === 'AccountingFinancialVoidCase' && event.entityId === voidCase.id) return true;
       const stateMetadata = metadataObject(metadataObject(event.afterState).metadata);
       return stateMetadata.voidCaseId === voidCase.id;
-    }).map(event => ({
-      id: event.id,
-      action: event.action,
-      occurredAt: event.createdAt,
-      actorName: voidActorLabel(event.actorId),
-      note: event.note,
-    })).reverse();
+    }).map(event => {
+      const afterState = metadataObject(event.afterState);
+      const stateMetadata = metadataObject(afterState.metadata);
+      const effectiveAt = stateMetadata.reversedAt || stateMetadata.resolvedForVoidAt || stateMetadata.voidedAt ||
+        afterState.occurredAt || afterState.voidedAt || afterState.effectiveAt || afterState.completedAt ||
+        afterState.cancelledAt || afterState.startedAt || event.createdAt;
+      return {
+        id: event.id,
+        action: event.action,
+        occurredAt: effectiveAt,
+        actorName: voidActorLabel(event.actorId),
+        note: event.note,
+      };
+    }).reverse();
     return [{
       ...workflow,
+      sourceRecordLabel: sourceRecord.systemInvoiceNumber
+        ? `فاکتور ${sourceRecord.systemInvoiceNumber}`
+        : 'رکورد مالی بدون شماره فاکتور',
+      retainedRecordLabel: retainedRecord?.systemInvoiceNumber ? `فاکتور ${retainedRecord.systemInvoiceNumber}` : null,
       startedByName: voidActorLabel(voidCase.startedBy),
       cancelledByName: voidActorLabel(voidCase.cancelledBy),
       completedByName: voidActorLabel(voidCase.completedBy),
@@ -1490,6 +1504,17 @@ const lockAccountingContract = async (tx: Prisma.TransactionClient, contractId?:
   if (!contractId) return;
   await tx.$queryRaw`SELECT 1::int AS "locked"
     FROM (SELECT pg_advisory_xact_lock(hashtextextended(${`accounting-void:${contractId}`}, 0))) AS acquired`;
+};
+
+const blockNewActivityForOpenVoidCase = async (tx: Prisma.TransactionClient, invoiceRecordId: string) => {
+  const openCase = await tx.accountingFinancialVoidCase.findFirst({ where: {
+    sourceRecordId: invoiceRecordId,
+    status: AccountingVoidCaseStatus.OPEN,
+  }, orderBy: { startedAt: 'desc' } });
+  if (openCase) throw new AccountingVoidBlockedError(
+    'این زنجیره در حال ابطال است و فعالیت مالی جدید نمی‌پذیرد. مدیر حسابداری باید مراحل پرونده ابطال را ادامه دهد.', undefined,
+    `/dashboard/accounting/contracts/${openCase.contractId}#financial-void-cases`,
+  );
 };
 
 const requiredAccountingEffectiveAt = (value: string | undefined, actionUrl?: string) => {
@@ -2213,6 +2238,16 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
   if (existingRecord) return actionResponse('APPLIED', 'دریافتنی قبلا ایجاد شده است', { financialRecordIds: [existingRecord.id], contractId: contract.id });
 
   const result = await prisma.$transaction(async (tx) => {
+    await lockAccountingContract(tx, contract.id);
+    const currentSourceInvoice = await tx.accountingFinancialRecord.findFirst({ where: {
+      id: sourceInvoice.id,
+      contractId: contract.id,
+      ...issuedInvoiceWhere,
+    } });
+    if (!currentSourceInvoice) {
+      throw accountingVoidInputError('فاکتور صادرشده دیگر قابل استفاده نیست. صفحه را تازه‌سازی و فاکتور دیگری انتخاب کنید.');
+    }
+    await blockNewActivityForOpenVoidCase(tx, currentSourceInvoice.id);
     const record = await tx.accountingFinancialRecord.create({
       data: {
         kind: FinancialRecordKind.RECEIVABLE,
@@ -2451,6 +2486,12 @@ const updateCheckStatus = async (command: AccountingActionRequest, actor: Actor)
     }
     const beforeMetadata = metadataObject(before.metadata);
     const linkedVoidCase = await findOpenVoidCaseForReceivable(tx, before.receivableId);
+    if (linkedVoidCase && checkStatus !== CheckAccountingStatus.BOUNCED && checkStatus !== CheckAccountingStatus.RETURNED) {
+      throw new AccountingVoidBlockedError(
+        'این چک در زنجیره ابطال است. فقط «عودت چک» یا «برگشت خورد» را ثبت کنید.', undefined,
+        `/dashboard/accounting/contracts/${linkedVoidCase.contractId}#financial-void-cases`,
+      );
+    }
     const collectionMovements = Array.isArray(beforeMetadata.collectionMovements)
       ? [...beforeMetadata.collectionMovements]
       : [];
@@ -2594,6 +2635,11 @@ const markTaxReady = async (command: AccountingActionRequest, actor: Actor) => {
     : TaxReadinessStatus.READY;
 
   const tax = await runPartnerAwareTaxMutation(prisma, command, actor, async (tx, context) => {
+    if (!context.partner) {
+      const invoice = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
+      await lockAccountingContract(tx, invoice?.contractId);
+      if (invoice) await blockNewActivityForOpenVoidCase(tx, invoice.id);
+    }
     const existing = await tx.accountingTaxRecord.findFirst({ where: { invoiceRecordId: invoiceId }, orderBy: { createdAt: 'desc' } });
     if (context.partner && existing && (existing.submittedAt || existing.acceptedAt || existing.rejectedAt ||
         !['NOT_READY', 'READY'].includes(existing.submissionStatus))) {
@@ -2656,6 +2702,11 @@ const trackTaxSubmission = async (command: AccountingActionRequest, actor: Actor
   const ordinaryNow = new Date();
 
   const tax = await runPartnerAwareTaxMutation(prisma, command, actor, async (tx, context) => {
+    if (!context.partner) {
+      const invoice = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
+      await lockAccountingContract(tx, invoice?.contractId);
+      if (invoice) await blockNewActivityForOpenVoidCase(tx, invoice.id);
+    }
     const now = context.partner ? context.now : ordinaryNow;
     const existing = await tx.accountingTaxRecord.findFirst({ where: { invoiceRecordId: invoiceId }, orderBy: { createdAt: 'desc' } });
     if (!existing) throw new Error('Tax record not found');
@@ -3106,9 +3157,11 @@ export async function voidAccountingRecordInTransaction(tx: Prisma.TransactionCl
   externalReference: string;
   downstreamNote: string;
   voidedAt: Date;
+  voidCaseId?: string;
   requireStepwiseDependencies?: boolean;
 }) {
-  const { recordId, actorId, voidReason, externalReference, downstreamNote, voidedAt, requireStepwiseDependencies = false } = input;
+  const { recordId, actorId, voidReason, externalReference, downstreamNote, voidedAt, voidCaseId,
+    requireStepwiseDependencies = false } = input;
     const before = await tx.accountingFinancialRecord.findUnique({
       where: { id: recordId },
       include: {
@@ -3194,7 +3247,9 @@ export async function voidAccountingRecordInTransaction(tx: Prisma.TransactionCl
           ...beforeMetadata,
           voidReason: voidReason || beforeMetadata.voidReason,
           externalVoidReference: externalReference || beforeMetadata.externalVoidReference,
-          downstreamCorrectionNote: downstreamNote || beforeMetadata.downstreamCorrectionNote
+          downstreamCorrectionNote: downstreamNote || beforeMetadata.downstreamCorrectionNote,
+          voidedAt: voidedAt.toISOString(),
+          ...(voidCaseId ? { voidCaseId } : {}),
         }
       }
     });
@@ -3266,6 +3321,7 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
       externalReference: '',
       downstreamNote: '',
       voidedAt: voidCase.effectiveAt,
+      voidCaseId: voidCase.id,
       requireStepwiseDependencies: true,
     });
     const completed = await tx.accountingFinancialVoidCase.update({ where: { id: voidCase.id }, data: {

@@ -45,7 +45,7 @@ const identity = (actorId: string): InquiryIdentity => ({ schemaVersion: 1, part
   materialRateEvidenceId: 'material-evidence-1', materialRateHash: `sha256-v1:${'2'.repeat(64)}`,
   components: [], currency: 'IRT', calculationPolicyVersion: 'calculation-v1', roundingPolicyVersion: 'rounding-v2' });
 
-async function submit(actorId: string, inquiryId: string, rowId = 'row-1', predecessor?: { rowId: string; revision: number; reason: string }) {
+async function submit(actorId: string, inquiryId: string, rowId = 'row-1', predecessor?: { rowId: string; revision: number; reason?: string }) {
   const rows = [{ rowId, configuration: { recoveryId: 'recovery-1', recoveryRevision: 1, productRowId: rowId }, ...(predecessor ? { predecessor } : {}) }];
   const payloadHash = await canonicalHash({ schemaVersion: 1, type: 'INQUIRY_SUBMIT', partnerSellerId: actorId, rows });
   return { schemaVersion: 1, type: 'INQUIRY_SUBMIT', partnerSellerId: actorId, rows,
@@ -195,6 +195,21 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     assert.equal((await responder.execute(successorDecision)).ok, true);
     const successorApproval = await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'row-3' } });
     assert.equal(successorApproval.supersessionReason, 'اصلاح فنی پس از قیمت قبلی');
+    const reasonlessSuccessor = await submit(ids.actorId, ids.inquiryId, 'row-4',
+      { rowId: 'row-3', revision: 2 });
+    assert.equal((await partner.execute(reasonlessSuccessor)).ok, true);
+    const reasonlessDecisions = [{ rowId: 'row-4', expectedRevision: 1, outcome: 'APPROVED' as const,
+      wholesaleUnitPrice: { amount: '1350000', currency: 'IRT' as const } }];
+    const reasonlessIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions: reasonlessDecisions };
+    const reasonlessDecision = { ...reasonlessIntent, commandId: 'reasonless-successor-decision',
+      correlationId: 'reasonless-successor-decision', idempotency: { actorId: ids.responderId,
+        operation: 'INQUIRY_DECIDE' as const, targetId: ids.inquiryId, key: 'reasonless-successor-decision',
+        payloadHash: await canonicalHash(reasonlessIntent) } };
+    const reasonlessResult = await responder.execute(reasonlessDecision);
+    assert.equal(reasonlessResult.ok, true);
+    const reasonlessApproval = await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'row-4' } });
+    assert.equal(reasonlessApproval.supersessionReason, null);
     const finalView = await partner.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId: ids.inquiryId });
     if (!finalView.ok || finalView.value.purpose !== 'PARTNER_INQUIRY') throw new Error('Partner view unavailable');
     assert.equal(finalView.value.rows.find(row => row.rowId === 'row-1')?.state, 'SUPERSEDED');

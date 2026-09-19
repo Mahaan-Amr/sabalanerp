@@ -151,14 +151,14 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         if (decision.wholesaleUnitPrice.currency !== definition.identity.currency) {
           outcomes.push({ ok: false, rowId: row.id, error: partnerError('INVALID_PAYLOAD') }); continue;
         }
+        if (row.predecessorId && !row.predecessor?.approval?.id) {
+          outcomes.push({ ok: false, rowId: row.id, error: partnerError('INTEGRITY_CONFLICT') }); continue;
+        }
         const evidenceHash = await canonicalHash({ schemaVersion: 1, identity: definition.identity,
           wholesaleUnitPrice: decision.wholesaleUnitPrice, assignmentId: assignment.id,
           assignmentRevision: assignment.revision, authorizationEvidenceId: authorization.value.evidenceId,
           ...(row.predecessorId ? { predecessorApprovalId: row.predecessor?.approval?.id,
-            supersessionReason: definition.predecessorReason } : {}) });
-        if (row.predecessorId && !row.predecessor?.approval?.id) {
-          outcomes.push({ ok: false, rowId: row.id, error: partnerError('INTEGRITY_CONFLICT') }); continue;
-        }
+            ...(definition.predecessorReason ? { supersessionReason: definition.predecessorReason } : {}) } : {}) });
         await tx.partnerInquiryApproval.create({ data: { id: outcomeId, rowId: row.id, assignmentId: assignment.id,
           actorId: dependencies.actorId, commandId: `${command.commandId}:${row.id}`,
           authorizationEvidenceId: authorization.value.evidenceId,

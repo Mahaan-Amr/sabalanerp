@@ -16,6 +16,7 @@ export const calculateRemainingChildCuttingBreakdown = ({
   sourcePieceQuantities,
   longitudinalCutMeters,
   crossCutMeters,
+  physicalPieces,
   sawKerfCm = 0
 }: {
   row: StonePartition;
@@ -24,6 +25,7 @@ export const calculateRemainingChildCuttingBreakdown = ({
   sourcePieceQuantities?: number[];
   longitudinalCutMeters?: number;
   crossCutMeters?: number;
+  physicalPieces?: StonePartition[];
   sawKerfCm?: number;
 }): CuttingBreakdownEntry[] | undefined => {
   const safeRate = Math.max(0, Number(rate) || 0);
@@ -36,7 +38,12 @@ export const calculateRemainingChildCuttingBreakdown = ({
       widthMeters: parseCanonicalDecimal(String(stock.width / 100)),
       quantity: Math.max(1, Math.floor(Number(stock.quantity) || 1))
     }],
-    demands: [{
+    demands: physicalPieces?.length ? physicalPieces.map((piece, index) => ({
+      demandId: `${row.id}:physical:${index}`,
+      lengthMeters: parseCanonicalDecimal(String(piece.length)),
+      widthMeters: parseCanonicalDecimal(String(piece.width / 100)),
+      quantity: 1
+    })) : [{
       demandId: row.id,
       lengthMeters: parseCanonicalDecimal(String(row.length)),
       widthMeters: parseCanonicalDecimal(String(row.width / 100)),

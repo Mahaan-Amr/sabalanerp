@@ -62,6 +62,7 @@ run_backend() {
       -e "DEPLOYMENT_GATE_MODE=${DEPLOYMENT_GATE_MODE:-}" \
       -e "DEPLOYMENT_LEASE_MS=1200000" \
       -e "DEPLOYMENT_CONTROL_IMAGE=${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
+      -e DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT \
       -e "DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP=${DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP:-false}" \
       -e "DEPLOYMENT_ALLOW_MISSING_PERFORMANCE_EXPORT_TABLE=${DEPLOYMENT_ALLOW_MISSING_PERFORMANCE_EXPORT_TABLE:-false}" \
       -e "DEPLOYMENT_PREVIOUS_BACKEND_IMAGE=${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
@@ -264,6 +265,26 @@ switch_to_previous_images() {
   DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
   DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
   export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE DEPLOYMENT_POSTGRES_IMAGE DEPLOYMENT_CLAMAV_IMAGE
+  # Values are journaled before mutation and emitted only after strict hash/digest validation.
+  rollback_runtime_exports="$(node scripts/performance-deployment-environment.mjs restore "${SESSION_HOST_PATH}")" || return 1
+  eval "${rollback_runtime_exports}"
+}
+
+refresh_performance_database_identity() {
+  identity_name="performance-database-${DEPLOYMENT_ID}.json"
+  if [ "${MUTATION_STARTED}" -eq 1 ]; then
+    identity_remaining="$(remaining_mutation_seconds)" || return 1
+    run_backend_timed "${identity_remaining}" node dist/scripts/deployment-performance-identity.js "/app/deployment-reports/${identity_name}"
+  else
+    run_backend node dist/scripts/deployment-performance-identity.js "/app/deployment-reports/${identity_name}" --before-migrations
+  fi
+  identity_path="${DEPLOYMENT_REPORT_DIR_HOST}/${identity_name}"
+  PERFORMANCE_RELEASE_SCHEMA_HASH="$(node -e 'const v=require("fs").readFileSync(process.argv[1],"utf8");const h=JSON.parse(v).schemaHash;if(!/^[a-f0-9]{64}$/.test(h))process.exit(1);process.stdout.write(h)' "${identity_path}")"
+  PERFORMANCE_RELEASE_POLICY_HASH="$(node -e 'const v=require("fs").readFileSync(process.argv[1],"utf8");const h=JSON.parse(v).policyHash;if(!/^[a-f0-9]{64}$/.test(h))process.exit(1);process.stdout.write(h)' "${identity_path}")"
+  export PERFORMANCE_RELEASE_SCHEMA_HASH PERFORMANCE_RELEASE_POLICY_HASH
+  PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH="$(compose config | grep -v -e 'PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH:' -e 'PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH:' | node -e "const c=require('node:crypto');let b='';process.stdin.on('data',d=>b+=d);process.stdin.on('end',()=>process.stdout.write(c.createHash('sha256').update(b).digest('hex')))")"
+  PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH="${PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH}"
+  export PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH
 }
 
 finish_with_notification_result() {
@@ -539,6 +560,9 @@ DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE="$(image_of_service postgres)"
 DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE="$(image_of_service clamav)"
 export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE DEPLOYMENT_PREVIOUS_NGINX_IMAGE DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE
 
+DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT="$(docker inspect "$(compose ps -q backend)" | node scripts/performance-deployment-environment.mjs capture)"
+export DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT
+
 backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")"
 frontend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}")"
 inquiry_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}")"
@@ -567,18 +591,35 @@ export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMA
 
 compose config --quiet
 echo "Building immutable release ${DEPLOYMENT_RELEASE_ID} before maintenance..."
-compose build backend frontend inquiry
+# Keep compiler heaps from competing with the live release on the production host.
+for release_service in backend frontend inquiry; do
+  compose build "${release_service}"
+done
 DEPLOYMENT_BACKEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_BACKEND_IMAGE}")"
 DEPLOYMENT_FRONTEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_FRONTEND_IMAGE}")"
 DEPLOYMENT_INQUIRY_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_INQUIRY_IMAGE}")"
 DEPLOYMENT_NGINX_IMAGE="$(docker image inspect --format '{{.Id}}' nginx:1.27-alpine)"
 export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE
-PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH="$(compose config | grep -v -e 'PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH:' -e 'PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH:' | node -e "const c=require('node:crypto');let b='';process.stdin.on('data',d=>b+=d);process.stdin.on('end',()=>process.stdout.write(c.createHash('sha256').update(b).digest('hex')))")"
-PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH="${PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH}"
-export PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH
+# Reclaim disposable build records only after every image export has finished.
+# Otherwise a low-space checkpoint may spend its maintenance window verifying
+# old remote archives for retention even though build cache can supply the space.
+docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
+docker_available_bytes=$((docker_available_kb * 1024))
+if [ "${docker_available_bytes}" -lt "${docker_required_bytes}" ]; then
+  echo "Reclaiming unused build cache before maintenance; release images and checkpoints remain protected."
+  docker builder prune --all --force >"${REPO_ROOT}/.deploy-state/post-build-cache-prune.log"
+fi
 DEPLOYMENT_TARGET_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
 export DEPLOYMENT_TARGET_BACKEND_IMAGE
+PERFORMANCE_RELEASE_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
+PERFORMANCE_RELEASE_SOURCE_HASH="$(node --input-type=module -e 'import { performanceSourceHash } from "./scripts/performance-source-identity.mjs"; console.log(await performanceSourceHash());')"
+PERFORMANCE_RELEASE_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
+PERFORMANCE_RELEASE_FRONTEND_IMAGE="${DEPLOYMENT_FRONTEND_IMAGE}"
+PERFORMANCE_RELEASE_INQUIRY_IMAGE="${DEPLOYMENT_INQUIRY_IMAGE}"
+export PERFORMANCE_RELEASE_COMMIT PERFORMANCE_RELEASE_SOURCE_HASH PERFORMANCE_RELEASE_BACKEND_IMAGE PERFORMANCE_RELEASE_FRONTEND_IMAGE PERFORMANCE_RELEASE_INQUIRY_IMAGE
+refresh_performance_database_identity
 
+run_backend node dist/scripts/validate-production-environment.js
 run_backend node dist/scripts/deployment-drill-preflight.js
 
 compose up -d postgres clamav
@@ -769,6 +810,7 @@ run_backend_timed "${remaining}" node dist/scripts/reconcile-contract-financial-
   --output="/app/deployment-reports/${evidence_apply_name}"
 
 phase RELEASE_STARTED
+refresh_performance_database_identity
 remaining="$(remaining_mutation_seconds)" || exit 1
 start_release_services "${remaining}"
 

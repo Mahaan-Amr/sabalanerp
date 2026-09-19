@@ -33,6 +33,7 @@ type Session = {
   bootstrap: boolean;
   controlImage: string;
   rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
+  rollbackPerformanceEnvironment?: Record<string, string>;
 };
 
 const required = (name: string) => {
@@ -68,6 +69,13 @@ const journal = async (session: Session, event: string, details?: Record<string,
   });
 
 const prepare = async () => {
+  const rollbackPerformanceEnvironment = JSON.parse(process.env.DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT || '{}');
+  const identityKey = /^PERFORMANCE_(RELEASE_(COMMIT|SOURCE_HASH|SCHEMA_HASH|POLICY_HASH|INFRASTRUCTURE_HASH|BACKEND_IMAGE|FRONTEND_IMAGE|INQUIRY_IMAGE)|RUNTIME_INFRASTRUCTURE_HASH)$/;
+  if (!rollbackPerformanceEnvironment || typeof rollbackPerformanceEnvironment !== 'object' || Array.isArray(rollbackPerformanceEnvironment)
+    || Object.entries(rollbackPerformanceEnvironment).some(([key, value]) => !identityKey.test(key)
+      || typeof value !== 'string' || (value !== '' && !/^(sha256:)?[a-f0-9]{40,64}$/.test(value)))) {
+    throw new Error('Invalid previous performance runtime identity.');
+  }
   const session: Session = {
     deploymentId: process.env.DEPLOYMENT_ID || `deploy-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
     leaseToken: crypto.randomBytes(32).toString('hex'),
@@ -77,6 +85,7 @@ const prepare = async () => {
     phase: 'PREFLIGHT',
     bootstrap: false,
     controlImage: required('DEPLOYMENT_CONTROL_IMAGE'),
+    rollbackPerformanceEnvironment,
     rollbackReleaseSet: {
       backend: required('DEPLOYMENT_PREVIOUS_BACKEND_IMAGE'),
       frontend: required('DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE'),

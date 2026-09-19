@@ -227,6 +227,7 @@ const createRemainderChildPolicyInput = ({
   allocationOrder,
   row,
   cuttingBreakdown,
+  physicalPieces,
   sourcePieceQuantities
 }: {
   child: ContractProduct;
@@ -236,6 +237,7 @@ const createRemainderChildPolicyInput = ({
   allocationOrder: number;
   row: StonePartition;
   cuttingBreakdown: ContractProduct['cuttingBreakdown'];
+  physicalPieces: StonePartition[];
   sourcePieceQuantities?: number[];
 }): RemainderChildPolicyInput => {
   const rate = (type: 'longitudinal' | 'cross') =>
@@ -251,6 +253,11 @@ const createRemainderChildPolicyInput = ({
     lengthMeters: parseCanonicalDecimal(String(row.length)),
     widthMeters: parseCanonicalDecimal(String(row.width / 100)),
     quantity: row.quantity,
+    ...(physicalPieces.length === row.quantity ? {} : { physicalPieces: physicalPieces.map(piece => ({
+      logicalPieceOrdinal: piece.logicalPieceOrdinal!,
+      lengthMeters: parseCanonicalDecimal(String(piece.length)),
+      widthMeters: parseCanonicalDecimal(String(piece.width / 100))
+    })) }),
     ...(sourcePieceQuantities === undefined ? {} : { sourcePieceQuantities }),
     kerfMeters: parseCanonicalDecimal(
       child.sawKerfEnabled ? String(Number(child.sawKerfCm || 0) / 100) : '0'
@@ -403,6 +410,7 @@ export const replayRemainingStoneAllocations = ({
       stock,
       rate: Number(recalculatedChild.cuttingCostPerMeter || 0),
       sourcePieceQuantities: successfulAllocation.sourcePieceQuantitiesByRow.get(row.id),
+      physicalPieces,
       longitudinalCutMeters: successfulAllocation.longitudinalCutMeters,
       crossCutMeters: successfulAllocation.crossCutMeters,
       sawKerfCm: recalculatedChild.sawKerfEnabled
@@ -468,6 +476,7 @@ export const replayRemainingStoneAllocations = ({
         allocationOrder,
         row,
         cuttingBreakdown,
+        physicalPieces,
         sourcePieceQuantities: successfulAllocation.sourcePieceQuantitiesByRow.get(row.id)
       }),
       parentProductIndex: sourceIndex,

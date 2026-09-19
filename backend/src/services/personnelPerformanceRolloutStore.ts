@@ -12,6 +12,7 @@ import {
   type PerformancePromotionEvidenceReport,
 } from './personnelPerformancePromotionEvidence';
 import { assertPerformanceOperationalExpansionReady } from './personnelPerformanceMonitoringStore';
+import { measurePerformanceDatabaseIdentity } from './personnelPerformanceDatabaseIdentity';
 
 type Client = PrismaClient | Prisma.TransactionClient;
 type OwnerType = 'HUMAN_RESOURCES' | 'SECURITY_PRIVACY' | 'SYSTEM_OWNER';
@@ -54,16 +55,7 @@ const requirePermission = async (tx: Prisma.TransactionClient, actorUserId: stri
 
 const currentPerformanceReleaseIdentity = async (tx: Prisma.TransactionClient) => {
   const configured = performanceRuntimeReleaseIdentityFromEnvironment();
-  const [row] = await tx.$queryRaw<Array<{ metadata: { migrations: unknown; policies: unknown } }>>`
-    SELECT json_build_object(
-      'migrations', (SELECT json_agg(row_to_json(m) ORDER BY m.migration_name) FROM
-        (SELECT migration_name, checksum, finished_at IS NOT NULL AS finished,
-          rolled_back_at IS NOT NULL AS rolled_back FROM _prisma_migrations) m),
-      'policies', (SELECT json_agg(row_to_json(p) ORDER BY p."policyKind", p.version) FROM
-        (SELECT "policyKind", version, lifecycle, "effectiveFrom", "contentHash" FROM performance_policy_versions) p)
-    ) AS metadata`;
-  const schemaHash = canonicalPerformanceHash(row.metadata.migrations);
-  const policyHash = canonicalPerformanceHash(row.metadata.policies);
+  const { schemaHash, policyHash } = await measurePerformanceDatabaseIdentity(tx);
   if (configured.schemaHash !== schemaHash) throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_SCHEMA_CHANGED');
   if (configured.policyHash !== policyHash) throw rolloutError('PERFORMANCE_PROMOTION_EVIDENCE_POLICY_CHANGED');
   return configured;

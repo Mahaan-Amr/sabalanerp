@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { BusinessIdentity, ContractRuntime, CurrentOutput, CustomerOutputError, Output, Snapshot } from './contracts';
+import { projectCustomerVisibleRevisionContent } from './customerVisible';
 
 // The wire allows 80-character decimals. Validate sums without changing Prisma's
 // shared Decimal configuration or rounding valid large evidence to 20 digits.
@@ -80,7 +81,10 @@ export function createCustomerOutputSnapshots(contract: ContractRuntime) {
     if (snapshot.owner.revision > current.owner.revision) return conflict();
     if (snapshot.owner.revision === current.owner.revision && snapshot.owner.integrityHash !== current.owner.integrityHash) return conflict();
     const cancelled = current.state === 'CANCELLED' || current.state === 'VOIDED';
-    const replaced = snapshot.owner.revision !== current.owner.revision
+    const sameCustomerContent = current.customerContent !== undefined && contract.canonicalJson(
+      projectCustomerVisibleRevisionContent(snapshot.content)) === contract.canonicalJson(
+      projectCustomerVisibleRevisionContent(current.customerContent));
+    const replaced = (snapshot.owner.revision !== current.owner.revision && !sameCustomerContent)
       || snapshot.normalizedRecipient !== current.normalizedRecipient;
     if (!verifiedAt && (cancelled || replaced)) throw new CustomerOutputError('ROW_STALE');
     if (verifiedAt) {

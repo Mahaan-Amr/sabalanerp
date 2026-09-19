@@ -7,6 +7,8 @@ type Token = Meta & { token: string };
 type Response<T> = { success: boolean; error?: string; data?: T };
 export type PublicCustomerConfirmation = {
   contract: Output; verifiedAt: string | null; linkExpiresAt: string;
+  sellerFinalized: boolean;
+  decision: 'PENDING' | 'APPROVED' | 'REJECTED';
   readOnly: boolean; banner: 'CANCELLED' | 'SUPERSEDED' | null;
 };
 
@@ -21,6 +23,7 @@ export interface PartnerConfirmationHooks {
   getPublicContractByManualLookup(input: Lookup): Promise<Response<PublicCustomerConfirmation> | undefined>;
   verifyPublicOtp(input: Token & { code: string }): Promise<Response<{ status: string; verifiedAt?: string }> | undefined>;
   verifyPublicOtpByManualLookup(input: Lookup & { code: string }): Promise<Response<{ status: string; verifiedAt?: string }> | undefined>;
+  rejectPublicContract(input: Token): Promise<Response<{ status: 'REJECTED'; rejectedAt: string }> | undefined>;
   resendFromPublicToken(input: Token): Promise<SendConfirmationResult | undefined>;
   resendFromManualLookup(input: Lookup): Promise<SendConfirmationResult | undefined>;
   cancelContract(input: Meta & { contractId: string; requestedBy: string; canCancelApproved: boolean }): Promise<Response<{ contractId: string; status: string }> | undefined>;

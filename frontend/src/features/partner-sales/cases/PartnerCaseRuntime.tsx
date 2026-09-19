@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ErpButton, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSheet, ErpTextarea, ErpWorkspacePage } from '@/components/erp';
+import { ErpButton, ErpCheckbox, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSheet, ErpTextarea, ErpWorkspacePage } from '@/components/erp';
 import { FaFileContract } from 'react-icons/fa';
 import { PartnerCaseWorkspace } from './PartnerCaseWorkspace';
-import { openPartnerPdf, readPartnerAccount, readPartnerCases, sendPartnerConfirmation,
+import { finalizePartnerCase, openPartnerPdf, readPartnerAccount, readPartnerCases, sendPartnerConfirmation,
   readPartnerCollections, readPartnerCorrection, requestPartnerCorrection,
   cancelPartnerCase, recordPartnerCollection, reversePartnerCollection, savePartnerRetailCorrection,
   type PartnerCaseRuntimeRow } from './partnerCaseHttpPort';
@@ -28,6 +28,8 @@ export function PartnerCaseRuntime() {
   const actionFlight = useRef(false);
   const [cancelTarget, setCancelTarget] = useState<PartnerCaseRuntimeRow>();
   const [cancelReason, setCancelReason] = useState('');
+  const [finalizeTarget, setFinalizeTarget] = useState<PartnerCaseRuntimeRow>();
+  const [lossAccepted, setLossAccepted] = useState(false);
   const [collectionTarget, setCollectionTarget] = useState<PartnerCaseRuntimeRow>();
   const [collectionAmount, setCollectionAmount] = useState('');
   const [collectionDate, setCollectionDate] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()));
@@ -211,6 +213,7 @@ export function PartnerCaseRuntime() {
                 onCancel: () => { setCancelTarget(row); setCancelReason(''); },
                 onPreview: row.snapshotId ? () => void previewPdf(row.view.owner.caseId, row.snapshotId!) : undefined,
                 onIssue: row.snapshotId ? () => void previewPdf(row.view.owner.caseId, row.snapshotId!, 'FINAL') : undefined,
+                onFinalize: () => { setFinalizeTarget(row); setLossAccepted(false); },
                 onSendConfirmation: () => void runAction(row.view.owner.caseId, 'send-confirmation', 'ارسال تأییدیه فروش همکار', () => sendPartnerConfirmation(row.view.owner.caseId)),
                 onRequestCorrection: () => void runAction(row.view.owner.caseId, 'request-correction:retail', 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, 'RETAIL_ONLY')),
                 onRequestVoid: () => void runAction(row.view.owner.caseId, 'request-void', 'ثبت درخواست ابطال فروش همکار', () => requestPartnerCorrection(row.view, 'VOID')),
@@ -220,6 +223,23 @@ export function PartnerCaseRuntime() {
         );
       })}
     </div>
+    <ErpSheet open={Boolean(finalizeTarget)} onClose={() => { if (!actionPending) setFinalizeTarget(undefined); }}
+      title="تأیید و نهایی‌سازی قرارداد" presentation="modal" pending={actionPending}
+      footer={<ErpButton label="تأیید و نهایی‌سازی قرارداد" tone="success"
+        disabled={actionPending || Boolean(finalizeTarget?.view.resaleDifference?.startsWith('-') && !lossAccepted)}
+        onClick={() => {
+          if (!finalizeTarget) return;
+          void runAction(finalizeTarget.view.owner.caseId, 'finalize', 'نهایی‌سازی قرارداد فروش همکار',
+            () => finalizePartnerCase(finalizeTarget.view, lossAccepted)).then(saved => { if (saved) setFinalizeTarget(undefined); });
+        }} />}>
+      <ErpInlineState kind={finalizeTarget?.view.customerConfirmationState === 'APPROVED' ? 'success' : 'stale'}
+        title={finalizeTarget?.view.customerConfirmationState === 'APPROVED'
+        ? 'مشتری این نسخه را تأیید کرده است.'
+        : 'مشتری هنوز این نسخه را تأیید نکرده است. با نهایی‌سازی، تعهد شما به سبلان مستقل از پاسخ مشتری ایجاد می‌شود.'} />
+      {finalizeTarget?.view.resaleDifference?.startsWith('-') && <ErpCheckbox
+        label="زیان این قرارداد را بررسی کرده‌ام و صریحاً می‌پذیرم"
+        checked={lossAccepted} onChange={event => setLossAccepted(event.target.checked)} />}
+    </ErpSheet>
     <ErpSheet open={Boolean(cancelTarget)} onClose={() => { if (!actionPending) setCancelTarget(undefined); }} title="لغو پیش از قطعیت" presentation="modal" pending={actionPending}
       footer={<ErpButton label="ثبت لغو" tone="danger" disabled={actionPending || !/[\u0600-\u06ff]/.test(cancelReason) || !cancelReason.trim()} onClick={() => {
         if (!cancelTarget) return; void runAction(cancelTarget.view.owner.caseId, 'cancel', 'لغو پرونده', () => cancelPartnerCase(cancelTarget.view, cancelReason.trim())).then(saved => { if (saved) setCancelTarget(undefined); });

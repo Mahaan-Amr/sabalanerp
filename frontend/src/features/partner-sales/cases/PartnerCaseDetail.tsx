@@ -9,12 +9,14 @@ import { formatPartnerMoney, partnerPaymentMethodCopy } from '../presentation';
 export type PartnerCaseActions = {
   canPreview: boolean;
   canIssue: boolean;
+  canFinalize?: boolean;
   canSendConfirmation?: boolean;
   canRequestCorrection: boolean;
   canCancel: boolean;
   canRequestVoid: boolean;
   onPreview?: () => void;
   onIssue?: () => void;
+  onFinalize?: () => void;
   onSendConfirmation?: () => void;
   onRequestCorrection?: () => void;
   onCancel?: () => void;
@@ -77,10 +79,12 @@ export function PartnerCaseDetailContent({ view, actions }: { view: PartnerCaseV
           ...(actions.canRequestVoid ? [{ title: 'درخواست ابطال', description: 'پس از بررسی وابستگی‌ها و تأییدهای لازم.', icon: FaBan, tone: 'danger' as const, onClick: actions.onRequestVoid }] : []),
         ]} />
       </ErpSection>}
-      <ErpSection title="خروجی مشتری" description="پیش‌نمایش هیچ تعهدی ایجاد نمی‌کند؛ صدور نهایی می‌تواند پرونده را قطعی کند.">
+      <ErpSection title="خروجی مشتری" description="ارسال برای مشتری و نهایی‌سازی فروشنده دو اقدام مستقل هستند.">
         <div className="grid gap-2"><ErpButton label="پیش‌نمایش" icon={FaEye} variant="outline" disabled={!actions.canPreview} onClick={actions.onPreview} />
           {actions.canSendConfirmation && <ErpButton label={view.state === 'DRAFT' ? 'ارسال پیامک تأیید' : 'ارسال دوباره پیامک تأیید'} icon={FaSms} tone="info" variant="outline" onClick={actions.onSendConfirmation} />}
-          <ErpButton label="صدور نهایی و چاپ" icon={FaPrint} tone="success" disabled={!actions.canIssue} onClick={actions.onIssue} /></div>
+          {actions.canFinalize && <ErpButton label="تأیید و نهایی‌سازی قرارداد" icon={FaFileContract}
+            tone="success" onClick={actions.onFinalize} />}
+          <ErpButton label="صدور PDF نهایی" icon={FaPrint} tone="success" disabled={!actions.canIssue} onClick={actions.onIssue} /></div>
       </ErpSection>
     </>} />
   </>;

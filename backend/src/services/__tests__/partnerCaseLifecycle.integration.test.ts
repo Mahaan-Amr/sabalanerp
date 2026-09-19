@@ -188,8 +188,17 @@ const idsFor = (prefix: string) => ({ caseId: `${prefix}-case`, partnerId: `${pr
   internalId: `${prefix}-internal`, contractId: `${prefix}-contract`, rowId: `${prefix}-row`, cohortId: `${prefix}-cohort` });
 
 async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting = false, passThrough = false,
-  deliveryPlan?: partnerContracts.FulfillmentView['deliveries']) {
+  deliveryPlan?: partnerContracts.FulfillmentView['deliveries'], loss = false) {
   const base = createPartnerFixtures();
+  if (loss) {
+    base.partner.products[0].retailUnitPrice = '700';
+    for (const totals of [base.partner.retailTotals, base.customer.totals]) {
+      totals.net = '1400'; totals.discount = '0'; totals.tax = '0'; totals.charges = '0'; totals.payable = '1400';
+    }
+    base.partner.customerPaymentPlan.installments[0].amount.amount = '1400';
+    base.customer.customerPaymentPlan.installments[0].amount.amount = '1400';
+    base.partner.resaleDifference = '-200';
+  }
   if (passThrough) {
     for (const totals of [base.partner.sabalanTotals!, base.accounting.totals]) {
       totals.tax = '100'; totals.payable = '1700';
@@ -287,6 +296,22 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
   await tx.partnerProductRow.create({ data: { id: ids.rowId, caseId: ids.caseId } });
   await tx.partnerCaseRowBinding.create({ data: { caseId: ids.caseId, revision: 1, productRowId: ids.rowId,
     configurationHash: hash, quantity: '2', unit: 'm', precisionPolicyVersion: 'measured-v1' } });
+  const inquiryId = `${ids.caseId}-inquiry`, inquiryRowId = `${ids.caseId}-inquiry-row`;
+  const assignmentId = `${ids.caseId}-assignment`, approvalId = `${ids.caseId}-approval`;
+  await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+  await tx.partnerInquiry.create({ data: { id: inquiryId, profileId: ids.profileId, submittedAt: new Date() } });
+  await tx.partnerInquiryAssignment.create({ data: { id: assignmentId, inquiryId, revision: 1,
+    responderId: ids.partnerId, actorId: ids.partnerId, reason: 'آزمون چرخه پرونده', eligibilityEvidence: {} } });
+  await tx.partnerInquiryRow.create({ data: { id: inquiryRowId, inquiryId, version: 1, outcome: 'APPROVED',
+    configurationHash: hash, definition: {} } });
+  await tx.partnerInquiryApproval.create({ data: { id: approvalId, rowId: inquiryRowId, assignmentId,
+    actorId: ids.partnerId, commandId: `${ids.caseId}-approval-command`, authorizationEvidenceId: `${ids.caseId}-approval-auth`,
+    wholesaleUnitPrice: product.wholesaleUnitPrice!, currency: base.accounting.totals.currency,
+    evidenceHash: hash, approvedAt: new Date(Date.now() - 60_000),
+    expiresAt: new Date(Date.now() - 60_000 + 48 * 60 * 60 * 1000) } });
+  await tx.partnerInquiryUsage.create({ data: { id: `${ids.caseId}-usage`, caseId: ids.caseId, caseRevision: 1,
+    productRowId: ids.rowId, approvalId, approvalSnapshot: {}, evidenceHash: hash } });
+  await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
   for (const delivery of deliveries) {
     await tx.partnerCaseDelivery.create({ data: { caseId: ids.caseId, revision: 1, id: delivery.deliveryId,
       date: new Date(`${delivery.date}T00:00:00.000Z`), destination: delivery.destination } });
@@ -320,14 +345,59 @@ PartnerCaseLifecycleDependencies {
   recordEvidenceReview: async (_tx, input) => { reviews.push(input.code); } };
 }
 
-async function commitCommand(ids: Ids, owner: RevisionRef, trigger: 'SIGNED' | 'PRINTED', suffix = trigger.toLowerCase()):
+async function commitCommand(ids: Ids, owner: RevisionRef, trigger: 'SIGNED' | 'PRINTED', suffix = trigger.toLowerCase(),
+  expectedState: 'DRAFT' | 'AWAITING_CUSTOMER_CONFIRMATION' | 'CUSTOMER_APPROVED' | 'COMMITTED' = 'CUSTOMER_APPROVED',
+  lossAccepted = false):
 Promise<Extract<PartnerCommand, { type: 'CASE_COMMIT' }>> {
-  const intent = { trigger, authenticatedOutputEvidenceId: `${ids.caseId}-${suffix}-output` };
+  const intent = { trigger, authenticatedOutputEvidenceId: `${ids.caseId}-${suffix}-output`, lossAccepted };
   return { schemaVersion: 1, type: 'CASE_COMMIT', commandId: `${ids.caseId}-${suffix}-command`,
-    correlationId: `${ids.caseId}-${suffix}-correlation`, expected: owner, expectedState: 'CUSTOMER_APPROVED', ...intent,
+    correlationId: `${ids.caseId}-${suffix}-correlation`, expected: owner, expectedState, ...intent,
     idempotency: { actorId: ids.partnerId, operation: 'CASE_COMMIT', targetId: ids.caseId, key: `${ids.caseId}-${suffix}-key`,
       payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_COMMIT', ...intent }) } };
 }
+
+test('Partner can finalize a priced current revision without a customer response but not after explicit rejection', () =>
+  fixture(async (tx, ids, owner) => {
+    const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
+    await service.markAwaitingCustomerConfirmation({ expected: owner, commandId: `${ids.caseId}-send`,
+      correlationId: `${ids.caseId}-send`, snapshotId: `${ids.caseId}-snapshot` });
+    const committed = await service.execute(await commitCommand(ids, owner, 'SIGNED', 'silent-customer',
+      'AWAITING_CUSTOMER_CONFIRMATION'));
+    assert.equal(committed.ok && committed.value.case?.state, 'COMMITTED');
+    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).customerConfirmationState, 'SENT');
+    const lateRejection = await service.markCustomerRejected({ expected: owner, commandId: `${ids.caseId}-late-reject`,
+      correlationId: `${ids.caseId}-late-reject`, snapshotId: `${ids.caseId}-snapshot`,
+      rejectedAt: '2026-08-30T10:00:00.000Z' });
+    assert.equal(lateRejection.ok && lateRejection.value.case.state, 'COMMITTED');
+    const retained = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } });
+    assert.equal(retained.state, 'COMMITTED');
+    assert.equal(retained.customerConfirmationState, 'REJECTED');
+  }));
+
+test('explicit customer rejection blocks finalization of that revision', () => fixture(async (tx, ids, owner) => {
+  const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
+  await service.markAwaitingCustomerConfirmation({ expected: owner, commandId: `${ids.caseId}-send`,
+    correlationId: `${ids.caseId}-send`, snapshotId: `${ids.caseId}-snapshot` });
+  const rejected = await service.markCustomerRejected({ expected: owner, commandId: `${ids.caseId}-reject`,
+    correlationId: `${ids.caseId}-reject`, snapshotId: `${ids.caseId}-snapshot`,
+    rejectedAt: '2026-08-30T07:45:00.000Z' });
+  assert.equal(rejected.ok && rejected.value.case.customerConfirmationState, 'REJECTED');
+  const blocked = await service.execute(await commitCommand(ids, owner, 'SIGNED', 'rejected-customer',
+    'AWAITING_CUSTOMER_CONFIRMATION'));
+  assert.equal(blocked.ok ? null : blocked.error.code, 'STATE_CONFLICT');
+}));
+
+test('finalization rechecks inquiry expiry inside the locked transaction', () => fixture(async (tx, ids, owner) => {
+  await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+  await tx.partnerInquiryApproval.update({ where: { id: `${ids.caseId}-approval` },
+    data: { approvedAt: new Date(Date.now() - 48 * 60 * 60 * 1000 - 1_000),
+      expiresAt: new Date(Date.now() - 1_000) } });
+  await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+  const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
+  const blocked = await service.execute(await commitCommand(ids, owner, 'SIGNED', 'expired-inquiry', 'DRAFT'));
+  assert.equal(blocked.ok ? null : blocked.error.code, 'APPROVAL_EXPIRED');
+  assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).state, 'DRAFT');
+}));
 
 async function cancelCommand(ids: Ids, owner: RevisionRef,
   expectedState: 'DRAFT' | 'AWAITING_CUSTOMER_CONFIRMATION' | 'CUSTOMER_APPROVED' = 'DRAFT'):
@@ -340,13 +410,22 @@ Promise<Extract<PartnerCommand, { type: 'CASE_CANCEL' }>> {
 }
 
 async function fixture(run: (tx: Prisma.TransactionClient, ids: Ids, owner: RevisionRef) => Promise<void>,
-  tamperAccounting = false) {
+  tamperAccounting = false, loss = false) {
   const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
   const rollback = new Error('rollback Partner lifecycle fixture');
   try { await database.$transaction(async tx => { const ids = idsFor(`partner-lifecycle-${randomUUID()}`);
-    const owner = await seedCase(tx, ids, tamperAccounting); await run(tx, ids, owner); throw rollback; }, { timeout: 30_000 }); }
+    const owner = await seedCase(tx, ids, tamperAccounting, false, undefined, loss);
+    await run(tx, ids, owner); throw rollback; }, { timeout: 30_000 }); }
   catch (error) { if (error !== rollback) throw error; } finally { await database.$disconnect(); }
 }
+
+test('a loss requires explicit acceptance at finalization time', () => fixture(async (tx, ids, owner) => {
+  const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
+  const blocked = await service.execute(await commitCommand(ids, owner, 'SIGNED', 'loss-not-accepted', 'DRAFT', false));
+  assert.equal(blocked.ok ? null : blocked.error.code, 'STATE_CONFLICT');
+  const committed = await service.execute(await commitCommand(ids, owner, 'SIGNED', 'loss-accepted', 'DRAFT', true));
+  assert.equal(committed.ok && committed.value.case?.state, 'COMMITTED');
+}, false, true));
 
 test('confirmation, approval and both issuance facts create one commitment without status regression', () => fixture(async (tx, ids, owner) => {
   const authorized: string[] = [];
@@ -444,18 +523,6 @@ test('an immutable priced revision remains readable after current pricing return
     assert.ok(historical, 'historical reads must use the immutable revision pricing state, not the mutable current state');
     assert.equal(historical.partner.pricingState, 'READY_TO_FINALIZE');
     assert.ok(historical.accounting, 'a historically priced revision must retain its canonical Accounting projection');
-  }));
-
-test('customer confirmation fails closed under the locked lifecycle check when pricing is not ready', () =>
-  fixture(async (tx, ids, owner) => {
-    await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
-    await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: { pricingState: 'AWAITING_INQUIRY' } });
-    const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
-    const sent = await service.markAwaitingCustomerConfirmation({ expected: owner,
-      commandId: `${ids.caseId}-unpriced-send`, correlationId: `${ids.caseId}-unpriced-send`,
-      snapshotId: `${ids.caseId}-unpriced-snapshot` });
-    assert.equal(sent.ok ? null : sent.error.code, 'STATE_CONFLICT');
-    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).state, 'DRAFT');
   }));
 
 test('operational pause blocks commitment but support cancellation remains atomic and retained', () => fixture(async (tx, ids, owner) => {

@@ -1,5 +1,6 @@
 'use client';
-import { ErpButton, ErpCard, ErpInlineState, ErpInput } from '@/components/erp';
+import React, { useState } from 'react';
+import { ErpButton, ErpCard, ErpInlineState, ErpInput, ErpSheet } from '@/components/erp';
 import { formatPriceWithRial, toFiniteNumber } from '@/lib/numberFormat';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
 import type { CustomerContractOutput } from '../../../../../packages/partner-sales-contracts';
@@ -35,6 +36,8 @@ type RetailConfirmationData = {
   contract: CustomerContractOutput;
   verifiedAt: string | null;
   linkExpiresAt: string;
+  sellerFinalized: boolean;
+  decision: 'PENDING' | 'APPROVED' | 'REJECTED';
   readOnly: boolean;
   banner: 'CANCELLED' | 'SUPERSEDED' | null;
 };
@@ -49,6 +52,7 @@ interface ConfirmationContractViewProps {
   onCodeChange: (value: string) => void;
   onVerify: () => void;
   onResend: () => void;
+  onReject?: () => void;
 }
 
 const statusLabel = (status: string) => {
@@ -85,8 +89,10 @@ export default function ConfirmationContractView({
   submitting,
   onCodeChange,
   onVerify,
-  onResend
+  onResend,
+  onReject
 }: ConfirmationContractViewProps) {
+  const [rejectOpen, setRejectOpen] = useState(false);
   const retailData = 'readOnly' in data ? data : null;
   const retail = retailData?.contract;
   const ordinary = retailData ? null : data as OrdinaryConfirmationData;
@@ -94,7 +100,8 @@ export default function ConfirmationContractView({
   const customerName = retail?.customer.displayName || fullName || ordinary?.contract.customer.companyName || 'مشتری';
   const contractStatus = retailData?.banner === 'CANCELLED' ? 'CANCELLED'
     : retailData?.verifiedAt ? 'APPROVED' : retail?.status || ordinary?.contractStatus || '';
-  const isApproved = Boolean(retailData?.readOnly) || ['APPROVED', 'SIGNED', 'PRINTED'].includes(contractStatus);
+  const isApproved = retailData?.decision === 'APPROVED' || (!retailData && ['APPROVED', 'SIGNED', 'PRINTED'].includes(contractStatus));
+  const isRejected = retailData?.decision === 'REJECTED';
   const verifiedDate = formatPersianDate(data.verifiedAt);
   const displayItems = retail?.products || (Array.isArray(ordinary?.contract.contractData?.products) && ordinary.contract.contractData.products.length > 0
     ? ordinary.contract.contractData.products : ordinary?.contract.items || []);
@@ -113,6 +120,10 @@ export default function ConfirmationContractView({
         {retailData?.banner && <ErpInlineState kind="stale" title={retailData.banner === 'CANCELLED'
           ? 'این قرارداد لغو شده است؛ نسخه تأییدشده فقط برای مشاهده نگهداری می‌شود.'
           : 'نسخه جدید جایگزین شده است؛ این نسخه تأییدشده فقط برای مشاهده است.'} />}
+
+        {retailData && !retailData.sellerFinalized && <ErpInlineState kind="permission"
+          title="پیش‌نویس — هنوز توسط فروشنده نهایی نشده" />}
+        {isRejected && <ErpInlineState kind="error" title="رد این نسخه توسط مشتری ثبت شده است." />}
 
         <ErpCard className="p-6">
           <h2 className="mb-4 text-xl font-semibold">اطلاعات قرارداد</h2>
@@ -170,7 +181,7 @@ export default function ConfirmationContractView({
           </ErpCard>
         )}
 
-        {!isApproved ? (
+        {!isApproved && !isRejected && !retailData?.readOnly ? (
           <ErpCard className="p-6">
             <h2 className="mb-3 text-xl font-semibold">ثبت کد تایید</h2>
             <p className="mb-4 text-sm text-secondary">
@@ -186,15 +197,29 @@ export default function ConfirmationContractView({
             />
             <div className="mt-4 flex flex-wrap gap-3">
               <ErpButton label="تایید قرارداد" disabled={submitting} onClick={onVerify} variant="solid" />
+              {retailData && onReject && <ErpButton label="رد این نسخه" disabled={submitting}
+                onClick={() => setRejectOpen(true)} variant="outline" tone="danger" />}
               <ErpButton label="ارسال مجدد کد" disabled={submitting} onClick={onResend} variant="outline" tone="neutral" />
             </div>
             {error && <ErpInlineState kind="error" title={error} className="mt-4" />}
             {success && <ErpInlineState kind="success" title={success} className="mt-4" />}
           </ErpCard>
-        ) : (
+        ) : isApproved ? (
           <ErpInlineState kind="success" title={verifiedDate ? `تایید شده در تاریخ ${verifiedDate}` : 'تایید شده'} />
-        )}
+        ) : null}
       </div>
+      <ErpSheet open={rejectOpen} onClose={() => { if (!submitting) setRejectOpen(false); }}
+        title="رد این نسخه قرارداد" presentation="modal" pending={submitting}
+        footer={<div className="flex gap-3">
+          <ErpButton label="انصراف" disabled={submitting} variant="outline" tone="neutral"
+            onClick={() => setRejectOpen(false)} />
+          <ErpButton label="بله، این نسخه رد شود" disabled={submitting} tone="danger"
+            onClick={() => { setRejectOpen(false); onReject?.(); }} />
+        </div>}>
+        <ErpInlineState kind="error" title={retailData?.sellerFinalized
+          ? 'رد شما ثبت می‌شود، اما تعهد نهایی‌شده فروشنده به سبلان خودکار لغو نمی‌شود و ادامه کار از مسیر رسمی اصلاح یا لغو انجام خواهد شد.'
+          : 'با ثبت رد، فروشنده باید نسخه را اصلاح و دوباره برای شما ارسال کند.'} />
+      </ErpSheet>
     </main>
   );
 }

@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
-  ApprovedInquirySchema, PartnerCaseViewSchema, PartnerCommandSchema, canonicalHash, partnerError,
+  ApprovedInquirySchema, CustomerContractOutputSchema, PartnerCaseViewSchema, PartnerCommandSchema, canonicalHash, partnerError,
   type ApprovedInquiry, type PartnerCommandPort, type Result,
 } from '@sabalanerp/partner-sales-contracts';
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { bindApprovalUsage, bindFrozenApprovalUsage, bindFrozenMaterialApprovalUsage, bindMaterialApprovalUsage, resolveApprovalForUse } from '../inquiries/approvalUsage';
 import { buildCaseProjections } from './projections';
 import { buildRevisionEvidence, validateResolvedDraft, type ApprovedCaseRow, type ResolvedCaseDraft } from './revisions';
+import { projectCustomerVisibleRevisionContent } from '../customerOutput/customerVisible';
 
 type Transaction = Prisma.TransactionClient;
 type Submit = Extract<ReturnType<typeof PartnerCommandSchema.parse>, { type: 'CASE_SUBMIT' }>;
@@ -137,8 +138,9 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
   const current = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
     id: true, caseNumber: true, profileId: true, customerId: true, internalRecordId: true,
-    customerContractId: true, headRevision: true, integrityHash: true, state: true, stateRevision: true,
-    head: { select: { customerContent: true, rowBindings: { select: { productRowId: true,
+    customerContractId: true, headRevision: true, integrityHash: true, state: true,
+    customerConfirmationState: true, stateRevision: true,
+    head: { select: { customerContent: true, customerProjection: true, rowBindings: { select: { productRowId: true,
       configurationHash: true, inquiryUsages: { select: { approvalSnapshot: true } } } },
       materialInquiryUsages: { select: { pricingSubjectId: true, approvalId: true,
         approvalSnapshot: true, evidenceHash: true } } } },
@@ -146,7 +148,8 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     customerContract: { select: { contractNumber: true } },
   } });
   if (!current) return { ok: false, error: partnerError('NOT_FOUND') } as const;
-  if (current.state !== 'DRAFT' || command.expectedState !== current.state) {
+  if (!['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(current.state) ||
+      command.expectedState !== current.state) {
     return { ok: false, error: partnerError('STATE_CONFLICT') } as const;
   }
   if (command.expected.revision !== current.headRevision) return { ok: false, error: partnerError('ROW_STALE') } as const;
@@ -271,6 +274,17 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       evidence: { expectedRevision: command.expected.revision } });
     return projections;
   }
+  const previousCustomerOutput = CustomerContractOutputSchema.safeParse(current.head.customerProjection);
+  const nextCustomerOutput = CustomerContractOutputSchema.safeParse(projections.value.customer);
+  const previousCustomer = previousCustomerOutput.success
+    ? projectCustomerVisibleRevisionContent(previousCustomerOutput.data) : undefined;
+  const nextCustomer = nextCustomerOutput.success
+    ? projectCustomerVisibleRevisionContent(nextCustomerOutput.data) : undefined;
+  const customerVisibleChanged = !previousCustomer || !nextCustomer ||
+    await canonicalHash(previousCustomer) !== await canonicalHash(nextCustomer);
+  const nextState = customerVisibleChanged ? 'DRAFT' as const : current.state;
+  const nextConfirmationState = customerVisibleChanged && current.customerConfirmationState !== 'NOT_SENT'
+    ? 'RECONFIRMATION_REQUIRED' as const : current.customerConfirmationState;
   const eventId = randomUUID();
   const maximum = await tx.partnerCaseEvent.aggregate({ where: { caseId }, _max: { sequence: true } });
   markMutated();
@@ -285,9 +299,9 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     customerProjection: json(projections.value.customer),
     actorId: dependencies.actorId, commandId: command.commandId } });
   const updated = await tx.partnerSaleCase.updateMany({ where: { id: caseId, headRevision: current.headRevision,
-    integrityHash: current.integrityHash, state: 'DRAFT', stateRevision: current.stateRevision },
+    integrityHash: current.integrityHash, state: current.state, stateRevision: current.stateRevision },
     data: { headRevision: revision, integrityHash, customerId: resolved.value.customerId,
-      pricingState: evidence.value.pricingState,
+      pricingState: evidence.value.pricingState, state: nextState, customerConfirmationState: nextConfirmationState,
       stateRevision: { increment: 1 } } });
   if (updated.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
   await tx.sabalanToPartnerSaleRecord.update({ where: { id: current.internalRecordId },
@@ -296,7 +310,12 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     partnerRevision: revision, partnerIntegrityHash: integrityHash, customerId: resolved.value.customerId,
     totalAmount: evidence.value.retailEnvelope.totals.payable, content: resolved.value.legalText,
     contractData: json(projections.value.customer),
+    ...(customerVisibleChanged ? { status: 'DRAFT' } : {}),
   } });
+  if (customerVisibleChanged) {
+    await tx.contractPublicConfirmation.updateMany({ where: { contractId: current.customerContractId, status: 'PENDING' },
+      data: { status: 'CANCELLED', cancelledAt: new Date() } });
+  }
   await tx.partnerProductRow.createMany({ data: approvedRows
     .filter(row => !existingRows.some(existing => existing.id === row.productRowId))
     .map(row => ({ id: row.productRowId, caseId })) });
@@ -331,7 +350,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   await insertPaymentPlan(tx, caseId, revision, 'SABALAN', resolved.value.sabalanPaymentPlan);
   await tx.partnerCaseEvent.create({ data: { id: eventId, caseId, caseRevision: revision, integrityHash,
     sequence: (maximum._max.sequence ?? 0) + 1, stateRevision: current.stateRevision + 1,
-    type: 'CASE_DRAFT_REVISED', fromState: 'DRAFT', toState: 'DRAFT', actorId: dependencies.actorId,
+    type: 'CASE_DRAFT_REVISED', fromState: current.state, toState: nextState, actorId: dependencies.actorId,
     commandId: command.commandId, correlationId: command.correlationId,
     effectiveDate: new Date(`${command.intent.contractDate}T00:00:00.000Z`), evidence: json({ version: 1,
       predecessorRevision: current.headRevision, caseAuthorizationEvidenceId: caseAccess.value.evidenceId,
@@ -375,7 +394,8 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   const outcome = { version: 1, commandId: command.commandId, caseId, revision, integrityHash, eventIds: [eventId] };
   await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...key, payloadHash: intentHash, outcome: json(outcome) } });
   return { ok: true, value: { commandId: command.commandId, replayed: false,
-    case: projections.value.partner, eventIds: [eventId] } } as const;
+    case: { ...projections.value.partner, state: nextState,
+      customerConfirmationState: nextConfirmationState }, eventIds: [eventId] } } as const;
 }
 
 export function createPrismaPartnerCaseService(input: Omit<PartnerCaseDependencies, 'transaction'> & { database: PrismaClient }) {

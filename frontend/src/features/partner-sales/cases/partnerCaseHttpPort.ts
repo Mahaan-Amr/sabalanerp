@@ -144,6 +144,13 @@ export async function sendPartnerConfirmation(caseId: string) {
   return response.data;
 }
 
+export async function finalizePartnerCase(view: PartnerCaseView, lossAccepted: boolean) {
+  const response = await api.post(`/partner/cases/${encodeURIComponent(view.owner.caseId)}/finalize`, {
+    expected: view.owner, expectedState: view.state, lossAccepted,
+  });
+  return response.data;
+}
+
 export async function openPartnerPdf(caseId: string, snapshotId: string, mode: 'PREVIEW' | 'FINAL' | 'DOWNLOAD_EXISTING') {
   const response = await api.post(`/partner/cases/${encodeURIComponent(caseId)}/output`, { snapshotId, mode }, { responseType: 'blob' });
   await assertSuccessfulSalesDownload(response);

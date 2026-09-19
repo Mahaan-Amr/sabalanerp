@@ -1138,7 +1138,10 @@ export const publicContractsAPI = {
     publicApi.post(`/contracts/confirm/${token}/verify`, { code }),
 
   resendConfirmationCode: (token: string) =>
-    publicApi.post(`/contracts/confirm/${token}/resend`)
+    publicApi.post(`/contracts/confirm/${token}/resend`),
+
+  rejectConfirmation: (token: string) =>
+    publicApi.post(`/contracts/confirm/${token}/reject`)
 };
 
 export const customersAPI = {

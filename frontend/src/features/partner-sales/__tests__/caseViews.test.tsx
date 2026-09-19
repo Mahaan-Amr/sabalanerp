@@ -9,17 +9,19 @@ import { PartnerAccountPanel } from '../account/PartnerAccountPanel';
 import { PartnerReportContent, partnerReportPrimaryAction, type PartnerReportPresentation } from '../reports/PartnerReportView';
 import { RetailCollectionsPanel, type RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import { PartnerCorrectionPanel } from '../cases/PartnerCorrectionPanel';
+import ConfirmationContractView from '../../../app/contracts/confirm/ConfirmationContractView';
 
 test('Partner case detail separates retail, wholesale and margin without exposing the internal record', () => {
   const fixture = createPartnerFixtures();
   const html = renderToStaticMarkup(<><ErpMetricGrid items={partnerCaseMetrics(fixture.partner)} /><PartnerCaseDetailContent view={fixture.partner} actions={{
-    canPreview: true, canIssue: true, canSendConfirmation: true, canRequestCorrection: true, canCancel: true, canRequestVoid: false,
+    canPreview: true, canIssue: true, canFinalize: true, canSendConfirmation: true, canRequestCorrection: true, canCancel: true, canRequestVoid: false,
   }} /></>);
   assert.match(html, /فروش به مشتری/);
   assert.match(html, /خرید از سبلان/);
   assert.match(html, /سود بازفروش/);
   assert.match(html, /پیش‌نمایش/);
-  assert.match(html, /صدور نهایی/);
+  assert.match(html, /تأیید و نهایی‌سازی قرارداد/);
+  assert.match(html, /صدور PDF نهایی/);
   assert.match(html, /ارسال پیامک تأیید/);
   assert.doesNotMatch(html, /FIXTURE-INTERNAL-313|شماره سند داخلی|approvalEvidenceId|commercialAccountId/);
 });
@@ -118,4 +120,30 @@ test('approved retail correction makes its deadline, one-save rule and fresh con
   assert.match(html, /برنامه پرداخت آینده مشتری/);
   assert.match(html, /نسخه جانشین/);
   assert.doesNotMatch(html, /حسابداری|شماره سند داخلی|قیمت تأییدشده سبلان/);
+});
+
+test('a rejected customer revision is read-only and never appears approved', () => {
+  const fixture = createPartnerFixtures();
+  const html = renderToStaticMarkup(<ConfirmationContractView
+    data={{
+      contract: fixture.customer,
+      verifiedAt: null,
+      linkExpiresAt: '2026-09-30T12:00:00.000Z',
+      sellerFinalized: false,
+      decision: 'REJECTED',
+      readOnly: true,
+      banner: null,
+    }}
+    code=""
+    error=""
+    success=""
+    submitting={false}
+    onCodeChange={() => undefined}
+    onVerify={() => undefined}
+    onResend={() => undefined}
+    onReject={() => undefined}
+  />);
+
+  assert.match(html, /رد این نسخه توسط مشتری ثبت شده است/);
+  assert.doesNotMatch(html, /تایید شده در تاریخ|ثبت کد تایید|تایید قرارداد|ارسال مجدد کد/);
 });

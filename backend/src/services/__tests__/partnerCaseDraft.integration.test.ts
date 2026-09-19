@@ -6,6 +6,7 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { parseCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { canonicalHash, type PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerCaseService, createPrismaPartnerCaseService, type PartnerCaseDependencies } from '../partnerSales/cases/aggregate';
+import { projectCustomerVisibleRevisionContent } from '../partnerSales/customerOutput/customerVisible';
 import { createPartnerCaseLifecycleService } from '../partnerSales/cases/lifecycle';
 import { buildRevisionEvidence, validateResolvedDraft, type ResolvedCaseDraft } from '../partnerSales/cases/revisions';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
@@ -28,6 +29,23 @@ const graphFor = (productRowId: string) => parseCanonicalProductGraph({ schemaVe
   sourceBatches: [], remainingStones: [], allocations: [], operationGroups: [], toolSelections: [], finishingSelections: [] });
 const configurationHash = `sha256-v1:${'1'.repeat(64)}`;
 const approvalEvidenceHash = `sha256-v1:${'2'.repeat(64)}`;
+
+test('customer-visible comparison ignores revision-owned identifiers but retains commercial content', () => {
+  const original = createPartnerFixtures().customer;
+  const revised = { ...original, revision: original.revision + 1,
+    outputHash: `sha256-v1:${'f'.repeat(64)}`, status: 'DRAFT' as const, confirmation: 'INVALIDATED' as const,
+    products: original.products.map(product => ({ ...product, productRowId: `${product.productRowId}-next` })),
+    customerPaymentPlan: { ...original.customerPaymentPlan, planId: `${original.customerPaymentPlan.planId}-next`,
+      version: original.customerPaymentPlan.version + 1, predecessorPlanId: original.customerPaymentPlan.planId,
+      installments: original.customerPaymentPlan.installments.map(item => ({ ...item,
+        installmentId: `${item.installmentId}-next` })) },
+    deliveries: original.deliveries.map(delivery => ({ ...delivery, deliveryId: `${delivery.deliveryId}-next`,
+      items: delivery.items.map(item => ({ ...item, productRowId: `${item.productRowId}-next` })) })),
+  };
+  assert.deepEqual(projectCustomerVisibleRevisionContent(revised), projectCustomerVisibleRevisionContent(original));
+  assert.notDeepEqual(projectCustomerVisibleRevisionContent({ ...revised,
+    totals: { ...revised.totals, payable: '999' } }), projectCustomerVisibleRevisionContent(original));
+});
 
 test('numbered Case customer data rejects a missing visible address or SMS recipient', () => {
   assert.equal(requireCompleteCustomerParty({ displayName: 'مشتری', phone: '09121234567' }).ok, false);
@@ -356,7 +374,9 @@ test('concurrent first-save retries create one numbered unpriced Case and one du
 });
 
 async function reviseCommand(ids: Record<string, string>, submitted: Extract<PartnerCommand, { type: 'CASE_SUBMIT' }>,
-  revision: number, integrityHash: string, suffix = 'revise'): Promise<Extract<PartnerCommand, { type: 'CASE_DRAFT_REVISE' }>> {
+  revision: number, integrityHash: string, suffix = 'revise',
+  expectedState: Extract<PartnerCommand, { type: 'CASE_DRAFT_REVISE' }>['expectedState'] = 'DRAFT'):
+Promise<Extract<PartnerCommand, { type: 'CASE_DRAFT_REVISE' }>> {
   const caseId = submitted.idempotency.targetId;
   const productRowId = `${caseId}-product-row`;
   const intent = { ...submitted.intent, recoveryRevision: revision + 1,
@@ -369,10 +389,42 @@ async function reviseCommand(ids: Record<string, string>, submitted: Extract<Par
       items: [{ productRowId, quantity: '2' }] }],
   };
   return { schemaVersion: 1, type: 'CASE_DRAFT_REVISE', commandId: `${caseId}-command-${suffix}`,
-    correlationId: `${caseId}-correlation-${suffix}`, expected: { caseId, revision, integrityHash }, expectedState: 'DRAFT',
+    correlationId: `${caseId}-correlation-${suffix}`, expected: { caseId, revision, integrityHash }, expectedState,
     intent, idempotency: { actorId: ids.partnerId, operation: 'CASE_DRAFT_REVISE', targetId: caseId,
       key: `${caseId}-key-${suffix}`, payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent }) } };
 }
+
+test('a customer-visible revision invalidates the sent version and requires confirmation again', async () => {
+  await fixture(async (tx, ids) => {
+    const submitted = await command(ids);
+    const created = await service(tx, ids).execute(submitted);
+    assert.equal(created.ok, true);
+    if (!created.ok || !created.value.case) return;
+    const lifecycle = createPartnerCaseLifecycleService({ actorId: ids.partnerId, cancellationPurpose: 'PARTNER',
+      transaction: work => work(tx),
+      authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
+      verifyOutputEvidence: async () => ({ ok: false as const, error: { code: 'STATE_CONFLICT' as const, status: 409 as const,
+        message: 'وضعیت پرونده اجازه این اقدام را نمی‌دهد.' } }),
+      cancelConfirmationSessions: async () => ({ ok: true, value: {
+        invalidatedSessionIds: [], preservedSnapshotIds: [],
+      } }), recordEvidenceReview: async () => undefined });
+    const sent = await lifecycle.markAwaitingCustomerConfirmation({ expected: created.value.case.owner,
+      commandId: `${ids.caseId}-send`, correlationId: `${ids.caseId}-send`, snapshotId: `${ids.caseId}-snapshot` });
+    assert.equal(sent.ok && sent.value.case.customerConfirmationState, 'SENT');
+
+    const revised = await service(tx, ids).execute(await reviseCommand(ids, submitted, 1,
+      created.value.case.owner.integrityHash, 'customer-visible', 'AWAITING_CUSTOMER_CONFIRMATION'));
+    assert.equal(revised.ok, true, JSON.stringify(revised));
+    if (!revised.ok || !revised.value.case) return;
+    assert.equal(revised.value.case.state, 'DRAFT');
+    assert.equal(revised.value.case.customerConfirmationState, 'RECONFIRMATION_REQUIRED');
+    const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, select: {
+      state: true, customerConfirmationState: true, customerContract: { select: { status: true } },
+    } });
+    assert.deepEqual(root, { state: 'DRAFT', customerConfirmationState: 'RECONFIRMATION_REQUIRED',
+      customerContract: { status: 'DRAFT' } });
+  });
+});
 
 test('draft revision advances the atomic pair once and rejects a stale competing writer', async () => {
   await fixture(async (tx, ids) => {

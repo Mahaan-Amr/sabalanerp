@@ -25,6 +25,7 @@ export type CurrentOutput = {
   contractNumber: string;
   normalizedRecipient: string;
   state: Foundation.CaseState;
+  customerContent?: Output;
 };
 
 export const SUPPLY_CREDIT = 'تأمین و تحویل توسط سبلان';

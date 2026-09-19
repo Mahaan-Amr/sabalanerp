@@ -737,6 +737,11 @@ export class ContractConfirmationService {
     });
   }
 
+  async rejectPublicContract(params: { token: string; meta?: RequestEvidenceMeta }) {
+    const partner = await this.partnerOutput?.rejectPublicContract(params);
+    return partner ?? { success: false, error: 'رد مستقیم برای این قرارداد فعال نیست' };
+  }
+
   private async verifySessionOtp(params: {
     session: any;
     code: string;

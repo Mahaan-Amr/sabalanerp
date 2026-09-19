@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { PartnerCommandSchema, compareIdempotency, canonicalHash, canonicalJson } from '../src';
+import { PartnerCaseFinalizeRequestSchema, PartnerCommandSchema, compareIdempotency, canonicalHash, canonicalJson } from '../src';
 
 test('commands bind version, expected state/revision and scoped idempotency intent', async () => {
   const hash = 'sha256-v1:' + 'a'.repeat(64);
@@ -42,4 +42,26 @@ test('a customer-complete Case draft may be saved before Sabalan inquiry approva
     } });
   assert.equal(parsed.type, 'CASE_SUBMIT');
   assert.equal(parsed.intent.rows[0].approvedRowBinding, undefined);
+});
+
+test('Partner finalization carries an explicit loss decision', async () => {
+  const integrityHash = `sha256-v1:${'a'.repeat(64)}`;
+  const intent = { trigger: 'SIGNED' as const, authenticatedOutputEvidenceId: 'finalize-evidence-379', lossAccepted: false };
+  const parsed = PartnerCommandSchema.parse({ schemaVersion: 1, type: 'CASE_COMMIT', ...intent,
+    commandId: 'finalize-command-379', correlationId: 'finalize-correlation-379',
+    expected: { caseId: 'case-379', revision: 1, integrityHash }, expectedState: 'DRAFT',
+    idempotency: { actorId: 'partner-379', operation: 'CASE_COMMIT', targetId: 'case-379',
+      key: 'finalize-379', payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_COMMIT', ...intent }) } });
+  assert.equal(parsed.type, 'CASE_COMMIT');
+  assert.equal(parsed.lossAccepted, false);
+  assert.equal(PartnerCommandSchema.safeParse({ ...parsed, lossAccepted: undefined }).success, false);
+});
+
+test('Partner finalization request cannot add another signature after commitment', () => {
+  const expected = { caseId: 'case-finalize-guard', revision: 1,
+    integrityHash: `sha256-v1:${'a'.repeat(64)}` };
+  assert.equal(PartnerCaseFinalizeRequestSchema.safeParse({ expected,
+    expectedState: 'DRAFT', lossAccepted: false }).success, true);
+  assert.equal(PartnerCaseFinalizeRequestSchema.safeParse({ expected,
+    expectedState: 'COMMITTED', lossAccepted: false }).success, false);
 });

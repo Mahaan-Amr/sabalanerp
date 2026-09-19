@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { IdSchema, InstantSchema } from './primitives';
+import { IdSchema, InstantSchema, RevisionRefSchema } from './primitives';
 import { PartnerCaseViewSchema } from './projections';
 import { CaseDraftIntentSchema } from './commands';
 import { PartnerInquiryRowV2Schema } from './inquiry-v2';
@@ -9,6 +9,7 @@ export const PartnerCaseRuntimeQuerySchema = z.object({ caseId: IdSchema.optiona
 export const PartnerCaseRuntimeActionsSchema = z.object({
   canPreview: z.boolean(),
   canIssue: z.boolean(),
+  canFinalize: z.boolean(),
   canSendConfirmation: z.boolean(),
   canRequestCorrection: z.boolean(),
   canCancel: z.boolean(),
@@ -28,6 +29,12 @@ export const PartnerCaseRuntimeResultSchema = z.object({
 export const PartnerCustomerOutputRequestSchema = z.object({
   mode: z.enum(['PREVIEW', 'FINAL', 'DOWNLOAD_EXISTING']),
   snapshotId: IdSchema,
+}).strict();
+
+export const PartnerCaseFinalizeRequestSchema = z.object({
+  expected: RevisionRefSchema,
+  expectedState: z.enum(['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED']),
+  lossAccepted: z.boolean(),
 }).strict();
 
 export const PartnerCreationContextSchema = z.discriminatedUnion('kind', [

@@ -35,6 +35,13 @@ class Rollback extends Error {
   constructor(readonly result: SendConfirmationResult | { success: false; error: string }) { super('rollback Partner customer output'); }
 }
 
+type RejectionResult = { success: false; error: string } |
+  { success: true; data: { status: 'REJECTED'; rejectedAt: string } };
+
+class RejectionRollback extends Error {
+  constructor(readonly result: RejectionResult) { super('rollback Partner customer rejection'); }
+}
+
 function safeError(code: contracts.PartnerErrorCode) {
   return contracts.partnerError(code).message;
 }
@@ -75,7 +82,8 @@ async function caseOutput(tx: Prisma.TransactionClient, contractId: string) {
   await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${contractId} FOR UPDATE`;
   const row = await tx.salesContract.findUnique({ where: { id: contractId }, select: {
     id: true, partnerKind: true, partnerCaseId: true, contractNumber: true, customerId: true,
-    partnerCase: { select: { id: true, state: true, headRevision: true, integrityHash: true,
+    partnerCase: { select: { id: true, state: true, customerConfirmationState: true,
+      headRevision: true, integrityHash: true,
       committedRevision: true,
       profile: { select: { id: true, userId: true } },
       head: { select: { customerProjection: true } },
@@ -108,7 +116,8 @@ async function readSnapshot(tx: Prisma.TransactionClient, session: { createdBy: 
 }
 
 async function send(input: { contractId: string; requestedBy: string; resend?: boolean; explicitToken?: string; meta?: RequestEvidenceMeta }) {
-  let delivery: { phone: string; otp: string; contractNumber: string; customerName: string } | undefined;
+  let delivery: { phone: string; otp: string; contractNumber: string; customerName: string;
+    contractId: string; sessionId: string } | undefined;
   let response: SendConfirmationResult;
   try {
     response = await prisma.$transaction(async tx => {
@@ -116,6 +125,9 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
       const source = await caseOutput(tx, input.contractId);
       if (source === 'ORDINARY') return undefined as unknown as SendConfirmationResult;
       if (!source) throw new Rollback({ success: false, error: safeError('NOT_FOUND') });
+      if (source.case.customerConfirmationState === 'REJECTED') {
+        throw new Rollback({ success: false, error: safeError('STATE_CONFLICT') });
+      }
       const correlationId = randomUUID();
       const allowed = await authorization(tx, { actorId: input.requestedBy, caseId: source.case.id, correlationId });
       if (!allowed.ok) throw new Rollback({ success: false, error: allowed.error.message });
@@ -169,7 +181,7 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
           linkExpiresAt: snapshot.expiresAt, otpExpiresAt: otpExpiresAt.toISOString(), resend: Boolean(input.resend) }),
         ipAddress: input.meta?.ipAddress, userAgent: input.meta?.userAgent } });
       delivery = { phone: localPhone(recipient), otp, contractNumber: source.contract.contractNumber,
-        customerName: source.content.customer.displayName };
+        customerName: source.content.customer.displayName, contractId: source.contract.id, sessionId: session.id };
       return { success: true, data: { contractId: input.contractId, status: 'PENDING_APPROVAL', phoneNumber: localPhone(recipient),
         publicLink: `${frontendUrl()}/contracts/confirm/${rawToken}`, expiresAt: snapshot.expiresAt,
         otpExpiresAt: otpExpiresAt.toISOString(),
@@ -183,9 +195,17 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
   try {
     const sent = await sms.sendContractConfirmationMessage({ phoneNumber: delivery.phone, code: delivery.otp,
       customerName: delivery.customerName, contractNumber: delivery.contractNumber });
+    await prisma.contractConfirmationAuditLog.create({ data: { contractId: delivery.contractId,
+      sessionId: delivery.sessionId, eventType: sent.success ? 'PARTNER_SMS_DELIVERED' : 'PARTNER_SMS_FAILED',
+      providerMessageId: sent.messageId ? String(sent.messageId) : undefined,
+      eventPayloadJson: json({ success: sent.success, ...(sent.error ? { error: sent.error } : {}) }) } });
     if (!sent.success) return { success: false, error: sent.error || 'ارسال پیامک تایید انجام نشد' };
     if (response.data && sent.messageId) response.data.messageId = String(sent.messageId);
-  } catch { return { success: false, error: 'ارسال پیامک تایید انجام نشد' }; }
+  } catch {
+    await prisma.contractConfirmationAuditLog.create({ data: { contractId: delivery.contractId,
+      sessionId: delivery.sessionId, eventType: 'PARTNER_SMS_FAILED', eventPayloadJson: json({ success: false }) } });
+    return { success: false, error: 'ارسال پیامک تایید انجام نشد' };
+  }
   return response;
 }
 
@@ -204,13 +224,16 @@ async function getPublic(session: Awaited<ReturnType<typeof publicSession>>, met
       return { success: false, error: safeError('NOT_FOUND') };
     }
     const disposition = snapshots.disposition(snapshot, { owner: source.owner, contractNumber: source.contract.contractNumber,
-      normalizedRecipient: normalize(source.content.customer.phone), state: source.case.state },
+      normalizedRecipient: normalize(source.content.customer.phone), state: source.case.state,
+      customerContent: source.content },
     locked.verifiedAt?.toISOString() || null, new Date().toISOString());
     await tx.contractConfirmationAuditLog.create({ data: { contractId: locked.contractId, sessionId: locked.id,
       eventType: 'PARTNER_LINK_OPENED', eventPayloadJson: json({ snapshotId: snapshot.snapshotId }),
       ipAddress: meta?.ipAddress, userAgent: meta?.userAgent } });
     return { success: true, data: { contract: snapshot.content, verifiedAt: locked.verifiedAt?.toISOString() || null,
-      linkExpiresAt: snapshot.expiresAt, ...disposition } satisfies PublicCustomerConfirmation };
+      linkExpiresAt: snapshot.expiresAt, sellerFinalized: source.case.state === 'COMMITTED',
+      decision: locked.status === 'REJECTED' ? 'REJECTED' : locked.verifiedAt ? 'APPROVED' : 'PENDING',
+      ...disposition, readOnly: disposition.readOnly || locked.status === 'REJECTED' } satisfies PublicCustomerConfirmation };
   });
 }
 
@@ -235,10 +258,11 @@ async function verify(session: Awaited<ReturnType<typeof publicSession>>, code: 
       const verifiedAt = new Date();
       const correlationId = randomUUID();
       snapshots.disposition(snapshot, { owner: source.owner, contractNumber: source.contract.contractNumber,
-        normalizedRecipient: normalize(source.content.customer.phone), state: source.case.state }, null, verifiedAt.toISOString());
+        normalizedRecipient: normalize(source.content.customer.phone), state: source.case.state,
+        customerContent: source.content }, null, verifiedAt.toISOString());
       if (!source.pendingRetailCorrection) {
         const approved = await lifecycle(tx, source.case.profile.userId, correlationId).markCustomerApproved({
-          expected: snapshot.owner, commandId: randomUUID(), correlationId,
+          expected: source.owner, commandId: randomUUID(), correlationId,
             snapshotId: snapshot.snapshotId, verifiedAt: verifiedAt.toISOString() });
         if (!approved.ok) throw new Rollback({ success: false, error: approved.error.message });
       }
@@ -266,6 +290,42 @@ async function verify(session: Awaited<ReturnType<typeof publicSession>>, code: 
   }
 }
 
+async function reject(session: Awaited<ReturnType<typeof publicSession>>, meta?: RequestEvidenceMeta): Promise<RejectionResult> {
+  if (!session) return { success: false, error: safeError('NOT_FOUND') };
+  try {
+    return await prisma.$transaction(async tx => {
+      await lockPartnerOperationsControl(tx);
+      await tx.$queryRaw`SELECT id FROM contract_public_confirmations WHERE id = ${session.id} FOR UPDATE`;
+      const current = await tx.contractPublicConfirmation.findUnique({ where: { id: session.id } });
+      const snapshot = current && await readSnapshot(tx, current);
+      const source = current && await caseOutput(tx, current.contractId);
+      if (!current || !snapshot || !source || source === 'ORDINARY' || source.pendingRetailCorrection ||
+          current.status !== 'PENDING' || current.linkExpiresAt <= new Date()) {
+        throw new RejectionRollback({ success: false, error: safeError('NOT_FOUND') });
+      }
+      const rejectedAt = new Date();
+      snapshots.disposition(snapshot, { owner: source.owner, contractNumber: source.contract.contractNumber,
+        normalizedRecipient: normalize(source.content.customer.phone), state: source.case.state,
+        customerContent: source.content }, null, rejectedAt.toISOString());
+      const correlationId = randomUUID();
+      const rejected = await lifecycle(tx, source.case.profile.userId, correlationId).markCustomerRejected({
+        expected: source.owner, commandId: `customer-reject:${current.id}`, correlationId,
+        snapshotId: snapshot.snapshotId, rejectedAt: rejectedAt.toISOString() });
+      if (!rejected.ok) throw new RejectionRollback({ success: false, error: rejected.error.message });
+      await tx.contractPublicConfirmation.update({ where: { id: current.id }, data: {
+        status: 'REJECTED', cancelledAt: rejectedAt } });
+      await tx.contractConfirmationAuditLog.create({ data: { contractId: current.contractId, sessionId: current.id,
+        eventType: 'PARTNER_CUSTOMER_REJECTED', eventPayloadJson: json({ snapshotId: snapshot.snapshotId,
+          rejectedAt: rejectedAt.toISOString() }), ipAddress: meta?.ipAddress, userAgent: meta?.userAgent } });
+      await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+      return { success: true, data: { status: 'REJECTED' as const, rejectedAt: rejectedAt.toISOString() } };
+    });
+  } catch (error) {
+    return error instanceof RejectionRollback ? error.result
+      : { success: false, error: safeError('INTEGRITY_CONFLICT') };
+  }
+}
+
   return {
     async sendForConfirmation(input) {
       const contract = await prisma.salesContract.findUnique({ where: { id: input.contractId }, select: { partnerKind: true } });
@@ -288,6 +348,10 @@ async function verify(session: Awaited<ReturnType<typeof publicSession>>, code: 
       const session = await publicSession({ contract: { contractNumber: input.contractNumber },
         phoneNumber: localPhone(normalize(input.phoneNumber)) });
       return session ? verify(session, input.code) : undefined;
+    },
+    async rejectPublicContract(input) {
+      const session = await publicSession({ tokenHash: hash(input.token) });
+      return session ? reject(session, input.meta) : undefined;
     },
     async resendFromPublicToken(input) {
       const session = await publicSession({ tokenHash: hash(input.token) });

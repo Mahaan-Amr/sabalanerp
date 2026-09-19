@@ -84,6 +84,17 @@ export default function TokenContractConfirmationPage() {
     }
   };
 
+  const rejectContract = async () => {
+    setSubmitting(true); setError(''); setSuccess('');
+    try {
+      const response = await publicContractsAPI.rejectConfirmation(token);
+      if (!response.data.success) { setError(response.data.error || 'ثبت رد قرارداد انجام نشد'); return; }
+      setSuccess('رد این نسخه ثبت شد');
+      await loadData();
+    } catch (err: any) { setError(err.response?.data?.error || 'ثبت رد قرارداد انجام نشد'); }
+    finally { setSubmitting(false); }
+  };
+
   if (loading) {
     return <main className="sds-workspace flex min-h-screen items-center justify-center text-primary"><ErpLoading /></main>;
   }
@@ -109,6 +120,7 @@ export default function TokenContractConfirmationPage() {
       onCodeChange={setCode}
       onVerify={verifyCode}
       onResend={resendCode}
+      onReject={rejectContract}
     />
   );
 }

@@ -39,6 +39,6 @@ export function projectCustomerContractStatus(current: CustomerStatus, fact: 'SI
   'SIGNED' | 'PRINTED' | null {
   if (current === 'PRINTED') return 'PRINTED';
   if (current === 'SIGNED') return fact === 'PRINTED' ? 'PRINTED' : 'SIGNED';
-  if (current === 'APPROVED') return fact;
+  if (['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(current)) return fact;
   return null;
 }

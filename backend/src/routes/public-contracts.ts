@@ -179,4 +179,18 @@ router.post(
   }
 );
 
+router.post(
+  '/contracts/confirm/:token/reject',
+  [param('token').isLength({ min: 32 }).withMessage('Invalid token')],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Invalid confirmation link' });
+    const result = await contractConfirmationService.rejectPublicContract({
+      token: req.params.token, meta: getRequestEvidence(req)
+    });
+    if (!result.success) return res.status(400).json({ success: false, error: confirmationError(result) });
+    return res.json({ success: true, message: 'رد این نسخه ثبت شد', data: result.data });
+  }
+);
+
 export default router;

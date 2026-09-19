@@ -37,6 +37,8 @@ const customerTransitions = {
     status: 'PENDING_APPROVAL', confirmationState: 'SENT', eventType: 'CASE_AWAITING_CUSTOMER_CONFIRMATION' },
   APPROVED: { operation: 'CUSTOMER_CONFIRMATION_VERIFY', from: 'AWAITING_CUSTOMER_CONFIRMATION', to: 'CUSTOMER_APPROVED',
     status: 'APPROVED', confirmationState: 'APPROVED', eventType: 'CASE_CUSTOMER_APPROVED' },
+  REJECTED: { operation: 'CUSTOMER_CONFIRMATION_REJECT', from: 'AWAITING_CUSTOMER_CONFIRMATION', to: 'AWAITING_CUSTOMER_CONFIRMATION',
+    status: 'PENDING_APPROVAL', confirmationState: 'REJECTED', eventType: 'CASE_CUSTOMER_REJECTED' },
 } as const;
 
 export interface PartnerCaseLifecycleDependencies {
@@ -261,6 +263,33 @@ async function nextSequence(tx: Transaction, caseId: string) {
   return (maximum._max.sequence ?? 0) + 1;
 }
 
+async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef) {
+  await tx.$queryRaw`SELECT a.id
+    FROM partner_inquiry_usages u
+    JOIN partner_inquiry_approvals a ON a.id = u."approvalId"
+    JOIN partner_inquiry_rows r ON r.id = a."rowId"
+    WHERE u."caseId" = ${owner.caseId} AND u."caseRevision" = ${owner.revision}
+    ORDER BY a.id FOR UPDATE OF a, r`;
+  await tx.$queryRaw`SELECT a.id
+    FROM partner_material_inquiry_usages u
+    JOIN partner_inquiry_approvals a ON a.id = u."approvalId"
+    JOIN partner_inquiry_rows r ON r.id = a."rowId"
+    WHERE u."caseId" = ${owner.caseId} AND u."caseRevision" = ${owner.revision}
+    ORDER BY a.id FOR UPDATE OF a, r`;
+  const [bindings, usages, materialUsages, now] = await Promise.all([
+    tx.partnerCaseRowBinding.count({ where: { caseId: owner.caseId, revision: owner.revision } }),
+    tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
+      select: { approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } } } } } } } }),
+    tx.partnerMaterialInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
+      select: { approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } } } } } } } }),
+    tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`,
+  ]);
+  const instant = now[0]?.now;
+  const valid = (usage: (typeof usages)[number]) => Boolean(instant) && usage.approval.row.outcome === 'APPROVED' &&
+    !usage.approval.row.successor && usage.approval.expiresAt.getTime() > instant!.getTime();
+  return usages.length === bindings && usages.every(valid) && materialUsages.every(valid);
+}
+
 async function saveOutcome(tx: Transaction, input: { actorId: string; operation: string; caseId: string; key: string;
   payloadHash: string; commandId: string; owner: RevisionRef; state: CaseState; eventIds: readonly string[] }) {
   const outcome = { version: 1, commandId: input.commandId, caseId: input.caseId, revision: input.owner.revision,
@@ -275,7 +304,7 @@ Promise<ExecutionResult> {
   const key = { actorId: dependencies.actorId, operation: command.type, targetScope: caseId, key: command.idempotency.key };
   const payload = command.type === 'CASE_COMMIT'
     ? { schemaVersion: 1, type: command.type, trigger: command.trigger,
-      authenticatedOutputEvidenceId: command.authenticatedOutputEvidenceId }
+      authenticatedOutputEvidenceId: command.authenticatedOutputEvidenceId, lossAccepted: command.lossAccepted }
     : { schemaVersion: 1, type: command.type, reason: command.reason };
   const payloadHash = await canonicalHash(payload);
   if (command.idempotency.actorId !== dependencies.actorId || command.idempotency.operation !== command.type ||
@@ -342,16 +371,25 @@ Promise<ExecutionResult> {
       case: { ...views.partner, state: 'CANCELLED' }, eventIds: [eventId] } };
   }
 
-  if (row.state !== 'CUSTOMER_APPROVED' && row.state !== 'COMMITTED') {
+  if (!['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED', 'COMMITTED'].includes(row.state)) {
     return { ok: false, error: partnerError('STATE_CONFLICT') };
   }
   if (row.pricingState !== 'READY_TO_FINALIZE' || !views.accounting) {
     return { ok: false, error: partnerError('STATE_CONFLICT') };
   }
-  if (row.state === 'CUSTOMER_APPROVED' && command.expectedState !== 'CUSTOMER_APPROVED') {
+  const firstCommitment = row.state !== 'COMMITTED';
+  if (firstCommitment && command.expectedState !== row.state) {
     return { ok: false, error: partnerError('STATE_CONFLICT') };
   }
-  const firstCommitment = row.state === 'CUSTOMER_APPROVED';
+  if (firstCommitment && row.customerConfirmationState === 'REJECTED') {
+    return { ok: false, error: partnerError('STATE_CONFLICT') };
+  }
+  if (firstCommitment && !await currentPricingEvidenceIsValid(tx, expectedOwner(row))) {
+    return { ok: false, error: partnerError('APPROVAL_EXPIRED') };
+  }
+  if (firstCommitment && views.partner.resaleDifference?.startsWith('-') && !command.lossAccepted) {
+    return { ok: false, error: partnerError('STATE_CONFLICT') };
+  }
   const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId,
     action: firstCommitment ? 'CASE_COMMIT' : 'CUSTOMER_OUTPUT',
     purpose: firstCommitment ? 'PARTNER' : 'CUSTOMER_OUTPUT', root: { kind: 'CASE', id: caseId } });
@@ -410,7 +448,7 @@ Promise<ExecutionResult> {
       sabalanNetAmount: { amount: caseComparableAmount(views.accounting.totals), currency: views.accounting.totals.currency } });
     await tx.partnerCaseEvent.create({ data: { id: commitmentEventId, caseId, caseRevision: row.headRevision,
       integrityHash: row.integrityHash, sequence: sequence + 1, stateRevision, type: commitment.type,
-      fromState: 'CUSTOMER_APPROVED', toState: 'COMMITTED', actorId: dependencies.actorId,
+      fromState: row.state, toState: 'COMMITTED', actorId: dependencies.actorId,
       commandId: command.commandId, correlationId: command.correlationId,
       effectiveDate: new Date(`${commitment.effectiveDate}T00:00:00.000Z`), recordedAt: new Date(at.instant),
       evidence: json({ publicEvent: commitment, outputEvidenceId: output.value.evidenceId,
@@ -434,19 +472,19 @@ export function createPrismaPartnerCaseLifecycleService(input: Omit<PartnerCaseL
 export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifecycleDependencies): PartnerCommandPort & {
   markAwaitingCustomerConfirmation(input: TransitionInput): Promise<TransitionResult>;
   markCustomerApproved(input: TransitionInput & { verifiedAt: string }): Promise<TransitionResult>;
+  markCustomerRejected(input: TransitionInput & { rejectedAt: string }): Promise<TransitionResult>;
 } {
-  async function customerTransition(input: TransitionInput & { verifiedAt?: string }, kind: 'AWAITING' | 'APPROVED'):
+  async function customerTransition(input: TransitionInput & { verifiedAt?: string; rejectedAt?: string },
+    kind: 'AWAITING' | 'APPROVED' | 'REJECTED'):
   Promise<TransitionResult> {
     try {
       return await dependencies.transaction(async tx => {
         const transition = customerTransitions[kind];
         const payloadHash = await canonicalHash({ schemaVersion: 1, operation: transition.operation,
-          expected: input.expected, snapshotId: input.snapshotId, ...(input.verifiedAt ? { verifiedAt: input.verifiedAt } : {}) });
+          expected: input.expected, snapshotId: input.snapshotId, ...(input.verifiedAt ? { verifiedAt: input.verifiedAt } : {}),
+          ...(input.rejectedAt ? { rejectedAt: input.rejectedAt } : {}) });
         const row = await lockCase(tx, input.expected.caseId);
         if (!row) return { ok: false, error: partnerError('NOT_FOUND') };
-        if (kind === 'AWAITING' && row.pricingState !== 'READY_TO_FINALIZE') {
-          return { ok: false, error: partnerError('STATE_CONFLICT') };
-        }
         const views = await parseViews(tx, row);
         if (!views) {
           await dependencies.recordEvidenceReview(tx, { caseId: row.id, correlationId: input.correlationId,
@@ -472,7 +510,7 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
         }
         const expectedError = checkExpectedRevision(input.expected, expectedOwner(row));
         if (expectedError) return { ok: false, error: expectedError };
-        if (kind === 'APPROVED' && (row.state === 'CUSTOMER_APPROVED' || row.state === 'COMMITTED')) {
+        if (kind === 'APPROVED' && row.state === 'CUSTOMER_APPROVED') {
           const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CUSTOMER_OUTPUT',
             purpose: 'CUSTOMER_OUTPUT', root: { kind: 'CASE', id: row.id } });
           if (!authorization.ok) return authorization;
@@ -481,6 +519,21 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
             state: row.state, eventIds: [] });
           return { ok: true, value: { commandId: input.commandId, replayed: false,
             case: { ...views.partner, customerConfirmationState: row.customerConfirmationState }, eventIds: [] } };
+        }
+        if ((kind === 'APPROVED' || kind === 'REJECTED') && row.state === 'COMMITTED') {
+          const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CUSTOMER_OUTPUT',
+            purpose: 'CUSTOMER_OUTPUT', root: { kind: 'CASE', id: row.id } });
+          if (!authorization.ok) return authorization;
+          const updated = await tx.partnerSaleCase.updateMany({ where: { id: row.id, state: 'COMMITTED',
+            stateRevision: row.stateRevision, headRevision: row.headRevision, integrityHash: row.integrityHash },
+            data: { customerConfirmationState: transition.confirmationState, stateRevision: { increment: 1 } } });
+          if (updated.count !== 1) throw new RollbackLifecycleResult({ ok: false, error: partnerError('ROW_STALE') });
+          await saveOutcome(tx, { actorId: dependencies.actorId, operation: transition.operation, caseId: row.id,
+            key: input.commandId, payloadHash, commandId: input.commandId, owner: expectedOwner(row),
+            state: 'COMMITTED', eventIds: [] });
+          return { ok: true, value: { commandId: input.commandId, replayed: false,
+            case: { ...views.partner, state: 'COMMITTED',
+              customerConfirmationState: transition.confirmationState }, eventIds: [] } };
         }
         if (row.state !== transition.from) return { ok: false, error: partnerError('STATE_CONFLICT') };
         const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CUSTOMER_OUTPUT',
@@ -499,9 +552,11 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
           integrityHash: row.integrityHash, sequence, stateRevision: row.stateRevision + 1,
           type: transition.eventType, fromState: transition.from, toState: transition.to,
           actorId: dependencies.actorId, commandId: input.commandId,
-          correlationId: input.correlationId, effectiveDate: new Date(`${(input.verifiedAt ?? at.date).slice(0, 10)}T00:00:00.000Z`),
+          correlationId: input.correlationId,
+          effectiveDate: new Date(`${(input.verifiedAt ?? input.rejectedAt ?? at.date).slice(0, 10)}T00:00:00.000Z`),
           recordedAt: new Date(at.instant), evidence: json({ version: 1, snapshotId: input.snapshotId,
             ...(input.verifiedAt ? { verifiedAt: input.verifiedAt } : {}),
+            ...(input.rejectedAt ? { rejectedAt: input.rejectedAt } : {}),
             authorizationEvidenceId: authorization.value.evidenceId }) } });
         await saveOutcome(tx, { actorId: dependencies.actorId, operation: transition.operation, caseId: row.id,
           key: input.commandId, payloadHash, commandId: input.commandId, owner: expectedOwner(row),
@@ -528,5 +583,6 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
     },
     markAwaitingCustomerConfirmation: input => customerTransition(input, 'AWAITING'),
     markCustomerApproved: input => customerTransition(input, 'APPROVED'),
+    markCustomerRejected: input => customerTransition(input, 'REJECTED'),
   };
 }

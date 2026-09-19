@@ -390,6 +390,8 @@ Promise<Extract<PartnerCommand, { type: 'CASE_DRAFT_REVISE' }>> {
   };
   return { schemaVersion: 1, type: 'CASE_DRAFT_REVISE', commandId: `${caseId}-command-${suffix}`,
     correlationId: `${caseId}-correlation-${suffix}`, expected: { caseId, revision, integrityHash }, expectedState,
+    editLease: { recoveryId: intent.recoveryId, browserSessionId: `${caseId}-browser`,
+      leaseToken: `${caseId}-lease`, baseRevision: 0 },
     intent, idempotency: { actorId: ids.partnerId, operation: 'CASE_DRAFT_REVISE', targetId: caseId,
       key: `${caseId}-key-${suffix}`, payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent }) } };
 }

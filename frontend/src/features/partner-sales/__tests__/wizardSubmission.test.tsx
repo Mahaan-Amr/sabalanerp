@@ -5,6 +5,8 @@ import type { PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerCaseSubmission, type PartnerDraftCommand } from '../../contract-creation/partner/partnerCaseSubmission';
 
 const fixture = createPartnerFixtures();
+const prepareEditLease = async () => ({ recoveryId: fixture.draftSubmissionReference.recoveryId,
+  browserSessionId: 'browser-1', leaseToken: 'lease-1', baseRevision: 0 });
 const intent = () => ({
   ...fixture.draftSubmissionReference, contractDate: fixture.customer.contractDate,
   rows: [{ productRowId: fixture.configurationDraft.productRowId,
@@ -32,6 +34,7 @@ test('lost final-submit response retains one durable command, and retry discover
       savePending: async command => { pending = command; },
       clearPending: async () => { pending = null; },
       finalizeCommitted: async () => { clears++; pending = null; },
+      prepareEditLease,
     },
   });
   const original = intent();
@@ -62,6 +65,7 @@ test('double click checkpoints once and a later explicit save uses the draft rev
       pending: () => pending,
       savePending: async command => { if (gate) { gate = false; await new Promise<void>(resolve => { release = resolve; }); } pending = command; },
       clearPending: async () => { pending = null; }, finalizeCommitted: async () => { pending = null; },
+      prepareEditLease,
     },
   });
   const first = submission.submit(intent());
@@ -77,7 +81,8 @@ test('double click checkpoints once and a later explicit save uses the draft rev
 
   const blocked = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
     commands: { execute: async () => { assert.fail('a revoked writer must not submit'); } },
-    recovery: { pending: () => null, savePending: async () => { throw new Error('lease revoked'); }, clearPending: async () => undefined, finalizeCommitted: async () => undefined },
+    recovery: { pending: () => null, savePending: async () => { throw new Error('lease revoked'); }, clearPending: async () => undefined,
+      finalizeCommitted: async () => undefined, prepareEditLease },
   });
   await blocked.submit(intent());
   assert.equal(blocked.getSnapshot().phase, 'editing');
@@ -93,7 +98,7 @@ test('resuming a numbered Case starts from its current revision and never submit
         case: { ...fixture.partner, owner: { ...fixture.partner.owner, revision: fixture.partner.owner.revision + 1 } }, eventIds: [] } };
     } },
     recovery: { pending: () => null, savePending: async () => undefined,
-      clearPending: async () => undefined, finalizeCommitted: async () => undefined },
+      clearPending: async () => undefined, finalizeCommitted: async () => undefined, prepareEditLease },
   });
 
   assert.equal(submission.getSnapshot().phase, 'created');
@@ -103,6 +108,24 @@ test('resuming a numbered Case starts from its current revision and never submit
   assert.equal(submission.getSnapshot().case?.owner.revision, fixture.partner.owner.revision + 1);
 });
 
+test('sent and customer-approved numbered Cases remain editable through revision commands', async () => {
+  for (const state of ['AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'] as const) {
+    const commandTypes: string[] = [];
+    const initialCase = { ...fixture.partner, state };
+    const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId, initialCase,
+      commands: { execute: async command => {
+        commandTypes.push(command.type);
+        return { ok: true, value: { commandId: command.commandId, replayed: false,
+          case: { ...initialCase, owner: { ...initialCase.owner, revision: initialCase.owner.revision + 1 } }, eventIds: [] } };
+      } },
+      recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined,
+        finalizeCommitted: async () => undefined, prepareEditLease },
+    });
+    await submission.submit(intent());
+    assert.deepEqual(commandTypes, ['CASE_DRAFT_REVISE']);
+  }
+});
+
 test('expiry rejection preserves the draft and a successful Case remains successful if local cleanup fails', async () => {
   let pending: PartnerDraftCommand | null = null;
   let expires = true;
@@ -110,7 +133,8 @@ test('expiry rejection preserves the draft and a successful Case remains success
     commands: { execute: async command => expires
       ? { ok: false, error: { code: 'APPROVAL_EXPIRED', status: 409, message: 'اعتبار قیمت پایان یافته است؛ دوباره استعلام بگیرید.' } }
       : { ok: true, value: { commandId: command.commandId, replayed: false, case: fixture.partner, eventIds: [] } } },
-    recovery: { pending: () => pending, savePending: async command => { pending = command; }, clearPending: async () => { pending = null; }, finalizeCommitted: async () => { throw new Error('storage unavailable'); } },
+    recovery: { pending: () => pending, savePending: async command => { pending = command; }, clearPending: async () => { pending = null; },
+      finalizeCommitted: async () => { throw new Error('storage unavailable'); }, prepareEditLease },
   });
   const original = intent();
   await submission.submit(original);
@@ -126,7 +150,8 @@ test('expiry rejection preserves the draft and a successful Case remains success
 test('recovery replay refuses a different actor or changed intent without clearing evidence', async () => {
   let pending: PartnerDraftCommand | null = null;
   const recovery = { pending: () => pending, savePending: async (command: PartnerDraftCommand) => { pending = command; },
-    clearPending: async () => { assert.fail('invalid replay must retain evidence'); }, finalizeCommitted: async () => undefined };
+    clearPending: async () => { assert.fail('invalid replay must retain evidence'); }, finalizeCommitted: async () => undefined,
+    prepareEditLease };
   const original = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
     recovery, commands: { execute: async () => { throw new Error('offline'); } } });
   await original.submit(intent());

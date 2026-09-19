@@ -44,6 +44,29 @@ test('a customer-complete Case draft may be saved before Sabalan inquiry approva
   assert.equal(parsed.intent.rows[0].approvedRowBinding, undefined);
 });
 
+test('a Draft revision requires the exact recovery edit lease', async () => {
+  const intent = {
+    customerId: 'customer-380', recoveryId: 'recovery-380', recoveryRevision: 2,
+    graphHash: `sha256-v1:${'a'.repeat(64)}`, projectId: 'project-380', contractDate: '2026-09-19',
+    rows: [{ productRowId: 'product-380', retailUnitPrice: { amount: '250000', currency: 'IRT' as const } }],
+    customerPaymentPlan: { planId: 'customer-plan-380', version: 2, effectiveDate: '2026-09-19', installments: [{
+      installmentId: 'customer-installment-380', dueDate: '2026-09-19',
+      amount: { amount: '250000', currency: 'IRT' as const }, method: 'CASH' as const,
+    }] },
+    retailDiscount: { amount: '0', currency: 'IRT' as const }, belowCostConfirmed: false, deliveries: [],
+  };
+  const expected = { caseId: 'case-380', revision: 1, integrityHash: `sha256-v1:${'b'.repeat(64)}` };
+  const command = { schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent,
+    commandId: 'command-380', correlationId: 'correlation-380', expected, expectedState: 'CUSTOMER_APPROVED',
+    editLease: { recoveryId: intent.recoveryId, browserSessionId: 'browser-380', leaseToken: 'lease-380', baseRevision: 1 },
+    idempotency: { actorId: 'partner-380', operation: 'CASE_DRAFT_REVISE', targetId: expected.caseId,
+      key: 'revise-380', payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent }) } };
+  assert.equal(PartnerCommandSchema.safeParse(command).success, true);
+  assert.equal(PartnerCommandSchema.safeParse({ ...command, editLease: undefined }).success, false);
+  assert.equal(PartnerCommandSchema.safeParse({ ...command,
+    editLease: { ...command.editLease, recoveryId: 'another-recovery' } }).success, false);
+});
+
 test('Partner finalization carries an explicit loss decision', async () => {
   const integrityHash = `sha256-v1:${'a'.repeat(64)}`;
   const intent = { trigger: 'SIGNED' as const, authenticatedOutputEvidenceId: 'finalize-evidence-379', lossAccepted: false };

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
-import { PartnerTechnicalLeaseRequestSchema, PartnerTechnicalLeaseReceiptSchema, partnerError,
+import { PartnerTechnicalLeaseRequestSchema, PartnerTechnicalLeaseReceiptSchema, isPartnerCaseEditableState, partnerError,
   type PartnerTechnicalCatalogPort, type PartnerTechnicalLeasePort, type PartnerTechnicalRecoveryPort,
   type PartnerTechnicalSavePort, type Result } from '@sabalanerp/partner-sales-contracts';
 import type { PrismaClient } from '@prisma/client';
@@ -69,7 +69,7 @@ export function createPartnerTechnicalRequestServices(input: {
             profile: { select: { userId: true } } } } } }) : null;
         if (existing?.contractId && (contract?.partnerKind !== 'PARTNER_CUSTOMER' ||
             contract.partnerCase?.profile.userId !== input.actorId ||
-            !['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(contract.partnerCase?.state ?? ''))) {
+            !isPartnerCaseEditableState(contract.partnerCase?.state ?? ''))) {
           return { ok: false, error: partnerError('STATE_CONFLICT') };
         }
         const sessionInput = {

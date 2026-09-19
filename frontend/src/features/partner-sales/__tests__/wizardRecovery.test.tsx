@@ -23,7 +23,9 @@ const draft: PartnerWizardDraft = { step: 'products', rows, intent: {
 } };
 const submission = () => createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
   commands: { execute: async () => { throw new Error('not used'); } },
-  recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined, finalizeCommitted: async () => undefined },
+  recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined,
+    finalizeCommitted: async () => undefined, prepareEditLease: async () => ({ recoveryId: fixture.draftSubmissionReference.recoveryId,
+      browserSessionId: 'browser-1', leaseToken: 'lease-1', baseRevision: 0 }) },
 });
 
 test('local recovery freshness follows the shared server revision instead of either machine clock', () => {

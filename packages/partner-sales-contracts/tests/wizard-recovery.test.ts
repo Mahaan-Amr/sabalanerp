@@ -20,12 +20,15 @@ function intent() {
 }
 
 test('wizard recovery persists the seven-step intent with optimistic revision', () => {
-  const value = { schemaVersion: 1 as const, expectedWizardRevision: 0, step: 'products' as const, intent: intent() };
+  const value = { schemaVersion: 1 as const, expectedWizardRevision: 0,
+    editLease: { recoveryId: intent().recoveryId, browserSessionId: 'browser-1', leaseToken: 'lease-1', baseRevision: 0 },
+    step: 'products' as const, intent: intent() };
   assert.equal(PartnerWizardRecoverySaveSchema.safeParse(value).success, true);
   const snapshot = { schemaVersion: 1 as const, wizardRevision: 1, step: value.step,
     intent: value.intent, updatedAt: new Date().toISOString() };
   assert.equal(PartnerWizardRecoverySnapshotSchema.safeParse(snapshot).success, true);
   assert.equal(PartnerWizardRecoverySaveSchema.safeParse({ ...value, step: 'unknown' }).success, false);
+  assert.equal(PartnerWizardRecoverySaveSchema.safeParse({ ...value, editLease: undefined }).success, false);
   assert.equal(PartnerWizardRecoverySaveSchema.safeParse({ ...value, unexpected: true }).success, false);
   assert.equal(PartnerWizardRecoverySnapshotSchema.safeParse({ ...snapshot, wizardRevision: 0 }).success, false);
 });

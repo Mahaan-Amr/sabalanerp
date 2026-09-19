@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useSyncExternalStore } from 'react';
-import { ErpBadge, ErpButton, ErpInlineState, ErpLoading, ErpSheet } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpInlineState, ErpLoading, ErpSheet } from '@/components/erp';
 import { FaBuilding, FaCalendarAlt, FaCreditCard, FaSignature, FaTruck, FaUser, FaWarehouse } from 'react-icons/fa';
 import type { WizardStep } from '../components/shared/WizardProgressBar';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
@@ -111,6 +111,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     if (requestedStepIndex < 0 && draft.step === 'delivery') onChange({ ...draft, step: 'payment' });
   }, [draft, onChange, requestedStepIndex]);
 
+  React.useEffect(() => {
+    setConfirmationSent(false);
+  }, [result.case?.owner.caseId, result.case?.owner.revision]);
+
   const recover = async (operation: () => Promise<void>) => {
     if (recoveryFlight.current) return;
     recoveryFlight.current = true; setRecoveryPending(true); setError(null);
@@ -141,19 +145,14 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     setError(null); onChange({ ...draft, step: visibleSteps[index].id });
     requestAnimationFrame(() => heading.current?.focus());
   };
-  const next = () => {
+  const submit = () => {
     if (disabled || stepIndex < 0) return;
-    const failure = validateStep(draft.step, draft);
-    if (failure) { setError(failure); return; }
-    if (draft.step === 'products' || draft.step === 'confirmation') {
-      if (!summary.valid) { setError(summary.message); return; }
-      if (summary.loss && !draft.intent.belowCostConfirmed) {
-        onChange({ ...draft, step: 'products' }); setError('زیان فروش را بررسی و تأیید کنید.'); return;
-      }
-    }
-    if (stepIndex < visibleSteps.length - 1) { move(stepIndex + 1); return; }
     const invalid = visibleSteps.map(step => ({ step, failure: validateStep(step.id, draft) })).find(item => item.failure);
     if (invalid) { onChange({ ...draft, step: invalid.step.id }); setError(invalid.failure); return; }
+    if (!summary.valid) { onChange({ ...draft, step: 'products' }); setError(summary.message); return; }
+    if (summary.loss && !draft.intent.belowCostConfirmed) {
+      onChange({ ...draft, step: 'products' }); setError('زیان فروش را بررسی و تأیید کنید.'); return;
+    }
     if (!draft.rows.length || new Set(draft.rows.map(row => row.productRowId)).size !== draft.rows.length) {
       setError('حداقل یک محصول کامل و بدون ردیف تکراری لازم است.'); return;
     }
@@ -161,17 +160,35 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     // must never submit stale hidden prices or approval bindings.
     void submission.submit({ ...draft.intent, rows: partnerRetailIntentRows(draft.rows) });
   };
+  const next = () => {
+    if (disabled || stepIndex < 0) return;
+    const failure = validateStep(draft.step, draft);
+    if (failure) { setError(failure); return; }
+    if ((draft.step === 'products' || draft.step === 'confirmation') && !summary.valid) {
+      setError(summary.message); return;
+    }
+    if ((draft.step === 'products' || draft.step === 'confirmation') && summary.loss && !draft.intent.belowCostConfirmed) {
+      onChange({ ...draft, step: 'products' }); setError('زیان فروش را بررسی و تأیید کنید.'); return;
+    }
+    if (stepIndex < visibleSteps.length - 1) { move(stepIndex + 1); return; }
+    submit();
+  };
+  const editMode = Boolean(result.case);
   return <ContractWizardFrame
     title="ایجاد فروش همکار"
     currentStep={stepIndex + 1}
     steps={visiblePresentationSteps}
+    clickableSteps={editMode}
+    onStepClick={step => move(step - 1)}
     notices={<div className="mb-4 space-y-3">
-      {result.phase === 'created' && result.case && compactStatus && <div className="flex flex-wrap items-center gap-2 rounded-[var(--sds-radius-card)] border border-[var(--sds-border-default)] p-2">
+      {result.phase === 'created' && result.case && compactStatus && <ErpCard className="flex flex-wrap items-center gap-2 p-2">
         <span className="text-sm font-bold">{result.case.caseNumber}</span>
         <ErpBadge tone="neutral">قرارداد: {compactStatus.contract}</ErpBadge>
         <ErpBadge tone={result.case.pricingState === 'READY_TO_FINALIZE' ? 'success' : 'warning'}>قیمت سبلان: {compactStatus.pricing}</ErpBadge>
-        <ErpBadge tone={result.case.customerConfirmationState === 'APPROVED' ? 'success'
-          : result.case.customerConfirmationState === 'REJECTED' ? 'danger' : 'info'}>مشتری: {compactStatus.customer}</ErpBadge>
+        <ErpBadge tone={!confirmationSent && result.case.customerConfirmationState === 'APPROVED' ? 'success'
+          : !confirmationSent && result.case.customerConfirmationState === 'REJECTED' ? 'danger' : 'info'}>
+          مشتری: {confirmationSent ? 'ارسال‌شده، بدون پاسخ' : compactStatus.customer}
+        </ErpBadge>
         {onSendConfirmation && result.case.customerConfirmationState !== 'REJECTED' &&
           (customerNotSent ? <ErpButton variant="solid" label="ارسال برای مشتری" onClick={() => {
             setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
@@ -184,7 +201,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
           void Promise.resolve().then(() => onOpenCase(result.case!.owner.caseId))
             .catch(() => setError('پرونده ذخیره شده است؛ باز کردن جزئیات را دوباره امتحان کنید.'));
         }} />
-      </div>}
+      </ErpCard>}
       {result.phase === 'created' && result.message && <ErpInlineState kind="stale" title={result.message}
         action={{ label: 'تلاش مجدد برای پاک‌سازی بازیابی', onClick: () => void submission.retry() }} />}
       {unusable.map(row => <ErpInlineState key={row.id} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
@@ -196,10 +213,11 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     navigation={{
       onPrevious: () => move(stepIndex - 1),
       onNext: next,
-      onSubmit: next,
+      onSubmit: submit,
       loading: mutatePending,
       canGoPrevious: !disabled && stepIndex > 0,
       canGoNext: !disabled,
+      showSubmitOnEveryStep: editMode,
       labels: { submit: result.phase === 'created' ? 'ذخیره تغییرات' : 'ذخیره قرارداد' }
     }}
   >

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
-  ApprovedInquirySchema, CustomerContractOutputSchema, PartnerCaseViewSchema, PartnerCommandSchema, canonicalHash, partnerError,
+  ApprovedInquirySchema, CustomerContractOutputSchema, PartnerCaseViewSchema, PartnerCommandSchema, canonicalHash,
+  isPartnerCaseEditableState, partnerError,
   type ApprovedInquiry, type PartnerCommandPort, type Result,
 } from '@sabalanerp/partner-sales-contracts';
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
@@ -73,7 +74,8 @@ export interface PartnerCaseDependencies {
     Promise<Result<{ evidenceId: string }>>;
   recordEvidenceReview(tx: Transaction, input: { caseId?: string; profileId?: string; correlationId: string;
     code: 'CONFIG_MISMATCH' | 'INTEGRITY_CONFLICT'; evidence: Record<string, string | number> }): Promise<void>;
-  resolveDraft(tx: Transaction, input: { actorId: string; command: DraftCommand }): Promise<Result<ResolvedCaseDraft>>;
+  resolveDraft(tx: Transaction, input: { actorId: string; command: DraftCommand;
+    expectedCustomerContractId?: string }): Promise<Result<ResolvedCaseDraft>>;
   consumeRecovery(tx: Transaction, input: { actorId: string; recoveryId: string; recoveryRevision: number;
     customerContractId: string }): Promise<Result<void>>;
   failpoint?(point: FailurePoint): void;
@@ -148,7 +150,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     customerContract: { select: { contractNumber: true } },
   } });
   if (!current) return { ok: false, error: partnerError('NOT_FOUND') } as const;
-  if (!['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(current.state) ||
+  if (!isPartnerCaseEditableState(current.state) ||
       command.expectedState !== current.state) {
     return { ok: false, error: partnerError('STATE_CONFLICT') } as const;
   }
@@ -162,7 +164,8 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   const caseAccess = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CASE_DRAFT_WRITE',
     purpose: 'PARTNER', root: { kind: 'CASE', id: caseId } });
   if (!caseAccess.ok) return caseAccess;
-  const resolved = await dependencies.resolveDraft(tx, { actorId: dependencies.actorId, command });
+  const resolved = await dependencies.resolveDraft(tx, { actorId: dependencies.actorId, command,
+    expectedCustomerContractId: current.customerContractId });
   if (!resolved.ok) return resolved;
   if (resolved.value.profileId !== current.profileId) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;

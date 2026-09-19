@@ -83,7 +83,11 @@ async function dependencySnapshot(tx: Tx, input: { caseId: string; contractId: s
 async function prepare(tx: Tx, command: SharedSave, snapshot: Parameters<PartnerFinancialCorrectionAdapterInput['prepareSharedSuccessor']>[1]['snapshot']):
 Promise<Result<PreparedPrismaSharedSuccessor>> {
   const synthetic = { ...command, type: 'CASE_DRAFT_REVISE' as const } as unknown as Extract<PartnerCommand, { type: 'CASE_DRAFT_REVISE' }>;
-  const resolved = await resolvePrismaPartnerCaseDraft(tx, { actorId: command.idempotency.actorId, command: synthetic });
+  const bound = await tx.partnerSaleCase.findUnique({ where: { id: snapshot.caseId },
+    select: { customerContractId: true } });
+  if (!bound) return { ok: false, error: partnerError('NOT_FOUND') };
+  const resolved = await resolvePrismaPartnerCaseDraft(tx, { actorId: command.idempotency.actorId, command: synthetic,
+    expectedCustomerContractId: bound.customerContractId, revisionAuthority: 'CORRECTION_WORKFLOW' });
   if (!resolved.ok) return resolved;
   const validated = await validateResolvedDraft(synthetic, resolved.value);
   if (!validated.ok) return validated;

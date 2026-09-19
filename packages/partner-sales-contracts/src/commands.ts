@@ -20,6 +20,12 @@ export const CaseDraftIntentSchema = PartnerDraftSubmissionRefSchema.extend({
   customerPaymentPlan: CustomerPaymentPlanSchema,
   retailDiscount: MoneySchema, belowCostConfirmed: z.boolean(), deliveries: z.array(DeliverySchema),
 }).strict();
+export const PartnerDraftEditLeaseSchema = z.object({
+  recoveryId: IdSchema,
+  browserSessionId: IdSchema,
+  leaseToken: IdSchema,
+  baseRevision: z.number().int().nonnegative().safe(),
+}).strict();
 const decision = z.discriminatedUnion('outcome', [
   z.object({ rowId: IdSchema, expectedRevision: RevisionSchema, outcome: z.literal('APPROVED'), wholesaleUnitPrice: MoneySchema, note: TextSchema.optional() }).strict(),
   z.object({ rowId: IdSchema, expectedRevision: RevisionSchema, outcome: z.literal('REJECTED'), reason: PersianReasonSchema }).strict(),
@@ -30,7 +36,8 @@ const inquiryDimensions = z.object({
 }).strict();
 export const PartnerCommandSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('CASE_SUBMIT'), intent: CaseDraftIntentSchema }).strict(),
-  z.object({ ...envelope, ...expected, type: z.literal('CASE_DRAFT_REVISE'), intent: CaseDraftIntentSchema }).strict(),
+  z.object({ ...envelope, ...expected, type: z.literal('CASE_DRAFT_REVISE'),
+    editLease: PartnerDraftEditLeaseSchema, intent: CaseDraftIntentSchema }).strict(),
   z.object({ ...envelope, ...expected, type: z.literal('CASE_CANCEL'), reason: PersianReasonSchema }).strict(),
   z.object({ ...envelope, ...expected, type: z.literal('CASE_COMMIT'), trigger: z.enum(['SIGNED', 'PRINTED']),
     authenticatedOutputEvidenceId: IdSchema, lossAccepted: z.boolean() }).strict(),
@@ -64,6 +71,9 @@ export const PartnerCommandSchema = z.discriminatedUnion('type', [
   const invalid = (message: string) => context.addIssue({ code: z.ZodIssueCode.custom, message });
   if (command.idempotency.operation !== command.type) invalid('Idempotency operation must match command');
   if ('expected' in command && command.idempotency.targetId !== command.expected.caseId) invalid('Idempotency target must match Case');
+  if (command.type === 'CASE_DRAFT_REVISE' && command.editLease.recoveryId !== command.intent.recoveryId) {
+    invalid('Edit lease must match recovery');
+  }
   if (command.type === 'INQUIRY_DECIDE' && new Set(command.decisions.map(row => row.rowId)).size !== command.decisions.length) invalid('Duplicate decision row');
 });
 export type PartnerCommand = z.infer<typeof PartnerCommandSchema>;

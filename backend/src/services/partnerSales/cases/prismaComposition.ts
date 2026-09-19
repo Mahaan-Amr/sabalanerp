@@ -17,6 +17,7 @@ import { SUBMISSION_EVIDENCE_OPERATION } from './submissionEvidence';
 import type { PartnerCaseDependencies } from './aggregate';
 import type { ResolvedCaseDraft } from './revisions';
 import { parseInquiryDefinition } from '../inquiries/definition';
+import { assertContractEditOwnership, PrismaContractEditSessionStore } from '../../contractEditSessionService';
 
 type Transaction = Prisma.TransactionClient;
 type DraftCommand = Extract<PartnerCommand, { type: 'CASE_SUBMIT' | 'CASE_DRAFT_REVISE' }>;
@@ -90,6 +91,8 @@ function phone(values: unknown[]): string | undefined {
 export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   actorId: string;
   command: DraftCommand;
+  expectedCustomerContractId?: string;
+  revisionAuthority?: 'CASE_EDIT_LEASE' | 'CORRECTION_WORKFLOW';
 }): Promise<Result<ResolvedCaseDraft>> {
   const { command, actorId } = input;
   const session = await tx.salesContractEditSession.findUnique({
@@ -97,8 +100,22 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     select: { id: true, draftId: true, ownerUserId: true, purpose: true, contractId: true, recovery: true },
   });
   if (!session || session.ownerUserId !== actorId || session.purpose !== 'PARTNER_TECHNICAL' ||
-      (session.contractId && command.type === 'CASE_SUBMIT')) {
+      (command.type === 'CASE_SUBMIT' && session.contractId) ||
+      (command.type === 'CASE_DRAFT_REVISE' && (!input.expectedCustomerContractId ||
+        session.contractId !== input.expectedCustomerContractId || !input.revisionAuthority))) {
     return { ok: false, error: partnerError('NOT_FOUND') };
+  }
+  if (command.type === 'CASE_DRAFT_REVISE' && input.revisionAuthority === 'CASE_EDIT_LEASE') {
+    const ownership = await assertContractEditOwnership(new PrismaContractEditSessionStore(tx), {
+      draftId: command.editLease.recoveryId, userId: actorId,
+      browserSessionId: command.editLease.browserSessionId, leaseToken: command.editLease.leaseToken,
+      baseRevision: command.editLease.baseRevision,
+    });
+    if (!ownership.ok) return { ok: false, error: partnerError(ownership.code === 'revision-conflict'
+      ? 'ROW_STALE' : ownership.code === 'edit-session-missing' ? 'NOT_FOUND' : 'FORBIDDEN') };
+    if (ownership.session.contractId !== input.expectedCustomerContractId) {
+      return { ok: false, error: partnerError('NOT_FOUND') };
+    }
   }
   const recovery = decodeTechnicalRecovery(session.recovery);
   const history = object(session.recovery)?.validatedSnapshots;
@@ -279,7 +296,8 @@ export function createPrismaPartnerCaseDependencies(input: {
         key, payloadHash: await canonicalHash(review.evidence),
         outcome: json({ schemaVersion: 1, correlationId: review.correlationId, code: review.code, evidence: review.evidence }) } });
     },
-    resolveDraft: (tx, request) => resolvePrismaPartnerCaseDraft(tx, request),
+    resolveDraft: (tx, request) => resolvePrismaPartnerCaseDraft(tx, { ...request,
+      ...(request.command.type === 'CASE_DRAFT_REVISE' ? { revisionAuthority: 'CASE_EDIT_LEASE' as const } : {}) }),
     consumeRecovery: (tx, request) => request.actorId === input.actorId
       ? consumePrismaPartnerTechnicalRecovery(tx, request)
       : Promise.resolve({ ok: false as const, error: partnerError('NOT_FOUND') }),

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { IdSchema, InstantSchema, RevisionRefSchema } from './primitives';
 import { PartnerCaseViewSchema } from './projections';
-import { CaseDraftIntentSchema } from './commands';
+import { CaseDraftIntentSchema, PartnerDraftEditLeaseSchema } from './commands';
 import { PartnerInquiryRowV2Schema } from './inquiry-v2';
 
 export const PartnerCaseRuntimeQuerySchema = z.object({ caseId: IdSchema.optional() }).strict();
@@ -39,6 +39,13 @@ export const PartnerCaseFinalizeRequestSchema = z.object({
   lossAccepted: z.boolean(),
 }).strict();
 
+export const PARTNER_EDITABLE_CASE_STATES = [
+  'DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED',
+] as const;
+export function isPartnerCaseEditableState(state: string): state is typeof PARTNER_EDITABLE_CASE_STATES[number] {
+  return (PARTNER_EDITABLE_CASE_STATES as readonly string[]).includes(state);
+}
+
 export const PartnerCreationContextSchema = z.discriminatedUnion('kind', [
   z.object({ schemaVersion: z.literal(1), kind: z.literal('ORDINARY_SALES') }).strict(),
   z.object({ schemaVersion: z.literal(1), kind: z.literal('PARTNER'), actorId: IdSchema,
@@ -63,6 +70,7 @@ export const PartnerWizardStepSchema = z.enum([
 export const PartnerWizardRecoverySaveSchema = z.object({
   schemaVersion: z.literal(1),
   expectedWizardRevision: z.number().int().nonnegative().safe(),
+  editLease: PartnerDraftEditLeaseSchema,
   step: PartnerWizardStepSchema,
   intent: CaseDraftIntentSchema,
 }).strict();

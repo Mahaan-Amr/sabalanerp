@@ -1,6 +1,6 @@
 import {
   canonicalHash, CaseDraftIntentSchema, PartnerCaseViewSchema, PartnerCommandSchema,
-  PartnerErrorSchema, type PartnerCaseView, type PartnerCommand, type PartnerCommandPort,
+  PartnerErrorSchema, isPartnerCaseEditableState, type PartnerCaseView, type PartnerCommand, type PartnerCommandPort,
 } from '@sabalanerp/partner-sales-contracts';
 
 export type PartnerSubmitCommand = Extract<PartnerCommand, { type: 'CASE_SUBMIT' }>;
@@ -17,6 +17,7 @@ export interface PartnerSubmissionRecovery {
   savePending: (command: PartnerDraftCommand) => Promise<void>;
   clearPending: () => Promise<void>;
   finalizeCommitted: (view: PartnerCaseView) => Promise<void>;
+  prepareEditLease: () => Promise<Extract<PartnerDraftCommand, { type: 'CASE_DRAFT_REVISE' }>['editLease']>;
 }
 
 export interface PartnerSubmissionState {
@@ -106,15 +107,17 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
       publish({ phase: 'submitting' });
       try {
         const revising = Boolean(savedCase);
-        if (savedCase && savedCase.state !== 'DRAFT') {
+        if (savedCase && !isPartnerCaseEditableState(savedCase.state)) {
           publish({ phase: 'created', case: savedCase, message: 'این پرونده دیگر در وضعیت پیش‌نویس قابل ویرایش نیست.' }); return;
         }
         const type = revising ? 'CASE_DRAFT_REVISE' as const : 'CASE_SUBMIT' as const;
+        const editLease = savedCase ? await recovery.prepareEditLease() : undefined;
         const payloadHash = await canonicalHash({ schemaVersion: 1, type, intent: parsed.data });
         const identity = crypto.randomUUID();
         const command = PartnerCommandSchema.parse({
           schemaVersion: 1, type, commandId: identity, correlationId: identity,
           ...(savedCase ? { expected: savedCase.owner, expectedState: savedCase.state } : {}),
+          ...(editLease ? { editLease } : {}),
           idempotency: { actorId, operation: type,
             targetId: savedCase ? savedCase.owner.caseId : parsed.data.recoveryId, key: identity, payloadHash },
           intent: parsed.data,

@@ -1,4 +1,4 @@
-import { partnerError } from '@sabalanerp/partner-sales-contracts';
+import { isPartnerCaseEditableState, partnerError } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerTechnicalRecoveryDependencies } from '../cases/technicalRecovery';
 import { createAuditedPartnerAuthorization } from './audited';
 import { authorizePartnerTechnicalRollout } from './technicalRollout';
@@ -28,7 +28,7 @@ export function createPartnerTechnicalRecoveryAuthority(binding: { actorId: stri
     const boundCase = contract?.partnerCase;
     if (session.contractId && (contract?.partnerKind !== 'PARTNER_CUSTOMER' || !boundCase ||
         boundCase.profile.userId !== binding.actorId ||
-        !['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(boundCase.state))) {
+        !isPartnerCaseEditableState(boundCase.state))) {
       return { ok: false, error: partnerError('STATE_CONFLICT') };
     }
     const decision = await port.authorize(input.operation === 'READ' ? 'CASE_READ' : 'CASE_DRAFT_WRITE',

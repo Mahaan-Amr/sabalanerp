@@ -216,6 +216,17 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const technicalActionReady = retailPricesReady && canSubmitPartnerTechnicalAction({ mode, pending, technicalReady,
     contractConfigurationReady, quickDimensionsValid, hasDraftAccess: Boolean(draftAccess) });
 
+  const reacquireRuntime = useCallback(async (value: PersistedRuntime): Promise<PersistedRuntime | null> => {
+    const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: value.access.recoveryId,
+      browserSessionId: value.access.browserSessionId, baseRevision: value.access.baseRevision, takeover: false });
+    if (!lease.ok) { setError(lease.error.message); return null; }
+    if (lease.value.leaseToken === value.access.leaseToken && lease.value.baseRevision === value.access.baseRevision) return value;
+    const refreshed = { ...value, access: { ...value.access, leaseToken: lease.value.leaseToken,
+      baseRevision: lease.value.baseRevision } };
+    persistRuntime(refreshed);
+    return refreshed;
+  }, [persistRuntime]);
+
   const wizardRecoveryId = wizard?.intent.recoveryId;
   useEffect(() => {
     if (!wizardRecoveryId || !runtime) return;
@@ -233,8 +244,16 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           while (wizardSavePending.current) {
             const current = wizardSavePending.current;
             wizardSavePending.current = null;
+            const active = runtimeRef.current;
+            if (!active || active.actorId !== runtime.actorId ||
+                active.access.recoveryId !== current.intent.recoveryId) throw new Error('Recovery changed');
+            const refreshed = await reacquireRuntime(active);
+            if (!refreshed) throw new Error('Recovery lease unavailable');
             const response = await api.put(`/partner/cases/drafts/${encodeURIComponent(current.intent.recoveryId)}/wizard`, {
               schemaVersion: 1, expectedWizardRevision: wizardServerRevision.current,
+              editLease: { recoveryId: refreshed.access.recoveryId,
+                browserSessionId: refreshed.access.browserSessionId, leaseToken: refreshed.access.leaseToken,
+                baseRevision: refreshed.access.baseRevision },
               step: current.step, intent: current.intent,
             });
             const parsed = PartnerWizardRecoverySnapshotSchema.safeParse((response.data as { data?: unknown })?.data);
@@ -255,7 +274,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       })();
     }
     return wizardSaveFlight.current;
-  }, [runtime]);
+  }, [reacquireRuntime, runtime]);
 
   useEffect(() => {
     if (!wizardRecoveryId || !runtime) return;
@@ -265,7 +284,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
 
   useEffect(() => {
     let active = true;
-    void readPartnerCreationContext(() => api.get('/partner/cases/creation-context')).then(response => {
+    const requestedCaseId = searchParams.get('caseId');
+    void readPartnerCreationContext(() => api.get(requestedCaseId
+      ? `/partner/cases/creation-context?caseId=${encodeURIComponent(requestedCaseId)}`
+      : '/partner/cases/creation-context')).then(response => {
       const parsed = PartnerCreationContextSchema.safeParse((response.data as { data?: unknown })?.data);
       if (!active) return;
       if (!parsed.success) throw new Error('Invalid Partner creation context');
@@ -447,8 +469,14 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   }, []);
 
   const discardDraftRecovery = useCallback(async (partner: PartnerContext) => {
+    if (searchParams.get('caseId')) {
+      setError('پیش‌نویس متصل به پرونده را نمی‌توان به‌عنوان پیش‌نویس جدید کنار گذاشت.');
+      return;
+    }
     const requestedDraft = searchParams.get('draftId');
-    const candidate = partner.recoverableDrafts?.find(item => item.recoveryId === requestedDraft) ?? partner.recoverableDraft;
+    const candidate = requestedDraft
+      ? partner.recoverableDrafts?.find(item => item.recoveryId === requestedDraft)
+      : partner.recoverableDraft;
     if (!candidate || recoveryStarting.current) return;
     recoveryStarting.current = true; setError(null);
     try {
@@ -519,17 +547,6 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         ...(mode === 'sale' ? { contractDate, projectId } : {}) });
     }).catch(() => setError('بازیابی استعلام ذخیره‌شده انجام نشد.')).finally(() => { inquiryHydrationFlight.current = false; });
   }, [context, contractDate, customerId, draftAccess, mode, persistRuntime, projectId, recoveryRevision, runtime, searchParams]);
-
-  const reacquireRuntime = useCallback(async (value: PersistedRuntime): Promise<PersistedRuntime | null> => {
-    const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: value.access.recoveryId,
-      browserSessionId: value.access.browserSessionId, baseRevision: value.access.baseRevision, takeover: false });
-    if (!lease.ok) { setError(lease.error.message); return null; }
-    if (lease.value.leaseToken === value.access.leaseToken && lease.value.baseRevision === value.access.baseRevision) return value;
-    const refreshed = { ...value, access: { ...value.access, leaseToken: lease.value.leaseToken,
-      baseRevision: lease.value.baseRevision } };
-    persistRuntime(refreshed);
-    return refreshed;
-  }, [persistRuntime]);
 
   const readApprovalMatches = async (saved: PartnerTechnicalSaveReceipt) => {
     const response = await api.post('/partner/cases/approval-matches', { schemaVersion: 1,
@@ -640,6 +657,16 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           window.localStorage.removeItem(runtimeKey(submissionActorId, active.inquiryId));
           window.localStorage.removeItem(wizardDraftKey(submissionActorId, active.access.recoveryId));
         }
+      },
+      prepareEditLease: async () => {
+        const active = runtimeRef.current;
+        if (!active || active.actorId !== submissionActorId || active.access.recoveryId !== submissionRecoveryId) {
+          throw new Error('Recovery changed');
+        }
+        const refreshed = await reacquireRuntime(active);
+        if (!refreshed) throw new Error('Recovery lease unavailable');
+        return { recoveryId: refreshed.access.recoveryId, browserSessionId: refreshed.access.browserSessionId,
+          leaseToken: refreshed.access.leaseToken, baseRevision: refreshed.access.baseRevision };
       },
     } });
   }, [editingCase, reacquireRuntime, submissionActorId, submissionRecoveryId]);
@@ -1087,7 +1114,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   if (recoveryBlocked && !runtime) return <section dir="rtl" className="mx-auto max-w-3xl space-y-4"><ErpInlineState kind="stale"
     title="این پیش‌نویس در نشست دیگری باز است یا نسخه آن تغییر کرده است."
     actions={[{ label: 'تصاحب و ادامه در اینجا', onClick: () => void openDraftRecovery(context, true) },
-      { label: 'کنار گذاشتن و شروع جدید', tone: 'danger', variant: 'outline', onClick: () => void discardDraftRecovery(context) }]} />
+      ...(searchParams.get('caseId') ? [] : [{ label: 'کنار گذاشتن و شروع جدید', tone: 'danger' as const,
+        variant: 'outline' as const, onClick: () => void discardDraftRecovery(context) }])]} />
     {error && <ErpInlineState kind="error" title={error} />}</section>;
   if (wizard && submission) return <PartnerContractWizard draft={wizard} onChange={updateWizard} recovery={{ state: 'writable' }}
     submission={submission} now={Date.now()} renderSection={renderSection}

@@ -23,7 +23,10 @@ function Fixture() {
     let pending: PartnerDraftCommand | null = null;
     return createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
       commands: { execute: async command => ({ ok: true, value: { commandId: command.commandId, replayed: false, case: fixture.partner, eventIds: [] } }) },
-      recovery: { pending: () => pending, savePending: async command => { pending = command; }, clearPending: async () => { pending = null; }, finalizeCommitted: async () => { pending = null; } },
+      recovery: { pending: () => pending, savePending: async command => { pending = command; }, clearPending: async () => { pending = null; },
+        finalizeCommitted: async () => { pending = null; }, prepareEditLease: async () => ({
+          recoveryId: fixture.draftSubmissionReference.recoveryId, browserSessionId: 'browser-1',
+          leaseToken: 'lease-1', baseRevision: 0 }) },
     });
   }, [fixture]);
   const now = Date.parse(expired ? fixture.approval.expiresAt : '2026-08-27T09:00:00.000Z');

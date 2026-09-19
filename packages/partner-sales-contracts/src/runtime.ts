@@ -7,6 +7,7 @@ import { PartnerInquiryRowV2Schema } from './inquiry-v2';
 export const PartnerCaseRuntimeQuerySchema = z.object({ caseId: IdSchema.optional() }).strict();
 
 export const PartnerCaseRuntimeActionsSchema = z.object({
+  canContinue: z.boolean(),
   canPreview: z.boolean(),
   canIssue: z.boolean(),
   canFinalize: z.boolean(),
@@ -19,6 +20,7 @@ export const PartnerCaseRuntimeActionsSchema = z.object({
 export const PartnerCaseRuntimeRowSchema = z.object({
   view: PartnerCaseViewSchema,
   snapshotId: IdSchema.nullable(),
+  editRecovery: z.object({ recoveryId: IdSchema, baseRevision: z.number().int().nonnegative().safe() }).strict().optional(),
   actions: PartnerCaseRuntimeActionsSchema,
 }).strict();
 

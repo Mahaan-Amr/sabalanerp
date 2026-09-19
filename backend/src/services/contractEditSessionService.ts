@@ -530,6 +530,14 @@ export const acquirePartnerTechnicalContractEditSession = async (
 ) => publicSessionResult(await acquireContractEditSessionInternal(store, {
   ...input, contractId: null, purpose: 'PARTNER_TECHNICAL',
 }));
+/** Trusted Partner edit transport supplies a server-resolved customer contract.
+ * Browser input never chooses or changes this binding. */
+export const acquireBoundPartnerTechnicalContractEditSession = async (
+  store: ContractEditSessionStore,
+  input: Omit<AcquireContractEditSessionInput, 'purpose'> & { contractId: string },
+) => publicSessionResult(await acquireContractEditSessionInternal(store, {
+  ...input, purpose: 'PARTNER_TECHNICAL',
+}));
 export const assertContractEditOwnership = async (store: ContractEditSessionStore, input: AssertContractEditOwnershipInput) =>
   publicSessionResult(await assertContractEditOwnershipInternal(store, input));
 export const checkpointContractRecovery = async (store: ContractEditSessionStore, input: CheckpointContractRecoveryInput) =>

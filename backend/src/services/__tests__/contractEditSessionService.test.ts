@@ -6,6 +6,7 @@ import {
   discoverRecoverableContractCreationDraft,
   discardContractCreationDraft,
   checkpointContractRecovery,
+  acquireBoundPartnerTechnicalContractEditSession,
   assertContractEditOwnership,
   releaseContractEditSession,
   type ContractEditSessionRecord,
@@ -341,6 +342,29 @@ if (!editAfterCommit.ok) throw new Error('Expected a fresh post-commit lease');
 assert.equal(editAfterCommit.recovery, null, 'stale recovery must not cross canonical revisions');
 assert.equal(editAfterCommit.session.baseRevision, 1);
 assert.equal(editAfterCommit.session.leaseToken, 'lease-after-commit');
+
+const boundPartnerStore = new MemoryStore();
+const boundPartnerLease = await acquireBoundPartnerTechnicalContractEditSession(boundPartnerStore, {
+  draftId: 'partner-numbered-case-recovery', contractId: 'partner-customer-contract', userId: 'seller-1',
+  browserSessionId: 'browser-partner', schemaVersion: 1, baseRevision: 0, takeover: false, now,
+  createToken: () => 'partner-bound-lease'
+});
+assert.equal(boundPartnerLease.ok, true);
+if (!boundPartnerLease.ok) throw new Error('Expected a bound Partner technical lease');
+assert.equal(boundPartnerLease.session.purpose, 'PARTNER_TECHNICAL');
+assert.equal(boundPartnerLease.session.contractId, 'partner-customer-contract');
+boundPartnerStore.record = { ...boundPartnerStore.record!, recovery: {
+  kind: 'partner-technical-recovery', version: 1, recoveryRevision: 1,
+} };
+const wrongBinding = await acquireBoundPartnerTechnicalContractEditSession(boundPartnerStore, {
+  draftId: 'partner-numbered-case-recovery', contractId: 'another-contract', userId: 'seller-1',
+  browserSessionId: 'browser-partner', schemaVersion: 1, baseRevision: 0, takeover: false, now,
+  createToken: () => 'must-not-be-used'
+});
+assert.equal(wrongBinding.ok, false, 'a server-resolved recovery cannot be rebound to another contract');
+if (wrongBinding.ok) throw new Error('Expected protected Partner binding rejection');
+assert.equal(wrongBinding.code, 'revision-conflict');
+assert.equal(wrongBinding.recovery, null, 'binding conflicts must not disclose recovery contents');
 
 console.log('contractEditSessionService tests passed');
 };

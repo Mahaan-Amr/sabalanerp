@@ -161,7 +161,7 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         const written = await tx.salesContractEditSession.updateMany({ where: { draftId: session.draftId,
           leaseToken: session.leaseToken, baseRevision: session.baseRevision,
           recovery: { equals: session.recovery === null ? Prisma.AnyNull : json(session.recovery) },
-          id: session.id, contractId: null,
+          id: session.id, contractId: session.contractId,
         }, data: { recovery: json(next), updatedAt: commitClock.now } });
         if (written.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
         const receipt = { ...view.data, replayed: false };

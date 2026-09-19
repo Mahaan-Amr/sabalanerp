@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ErpButton, ErpCheckbox, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSheet, ErpTextarea, ErpWorkspacePage } from '@/components/erp';
 import { FaFileContract } from 'react-icons/fa';
 import { PartnerCaseWorkspace } from './PartnerCaseWorkspace';
@@ -17,6 +17,7 @@ import { normalizePartnerSalesOperationalError } from '../partnerSalesErrorMessa
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
 export function PartnerCaseRuntime() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const selectedCaseId = searchParams.get('caseId') || undefined;
   const [rows, setRows] = useState<PartnerCaseRuntimeRow[]>([]);
@@ -210,6 +211,7 @@ export function PartnerCaseRuntime() {
               onRequestCorrection={(scope) => void runAction(row.view.owner.caseId, `request-correction:${scope}`, 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, scope))}
               actions={{
                 ...row.actions,
+                onContinue: row.editRecovery ? () => router.push(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(row.view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}`) : undefined,
                 onCancel: () => { setCancelTarget(row); setCancelReason(''); },
                 onPreview: row.snapshotId ? () => void previewPdf(row.view.owner.caseId, row.snapshotId!) : undefined,
                 onIssue: row.snapshotId ? () => void previewPdf(row.view.owner.caseId, row.snapshotId!, 'FINAL') : undefined,

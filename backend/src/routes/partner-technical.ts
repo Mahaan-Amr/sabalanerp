@@ -14,6 +14,7 @@ import { createPartnerTechnicalRecoveryAuthority } from '../services/partnerSale
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { authorizePartnerTechnicalRollout } from '../services/partnerSales/authorization/technicalRollout';
 import { acquirePartnerTechnicalContractEditSession,
+  acquireBoundPartnerTechnicalContractEditSession,
   PrismaContractEditSessionStore } from '../services/contractEditSessionService';
 
 export type TechnicalRequest = { body: unknown };
@@ -61,11 +62,25 @@ export function createPartnerTechnicalRequestServices(input: {
         if (!decision.ok) return decision;
         const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'MUTATE');
         if (!rollout.ok) return rollout;
-        const acquired = await acquirePartnerTechnicalContractEditSession(new PrismaContractEditSessionStore(tx), {
+        const existing = await tx.salesContractEditSession.findUnique({ where: { draftId: parsed.data.recoveryId },
+          select: { contractId: true } });
+        const contract = existing?.contractId ? await tx.salesContract.findUnique({ where: { id: existing.contractId },
+          select: { partnerKind: true, partnerCase: { select: { state: true,
+            profile: { select: { userId: true } } } } } }) : null;
+        if (existing?.contractId && (contract?.partnerKind !== 'PARTNER_CUSTOMER' ||
+            contract.partnerCase?.profile.userId !== input.actorId ||
+            !['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(contract.partnerCase?.state ?? ''))) {
+          return { ok: false, error: partnerError('STATE_CONFLICT') };
+        }
+        const sessionInput = {
           draftId: parsed.data.recoveryId, userId: input.actorId,
           browserSessionId: parsed.data.browserSessionId, schemaVersion: 1,
           baseRevision: parsed.data.baseRevision, takeover: parsed.data.takeover,
-        });
+        };
+        const acquired = existing?.contractId
+          ? await acquireBoundPartnerTechnicalContractEditSession(new PrismaContractEditSessionStore(tx), {
+            ...sessionInput, contractId: existing.contractId })
+          : await acquirePartnerTechnicalContractEditSession(new PrismaContractEditSessionStore(tx), sessionInput);
         if (!acquired.ok) return { ok: false, error: partnerError(acquired.code === 'revision-conflict'
           ? 'ROW_STALE' : acquired.code === 'draft-owner-mismatch' ? 'NOT_FOUND' : 'FORBIDDEN') };
         return { ok: true, value: PartnerTechnicalLeaseReceiptSchema.parse({ schemaVersion: 1,

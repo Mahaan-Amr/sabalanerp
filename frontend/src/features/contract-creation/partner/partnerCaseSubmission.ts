@@ -26,12 +26,14 @@ export interface PartnerSubmissionState {
   cleanupPending?: boolean;
 }
 
-export function createPartnerCaseSubmission({ actorId, commands, recovery }: {
+export function createPartnerCaseSubmission({ actorId, commands, recovery, initialCase }: {
   actorId: string;
   commands: PartnerCommandPort;
   recovery: PartnerSubmissionRecovery;
+  initialCase?: PartnerCaseView;
 }) {
-  let state: PartnerSubmissionState = { phase: recovery.pending() ? 'uncertain' : 'editing' };
+  let state: PartnerSubmissionState = recovery.pending() ? { phase: 'uncertain' }
+    : initialCase ? { phase: 'created', case: initialCase } : { phase: 'editing' };
   let flight: Promise<void> | null = null;
   let cleanupInitialSave = false;
   const listeners = new Set<() => void>();

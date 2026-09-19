@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  CaseDraftIntentSchema, DuplicateCustomerMatchSchema, PartnerCaseViewSchema, PartnerCommandSchema, PartnerCreationContextSchema,
+  CaseDraftIntentSchema, DuplicateCustomerMatchSchema, PartnerCaseRuntimeResultSchema, PartnerCaseViewSchema, PartnerCommandSchema, PartnerCreationContextSchema,
   PartnerApprovalMatchSetSchema, PartnerWholesaleQuoteSchema, PartnerWizardRecoverySnapshotSchema,
   PartnerTechnicalCatalogPageSchema, CustomerPaymentPlanSchema, canonicalHash, partnerError, previewPartnerTechnicalDraft,
   type PartnerCaseView, type PartnerCommand, type PartnerCommandPort, type PartnerApprovalMatchSet,
@@ -180,6 +180,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateCustomerMatch | null>(null);
   const [transferReason, setTransferReason] = useState('');
   const [wizard, setWizard] = useState<PartnerWizardDraft | null>(null);
+  const [editingCase, setEditingCase] = useState<PartnerCaseView | null>(null);
+  const editingHydrationFlight = useRef(false);
   const wizardServerRevision = useRef(0);
   const wizardSaveFlight = useRef<Promise<boolean> | null>(null);
   const wizardSavePending = useRef<PartnerWizardDraft | null>(null);
@@ -401,8 +403,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     recoveryStarting.current = true; setError(null);
     try {
       const requestedDraft = searchParams.get('draftId');
-      const candidate = fresh ? undefined : partner.recoverableDrafts?.find(item => item.recoveryId === requestedDraft)
-        ?? partner.recoverableDraft;
+      const requestedBase = Number(searchParams.get('baseRevision'));
+      const requestedCandidate = requestedDraft ? partner.recoverableDrafts?.find(item => item.recoveryId === requestedDraft)
+        ?? { recoveryId: requestedDraft, baseRevision: Number.isSafeInteger(requestedBase) && requestedBase >= 0 ? requestedBase : 0,
+          updatedAt: new Date().toISOString() } : undefined;
+      const candidate = fresh ? undefined : requestedCandidate ?? partner.recoverableDraft;
       const recoveryId = candidate?.recoveryId ?? `partner-recovery-${crypto.randomUUID()}`;
       const browserSessionId = getPartnerBrowserSessionId(window.sessionStorage, partner.actorId);
       const baseRevision = candidate?.baseRevision ?? 0;
@@ -497,6 +502,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
 
   useEffect(() => {
     if (context?.kind !== 'PARTNER' || runtime || freshInquiryRef.current || !draftAccess || recoveryRevision < 1 ||
+        searchParams.get('caseId') ||
         inquiryHydrationFlight.current || (mode === 'sale' && searchParams.get('configure') === '1')) return;
     const inquiryId = searchParams.get('inquiryId') || context.latestInquiryId;
     if (!inquiryId) return;
@@ -611,7 +617,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const submissionRecoveryId = runtime?.access.recoveryId;
   const submission = useMemo(() => {
     if (!submissionActorId || !submissionRecoveryId) return null;
-    return createPartnerCaseSubmission({ actorId: submissionActorId, commands: caseCommands, recovery: {
+    return createPartnerCaseSubmission({ actorId: submissionActorId, commands: caseCommands, initialCase: editingCase ?? undefined, recovery: {
       pending: () => readStored<PartnerDraftCommand>(casePendingKey(submissionActorId)),
       savePending: async command => {
         const active = runtimeRef.current;
@@ -636,7 +642,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         }
       },
     } });
-  }, [reacquireRuntime, submissionActorId, submissionRecoveryId]);
+  }, [editingCase, reacquireRuntime, submissionActorId, submissionRecoveryId]);
 
   const enterWizard = async (inquiry: PartnerInquiryView, runtimeOverride?: PersistedRuntime) => {
     const currentRuntime = runtimeOverride ?? runtime;
@@ -746,6 +752,47 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     wizardServerRevision.current = 0;
     setWizard(draft);
   };
+  const enterWizardRef = useRef(enterWizard);
+  enterWizardRef.current = enterWizard;
+
+  useEffect(() => {
+    const caseId = searchParams.get('caseId');
+    if (!caseId || context?.kind !== 'PARTNER' || !draftAccess || recoveryRevision < 1 || runtime ||
+        editingHydrationFlight.current) return;
+    editingHydrationFlight.current = true;
+    void (async () => {
+      const [caseResponse, wizardResponse, savedResult] = await Promise.all([
+        api.post('/partner/cases/query-v2', { caseId }),
+        api.get(`/partner/cases/drafts/${encodeURIComponent(draftAccess.recoveryId)}/wizard`),
+        ports.saved.readSaved({ ...draftAccess, recoveryRevision }),
+      ]);
+      const cases = PartnerCaseRuntimeResultSchema.safeParse((caseResponse.data as { data?: unknown })?.data);
+      const recoveredWizard = PartnerWizardRecoverySnapshotSchema.safeParse((wizardResponse.data as { data?: unknown })?.data);
+      if (!cases.success || cases.data.cases.length !== 1 || !savedResult.ok || !recoveredWizard.success ||
+          cases.data.cases[0].view.owner.caseId !== caseId ||
+          recoveredWizard.data.intent.recoveryId !== draftAccess.recoveryId) throw new Error('Invalid editable Case recovery');
+      const savedReceipt: PartnerTechnicalSaveReceipt = { ...savedResult.value, replayed: true };
+      const matches = await readApprovalMatches(savedReceipt);
+      const inquiryId = matches.rows[0]?.approvedRowBinding?.inquiryId ?? `${draftAccess.recoveryId}-edit`;
+      const configuredRows: PartnerConfiguredInquiryRows = (savedResult.value.pricingSubjects ?? savedResult.value.rows.map(row => ({
+        configurationRef: row.configurationRef, role: 'PRIMARY' as const,
+      }))).map((subject, index) => ({
+        rowId: matches.rows.find(row => row.configurationRef.productRowId === subject.configurationRef.productRowId)?.rowId
+          ?? `${subject.configurationRef.productRowId}-edit-${index + 1}`,
+        configuration: subject.configurationRef,
+      }));
+      const value: PersistedRuntime = { actorId: context.actorId, inquiryId, access: draftAccess,
+        saved: savedReceipt, configuredRows, knownInquiryRows: matches.rows,
+        customerId: recoveredWizard.data.intent.customerId,
+        contractDate: recoveredWizard.data.intent.contractDate,
+        ...(recoveredWizard.data.intent.projectId ? { projectId: recoveredWizard.data.intent.projectId } : {}) };
+      setEditingCase(cases.data.cases[0].view);
+      setCustomerId(value.customerId); setContractDate(value.contractDate!); setProjectId(value.projectId ?? '');
+      persistRuntime(value);
+      await enterWizardRef.current({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: matches.rows }, value);
+    })().catch(() => setError('بازیابی پرونده ذخیره‌شده انجام نشد؛ هیچ تغییری ثبت نشده است.'))
+      .finally(() => { editingHydrationFlight.current = false; });
+  }, [context, draftAccess, persistRuntime, recoveryRevision, runtime, searchParams]);
 
   const updateWizard = (next: PartnerWizardDraft) => {
     const summary = partnerRetailSummary(next.rows, next.intent.retailDiscount);

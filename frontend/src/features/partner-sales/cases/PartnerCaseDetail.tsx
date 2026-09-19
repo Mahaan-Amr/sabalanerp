@@ -8,6 +8,7 @@ import { formatPartnerMoney, partnerPaymentMethodCopy } from '../presentation';
 
 export type PartnerCaseActions = {
   canPreview: boolean;
+  canContinue?: boolean;
   canIssue: boolean;
   canFinalize?: boolean;
   canSendConfirmation?: boolean;
@@ -15,6 +16,7 @@ export type PartnerCaseActions = {
   canCancel: boolean;
   canRequestVoid: boolean;
   onPreview?: () => void;
+  onContinue?: () => void;
   onIssue?: () => void;
   onFinalize?: () => void;
   onSendConfirmation?: () => void;
@@ -34,13 +36,18 @@ const stateCopy: Record<PartnerCaseView['state'], { label: string; tone: ErpTone
 
 export function PartnerCaseDetail({ view, actions, children }: { view: PartnerCaseView; actions: PartnerCaseActions; children?: React.ReactNode }) {
   const status = stateCopy[view.state];
-  const pageActions: ErpAction[] = [
-    ...(actions.canPreview ? [{ label: 'پیش‌نمایش قرارداد', icon: FaEye, variant: 'outline' as const, onClick: actions.onPreview }] : []),
-    ...(actions.canIssue ? [{ label: 'صدور نهایی PDF', icon: FaFilePdf, tone: 'success' as const, onClick: actions.onIssue }] : []),
-  ];
+  const pageActions = partnerCasePageActions(actions);
   return <ErpPage eyebrow="پرونده فروش همکار" title={`پرونده ${view.caseNumber}`} description={`قرارداد مشتری: ${view.customerContractNumber}`}
     backHref="/dashboard/sales/contracts" actions={pageActions} metrics={partnerCaseMetrics(view, status)}><PartnerCaseDetailContent view={view} actions={actions} />{children}
   </ErpPage>;
+}
+
+export function partnerCasePageActions(actions: PartnerCaseActions): ErpAction[] {
+  return [
+    ...(actions.canContinue ? [{ label: 'ادامه تکمیل قرارداد', icon: FaEdit, onClick: actions.onContinue }] : []),
+    ...(actions.canPreview ? [{ label: 'پیش‌نمایش قرارداد', icon: FaEye, variant: 'outline' as const, onClick: actions.onPreview }] : []),
+    ...(actions.canIssue ? [{ label: 'صدور نهایی PDF', icon: FaFilePdf, tone: 'success' as const, onClick: actions.onIssue }] : []),
+  ];
 }
 
 export function partnerCaseMetrics(view: PartnerCaseView, status = stateCopy[view.state]): ErpMetric[] {

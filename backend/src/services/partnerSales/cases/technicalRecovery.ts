@@ -59,7 +59,6 @@ export function technicalRecoveryLease(dependencies: PartnerTechnicalRecoveryDep
           now.getTime() - session.updatedAt.getTime() > CONTRACT_EDIT_LEASE_TTL_MS) {
         return { ok: false, error: partnerError('FORBIDDEN') };
       }
-      if (session.contractId !== null) return { ok: false, error: partnerError('STATE_CONFLICT') };
       if (session.baseRevision !== access.baseRevision) return { ok: false, error: partnerError('ROW_STALE') };
       const recovery = session.recovery === null ? null : decodeTechnicalRecovery(session.recovery);
       if (recovery === undefined) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };

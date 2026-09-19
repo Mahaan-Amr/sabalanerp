@@ -83,6 +83,26 @@ test('double click checkpoints once and a later explicit save uses the draft rev
   assert.equal(blocked.getSnapshot().phase, 'editing');
 });
 
+test('resuming a numbered Case starts from its current revision and never submits a duplicate Case', async () => {
+  const commandTypes: string[] = [];
+  const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
+    initialCase: fixture.partner,
+    commands: { execute: async command => {
+      commandTypes.push(command.type);
+      return { ok: true, value: { commandId: command.commandId, replayed: false,
+        case: { ...fixture.partner, owner: { ...fixture.partner.owner, revision: fixture.partner.owner.revision + 1 } }, eventIds: [] } };
+    } },
+    recovery: { pending: () => null, savePending: async () => undefined,
+      clearPending: async () => undefined, finalizeCommitted: async () => undefined },
+  });
+
+  assert.equal(submission.getSnapshot().phase, 'created');
+  assert.equal(submission.getSnapshot().case?.owner.caseId, fixture.partner.owner.caseId);
+  await submission.submit(intent());
+  assert.deepEqual(commandTypes, ['CASE_DRAFT_REVISE']);
+  assert.equal(submission.getSnapshot().case?.owner.revision, fixture.partner.owner.revision + 1);
+});
+
 test('expiry rejection preserves the draft and a successful Case remains successful if local cleanup fails', async () => {
   let pending: PartnerDraftCommand | null = null;
   let expires = true;

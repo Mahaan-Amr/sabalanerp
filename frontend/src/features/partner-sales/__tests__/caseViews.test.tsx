@@ -3,7 +3,8 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
-import { PartnerCaseDetailContent, partnerCaseMetrics } from '../cases/PartnerCaseDetail';
+import { PartnerCaseRuntimeResultSchema } from '@sabalanerp/partner-sales-contracts';
+import { PartnerCaseDetailContent, partnerCaseMetrics, partnerCasePageActions } from '../cases/PartnerCaseDetail';
 import { ErpMetricGrid } from '@/components/erp';
 import { PartnerAccountPanel } from '../account/PartnerAccountPanel';
 import { PartnerReportContent, partnerReportPrimaryAction, type PartnerReportPresentation } from '../reports/PartnerReportView';
@@ -25,6 +26,22 @@ test('Partner case detail separates retail, wholesale and margin without exposin
   assert.match(html, /صدور PDF نهایی/);
   assert.match(html, /ارسال پیامک تأیید/);
   assert.doesNotMatch(html, /FIXTURE-INTERNAL-313|شماره سند داخلی|approvalEvidenceId|commercialAccountId/);
+});
+
+test('an editable numbered Case exposes one safe continuation action and wire metadata', () => {
+  const fixture = createPartnerFixtures();
+  const actions = {
+    canContinue: true, canPreview: false, canIssue: false, canFinalize: false,
+    canSendConfirmation: false, canRequestCorrection: false, canCancel: true, canRequestVoid: false,
+  };
+  assert.deepEqual(partnerCasePageActions(actions).map(action => action.label), ['ادامه تکمیل قرارداد']);
+  const runtime = { cases: [{ view: fixture.partner, snapshotId: null,
+    editRecovery: { recoveryId: 'recovery-editable-1', baseRevision: 0 },
+    actions: { canContinue: true, canPreview: false, canIssue: false, canFinalize: false,
+      canSendConfirmation: false, canRequestCorrection: false, canCancel: true, canRequestVoid: false } }] };
+  assert.deepEqual(PartnerCaseRuntimeResultSchema.parse(runtime), runtime);
+  assert.equal(PartnerCaseRuntimeResultSchema.safeParse({ cases: [{ ...runtime.cases[0],
+    editRecovery: { ...runtime.cases[0].editRecovery, contractId: 'browser-controlled' } }] }).success, false);
 });
 
 test('unpriced margin uses an informational tone instead of claiming success', () => {

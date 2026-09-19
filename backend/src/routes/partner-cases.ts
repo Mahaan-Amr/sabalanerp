@@ -414,6 +414,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const rows = await tx.partnerSaleCase.findMany({ where: body.caseId ? { id: body.caseId } : undefined,
           orderBy: { createdAt: 'desc' }, select: { id: true, state: true, pricingState: true,
             customerConfirmationState: true, headRevision: true, integrityHash: true,
+            customerContractId: true,
             head: { select: { internalProjection: true } }, outputs: { orderBy: { recordedAt: 'desc' }, take: 1,
               select: { id: true } } } });
         // A list can span several cases belonging to one profile. Acquire every
@@ -452,14 +453,22 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           // Authorization is audited. Keep these writes in a stable order so duplicate
           // read requests cannot deadlock while acquiring the same audit-related locks.
           const output = await authorized('CUSTOMER_OUTPUT', 'CUSTOMER_OUTPUT', 'PDF');
+          const edit = await authorized('CASE_DRAFT_WRITE', casePurpose, 'API');
           const commit = await authorized('CASE_COMMIT', casePurpose, 'API');
           const correction = await authorized('CORRECTION_REQUEST', casePurpose, 'API');
           const cancel = await authorized('CASE_CANCEL', casePurpose, 'API');
           const voidRequest = await authorized('VOID_REQUEST', casePurpose, 'API');
+          const editSession = edit && ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(row.state)
+            ? await tx.salesContractEditSession.findFirst({ where: { contractId: row.customerContractId,
+              ownerUserId: request.user!.id, purpose: 'PARTNER_TECHNICAL' },
+              select: { draftId: true, baseRevision: true, recovery: true } }) : null;
+          const editableRecovery = editSession && decodeTechnicalRecovery(editSession.recovery) ? editSession : null;
           cases.push({ view: { ...view.data, state: row.state,
             pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
             snapshotId: row.outputs[0]?.id || null,
-            actions: { canPreview: output && Boolean(row.outputs[0]),
+            ...(editableRecovery ? { editRecovery: { recoveryId: editableRecovery.draftId,
+              baseRevision: editableRecovery.baseRevision } } : {}),
+            actions: { canContinue: Boolean(editableRecovery), canPreview: output && Boolean(row.outputs[0]),
               canIssue: output && row.state === 'COMMITTED' && Boolean(row.outputs[0]),
               canFinalize: commit && row.pricingState === 'READY_TO_FINALIZE' &&
                 row.customerConfirmationState !== 'REJECTED' &&

@@ -29,7 +29,7 @@ type PaymentView = {
   metadata?: unknown;
 };
 
-type TaxView = { id: string; submissionStatus: string };
+type TaxView = { id: string; submissionStatus: string; metadata?: unknown };
 
 export type AccountingVoidNextAction = {
   kind: 'REVERSE_RECEIPT' | 'RETURN_CHECK' | 'RESOLVE_TAX' | 'VOID_RECEIVABLE' | 'VOID_FINANCIAL_RECORD';
@@ -55,7 +55,7 @@ const submittedTaxStatuses = new Set([
   'NEEDS_CORRECTION',
 ]);
 const isPositive = (value: ReceivableView['paidAmount']) => Number(value.toString()) > 0;
-const tehranDayKey = (value: Date) => new Intl.DateTimeFormat('en-CA', {
+export const tehranAccountingDayKey = (value: Date) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(value);
 const linkedVoidCaseId = (metadata: unknown) => metadata && typeof metadata === 'object' && !Array.isArray(metadata)
@@ -63,7 +63,8 @@ const linkedVoidCaseId = (metadata: unknown) => metadata && typeof metadata === 
   : '';
 
 export const validateAccountingVoidCaseStart = (input: {
-  sourceRecord: { id: string; contractId?: string | null; status: string; createdAt: Date };
+  sourceRecord: { id: string; contractId?: string | null; status: string; createdAt: Date;
+    systemInvoiceDate?: Date | null; financiallyApprovedAt?: Date | null; postedAt?: Date | null };
   retainedRecord: { id: string; contractId?: string | null; status: string } | null;
   reasonKind: AccountingVoidReasonKind;
   reason: string;
@@ -75,10 +76,12 @@ export const validateAccountingVoidCaseStart = (input: {
   }
   if (!input.sourceRecord.contractId) throw new Error('این رکورد مالی به قرارداد معتبری متصل نیست.');
   if (!input.reason.trim()) throw new Error('دلیل ابطال را وارد کنید.');
-  if (tehranDayKey(input.effectiveAt) < tehranDayKey(input.sourceRecord.createdAt)) {
+  const originalBusinessAt = input.sourceRecord.systemInvoiceDate || input.sourceRecord.financiallyApprovedAt ||
+    input.sourceRecord.postedAt || input.sourceRecord.createdAt;
+  if (tehranAccountingDayKey(input.effectiveAt) < tehranAccountingDayKey(originalBusinessAt)) {
     throw new Error('تاریخ مؤثر ابطال نمی‌تواند پیش از تاریخ ایجاد رکورد مالی باشد.');
   }
-  if (tehranDayKey(input.effectiveAt) > tehranDayKey(input.now)) {
+  if (tehranAccountingDayKey(input.effectiveAt) > tehranAccountingDayKey(input.now)) {
     throw new Error('تاریخ مؤثر ابطال نمی‌تواند در آینده باشد.');
   }
   if (input.reasonKind === 'DUPLICATE_ISSUE') {
@@ -86,6 +89,29 @@ export const validateAccountingVoidCaseStart = (input: {
     if (input.retainedRecord.id === input.sourceRecord.id) throw new Error('رکورد مالی نمی‌تواند خودش به‌عنوان فاکتور معتبر انتخاب شود.');
     if (input.retainedRecord.contractId !== input.sourceRecord.contractId) throw new Error('فاکتور معتبر باقی‌مانده باید متعلق به همان قرارداد باشد.');
     if (!['ISSUED', 'POSTED'].includes(input.retainedRecord.status)) throw new Error('فاکتور معتبر باقی‌مانده باید صادرشده و باطل‌نشده باشد.');
+  }
+};
+
+export const validateRetainedRecordForCompletion = (input: {
+  sourceRecordId: string;
+  contractId: string;
+  reasonKind: AccountingVoidReasonKind;
+  retainedRecordId?: string | null;
+  retainedRecord: { id: string; contractId?: string | null; status: string } | null;
+  retainedRecordHasOpenVoidCase: boolean;
+}) => {
+  if (input.reasonKind !== 'DUPLICATE_ISSUE') return;
+  if (!input.retainedRecordId || !input.retainedRecord) {
+    throw new Error('فاکتور معتبر باقی‌مانده پیدا نشد؛ یک فاکتور معتبر از همین قرارداد انتخاب کنید.');
+  }
+  if (input.retainedRecord.id === input.sourceRecordId || input.retainedRecord.contractId !== input.contractId) {
+    throw new Error('فاکتور معتبر باقی‌مانده باید رکوردی دیگر از همین قرارداد باشد.');
+  }
+  if (!['ISSUED', 'POSTED'].includes(input.retainedRecord.status)) {
+    throw new Error('فاکتور معتبر باقی‌مانده باید صادرشده و باطل‌نشده باشد.');
+  }
+  if (input.retainedRecordHasOpenVoidCase) {
+    throw new Error('فاکتور معتبر باقی‌مانده خودش پرونده ابطال باز دارد؛ ابتدا آن پرونده را تعیین‌تکلیف کنید.');
   }
 };
 
@@ -122,7 +148,7 @@ export const buildAccountingVoidWorkflow = (input: {
   const collectionsChanged = input.payments.some(payment => linkedVoidCaseId(payment.metadata) === input.voidCase.id);
   const downstreamChanged = collectionsChanged || input.receivables.some(
     receivable => linkedVoidCaseId(receivable.metadata) === input.voidCase.id,
-  );
+  ) || input.taxRecords.some(tax => linkedVoidCaseId(tax.metadata) === input.voidCase.id);
 
   const blockers: Array<{ code: string; messageFa: string; responsibleRoleFa: string }> = [];
   if (activePayment?.payment.method === 'CHECK') blockers.push({
@@ -134,7 +160,7 @@ export const buildAccountingVoidWorkflow = (input: {
         : 'چک فعال را ابتدا عودت دهید.',
     responsibleRoleFa: 'مدیر حسابداری',
   });
-  if (activePayment?.payment.method !== 'CHECK') blockers.push({
+  if (activePayment && activePayment.payment.method !== 'CHECK') blockers.push({
     code: 'ACTIVE_RECEIPT', messageFa: 'ابتدا دریافت ثبت‌شده را برگشت بزنید.', responsibleRoleFa: 'مدیر حسابداری',
   });
   if (submittedTax) blockers.push({

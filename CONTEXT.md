@@ -1788,8 +1788,8 @@ A replacement invoice candidate created after a post-approval correction is expl
 _Avoid_: using the original contract-level invoice idempotency key for replacement records, or leaving the replacement record disconnected from the correction that required it
 
 **شماره فاکتور سیستمی رکورد مالی جایگزین**:
-A replacement invoice candidate may reuse the Sepidar/system invoice number of the old voided invoice only when it is explicitly linked as replacing that old financial record. Unrelated invoices must still have unique system invoice numbers.
-_Avoid_: allowing duplicate system invoice numbers across unrelated invoices, or forcing a replacement invoice to receive a different number from the voided invoice it replaces
+A replacement invoice candidate always receives a new system invoice number while retaining an explicit link to the old voided financial record. A system invoice number remains permanently attached to its original record and is never reassigned, even after voiding.
+_Avoid_: reusing the old system invoice number for a replacement, changing the historical number, or leaving the replacement disconnected from the record it replaces
 
 **اختیار ابطال و جایگزینی رکورد مالی**:
 Voiding an approved financial record and financially approving its replacement require manager-level accounting authority, expressed through accounting approve/void permission rather than a hard-coded role name. Normal accounting users may request corrections and prepare allowed drafts, but sales users never void or replace accounting records.

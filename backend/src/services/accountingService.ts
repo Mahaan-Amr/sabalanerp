@@ -93,7 +93,12 @@ import { partnerTaxTransitions } from './partnerSales/accounting/taxPolicy';
 import { hasConflictingPartnerAccountingEvidence } from './partnerSales/accounting/provenance';
 import { PartnerAccountingCommandError } from './partnerSales/accounting/errors';
 import { runPartnerAwareTaxMutation } from './partnerSales/accounting/taxCommands';
-import { buildAccountingVoidWorkflow, validateAccountingVoidCaseStart } from './accountingVoidWorkflow';
+import {
+  buildAccountingVoidWorkflow,
+  tehranAccountingDayKey,
+  validateAccountingVoidCaseStart,
+  validateRetainedRecordForCompletion,
+} from './accountingVoidWorkflow';
 
 
 const ELIGIBLE_CONTRACT_STATUSES: ContractStatus[] = [
@@ -189,6 +194,7 @@ type AccountingActionRequest = {
   flagId?: string;
   reviewCaseId?: string;
   voidCaseId?: string;
+  taxRecordId?: string;
   replacesRecordId?: string;
   retainedRecordId?: string;
   reasonKind?: keyof typeof AccountingVoidReasonKind;
@@ -1452,6 +1458,13 @@ export class AccountingVoidBlockedError extends Error {
 const accountingVoidInputError = (message: string, actionUrl?: string) =>
   new AccountingVoidBlockedError(message, undefined, actionUrl, 400);
 
+const requiredAccountingEffectiveAt = (value: string | undefined, actionUrl?: string) => {
+  if (!value) throw accountingVoidInputError('تاریخ مؤثر را وارد کنید.', actionUrl);
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) throw accountingVoidInputError('تاریخ مؤثر معتبر نیست؛ تاریخ را دوباره انتخاب کنید.', actionUrl);
+  return parsed;
+};
+
 const loadAccountingVoidWorkflow = async (
   tx: Prisma.TransactionClient | PrismaClient,
   voidCase: {
@@ -1476,7 +1489,7 @@ const startAccountingVoidCase = async (command: AccountingActionRequest, actor: 
     ? AccountingVoidReasonKind[command.reasonKind]
     : AccountingVoidReasonKind.OTHER;
   const reason = String(command.reason || command.note || '').trim();
-  const effectiveAt = parseDate(command.effectiveAt || command.occurredAt, new Date());
+  const effectiveAt = requiredAccountingEffectiveAt(command.effectiveAt || command.occurredAt, '/dashboard/accounting/invoice-candidates');
   const result = await prisma.$transaction(async tx => {
     const sourceRecord = await tx.accountingFinancialRecord.findUnique({ where: { id: sourceRecordId } });
     if (!sourceRecord) throw accountingVoidInputError('رکورد مالی پیدا نشد. فهرست رکوردهای مالی را تازه‌سازی و دوباره انتخاب کنید.', '/dashboard/accounting/invoice-candidates');
@@ -1493,6 +1506,13 @@ const startAccountingVoidCase = async (command: AccountingActionRequest, actor: 
         error instanceof Error ? error.message : 'اطلاعات شروع ابطال کامل نیست. موارد فرم را بررسی کنید.',
         `/dashboard/accounting/contracts/${sourceRecord.contractId}`,
       );
+    }
+    if (retainedRecord && await tx.accountingFinancialVoidCase.findFirst({ where: {
+      sourceRecordId: retainedRecord.id,
+      status: AccountingVoidCaseStatus.OPEN,
+    } })) {
+      throw accountingVoidInputError('فاکتور معتبر باقی‌مانده خودش پرونده ابطال باز دارد؛ فاکتور دیگری انتخاب کنید.',
+        `/dashboard/accounting/contracts/${sourceRecord.contractId}`);
     }
     const existing = await tx.accountingFinancialVoidCase.findFirst({
       where: { sourceRecordId, status: AccountingVoidCaseStatus.OPEN }, orderBy: { startedAt: 'desc' },
@@ -1578,6 +1598,8 @@ export const executeAccountingAction = async (
       return markTaxReady(command, actor);
     case 'TRACK_TAX_SUBMISSION':
       return trackTaxSubmission(command, actor);
+    case 'RESOLVE_TAX_FOR_VOID':
+      return resolveTaxForVoid(command, actor);
     case 'REQUEST_CORRECTION':
       throw new Error('DUTY_LEGACY_ACCOUNTING_CORRECTION_WRITER_RETIRED');
     case 'APPROVE_CORRECTION_FOR_SALES_EDIT':
@@ -1972,16 +1994,8 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
         id: { not: invoiceId }
       }
     });
-    const metadata = metadataObject(before.metadata);
-    const replacedRecordId = typeof metadata.replacesRecordId === 'string' ? metadata.replacesRecordId : null;
-    const replacementNumberSource = duplicateRecords.length === 1 ? duplicateRecords[0] : null;
-    const isAllowedReplacementNumberReuse =
-      Boolean(replacementNumberSource) &&
-      replacedRecordId === replacementNumberSource?.id &&
-      replacementNumberSource?.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
-      replacementNumberSource?.status === AccountingRecordStatus.VOIDED;
-    if (duplicateRecords.length > 0 && !isAllowedReplacementNumberReuse) {
-      throw new Error('System invoice number is already used');
+    if (duplicateRecords.length > 0) {
+      throw accountingVoidInputError('این شماره فاکتور قبلاً استفاده شده است. برای رکورد جدید یک شماره تازه وارد کنید.');
     }
 
     const approvedAt = new Date();
@@ -2081,10 +2095,6 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       });
     }
 
-    const replacementNumberReuseNote = isAllowedReplacementNumberReuse && replacementNumberSource
-      ? `Replacement invoice reused system invoice number ${systemInvoiceNumber} from voided source record ${replacementNumberSource.id}; replacement record ${updated.id} is linked by metadata.replacesRecordId. Reason: linked replacement invoice for a post-approval correction.`
-      : null;
-
     await audit(tx, {
       action: 'APPROVE_FINANCIAL_INVOICE',
       actorId: actor.userId,
@@ -2094,7 +2104,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       entityId: updated.id,
       beforeState: toJsonValue(before),
       afterState: toJsonValue(updated),
-      note: [command.note, replacementNumberReuseNote].filter(Boolean).join(' | ') || null
+      note: command.note || null
     });
 
     if (updated.contractId) {
@@ -2197,18 +2207,26 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
 const registerReceipt = async (command: AccountingActionRequest, actor: Actor, notificationHook?: AccountingActionNotificationHook) => {
   if (!command.contractId) throw new Error('contractId is required');
   const contract = await ensureContractForReceipt(command.contractId, command.receivableId);
+  let lockedVoidCase: AccountingFinancialVoidCase | null = null;
   if (command.receivableId) {
     const receivable = await prisma.accountingReceivable.findUnique({ where: { id: command.receivableId },
       select: { invoiceRecordId: true } });
     if (receivable?.invoiceRecordId) {
-      const voidCase = await prisma.accountingFinancialVoidCase.findFirst({ where: {
+      lockedVoidCase = await prisma.accountingFinancialVoidCase.findFirst({ where: {
         sourceRecordId: receivable.invoiceRecordId, status: AccountingVoidCaseStatus.OPEN,
       } });
-      if (voidCase) throw new AccountingVoidBlockedError(
-        'این زنجیره در حال ابطال است و دریافت جدید نمی‌پذیرد. مراحل پرونده ابطال را ادامه دهید.', undefined,
-        `/dashboard/accounting/contracts/${voidCase.contractId}#financial-void-cases`,
-      );
     }
+  } else {
+    lockedVoidCase = await prisma.accountingFinancialVoidCase.findFirst({ where: {
+      contractId: command.contractId,
+      status: AccountingVoidCaseStatus.OPEN,
+    }, orderBy: { startedAt: 'desc' } });
+  }
+  if (lockedVoidCase) {
+    throw new AccountingVoidBlockedError(
+      'این زنجیره در حال ابطال است و دریافت جدید نمی‌پذیرد. مدیر حسابداری باید مراحل پرونده ابطال را ادامه دهد.', undefined,
+      `/dashboard/accounting/contracts/${lockedVoidCase.contractId}#financial-void-cases`,
+    );
   }
   const method = command.method && command.method in AccountingPaymentMethod
     ? AccountingPaymentMethod[command.method as keyof typeof AccountingPaymentMethod]
@@ -2287,11 +2305,12 @@ const applyReceivablePayment = async (tx: Prisma.TransactionClient, receivableId
 };
 
 const validateFinancialEventDate = (effectiveAt: Date, originalAt: Date) => {
-  const dayKey = (value: Date) => new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(value);
-  if (dayKey(effectiveAt) < dayKey(originalAt)) throw new Error('تاریخ مؤثر نمی‌تواند پیش از تاریخ رویداد اصلی باشد.');
-  if (dayKey(effectiveAt) > dayKey(new Date())) throw new Error('تاریخ مؤثر نمی‌تواند در آینده باشد.');
+  if (tehranAccountingDayKey(effectiveAt) < tehranAccountingDayKey(originalAt)) {
+    throw new Error('تاریخ مؤثر نمی‌تواند پیش از تاریخ رویداد اصلی باشد.');
+  }
+  if (tehranAccountingDayKey(effectiveAt) > tehranAccountingDayKey(new Date())) {
+    throw new Error('تاریخ مؤثر نمی‌تواند در آینده باشد.');
+  }
 };
 
 const findOpenVoidCaseForReceivable = async (tx: Prisma.TransactionClient, receivableId?: string | null) => {
@@ -2316,7 +2335,8 @@ const reverseReceipt = async (command: AccountingActionRequest, actor: Actor) =>
     if (before.status !== PaymentAccountingStatus.RECEIVED && before.status !== PaymentAccountingStatus.RECONCILED) {
       throw accountingVoidInputError('این دریافت فعال نیست. وضعیت آن را در فهرست دریافت‌ها بررسی کنید.', `/dashboard/accounting/payments?recordId=${before.id}`);
     }
-    const effectiveAt = parseDate(command.effectiveAt || command.occurredAt, new Date());
+    const effectiveAt = requiredAccountingEffectiveAt(command.effectiveAt || command.occurredAt,
+      `/dashboard/accounting/payments?recordId=${before.id}`);
     try {
       validateFinancialEventDate(effectiveAt, before.occurredAt || before.createdAt);
     } catch (error) {
@@ -2347,16 +2367,25 @@ const reverseReceipt = async (command: AccountingActionRequest, actor: Actor) =>
 };
 
 const updateCheckStatus = async (command: AccountingActionRequest, actor: Actor) => {
-  if (!command.paymentEventId) throw new Error('paymentEventId is required');
+  if (!command.paymentEventId) throw accountingVoidInputError('چک را از فهرست دریافت‌ها انتخاب کنید.', '/dashboard/accounting/payments');
   const checkStatus = command.status && command.status in CheckAccountingStatus
     ? CheckAccountingStatus[command.status as keyof typeof CheckAccountingStatus]
     : CheckAccountingStatus.RECEIVED;
-  const occurredAt = parseDate(command.occurredAt, new Date());
+  const occurredAt = requiredAccountingEffectiveAt(command.occurredAt, '/dashboard/accounting/payments');
+  if ((checkStatus === CheckAccountingStatus.BOUNCED || checkStatus === CheckAccountingStatus.RETURNED) &&
+    !String(command.note || '').trim()) {
+    throw accountingVoidInputError('دلیل برگشت یا عودت چک را وارد کنید.', '/dashboard/accounting/payments');
+  }
 
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.accountingPaymentStatus.findUnique({ where: { id: command.paymentEventId } });
-    if (!before) throw new Error('Payment event not found');
-    validateFinancialEventDate(occurredAt, before.occurredAt || before.createdAt);
+    if (!before) throw accountingVoidInputError('چک پیدا نشد. فهرست دریافت‌ها را تازه‌سازی کنید.', '/dashboard/accounting/payments');
+    try {
+      validateFinancialEventDate(occurredAt, before.occurredAt || before.createdAt);
+    } catch (error) {
+      throw accountingVoidInputError(error instanceof Error ? error.message : 'تاریخ مؤثر معتبر نیست.',
+        `/dashboard/accounting/payments?recordId=${before.id}`);
+    }
     const beforeMetadata = metadataObject(before.metadata);
     const linkedVoidCase = await findOpenVoidCaseForReceivable(tx, before.receivableId);
     const collectionMovements = Array.isArray(beforeMetadata.collectionMovements)
@@ -2434,6 +2463,59 @@ const updateCheckStatus = async (command: AccountingActionRequest, actor: Actor)
   });
 
   return actionResponse('APPLIED', 'وضعیت چک به‌روزرسانی شد', { contractId: result.contractId || undefined, paymentEventIds: [result.id] });
+};
+
+const resolveTaxForVoid = async (command: AccountingActionRequest, actor: Actor) => {
+  if (!command.taxRecordId) throw accountingVoidInputError('سابقه مالیاتی را از پرونده ابطال انتخاب کنید.');
+  const reason = String(command.reason || command.note || '').trim();
+  if (!reason) throw accountingVoidInputError('دلیل تعیین‌تکلیف مالیات را وارد کنید.');
+  const effectiveAt = requiredAccountingEffectiveAt(command.effectiveAt || command.occurredAt);
+  const result = await prisma.$transaction(async tx => {
+    const before = await tx.accountingTaxRecord.findUnique({ where: { id: command.taxRecordId } });
+    if (!before || !before.invoiceRecordId) {
+      throw accountingVoidInputError('سابقه مالیاتی مرتبط پیدا نشد. صفحه قرارداد را تازه‌سازی کنید.');
+    }
+    const voidCase = await tx.accountingFinancialVoidCase.findFirst({ where: {
+      sourceRecordId: before.invoiceRecordId,
+      status: AccountingVoidCaseStatus.OPEN,
+    }, orderBy: { startedAt: 'desc' } });
+    if (!voidCase) throw new AccountingVoidBlockedError(
+      'ابتدا پرونده ابطال رکورد مالی مرتبط را شروع کنید.', undefined,
+      before.contractId ? `/dashboard/accounting/contracts/${before.contractId}#financial-records` : undefined,
+    );
+    const beforeMetadata = metadataObject(before.metadata);
+    if (beforeMetadata.voidCaseId === voidCase.id && before.submissionStatus === TaxSubmissionStatus.NOT_READY) return before;
+    if (!isSubmittedTaxStatus(before.submissionStatus)) throw accountingVoidInputError(
+      'این سابقه مالیاتی ارسال نشده است و برای ادامه ابطال به تعیین‌تکلیف جداگانه نیاز ندارد.',
+      `/dashboard/accounting/contracts/${voidCase.contractId}#financial-void-cases`,
+    );
+    try {
+      validateFinancialEventDate(effectiveAt, before.submittedAt || before.createdAt);
+    } catch (error) {
+      throw accountingVoidInputError(error instanceof Error ? error.message : 'تاریخ مؤثر معتبر نیست.',
+        `/dashboard/accounting/contracts/${voidCase.contractId}#financial-void-cases`);
+    }
+    const updated = await tx.accountingTaxRecord.update({ where: { id: before.id }, data: {
+      readinessStatus: TaxReadinessStatus.NOT_READY,
+      submissionStatus: TaxSubmissionStatus.NOT_READY,
+      metadata: {
+        ...beforeMetadata,
+        voidCaseId: voidCase.id,
+        voidedWithInvoiceRecordId: before.invoiceRecordId,
+        resolvedForVoidAt: effectiveAt.toISOString(),
+        resolvedForVoidBy: actor.userId,
+        resolvedForVoidReason: reason,
+        previousSubmissionStatus: before.submissionStatus,
+      },
+    } });
+    await audit(tx, { action: 'RESOLVE_TAX_FOR_VOID', actorId: actor.userId, contractId: before.contractId,
+      recordId: before.invoiceRecordId, entityType: 'AccountingTaxRecord', entityId: before.id,
+      beforeState: toJsonValue(before), afterState: toJsonValue(updated), note: reason });
+    return updated;
+  });
+  return actionResponse('APPLIED', 'سابقه مالیاتی برای ابطال تعیین‌تکلیف شد. مرحله بعدی پرونده را انجام دهید.', {
+    contractId: result.contractId || undefined, financialRecordIds: result.invoiceRecordId ? [result.invoiceRecordId] : [],
+  });
 };
 
 const markTaxReady = async (command: AccountingActionRequest, actor: Actor) => {
@@ -2923,7 +3005,8 @@ const voidAccountingReceivable = async (command: AccountingActionRequest, actor:
           `/dashboard/accounting/contracts/${voidCase.contractId}#financial-void-cases`);
       }
     }
-    const effectiveAt = parseDate(command.effectiveAt || command.occurredAt, new Date());
+    const effectiveAt = requiredAccountingEffectiveAt(command.effectiveAt || command.occurredAt,
+      `/dashboard/accounting/receivables?recordId=${before.id}`);
     try {
       validateFinancialEventDate(effectiveAt, before.createdAt);
     } catch (error) {
@@ -3076,6 +3159,26 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
       'ابتدا پرونده ابطال این رکورد مالی را شروع کنید.', undefined,
       '/dashboard/accounting/invoice-candidates',
     );
+    const retainedRecord = voidCase.retainedRecordId ? await tx.accountingFinancialRecord.findUnique({
+      where: { id: voidCase.retainedRecordId },
+    }) : null;
+    const retainedRecordHasOpenVoidCase = retainedRecord ? Boolean(await tx.accountingFinancialVoidCase.findFirst({ where: {
+      sourceRecordId: retainedRecord.id,
+      status: AccountingVoidCaseStatus.OPEN,
+    } })) : false;
+    try {
+      validateRetainedRecordForCompletion({
+        sourceRecordId: recordId,
+        contractId: voidCase.contractId,
+        reasonKind: voidCase.reasonKind,
+        retainedRecordId: voidCase.retainedRecordId,
+        retainedRecord,
+        retainedRecordHasOpenVoidCase,
+      });
+    } catch (error) {
+      throw new AccountingVoidBlockedError(error instanceof Error ? error.message : 'فاکتور معتبر باقی‌مانده قابل تأیید نیست.',
+        undefined, `/dashboard/accounting/contracts/${voidCase.contractId}#financial-records`);
+    }
     const workflow = await loadAccountingVoidWorkflow(tx, voidCase);
     if (workflow.nextAction?.kind !== 'VOID_FINANCIAL_RECORD') throw new AccountingVoidBlockedError(
       workflow.blockers[0]?.messageFa || 'مراحل قبلی پرونده ابطال را کامل کنید.', workflow,

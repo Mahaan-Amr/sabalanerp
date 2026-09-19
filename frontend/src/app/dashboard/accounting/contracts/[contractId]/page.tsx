@@ -145,6 +145,7 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
   const [voidTarget, setVoidTarget] = useState<any | null>(null);
   const [startVoidTarget, setStartVoidTarget] = useState<any | null>(null);
   const [voidReceivableTarget, setVoidReceivableTarget] = useState<{ workflow: AccountingVoidWorkflowView; receivableId: string } | null>(null);
+  const [resolveTaxTarget, setResolveTaxTarget] = useState<{ workflow: AccountingVoidWorkflowView; taxRecordId: string } | null>(null);
   const [cancelVoidTarget, setCancelVoidTarget] = useState<AccountingVoidWorkflowView | null>(null);
   const [replacementTarget, setReplacementTarget] = useState<any | null>(null);
   const [resolveTarget, setResolveTarget] = useState<any | null>(null);
@@ -327,6 +328,17 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
       effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString(),
     });
     if (applied) setVoidReceivableTarget(null);
+  };
+
+  const resolveTaxForVoid = async (values: Record<string, string | number>) => {
+    if (!resolveTaxTarget) return;
+    const applied = await execute({
+      kind: 'RESOLVE_TAX_FOR_VOID',
+      taxRecordId: resolveTaxTarget.taxRecordId,
+      reason: String(values.reason || '').trim(),
+      effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString(),
+    });
+    if (applied) setResolveTaxTarget(null);
   };
 
   const cancelAccountingVoidCase = async (values: Record<string, string | number>) => {
@@ -552,7 +564,7 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
         { label: 'مانده', value: money(contract.accounting.remainingAmount), icon: FaMoneyCheckAlt, tone: contract.accounting.receivableStatus === 'OVERDUE' ? 'danger' : 'warning' },
       ]}
     >
-      {actionError && !deleteTarget && !voidTarget && !startVoidTarget && !voidReceivableTarget && !cancelVoidTarget &&
+      {actionError && !deleteTarget && !voidTarget && !startVoidTarget && !voidReceivableTarget && !resolveTaxTarget && !cancelVoidTarget &&
         !replacementTarget && !resolveTarget && !flagModalOpen && !correctionModalOpen && (
         <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-4 py-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {actionError}
@@ -952,6 +964,7 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
                   <AccountingVoidWorkflowPanel
                     workflows={data.voidWorkflows}
                     busy={actionLoading}
+                    onResolveTax={(workflow, taxRecordId) => setResolveTaxTarget({ workflow, taxRecordId })}
                     onVoidReceivable={(workflow, receivableId) => setVoidReceivableTarget({ workflow, receivableId })}
                     onVoidRecord={(workflow, recordId) => setVoidTarget({ ...workflow, sourceRecordId: recordId })}
                     onCancel={setCancelVoidTarget}
@@ -1194,6 +1207,21 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
         error={actionError}
         onClose={() => setVoidTarget(null)}
         onSubmit={voidAccountingRecord}
+      />
+      <AccountingActionModal
+        open={Boolean(resolveTaxTarget)}
+        title="تعیین‌تکلیف مالیات برای ابطال"
+        description="وضعیت ارسال‌شده در سابقه باقی می‌ماند و تعیین‌تکلیف آن با دلیل و تاریخ مؤثر ثبت می‌شود."
+        fields={[
+          { id: 'reason', label: 'دلیل تعیین‌تکلیف مالیات', type: 'textarea', required: true },
+          { id: 'effectiveAt', label: 'تاریخ مؤثر', type: 'date', required: true },
+        ]}
+        submitLabel="ثبت تعیین‌تکلیف مالیات"
+        destructive
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setResolveTaxTarget(null)}
+        onSubmit={resolveTaxForVoid}
       />
       <AccountingActionModal
         open={Boolean(voidReceivableTarget)}

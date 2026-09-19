@@ -31,9 +31,10 @@ const stateLabel = (state: VoidStep['state']) => ({
   DONE: 'انجام شده', ACTIONABLE: 'اقدام بعدی', WAITING: 'منتظر مرحله قبل', BLOCKED: 'مسدود',
 }[state]);
 
-export default function AccountingVoidWorkflowPanel({ workflows, busy, onVoidReceivable, onVoidRecord, onCancel }: {
+export default function AccountingVoidWorkflowPanel({ workflows, busy, onResolveTax, onVoidReceivable, onVoidRecord, onCancel }: {
   workflows: AccountingVoidWorkflowView[];
   busy?: boolean;
+  onResolveTax: (workflow: AccountingVoidWorkflowView, taxRecordId: string) => void;
   onVoidReceivable: (workflow: AccountingVoidWorkflowView, receivableId: string) => void;
   onVoidRecord: (workflow: AccountingVoidWorkflowView, recordId: string) => void;
   onCancel: (workflow: AccountingVoidWorkflowView) => void;
@@ -81,7 +82,10 @@ export default function AccountingVoidWorkflowPanel({ workflows, busy, onVoidRec
                         <p className="mt-1 text-xs text-[var(--sds-text-muted)]">{stateLabel(step.state)}</p>
                       </div>
                     </div>
-                    {actionable && (step.action!.kind === 'VOID_RECEIVABLE' ? (
+                    {actionable && (step.action!.kind === 'RESOLVE_TAX' ? (
+                      <ErpButton label={step.action!.labelFa} tone="warning" variant="solid" disabled={busy}
+                        onClick={() => onResolveTax(workflow, step.action!.targetId)} />
+                    ) : step.action!.kind === 'VOID_RECEIVABLE' ? (
                       <ErpButton label={step.action!.labelFa} tone="danger" variant="outline" disabled={busy}
                         onClick={() => onVoidReceivable(workflow, step.action!.targetId)} />
                     ) : step.action!.kind === 'VOID_FINANCIAL_RECORD' ? (

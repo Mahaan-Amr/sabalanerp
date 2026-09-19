@@ -27,7 +27,7 @@ const workflow: AccountingVoidWorkflowView = {
 
 test('shows a simple resolution step, responsible role, and direct action for a blocker', () => {
   const html = renderToStaticMarkup(
-    <AccountingVoidWorkflowPanel workflows={[workflow]} onVoidReceivable={() => undefined}
+    <AccountingVoidWorkflowPanel workflows={[workflow]} onResolveTax={() => undefined} onVoidReceivable={() => undefined}
       onVoidRecord={() => undefined} onCancel={() => undefined} />,
   );
   assert.match(html, /راه‌حل: ابتدا دریافت ثبت‌شده را برگشت بزنید/);

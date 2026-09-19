@@ -47,10 +47,15 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
       occurredAt: createdAt, createdBy: actor.userId,
       metadata: { collectionMovements: [{ kind: 'RECEIVED', effectiveAt: createdAt.toISOString(), amount: '100.00' }] },
     } });
-    const unsentTax = await prisma.accountingTaxRecord.create({ data: {
+    const submittedTax = await prisma.accountingTaxRecord.create({ data: {
       contractId, invoiceRecordId: source.id, readinessStatus: TaxReadinessStatus.READY,
-      submissionStatus: TaxSubmissionStatus.READY, missingFields: [], createdBy: actor.userId,
+      submissionStatus: TaxSubmissionStatus.SUBMITTED_MANUALLY, missingFields: [], createdBy: actor.userId,
     } });
+
+    await assert.rejects(() => executeAccountingAction({
+      kind: 'START_ACCOUNTING_VOID_CASE', recordId: source.id, retainedRecordId: retained.id,
+      reasonKind: 'DUPLICATE_ISSUE', reason: 'صدور تکراری',
+    }, actor), /تاریخ مؤثر/);
 
     const started = await executeAccountingAction({
       kind: 'START_ACCOUNTING_VOID_CASE', recordId: source.id, retainedRecordId: retained.id,
@@ -64,6 +69,11 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
 
     await executeAccountingAction({ kind: 'REVERSE_RECEIPT', paymentEventId: payment.id,
       reason: 'برگشت پیش از ابطال فاکتور تکراری', effectiveAt }, actor);
+    await executeAccountingAction({ kind: 'RESOLVE_TAX_FOR_VOID', taxRecordId: submittedTax.id,
+      reason: 'تعیین‌تکلیف مالیات فاکتور تکراری', effectiveAt }, actor);
+    const openCase = await prisma.accountingFinancialVoidCase.findFirstOrThrow({ where: { sourceRecordId: source.id } });
+    await assert.rejects(() => executeAccountingAction({ kind: 'CANCEL_ACCOUNTING_VOID_CASE', voidCaseId: openCase.id,
+      cancellationReason: 'نباید پس از تغییر مالی ممکن باشد' }, actor), /پس از اولین تغییر مالی/);
     await executeAccountingAction({ kind: 'VOID_ACCOUNTING_RECEIVABLE', receivableId: receivable.id,
       reason: 'دریافتنی فاکتور تکراری', effectiveAt }, actor);
     await executeAccountingAction({ kind: 'VOID_ACCOUNTING_RECORD', recordId: source.id }, actor);
@@ -73,7 +83,7 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
       prisma.accountingReceivable.findUniqueOrThrow({ where: { id: receivable.id } }),
       prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: source.id } }),
       prisma.accountingFinancialVoidCase.findFirstOrThrow({ where: { sourceRecordId: source.id } }),
-      prisma.accountingTaxRecord.findUniqueOrThrow({ where: { id: unsentTax.id } }),
+      prisma.accountingTaxRecord.findUniqueOrThrow({ where: { id: submittedTax.id } }),
     ]);
     assert.equal(finalPayment.status, PaymentAccountingStatus.REVERSED);
     assert.equal(finalReceivable.paidAmount.toString(), '0');
@@ -83,6 +93,7 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
     assert.equal(finalTax.readinessStatus, TaxReadinessStatus.NOT_READY);
     assert.equal(finalTax.submissionStatus, TaxSubmissionStatus.NOT_READY);
     assert.equal((finalTax.metadata as { voidedWithInvoiceRecordId?: string }).voidedWithInvoiceRecordId, source.id);
+    assert.equal((finalTax.metadata as { voidCaseId?: string }).voidCaseId, finalCase.id);
   } finally {
     await prisma.accountingAuditLog.deleteMany({ where: { contractId } });
     await prisma.accountingFinancialVoidCase.deleteMany({ where: { contractId } });

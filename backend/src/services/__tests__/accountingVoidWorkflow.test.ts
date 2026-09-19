@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildAccountingVoidWorkflow, validateAccountingVoidCaseStart } from '../accountingVoidWorkflow';
+import {
+  buildAccountingVoidWorkflow,
+  validateAccountingVoidCaseStart,
+  validateRetainedRecordForCompletion,
+} from '../accountingVoidWorkflow';
 
 const baseCase = {
   id: 'case-1',
@@ -42,6 +46,16 @@ test('guides the manager through receipts, receivable, then invoice without casc
     taxRecords: [],
   });
   assert.equal(readyForInvoice.nextAction?.kind, 'VOID_FINANCIAL_RECORD');
+  assert.equal(readyForInvoice.blockers.some(item => item.code === 'ACTIVE_RECEIPT'), false);
+
+  const unsentTax = buildAccountingVoidWorkflow({
+    voidCase: baseCase,
+    sourceRecord: { id: 'invoice-1406', status: 'ISSUED' },
+    receivables: [{ id: 'receivable-1', status: 'VOIDED', paidAmount: '0', remainingAmount: '1000' }],
+    payments: [],
+    taxRecords: [{ id: 'tax-ready', submissionStatus: 'READY' }],
+  });
+  assert.equal(unsentTax.nextAction?.kind, 'VOID_FINANCIAL_RECORD');
 });
 
 test('explains check and submitted-tax blockers in simple Persian', () => {
@@ -122,4 +136,15 @@ test('effective void date cannot precede the source record or be in the future',
     reasonKind: 'OTHER', reason: 'اشتباه ثبت', effectiveAt: new Date('2026-09-09'), now: new Date('2026-09-19') }), /پیش از تاریخ/);
   assert.throws(() => validateAccountingVoidCaseStart({ sourceRecord, retainedRecord: null,
     reasonKind: 'OTHER', reason: 'اشتباه ثبت', effectiveAt: new Date('2026-09-20'), now: new Date('2026-09-19') }), /آینده/);
+});
+
+test('duplicate completion still requires the retained invoice to be valid and outside another open void case', () => {
+  assert.throws(() => validateRetainedRecordForCompletion({
+    sourceRecordId: 'invoice-1406', contractId: 'contract-1', reasonKind: 'DUPLICATE_ISSUE', retainedRecordId: 'invoice-1405',
+    retainedRecord: { id: 'invoice-1405', contractId: 'contract-1', status: 'VOIDED' }, retainedRecordHasOpenVoidCase: false,
+  }), /باطل‌نشده/);
+  assert.throws(() => validateRetainedRecordForCompletion({
+    sourceRecordId: 'invoice-1406', contractId: 'contract-1', reasonKind: 'DUPLICATE_ISSUE', retainedRecordId: 'invoice-1405',
+    retainedRecord: { id: 'invoice-1405', contractId: 'contract-1', status: 'ISSUED' }, retainedRecordHasOpenVoidCase: true,
+  }), /پرونده ابطال باز/);
 });

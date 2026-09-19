@@ -1,10 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  accountingVoidAuditOccurredAt,
   buildAccountingVoidWorkflow,
   validateAccountingVoidCaseStart,
   validateRetainedRecordForCompletion,
 } from '../accountingVoidWorkflow';
+
+test('uses lifecycle timestamps instead of the financial effective date in case history', () => {
+  const effectiveAt = '2026-09-19T00:00:00.000Z';
+  const startedAt = '2026-09-19T08:00:00.000Z';
+  const completedAt = '2026-09-19T09:00:00.000Z';
+  const createdAt = new Date('2026-09-19T10:00:00.000Z');
+  assert.equal(accountingVoidAuditOccurredAt({
+    action: 'START_ACCOUNTING_VOID_CASE', createdAt, afterState: { effectiveAt, startedAt },
+  }), startedAt);
+  assert.equal(accountingVoidAuditOccurredAt({
+    action: 'COMPLETE_ACCOUNTING_VOID_CASE', createdAt, afterState: { effectiveAt, startedAt, completedAt },
+  }), completedAt);
+});
 
 const baseCase = {
   id: 'case-1',

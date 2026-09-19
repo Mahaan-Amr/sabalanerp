@@ -68,6 +68,26 @@ const linkedVoidCaseId = (metadata: unknown) => metadata && typeof metadata === 
   ? String((metadata as Record<string, unknown>).voidCaseId || '')
   : '';
 
+export const accountingVoidAuditOccurredAt = (event: {
+  action: string;
+  createdAt: Date;
+  afterState?: unknown;
+}) => {
+  const afterState = event.afterState && typeof event.afterState === 'object' && !Array.isArray(event.afterState)
+    ? event.afterState as Record<string, unknown>
+    : {};
+  const metadata = afterState.metadata && typeof afterState.metadata === 'object' && !Array.isArray(afterState.metadata)
+    ? afterState.metadata as Record<string, unknown>
+    : {};
+  const lifecycleTimestamp = event.action === 'COMPLETE_ACCOUNTING_VOID_CASE' ? afterState.completedAt
+    : event.action === 'CANCEL_ACCOUNTING_VOID_CASE' ? afterState.cancelledAt
+      : event.action === 'START_ACCOUNTING_VOID_CASE' ? afterState.startedAt
+        : undefined;
+  const timestamp = lifecycleTimestamp || metadata.reversedAt || metadata.resolvedForVoidAt || metadata.voidedAt ||
+    afterState.occurredAt || afterState.voidedAt || afterState.effectiveAt;
+  return timestamp instanceof Date || typeof timestamp === 'string' ? timestamp : event.createdAt;
+};
+
 export const validateAccountingVoidCaseStart = (input: {
   sourceRecord: { id: string; contractId?: string | null; status: string; createdAt: Date;
     systemInvoiceDate?: Date | null; financiallyApprovedAt?: Date | null; postedAt?: Date | null };

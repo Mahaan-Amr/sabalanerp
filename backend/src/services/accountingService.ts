@@ -94,6 +94,7 @@ import { hasConflictingPartnerAccountingEvidence } from './partnerSales/accounti
 import { PartnerAccountingCommandError } from './partnerSales/accounting/errors';
 import { runPartnerAwareTaxMutation } from './partnerSales/accounting/taxCommands';
 import {
+  accountingVoidAuditOccurredAt,
   buildAccountingVoidWorkflow,
   tehranAccountingDayKey,
   validateAccountingVoidCaseStart,
@@ -1368,15 +1369,10 @@ export const getAccountingContractDetail = async (contractId: string) => {
       const stateMetadata = metadataObject(metadataObject(event.afterState).metadata);
       return stateMetadata.voidCaseId === voidCase.id;
     }).map(event => {
-      const afterState = metadataObject(event.afterState);
-      const stateMetadata = metadataObject(afterState.metadata);
-      const effectiveAt = stateMetadata.reversedAt || stateMetadata.resolvedForVoidAt || stateMetadata.voidedAt ||
-        afterState.occurredAt || afterState.voidedAt || afterState.effectiveAt || afterState.completedAt ||
-        afterState.cancelledAt || afterState.startedAt || event.createdAt;
       return {
         id: event.id,
         action: event.action,
-        occurredAt: effectiveAt,
+        occurredAt: accountingVoidAuditOccurredAt(event),
         actorName: voidActorLabel(event.actorId),
         note: event.note,
       };

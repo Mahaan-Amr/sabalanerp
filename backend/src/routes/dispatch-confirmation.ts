@@ -35,7 +35,6 @@ const service = () => {
   return new DispatchConfirmationService(prisma, { connector: simulatorAllowed ? new DeterministicBiometricSimulator() : unavailableConnector,
     vault: new ProtectedTemplateVault({ activeKeyId: 'dispatch-v1', keys: { 'dispatch-v1': key } }),
     otpSecret: process.env.DISPATCH_CONFIRMATION_OTP_SECRET || '',
-    production: process.env.NODE_ENV === 'production', legalReadinessEnabled: process.env.BIOMETRIC_LEGAL_READY === 'true',
     sendOtp: async ({ phone, code, dispatchNumber }) => {
       const result = await smsService.sendDispatchConfirmationOtp({ phoneNumber: phone, code, dispatchNumber });
       if (!result.success) throw new Error(result.error || 'OTP delivery failed');
@@ -68,11 +67,6 @@ router.get('/capabilities', protect, async (req: AuthRequest, res) => {
   } catch (error) { return handle(res, error); }
 });
 
-router.post('/governance-policies', hrManage, async (req: AuthRequest, res) => {
-  try { return res.status(201).json({ success: true, data: await service().recordGovernancePolicy({ ...req.body,
-    counselApprovedAt: new Date(req.body.counselApprovedAt), activeFrom: req.body.activeFrom ? new Date(req.body.activeFrom) : undefined, actorId: req.user!.id }) }); }
-  catch (error) { return handle(res, error); }
-});
 router.post('/internal-drivers/:personnelId/enrollment-commands', hrManage, async (req: AuthRequest, res) => {
   try {
     if (simulatorEnabled()) throw new DispatchConfirmationConflictError('Physical enrollment commands are disabled in simulator mode.');
@@ -97,7 +91,7 @@ router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: A
         const templates = claimed.map((item) => ({ finger: item.challenge.finger!, format: 'ISO-19794-2', material: item.material,
           deviceEvidence: { commandId: item.challenge.id, deviceModel: item.response.result.device.model, deviceSerial: item.response.result.device.serial,
             captureQuality: item.response.result.captureQuality, liveness: item.response.result.liveness }, provenance: 'APPROVED_CONNECTOR' as const }));
-        const data = await service().enrollInternalDriver({ personnelId: req.params.personnelId, acknowledgement: req.body.acknowledgement,
+        const data = await service().enrollInternalDriver({ personnelId: req.params.personnelId,
           confirmationPhone: req.body.confirmationPhone, templates, actorId: req.user!.id });
         success = true;
         return res.status(201).json({ success: true, data });
@@ -119,11 +113,11 @@ router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: A
         deviceEvidence: { commandId, deviceModel: result.device.model, deviceSerial: result.device.serial, captureQuality: result.captureQuality, liveness: result.liveness }, provenance: 'APPROVED_CONNECTOR' as const };
     }));
     return res.status(201).json({ success: true, data: await service().enrollInternalDriver({ personnelId: req.params.personnelId,
-      acknowledgement: req.body.acknowledgement, confirmationPhone: req.body.confirmationPhone, templates, actorId: req.user!.id }) });
+      confirmationPhone: req.body.confirmationPhone, templates, actorId: req.user!.id }) });
   } catch (error) { return handle(res, error); }
 });
-router.post('/enrollments/:enrollmentId/withdraw', hrManage, async (req: AuthRequest, res) => {
-  try { return res.json({ success: true, data: await service().withdrawEnrollment({ enrollmentId: req.params.enrollmentId, actorId: req.user!.id, reason: req.body.reason }) }); }
+router.post('/enrollments/:enrollmentId/deactivate', hrManage, async (req: AuthRequest, res) => {
+  try { return res.json({ success: true, data: await service().deactivateEnrollment({ enrollmentId: req.params.enrollmentId, actorId: req.user!.id, reason: req.body.reason }) }); }
   catch (error) { return handle(res, error); }
 });
 router.post('/waybills/:waybillId/sessions', accountingManage, async (req: AuthRequest, res) => {

@@ -28,25 +28,13 @@ const main = async () => {
   const driver = await prisma.internalDriverProfile.create({ data: { personnelId: personnel.id, status: 'ACTIVE', createdBy: actor.id } });
   await prisma.internalDriverEligibilityPeriod.create({ data: { driverId: driver.id, status: 'ELIGIBLE', effectiveFrom: now,
     reason: 'Dispatch confirmation verification', recordedBy: actor.id } });
-  if (!await prisma.biometricGovernancePolicy.findFirst({ where: { activeFrom: { lte: now }, retiredAt: null } })) {
-    await assert.rejects(service.assertEnrollmentCaptureAllowed(personnel.id), /disabled until legal basis/i);
-    await assert.rejects(service.enrollInternalDriver({ personnelId: personnel.id, acknowledgement: 'accepted', confirmationPhone: '09121111111',
-      templates: [{ finger: 'LEFT_INDEX', format: 'ISO-19794-2', material: Buffer.from('one'), deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' },
-        { finger: 'RIGHT_INDEX', format: 'ISO-19794-2', material: Buffer.from('two'), deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' }], actorId: actor.id }), /disabled until legal basis/i);
-  }
-  await service.recordGovernancePolicy({ policyVersion: `policy-${suffix}`, legalBasis: 'Explicit employee acknowledgement for gate identity confirmation',
-    consentWordingVersion: 'dispatch-consent-v1', templateRetentionDays: 365, confirmationEvidenceRetentionDays: 365,
-    securityLogRetentionDays: 730, exportRetentionDays: 365, backupRetentionDays: 90, deletionCertificateRetentionDays: 2555,
-    accessControlPolicy: 'Narrow HR and Security permissions', legalHoldPolicy: 'Suspend deletion under documented hold',
-    incidentResponsePolicy: 'Notify Security and privacy counsel', disclosurePolicy: 'No ordinary export or disclosure',
-    counselApprovedAt: now, counselApprovedBy: `counsel-${suffix}`, actorId: actor.id });
-  await assert.rejects(service.enrollInternalDriver({ personnelId: personnel.id, acknowledgement: 'accepted', confirmationPhone: '09121111111',
+  await service.assertEnrollmentCaptureAllowed(personnel.id);
+  await assert.rejects(service.enrollInternalDriver({ personnelId: personnel.id, confirmationPhone: '09121111111',
     templates: [{ finger: 'LEFT_INDEX', format: 'ISO-19794-2', material: Buffer.from('one'), deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' }], actorId: actor.id }), /two distinct fingers/i);
-  await assert.rejects(service.enrollInternalDriver({ personnelId: personnel.id, acknowledgement: 'accepted', confirmationPhone: '09121111111',
+  await assert.rejects(service.enrollInternalDriver({ personnelId: personnel.id, confirmationPhone: '09121111111',
     templates: [{ finger: 'LEFT_INDEX', format: 'ISO-19794-2', material: Buffer.from('one'), deviceEvidence: { rawImage: 'forbidden' }, provenance: 'APPROVED_CONNECTOR' },
       { finger: 'RIGHT_INDEX', format: 'ISO-19794-2', material: Buffer.from('two'), deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' }], actorId: actor.id }), /Raw biometric material/i);
-  const enrollment = await service.enrollInternalDriver({ personnelId: personnel.id, acknowledgement: 'Policy accepted for dispatch confirmation',
-    confirmationPhone: '09121111111', templates: [
+  const enrollment = await service.enrollInternalDriver({ personnelId: personnel.id, confirmationPhone: '09121111111', templates: [
       { finger: 'LEFT_INDEX', format: 'ISO-19794-2', material: Buffer.from('protected-feature-vector-one'), deviceEvidence: { deviceSerial: 'SIM-0001', quality: 90 }, provenance: 'APPROVED_CONNECTOR' },
       { finger: 'RIGHT_INDEX', format: 'ISO-19794-2', material: Buffer.from('protected-feature-vector-two'), deviceEvidence: { deviceSerial: 'SIM-0001', quality: 92 }, provenance: 'APPROVED_CONNECTOR' },
     ], actorId: actor.id });
@@ -170,15 +158,15 @@ const main = async () => {
   const expiring = await service.startSession({ waybillId: expiringWaybill.id, actorId: actor.id, workstationId: 'ACCOUNTING-01' });
   now = new Date(now.getTime() + 10 * 60_000 + 1);
   await assert.rejects(service.verifyInternalBiometric({ sessionId: expiring.id, actorId: actor.id }), /expired/i);
-  const consentWaybill = await cloneInternalWaybill();
-  const consentSession = await service.startSession({ waybillId: consentWaybill.id, actorId: actor.id, workstationId: 'ACCOUNTING-01' });
-  await service.verifyInternalBiometric({ sessionId: consentSession.id, actorId: actor.id, scenario: 'DISCONNECT' });
-  await service.beginInternalFallback({ sessionId: consentSession.id, actorId: actor.id });
-  await service.verifyOtp({ sessionId: consentSession.id, code: deliveries.at(-1)!.code, actorId: actor.id });
-  const withdrawn = await service.withdrawEnrollment({ enrollmentId: enrollment.id, actorId: actor.id, reason: 'Driver withdrew biometric consent' });
-  assert.equal(withdrawn.status, 'WITHDRAWN');
-  await assert.rejects(service.approveByGuard({ sessionId: consentSession.id, guardActorId: `guard-consent-${suffix}`, reauthenticatedAt: now,
-    reason: 'Scanner disconnected' }), /consent ended/i);
+  const deactivationWaybill = await cloneInternalWaybill();
+  const deactivationSession = await service.startSession({ waybillId: deactivationWaybill.id, actorId: actor.id, workstationId: 'ACCOUNTING-01' });
+  await service.verifyInternalBiometric({ sessionId: deactivationSession.id, actorId: actor.id, scenario: 'DISCONNECT' });
+  await service.beginInternalFallback({ sessionId: deactivationSession.id, actorId: actor.id });
+  await service.verifyOtp({ sessionId: deactivationSession.id, code: deliveries.at(-1)!.code, actorId: actor.id });
+  const deactivated = await service.deactivateEnrollment({ enrollmentId: enrollment.id, actorId: actor.id, reason: 'Operational deactivation' });
+  assert.equal(deactivated.status, 'INACTIVE');
+  await assert.rejects(service.approveByGuard({ sessionId: deactivationSession.id, guardActorId: `guard-deactivation-${suffix}`, reauthenticatedAt: now,
+    reason: 'Scanner disconnected' }), /enrollment ended/i);
   await prisma.internalDriverProfile.update({ where: { id: driver.id }, data: { status: 'ARCHIVED' } });
   const ineligibleWaybill = await cloneInternalWaybill();
   await assert.rejects(service.startSession({ waybillId: ineligibleWaybill.id, actorId: actor.id, workstationId: 'ACCOUNTING-01' }), /not currently eligible/i);

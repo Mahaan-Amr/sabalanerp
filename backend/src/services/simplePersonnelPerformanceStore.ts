@@ -9,7 +9,15 @@ import {
   type SimpleEvaluatorAuthority,
   type SimplePerformanceDirection,
 } from './simplePersonnelPerformance';
-import { aggregateBehaviorSurveyScores, applySellerPerformanceGates, redistributeSellerFactorWeights, sellerPerformancePeriodFor, sellerPerformancePeriodWindowFor } from './sellerPerformancePolicy';
+import {
+  aggregateBehaviorSurveyScores,
+  applySellerPerformanceGates,
+  redistributeSellerFactorWeights,
+  sellerPerformancePeriodFor,
+  sellerPerformancePeriodWindowFor,
+  SELLER_PERFORMANCE_LEVEL_PRESENTATIONS,
+  type SellerPerformanceLevelCode,
+} from './sellerPerformancePolicy';
 
 type Client = PrismaClient | Prisma.TransactionClient;
 
@@ -264,6 +272,7 @@ export const getSimplePerformanceWorkspace = async (client: Client, actorUserId:
   }
   return {
     currentUserId: actorUserId, personnel, historyPersonnel, assignments,
+    levelLabels: SIMPLE_PERFORMANCE_LEVEL_LABELS,
     currentPeriodKey: sellerPerformancePeriodFor(now).key,
     evaluations: evaluations.map((evaluation) => ({ ...evaluation, evaluatorNameFa: evaluatorNames.get(evaluation.evaluatorUserId) || 'نامشخص' })),
     profiles, jobs, currentJobIdByPersonnel,
@@ -815,6 +824,7 @@ export const createSimplePerformanceCorrection = async (client: Client, input: {
 };
 
 export const getSimplePerformanceBadges = async (client: Client, personnelIds: string[], now = new Date()) => {
+  const unevaluatedCompanion = SELLER_PERFORMANCE_LEVEL_PRESENTATIONS.COMPANION;
   const [activePersonnel, relationships] = await Promise.all([
     client.personnel.findMany({
       where: { id: { in: personnelIds }, isActive: true, archivedAt: null }, select: { id: true },
@@ -832,20 +842,29 @@ export const getSimplePerformanceBadges = async (client: Client, personnelIds: s
   }
   const currentRelationshipByPersonnel = new Map<string, string>();
   const badges: Record<string, unknown> = Object.fromEntries(activePersonnel.map(({ id }) => [id, {
-    state: 'LEVEL', levelCode: 'COMPANION', labelFa: 'همراه',
-    meaningFa: 'هنوز نتیجه رسمی هفت‌سطحی ثبت نشده است.', version: 2, officialResult: false,
+    state: 'LEVEL', levelCode: 'COMPANION', labelFa: unevaluatedCompanion.labelFa,
+    meaningFa: unevaluatedCompanion.meaningFa, ordinal: unevaluatedCompanion.ordinal,
+    stoneFamily: unevaluatedCompanion.stoneFamily, lightAsset: unevaluatedCompanion.lightAsset,
+    darkAsset: unevaluatedCompanion.darkAsset, presentationVersion: unevaluatedCompanion.presentationVersion,
+    version: 2, officialResult: false,
   }]));
   for (const [personnelId, relationshipIds] of relationshipsByPersonnel) {
     if (relationshipIds.length === 1) {
       currentRelationshipByPersonnel.set(personnelId, relationshipIds[0]);
       badges[personnelId] = {
-        state: 'LEVEL', levelCode: 'COMPANION', labelFa: 'همراه',
-        meaningFa: 'هنوز نتیجه رسمی هفت‌سطحی ثبت نشده است.', version: 2, officialResult: false,
+        state: 'LEVEL', levelCode: 'COMPANION', labelFa: unevaluatedCompanion.labelFa,
+        meaningFa: unevaluatedCompanion.meaningFa, ordinal: unevaluatedCompanion.ordinal,
+        stoneFamily: unevaluatedCompanion.stoneFamily, lightAsset: unevaluatedCompanion.lightAsset,
+        darkAsset: unevaluatedCompanion.darkAsset, presentationVersion: unevaluatedCompanion.presentationVersion,
+        version: 2, officialResult: false,
       };
     }
     else if (relationshipIds.length > 1) badges[personnelId] = {
-      state: 'LEVEL', levelCode: 'COMPANION', labelFa: 'همراه',
-      meaningFa: 'اطلاعات استخدام برای صدور نتیجه رسمی نیاز به بررسی دارد.', version: 2, officialResult: false,
+      state: 'LEVEL', levelCode: 'COMPANION', labelFa: unevaluatedCompanion.labelFa,
+      meaningFa: unevaluatedCompanion.meaningFa, ordinal: unevaluatedCompanion.ordinal,
+      stoneFamily: unevaluatedCompanion.stoneFamily, lightAsset: unevaluatedCompanion.lightAsset,
+      darkAsset: unevaluatedCompanion.darkAsset, presentationVersion: unevaluatedCompanion.presentationVersion,
+      version: 2, officialResult: false,
     };
   }
   const evaluations = await client.simplePerformanceEvaluation.findMany({
@@ -858,9 +877,9 @@ export const getSimplePerformanceBadges = async (client: Client, personnelIds: s
       || currentRelationshipByPersonnel.get(evaluation.personnelId) !== evaluation.employmentRelationshipId) continue;
     const levelCode = evaluation.levelCode as keyof typeof SIMPLE_PERFORMANCE_LEVEL_LABELS;
     if (!SIMPLE_PERFORMANCE_LEVEL_LABELS[levelCode]) continue;
+    const presentation = SELLER_PERFORMANCE_LEVEL_PRESENTATIONS[levelCode as SellerPerformanceLevelCode];
     badges[evaluation.personnelId] = {
-      state: 'LEVEL', levelCode, labelFa: SIMPLE_PERFORMANCE_LEVEL_LABELS[levelCode],
-      meaningFa: 'آخرین نتیجه نهایی عملکرد.',
+      state: 'LEVEL', levelCode, ...presentation,
       newestMeasurementTo: (evaluation.measurementTo ?? evaluation.evaluationDate).toISOString(), version: 2, officialResult: true,
     };
     resolvedPersonnelIds.add(evaluation.personnelId);

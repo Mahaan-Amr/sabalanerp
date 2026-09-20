@@ -54,6 +54,7 @@ type LegacyEvaluation = {
 };
 type Workspace = {
   currentUserId: string;
+  levelLabels: Record<string, string>;
   currentPeriodKey: PerformancePeriodKey;
   evaluablePersonnelIds: string[];
   latestFinalizedAtByPersonnel: Record<string, string>;
@@ -64,10 +65,6 @@ type Workspace = {
 };
 type ProfileIndicatorDraft = Omit<Indicator, "id" | "sortOrder">;
 
-const levelLabels: Record<string, string> = {
-  COMPANION: "همراه", DILIGENT: "کوشا", WORTHY: "شایسته", CAPABLE: "توانمند",
-  SUPERIOR: "برتر", EXCELLENT: "سرآمد", ROLE_MODEL: "الگو",
-};
 const levelTones: Record<string, "neutral" | "warning" | "success" | "primary" | "purple"> = {
   COMPANION: "neutral", DILIGENT: "warning", WORTHY: "success", CAPABLE: "success",
   SUPERIOR: "primary", EXCELLENT: "purple", ROLE_MODEL: "purple",
@@ -396,7 +393,7 @@ export default function SimplePerformanceWorkspace() {
 
         {canFinalize && pendingResults.length > 0 && <ErpSection title="نتیجه‌های پیشنهادی و اعتراض‌ها"><div className="space-y-3">
           {pendingResults.map((evaluation) => <ErpCard key={evaluation.id} className="p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{workspace?.personnel.find(({ id }) => id === evaluation.personnelId)?.firstName} {workspace?.personnel.find(({ id }) => id === evaluation.personnelId)?.lastName}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{evaluation.periodLabelFa || dateFa(evaluation.evaluationDate)} · امتیاز {scoreFa(evaluation.score)} · {levelLabels[evaluation.levelCode || ""] || "—"}</p>{evaluation.appealDeadline && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">مهلت اعتراض: {dateTimeFa(evaluation.appealDeadline)}</p>}</div><ErpBadge tone={evaluation.appealedAt ? "warning" : "neutral"}>{evaluation.appealedAt ? "دارای اعتراض" : "در مهلت بازبینی"}</ErpBadge></div>
+            <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{workspace?.personnel.find(({ id }) => id === evaluation.personnelId)?.firstName} {workspace?.personnel.find(({ id }) => id === evaluation.personnelId)?.lastName}</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{evaluation.periodLabelFa || dateFa(evaluation.evaluationDate)} · امتیاز {scoreFa(evaluation.score)} · {workspace?.levelLabels[evaluation.levelCode || ""] || "—"}</p>{evaluation.appealDeadline && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">مهلت اعتراض: {dateTimeFa(evaluation.appealDeadline)}</p>}</div><ErpBadge tone={evaluation.appealedAt ? "warning" : "neutral"}>{evaluation.appealedAt ? "دارای اعتراض" : "در مهلت بازبینی"}</ErpBadge></div>
             {evaluation.appealText && <div className="mt-3 space-y-2"><p className="text-sm leading-7">متن اعتراض: {evaluation.appealText}</p>{!evaluation.appealResolvedAt && <><ErpField label="نتیجه رسیدگی" required><ErpTextarea rows={3} value={appealResolution[evaluation.id] || ""} onChange={(event) => setAppealResolution((items) => ({ ...items, [evaluation.id]: event.target.value }))} /></ErpField><ErpButton label="ثبت رسیدگی" variant="soft" disabled={pending || (appealResolution[evaluation.id] || "").trim().length < 8} onClick={() => setResolveAppealId(evaluation.id)} /></>}</div>}
             <div className="mt-3"><ErpButton label="انتشار نتیجه رسمی" disabled={pending || Boolean(evaluation.appealedAt && !evaluation.appealResolvedAt)} onClick={() => setPublishEvaluationId(evaluation.id)} /></div>
           </ErpCard>)}
@@ -450,7 +447,7 @@ export default function SimplePerformanceWorkspace() {
           {historyGroups.map(([month, evaluations]) => <div key={month} className="space-y-3">
             <p className="font-semibold">{month}</p>
             {evaluations.map((evaluation) => <ErpCard key={evaluation.id} className="p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{dateFa(evaluation.evaluationDate)}</p>{evaluation.levelCode && <ErpBadge tone={levelTones[evaluation.levelCode] || "neutral"}>{levelLabels[evaluation.levelCode] || evaluation.levelCode}</ErpBadge>}{evaluation.supersededAt && <ErpBadge tone="neutral">اصلاح‌شده</ErpBadge>}</div><p className="mt-2 text-sm text-[var(--sds-text-secondary)]">امتیاز: {scoreFa(evaluation.score)} · ارزیاب: {evaluation.evaluatorNameFa} ({evaluation.evaluatorAuthority === "HR_MANAGER" ? "منابع انسانی" : "سرپرست"})</p>{evaluation.finalizedAt && <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">نهایی‌شده: {dateTimeFa(evaluation.finalizedAt)}</p>}</div></div>
+              <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{dateFa(evaluation.evaluationDate)}</p>{evaluation.levelCode && <ErpBadge tone={levelTones[evaluation.levelCode] || "neutral"}>{workspace?.levelLabels[evaluation.levelCode] || evaluation.levelCode}</ErpBadge>}{evaluation.supersededAt && <ErpBadge tone="neutral">اصلاح‌شده</ErpBadge>}</div><p className="mt-2 text-sm text-[var(--sds-text-secondary)]">امتیاز: {scoreFa(evaluation.score)} · ارزیاب: {evaluation.evaluatorNameFa} ({evaluation.evaluatorAuthority === "HR_MANAGER" ? "منابع انسانی" : "سرپرست"})</p>{evaluation.finalizedAt && <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">نهایی‌شده: {dateTimeFa(evaluation.finalizedAt)}</p>}</div></div>
               {!evaluation.supersededAt && canEvaluateSelected && (workspace.capabilities.EVALUATE_ALL_PERSONNEL || evaluation.evaluatorUserId === workspace.currentUserId) && <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]"><ErpField label="دلیل اصلاح"><ErpTextarea rows={2} value={correctionReason[evaluation.id] || ""} onChange={(event) => setCorrectionReason((items) => ({ ...items, [evaluation.id]: event.target.value }))} /></ErpField><div className="md:self-end"><ErpButton label="اصلاح نتیجه" variant="soft" onClick={() => void beginCorrection(evaluation)} disabled={pending} /></div></div>}
             </ErpCard>)}
           </div>)}
@@ -467,7 +464,7 @@ export default function SimplePerformanceWorkspace() {
         <div className="space-y-2 text-sm text-[var(--sds-text-secondary)]">
           <p>{selectedPersonnel?.firstName} {selectedPersonnel?.lastName}</p>
           <p>تاریخ: {dateFa(selectedEvaluation?.evaluationDate || evaluationDate)}</p>
-          {preview && <p>امتیاز: {scoreFa(preview.score)} · نشان: {levelLabels[preview.level]}</p>}
+          {preview && <p>امتیاز: {scoreFa(preview.score)} · نشان: {workspace?.levelLabels[preview.level]}</p>}
           <ErpCheckbox checked={confirmedSeriousViolation} onChange={(event) => setConfirmedSeriousViolation(event.target.checked)} label="تخلف جدی این دوره پس از تکمیل رسیدگی و حق اعتراض، قطعی شده است." />
           {newerFinalExists && <p className="text-[var(--sds-warning)]">بعد از این پیش‌نویس، نتیجه جدیدتری ثبت شده است. با ثبت این ارزیابی، جدیدترین نتیجه نشان داده می‌شود.</p>}
         </div>

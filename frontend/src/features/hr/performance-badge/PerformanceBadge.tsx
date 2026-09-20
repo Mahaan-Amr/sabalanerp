@@ -8,6 +8,15 @@ import { personnelPerformanceAPI } from '@/lib/api';
 import { dateFa } from '@/features/hr/hrUi';
 import { performanceBadgePresentation, type PerformanceBadgeSummary } from './performanceBadgeModel';
 
+function RomanNumeral({ value }: { value?: 'I' | 'II' | 'III' }) {
+  return value ? <bdi
+    dir="ltr"
+    aria-hidden="true"
+    className="block bg-clip-text text-center text-[11px] font-bold leading-none text-transparent"
+    style={{ fontFamily: 'Georgia, "Times New Roman", serif', backgroundImage: 'linear-gradient(180deg, var(--sds-artwork-metal-gold-highlight) 0%, var(--sds-artwork-metal-gold-mid) 45%, var(--sds-artwork-metal-gold-shadow) 100%)' }}
+  >{value}</bdi> : null;
+}
+
 export function PerformanceBadge({ badge, onAppeal }: { badge: PerformanceBadgeSummary; compact?: boolean; onAppeal?: (text: string) => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [appealText, setAppealText] = useState('');
@@ -18,24 +27,30 @@ export function PerformanceBadge({ badge, onAppeal }: { badge: PerformanceBadgeS
     <ErpPressable
       type="button"
       onClick={(event) => { event.stopPropagation(); setOpen(true); }}
-      aria-label={`سطح عملکرد: ${presentation.labelFa}`}
+      aria-label={`سطح عملکرد: ${presentation.labelFa}${badge.officialResult === false ? '، بدون نتیجه رسمی' : ''}`}
       className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 py-1 text-right dark:border-[var(--sds-border-strong)]"
     >
-      <span className="relative block h-9 w-9 shrink-0" aria-hidden="true">
-        <Image src={presentation.lightAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="object-contain dark:hidden" unoptimized />
-        <Image src={presentation.darkAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="hidden object-contain dark:block" unoptimized />
+      <span className="flex w-9 shrink-0 flex-col items-center gap-0.5" aria-hidden="true">
+        <span className="relative block h-9 w-9">
+          <Image src={presentation.lightAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="object-contain dark:hidden" unoptimized />
+          <Image src={presentation.darkAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="hidden object-contain dark:block" unoptimized />
+        </span>
+        <RomanNumeral value={presentation.romanNumeral} />
       </span>
       <span className="text-xs font-bold text-[var(--sds-text-primary)]">{presentation.labelFa}</span>
       <span className="sr-only">{presentation.meaningFa}</span>
     </ErpPressable>
     <ErpSheet open={open} onClose={() => !appealPending && setOpen(false)} title="خلاصه سطح عملکرد" presentation="modal" pending={appealPending}>
       <div className="space-y-4" dir="rtl">
-        <ErpCard className="flex items-center gap-4 p-4">
-          <span className="relative block h-20 w-20 shrink-0" aria-hidden="true">
-            <Image src={presentation.lightAsset} alt="" fill sizes="80px" style={{ filter: presentation.imageFilter }} className="object-contain dark:hidden" unoptimized />
-            <Image src={presentation.darkAsset} alt="" fill sizes="80px" style={{ filter: presentation.imageFilter }} className="hidden object-contain dark:block" unoptimized />
+        <ErpCard className="flex flex-col items-center p-4 text-center">
+          <span className="flex shrink-0 flex-col items-center gap-1" aria-hidden="true">
+            <span className="relative block h-20 w-20">
+              <Image src={presentation.lightAsset} alt="" fill sizes="80px" style={{ filter: presentation.imageFilter }} className="object-contain dark:hidden" unoptimized />
+              <Image src={presentation.darkAsset} alt="" fill sizes="80px" style={{ filter: presentation.imageFilter }} className="hidden object-contain dark:block" unoptimized />
+            </span>
+            <RomanNumeral value={presentation.romanNumeral} />
           </span>
-          <div><ErpBadge tone={presentation.tone}>{presentation.labelFa}</ErpBadge><p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">{presentation.meaningFa}</p></div>
+          <div className="mt-2"><ErpBadge tone={presentation.tone}>{presentation.labelFa}</ErpBadge><p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">{presentation.meaningFa}</p></div>
         </ErpCard>
         {badge.officialResult === false && <ErpCard className="p-4"><p className="font-bold">بدون نتیجه رسمی</p><p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">نشان «همراه» تا ثبت نخستین نتیجه معتبر نمایش داده می‌شود و در تصمیم‌های رسمی یا تحلیل رقابتی محاسبه نمی‌شود.</p></ErpCard>}
         {badge.details && <>

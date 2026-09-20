@@ -309,7 +309,10 @@ try {
     } });
     assert.deepEqual((await getSimplePerformanceBadges(tx, [personnel.id]))[personnel.id], {
       state: 'LEVEL', levelCode: 'COMPANION', labelFa: 'همراه',
-      meaningFa: 'هنوز نتیجه رسمی هفت‌سطحی ثبت نشده است.', version: 2, officialResult: false,
+      meaningFa: 'با ماست', ordinal: 1, stoneFamily: 'TURQUOISE',
+      lightAsset: '/assets/performance-rank-badges-roman-v1/light/rank-01.png',
+      darkAsset: '/assets/performance-rank-badges-roman-v1/dark/rank-01.png',
+      presentationVersion: 'roman-v1', version: 2, officialResult: false,
     }, 'a rehire starts at the visible companion level without transferring the former result');
     throw rollback;
   });

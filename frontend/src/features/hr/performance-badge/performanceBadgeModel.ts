@@ -11,6 +11,12 @@ export type PerformanceBadgeSummary = {
   nextReviewAt?: string;
   version: number;
   officialResult?: boolean;
+  ordinal?: number;
+  stoneFamily?: 'TURQUOISE' | 'RUBY' | 'DIAMOND';
+  romanNumeral?: 'I' | 'II' | 'III';
+  lightAsset?: string;
+  darkAsset?: string;
+  presentationVersion?: 'roman-v1' | string;
   details?: {
     evaluationId?: string; status?: 'PENDING_APPEAL' | 'FINAL'; score: string | null; behavioralScore: string | null; performanceScore: string | null; evaluationDate: string;
     periodLabelFa?: string | null; measurementFrom?: string | null; measurementTo?: string | null; nextReviewAt?: string | null;
@@ -49,6 +55,19 @@ export const performanceLevelTone = (levelCode: string): PerformanceLevelTone =>
   levelPresentation[levelCode as PerformanceLevelCode]?.tone ?? 'neutral';
 
 export const performanceBadgePresentation = (badge: PerformanceBadgeSummary) => {
+  if (badge.presentationVersion === 'roman-v1' && badge.lightAsset && badge.darkAsset) return {
+    labelFa: badge.labelFa,
+    meaningFa: badge.meaningFa,
+    tone: performanceLevelTone(badge.levelCode ?? ''),
+    lightAsset: badge.lightAsset,
+    darkAsset: badge.darkAsset,
+    imageFilter: undefined,
+    ordinal: badge.ordinal,
+    stoneFamily: badge.stoneFamily,
+    romanNumeral: badge.officialResult === false ? undefined : badge.romanNumeral,
+    presentationVersion: badge.presentationVersion,
+    neutral: false,
+  };
   const level = badge.state === 'LEVEL' && badge.levelCode ? levelPresentation[badge.levelCode] : null;
   const asset = level?.asset ?? 'neutral-frame';
   const tone: PerformanceLevelTone = level?.tone ?? 'neutral';
@@ -60,6 +79,8 @@ export const performanceBadgePresentation = (badge: PerformanceBadgeSummary) => 
     lightAsset: `/assets/performance-rank-badges-v2/light/${asset}.png`,
     darkAsset: `/assets/performance-rank-badges-v2/dark/${asset}.png`,
     imageFilter,
+    romanNumeral: undefined,
+    presentationVersion: undefined,
     neutral: !level,
   };
 };

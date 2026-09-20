@@ -4,12 +4,11 @@ Issue: #224
 
 ## Fail-closed prerequisites
 
-Do not set `BIOMETRIC_CONNECTOR_MODE=physical` or `BIOMETRIC_LEGAL_READY=true` until all of these records exist:
+Do not set `BIOMETRIC_CONNECTOR_MODE=physical` until all of these records exist:
 
 - supplier invoice and unit serial;
 - Xperix production SDK licence plus explicit development, production, redistribution, offline operation and 1:1 matching rights;
 - warranty, replacement turnaround and spare-device terms;
-- qualified Iranian counsel approval covering consent wording, retention, deletion, incident response, disclosure, vendor processing, evidence use, withdrawal and legal hold;
 - Sabalan-owned code-signing certificate and a production package whose pinned signer and manifest pass `install-connector.ps1`;
 - approved workstation hardening record: supported Windows release, patches, restricted local administration, USB power policy, endpoint protection and time synchronization; and
 - named primary/backup HR, Accounting, Guard and IT operators who passed the competency checks below.
@@ -27,7 +26,7 @@ No manager can waive one of these gates. A missing gate keeps enrollment disable
 
 ## Operator competency
 
-- HR: explain consent and withdrawal, confirm identity, capture two distinct fingers, recognize quality/liveness rejection, and never photograph or export a fingerprint.
+- HR: confirm identity, capture two distinct fingers, recognize quality/liveness rejection, and deactivate an enrollment when operationally required.
 - Accounting: bind the correct issued waybill and driver, position the finger, recognize success/non-match/device outage, and start fallback only after the system makes it eligible.
 - Guard supervisor: reauthenticate independently, inspect the live authorization state, record an exception reason, and reject a printed document whose authorization is revoked.
 - IT/support: reconnect and restart safely, verify signatures and ACLs, rotate one workstation without affecting another, preserve journal evidence, and escalate licence/spoof/unknown-result events.
@@ -38,7 +37,7 @@ Each operator must complete one supervised success, one poor-quality retry, one 
 
 - Representative genuine-driver study: at least 100 genuine attempts; at least 95% first-attempt success; no driver below 90%; at least 99% within three attempts.
 - Wrong-driver study: at least 100 attempts across enrolled/non-enrolled driver pairs; zero false matches.
-- Spoof study: use only counsel and safety-approved presentation artifacts; every attempt must fail liveness or matching and must not expose reusable material.
+- Spoof study: use only safety-approved presentation artifacts; every attempt must fail liveness or matching and must not expose reusable material.
 - Latency: p95 from ERP command issuance through authoritative attempt commit must be at most three seconds on the actual pilot PC and network.
 - Resilience: pass application restart, connector restart, USB unplug/replug, USB suspend/resume, workstation reboot, clock skew, licence failure, command replay, ciphertext substitution, revoked enrollment and cross-waybill substitution.
 - Soak: 500 sequential cycles with no duplicate authoritative attempt, stale device handle, unbounded memory growth, local template retention or unreconciled interrupted command; then operate for one full business day.

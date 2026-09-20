@@ -4,9 +4,25 @@ import {
   applySellerPerformanceGates,
   calculateSellerPerformance,
   redistributeSellerFactorWeights,
+  SELLER_PERFORMANCE_LEVEL_PRESENTATIONS,
   sellerPerformancePeriodFor,
   sellerPerformancePeriodWindowFor,
 } from '../sellerPerformancePolicy';
+
+assert.deepEqual(Object.values(SELLER_PERFORMANCE_LEVEL_PRESENTATIONS).map((level) => [
+  level.ordinal, level.labelFa, level.meaningFa, level.stoneFamily, level.romanNumeral,
+]), [
+  [1, 'همراه', 'با ماست', 'TURQUOISE', 'I'],
+  [2, 'هم‌ریشه', 'از ماست', 'TURQUOISE', 'II'],
+  [3, 'کارساز', 'به کار ما می‌آید', 'TURQUOISE', 'III'],
+  [4, 'مانا', 'با ما می‌ماند', 'RUBY', 'I'],
+  [5, 'ستون', 'تکیه‌گاه ماست', 'RUBY', 'II'],
+  [6, 'اثرگذار', 'ما را بهتر می‌کند', 'DIAMOND', 'I'],
+  [7, 'الگو', 'آن‌گونه که باید باشی', 'DIAMOND', 'II'],
+]);
+assert.deepEqual(Object.values(SELLER_PERFORMANCE_LEVEL_PRESENTATIONS).map(({ ordinal, romanNumeral }) => [ordinal, romanNumeral]), [
+  [1, 'I'], [2, 'II'], [3, 'III'], [4, 'I'], [5, 'II'], [6, 'I'], [7, 'II'],
+], 'Roman numerals restart inside each stone family and never define total ordering');
 
 const atTarget = calculateSellerPerformance([{
   factorCode: 'NET_CONTRACT_VALUE',

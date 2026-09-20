@@ -18,7 +18,6 @@ const json = (value: unknown) => value as Prisma.InputJsonValue;
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const addMinutes = (date: Date, minutes: number) => new Date(date.getTime() + minutes * 60_000);
 const addHours = (date: Date, hours: number) => new Date(date.getTime() + hours * 3_600_000);
-const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 86_400_000);
 
 const appendAudit = async (tx: Tx, input: { aggregateType: string; aggregateId: string; eventType: string; payload: unknown; actorId: string; at: Date }) => {
   await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DISPATCH_AUDIT:${input.aggregateType}:${input.aggregateId}`);
@@ -35,31 +34,13 @@ type OtpDelivery = (message: { phone: string; code: string; dispatchNumber: stri
 export class DispatchConfirmationService {
   constructor(private readonly prisma: PrismaClient, private readonly dependencies: {
     connector: BiometricConnector; vault: ProtectedTemplateVault; otpSecret: string; sendOtp: OtpDelivery;
-    now?: () => Date; sessionMinutes?: number; authorizationHours?: number; production?: boolean; legalReadinessEnabled?: boolean;
+    now?: () => Date; sessionMinutes?: number; authorizationHours?: number;
   }) {
     if (!dependencies.otpSecret || dependencies.otpSecret.length < 16) throw new Error('A strong OTP secret is required');
   }
 
   private now() { return this.dependencies.now?.() || new Date(); }
   private otpDigest(challengeId: string, code: string) { return createHmac('sha256', this.dependencies.otpSecret).update(`${challengeId}:${code}`).digest('hex'); }
-
-  async recordGovernancePolicy(input: { policyVersion: string; legalBasis: string; consentWordingVersion: string;
-    templateRetentionDays: number; confirmationEvidenceRetentionDays: number; securityLogRetentionDays: number; exportRetentionDays: number;
-    backupRetentionDays: number; deletionCertificateRetentionDays: number; accessControlPolicy: string; legalHoldPolicy: string;
-    incidentResponsePolicy: string; disclosurePolicy: string; counselApprovedAt: Date; counselApprovedBy: string; activeFrom?: Date; actorId: string }) {
-    const retention = [input.templateRetentionDays, input.confirmationEvidenceRetentionDays, input.securityLogRetentionDays,
-      input.exportRetentionDays, input.backupRetentionDays, input.deletionCertificateRetentionDays];
-    if (retention.some((days) => !Number.isInteger(days) || days < 1)) throw new DispatchConfirmationValidationError('Every retention schedule must be a positive whole number.');
-    if (!(input.counselApprovedAt instanceof Date) || Number.isNaN(input.counselApprovedAt.getTime())) throw new DispatchConfirmationValidationError('Counsel approval evidence is required.');
-    return this.prisma.biometricGovernancePolicy.create({ data: { policyVersion: required(input.policyVersion, 'policyVersion'), legalBasis: required(input.legalBasis, 'legalBasis'),
-      consentWordingVersion: required(input.consentWordingVersion, 'consentWordingVersion'), templateRetentionDays: input.templateRetentionDays,
-      confirmationEvidenceRetentionDays: input.confirmationEvidenceRetentionDays, securityLogRetentionDays: input.securityLogRetentionDays,
-      exportRetentionDays: input.exportRetentionDays, backupRetentionDays: input.backupRetentionDays,
-      deletionCertificateRetentionDays: input.deletionCertificateRetentionDays, accessControlPolicy: required(input.accessControlPolicy, 'accessControlPolicy'),
-      legalHoldPolicy: required(input.legalHoldPolicy, 'legalHoldPolicy'), incidentResponsePolicy: required(input.incidentResponsePolicy, 'incidentResponsePolicy'),
-      disclosurePolicy: required(input.disclosurePolicy, 'disclosurePolicy'), counselApprovedAt: input.counselApprovedAt,
-      counselApprovedBy: required(input.counselApprovedBy, 'counselApprovedBy'), activeFrom: input.activeFrom || this.now(), recordedBy: required(input.actorId, 'actorId') } });
-  }
 
   private async assertInternalDriverEligible(driverId: string) {
     const at = this.now();
@@ -72,22 +53,15 @@ export class DispatchConfirmationService {
   }
 
   async assertEnrollmentCaptureAllowed(personnelId: string) {
-    const at = this.now();
-    if (!this.dependencies.legalReadinessEnabled) throw new DispatchConfirmationConflictError('Physical biometric capture is disabled until the approved legal readiness gate is enabled.');
     const personnel = await this.prisma.personnel.findUnique({ where: { id: personnelId }, include: { internalDriverProfile: true } });
     if (!personnel?.internalDriverProfile) throw new DispatchConfirmationValidationError('An active internal driver personnel record is required.');
     await this.assertInternalDriverEligible(personnel.internalDriverProfile.id);
-    const [policy, active] = await Promise.all([
-      this.prisma.biometricGovernancePolicy.findFirst({ where: { activeFrom: { lte: at }, OR: [{ retiredAt: null }, { retiredAt: { gt: at } }] } }),
-      this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId, status: 'ACTIVE' } }),
-    ]);
-    if (!policy) throw new DispatchConfirmationConflictError('Biometric capture is disabled until legal basis and retention policy are active.');
+    const active = await this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId, status: 'ACTIVE' } });
     if (active) throw new DispatchConfirmationConflictError('The driver already has an active biometric enrollment.');
   }
 
-  async enrollInternalDriver(input: { personnelId: string; acknowledgement: string; confirmationPhone: string; templates: EnrollmentTemplateInput[]; actorId: string }) {
+  async enrollInternalDriver(input: { personnelId: string; confirmationPhone: string; templates: EnrollmentTemplateInput[]; actorId: string }) {
     const at = this.now();
-    if (this.dependencies.production && !this.dependencies.legalReadinessEnabled) throw new DispatchConfirmationConflictError('Production biometric enrollment is disabled until the approved legal readiness gate is enabled.');
     if (!Array.isArray(input.templates) || input.templates.length < 2 || new Set(input.templates.map((item) => item.finger)).size < 2) {
       throw new DispatchConfirmationValidationError('At least two distinct fingers are required.');
     }
@@ -102,17 +76,12 @@ export class DispatchConfirmationService {
     const personnel = await this.prisma.personnel.findUnique({ where: { id: input.personnelId }, include: { internalDriverProfile: true } });
     if (!personnel?.internalDriverProfile) throw new DispatchConfirmationValidationError('An active internal driver personnel record is required.');
     await this.assertInternalDriverEligible(personnel.internalDriverProfile.id);
-    const [policy, active] = await Promise.all([
-      this.prisma.biometricGovernancePolicy.findFirst({ where: { activeFrom: { lte: at }, OR: [{ retiredAt: null }, { retiredAt: { gt: at } }] }, orderBy: { activeFrom: 'desc' } }),
-      this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: input.personnelId, status: 'ACTIVE' } }),
-    ]);
-    if (!policy) throw new DispatchConfirmationConflictError('Biometric enrollment is disabled until legal basis and retention policy are active.');
+    const active = await this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: input.personnelId, status: 'ACTIVE' } });
     if (active) throw new DispatchConfirmationConflictError('The driver already has an active biometric enrollment.');
-    const acknowledgement = required(input.acknowledgement, 'policy acknowledgement');
     const phone = required(input.confirmationPhone, 'confirmationPhone');
     return this.prisma.$transaction(async (tx) => {
-      const enrollment = await tx.driverBiometricEnrollment.create({ data: { personnelId: personnel.id, governancePolicyId: policy.id,
-        acknowledgement, confirmationPhone: phone, acknowledgedAt: at, enrolledBy: required(input.actorId, 'actorId'), retentionUntil: addDays(at, policy.templateRetentionDays) } });
+      const enrollment = await tx.driverBiometricEnrollment.create({ data: { personnelId: personnel.id,
+        confirmationPhone: phone, enrolledBy: required(input.actorId, 'actorId') } });
       for (const template of input.templates) {
         const reference = `bio:${enrollment.id}:${randomUUID()}`;
         const envelope = this.dependencies.vault.seal(template.material, { personnelId: personnel.id, finger: template.finger, format: template.format });
@@ -120,23 +89,23 @@ export class DispatchConfirmationService {
           format: template.format, templateReference: reference, protectedEnvelope: json(envelope), deviceEvidence: json(template.deviceEvidence) } });
       }
       await appendAudit(tx, { aggregateType: 'DRIVER_BIOMETRIC_ENROLLMENT', aggregateId: enrollment.id, eventType: 'ENROLLED',
-        payload: { personnelId: personnel.id, policyVersion: policy.policyVersion, fingers: input.templates.map((item) => item.finger), retentionUntil: enrollment.retentionUntil }, actorId: input.actorId, at });
+        payload: { personnelId: personnel.id, fingers: input.templates.map((item) => item.finger) }, actorId: input.actorId, at });
       return tx.driverBiometricEnrollment.findUniqueOrThrow({ where: { id: enrollment.id }, select: { id: true, personnelId: true, status: true,
-        acknowledgedAt: true, retentionUntil: true, templates: { select: { finger: true, format: true, templateReference: true, createdAt: true } } } });
+        enrolledAt: true, templates: { select: { finger: true, format: true, templateReference: true, createdAt: true } } } });
     });
   }
 
-  async withdrawEnrollment(input: { enrollmentId: string; actorId: string; reason: string }) {
+  async deactivateEnrollment(input: { enrollmentId: string; actorId: string; reason: string }) {
     const at = this.now();
     return this.prisma.$transaction(async (tx) => {
       let enrollment = await tx.driverBiometricEnrollment.findUnique({ where: { id: input.enrollmentId } });
-      if (!enrollment || enrollment.status !== 'ACTIVE') throw new DispatchConfirmationConflictError('Only an active enrollment can be withdrawn.');
+      if (!enrollment || enrollment.status !== 'ACTIVE') throw new DispatchConfirmationConflictError('Only an active enrollment can be deactivated.');
       const driver = await tx.internalDriverProfile.findUniqueOrThrow({ where: { personnelId: enrollment.personnelId } });
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DRIVER_BIOMETRIC:${driver.id}`);
       enrollment = await tx.driverBiometricEnrollment.findUnique({ where: { id: input.enrollmentId } });
-      if (!enrollment || enrollment.status !== 'ACTIVE') throw new DispatchConfirmationConflictError('Only an active enrollment can be withdrawn.');
-      const updated = await tx.driverBiometricEnrollment.update({ where: { id: enrollment.id }, data: { status: 'WITHDRAWN', withdrawnAt: at, withdrawnBy: required(input.actorId, 'actorId') } });
-      await appendAudit(tx, { aggregateType: 'DRIVER_BIOMETRIC_ENROLLMENT', aggregateId: enrollment.id, eventType: 'CONSENT_WITHDRAWN', payload: { reason: required(input.reason, 'reason') }, actorId: input.actorId, at });
+      if (!enrollment || enrollment.status !== 'ACTIVE') throw new DispatchConfirmationConflictError('Only an active enrollment can be deactivated.');
+      const updated = await tx.driverBiometricEnrollment.update({ where: { id: enrollment.id }, data: { status: 'INACTIVE', deactivatedAt: at, deactivatedBy: required(input.actorId, 'actorId') } });
+      await appendAudit(tx, { aggregateType: 'DRIVER_BIOMETRIC_ENROLLMENT', aggregateId: enrollment.id, eventType: 'ENROLLMENT_DEACTIVATED', payload: { reason: required(input.reason, 'reason') }, actorId: input.actorId, at });
       return updated;
     });
   }
@@ -189,7 +158,7 @@ export class DispatchConfirmationService {
     if (turn.driverSource === GuardDriverSource.INTERNAL) {
       method = 'INTERNAL_BIOMETRIC';
       await this.assertInternalDriverEligible(turn.internalDriverId!);
-      const enrollment = await this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: turn.internalDriver!.personnelId, status: 'ACTIVE', retentionUntil: { gt: at } } });
+      const enrollment = await this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: turn.internalDriver!.personnelId, status: 'ACTIVE' } });
       if (!enrollment) throw new DispatchConfirmationConflictError('The internal driver has no current biometric enrollment.');
       phone = enrollment.confirmationPhone;
     } else phone = turn.externalDriver!.phone;
@@ -231,9 +200,9 @@ export class DispatchConfirmationService {
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DRIVER_BIOMETRIC:${session.driverId}`);
       const driver = await tx.internalDriverProfile.findUnique({ where: { id: session.driverId }, include: { personnel: true,
         eligibilityPeriods: { where: { effectiveFrom: { lte: at }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }] }, orderBy: { effectiveFrom: 'desc' }, take: 1 } } });
-      const enrollment = driver && await tx.driverBiometricEnrollment.findFirst({ where: { personnelId: driver.personnelId, status: 'ACTIVE', retentionUntil: { gt: at } } });
+      const enrollment = driver && await tx.driverBiometricEnrollment.findFirst({ where: { personnelId: driver.personnelId, status: 'ACTIVE' } });
       if (!driver || driver.status !== 'ACTIVE' || !driver.personnel.isActive || driver.eligibilityPeriods[0]?.status !== 'ELIGIBLE' || !enrollment) {
-        throw new DispatchConfirmationConflictError('Internal driver eligibility or biometric consent ended before authorization commit.');
+        throw new DispatchConfirmationConflictError('Internal driver eligibility or biometric enrollment ended before authorization commit.');
       }
     }
     const evidenceSnapshot = { sessionId: session.id, method: session.method, confirmedAt: at.toISOString(), workstationId: session.workstationId,
@@ -278,7 +247,7 @@ export class DispatchConfirmationService {
     if (session.driverSource !== GuardDriverSource.INTERNAL || session.method !== 'INTERNAL_BIOMETRIC') throw new DispatchConfirmationValidationError('This session does not accept biometric verification.');
     const driver = await this.prisma.internalDriverProfile.findUnique({ where: { id: session.driverId } });
     await this.assertInternalDriverEligible(session.driverId);
-    const enrollment = driver && await this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: driver.personnelId, status: 'ACTIVE', retentionUntil: { gt: this.now() } }, include: { templates: true } });
+    const enrollment = driver && await this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: driver.personnelId, status: 'ACTIVE' }, include: { templates: true } });
     const templates = enrollment?.templates.slice().sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime()) || [];
     const template = finger ? templates.find((item) => item.finger === finger) : templates[0];
     if (!driver || !template) throw new DispatchConfirmationConflictError('The protected enrollment is unavailable.');

@@ -3544,49 +3544,17 @@ model ShipmentStatementMigrationEvidence {
   @@map("shipment_statement_migration_evidence")
 }
 
-model BiometricGovernancePolicy {
-  id                                String                      @id @default(cuid())
-  policyVersion                     String                      @unique
-  legalBasis                        String
-  consentWordingVersion             String
-  templateRetentionDays             Int
-  confirmationEvidenceRetentionDays Int
-  securityLogRetentionDays          Int
-  exportRetentionDays               Int
-  backupRetentionDays               Int
-  deletionCertificateRetentionDays  Int
-  accessControlPolicy               String
-  legalHoldPolicy                   String
-  incidentResponsePolicy            String
-  disclosurePolicy                  String
-  counselApprovedAt                 DateTime
-  counselApprovedBy                 String
-  activeFrom                        DateTime
-  retiredAt                         DateTime?
-  recordedBy                        String
-  recordedAt                        DateTime                    @default(now())
-  enrollments                       DriverBiometricEnrollment[]
-
-  @@index([activeFrom, retiredAt])
-  @@map("biometric_governance_policies")
-}
-
 model DriverBiometricEnrollment {
-  id                 String                    @id @default(cuid())
-  personnelId        String
-  governancePolicyId String
-  status             String                    @default("ACTIVE")
-  acknowledgement    String
-  confirmationPhone  String
-  acknowledgedAt     DateTime
-  enrolledAt         DateTime                  @default(now())
-  enrolledBy         String
-  retentionUntil     DateTime
-  withdrawnAt        DateTime?
-  withdrawnBy        String?
-  personnel          Personnel                 @relation(fields: [personnelId], references: [id], onDelete: Restrict)
-  governancePolicy   BiometricGovernancePolicy @relation(fields: [governancePolicyId], references: [id], onDelete: Restrict)
-  templates          DriverBiometricTemplate[]
+  id                String                    @id @default(cuid())
+  personnelId       String
+  status            String                    @default("ACTIVE")
+  confirmationPhone String
+  enrolledAt        DateTime                  @default(now())
+  enrolledBy        String
+  deactivatedAt     DateTime?
+  deactivatedBy     String?
+  personnel         Personnel                 @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  templates         DriverBiometricTemplate[]
 
   @@index([personnelId, status])
   @@map("driver_biometric_enrollments")
@@ -5425,17 +5393,17 @@ model HrCostCenter {
 }
 
 model HrJob {
-  id               String       @id @default(cuid())
-  code             String       @unique
-  codeOccurrence   Int          @default(1)
-  title            String
-  description      String?
-  responsibilities String?
-  isActive         Boolean      @default(true)
-  createdBy        String
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  positions        HrPosition[]
+  id                        String                     @id @default(cuid())
+  code                      String                     @unique
+  codeOccurrence            Int                        @default(1)
+  title                     String
+  description               String?
+  responsibilities          String?
+  isActive                  Boolean                    @default(true)
+  createdBy                 String
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  positions                 HrPosition[]
   simplePerformanceProfiles SimplePerformanceProfile[]
 
   @@map("hr_jobs")
@@ -8280,19 +8248,19 @@ model PerformanceCorrection {
 }
 
 model SimplePerformanceProfile {
-  id              String                               @id @default(cuid())
-  stableKey       String
-  nameFa          String
-  version         Int
+  id                 String                               @id @default(cuid())
+  stableKey          String
+  nameFa             String
+  version            Int
   effectivePeriodKey String?
-  jobId           String?
-  isActive        Boolean                              @default(true)
-  createdByUserId String
-  createdAt       DateTime                             @default(now())
-  indicators      SimplePerformanceIndicator[]
-  assignments     SimplePerformanceProfileAssignment[]
-  evaluations     SimplePerformanceEvaluation[]
-  job             HrJob?                               @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  jobId              String?
+  isActive           Boolean                              @default(true)
+  createdByUserId    String
+  createdAt          DateTime                             @default(now())
+  indicators         SimplePerformanceIndicator[]
+  assignments        SimplePerformanceProfileAssignment[]
+  evaluations        SimplePerformanceEvaluation[]
+  job                HrJob?                               @relation(fields: [jobId], references: [id], onDelete: Restrict)
 
   @@unique([stableKey, version])
   @@index([isActive, nameFa])
@@ -8336,22 +8304,22 @@ model SimplePerformanceProfileAssignment {
 }
 
 model SimplePerformanceEvaluation {
-  id                        String                    @id @default(cuid())
+  id                        String                           @id @default(cuid())
   personnelId               String
   employmentRelationshipId  String?
-  employmentBindingStatus   String                    @default("BOUND")
+  employmentBindingStatus   String                           @default("BOUND")
   profileId                 String
-  evaluationDate            DateTime                  @db.Date
-  status                    String                    @default("DRAFT")
+  evaluationDate            DateTime                         @db.Date
+  status                    String                           @default("DRAFT")
   evaluatorUserId           String
   evaluatorAuthority        String
-  score                     Decimal?                  @db.Decimal(38, 18)
+  score                     Decimal?                         @db.Decimal(38, 18)
   levelCode                 String?
-  confirmedSeriousViolation Boolean                   @default(false)
+  confirmedSeriousViolation Boolean                          @default(false)
   periodKey                 String?
   periodLabelFa             String?
-  measurementFrom           DateTime?                 @db.Date
-  measurementTo             DateTime?                 @db.Date
+  measurementFrom           DateTime?                        @db.Date
+  measurementTo             DateTime?                        @db.Date
   effectiveDays             Int?
   proposedAt                DateTime?
   appealDeadline            DateTime?
@@ -8360,15 +8328,15 @@ model SimplePerformanceEvaluation {
   appealResolution          String?
   appealResolvedAt          DateTime?
   appealResolvedByUserId    String?
-  assignmentSegments       Json?
+  assignmentSegments        Json?
   finalizedAt               DateTime?
   correctionOfId            String?
   correctionReason          String?
   supersededAt              DateTime?
-  createdAt                 DateTime                  @default(now())
-  updatedAt                 DateTime                  @updatedAt
-  profile                   SimplePerformanceProfile  @relation(fields: [profileId], references: [id], onDelete: Restrict)
-  employmentRelationship    HrEmploymentRelationship? @relation(fields: [employmentRelationshipId, personnelId], references: [id, personnelId], onDelete: Restrict)
+  createdAt                 DateTime                         @default(now())
+  updatedAt                 DateTime                         @updatedAt
+  profile                   SimplePerformanceProfile         @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  employmentRelationship    HrEmploymentRelationship?        @relation(fields: [employmentRelationshipId, personnelId], references: [id, personnelId], onDelete: Restrict)
   values                    SimplePerformanceValue[]
   valueRevisions            SimplePerformanceValueRevision[]
 
@@ -8493,17 +8461,17 @@ model PersonnelBehaviorSurveyRespondent {
 }
 
 model PersonnelBehaviorSurveyResponse {
-  id                    String                          @id @default(cuid())
+  id                    String                                    @id @default(cuid())
   campaignId            String
   targetPersonnelId     String
   respondentPersonnelId String
-  status                String                          @default("DRAFT")
-  version               Int                             @default(1)
+  status                String                                    @default("DRAFT")
+  version               Int                                       @default(1)
   commentText           String?
   submittedAt           DateTime?
-  createdAt             DateTime                        @default(now())
-  updatedAt             DateTime                        @updatedAt
-  campaign              PersonnelBehaviorSurveyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdAt             DateTime                                  @default(now())
+  updatedAt             DateTime                                  @updatedAt
+  campaign              PersonnelBehaviorSurveyCampaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   answers               PersonnelBehaviorSurveyAnswer[]
   revisions             PersonnelBehaviorSurveyResponseRevision[]
 
@@ -8514,15 +8482,15 @@ model PersonnelBehaviorSurveyResponse {
 }
 
 model PersonnelBehaviorSurveyResponseRevision {
-  id            String                          @id @default(cuid())
-  responseId    String
-  version       Int
-  status        String
-  commentText   String?
-  answers       Json
-  actorUserId   String
-  createdAt     DateTime                        @default(now())
-  response      PersonnelBehaviorSurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  id          String                          @id @default(cuid())
+  responseId  String
+  version     Int
+  status      String
+  commentText String?
+  answers     Json
+  actorUserId String
+  createdAt   DateTime                        @default(now())
+  response    PersonnelBehaviorSurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
 
   @@unique([responseId, version])
   @@index([responseId, createdAt])

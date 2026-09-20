@@ -2,7 +2,7 @@
 
 ## Status
 
-This document fixes the production seam for issue #224. The authenticated loopback host, ERP handshake, one-use transport encryption, replay journal, physical adapter process boundary, and role-specific UI integration are implemented. Production activation remains fail-closed until every licensing, signing, legal, physical, training, and pilot gate below is accepted.
+This document fixes the production seam for issue #224. The authenticated loopback host, ERP handshake, one-use transport encryption, replay journal, physical adapter process boundary, and role-specific UI integration are implemented. Production activation remains fail-closed until every licensing, signing, physical, training, and pilot gate below is accepted.
 
 ## Deep module and seam
 
@@ -53,10 +53,9 @@ Production configuration remains fail-closed until all are true:
 
 1. Xperix production, redistribution, offline and matching rights are recorded.
 2. The connector installer and executable are signed by Sabalan's code-signing certificate.
-3. The legal-readiness configuration is active and counsel-approved.
-4. Enrollment and verification envelopes pass replay, substitution, expiry and restart tests.
-5. Origin restrictions, loopback binding, journal ACLs and secret provisioning pass security review.
-6. Issue #224's physical accuracy, liveness, latency, reconnect and 500-cycle gates pass.
+3. Enrollment and verification envelopes pass replay, substitution, expiry and restart tests.
+4. Origin restrictions, loopback binding, journal ACLs and secret provisioning pass security review.
+5. Issue #224's physical accuracy, liveness, latency, reconnect and 500-cycle gates pass.
 
 ## ERP handshake
 

@@ -1,0 +1,24 @@
+{
+  "presentationVersion": "roman-v1",
+  "source": "reference-roman-badges.png; isolated transparent variants generated with the built-in image generation tool",
+  "format": "PNG",
+  "width": 512,
+  "height": 512,
+  "alpha": true,
+  "files": {
+    "dark/rank-01.png": { "bytes": 223786, "sha256": "d4ae86dd85de0e083b41c218d0c6dabbebdfc373b8cd3a85e65e41c80791b5b5" },
+    "dark/rank-02.png": { "bytes": 284680, "sha256": "3a2d7518f4a6e7025c1037620efee63126651c785d722c2b7c9a6251f171fa64" },
+    "dark/rank-03.png": { "bytes": 227903, "sha256": "f6c66dd075619d9f05d9f6ecb7c2a45250bfe5f73ca319f71641823d651d6d89" },
+    "dark/rank-04.png": { "bytes": 225987, "sha256": "5367349d30cabb444f7203614d1a65bfbf8b0d669779a2d968e43ff9293a5e1a" },
+    "dark/rank-05.png": { "bytes": 249363, "sha256": "1ab9f8c2fb97375e0ea3e091271d67123896fabd2b433f269df9c5244be45506" },
+    "dark/rank-06.png": { "bytes": 235649, "sha256": "6cba11e53428aa0aa6abf8f690a7ae5a9156636fee62f3186bfe3234d245e7c6" },
+    "dark/rank-07.png": { "bytes": 230468, "sha256": "f8f1650c950b48aac172407128dfe0633ba87098a36a7c719cb82d1da77c2761" },
+    "light/rank-01.png": { "bytes": 219152, "sha256": "8ce8f650d58776e0ffe96e838ae74415948fd08ddaf750c84f792c5215d4b168" },
+    "light/rank-02.png": { "bytes": 202505, "sha256": "e83b3be156c84a580e529d8ded6c3e31391ab5ce8345849ce8524c563d365683" },
+    "light/rank-03.png": { "bytes": 222304, "sha256": "60753c7d0c6cc5f1e497e052674ea10aec2521968746c2b79b567ab565d07197" },
+    "light/rank-04.png": { "bytes": 213536, "sha256": "a33e5e7ecffb13ff0761c9a6afbe7f986ae58dd8c9f2ad55aa90622164f896ae" },
+    "light/rank-05.png": { "bytes": 218738, "sha256": "43ed8b9834a80dc0cb5096fe1b96219c060aa2f8fb1d7a997235aaa50fa0b4ec" },
+    "light/rank-06.png": { "bytes": 207533, "sha256": "d9f29a99eba837150ab50eddb98bcf25905cb1b6d1ed13854d9f9d0c17b20317" },
+    "light/rank-07.png": { "bytes": 212882, "sha256": "b5e423f7a0ed75c0cb2ee7da6b10f26f59e053be048dd26f8fc70f5a58ac22d4" }
+  }
+}

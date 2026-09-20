@@ -24,15 +24,32 @@ export type BehaviorSurveyScore = {
   score: number;
 };
 
-export const SELLER_PERFORMANCE_LEVEL_LABELS: Record<SellerPerformanceLevelCode, string> = {
-  COMPANION: 'همراه',
-  DILIGENT: 'کوشا',
-  WORTHY: 'شایسته',
-  CAPABLE: 'توانمند',
-  SUPERIOR: 'برتر',
-  EXCELLENT: 'سرآمد',
-  ROLE_MODEL: 'الگو',
+export type SellerPerformanceStoneFamily = 'TURQUOISE' | 'RUBY' | 'DIAMOND';
+
+export const SELLER_PERFORMANCE_BADGE_PRESENTATION_VERSION = 'roman-v1' as const;
+
+export const SELLER_PERFORMANCE_LEVEL_PRESENTATIONS: Record<SellerPerformanceLevelCode, {
+  ordinal: number;
+  labelFa: string;
+  meaningFa: string;
+  stoneFamily: SellerPerformanceStoneFamily;
+  romanNumeral: 'I' | 'II' | 'III';
+  lightAsset: string;
+  darkAsset: string;
+  presentationVersion: typeof SELLER_PERFORMANCE_BADGE_PRESENTATION_VERSION;
+}> = {
+  COMPANION: { ordinal: 1, labelFa: 'همراه', meaningFa: 'با ماست', stoneFamily: 'TURQUOISE', romanNumeral: 'I', lightAsset: '/assets/performance-rank-badges-roman-v1/light/rank-01.png', darkAsset: '/assets/performance-rank-badges-roman-v1/dark/rank-01.png', presentationVersion: SELLER_PERFORMANCE_BADGE_PRESENTATION_VERSION },
+  DILIGENT: { ordinal: 2, labelFa: 'هم‌ریشه', meaningFa: 'از ماست', stoneFamily: 'TURQUOISE', romanNumeral: 'II', lightAsset: '/assets/performance-rank-badges-roman-v1/light/rank-02.png', darkAsset: '/assets/performance-rank-badges-roman-v1/dark/rank-02.png', presentationVersion: SELLER_PERFORMANCE_BADGE_PRESENTATION_VERSION },
+  WORTHY: { ordinal: 3, labelFa: 'کارساز', meaningFa: 'به کار ما می‌آید', stoneFamily: 'TURQUOISE', romanNumeral: 'III', lightAsset: '/assets/performance-rank-badges-roman-v1/light/rank-03.png', darkAsset: '/assets/performance-rank-badges-roman-v1/dark/rank-03.png', presentationVersion: SELLER_PERFORMANCE_BADGE_PRESENTATION_VERSION },
+  CAPABLE: { ordinal: 4, labelFa: 'مانا', meaningFa: 'با ما می‌ماند', stoneFamily: 'RUBY', romanNumeral: 'I', lightAsset: '/assets/performance-rank-badges-roman-v1/light/rank-04.png', darkAsset: '/assets/performance-rank-badges-roman-v1/dark/rank-04.png', presentationVersion: SELLER_PERFORMANCE_BADGE_PRESENTATION_VERSION },
+  SUPERIOR: { ordinal: 5, labelFa: 'ستون', meaningFa: 'تکیه‌گاه ماست', stoneFamily: 'RUBY', romanNumeral: 'II', lightAsset: '/assets/performance-rank-badges-roman-v1/light/rank-05.png', darkAsset: '/assets/performance-rank-badges-roman-v1/dark/rank-05.png', presentationVersion: SELLER_PERFORMANCE_BADGE_PRESENTATION_VERSION },
+  EXCELLENT: { ordinal: 6, labelFa: 'اثرگذار', meaningFa: 'ما را بهتر می‌کند', stoneFamily: 'DIAMOND', romanNumeral: 'I', lightAsset: '/assets/performance-rank-badges-roman-v1/light/rank-06.png', darkAsset: '/assets/performance-rank-badges-roman-v1/dark/rank-06.png', presentationVersion: SELLER_PERFORMANCE_BADGE_PRESENTATION_VERSION },
+  ROLE_MODEL: { ordinal: 7, labelFa: 'الگو', meaningFa: 'آن‌گونه که باید باشی', stoneFamily: 'DIAMOND', romanNumeral: 'II', lightAsset: '/assets/performance-rank-badges-roman-v1/light/rank-07.png', darkAsset: '/assets/performance-rank-badges-roman-v1/dark/rank-07.png', presentationVersion: SELLER_PERFORMANCE_BADGE_PRESENTATION_VERSION },
 };
+
+export const SELLER_PERFORMANCE_LEVEL_LABELS = Object.fromEntries(
+  Object.entries(SELLER_PERFORMANCE_LEVEL_PRESENTATIONS).map(([code, presentation]) => [code, presentation.labelFa]),
+) as Record<SellerPerformanceLevelCode, string>;
 
 export const SELLER_PERFORMANCE_FACTORS = [
   { code: 'NET_CONTRACT_VALUE', familyCode: 'SALES_CONTRIBUTION', titleFa: 'ارزش خالص قراردادهای نهایی‌شده نسبت به هدف', weightPercent: 14, direction: 'HIGHER_IS_BETTER', sourceKind: 'SYSTEM', minimumSampleCount: 1 },

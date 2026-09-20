@@ -1,0 +1,3 @@
+# Release system invoice numbers after completed void
+
+After the required Accounting void workflow completes, Sabalan releases the voided record's system invoice number for controlled reuse by another financial record, superseding only ADR-0060's permanent number-reservation rule while preserving its staged dependency resolution and immutable history. The voided record keeps its original number and complete audit evidence, but only a non-voided record may hold the active number claim; an incomplete void workflow never releases the claim, and concurrent approval remains protected by the claim ledger.

@@ -1788,8 +1788,8 @@ _Avoid_: ایجاد ناسازگاری موقت با ابطال مستقل در�
 _Avoid_: ابطال تکراری بدون معرفی رکورد معتبر، انتخاب رکوردی از قرارداد دیگر، انتخاب خود رکورد یا رکورد باطل‌شده، یا جابه‌جایی پنهانی وابستگی‌های مالی
 
 **شماره رکورد مالی باطل‌شده**:
-شماره فاکتور یک رکورد مالی پس از ابطال برای همیشه به همان سابقه تاریخی متصل می‌ماند و دوباره به رکورد دیگری اختصاص نمی‌یابد. رکورد جدید شماره مستقل خود را دریافت می‌کند، حتی وقتی برای جایگزینی رکورد باطل‌شده ساخته شده باشد.
-_Avoid_: آزادکردن یا استفاده مجدد از شماره رکورد باطل‌شده، تغییر شماره سابقه تاریخی، یا پنهان‌کردن وضعیت ابطال آن
+شماره فاکتور پس از تکمیل گردش مجاز ابطال و رسیدن رکورد مالی به وضعیت نهایی «باطل‌شده» برای استفاده در یک رکورد مالی دیگر آزاد می‌شود، درحالی‌که شماره، وضعیت ابطال، دلیل، تاریخ و عامل آن بدون تغییر در سابقه رکورد قبلی باقی می‌مانند. درخواست ابطال یا گردش ابطال ناتمام شماره را آزاد نمی‌کند، و در هر لحظه حداکثر یک رکورد مالیِ باطل‌نشده مالک فعال یک شماره است.
+_Avoid_: آزادکردن شماره پیش از تکمیل ابطال، تغییر یا حذف شماره از سابقه باطل‌شده، داشتن دو مالک فعال برای یک شماره، یا پنهان‌کردن دفعات استفاده تاریخی آن
 
 **تاریخچه پرونده‌های ابطال مالی**:
 پرونده ابطال تکمیل‌شده یا لغوشده از صف کارهای باز خارج می‌شود، اما وضعیت، مراحل، دلایل، عاملان، تاریخ‌های مؤثر و پیوند رکوردهای آن در تاریخچه حسابداری قابل مشاهده باقی می‌ماند.
@@ -1820,8 +1820,8 @@ A replacement invoice candidate created after a post-approval correction is expl
 _Avoid_: using the original contract-level invoice idempotency key for replacement records, or leaving the replacement record disconnected from the correction that required it
 
 **شماره فاکتور سیستمی رکورد مالی جایگزین**:
-A replacement invoice candidate always receives a new system invoice number while retaining an explicit link to the old voided financial record. A system invoice number remains permanently attached to its original record and is never reassigned, even after voiding.
-_Avoid_: reusing the old system invoice number for a replacement, changing the historical number, or leaving the replacement disconnected from the record it replaces
+A replacement invoice candidate receives an available system invoice number while retaining an explicit link to the old voided financial record. The number may be the voided predecessor's number or another released number only after the predecessor's required void workflow is complete; the predecessor keeps that number in immutable history while active ownership moves to the replacement.
+_Avoid_: claiming the number before void completion, changing the historical number, allowing simultaneous active owners, or leaving the replacement disconnected from the record it replaces
 
 **اختیار ابطال و جایگزینی رکورد مالی**:
 Voiding an approved financial record and financially approving its replacement require manager-level accounting authority, expressed through accounting approve/void permission rather than a hard-coded role name. Normal accounting users may request corrections and prepare allowed drafts, but sales users never void or replace accounting records.

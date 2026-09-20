@@ -19,6 +19,7 @@ import { AccountingVoidBlockedError, executeAccountingAction } from '../accounti
 test('ordinary Accounting voids a duplicate invoice only after receipt reversal and receivable void', async () => {
   const token = `void-workflow-${Date.now()}`;
   const contractId = `${token}-contract`;
+  const reusedContractId = `${token}-reused-contract`;
   const actor = { userId: `${token}-manager`, role: 'ADMIN' };
   const createdAt = new Date(Date.now() - 60_000);
   const effectiveAt = new Date().toISOString();
@@ -36,6 +37,9 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
       amount: new Prisma.Decimal(1_000), systemInvoiceNumber: `${token}-1406`,
       systemInvoiceDate: createdAt, financiallyApprovedAt: createdAt, financiallyApprovedBy: actor.userId,
       createdBy: actor.userId, createdAt,
+    } });
+    await prisma.accountingInvoiceNumberClaim.create({ data: {
+      number: source.systemInvoiceNumber!, financialRecordId: source.id,
     } });
     const receivable = await prisma.accountingReceivable.create({ data: {
       contractId, invoiceRecordId: source.id, originalAmount: new Prisma.Decimal(1_000),
@@ -94,9 +98,10 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
       cancellationReason: 'نباید پس از تغییر مالی ممکن باشد' }, actor), /پس از اولین تغییر مالی/);
     await executeAccountingAction({ kind: 'VOID_ACCOUNTING_RECEIVABLE', receivableId: receivable.id,
       reason: 'دریافتنی فاکتور تکراری', effectiveAt }, actor);
-    await executeAccountingAction({ kind: 'VOID_ACCOUNTING_RECORD', recordId: source.id }, actor);
+    const voided = await executeAccountingAction({ kind: 'VOID_ACCOUNTING_RECORD', recordId: source.id }, actor);
+    assert.match(voided.messageFa, /شماره فاکتور.*آزاد است/);
 
-    const [finalPayment, finalCheck, finalReceivable, finalSource, finalCase, finalTax, finalVoidAudit] = await Promise.all([
+    const [finalPayment, finalCheck, finalReceivable, finalSource, finalCase, finalTax, finalVoidAudit, releasedClaim, releaseAudit] = await Promise.all([
       prisma.accountingPaymentStatus.findUniqueOrThrow({ where: { id: payment.id } }),
       prisma.accountingPaymentStatus.findUniqueOrThrow({ where: { id: check.id } }),
       prisma.accountingReceivable.findUniqueOrThrow({ where: { id: receivable.id } }),
@@ -104,6 +109,8 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
       prisma.accountingFinancialVoidCase.findFirstOrThrow({ where: { sourceRecordId: source.id } }),
       prisma.accountingTaxRecord.findUniqueOrThrow({ where: { id: submittedTax.id } }),
       prisma.accountingAuditLog.findFirstOrThrow({ where: { contractId, action: 'VOID_ACCOUNTING_RECORD' } }),
+      prisma.accountingInvoiceNumberClaim.findUnique({ where: { number: source.systemInvoiceNumber! } }),
+      prisma.accountingAuditLog.findFirstOrThrow({ where: { contractId, action: 'RELEASE_VOIDED_INVOICE_NUMBER' } }),
     ]);
     assert.equal(finalPayment.status, PaymentAccountingStatus.REVERSED);
     assert.equal(finalCheck.checkStatus, CheckAccountingStatus.RETURNED);
@@ -116,12 +123,29 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
     assert.equal((finalTax.metadata as { voidedWithInvoiceRecordId?: string }).voidedWithInvoiceRecordId, source.id);
     assert.equal((finalTax.metadata as { voidCaseId?: string }).voidCaseId, finalCase.id);
     assert.equal(((finalVoidAudit.afterState as { metadata?: { voidCaseId?: string } })?.metadata?.voidCaseId), finalCase.id);
+    assert.equal(releasedClaim, null);
+    assert.equal((releaseAudit.afterState as { activeOwnerRecordId?: string | null }).activeOwnerRecordId, null);
+
+    const reused = await prisma.accountingFinancialRecord.create({ data: {
+      kind: FinancialRecordKind.INVOICE_CANDIDATE, status: AccountingRecordStatus.ISSUED,
+      sourceKind: AccountingSourceKind.SALES_CONTRACT, sourceId: reusedContractId, contractId: reusedContractId,
+      amount: new Prisma.Decimal(1_000), systemInvoiceNumber: source.systemInvoiceNumber,
+      systemInvoiceDate: createdAt, financiallyApprovedAt: new Date(), financiallyApprovedBy: actor.userId,
+      createdBy: actor.userId,
+    } });
+    const reassignedClaim = await prisma.accountingInvoiceNumberClaim.create({ data: {
+      number: source.systemInvoiceNumber!, financialRecordId: reused.id,
+    } });
+    assert.equal(reassignedClaim.financialRecordId, reused.id);
   } finally {
-    await prisma.accountingAuditLog.deleteMany({ where: { contractId } });
-    await prisma.accountingFinancialVoidCase.deleteMany({ where: { contractId } });
-    await prisma.accountingTaxRecord.deleteMany({ where: { contractId } });
-    await prisma.accountingPaymentStatus.deleteMany({ where: { contractId } });
-    await prisma.accountingReceivable.deleteMany({ where: { contractId } });
-    await prisma.accountingFinancialRecord.deleteMany({ where: { contractId } });
+    const contractIds = [contractId, reusedContractId];
+    const records = await prisma.accountingFinancialRecord.findMany({ where: { contractId: { in: contractIds } }, select: { id: true } });
+    await prisma.accountingInvoiceNumberClaim.deleteMany({ where: { financialRecordId: { in: records.map(record => record.id) } } });
+    await prisma.accountingAuditLog.deleteMany({ where: { contractId: { in: contractIds } } });
+    await prisma.accountingFinancialVoidCase.deleteMany({ where: { contractId: { in: contractIds } } });
+    await prisma.accountingTaxRecord.deleteMany({ where: { contractId: { in: contractIds } } });
+    await prisma.accountingPaymentStatus.deleteMany({ where: { contractId: { in: contractIds } } });
+    await prisma.accountingReceivable.deleteMany({ where: { contractId: { in: contractIds } } });
+    await prisma.accountingFinancialRecord.deleteMany({ where: { contractId: { in: contractIds } } });
   }
 });

@@ -2054,11 +2054,12 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     const duplicateRecords = await tx.accountingFinancialRecord.findMany({
       where: {
         systemInvoiceNumber,
-        id: { not: invoiceId }
+        id: { not: invoiceId },
+        status: { not: AccountingRecordStatus.VOIDED },
       }
     });
     if (duplicateRecords.length > 0) {
-      throw accountingVoidInputError('این شماره فاکتور قبلاً استفاده شده است. برای رکورد جدید یک شماره تازه وارد کنید.');
+      throw accountingVoidInputError('این شماره فاکتور روی یک رکورد مالی فعال است. اگر آن رکورد اشتباه است، ابتدا پرونده ابطالش را تکمیل کنید؛ سپس دوباره تلاش کنید. در غیر این صورت، شماره دیگری وارد کنید.');
     }
     const invoiceNumberClaim = await tx.accountingInvoiceNumberClaim.upsert({
       where: { number: systemInvoiceNumber },
@@ -2066,7 +2067,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       update: {},
     });
     if (invoiceNumberClaim.financialRecordId !== before.id) {
-      throw accountingVoidInputError('این شماره فاکتور قبلاً استفاده شده است. برای رکورد جدید یک شماره تازه وارد کنید.');
+      throw accountingVoidInputError('این شماره فاکتور روی یک رکورد مالی فعال است. صفحه را تازه کنید. اگر آن رکورد اشتباه است، ابتدا پرونده ابطالش را تکمیل کنید؛ در غیر این صورت شماره دیگری وارد کنید.');
     }
 
     const approvedAt = new Date();
@@ -2190,7 +2191,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const target = Array.isArray(error.meta?.target) ? error.meta.target.map(String) : [String(error.meta?.target || '')];
       if (target.some(field => field.includes('systemInvoiceNumber') || field.includes('number') || field.includes('financialRecordId'))) {
-        throw accountingVoidInputError('این شماره فاکتور هم‌زمان توسط رکورد دیگری استفاده شد. یک شماره تازه وارد کنید.');
+        throw accountingVoidInputError('این شماره همین حالا توسط رکورد مالی دیگری ثبت شد. صفحه را تازه کنید. اگر آن رکورد اشتباه است، ابتدا پرونده ابطالش را تکمیل کنید؛ در غیر این صورت شماره دیگری وارد کنید.');
       }
     }
     throw error;
@@ -3260,6 +3261,24 @@ export async function voidAccountingRecordInTransaction(tx: Prisma.TransactionCl
       afterState: toJsonValue(record),
       note: voidReason || null
     });
+    if (before.systemInvoiceNumber) {
+      const releasedClaim = await tx.accountingInvoiceNumberClaim.deleteMany({
+        where: { number: before.systemInvoiceNumber, financialRecordId: before.id },
+      });
+      if (releasedClaim.count > 0) {
+        await audit(tx, {
+          action: 'RELEASE_VOIDED_INVOICE_NUMBER',
+          actorId,
+          contractId: record.contractId,
+          recordId: record.id,
+          entityType: 'AccountingFinancialRecord',
+          entityId: record.id,
+          beforeState: toJsonValue({ systemInvoiceNumber: before.systemInvoiceNumber, activeOwnerRecordId: before.id }),
+          afterState: toJsonValue({ systemInvoiceNumber: before.systemInvoiceNumber, activeOwnerRecordId: null }),
+          note: 'شماره فاکتور پس از تکمیل ابطال برای استفاده مجدد آزاد شد.',
+        });
+      }
+    }
     return record;
 }
 
@@ -3329,7 +3348,10 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
     return { record, voidCase: completed };
   });
 
-  return actionResponse('APPLIED', 'رکورد مالی باطل شد و پرونده ابطال تکمیل شد.', {
+  const releasedNumberMessage = result.record.systemInvoiceNumber
+    ? ` شماره فاکتور ${result.record.systemInvoiceNumber} اکنون برای ثبت روی رکورد مالی دیگر آزاد است.`
+    : '';
+  return actionResponse('APPLIED', `رکورد مالی باطل شد و پرونده ابطال تکمیل شد.${releasedNumberMessage}`, {
     contractId: result.record.contractId || undefined, financialRecordIds: [result.record.id], voidCaseIds: [result.voidCase.id],
   });
 };

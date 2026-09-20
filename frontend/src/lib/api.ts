@@ -1006,7 +1006,7 @@ export const dispatchConfirmationAPI = {
   getCapabilities: () => api.get('/dispatch-confirmation/capabilities'),
   enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment`, data),
   createEnrollmentCommand: (personnelId: string, data: { workstationId: string; finger: string }) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-commands`, data),
-  withdrawEnrollment: (enrollmentId: string, reason: string) => api.post(`/dispatch-confirmation/enrollments/${enrollmentId}/withdraw`, { reason }),
+  deactivateEnrollment: (enrollmentId: string, reason: string) => api.post(`/dispatch-confirmation/enrollments/${enrollmentId}/deactivate`, { reason }),
   startSession: (waybillId: string, workstationId: string) => api.post(`/dispatch-confirmation/waybills/${waybillId}/sessions`, { workstationId }),
   verifyBiometric: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-attempts`, {}),
   createBiometricCommand: (sessionId: string, finger: 'RIGHT_INDEX' | 'LEFT_INDEX') => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-command`, { finger }),
@@ -1513,12 +1513,32 @@ export const personnelPerformanceAPI = {
   createSimpleProfile: (input: unknown) => api.post('/hr/personnel-performance/simple/profiles', input),
   assignSimpleProfile: (input: { personnelId: string; profileId: string }) => api.post('/hr/personnel-performance/simple/profile-assignments', input),
   createSimpleEvaluation: (input: { personnelId: string; evaluationDate: string }) => api.post('/hr/personnel-performance/simple/evaluations', input),
-  saveSimpleEvaluation: (evaluationId: string, values: Array<{ indicatorId: string; actual: string }>) => api.put(
-    `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/draft`, { values },
+  saveSimpleEvaluation: (evaluationId: string, values: Array<{ indicatorId: string; actual: string }>, reason?: string) => api.put(
+    `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/draft`, { values, reason },
   ),
-  finalizeSimpleEvaluation: (evaluationId: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/finalize`),
+  finalizeSimpleEvaluation: (evaluationId: string, input?: { confirmedSeriousViolation?: boolean }) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/finalize`, input ?? {}),
+  publishSimpleEvaluation: (evaluationId: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/publish`),
+  appealSimpleEvaluation: (evaluationId: string, text: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/appeal`, { text }),
+  resolveSimpleEvaluationAppeal: (evaluationId: string, resolution: string) => api.post(`/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/resolve-appeal`, { resolution }),
   correctSimpleEvaluation: (evaluationId: string, reason: string) => api.post(
     `/hr/personnel-performance/simple/evaluations/${encodeURIComponent(evaluationId)}/corrections`, { reason },
+  ),
+  sellerPerformancePolicy: () => api.get('/hr/personnel-performance/seller-policy'),
+  behaviorSurveys: () => api.get('/hr/personnel-performance/behavior-surveys'),
+  createBehaviorSurvey: (input: unknown) => api.post('/hr/personnel-performance/behavior-surveys', input),
+  deleteBehaviorSurvey: (campaignId: string) => api.delete(`/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}`),
+  updateBehaviorSurvey: (campaignId: string, input: unknown) => api.put(
+    `/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}`, input,
+  ),
+  activateBehaviorSurvey: (campaignId: string, input: { opensAt: string; closesAt: string }) => api.post(
+    `/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}/activate`, input,
+  ),
+  assignedBehaviorSurveys: () => api.get('/hr/personnel-performance/behavior-surveys/assigned'),
+  saveBehaviorSurveyResponse: (campaignId: string, targetPersonnelId: string, input: unknown) => api.put(
+    `/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}/responses/${encodeURIComponent(targetPersonnelId)}`, input,
+  ),
+  behaviorSurveyAggregate: (campaignId: string) => api.get(
+    `/hr/personnel-performance/behavior-surveys/${encodeURIComponent(campaignId)}/aggregate`,
   ),
   personalBadge: () => api.get('/hr/personnel-performance/badge/me'),
   badges: (personnelIds: string[]) => api.post('/hr/personnel-performance/badges', { personnelIds }),

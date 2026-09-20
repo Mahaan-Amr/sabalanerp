@@ -252,7 +252,6 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
   ]);
   assert.equal(replayedChild.cuttingCost, 14_800);
   assert.equal(replayedChild.totalPrice, 14_800);
-  assert.deepEqual(replayedChild.meta?.remainingSource?.sourcePieceQuantities, [1]);
   assert.deepEqual(replayedChild.remainderChildPolicyInput, {
     allocationId: 'allocation-child-two-axis-cut',
     allocationOrder: 0,
@@ -268,6 +267,7 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
     longitudinalCutRateToman: '20000',
     crossCutRateToman: '20000'
   }, 'the validated modal replay must carry its exact allocation into persistence');
+  assert.deepEqual(replayedChild.meta?.remainingSource?.sourcePieceQuantities, [1]);
 }
 
 {

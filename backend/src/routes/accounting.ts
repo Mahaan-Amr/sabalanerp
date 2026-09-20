@@ -19,6 +19,7 @@ import {
 } from '../utils/salesContractPdf';
 import {
   executeAccountingAction,
+  AccountingVoidBlockedError,
   getAccountantPerformanceReport,
   getAccountingSettings,
   getAccountingContractDetail,
@@ -83,15 +84,18 @@ const router = express.Router();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
 
 const accountingActionFeature: Record<string, string[]> = {
+  START_ACCOUNTING_VOID_CASE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
+  CANCEL_ACCOUNTING_VOID_CASE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   CREATE_INVOICE: [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE],
   CREATE_REPLACEMENT_INVOICE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   CREATE_RECEIVABLE: [FEATURES.ACCOUNTING_RECEIVABLES_MANAGE],
   APPROVE_FINANCIAL_INVOICE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   REGISTER_RECEIPT: [FEATURES.ACCOUNTING_PAYMENTS_MANAGE],
-  REVERSE_RECEIPT: [FEATURES.ACCOUNTING_PAYMENTS_MANAGE],
+  REVERSE_RECEIPT: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   UPDATE_CHECK_STATUS: [FEATURES.ACCOUNTING_PAYMENTS_MANAGE],
   MARK_TAX_READY: [FEATURES.ACCOUNTING_TAX_MANAGE],
   TRACK_TAX_SUBMISSION: [FEATURES.ACCOUNTING_TAX_MANAGE],
+  RESOLVE_TAX_FOR_VOID: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   APPROVE_CORRECTION_FOR_SALES_EDIT: [FEATURES.ACCOUNTING_CORRECTIONS_APPROVE],
   DECLINE_CORRECTION: [FEATURES.ACCOUNTING_CORRECTIONS_APPROVE],
   RESOLVE_CORRECTION: [FEATURES.ACCOUNTING_CORRECTIONS_VERIFY],
@@ -99,6 +103,7 @@ const accountingActionFeature: Record<string, string[]> = {
   RESOLVE_CONTRACT_FLAG: [FEATURES.ACCOUNTING_ACTIONS_MANAGE],
   CANCEL_CONTRACT_FLAG: [FEATURES.ACCOUNTING_ACTIONS_MANAGE],
   VOID_ACCOUNTING_RECORD: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
+  VOID_ACCOUNTING_RECEIVABLE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   DELETE_DRAFT_ACCOUNTING_RECORD: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
 };
 
@@ -244,12 +249,17 @@ const dispatchAuthority = (req: WorkspaceRequest & FeatureRequest) => ({ actorRo
 const managerReviewActions = new Set([
   'APPROVE_CORRECTION_FOR_SALES_EDIT',
   'DECLINE_CORRECTION',
-  'VOID_ACCOUNTING_RECORD',
   'CREATE_REPLACEMENT_INVOICE',
   'APPROVE_FINANCIAL_INVOICE',
   'RESOLVE_CORRECTION',
   'RECHECK_FINANCIAL_EVIDENCE_REVIEW'
 ]);
+
+const featuresForAccountingAction = (body: Record<string, unknown>) => (
+  body.kind === 'UPDATE_CHECK_STATUS' && ['BOUNCED', 'RETURNED'].includes(String(body.status || ''))
+    ? [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID]
+    : accountingActionFeature[String(body.kind)] || []
+);
 
 const dispatchError = (res: Response, error: unknown) => {
   const documentStatus = dispatchDocumentHttpStatus(error);
@@ -1072,8 +1082,9 @@ export const createAccountingActionHandler = (
           message: 'درخواست اصلاح را از دکمه «درخواست اصلاح» در پرونده حسابداری قرارداد دوباره ثبت کنید.',
         });
       }
+      const requiresManagerReview = managerReviewActions.has(req.body.kind);
       if (
-        managerReviewActions.has(req.body.kind) &&
+        requiresManagerReview &&
         req.user!.role !== 'ADMIN' &&
         (req as any).workspacePermission !== WORKSPACE_PERMISSIONS.ADMIN
       ) {
@@ -1090,7 +1101,7 @@ export const createAccountingActionHandler = (
         userId: req.user!.id,
         role: req.user!.role,
         effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace, workspacePermission: req.workspacePermission,
-          feature: accountingActionFeature[String(req.body.kind)]?.[0] || FEATURES.ACCOUNTING_ACTIONS_MANAGE,
+          feature: featuresForAccountingAction(req.body)[0] || FEATURES.ACCOUNTING_ACTIONS_MANAGE,
           featurePermission: req.featurePermission },
       }, async (tx, notification) => {
         const correctionRequired = notification.kind === 'APPROVE_CORRECTION_FOR_SALES_EDIT';
@@ -1125,6 +1136,13 @@ export const createAccountingActionHandler = (
         console.error('Partner Accounting technical failure:', { trackingId, diagnostic: error.diagnostic });
         return res.status(500).json({ success: false, error: error.message, trackingId });
       }
+      if (error instanceof AccountingVoidBlockedError) return res.status(error.status).json({
+        success: false,
+        code: 'ACCOUNTING_VOID_BLOCKED',
+        message: error.message,
+        workflow: error.workflow,
+        actionUrl: error.actionUrl,
+      });
       if (error instanceof FinancialEvidenceConflictError && (req.body.invoiceId || req.body.recordId)) {
         const reviewCase = await recordFinancialEvidenceReviewCase({
           invoiceId: req.body.invoiceId || req.body.recordId,
@@ -1155,7 +1173,7 @@ export const createAccountingActionHandler = (
 
 const authorizeAccountingAction = async (req: WorkspaceRequest & FeatureRequest, res: Response, next: express.NextFunction) => {
   if (req.body.kind === 'REQUEST_CORRECTION') return next();
-  const features = accountingActionFeature[String(req.body.kind)] || [];
+  const features = featuresForAccountingAction(req.body);
   if (features.length === 0) return res.status(400).json({
     success: false,
     message: 'اقدام درخواست‌شده در سامانه حسابداری تعریف نشده است. پشتیبان سامانه باید مسیر اقدام را بررسی کند.',
@@ -1191,7 +1209,13 @@ router.post(
     body('correctionRequestId').optional().isString(),
     body('flagId').optional().isString(),
     body('reviewCaseId').optional().isString(),
+    body('voidCaseId').optional().isString(),
+    body('taxRecordId').optional().isString(),
     body('replacesRecordId').optional().isString(),
+    body('retainedRecordId').optional().isString(),
+    body('reasonKind').optional().isString(),
+    body('effectiveAt').optional().isISO8601(),
+    body('cancellationReason').optional().isString(),
     body('externalReference').optional().isString(),
     body('downstreamNote').optional().isString(),
     body('note').optional().isString(),

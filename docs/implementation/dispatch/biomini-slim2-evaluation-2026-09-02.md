@@ -41,7 +41,6 @@ This is not the Physical Biometric Device Gate and does not authorize real-drive
 - written production SDK, redistribution, offline use and matching rights;
 - supplier warranty, replacement turnaround and spare-unit terms;
 - organization-owned signed connector release;
-- approved legal/consent/retention/deletion policies;
 - numeric quality and liveness threshold calibration;
 - wrong-driver and approved spoof tests;
 - reconnect, restart, USB suspend, clock, replay and license-failure tests;

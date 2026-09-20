@@ -100,17 +100,36 @@ import {
 } from '../services/personnelPerformanceDisclosureStore';
 import {
   assignSimplePerformanceProfile,
+  appealSimplePerformanceEvaluation,
   createSimplePerformanceCorrection,
   createSimplePerformanceEvaluation,
   createSimplePerformanceProfile,
   finalizeSimplePerformanceEvaluation,
   getSimplePerformanceBadges,
+  getSimplePersonalPerformanceDetails,
   getSimplePerformanceHistory,
   getSimplePerformanceWorkspace,
   listSimplePerformanceProfiles,
+  publishSimplePerformanceEvaluation,
+  resolveSimplePerformanceAppeal,
   saveSimplePerformanceDraft,
   visibleSimplePerformancePersonnelIds,
 } from '../services/simplePersonnelPerformanceStore';
+import {
+  activateBehaviorSurvey,
+  aggregateBehaviorSurveyCampaign,
+  createBehaviorSurveyDraft,
+  deleteBehaviorSurveyDraft,
+  inspectRawBehaviorSurveyResponses,
+  listAssignedBehaviorSurveys,
+  listBehaviorSurveyCampaigns,
+  saveBehaviorSurveyResponse,
+  updateBehaviorSurveyDraft,
+} from '../services/personnelBehaviorSurveyStore';
+import {
+  SELLER_EVALUATION_TEMPLATE,
+  SELLER_PERFORMANCE_LEVEL_LABELS,
+} from '../services/sellerPerformancePolicy';
 
 const router = express.Router();
 router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
@@ -179,6 +198,8 @@ const requireAnySimplePerformancePermission = (codes: string[]) => async (req: A
 
 const useSimplePerformance = requireAnySimplePerformancePermission([
   'VIEW_PERFORMANCE_EVALUATIONS', 'EVALUATE_DIRECT_REPORTS', 'EVALUATE_ALL_PERSONNEL', 'MANAGE_PERFORMANCE_PROFILES',
+  'MANAGE_PERFORMANCE_SURVEYS',
+  'ENTER_PERFORMANCE_EVIDENCE', 'FINALIZE_PERFORMANCE_RESULTS',
 ]);
 const manageSimpleProfiles = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_PROFILES'] });
 
@@ -235,6 +256,7 @@ router.post('/simple/evaluations', useSimplePerformance, async (req: AuthRequest
 router.put('/simple/evaluations/:evaluationId/draft', useSimplePerformance, async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, evaluation: await saveSimplePerformanceDraft(prisma, {
     actorUserId: req.user!.id, evaluationId: req.params.evaluationId, values: Array.isArray(req.body.values) ? req.body.values : [],
+    reason: typeof req.body.reason === 'string' ? req.body.reason : undefined,
   }) }); }
   catch (error) { return next(error); }
 });
@@ -242,6 +264,30 @@ router.put('/simple/evaluations/:evaluationId/draft', useSimplePerformance, asyn
 router.post('/simple/evaluations/:evaluationId/finalize', useSimplePerformance, async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, evaluation: await finalizeSimplePerformanceEvaluation(prisma, {
     actorUserId: req.user!.id, evaluationId: req.params.evaluationId,
+    confirmedSeriousViolation: req.body.confirmedSeriousViolation === true,
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/publish', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await publishSimplePerformanceEvaluation(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId,
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/appeal', async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    return res.json({ success: true, evaluation: await appealSimplePerformanceEvaluation(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId, text: String(req.body.text ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/simple/evaluations/:evaluationId/resolve-appeal', useSimplePerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await resolveSimplePerformanceAppeal(prisma, {
+    actorUserId: req.user!.id, evaluationId: req.params.evaluationId, resolution: String(req.body.resolution ?? ''),
   }) }); }
   catch (error) { return next(error); }
 });
@@ -249,6 +295,78 @@ router.post('/simple/evaluations/:evaluationId/finalize', useSimplePerformance, 
 router.post('/simple/evaluations/:evaluationId/corrections', useSimplePerformance, async (req: AuthRequest, res, next) => {
   try { return res.status(201).json({ success: true, evaluation: await createSimplePerformanceCorrection(prisma, {
     actorUserId: req.user!.id, evaluationId: req.params.evaluationId, reason: String(req.body.reason ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/seller-policy', useSimplePerformance, (_req, res) => res.json({
+  success: true,
+  levels: SELLER_PERFORMANCE_LEVEL_LABELS,
+  factors: SELLER_EVALUATION_TEMPLATE,
+  composition: { systemPerformance: 63, supervisorPerformance: 7, supervisorBehavior: 12, peerSurvey: 9, systemBehavior: 9 },
+}));
+
+const manageBehaviorSurveys = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_SURVEYS'] });
+const viewRawBehaviorSurveys = requireHrAuthorization({ actionPermissionCodes: ['VIEW_RAW_PERFORMANCE_SURVEY'] });
+
+router.get('/behavior-surveys', manageBehaviorSurveys, async (_req, res, next) => {
+  try { return res.json({ success: true, campaigns: await listBehaviorSurveyCampaigns(prisma) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/behavior-surveys', manageBehaviorSurveys, async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, campaign: await createBehaviorSurveyDraft(prisma, { ...req.body, actorUserId: req.user!.id }) }); }
+  catch (error) { return next(error); }
+});
+
+router.delete('/behavior-surveys/:campaignId', manageBehaviorSurveys, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, deleted: await deleteBehaviorSurveyDraft(prisma, {
+    campaignId: req.params.campaignId, actorUserId: req.user!.id,
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.put('/behavior-surveys/:campaignId', manageBehaviorSurveys, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, campaign: await updateBehaviorSurveyDraft(prisma, {
+    ...req.body, campaignId: req.params.campaignId, actorUserId: req.user!.id,
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/behavior-surveys/:campaignId/activate', manageBehaviorSurveys, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, campaign: await activateBehaviorSurvey(prisma, {
+    campaignId: req.params.campaignId, actorUserId: req.user!.id,
+    opensAt: new Date(req.body.opensAt), closesAt: new Date(req.body.closesAt),
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/behavior-surveys/assigned', async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    return res.json({ success: true, campaigns: await listAssignedBehaviorSurveys(prisma, req.user.id) });
+  } catch (error) { return next(error); }
+});
+
+router.put('/behavior-surveys/:campaignId/responses/:targetPersonnelId', async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    return res.json({ success: true, response: await saveBehaviorSurveyResponse(prisma, {
+      campaignId: req.params.campaignId, targetPersonnelId: req.params.targetPersonnelId,
+      actorUserId: req.user.id, submit: Boolean(req.body.submit), commentText: req.body.commentText,
+      answers: Array.isArray(req.body.answers) ? req.body.answers : [],
+    }) });
+  } catch (error) { return next(error); }
+});
+
+router.get('/behavior-surveys/:campaignId/aggregate', useSimplePerformance, async (req, res, next) => {
+  try { return res.json({ success: true, results: await aggregateBehaviorSurveyCampaign(prisma, req.params.campaignId) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/behavior-surveys/:campaignId/raw/:targetPersonnelId', viewRawBehaviorSurveys, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, responses: await inspectRawBehaviorSurveyResponses(prisma, {
+    campaignId: req.params.campaignId, targetPersonnelId: req.params.targetPersonnelId, actorUserId: req.user!.id,
   }) }); }
   catch (error) { return next(error); }
 });
@@ -448,7 +566,10 @@ router.get('/badge/me', async (req: AuthRequest, res, next) => {
     const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { personnelId: true } });
     if (user?.personnelId) {
       const simple = await getSimplePerformanceBadges(prisma, [user.personnelId]);
-      if (simple[user.personnelId]) return res.json({ success: true, badge: simple[user.personnelId] });
+      if (simple[user.personnelId]) return res.json({
+        success: true,
+        badge: { ...(simple[user.personnelId] as object), details: await getSimplePersonalPerformanceDetails(prisma, user.personnelId) },
+      });
     }
     return res.json({ success: true, badge: await getPersonalPerformanceBadge(prisma, req.user.id) });
   } catch (error) { return next(error); }

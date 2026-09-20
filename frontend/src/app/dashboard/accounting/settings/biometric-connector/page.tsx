@@ -13,7 +13,7 @@ interface Diagnostics {
   checkedAt: string;
   device: { model: string; serial: string; connectorVersion: string; sdkVersion: string };
   supportedChecks: readonly string[];
-  platform?: Record<'connector' | 'lifecycle' | 'confirmation' | 'authorization' | 'projection' | 'auditIntegrity' | 'outage' | 'sms', number>;
+  platform?: Record<'connector' | 'confirmation' | 'authorization' | 'projection' | 'auditIntegrity' | 'outage' | 'sms', number>;
 }
 
 const checkLabels: Record<string, string> = {
@@ -88,7 +88,7 @@ export default function BiometricConnectorDiagnosticsPage() {
           </ErpSection>
           {diagnostics.platform && <ErpSection title="پایش زنجیره ارسال" description="مقدار صفر یعنی مورد باز فعلی یا شکست ثبت‌شده در ۲۴ ساعت اخیر دیده نشده است؛ تطبیق روزانه موارد منقضی را به استثنای ممیزی تبدیل می‌کند.">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {Object.entries({ connector: 'اتصال‌گر', lifecycle: 'چرخه ثبت', confirmation: 'تأیید راننده', authorization: 'مجوز خروج', projection: 'مانده بار', auditIntegrity: 'یکپارچگی ممیزی', outage: 'خروج اضطراری', sms: 'پیامک خریدار' }).map(([key, label]) => {
+              {Object.entries({ connector: 'اتصال‌گر', confirmation: 'تأیید راننده', authorization: 'مجوز خروج', projection: 'مانده بار', auditIntegrity: 'یکپارچگی ممیزی', outage: 'خروج اضطراری', sms: 'پیامک خریدار' }).map(([key, label]) => {
                 const count = diagnostics.platform![key as keyof typeof diagnostics.platform];
                 return <ErpFieldView key={key} label={label} value={count === 0 ? 'سالم' : `${count} مورد نیازمند رسیدگی`} tone={count === 0 ? 'success' : 'warning'} />;
               })}

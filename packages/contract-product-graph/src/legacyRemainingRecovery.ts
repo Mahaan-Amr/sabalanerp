@@ -236,26 +236,29 @@ export const recoverLegacyRemainingChildren = (
       const legacyKerfMeters = p.sawKerfEnabled ? canonical(decimal(p.sawKerfCm).div(100).toFixed()) : canonical('0');
       const kerfMeters = explicitPolicy?.kerfMeters ?? legacyKerfMeters;
       if (kerfMeters !== legacyKerfMeters) throw new Error('conflicting-kerf-policy');
-      let distribution: number[];
+      let witnessedDistribution: number[];
       if (s.sourcePieceQuantities !== undefined) {
         if (!Array.isArray(s.sourcePieceQuantities)) throw new Error('invalid-physical-layout');
-        distribution = s.sourcePieceQuantities.map(integer);
-        if (distribution.length !== consumed.length || distribution.reduce((sum, value) => sum + value, 0) !== pieces.length) {
+        witnessedDistribution = s.sourcePieceQuantities.map(integer);
+        if (witnessedDistribution.length !== consumed.length || witnessedDistribution.reduce((sum, value) => sum + value, 0) !== pieces.length) {
           throw new Error('invalid-physical-layout');
         }
       } else if (pieces.length === consumed.length) {
         // Existing drafts can prove a one-piece-per-source layout from their physical-piece ledger.
         // Canonical replay below remains authoritative for whether the two-dimensional cut fits.
-        distribution = consumed.map(() => 1);
+        witnessedDistribution = consumed.map(() => 1);
       } else if (consumed.length === 1) {
-        distribution = [pieces.length];
+        witnessedDistribution = [pieces.length];
       } else {
         if (pieces.length !== quantity || !sameGeometry(p.length, selected.lengthMeters)) {
           throw new Error('unsupported-physical-layout');
         }
-        distribution = uniqueSourceDistribution(consumed, generated, selected.widthMeters, widthMeters, kerfMeters, quantity);
+        witnessedDistribution = uniqueSourceDistribution(consumed, generated, selected.widthMeters, widthMeters, kerfMeters, quantity);
       }
-      if (explicitPolicy?.sourcePieceQuantities && JSON.stringify(explicitPolicy.sourcePieceQuantities) !== JSON.stringify(distribution)) throw new Error('invalid-physical-layout');
+      const distribution = explicitPolicy?.sourcePieceQuantities ?? witnessedDistribution;
+      if (explicitPolicy && JSON.stringify(distribution) !== JSON.stringify(witnessedDistribution)) {
+        throw new Error('canonical-remainder-evidence-mismatch');
+      }
       const breakdown = list(p.cuttingBreakdown);
       if (new Set(breakdown.map(b => b.type)).size !== breakdown.length ||
         breakdown.some(b => !['longitudinal', 'cross', 'calibration'].includes(String(b.type)))) throw new Error('invalid-cutting-evidence');
@@ -322,27 +325,34 @@ export const recoverLegacyRemainingChildren = (
         if (amount !== undefined && !equal(amount, allocation.cuttingAmountToman)) throw new Error('cutting-price-drift');
       }
       const secondaries = replay.result.inventory.filter(stock => allocation.generatedRemainingStoneIds.includes(stock.remainingStoneId));
-      const sequenceBySource = new Map<number, number>();
-      const secondaryWitnesses = new Map<string, string[]>();
+      const remainderSequenceBySource = new Map<string, number>();
+      const sourceOrdinalOffset =
+        allocation.packingPlan.remainders.some(remainder => remainder.sourceOrdinal === consumed.length) &&
+        !allocation.packingPlan.remainders.some(remainder => remainder.sourceOrdinal === 0)
+          ? 1
+          : 0;
       const expectedGenerated = allocation.packingPlan.remainders.map(remainder => {
-        const sequence = (sequenceBySource.get(remainder.sourceOrdinal) ?? 0) + 1;
-        sequenceBySource.set(remainder.sourceOrdinal, sequence);
-        const legacyId = `${consumed[remainder.sourceOrdinal]}:secondary:${sequence}`;
-        const matches = secondaries.filter(stock =>
-          stock.lengthMeters === remainder.lengthMeters && stock.widthMeters === remainder.widthMeters);
-        if (matches.length !== 1) throw new Error('secondary-lineage-mismatch');
-        secondaryWitnesses.set(matches[0].remainingStoneId, [
-          ...(secondaryWitnesses.get(matches[0].remainingStoneId) ?? []),
-          legacyId
-        ]);
-        return legacyId;
+        const sourceId = consumed[remainder.sourceOrdinal - sourceOrdinalOffset];
+        if (!sourceId) throw new Error('secondary-lineage-mismatch');
+        const sequence = (remainderSequenceBySource.get(sourceId) ?? 0) + 1;
+        remainderSequenceBySource.set(sourceId, sequence);
+        return {
+          id: `${sourceId}:secondary:${sequence}`,
+          lengthMeters: remainder.lengthMeters,
+          widthMeters: remainder.widthMeters
+        };
       });
-      if (JSON.stringify([...expectedGenerated].sort()) !== JSON.stringify([...generated].sort()) ||
-        secondaries.some(stock => secondaryWitnesses.get(stock.remainingStoneId)?.length !== stock.quantity)) {
+      if (JSON.stringify(expectedGenerated.map(item => item.id).sort()) !== JSON.stringify([...generated].sort())) {
         throw new Error('secondary-lineage-mismatch');
       }
       for (const id of consumed) pools.get(selectedId!)!.delete(id);
-      for (const stock of secondaries) addPool(stock.remainingStoneId, secondaryWitnesses.get(stock.remainingStoneId) ?? []);
+      for (const secondary of secondaries) {
+        const matchingIds = expectedGenerated
+          .filter(item => item.lengthMeters === secondary.lengthMeters && item.widthMeters === secondary.widthMeters)
+          .map(item => item.id);
+        if (matchingIds.length !== secondary.quantity) throw new Error('secondary-lineage-mismatch');
+        addPool(secondary.remainingStoneId, matchingIds);
+      }
       inventory = [...replay.result.inventory];
       allocations.push({ ...allocation, intentSnapshot: intent });
       const groups = new Set(graph.operationGroups.filter(g => g.productRowId === affected).map(g => g.operationGroupId));

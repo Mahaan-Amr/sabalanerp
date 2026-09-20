@@ -14,6 +14,8 @@ export const calculateRemainingChildCuttingBreakdown = ({
   stock,
   rate,
   sourcePieceQuantities,
+  longitudinalCutMeters,
+  crossCutMeters,
   physicalPieces,
   sawKerfCm = 0
 }: {
@@ -21,6 +23,8 @@ export const calculateRemainingChildCuttingBreakdown = ({
   stock: RemainingStone;
   rate: number;
   sourcePieceQuantities?: number[];
+  longitudinalCutMeters?: number;
+  crossCutMeters?: number;
   physicalPieces?: StonePartition[];
   sawKerfCm?: number;
 }): CuttingBreakdownEntry[] | undefined => {
@@ -46,21 +50,34 @@ export const calculateRemainingChildCuttingBreakdown = ({
       quantity: Math.max(1, Math.floor(Number(row.quantity) || 1))
     }]
   };
-  const packed = sourcePieceQuantities
-    ? packPreservedSourceDistribution(request, sourcePieceQuantities)
-    : calculatePackingPlan(request);
-  if (!packed.ok) return undefined;
+  const packed = longitudinalCutMeters === undefined || crossCutMeters === undefined
+    ? (sourcePieceQuantities
+        ? packPreservedSourceDistribution(request, sourcePieceQuantities)
+        : calculatePackingPlan(request))
+    : undefined;
+  if (packed && !packed.ok) return undefined;
 
-  return ([
-    ['longitudinal', packed.plan.longitudinalCutMeters],
-    ['cross', packed.plan.crossCutMeters]
+  const cuttingQuantities = ([
+    ['longitudinal', longitudinalCutMeters ?? (packed?.ok ? packed.plan.longitudinalCutMeters : 0)],
+    ['cross', crossCutMeters ?? (packed?.ok ? packed.plan.crossCutMeters : 0)]
   ] as const).flatMap(([type, canonicalMeters]) => {
     const meters = normalizeCalculatedNumber(Number(canonicalMeters));
-    return meters > 0
-      ? [{ type, meters, rate: safeRate, cost: Number(calculatePricing({
-          policyVersion: 'pricing-v1', roundingPolicyVersion: 'rounding-v2',
-          lines: [{ lineId: `${row.id}:${type}`, quantity: canonicalMeters, rateToman: parseCanonicalDecimal(String(safeRate)) }]
-        }).totalAmountToman) }]
-      : [];
+    return meters > 0 ? [{ type, meters }] : [];
   });
+  const pricing = calculatePricing({
+    policyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v2',
+    lines: cuttingQuantities.map(({ type, meters }) => ({
+      lineId: `${row.id}:${type}-cut`,
+      quantity: parseCanonicalDecimal(String(meters)),
+      rateToman: parseCanonicalDecimal(String(safeRate))
+    }))
+  });
+
+  return cuttingQuantities.map(({ type, meters }) => ({
+    type,
+    meters,
+    rate: safeRate,
+    cost: Number(pricing.lines.find(line => line.lineId === `${row.id}:${type}-cut`)?.amountToman ?? 0)
+  }));
 };

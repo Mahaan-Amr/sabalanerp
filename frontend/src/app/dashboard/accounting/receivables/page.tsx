@@ -1,10 +1,10 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { FaReceipt, FaSync } from 'react-icons/fa';
+import { FaExclamationTriangle, FaReceipt, FaSync } from 'react-icons/fa';
 import { ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
-import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
+import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage, receivableStatusLabels } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import PersianCalendar from '@/lib/persian-calendar';
 import { accountingEventInstant, partnerAccountingTimeFields } from '@/features/accounting/accountingEventTime';
@@ -52,6 +52,7 @@ export default function AccountingReceivablesPage() {
   const [searchInput, setSearchInput] = useState(query.search);
   const [focus, setFocus] = useState<any | null>(null);
   const [receiptTarget, setReceiptTarget] = useState<any | null>(null);
+  const [voidTarget, setVoidTarget] = useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -125,7 +126,7 @@ export default function AccountingReceivablesPage() {
     { id: 'paid', header: 'پرداخت شده', mobileLabel: 'پرداخت شده', priority: 'secondary', align: 'end', cell: (row) => money(row.paidAmount, row.currency) },
     { id: 'remaining', header: 'مانده', mobileLabel: 'مانده', priority: 'secondary', align: 'end', cell: (row) => <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{money(row.remainingAmount, row.currency)}</span> },
     { id: 'due', header: 'سررسید', mobileLabel: 'سررسید', priority: 'meta', cell: (row) => dateFa(row.dueDate) },
-    { id: 'status', header: 'وضعیت', mobileLabel: 'وضعیت', priority: 'meta', cell: (row) => <StatusBadge status={row.status} /> },
+    { id: 'status', header: 'وضعیت', mobileLabel: 'وضعیت', priority: 'meta', cell: (row) => <StatusBadge status={row.status} label={receivableStatusLabels[row.status] || row.status} /> },
   ];
 
   const registerReceipt = async (values: Record<string, string | number>) => {
@@ -164,6 +165,21 @@ export default function AccountingReceivablesPage() {
     }
   };
 
+  const voidReceivable = async (values: Record<string, string | number>) => {
+    if (!voidTarget) return;
+    setActionError(null); setActionLoading(voidTarget.id);
+    try {
+      await accountingAPI.executeAction({
+        kind: 'VOID_ACCOUNTING_RECEIVABLE', receivableId: voidTarget.id,
+        reason: String(values.reason || '').trim(),
+        effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString(),
+      });
+      setVoidTarget(null); await loadRows();
+    } catch (error) {
+      setActionError(accountingFailureMessage(error, 'ابطال دریافتنی انجام نشد؛ راهنمای مانع را بررسی کنید.'));
+    } finally { setActionLoading(null); }
+  };
+
   const rowActions = (row: any): ErpAction[] => [
     ...(query.view === 'outstanding' || (row.sourceKind === 'PARTNER_INTERNAL_RECORD' && !row.partnerActions?.registerReceipt) ? [] : [
     {
@@ -174,6 +190,13 @@ export default function AccountingReceivablesPage() {
       onClick: () => setReceiptTarget(row),
     },
     ]),
+    ...(row.sourceKind === 'PARTNER_INTERNAL_RECORD' || row.status === 'VOIDED' ? [] : row.invoiceRecordId && row.contractId ? [{
+      label: 'مشاهده مسیر ابطال', icon: FaExclamationTriangle, tone: 'warning' as const,
+      href: `/dashboard/accounting/contracts/${row.contractId}#financial-void-cases`,
+    }] : Number(row.paidAmount) === 0 ? [{
+      label: 'ابطال دریافتنی', icon: FaExclamationTriangle, tone: 'danger' as const,
+      onClick: () => { setActionError(null); setVoidTarget(row); },
+    }] : []),
   ];
 
   return (
@@ -205,7 +228,7 @@ export default function AccountingReceivablesPage() {
           <p className="font-semibold text-[var(--sds-text-primary)]">{focus.record.contract?.contractNumber || focus.record.id}</p>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm text-[var(--sds-text-secondary)]">
             <span>{money(focus.record.remainingAmount, focus.record.currency)}</span>
-            <StatusBadge status={focus.record.status} />
+            <StatusBadge status={focus.record.status} label={receivableStatusLabels[focus.record.status] || focus.record.status} />
           </div>
         </ErpCard>
       )}
@@ -236,6 +259,21 @@ export default function AccountingReceivablesPage() {
         error={actionError}
         onClose={() => setReceiptTarget(null)}
         onSubmit={registerReceipt}
+      />
+      <AccountingActionModal
+        open={Boolean(voidTarget)}
+        title="ابطال دریافتنی مستقل"
+        description="این دریافتنی به فاکتور متصل نیست و هیچ مبلغ پرداخت‌شده‌ای ندارد. سابقه پس از ابطال باقی می‌ماند."
+        fields={[
+          { id: 'reason', label: 'دلیل ابطال', type: 'textarea', required: true },
+          { id: 'effectiveAt', label: 'تاریخ مؤثر', type: 'date', required: true },
+        ]}
+        submitLabel="ابطال دریافتنی"
+        destructive
+        busy={Boolean(actionLoading)}
+        error={actionError}
+        onClose={() => setVoidTarget(null)}
+        onSubmit={voidReceivable}
       />
     </ErpListPage>
   );

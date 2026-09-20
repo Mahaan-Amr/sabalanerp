@@ -1,6 +1,6 @@
 # Sabalan BioMini workstation adapter
 
-This Windows-only package is the Xperix/Suprema implementation behind SabalanERP's device-neutral biometric connector seam. Its software path is implemented, but it remains **pilot-gated** until the signed distribution, vendor rights, counsel approval, and physical acceptance evidence are supplied.
+This Windows-only package is the Xperix/Suprema implementation behind SabalanERP's device-neutral biometric connector seam. Its software path is implemented, but it remains **pilot-gated** until the signed distribution, vendor rights, and physical acceptance evidence are supplied.
 
 It deliberately:
 
@@ -66,7 +66,6 @@ Before this adapter may be hosted by the authenticated loopback connector:
 
 1. written production SDK and redistribution/matching terms;
 2. an organization-owned code-signing certificate and signed release pipeline;
-3. counsel-approved biometric consent, retention, deletion, incident and legal-hold configuration;
-4. production workstation installation and configuration reconciliation;
-5. the accuracy, latency, spoof, reconnect, restart and 500-cycle tests in issue #224; and
-6. completed operator competency and support coverage records.
+3. production workstation installation and configuration reconciliation;
+4. the accuracy, latency, spoof, reconnect, restart and 500-cycle tests in issue #224; and
+5. completed operator competency and support coverage records.

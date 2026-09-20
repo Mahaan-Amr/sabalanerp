@@ -3546,49 +3546,17 @@ model ShipmentStatementMigrationEvidence {
   @@map("shipment_statement_migration_evidence")
 }
 
-model BiometricGovernancePolicy {
-  id                                String                      @id @default(cuid())
-  policyVersion                     String                      @unique
-  legalBasis                        String
-  consentWordingVersion             String
-  templateRetentionDays             Int
-  confirmationEvidenceRetentionDays Int
-  securityLogRetentionDays          Int
-  exportRetentionDays               Int
-  backupRetentionDays               Int
-  deletionCertificateRetentionDays  Int
-  accessControlPolicy               String
-  legalHoldPolicy                   String
-  incidentResponsePolicy            String
-  disclosurePolicy                  String
-  counselApprovedAt                 DateTime
-  counselApprovedBy                 String
-  activeFrom                        DateTime
-  retiredAt                         DateTime?
-  recordedBy                        String
-  recordedAt                        DateTime                    @default(now())
-  enrollments                       DriverBiometricEnrollment[]
-
-  @@index([activeFrom, retiredAt])
-  @@map("biometric_governance_policies")
-}
-
 model DriverBiometricEnrollment {
-  id                 String                    @id @default(cuid())
-  personnelId        String
-  governancePolicyId String
-  status             String                    @default("ACTIVE")
-  acknowledgement    String
-  confirmationPhone  String
-  acknowledgedAt     DateTime
-  enrolledAt         DateTime                  @default(now())
-  enrolledBy         String
-  retentionUntil     DateTime
-  withdrawnAt        DateTime?
-  withdrawnBy        String?
-  personnel          Personnel                 @relation(fields: [personnelId], references: [id], onDelete: Restrict)
-  governancePolicy   BiometricGovernancePolicy @relation(fields: [governancePolicyId], references: [id], onDelete: Restrict)
-  templates          DriverBiometricTemplate[]
+  id                String                    @id @default(cuid())
+  personnelId       String
+  status            String                    @default("ACTIVE")
+  confirmationPhone String
+  enrolledAt        DateTime                  @default(now())
+  enrolledBy        String
+  deactivatedAt     DateTime?
+  deactivatedBy     String?
+  personnel         Personnel                 @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  templates         DriverBiometricTemplate[]
 
   @@index([personnelId, status])
   @@map("driver_biometric_enrollments")
@@ -4432,6 +4400,7 @@ model AccountingFinancialRecord {
   approvedPricingVersions ContractApprovedPricingVersion[]
   pricingReadinessResults ContractPricingReadinessResult[]
   partnerShipmentPricing  PartnerAllocationRevisionPricing[]
+  invoiceNumberClaim      AccountingInvoiceNumberClaim?
 
   @@index([kind, status])
   @@index([sourceKind, sourceId])
@@ -4439,6 +4408,15 @@ model AccountingFinancialRecord {
   @@index([customerId])
   @@index([systemInvoiceNumber])
   @@map("accounting_financial_records")
+}
+
+model AccountingInvoiceNumberClaim {
+  number            String                    @id
+  financialRecordId String                    @unique
+  claimedAt         DateTime                  @default(now())
+  financialRecord   AccountingFinancialRecord @relation(fields: [financialRecordId], references: [id], onDelete: Restrict)
+
+  @@map("accounting_invoice_number_claims")
 }
 
 model AccountingInvoiceCandidateItem {
@@ -4598,6 +4576,32 @@ model AccountingCorrectionRequest {
   @@index([recordId])
   @@index([status])
   @@map("accounting_correction_requests")
+}
+
+model AccountingFinancialVoidCase {
+  id                 String                   @id @default(cuid())
+  contractId         String
+  sourceRecordId     String
+  retainedRecordId   String?
+  status             AccountingVoidCaseStatus @default(OPEN)
+  reasonKind         AccountingVoidReasonKind
+  reason             String
+  effectiveAt        DateTime
+  startedBy          String
+  startedAt          DateTime                 @default(now())
+  cancelledBy        String?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  completedBy        String?
+  completedAt        DateTime?
+  metadata           Json?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@index([contractId, createdAt])
+  @@index([sourceRecordId, status])
+  @@index([status, startedAt])
+  @@map("accounting_financial_void_cases")
 }
 
 model ContractLifecycleRequest {
@@ -5070,6 +5074,19 @@ enum AccountingRecordStatus {
   NEEDS_CORRECTION
 }
 
+enum AccountingVoidCaseStatus {
+  OPEN
+  CANCELLED
+  COMPLETED
+}
+
+enum AccountingVoidReasonKind {
+  DUPLICATE_ISSUE
+  ENTRY_ERROR
+  SALE_CANCELLED
+  OTHER
+}
+
 enum ReceivableStatus {
   OPEN
   PARTIALLY_PAID
@@ -5378,17 +5395,18 @@ model HrCostCenter {
 }
 
 model HrJob {
-  id               String       @id @default(cuid())
-  code             String       @unique
-  codeOccurrence   Int          @default(1)
-  title            String
-  description      String?
-  responsibilities String?
-  isActive         Boolean      @default(true)
-  createdBy        String
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  positions        HrPosition[]
+  id                        String                     @id @default(cuid())
+  code                      String                     @unique
+  codeOccurrence            Int                        @default(1)
+  title                     String
+  description               String?
+  responsibilities          String?
+  isActive                  Boolean                    @default(true)
+  createdBy                 String
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  positions                 HrPosition[]
+  simplePerformanceProfiles SimplePerformanceProfile[]
 
   @@map("hr_jobs")
 }
@@ -8232,35 +8250,43 @@ model PerformanceCorrection {
 }
 
 model SimplePerformanceProfile {
-  id              String                               @id @default(cuid())
-  stableKey       String
-  nameFa          String
-  version         Int
-  isActive        Boolean                              @default(true)
-  createdByUserId String
-  createdAt       DateTime                             @default(now())
-  indicators      SimplePerformanceIndicator[]
-  assignments     SimplePerformanceProfileAssignment[]
-  evaluations     SimplePerformanceEvaluation[]
+  id                 String                               @id @default(cuid())
+  stableKey          String
+  nameFa             String
+  version            Int
+  effectivePeriodKey String?
+  jobId              String?
+  isActive           Boolean                              @default(true)
+  createdByUserId    String
+  createdAt          DateTime                             @default(now())
+  indicators         SimplePerformanceIndicator[]
+  assignments        SimplePerformanceProfileAssignment[]
+  evaluations        SimplePerformanceEvaluation[]
+  job                HrJob?                               @relation(fields: [jobId], references: [id], onDelete: Restrict)
 
   @@unique([stableKey, version])
   @@index([isActive, nameFa])
+  @@index([stableKey, effectivePeriodKey, version])
+  @@index([jobId, effectivePeriodKey, version])
   @@map("simple_performance_profiles")
 }
 
 model SimplePerformanceIndicator {
-  id            String                   @id @default(cuid())
-  profileId     String
-  code          String
-  categoryFa    String?
-  titleFa       String
-  unitFa        String
-  target        Decimal                  @db.Decimal(18, 4)
-  direction     String
-  weightPercent Decimal                  @db.Decimal(7, 4)
-  sortOrder     Int
-  profile       SimplePerformanceProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
-  values        SimplePerformanceValue[]
+  id                 String                   @id @default(cuid())
+  profileId          String
+  code               String
+  categoryFa         String?
+  titleFa            String
+  unitFa             String
+  target             Decimal                  @db.Decimal(18, 4)
+  direction          String
+  weightPercent      Decimal                  @db.Decimal(7, 4)
+  familyCode         String?
+  sourceKind         String                   @default("SYSTEM")
+  minimumSampleCount Int                      @default(1)
+  sortOrder          Int
+  profile            SimplePerformanceProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  values             SimplePerformanceValue[]
 
   @@unique([profileId, code])
   @@index([profileId, sortOrder])
@@ -8280,26 +8306,41 @@ model SimplePerformanceProfileAssignment {
 }
 
 model SimplePerformanceEvaluation {
-  id                       String                    @id @default(cuid())
-  personnelId              String
-  employmentRelationshipId String?
-  employmentBindingStatus  String                    @default("BOUND")
-  profileId                String
-  evaluationDate           DateTime                  @db.Date
-  status                   String                    @default("DRAFT")
-  evaluatorUserId          String
-  evaluatorAuthority       String
-  score                    Decimal?                  @db.Decimal(38, 18)
-  levelCode                String?
-  finalizedAt              DateTime?
-  correctionOfId           String?
-  correctionReason         String?
-  supersededAt             DateTime?
-  createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
-  profile                  SimplePerformanceProfile  @relation(fields: [profileId], references: [id], onDelete: Restrict)
-  employmentRelationship   HrEmploymentRelationship? @relation(fields: [employmentRelationshipId, personnelId], references: [id, personnelId], onDelete: Restrict)
-  values                   SimplePerformanceValue[]
+  id                        String                           @id @default(cuid())
+  personnelId               String
+  employmentRelationshipId  String?
+  employmentBindingStatus   String                           @default("BOUND")
+  profileId                 String
+  evaluationDate            DateTime                         @db.Date
+  status                    String                           @default("DRAFT")
+  evaluatorUserId           String
+  evaluatorAuthority        String
+  score                     Decimal?                         @db.Decimal(38, 18)
+  levelCode                 String?
+  confirmedSeriousViolation Boolean                          @default(false)
+  periodKey                 String?
+  periodLabelFa             String?
+  measurementFrom           DateTime?                        @db.Date
+  measurementTo             DateTime?                        @db.Date
+  effectiveDays             Int?
+  proposedAt                DateTime?
+  appealDeadline            DateTime?
+  appealText                String?
+  appealedAt                DateTime?
+  appealResolution          String?
+  appealResolvedAt          DateTime?
+  appealResolvedByUserId    String?
+  assignmentSegments        Json?
+  finalizedAt               DateTime?
+  correctionOfId            String?
+  correctionReason          String?
+  supersededAt              DateTime?
+  createdAt                 DateTime                         @default(now())
+  updatedAt                 DateTime                         @updatedAt
+  profile                   SimplePerformanceProfile         @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  employmentRelationship    HrEmploymentRelationship?        @relation(fields: [employmentRelationshipId, personnelId], references: [id, personnelId], onDelete: Restrict)
+  values                    SimplePerformanceValue[]
+  valueRevisions            SimplePerformanceValueRevision[]
 
   @@index([personnelId, status, finalizedAt])
   @@index([employmentRelationshipId, status, finalizedAt])
@@ -8307,14 +8348,39 @@ model SimplePerformanceEvaluation {
   @@map("simple_performance_evaluations")
 }
 
+model SimplePerformanceValueRevision {
+  id                 String                      @id @default(cuid())
+  evaluationId       String
+  indicatorId        String
+  version            Int
+  oldActual          Decimal?                    @db.Decimal(18, 4)
+  newActual          Decimal                     @db.Decimal(18, 4)
+  oldSampleCount     Int?
+  newSampleCount     Int?
+  oldSourceReference String?
+  newSourceReference String?
+  reason             String
+  actorUserId        String
+  createdAt          DateTime                    @default(now())
+  evaluation         SimplePerformanceEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@unique([evaluationId, indicatorId, version])
+  @@index([evaluationId, createdAt])
+  @@map("simple_performance_value_revisions")
+}
+
 model SimplePerformanceValue {
-  id           String                      @id @default(cuid())
-  evaluationId String
-  indicatorId  String
-  actual       Decimal                     @db.Decimal(18, 4)
-  score        Decimal?                    @db.Decimal(38, 18)
-  evaluation   SimplePerformanceEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
-  indicator    SimplePerformanceIndicator  @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
+  id              String                      @id @default(cuid())
+  evaluationId    String
+  indicatorId     String
+  actual          Decimal                     @db.Decimal(18, 4)
+  score           Decimal?                    @db.Decimal(38, 18)
+  sampleCount     Int?
+  sourceReference String?
+  enteredByUserId String?
+  updatedAt       DateTime                    @updatedAt
+  evaluation      SimplePerformanceEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  indicator       SimplePerformanceIndicator  @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
 
   @@unique([evaluationId, indicatorId])
   @@index([indicatorId])
@@ -8335,6 +8401,130 @@ model SimplePerformanceAudit {
   @@index([evaluationId, createdAt])
   @@index([personnelId, createdAt])
   @@map("simple_performance_audits")
+}
+
+model PersonnelBehaviorSurveyCampaign {
+  id                String                              @id @default(cuid())
+  titleFa           String
+  periodKey         String
+  version           Int                                 @default(1)
+  status            String                              @default("DRAFT")
+  opensAt           DateTime?
+  closesAt          DateTime?
+  createdByUserId   String
+  activatedByUserId String?
+  activatedAt       DateTime?
+  createdAt         DateTime                            @default(now())
+  updatedAt         DateTime                            @updatedAt
+  questions         PersonnelBehaviorSurveyQuestion[]
+  targets           PersonnelBehaviorSurveyTarget[]
+  respondents       PersonnelBehaviorSurveyRespondent[]
+  responses         PersonnelBehaviorSurveyResponse[]
+
+  @@index([status, opensAt, closesAt])
+  @@index([periodKey, version])
+  @@map("personnel_behavior_survey_campaigns")
+}
+
+model PersonnelBehaviorSurveyQuestion {
+  id          String                          @id @default(cuid())
+  campaignId  String
+  sectionCode String
+  promptFa    String
+  sortOrder   Int
+  campaign    PersonnelBehaviorSurveyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  answers     PersonnelBehaviorSurveyAnswer[]
+
+  @@unique([campaignId, sortOrder])
+  @@index([campaignId, sectionCode])
+  @@map("personnel_behavior_survey_questions")
+}
+
+model PersonnelBehaviorSurveyTarget {
+  id          String                          @id @default(cuid())
+  campaignId  String
+  personnelId String
+  campaign    PersonnelBehaviorSurveyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, personnelId])
+  @@index([personnelId, campaignId])
+  @@map("personnel_behavior_survey_targets")
+}
+
+model PersonnelBehaviorSurveyRespondent {
+  id          String                          @id @default(cuid())
+  campaignId  String
+  personnelId String
+  campaign    PersonnelBehaviorSurveyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, personnelId])
+  @@index([personnelId, campaignId])
+  @@map("personnel_behavior_survey_respondents")
+}
+
+model PersonnelBehaviorSurveyResponse {
+  id                    String                                    @id @default(cuid())
+  campaignId            String
+  targetPersonnelId     String
+  respondentPersonnelId String
+  status                String                                    @default("DRAFT")
+  version               Int                                       @default(1)
+  commentText           String?
+  submittedAt           DateTime?
+  createdAt             DateTime                                  @default(now())
+  updatedAt             DateTime                                  @updatedAt
+  campaign              PersonnelBehaviorSurveyCampaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  answers               PersonnelBehaviorSurveyAnswer[]
+  revisions             PersonnelBehaviorSurveyResponseRevision[]
+
+  @@unique([campaignId, targetPersonnelId, respondentPersonnelId])
+  @@index([targetPersonnelId, campaignId, status])
+  @@index([respondentPersonnelId, campaignId, status])
+  @@map("personnel_behavior_survey_responses")
+}
+
+model PersonnelBehaviorSurveyResponseRevision {
+  id          String                          @id @default(cuid())
+  responseId  String
+  version     Int
+  status      String
+  commentText String?
+  answers     Json
+  actorUserId String
+  createdAt   DateTime                        @default(now())
+  response    PersonnelBehaviorSurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@unique([responseId, version])
+  @@index([responseId, createdAt])
+  @@map("personnel_behavior_survey_response_revisions")
+}
+
+model PersonnelBehaviorSurveyAnswer {
+  id           String                          @id @default(cuid())
+  responseId   String
+  questionId   String
+  optionCode   String
+  numericScore Int?
+  response     PersonnelBehaviorSurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  question     PersonnelBehaviorSurveyQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([responseId, questionId])
+  @@index([questionId, optionCode])
+  @@map("personnel_behavior_survey_answers")
+}
+
+model PersonnelBehaviorSurveyAudit {
+  id          String   @id @default(cuid())
+  campaignId  String?
+  responseId  String?
+  actorUserId String
+  eventType   String
+  details     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([campaignId, createdAt])
+  @@index([responseId, createdAt])
+  @@map("personnel_behavior_survey_audits")
 }
 
 model PerformanceAuditEvent {

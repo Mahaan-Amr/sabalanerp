@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { FaCheckCircle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
+import { FaCheckCircle, FaExclamationTriangle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
 import { ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpListPage, ErpPagination, ErpRialInput, ErpSelect, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -54,6 +54,7 @@ export default function AccountingInvoiceCandidatesPage() {
   const [searchInput, setSearchInput] = useState(query.search);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [approvalTarget, setApprovalTarget] = useState<any | null>(null);
+  const [voidTarget, setVoidTarget] = useState<any | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -184,6 +185,25 @@ export default function AccountingInvoiceCandidatesPage() {
     }
   };
 
+  const startVoidCase = async (values: Record<string, string | number>) => {
+    if (!voidTarget) return;
+    setActionError(null); setActionLoading(voidTarget.id);
+    try {
+      const reasonKind = String(values.reasonKind || 'OTHER');
+      await accountingAPI.executeAction({
+        kind: 'START_ACCOUNTING_VOID_CASE', recordId: voidTarget.id, reasonKind,
+        reason: String(values.reason || '').trim(),
+        effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString(),
+        ...(reasonKind === 'DUPLICATE_ISSUE' ? { retainedRecordId: String(values.retainedRecordId || '') } : {}),
+      });
+      setVoidTarget(null);
+      if (voidTarget.contractId) router.push(`/dashboard/accounting/contracts/${voidTarget.contractId}#financial-void-cases`);
+      else await loadRows();
+    } catch (error) {
+      setActionError(accountingFailureMessage(error, 'شروع پرونده ابطال انجام نشد؛ دلیل و فاکتور معتبر را بررسی کنید.'));
+    } finally { setActionLoading(null); }
+  };
+
   const rowActions = (row: any): ErpAction[] => [
     ...(row.contractId ? [{ label: 'مشاهده پرونده', href: `/dashboard/accounting/contracts/${row.contractId}`, icon: FaEye, tone: 'primary' as const }] : []),
     {
@@ -200,6 +220,10 @@ export default function AccountingInvoiceCandidatesPage() {
       disabled: row.sourceKind === 'PARTNER_INTERNAL_RECORD' || row.status !== 'DRAFT' || actionLoading === row.id,
       onClick: () => setDeleteTarget(row),
     },
+    ...(['ISSUED', 'POSTED'].includes(row.status) && row.sourceKind !== 'PARTNER_INTERNAL_RECORD' ? [{
+      label: 'شروع ابطال', icon: FaExclamationTriangle, tone: 'danger' as const,
+      disabled: actionLoading === row.id, onClick: () => { setActionError(null); setVoidTarget(row); },
+    }] : []),
   ];
 
   const columns: ErpColumn<any>[] = [
@@ -259,7 +283,7 @@ export default function AccountingInvoiceCandidatesPage() {
       </div>}
       {actionSuccess && <ErpInlineState kind="success" title={actionSuccess} />}
       {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadRows }} />}
-      {actionError && !deleteTarget && !approvalTarget && <ErpInlineState kind="error" title={actionError} />}
+      {actionError && !deleteTarget && !approvalTarget && !voidTarget && <ErpInlineState kind="error" title={actionError} />}
       <ErpSheet open={Boolean(approvalTarget)} onClose={() => setApprovalTarget(null)} title="تایید مالی صورتحساب"
         presentation="modal" pending={Boolean(actionLoading)}>
         {actionError && <ErpInlineState kind="error" title={actionError} />}
@@ -305,6 +329,32 @@ export default function AccountingInvoiceCandidatesPage() {
         error={actionError}
         onClose={() => setDeleteTarget(null)}
         onSubmit={(values) => deleteDraftRecord({ ...deleteTarget, note: String(values.note || '') })}
+      />
+      <AccountingActionModal
+        open={Boolean(voidTarget)}
+        title="شروع پرونده ابطال مالی"
+        description="سامانه مراحل تعیین‌تکلیف دریافت‌ها، چک‌ها و دریافتنی را به‌ترتیب نشان می‌دهد."
+        fields={[
+          { id: 'reasonKind', label: 'نوع دلیل', type: 'select', required: true, defaultValue: 'DUPLICATE_ISSUE', options: [
+            { label: 'صدور تکراری', value: 'DUPLICATE_ISSUE' }, { label: 'اشتباه ثبت', value: 'ENTRY_ERROR' },
+            { label: 'لغو معامله', value: 'SALE_CANCELLED' }, { label: 'سایر', value: 'OTHER' },
+          ] },
+          { id: 'retainedRecordId', label: 'فاکتور معتبر باقی‌مانده', type: 'select',
+            visibleWhen: { fieldId: 'reasonKind', equals: 'DUPLICATE_ISSUE' },
+            requiredWhen: { fieldId: 'reasonKind', equals: 'DUPLICATE_ISSUE' },
+            options: rows.filter(row => row.id !== voidTarget?.id && row.contractId === voidTarget?.contractId &&
+              ['ISSUED', 'POSTED'].includes(row.status)).map(row => ({
+                label: row.systemInvoiceNumber ? `فاکتور ${row.systemInvoiceNumber}` : row.id, value: row.id,
+              })) },
+          { id: 'reason', label: 'دلیل ابطال', type: 'textarea', required: true },
+          { id: 'effectiveAt', label: 'تاریخ مؤثر', type: 'date', required: true },
+        ]}
+        submitLabel="شروع ابطال"
+        destructive
+        busy={Boolean(actionLoading)}
+        error={actionError}
+        onClose={() => setVoidTarget(null)}
+        onSubmit={startVoidCase}
       />
     </ErpListPage>
   );

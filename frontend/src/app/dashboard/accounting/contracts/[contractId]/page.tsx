@@ -29,6 +29,8 @@ import {
 import { accountingAPI, dashboardAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
+import AccountingVoidWorkflowPanel, { type AccountingVoidWorkflowView } from '@/features/accounting/AccountingVoidWorkflowPanel';
+import PersianCalendar from '@/lib/persian-calendar';
 import {
   financialEvidenceCaseHref,
   financialEvidenceReviewFromConflict,
@@ -141,6 +143,10 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
   const [reviewActionUrl, setReviewActionUrl] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [voidTarget, setVoidTarget] = useState<any | null>(null);
+  const [startVoidTarget, setStartVoidTarget] = useState<any | null>(null);
+  const [voidReceivableTarget, setVoidReceivableTarget] = useState<{ workflow: AccountingVoidWorkflowView; receivableId: string } | null>(null);
+  const [resolveTaxTarget, setResolveTaxTarget] = useState<{ workflow: AccountingVoidWorkflowView; taxRecordId: string } | null>(null);
+  const [cancelVoidTarget, setCancelVoidTarget] = useState<AccountingVoidWorkflowView | null>(null);
   const [replacementTarget, setReplacementTarget] = useState<any | null>(null);
   const [resolveTarget, setResolveTarget] = useState<any | null>(null);
   const [flagModalOpen, setFlagModalOpen] = useState(false);
@@ -208,7 +214,7 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
     } catch (error) {
       console.error('Accounting action failed:', error);
       const response = (error as any)?.response?.data;
-      setActionError(response?.error || 'اقدام حسابداری انجام نشد');
+      setActionError(response?.message || response?.error || 'اقدام حسابداری انجام نشد');
       const exactReviewUrl = financialEvidenceReviewFromConflict(response);
       if (exactReviewUrl) await loadDetail();
       setReviewActionUrl(exactReviewUrl);
@@ -294,13 +300,52 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
     if (!voidTarget) return;
     const applied = await execute({
       kind: 'VOID_ACCOUNTING_RECORD',
-      recordId: voidTarget.sourceRecordId,
-      reason: String(values.note || '').trim(),
-      note: String(values.note || '').trim(),
-      externalReference: String(values.externalReference || '').trim(),
-      downstreamNote: String(values.downstreamNote || '').trim() || undefined,
+      recordId: voidTarget.sourceRecordId || voidTarget.id,
     });
     if (applied) setVoidTarget(null);
+  };
+
+  const startAccountingVoidCase = async (values: Record<string, string | number>) => {
+    if (!startVoidTarget) return;
+    const reasonKind = String(values.reasonKind || 'OTHER');
+    const applied = await execute({
+      kind: 'START_ACCOUNTING_VOID_CASE',
+      recordId: startVoidTarget.id,
+      reasonKind,
+      reason: String(values.reason || '').trim(),
+      effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString(),
+      ...(reasonKind === 'DUPLICATE_ISSUE' ? { retainedRecordId: String(values.retainedRecordId || '') } : {}),
+    });
+    if (applied) setStartVoidTarget(null);
+  };
+
+  const voidAccountingReceivable = async (values: Record<string, string | number>) => {
+    if (!voidReceivableTarget) return;
+    const applied = await execute({
+      kind: 'VOID_ACCOUNTING_RECEIVABLE',
+      receivableId: voidReceivableTarget.receivableId,
+      reason: String(values.reason || '').trim(),
+      effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString(),
+    });
+    if (applied) setVoidReceivableTarget(null);
+  };
+
+  const resolveTaxForVoid = async (values: Record<string, string | number>) => {
+    if (!resolveTaxTarget) return;
+    const applied = await execute({
+      kind: 'RESOLVE_TAX_FOR_VOID',
+      taxRecordId: resolveTaxTarget.taxRecordId,
+      reason: String(values.reason || '').trim(),
+      effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString(),
+    });
+    if (applied) setResolveTaxTarget(null);
+  };
+
+  const cancelAccountingVoidCase = async (values: Record<string, string | number>) => {
+    if (!cancelVoidTarget) return;
+    const applied = await execute({ kind: 'CANCEL_ACCOUNTING_VOID_CASE', voidCaseId: cancelVoidTarget.id,
+      cancellationReason: String(values.reason || '').trim() });
+    if (applied) setCancelVoidTarget(null);
   };
 
   const createReplacementInvoice = async (values: Record<string, string | number>) => {
@@ -519,7 +564,8 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
         { label: 'مانده', value: money(contract.accounting.remainingAmount), icon: FaMoneyCheckAlt, tone: contract.accounting.receivableStatus === 'OVERDUE' ? 'danger' : 'warning' },
       ]}
     >
-      {actionError && !deleteTarget && !voidTarget && !replacementTarget && !resolveTarget && !flagModalOpen && !correctionModalOpen && (
+      {actionError && !deleteTarget && !voidTarget && !startVoidTarget && !voidReceivableTarget && !resolveTaxTarget && !cancelVoidTarget &&
+        !replacementTarget && !resolveTarget && !flagModalOpen && !correctionModalOpen && (
         <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-4 py-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {actionError}
           {reviewActionUrl && (
@@ -785,7 +831,10 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
                           icon={FaExclamationTriangle}
                           tone="danger"
                           disabled={!replacementWorkflow.canVoidSource || actionLoading}
-                          onClick={() => setVoidTarget(replacementWorkflow)}
+                          onClick={() => {
+                            const sourceRecord = (data.financialRecords || []).find((record: any) => record.id === replacementWorkflow.sourceRecordId);
+                            if (sourceRecord) setStartVoidTarget(sourceRecord);
+                          }}
                         />
                         <ErpButton
                           label="ایجاد پیش‌نویس جایگزین"
@@ -884,6 +933,20 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
                             />
                           </div>
                         )}
+                        {['ISSUED', 'POSTED'].includes(record.status) && !(data.voidWorkflows || []).some(
+                          (workflow: AccountingVoidWorkflowView) => workflow.sourceRecordId === record.id && workflow.status === 'OPEN',
+                        ) && (
+                          <div className="flex justify-end">
+                            <ErpButton
+                              label="شروع ابطال"
+                              icon={FaExclamationTriangle}
+                              tone="danger"
+                              variant="outline"
+                              disabled={actionLoading}
+                              onClick={() => setStartVoidTarget(record)}
+                            />
+                          </div>
+                        )}
                       </div>
                     ) : undefined}
                   />
@@ -894,6 +957,21 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
               </div>
             </ErpSection>
             </div>
+
+            {(data.voidWorkflows || []).length > 0 && (
+              <div id="financial-void-cases" className="scroll-mt-24">
+                <ErpSection title="پرونده‌های ابطال مالی" description="هر مرحله را به‌ترتیب انجام دهید؛ فقط اقدام بعدی فعال است.">
+                  <AccountingVoidWorkflowPanel
+                    workflows={data.voidWorkflows}
+                    busy={actionLoading}
+                    onResolveTax={(workflow, taxRecordId) => setResolveTaxTarget({ workflow, taxRecordId })}
+                    onVoidReceivable={(workflow, receivableId) => setVoidReceivableTarget({ workflow, receivableId })}
+                    onVoidRecord={(workflow, recordId) => setVoidTarget({ ...workflow, sourceRecordId: recordId })}
+                    onCancel={setCancelVoidTarget}
+                  />
+                </ErpSection>
+              </div>
+            )}
 
             <div id="collections" className="scroll-mt-6">
             <ErpSection title="دریافتنی‌ها و دریافت‌ها">
@@ -915,7 +993,7 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
                     title="دریافتنی"
                     meta={`سررسید: ${dateFa(item.dueDate)} · پرداخت شده: ${money(item.paidAmount, item.currency)}`}
                     amount={money(item.remainingAmount, item.currency)}
-                    status={<StatusBadge status={item.status} />}
+                    status={<StatusBadge status={item.status} label={receivableStatusLabels[item.status] || item.status} />}
                   />
                   </div>
                 ))}
@@ -1091,19 +1169,86 @@ export default function AccountingContractDetailPage(props: { params: Promise<{ 
         onSubmit={submitLifecycle}
       />
       <AccountingActionModal
-        open={Boolean(voidTarget)}
-        title="ابطال رکورد مالی قبلی"
-        description="برای رکورد مالی تایید شده، دلیل ابطال و شاهد ابطال یا برگشت در سیستم خارجی الزامی است."
+        open={Boolean(startVoidTarget)}
+        title="شروع پرونده ابطال مالی"
+        description="سامانه ابتدا دریافت‌ها و چک‌ها، سپس دریافتنی و در پایان رکورد مالی را مرحله‌به‌مرحله تعیین‌تکلیف می‌کند."
         fields={[
-          { id: 'note', label: 'دلیل ابطال', type: 'textarea', required: true },
-          { id: 'externalReference', label: 'شاهد ابطال/برگشت خارجی', type: 'text', required: true },
-          { id: 'downstreamNote', label: 'یادداشت وابستگی‌های دریافتنی/مالیات', type: 'textarea' },
+          { id: 'reasonKind', label: 'نوع دلیل', type: 'select', required: true, defaultValue: 'DUPLICATE_ISSUE', options: [
+            { label: 'صدور تکراری', value: 'DUPLICATE_ISSUE' },
+            { label: 'اشتباه ثبت', value: 'ENTRY_ERROR' },
+            { label: 'لغو معامله', value: 'SALE_CANCELLED' },
+            { label: 'سایر', value: 'OTHER' },
+          ] },
+          { id: 'retainedRecordId', label: 'فاکتور معتبر باقی‌مانده', type: 'select',
+            visibleWhen: { fieldId: 'reasonKind', equals: 'DUPLICATE_ISSUE' },
+            requiredWhen: { fieldId: 'reasonKind', equals: 'DUPLICATE_ISSUE' },
+            options: (data.financialRecords || []).filter((record: any) => record.id !== startVoidTarget?.id &&
+              ['ISSUED', 'POSTED'].includes(record.status)).map((record: any) => ({
+                label: record.systemInvoiceNumber ? `فاکتور ${record.systemInvoiceNumber}` : record.id, value: record.id,
+              })) },
+          { id: 'reason', label: 'دلیل ابطال', type: 'textarea', required: true },
+          { id: 'effectiveAt', label: 'تاریخ مؤثر', type: 'date', required: true },
         ]}
-        submitLabel="ابطال رکورد"
+        submitLabel="شروع ابطال"
+        destructive
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setStartVoidTarget(null)}
+        onSubmit={startAccountingVoidCase}
+      />
+      <AccountingActionModal
+        open={Boolean(voidTarget)}
+        title="تکمیل ابطال رکورد مالی"
+        description="تمام مراحل قبلی انجام شده‌اند. با تأیید، رکورد مالی باطل و پرونده تکمیل می‌شود."
+        fields={[]}
+        submitLabel="تأیید ابطال نهایی"
+        destructive
         busy={actionLoading}
         error={actionError}
         onClose={() => setVoidTarget(null)}
         onSubmit={voidAccountingRecord}
+      />
+      <AccountingActionModal
+        open={Boolean(resolveTaxTarget)}
+        title="تعیین‌تکلیف مالیات برای ابطال"
+        description="وضعیت ارسال‌شده در سابقه باقی می‌ماند و تعیین‌تکلیف آن با دلیل و تاریخ مؤثر ثبت می‌شود."
+        fields={[
+          { id: 'reason', label: 'دلیل تعیین‌تکلیف مالیات', type: 'textarea', required: true },
+          { id: 'effectiveAt', label: 'تاریخ مؤثر', type: 'date', required: true },
+        ]}
+        submitLabel="ثبت تعیین‌تکلیف مالیات"
+        destructive
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setResolveTaxTarget(null)}
+        onSubmit={resolveTaxForVoid}
+      />
+      <AccountingActionModal
+        open={Boolean(voidReceivableTarget)}
+        title="ابطال دریافتنی"
+        description="این دریافتنی اثر وصول فعالی ندارد و پس از ابطال در تاریخچه باقی می‌ماند."
+        fields={[
+          { id: 'reason', label: 'دلیل ابطال دریافتنی', type: 'textarea', required: true },
+          { id: 'effectiveAt', label: 'تاریخ مؤثر', type: 'date', required: true },
+        ]}
+        submitLabel="ابطال دریافتنی"
+        destructive
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setVoidReceivableTarget(null)}
+        onSubmit={voidAccountingReceivable}
+      />
+      <AccountingActionModal
+        open={Boolean(cancelVoidTarget)}
+        title="لغو پرونده ابطال"
+        description="چون هنوز تغییر مالی پایین‌دستی انجام نشده است، این پرونده قابل لغو است."
+        fields={[{ id: 'reason', label: 'دلیل لغو پرونده', type: 'textarea', required: true }]}
+        submitLabel="لغو پرونده"
+        destructive
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setCancelVoidTarget(null)}
+        onSubmit={cancelAccountingVoidCase}
       />
       <AccountingActionModal
         open={Boolean(replacementTarget)}

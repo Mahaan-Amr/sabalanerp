@@ -45,6 +45,9 @@
   --sds-purple: #6941c6;
   --sds-purple-surface: #f4f0ff;
   --sds-purple-border: #d5c6fa;
+  --sds-artwork-metal-gold-highlight: #fff1bd;
+  --sds-artwork-metal-gold-mid: #d6a34f;
+  --sds-artwork-metal-gold-shadow: #8b551d;
   --sds-space-1: 0.25rem;
   --sds-space-2: 0.5rem;
   --sds-space-3: 0.75rem;
@@ -107,6 +110,9 @@
   --sds-purple: #c3b2ff;
   --sds-purple-surface: #31245a;
   --sds-purple-border: #594692;
+  --sds-artwork-metal-gold-highlight: #fff1bd;
+  --sds-artwork-metal-gold-mid: #d6a34f;
+  --sds-artwork-metal-gold-shadow: #8b551d;
   --sds-shadow-card: 0 1px 2px rgb(0 0 0 / 24%);
   --sds-shadow-raised: 0 18px 44px rgb(0 0 0 / 42%);
   --sds-shadow-focus: 0 0 0 3px rgb(116 212 206 / 30%);

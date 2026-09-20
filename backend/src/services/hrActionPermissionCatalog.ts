@@ -55,6 +55,11 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'EVALUATE_ALL_PERSONNEL', labelFa: 'ارزیابی همه پرسنل', level: 'EDIT', prerequisites: [] },
   { code: 'MANAGE_PERFORMANCE_PROFILES', labelFa: 'مدیریت الگوهای ارزیابی', level: 'ADMIN', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_BADGE_LIST', labelFa: 'مشاهده نشان در فهرست پرسنل', level: 'VIEW', prerequisites: [] },
+  { code: 'MANAGE_PERFORMANCE_SURVEYS', labelFa: 'مدیریت نظرسنجی رفتاری', level: 'ADMIN', prerequisites: [] },
+  { code: 'RESPOND_PERFORMANCE_SURVEYS', labelFa: 'پاسخ به نظرسنجی رفتاری', level: 'EDIT', prerequisites: [] },
+  { code: 'ENTER_PERFORMANCE_EVIDENCE', labelFa: 'ثبت شواهد کمی ارزیابی', level: 'EDIT', prerequisites: [] },
+  { code: 'FINALIZE_PERFORMANCE_RESULTS', labelFa: 'نهایی‌سازی نتیجه ارزیابی', level: 'ADMIN', prerequisites: [] },
+  { code: 'VIEW_RAW_PERFORMANCE_SURVEY', labelFa: 'مشاهده محرمانه پاسخ خام نظرسنجی', level: 'ADMIN', prerequisites: [] },
 ] as const;
 
 export const PERFORMANCE_ACTION_PERMISSION_CODES = PERFORMANCE_ACTION_PERMISSIONS.map(({ code }) => code);

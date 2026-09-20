@@ -152,7 +152,8 @@ export default function AccountingPaymentsPage() {
     { id: 'status', header: 'وضعیت', mobileLabel: 'وضعیت', priority: 'secondary', cell: (row) => <StatusBadge status={row.checkStatus || row.status} /> },
   ];
 
-  const rowActions = (row: any): ErpAction[] => row.sourceKind === 'PARTNER_INTERNAL_RECORD'
+  const rowActions = (row: any): ErpAction[] => row.method === 'CHECK' && ['BOUNCED', 'RETURNED', 'REPLACED'].includes(row.checkStatus)
+    ? [] : row.sourceKind === 'PARTNER_INTERNAL_RECORD'
     ? [
       ...(row.partnerActions?.checkStatuses || []).map((status: string): ErpAction => ({
         label: ({ RECEIVED: 'دریافت شد', DEPOSITED: 'واگذار شد', CLEARED: 'وصول شد', BOUNCED: 'برگشت خورد', RETURNED: 'عودت چک' } as Record<string, string>)[status],
@@ -166,8 +167,16 @@ export default function AccountingPaymentsPage() {
         { label: 'واگذار شد', icon: FaMoneyCheckAlt, tone: 'info', disabled: actionLoading === `${row.id}:DEPOSITED`, onClick: () => setCheckTarget({ row, status: 'DEPOSITED' }) },
         { label: 'وصول شد', icon: FaMoneyCheckAlt, tone: 'success', disabled: actionLoading === `${row.id}:CLEARED`, onClick: () => setCheckTarget({ row, status: 'CLEARED' }) },
         { label: 'برگشت خورد', icon: FaMoneyCheckAlt, tone: 'danger', disabled: actionLoading === `${row.id}:BOUNCED`, onClick: () => setCheckTarget({ row, status: 'BOUNCED' }) },
+        ...(!['BOUNCED', 'RETURNED', 'REPLACED'].includes(row.checkStatus) ? [{
+          label: 'عودت چک', icon: FaMoneyCheckAlt, tone: 'danger' as const,
+          disabled: actionLoading === `${row.id}:RETURNED`, onClick: () => setCheckTarget({ row, status: 'RETURNED' }),
+        }] : []),
       ]
-    : [];
+    : ['RECEIVED', 'RECONCILED'].includes(row.status) ? [{
+        label: 'برگشت دریافت', icon: FaMoneyCheckAlt, tone: 'danger' as const,
+        disabled: actionLoading === `${row.id}:REVERSE_RECEIPT`,
+        onClick: () => { setActionError(null); setCheckTarget({ row, status: 'REVERSE_RECEIPT' }); },
+      }] : [];
 
   return (
     <ErpListPage
@@ -209,12 +218,15 @@ export default function AccountingPaymentsPage() {
         title={checkTarget?.status === 'REVERSE_RECEIPT' ? 'برگشت دریافت' : checkTarget?.status === 'RETURNED' ? 'عودت چک' : 'به‌روزرسانی وضعیت چک'}
         description={checkTarget?.row.sourceKind === 'PARTNER_INTERNAL_RECORD'
           ? `پرونده ${checkTarget.row.partnerContext?.caseNumber} · ${money(checkTarget.row.amount, checkTarget.row.currency)}${['RETURNED', 'REVERSE_RECEIPT'].includes(checkTarget.status) ? ' — با تأیید این اقدام، اثر وصول برگشت می‌خورد و مانده حساب به‌روزرسانی می‌شود.' : ''}`
-          : checkTarget ? `چک ${checkTarget.row.checkNumber || ''} - ${checkTarget.row.contract?.contractNumber || ''}` : undefined}
+          : checkTarget?.status === 'REVERSE_RECEIPT'
+            ? `دریافت ${money(checkTarget.row.amount, checkTarget.row.currency)} · قرارداد ${checkTarget.row.contract?.contractNumber || checkTarget.row.contractId || '—'} — اثر وصول برگشت می‌خورد و مانده دریافتنی به‌روزرسانی می‌شود.`
+            : checkTarget ? `چک ${checkTarget.row.checkNumber || ''} - ${checkTarget.row.contract?.contractNumber || ''}` : undefined}
         fields={[
           ...(checkTarget?.row.sourceKind === 'PARTNER_INTERNAL_RECORD' ? partnerAccountingTimeFields
             : [{ id: 'occurredAt', label: 'تاریخ رخداد', type: 'date' as const, required: true }]),
           checkTarget?.status === 'REVERSE_RECEIPT' ? { id: 'reason', label: 'دلیل برگشت دریافت', type: 'textarea', required: true }
-            : { id: 'note', label: 'یادداشت', type: 'textarea' },
+            : { id: 'note', label: ['RETURNED', 'BOUNCED'].includes(checkTarget?.status || '') ? 'دلیل تعیین‌تکلیف چک' : 'یادداشت', type: 'textarea',
+              required: ['RETURNED', 'BOUNCED'].includes(checkTarget?.status || '') },
         ]}
         submitLabel={checkTarget?.status === 'REVERSE_RECEIPT' ? 'تأیید برگشت دریافت' : checkTarget?.status === 'RETURNED' ? 'تأیید عودت چک' : 'ثبت وضعیت'}
         destructive={['RETURNED', 'BOUNCED', 'REVERSE_RECEIPT'].includes(checkTarget?.status || '')}

@@ -226,7 +226,11 @@ function service(tx: Prisma.TransactionClient, ids: Record<string, string>, fail
 
 test('final submit atomically creates the exact pair, binds reusable approval and replays one Case', async () => {
   await fixture(async (tx, ids) => {
-    const input = await command(ids);
+    const base = await command(ids);
+    const intent = { ...base.intent, projectId: ids.firstProjectId };
+    const input = { ...base, intent, idempotency: { ...base.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent }) } };
+    await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', '', true)`;
     const first = await service(tx, ids).execute(input);
     assert.equal(first.ok, true);
     if (!first.ok) return;
@@ -512,6 +516,7 @@ test('an explicit Draft revision reauthorizes and snapshots a changed Customer a
     const revisedIntent = { ...draft.intent, customerId: ids.secondCustomerId, projectId: ids.secondProjectId };
     const revisedCommand = { ...draft, intent: revisedIntent, idempotency: { ...draft.idempotency,
       payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent: revisedIntent }) } };
+    await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', '', true)`;
     const projectChecks: string[] = [];
     const revised = await service(tx, ids, undefined, async () => undefined, async (_tx, request) => {
       projectChecks.push(request.projectId);

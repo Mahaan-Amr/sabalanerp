@@ -82,6 +82,8 @@ export interface PartnerCaseDependencies {
 }
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+const setPartnerCrmOwnerContext = (tx: Transaction, profileId: string) =>
+  tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${profileId}, true)`;
 const receipt = (value: unknown) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const row = value as Record<string, unknown>;
@@ -372,6 +374,9 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       projectId: resolved.value.projectId, customerId: resolved.value.customerId });
     if (!stillProject.ok) return stillProject;
   }
+  if (previousProjectId !== resolved.value.projectId) {
+    await setPartnerCrmOwnerContext(tx, resolved.value.profileId);
+  }
   if (previousProjectId && previousProjectId !== resolved.value.projectId) {
     const stillPreviousProject = await dependencies.authorizeProject(tx, { actorId: dependencies.actorId,
       projectId: previousProjectId, customerId: current.customerId });
@@ -564,6 +569,11 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         totalAmount: evidence.value.retailEnvelope.totals.payable,
         currency: evidence.value.retailEnvelope.totals.currency, contractData: json(projections.value.customer) } });
       if (resolved.value.projectId) {
+        // The database trigger independently enforces that Partner-owned CRM
+        // children are mutated only under their current owner Profile. The
+        // Case transaction has already resolved and authorized that Profile,
+        // so carry the same evidence into the transaction-local DB context.
+        await setPartnerCrmOwnerContext(tx, resolved.value.profileId);
         const linked = await tx.crmPotentialProject.updateMany({ where: { id: resolved.value.projectId,
           customerId: resolved.value.customerId, wonSalesContractId: null, partnerRevision: { not: null } },
           data: { wonSalesContractId: ids.customerContractId, partnerRevision: { increment: 1 } } });

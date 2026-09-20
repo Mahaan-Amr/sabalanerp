@@ -20,6 +20,7 @@ import { resolveApprovalForUse } from '../services/partnerSales/inquiries/approv
 import { decodeTechnicalSavedSnapshot } from '../services/partnerSales/cases/technicalSavedRecords';
 import { parseInquiryDefinition } from '../services/partnerSales/inquiries/definition';
 import { assertContractEditOwnership, PrismaContractEditSessionStore } from '../services/contractEditSessionService';
+import { assertPartnerCasePrismaClientCompatibility } from '../services/partnerSales/cases/prismaClientCompatibility';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
@@ -45,6 +46,7 @@ function respond(response: Response, result: Result<unknown>) {
 }
 
 export function createPartnerCaseRouter(input: { database?: PrismaClient; authenticate?: RequestHandler } = {}) {
+  assertPartnerCasePrismaClientCompatibility();
   const prisma = input.database ?? applicationPrisma;
   const router = Router();
   router.use(input.authenticate ?? protect);
@@ -378,12 +380,14 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
     if (!command.success || !['CASE_SUBMIT', 'CASE_DRAFT_REVISE'].includes(command.data.type)) {
       respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return;
     }
+    const correlationId = correlation(request);
     try {
       const dependencies = createPrismaPartnerCaseDependencies({ database: prisma, actorId: request.user.id,
-        correlationId: correlation(request) });
+        correlationId });
       const service = createPrismaPartnerCaseService({ database: prisma, ...dependencies });
       respond(response, await service.execute(command.data));
-    } catch {
+    } catch (error) {
+      console.error('Partner Case command failed:', { correlationId, error });
       respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') });
     }
   });

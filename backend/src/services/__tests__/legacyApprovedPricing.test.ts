@@ -267,6 +267,28 @@ test('source adapter binds rows only by exact stable identity and hashes the unt
   assert.ok(result.reasons.some(item => item.code === 'MISSING_STABLE_ROW_ID'));
 });
 
+test('source adapter reads frozen multi-finishing evidence without requiring the legacy aggregate field', () => {
+  const source = completeLegacySource();
+  const product = (source.financialRecords[0]!.sourceSnapshot as any).contractData.products[0];
+  delete product.finishingCost;
+  product.finishingId = null;
+  product.finishings = [{ cost: '4' }, { cost: '6' }];
+  product.meta = { ...product.meta, pricing: { finishingCost: '10' } };
+
+  const candidate = buildLegacyPricingCandidate(source);
+  assert.equal(candidate.rows[0]?.componentEvidence?.finishing, '10.000000000000');
+  assert.equal(candidate.rows[0]?.componentEvidenceConflict, false);
+
+  product.meta.pricing.finishingCost = '11';
+  const conflicting = buildLegacyPricingCandidate(source);
+  assert.equal(conflicting.rows[0]?.componentEvidenceConflict, true);
+
+  product.meta.pricing.finishingCost = '10';
+  product.finishingCost = 'invalid-money';
+  const invalid = buildLegacyPricingCandidate(source);
+  assert.equal(invalid.rows[0]?.componentEvidence?.finishing, null);
+});
+
 test('product quantity and canonical Toman total reconcile with every row witness', () => {
   const quantitySource = completeLegacySource();
   const quantityProduct = ((quantitySource.financialRecords[0].sourceSnapshot as any).contractData.products as any[])[0];

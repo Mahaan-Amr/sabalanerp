@@ -97,23 +97,46 @@ const legacyComponentEvidence = (product: Record<string, unknown>, currency: unk
     : null;
   let conflict = Boolean(toolingSnapshot && toolingFromRows && toolingSnapshot !== toolingFromRows);
 
+  const meta = object(product.meta);
+  const pricing = object(meta.pricing);
+  const legacyFinishing = object(meta.finishing);
   const finishings = Array.isArray(product.finishings) ? product.finishings.map(object) : [];
   const finishingAmounts = finishings.map(finishing => toContractMoney(finishing.cost, currency, contractCurrency));
   const finishingFromRows = finishingAmounts.length && finishingAmounts.every((value): value is string => value != null)
     ? finishingAmounts.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)).toFixed(12)
     : null;
-  const hasFinishing = Boolean(text(product.finishingId) || finishings.length || object(product.meta).finishing);
-  const finishingSnapshot = owns(product, 'finishingCost')
-    ? toContractMoney(product.finishingCost ?? (hasFinishing ? null : 0), currency, contractCurrency)
-    : hasFinishing ? null : new Prisma.Decimal(0).toFixed(12);
-  if (finishingSnapshot && finishingFromRows && finishingSnapshot !== finishingFromRows) conflict = true;
+  const rawFinishingWitnesses = [
+    product.finishingCost,
+    pricing.finishingCost,
+    legacyFinishing.cost,
+  ];
+  const convertedFinishingWitnesses = rawFinishingWitnesses.map(value =>
+    value == null ? null : toContractMoney(value, currency, contractCurrency));
+  const finishingWitnesses = [
+    convertedFinishingWitnesses[0],
+    finishingFromRows,
+    convertedFinishingWitnesses[1],
+    convertedFinishingWitnesses[2],
+  ].filter((value): value is string => value != null);
+  const hasFinishing = Boolean(
+    text(product.finishingId) || finishings.length || meta.finishing || pricing.finishingCost != null,
+  );
+  const hasInvalidFinishingEvidence = (
+    product.finishings != null && !Array.isArray(product.finishings)
+  ) || finishingAmounts.some(value => value == null) || rawFinishingWitnesses.some(
+    (value, index) => value != null && convertedFinishingWitnesses[index] == null,
+  );
+  const finishingSnapshot = hasInvalidFinishingEvidence
+    ? null
+    : finishingWitnesses[0] ?? (hasFinishing ? null : new Prisma.Decimal(0).toFixed(12));
+  if (finishingWitnesses.some(value => value !== finishingWitnesses[0])) conflict = true;
 
   const mandatoryEnabled = typeof product.isMandatory === 'boolean' ? product.isMandatory : null;
   const percentage = decimal(product.mandatoryPercentage, 12);
   const mandatory = mandatoryEnabled === true
     ? material && percentage ? new Prisma.Decimal(material).mul(percentage).div(100).toFixed(12) : null
     : mandatoryEnabled === false ? new Prisma.Decimal(0).toFixed(12) : null;
-  const isLayer = object(product.meta).isLayer;
+  const isLayer = meta.isLayer;
   const discountEligible = material == null || typeof isLayer !== 'boolean'
     ? null
     : isLayer === false && new Prisma.Decimal(material).gt(0);

@@ -362,6 +362,64 @@ const legacyMoney = (value: unknown, label: string) => {
   }
 };
 
+const reconstructLegacyV1Finishing = (input: {
+  productRowId: string;
+  product: Record<string, any>;
+}) => {
+  const { product, productRowId } = input;
+  const meta = optionalRecord(product.meta);
+  const pricing = optionalRecord(meta?.pricing);
+  const legacyFinishing = optionalRecord(meta?.finishing);
+  if (product.finishings != null && !Array.isArray(product.finishings)) {
+    throw new ApprovedPricingEvidenceError(`Product ${productRowId} legacy finishing rows are invalid`);
+  }
+  const finishingRows = Array.isArray(product.finishings) ? product.finishings : [];
+  const witnesses: Array<{ source: string; amount: Prisma.Decimal }> = [];
+
+  if (product.finishingCost != null) {
+    witnesses.push({
+      source: 'legacy finishing amount',
+      amount: legacyMoney(product.finishingCost, `Product ${productRowId} legacy finishing amount`),
+    });
+  }
+  if (finishingRows.length > 0) {
+    const amount = finishingRows.reduce<Prisma.Decimal>((sum, value, index) => {
+      const row = optionalRecord(value);
+      if (!row) throw new ApprovedPricingEvidenceError(`Product ${productRowId} legacy finishing row ${index + 1} is invalid`);
+      return sum.plus(legacyMoney(row.cost, `Product ${productRowId} legacy finishing row ${index + 1} amount`));
+    }, new Prisma.Decimal(0));
+    witnesses.push({ source: 'legacy finishing rows', amount });
+  }
+  if (pricing?.finishingCost != null) {
+    witnesses.push({
+      source: 'legacy pricing finishing amount',
+      amount: legacyMoney(pricing.finishingCost, `Product ${productRowId} legacy pricing finishing amount`),
+    });
+  }
+  if (legacyFinishing?.cost != null) {
+    witnesses.push({
+      source: 'legacy finishing snapshot amount',
+      amount: legacyMoney(legacyFinishing.cost, `Product ${productRowId} legacy finishing snapshot amount`),
+    });
+  }
+
+  const hasFinishing = Boolean(
+    product.finishingId || finishingRows.length || meta?.finishing || pricing?.finishingCost != null,
+  );
+  if (witnesses.length === 0) {
+    if (!hasFinishing) return new Prisma.Decimal(0);
+    throw new ApprovedPricingEvidenceError(`Product ${productRowId} legacy finishing evidence is incomplete`);
+  }
+  const [first, ...rest] = witnesses;
+  const conflict = rest.find(witness => !witness.amount.eq(first!.amount));
+  if (conflict) {
+    throw new ApprovedPricingEvidenceError(
+      `Product ${productRowId} ${first!.source} conflicts with ${conflict.source}`,
+    );
+  }
+  return first!.amount;
+};
+
 export const reconstructLegacyV1Pricing = (input: {
   productRowId: string;
   productSnapshot: Record<string, any>;
@@ -395,11 +453,7 @@ export const reconstructLegacyV1Pricing = (input: {
     : Array.isArray(product.appliedSubServices) && product.appliedSubServices.length === 0
       ? new Prisma.Decimal(0)
       : (() => { throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} legacy tooling evidence is incomplete`); })();
-  const meta = optionalRecord(product.meta);
-  const hasFinishing = Boolean(product.finishingId || (Array.isArray(product.finishings) && product.finishings.length) || meta?.finishing);
-  const finishing = product.finishingCost != null
-    ? legacyMoney(product.finishingCost, `Product ${input.productRowId} legacy finishing amount`)
-    : !hasFinishing ? new Prisma.Decimal(0) : (() => { throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} legacy finishing evidence is incomplete`); })();
+  const finishing = reconstructLegacyV1Finishing({ productRowId: input.productRowId, product });
   if (typeof product.isMandatory !== 'boolean') throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} legacy mandatory evidence is incomplete`);
   const mandatory = product.isMandatory
     ? material.mul(legacyMoney(product.mandatoryPercentage, `Product ${input.productRowId} legacy mandatory percentage`)).div(100)

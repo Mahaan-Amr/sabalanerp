@@ -302,6 +302,85 @@ test('reconstructs legacy v1 monetary components with audited half-up Toman conv
   }), /do not reconcile/);
 });
 
+test('reconstructs legacy v1 finishing from frozen multi-finishing evidence', () => {
+  const pricing = reconstructLegacyV1Pricing({
+    productRowId: 'contract-row-593d4625-98a9-4869-987d-14d45b5d95b4',
+    rawTotalAmountToman: '2183076.923076922',
+    productSnapshot: {
+      currency: 'تومان',
+      originalTotalPrice: '1723076.923076922',
+      cuttingCost: '400000',
+      totalSubServiceCost: '0',
+      finishingId: null,
+      finishings: [{
+        name: 'ساب صفر',
+        quantity: '0.6',
+        unitPrice: '100000',
+        cost: '60000',
+      }],
+      meta: { pricing: { finishingCost: '60000' } },
+      isMandatory: false,
+      mandatoryPercentage: '20',
+      appliedSubServices: [],
+    },
+  });
+
+  assert.deepEqual(pricing.pricingComponents, [{
+    id: 'base-material', kind: 'base-material', amountToman: '1723077',
+  }, {
+    id: 'legacy-cutting', kind: 'legacy-cutting', amountToman: '400000',
+  }, {
+    id: 'legacy-finishing', kind: 'legacy-finishing', amountToman: '60000',
+  }]);
+  assert.equal(pricing.totalAmountToman, '2183077');
+});
+
+test('requires every frozen legacy finishing witness to be complete and equal', () => {
+  const productSnapshot = {
+    currency: 'تومان',
+    originalTotalPrice: '100',
+    cuttingCost: '0',
+    totalSubServiceCost: '0',
+    finishingCost: '30',
+    finishings: [{ cost: '10' }, { cost: '20' }],
+    meta: {
+      finishing: { cost: '30' },
+      pricing: { finishingCost: '30' },
+    },
+    isMandatory: false,
+    mandatoryPercentage: '20',
+    appliedSubServices: [],
+  };
+  const pricing = reconstructLegacyV1Pricing({
+    productRowId: 'legacy-row-with-two-finishings',
+    rawTotalAmountToman: '130',
+    productSnapshot,
+  });
+  assert.deepEqual(pricing.pricingComponents.at(-1), {
+    id: 'legacy-finishing', kind: 'legacy-finishing', amountToman: '30',
+  });
+
+  assert.throws(() => reconstructLegacyV1Pricing({
+    productRowId: 'legacy-row-with-conflicting-finishing',
+    rawTotalAmountToman: '130',
+    productSnapshot: {
+      ...productSnapshot,
+      meta: { ...productSnapshot.meta, pricing: { finishingCost: '31' } },
+    },
+  }), /conflicts with legacy pricing finishing amount/);
+
+  assert.throws(() => reconstructLegacyV1Pricing({
+    productRowId: 'legacy-row-with-incomplete-finishing',
+    rawTotalAmountToman: '130',
+    productSnapshot: {
+      ...productSnapshot,
+      finishingCost: null,
+      finishings: [{ name: 'ساب ناقص' }],
+      meta: {},
+    },
+  }), /legacy finishing row 1 amount is missing/);
+});
+
 test('preserves a fractional graph-v1 source total when it seals exactly to the canonical whole Toman', () => {
   const pricing = {
     baseAmountToman: '42666667',

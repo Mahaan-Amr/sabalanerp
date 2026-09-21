@@ -209,7 +209,13 @@ router.post('/payroll-obligations/:id/settlement-attempts', ...editAccess, run(a
     if (!/^[a-f0-9]{64}$/i.test(bankResultHash)) throw new Error('اثر انگشت نتیجه بانک باید SHA-256 معتبر باشد.');
     settlementVoucherId = positiveText(req.body.settlementVoucherId, 'سند تسویه حقوق');
     const voucher = await tx.accountingLedgerVoucher.findUnique({ where: { id: settlementVoucherId } });
-    if (!voucher || voucher.bookId !== obligation.handoff.bookId || voucher.status !== 'POSTED') throw new Error('تسویه موفق حقوق باید به سند قطعی همان دفتر متصل باشد.');
+    const correctSource = voucher?.sourceType === 'PAYROLL_SETTLEMENT'
+      && [obligation.id, obligation.obligationIdentity].includes(voucher.sourceId);
+    const correctAmount = voucher && BigInt(voucher.debitTotalRials.toFixed(0)) === attempt.amountRials
+      && BigInt(voucher.creditTotalRials.toFixed(0)) === attempt.amountRials;
+    if (!voucher || voucher.bookId !== obligation.handoff.bookId || voucher.status !== 'POSTED' || !correctSource || !correctAmount) {
+      throw new Error('تسویه موفق حقوق باید به سند قطعی تسویه همان تعهد، با مبلغ دقیق و در همان دفتر متصل باشد.');
+    }
   }
   const next = applyPayrollSettlementAttempt({
     identity: obligation.obligationIdentity,
@@ -328,6 +334,7 @@ router.post('/assets/:id/depreciation', ...editAccess, run(async (req) => prisma
     components: asset.components.filter((component) => !component.retiredAt).map((component) => ({
       id: component.id, costRials: BigInt(component.bookCostRials.toFixed(0)), residualValueRials: BigInt(component.residualValueRials.toFixed(0)),
       usefulLifeMonths: component.usefulLifeMonths, method: depreciationMethod(component.bookMethod, 'روش استهلاک دفتری'), annualRateBasisPoints: policy.decliningRateBasisPoints || undefined,
+      accumulatedDepreciationRials: BigInt(component.accumulatedBookRials.toFixed(0)),
       periodUnits: req.body.periodUnits == null ? undefined : rials(req.body.periodUnits, 'مقدار تولید دوره'), totalExpectedUnits: req.body.totalExpectedUnits == null ? undefined : rials(req.body.totalExpectedUnits, 'کل تولید برآوردی'),
     })),
     taxBasis: {
@@ -460,6 +467,8 @@ router.post('/report-snapshots', ...editAccess, run((req) => createOfficialAccou
     from: date(req.body.request?.from, 'ابتدای گزارش'),
     to: date(req.body.request?.to, 'انتهای گزارش'),
     cutoffAt: date(req.body.request?.cutoffAt, 'زمان برش گزارش'),
+    comparativeFrom: req.body.request?.comparativeFrom ? date(req.body.request.comparativeFrom, 'ابتدای دوره مقایسه‌ای') : undefined,
+    comparativeTo: req.body.request?.comparativeTo ? date(req.body.request.comparativeTo, 'انتهای دوره مقایسه‌ای') : undefined,
   },
   policyVersions: req.body.policyVersions,
 }), true));
@@ -597,11 +606,23 @@ router.post('/tax-obligations/:id/attempts', ...editAccess, run((req) => prisma.
 router.post('/tax-obligations/:id/reconcile', ...editAccess, run((req) => prisma.$transaction(async (tx) => {
   await tx.$queryRaw`SELECT id FROM accounting_tax_obligations WHERE id = ${req.params.id} FOR UPDATE`;
   const obligation = await tx.accountingTaxObligation.findUniqueOrThrow({ where: { id: req.params.id } });
-  const paidRials = rials(req.body.paidRials, 'مالیات پرداخت‌شده');
   const ledgerLineIds = [...new Set((req.body.ledgerLineIds || []).map((item: unknown) => positiveText(item, 'آرتیکل دفترکل')))] as string[];
   if (ledgerLineIds.length === 0) throw new Error('تطبیق مالیاتی باید به آرتیکل‌های قطعی دفترکل متصل باشد.');
-  const verifiedLedgerLines = await tx.accountingLedgerLine.count({ where: { id: { in: ledgerLineIds }, voucher: { bookId: obligation.bookId, status: { in: ['POSTED', 'REVERSED'] } } } });
-  if (verifiedLedgerLines !== ledgerLineIds.length) throw new Error('حداقل یکی از آرتیکل‌های تطبیق مالیاتی قطعی یا متعلق به این دفتر نیست.');
+  const verifiedLedgerLines = await tx.accountingLedgerLine.findMany({
+    where: { id: { in: ledgerLineIds }, voucher: { bookId: obligation.bookId, status: { in: ['POSTED', 'REVERSED'] } } },
+    include: { voucher: true },
+  });
+  if (verifiedLedgerLines.length !== ledgerLineIds.length) throw new Error('حداقل یکی از آرتیکل‌های تطبیق مالیاتی قطعی یا متعلق به این دفتر نیست.');
+  const settlementVouchers = new Map(verifiedLedgerLines.map((line) => [line.voucher.id, line.voucher]));
+  if ([...settlementVouchers.values()].some((voucher) => voucher.sourceType !== 'TAX_PAYMENT'
+    || ![obligation.id, obligation.obligationIdentity].includes(voucher.sourceId))) {
+    throw new Error('آرتیکل‌های تطبیق باید فقط از سندهای پرداخت همین تکلیف مالیاتی باشند.');
+  }
+  const paidRials = [...settlementVouchers.values()].reduce((total, voucher) => {
+    const payload = voucher.sourcePayload as Record<string, unknown>;
+    return total + rials(payload.amountRials, 'مبلغ منبع سند پرداخت مالیات');
+  }, 0n);
+  if (req.body.paidRials != null && rials(req.body.paidRials, 'مالیات پرداخت‌شده') !== paidRials) throw new Error('مبلغ پرداختی ارسالی با سندهای قطعی مالیات سازگار نیست.');
   const expected = BigInt(obligation.payableRials.toFixed(0)) + BigInt(obligation.penaltyRials.toFixed(0))
     + BigInt(obligation.adjustmentRials.toFixed(0)) - BigInt(obligation.refundableRials.toFixed(0));
   const evidence = {
@@ -672,9 +693,9 @@ router.post('/close-runs', ...managerAccess, run(async (req) => prisma.$transact
   const debitTotal = BigInt(ledgerTotals._sum.debitRials?.toFixed(0) ?? '0');
   const creditTotal = BigInt(ledgerTotals._sum.creditRials?.toFixed(0) ?? '0');
   authoritative('TRIAL_BALANCE', 'تراز آزمایشی دفترکل متوازن نیست.', debitTotal !== creditTotal, { debitTotal: debitTotal.toString(), creditTotal: creditTotal.toString() });
-  authoritative('SUBLEDGERS', 'تطبیق معین و تفصیلی قابل بازتولید نیست.', false, subledgerLines);
-  authoritative('TREASURY', 'تطبیق خزانه قابل بازتولید نیست.', false, treasuryLines);
-  authoritative('INVENTORY', 'تطبیق بهای تمام‌شده موجودی قابل بازتولید نیست.', false, inventoryVouchers);
+  authoritative('SUBLEDGERS', 'شاهد قطعی تطبیق معین و تفصیلی برای این دوره وجود ندارد.', subledgerLines.length === 0, subledgerLines);
+  authoritative('TREASURY', 'شاهد قطعی تطبیق خزانه برای این دوره وجود ندارد.', treasuryLines.length === 0, treasuryLines);
+  authoritative('INVENTORY', 'شاهد قطعی تطبیق بهای تمام‌شده موجودی برای این دوره وجود ندارد.', inventoryVouchers.length === 0, inventoryVouchers);
   const assetsMissingDepreciation = period ? assets.filter((asset) => asset.readyForUseAt && asset.readyForUseAt <= period.endsAt
     && !asset.events.some((event) => event.eventIdentity === `DEPRECIATION:${asset.id}:${period.id}`)) : [];
   authoritative('FIXED_ASSETS', `${assetsMissingDepreciation.length.toLocaleString('fa-IR')} دارایی فعال فاقد ثبت استهلاک این دوره است.`, assetsMissingDepreciation.length > 0, assets.map((asset) => ({ id: asset.id, events: asset.events })));
@@ -732,7 +753,9 @@ router.post('/close-runs/:id/year-end-transition', ...managerAccess, run(async (
   }).filter((balance) => balance.debitRials > 0n || balance.creditRials > 0n);
   const openItemMap = new Map<string, { identity: string; accountId: string; partyId?: string; debitRials: bigint; creditRials: bigint }>();
   for (const line of postedLines.filter((item) => item.partyId || item.financialAccountId)) {
-    const identity = `${line.accountId}:${line.partyId || 'بدون-طرف'}:${line.financialAccountId || 'بدون-حساب-مالی'}`;
+    const payload = line.evidencePayload as Record<string, unknown>;
+    const sourceOpenItemId = payload.openItemIdentity || payload.obligationIdentity || payload.invoiceId || payload.allocationIdentity || line.evidenceId;
+    const identity = `${line.accountId}:${line.partyId || 'بدون-طرف'}:${line.financialAccountId || 'بدون-حساب-مالی'}:${String(sourceOpenItemId)}`;
     const item = openItemMap.get(identity) ?? { identity, accountId: line.accountId, partyId: line.partyId || line.financialAccountId || undefined, debitRials: 0n, creditRials: 0n };
     item.debitRials += BigInt(line.debitRials.toFixed(0));
     item.creditRials += BigInt(line.creditRials.toFixed(0));
@@ -759,7 +782,9 @@ router.post('/close-runs/:id/year-end-transition', ...managerAccess, run(async (
   };
   const closing = await postTransition('اختتامیه', stored.fiscalYearId, stored.periodId || positiveText(req.body.closingPeriodId, 'دوره اختتامیه'), fiscalYear.endsAt, transition.closingLines);
   const opening = await postTransition('افتتاحیه', openingYear.id, openingPeriod.id, openingYear.startsAt, transition.openingLines);
+  await tx.accountingCloseRunStep.updateMany({ where: { closeRunId: stored.id }, data: { status: 'PENDING', checkedAt: null, evidenceHash: null, blocker: null, invalidatedBy: ['YEAR_END_TRANSITION'] } });
   return tx.accountingCloseRun.update({ where: { id: stored.id }, data: {
+    status: 'IN_PROGRESS',
     closingVoucherId: closing.id, openingVoucherId: opening.id, openingFiscalYearId: openingYear.id, openingPeriodId: openingPeriod.id,
     yearEndEvidence: serialize({ retainedResultAccountId, openingOpenItems: transition.openingOpenItems, closingVoucherId: closing.id, openingVoucherId: opening.id }),
   } });
@@ -768,6 +793,12 @@ router.post('/close-runs/:id/year-end-transition', ...managerAccess, run(async (
 router.post('/close-runs/:id/finalize', ...managerAccess, run(async (req) => prisma.$transaction(async (tx) => {
   const stored = await tx.accountingCloseRun.findUniqueOrThrow({ where: { id: req.params.id }, include: { steps: true } });
   if (stored.closeType === 'YEAR' && (!stored.closingVoucherId || !stored.openingVoucherId || !stored.yearEndEvidence)) throw new Error('پیش از بستن سال باید سندهای اختتامیه و افتتاحیه مرتبط ثبت شوند.');
+  const lastCheckedAt = stored.steps.reduce<Date | null>((earliest, step) => !step.checkedAt ? earliest : !earliest || step.checkedAt < earliest ? step.checkedAt : earliest, null);
+  if (!lastCheckedAt) throw new Error('کنترل‌های بستن دوره باید بلافاصله پیش از نهایی‌سازی دوباره اجرا شوند.');
+  const changedVoucher = await tx.accountingLedgerVoucher.findFirst({ where: {
+    bookId: stored.bookId, fiscalYearId: stored.fiscalYearId, updatedAt: { gt: lastCheckedAt },
+  }, select: { id: true } });
+  if (changedVoucher) throw new Error('پس از آخرین کنترل، دفترکل تغییر کرده است؛ کنترل‌های بستن دوره را دوباره اجرا کنید.');
   const run = {
     runId: stored.id,
     status: stored.status,

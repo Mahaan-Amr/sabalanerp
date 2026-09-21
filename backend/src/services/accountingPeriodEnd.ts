@@ -342,6 +342,7 @@ type DepreciationComponent = {
   annualRateBasisPoints?: number;
   periodUnits?: bigint;
   totalExpectedUnits?: bigint;
+  accumulatedDepreciationRials?: bigint;
 };
 
 const divideRounded = (numerator: bigint, denominator: bigint) => {
@@ -385,17 +386,18 @@ export const calculateAssetDepreciation = (input: {
   };
 }) => {
   const eligible = input.readyForUseAt <= input.periodEnd;
-  const componentCharges = input.components.map((component) => ({
-    componentId: component.id,
-    bookChargeRials: eligible ? componentPeriodCharge(component) : 0n,
-  }));
+  const componentCharges = input.components.map((component) => {
+    const candidate = eligible ? componentPeriodCharge(component) : 0n;
+    const remaining = component.costRials - component.residualValueRials - (component.accumulatedDepreciationRials ?? 0n);
+    return { componentId: component.id, bookChargeRials: remaining <= 0n ? 0n : candidate > remaining ? remaining : candidate };
+  });
   const grossBookCharge = sum(componentCharges.map((component) => component.bookChargeRials));
   const maximumBookCharge = sum(input.components.map((component) => component.costRials - component.residualValueRials))
     - input.accumulatedBookDepreciationRials;
   const bookChargeRials = maximumBookCharge > 0n && grossBookCharge > maximumBookCharge ? maximumBookCharge : grossBookCharge;
   const taxChargeCandidate = eligible ? componentPeriodCharge({
     id: 'tax-basis',
-    costRials: input.taxBasis.costRials - input.accumulatedTaxDepreciationRials,
+    costRials: input.taxBasis.costRials,
     residualValueRials: input.taxBasis.residualValueRials,
     usefulLifeMonths: input.taxBasis.usefulLifeMonths ?? 1,
     method: input.taxBasis.method,
@@ -467,7 +469,7 @@ export type FinancialStatementMapping = {
   effectiveFrom: Date;
   rows: Array<{
     accountId: string;
-    statement: 'FINANCIAL_POSITION' | 'PROFIT_OR_LOSS' | 'COMPREHENSIVE_INCOME' | 'CHANGES_IN_EQUITY' | 'NOTES';
+    statement: 'FINANCIAL_POSITION' | 'PROFIT_OR_LOSS' | 'COMPREHENSIVE_INCOME' | 'CHANGES_IN_EQUITY' | 'NOTES' | 'CASH_FLOW_DIRECT' | 'CASH_FLOW_INDIRECT';
     sectionCode: string;
     signMultiplier?: number;
     cashFlowClass?: 'OPERATING' | 'INVESTING' | 'FINANCING' | 'INTERNAL_TRANSFER';
@@ -487,6 +489,9 @@ export type OfficialDatasetRequest = {
   statutoryFormatId?: string;
   cutoffAt: Date;
   dimensionFilters?: Record<string, string>;
+  comparativeFrom?: Date;
+  comparativeTo?: Date;
+  cashFlowMethod?: 'DIRECT' | 'INDIRECT';
 };
 
 type TrialBalanceAmounts = {
@@ -525,7 +530,10 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
   if (request.mappingVersionId && request.mappingVersionId !== mapping.id) throw new Error('نسخه نگاشت گزارش با درخواست رسمی مطابقت ندارد.');
   const mappingsByAccount = new Map<string, FinancialStatementMapping['rows']>();
   for (const row of mapping.rows) mappingsByAccount.set(row.accountId, [...(mappingsByAccount.get(row.accountId) ?? []), row]);
-  const primaryMappingByAccount = new Map([...mappingsByAccount].map(([accountId, rows]) => [accountId, rows[0]]));
+  const cashFlowRows = (rows: FinancialStatementMapping['rows']) => request.cashFlowMethod === 'INDIRECT'
+    ? rows.filter((row) => row.statement === 'CASH_FLOW_INDIRECT')
+    : rows.filter((row) => row.statement !== 'CASH_FLOW_INDIRECT');
+  const primaryMappingByAccount = new Map([...mappingsByAccount].map(([accountId, rows]) => [accountId, cashFlowRows(rows)[0] ?? rows[0]]));
   const included = lines.filter((line) => (
     (line.status === 'POSTED' || line.status === 'REVERSED')
     && line.postedAt != null
@@ -542,11 +550,13 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
   for (const line of included) {
     const applicableMappings = request.reportKind === 'FINANCIAL_STATEMENT'
       ? (mappingsByAccount.get(line.accountId) ?? [undefined])
+      : request.reportKind === 'CASH_FLOW'
+        ? cashFlowRows(mappingsByAccount.get(line.accountId) ?? [])
       : [primaryMappingByAccount.get(line.accountId)];
     for (const mappingRow of applicableMappings) {
       const key = request.reportKind === 'LEGAL_BOOK' && (request.legalBookKind ?? 'JOURNAL') === 'JOURNAL'
         ? `${line.documentDate.toISOString()}:${line.voucherNumber ?? 0}:${line.id}`
-      : request.reportKind === 'CASH_FLOW' ? mappingRow!.cashFlowClass!
+      : request.reportKind === 'CASH_FLOW' ? request.cashFlowMethod === 'INDIRECT' ? mappingRow!.sectionCode : mappingRow!.cashFlowClass!
       : request.reportKind === 'FINANCIAL_STATEMENT' ? `${mappingRow?.statement ?? 'UNMAPPED'}:${mappingRow?.sectionCode ?? 'UNMAPPED'}`
       : level === 'GROUP' ? line.accountPath.group
       : level === 'GENERAL' ? `${line.accountPath.group}/${line.accountPath.general}`
@@ -554,6 +564,7 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
           : line.accountCode;
       const title = request.reportKind === 'LEGAL_BOOK' && (request.legalBookKind ?? 'JOURNAL') === 'JOURNAL'
         ? `${line.voucherNumber?.toLocaleString('fa-IR') ?? 'بدون شماره'} · ${line.accountCode} · ${line.accountTitlePersian}`
+      : request.reportKind === 'CASH_FLOW' && request.cashFlowMethod === 'INDIRECT' ? mappingRow!.sectionCode
       : request.reportKind === 'CASH_FLOW' ? ({
       OPERATING: 'جریان‌های نقدی عملیاتی', INVESTING: 'جریان‌های نقدی سرمایه‌گذاری', FINANCING: 'جریان‌های نقدی تأمین مالی',
     }[mappingRow!.cashFlowClass!] ?? mappingRow!.cashFlowClass!)

@@ -108,6 +108,18 @@ test('component depreciation posts the book charge while tax basis remains analy
   assert.equal(calculation.deferredTaxTemporaryDifferenceRials, 916n);
   assert.equal(calculation.postingLines.length, 2);
   assert.equal(calculation.postingLines.some((line) => line.description.includes('مالیاتی')), false);
+
+  const finalPeriod = calculateAssetDepreciation({
+    assetId: 'asset-1', periodIdentity: '1409-12', readyForUseAt: new Date('2026-08-01T00:00:00.000Z'),
+    periodStart: new Date('2031-03-01T00:00:00.000Z'), periodEnd: new Date('2031-03-31T23:59:59.999Z'),
+    accumulatedBookDepreciationRials: 29_900n, accumulatedTaxDepreciationRials: 50_000n,
+    depreciationExpenseAccountId: 'depreciation-expense', accumulatedDepreciationAccountId: 'accumulated-depreciation',
+    components: [{ id: 'motor', costRials: 30_000n, residualValueRials: 0n, usefulLifeMonths: 60, method: 'STRAIGHT_LINE', accumulatedDepreciationRials: 29_900n }],
+    taxBasis: { costRials: 100_000n, residualValueRials: 0n, method: 'STRAIGHT_LINE', usefulLifeMonths: 12 },
+  });
+  assert.deepEqual(finalPeriod.componentCharges, [{ componentId: 'motor', bookChargeRials: 100n }]);
+  assert.equal(finalPeriod.bookChargeRials, 100n);
+  assert.equal(finalPeriod.taxChargeRials, 8_333n);
 });
 
 test('asset repair and improvement remain explicit immutable lifecycle treatments', async () => {
@@ -303,6 +315,15 @@ test('cash-flow dataset excludes internal transfers and keeps the mapping versio
   assert.deepEqual(dataset.sourceLineIds, ['external']);
   assert.equal(dataset.rows[0].key, 'OPERATING');
   assert.equal(dataset.rows[0].amounts.turnoverDebit, 10_000n);
+
+  const indirect = buildOfficialAccountingDataset({
+    request: { reportKind: 'CASH_FLOW', cashFlowMethod: 'INDIRECT', bookId: 'book-1', fiscalYearId: 'year-1', from: new Date('2026-09-01'), to: new Date('2026-09-30T23:59:59.999Z'), mappingVersionId: 'mapping-cash', cutoffAt: now },
+    mapping: { id: 'mapping-cash', effectiveFrom: new Date('2026-01-01'), rows: [
+      { accountId: 'customer-bank', statement: 'CASH_FLOW_INDIRECT', sectionCode: 'تعدیلات سرمایه در گردش', cashFlowClass: 'OPERATING' },
+    ] },
+    lines: [{ ...base, id: 'external', voucherId: 'v1', accountId: 'customer-bank' }],
+  });
+  assert.equal(indirect.rows[0].key, 'تعدیلات سرمایه در گردش');
 });
 
 test('financial statements preserve multiple mapping rows and contra signs', () => {

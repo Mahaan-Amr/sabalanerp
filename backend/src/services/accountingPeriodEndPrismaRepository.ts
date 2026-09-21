@@ -269,18 +269,20 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
   }) : null;
   if (['FINANCIAL_STATEMENT', 'CASH_FLOW'].includes(input.request.reportKind) && !mapping) throw new Error('نسخه نگاشت برای این گزارش رسمی الزامی است.');
   if (mapping && mapping.bookId !== input.request.bookId) throw new Error('نسخه نگاشت گزارش رسمی پیدا نشد.');
-  if (mapping && (mapping.effectiveFrom > input.request.to || (mapping.effectiveTo && mapping.effectiveTo < input.request.from))) {
-    throw new Error('نسخه نگاشت در بازه گزارش رسمی معتبر نیست.');
+  const earliestReportDate = input.request.comparativeFrom && input.request.comparativeFrom < input.request.from ? input.request.comparativeFrom : input.request.from;
+  const latestReportDate = input.request.comparativeTo && input.request.comparativeTo > input.request.to ? input.request.comparativeTo : input.request.to;
+  if (mapping && (mapping.effectiveFrom > earliestReportDate || (mapping.effectiveTo && mapping.effectiveTo < latestReportDate))) {
+    throw new Error('نسخه نگاشت باید تمام بازه گزارش رسمی را پوشش دهد.');
   }
-  let statutoryFormat: { id: string; contentHash: string } | null = null;
+  let statutoryFormat: { id: string; contentHash: string; schemaPayload: Prisma.JsonValue; validationRules: Prisma.JsonValue; officialSource: string } | null = null;
   if (input.request.reportKind === 'LEGAL_BOOK') {
     if (!input.request.statutoryFormatId) throw new Error('نسخه قالب رسمی دفتر قانونی الزامی است.');
     const format = await database.accountingStatutoryFormat.findUnique({ where: { id: input.request.statutoryFormatId } });
-    if (!format || format.bookId !== input.request.bookId || format.effectiveFrom > input.request.to
-      || (format.effectiveTo && format.effectiveTo < input.request.from)) {
-      throw new Error('نسخه قالب رسمی دفتر قانونی در بازه گزارش معتبر نیست.');
+    if (!format || format.bookId !== input.request.bookId || format.effectiveFrom > input.request.from
+      || (format.effectiveTo && format.effectiveTo < input.request.to)) {
+      throw new Error('نسخه قالب رسمی دفتر قانونی باید تمام بازه گزارش را پوشش دهد.');
     }
-    statutoryFormat = { id: format.id, contentHash: format.contentHash };
+    statutoryFormat = { id: format.id, contentHash: format.contentHash, schemaPayload: format.schemaPayload, validationRules: format.validationRules, officialSource: format.officialSource };
   }
   const lines = await database.accountingLedgerLine.findMany({
     where: {
@@ -288,7 +290,7 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
         bookId: input.request.bookId,
         fiscalYearId: input.request.fiscalYearId,
         status: { in: ['POSTED', 'REVERSED'] },
-        documentDate: { lte: input.request.to },
+        documentDate: { lte: input.request.comparativeTo && input.request.comparativeTo > input.request.to ? input.request.comparativeTo : input.request.to },
         postedAt: { lte: input.request.cutoffAt },
       },
     },
@@ -306,7 +308,7 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
       effectiveFrom: mapping?.effectiveFrom ?? input.request.from,
       rows: (mapping?.rows ?? []).map((row) => ({
         accountId: row.accountId,
-        statement: row.statementType as 'FINANCIAL_POSITION' | 'PROFIT_OR_LOSS' | 'COMPREHENSIVE_INCOME' | 'CHANGES_IN_EQUITY' | 'NOTES',
+        statement: row.statementType as 'FINANCIAL_POSITION' | 'PROFIT_OR_LOSS' | 'COMPREHENSIVE_INCOME' | 'CHANGES_IN_EQUITY' | 'NOTES' | 'CASH_FLOW_DIRECT' | 'CASH_FLOW_INDIRECT',
         sectionCode: row.sectionCode,
         signMultiplier: row.signMultiplier,
         cashFlowClass: row.cashFlowClass as 'OPERATING' | 'INVESTING' | 'FINANCING' | 'INTERNAL_TRANSFER' | undefined,
@@ -336,6 +338,45 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
       };
     }),
   });
+  if (input.request.reportKind === 'CASH_FLOW' && input.request.cashFlowMethod === 'INDIRECT' && dataset.rows.length === 0) {
+    throw new Error('نگاشت مستقل روش غیرمستقیم جریان وجوه نقد ثبت نشده است.');
+  }
+  let finalDataset: typeof dataset & { comparative?: { from: Date; to: Date; rows: typeof dataset.rows; integrityHash: string } } = dataset;
+  if (input.request.comparativeFrom || input.request.comparativeTo) {
+    if (!input.request.comparativeFrom || !input.request.comparativeTo || input.request.comparativeFrom > input.request.comparativeTo) throw new Error('بازه مقایسه‌ای گزارش معتبر نیست.');
+    const comparative = buildOfficialAccountingDataset({
+      request: { ...input.request, from: input.request.comparativeFrom, to: input.request.comparativeTo, comparativeFrom: undefined, comparativeTo: undefined },
+      mapping: { id: mapping?.id ?? 'بدون-نگاشت', effectiveFrom: mapping?.effectiveFrom ?? input.request.comparativeFrom, rows: (mapping?.rows ?? []).map((row) => ({
+        accountId: row.accountId, statement: row.statementType as 'FINANCIAL_POSITION' | 'PROFIT_OR_LOSS' | 'COMPREHENSIVE_INCOME' | 'CHANGES_IN_EQUITY' | 'NOTES' | 'CASH_FLOW_DIRECT' | 'CASH_FLOW_INDIRECT',
+        sectionCode: row.sectionCode, signMultiplier: row.signMultiplier,
+        cashFlowClass: row.cashFlowClass as 'OPERATING' | 'INVESTING' | 'FINANCING' | 'INTERNAL_TRANSFER' | undefined,
+      })) },
+      lines: lines.map((line) => {
+        const group = line.account.level === 'GROUP' ? line.account : line.account.parent?.parent ?? line.account.parent ?? line.account;
+        const general = line.account.level === 'KOL' ? line.account : line.account.parent ?? line.account;
+        return { id: line.id, voucherId: line.voucher.id, voucherNumber: line.voucher.statutoryNumber, status: line.voucher.status, accountId: line.accountId,
+          accountCode: line.account.code, accountTitlePersian: line.account.titlePersian, accountPath: { group: group.titlePersian, general: general.titlePersian, subsidiary: line.account.titlePersian },
+          debitRials: BigInt(line.debitRials.toFixed(0)), creditRials: BigInt(line.creditRials.toFixed(0)), documentDate: line.voucher.documentDate,
+          postedAt: line.voucher.postedAt, dimensions: Object.fromEntries(line.dimensions.map((dimension) => [dimension.dimensionType.code, dimension.member.titlePersian])) };
+      }),
+    });
+    const comparison = { from: input.request.comparativeFrom, to: input.request.comparativeTo, rows: comparative.rows, integrityHash: comparative.integrityHash };
+    finalDataset = { ...dataset, comparative: comparison, integrityHash: hashAccountingEvidence({ current: dataset.integrityHash, comparative: comparison }) };
+  }
+  let statutoryValidation: Record<string, unknown> | null = null;
+  if (statutoryFormat) {
+    const rules = statutoryFormat.validationRules as Record<string, unknown>;
+    const schema = statutoryFormat.schemaPayload as Record<string, unknown>;
+    const voucherNumbers = [...new Set(lines.filter((line) => line.voucher.documentDate >= input.request.from && line.voucher.documentDate <= input.request.to)
+      .map((line) => line.voucher.statutoryNumber))];
+    if (voucherNumbers.some((number) => number == null)) throw new Error('همه اسناد دفتر قانونی باید شماره قطعی قانونی داشته باشند.');
+    const numbers = (voucherNumbers as number[]).sort((left, right) => left - right);
+    if (rules.requireSequentialStatutoryNumbers !== false && numbers.some((number, index) => index > 0 && number !== numbers[index - 1] + 1)) throw new Error('توالی شماره اسناد دفتر قانونی پیوسته نیست.');
+    if (typeof rules.maxRows === 'number' && finalDataset.rows.length > rules.maxRows) throw new Error('تعداد ردیف‌های بسته قانونی از سقف قالب رسمی بیشتر است.');
+    const requiredColumns = Array.isArray(schema.requiredColumns) ? schema.requiredColumns.map(String) : [];
+    if (requiredColumns.some((column) => !finalDataset.columnKeys.includes(column))) throw new Error('ستون‌های الزامی قالب رسمی در داده گزارش وجود ندارد.');
+    statutoryValidation = { formatId: statutoryFormat.id, officialSource: statutoryFormat.officialSource, voucherNumbers: numbers, requiredColumns, validatedAt: input.request.cutoffAt };
+  }
   const snapshotIdentity = `گزارش-${input.request.reportKind}-${randomUUID()}`;
   const snapshot = await database.accountingOfficialReportSnapshot.create({
     data: {
@@ -347,13 +388,13 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
       mappingVersionId: mapping?.id ?? null,
       policyVersions: jsonValue({
         ...(input.policyVersions ?? {}),
-        ...(statutoryFormat ? { statutoryFormatId: statutoryFormat.id, statutoryFormatHash: statutoryFormat.contentHash } : {}),
+        ...(statutoryFormat ? { statutoryFormatId: statutoryFormat.id, statutoryFormatHash: statutoryFormat.contentHash, statutoryValidation } : {}),
       }),
-      sourceIdentities: jsonValue(dataset.sourceLineIds),
-      dataset: jsonValue(dataset),
-      datasetHash: dataset.integrityHash,
+      sourceIdentities: jsonValue(finalDataset.sourceLineIds),
+      dataset: jsonValue(finalDataset),
+      datasetHash: finalDataset.integrityHash,
       generatedBy: input.actorId,
     },
   });
-  return { snapshot, dataset };
+  return { snapshot, dataset: finalDataset };
 };

@@ -5,6 +5,8 @@ import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURES, FEATURE_PERMISSIONS } from '../middleware/feature';
+import { AccountingCustomerTreasuryError } from '../services/accountingCustomerTreasury';
+import { publishInventoryCostEvidencePrisma, publishInventoryValuationEvidencePrisma } from '../services/accountingCustomerTreasuryPrisma';
 
 const router = express.Router();
 
@@ -1257,6 +1259,41 @@ router.put('/colors/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, 
 // @desc    Delete color
 // @route   DELETE /api/inventory/colors/:id
 // @access  Private/Inventory Workspace
+router.post('/valuation-evidence', protect,
+  requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_COST_EVIDENCE_MANAGE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
+    try {
+      const unitCost = String(req.body.unitCostRials ?? '').trim();
+      if (!/^\d+$/.test(unitCost)) throw new AccountingCustomerTreasuryError('INVENTORY_VALUATION_AMOUNT_INVALID', 'بهای واحد باید عدد صحیح نامنفی به ریال باشد.', 400);
+      const result = await publishInventoryValuationEvidencePrisma(prisma, {
+        shipmentQuantityEvidenceId: String(req.body.shipmentQuantityEvidenceId || ''),
+        valuationVersion: Number(req.body.valuationVersion), valuationMethod: req.body.valuationMethod,
+        inventoryDocumentId: String(req.body.inventoryDocumentId || ''), unitCostRials: BigInt(unitCost),
+        actorId: req.user?.id || 'ناشناس',
+      });
+      res.status(201).json({ success: true, data: JSON.parse(JSON.stringify(result, (_key, value) => typeof value === 'bigint' ? value.toString() : value)) });
+    } catch (error) {
+      if (error instanceof AccountingCustomerTreasuryError) return res.status(error.status).json({ success: false, code: error.code, error: error.message });
+      console.error('Inventory valuation evidence failed:', error);
+      res.status(500).json({ success: false, error: 'ثبت شاهد ارزش‌گذاری انبار انجام نشد.' });
+    }
+  });
+
+router.post('/accounting-cost-evidence', protect,
+  requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_COST_EVIDENCE_MANAGE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
+    try {
+      const result = await publishInventoryCostEvidencePrisma(prisma, {
+        legalEntityId: String(req.body.legalEntityId || ''), valuationEvidenceId: String(req.body.valuationEvidenceId || ''),
+      });
+      res.status(201).json({ success: true, data: result });
+    } catch (error) {
+      if (error instanceof AccountingCustomerTreasuryError) return res.status(error.status).json({ success: false, code: error.code, error: error.message });
+      console.error('Accounting inventory cost evidence failed:', error);
+      res.status(500).json({ success: false, error: 'انتشار شاهد بهای موجودی برای حسابداری انجام نشد.' });
+    }
+  });
+
 router.delete('/colors/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_COLORS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const { id } = req.params;

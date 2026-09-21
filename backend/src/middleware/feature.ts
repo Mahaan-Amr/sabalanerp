@@ -191,6 +191,7 @@ export const FEATURES = {
   INVENTORY_STONE_FINISHINGS_EDIT: 'inventory_stone_finishings_edit',
   INVENTORY_STONE_FINISHINGS_DELETE: 'inventory_stone_finishings_delete',
   INVENTORY_STONE_FINISHINGS_TOGGLE: 'inventory_stone_finishings_toggle',
+  INVENTORY_COST_EVIDENCE_MANAGE: 'inventory_cost_evidence_manage',
 
   // Accounting Features
   ACCOUNTING_DASHBOARD_VIEW: 'accounting_dashboard_view',
@@ -211,6 +212,11 @@ export const FEATURES = {
   ACCOUNTING_DISPATCH_CANDIDATES_MANAGE: 'accounting_dispatch_candidates_manage',
   ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE: 'accounting_dispatch_confirmation_manage',
   ACCOUNTING_PARTNER_TERMS_MANAGE: 'accounting_partner_terms_manage',
+  ACCOUNTING_CUSTOMER_POSTING_MANAGE: 'accounting_customer_posting_manage',
+  ACCOUNTING_TREASURY_MANAGE: 'accounting_treasury_manage',
+  ACCOUNTING_EVIDENCE_MANAGE: 'accounting_evidence_manage',
+  ACCOUNTING_TAX_SUBMISSIONS_MANAGE: 'accounting_tax_submissions_manage',
+  ACCOUNTING_CUSTOMER_STATEMENTS_EXPORT: 'accounting_customer_statements_export',
 
   // BI Features
   BI_DASHBOARD_VIEW: 'bi_dashboard_view',
@@ -476,6 +482,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.INVENTORY_STONE_FINISHINGS_EDIT]: 'inventory',
   [FEATURES.INVENTORY_STONE_FINISHINGS_DELETE]: 'inventory',
   [FEATURES.INVENTORY_STONE_FINISHINGS_TOGGLE]: 'inventory',
+  [FEATURES.INVENTORY_COST_EVIDENCE_MANAGE]: 'inventory',
 
   // Accounting Features
   [FEATURES.ACCOUNTING_DASHBOARD_VIEW]: 'accounting',
@@ -496,6 +503,11 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE]: 'accounting',
   [FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE]: 'accounting',
   [FEATURES.ACCOUNTING_PARTNER_TERMS_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_CUSTOMER_POSTING_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_TREASURY_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_EVIDENCE_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_TAX_SUBMISSIONS_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_CUSTOMER_STATEMENTS_EXPORT]: 'accounting',
 
   // BI Features
   [FEATURES.BI_DASHBOARD_VIEW]: 'bi',
@@ -619,6 +631,7 @@ const FEATURE_SUBJECT_LABELS_FA: Record<string, string> = {
   inventory_stair_standard_lengths: 'طول‌های استاندارد پله',
   inventory_layer_types: 'انواع لایه',
   inventory_stone_finishings: 'پرداخت‌های سنگ',
+  inventory_cost_evidence: 'شواهد بهای موجودی',
   accounting_dashboard: 'داشبورد حسابداری',
   accounting_contracts: 'قراردادهای حسابداری',
   accounting_invoice_candidates: 'گزینه‌های صدور صورت‌حساب',
@@ -633,6 +646,11 @@ const FEATURE_SUBJECT_LABELS_FA: Record<string, string> = {
   accounting_dispatch_candidates: 'گزینه‌های ارسال اسناد حسابداری',
   accounting_dispatch_confirmation: 'تأیید ارسال اسناد حسابداری',
   accounting_partner_terms: 'شرایط تجاری و اعتبار فروشنده همکار',
+  accounting_customer_posting: 'ثبت فروش و دریافتنی مشتری',
+  accounting_treasury: 'عملیات خزانه‌داری',
+  accounting_evidence: 'شواهد عملیاتی حسابداری',
+  accounting_tax_submissions: 'ارسال صورتحساب مالیاتی',
+  accounting_customer_statements: 'صورتحساب مشتری',
   bi_dashboard: 'داشبورد هوش تجاری',
   bi_partner_reports: 'گزارش‌ها و حساب‌های فروشنده همکار',
   logistics_dashboard: 'داشبورد لجستیک',

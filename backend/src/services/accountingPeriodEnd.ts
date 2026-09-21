@@ -358,7 +358,8 @@ const componentPeriodCharge = (component: DepreciationComponent) => {
   }
   if (component.method === 'DECLINING_BALANCE') {
     if (!component.annualRateBasisPoints) throw new Error('نرخ استهلاک نزولی ثبت نشده است.');
-    return divideRounded(component.costRials * BigInt(component.annualRateBasisPoints), 120_000n);
+    const carryingAmount = component.costRials - (component.accumulatedDepreciationRials ?? 0n);
+    return divideRounded(carryingAmount * BigInt(component.annualRateBasisPoints), 120_000n);
   }
   if (!component.periodUnits || !component.totalExpectedUnits) throw new Error('مقدار تولید دوره و کل برآورد تولید باید ثبت شود.');
   return divideRounded(depreciable * component.periodUnits, component.totalExpectedUnits);
@@ -402,6 +403,7 @@ export const calculateAssetDepreciation = (input: {
     usefulLifeMonths: input.taxBasis.usefulLifeMonths ?? 1,
     method: input.taxBasis.method,
     annualRateBasisPoints: input.taxBasis.annualRateBasisPoints,
+    accumulatedDepreciationRials: input.accumulatedTaxDepreciationRials,
     periodUnits: input.taxBasis.periodUnits,
     totalExpectedUnits: input.taxBasis.totalExpectedUnits,
   }) : 0n;

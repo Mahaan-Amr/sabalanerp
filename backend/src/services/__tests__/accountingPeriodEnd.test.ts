@@ -120,6 +120,16 @@ test('component depreciation posts the book charge while tax basis remains analy
   assert.deepEqual(finalPeriod.componentCharges, [{ componentId: 'motor', bookChargeRials: 100n }]);
   assert.equal(finalPeriod.bookChargeRials, 100n);
   assert.equal(finalPeriod.taxChargeRials, 8_333n);
+  const decliningLaterPeriod = calculateAssetDepreciation({
+    assetId: 'asset-2', periodIdentity: '1406-02', readyForUseAt: new Date('2026-08-01T00:00:00.000Z'),
+    periodStart: new Date('2027-05-01T00:00:00.000Z'), periodEnd: new Date('2027-05-31T23:59:59.999Z'),
+    accumulatedBookDepreciationRials: 20_000n, accumulatedTaxDepreciationRials: 50_000n,
+    depreciationExpenseAccountId: 'depreciation-expense', accumulatedDepreciationAccountId: 'accumulated-depreciation',
+    components: [{ id: 'body', costRials: 100_000n, residualValueRials: 0n, usefulLifeMonths: 120, method: 'DECLINING_BALANCE', annualRateBasisPoints: 2_500, accumulatedDepreciationRials: 20_000n }],
+    taxBasis: { costRials: 100_000n, residualValueRials: 0n, method: 'DECLINING_BALANCE', annualRateBasisPoints: 2_500 },
+  });
+  assert.equal(decliningLaterPeriod.componentCharges[0].bookChargeRials, 1_667n);
+  assert.equal(decliningLaterPeriod.taxChargeRials, 1_042n);
 });
 
 test('asset repair and improvement remain explicit immutable lifecycle treatments', async () => {

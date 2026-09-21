@@ -5445,6 +5445,29 @@ model AccountingCloseRunStep {
   @@map("accounting_close_run_steps")
 }
 
+model AccountingOperationalReconciliation {
+  id                    String   @id @default(cuid())
+  bookId                String
+  fiscalYearId          String
+  periodId              String?
+  reconciliationCode    String
+  sourceSystem          String
+  sourceSnapshotHash    String
+  sourceDebitRials      Decimal  @db.Decimal(20, 0)
+  sourceCreditRials     Decimal  @db.Decimal(20, 0)
+  ledgerDebitRials      Decimal  @db.Decimal(20, 0)
+  ledgerCreditRials     Decimal  @db.Decimal(20, 0)
+  unresolvedDifferences Json
+  controlPayload        Json
+  evidenceHash          String
+  reconciledAt          DateTime
+  createdAt             DateTime @default(now())
+
+  @@unique([bookId, fiscalYearId, periodId, reconciliationCode, sourceSystem, sourceSnapshotHash])
+  @@index([bookId, fiscalYearId, periodId, reconciliationCode, reconciledAt])
+  @@map("accounting_operational_reconciliations")
+}
+
 model AccountingRestatementCase {
   id                   String   @id @default(cuid())
   bookId               String

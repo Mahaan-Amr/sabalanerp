@@ -547,7 +547,9 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
       && primaryMappingByAccount.get(line.accountId)?.cashFlowClass !== 'INTERNAL_TRANSFER'
     ))
   ));
-  const level = request.level ?? 'SUBSIDIARY';
+  const level = request.reportKind === 'LEGAL_BOOK' && request.legalBookKind === 'GENERAL_LEDGER' ? 'GENERAL'
+    : request.reportKind === 'LEGAL_BOOK' && request.legalBookKind === 'SUBSIDIARY_LEDGER' ? 'SUBSIDIARY'
+      : request.level ?? 'SUBSIDIARY';
   const buckets = new Map<string, { title: string; entries: Array<{ line: OfficialPostedLine; signMultiplier: number }> }>();
   for (const line of included) {
     const applicableMappings = request.reportKind === 'FINANCIAL_STATEMENT'

@@ -138,3 +138,25 @@ test('صفحه فارسی و راست‌به‌چپ در عرض باریک و ب
   }).length);
   expect(unnamedControls).toBe(0);
 });
+
+test('داشبورد پایان دوره در عرض باریک، وضعیت‌های فارسی و زنجیره شواهد را خوانا نگه می‌دارد', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await mockLedger(page, 'ACCOUNTING_MANAGER');
+  await page.route('**/api/accounting/period-end/overview**', (route) => json(route, 200, {
+    success: true,
+    data: {
+      assets: [{ id: 'asset-1', registerNumber: 'دارایی-۱', titlePersian: 'دستگاه برش', location: 'کارخانه', status: 'ACTIVE', bookCostRials: '120000000', taxCostRials: '100000000', readyForUseAt: '2026-09-01', components: [{ id: 'component-1' }] }],
+      payroll: [], schedules: [], estimates: [], taxes: [], snapshots: [], mappings: [], statutoryFormats: [], archiveEvidence: [],
+      closeRuns: [{ id: 'close-1', runIdentity: 'بستن-شهریور', closeType: 'PERIOD', status: 'BLOCKED', steps: [{ id: 'step-1', stepCode: 'PAYROLL', status: 'BLOCKED' }] }],
+    },
+  }));
+  await page.goto('/dashboard/accounting/period-end');
+  await expect(page.getByRole('heading', { name: 'پایان دوره و گزارش‌های قانونی' })).toBeVisible();
+  await expect(page.getByText('دستگاه برش')).toBeVisible();
+  await page.getByRole('button', { name: 'بستن دوره' }).click();
+  await expect(page.getByText('حقوق: مسدود')).toBeVisible();
+  expect(await page.evaluate(() => getComputedStyle(document.body).direction)).toBe('rtl');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('پایان-دوره-عرض-باریک.png'), fullPage: true });
+});

@@ -81,9 +81,11 @@ import { randomUUID } from 'node:crypto';
 import { projectAccountingDispatchCandidateSummary } from '../services/accountingDispatchCandidatePresentation';
 import { readPartnerDispatchAccountingViewCapability } from '../services/partnerSales/accounting/capabilities';
 import accountingLedgerRouter from './accountingLedger';
+import accountingPeriodEndRouter from './accountingPeriodEnd';
 
 const router = express.Router();
 router.use('/ledger', accountingLedgerRouter);
+router.use('/period-end', accountingPeriodEndRouter);
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
 
 const accountingActionFeature: Record<string, string[]> = {

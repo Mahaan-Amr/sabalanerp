@@ -93,6 +93,8 @@
     "test:design-system:e2e:infrastructure": "node --test tests/design-system-e2e-infrastructure/infrastructure.spec.mjs",
     "test:accounting-dispatch-documents:e2e:real": "npx tsx --test tests/accounting-dispatch-documents-real/qa-identities.test.ts && playwright test --config=playwright.accounting-dispatch-documents.config.ts",
     "test:accounting-ledger:e2e": "playwright test --config=playwright.accounting-ledger.config.ts",
+    "test:accounting-period-end": "npm --prefix backend run test:accounting-period-end",
+    "test:accounting-period-end:db": "npm --prefix backend run test:accounting-period-end:db",
     "test:support-notifications:e2e": "playwright test --config=playwright.support-notifications.config.ts",
     "test:hr-hiring:e2e": "node scripts/run-hr-hiring-e2e.mjs",
     "test:hr-hiring:e2e:docker": "docker compose -f docker-compose.e2e.yml up -d --wait && npm run test:hr-hiring:e2e:ci",

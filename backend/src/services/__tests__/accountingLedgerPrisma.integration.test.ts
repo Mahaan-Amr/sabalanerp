@@ -170,8 +170,10 @@ test('دفترکل واقعی در رقابت شماره یکتا، توازن �
     ]);
     const persistedPeriod = await database.accountingPostingPeriod.findUniqueOrThrow({ where: { id: fiscal.periods[0].id } });
     const persistedRaceVoucher = await database.accountingLedgerVoucher.findUniqueOrThrow({ where: { id: closeRaceDraft.id } });
-    assert.ok(postRace.status === 'fulfilled' || closeRace.status === 'fulfilled');
-    if (persistedPeriod.status === 'HARD_CLOSED') assert.equal(persistedRaceVoucher.status, 'POSTED');
+    assert.equal(postRace.status, 'fulfilled');
+    assert.equal(closeRace.status, 'rejected');
+    assert.equal(persistedPeriod.status, 'SOFT_CLOSED');
+    assert.equal(persistedRaceVoucher.status, 'POSTED');
     const audit = await database.accountingLedgerAuditEntry.findFirstOrThrow({ orderBy: { sequence: 'desc' } });
     assert.deepEqual(await verifyLedgerAuditChain(database), {
       valid: true,

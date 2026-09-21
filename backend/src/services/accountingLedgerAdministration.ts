@@ -1,6 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { AccountingLedgerError } from './accountingLedgerFoundation';
+
+export const validatePeriodTransition = (
+  current: 'OPEN' | 'SOFT_CLOSED' | 'HARD_CLOSED',
+  target: 'OPEN' | 'SOFT_CLOSED' | 'HARD_CLOSED',
+) => {
+  if (target === 'HARD_CLOSED') {
+    throw new AccountingLedgerError('HARD_CLOSE_REQUIRES_CLOSE_RUN', 'بستن قطعی فقط پس از تکمیل اجرای بستن دوره مجاز است.', 409);
+  }
+  const allowed: Record<string, string[]> = { OPEN: ['SOFT_CLOSED'], SOFT_CLOSED: ['OPEN'], HARD_CLOSED: [] };
+  if (!allowed[current].includes(target)) throw new AccountingLedgerError('INVALID_PERIOD_TRANSITION', 'تغییر وضعیت دوره از این حالت مجاز نیست.', 409);
+};
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 
 type PeriodDefinition = { startsAt: Date; endsAt: Date; isAdjustment: boolean };
@@ -232,12 +243,7 @@ export const createAccountingLedgerAdministration = (database: PrismaClient) => 
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.periodId}))`;
     const period = await tx.accountingPostingPeriod.findUnique({ where: { id: input.periodId } });
     if (!period) throw new AccountingLedgerError('PERIOD_NOT_FOUND', 'دوره حسابداری پیدا نشد.', 404);
-    const allowed: Record<string, string[]> = { OPEN: ['SOFT_CLOSED'], SOFT_CLOSED: ['OPEN', 'HARD_CLOSED'], HARD_CLOSED: [] };
-    if (!allowed[period.status].includes(input.status)) throw new AccountingLedgerError('INVALID_PERIOD_TRANSITION', 'تغییر وضعیت دوره از این حالت مجاز نیست.', 409);
-    if (input.status === 'HARD_CLOSED') {
-      const draftCount = await tx.accountingLedgerVoucher.count({ where: { periodId: period.id, status: 'DRAFT' } });
-      if (draftCount) throw new AccountingLedgerError('PERIOD_HAS_DRAFTS', 'تا تعیین تکلیف همه پیش‌نویس‌ها، بستن قطعی دوره مجاز نیست.', 409);
-    }
+    validatePeriodTransition(period.status, input.status);
     const updated = await tx.accountingPostingPeriod.update({
       where: { id: period.id },
       data: input.status === 'OPEN'

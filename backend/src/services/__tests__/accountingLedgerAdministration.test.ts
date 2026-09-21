@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   validateAccountDefinition,
   validateFiscalPeriodCoverage,
+  validatePeriodTransition,
 } from '../accountingLedgerAdministration';
 
 test('دوره‌های سفارشی باید سال مالی را بدون فاصله و هم‌پوشانی پوشش دهند', () => {
@@ -17,6 +18,12 @@ test('دوره‌های سفارشی باید سال مالی را بدون فا
     { startsAt, endsAt: new Date('2026-09-20T23:59:59.999Z'), isAdjustment: false },
     { startsAt: new Date('2026-09-22T00:00:00.000Z'), endsAt, isAdjustment: false },
   ]), /بدون فاصله/);
+});
+
+test('بستن قطعی دوره فقط از اجرای بستن دوره پذیرفته می‌شود', () => {
+  assert.doesNotThrow(() => validatePeriodTransition('OPEN', 'SOFT_CLOSED'));
+  assert.doesNotThrow(() => validatePeriodTransition('SOFT_CLOSED', 'OPEN'));
+  assert.throws(() => validatePeriodTransition('SOFT_CLOSED', 'HARD_CLOSED'), /اجرای بستن دوره/);
 });
 
 test('کد و سلسله‌مراتب حساب با نسخه کدینگ کنترل می‌شود', () => {

@@ -591,6 +591,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show: true,
           },
           {
+            name: "Period End",
+            namePersian: "پایان دوره و گزارش قانونی",
+            href: "/dashboard/accounting/period-end",
+            icon: FaClipboardList,
+            show: true,
+          },
+          {
             name: "Accounting Dispatch",
             namePersian: "فرمان‌های ارسال",
             href: "/dashboard/accounting/dispatch",

@@ -56,6 +56,16 @@ export type AssetPaymentEvidence = EvidenceIdentity & {
   amountRials: bigint;
 };
 
+export type AssetCostEvidence = EvidenceIdentity & {
+  kind: 'ASSET_COST';
+  assetId: string;
+  costKind: 'PURCHASE' | 'DIRECTLY_ATTRIBUTABLE' | 'CONSTRUCTION_IN_PROGRESS';
+  amountRials: bigint;
+  constructionInProgressAccountId: string;
+  creditAccountId: string;
+  documentIds: string[];
+};
+
 export type AssetLifecycleEvidence = EvidenceIdentity & {
   kind: 'ASSET_LIFECYCLE';
   assetId: string;
@@ -102,7 +112,7 @@ export type RecognitionDueEvidence = EvidenceIdentity & {
   reviewDueAt: Date;
 };
 
-export type PeriodEndEvidence = AssetReadyForUseEvidence | AssetPaymentEvidence | AssetLifecycleEvidence | ApprovedPayrollEvidence | RecognitionDueEvidence;
+export type PeriodEndEvidence = AssetReadyForUseEvidence | AssetPaymentEvidence | AssetCostEvidence | AssetLifecycleEvidence | ApprovedPayrollEvidence | RecognitionDueEvidence;
 
 export type PeriodEndVoucherLine = {
   accountId: string;
@@ -201,6 +211,17 @@ const preparePosting = (command: EvidenceCommand): PeriodEndPosting | PeriodEndR
 
   if (evidence.kind === 'ASSET_PAYMENT') {
     return exception(evidence.sourceHash, 'ASSET_NOT_READY_FOR_USE', 'پرداخت به‌تنهایی مجوز شروع استهلاک یا انتقال دارایی به وضعیت آماده‌به‌کار نیست.');
+  }
+  if (evidence.kind === 'ASSET_COST') {
+    if (evidence.amountRials <= 0n || evidence.documentIds.length === 0) return exception(evidence.sourceHash, 'ASSET_COMPONENT_COST_MISMATCH', 'بهای دارایی باید مثبت و دارای مدرک منشأ باشد.');
+    return {
+      ...base,
+      description: `انباشت بهای دارایی در جریان تکمیل ${evidence.assetId}`,
+      lines: [
+        { accountId: evidence.constructionInProgressAccountId, debitRials: evidence.amountRials, creditRials: 0n, description: 'بهای دارایی در جریان تکمیل', dimensions: [] },
+        { accountId: evidence.creditAccountId, debitRials: 0n, creditRials: evidence.amountRials, description: 'منبع تأمین بهای دارایی', dimensions: [] },
+      ],
+    };
   }
   if (evidence.kind === 'ASSET_READY_FOR_USE') {
     const componentCost = sum(evidence.asset.components.map((component) => component.costRials));
@@ -448,6 +469,7 @@ export type FinancialStatementMapping = {
     accountId: string;
     statement: 'FINANCIAL_POSITION' | 'PROFIT_OR_LOSS' | 'COMPREHENSIVE_INCOME' | 'CHANGES_IN_EQUITY' | 'NOTES';
     sectionCode: string;
+    signMultiplier?: number;
     cashFlowClass?: 'OPERATING' | 'INVESTING' | 'FINANCING' | 'INTERNAL_TRANSFER';
   }>;
 };
@@ -460,7 +482,8 @@ export type OfficialDatasetRequest = {
   to: Date;
   columns?: 2 | 4 | 6 | 8;
   level?: TrialBalanceLevel;
-  mappingVersionId: string;
+  mappingVersionId?: string;
+  legalBookKind?: 'JOURNAL' | 'GENERAL_LEDGER' | 'SUBSIDIARY_LEDGER';
   statutoryFormatId?: string;
   cutoffAt: Date;
   dimensionFilters?: Record<string, string>;
@@ -499,8 +522,10 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
   mapping: FinancialStatementMapping;
   lines: OfficialPostedLine[];
 }) => {
-  if (request.mappingVersionId !== mapping.id) throw new Error('نسخه نگاشت گزارش با درخواست رسمی مطابقت ندارد.');
-  const mappingByAccount = new Map(mapping.rows.map((row) => [row.accountId, row]));
+  if (request.mappingVersionId && request.mappingVersionId !== mapping.id) throw new Error('نسخه نگاشت گزارش با درخواست رسمی مطابقت ندارد.');
+  const mappingsByAccount = new Map<string, FinancialStatementMapping['rows']>();
+  for (const row of mapping.rows) mappingsByAccount.set(row.accountId, [...(mappingsByAccount.get(row.accountId) ?? []), row]);
+  const primaryMappingByAccount = new Map([...mappingsByAccount].map(([accountId, rows]) => [accountId, rows[0]]));
   const included = lines.filter((line) => (
     (line.status === 'POSTED' || line.status === 'REVERSED')
     && line.postedAt != null
@@ -508,21 +533,28 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
     && line.documentDate <= request.to
     && lineMatchesDimensions(line, request.dimensionFilters)
     && (request.reportKind !== 'CASH_FLOW' || (
-      mappingByAccount.get(line.accountId)?.cashFlowClass != null
-      && mappingByAccount.get(line.accountId)?.cashFlowClass !== 'INTERNAL_TRANSFER'
+      primaryMappingByAccount.get(line.accountId)?.cashFlowClass != null
+      && primaryMappingByAccount.get(line.accountId)?.cashFlowClass !== 'INTERNAL_TRANSFER'
     ))
   ));
   const level = request.level ?? 'SUBSIDIARY';
-  const buckets = new Map<string, { title: string; lines: OfficialPostedLine[] }>();
+  const buckets = new Map<string, { title: string; entries: Array<{ line: OfficialPostedLine; signMultiplier: number }> }>();
   for (const line of included) {
-    const mappingRow = mappingByAccount.get(line.accountId);
-    const key = request.reportKind === 'CASH_FLOW' ? mappingRow!.cashFlowClass!
+    const applicableMappings = request.reportKind === 'FINANCIAL_STATEMENT'
+      ? (mappingsByAccount.get(line.accountId) ?? [undefined])
+      : [primaryMappingByAccount.get(line.accountId)];
+    for (const mappingRow of applicableMappings) {
+      const key = request.reportKind === 'LEGAL_BOOK' && (request.legalBookKind ?? 'JOURNAL') === 'JOURNAL'
+        ? `${line.documentDate.toISOString()}:${line.voucherNumber ?? 0}:${line.id}`
+      : request.reportKind === 'CASH_FLOW' ? mappingRow!.cashFlowClass!
       : request.reportKind === 'FINANCIAL_STATEMENT' ? `${mappingRow?.statement ?? 'UNMAPPED'}:${mappingRow?.sectionCode ?? 'UNMAPPED'}`
       : level === 'GROUP' ? line.accountPath.group
       : level === 'GENERAL' ? `${line.accountPath.group}/${line.accountPath.general}`
         : level === 'DETAIL' ? `${line.accountCode}/${line.accountPath.detail ?? line.accountTitlePersian}`
           : line.accountCode;
-    const title = request.reportKind === 'CASH_FLOW' ? ({
+      const title = request.reportKind === 'LEGAL_BOOK' && (request.legalBookKind ?? 'JOURNAL') === 'JOURNAL'
+        ? `${line.voucherNumber?.toLocaleString('fa-IR') ?? 'بدون شماره'} · ${line.accountCode} · ${line.accountTitlePersian}`
+      : request.reportKind === 'CASH_FLOW' ? ({
       OPERATING: 'جریان‌های نقدی عملیاتی', INVESTING: 'جریان‌های نقدی سرمایه‌گذاری', FINANCING: 'جریان‌های نقدی تأمین مالی',
     }[mappingRow!.cashFlowClass!] ?? mappingRow!.cashFlowClass!)
       : request.reportKind === 'FINANCIAL_STATEMENT' ? mappingRow?.sectionCode ?? 'فاقد نگاشت'
@@ -530,19 +562,24 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
       : level === 'GENERAL' ? line.accountPath.general
         : level === 'DETAIL' ? line.accountPath.detail ?? line.accountTitlePersian
           : line.accountPath.subsidiary;
-    const bucket: { title: string; lines: OfficialPostedLine[] } = buckets.get(key) ?? { title, lines: [] };
-    bucket.lines.push(line);
-    buckets.set(key, bucket);
+      const bucket: { title: string; entries: Array<{ line: OfficialPostedLine; signMultiplier: number }> }
+        = buckets.get(key) ?? { title, entries: [] };
+      bucket.entries.push({ line, signMultiplier: mappingRow?.signMultiplier ?? 1 });
+      buckets.set(key, bucket);
+    }
   }
   const rows: OfficialDatasetRow[] = [...buckets.entries()].sort(([left], [right]) => left.localeCompare(right, 'fa')).map(([key, bucket]) => {
-    const openingLines = bucket.lines.filter((line) => line.documentDate < request.from);
-    const turnoverLines = bucket.lines.filter((line) => line.documentDate >= request.from);
-    const opening = normalBalance(sum(openingLines.map((line) => line.debitRials)), sum(openingLines.map((line) => line.creditRials)));
-    const turnoverDebit = sum(turnoverLines.map((line) => line.debitRials));
-    const turnoverCredit = sum(turnoverLines.map((line) => line.creditRials));
+    const amounts = (entry: { line: OfficialPostedLine; signMultiplier: number }) => entry.signMultiplier < 0
+      ? { debit: entry.line.creditRials * BigInt(-entry.signMultiplier), credit: entry.line.debitRials * BigInt(-entry.signMultiplier) }
+      : { debit: entry.line.debitRials * BigInt(entry.signMultiplier), credit: entry.line.creditRials * BigInt(entry.signMultiplier) };
+    const openingEntries = bucket.entries.filter(({ line }) => line.documentDate < request.from);
+    const turnoverEntries = bucket.entries.filter(({ line }) => line.documentDate >= request.from);
+    const opening = normalBalance(sum(openingEntries.map((entry) => amounts(entry).debit)), sum(openingEntries.map((entry) => amounts(entry).credit)));
+    const turnoverDebit = sum(turnoverEntries.map((entry) => amounts(entry).debit));
+    const turnoverCredit = sum(turnoverEntries.map((entry) => amounts(entry).credit));
     const ending = normalBalance(opening.debit + turnoverDebit, opening.credit + turnoverCredit);
     const periodNet = normalBalance(turnoverDebit, turnoverCredit);
-    const accountIds = [...new Set(bucket.lines.map((line) => line.accountId))].sort();
+    const accountIds = [...new Set(bucket.entries.map(({ line }) => line.accountId))].sort();
     const mappingSectionCodes = [...new Set(mapping.rows.filter((row) => accountIds.includes(row.accountId)).map((row) => row.sectionCode))].sort();
     return {
       key,
@@ -559,7 +596,7 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
         periodNetDebit: periodNet.debit,
         periodNetCredit: periodNet.credit,
       },
-      drilldownLineIds: bucket.lines.map((line) => line.id),
+      drilldownLineIds: [...new Set(bucket.entries.map(({ line }) => line.id))],
     };
   });
   const sourceLineIds = included.map((line) => line.id);

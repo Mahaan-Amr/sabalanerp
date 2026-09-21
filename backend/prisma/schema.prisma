@@ -5400,22 +5400,27 @@ model AccountingTaxComplianceAttempt {
 }
 
 model AccountingCloseRun {
-  id                 String                   @id @default(cuid())
-  bookId             String
-  fiscalYearId       String
-  periodId           String?
-  runIdentity        String                   @unique
-  closeType          String
-  status             String
-  confirmationReason String?
-  completedBy        String?
-  completedAt        DateTime?
-  evidenceHash       String?
-  predecessorRunId   String?
-  createdBy          String
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
-  steps              AccountingCloseRunStep[]
+  id                  String                   @id @default(cuid())
+  bookId              String
+  fiscalYearId        String
+  periodId            String?
+  runIdentity         String                   @unique
+  closeType           String
+  status              String
+  confirmationReason  String?
+  completedBy         String?
+  completedAt         DateTime?
+  evidenceHash        String?
+  predecessorRunId    String?
+  closingVoucherId    String?
+  openingVoucherId    String?
+  openingFiscalYearId String?
+  openingPeriodId     String?
+  yearEndEvidence     Json?
+  createdBy           String
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  steps               AccountingCloseRunStep[]
 
   @@index([bookId, fiscalYearId, status])
   @@index([periodId, status])

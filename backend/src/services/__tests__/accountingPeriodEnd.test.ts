@@ -304,3 +304,17 @@ test('cash-flow dataset excludes internal transfers and keeps the mapping versio
   assert.equal(dataset.rows[0].key, 'OPERATING');
   assert.equal(dataset.rows[0].amounts.turnoverDebit, 10_000n);
 });
+
+test('financial statements preserve multiple mapping rows and contra signs', () => {
+  const dataset = buildOfficialAccountingDataset({
+    request: { reportKind: 'FINANCIAL_STATEMENT', bookId: 'book-1', fiscalYearId: 'year-1', from: new Date('2026-09-01'), to: new Date('2026-09-30'), cutoffAt: new Date('2026-09-30T23:59:59Z'), mappingVersionId: 'mapping-1', columns: 2 },
+    mapping: { id: 'mapping-1', effectiveFrom: new Date('2026-01-01'), rows: [
+      { accountId: 'account-1', statement: 'FINANCIAL_POSITION', sectionCode: 'دارایی', signMultiplier: 1 },
+      { accountId: 'account-1', statement: 'NOTES', sectionCode: 'یادداشت-یک', signMultiplier: -1 },
+    ] },
+    lines: [{ id: 'line-1', voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED', accountId: 'account-1', accountCode: '101', accountTitlePersian: 'صندوق', accountPath: { group: 'دارایی', general: 'نقد', subsidiary: 'صندوق' }, debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} }],
+  });
+  assert.equal(dataset.rows.length, 2);
+  assert.equal(dataset.rows.find((row) => row.key.startsWith('FINANCIAL_POSITION'))?.amounts.endingDebit, 100n);
+  assert.equal(dataset.rows.find((row) => row.key.startsWith('NOTES'))?.amounts.endingCredit, 100n);
+});

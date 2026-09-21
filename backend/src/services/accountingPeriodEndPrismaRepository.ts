@@ -131,6 +131,21 @@ export const createAccountingPeriodEndPrismaRepository = (
           },
         });
       }
+      if (posting.sourcePayload.kind === 'ASSET_COST') {
+        await database.accountingAssetEvent.create({ data: {
+          assetId: posting.sourcePayload.assetId,
+          eventIdentity: `${posting.sourcePayload.kind}:${posting.sourceId}:${posting.sourceVersion}`,
+          eventType: posting.sourcePayload.costKind,
+          occurredAt: posting.documentDate,
+          sourceType: posting.sourceType,
+          sourceId: posting.sourceId,
+          sourceVersion: posting.sourceVersion,
+          sourceHash: posting.sourceHash,
+          payload: jsonValue(unsignedPayload),
+          voucherId: posted.id,
+          createdBy: posting.actorId,
+        } });
+      }
       if (posting.sourcePayload.kind === 'ASSET_LIFECYCLE') {
         await database.accountingAssetEvent.create({ data: {
           assetId: posting.sourcePayload.assetId,
@@ -237,7 +252,10 @@ export const listAccountingPeriodEndOverview = async (database: Database, bookId
     database.accountingArchiveEvidence.findMany({ where: { bookId }, orderBy: { uploadedAt: 'desc' }, take: 50 }),
     database.accountingRestatementCase.findMany({ where: { bookId }, orderBy: { discoveredAt: 'desc' }, take: 50 }),
   ]);
-  return { assets, payroll, schedules, estimates, taxes, closeRuns, snapshots, mappings, statutoryFormats, archiveEvidence, restatements };
+  return {
+    assets, payroll, schedules, estimates, taxes, closeRuns, snapshots, mappings, statutoryFormats, restatements,
+    archiveEvidence: archiveEvidence.map(({ storageKey: _protectedStorageKey, ...evidence }) => evidence),
+  };
 };
 
 export const createOfficialAccountingSnapshot = async (database: Database, input: {
@@ -245,12 +263,13 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
   actorId: string;
   policyVersions?: Record<string, string>;
 }) => {
-  const mapping = await database.accountingFinancialStatementMapping.findUnique({
+  const mapping = input.request.mappingVersionId ? await database.accountingFinancialStatementMapping.findUnique({
     where: { id: input.request.mappingVersionId },
     include: { rows: true },
-  });
-  if (!mapping || mapping.bookId !== input.request.bookId) throw new Error('نسخه نگاشت گزارش رسمی پیدا نشد.');
-  if (mapping.effectiveFrom > input.request.to || (mapping.effectiveTo && mapping.effectiveTo < input.request.from)) {
+  }) : null;
+  if (['FINANCIAL_STATEMENT', 'CASH_FLOW'].includes(input.request.reportKind) && !mapping) throw new Error('نسخه نگاشت برای این گزارش رسمی الزامی است.');
+  if (mapping && mapping.bookId !== input.request.bookId) throw new Error('نسخه نگاشت گزارش رسمی پیدا نشد.');
+  if (mapping && (mapping.effectiveFrom > input.request.to || (mapping.effectiveTo && mapping.effectiveTo < input.request.from))) {
     throw new Error('نسخه نگاشت در بازه گزارش رسمی معتبر نیست.');
   }
   let statutoryFormat: { id: string; contentHash: string } | null = null;
@@ -283,12 +302,13 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
   const dataset = buildOfficialAccountingDataset({
     request: input.request,
     mapping: {
-      id: mapping.id,
-      effectiveFrom: mapping.effectiveFrom,
-      rows: mapping.rows.map((row) => ({
+      id: mapping?.id ?? 'بدون-نگاشت',
+      effectiveFrom: mapping?.effectiveFrom ?? input.request.from,
+      rows: (mapping?.rows ?? []).map((row) => ({
         accountId: row.accountId,
         statement: row.statementType as 'FINANCIAL_POSITION' | 'PROFIT_OR_LOSS' | 'COMPREHENSIVE_INCOME' | 'CHANGES_IN_EQUITY' | 'NOTES',
         sectionCode: row.sectionCode,
+        signMultiplier: row.signMultiplier,
         cashFlowClass: row.cashFlowClass as 'OPERATING' | 'INVESTING' | 'FINANCING' | 'INTERNAL_TRANSFER' | undefined,
       })),
     },
@@ -324,7 +344,7 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
       reportType: input.request.reportKind,
       parameters: jsonValue(input.request),
       cutoffAt: input.request.cutoffAt,
-      mappingVersionId: mapping.id,
+      mappingVersionId: mapping?.id ?? null,
       policyVersions: jsonValue({
         ...(input.policyVersions ?? {}),
         ...(statutoryFormat ? { statutoryFormatId: statutoryFormat.id, statutoryFormatHash: statutoryFormat.contentHash } : {}),

@@ -107,3 +107,5 @@ Future GL work should introduce stricter permissions for voucher posting, revers
 Accounting uses the shared ERP design system: slate/teal surfaces, `ErpPage`, `ErpListPage`, `ErpSection`, `ErpCard`, `ErpButton`, and `ErpBadge`.
 
 Do not reintroduce standalone purple/glassmorphism accounting screens. Accounting should remain visually consistent with the rest of Sabalan ERP.
+
+The complete accounting replacement is Persian-only in every User-visible surface. Page titles, navigation, fields, actions, statuses, validation, confirmations, errors, tooltips, empty states, reports, exports, and print labels must contain no English words or phrases. Technical identifiers may remain English only inside source code and developer evidence. The experience is RTL, uses the platform's Persian date and number presentation policies, remains responsive, and reuses canonical Sabalan Design System components and interaction patterns already established by mature Sales and Guard surfaces instead of creating an Accounting-specific visual language or local component substitutes.

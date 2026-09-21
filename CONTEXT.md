@@ -346,6 +346,38 @@ _Avoid_: closing with unresolved differences, one-click close without evidence o
 A reproducible statutory or official balance, ledger, T-account, trial balance, or financial statement derived only from posted vouchers under a recorded book, period, mapping, policy version, and as-of time. Draft vouchers never enter its totals.
 _Avoid_: mixing drafts into official totals, an editable saved balance, a report without drill-down to journal lines, or a result whose filters and rule versions cannot be reproduced
 
+**Financial Statement Mapping**:
+The effective-dated, versioned assignment of eligible ledger accounts to governed financial-statement sections, rows, signs, contra behavior, and disclosure breakdowns. A report records the mapping version it used, so a later remapping affects only its declared effective periods and never changes a historical official result silently.
+_Avoid_: guessing a statement row from account type or code, overwriting an earlier mapping, manually typing statement totals, or applying today's mapping retrospectively without an explicit restatement
+
+**Trial Balance Projection**:
+A rebuildable view of posted journal lines at Group, General, Subsidiary, or permitted Detail level, available in two-, four-, six-, and eight-column forms with opening, period debit and credit turnover, and ending balances. It supports governed dimension filters and drills through every aggregate to its journal lines and source evidence without storing an independent balance truth.
+_Avoid_: a mutable trial-balance table, totals without journal drill-down, mixing draft amounts into official columns, or treating a filtered subtotal as the complete book balance
+
+**T-Account Projection**:
+The debit-and-credit presentation of posted journal lines for a selected account, party, contract, period, and permitted dimensions, including chronological running balance and links to voucher and source evidence. It is computed from the ledger and is never an independently written accounting entity.
+_Avoid_: a T-account table or editable balance, a diagram detached from journal lines, including drafts without a labeled preview, or losing source-document traceability
+
+**Financial Statement Set**:
+The linked, reproducible set comprising the statement of financial position, profit or loss, comprehensive income when applicable, changes in equity, cash flows, supporting notes and breakdowns, prior-period comparatives, and a comparative opening statement when a material restatement requires it. Every amount comes from posted ledger truth through a recorded Financial Statement Mapping rather than an independent form.
+_Avoid_: balance sheet and profit-and-loss as the whole statutory set, hand-entered report totals, inconsistent datasets between statements, or comparatives rebuilt under an undisclosed newer mapping
+
+**Cash Flow Statement Projection**:
+The direct and indirect presentations of cash flows derived from the same posted ledger evidence and versioned operating, investing, or financing classifications. Transfers between governed cash and bank accounts reconcile but do not become external inflows or outflows, and every classification remains drillable to its source lines.
+_Avoid_: double-counting internal transfers, classifying from free text, a direct report unrelated to treasury movements, or an indirect report whose adjustments cannot be reproduced
+
+**Accounting Suspense Item**:
+The accountable unresolved amount posted through an approved suspense or clearing account with an owner, reason, creation time, due date, source evidence, and eventual linked resolution. Overdue items warn explicitly, and unresolved material items block Hard Close according to the recorded close policy.
+_Avoid_: permanent parking for incomplete entries, an ownerless suspense balance, clearing by editing a posted voucher, hiding aged items in an aggregate, or closing despite an applicable material exception
+
+**Official Report Snapshot**:
+The immutable saved dataset behind an official Accounting report or export, recording book, parameters, cutoff, mapping and policy versions, generation time, actor, source identities, and integrity hash. Persian RTL PDF and Excel outputs render from that same dataset and may be reproduced and hash-verified after live data changes.
+_Avoid_: treating a downloaded file as the only evidence, generating PDF and Excel from different queries, a saved report that changes on reopen, or an export without its parameters and rule versions
+
+**Accounting Evidence Attachment**:
+The immutable, hash-addressed version of a supporting file linked to a voucher, journal line, report, or other Accounting record with document type, uploader, timestamps, retention policy, malware-scan result, and audited access history. A corrected file becomes a linked successor version and never replaces the evidence attached to posted truth.
+_Avoid_: overwriting a posted attachment, mutable URL-only evidence, serving an unscanned file, losing supersession history, or downloading protected evidence without an audit record
+
 **Draft-Inclusive Accounting Preview**:
 A distinctly labeled management-only projection that shows the effect of selected draft vouchers separately from posted official truth. It never replaces, overwrites, or shares an unlabeled total with an Official Accounting Report.
 _Avoid_: statutory report, default ledger balance, hiding which drafts are included, combining draft and posted amounts in one unexplained figure, or exporting a preview as official evidence
@@ -398,6 +430,38 @@ _Avoid_: accounting revenue, Customer balance, transfer-of-control evidence, rep
 The revenue derived only from a satisfied Contract Control Transfer Policy and a posted journal voucher, with source evidence, transferred quantity, allocated consideration, tax treatment, and rule version preserved. It remains separate from Commercial Sales Realization even when both concern the same Contract.
 _Avoid_: signed Contract amount, printed Contract amount, financial-approval KPI, advance receipt, mutable Delivery status, or revenue without a posted source-linked journal
 
+**Commercial Customer Invoice**:
+The customer-facing commercial claim for supplied goods or services, with its own number, lifecycle, lines, terms, and corrections. It links to but is not itself the posted Journal Voucher or the electronic Tax Invoice submitted to the Taxpayer System.
+_Avoid_: Journal Voucher, Tax Invoice, payment receipt, one shared identifier for all documents, or changing ledger truth when an external tax submission fails
+
+**Tax Invoice**:
+The immutable electronic tax document derived from eligible commercial evidence under a snapshotted Tax Rule, carrying its internal tax serial, external unique tax identity when assigned, submission lifecycle, and any reference to an earlier tax document. It remains linked to but lifecycle-independent from the Commercial Customer Invoice and posted Journal Voucher.
+_Avoid_: Commercial Customer Invoice, Journal Voucher, mutable submitted payload, deleting economic evidence after rejection, or reusing accounting and tax identifiers
+
+**Tax Rule**:
+The effective-dated, source-cited rule that determines line-level taxability, exemption, rates, components, invoice type and pattern, allocation, and rounding for a qualifying product or service and customer context. Each Tax Invoice line preserves the exact rule version, raw calculation, rounded result, and evidence applied.
+_Avoid_: one timeless default VAT rate, header-only calculation, current rule applied retrospectively, hidden rounding, or a rate without legal provenance and effective dates
+
+**Tax Invoice Reference Chain**:
+The immutable relationship connecting an original Tax Invoice to later corrective, cancellation, or sales-return Tax Invoices through the required reference tax identity. A submitted document is never edited in place, and every predecessor and successor remains visible.
+_Avoid_: overwriting an accepted or rejected invoice, deleting the original, unlinked correction, reusing its identity, or treating a journal reversal as the tax correction itself
+
+**Tax Submission Attempt**:
+One idempotent asynchronous attempt to deliver the canonical Tax Invoice payload through the configured Tax Submission Channel, preserving protocol version, request identity, timestamps, result, safe raw response, and error evidence. Retry never creates a second Tax Invoice and external rejection never silently deletes or rewrites the economic posting.
+_Avoid_: synchronous UI blocking, duplicate invoice on retry, mutable last-status-only history, logging secrets, or equating transport failure with transaction cancellation
+
+**Tax Submission Channel**:
+The effective-dated Legal Entity configuration selecting direct Taxpayer System submission with its own fiscal memory or submission through a trusted company. Changing channel affects only later attempts and never rewrites prior payloads, identities, credentials, or responses.
+_Avoid_: one hard-coded provider, changing history when the provider changes, mixing credentials between Legal Entities, or losing which channel submitted an invoice
+
+**Tax Credential**:
+The non-exportable secret, private key, certificate material, or provider credential used by one Legal Entity and Tax Submission Channel, stored in an encrypted secret store outside operational rows, logs, exports, and audit snapshots. The UI exposes only safe status, version, validity, and rotation metadata after initial entry.
+_Avoid_: plaintext database field, redisplaying a private key, including secrets in request evidence, exporting credentials, or sharing one Legal Entity's key with another
+
+**Accounting Document Identity Set**:
+The distinct linked identities of a Commercial Customer Invoice, Journal Voucher, internal tax serial, external unique tax identity, and referenced predecessor document. Each retains its own scope and lifecycle while Accounting presents their traceable relationship together.
+_Avoid_: one number reused across document types, substituting a journal number for a tax identity, losing the reference tax ID, or presenting unrelated identifiers without provenance
+
 **Returned-Goods Financial Effect**:
 The posted credit note, reversal, or corrective journal that changes recognized revenue, tax, receivable, inventory, and cost after reviewed physical-return evidence. Guard inbound evidence preserves the actual return time but never mutates the ledger directly or substitutes for Accounting's posted decision.
 _Avoid_: posting from Guard entry alone, rewriting the original sale, losing physical effective time, changing a Hard-Closed period silently, or reducing revenue without linked return evidence
@@ -425,6 +489,158 @@ _Avoid_: one mutable aggregate balance, negative receivable used as an advance, 
 **Settlement Allocation**:
 The immutable application of all or part of one posted receipt, payment, credit, or advance to one or more Accounting Open Items. Unallocated value remains a distinct Party advance or credit, transfer to another item requires explicit action, and correction uses a reversing allocation rather than editing the original.
 _Avoid_: silent oldest-first allocation, automatic cross-Contract transfer, negative open items for overpayment, mutable allocation rows, or aging calculated independently from allocations
+
+**Supplier Accounting Profile**:
+The balance-free Supplier role activated on a stable Accounting Party when its first approved purchase document or other governed supplier relationship becomes effective. Provisioning never creates a payable or journal entry, and deactivation never deletes the Party, role history, open items, or prior activity.
+_Avoid_: duplicating a Customer that is also a Supplier, creating debt from registration alone, one Supplier per purchase, deleting inactive history, or exposing chart-detail mechanics as ordinary User work
+
+**Supplier Invoice**:
+The versioned commercial claim received from a Supplier, preserving line amounts, discounts, attributable freight, recoverable and non-recoverable taxes, statutory or contractual deductions, retention when applicable, rounding evidence, and net payable. A confirmed accounting effect creates linked posted journal and open-item evidence; a return or correction creates a new reference-linked document rather than editing the confirmed invoice.
+_Avoid_: treating Guard entry or an uploaded image as a payable, one unexplained net total, overwriting a confirmed invoice, losing tax treatment, or using a negative payable as a purchase advance
+
+**Purchase Match**:
+The governed evidence comparison required before recognizing a Supplier Invoice: ordered, received, and invoiced facts for inventory and fixed assets; accepted service and invoiced facts for services and expenses. A purchase without an order is an explicitly authorized, reasoned exception, while quantity, price, tax, or Supplier differences fail closed into review.
+_Avoid_: three-way matching every service, posting from Guard evidence alone, guessing through a difference, treating an attachment as acceptance, or hiding a non-order purchase in the ordinary path
+
+**Treasury Transaction**:
+An independently evidenced receipt, payment, transfer, fee, interest, or other movement of a governed Financial Account. It may settle multiple Accounting Open Items through immutable allocations; unallocated Customer money remains an advance or credit, and unallocated Supplier money remains a purchase advance until an explicit later allocation.
+_Avoid_: editing an invoice balance directly, silent oldest-first allocation, counting an internal transfer as external cash flow, merging bank movement and settlement identity, or treating a payment draft as posted truth
+
+**Bank Statement Line**:
+The immutable imported or controlled manual representation of one bank-reported movement, retaining source channel, original file or API identity, mapping version, value and booking dates, description, amount, currency, and integrity evidence. A duplicate import is idempotently recognized and never creates a second line.
+_Avoid_: overwriting source text, importing the same movement twice, treating a spreadsheet row as a posted voucher automatically, losing the file mapping used, or storing only a mutable running balance
+
+**Bank Reconciliation Match**:
+The confirmed association of one or more Bank Statement Lines with one or more Treasury Transactions or posted journal lines. Automatic logic may propose matches, but ambiguous cases remain unresolved; correction reverses or supersedes the match with history instead of editing the earlier decision.
+_Avoid_: auto-confirming an ambiguous match, hiding unmatched amounts, deleting a mistaken match, confusing reconciliation with posting, or double-counting transfers between Sabalan accounts
+
+**Check Instrument**:
+The stable identity and append-only custody and financial history of one receivable or payable check, including Sayad identity when applicable, parties, amount, currency, due date, physical location, endorsements, assignment, deposit, clearing, bounce, return, replacement, and cancellation evidence. Operational status alone changes the ledger only through its applicable versioned posting rule.
+_Avoid_: a mutable last-status row, losing endorsement lineage, reusing identity after replacement, posting from an unaudited status toggle, or omitting custody of a physical check
+
+**Cash Fund**:
+One real cash box represented by a Financial Account beneath its control account, with accountable custody, count records, and separately posted shortages or overages. It remains distinct from a Petty Cash Advance issued to a responsible person.
+_Avoid_: one anonymous cash balance, treating a personal advance as central cash, correcting a count by editing the balance, or losing custodian and location history
+
+**Petty Cash Advance**:
+The accountable advance issued to a named custodian with effective limit, settlement period, Cost Center attribution, and open supporting-document obligations. It remains an asset until accepted evidence allocates it to expense, inventory, asset, repayment, shortage, or another authorized outcome.
+_Avoid_: expensing the entire advance at payment, using a negative payable, carrying undocumented advances indefinitely, or mixing several custodians in one mutable balance
+
+**Traceable Inventory Identity**:
+The stable lot, block, slab, piece, remainder, or other governed identity that preserves origin, location, compatible measurement units, transformations, reservations, physical movements, and successor relationships. Sale reservation, physical custody, and accounting valuation remain linked but distinct facts.
+_Avoid_: catalog Product as stock on hand, merging visually similar stone identities, summing incompatible units, replacing a remainder's origin, or making a reservation equal a physical issue
+
+**Inventory Valuation Layer**:
+The immutable quantity-and-cost evidence used to value an inventory movement under the effective method: specific identification for traceable stone and moving weighted average for homogeneous consumables. A method is versioned prospectively and never recalculates used historical layers silently.
+_Avoid_: binary floating-point cost, retrospective method switching, mutable stock value, average costing a specifically identified slab, or valuation without a physical inventory identity
+
+**Production Cost Flow**:
+The perpetual, evidence-based movement of actual cost from raw material through work in progress and finished goods to cost of goods sold. Direct labor, machine, energy, and overhead pools use effective-dated allocation bases; normal waste is absorbed by output, abnormal waste is period expense, and missing or contradictory production evidence blocks final costing.
+_Avoid_: standard cost as ledger truth, posting COGS without inventory relief, hiding abnormal waste in output, allocating overhead without a recorded basis, or estimating through missing production evidence
+
+**Inventory Cutover Dataset**:
+The reconciled physical-count opening of inventory at authority transfer, itemized by warehouse, location, governed identity, unit, quantity, valuation method, amount, source, and review evidence. Uncertain items remain explicit exceptions rather than available good stock, and the total reconciles to Sepidar control balances before later SabalanERP movements become authoritative.
+_Avoid_: one opening total without item detail, importing unverified stock as saleable, unexplained quantity or value differences, mixing pre- and post-cutover movement, or losing the physical-count evidence
+
+**Fixed Asset Class Policy**:
+The effective-dated recognition, capitalization threshold, book and tax depreciation methods, useful lives, residual-value rules, impairment behavior, and eligible account mappings for a class of assets. Applying a successor policy never silently rewrites an earlier asset decision or posted depreciation.
+_Avoid_: one timeless threshold, deriving treatment from description text, confusing book and tax depreciation, retrospective policy replacement, or changing a used class in place
+
+**Fixed Asset Identity**:
+The stable register identity of one asset or separately depreciable significant component, preserving class, serial and physical identifiers, acquisition and ready-for-use evidence, location, Branch, Cost Center, custodian, documents, counts, transfers, and lifecycle history. A parent asset may have components with different useful lives without losing their relationship.
+_Avoid_: one aggregate row per account, overwriting location or custodian, treating an invoice line as the complete register, deleting a disposed asset, or losing component history
+
+**Fixed Asset Book and Tax Basis**:
+The separately reproducible carrying and depreciation evidence for financial reporting and tax reporting on the same Fixed Asset Identity. The statutory ledger posts approved book depreciation, while tax basis and differences remain traceable for tax reporting and deferred-tax analysis without forming a competing general ledger.
+_Avoid_: posting two authoritative ledgers, forcing tax lives onto book reporting, hiding basis differences, recalculating history under a newer rule, or losing rounding evidence
+
+**Fixed Asset Lifecycle Event**:
+An immutable acquisition, capitalization, ready-for-use, component replacement, transfer, impairment, impairment reversal, class-wide revaluation, sale, retirement, loss, or disposal event with effective time, evidence, policy version, actor, and linked accounting effect. Physical Guard evidence may support movement but never posts or disposes of an asset by itself.
+_Avoid_: editing acquisition history, beginning depreciation at payment automatically, capitalizing routine repair, selective unsupported revaluation, or deleting cost and accumulated depreciation on disposal
+
+**Approved Payroll Accounting Handoff**:
+The idempotent, versioned summary delivered by HR Payroll after a Payroll Run is approved, carrying population and policy hashes, pay components, Cost Centers and other allowed dimensions, control-account totals, liability breakdown, and proposed balanced posting. Accounting may post it or return it with reason but never edits individual payroll calculations.
+_Avoid_: recalculating salary in Accounting, exposing employee detail in a general ledger report, accepting an unapproved run, posting the same handoff twice, or changing an approved run instead of using a supplemental or reversal run
+
+**Payroll Accounting Reconciliation**:
+The controlled proof that confidential employee-level payroll obligations equal the summarized posted payroll accounts and that net pay, payroll tax, insurance, loans, advances, and other deductions reconcile to bank and authority settlements. Failed payments remain open liabilities and retries retain the same obligation identity.
+_Avoid_: clearing liability when a bank payment failed, putting employee names in ordinary ledger exports, treating a bank file as proof of payment, duplicating an obligation on retry, or leaving tax and insurance outside reconciliation
+
+**Employee Benefit Obligation**:
+The effective-dated HR calculation and summarized Accounting liability for unused leave, bonus, severance, end-of-service benefits, or another earned employee benefit. Periodic changes post separately, settlement consumes the recorded liability first, and later legal or policy changes never overwrite earlier calculations.
+_Avoid_: one manual year-end total without population evidence, recalculating a closed period silently, expensing a settlement without releasing liability, or storing confidential employee detail in ordinary journal narration
+
+**Accounting Recognition Schedule**:
+The versioned plan that proposes or automatically posts governed recognition of a prepayment, deferred income, accrued expense, provision, or recurring accounting event over future periods. Estimate changes affect declared future periods, cancellation never changes prior posted vouchers, and overdue or unreviewed schedules remain explicit close exceptions.
+_Avoid_: editing prior postings, hidden recurring journals, recognizing beyond the supported evidence term, a provision without estimate basis, or closing while an applicable schedule exception is unresolved
+
+**Statutory Ledger Projection**:
+The non-editable legal journal, general ledger, or subsidiary ledger rendered from the same posted journal lines under a recorded sequence, cutoff, chart, and reporting policy. Every row retains statutory reference fields and drills to its voucher, journal line, and source evidence.
+_Avoid_: a separately writable legal book, totals detached from journal lines, reordering without recorded rules, including drafts, or changing ledger output independently from posted truth
+
+**Regulatory Output Format Version**:
+The effective-dated official schema, validation rules, rendering behavior, and source citation used to produce one statutory book, declaration, or electronic submission package. Historical packages retain their applied version and remain reproducible after a successor format becomes effective.
+_Avoid_: scattered hard-coded fields, silently regenerating history under today's format, output without preflight validation, losing the authority receipt, or treating an external portal as the only archive
+
+**Tax Obligation**:
+The governed liability, credit, prepayment, refund, penalty, or adjustment for VAT, payroll tax, performance tax, or another legally applicable tax type, carrying Legal Entity, period, rule version, authority, due date, source calculations, ledger controls, submissions, settlements, and remaining status.
+_Avoid_: deriving every tax from one default rate, one mutable balance per tax, mixing unrelated tax types, clearing liability from submission alone, or losing the link between calculation, ledger, filing, and payment
+
+**Compliance Calendar Duty**:
+The versioned obligation to calculate, review, submit, pay, or otherwise complete one statutory requirement by its applicable deadline, with accountable owner, required evidence, status, attempts, receipts, and exceptions. A changed official deadline creates traceable effective evidence rather than rewriting what was previously due.
+_Avoid_: a generic reminder without legal context, marking complete before required evidence exists, retrying a submission as a duplicate declaration, hiding a rejection, or losing an earlier deadline version
+
+**Accounting Close Dependency Graph**:
+The resumable ordered dependency plan within an Accounting Close Run, covering document completion; receivables and advances; payables and prepayments; treasury; inventory and costing; fixed assets; payroll; remeasurement and schedules; tax; suspense and exceptions; trial balance; report snapshots; and final close. A material upstream change invalidates every affected downstream result explicitly.
+_Avoid_: closing all subledgers as unrelated toggles, retaining a stale downstream check after data changed, restarting without evidence, skipping an applicable dependency, or calling a status flip a close run
+
+**Prior-Period Error Case**:
+The immutable assessment of an error discovered after close, preserving origin, occurred and discovered times, affected accounts and taxes, quantitative and qualitative materiality policy, decision, correcting entries, disclosures, comparative effects, and every original and restated report version. One authorized Accounting Manager may decide with strong confirmation and reason.
+_Avoid_: backdating silently, deleting the original report, applying only a numeric threshold, calling every estimate change an error, requiring a second actor, or restating without opening-balance and comparative traceability
+
+**Accounting Estimate and Contingency Case**:
+The reviewable evidence for an uncertain obligation or asset, including nature, owner, probability assessment, amount or range, method, assumptions, source support, review date, disclosure treatment, and linked posted provision when recognition criteria are met. Later estimates supersede but never erase earlier assessments.
+_Avoid_: posting every possible exposure, omitting a required disclosure because no journal exists, a provision without basis, overwriting assumptions, or leaving a case without a next review
+
+**Legal Accounting Archive**:
+The searchable, integrity-verifiable retention of posted vouchers, statutory ledgers, financial statements, declarations, receipts, attachments, audit evidence, and their applicable versions under an effective retention policy and any legal, audit, or dispute hold. Expiry enables governed review but never automatic destruction of accounting truth.
+_Avoid_: deleting posted evidence on a timer, an unreadable cold archive, losing hashes or search metadata, bypassing a hold, or allowing non-financial privacy cleanup to break statutory traceability
+
+**Accounting Migration Run**:
+One reproducible, idempotent execution that reads a hashed legacy source package through a versioned mapping set and produces preview, accepted target identities, explicit rejections, counts, totals, and integrity evidence. Re-running the same package never duplicates results, and a mapping correction creates a new run rather than mutating an earlier result.
+_Avoid_: direct unlogged imports, silent fallback to suspense, unmapped source loss, duplicate records on retry, or one mutable migration status without record-level lineage
+
+**Parallel Accounting Run**:
+The controlled period during which the same traceable business events are processed in Sepidar and SabalanERP solely to prove replacement readiness. Acceptance requires at least two complete monthly periods, including a full month close, with no unresolved material or critical software difference and no unexplained reconciliation difference.
+_Avoid_: two permanent ledgers, shortening the run because of a target date, unrelated sample transactions, comparing only headline totals, or continuing ordinary Sepidar writes after authority transfer
+
+**Accounting Reconciliation Difference**:
+An explicitly identified difference between source, subledger, ledger, bank, tax, inventory, asset, payroll, or report evidence, carrying amount, item identities, cause, owner, resolution, and proof. No unexplained difference is acceptable; approved rounding and corrected legacy error remain visible as explained differences rather than disappearing inside tolerance.
+_Avoid_: a hidden tolerance, netting unrelated differences, calling a mismatch immaterial without cause, clearing a case by editing totals, or accepting equal control totals with unequal open items
+
+**Accounting Authority Transfer Boundary**:
+The immutable instant after final checkpoint, delta migration, reconciliation, and acceptance when SabalanERP becomes the sole Authoritative Accounting Ledger and Sepidar becomes read-only. Before the first new authoritative posting the rehearsed rollback may restore the prior system; afterward an incident fails closed and fixes forward unless a complete reconciled reverse transfer is explicitly executed.
+_Avoid_: dual ordinary posting after cutover, an ambiguous authority time, rolling back only application code after new ledger facts exist, opening an unverified release, or treating a backup as proven without restore
+
+**Accounting Recovery Objective**:
+The accepted recovery target of no more than fifteen minutes of potentially unrecovered accounting change and no more than four hours to restore the core accounting service, supported by point-in-time recovery, encrypted off-host and immutable copies, coordinated database and file evidence, automated integrity checks, and quarterly full restore proof.
+_Avoid_: database-only backup, backup success without restore, unencrypted off-host copies, uncoordinated files and rows, deleting the last proven recovery point, or reopening a partially verified service
+
+**Accounting Audit Chain**:
+The append-only, hash-linked record of successful and denied financial actions, authorization and override use, sensitive evidence access, exports, state transitions, and integrity checkpoints, carrying effective actor, server time, reason, session context, and before/after hashes without secrets. A privileged administrator cannot edit or delete the chain, and missing or altered history is detectable.
+_Avoid_: mutable activity logs, success-only logging, client timestamps as authority, plaintext secrets, ADMIN deletion, or an audit chain with no external checkpoint or scheduled verification
+
+**Accounting Performance Acceptance Profile**:
+The production-like data volume, concurrency multiplier, latency thresholds, background-export behavior, and race scenarios used to prove that posting, numbering, allocation, period close, and reports remain correct under load. Correctness, uniqueness, and idempotency are never traded for latency.
+_Avoid_: testing only empty data, averages that hide slow tails, benchmarking reads without posting races, synchronous heavy exports, or accepting duplicate effects after timeout and retry
+
+**Accounting Exception Center**:
+The Persian operational health surface that assigns and ages actionable posting, mapping, tax, bank, check, close, suspense, migration, audit, backup, queue, and external-connection exceptions without exposing secrets. Resolving an exception links the corrective evidence and never erases the failed attempt.
+_Avoid_: infrastructure-only monitoring, raw log hunting as the workflow, alerts without owner or age, leaking protected payloads, or clearing a warning without fixing its authoritative source
+
+**Accounting Release Acceptance Package**:
+The versioned body of automated results, Persian manual scenarios, evidence attachments, reconciliation reports, parallel-run outcomes, migration and cutover rehearsals, restore proof, performance results, security and permission checks, visual RTL checks, and defect dispositions required before production authority transfers. Every scenario is Accepted, Rejected, or Blocked, and no critical or high-severity defect may remain open.
+_Avoid_: deployment from code completion alone, an unsigned verbal acceptance, hiding blocked scenarios, accepting stale evidence after a material change, or allowing a release override to bypass a mandatory gate
 
 **Journal Reference Identity**:
 The immutable internal identity and reference assigned when a journal voucher is created, independent of its later statutory sequence. Posting assigns a never-reused number unique within the Primary Accounting Book and Accounting Fiscal Year; voiding, reversal, or an explained sequence gap never releases that number.

@@ -4,6 +4,7 @@ import { normalizePersianSearchTokens } from './crmCustomerSearch';
 import { randomUUID } from 'node:crypto';
 import { canonicalHash, InstantSchema } from '@sabalanerp/partner-sales-contracts';
 import { buildAccountingContractSourceSnapshot } from './contractSnapshotBoundary';
+import { publishCustomerPaymentOperationalEvidence } from './accountingOperationalEvidence';
 import {
   AccountingFlagCategory,
   AccountingFlagSeverity,
@@ -2341,6 +2342,9 @@ const registerReceipt = async (command: AccountingActionRequest, actor: Actor, n
         },
         createdBy: actor.userId
       }
+    });
+    await publishCustomerPaymentOperationalEvidence(tx, {
+      sourceId: event.id, sourceVersion: 1, sourcePayload: event, occurredAt: event.occurredAt ?? event.createdAt,
     });
 
     if (command.receivableId && method !== AccountingPaymentMethod.CHECK) {

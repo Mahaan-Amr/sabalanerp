@@ -86,6 +86,12 @@
       "reason": "Loading planning, detail, and dispatch surfaces use the shared responsive foundation without changing quantities, permissions, or lifecycle transitions."
     },
     {
+      "pattern": "frontend/src/app/dashboard/accounting/supply-chain/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "خرید، موجودی، چک و بهای تمام‌شده از اجزای canonical، چیدمان RTL پاسخ‌گو و برچسب‌های فارسی استفاده می‌کنند."
+    },
+    {
       "pattern": "frontend/src/app/dashboard/accounting/**/page.tsx",
       "status": "migrated",
       "acceptanceStatus": "accepted",

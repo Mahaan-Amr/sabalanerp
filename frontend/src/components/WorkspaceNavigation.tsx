@@ -585,6 +585,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show: true,
           },
           {
+            name: "Supply Chain Accounting",
+            namePersian: "خرید، موجودی و بهای تمام‌شده",
+            href: "/dashboard/accounting/supply-chain",
+            icon: FaClipboardList,
+            show: true,
+          },
+          {
             name: "Accounting Dashboard",
             namePersian: "داشبورد حسابداری",
             href: "/dashboard/accounting",

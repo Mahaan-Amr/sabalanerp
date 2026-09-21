@@ -970,6 +970,7 @@ export const accountingAPI = {
   recordPayrollSettlementAttempt: (id: string, data: any) => api.post(`/accounting/period-end/payroll-obligations/${id}/settlement-attempts`, data),
   createAssetClassPolicy: (data: any) => api.post('/accounting/period-end/asset-policies', data),
   createFixedAsset: (data: any) => api.post('/accounting/period-end/assets', data),
+  postAssetDepreciation: (id: string, data: any) => api.post(`/accounting/period-end/assets/${id}/depreciation`, data),
   createRecognitionSchedule: (data: any) => api.post('/accounting/period-end/schedules', data),
   createEstimateCase: (data: any) => api.post('/accounting/period-end/estimate-cases', data),
   createFinancialStatementMapping: (data: any) => api.post('/accounting/period-end/mappings', data),

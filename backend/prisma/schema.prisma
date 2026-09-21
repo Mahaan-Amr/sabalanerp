@@ -5212,16 +5212,17 @@ model AccountingPayrollObligation {
 }
 
 model AccountingPayrollSettlementAttempt {
-  id              String                      @id @default(cuid())
-  obligationId    String
-  attemptIdentity String                      @unique
-  status          String
-  amountRials     Decimal                     @db.Decimal(20, 0)
-  bankResultHash  String?
-  failureReason   String?
-  attemptedBy     String
-  attemptedAt     DateTime                    @default(now())
-  obligation      AccountingPayrollObligation @relation(fields: [obligationId], references: [id], onDelete: Restrict)
+  id                  String                      @id @default(cuid())
+  obligationId        String
+  attemptIdentity     String                      @unique
+  status              String
+  amountRials         Decimal                     @db.Decimal(20, 0)
+  bankResultHash      String?
+  settlementVoucherId String?
+  failureReason       String?
+  attemptedBy         String
+  attemptedAt         DateTime                    @default(now())
+  obligation          AccountingPayrollObligation @relation(fields: [obligationId], references: [id], onDelete: Restrict)
 
   @@index([obligationId, attemptedAt])
   @@map("accounting_payroll_settlement_attempts")

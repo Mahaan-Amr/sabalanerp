@@ -94,6 +94,12 @@ test('year end closes temporary accounts and carries permanent balances plus det
     { accountId: 'retained-result', debitRials: 0n, creditRials: 40_000n, sourceIdentity: 'YEAR_END:RESULT' },
   ]);
   assert.equal(transition.openingLines.some((line) => line.accountId === 'revenue'), false);
+  assert.deepEqual(transition.openingLines.find((line) => line.accountId === 'payable'), {
+    accountId: 'payable', debitRials: 0n, creditRials: 40_000n, sourceIdentity: 'OPEN_ITEM:payable:invoice-1',
+  });
+  assert.deepEqual(transition.openingLines.find((line) => line.accountId === 'cash'), {
+    accountId: 'cash', debitRials: 80_000n, creditRials: 0n, sourceIdentity: 'OPENING:cash',
+  });
   assert.equal(transition.openingOpenItems[0].identity, 'payable:invoice-1');
   assert.equal(transition.closingDebitRials, transition.closingCreditRials);
 });

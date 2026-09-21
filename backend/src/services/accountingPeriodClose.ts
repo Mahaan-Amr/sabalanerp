@@ -175,12 +175,24 @@ export const buildYearEndTransition = (input: {
     creditRials: resultDifference > 0n ? resultDifference : 0n,
     sourceIdentity: 'YEAR_END:RESULT',
   });
-  const openingLines: TransitionLine[] = input.balances.filter((balance) => balance.role === 'PERMANENT').map((balance) => ({
-    accountId: balance.accountId,
-    debitRials: balance.debitRials,
-    creditRials: balance.creditRials,
-    sourceIdentity: `OPENING:${balance.accountId}`,
+  const normalizedOpenItems = input.openItems.map((item) => {
+    const net = item.debitRials - item.creditRials;
+    return { ...item, debitRials: net > 0n ? net : 0n, creditRials: net < 0n ? -net : 0n };
+  }).filter((item) => item.debitRials > 0n || item.creditRials > 0n);
+  const openingLines: TransitionLine[] = normalizedOpenItems.map((item) => ({
+    accountId: item.accountId, debitRials: item.debitRials, creditRials: item.creditRials, sourceIdentity: `OPEN_ITEM:${item.identity}`,
   }));
+  for (const balance of input.balances.filter((item) => item.role === 'PERMANENT')) {
+    const detailedNet = normalizedOpenItems.filter((item) => item.accountId === balance.accountId)
+      .reduce((total, item) => total + item.debitRials - item.creditRials, 0n);
+    const remainingNet = balance.debitRials - balance.creditRials - detailedNet;
+    if (remainingNet !== 0n) openingLines.push({
+      accountId: balance.accountId,
+      debitRials: remainingNet > 0n ? remainingNet : 0n,
+      creditRials: remainingNet < 0n ? -remainingNet : 0n,
+      sourceIdentity: `OPENING:${balance.accountId}`,
+    });
+  }
   if (resultDifference !== 0n) openingLines.push({
     accountId: input.retainedResultAccountId,
     debitRials: resultDifference < 0n ? -resultDifference : 0n,
@@ -191,7 +203,7 @@ export const buildYearEndTransition = (input: {
   return {
     closingLines,
     openingLines,
-    openingOpenItems: input.openItems.map((item) => ({ ...item })),
+    openingOpenItems: normalizedOpenItems,
     closingDebitRials: closingTotals.debit,
     closingCreditRials: closingTotals.credit,
   };

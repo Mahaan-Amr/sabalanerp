@@ -67,6 +67,7 @@ import { persistContractLocalValue } from '@/features/contract-creation/utils/co
 import { ProductConfigurationModal } from '@/features/contract-creation/components/modals/ProductConfigurationModal';
 import { RemainingStoneModal } from '@/features/contract-creation/components/modals/RemainingStoneModal';
 import { PaymentEntryModal } from '@/features/contract-creation/components/modals/PaymentEntryModal';
+import { contractEditRecoveryBoundaryProps } from '@/features/contract-creation/utils/contractEditRecoveryBoundary';
 import {
   AutoGrowingDescription,
   CompactSegmentedControl,
@@ -6325,11 +6326,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           </div>
         </ErpNeumorphicDialog>
 
-        <div
-          aria-disabled={editRecovery.blocked && !isContractCreationComplete}
-          {...(editRecovery.blocked && !isContractCreationComplete ? ({ inert: '' } as any) : {})}
-          className={editRecovery.blocked && !isContractCreationComplete ? 'pointer-events-none select-none opacity-70' : ''}
-        >
+        <div {...contractEditRecoveryBoundaryProps(editRecovery.blocked && !isContractCreationComplete)}>
 
         <ContractWizardStage
           currentStep={currentStep}

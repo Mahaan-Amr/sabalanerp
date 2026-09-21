@@ -9,6 +9,7 @@ import {
   type PartnerCaseView, type PartnerCommand, type PartnerCommandPort, type PartnerApprovalMatchSet,
   type DuplicateCustomerMatch, type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
+  type CustomerPaymentPlan,
 } from '@sabalanerp/partner-sales-contracts';
 import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
 import api from '@/lib/api';
@@ -25,6 +26,8 @@ import { ContractCustomerStepView, ContractDateStepView, ContractDeliveryDetails
 import { ContractPaymentInstallmentFields } from '../components/shared/ContractPaymentInstallmentFields';
 import { ContractPaymentCheckFields } from '../components/shared/ContractPaymentCheckFields';
 import { ContractDiscountEditor } from '../components/shared/ContractDiscountEditor';
+import { PaymentEntryModal } from '../components/modals/PaymentEntryModal';
+import type { PaymentEntry } from '../types/contract.types';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { createPartnerCaseSubmission, type PartnerDraftCommand } from './partnerCaseSubmission';
 import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
@@ -43,11 +46,14 @@ import { getPartnerBrowserSessionId } from './partnerBrowserSession';
 import { canSubmitPartnerTechnicalAction, showPartnerContractConfigurationWarning } from './partnerCreationFlow';
 import { readPartnerCreationContext } from './partnerCreationContext';
 import { partnerPaymentChoice, partnerPaymentMethodUpdate } from './partnerPaymentMethodAdapter';
+import { paymentEntryFromPartnerInstallment, partnerInstallmentFromPaymentEntry } from './partnerPaymentEntryAdapter';
 import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment } from './partnerPaymentValidation';
 import { buildPartnerInquirySubjectOptions, type PartnerInquirySubjectOption } from './partnerInquirySubjectOptions';
 
 type PartnerContext = Extract<PartnerCreationContext, { kind: 'PARTNER' }>;
 type PartnerCustomer = PartnerContext['customers'][number];
+type PartnerPaymentInstallment = CustomerPaymentPlan['installments'][number];
+type PartnerPaymentModalErrors = Partial<Record<'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode', string>>;
 const partnerSaleEntrySteps: PartnerWizardStep[] = ['date', 'customer', 'project', 'products'];
 type Access = { schemaVersion: 1; recoveryId: string; browserSessionId: string;
   leaseToken: string; baseRevision: number };
@@ -181,6 +187,13 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const [transferReason, setTransferReason] = useState('');
   const [wizard, setWizard] = useState<PartnerWizardDraft | null>(null);
   const [editingCase, setEditingCase] = useState<PartnerCaseView | null>(null);
+  const [paymentModal, setPaymentModal] = useState<{
+    installment: PartnerPaymentInstallment;
+    isNew: boolean;
+    isFirst: boolean;
+  } | null>(null);
+  const [paymentForm, setPaymentForm] = useState<Partial<PaymentEntry>>({});
+  const [paymentModalErrors, setPaymentModalErrors] = useState<PartnerPaymentModalErrors>({});
   const editingHydrationFlight = useRef(false);
   const wizardServerRevision = useRef(0);
   const wizardSaveFlight = useRef<Promise<boolean> | null>(null);
@@ -848,6 +861,52 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     }
   };
 
+  const openPartnerPaymentModal = (installment: PartnerPaymentInstallment, isNew: boolean, isFirst: boolean) => {
+    setPaymentModal({ installment, isNew, isFirst });
+    setPaymentForm(paymentEntryFromPartnerInstallment(installment));
+    setPaymentModalErrors({});
+  };
+
+  const closePartnerPaymentModal = () => {
+    setPaymentModal(null);
+    setPaymentForm({});
+    setPaymentModalErrors({});
+  };
+
+  const savePartnerPayment = (draft: PartnerWizardDraft) => {
+    if (!paymentModal) return;
+    const entry: PaymentEntry = {
+      id: paymentModal.installment.installmentId,
+      method: paymentForm.method ?? 'CASH_SHIBA',
+      amount: Number(paymentForm.amount ?? 0),
+      paymentDate: paymentForm.paymentDate ?? '',
+      nationalCode: paymentForm.nationalCode ? normalizeNumericText(paymentForm.nationalCode).replace(/\D/g, '') : undefined,
+      checkNumber: paymentForm.checkNumber,
+      checkOwnerName: paymentForm.checkOwnerName,
+      handoverDate: paymentForm.handoverDate,
+    };
+    const installment = partnerInstallmentFromPaymentEntry(paymentModal.installment, entry);
+    const validation = validatePartnerPaymentInstallment(installment, today());
+    if (Object.keys(validation).length > 0) {
+      setPaymentModalErrors({
+        amount: validation.amount,
+        paymentDate: validation.date,
+        checkNumber: validation.number,
+        checkOwnerName: validation.ownerName,
+        handoverDate: validation.handoverDate,
+        nationalCode: validation.nationalCode,
+      });
+      return;
+    }
+    const current = draft.intent.customerPaymentPlan.installments;
+    const installments = paymentModal.isNew
+      ? [...current, installment]
+      : current.map(item => item.installmentId === installment.installmentId ? installment : item);
+    updateWizard({ ...draft, intent: { ...draft.intent,
+      customerPaymentPlan: { ...draft.intent.customerPaymentPlan, installments } } });
+    closePartnerPaymentModal();
+  };
+
   const renameDraft = async (recoveryId: string) => {
     const title = draftTitles[recoveryId]?.trim();
     if (!title || context?.kind !== 'PARTNER') return;
@@ -1089,11 +1148,33 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       {installmentIndex > 0 && <ErpButton label="حذف قسط" tone="danger" variant="outline" onClick={() => updateWizard({ ...draft,
         intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
           installments: draft.intent.customerPaymentPlan.installments.filter(item => item.installmentId !== installment.installmentId) } } })} />}
-    </ErpCard>; })}<ErpButton label="افزودن قسط" variant="outline" onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
-      customerPaymentPlan: { ...draft.intent.customerPaymentPlan, installments: [...draft.intent.customerPaymentPlan.installments,
-        { installmentId: `partner-installment-${crypto.randomUUID()}`, dueDate: addDays(draft.intent.contractDate, 30),
-          amount: { amount: '0', currency: draft.intent.customerPaymentPlan.installments[0].amount.currency },
-          method: 'BANK_TRANSFER', subtype: 'SHIBA' }] } } })} /></div>; }
+    </ErpCard>; })}<ErpButton label="افزودن پرداخت" variant="outline" onClick={() => openPartnerPaymentModal({
+      installmentId: `partner-installment-${crypto.randomUUID()}`,
+      dueDate: addDays(draft.intent.contractDate, 30),
+      amount: { amount: '0', currency: draft.intent.customerPaymentPlan.installments[0].amount.currency },
+      method: 'BANK_TRANSFER', subtype: 'SHIBA',
+    }, true, false)} />
+      {paymentModal && <PaymentEntryModal
+        isOpen
+        onClose={closePartnerPaymentModal}
+        form={paymentForm}
+        onFormChange={updates => {
+          setPaymentForm(current => ({ ...current, ...updates,
+            ...(updates.nationalCode !== undefined
+              ? { nationalCode: normalizeNumericText(updates.nationalCode).replace(/\D/g, '') }
+              : {}) }));
+          setPaymentModalErrors(current => { const next = { ...current };
+            Object.keys(updates).forEach(key => delete next[key as keyof PartnerPaymentModalErrors]); return next; });
+        }}
+        onSave={() => savePartnerPayment(draft)}
+        currency={paymentModal.installment.amount.currency}
+        fieldErrors={paymentModalErrors}
+        isEdit={!paymentModal.isNew}
+        disabledAmount={paymentModal.isFirst}
+        nationalCodeRequired={paymentForm.method !== 'CUSTOMER_BALANCE'
+          && Boolean(paymentForm.paymentDate) && paymentForm.paymentDate !== today()}
+      />}
+    </div>; }
     const customer = context.customers.find(item => item.id === draft.intent.customerId);
     return <div className="space-y-2"><p>مشتری: {customer?.displayName}</p>
       {customer?.phone && <p>شماره همراه: {customer.phone}</p>}

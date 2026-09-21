@@ -12,6 +12,8 @@ import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from
 import { preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
   shouldPreferLocalPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
 import { WIZARD_STEPS } from '../../contract-creation/constants/contract.constants';
+import type { PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
+import { selectPartnerReinquiryRows } from '../../contract-creation/partner/partnerReinquiry';
 
 const fixture = createPartnerFixtures();
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
@@ -22,8 +24,9 @@ const draft: PartnerWizardDraft = { step: 'products', rows, intent: {
   customerPaymentPlan: fixture.partner.customerPaymentPlan, deliveries: fixture.partner.deliveries,
   retailDiscount: { amount: '0', currency: 'IRR' }, belowCostConfirmed: false,
 } };
-const submission = () => createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
+const submission = (initialCase?: PartnerCaseView) => createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
   commands: { execute: async () => { throw new Error('not used'); } },
+  initialCase,
   recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined,
     finalizeCommitted: async () => undefined, prepareEditLease: async () => ({ recoveryId: fixture.draftSubmissionReference.recoveryId,
       browserSessionId: 'browser-1', leaseToken: 'lease-1', baseRevision: 0 }) },
@@ -70,11 +73,34 @@ test('Partner always keeps the exact ordinary Sales wizard sequence', () => {
   assert.equal(partnerWizardStepsForDraft(draft).some(step => step.id === 'delivery'), true);
 });
 
-test('a numbered unpriced Partner draft automatically enters the Sabalan pricing queue', () => {
-  const view = { ...fixture.case, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY' };
-  assert.equal(partnerCaseNeedsAutomaticPricingInquiry(view, 1), true);
+test('the atomic numbered save owns initial Sabalan pricing without a duplicate automatic re-inquiry', () => {
+  const view: PartnerCaseView = { ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY' };
+  assert.equal(partnerCaseNeedsAutomaticPricingInquiry(view, 1), false);
   assert.equal(partnerCaseNeedsAutomaticPricingInquiry({ ...view, pricingState: 'READY_TO_FINALIZE' }, 1), false);
   assert.equal(partnerCaseNeedsAutomaticPricingInquiry(view, 0), false);
+});
+
+test('re-inquiry keeps the original case pricing package scope and can target one product', () => {
+  const sibling = { ...fixture.inquiry.rows[0], rowId: 'fixture-sibling-row',
+    configurationRef: { ...fixture.inquiry.rows[0].configurationRef, productRowId: 'fixture-sibling-product' } };
+  const packageRows = selectPartnerReinquiryRows([fixture.inquiry.rows[0], sibling], fixture.inquiry.inquiryId);
+  assert.equal(packageRows.inquiryId, fixture.inquiry.inquiryId);
+  assert.deepEqual(packageRows.rows.map(row => row.rowId), [fixture.inquiry.rows[0].rowId, sibling.rowId]);
+  const single = selectPartnerReinquiryRows([fixture.inquiry.rows[0], sibling], fixture.inquiry.inquiryId, sibling);
+  assert.deepEqual(single.rows.map(row => row.rowId), [sibling.rowId]);
+});
+
+test('unsubmitted placeholder prices explain automatic pricing instead of claiming package expiry', () => {
+  const pendingRows = draft.rows.map(row => ({ ...row, inquiryRow: { ...row.inquiryRow,
+    state: 'PENDING' as const, approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
+    approvedRowBinding: undefined } }));
+  const pendingDraft = { ...draft, rows: pendingRows, intent: { ...draft.intent,
+    rows: pendingRows.map(row => ({ productRowId: row.productRowId, retailUnitPrice: row.retailUnitPrice })) } };
+  const html = renderToStaticMarkup(<PartnerContractWizard draft={pendingDraft} onChange={() => undefined}
+    recovery={{ state: 'writable' }} submission={submission()} now={Date.parse('2026-08-27T09:00:00.000Z')}
+    renderSection={() => null} validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
+  assert.match(html, /پس از ثبت قرارداد.*خودکار.*فروشنده سبلان/);
+  assert.doesNotMatch(html, /بسته قیمت این پرونده منقضی شده|استعلام مجدد/);
 });
 
 test('a centrally blocked Partner entry never mounts the ordinary Sales wizard', () => {
@@ -96,21 +122,21 @@ test('an active competing location presents one takeover decision without a sepa
 
 test('expiry during the wizard retains entered retail data and exposes inline re-inquiry', () => {
   const html = renderToStaticMarkup(<PartnerContractWizard draft={draft} onChange={() => undefined}
-    recovery={{ state: 'writable' }} submission={submission()} now={Date.parse(fixture.approval.expiresAt)}
+    recovery={{ state: 'writable' }} submission={submission({ ...fixture.partner, state: 'DRAFT', pricingState: 'EXPIRED' })} now={Date.parse(fixture.approval.expiresAt)}
     renderSection={() => null} validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /بسته قیمت این پرونده منقضی شده است/);
   assert.match(html, /استعلام مجدد/);
   assert.match(html, /value="800"/);
 });
 
-test('a changed technical row keeps the wizard inputs and permits an unpriced numbered save', () => {
+test('a changed technical row keeps the wizard inputs and defers its first inquiry to the numbered save', () => {
   const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'confirmation' }} onChange={() => undefined}
     recovery={{ state: 'writable' }} submission={submission()} now={Date.parse('2026-08-27T09:00:00.000Z')}
     mismatchedRowIds={[fixture.inquiry.rows[0].rowId]} renderSection={() => <p>preserved-review</p>}
     validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /preserved-review/);
-  assert.match(html, /ذخیره قرارداد/);
-  assert.match(html, /استعلام مجدد/);
+  assert.match(html, /ثبت پرونده و ارسال برای قیمت‌گذاری/);
+  assert.doesNotMatch(html, /استعلام مجدد/);
 });
 
 test('reloading an uncertain inquiry exposes a reachable retry without a new submission', async () => {

@@ -57,7 +57,7 @@ export function partnerWizardCompactStatus(view: PartnerCaseView) {
 }
 
 export const partnerCaseNeedsAutomaticPricingInquiry = (view: PartnerCaseView | undefined, missingPriceRows: number) =>
-  Boolean(view && view.state === 'DRAFT' && view.pricingState === 'AWAITING_INQUIRY' && missingPriceRows > 0);
+  false;
 
 /** Host-supplied sections reuse the existing customer/delivery/payment editors
  * and their validation. They receive the recovery-owned draft, never internal
@@ -73,7 +73,7 @@ export interface PartnerContractWizardProps {
   renderSection: (step: Exclude<PartnerWizardStep, 'products'>, draft: PartnerWizardDraft,
     showValidationErrors: boolean) => React.ReactNode;
   validateStep: (step: PartnerWizardStep, draft: PartnerWizardDraft) => string | null;
-  onReinquire: (row: PartnerRetailRow['inquiryRow']) => void;
+  onReinquire: (row?: PartnerRetailRow['inquiryRow']) => void;
   onEditProducts?: () => void;
   onSendConfirmation?: (caseId: string) => Promise<void> | void;
   onOpenCase: (caseId: string) => Promise<void> | void;
@@ -85,7 +85,6 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const [discardOpen, setDiscardOpen] = useState(false);
   const [recoveryPending, setRecoveryPending] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
-  const automaticInquiryKey = useRef<string | null>(null);
   const recoveryFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const visibleSteps = partnerWizardStepsForDraft(draft);
@@ -93,12 +92,18 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const stepIndex = requestedStepIndex >= 0 ? requestedStepIndex : visibleSteps.findIndex(step => step.id === 'payment');
   const visiblePresentationSteps = presentPartnerWizardSteps(visibleSteps);
   const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
-  const unusable = [...draft.rows.map(row => ({ id: row.productRowId, inquiryRow: row.inquiryRow })),
+  const pricingEntries = [...draft.rows.map(row => ({ id: row.productRowId, inquiryRow: row.inquiryRow })),
     ...(draft.materialInquiryRows ?? []).map(row => ({ id: row.pricingSubjectId, inquiryRow: row.inquiryRow }))]
-    .filter(row => !isUsableInquiryRow(row.inquiryRow, now)
+  const unusable = pricingEntries.filter(row => !isUsableInquiryRow(row.inquiryRow, now)
     || mismatchedRowIds.includes(row.inquiryRow.rowId)
     || row.inquiryRow.configurationRef.productRowId !== row.id
     || row.inquiryRow.configurationRef.recoveryId !== draft.intent.recoveryId);
+  const awaitingInitialPricing = !result.case && pricingEntries.length > 0 && pricingEntries.every(({ inquiryRow }) =>
+    inquiryRow.state === 'PENDING' && !inquiryRow.approvedRowBinding && !inquiryRow.approvedPrice);
+  const waitingForSabalan = result.case?.state === 'DRAFT' && result.case.pricingState === 'AWAITING_INQUIRY';
+  const expiredPackage = result.case?.pricingState === 'EXPIRED';
+  const rowReinquiries = result.case && !expiredPackage ? unusable.filter(({ inquiryRow }) =>
+    inquiryRow.state !== 'PENDING' && inquiryRow.successor?.state !== 'PENDING') : [];
   const mutatePending = result.phase === 'submitting' || result.phase === 'uncertain';
   const disabled = recovery.state !== 'writable' || mutatePending;
   const compactStatus = result.case ? partnerWizardCompactStatus(result.case) : null;
@@ -112,14 +117,6 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   React.useEffect(() => {
     setConfirmationSent(false);
   }, [result.case?.owner.caseId, result.case?.owner.revision]);
-
-  React.useEffect(() => {
-    if (!partnerCaseNeedsAutomaticPricingInquiry(result.case, unusable.length) || !result.case || !unusable[0]) return;
-    const key = `${result.case.owner.caseId}:${result.case.owner.revision}`;
-    if (automaticInquiryKey.current === key) return;
-    automaticInquiryKey.current = key;
-    onReinquire(unusable[0].inquiryRow);
-  }, [onReinquire, result.case, unusable]);
 
   const recover = async (operation: () => Promise<void>) => {
     if (recoveryFlight.current) return;
@@ -223,10 +220,14 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       </ErpCard>}
       {result.phase === 'created' && result.message && <ErpInlineState kind="stale" title={result.message}
         action={{ label: 'تلاش مجدد برای پاک‌سازی بازیابی', onClick: () => void submission.retry() }} />}
-      {unusable.length > 0 && <ErpInlineState kind="stale"
+      {awaitingInitialPricing && <ErpInlineState kind="empty"
+        title="پس از ثبت قرارداد، استعلام قیمت به‌صورت خودکار برای فروشنده سبلان ارسال می‌شود و پاسخ آن در همین پرونده نمایش داده خواهد شد." />}
+      {waitingForSabalan && <ErpInlineState kind="empty"
+        title="استعلام قیمت برای فروشنده سبلان ارسال شده است و در وظایف بین‌واحدی او قرار دارد. پس از ثبت پاسخ، قیمت خرید شما در همین پرونده نمایش داده می‌شود." />}
+      {expiredPackage && unusable.length > 0 && <ErpInlineState kind="stale"
         title={`بسته قیمت این پرونده منقضی شده است؛ هر ${unusable.length.toLocaleString('fa-IR')} ردیف باید دوباره قیمت‌گذاری شود. یک استعلام جانشین برای کل بسته ساخته می‌شود و هیچ قیمت قبلی خودکار منتقل نخواهد شد.`}
         action={{ label: 'استعلام مجدد کل بسته', disabled: mutatePending,
-          onClick: () => onReinquire(unusable[0].inquiryRow) }} />}
+          onClick: () => onReinquire() }} />}
       {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
       {result.phase === 'editing' && result.message && <ErpInlineState kind="error" title={result.message} />}
       {error && <ErpInlineState kind="error" title={error} />}
@@ -239,7 +240,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       canGoPrevious: !disabled && stepIndex > 0,
       canGoNext: !disabled,
       showSubmitOnEveryStep: editMode,
-      labels: { submit: result.phase === 'created' ? 'ذخیره تغییرات' : 'ذخیره قرارداد' }
+      labels: { submit: result.phase === 'created' ? 'ذخیره تغییرات' : 'ثبت پرونده و ارسال برای قیمت‌گذاری' }
     }}
   >
     <div className="min-w-0 space-y-4" aria-label="ایجاد پرونده فروش همکار">
@@ -249,10 +250,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
           onRowsChange={updateRetail} onConfirmLoss={belowCostConfirmed => onChange({ ...draft, intent: { ...draft.intent, belowCostConfirmed } })} />
           {onEditProducts && <ErpButton label="ویرایش محصولات و استعلام قیمت" variant="outline" disabled={disabled}
             onClick={onEditProducts} />}
-          <div className="flex flex-wrap gap-2">{draft.rows.map(row => <ErpButton key={row.productRowId}
+          <div className="flex flex-wrap gap-2">{draft.rows.filter(row => rowReinquiries.some(item => item.id === row.productRowId)).map(row => <ErpButton key={row.productRowId}
             label={`استعلام مجدد ${row.inquiryRow.description}`} variant="outline"
             disabled={disabled || row.inquiryRow.successor?.state === 'PENDING'} onClick={() => onReinquire(row.inquiryRow)} />)}</div>
-          {(draft.materialInquiryRows?.length ?? 0) > 0 && <div className="flex flex-wrap gap-2">{draft.materialInquiryRows!.map(row => <ErpButton key={row.pricingSubjectId}
+          {rowReinquiries.some(item => draft.materialInquiryRows?.some(row => row.pricingSubjectId === item.id)) && <div className="flex flex-wrap gap-2">{draft.materialInquiryRows!.filter(row => rowReinquiries.some(item => item.id === row.pricingSubjectId)).map(row => <ErpButton key={row.pricingSubjectId}
             label={`استعلام مجدد ${row.inquiryRow.description}`} variant="outline"
             disabled={disabled || row.inquiryRow.successor?.state === 'PENDING'} onClick={() => onReinquire(row.inquiryRow)} />)}</div>}
         </div> : renderSection(draft.step, draft, Boolean(error))}

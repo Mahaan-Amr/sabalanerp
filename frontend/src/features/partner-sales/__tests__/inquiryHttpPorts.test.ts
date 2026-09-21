@@ -25,3 +25,22 @@ test('inquiry HTTP ports validate commands and v2 queries before transport and r
   const result = await corrupt.commands.execute(command);
   assert.equal(result.ok ? null : result.error.code, 'INTEGRITY_CONFLICT');
 });
+
+test('case-scoped repricing reaches the inquiry command endpoint', async () => {
+  const calls: Array<{ path: string; body: unknown }> = [];
+  const client = { post: async (path: string, body: unknown) => {
+    calls.push({ path, body });
+    return { data: { success: true, data: { commandId: 'pricing-command', replayed: false, eventIds: [] } } };
+  } };
+  const ports = createPartnerInquiryHttpPorts(client);
+  const intent = { schemaVersion: 1 as const, type: 'CASE_PRICING_SUBMIT' as const,
+    caseId: 'case-1', expected: { caseId: 'case-1', revision: 1, integrityHash: `sha256-v1:${'a'.repeat(64)}` },
+    inquiryId: 'partner-case-pricing:case-1:1', rows: [{ rowId: 'pricing-row-1',
+      configuration: { recoveryId: 'recovery-1', recoveryRevision: 1, productRowId: 'product-row-1' } }] };
+  const command = { ...intent, commandId: 'pricing-command', correlationId: 'pricing-command', idempotency: {
+    actorId: 'partner-1', operation: 'CASE_PRICING_SUBMIT' as const, targetId: 'case-1',
+    key: 'pricing-command', payloadHash: await canonicalHash(intent) } };
+  const result = await ports.commands.execute(command);
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.map(call => call.path), ['/partner/inquiries/commands']);
+});

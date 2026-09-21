@@ -24,6 +24,7 @@ import { partnerRetailPriceUnitLabel, partnerSelectableFamilies } from './partne
 import { ContractProductCatalog, type ContractCatalogFamily } from '../components/steps/ContractProductCatalog';
 import { CentralProductModalShell } from '../components/product-modal-system/productModalPrimitives';
 import { partnerRemainderChildren } from './partnerDependentPresentation';
+import { RemainingInventorySelector } from '../components/steps/RemainingInventorySelector';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
 const nextDraft = (draft: PartnerTechnicalDraft, rows: PartnerTechnicalDraft['rows']) => PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1, rows });
@@ -55,6 +56,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
   const [query, setQuery] = useState('');
   const [modal, setModal] = useState<{ draft: PartnerTechnicalDraft; productRowId: string; mode: 'create' | 'edit' } | null>(null);
   const [deleteRowId, setDeleteRowId] = useState<string | null>(null);
+  const [editingDependentId, setEditingDependentId] = useState<string | null>(null);
   const available = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('fa-IR');
     return products.filter(product => product.isAvailable
@@ -132,7 +134,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
         </div>
         {calculation && !calculation.ok && <ErpInlineState kind="stale" className="mt-2" title={`مشخصات این ردیف کامل نیست. ${calculation.conflicts[0]?.message ?? ''}`} />}
         {preview.ok && <RemainderEditor draft={draft} parentProductRowId={row.productRowId} products={products}
-          inventory={preview.value.inventory} onChange={onChange} />}
+          inventory={preview.value.inventory} onChange={onChange} onEdit={setEditingDependentId} />}
       </div>;
     })}
     </ErpCard></section>
@@ -140,6 +142,8 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
     {modal && <PartnerProductConfigurationFlow state={modal} products={products} operations={operations} sawKerfMeters={sawKerfMeters}
       onDraftChange={next => setModal(current => current ? { ...current, draft: next } : current)} onClose={() => setModal(null)}
       onSave={() => { onChange(modal.draft); setModal(null); }} />}
+    {editingDependentId && <PartnerRemainderConfigurationFlow draft={draft} productRowId={editingDependentId}
+      onChange={onChange} onClose={() => setEditingDependentId(null)} />}
   </section></TechnicalProductConfiguration>;
 }
 
@@ -319,36 +323,61 @@ function LayerEditor({ draft, products, operations, previewRows, inventory, onCh
   </div>)}</ErpCard>;
 }
 
-function RemainderEditor({ draft, parentProductRowId, products, inventory, onChange }: { draft: PartnerTechnicalDraft;
+function RemainderEditor({ draft, parentProductRowId, products, inventory, onChange, onEdit }: { draft: PartnerTechnicalDraft;
   parentProductRowId: string; products: PartnerTechnicalProduct[];
   inventory: readonly { remainingStoneId: string; ownerProductRowId: string; catalogProductId: string; lengthMeters: string; widthMeters: string; quantity: number }[];
-  onChange: (draft: PartnerTechnicalDraft) => void }) {
+  onChange: (draft: PartnerTechnicalDraft) => void; onEdit: (productRowId: string) => void }) {
   const parent = draft.rows.find(row => row.productRowId === parentProductRowId);
   const children = partnerRemainderChildren(draft, parentProductRowId);
-  const stock = inventory.find(item => item.ownerProductRowId === parentProductRowId);
-  if (!parent || (!children.length && !stock)) return null;
-  return <div className="mt-3 space-y-3 border-r-2 border-[var(--sds-border-default)] pr-3" aria-label="فرزندان محصول">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-bold">فرزندان باقی‌مانده</h3>
-      <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">فرزندان این محصول در فهرست قرارداد نمایش داده می‌شوند.</p></div>
-    <ErpButton label="افزودن فرزند" variant="outline" disabled={!stock} onClick={() => {
-      const product = products.find(item => item.catalogItemId === parent.catalogItemId); if (!stock || !product) return;
-      onChange(addPartnerTechnicalDependent(draft, { kind: 'remainder', parentProductRowId, product,
-        allocationId: `allocation:${crypto.randomUUID()}`, productRowId: `product-row:${crypto.randomUUID()}`,
-        creationOrder: (draft.dependents?.length ?? 0) + 1, selectedRemainingStoneId: String(stock.remainingStoneId) }));
-    }} /></div>
-    {!children.length ? <p className="text-sm text-[var(--sds-text-muted)]">فرزندی تعریف نشده است.</p> : children.map(({ row: item, depth }, index) => {
-      const stocks = inventory.filter(stock => stock.ownerProductRowId === item.sourceProductRowId || stock.remainingStoneId === item.selectedRemainingStoneId);
-      return <div key={item.allocationId} style={{ marginInlineStart: `${depth * 16}px` }}><ErpCard className="space-y-3 p-3"><div className="flex justify-between gap-3"><strong>فرزند {(index + 1).toLocaleString('fa-IR')}</strong>
-        <ErpButton label="حذف" tone="danger" variant="ghost" onClick={() => onChange(removePartnerTechnicalDependent(draft, item.productRowId))} /></div>
-        <ErpField label="قطعه باقی‌مانده"><ErpSelect value={item.selectedRemainingStoneId ?? ''} onChange={event => onChange(PartnerTechnicalDraftSchema.parse({ ...draft,
-          inputRevision: draft.inputRevision + 1, dependents: (draft.dependents ?? []).map(dependent => dependent === item ? { ...item, selectedRemainingStoneId: event.target.value } : dependent) }))}>
-          <option value="">انتخاب خودکار</option>{stocks.map(stock => <option key={stock.remainingStoneId} value={stock.remainingStoneId}>{stock.lengthMeters} × {stock.widthMeters} متر · {stock.quantity.toLocaleString('fa-IR')} قطعه</option>)}</ErpSelect></ErpField>
-        <div className="grid gap-3 sm:grid-cols-3">{([['lengthMeters', 'طول (متر)'], ['widthMeters', 'عرض (متر)'], ['quantity', 'تعداد']] as const).map(([field, label]) => <ErpField key={field} label={label} required>
-          <ErpInput inputMode={field === 'quantity' ? 'numeric' : 'decimal'} value={editText(draft, item.productRowId, field, item[field])}
-            onChange={event => onChange(commitText(draft, item.productRowId, field, event.target.value))} /></ErpField>)}</div>
-      </ErpCard></div>;
-    })}
+  const stocks = inventory.filter(item => item.ownerProductRowId === parentProductRowId);
+  if (!parent || (!children.length && !stocks.length)) return null;
+  const product = products.find(item => item.catalogItemId === parent.catalogItemId);
+  return <div className="mt-2 space-y-2" aria-label="فرزندان محصول">
+    {stocks.length > 0 && <div className="space-y-2 text-xs sds-text-secondary"><div className="font-medium">
+      باقی‌مانده — {formatDisplayNumber(stocks.reduce((sum, item) => sum + item.quantity, 0))} قطعه در {formatDisplayNumber(stocks.length)} گروه هندسی
+    </div>{product && stocks.map(stock => { const length = Number(stock.lengthMeters); const width = Number(stock.widthMeters);
+      return <RemainingInventorySelector key={stock.remainingStoneId} quantity={stock.quantity} lengthMeters={length}
+        widthMeters={width * 100} pieceSquareMeters={length * width} totalSquareMeters={length * width * stock.quantity}
+        onUse={quantity => onChange(addPartnerTechnicalDependent(draft, { kind: 'remainder', parentProductRowId, product,
+          allocationId: `allocation:${crypto.randomUUID()}`, productRowId: `product-row:${crypto.randomUUID()}`,
+          creationOrder: (draft.dependents?.length ?? 0) + 1, selectedRemainingStoneId: String(stock.remainingStoneId),
+          sourcePieceQuantities: [quantity] }))} />; })}</div>}
+    {children.map(({ row: item, depth }) => <div key={item.allocationId}
+      className="mr-5 border-r border-[var(--sds-border-subtle)] py-3 pr-4" style={{ marginInlineStart: `${depth * 16}px` }}
+      data-contract-row-id={item.productRowId}>
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"><div className="min-w-0">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><strong className="sds-text-primary text-sm">{product?.name ?? 'محصول باقی‌مانده'}</strong>
+          <span className="sds-text-muted text-xs">فرزند باقی‌مانده</span></div>
+        <div className="sds-text-secondary mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+          <span>{formatDisplayNumber(Number(item.quantity) || 0)} قطعه × ({formatDisplayNumber(Number(item.lengthMeters) || 0)}m × {formatDisplayNumber((Number(item.widthMeters) || 0) * 100)}cm)</span>
+        </div></div><div className="flex flex-wrap items-center gap-3 text-xs font-medium">
+          <ErpPressable type="button" onClick={() => onEdit(item.productRowId)}>ویرایش</ErpPressable>
+          <ErpPressable type="button" onClick={() => { if (!product) return; const nextId = `product-row:${crypto.randomUUID()}`;
+            const added = addPartnerTechnicalDependent(draft, { kind: 'remainder', parentProductRowId: item.sourceProductRowId, product,
+              allocationId: `allocation:${crypto.randomUUID()}`, productRowId: nextId, creationOrder: (draft.dependents?.length ?? 0) + 1,
+              ...(item.selectedRemainingStoneId ? { selectedRemainingStoneId: item.selectedRemainingStoneId } : {}),
+              ...(item.sourcePieceQuantities ? { sourcePieceQuantities: item.sourcePieceQuantities } : {}) });
+            onChange(PartnerTechnicalDraftSchema.parse({ ...added, inputRevision: added.inputRevision + 1,
+              dependents: (added.dependents ?? []).map(dependent => dependent.kind === 'remainder' && dependent.productRowId === nextId
+                ? { ...dependent, lengthMeters: item.lengthMeters, widthMeters: item.widthMeters, quantity: item.quantity } : dependent) }));
+          }}>تکثیر</ErpPressable>
+          <ErpPressable type="button" tone="danger" onClick={() => onChange(removePartnerTechnicalDependent(draft, item.productRowId))}>حذف</ErpPressable>
+        </div></div>
+    </div>)}
   </div>;
+}
+
+function PartnerRemainderConfigurationFlow({ draft, productRowId, onChange, onClose }: { draft: PartnerTechnicalDraft;
+  productRowId: string; onChange: (draft: PartnerTechnicalDraft) => void; onClose: () => void }) {
+  const item = (draft.dependents ?? []).find(dependent => dependent.kind === 'remainder' && dependent.productRowId === productRowId);
+  if (!item || item.kind !== 'remainder') return null;
+  return <CentralProductModalShell open title="ویرایش تنظیمات محصول" view="main" onClose={onClose}
+    primaryLabel="ذخیره تغییرات" pending={false} onPrimary={onClose}>
+    <div className="grid gap-3 p-2 sm:grid-cols-3">{([['lengthMeters', 'طول (متر)'], ['widthMeters', 'عرض (متر)'], ['quantity', 'تعداد']] as const)
+      .map(([field, label]) => <ErpField key={field} label={label} required><ErpInput
+        inputMode={field === 'quantity' ? 'numeric' : 'decimal'} value={editText(draft, item.productRowId, field, item[field])}
+        onChange={event => onChange(commitText(draft, item.productRowId, field, event.target.value))} /></ErpField>)}</div>
+  </CentralProductModalShell>;
 }
 
 function OperationsEditor({ draft, row, calculation, catalog, onChange }: { draft: PartnerTechnicalDraft;

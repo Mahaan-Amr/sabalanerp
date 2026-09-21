@@ -40,6 +40,7 @@ import { hasUnresolvedLegacyRemainingChildAddOns } from '../../services/remainin
 import { nextStandaloneServiceCatalogState } from '../../services/standaloneServiceCatalog';
 import { buildContractCartRows } from './contractCartRows';
 import { ContractProductCatalog } from './ContractProductCatalog';
+import { RemainingInventorySelector } from './RemainingInventorySelector';
 
 interface Step5ProductSelectionProps {
   controller: ContractProductCartController;
@@ -173,13 +174,7 @@ const RemainingInventoryGroupRow: React.FC<{
   sourceProduct: ContractProduct;
   onUse: (stone: RemainingStone, sourceProduct: ContractProduct) => void;
 }> = ({ group, sourceProduct, onUse }) => {
-  const [quantity, setQuantity] = useState(1);
-  const safeQuantity = Math.min(
-    group.quantity,
-    Math.max(1, Math.trunc(Number(quantity) || 1))
-  );
-
-  const selectGroup = () => {
+  const selectGroup = (safeQuantity: number) => {
     const representative = group.stones[0];
     onUse({
       ...representative,
@@ -193,47 +188,9 @@ const RemainingInventoryGroupRow: React.FC<{
     }, sourceProduct);
   };
 
-  return (
-    <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-2.5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="font-medium sds-text-primary ">
-            {formatDisplayNumber(group.quantity)} قطعه × (
-            {formatDisplayNumber(group.length)}m × {formatDisplayNumber(group.width)}cm)
-          </div>
-          <div className="mt-0.5 sds-text-muted ">
-            هر قطعه {formatSquareMeters(group.pieceSquareMeters)}
-            {' · '}مجموع {formatSquareMeters(group.totalSquareMeters)}
-          </div>
-        </div>
-        <div className="flex items-end gap-2">
-          <label className="text-[11px] sds-text-muted ">
-            تعداد استفاده
-            <ErpInput
-              type="text"
-              inputMode="numeric"
-              value={formatDisplayNumber(safeQuantity)}
-              onChange={(event) => {
-                const next = Math.trunc(parseFormattedNumber(event.target.value));
-                setQuantity(Math.min(group.quantity, Math.max(1, next || 1)));
-              }}
-              className="mt-1 block w-24 px-2 text-center"
-              aria-label="تعداد قطعات باقی‌مانده برای استفاده"
-            />
-          </label>
-          <ErpPressable
-            type="button"
-            onClick={selectGroup}
-            tone="primary"
-            variant="solid"
-            className="px-3 text-xs font-semibold"
-          >
-            استفاده
-          </ErpPressable>
-        </div>
-      </div>
-    </div>
-  );
+  return <RemainingInventorySelector quantity={group.quantity} lengthMeters={group.length}
+    widthMeters={group.width} pieceSquareMeters={group.pieceSquareMeters}
+    totalSquareMeters={group.totalSquareMeters} onUse={selectGroup} />;
 };
 
 const ContractRow: React.FC<{

@@ -17,6 +17,7 @@ import { PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft } from '@saba
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { CanonicalStairLayerSummary } from '../../contract-creation/components/product-modal-system/CanonicalStairLayerSummary';
 import { PartnerTechnicalDraftEditor } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
+import { buildPartnerProductionTechnicalDraft } from '../../contract-creation/partner/partnerProductionTechnicalDraft';
 
 test('layer summary consumes canonical rate-free strips and rejects a preview from an older edit', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
@@ -118,9 +119,29 @@ test('Partner product configuration includes one compact customer unit-price fie
   assert.match(html, /همه/);
   assert.match(html, /طولی/);
   assert.doesNotMatch(html, /سنگ حجمی|کوپ/);
-  assert.match(html, /قیمت فروش به مشتری — قیمت واحد \(تومان\)/);
-  assert.match(html, /1,250,000/);
+  assert.match(html, /قیمت واحد \(تومان\)/);
+  assert.match(html, /۱٬۲۵۰٬۰۰۰/);
   assert.doesNotMatch(html, /قیمت خرید شما از سبلان/);
+});
+
+test('Partner remainder children use the ordinary Sales nested inventory and contract-row interaction', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const product = catalog.products.find(item => item.families.includes('longitudinal'))!;
+  let sequence = 0;
+  const draft = buildPartnerProductionTechnicalDraft({ family: 'longitudinal', product, quantity: '2',
+    lengthMeters: '1', widthMeters: '0.1', sourceLengthMeters: '2', sourceWidthMeters: '1',
+    products: catalog.products, operationsCatalog: catalog.operations, includeRemainder: true,
+  }, kind => `partner-child-${kind}-${++sequence}`);
+  const inventoryHtml = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={{ ...draft, dependents: [] }} products={catalog.products}
+    operations={catalog.operations} onChange={() => undefined} />);
+  const html = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft} products={catalog.products}
+    operations={catalog.operations} onChange={() => undefined} />);
+  assert.match(inventoryHtml, /باقی‌مانده —/);
+  assert.match(inventoryHtml, /تعداد استفاده/);
+  assert.match(inventoryHtml, />استفاده</);
+  assert.match(html, /فرزند باقی‌مانده/);
+  assert.match(html, />ویرایش<[\s\S]*>تکثیر<[\s\S]*>حذف</);
+  assert.doesNotMatch(html, /افزودن فرزند|فرزندی تعریف نشده است/);
 });
 
 test('Partner layer and operation forms retain source, edge, and processing choices without catalog rates', () => {

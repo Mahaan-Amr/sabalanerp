@@ -30,6 +30,7 @@ import { PaymentEntryModal } from '../components/modals/PaymentEntryModal';
 import type { PaymentEntry } from '../types/contract.types';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { createPartnerCaseSubmission, type PartnerDraftCommand } from './partnerCaseSubmission';
+import { selectPartnerReinquiryRows } from './partnerReinquiry';
 import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
   shouldPreferLocalPartnerWizard } from './partnerWizardEntry';
 import { partnerMoneyText, partnerRetailIntentRows, partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
@@ -992,7 +993,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [runtime, submission, wizardRecoveryId]);
 
-  const reinquireFromWizard = async (_row: PartnerInquiryRow) => {
+  const reinquireFromWizard = async (requestedRow?: PartnerInquiryRow) => {
     if (!runtime || !wizard) return;
     setError(null);
     try {
@@ -1000,8 +1001,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       if (!activeOwner) throw new Error('Numbered Case required');
       const sourceRows = [...wizard.rows.map(item => item.inquiryRow),
         ...(wizard.materialInquiryRows ?? []).map(item => item.inquiryRow)];
-      const distinct = new Map(sourceRows.map(item => [item.configurationRef.productRowId, item]));
-      const rows = Array.from(distinct.values()).map(item => {
+      const selectedPackage = selectPartnerReinquiryRows(sourceRows,
+        `partner-case-pricing:${wizard.intent.recoveryId}:1`, requestedRow);
+      const selected = selectedPackage.rows;
+      const rows = selected.map(item => {
         const deliveryFacts = wizard.intent.deliveries.flatMap(delivery => delivery.items
           .filter(deliveryItem => deliveryItem.productRowId === item.configurationRef.productRowId)
           .map(deliveryItem => ({ date: delivery.date, quantity: deliveryItem.quantity })));
@@ -1009,7 +1012,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           ...(deliveryFacts.length ? { deliveryFacts } : {}),
           predecessor: { rowId: item.rowId, revision: item.revision } };
       });
-      const scopedInquiryId = `partner-case-pricing:${activeOwner.caseId}:1`;
+      const scopedInquiryId = selectedPackage.inquiryId;
       const intent = { schemaVersion: 1 as const, type: 'CASE_PRICING_SUBMIT' as const,
         caseId: activeOwner.caseId, expected: activeOwner, inquiryId: scopedInquiryId, rows };
       const payloadHash = await canonicalHash(intent);
@@ -1018,7 +1021,17 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           targetId: activeOwner.caseId,
           key: payloadHash, payloadHash } });
       const result = await inquiryPorts.commands.execute(command);
-      if (!result.ok) setError(result.error.message);
+      if (!result.ok) { setError(result.error.message); return; }
+      const pendingByProductRowId = new Map(rows.map(item => [item.configuration.productRowId, {
+        inquiryId: scopedInquiryId, rowId: item.rowId, revision: 1, state: 'PENDING' as const,
+      }]));
+      setWizard(current => current ? { ...current,
+        rows: current.rows.map(item => ({ ...item, inquiryRow: pendingByProductRowId.has(item.productRowId)
+          ? { ...item.inquiryRow, successor: pendingByProductRowId.get(item.productRowId) } : item.inquiryRow })),
+        materialInquiryRows: current.materialInquiryRows?.map(item => ({ ...item,
+          inquiryRow: pendingByProductRowId.has(item.pricingSubjectId)
+            ? { ...item.inquiryRow, successor: pendingByProductRowId.get(item.pricingSubjectId) } : item.inquiryRow })),
+      } : current);
     } catch { setError('ارسال استعلام مجدد انجام نشد؛ اطلاعات Wizard حفظ شده است.'); }
   };
 

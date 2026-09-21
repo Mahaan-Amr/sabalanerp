@@ -72,6 +72,42 @@ interface NormalizedSourceMaterial {
   presentsMaterialCharge?: boolean;
 }
 
+interface NormalizedLayerGeometryRow {
+  description: string;
+  lengthMeters: number;
+  widthMeters: number;
+  quantity: number;
+  areaSquareMeters: number;
+}
+
+interface NormalizedLayerMaterialRow {
+  code: string;
+  description: string;
+  lengthMeters: number;
+  widthMeters: number;
+  quantity: number;
+  areaSquareMeters: number;
+  rate: number;
+  total: number;
+  note?: string;
+}
+
+interface NormalizedLayerDetails {
+  parentRowId: string;
+  title: string;
+  typeCode: string;
+  billingUnit: 'set' | 'physicalPiece' | 'meter' | 'squareMeter';
+  billingQuantity: number;
+  billingRate: number;
+  billingTotal: number;
+  supplyNote: string;
+  geometryRows: NormalizedLayerGeometryRow[];
+  paidMaterialRows: NormalizedLayerMaterialRow[];
+  freshMaterialRows: NormalizedLayerMaterialRow[];
+  freshMandatoryPercentage: number;
+  freshMandatoryAmount: number;
+}
+
 interface NormalizedProduct {
   id: string;
   rowId: string;
@@ -102,6 +138,7 @@ interface NormalizedProduct {
   sourceMaterials: NormalizedSourceMaterial[];
   isLayer: boolean;
   isFromRemainingStone: boolean;
+  layer?: NormalizedLayerDetails;
 }
 
 interface NormalizedStandaloneService {
@@ -117,6 +154,7 @@ interface NormalizedStandaloneService {
 }
 
 interface FlatProductRow {
+  groupKey?: string;
   indexLabel: string;
   code: string;
   description: string;
@@ -798,6 +836,225 @@ const buildSourceMaterialRows = (
   }];
 };
 
+const layerEdgeLabels: Record<string, string> = {
+  front: 'جلو',
+  back: 'عقب',
+  left: 'چپ',
+  right: 'راست'
+};
+
+const normalizedLayerEdges = (product: any): string[] => {
+  const configured = product?.meta?.layerEdges || {};
+  if (configured?.perimeter) return ['front', 'back', 'left', 'right'];
+  const selected = Object.keys(layerEdgeLabels).filter(edge => Boolean(configured?.[edge]));
+  if (selected.length > 0) return selected;
+  const canonicalEdges = product?.meta?.layerSourcePlan?.canonicalInput?.targetSides;
+  return Array.isArray(canonicalEdges)
+    ? canonicalEdges.filter((edge: unknown): edge is string => typeof edge === 'string' && edge in layerEdgeLabels)
+    : [];
+};
+
+const layerBillingUnit = (value: unknown): NormalizedLayerDetails['billingUnit'] => {
+  if (value === 'physicalPiece' || value === 'meter' || value === 'squareMeter') return value;
+  return 'set';
+};
+
+const aggregateLayerMaterialRows = (
+  rows: NormalizedLayerMaterialRow[]
+): NormalizedLayerMaterialRow[] => {
+  const groups = new Map<string, NormalizedLayerMaterialRow>();
+  rows.forEach(row => {
+    const key = [row.code, row.description, row.lengthMeters, row.widthMeters, row.rate, row.note || ''].join('|');
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, { ...row });
+      return;
+    }
+    existing.quantity += row.quantity;
+    existing.areaSquareMeters += row.areaSquareMeters;
+    existing.total += row.total;
+  });
+  return Array.from(groups.values());
+};
+
+const buildNormalizedLayerDetails = (
+  product: any,
+  parent: any
+): NormalizedLayerDetails | undefined => {
+  if (!product?.meta?.isLayer) return undefined;
+
+  const info = product?.meta?.layerInfo || {};
+  const sourcePlan = product?.meta?.layerSourcePlan || {};
+  const canonicalInput = sourcePlan?.canonicalInput || {};
+  const edges = normalizedLayerEdges(product);
+  const edgeTitle = edges.map(edge => layerEdgeLabels[edge]).filter(Boolean).join(' و ') || EMPTY;
+  const typeName = firstText(product?.meta?.layerType?.name, product?.layerTypeName, canonicalInput?.layerTitle, EMPTY);
+  const parentPart = stairPartLabel(info?.parentPartType || parent?.stairPartType || product?.stairPartType);
+  const setQuantity = toNumber(info?.layerSetQuantity || product?.quantity);
+  const physicalPieceQuantity = toNumber(info?.physicalPieceQuantity) || setQuantity * Math.max(edges.length, 1);
+  const billingUnit = layerBillingUnit(
+    info?.calculationUnit || product?.layerTypeCalculationUnit || canonicalInput?.layerUnit
+  );
+  const billingQuantity = toNumber(info?.pricingQuantity) || (
+    billingUnit === 'physicalPiece' ? physicalPieceQuantity
+      : billingUnit === 'meter' ? toNumber(product?.linearMeters)
+        : billingUnit === 'squareMeter' ? toNumber(product?.squareMeters)
+          : setQuantity
+  );
+  const billingRate = toNumber(
+    info?.manualRateToman || product?.meta?.layerType?.pricePerLayer || product?.layerTypePrice || canonicalInput?.layerRateToman
+  );
+  const billingTotal = toNumber(product?.meta?.layerType?.totalCost) || billingQuantity * billingRate;
+  const parentRowId = firstText(product?.parentProductRowId, info?.parentProductRowId, canonicalInput?.parentProductRowId);
+
+  const parentLengthMeters = lengthValueToMeters(parent?.length, parent?.lengthUnit);
+  const parentWidthMeters = lengthValueToMeters(parent?.width, parent?.widthUnit);
+  const layerWidthMeters = lengthValueToMeters(product?.width, product?.widthUnit);
+  const rawGeometryRows: NormalizedLayerGeometryRow[] = edges.map(edge => {
+    const lengthMeters = edge === 'front' || edge === 'back' ? parentLengthMeters : parentWidthMeters;
+    return {
+      description: `نوار ${layerEdgeLabels[edge]}`,
+      lengthMeters,
+      widthMeters: layerWidthMeters,
+      quantity: setQuantity,
+      areaSquareMeters: lengthMeters * layerWidthMeters * setQuantity
+    };
+  });
+  const geometryGroups = new Map<string, NormalizedLayerGeometryRow>();
+  rawGeometryRows.forEach(row => {
+    const key = `${row.lengthMeters}|${row.widthMeters}|${row.quantity}`;
+    const existing = geometryGroups.get(key);
+    if (!existing) {
+      geometryGroups.set(key, { ...row });
+      return;
+    }
+    existing.description = `${existing.description} و ${row.description.replace(/^نوار\s*/, '')}`;
+    existing.areaSquareMeters += row.areaSquareMeters;
+  });
+  const geometryRows = Array.from(geometryGroups.values());
+
+  const parentCode = firstText(parent?.stoneCode, parent?.product?.code, product?.stoneCode, EMPTY);
+  const parentName = firstText(parent?.stoneName, parent?.product?.namePersian, parent?.product?.name, product?.stoneName, EMPTY);
+  const usedRemainingStones = Array.isArray(product?.usedRemainingStones) ? product.usedRemainingStones : [];
+  const paidMaterialRows = aggregateLayerMaterialRows(usedRemainingStones.map((stone: any) => {
+    const lengthMeters = lengthValueToMeters(stone?.length, stone?.lengthUnit || 'm');
+    const widthMeters = lengthValueToMeters(stone?.width, stone?.widthUnit || 'cm');
+    const quantity = Math.max(toNumber(stone?.quantity), 1);
+    return {
+      code: parentCode,
+      description: 'سنگ مصرفی لایه — قبلاً در کف پله محاسبه شده',
+      lengthMeters,
+      widthMeters,
+      quantity,
+      areaSquareMeters: toNumber(stone?.squareMeters) || lengthMeters * widthMeters * quantity,
+      rate: 0,
+      total: 0,
+      note: 'هزینه سنگ در محصول والد محاسبه شده است.'
+    };
+  }));
+
+  const freshArea = toNumber(sourcePlan?.sourceAreaSqm);
+  const fromNewSets = toNumber(sourcePlan?.fromNewSets);
+  const hasFreshCharge = freshArea > 0 && toNumber(product?.originalTotalPrice) > 0 && fromNewSets >= 0;
+  const source = canonicalInput?.source || {};
+  const alternateStone = product?.meta?.layerAltStone || {};
+  const mandatoryPercentage = toNumber(
+    alternateStone?.mandatoryPercentage ||
+    (source?.kind === 'parent-material' ? parent?.mandatoryPercentage : 0)
+  );
+  const effectiveMaterialTotal = hasFreshCharge ? toNumber(product?.originalTotalPrice) : 0;
+  const effectiveRate = toNumber(
+    source?.materialRateToman || product?.pricePerSquareMeter || alternateStone?.effectivePricePerSquareMeter
+  );
+  const baseRate = toNumber(alternateStone?.basePricePerSquareMeter) ||
+    toNumber(source?.kind === 'parent-material' ? parent?.pricePerSquareMeter : 0) ||
+    (mandatoryPercentage > 0 ? effectiveRate / (1 + mandatoryPercentage / 100) : effectiveRate);
+  const baseMaterialTotal = hasFreshCharge
+    ? Math.min(effectiveMaterialTotal, Math.round(freshArea * baseRate))
+    : 0;
+  const freshMandatoryAmount = Math.max(effectiveMaterialTotal - baseMaterialTotal, 0);
+  const sourceRows = Array.isArray(source?.sourceRows) ? source.sourceRows : [];
+  const consumedSources = Array.isArray(sourcePlan?.packingPlan?.consumedSources)
+    ? sourcePlan.packingPlan.consumedSources : [];
+  const consumedBySourceRow = new Map<string, number>();
+  consumedSources.forEach((consumed: any) => {
+    const batchId = String(consumed?.sourceBatchId || '');
+    sourceRows.forEach((sourceRow: any) => {
+      const sourceRowId = String(sourceRow?.sourceRowId || '');
+      if (sourceRowId && batchId.endsWith(`:new:${sourceRowId}`)) {
+        consumedBySourceRow.set(sourceRowId, (consumedBySourceRow.get(sourceRowId) || 0) + 1);
+      }
+    });
+  });
+  const freshMaterialName = firstText(alternateStone?.name, source?.stoneName, parentName, product?.stoneName, EMPTY);
+  const freshMaterialCode = firstText(alternateStone?.code, source?.stoneCode, parentCode, product?.stoneCode, EMPTY);
+  let freshMaterialRows: NormalizedLayerMaterialRow[] = [];
+  if (hasFreshCharge) {
+    const candidates = sourceRows.map((sourceRow: any) => {
+      const sourceRowId = String(sourceRow?.sourceRowId || '');
+      const quantity = consumedBySourceRow.size > 0
+        ? toNumber(consumedBySourceRow.get(sourceRowId))
+        : toNumber(sourceRow?.quantity);
+      const lengthMeters = toNumber(sourceRow?.lengthMeters);
+      const widthMeters = toNumber(sourceRow?.widthMeters);
+      return {
+        code: freshMaterialCode,
+        description: `سنگ جدید مصرفی لایه — ${freshMaterialName}`,
+        lengthMeters,
+        widthMeters,
+        quantity,
+        areaSquareMeters: lengthMeters * widthMeters * quantity,
+        rate: baseRate,
+        total: 0
+      };
+    }).filter((row: NormalizedLayerMaterialRow) => row.quantity > 0);
+    freshMaterialRows = aggregateLayerMaterialRows(candidates.length > 0 ? candidates : [{
+      code: freshMaterialCode,
+      description: `سنگ جدید مصرفی لایه — ${freshMaterialName}`,
+      lengthMeters: toNumber(sourcePlan?.sourceLengthM),
+      widthMeters: toNumber(sourcePlan?.sourceWidthCm) / 100,
+      quantity: 0,
+      areaSquareMeters: freshArea,
+      rate: baseRate,
+      total: 0
+    }]);
+    const candidateArea = freshMaterialRows.reduce((sum, row) => sum + row.areaSquareMeters, 0);
+    freshMaterialRows.forEach((row, index) => {
+      row.areaSquareMeters = candidateArea > 0
+        ? freshArea * (row.areaSquareMeters / candidateArea)
+        : index === 0 ? freshArea : 0;
+      row.total = index === freshMaterialRows.length - 1
+        ? baseMaterialTotal - freshMaterialRows.slice(0, index).reduce((sum, current) => sum + current.total, 0)
+        : Math.round(row.areaSquareMeters * baseRate);
+    });
+  }
+
+  const alreadyPaidSets = toNumber(sourcePlan?.fromAlreadyPaidSets);
+  const supplyNote = alreadyPaidSets > 0 && freshArea > 0
+    ? 'تأمین سنگ لایه: بخشی از باقی‌مانده محاسبه‌شده و بخش قابل‌پرداخت از سنگ جدید تأمین شده است.'
+    : alreadyPaidSets > 0
+      ? 'تأمین سنگ لایه: از باقی‌مانده محاسبه‌شده، بدون هزینه مجدد سنگ'
+      : freshArea > 0
+        ? 'تأمین سنگ لایه: از سنگ جدید قابل‌پرداخت'
+        : '';
+
+  return {
+    parentRowId,
+    title: `↳ لایه ${parentPart} — نوع ${typeName} — ${edgeTitle}`,
+    typeCode: firstText(product?.meta?.layerType?.code, product?.layerTypeCode, EMPTY),
+    billingUnit,
+    billingQuantity,
+    billingRate,
+    billingTotal,
+    supplyNote,
+    geometryRows,
+    paidMaterialRows,
+    freshMaterialRows,
+    freshMandatoryPercentage: mandatoryPercentage,
+    freshMandatoryAmount
+  };
+};
+
 const normalizeProducts = (
   contract: RenderableContract,
   lookups: {
@@ -819,6 +1076,13 @@ const normalizeProducts = (
     return contractDataProducts.map((savedProduct: any, index: number) => {
       const product = restoreLongitudinalCustomerRequest(savedProduct);
       const rowId = product?.productRowId || product?.rowId;
+      const parentRowId = product?.parentProductRowId || product?.meta?.layerInfo?.parentProductRowId ||
+        product?.meta?.layerSourcePlan?.canonicalInput?.parentProductRowId;
+      const parentProduct = parentRowId
+        ? contractDataProducts.find((candidate: any) =>
+            (candidate?.productRowId || candidate?.rowId) === parentRowId)
+        : undefined;
+      const layer = buildNormalizedLayerDetails(product, parentProduct);
       const identityMatches = rowId ? relationItems.filter((item: any) =>
         (item?.productRowId || item?.rowId) === rowId) : [];
       const catalogMatches = relationItems.filter((item: any) =>
@@ -992,36 +1256,22 @@ const normalizeProducts = (
       const remainingCount = Array.isArray(product?.remainingStones) ? product.remainingStones.length : 0;
       const usedRemainingCount = Array.isArray(product?.usedRemainingStones) ? product.usedRemainingStones.length : 0;
       const rowConsumption = consumption.filter(source => source.productRowId === rowId);
-      const sourceMaterials = buildSourceMaterialRows(product, rowConsumption);
+      const sourceMaterials = layer ? [] : buildSourceMaterialRows(product, rowConsumption);
       const isFromRemainingStone = rowConsumption.length > 0 || Boolean(product?.meta?.remainingSource);
       const sourceMaterialSummary = sourceMaterials.length > 0
         ? `${sourceMaterials[0].dimensionsOrAmount}، ${sourceMaterials[0].quantityOrArea}`
         : EMPTY;
       const physicalProductionNote = buildPhysicalProductionNote(product);
-      const layerInfo = product?.meta?.layerInfo || {};
-      const layerEdges = product?.meta?.layerEdges || {};
-      const layerEdgeLabels = layerEdges?.perimeter
-        ? ['محیط کامل']
-        : [
-            layerEdges?.front ? 'جلو' : '',
-            layerEdges?.back ? 'عقب' : '',
-            layerEdges?.left ? 'چپ' : '',
-            layerEdges?.right ? 'راست' : ''
-          ].filter(Boolean);
-      const layerProductionNote = product?.meta?.isLayer
-        ? `لایه وابسته به ${stairPartLabel(layerInfo?.parentPartType || product?.stairPartType)}: ${toFaNumber(layerInfo?.layerSetQuantity || product?.quantity, 4)} ست (${layerEdgeLabels.join(' + ') || EMPTY})، ${toFaNumber(layerInfo?.physicalPieceQuantity || 0, 0)} نوار فیزیکی`
-        : '';
       const description = [
         typeof product?.description === 'string' ? product.description : relationItem?.description || '',
-        layerProductionNote,
         product?.sawKerfEnabled ? 'خوراک اره لحاظ شده' : '',
-        physicalProductionNote
+        layer ? '' : physicalProductionNote
       ].filter(hasTextValue).join('، ') || EMPTY;
 
       return {
         id: `${product?.productId || 'product'}-${index}`,
-        rowId: String(product?.rowId || ''),
-        code: product?.stoneCode || product?.product?.code || relationItem?.product?.code || EMPTY,
+        rowId: String(rowId || ''),
+        code: layer?.typeCode || product?.stoneCode || product?.product?.code || relationItem?.product?.code || EMPTY,
         name: product?.stoneName || product?.product?.namePersian || product?.product?.name || relationItem?.product?.namePersian || relationItem?.product?.name || EMPTY,
         productTypeCode: String(product?.productType || relationItem?.productType || ''),
         productType: productTypeLabel(product?.productType || relationItem?.productType),
@@ -1051,7 +1301,8 @@ const normalizeProducts = (
         sourceMaterialSummary,
         sourceMaterials,
         isLayer: Boolean(product?.meta?.isLayer),
-        isFromRemainingStone
+        isFromRemainingStone,
+        layer
       };
     });
   }
@@ -1521,6 +1772,7 @@ const buildFlatProductRows = (
   options: {
     includeRialEquivalent?: boolean;
     displayInRials?: boolean;
+    accountingDetail?: boolean;
     productRowsMode?: 'detailed' | 'summarized';
     showExplanatoryRows?: boolean;
     showTotals?: boolean;
@@ -1533,8 +1785,11 @@ const buildFlatProductRows = (
   const showTotals = options.showTotals !== false;
   const showNotes = options.showNotes !== false;
   const summaryAddOnGroups = new Map<string, SummaryAddOnGroup>();
+  let topLevelProductIndex = 0;
+  const topLevelProductCount = products.filter(product => !product.isLayer).length;
 
-  products.forEach((product, productIndex) => {
+  products.forEach((product) => {
+    const groupKey = product.layer?.parentRowId || product.rowId || product.id;
     const billableCuts = product.cuts;
     const addOnsTotal =
       billableCuts.reduce((sum, cut) => sum + toNumber(cut.cost), 0) +
@@ -1590,6 +1845,177 @@ const buildFlatProductRows = (
         });
       });
     }
+
+    if (product.layer && !isSummarized) {
+      const layer = product.layer;
+      const layerQuantityColumns = emptyMeasurementCells();
+      if (product.squareMeters > 0) {
+        layerQuantityColumns.squareMeasurement = toFaNumber(product.squareMeters, 4);
+      }
+      if (layer.billingUnit === 'physicalPiece') {
+        layerQuantityColumns.count = `${toFaNumber(layer.billingQuantity, 4)} نوار`;
+      } else if (layer.billingUnit === 'set') {
+        layerQuantityColumns.count = `${toFaNumber(layer.billingQuantity, 4)} ست`;
+      } else if (layer.billingUnit === 'meter') {
+        layerQuantityColumns.linearMeasurement = toFaNumber(layer.billingQuantity, 4);
+      } else {
+        layerQuantityColumns.squareMeasurement = toFaNumber(layer.billingQuantity, 4);
+      }
+      rows.push({
+        groupKey,
+        indexLabel: EMPTY,
+        code: layer.typeCode,
+        description: layer.title,
+        category: product.stairPart !== EMPTY ? product.stairPart : 'لایه',
+        length: '',
+        width: '',
+        ...layerQuantityColumns,
+        rate: formatPrintMoneyCell(layer.billingRate, currency, options),
+        total: formatPrintMoneyCell(layer.billingTotal, currency, options)
+      });
+
+      if (options.accountingDetail) {
+        layer.geometryRows.forEach(geometry => rows.push({
+          groupKey,
+          indexLabel: '',
+          code: '',
+          description: geometry.description,
+          category: 'ابعاد لایه',
+          length: toFaNumber(geometry.lengthMeters, 4),
+          width: toFaNumber(geometry.widthMeters, 4),
+          linearMeasurement: '',
+          squareMeasurement: toFaNumber(geometry.areaSquareMeters, 4),
+          count: toFaNumber(geometry.quantity, 4),
+          rate: '',
+          total: ''
+        }));
+        layer.paidMaterialRows.forEach(material => rows.push({
+          groupKey,
+          indexLabel: '',
+          code: material.code,
+          description: material.description,
+          note: material.note,
+          category: 'سنگ مصرفی',
+          length: material.lengthMeters > 0 ? toFaNumber(material.lengthMeters, 4) : '',
+          width: material.widthMeters > 0 ? toFaNumber(material.widthMeters, 4) : '',
+          linearMeasurement: '',
+          squareMeasurement: toFaNumber(material.areaSquareMeters, 4),
+          count: material.quantity > 0 ? toFaNumber(material.quantity, 4) : '',
+          rate: formatPrintMoneyCell(0, currency, options),
+          total: formatPrintMoneyCell(0, currency, options)
+        }));
+      }
+
+      layer.freshMaterialRows.forEach(material => rows.push({
+        groupKey,
+        indexLabel: '',
+        code: material.code,
+        description: material.description,
+        category: 'سنگ مصرفی',
+        length: options.accountingDetail && material.lengthMeters > 0 ? toFaNumber(material.lengthMeters, 4) : '',
+        width: options.accountingDetail && material.widthMeters > 0 ? toFaNumber(material.widthMeters, 4) : '',
+        linearMeasurement: '',
+        squareMeasurement: toFaNumber(material.areaSquareMeters, 4),
+        count: options.accountingDetail && material.quantity > 0 ? toFaNumber(material.quantity, 4) : '',
+        rate: formatPrintMoneyCell(material.rate, currency, options),
+        total: formatPrintMoneyCell(material.total, currency, options)
+      }));
+      if (layer.freshMandatoryAmount > 0) {
+        rows.push({
+          groupKey,
+          indexLabel: '',
+          code: '',
+          description: 'حکمی سنگ جدید لایه',
+          category: 'حکمی',
+          length: '',
+          width: '',
+          ...emptyMeasurementCells(),
+          rate: `${toFaNumber(layer.freshMandatoryPercentage, 4)}%`,
+          total: formatPrintMoneyCell(layer.freshMandatoryAmount, currency, options)
+        });
+      }
+
+      const aggregatedCuts = new Map<string, NormalizedCut>();
+      product.cuts.filter(isMeaningfulCut).forEach(cut => {
+        const key = `${cut.code || ''}|${cut.type}|${cut.rate}`;
+        const existing = aggregatedCuts.get(key);
+        if (existing) {
+          existing.meters += cut.meters;
+          existing.cost += cut.cost;
+        } else {
+          aggregatedCuts.set(key, { ...cut });
+        }
+      });
+      Array.from(aggregatedCuts.values()).forEach(cut => rows.push({
+        groupKey,
+        indexLabel: '',
+        code: cut.code || '',
+        description: `${cut.type} لایه`,
+        category: 'برش',
+        length: '',
+        width: '',
+        linearMeasurement: toFaNumber(cut.meters, 4),
+        squareMeasurement: '',
+        count: '',
+        rate: formatPrintMoneyCell(cut.rate, currency, options),
+        total: formatPrintMoneyCell(cut.cost, currency, options)
+      }));
+      product.tools.filter(isMeaningfulTool).forEach(tool => rows.push({
+        groupKey,
+        indexLabel: '',
+        code: tool.code || '',
+        description: withSelectedEdges(tool.name, tool.selectedEdgesLabel),
+        category: 'ابزار',
+        length: '',
+        width: '',
+        ...measurementCellsFromLabel(tool.amountLabel),
+        rate: formatPrintRate(tool.rate, currency, tool.rateUnitLabel, options),
+        total: formatPrintMoneyCell(tool.cost, currency, options)
+      }));
+      product.services.filter(isMeaningfulService).forEach(service => rows.push({
+        groupKey,
+        indexLabel: '',
+        code: service.code || '',
+        description: withSelectedEdges(service.name, service.selectedEdgesLabel),
+        category: service.category,
+        length: '',
+        width: '',
+        ...measurementCellsFromLabel(service.amountLabel),
+        rate: formatPrintRate(service.rate, currency, service.rateUnitLabel, options),
+        total: formatPrintMoneyCell(service.cost, currency, options)
+      }));
+      if (layer.supplyNote) {
+        rows.push({
+          groupKey,
+          indexLabel: '',
+          code: '',
+          description: layer.supplyNote,
+          category: 'توضیحات',
+          length: '',
+          width: '',
+          ...emptyMeasurementCells(),
+          rate: '',
+          total: '',
+          renderAsNoteRow: true
+        });
+      }
+      if (showNotes && product.description && product.description !== EMPTY) {
+        rows.push({
+          groupKey,
+          indexLabel: '',
+          code: '',
+          description: product.description,
+          category: 'توضیحات',
+          length: '',
+          width: '',
+          ...emptyMeasurementCells(),
+          rate: '',
+          total: '',
+          renderAsNoteRow: true
+        });
+      }
+      return;
+    }
     const baseAmount = product.isFromRemainingStone
       ? 0
       : product.originalTotalPrice > 0
@@ -1621,7 +2047,8 @@ const buildFlatProductRows = (
       showExplanatoryRows &&
       pricedSourceMaterialIndex >= 0;
     rows.push({
-      indexLabel: toFaNumber(productIndex + 1),
+      groupKey,
+      indexLabel: product.isLayer ? EMPTY : toFaNumber(++topLevelProductIndex),
       code: product.code,
       description: productDescription,
       category: product.stairPart !== EMPTY ? product.stairPart : 'محصول',
@@ -1640,6 +2067,7 @@ const buildFlatProductRows = (
         );
         const presentsMaterialCharge = sourceMaterialIndex === pricedSourceMaterialIndex;
         rows.push({
+          groupKey,
           indexLabel: '',
           code: product.code,
           description: `سنگ مصرفی برای ${sourceMaterial.description || product.name}`,
@@ -1655,6 +2083,7 @@ const buildFlatProductRows = (
     if (product.isMandatory && product.mandatoryPercentage > 0 && product.originalTotalPrice > 0) {
       const mandatoryAmount = product.originalTotalPrice * (product.mandatoryPercentage / 100);
       rows.push({
+        groupKey,
         indexLabel: '',
         code: '',
         description: `حکمی ${toFaNumber(product.mandatoryPercentage)}٪`,
@@ -1669,6 +2098,7 @@ const buildFlatProductRows = (
 
     product.cuts.filter(isMeaningfulCut).forEach((cut) => {
       rows.push({
+        groupKey,
         indexLabel: '',
         code: cut.code || '',
         description: cut.type,
@@ -1685,6 +2115,7 @@ const buildFlatProductRows = (
 
     product.tools.filter(isMeaningfulTool).forEach((tool) => {
       rows.push({
+        groupKey,
         indexLabel: '',
         code: tool.code || '',
         description: withSelectedEdges(tool.name, tool.selectedEdgesLabel),
@@ -1699,6 +2130,7 @@ const buildFlatProductRows = (
 
     product.services.filter(isMeaningfulService).forEach((service) => {
       rows.push({
+        groupKey,
         indexLabel: '',
         code: service.code || '',
         description: withSelectedEdges(service.name, service.selectedEdgesLabel),
@@ -1713,6 +2145,7 @@ const buildFlatProductRows = (
 
     if (showNotes && product.description && product.description !== EMPTY) {
       rows.push({
+        groupKey,
         indexLabel: '',
         code: '',
         description: product.description,
@@ -1744,7 +2177,8 @@ const buildFlatProductRows = (
 
     const serviceQuantityColumns = buildStandaloneServiceQuantityColumns(service.quantity, service.unit);
     rows.push({
-      indexLabel: toFaNumber(products.length + serviceIndex + 1),
+      groupKey: `standalone-service:${service.id}`,
+      indexLabel: toFaNumber(topLevelProductCount + serviceIndex + 1),
       code: service.code,
       description: service.title,
       note: service.description && service.description !== EMPTY ? service.description : undefined,
@@ -1809,6 +2243,7 @@ const renderProductMainRows = (
     hidePrices?: boolean;
     includeRialEquivalent?: boolean;
     displayInRials?: boolean;
+    accountingDetail?: boolean;
     productRowsMode?: 'detailed' | 'summarized';
     showExplanatoryRows?: boolean;
     showTotals?: boolean;
@@ -1837,7 +2272,7 @@ const renderProductMainRows = (
   };
   const visibleColumnCount = Object.values(columns).filter(Boolean).length;
   if (!products.length && !standaloneServices.length) {
-    return `<tr><td colspan="${visibleColumnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
+    return `<tbody><tr><td colspan="${visibleColumnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr></tbody>`;
   }
 
   const renderFormattedAmountCell = (value: string): string =>
@@ -1845,9 +2280,9 @@ const renderProductMainRows = (
       ? value
       : escapeHtml(value || EMPTY);
 
-  return buildFlatProductRows(products, standaloneServices, currency, grandTotal, financials, options)
-    .filter((row) => !(options.hidePrices && (row.className === 'total-row' || row.className === 'discount-row')))
-    .map((row) => {
+  const flatRows = buildFlatProductRows(products, standaloneServices, currency, grandTotal, financials, options)
+    .filter((row) => !(options.hidePrices && (row.className === 'total-row' || row.className === 'discount-row')));
+  const renderRow = (row: FlatProductRow): string => {
     const classAttribute = row.className ? ` class="${row.className}"` : '';
     if (row.className === 'total-row' && columns.total) {
       return `
@@ -1892,7 +2327,21 @@ const renderProductMainRows = (
       </tr>
       ${noteRow}
     `;
-  }).join('');
+  };
+
+  const groups: Array<{ key?: string; rows: FlatProductRow[] }> = [];
+  flatRows.forEach(row => {
+    const key = row.groupKey;
+    const current = groups[groups.length - 1];
+    if (!current || current.key !== key || !key) {
+      groups.push({ key, rows: [row] });
+    } else {
+      current.rows.push(row);
+    }
+  });
+  return groups.map(group =>
+    `<tbody${group.key ? ' class="product-group"' : ''}>${group.rows.map(renderRow).join('')}</tbody>`
+  ).join('');
 };
 
 const renderDeliveryRows = (deliveries: NormalizedDelivery[], options: { hideReceiver?: boolean } = {}): string => {
@@ -2293,9 +2742,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
             ${visibleProductColumnDefinitions.map((column) => `<th>${column.label}</th>`).join('')}
           </tr>
         </thead>
-        <tbody>
-          ${output ? renderCustomerProductRows(output, visibleProductColumnDefinitions) : renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, {
+        ${output ? `<tbody>${renderCustomerProductRows(output, visibleProductColumnDefinitions)}</tbody>` : renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, {
             hidePrices: !showPriceColumns,
+            accountingDetail: isAccountingVariant,
             productRowsMode: customPrint.productRowsMode || (customPrint.preset === 'summarized' ? 'summarized' : 'detailed'),
             showExplanatoryRows: customPrint.showExplanatoryRows,
             showTotals: customPrint.showTotals,
@@ -2303,7 +2752,6 @@ export function renderContractHtml(contract: RenderableContract, options: Render
             columns: productColumns,
             ...priceFormatOptions
           })}
-        </tbody>
       </table>
     </section>` : ''}
 
@@ -2404,6 +2852,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     ${renderYekanFontFaces()}
 
     .customer-output tr { break-inside: avoid; page-break-inside: avoid; }
+    .main-products-table > .product-group { break-inside: avoid; page-break-inside: avoid; }
     .customer-output .section h2 { break-after: avoid; page-break-after: avoid; }
     .customer-output .section:has(> .grid) { break-inside: avoid; page-break-inside: avoid; }
 

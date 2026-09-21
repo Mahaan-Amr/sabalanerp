@@ -10,8 +10,18 @@ import {
   type PeriodEndRepository,
   type PeriodEndResult,
 } from '../accountingPeriodEnd';
+import { recordOperationalReconciliation } from '../accountingOperationalReconciliation';
 
 const now = new Date('2026-09-21T12:00:00.000Z');
+
+test('operational reconciliation rejects materially future-dated evidence before database access', async () => {
+  await assert.rejects(() => recordOperationalReconciliation({} as never, {
+    bookId: 'book-1', fiscalYearId: 'year-1', reconciliationCode: 'TREASURY', sourceSystem: 'TREASURY',
+    sourceSnapshotHash: 'a'.repeat(64), sourceDebitRials: 1n, sourceCreditRials: 1n,
+    ledgerDebitRials: 1n, ledgerCreditRials: 1n, unresolvedDifferences: [], controlPayload: {},
+    reconciledAt: new Date(Date.now() + 10 * 60_000),
+  }), /نمی‌تواند در آینده باشد/);
+});
 
 const createRepository = (): PeriodEndRepository & { results: Map<string, PeriodEndResult>; posts: any[] } => {
   const results = new Map<string, PeriodEndResult>();

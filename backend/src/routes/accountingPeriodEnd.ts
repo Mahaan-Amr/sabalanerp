@@ -185,10 +185,15 @@ router.get('/overview', ...viewAccess, run((req) => listAccountingPeriodEndOverv
 
 router.post('/operational-reconciliations', async (req: WorkspaceRequest, res: Response) => {
   try {
-    const secret = process.env.ACCOUNTING_RECONCILIATION_HMAC_SECRET || '';
-    if (Buffer.byteLength(secret) < 32) throw new Error('کلید امن تطبیق عملیاتی پیکربندی نشده است.');
+    const producerId = String(req.get('X-Accounting-Reconciliation-Producer') || '');
+    const producers = JSON.parse(process.env.ACCOUNTING_RECONCILIATION_PRODUCERS || '[]') as Array<{
+      id: string; secret: string; sourceSystem: string; reconciliationCodes: string[];
+      bookIds?: string[]; legalEntityCodes?: string[];
+    }>;
+    const producer = producers.find((item) => item.id === producerId);
+    if (!producer || Buffer.byteLength(producer.secret || '') < 32) throw new Error('هویت امن تولیدکننده تطبیق عملیاتی پیکربندی نشده است.');
     const signature = String(req.get('X-Accounting-Reconciliation-Signature') || '').toLowerCase();
-    const expected = createHmac('sha256', secret).update(hashAccountingEvidence(req.body)).digest('hex');
+    const expected = createHmac('sha256', producer.secret).update(hashAccountingEvidence(req.body)).digest('hex');
     const suppliedBuffer = Buffer.from(signature, 'hex');
     const expectedBuffer = Buffer.from(expected, 'hex');
     if (!/^[a-f0-9]{64}$/.test(signature) || suppliedBuffer.length !== expectedBuffer.length || !timingSafeEqual(suppliedBuffer, expectedBuffer)) {
@@ -196,8 +201,21 @@ router.post('/operational-reconciliations', async (req: WorkspaceRequest, res: R
     }
     const code = positiveText(req.body.reconciliationCode, 'نوع تطبیق');
     if (!['SUBLEDGERS', 'TREASURY', 'INVENTORY', 'VAT'].includes(code)) throw new Error('نوع تطبیق عملیاتی پشتیبانی نمی‌شود.');
+    const bookId = positiveText(req.body.bookId, 'دفتر حسابداری');
+    const book = await prisma.accountingBook.findUnique({
+      where: { id: bookId },
+      include: { legalEntity: { select: { code: true } } },
+    });
+    const producerOwnsBook = Boolean(book) && (
+      producer.bookIds?.includes(bookId)
+      || producer.legalEntityCodes?.includes(book!.legalEntity.code)
+    );
+    if (positiveText(req.body.sourceSystem, 'سامانه منبع') !== producer.sourceSystem
+      || !producer.reconciliationCodes.includes(code) || !producerOwnsBook) {
+      return res.status(403).json({ success: false, error: 'تولیدکننده برای این منبع، نوع تطبیق یا دفتر مجاز نیست.' });
+    }
     const created = await prisma.$transaction((tx) => recordOperationalReconciliation(tx, {
-      bookId: positiveText(req.body.bookId, 'دفتر حسابداری'), fiscalYearId: positiveText(req.body.fiscalYearId, 'سال مالی'),
+      bookId, fiscalYearId: positiveText(req.body.fiscalYearId, 'سال مالی'),
       periodId: req.body.periodId ? positiveText(req.body.periodId, 'دوره مالی') : undefined,
       reconciliationCode: code as 'SUBLEDGERS' | 'TREASURY' | 'INVENTORY' | 'VAT', sourceSystem: positiveText(req.body.sourceSystem, 'سامانه منبع'),
       sourceSnapshotHash: positiveText(req.body.sourceSnapshotHash, 'اثر انگشت snapshot منبع').toLowerCase(),

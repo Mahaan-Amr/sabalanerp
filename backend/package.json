@@ -128,6 +128,7 @@
     "test:accounting-ledger:db": "tsx --test src/services/__tests__/accountingLedgerPrisma.integration.test.ts",
     "test:accounting-period-end": "tsx --test src/services/__tests__/accountingPeriodEnd.test.ts src/services/__tests__/accountingPeriodClose.test.ts src/services/__tests__/accountingLedgerAdministration.test.ts",
     "test:accounting-period-end:db": "tsx --test src/services/__tests__/accountingPeriodEndPrisma.integration.test.ts src/services/__tests__/accountingLedgerPrisma.integration.test.ts",
+    "accounting:reconciliation:submit": "tsx src/scripts/submit-accounting-reconciliation.ts",
     "test:dispatch-documents:db": "tsx src/services/__tests__/dispatchDocumentsPrismaIntegration.test.ts && tsx src/services/__tests__/dispatchDocumentsIssuanceConcurrency.test.ts",
     "test:statement-adjustments": "tsx src/services/__tests__/dispatchCorrectionAdjustmentPolicy.test.ts && tsx src/services/__tests__/statementAdjustment.test.ts && tsx src/services/__tests__/statementAdjustmentRuntime.test.ts",
     "test:statement-adjustments:db": "tsx src/services/__tests__/statementAdjustmentPrisma.test.ts",

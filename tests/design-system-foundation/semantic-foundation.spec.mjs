@@ -550,6 +550,7 @@ test('the complete Contract Creation wizard uses the shared semantic and accessi
   assert.match(neumorphicPrimitives, /previouslyFocused\?\.focus\(\)/);
   assert.doesNotMatch(wizard, /مراحل ایجاد قرارداد را تکمیل کنید/u);
   assert.match(paymentDialog, /<CentralProductModalShell/);
+  assert.match(paymentDialog, /closeVariant="outline"/);
   assert.match(progress, /<ErpNeumorphicWorkflowProgress/);
   assert.match(navigation, /<ErpNeumorphicWorkflowNavigation/);
   assert.match(erpPrimitives, /aria-current=\{isActive \? 'step' : undefined\}/);

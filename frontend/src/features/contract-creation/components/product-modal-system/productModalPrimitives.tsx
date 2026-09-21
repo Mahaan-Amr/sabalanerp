@@ -338,7 +338,8 @@ export function CentralProductModalShell({
   pendingLabel = 'در حال ذخیره…',
   pending,
   onPrimary,
-  error
+  error,
+  closeVariant = 'ghost'
 }: {
   open: boolean;
   title: string;
@@ -351,6 +352,7 @@ export function CentralProductModalShell({
   pending: boolean;
   onPrimary: () => void;
   error?: string;
+  closeVariant?: 'ghost' | 'outline';
 }) {
   const reducedMotion = useReducedMotion();
   const [portalTarget, setPortalTarget] = React.useState<HTMLElement | null>(null);
@@ -443,7 +445,7 @@ export function CentralProductModalShell({
                 )}
                 <h2 id="central-product-modal-title" className="truncate text-base font-black">{title}</h2>
               </div>
-              <ErpPressable type="button" onClick={onClose} disabled={pending} aria-label="بستن" variant="ghost" className="px-2 text-sm">
+              <ErpPressable type="button" onClick={onClose} disabled={pending} aria-label="بستن" variant={closeVariant} className="px-3 text-sm">
                 بستن
               </ErpPressable>
             </header>

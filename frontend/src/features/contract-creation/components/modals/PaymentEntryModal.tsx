@@ -53,6 +53,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
       title={isEdit ? 'ویرایش پرداخت' : 'افزودن پرداخت'}
       view="main"
       onClose={onClose}
+      closeVariant="outline"
       primaryLabel={nationalCodeConflict ? 'ادامه بدون تغییر اطلاعات مشتری' : 'ذخیره'}
       pending={false}
       onPrimary={nationalCodeConflict && onContinueNationalCodeConflict

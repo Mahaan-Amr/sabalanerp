@@ -8,6 +8,7 @@ import { createPartnerTechnicalSaveService } from '../partnerSales/cases/technic
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { createPartnerTechnicalRecoveryAuthority } from '../partnerSales/authorization/technicalRecovery';
 import { createPartnerTechnicalEvidenceResolver } from '../partnerSales/cases/technicalEvidence';
+import { compilePartnerTechnicalGraph } from '../partnerSales/cases/technicalGraph';
 import { resolveSavedTechnicalConfiguration } from '../partnerSales/inquiries/adapters';
 
 function localDatabaseUrl(): string {
@@ -180,6 +181,58 @@ test('real database policy and private catalog evidence produce a validated safe
       assert.equal(JSON.stringify(inquiryConfiguration.value).includes('12000000'), false);
       assert.equal(JSON.stringify(inquiryConfiguration.value).includes('mandatoryPercentage'), false);
     }
+  });
+});
+
+test('a checkpointed longitudinal Partner row validates against the real local policy on next step', async () => {
+  await fixture(async (tx, actorId, access) => {
+    await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`,
+      password: 'not-a-login', firstName: 'Fixture', lastName: 'Longitudinal evidence' } });
+    await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'ACTIVE',
+      commercialAccount: { create: { id: actorId } } } });
+    const terms = { schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_PRICING',
+      calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
+      mandatoryPercentage: '0', mandatoryEnabled: false, slabCuttingPricingMethod: 'lineBased', sawKerfMeters: '0.003',
+      materialRateScale: '1', currency: 'IRT', rates: { longitudinalCutRateToman: '0', crossCutRateToman: '0',
+        calibrationCutRateToman: '0', verticalCutRateToman: '0', squareMeterCutRateToman: '0' } };
+    const effectiveDate = new Date('2026-01-01T00:00:00.000Z');
+    const integrityHash = await canonicalHash({ accountId: actorId, version: 1, effectiveDate: '2026-01-01', terms,
+      actorId, reason: 'سیاست بدون برش حکمی' });
+    await tx.partnerCommercialTerms.create({ data: { id: `${actorId}-terms`, accountId: actorId, version: 1,
+      effectiveDate, terms, integrityHash, actorId, reason: 'سیاست بدون برش حکمی' } });
+    const product = await tx.product.create({ data: { id: actorId, code: actorId, name: actorId,
+      namePersian: 'سنگ طولی تست فنی', cuttingDimensionCode: 'longitudinal', cuttingDimensionName: 'longitudinal',
+      cuttingDimensionNamePersian: 'طولی', stoneTypeCode: 'technical', stoneTypeName: 'technical',
+      stoneTypeNamePersian: 'کریستال', widthCode: '35', widthValue: '35', widthName: '35',
+      thicknessCode: '3', thicknessValue: '3', thicknessName: '3', mineCode: 'technical', mineName: 'technical',
+      mineNamePersian: 'معدن تست', finishCode: 'technical', finishName: 'technical', finishNamePersian: 'صیقلی',
+      colorCode: 'technical', colorName: 'technical', colorNamePersian: 'سفید', qualityCode: 'technical',
+      qualityName: 'technical', qualityNamePersian: 'درجه یک', basePrice: '10000000', images: [],
+      availableInLongitudinalContracts: true } });
+    const draft = { schemaVersion: 1 as const, inputRevision: 2, rows: [{
+      productRowId: 'product-row:longitudinal-regression', catalogItemId: product.id,
+      catalogSnapshotVersion: product.updatedAt.toISOString(), family: 'longitudinal' as const,
+      retailUnitPrice: { amount: '2000000', currency: 'IRT' as const },
+      configuration: { sourceBatchId: 'source-batch:longitudinal-regression', lengthMeters: '1.25',
+        widthMeters: '0.25', quantity: 1, lastManualField: 'quantity' as const,
+        lastManualDimension: 'length' as const, lengthDisplayUnit: 'm' as const, widthDisplayUnit: 'm' as const,
+        sawKerfEnabled: true, calibrationEnabled: false, calibrationSelection: 'automatic' as const },
+    }] };
+    const dependencies = { actorId, transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: async () => ({ ok: true as const, value: undefined }), resolveEvidence: createPartnerTechnicalEvidenceResolver() };
+    const evidence = await dependencies.resolveEvidence(tx, { actorId, recoveryId: access.recoveryId, draft, previous: null });
+    if (!evidence.ok) throw new Error(`evidence:${evidence.error.code}`);
+    const compiled = compilePartnerTechnicalGraph(draft, evidence.value.context);
+    if (!compiled.ok) throw new Error(`compile:${compiled.error.code}`);
+    const checkpoint = await createPartnerTechnicalRecoveryService(dependencies).checkpoint({ ...access,
+      expectedRecoveryRevision: 0, idempotencyKey: 'longitudinal-checkpoint', draft });
+    if (!checkpoint.ok) throw new Error(checkpoint.error.code);
+    const result = await createPartnerTechnicalSaveService(dependencies).save({ ...access,
+      expectedRecoveryRevision: checkpoint.value.recoveryRevision, idempotencyKey: 'longitudinal-save', draft });
+    if (!result.ok) throw new Error(result.error.code);
+    assert.deepEqual(result.value.rows.map(row => ({ unit: row.unit, quantity: row.quantity })), [
+      { unit: 'meter', quantity: '1.25' },
+    ]);
   });
 });
 

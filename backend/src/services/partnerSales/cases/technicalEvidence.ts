@@ -390,6 +390,12 @@ function createContext(policy: PartnerTechnicalSalesPolicy, publicProducts: Part
   layers: Array<{ catalogItemId: string; catalogSnapshotVersion: string; layerRateToman: string;
     longitudinalCutRateToman: string; crossCutRateToman: string; calibrationCutRateToman: string }>, draft: PartnerTechnicalDraft): PartnerTechnicalGraphContext {
   const amount = (value: string) => parseCanonicalDecimal(value);
+  // The canonical product graph retains the last positive mandatory percentage
+  // even while mandatory cutting is disabled. Older activation policies used
+  // zero to mean "disabled" and therefore need a harmless remembered default;
+  // this does not enable or price a mandatory cut.
+  const rememberedMandatoryPercentage = !policy.mandatoryEnabled && new Prisma.Decimal(policy.mandatoryPercentage).isZero()
+    ? '20' : policy.mandatoryPercentage;
   return { technicalPolicy: policy,
     catalog: { products: publicProducts, operations: publicOperations, sawKerfMeters: policy.sawKerfMeters },
     policy: policy.calculationPolicy,
@@ -400,16 +406,16 @@ function createContext(policy: PartnerTechnicalSalesPolicy, publicProducts: Part
       return { catalogItemId: product.id, catalogSnapshotVersion: product.updatedAt.toISOString(), layerMaterialRateToman: rate,
         preparedRates: preparedRates.map(item => ({ ...item, rateToman: amount(item.rateToman) })),
         longitudinal: { baseRateToman: amount(rate), mandatoryEnabled: policy.mandatoryEnabled,
-          mandatoryPercentage: amount(policy.mandatoryPercentage), rememberedMandatoryPercentage: amount(policy.mandatoryPercentage),
+          mandatoryPercentage: amount(rememberedMandatoryPercentage), rememberedMandatoryPercentage: amount(rememberedMandatoryPercentage),
           longitudinalCutRateToman: amount(policy.rates.longitudinalCutRateToman), calibrationCutRateToman: amount(policy.rates.calibrationCutRateToman) },
         slab: { baseMaterialRateToman: amount(rate), cuttingPricingMethod: policy.slabCuttingPricingMethod,
           longitudinalCutRateToman: amount(policy.rates.longitudinalCutRateToman), crossCutRateToman: amount(policy.rates.crossCutRateToman),
           squareMeterCutRateToman: amount(policy.rates.squareMeterCutRateToman), verticalCutRateToman: amount(policy.rates.verticalCutRateToman) },
         stair: { baseRateToman: amount(rate), mandatoryEnabled: policy.mandatoryEnabled,
-          mandatoryPercentage: amount(policy.mandatoryPercentage), rememberedMandatoryPercentage: amount(policy.mandatoryPercentage),
+          mandatoryPercentage: amount(rememberedMandatoryPercentage), rememberedMandatoryPercentage: amount(rememberedMandatoryPercentage),
           longitudinalCutRateToman: amount(policy.rates.longitudinalCutRateToman), crossCutRateToman: amount(policy.rates.crossCutRateToman),
           calibrationCutRateToman: amount(policy.rates.calibrationCutRateToman) },
-        remainder: { mandatoryPercentage: amount(policy.mandatoryPercentage), rememberedMandatoryPercentage: amount(policy.mandatoryPercentage),
+        remainder: { mandatoryPercentage: amount(rememberedMandatoryPercentage), rememberedMandatoryPercentage: amount(rememberedMandatoryPercentage),
           longitudinalCutRateToman: amount(policy.rates.longitudinalCutRateToman), crossCutRateToman: amount(policy.rates.crossCutRateToman),
           calibrationCutRateToman: amount(policy.rates.calibrationCutRateToman) } };
     }), operations: operations.map(item => ({ ...item, rateToman: amount(item.rateToman) })),

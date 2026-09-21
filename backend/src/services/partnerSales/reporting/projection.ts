@@ -22,7 +22,10 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
     revisions.set(view.owner.revision, { view, comparable: { retail, sabalan, evidenceId: candidate.comparable.evidenceId } });
   }
   const current = revisions.get(data.internal.owner.revision);
-  if (!current || runtime.checkExpectedRevision(data.internal.owner, current.view.owner)) conflict();
+  if (!current) return conflict();
+  if (runtime.checkExpectedRevision(data.internal.owner, current.view.owner)) return conflict();
+  const customerContractNumber = current.view.customerContractNumber;
+  if (!customerContractNumber) return conflict();
   const revision = (ref: PartnerEvent['owner']) => {
     const value = revisions.get(ref.revision);
     if (!value || runtime.checkExpectedRevision(ref, value.view.owner)) return conflict();
@@ -64,7 +67,7 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
   const collectionStatus = balance.startsWith('-') ? 'OVERPAID' : balance === '0' ? 'SETTLED' : collected === '0' ? 'UNPAID' : 'PARTIAL';
   const transaction = (event: PartnerEvent, kind: ReportChartTransaction['kind'], debtDelta = '0', receivableDelta = '0', receiptDelta = '0') => ({
     caseId: data.root.caseId, caseNumber: current!.view.caseNumber,
-    customerContractNumber: current!.view.customerContractNumber, effectiveDate: event.effectiveDate,
+    customerContractNumber, effectiveDate: event.effectiveDate,
     kind, debtDelta, receivableDelta, receiptDelta,
   });
   const chartTransactions: ReportChartTransaction[] = [];

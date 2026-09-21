@@ -74,6 +74,12 @@ test('Partner queries keep discounted retail, wholesale and Accounting balances 
   assert.equal((await service.query({ ...query, search: 'FIXTURE-CUSTOMER-313' })).count, 1);
 });
 
+test('a committed report fails closed when the customer contract identity is missing', async () => {
+  const { service, data } = harness();
+  data.commercial![0].view.customerContractNumber = undefined;
+  await assert.rejects(service.query(query), { code: 'INTEGRITY_CONFLICT' });
+});
+
 test('current reports omit retired zero-obligation lineage without hiding an outstanding retired balance', async () => {
   const { service, data } = harness();
   const current = data.fulfillment.products[0]!;

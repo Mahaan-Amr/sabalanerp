@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { ErpCard, ErpInput, ErpPressable } from '@/components/erp';
-import { moveCatalogHighlight } from './catalogProductRanking';
+import { moveCatalogHighlight, scrollHighlightedCatalogItem } from './catalogProductRanking';
 
 export type ContractCatalogFamily = 'longitudinal' | 'stair' | 'slab' | 'prepared';
 
@@ -35,8 +35,12 @@ export function ContractProductCatalog({ query, onQueryChange, activeType, onTyp
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
   const highlightedRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => setHighlightedIndex(null), [activeType, query]);
-  useEffect(() => highlightedRef.current?.scrollIntoView({ block: 'nearest' }), [highlightedIndex]);
+  useEffect(() => {
+    setHighlightedIndex(null);
+  }, [activeType, query]);
+  useEffect(() => {
+    scrollHighlightedCatalogItem(highlightedRef.current);
+  }, [highlightedIndex]);
 
   const selectHighlighted = () => {
     if (highlightedIndex === null) return;

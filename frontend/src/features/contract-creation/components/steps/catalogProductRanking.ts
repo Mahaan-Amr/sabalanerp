@@ -185,6 +185,12 @@ export const moveCatalogHighlight = (
     : (currentIndex - 1 + resultCount) % resultCount;
 };
 
+export const scrollHighlightedCatalogItem = (target: {
+  scrollIntoView: (options: ScrollIntoViewOptions) => unknown;
+} | null): void => {
+  target?.scrollIntoView({ block: 'nearest' });
+};
+
 export const resolveHighlightedCatalogProduct = (
   products: Product[],
   highlightedIndex: number | null

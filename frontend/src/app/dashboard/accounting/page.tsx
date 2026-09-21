@@ -229,6 +229,11 @@ export default function AccountingDashboardPage() {
         { label: 'به‌روزرسانی', icon: FaSync, onClick: refreshDashboard, tone: 'neutral' },
       ]}
     >
+      <ErpInlineState
+        kind="permission"
+        title={<span>مرجع رسمی حسابداری، دفترکل جدید است.<small className="mt-1 block font-normal">رکوردهای مالی قدیمی فقط نمای عملیاتی و ارجاع سپیدار هستند و مانده رسمی نمی‌سازند.</small></span>}
+        action={{ label: 'ورود به دفترکل و کدینگ', onClick: () => router.push('/dashboard/accounting/ledger'), tone: 'primary' }}
+      />
       {workspaceState.stale && (
         <ErpInlineState
           kind="stale"
@@ -255,6 +260,13 @@ export default function AccountingDashboardPage() {
         columns={5}
         compact
         items={[
+          {
+            title: 'دفترکل و کدینگ',
+            description: 'اسناد قطعی، دفتر روزنامه و تراز آزمایشی رسمی',
+            href: '/dashboard/accounting/ledger',
+            icon: FaBalanceScale,
+            tone: 'primary',
+          },
           {
             title: 'قراردادهای قابل بررسی',
             href: '/dashboard/accounting/contracts?view=reviewable',

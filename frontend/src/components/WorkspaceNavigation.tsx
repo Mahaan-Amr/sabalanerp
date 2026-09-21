@@ -577,6 +577,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
       case WORKSPACES.ACCOUNTING:
         return [
           {
+            name: "دفترکل",
+            namePersian: "دفترکل و کدینگ",
+            href: "/dashboard/accounting/ledger",
+            icon: FaCalculator,
+            show: true,
+          },
+          {
             name: "Accounting Dashboard",
             namePersian: "داشبورد حسابداری",
             href: "/dashboard/accounting",

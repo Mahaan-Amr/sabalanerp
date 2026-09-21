@@ -41,21 +41,38 @@ export const WORKSPACES = {
 
 export type Workspace = typeof WORKSPACES[keyof typeof WORKSPACES];
 
+type WorkspaceAccessDenied = (input: {
+  req: WorkspaceRequest;
+  workspace: Workspace;
+  requiredPermission: WorkspacePermission;
+  effectivePermission: WorkspacePermission | null;
+  reason: 'UNAUTHENTICATED' | 'NO_PERMISSION' | 'INSUFFICIENT_PERMISSION';
+}) => Promise<void>;
+
 /**
  * Middleware to check workspace access
  */
-export const requireWorkspaceAccessWithClient = (prismaClient: Pick<PrismaClient, 'workspacePermission' | 'roleWorkspacePermission'>, workspace: Workspace, requiredPermission: WorkspacePermission = WORKSPACE_PERMISSIONS.VIEW) => {
+export const requireWorkspaceAccessWithClient = (
+  prismaClient: Pick<PrismaClient, 'workspacePermission' | 'roleWorkspacePermission'>,
+  workspace: Workspace,
+  requiredPermission: WorkspacePermission = WORKSPACE_PERMISSIONS.VIEW,
+  onDenied?: WorkspaceAccessDenied,
+) => {
   return async (req: WorkspaceRequest, res: Response, next: NextFunction) => {
     try {
       if (!req.user) {
+        await onDenied?.({ req, workspace, requiredPermission, effectivePermission: null, reason: 'UNAUTHENTICATED' });
         return res.status(401).json({
           success: false,
           error: 'Authentication required'
         });
       }
 
-      // Super admin has access to all workspaces
-      if (req.user.role === 'ADMIN') {
+      // Accounting is deliberately explicit even for technical administrators:
+      // the accounting workspace level is the simple Viewer/Accountant/Manager
+      // profile selected in central access management. Other workspaces retain
+      // their established technical-administrator behavior.
+      if (req.user.role === 'ADMIN' && workspace !== WORKSPACES.ACCOUNTING) {
         req.workspace = workspace;
         req.workspacePermission = WORKSPACE_PERMISSIONS.ADMIN;
         return next();
@@ -91,9 +108,12 @@ export const requireWorkspaceAccessWithClient = (prismaClient: Pick<PrismaClient
       }
 
       if (!effectivePermission) {
+        await onDenied?.({ req, workspace, requiredPermission, effectivePermission: null, reason: 'NO_PERMISSION' });
         return res.status(403).json({
           success: false,
-          error: `Access denied to ${workspace} workspace`
+          error: workspace === WORKSPACES.ACCOUNTING
+            ? 'دسترسی به فضای حسابداری برای این کاربر فعال نیست.'
+            : `Access denied to ${workspace} workspace`
         });
       }
 
@@ -103,9 +123,12 @@ export const requireWorkspaceAccessWithClient = (prismaClient: Pick<PrismaClient
       const requiredLevel = permissionLevels.indexOf(requiredPermission);
 
       if (userLevel < requiredLevel) {
+        await onDenied?.({ req, workspace, requiredPermission, effectivePermission, reason: 'INSUFFICIENT_PERMISSION' });
         return res.status(403).json({
           success: false,
-          error: `Insufficient permissions for ${workspace} workspace. Required: ${requiredPermission}, Current: ${effectivePermission}`
+          error: workspace === WORKSPACES.ACCOUNTING
+            ? 'سطح دسترسی حسابداری برای این عملیات کافی نیست.'
+            : `Insufficient permissions for ${workspace} workspace. Required: ${requiredPermission}, Current: ${effectivePermission}`
         });
       }
 

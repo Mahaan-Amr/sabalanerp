@@ -948,6 +948,22 @@ export const inventoryAPI = {
 
 // Accounting Workspace API
 export const accountingAPI = {
+  getLedgerContext: () => api.get('/accounting/ledger/context'),
+  setupLedger: (data: any) => api.post('/accounting/ledger/setup', data),
+  createLedgerFiscalYear: (data: any) => api.post('/accounting/ledger/fiscal-years', data),
+  setLedgerPeriodStatus: (id: string, data: { status: 'OPEN' | 'SOFT_CLOSED' | 'HARD_CLOSED'; reason: string }) => api.patch(`/accounting/ledger/periods/${id}/status`, data),
+  createLedgerAccount: (data: any) => api.post('/accounting/ledger/accounts', data),
+  createLedgerDimension: (data: any) => api.post('/accounting/ledger/dimensions', data),
+  createLedgerDimensionMember: (dimensionId: string, data: any) => api.post(`/accounting/ledger/dimensions/${dimensionId}/members`, data),
+  createLedgerFinancialAccount: (data: any) => api.post('/accounting/ledger/financial-accounts', data),
+  createLedgerVoucher: (data: any, idempotencyKey: string) => api.post('/accounting/ledger/vouchers', data, { headers: { 'Idempotency-Key': idempotencyKey } }),
+  postLedgerVoucher: (id: string, data: { reason: string; override?: { confirmed: boolean; reason: string } }) => api.post(`/accounting/ledger/vouchers/${id}/post`, data),
+  reverseLedgerVoucher: (id: string, data: { reason: string; idempotencyKey: string; targetFiscalYearId: string; targetPeriodId: string; documentDate: string; override?: { confirmed: boolean; reason: string } }) => api.post(`/accounting/ledger/vouchers/${id}/reverse`, data, { headers: { 'Idempotency-Key': data.idempotencyKey } }),
+  getLedgerJournal: (params: { bookId: string; fiscalYearId: string; periodId?: string }) => api.get('/accounting/ledger/journal', { params }),
+  getLedgerVouchers: (params: { bookId: string; fiscalYearId: string; periodId?: string; status?: 'DRAFT' | 'POSTED' | 'REVERSED' }) => api.get('/accounting/ledger/vouchers', { params }),
+  getLedgerVoucherEvidence: (id: string, reason: string) => api.get(`/accounting/ledger/vouchers/${id}/evidence`, { params: { reason } }),
+  getLedgerTrialBalance: (params: { bookId: string; fiscalYearId: string; periodId?: string }) => api.get('/accounting/ledger/trial-balance', { params }),
+  verifyLedgerAuditChain: () => api.get('/accounting/ledger/audit/verify'),
     getPartnerSabalanPlanCandidates: () => api.get('/partner-accounting/sabalan-plan-candidates'),
     setPartnerSabalanPaymentPlan: (data: any) => api.post('/partner-accounting/sabalan-payment-plan', data),
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),

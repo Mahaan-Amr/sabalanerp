@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import express, { Response } from 'express';
@@ -18,6 +18,7 @@ import {
 import { createAccountingLedgerPrismaRepository } from '../services/accountingLedgerPrismaRepository';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { scanHiringFile, sha256File } from '../services/hrHiringFileStorage';
+import { recordOperationalReconciliation } from '../services/accountingOperationalReconciliation';
 
 const router = express.Router();
 const viewAccess = [protect, requireWorkspaceAccessWithClient(prisma, WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW)];
@@ -181,6 +182,37 @@ const evidenceFromBody = (body: any): PeriodEndEvidence => {
 };
 
 router.get('/overview', ...viewAccess, run((req) => listAccountingPeriodEndOverview(prisma, positiveText(req.query.bookId, 'دفتر حسابداری'))));
+
+router.post('/operational-reconciliations', async (req: WorkspaceRequest, res: Response) => {
+  try {
+    const secret = process.env.ACCOUNTING_RECONCILIATION_HMAC_SECRET || '';
+    if (Buffer.byteLength(secret) < 32) throw new Error('کلید امن تطبیق عملیاتی پیکربندی نشده است.');
+    const signature = String(req.get('X-Accounting-Reconciliation-Signature') || '').toLowerCase();
+    const expected = createHmac('sha256', secret).update(hashAccountingEvidence(req.body)).digest('hex');
+    const suppliedBuffer = Buffer.from(signature, 'hex');
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    if (!/^[a-f0-9]{64}$/.test(signature) || suppliedBuffer.length !== expectedBuffer.length || !timingSafeEqual(suppliedBuffer, expectedBuffer)) {
+      return res.status(401).json({ success: false, error: 'امضای منبع تطبیق عملیاتی معتبر نیست.' });
+    }
+    const code = positiveText(req.body.reconciliationCode, 'نوع تطبیق');
+    if (!['SUBLEDGERS', 'TREASURY', 'INVENTORY', 'VAT'].includes(code)) throw new Error('نوع تطبیق عملیاتی پشتیبانی نمی‌شود.');
+    const created = await prisma.$transaction((tx) => recordOperationalReconciliation(tx, {
+      bookId: positiveText(req.body.bookId, 'دفتر حسابداری'), fiscalYearId: positiveText(req.body.fiscalYearId, 'سال مالی'),
+      periodId: req.body.periodId ? positiveText(req.body.periodId, 'دوره مالی') : undefined,
+      reconciliationCode: code as 'SUBLEDGERS' | 'TREASURY' | 'INVENTORY' | 'VAT', sourceSystem: positiveText(req.body.sourceSystem, 'سامانه منبع'),
+      sourceSnapshotHash: positiveText(req.body.sourceSnapshotHash, 'اثر انگشت snapshot منبع').toLowerCase(),
+      sourceDebitRials: rials(req.body.sourceDebitRials, 'جمع بدهکار منبع'), sourceCreditRials: rials(req.body.sourceCreditRials, 'جمع بستانکار منبع'),
+      ledgerDebitRials: rials(req.body.ledgerDebitRials, 'جمع بدهکار دفترکل'), ledgerCreditRials: rials(req.body.ledgerCreditRials, 'جمع بستانکار دفترکل'),
+      unresolvedDifferences: Array.isArray(req.body.unresolvedDifferences) ? req.body.unresolvedDifferences : [],
+      controlPayload: req.body.controlPayload && typeof req.body.controlPayload === 'object' ? req.body.controlPayload : {},
+      reconciledAt: date(req.body.reconciledAt, 'زمان تطبیق'),
+    }));
+    return res.status(201).json({ success: true, data: serialize(created) });
+  } catch (error) {
+    console.error('Operational Accounting reconciliation rejected:', error);
+    return res.status(400).json({ success: false, error: error instanceof Error && /[\u0600-\u06ff]/.test(error.message) ? error.message : 'ثبت تطبیق عملیاتی انجام نشد.' });
+  }
+});
 
 router.post('/evidence', ...editAccess, run(async (req) => {
   const application = createAccountingPeriodEndApplication(createAccountingPeriodEndPrismaRepository(prisma), { now: () => new Date() });
@@ -606,8 +638,11 @@ router.post('/tax-obligations', ...editAccess, run(async (req) => {
   let basisEvidence: Record<string, string> | null = null;
   if (taxType === 'VAT') {
     const reconciliation = await prisma.accountingOperationalReconciliation.findUniqueOrThrow({ where: { id: positiveText(req.body.reconciliationId, 'تطبیق عملیاتی ارزش افزوده') } });
+    const period = reconciliation.periodId ? await prisma.accountingPostingPeriod.findUniqueOrThrow({ where: { id: reconciliation.periodId } }) : null;
     if (reconciliation.bookId !== bookId || reconciliation.reconciliationCode !== 'VAT'
-      || !Array.isArray(reconciliation.unresolvedDifferences) || reconciliation.unresolvedDifferences.length > 0) throw new Error('تطبیق عملیاتی ارزش افزوده معتبر و بدون اختلاف نیست.');
+      || reconciliation.fiscalYearId !== positiveText(req.body.fiscalYearId, 'سال مالی تکلیف')
+      || !period || ![period.id, period.code].includes(positiveText(req.body.periodIdentity, 'دوره تکلیف'))
+      || !Array.isArray(reconciliation.unresolvedDifferences) || reconciliation.unresolvedDifferences.length > 0) throw new Error('تطبیق عملیاتی ارزش افزوده معتبر، هم‌دوره و بدون اختلاف نیست.');
     const basis = reconciliation.controlPayload as Record<string, unknown>;
     const salesTaxRials = rials(basis.salesTaxRials, 'مالیات فروش');
     const eligiblePurchaseCreditRials = rials(basis.eligiblePurchaseCreditRials || 0, 'اعتبار خرید واجد شرایط');

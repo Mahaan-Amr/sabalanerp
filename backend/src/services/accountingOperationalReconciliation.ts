@@ -21,6 +21,11 @@ type TrustedReconciliationInput = {
 // source-owner adapters compute their own immutable snapshot and pass its trusted hash here.
 export const recordOperationalReconciliation = async (database: Prisma.TransactionClient, input: TrustedReconciliationInput) => {
   if (!/^[a-f0-9]{64}$/.test(input.sourceSnapshotHash)) throw new Error('اثر انگشت snapshot منبع تطبیق معتبر نیست.');
+  const [fiscalYear, period] = await Promise.all([
+    database.accountingFiscalYear.findUniqueOrThrow({ where: { id: input.fiscalYearId } }),
+    input.periodId ? database.accountingPostingPeriod.findUniqueOrThrow({ where: { id: input.periodId } }) : Promise.resolve(null),
+  ]);
+  if (fiscalYear.bookId !== input.bookId || (period && period.fiscalYearId !== fiscalYear.id)) throw new Error('دامنه دفتر، سال و دوره تطبیق عملیاتی سازگار نیست.');
   const evidence = {
     ...input,
     periodId: input.periodId ?? null,

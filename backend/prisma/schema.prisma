@@ -4677,22 +4677,23 @@ model AccountingLegalEntity {
 }
 
 model AccountingBook {
-  id             String                      @id @default(cuid())
-  legalEntityId  String
-  code           String
-  namePersian    String
-  baseCurrency   String                      @default("IRR")
-  isPrimary      Boolean                     @default(true)
-  createdBy      String
-  createdAt      DateTime                    @default(now())
-  updatedAt      DateTime                    @updatedAt
-  legalEntity    AccountingLegalEntity       @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
-  fiscalYears    AccountingFiscalYear[]
-  codeSchemes    AccountingCodeScheme[]
-  accounts       AccountingLedgerAccount[]
-  dimensionTypes AccountingDimensionType[]
-  vouchers       AccountingLedgerVoucher[]
-  sequences      AccountingVoucherSequence[]
+  id                         String                                @id @default(cuid())
+  legalEntityId              String
+  code                       String
+  namePersian                String
+  baseCurrency               String                                @default("IRR")
+  isPrimary                  Boolean                               @default(true)
+  createdBy                  String
+  createdAt                  DateTime                              @default(now())
+  updatedAt                  DateTime                              @updatedAt
+  legalEntity                AccountingLegalEntity                 @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  fiscalYears                AccountingFiscalYear[]
+  codeSchemes                AccountingCodeScheme[]
+  accounts                   AccountingLedgerAccount[]
+  dimensionTypes             AccountingDimensionType[]
+  vouchers                   AccountingLedgerVoucher[]
+  sequences                  AccountingVoucherSequence[]
+  operationalReconciliations AccountingOperationalReconciliation[]
 
   @@unique([legalEntityId, code])
   @@index([legalEntityId, isPrimary])
@@ -4700,20 +4701,21 @@ model AccountingBook {
 }
 
 model AccountingFiscalYear {
-  id           String                      @id @default(cuid())
-  bookId       String
-  code         String
-  titlePersian String
-  startsAt     DateTime
-  endsAt       DateTime
-  status       AccountingFiscalYearStatus  @default(DRAFT)
-  createdBy    String
-  createdAt    DateTime                    @default(now())
-  updatedAt    DateTime                    @updatedAt
-  book         AccountingBook              @relation(fields: [bookId], references: [id], onDelete: Restrict)
-  periods      AccountingPostingPeriod[]
-  vouchers     AccountingLedgerVoucher[]
-  sequences    AccountingVoucherSequence[]
+  id                         String                                @id @default(cuid())
+  bookId                     String
+  code                       String
+  titlePersian               String
+  startsAt                   DateTime
+  endsAt                     DateTime
+  status                     AccountingFiscalYearStatus            @default(DRAFT)
+  createdBy                  String
+  createdAt                  DateTime                              @default(now())
+  updatedAt                  DateTime                              @updatedAt
+  book                       AccountingBook                        @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  periods                    AccountingPostingPeriod[]
+  vouchers                   AccountingLedgerVoucher[]
+  sequences                  AccountingVoucherSequence[]
+  operationalReconciliations AccountingOperationalReconciliation[]
 
   @@unique([bookId, code])
   @@index([bookId, startsAt, endsAt])
@@ -4722,22 +4724,23 @@ model AccountingFiscalYear {
 }
 
 model AccountingPostingPeriod {
-  id           String                        @id @default(cuid())
-  fiscalYearId String
-  code         String
-  titlePersian String
-  sequence     Int
-  startsAt     DateTime
-  endsAt       DateTime
-  status       AccountingPostingPeriodStatus @default(OPEN)
-  isAdjustment Boolean                       @default(false)
-  closedAt     DateTime?
-  closedBy     String?
-  closeReason  String?
-  createdAt    DateTime                      @default(now())
-  updatedAt    DateTime                      @updatedAt
-  fiscalYear   AccountingFiscalYear          @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
-  vouchers     AccountingLedgerVoucher[]
+  id                         String                                @id @default(cuid())
+  fiscalYearId               String
+  code                       String
+  titlePersian               String
+  sequence                   Int
+  startsAt                   DateTime
+  endsAt                     DateTime
+  status                     AccountingPostingPeriodStatus         @default(OPEN)
+  isAdjustment               Boolean                               @default(false)
+  closedAt                   DateTime?
+  closedBy                   String?
+  closeReason                String?
+  createdAt                  DateTime                              @default(now())
+  updatedAt                  DateTime                              @updatedAt
+  fiscalYear                 AccountingFiscalYear                  @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  vouchers                   AccountingLedgerVoucher[]
+  operationalReconciliations AccountingOperationalReconciliation[]
 
   @@unique([fiscalYearId, code])
   @@unique([fiscalYearId, sequence])
@@ -5446,22 +5449,25 @@ model AccountingCloseRunStep {
 }
 
 model AccountingOperationalReconciliation {
-  id                    String   @id @default(cuid())
+  id                    String                   @id @default(cuid())
   bookId                String
   fiscalYearId          String
   periodId              String?
   reconciliationCode    String
   sourceSystem          String
   sourceSnapshotHash    String
-  sourceDebitRials      Decimal  @db.Decimal(20, 0)
-  sourceCreditRials     Decimal  @db.Decimal(20, 0)
-  ledgerDebitRials      Decimal  @db.Decimal(20, 0)
-  ledgerCreditRials     Decimal  @db.Decimal(20, 0)
+  sourceDebitRials      Decimal                  @db.Decimal(20, 0)
+  sourceCreditRials     Decimal                  @db.Decimal(20, 0)
+  ledgerDebitRials      Decimal                  @db.Decimal(20, 0)
+  ledgerCreditRials     Decimal                  @db.Decimal(20, 0)
   unresolvedDifferences Json
   controlPayload        Json
   evidenceHash          String
   reconciledAt          DateTime
-  createdAt             DateTime @default(now())
+  createdAt             DateTime                 @default(now())
+  book                  AccountingBook           @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  fiscalYear            AccountingFiscalYear     @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  period                AccountingPostingPeriod? @relation(fields: [periodId], references: [id], onDelete: Restrict)
 
   @@unique([bookId, fiscalYearId, periodId, reconciliationCode, sourceSystem, sourceSnapshotHash])
   @@index([bookId, fiscalYearId, periodId, reconciliationCode, reconciledAt])

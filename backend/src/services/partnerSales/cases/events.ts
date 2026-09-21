@@ -15,7 +15,7 @@ type EventIdentity = {
 };
 
 type Commitment = EventIdentity & {
-  trigger: 'SIGNED' | 'PRINTED';
+  trigger: 'FINALIZED' | 'SIGNED' | 'PRINTED';
   internalRecordId: string;
   salesCreditOwnerId: string;
   sabalanNetAmount: { amount: string; currency: 'IRR' | 'IRT' };

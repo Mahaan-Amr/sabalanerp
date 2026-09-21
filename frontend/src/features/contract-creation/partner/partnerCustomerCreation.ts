@@ -1,4 +1,5 @@
 import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
+import { normalizeIdentifierDigits } from '@/lib/numberFormat';
 
 export type PartnerCustomerDraft = {
   firstName: string;
@@ -18,7 +19,7 @@ export const emptyPartnerCustomerDraft: PartnerCustomerDraft = {
 
 export function validatePartnerCustomerDraft(draft: PartnerCustomerDraft): boolean {
   return Boolean(draft.firstName.trim() && draft.lastName.trim() && draft.address.trim()
-    && draft.phone.trim().replace(/\D/g, '').length >= 7);
+    && normalizeIdentifierDigits(draft.phone).replace(/\D/g, '').length >= 7);
 }
 
 export async function buildPartnerCustomerCreateCommand(draft: PartnerCustomerDraft, ids: {
@@ -34,8 +35,8 @@ export async function buildPartnerCustomerCreateCommand(draft: PartnerCustomerDr
     customerType: draft.customerType,
     ...(draft.city.trim() ? { city: draft.city.trim() } : {}),
     address: draft.address.trim(),
-    ...(draft.nationalCode.trim() ? { nationalCode: draft.nationalCode.trim() } : {}),
-    phone: draft.phone.trim(),
+    ...(draft.nationalCode.trim() ? { nationalCode: normalizeIdentifierDigits(draft.nationalCode.trim()) } : {}),
+    phone: normalizeIdentifierDigits(draft.phone.trim()),
     reason: 'ثبت مشتری توسط فروشنده همکار',
   };
   return { ...intent, ...ids, payloadHash: await canonicalHash(intent) };

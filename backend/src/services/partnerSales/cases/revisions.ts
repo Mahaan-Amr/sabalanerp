@@ -13,7 +13,8 @@ export type ResolvedCaseDraft = {
   graph: CanonicalProductGraph;
   technicalSnapshot: PartnerTechnicalSavedView;
   rows: Array<{ productRowId: string; configurationHash: string; quantity: string; unit: string;
-    precisionPolicyVersion: string; description: string; wholesaleUnitPriceAmount?: string }>;
+    precisionPolicyVersion: string; description: string; retailUnitPriceAmount: string;
+    wholesaleUnitPriceAmount?: string }>;
   partner: DisplayParty; customer: DisplayParty; legalText: string;
   sabalanPaymentPlan: ReturnType<typeof PaymentPlanSchema.parse>;
   additionalMaterialApprovals?: Array<{ pricingSubjectId: string; configurationHash: string;

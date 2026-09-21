@@ -99,6 +99,7 @@ export async function listSabalanPlanCandidates(database: PrismaClient, actorId:
   for (const item of rows) {
     const source = await database.$transaction(tx => authorizedCommittedCase(tx, actorId, item.id, correlationId, false));
     if (!source.ok) continue;
+    if (!source.value.row.internalRecord) continue;
     result.push({ expected: source.value.rawView.owner, caseNumber: source.value.row.caseNumber,
       internalRecordNumber: source.value.row.internalRecord.recordNumber,
       partnerDisplayName: source.value.rawView.debtor.displayName,

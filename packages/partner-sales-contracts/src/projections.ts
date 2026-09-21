@@ -24,7 +24,7 @@ export const CustomerOutputSnapshotSchema = z.object({
 
 export const PartnerCaseViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('PARTNER_CASE'), owner: RevisionRefSchema,
-  caseNumber: IdSchema, customerContractNumber: IdSchema, state: CaseStateSchema,
+  caseNumber: IdSchema, customerContractNumber: IdSchema.optional(), state: CaseStateSchema,
   pricingState: PartnerPricingStateSchema.default('READY_TO_FINALIZE'),
   customerConfirmationState: PartnerCustomerConfirmationStateSchema.default('NOT_SENT'),
   products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema.optional(), retailUnitPrice: DecimalSchema }).strict()),

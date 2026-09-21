@@ -22,3 +22,13 @@ test('requires the fields needed to continue into partner-sale delivery', () => 
   assert.equal(validatePartnerCustomerDraft({ firstName: 'علی', lastName: 'نمونه', companyName: '',
     customerType: 'Individual', city: '', address: 'نشانی نمونه', nationalCode: '', phone: '09120000000' }), true);
 });
+
+test('accepts Persian and Arabic digits and persists identifiers with Latin digits', async () => {
+  const draft = { firstName: 'فریبا', lastName: 'پورشهید', companyName: '', customerType: 'Individual' as const,
+    city: 'تهران', address: 'معالی‌آباد', nationalCode: '۰۰۱۲۳۴۵۶۷۸', phone: '۰۹۳۹۸۳۷۳۵۷۰' };
+  assert.equal(validatePartnerCustomerDraft(draft), true);
+  const command = await buildPartnerCustomerCreateCommand(draft, { commandId: 'command-fa-digits',
+    correlationId: 'correlation-fa-digits', idempotencyKey: 'idempotency-fa-digits' });
+  assert.equal(command.phone, '09398373570');
+  assert.equal(command.nationalCode, '0012345678');
+});

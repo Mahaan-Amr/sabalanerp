@@ -14,7 +14,7 @@ export const PartnerSaleCaseSchema = z.object({
     recordNumber: IdSchema, owner: RevisionRefSchema, commercialAccountId: IdSchema }).strict(),
   customerContract: z.object({ kind: z.literal('PARTNER_CUSTOMER'), contractId: IdSchema,
     contractNumber: IdSchema, owner: RevisionRefSchema }).strict(),
-  commitment: z.object({ committedAt: InstantSchema, trigger: z.enum(['SIGNED', 'PRINTED']), eventId: IdSchema,
+  commitment: z.object({ committedAt: InstantSchema, trigger: z.enum(['FINALIZED', 'SIGNED', 'PRINTED']), eventId: IdSchema,
     committedRevision: RevisionRefSchema }).strict().optional(),
 }).strict().superRefine((value, context) => {
   const fail = (message: string) => context.addIssue({ code: z.ZodIssueCode.custom, message });

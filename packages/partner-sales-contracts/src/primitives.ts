@@ -1,18 +1,22 @@
 import { z } from 'zod';
 
+const normalizeNumerals = (value: unknown) => typeof value === 'string' ? value
+  .replace(/[\u06F0-\u06F9]/g, digit => String(digit.charCodeAt(0) - 0x06F0))
+  .replace(/[\u0660-\u0669]/g, digit => String(digit.charCodeAt(0) - 0x0660)) : value;
+
 export const PARTNER_CONTRACT_VERSION = '1.10.0' as const;
 export const PARTNER_SCHEMA_VERSION = 1 as const;
 export const IdSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9:_-]*$/);
 export const TextSchema = z.string().trim().min(1).max(4000);
 export const PersianReasonSchema = TextSchema.refine(reason => /[\u0600-\u06ff]/u.test(reason), 'Persian business reason required');
-export const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
+export const DateSchema = z.preprocess(normalizeNumerals, z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).refine(value => {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 });
 export const InstantSchema = z.string().datetime({ precision: 3 });
 // Wire amounts are exact decimal strings, never binary floating-point numbers.
-export const DecimalSchema = z.string().regex(/^(0|[1-9]\d*)(\.\d+)?$/).max(80);
-export const SignedDecimalSchema = z.string().regex(/^-?(0|[1-9]\d*)(\.\d+)?$/).max(81);
+export const DecimalSchema = z.preprocess(normalizeNumerals, z.string().regex(/^(0|[1-9]\d*)(\.\d+)?$/).max(80));
+export const SignedDecimalSchema = z.preprocess(normalizeNumerals, z.string().regex(/^-?(0|[1-9]\d*)(\.\d+)?$/).max(81));
 export const QuantitySchema = DecimalSchema.refine(value => /[1-9]/.test(value));
 export const HashSchema = z.string().regex(/^sha256-v1:[a-f0-9]{64}$/);
 export const RevisionSchema = z.number().int().positive().safe();
@@ -35,7 +39,7 @@ const paymentPlanSchema = (checkSchema: z.ZodTypeAny) => z.object({
     installmentId: IdSchema, dueDate: DateSchema, amount: MoneySchema,
     method: z.enum(['CASH', 'BANK_TRANSFER', 'CHECK', 'CREDIT']),
     subtype: TextSchema.optional(), check: checkSchema.optional(),
-    nationalCode: z.string().regex(/^\d{10}$/).optional(),
+    nationalCode: z.preprocess(normalizeNumerals, z.string().regex(/^\d{10}$/)).optional(),
     notes: TextSchema.optional(),
   }).strict()),
 }).strict().superRefine((plan, context) => {

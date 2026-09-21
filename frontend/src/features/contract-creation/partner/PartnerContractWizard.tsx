@@ -158,7 +158,20 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     }
     // The visible rows own retail intent. A recovered or updated projection
     // must never submit stale hidden prices or approval bindings.
-    void submission.submit({ ...draft.intent, rows: partnerRetailIntentRows(draft.rows) });
+    const deliveryFactsFor = (productRowId: string) => draft.intent.deliveries.flatMap(delivery =>
+      delivery.items.filter(item => item.productRowId === productRowId)
+        .map(item => ({ date: delivery.date, quantity: item.quantity })));
+    const pricingRows = [
+      ...draft.rows.map(row => ({ rowId: `pricing:${row.productRowId}`,
+        configuration: row.inquiryRow.configurationRef,
+        ...(deliveryFactsFor(row.productRowId).length ? { deliveryFacts: deliveryFactsFor(row.productRowId) } : {}) })),
+      ...(draft.materialInquiryRows ?? []).map(row => ({ rowId: `pricing:${row.pricingSubjectId}`,
+        configuration: row.inquiryRow.configurationRef })),
+    ];
+    const initialPricing = result.case ? {} : { pricingRequest: {
+      inquiryId: `partner-case-pricing:${draft.intent.recoveryId}:1`, rows: pricingRows,
+    } };
+    void submission.submit({ ...draft.intent, ...initialPricing, rows: partnerRetailIntentRows(draft.rows) });
   };
   const next = () => {
     if (disabled || stepIndex < 0) return;
@@ -189,7 +202,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
           : !confirmationSent && result.case.customerConfirmationState === 'REJECTED' ? 'danger' : 'info'}>
           مشتری: {confirmationSent ? 'ارسال‌شده، بدون پاسخ' : compactStatus.customer}
         </ErpBadge>
-        {onSendConfirmation && result.case.customerConfirmationState !== 'REJECTED' &&
+        {onSendConfirmation && result.case.state === 'COMMITTED' && result.case.customerConfirmationState !== 'REJECTED' &&
           (customerNotSent ? <ErpButton variant="solid" label="ارسال برای مشتری" onClick={() => {
             setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
               .then(() => setConfirmationSent(true)).catch(() => setError('ارسال پیامک انجام نشد؛ پرونده ذخیره شده و می‌توانید دوباره تلاش کنید.'));
@@ -204,8 +217,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       </ErpCard>}
       {result.phase === 'created' && result.message && <ErpInlineState kind="stale" title={result.message}
         action={{ label: 'تلاش مجدد برای پاک‌سازی بازیابی', onClick: () => void submission.retry() }} />}
-      {unusable.map(row => <ErpInlineState key={row.id} kind="stale" title={`قیمت «${row.inquiryRow.description}» نیاز به استعلام مجدد دارد؛ ورودی‌های پرونده حفظ شده‌اند.`}
-        action={{ label: 'استعلام مجدد', disabled: mutatePending, onClick: () => onReinquire(row.inquiryRow) }} />)}
+      {unusable.length > 0 && <ErpInlineState kind="stale"
+        title={`بسته قیمت این پرونده منقضی شده است؛ هر ${unusable.length.toLocaleString('fa-IR')} ردیف باید دوباره قیمت‌گذاری شود. یک استعلام جانشین برای کل بسته ساخته می‌شود و هیچ قیمت قبلی خودکار منتقل نخواهد شد.`}
+        action={{ label: 'استعلام مجدد کل بسته', disabled: mutatePending,
+          onClick: () => onReinquire(unusable[0].inquiryRow) }} />}
       {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
       {result.phase === 'editing' && result.message && <ErpInlineState kind="error" title={result.message} />}
       {error && <ErpInlineState kind="error" title={error} />}

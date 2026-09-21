@@ -16,6 +16,7 @@ import {
   resolveAuthoritativeSession,
   SESSION_COOKIE,
 } from "./services/identitySessionService";
+import { normalizeStructuredNumeralsMiddleware } from './middleware/normalizeStructuredNumerals';
 
 // Import routes
 import authRoutes from "./routes/auth";
@@ -152,6 +153,7 @@ app.use(
 app.use(morgan("combined"));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(normalizeStructuredNumeralsMiddleware);
 app.use(recoveryWriteGuard);
 
 // Routes

@@ -35,7 +35,7 @@ export function responseDecisions(rows: readonly { rowId: string; revision: numb
       const amount = exactAmount(draft.amount);
       if (amount === null) errors[row.rowId] = 'قیمت هر واحد را با رقم و بدون جداکننده بنویسید.';
       else decisions.push({ rowId: row.rowId, expectedRevision: row.revision, outcome: 'APPROVED',
-        wholesaleUnitPrice: { amount, currency: row.currency }, ...(note ? { note } : {}) });
+        wholesaleUnitPrice: { amount, currency: row.currency } });
     }
   }
   if (Object.keys(errors).length) return { ok: false, errors };

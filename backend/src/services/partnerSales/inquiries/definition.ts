@@ -5,14 +5,15 @@ import {
 
 export type ConfigurationRef = { recoveryId: string; recoveryRevision: number; productRowId: string };
 export type InquiryDefinition = { version: 1; configurationRef: ConfigurationRef; identity: InquiryIdentity;
-  description: string; configuration: Array<{ label: string; value: string }>; sellerNote?: string; predecessorReason?: string };
+  description: string; configuration: Array<{ label: string; value: string }>;
+  deliveryFacts?: Array<{ date: string; quantity: string }>; sellerNote?: string; predecessorReason?: string };
 
 /** Strict private persistence decoder. Unknown fields never flow into either
  * public inquiry projection. */
 export function parseInquiryDefinition(value: unknown): InquiryDefinition | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const row = value as Record<string, unknown>;
-  if (Object.keys(row).some(key => !['version', 'configurationRef', 'identity', 'description', 'configuration', 'sellerNote', 'predecessorReason'].includes(key)) ||
+  if (Object.keys(row).some(key => !['version', 'configurationRef', 'identity', 'description', 'configuration', 'deliveryFacts', 'sellerNote', 'predecessorReason'].includes(key)) ||
       row.version !== 1 || !Array.isArray(row.configuration)) return undefined;
   const reference = PartnerConfigurationRefSchema.safeParse(row.configurationRef);
   const identity = InquiryIdentitySchema.safeParse(row.identity);
@@ -27,8 +28,19 @@ export function parseInquiryDefinition(value: unknown): InquiryDefinition | unde
   }
   const reason = row.predecessorReason === undefined ? undefined : PersianReasonSchema.safeParse(row.predecessorReason);
   const sellerNote = row.sellerNote === undefined ? undefined : TextSchema.safeParse(row.sellerNote);
-  if (!reference.success || !identity.success || !description.success || (sellerNote && !sellerNote.success) || (reason && !reason.success)) return undefined;
+  const deliveryFacts = row.deliveryFacts === undefined ? undefined : Array.isArray(row.deliveryFacts)
+    ? row.deliveryFacts.map(fact => {
+      if (!fact || typeof fact !== 'object' || Array.isArray(fact) ||
+          Object.keys(fact).some(key => !['date', 'quantity'].includes(key))) return null;
+      const value = fact as Record<string, unknown>;
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(value.date)) ? String(value.date) : null;
+      const quantity = /^(0|[1-9]\d*)(\.\d+)?$/.test(String(value.quantity)) ? String(value.quantity) : null;
+      return date && quantity ? { date, quantity } : null;
+    }) : null;
+  if (!reference.success || !identity.success || !description.success || (sellerNote && !sellerNote.success) || (reason && !reason.success) ||
+      deliveryFacts === null || deliveryFacts?.some(fact => fact === null)) return undefined;
   return { version: 1, configurationRef: reference.data, identity: identity.data,
     description: description.data, configuration, ...(sellerNote?.success ? { sellerNote: sellerNote.data } : {}),
+    ...(deliveryFacts?.length ? { deliveryFacts: deliveryFacts as Array<{ date: string; quantity: string }> } : {}),
     ...(reason?.success ? { predecessorReason: reason.data } : {}) };
 }

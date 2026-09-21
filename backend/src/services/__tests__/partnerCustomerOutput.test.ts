@@ -24,7 +24,7 @@ function source(): ConfirmationSource {
   const { outputHash, seller, ...retail } = fixture.customer;
   return {
     owner: fixture.case.head, contractNumber: retail.contractNumber,
-    normalizedRecipient: '+989120000001', state: 'DRAFT', retail,
+    normalizedRecipient: '+989120000001', state: 'COMMITTED', retail,
     business: { tradeName: 'سنگ آفتاب', legalName: 'شرکت آفتاب', businessPhone: '02111111111', businessAddress: 'نشانی تجاری' },
   };
 }
@@ -76,7 +76,7 @@ function confirmationFixture() {
           markCustomerApproved: async (_snapshot, verifiedAt) => {
             assert.ok(session);
             session.verifiedAt = verifiedAt;
-            current.state = 'CUSTOMER_APPROVED';
+            current.state = 'COMMITTED';
             approvals++;
           },
         });

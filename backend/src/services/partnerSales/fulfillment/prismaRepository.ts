@@ -11,7 +11,7 @@ import { buildPartnerPhysicalLineage, canonicalPartnerQuantity } from './lineage
 import { capturePartnerContractedQuantities, readPartnerShipmentQuantityProjection } from './quantityStore';
 import type {
   PartnerFulfillmentCommandReceipt, PartnerFulfillmentCommandScope, PartnerFulfillmentRepository,
-  PartnerFulfillmentSource, PartnerPhysicalLineage,
+  PartnerFulfillmentSource, PartnerPhysicalLineage, PartnerQuantityDependency,
 } from './repository';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -158,10 +158,11 @@ export function createPrismaPartnerFulfillmentRepository(input: {
           readQuantityDependencies: async expected => {
             const caseRow = await tx.partnerSaleCase.findUnique({ where: { id: expected.caseId },
               select: { internalRecordId: true } });
-            if (!caseRow) return [];
+            if (!caseRow?.internalRecordId) return [];
+            const internalRecordId = caseRow.internalRecordId;
             const projection = await readPartnerShipmentQuantityProjection(tx, expected.caseId);
-            return projection.rows.map(row => ({ sourceKind: 'PARTNER_CASE' as const, owner: expected,
-              internalRecordId: caseRow.internalRecordId, productRowId: row.productRowId, unit: row.unit,
+            return projection.rows.map((row): PartnerQuantityDependency => ({ sourceKind: 'PARTNER_CASE', owner: expected,
+              internalRecordId, productRowId: row.productRowId, unit: row.unit,
               contracted: row.quantities?.contracted ?? '', finalizedReserved: row.quantities?.finalizedReserved ?? '',
               physicallyDispatched: row.quantities?.physicallyDispatched ?? '', health: row.health,
               evidenceIds: row.sourceEvidenceIds,

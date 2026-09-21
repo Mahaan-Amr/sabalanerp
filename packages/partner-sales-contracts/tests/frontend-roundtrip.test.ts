@@ -17,7 +17,11 @@ test('Partner constructs inquiry and Case submissions solely from safe query/dra
     rows: [{ rowId: 'new-inquiry-row', configuration: fixture.configurationDraft, sellerNote: 'برای نمای بیرونی ساختمان',
       dimensions: { lengthMeters: '2.4', widthMeters: '0.4', thicknessCentimeters: '2' } }] };
   assert.equal(PartnerCommandSchema.safeParse(inquiry).success, true);
-  assert.equal(PartnerCommandSchema.safeParse({ ...inquiry, rows: [{ ...inquiry.rows[0], dimensions: { lengthMeters: '۲.۴' } }] }).success, false);
+  const normalizedInquiry = PartnerCommandSchema.safeParse({ ...inquiry, rows: [{ ...inquiry.rows[0], dimensions: { lengthMeters: '۲.۴' } }] });
+  assert.equal(normalizedInquiry.success, true);
+  if (normalizedInquiry.success && normalizedInquiry.data.type === 'INQUIRY_SUBMIT') {
+    assert.equal(normalizedInquiry.data.rows[0].dimensions?.lengthMeters, '2.4');
+  }
   assert.equal(PartnerCommandSchema.safeParse({ ...inquiry, rows: [{ ...inquiry.rows[0], sellerNote: '' }] }).success, false);
   const successor = { ...inquiry, rows: [{ ...inquiry.rows[0], predecessor: { rowId: binding.rowId, revision: binding.revision, reason: 'درخواست قیمت جدید' } }] };
   assert.equal(PartnerCommandSchema.safeParse(successor).success, true);

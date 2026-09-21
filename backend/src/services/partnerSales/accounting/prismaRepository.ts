@@ -165,11 +165,12 @@ export function createPrismaPartnerAccountingRepository(input: {
             const purchases: PartnerAccountSnapshot['purchases'] = [];
             const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
             for (const row of cases) {
+              if (!row.internalRecordId) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
               if (!await readCurrentPartnerCaseViews(tx, row.id)) {
                 return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
               }
               const view = SabalanInternalRecordViewSchema.safeParse(object(row.head.internalProjection)?.accounting);
-              const events = readPersistedPartnerEvents(row, row.events);
+              const events = readPersistedPartnerEvents({ ...row, internalRecordId: row.internalRecordId }, row.events);
               const commitmentRow = row.events.find(event => event.type === 'CASE_COMMITTED');
               const commitment = PartnerEventSchema.safeParse(object(commitmentRow?.evidence)?.publicEvent);
               if (!view.success || !commitment.success || commitment.data.type !== 'CASE_COMMITTED' || !commitmentRow ||

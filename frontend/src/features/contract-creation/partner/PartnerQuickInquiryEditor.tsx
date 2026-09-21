@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { PartnerTechnicalDraft, PartnerTechnicalFamily, PartnerTechnicalProduct } from '@sabalanerp/partner-sales-contracts';
 import { ErpBadge, ErpButton, ErpCard, ErpCombobox, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpSelect } from '@/components/erp';
 import { addPartnerQuickInquiryProduct, removePartnerTechnicalProduct } from './partnerTechnicalDraftAdapter';
+import { partnerSelectableFamilies } from './partnerPricingUnit';
 
 export type PartnerInquiryDimensions = {
   lengthMeters?: string;
@@ -49,7 +50,7 @@ export function PartnerQuickInquiryEditor({ draft, products, dimensions, onDimen
       <div className="grid gap-4 sm:grid-cols-2">
         <ErpField label="خانواده محصول" required><ErpSelect value={family}
           onChange={event => { setFamily(event.target.value as PartnerTechnicalFamily); setProductId(''); }}>
-          {(Object.keys(labels) as PartnerTechnicalFamily[]).map(value => <option key={value} value={value}>{labels[value]}</option>)}
+          {partnerSelectableFamilies.map(value => <option key={value} value={value}>{labels[value]}</option>)}
         </ErpSelect></ErpField>
         <ErpCombobox label="سنگ" value={selectedId} onChange={setProductId}
           options={available.map(product => ({ value: product.catalogItemId,

@@ -9314,15 +9314,25 @@ model PartnerCommandOutcome {
 model PartnerInquiry {
   id          String                     @id @default(cuid())
   profileId   String
+  caseId      String?
+  caseRevision Int?
   revision    Int                        @default(1)
   submittedAt DateTime?                  @db.Timestamptz(3)
+  pricingReadyAt DateTime?               @db.Timestamptz(3)
+  pricingExpiresAt DateTime?             @db.Timestamptz(3)
   createdAt   DateTime                   @default(now()) @db.Timestamptz(3)
   profile     PartnerProfile             @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  case        PartnerSaleCase?            @relation(fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  caseRevisionOwner PartnerCaseRevision?   @relation(fields: [caseId, caseRevision], references: [caseId, revision], onDelete: Restrict, onUpdate: NoAction)
   assignments PartnerInquiryAssignment[]
   rows        PartnerInquiryRow[]
   events      PartnerInquiryEvent[]
 
+  @@unique([caseId, caseRevision], map: "partner_inquiries_case_revision_key")
+
   @@index([profileId, createdAt])
+  @@index([caseId, createdAt])
+  @@index([caseId, caseRevision, createdAt])
   @@map("partner_inquiries")
 }
 
@@ -9446,8 +9456,8 @@ model PartnerSaleCase {
   caseNumber          String                          @unique
   profileId           String
   customerId          String
-  internalRecordId    String                          @unique
-  customerContractId  String                          @unique
+  internalRecordId    String?                         @unique
+  customerContractId  String?                         @unique
   headRevision        Int
   integrityHash       String
   state               PartnerCaseState                @default(DRAFT)
@@ -9463,8 +9473,8 @@ model PartnerSaleCase {
   createdAt           DateTime                        @default(now()) @db.Timestamptz(3)
   profile             PartnerProfile                  @relation(fields: [profileId], references: [id], onDelete: Restrict)
   customer            CrmCustomer                     @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  internalRecord      SabalanToPartnerSaleRecord      @relation("PartnerInternalLink", fields: [internalRecordId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  customerContract    SalesContract                   @relation("PartnerCustomerLink", fields: [customerContractId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  internalRecord      SabalanToPartnerSaleRecord?     @relation("PartnerInternalLink", fields: [internalRecordId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customerContract    SalesContract?                  @relation("PartnerCustomerLink", fields: [customerContractId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   internalOwner       SabalanToPartnerSaleRecord?     @relation("PartnerInternalOwner")
   customerOwner       SalesContract?                  @relation("PartnerCustomerOwner")
   head                PartnerCaseRevision             @relation("PartnerCaseHead", fields: [id, headRevision], references: [caseId, revision], onDelete: NoAction, onUpdate: NoAction)
@@ -9477,6 +9487,7 @@ model PartnerSaleCase {
   corrections         PartnerCorrectionOpportunity[]
   fulfillmentLineages PartnerFulfillmentLineage[]
   loadings            LogisticsLoading[]
+  pricingInquiries    PartnerInquiry[]
 
   @@unique([id, customerId])
   @@index([profileId, state])
@@ -9553,6 +9564,7 @@ model PartnerCaseRevision {
   allocationRevisions     LogisticsAllocationRevision[]
   allocationRevisionLines LogisticsAllocationRevisionLine[]
   allocationPricing       PartnerAllocationRevisionPricing[]
+  pricingInquiries        PartnerInquiry[]
 
   @@id([caseId, revision])
   @@unique([caseId, revision, integrityHash], map: "partner_revision_exact_shipment_owner")

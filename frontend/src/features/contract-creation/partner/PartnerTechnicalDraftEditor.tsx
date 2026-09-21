@@ -19,6 +19,7 @@ import { addPartnerTechnicalDependent, addPartnerTechnicalProduct, commitPartner
   confirmPartnerContractConfiguration, retainPartnerTechnicalFieldText } from './partnerTechnicalDraftAdapter';
 import { setPartnerTechnicalRetailUnitPrice } from './partnerTechnicalDraftAdapter';
 import { TechnicalProductConfiguration } from './TechnicalProductConfiguration';
+import { partnerRetailPriceUnitLabel, partnerSelectableFamilies } from './partnerPricingUnit';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
 const nextDraft = (draft: PartnerTechnicalDraft, rows: PartnerTechnicalDraft['rows']) => PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1, rows });
@@ -68,7 +69,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
     <ErpCard className="space-y-4 p-4">
       <h2 className="font-bold">افزودن محصول</h2>
       <div className="grid gap-4 sm:grid-cols-2"><ErpField label="خانواده محصول" required><ErpSelect value={family} onChange={event => { setFamily(event.target.value as PartnerTechnicalFamily); setProductId(''); }}>
-        {(Object.keys(labels) as PartnerTechnicalFamily[]).map(value => <option key={value} value={value}>{labels[value]}</option>)}</ErpSelect></ErpField>
+        {partnerSelectableFamilies.map(value => <option key={value} value={value}>{labels[value]}</option>)}</ErpSelect></ErpField>
         <ErpCombobox label="محصول فنی" value={selectedId} onChange={setProductId}
           options={available.map(product => ({ value: product.catalogItemId, label: product.name }))} /></div>
       <ErpButton label="افزودن به فروش" disabled={!selectedId} onClick={add} />
@@ -113,11 +114,12 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
         {!['prepared', 'volumetric'].includes(row.family) && calculation?.ok && <OperationsEditor draft={draft} row={row as Extract<typeof row, { family: 'longitudinal' | 'slab' | 'stair' }>}
           calculation={calculation.result as unknown as Record<string, unknown>} catalog={operations} onChange={onChange} />}
         {calculation && !calculation.ok && <ErpInlineState kind="stale" title={`مشخصات این ردیف کامل نیست. ${calculation.conflicts[0]?.message ?? ''}`} />}
-        <div className="max-w-sm"><ErpField label="قیمت فروش به مشتری (فی واحد، تومان)" required
-          hint="پاسخ استعلام این مبلغ را بازنویسی نمی‌کند."><ErpRialInput dir="ltr"
+        {row.family !== 'volumetric' && <div className="max-w-sm"><ErpField label={`قیمت فروش به مشتری — ${partnerRetailPriceUnitLabel({ family: row.family,
+          ...(row.family === 'stair' ? { part: row.configuration.part } : {}) })}`} required
+          hint="فقط نرخ سنگ را وارد کنید؛ برش، چسب و سایر هزینه‌ها توسط سیستم محاسبه می‌شوند."><ErpRialInput dir="ltr"
             value={row.retailUnitPrice?.amount ?? ''}
             onValueChange={amount => onChange(setPartnerTechnicalRetailUnitPrice(draft, row.productRowId, amount))} />
-        </ErpField></div>
+        </ErpField></div>}
         {(draft.contractConfigurationRequiredProductRowIds ?? []).includes(row.productRowId) && <ErpCheckbox
           checked={(draft.contractConfiguredProductRowIds ?? []).includes(row.productRowId)}
           label="مشخصات واقعی قرارداد تأیید شد"

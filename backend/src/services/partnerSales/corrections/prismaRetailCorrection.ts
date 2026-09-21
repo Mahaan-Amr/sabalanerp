@@ -149,6 +149,7 @@ async function stageNormalized(tx: Tx, before: RetailCorrectionRecord, after: Re
     if (changed.count !== 1) throw new Rollback({ ok: false, error: partnerError('ROW_STALE') });
     const caseRow = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: after.caseId },
       select: { customerContractId: true, stateRevision: true } });
+    if (!caseRow.customerContractId) throw new Rollback({ ok: false, error: partnerError('INTEGRITY_CONFLICT') });
     await tx.salesContract.update({ where: { id: caseRow.customerContractId }, data: {
       partnerRevision: successor.owner.revision, partnerIntegrityHash: successor.owner.integrityHash,
       totalAmount: customer.data.totals.payable, contractData: json(customer.data) } });

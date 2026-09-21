@@ -34,6 +34,7 @@ export const PartnerCustomerOutputRequestSchema = z.object({
 }).strict();
 
 export const PartnerCaseFinalizeRequestSchema = z.object({
+  operationId: IdSchema,
   expected: RevisionRefSchema,
   expectedState: z.enum(['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED']),
   lossAccepted: z.boolean(),
@@ -87,6 +88,7 @@ export type PartnerWizardRecoverySnapshot = z.infer<typeof PartnerWizardRecovery
 export const PartnerApprovalMatchRequestSchema = z.object({
   schemaVersion: z.literal(1), recoveryId: IdSchema,
   recoveryRevision: z.number().int().positive().safe(),
+  caseId: IdSchema.optional(),
 }).strict();
 export const PartnerApprovalMatchSetSchema = z.object({
   schemaVersion: z.literal(1), recoveryId: IdSchema,

@@ -548,9 +548,9 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     }).catch(() => setError('بازیابی استعلام ذخیره‌شده انجام نشد.')).finally(() => { inquiryHydrationFlight.current = false; });
   }, [context, contractDate, customerId, draftAccess, mode, persistRuntime, projectId, recoveryRevision, runtime, searchParams]);
 
-  const readApprovalMatches = async (saved: PartnerTechnicalSaveReceipt) => {
+  const readApprovalMatches = async (saved: PartnerTechnicalSaveReceipt, caseId?: string) => {
     const response = await api.post('/partner/cases/approval-matches', { schemaVersion: 1,
-      recoveryId: saved.recoveryId, recoveryRevision: saved.recoveryRevision });
+      recoveryId: saved.recoveryId, recoveryRevision: saved.recoveryRevision, ...(caseId ? { caseId } : {}) });
     const parsed = PartnerApprovalMatchSetSchema.safeParse((response.data as { data?: unknown })?.data);
     if (!parsed.success || parsed.data.recoveryId !== saved.recoveryId ||
         parsed.data.recoveryRevision !== saved.recoveryRevision) throw new Error('Invalid approval matches');
@@ -573,7 +573,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       setRecoveryRevision(saved.value.recoveryRevision);
       const subjects = saved.value.pricingSubjects ?? saved.value.rows.map(row => ({ configurationRef: row.configurationRef,
         role: 'PRIMARY' as const }));
-      const matches = mode === 'sale' ? await readApprovalMatches(saved.value) : null;
+      const matches = mode === 'sale' && !skipInquiry ? await readApprovalMatches(saved.value) : null;
       const missing = new Set(matches?.missingPricingSubjectIds ?? subjects.map(row => row.configurationRef.productRowId));
       const availableRows: PartnerConfiguredInquiryRows = subjects.filter(row => missing.has(row.configurationRef.productRowId)).map(row => ({
         rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: row.configurationRef,
@@ -584,14 +584,14 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         { rowId: row.rowId, configuration: row.configurationRef });
       const allConfiguredRows = subjects.map(subject => configuredByProductRowId.get(subject.configurationRef.productRowId)!)
         .filter(Boolean);
-      if (skipInquiry && mode === 'sale' && matches) {
+      if (skipInquiry && mode === 'sale') {
         const inquiryId = `${saved.value.recoveryId}-unpriced`;
         const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
-          configuredRows: allConfiguredRows, knownInquiryRows: matches.rows, customerId, contractDate, projectId };
+          configuredRows: allConfiguredRows, knownInquiryRows: [], customerId, contractDate, projectId };
         persistRuntime(value);
         setInitialInquiryOpen(false);
         freshInquiryRef.current = false;
-        await enterWizard({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: matches.rows }, value);
+        await enterWizard({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: [] }, value);
         return;
       }
       if (!availableRows.length && matches?.rows.length) {
@@ -681,8 +681,9 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (!validated.ok) { setError(validated.error.message); return; }
     let inquiryRows: readonly PartnerInquiryRow[] = inquiry.rows;
     try {
-      const matches = await readApprovalMatches(refreshed.saved);
-      inquiryRows = matches.rows;
+      const caseId = editingCase?.owner.caseId;
+      const matches = caseId ? await readApprovalMatches(refreshed.saved, caseId) : null;
+      inquiryRows = matches?.rows ?? inquiry.rows;
     } catch { /* The exact inquiry view remains a safe fallback for older records. */ }
     const selectedCustomerId = currentRuntime.customerId || customerId || context.customers[0]?.id || '';
     const customer = context.customers.find(item => item.id === selectedCustomerId);
@@ -799,7 +800,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           cases.data.cases[0].view.owner.caseId !== caseId ||
           recoveredWizard.data.intent.recoveryId !== draftAccess.recoveryId) throw new Error('Invalid editable Case recovery');
       const savedReceipt: PartnerTechnicalSaveReceipt = { ...savedResult.value, replayed: true };
-      const matches = await readApprovalMatches(savedReceipt);
+      const matches = await readApprovalMatches(savedReceipt, caseId);
       const inquiryId = matches.rows[0]?.approvedRowBinding?.inquiryId ?? `${draftAccess.recoveryId}-edit`;
       const configuredRows: PartnerConfiguredInquiryRows = (savedResult.value.pricingSubjects ?? savedResult.value.rows.map(row => ({
         configurationRef: row.configurationRef, role: 'PRIMARY' as const,
@@ -909,7 +910,9 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (!wizardRecoveryId || !runtime) return;
     let cancelled = false;
     const refresh = async () => {
-      const result = await readApprovalMatches(runtime.saved);
+      const activeCaseId = submission?.getSnapshot().case?.owner.caseId;
+      if (!activeCaseId) return;
+      const result = await readApprovalMatches(runtime.saved, activeCaseId);
       if (cancelled) return;
       setWizard(current => {
         if (!current) return current;
@@ -928,20 +931,32 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     void refresh().catch(() => undefined);
     const timer = window.setInterval(() => void refresh().catch(() => undefined), 5_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [runtime, wizardRecoveryId]);
+  }, [runtime, submission, wizardRecoveryId]);
 
-  const reinquireFromWizard = async (row: PartnerInquiryRow) => {
-    if (!runtime) return;
+  const reinquireFromWizard = async (_row: PartnerInquiryRow) => {
+    if (!runtime || !wizard) return;
     setError(null);
     try {
-      const nextRowId = `partner-inquiry-row-${crypto.randomUUID()}`;
-      const rows = [{ rowId: nextRowId, configuration: row.configurationRef,
-        predecessor: { rowId: row.rowId, revision: row.revision } }];
-      const intent = { schemaVersion: 1 as const, type: 'INQUIRY_SUBMIT' as const,
-        partnerSellerId: runtime.actorId, rows };
+      const activeOwner = submission?.getSnapshot().case?.owner;
+      if (!activeOwner) throw new Error('Numbered Case required');
+      const sourceRows = [...wizard.rows.map(item => item.inquiryRow),
+        ...(wizard.materialInquiryRows ?? []).map(item => item.inquiryRow)];
+      const distinct = new Map(sourceRows.map(item => [item.configurationRef.productRowId, item]));
+      const rows = Array.from(distinct.values()).map(item => {
+        const deliveryFacts = wizard.intent.deliveries.flatMap(delivery => delivery.items
+          .filter(deliveryItem => deliveryItem.productRowId === item.configurationRef.productRowId)
+          .map(deliveryItem => ({ date: delivery.date, quantity: deliveryItem.quantity })));
+        return { rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: item.configurationRef,
+          ...(deliveryFacts.length ? { deliveryFacts } : {}),
+          predecessor: { rowId: item.rowId, revision: item.revision } };
+      });
+      const scopedInquiryId = `partner-case-pricing:${activeOwner.caseId}:1`;
+      const intent = { schemaVersion: 1 as const, type: 'CASE_PRICING_SUBMIT' as const,
+        caseId: activeOwner.caseId, expected: activeOwner, inquiryId: scopedInquiryId, rows };
       const payloadHash = await canonicalHash(intent);
       const command = PartnerCommandSchema.parse({ ...intent, commandId: payloadHash, correlationId: payloadHash,
-        idempotency: { actorId: runtime.actorId, operation: 'INQUIRY_SUBMIT', targetId: runtime.inquiryId,
+        idempotency: { actorId: runtime.actorId, operation: intent.type,
+          targetId: activeOwner.caseId,
           key: payloadHash, payloadHash } });
       const result = await inquiryPorts.commands.execute(command);
       if (!result.ok) setError(result.error.message);
@@ -1214,41 +1229,15 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
   if (mode === 'inquiry') return <section dir="rtl" className="mx-auto min-w-0 max-w-4xl space-y-5">
-    <h1 className="text-2xl font-bold">استعلام قیمت جدید</h1>
-    <ErpCard className="space-y-4 p-4 sm:p-6">
-      <PartnerQuickInquiryEditor draft={technicalDraft} products={catalog} dimensions={quickDimensions}
-        onDimensionsChange={setQuickDimensions} onChange={setTechnicalDraft} />
-      <ErpField label="یادداشت (اختیاری)"><ErpTextarea value={inquiryNote} maxLength={2000}
-        onChange={event => setInquiryNote(event.target.value)} /></ErpField>
-      <ErpButton label="ارسال همه ردیف‌ها" disabled={!technicalActionReady}
-        onClick={() => void startInquiry(context)} />
-    </ErpCard>
+    <h1 className="text-2xl font-bold">استعلام‌های قیمت</h1>
+    <ErpInlineState kind="empty" title="استعلام جدید فقط از داخل پرونده شماره‌دار فروش همکار ایجاد می‌شود. برای حفظ مشتری، پروژه، نسخه محصول و تاریخچه قیمت‌گذاری، ابتدا ایجاد قرارداد را شروع کنید."
+      action={{ label: 'ایجاد قرارداد فروش همکار', onClick: () => router.push('/dashboard/sales/contracts/create') }} />
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
   const saleStepIndex = partnerSaleEntrySteps.indexOf(saleStep);
   const openInitialInquiry = async () => {
-    if (!technicalActionReady || !draftAccess) return;
-    setPending(true); setError(null); technicalCommitFlight.current = true;
-    try {
-      const saved = await commitPartnerTechnicalDraft({
-        checkpointRequired: technicalDraft.inputRevision > checkpointedInputRevision.current,
-        checkpoint: () => checkpointTechnicalDraft(technicalDraft, draftAccess),
-        save: () => ports.saved.save({ ...draftAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
-          idempotencyKey: `partner-save-${crypto.randomUUID()}`, draft: technicalDraft }),
-      });
-      if (!saved) return;
-      if (!saved.ok) { setError(saved.error.message); return; }
-      setRecoveryRevision(saved.value.recoveryRevision);
-      const matches = await readApprovalMatches(saved.value);
-      setInitialInquiryMatches(matches);
-      const subjects = buildPartnerInquirySubjectOptions({ saved: saved.value, draft: technicalDraft, catalog });
-      setInitialInquirySubjects(subjects);
-      const missing = new Set(matches.missingPricingSubjectIds);
-      setInitialInquirySelection(new Set(subjects.filter(subject => missing.has(subject.productRowId))
-        .map(subject => subject.productRowId)));
-      setInitialInquiryOpen(true);
-    } catch { setError('وضعیت استعلام ردیف‌ها دریافت نشد؛ اطلاعات شما حفظ شده است.'); }
-    finally { technicalCommitFlight.current = false; setPending(false); }
+    if (!technicalActionReady || !draftAccess || context?.kind !== 'PARTNER') return;
+    await startInquiry(context, new Set(), true);
   };
   const advanceSale = () => {
     setError(null);
@@ -1278,7 +1267,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       loading: pending,
       canGoPrevious: !pending && saleStepIndex > 0,
       canGoNext: !pending && (saleStep !== 'products' || technicalActionReady),
-      labels: { next: saleStep === 'products' ? 'استعلام جدید' : 'بعدی' }
+      labels: { next: saleStep === 'products' ? 'ادامه تکمیل قرارداد' : 'بعدی' }
     }}
   >
     <div className="space-y-4">
@@ -1317,8 +1306,6 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       {saleStep === 'products' && <>
         <PartnerTechnicalDraftEditor draft={technicalDraft} products={catalog} operations={operations}
           preview={technicalPreview} onChange={setTechnicalDraft} />
-        <ErpField label="یادداشت (اختیاری)"><ErpTextarea value={inquiryNote} maxLength={2000}
-          onChange={event => setInquiryNote(event.target.value)} /></ErpField>
       </>}
       <ErpSheet open={initialInquiryOpen} onClose={() => setInitialInquiryOpen(false)} title="استعلام جدید"
         presentation="modal" pending={pending} footer={<div className="flex flex-wrap gap-2"><ErpButton

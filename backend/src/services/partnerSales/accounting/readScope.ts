@@ -44,9 +44,13 @@ export function withAccountingReadScope<T>(database: PrismaClient, actor: Accoun
 }
 
 async function createScope(database: Prisma.TransactionClient, actor: AccountingReadActor | undefined) {
-  const cases = await database.partnerSaleCase.findMany({ orderBy: { id: 'asc' }, select: {
+  const caseRows = await database.partnerSaleCase.findMany({ where: { internalRecordId: { not: null },
+    customerContractId: { not: null } }, orderBy: { id: 'asc' }, select: {
     id: true, caseNumber: true, internalRecordId: true, internalRecord: { select: { recordNumber: true } },
     customerContractId: true, customerContract: { select: { contractNumber: true } }, profile: { select: { userId: true } } } });
+  const cases = caseRows.filter((row): row is typeof row & { internalRecordId: string; customerContractId: string;
+    internalRecord: NonNullable<typeof row.internalRecord>; customerContract: NonNullable<typeof row.customerContract> } =>
+    Boolean(row.internalRecordId && row.customerContractId && row.internalRecord && row.customerContract));
   const allowedInternalIds: string[] = [];
   const writableCases = new Set<string>();
   let canManagePayments = false;

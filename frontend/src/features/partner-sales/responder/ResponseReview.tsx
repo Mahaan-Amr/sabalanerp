@@ -16,7 +16,7 @@ export function ResponseReview({ decisions, rowNumbers }: {
         <ErpBadge tone={decision.outcome === 'APPROVED' ? 'success' : 'danger'}>{decision.outcome === 'APPROVED' ? 'تأیید' : 'رد'}</ErpBadge>
       </div>
       {decision.outcome === 'APPROVED'
-        ? <><p>قیمت هر واحد: <b>{formatPartnerMoney(decision.wholesaleUnitPrice.amount, decision.wholesaleUnitPrice.currency)}</b></p>{decision.note && <p className="break-words">{decision.note}</p>}</>
+        ? <p>قیمت هر واحد: <b>{formatPartnerMoney(decision.wholesaleUnitPrice.amount, decision.wholesaleUnitPrice.currency)}</b></p>
         : <p className="break-words">{decision.reason}</p>}
     </ErpCard>)}
   </div>;

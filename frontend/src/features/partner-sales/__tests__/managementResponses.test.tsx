@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { responseDecisions, settleResponseDrafts } from '../responder/responseDraft';
 
-test('bulk approval preserves each selected row price and omits unselected rows', () => {
+test('bulk approval preserves each selected row price, drops acceptance notes and omits unselected rows', () => {
   const result = responseDecisions([
     { rowId: 'row-a', revision: 3, currency: 'IRR' },
     { rowId: 'row-b', revision: 8, currency: 'IRT' },
@@ -16,7 +16,7 @@ test('bulk approval preserves each selected row price and omits unselected rows'
   if (!result.ok) return;
   assert.deepEqual(result.decisions, [
     { rowId: 'row-a', expectedRevision: 3, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '120000', currency: 'IRR' } },
-    { rowId: 'row-b', expectedRevision: 8, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '25000', currency: 'IRT' }, note: 'نرخ مستقل' },
+    { rowId: 'row-b', expectedRevision: 8, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '25000', currency: 'IRT' } },
   ]);
 });
 

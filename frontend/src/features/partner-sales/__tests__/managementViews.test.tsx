@@ -63,3 +63,17 @@ test('an unavailable responder row shows evidence but no editable price or decis
   assert.match(html, /واگذار نشده/);
   assert.doesNotMatch(html, /<input|<textarea|<select|internal-rate|sha256|private-fingerprint|قیمت مشتری|حاشیه سود|>count</);
 });
+
+test('an accepted responder price never asks for an explanation', () => {
+  const html = renderToStaticMarkup(<ResponseRow number={1} row={{ rowId: 'fixture-row', revision: 2,
+    description: 'گرانیت نهبندان', configuration: [],
+    identity: { schemaVersion: 1, partnerSellerId: 'fixture-partner', catalogProductId: 'fixture-stone', family: 'longitudinal',
+      unit: 'squareMeter', configuration: [], materialRateEvidenceId: 'internal-rate',
+      materialRateHash: `sha256-v1:${'0'.repeat(64)}`, components: [], currency: 'IRT',
+      calculationPolicyVersion: 'v1', roundingPolicyVersion: 'v1' },
+    used: false, state: 'PENDING', actions: [{ action: 'RESPOND', enabled: true }] }} canRespond
+    status="در انتظار پاسخ" draft={{ selected: true, amount: '25000', outcome: 'APPROVED', note: 'نباید ارسال شود' }}
+    pending={false} onChange={() => undefined} />);
+  assert.match(html, /ثبت قیمت سبلان/);
+  assert.doesNotMatch(html, /یادداشت ردیف|<textarea/);
+});

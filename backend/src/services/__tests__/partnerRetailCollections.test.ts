@@ -73,6 +73,7 @@ async function receiptCommand(fixture: RetailFixture) {
     type: 'RETAIL_RECEIPT' as const, expected: fixture.source.owner, expectedState: 'COMMITTED' as const,
     planId: 'plan-324-v1', receiptId: 'receipt-324-a',
     amount: { amount: '250', currency: 'IRR' as const }, effectiveDate: '2026-08-30',
+    method: 'BANK_TRANSFER' as const,
     allocations: [{ installmentId: 'installment-324-a', amount: '250' }],
   };
   return contracts.PartnerCommandSchema.parse({
@@ -159,7 +160,7 @@ test('cumulative receipt allocations cannot exceed the historical installment am
   const intent = {
     type: 'RETAIL_RECEIPT' as const, expected: fixture.source.owner, expectedState: 'COMMITTED' as const,
     planId: 'plan-324-v1', receiptId: 'receipt-324-over', amount: { amount: '200', currency: 'IRR' as const },
-    effectiveDate: '2026-08-31', allocations: [{ installmentId: 'installment-324-a', amount: '200' }],
+    effectiveDate: '2026-08-31', method: 'CARD' as const, allocations: [{ installmentId: 'installment-324-a', amount: '200' }],
   };
   const command = contracts.PartnerCommandSchema.parse({
     schemaVersion: 1, commandId: 'command-324-over', correlationId: 'correlation-324', ...intent,
@@ -276,7 +277,7 @@ test('backdated collection cannot rewrite the balance captured by an effective s
   fixture.source.planHistory = [fixture.source.planHistory[0], successor];
   const intent = { type: 'RETAIL_RECEIPT' as const, expected: fixture.source.owner, expectedState: 'COMMITTED' as const,
     planId: 'plan-324-v1', receiptId: 'receipt-324-backdated', amount: { amount: '100', currency: 'IRR' as const },
-    effectiveDate: '2026-08-31', allocations: [{ installmentId: 'installment-324-a', amount: '100' }] };
+    effectiveDate: '2026-08-31', method: 'CASH' as const, allocations: [{ installmentId: 'installment-324-a', amount: '100' }] };
   const command = contracts.PartnerCommandSchema.parse({ schemaVersion: 1, commandId: 'command-324-backdated',
     correlationId: 'correlation-324', ...intent, idempotency: { actorId: 'partner-324', operation: 'RETAIL_RECEIPT',
       targetId: 'case-324', key: 'key-324-backdated', payloadHash: await contracts.canonicalHash(intent) } });

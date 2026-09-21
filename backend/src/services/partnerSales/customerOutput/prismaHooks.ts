@@ -133,7 +133,7 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
       if (!allowed.ok) throw new Rollback({ success: false, error: allowed.error.message });
       const rollout = await authorizePartnerTechnicalRollout(tx, source.case.profile.id, 'MUTATE');
       if (!rollout.ok) throw new Rollback({ success: false, error: rollout.error.message });
-      if (!['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION'].includes(source.case.state) && !source.pendingRetailCorrection) {
+      if (source.case.state !== 'COMMITTED' && !source.pendingRetailCorrection) {
         throw new Rollback({ success: false, error: safeError('STATE_CONFLICT') });
       }
       const recipient = normalize(source.content.customer.phone);
@@ -170,7 +170,8 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
         phoneNumber: localPhone(recipient), otpCodeHash: hash(otp), otpExpiresAt, linkExpiresAt: snapshot.expiresAt,
         maxAttempts: maxAttempts(), lastSentAt: now, resendCount: input.resend ? 1 : 0,
         createdBy: `partner-output:${snapshot.snapshotId}` } });
-      if (source.case.state === 'DRAFT') {
+      if (source.case.state === 'COMMITTED' && !source.pendingRetailCorrection &&
+          source.case.customerConfirmationState !== 'SENT') {
         const transitioned = await lifecycle(tx, input.requestedBy, correlationId).markAwaitingCustomerConfirmation({
           expected: snapshot.owner, commandId: randomUUID(), correlationId, snapshotId: snapshot.snapshotId,
         });

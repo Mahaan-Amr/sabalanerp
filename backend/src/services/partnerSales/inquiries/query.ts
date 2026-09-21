@@ -18,7 +18,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
     const inquiryId = parsed.data.inquiryId;
     return dependencies.transaction(async tx => {
       const inquiry = await tx.partnerInquiry.findUnique({ where: { id: inquiryId }, select: {
-        id: true, profileId: true, submittedAt: true,
+        id: true, profileId: true, submittedAt: true, pricingReadyAt: true, pricingExpiresAt: true,
         profile: { select: { user: { select: { firstName: true, lastName: true } } } },
         assignments: { orderBy: { revision: 'desc' }, take: 1, select: { id: true, revision: true, responderId: true } },
         events: { orderBy: { revision: 'asc' }, select: { type: true, reason: true, evidence: true } },
@@ -42,6 +42,8 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         superseded = false): 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED' | 'SUPERSEDED' | 'CANCELLED' =>
         outcome !== 'APPROVED' ? outcome : superseded ? 'SUPERSEDED'
           : expiresAt && clock.now.getTime() >= expiresAt.getTime() ? 'EXPIRED' : 'APPROVED';
+      const packageApprovedAt = inquiry.pricingReadyAt;
+      const packageExpiresAt = inquiry.pricingExpiresAt;
       const reasons = new Map<string, string>();
       for (const event of inquiry.events) {
         if (event.type === 'INQUIRY_CANCELLED' && event.reason) {
@@ -74,12 +76,14 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         const responseRows = inquiry.rows.map(row => {
           const definition = parseInquiryDefinition(row.definition);
           if (!definition) return null;
-          const currentState = state(row.outcome, row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
+          const currentState = state(row.outcome, packageExpiresAt ?? row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
           return { rowId: row.id, revision: row.revision, identity: definition.identity,
             description: definition.description, configuration: definition.configuration,
+            ...(definition.deliveryFacts ? { deliveryFacts: definition.deliveryFacts } : {}),
             ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
             ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
-              approvedAt: row.approval.approvedAt.toISOString(), expiresAt: row.approval.expiresAt.toISOString(),
+              approvedAt: (packageApprovedAt ?? row.approval.approvedAt).toISOString(),
+              expiresAt: (packageExpiresAt ?? row.approval.expiresAt).toISOString(),
               ...(row.approval.note ? { noteOrReason: row.approval.note } : {}) } :
               reasons.get(row.id) ? { noteOrReason: reasons.get(row.id) } : {}),
             used: Boolean(row.approval?.usages.length), state: currentState,
@@ -97,13 +101,14 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
       const rows = inquiry.rows.map(row => {
         const definition = parseInquiryDefinition(row.definition);
         if (!definition) return null;
-        const currentState = state(row.outcome, row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
+        const currentState = state(row.outcome, packageExpiresAt ?? row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
         const successor = row.successor;
         return { rowId: row.id, revision: row.revision, description: definition.description,
           state: currentState, configuration: definition.configuration, configurationRef: definition.configurationRef,
           ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
           ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
-            approvedAt: row.approval.approvedAt.toISOString(), expiresAt: row.approval.expiresAt.toISOString(),
+            approvedAt: (packageApprovedAt ?? row.approval.approvedAt).toISOString(),
+            expiresAt: (packageExpiresAt ?? row.approval.expiresAt).toISOString(),
             ...(row.approval.note ? { noteOrReason: row.approval.note } : {}),
             approvedRowBinding: { inquiryId: inquiry.id, rowId: row.id, revision: row.revision } } : {}),
           ...(!row.approval && definition.predecessorReason ? { noteOrReason: definition.predecessorReason } : {}),
@@ -111,7 +116,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
           ...(row.predecessor ? { predecessor: { inquiryId: inquiry.id, rowId: row.predecessor.id,
             revision: row.predecessor.revision, ...(definition.predecessorReason ? { reason: definition.predecessorReason } : {}) } } : {}),
           ...(successor ? { successor: { inquiryId: inquiry.id, rowId: successor.id, revision: successor.revision,
-            state: state(successor.outcome, successor.approval?.expiresAt) } } : {}),
+            state: state(successor.outcome, packageExpiresAt ?? successor.approval?.expiresAt) } } : {}),
         };
       });
       if (rows.some(row => row === null)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;

@@ -191,7 +191,9 @@ function effectiveAllocations(source: RetailCollectionSource): Result<Map<string
 
 function receiptIntent(command: RetailCommand) {
   if (command.type === 'RETAIL_RECEIPT') return { type: command.type, expected: command.expected, expectedState: command.expectedState, planId: command.planId,
-    receiptId: command.receiptId, amount: command.amount, effectiveDate: command.effectiveDate, allocations: command.allocations };
+    receiptId: command.receiptId, amount: command.amount, effectiveDate: command.effectiveDate, method: command.method,
+    ...(command.reference ? { reference: command.reference } : {}), ...(command.note ? { note: command.note } : {}),
+    allocations: command.allocations };
   return { type: command.type, expected: command.expected, expectedState: command.expectedState, receiptId: command.receiptId,
     effectiveDate: command.effectiveDate, reason: command.reason };
 }
@@ -305,7 +307,9 @@ export function createPartnerRetailCollectionsService(repository: RetailCollecti
           sum([allocated.value.get(item.installmentId) || '0', item.amount])).startsWith('-'))) return failure('STATE_CONFLICT');
         receipt = { receiptId: command.receiptId, planId: command.planId, kind: 'RECEIPT',
           amount: command.amount, effectiveDate: command.effectiveDate, recordedAt, actorId: source.permission.actorId,
-          commandId: command.commandId, correlationId: command.correlationId, allocations: command.allocations };
+          commandId: command.commandId, correlationId: command.correlationId, method: command.method,
+          ...(command.reference ? { reference: command.reference } : {}), ...(command.note ? { note: command.note } : {}),
+          allocations: command.allocations };
         eventId = `retail-event:${command.receiptId}`;
         event = contracts.PartnerEventSchema.parse({ schemaVersion: 1, type: 'RETAIL_RECEIPT', eventId,
           commandId: command.commandId, correlationId: command.correlationId, actorId: source.permission.actorId,

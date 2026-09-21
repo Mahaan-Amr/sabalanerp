@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Prisma } from '@prisma/client';
 import { ApprovedInquirySchema, canonicalHash } from '@sabalanerp/partner-sales-contracts';
-import { bindApprovalUsage } from '../partnerSales/inquiries/approvalUsage';
+import { bindApprovalUsage, resolveApprovalForUse } from '../partnerSales/inquiries/approvalUsage';
 
 const approval = ApprovedInquirySchema.parse({
   schemaVersion: 1,
@@ -33,7 +33,8 @@ test('an exact usage retry returns its immutable snapshot without revalidating a
   } as unknown as Prisma.TransactionClient;
   const result = await bindApprovalUsage(tx, { binding: { inquiryId: approval.inquiryId, rowId: approval.rowId,
     revision: approval.revision }, partnerSellerId: approval.partnerSellerId, configurationHash: approval.configurationHash,
-    caseId: 'case-usage-replay', caseRevision: 3, productRowId: 'case-row-usage-replay' });
+    caseId: 'case-usage-replay', pricingCaseRevision: 2, caseRevision: 3,
+    productRowId: 'case-row-usage-replay' });
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.value.replayed, true);
@@ -42,3 +43,28 @@ test('an exact usage retry returns its immutable snapshot without revalidating a
   assert.equal(currentApprovalReads, 0, 'historical replay must not depend on current approval validity');
 });
 
+test('fresh approval use is bound to the pricing source revision, not the successor revision', async () => {
+  const tx = {
+    $queryRaw: async () => [{ now: new Date('2026-08-21T10:00:00.000Z') }],
+    partnerInquiryRow: { findFirst: async () => ({ id: approval.rowId, revision: approval.revision,
+      configurationHash: approval.configurationHash, predecessorId: null, predecessor: null, successor: null,
+      inquiry: { id: approval.inquiryId, caseId: 'case-usage-replay', caseRevision: 2,
+        pricingReadyAt: new Date(approval.approvedAt), pricingExpiresAt: new Date(approval.expiresAt),
+        profile: { state: 'ACTIVE', userId: approval.partnerSellerId } },
+      approval: { id: approval.approvalId, actorId: approval.decision.actorId,
+        assignmentId: approval.decision.assignmentId, commandId: approval.decision.commandId,
+        authorizationEvidenceId: approval.decision.authorizationEvidenceId,
+        wholesaleUnitPrice: { toString: () => approval.wholesaleUnitPrice.amount },
+        currency: approval.wholesaleUnitPrice.currency, evidenceHash: approval.evidenceHash,
+        note: null, supersessionReason: null, approvedAt: new Date(approval.approvedAt),
+        expiresAt: new Date(approval.expiresAt), assignment: { revision: approval.decision.assignmentRevision } } }) },
+  } as unknown as Prisma.TransactionClient;
+  const usable = await resolveApprovalForUse(tx, { binding: { inquiryId: approval.inquiryId,
+    rowId: approval.rowId, revision: approval.revision }, partnerSellerId: approval.partnerSellerId,
+    configurationHash: approval.configurationHash, caseId: 'case-usage-replay', pricingCaseRevision: 2 });
+  assert.equal(usable.ok, true);
+  const wrongRevision = await resolveApprovalForUse(tx, { binding: { inquiryId: approval.inquiryId,
+    rowId: approval.rowId, revision: approval.revision }, partnerSellerId: approval.partnerSellerId,
+    configurationHash: approval.configurationHash, caseId: 'case-usage-replay', pricingCaseRevision: 3 });
+  assert.equal(wrongRevision.ok ? null : wrongRevision.error.code, 'NOT_FOUND');
+});

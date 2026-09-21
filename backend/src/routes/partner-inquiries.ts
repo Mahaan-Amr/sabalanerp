@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
-import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
+import { PartnerCommandSchema, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { createPrismaPartnerInquiryService, type PartnerInquiryDependencies } from '../services/partnerSales/inquiries/service';
@@ -46,6 +46,10 @@ export function createPartnerInquiryRouter() {
       publishCommittedEvents: eventIds => dispatchPartnerInquiryEvents(prisma, eventIds, inquiryNotificationAccess) });
   };
   router.post('/commands', async (request: AuthRequest, response) => {
+    const command = PartnerCommandSchema.safeParse(request.body);
+    if (command.success && command.data.type === 'INQUIRY_SUBMIT') {
+      respond(response, { ok: false, error: partnerError('STATE_CONFLICT') }); return;
+    }
     try { respond(response, await serviceFor(request).execute(request.body)); }
     catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
   });

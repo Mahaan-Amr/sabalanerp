@@ -11,7 +11,7 @@ import {
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { readAuthorizationDecisionByCorrelation } from '../../effectiveAuthorization/audit';
 import { decodeTechnicalRecovery } from './technicalRecoveryRecords';
-import { calculatePartnerCanonicalWholesale } from './canonicalWholesale';
+import { calculatePartnerCanonicalRetail, calculatePartnerCanonicalWholesale } from './canonicalWholesale';
 import { decodeTechnicalSavedSnapshot } from './technicalSavedRecords';
 import { SUBMISSION_EVIDENCE_OPERATION } from './submissionEvidence';
 import type { PartnerCaseDependencies } from './aggregate';
@@ -42,7 +42,8 @@ export async function consumePrismaPartnerTechnicalRecovery(tx: Transaction, inp
   actorId: string;
   recoveryId: string;
   recoveryRevision: number;
-  customerContractId: string;
+  caseId: string;
+  customerContractId?: string;
 }): Promise<Result<void>> {
   const current = await tx.salesContractEditSession.findUnique({ where: { draftId: input.recoveryId },
     select: { id: true, ownerUserId: true, purpose: true, contractId: true, recovery: true } });
@@ -50,22 +51,24 @@ export async function consumePrismaPartnerTechnicalRecovery(tx: Transaction, inp
   if (!current || current.ownerUserId !== input.actorId || current.purpose !== 'PARTNER_TECHNICAL') {
     return { ok: false, error: partnerError('NOT_FOUND') };
   }
-  if ((current.contractId !== null && current.contractId !== input.customerContractId) ||
+  if ((input.customerContractId && current.contractId !== null && current.contractId !== input.customerContractId) ||
       recovery?.recoveryRevision !== input.recoveryRevision) {
     return { ok: false, error: partnerError('ROW_STALE') };
   }
-  const evidence = { schemaVersion: 1, customerContractId: input.customerContractId,
+  const evidence = { schemaVersion: 1, caseId: input.caseId,
+    ...(input.customerContractId ? { customerContractId: input.customerContractId } : {}),
     recoveryRevision: input.recoveryRevision, validatedSnapshots: recovery.validatedSnapshots };
   const payloadHash = await canonicalHash(evidence);
+  const evidenceKey = input.customerContractId ? 'contract-v1' : 'case-v1';
   const prior = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: {
-    actorId: input.actorId, operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key: 'v1' } } });
+    actorId: input.actorId, operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key: evidenceKey } } });
   if (prior && (prior.payloadHash !== payloadHash || await canonicalHash(prior.outcome) !== prior.payloadHash)) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
   if (!prior) await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: input.actorId,
-    operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key: 'v1',
+    operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key: evidenceKey,
     payloadHash, outcome: json(evidence) } });
-  if (current.contractId === input.customerContractId) return { ok: true, value: undefined };
+  if (!input.customerContractId || current.contractId === input.customerContractId) return { ok: true, value: undefined };
   const updated = await tx.salesContractEditSession.updateMany({ where: { id: current.id, contractId: null,
     ownerUserId: input.actorId, purpose: 'PARTNER_TECHNICAL', recovery: { equals: json(current.recovery) } },
     data: { contractId: input.customerContractId } });
@@ -232,8 +235,13 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     }
     const commercialQuantity = new Prisma.Decimal(view.quantity);
     if (commercialQuantity.lte(0)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    let retail: ReturnType<typeof calculatePartnerCanonicalRetail>;
+    try { retail = calculatePartnerCanonicalRetail(row, intentRow.retailUnitPrice.amount,
+      saved.graph.layerConfigurations); }
+    catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
     rows.push({ productRowId: row.productRowId, configurationHash: hash ?? currentSubjectHash!, quantity: view.quantity,
       unit: view.unit, precisionPolicyVersion: identityRow.roundingPolicyVersion, description: product.name,
+      retailUnitPriceAmount: new Prisma.Decimal(retail.totalAmount).div(commercialQuantity).toString(),
       ...(wholesale ? { wholesaleUnitPriceAmount: new Prisma.Decimal(wholesale.totalAmount).div(commercialQuantity).toString() } : {}) });
   }
   const planVersion = command.type === 'CASE_DRAFT_REVISE' ? command.expected.revision + 1 : 1;

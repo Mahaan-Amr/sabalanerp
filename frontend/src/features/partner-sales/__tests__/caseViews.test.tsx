@@ -7,7 +7,7 @@ import { PartnerCaseRuntimeResultSchema } from '@sabalanerp/partner-sales-contra
 import { PartnerCaseDetailContent, partnerCaseMetrics, partnerCasePageActions } from '../cases/PartnerCaseDetail';
 import { ErpMetricGrid } from '@/components/erp';
 import { PartnerAccountPanel } from '../account/PartnerAccountPanel';
-import { PartnerReportContent, partnerReportPrimaryAction, type PartnerReportPresentation } from '../reports/PartnerReportView';
+import { PartnerReportContent, partnerReportPrimaryAction, partnerReportReceivable, type PartnerReportPresentation } from '../reports/PartnerReportView';
 import { RetailCollectionsPanel, type RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import { PartnerCorrectionPanel } from '../cases/PartnerCorrectionPanel';
 import ConfirmationContractView from '../../../app/contracts/confirm/ConfirmationContractView';
@@ -98,10 +98,17 @@ test('Concept C report keeps the two economic truths distinct and exposes scoped
       { currency: 'IRT', metrics: { retailSales: '3000', retailCollected: null, wholesalePurchases: '2200', netComparableMargin: null }, accountingBalance: null, accountingReceivedAsOf: null, accountingCovered: 0, accountingEligible: 1 },
     ],
     rows: [{ caseId: 'case-332', revision: 3, caseNumber: 'CASE-332', customerContractNumber: 'CUSTOMER-332', state: 'COMMITTED', currency: 'IRR',
-      metrics: { retailSales: '2000', retailCollected: '500', wholesalePurchases: '1600', netComparableMargin: '400' }, collectionStatus: 'PARTIAL',
+      accountingBalance: '1000', metrics: { retailSales: '2000', retailCollected: '500', wholesalePurchases: '1600', netComparableMargin: '400' }, collectionStatus: 'PARTIAL',
       history: { receiptCount: 2, revisionCount: 3, superseded: true, cancelled: false } }],
   };
   const html = renderToStaticMarkup(<PartnerReportContent report={report} onOpenCase={() => undefined} />);
+  assert.equal(partnerReportReceivable('2000', '500'), '1500');
+  assert.equal(partnerReportReceivable('2000.25', '500.05'), '1500.2');
+  assert.match(html, /بدهی فعلی به سبلان/);
+  assert.match(html, /مطالبات فعلی از مشتریان/);
+  assert.match(html, /دریافتی واقعی از مشتریان/);
+  assert.match(html, /نمودار مانده‌ها/);
+  assert.match(html, /نمودار دریافتی‌ها/);
   assert.match(html, /فروش من/);
   assert.match(html, /خرید از سبلان/);
   assert.match(html, /سود بازفروش من/);

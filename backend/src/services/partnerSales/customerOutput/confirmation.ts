@@ -71,7 +71,7 @@ export function createCustomerConfirmationAdapter(
     sendForConfirmation() {
       return run('SEND', async tx => {
         const source = await tx.source();
-        if (source.state !== 'DRAFT' && source.state !== 'AWAITING_CUSTOMER_CONFIRMATION') throw new CustomerOutputError('STATE_CONFLICT');
+        if (source.state !== 'COMMITTED') throw new CustomerOutputError('STATE_CONFLICT');
         if (source.retail.contractNumber !== source.contractNumber || source.retail.revision !== source.owner.revision) throw new CustomerOutputError('INTEGRITY_CONFLICT');
         const now = await tx.now();
         const previous = await tx.session();

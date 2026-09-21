@@ -6,7 +6,8 @@ import {
   type PartnerTechnicalDraft, type PartnerTechnicalFamily, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
 import { parseCanonicalDecimal, parseStableIdentity, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
-import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpRialInput, ErpSelect } from '@/components/erp';
+import { ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpRialInput, ErpSelect } from '@/components/erp';
+import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numberFormat';
 import { PreparedProductSection } from '../components/product-modal-system/PreparedProductSection';
 import { LongitudinalProductSection } from '../components/product-modal-system/LongitudinalProductSection';
 import { SlabProductSection } from '../components/product-modal-system/SlabProductSection';
@@ -21,6 +22,7 @@ import { setPartnerTechnicalRetailUnitPrice } from './partnerTechnicalDraftAdapt
 import { TechnicalProductConfiguration } from './TechnicalProductConfiguration';
 import { partnerRetailPriceUnitLabel, partnerSelectableFamilies } from './partnerPricingUnit';
 import { ContractProductCatalog, type ContractCatalogFamily } from '../components/steps/ContractProductCatalog';
+import { CentralProductModalShell } from '../components/product-modal-system/productModalPrimitives';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
 const nextDraft = (draft: PartnerTechnicalDraft, rows: PartnerTechnicalDraft['rows']) => PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1, rows });
@@ -50,6 +52,8 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
 }) {
   const [family, setFamily] = useState<ContractCatalogFamily | null>(null);
   const [query, setQuery] = useState('');
+  const [modal, setModal] = useState<{ draft: PartnerTechnicalDraft; productRowId: string; mode: 'create' | 'edit' } | null>(null);
+  const [deleteRowId, setDeleteRowId] = useState<string | null>(null);
   const available = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('fa-IR');
     return products.filter(product => product.isAvailable
@@ -72,7 +76,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
     const input = selectedFamily === 'prepared' ? { family: selectedFamily, productRowId }
       : selectedFamily === 'stair' ? { family: selectedFamily, productRowId, sourceBatchId, stairSystemId }
         : { family: selectedFamily, productRowId, sourceBatchId };
-    onChange(addPartnerTechnicalProduct(draft, product, input));
+    setModal({ draft: addPartnerTechnicalProduct(draft, product, input), productRowId, mode: 'create' });
   };
   return <TechnicalProductConfiguration><section className="space-y-4" aria-label="محصولات فروش همکار">
     <ContractProductCatalog query={query} onQueryChange={setQuery} activeType={family} onTypeChange={setFamily}
@@ -86,64 +90,148 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
         family ? labels[family] : product.families.filter(item => item !== 'volumetric')
           .map(item => labels[item]).join('، ')].filter(Boolean).join(' · ') }))}
       onSelect={item => add(item.id)} />
-    {!draft.rows.length && <ErpInlineState kind="empty" title="حداقل یک محصول به فروش اضافه کنید." />}
-    {draft.rows.length > 0 && <h2 className="sds-text-primary text-sm font-semibold">محصولات قرارداد</h2>}
-    {draft.rows.map((row, index) => {
+    <section aria-label="محصولات قرارداد"><ErpCard className="p-4">
+      <div className="sds-divider flex flex-wrap items-end justify-between gap-3 border-b pb-2">
+        <h2 className="sds-text-primary text-sm font-semibold">محصولات قرارداد</h2>
+        <div className="sds-text-secondary flex flex-wrap gap-3 text-xs">
+          <span>{formatDisplayNumber(draft.rows.length)} محصول</span>
+          <span>{formatSquareMeters(draft.rows.reduce((sum, row) => {
+            const value = row.family === 'longitudinal' ? row.configuration.requestedAreaSquareMeters
+              : row.family === 'slab' ? row.configuration.areaSquareMeters : undefined;
+            return sum + (Number(value) || 0);
+          }, 0))}</span>
+        </div>
+      </div>
+    {!draft.rows.length && <div className="sds-text-muted py-5 text-sm">هنوز محصولی اضافه نشده است</div>}
+    {draft.rows.map(row => {
       const product = products.find(item => item.catalogItemId === row.catalogItemId && item.catalogSnapshotVersion === row.catalogSnapshotVersion);
       if (!product) return <ErpInlineState key={row.productRowId} kind="stale" title="نسخه کاتالوگ این محصول در دسترس نیست." />;
       const calculation = preview.ok ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.calculation : undefined;
-      return <ErpCard key={row.productRowId} className="space-y-4 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><ErpBadge>{(index + 1).toLocaleString('fa-IR')}</ErpBadge><strong>{product.name}</strong><ErpBadge tone="info">{labels[row.family]}</ErpBadge></div>
-          <ErpButton label="حذف محصول" tone="danger" variant="ghost" onClick={() => onChange(removePartnerTechnicalProduct(draft, row.productRowId))} /></div>
-        {(row.family === 'prepared' || row.family === 'volumetric') && <PreparedProductSection product={productForCanonical(product)}
-          catalogFactLine={`${product.attributes.stoneType} · ${product.attributes.quality} · ${product.attributes.color}`}
-          config={{ stoneName: product.name, preparedKind: row.configuration.kind, preparedUnit: row.configuration.unit,
-            preparedQuantity: Number(row.configuration.quantity ?? 0) } as Partial<ContractProduct>}
-          onChange={config => onChange(replaceRow(draft, { ...row, configuration: { ...row.configuration,
-            kind: config.preparedKind ?? row.configuration.kind, unit: config.preparedUnit ?? row.configuration.unit,
-            quantity: config.preparedQuantity === null || config.preparedQuantity === undefined ? undefined : String(config.preparedQuantity) } }))} />}
-        {row.family === 'longitudinal' && <LongitudinalProductSection input={{ ...row.configuration, inputRevision: draft.inputRevision,
-          sourceBatchId: parseStableIdentity('source-batch', row.configuration.sourceBatchId),
-          lengthMeters: row.configuration.lengthMeters ? parseCanonicalDecimal(row.configuration.lengthMeters) : undefined,
-          widthMeters: row.configuration.widthMeters ? parseCanonicalDecimal(row.configuration.widthMeters) : undefined,
-          requestedAreaSquareMeters: row.configuration.requestedAreaSquareMeters ? parseCanonicalDecimal(row.configuration.requestedAreaSquareMeters) : undefined,
-          motherWidthMeters: parseCanonicalDecimal(String(Number(product.dimensions.motherWidthCentimeters ?? '0') / 100)),
-          sawKerfMeters: parseCanonicalDecimal(sawKerfMeters) } as LongitudinalTechnicalInput}
-          calculation={(calculation as LongitudinalTechnicalCalculation | undefined) ?? null}
-          showValidation onChange={input => { const { inputRevision, motherWidthMeters, sawKerfMeters: _kerf, ...configuration } = input;
-            void inputRevision; void motherWidthMeters; void _kerf; onChange(replaceRow(draft, { ...row, configuration: configuration as typeof row.configuration })); }} />}
-        {row.family === 'slab' && <SlabProductSection input={{ ...row.configuration, inputRevision: draft.inputRevision,
-          sourceBatchId: parseStableIdentity('source-batch', row.configuration.sourceBatchId),
-          lengthMeters: row.configuration.lengthMeters ? parseCanonicalDecimal(row.configuration.lengthMeters) : undefined,
-          widthMeters: row.configuration.widthMeters ? parseCanonicalDecimal(row.configuration.widthMeters) : undefined,
-          areaSquareMeters: row.configuration.areaSquareMeters ? parseCanonicalDecimal(row.configuration.areaSquareMeters) : undefined,
-          kerfMeters: parseCanonicalDecimal(row.configuration.sawKerfEnabled ? sawKerfMeters : '0'),
-          sourceRows: row.configuration.sourceRows.map(source => ({ ...source, sourceRowId: parseStableIdentity('slab-source-row', source.sourceRowId),
-            lengthMeters: parseCanonicalDecimal(source.lengthMeters ?? '0'), widthMeters: parseCanonicalDecimal(source.widthMeters ?? '0'), quantity: source.quantity ?? 0 })) } as SlabTechnicalInput}
-          sawKerfMeters={parseCanonicalDecimal(sawKerfMeters)} showValidation onChange={input => { const { inputRevision, kerfMeters, ...configuration } = input;
-            void inputRevision; void kerfMeters; onChange(replaceRow(draft, { ...row, configuration: { ...configuration,
-              sawKerfEnabled: row.configuration.sawKerfEnabled } as unknown as typeof row.configuration })); }} />}
-        {row.family === 'stair' && <StairEditor draft={draft} row={row} product={product} onChange={onChange} />}
-        {!['prepared', 'volumetric'].includes(row.family) && calculation?.ok && <OperationsEditor draft={draft} row={row as Extract<typeof row, { family: 'longitudinal' | 'slab' | 'stair' }>}
-          calculation={calculation.result as unknown as Record<string, unknown>} catalog={operations} onChange={onChange} />}
-        {calculation && !calculation.ok && <ErpInlineState kind="stale" title={`مشخصات این ردیف کامل نیست. ${calculation.conflicts[0]?.message ?? ''}`} />}
-        {row.family !== 'volumetric' && <div className="max-w-sm"><ErpField label={`قیمت فروش به مشتری — ${partnerRetailPriceUnitLabel({ family: row.family,
-          ...(row.family === 'stair' ? { part: row.configuration.part } : {}) })}`} required
-          hint="فقط نرخ سنگ را وارد کنید؛ برش، چسب و سایر هزینه‌ها توسط سیستم محاسبه می‌شوند."><ErpRialInput dir="ltr"
-            value={row.retailUnitPrice?.amount ?? ''}
-            onValueChange={amount => onChange(setPartnerTechnicalRetailUnitPrice(draft, row.productRowId, amount))} />
-        </ErpField></div>}
-        {(draft.contractConfigurationRequiredProductRowIds ?? []).includes(row.productRowId) && <ErpCheckbox
-          checked={(draft.contractConfiguredProductRowIds ?? []).includes(row.productRowId)}
-          label="مشخصات واقعی قرارداد تأیید شد"
-          onChange={event => onChange(confirmPartnerContractConfiguration(draft, row.productRowId, event.target.checked))} />}
-      </ErpCard>;
+      const facts = calculation?.ok ? calculation.result as unknown as Record<string, unknown> : undefined;
+      const geometry = row.family === 'prepared'
+        ? `${formatDisplayNumber(Number(row.configuration.quantity) || 0)} ${row.configuration.unit}`
+        : `${formatDisplayNumber(Number(facts?.lengthMeters) || 0)}m × ${formatDisplayNumber(Number(facts && ('widthMeters' in facts ? facts.widthMeters : facts.crossDimensionMeters)) || 0)}m`;
+      const retailUnitLabel = row.family === 'volumetric' ? null : partnerRetailPriceUnitLabel({ family: row.family,
+        ...(row.family === 'stair' ? { part: row.configuration.part } : {}) });
+      const confirmingDelete = deleteRowId === row.productRowId;
+      return <div key={row.productRowId} className="border-b border-[var(--sds-border-subtle)] py-3 last:border-b-0" data-contract-row-id={row.productRowId}>
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0"><div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <strong className="sds-text-primary text-sm">{product.name}</strong><span className="sds-text-muted text-xs">{labels[row.family]}</span>
+          </div><div className="sds-text-secondary mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"><span>{geometry}</span>
+            {row.retailUnitPrice?.amount && retailUnitLabel && <strong className="sds-text-primary">{formatPrice(Number(row.retailUnitPrice.amount), 'تومان')} · {retailUnitLabel}</strong>}
+          </div></div>
+          {confirmingDelete ? <div className="flex items-center gap-2 text-xs"><span>حذف این محصول؟</span>
+            <ErpPressable type="button" onClick={() => setDeleteRowId(null)}>انصراف</ErpPressable>
+            <ErpPressable type="button" tone="danger" onClick={() => { onChange(removePartnerTechnicalProduct(draft, row.productRowId)); setDeleteRowId(null); }}>حذف</ErpPressable></div>
+            : <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
+              <ErpPressable type="button" onClick={() => setModal({ draft, productRowId: row.productRowId, mode: 'edit' })}>ویرایش</ErpPressable>
+              <ErpPressable type="button" tone="danger" onClick={() => setDeleteRowId(row.productRowId)}>حذف</ErpPressable>
+            </div>}
+        </div>
+        {calculation && !calculation.ok && <ErpInlineState kind="stale" className="mt-2" title={`مشخصات این ردیف کامل نیست. ${calculation.conflicts[0]?.message ?? ''}`} />}
+      </div>;
     })}
+    </ErpCard></section>
     {preview.ok && preview.value.conflicts.length > 0 && <ErpInlineState kind="stale" title={`پیش از ارسال، تعارض‌های مشخصات فنی را برطرف کنید. ${preview.value.conflicts[0]?.message ?? ''}`} />}
-    {preview.ok && <RemainderEditor draft={draft} products={products} inventory={preview.value.inventory} onChange={onChange} />}
-    {preview.ok && <LayerEditor draft={draft} products={products} operations={operations} previewRows={preview.value.rows}
-      inventory={preview.value.inventory} onChange={onChange} />}
+    {modal && <PartnerProductConfigurationFlow state={modal} products={products} operations={operations} sawKerfMeters={sawKerfMeters}
+      onDraftChange={next => setModal(current => current ? { ...current, draft: next } : current)} onClose={() => setModal(null)}
+      onSave={() => { onChange(modal.draft); setModal(null); }} />}
   </section></TechnicalProductConfiguration>;
+}
+
+function PartnerProductConfigurationFlow({ state, products, operations, sawKerfMeters, onDraftChange, onClose, onSave }: {
+  state: { draft: PartnerTechnicalDraft; productRowId: string; mode: 'create' | 'edit' };
+  products: PartnerTechnicalProduct[];
+  operations: PartnerTechnicalOperation[];
+  sawKerfMeters: string;
+  onDraftChange: (draft: PartnerTechnicalDraft) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const row = state.draft.rows.find(item => item.productRowId === state.productRowId);
+  const product = row && products.find(item => item.catalogItemId === row.catalogItemId
+    && item.catalogSnapshotVersion === row.catalogSnapshotVersion);
+  const preview = useMemo(() => previewPartnerTechnicalDraft(state.draft, { products, operations, sawKerfMeters }),
+    [operations, products, sawKerfMeters, state.draft]);
+  if (!row || !product) return null;
+  const calculation = preview.ok
+    ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.calculation
+    : undefined;
+  const blockingConflict = calculation && !calculation.ok ? calculation.conflicts[0]?.message
+    : row.family !== 'volumetric' && !row.retailUnitPrice?.amount ? 'قیمت فروش سنگ به مشتری را وارد کنید.'
+      : preview.ok && preview.value.conflicts.length > 0 ? preview.value.conflicts[0]?.message : undefined;
+  return <CentralProductModalShell open title={state.mode === 'edit' ? 'ویرایش تنظیمات محصول' : 'تنظیمات محصول'}
+    view="main" onClose={onClose} primaryLabel={state.mode === 'edit' ? 'ذخیره تغییرات' : 'افزودن محصول'} pending={false}
+    onPrimary={() => { if (!blockingConflict) onSave(); }} error={blockingConflict}>
+    <div className="px-0 py-0 sm:px-2">
+      <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[var(--sds-border-subtle)] pb-3">
+        <span className="sds-text-muted text-xs font-semibold">نوع محصول</span>
+        <strong className="text-sm">{labels[row.family]}</strong>
+      </div>
+      <div className="sds-text-muted border-b border-[var(--sds-border-subtle)] py-3 text-xs">
+        {[product.name, product.attributes.stoneType, product.dimensions.motherWidthCentimeters
+          ? `مادر ${product.dimensions.motherWidthCentimeters}cm` : null,
+        product.dimensions.thicknessCentimeters ? `ضخامت ${product.dimensions.thicknessCentimeters}cm` : null]
+          .filter(Boolean).join(' · ')}
+      </div>
+      <div className="border-b border-[var(--sds-border-subtle)] py-3">
+        <span className="sds-text-secondary block text-xs font-semibold">عنوان محصول</span>
+        <ErpInput className="mt-1" value={product.name} readOnly aria-label="عنوان محصول" />
+      </div>
+      {(row.family === 'prepared' || row.family === 'volumetric') && <PreparedProductSection product={productForCanonical(product)}
+        catalogFactLine={`${product.attributes.stoneType} · ${product.attributes.quality} · ${product.attributes.color}`}
+        config={{ stoneName: product.name, preparedKind: row.configuration.kind, preparedUnit: row.configuration.unit,
+          preparedQuantity: Number(row.configuration.quantity ?? 0) } as Partial<ContractProduct>}
+        onChange={config => onDraftChange(replaceRow(state.draft, { ...row, configuration: { ...row.configuration,
+          kind: config.preparedKind ?? row.configuration.kind, unit: config.preparedUnit ?? row.configuration.unit,
+          quantity: config.preparedQuantity === null || config.preparedQuantity === undefined ? undefined : String(config.preparedQuantity) } }))} />}
+      {row.family === 'longitudinal' && <LongitudinalProductSection input={{ ...row.configuration, inputRevision: state.draft.inputRevision,
+        sourceBatchId: parseStableIdentity('source-batch', row.configuration.sourceBatchId),
+        lengthMeters: row.configuration.lengthMeters ? parseCanonicalDecimal(row.configuration.lengthMeters) : undefined,
+        widthMeters: row.configuration.widthMeters ? parseCanonicalDecimal(row.configuration.widthMeters) : undefined,
+        requestedAreaSquareMeters: row.configuration.requestedAreaSquareMeters ? parseCanonicalDecimal(row.configuration.requestedAreaSquareMeters) : undefined,
+        motherWidthMeters: parseCanonicalDecimal(String(Number(product.dimensions.motherWidthCentimeters ?? '0') / 100)),
+        sawKerfMeters: parseCanonicalDecimal(sawKerfMeters) } as LongitudinalTechnicalInput}
+        calculation={(calculation as LongitudinalTechnicalCalculation | undefined) ?? null}
+        showValidation onChange={input => { const { inputRevision, motherWidthMeters, sawKerfMeters: _kerf, ...configuration } = input;
+          void inputRevision; void motherWidthMeters; void _kerf;
+          onDraftChange(replaceRow(state.draft, { ...row, configuration: configuration as typeof row.configuration })); }} />}
+      {row.family === 'slab' && <SlabProductSection input={{ ...row.configuration, inputRevision: state.draft.inputRevision,
+        sourceBatchId: parseStableIdentity('source-batch', row.configuration.sourceBatchId),
+        lengthMeters: row.configuration.lengthMeters ? parseCanonicalDecimal(row.configuration.lengthMeters) : undefined,
+        widthMeters: row.configuration.widthMeters ? parseCanonicalDecimal(row.configuration.widthMeters) : undefined,
+        areaSquareMeters: row.configuration.areaSquareMeters ? parseCanonicalDecimal(row.configuration.areaSquareMeters) : undefined,
+        kerfMeters: parseCanonicalDecimal(row.configuration.sawKerfEnabled ? sawKerfMeters : '0'),
+        sourceRows: row.configuration.sourceRows.map(source => ({ ...source,
+          sourceRowId: parseStableIdentity('slab-source-row', source.sourceRowId),
+          lengthMeters: parseCanonicalDecimal(source.lengthMeters ?? '0'), widthMeters: parseCanonicalDecimal(source.widthMeters ?? '0'),
+          quantity: source.quantity ?? 0 })) } as SlabTechnicalInput}
+        sawKerfMeters={parseCanonicalDecimal(sawKerfMeters)} showValidation onChange={input => {
+          const { inputRevision, kerfMeters, ...configuration } = input; void inputRevision; void kerfMeters;
+          onDraftChange(replaceRow(state.draft, { ...row, configuration: { ...configuration,
+            sawKerfEnabled: row.configuration.sawKerfEnabled } as unknown as typeof row.configuration })); }} />}
+      {row.family === 'stair' && <StairEditor draft={state.draft} row={row} product={product} onChange={onDraftChange} />}
+      {!['prepared', 'volumetric'].includes(row.family) && calculation?.ok && <div id="product-operations" tabIndex={-1}>
+        <OperationsEditor draft={state.draft} row={row as Extract<typeof row, { family: 'longitudinal' | 'slab' | 'stair' }>}
+          calculation={calculation.result as unknown as Record<string, unknown>} catalog={operations} onChange={onDraftChange} />
+      </div>}
+      {row.family !== 'volumetric' && <div className="border-t border-[var(--sds-border-subtle)] py-3"><ErpField
+        label={`قیمت فروش به مشتری — ${partnerRetailPriceUnitLabel({ family: row.family,
+          ...(row.family === 'stair' ? { part: row.configuration.part } : {}) })}`} required
+        hint="فقط نرخ سنگ را وارد کنید؛ برش، چسب و سایر هزینه‌ها توسط سیستم محاسبه می‌شوند."><ErpRialInput dir="ltr"
+          value={row.retailUnitPrice?.amount ?? ''}
+          onValueChange={amount => onDraftChange(setPartnerTechnicalRetailUnitPrice(state.draft, row.productRowId, amount))} />
+      </ErpField></div>}
+      {(state.draft.contractConfigurationRequiredProductRowIds ?? []).includes(row.productRowId) && <ErpCheckbox
+        checked={(state.draft.contractConfiguredProductRowIds ?? []).includes(row.productRowId)}
+        label="مشخصات واقعی قرارداد تأیید شد"
+        onChange={event => onDraftChange(confirmPartnerContractConfiguration(state.draft, row.productRowId, event.target.checked))} />}
+      {preview.ok && <RemainderEditor draft={state.draft} products={products} inventory={preview.value.inventory} onChange={onDraftChange} />}
+      {preview.ok && <LayerEditor draft={state.draft} products={products} operations={operations} previewRows={preview.value.rows}
+        inventory={preview.value.inventory} onChange={onDraftChange} />}
+    </div>
+  </CentralProductModalShell>;
 }
 
 function LayerEditor({ draft, products, operations, previewRows, inventory, onChange }: { draft: PartnerTechnicalDraft; products: PartnerTechnicalProduct[];

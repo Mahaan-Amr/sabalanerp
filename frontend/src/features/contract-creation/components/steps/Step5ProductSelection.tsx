@@ -38,11 +38,8 @@ import {
 import { getPartDisplayLabel } from '../../utils/stairSystemHelpers';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../../services/remainingStoneChildAddOnService';
 import { nextStandaloneServiceCatalogState } from '../../services/standaloneServiceCatalog';
-import {
-  moveCatalogHighlight,
-  resolveHighlightedCatalogProduct
-} from './catalogProductRanking';
 import { buildContractCartRows } from './contractCartRows';
+import { ContractProductCatalog } from './ContractProductCatalog';
 
 interface Step5ProductSelectionProps {
   controller: ContractProductCartController;
@@ -465,26 +462,15 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   onSaveFeedbackExpired
 }) => {
   const { catalog, services, cart } = controller;
-  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
   const [deleteConfirmRowId, setDeleteConfirmRowId] = useState<string | null>(null);
   const [pendingRowId, setPendingRowId] = useState<string | null>(null);
   const [serviceDeleteId, setServiceDeleteId] = useState<string | null>(null);
   const [showServiceCatalog, setShowServiceCatalog] = useState(false);
   const [showServiceResults, setShowServiceResults] = useState(false);
-  const highlightedRef = useRef<HTMLButtonElement | null>(null);
   const catalogStartRef = useRef<HTMLDivElement | null>(null);
-  const searchRef = useRef<HTMLInputElement | null>(null);
   const serviceSearchRef = useRef<HTMLInputElement | null>(null);
   const productErrorRef = useRef<HTMLDivElement | null>(null);
   const projectedRows = useMemo(() => buildContractCartRows(cart.items), [cart.items]);
-
-  useEffect(() => {
-    setHighlightedIndex(null);
-  }, [catalog.query, catalog.activeType]);
-
-  useEffect(() => {
-    highlightedRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [highlightedIndex]);
 
   useEffect(() => {
     const rowErrorKey = Object.keys(errors).find(key => key.startsWith('productRow:'));
@@ -526,7 +512,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
             ? 'auto'
             : 'smooth'
         });
-        searchRef.current?.focus({ preventScroll: true });
+        document.getElementById('contract-product-search')?.focus({ preventScroll: true });
       });
     }
     const timer = window.setTimeout(
@@ -535,11 +521,6 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
     );
     return () => window.clearTimeout(timer);
   }, [onSaveFeedbackExpired, saveFeedback]);
-
-  const selectHighlighted = () => {
-    const product = resolveHighlightedCatalogProduct(catalog.products, highlightedIndex);
-    if (product) catalog.selectProduct(product);
-  };
 
   const focusServiceSearch = () => {
     requestAnimationFrame(() => {
@@ -611,102 +592,12 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
         />
       )}
 
-      <section
-        className="sds-workspace-surface p-4"
-        aria-label="کاتالوگ محصولات"
-      >
-        <div className="flex gap-1 overflow-x-auto pb-3" role="tablist" aria-label="نوع محصول">
-          <ErpPressable
-            type="button"
-            role="tab"
-            aria-selected={!catalog.activeType}
-            onClick={() => catalog.selectType(null)}
-            tone={!catalog.activeType ? 'primary' : 'neutral'}
-            variant={!catalog.activeType ? 'solid' : 'ghost'}
-            className="min-h-11 px-3 text-xs"
-          >
-            همه
-          </ErpPressable>
-          {catalog.typeOptions.map(type => (
-            <ErpPressable
-              key={type.id}
-              type="button"
-              role="tab"
-              aria-selected={catalog.activeType === type.id}
-              onClick={() => catalog.selectType(type.id)}
-              tone={catalog.activeType === type.id ? 'primary' : 'neutral'}
-              variant={catalog.activeType === type.id ? 'solid' : 'ghost'}
-              className="min-h-11 px-3 text-xs"
-            >
-              {TYPE_LABELS[type.id] ?? type.name}
-            </ErpPressable>
-          ))}
-        </div>
-
-        <label htmlFor="contract-product-search" className="sds-text-secondary mb-1 block text-xs font-medium">
-          جستجوی محصول
-        </label>
-        <ErpInput
-          ref={searchRef}
-          id="contract-product-search"
-          type="search"
-          value={catalog.query}
-          onChange={event => catalog.setQuery(event.target.value)}
-          onKeyDown={event => {
-            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-              event.preventDefault();
-              setHighlightedIndex(current => moveCatalogHighlight(
-                current,
-                event.key === 'ArrowDown' ? 'next' : 'previous',
-                catalog.products.length
-              ));
-              return;
-            }
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              selectHighlighted();
-            }
-          }}
-          className="sds-field w-full px-3 py-2 text-sm"
-          aria-controls="contract-product-results"
-          aria-activedescendant={highlightedIndex === null ? undefined : `contract-product-result-${highlightedIndex}`}
-        />
-
-        <div
-          id="contract-product-results"
-          role="listbox"
-          className="sds-divider mt-2 max-h-80 overflow-y-auto border-t"
-        >
-          {catalog.products.length === 0 ? (
-            <div className="sds-text-muted py-4 text-sm">محصولی پیدا نشد</div>
-          ) : catalog.products.map((product, index) => {
-            const highlighted = highlightedIndex === index;
-            return (
-              <ErpPressable
-                key={product.id}
-                ref={highlighted ? highlightedRef : null}
-                id={`contract-product-result-${index}`}
-                type="button"
-                role="option"
-                aria-selected={highlighted}
-                onMouseEnter={() => setHighlightedIndex(index)}
-                onClick={() => catalog.selectProduct(product)}
-                className={`sds-divider grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-2 py-2.5 text-right last:border-b-0 ${highlighted ? 'bg-[var(--sds-accent-soft)]' : ''}`}
-              >
-                <span className="min-w-0">
-                  <strong className="sds-text-primary block truncate text-sm">
-                    {product.namePersian || product.name}
-                  </strong>
-                  <span className="sds-text-muted mt-0.5 block truncate text-xs">
-                    {getProductFacts(product)} · {inferCatalogTypeLabel(product, catalog.activeType)}
-                  </span>
-                </span>
-                <span className="text-xs font-medium text-[var(--sds-accent)]">انتخاب</span>
-              </ErpPressable>
-            );
-          })}
-        </div>
-      </section>
+      <ContractProductCatalog query={catalog.query} onQueryChange={catalog.setQuery}
+        activeType={catalog.activeType} onTypeChange={catalog.selectType}
+        typeOptions={catalog.typeOptions.map(type => ({ id: type.id, label: TYPE_LABELS[type.id] ?? type.name, count: type.count }))}
+        items={catalog.products.map(product => ({ id: product.id, name: product.namePersian || product.name,
+          facts: `${getProductFacts(product)} · ${inferCatalogTypeLabel(product, catalog.activeType)}` }))}
+        onSelect={item => { const product = catalog.products.find(product => product.id === item.id); if (product) catalog.selectProduct(product); }} />
 
       <section className="sds-workspace-surface p-4" aria-label="محصولات قرارداد">
         <div className="sds-divider flex flex-wrap items-end justify-between gap-3 border-b pb-2">

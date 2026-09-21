@@ -113,7 +113,12 @@ test('Partner product configuration includes one compact customer unit-price fie
   });
   const html = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft} products={catalog.products}
     operations={catalog.operations} onChange={() => undefined} />);
-  assert.match(html, /قیمت فروش به مشتری \(فی واحد، تومان\)/);
+  assert.match(html, /کاتالوگ محصولات/);
+  assert.match(html, /جستجوی محصول/);
+  assert.match(html, /همه/);
+  assert.match(html, /طولی/);
+  assert.doesNotMatch(html, /سنگ حجمی|کوپ/);
+  assert.match(html, /قیمت فروش به مشتری — قیمت واحد \(تومان\)/);
   assert.match(html, /1,250,000/);
   assert.doesNotMatch(html, /قیمت خرید شما از سبلان/);
 });

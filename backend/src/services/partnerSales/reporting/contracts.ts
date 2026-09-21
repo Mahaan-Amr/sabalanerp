@@ -76,6 +76,11 @@ export type Metrics = {
   wholesalePurchases: string;
   retailSales?: string; retailCollected?: string; netComparableMargin?: string;
 };
+export type ReportChartTransaction = {
+  caseId: string; caseNumber: string; customerContractNumber: string; effectiveDate: string;
+  kind: 'COMMITMENT' | 'CORRECTION' | 'VOID' | 'SABALAN_RECEIPT' | 'CUSTOMER_RECEIPT' | 'CUSTOMER_RECEIPT_REVERSAL';
+  debtDelta: string; receivableDelta: string; receiptDelta: string;
+};
 export type ReportRow = {
   caseId: string; revision: number; caseNumber: string; customerContractNumber: string;
   internalRecordNumber?: string; state: Foundation.CaseState;
@@ -83,6 +88,7 @@ export type ReportRow = {
   account?: Purchase | null;
   customerPaymentPlan?: Foundation.PartnerCaseView['customerPaymentPlan'];
   collectionStatus?: 'UNPAID' | 'PARTIAL' | 'SETTLED' | 'OVERPAID';
+  chartTransactions?: ReportChartTransaction[];
   deliveries: Foundation.FulfillmentView['deliveries'];
   deliveryProgress: DeliveryProgress[] | null;
 };
@@ -94,6 +100,8 @@ export type Report = {
   count: number; offset: number; limit: number; rows: ReportRow[];
   totals: { currency: Currency; metrics: Metrics; accountingBalance: string | null; accountingReceivedAsOf: string | null;
     accountingCovered: number; accountingEligible: number }[];
+  series: { currency: Currency; points: Array<{ jalaliMonth: string; debtBalance: string;
+    receivableBalance: string; receipts: string; transactions: ReportChartTransaction[] }> }[];
 };
 
 export type FrozenExport = {

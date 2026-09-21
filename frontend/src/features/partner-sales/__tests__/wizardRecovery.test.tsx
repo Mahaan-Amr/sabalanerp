@@ -3,7 +3,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures';
-import { PartnerContractWizard, partnerWizardStepsForDraft, type PartnerWizardDraft } from '../../contract-creation/partner/PartnerContractWizard';
+import { PartnerContractWizard, partnerCaseNeedsAutomaticPricingInquiry, partnerWizardStepsForDraft, type PartnerWizardDraft } from '../../contract-creation/partner/PartnerContractWizard';
 import { createPartnerCaseSubmission } from '../../contract-creation/partner/partnerCaseSubmission';
 import { defaultPartnerRetailRows } from '../../contract-creation/partner/partnerRetail';
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
@@ -11,6 +11,7 @@ import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
 import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
 import { preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
   shouldPreferLocalPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
+import { WIZARD_STEPS } from '../../contract-creation/constants/contract.constants';
 
 const fixture = createPartnerFixtures();
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
@@ -62,10 +63,18 @@ test('product editing preserves split and grouped deliveries while adding only n
   ]);
 });
 
-test('delivery step is omitted when the contract has no deliverable allocations', () => {
+test('Partner always keeps the exact ordinary Sales wizard sequence', () => {
   assert.deepEqual(partnerWizardStepsForDraft({ ...draft, intent: { ...draft.intent, deliveries: [] } })
-    .map(step => step.id), ['date', 'customer', 'project', 'products', 'payment', 'confirmation']);
+    .map(step => step.id), ['date', 'customer', 'project', 'products', 'delivery', 'payment', 'confirmation']);
+  assert.deepEqual(partnerWizardStepsForDraft(draft).map(step => step.label), WIZARD_STEPS.map(step => step.title));
   assert.equal(partnerWizardStepsForDraft(draft).some(step => step.id === 'delivery'), true);
+});
+
+test('a numbered unpriced Partner draft automatically enters the Sabalan pricing queue', () => {
+  const view = { ...fixture.case, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY' };
+  assert.equal(partnerCaseNeedsAutomaticPricingInquiry(view, 1), true);
+  assert.equal(partnerCaseNeedsAutomaticPricingInquiry({ ...view, pricingState: 'READY_TO_FINALIZE' }, 1), false);
+  assert.equal(partnerCaseNeedsAutomaticPricingInquiry(view, 0), false);
 });
 
 test('a centrally blocked Partner entry never mounts the ordinary Sales wizard', () => {
@@ -89,7 +98,7 @@ test('expiry during the wizard retains entered retail data and exposes inline re
   const html = renderToStaticMarkup(<PartnerContractWizard draft={draft} onChange={() => undefined}
     recovery={{ state: 'writable' }} submission={submission()} now={Date.parse(fixture.approval.expiresAt)}
     renderSection={() => null} validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
-  assert.match(html, /ورودی‌های پرونده حفظ شده‌اند/);
+  assert.match(html, /بسته قیمت این پرونده منقضی شده است/);
   assert.match(html, /استعلام مجدد/);
   assert.match(html, /value="800"/);
 });

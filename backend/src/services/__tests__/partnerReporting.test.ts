@@ -63,6 +63,12 @@ test('Partner queries keep discounted retail, wholesale and Accounting balances 
     wholesalePurchases: '1600', retailSales: '1800', retailCollected: '0', netComparableMargin: '200',
   }, accountingBalance: '1200', accountingReceivedAsOf: '400', accountingCovered: 1, accountingEligible: 1 });
   assert.equal(report.rows[0].collectionStatus, 'UNPAID');
+  assert.equal(report.series.length, 1);
+  assert.deepEqual(report.series[0].points.map(point => ({ month: point.jalaliMonth, debt: point.debtBalance,
+    receivable: point.receivableBalance, receipts: point.receipts, transactions: point.transactions.length })), [
+    { month: '1405/05', debt: '0', receivable: '0', receipts: '0', transactions: 0 },
+    { month: '1405/06', debt: '1600', receivable: '1800', receipts: '0', transactions: 1 },
+  ]);
   assert.equal(JSON.stringify(report).includes('FIXTURE-INTERNAL-313'), false);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-INTERNAL-313' })).count, 0);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-CUSTOMER-313' })).count, 1);

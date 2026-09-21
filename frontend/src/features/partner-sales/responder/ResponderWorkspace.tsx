@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { ResponderWorkspaceViewV2Schema } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerCommandPort, PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
 import { ErpButton, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpWorkspacePage } from '@/components/erp';
@@ -16,12 +17,14 @@ const inquiryLabel = (inquiry: { partnerDisplayName: string; submittedAt: string
   `${inquiry.partnerDisplayName} · ${tehranTime(inquiry.submittedAt)} · ${inquiry.rows.length.toLocaleString('fa-IR')} ردیف`;
 
 export function ResponderWorkspace({ queryPort, commandPort }: { queryPort: PartnerQueryV2Port; commandPort: PartnerCommandPort }) {
+  const searchParams = useSearchParams();
+  const requestedInquiryId = searchParams.get('inquiryId');
   const load = useCallback(async (cursor?: string) => {
     const response = await queryPort.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', limit: 20, ...(cursor ? { cursor } : {}) });
     return response.ok ? { ok: true as const, value: ResponderWorkspaceViewV2Schema.parse(response.value) } : response;
   }, [queryPort]);
   const resource = useWorkspaceQuery(load);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(requestedInquiryId);
   const [locked, setLocked] = useState(false);
   const [draftsByInquiry, setDraftsByInquiry] = useState<Record<string, ResponseDrafts>>({});
   const [now, setNow] = useState(Date.now());
@@ -33,6 +36,7 @@ export function ResponderWorkspace({ queryPort, commandPort }: { queryPort: Part
     setDraftsByInquiry(previous => ({ ...previous, [activeInquiryId]: typeof update === 'function' ? update(previous[activeInquiryId] || {}) : update }));
   }, [activeInquiryId]);
   useEffect(() => setDraftsByInquiry({}), [resource.view?.actorId]);
+  useEffect(() => { if (requestedInquiryId) setSelected(requestedInquiryId); }, [requestedInquiryId]);
   const session = useMemo(() => new PartnerCommandSession(commandPort, resource.view?.actorId || 'unloaded'), [commandPort, resource.view?.actorId]);
   const inquiryAvailability = inquiry && actionPresentation(inquiry.actions, 'INQUIRY_RESPOND', now);
   const editableRowIds = inquiry?.rows.filter(row => row.state === 'PENDING' && inquiryAvailability?.enabled && actionPresentation(row.actions, 'INQUIRY_RESPOND', now)?.enabled).map(row => row.rowId) || [];

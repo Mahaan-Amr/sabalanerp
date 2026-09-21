@@ -2,9 +2,9 @@
 
 import React, { useRef, useState, useSyncExternalStore } from 'react';
 import { ErpBadge, ErpButton, ErpCard, ErpInlineState, ErpLoading, ErpSheet } from '@/components/erp';
-import { FaBuilding, FaCalendarAlt, FaCreditCard, FaSignature, FaTruck, FaUser, FaWarehouse } from 'react-icons/fa';
 import type { WizardStep } from '../components/shared/WizardProgressBar';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
+import { WIZARD_STEPS } from '../constants/contract.constants';
 import { PartnerRetailStep } from './PartnerRetailStep';
 import { partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
 import type { PartnerDraftIntent, createPartnerCaseSubmission } from './partnerCaseSubmission';
@@ -25,15 +25,12 @@ export type PartnerRecoverySurface =
   | { state: 'takeover'; takeover: () => Promise<void>; discard: () => Promise<void> }
   | { state: 'blocked'; message: string };
 
-export const partnerWizardSteps: Array<{ id: PartnerWizardStep; label: string; icon: WizardStep['icon'] }> = [
-  { id: 'date', label: 'تاریخ قرارداد', icon: FaCalendarAlt },
-  { id: 'customer', label: 'انتخاب مشتری', icon: FaUser },
-  { id: 'project', label: 'مدیریت پروژه', icon: FaBuilding },
-  { id: 'products', label: 'انتخاب محصولات', icon: FaWarehouse },
-  { id: 'delivery', label: 'برنامه تحویل', icon: FaTruck },
-  { id: 'payment', label: 'روش پرداخت', icon: FaCreditCard },
-  { id: 'confirmation', label: 'تأیید دیجیتال', icon: FaSignature },
-];
+const PARTNER_STEP_IDS: PartnerWizardStep[] = ['date', 'customer', 'project', 'products', 'delivery', 'payment', 'confirmation'];
+
+/** Partner creation deliberately derives its sequence and presentation from the
+ * ordinary Sales wizard. Partner policy may change actions, never the journey. */
+export const partnerWizardSteps: Array<{ id: PartnerWizardStep; label: string; icon: WizardStep['icon'] }> =
+  WIZARD_STEPS.map((step, index) => ({ id: PARTNER_STEP_IDS[index]!, label: step.title, icon: step.icon }));
 const presentPartnerWizardSteps = (steps: typeof partnerWizardSteps): WizardStep[] => steps.map((step, index) => ({
   id: index + 1,
   title: step.label,
@@ -43,10 +40,7 @@ const presentPartnerWizardSteps = (steps: typeof partnerWizardSteps): WizardStep
 }));
 export const partnerWizardPresentationSteps = presentPartnerWizardSteps(partnerWizardSteps);
 
-export const partnerWizardStepsForDraft = (draft: PartnerWizardDraft) => {
-  const hasDeliverableAllocation = draft.intent.deliveries.some(delivery => delivery.items.length > 0);
-  return hasDeliverableAllocation ? partnerWizardSteps : partnerWizardSteps.filter(step => step.id !== 'delivery');
-};
+export const partnerWizardStepsForDraft = (_draft: PartnerWizardDraft) => partnerWizardSteps;
 
 export function partnerWizardCompactStatus(view: PartnerCaseView) {
   const contract = view.state === 'DRAFT' ? 'پیش‌نویس'
@@ -61,6 +55,9 @@ export function partnerWizardCompactStatus(view: PartnerCaseView) {
         : view.customerConfirmationState === 'REJECTED' ? 'ردشده' : 'نیازمند تأیید نسخه جدید';
   return { contract, pricing, customer };
 }
+
+export const partnerCaseNeedsAutomaticPricingInquiry = (view: PartnerCaseView | undefined, missingPriceRows: number) =>
+  Boolean(view && view.state === 'DRAFT' && view.pricingState === 'AWAITING_INQUIRY' && missingPriceRows > 0);
 
 /** Host-supplied sections reuse the existing customer/delivery/payment editors
  * and their validation. They receive the recovery-owned draft, never internal
@@ -88,6 +85,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const [discardOpen, setDiscardOpen] = useState(false);
   const [recoveryPending, setRecoveryPending] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
+  const automaticInquiryKey = useRef<string | null>(null);
   const recoveryFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const visibleSteps = partnerWizardStepsForDraft(draft);
@@ -114,6 +112,14 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   React.useEffect(() => {
     setConfirmationSent(false);
   }, [result.case?.owner.caseId, result.case?.owner.revision]);
+
+  React.useEffect(() => {
+    if (!partnerCaseNeedsAutomaticPricingInquiry(result.case, unusable.length) || !result.case || !unusable[0]) return;
+    const key = `${result.case.owner.caseId}:${result.case.owner.revision}`;
+    if (automaticInquiryKey.current === key) return;
+    automaticInquiryKey.current = key;
+    onReinquire(unusable[0].inquiryRow);
+  }, [onReinquire, result.case, unusable]);
 
   const recover = async (operation: () => Promise<void>) => {
     if (recoveryFlight.current) return;

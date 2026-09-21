@@ -31,6 +31,19 @@ function parseReport(value: unknown): PartnerReportPresentation | null {
         accountingBalance: typeof total.accountingBalance === 'string' ? total.accountingBalance : null,
         accountingReceivedAsOf: typeof total.accountingReceivedAsOf === 'string' ? total.accountingReceivedAsOf : null,
         accountingCovered: Number(total.accountingCovered), accountingEligible: Number(total.accountingEligible) })),
+      series: Array.isArray(report.series) ? (report.series as Record<string, unknown>[]).map(series => ({
+        currency: series.currency as 'IRR' | 'IRT',
+        points: Array.isArray(series.points) ? (series.points as Record<string, unknown>[]).map(point => ({
+          jalaliMonth: String(point.jalaliMonth), debtBalance: String(point.debtBalance),
+          receivableBalance: String(point.receivableBalance), receipts: String(point.receipts),
+          transactions: Array.isArray(point.transactions) ? (point.transactions as Record<string, unknown>[]).map(transaction => ({
+            caseId: String(transaction.caseId), caseNumber: String(transaction.caseNumber),
+            customerContractNumber: String(transaction.customerContractNumber), effectiveDate: String(transaction.effectiveDate),
+            kind: transaction.kind as never, debtDelta: String(transaction.debtDelta),
+            receivableDelta: String(transaction.receivableDelta), receiptDelta: String(transaction.receiptDelta),
+          })) : [],
+        })) : [],
+      })) : [],
       rows: (report.rows as Record<string, unknown>[]).map(row => ({ caseId: String(row.caseId), revision: Number(row.revision),
         caseNumber: String(row.caseNumber), customerContractNumber: String(row.customerContractNumber), state: row.state as never,
         currency: row.currency as 'IRR' | 'IRT', metrics: metric(row.metrics),

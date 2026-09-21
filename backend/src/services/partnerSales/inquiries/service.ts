@@ -8,6 +8,11 @@ import {
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { parseInquiryDefinition, type ConfigurationRef, type InquiryDefinition } from './definition';
 import { createPartnerInquiryQuery } from './query';
+import {
+  createPartnerPricingDuty,
+  reassignPartnerPricingDuty,
+  reconcilePartnerPricingDuty,
+} from '../../crossWorkspaceDutyAdapters/partnerPricingDutyAdapter';
 type Transaction = Prisma.TransactionClient;
 type AuthorizationRequest = { actorId: string; action: 'INQUIRY_READ' | 'INQUIRY_WRITE' | 'INQUIRY_RESPOND' |
   'RESPONDER_REASSIGN' | 'INTERNAL_REMEDIATION';
@@ -187,6 +192,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         type: outcomes.every(outcome => outcome.ok) ? 'INQUIRY_DECIDED' : 'INQUIRY_PARTIALLY_DECIDED',
         evidence: { version: 1, assignmentId: assignment.id, assignmentRevision: assignment.revision,
           ...(managementTakeover ? { managementTakeover } : {}), batch, decisions: command.decisions } } });
+      await reconcilePartnerPricingDuty(tx, { inquiryId: inquiry.id, actorUserId: dependencies.actorId, now: clock.now });
     }
     const receipt = { version: 1, commandId: command.commandId, eventIds, batch };
     await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...identity, payloadHash: expectedHash, outcome: receipt } });
@@ -270,6 +276,13 @@ async function mutateInquiryLifecycle(dependencies: PartnerInquiryDependencies,
         : { version: 1, responderId: notificationAssignment.responderId, assignmentId: notificationAssignment.id,
           assignmentRevision: notificationAssignment.revision,
           authorizationEvidenceId: authorization.value.evidenceId } } });
+    if (command.type === 'INQUIRY_CANCEL') {
+      await reconcilePartnerPricingDuty(tx, { inquiryId: inquiry.id, actorUserId: dependencies.actorId,
+        cancelled: true });
+    } else {
+      await reassignPartnerPricingDuty(tx, { inquiryId: inquiry.id, responderId: notificationAssignment.responderId,
+        actorUserId: dependencies.actorId, reason: command.reason });
+    }
     const receipt = { version: 1, commandId: command.commandId, eventIds: [eventId] };
     await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...identity, payloadHash: expectedHash, outcome: receipt } });
     return { ok: true, value: { commandId: command.commandId, replayed: false, eventIds: [eventId] } } as const;
@@ -422,6 +435,10 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
             assignmentRevision: assignment.revision, rowIds: definitions.map(row => row.rowId),
             ...(command.type === 'CASE_PRICING_SUBMIT' ? { caseId: command.caseId,
               caseRevision: command.expected.revision } : {}) } } });
+        if (command.type === 'CASE_PRICING_SUBMIT') {
+          await createPartnerPricingDuty(tx, { inquiryId: inquiry.id, actorUserId: dependencies.actorId,
+            inquiryRevision: inquiry.revision, now: clock.now });
+        }
         const receipt = { version: 1, commandId: command.commandId, eventIds: [eventId] };
         await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId,
           operation: command.type, targetScope: scope, key: command.idempotency.key, payloadHash: expectedHash,

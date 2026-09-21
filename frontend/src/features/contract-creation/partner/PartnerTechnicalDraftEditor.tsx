@@ -20,6 +20,7 @@ import { addPartnerTechnicalDependent, addPartnerTechnicalProduct, commitPartner
 import { setPartnerTechnicalRetailUnitPrice } from './partnerTechnicalDraftAdapter';
 import { TechnicalProductConfiguration } from './TechnicalProductConfiguration';
 import { partnerRetailPriceUnitLabel, partnerSelectableFamilies } from './partnerPricingUnit';
+import { ContractProductCatalog, type ContractCatalogFamily } from '../components/steps/ContractProductCatalog';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
 const nextDraft = (draft: PartnerTechnicalDraft, rows: PartnerTechnicalDraft['rows']) => PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1, rows });
@@ -47,34 +48,46 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
   preview?: ReturnType<typeof previewPartnerTechnicalDraft>;
   onChange: (draft: PartnerTechnicalDraft) => void;
 }) {
-  const [family, setFamily] = useState<PartnerTechnicalFamily>('prepared');
-  const [productId, setProductId] = useState('');
-  const available = products.filter(product => product.isAvailable && product.families.includes(family));
-  const selectedId = available.some(product => product.catalogItemId === productId) ? productId : available[0]?.catalogItemId || '';
+  const [family, setFamily] = useState<ContractCatalogFamily | null>(null);
+  const [query, setQuery] = useState('');
+  const available = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase('fa-IR');
+    return products.filter(product => product.isAvailable
+      && (!family || product.families.includes(family))
+      && (!needle || `${product.name} ${product.code} ${product.attributes.stoneType} ${product.attributes.quality}`
+        .toLocaleLowerCase('fa-IR').includes(needle)));
+  }, [family, products, query]);
   const preview = useMemo(() => suppliedPreview?.ok && suppliedPreview.value.inputRevision === draft.inputRevision
     ? suppliedPreview : previewPartnerTechnicalDraft(draft, { products, operations, sawKerfMeters }),
   [draft, operations, products, sawKerfMeters, suppliedPreview]);
-  const add = () => {
-    const product = products.find(item => item.catalogItemId === selectedId && item.families.includes(family));
+  const add = (catalogItemId: string) => {
+    const product = products.find(item => item.catalogItemId === catalogItemId);
     if (!product) return;
+    const selectedFamily = family && product.families.includes(family) ? family
+      : partnerSelectableFamilies.find(candidate => product.families.includes(candidate));
+    if (!selectedFamily) return;
     const productRowId = `product-row:${crypto.randomUUID()}`;
     const sourceBatchId = `source-batch:${crypto.randomUUID()}`;
     const stairSystemId = `stair-system:${crypto.randomUUID()}`;
-    const input = family === 'prepared' || family === 'volumetric' ? { family, productRowId }
-      : family === 'stair' ? { family, productRowId, sourceBatchId, stairSystemId }
-        : { family, productRowId, sourceBatchId };
+    const input = selectedFamily === 'prepared' ? { family: selectedFamily, productRowId }
+      : selectedFamily === 'stair' ? { family: selectedFamily, productRowId, sourceBatchId, stairSystemId }
+        : { family: selectedFamily, productRowId, sourceBatchId };
     onChange(addPartnerTechnicalProduct(draft, product, input));
   };
   return <TechnicalProductConfiguration><section className="space-y-4" aria-label="محصولات فروش همکار">
-    <ErpCard className="space-y-4 p-4">
-      <h2 className="font-bold">افزودن محصول</h2>
-      <div className="grid gap-4 sm:grid-cols-2"><ErpField label="خانواده محصول" required><ErpSelect value={family} onChange={event => { setFamily(event.target.value as PartnerTechnicalFamily); setProductId(''); }}>
-        {partnerSelectableFamilies.map(value => <option key={value} value={value}>{labels[value]}</option>)}</ErpSelect></ErpField>
-        <ErpCombobox label="محصول فنی" value={selectedId} onChange={setProductId}
-          options={available.map(product => ({ value: product.catalogItemId, label: product.name }))} /></div>
-      <ErpButton label="افزودن به فروش" disabled={!selectedId} onClick={add} />
-    </ErpCard>
+    <ContractProductCatalog query={query} onQueryChange={setQuery} activeType={family} onTypeChange={setFamily}
+      searchId="partner-contract-product-search"
+      typeOptions={partnerSelectableFamilies.map(value => ({ id: value, label: labels[value],
+        count: products.filter(product => product.isAvailable && product.families.includes(value)).length }))}
+      items={available.map(product => ({ id: product.catalogItemId, name: product.name,
+        facts: [product.code, product.attributes.stoneType, product.dimensions.motherWidthCentimeters
+          ? `عرض ${product.dimensions.motherWidthCentimeters}cm` : null,
+        product.dimensions.thicknessCentimeters ? `ضخامت ${product.dimensions.thicknessCentimeters}cm` : null,
+        family ? labels[family] : product.families.filter(item => item !== 'volumetric')
+          .map(item => labels[item]).join('، ')].filter(Boolean).join(' · ') }))}
+      onSelect={item => add(item.id)} />
     {!draft.rows.length && <ErpInlineState kind="empty" title="حداقل یک محصول به فروش اضافه کنید." />}
+    {draft.rows.length > 0 && <h2 className="sds-text-primary text-sm font-semibold">محصولات قرارداد</h2>}
     {draft.rows.map((row, index) => {
       const product = products.find(item => item.catalogItemId === row.catalogItemId && item.catalogSnapshotVersion === row.catalogSnapshotVersion);
       if (!product) return <ErpInlineState key={row.productRowId} kind="stale" title="نسخه کاتالوگ این محصول در دسترس نیست." />;

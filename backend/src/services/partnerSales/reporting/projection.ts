@@ -1,5 +1,5 @@
 import type { PartnerEvent } from '../../../../../packages/partner-sales-contracts';
-import { CaseEvidence, CommercialRevision, ContractRuntime, Metrics, Period, ReportPurpose, ReportRow, ReportingError } from './contracts';
+import { CaseEvidence, CommercialRevision, ContractRuntime, Metrics, Period, ReportChartTransaction, ReportPurpose, ReportRow, ReportingError } from './contracts';
 import { negate, subtract, sum } from './money';
 import { projectSabalanRevenue, visibleEvents } from './revenue';
 import { caseHistory, collectionHistory } from './history';
@@ -62,7 +62,34 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
   });
   const balance = subtract(current!.view.retailTotals.payable, collected);
   const collectionStatus = balance.startsWith('-') ? 'OVERPAID' : balance === '0' ? 'SETTLED' : collected === '0' ? 'UNPAID' : 'PARTIAL';
-  return { current: current!, retailSales: sum(sales), retailCollected: periodCollected, netComparableMargin: sum(margins), collectionStatus } as const;
+  const transaction = (event: PartnerEvent, kind: ReportChartTransaction['kind'], debtDelta = '0', receivableDelta = '0', receiptDelta = '0') => ({
+    caseId: data.root.caseId, caseNumber: current!.view.caseNumber,
+    customerContractNumber: current!.view.customerContractNumber, effectiveDate: event.effectiveDate,
+    kind, debtDelta, receivableDelta, receiptDelta,
+  });
+  const chartTransactions: ReportChartTransaction[] = [];
+  for (const event of events) {
+    if (event.type === 'CASE_COMMITTED') {
+      const committed = revision(event.owner);
+      chartTransactions.push(transaction(event, 'COMMITMENT', event.sabalanNetAmount.amount, committed.comparable.retail.amount));
+    } else if (event.type === 'CORRECTION_EFFECTIVE') {
+      const previous = revision(event.predecessor); const next = revision(event.owner);
+      chartTransactions.push(transaction(event, 'CORRECTION', '0', subtract(next.comparable.retail.amount, previous.comparable.retail.amount)));
+    } else if (event.type === 'SABALAN_ADJUSTMENT') {
+      chartTransactions.push(transaction(event, 'CORRECTION', event.delta));
+    } else if (event.type === 'SABALAN_RECEIPT') {
+      chartTransactions.push(transaction(event, 'SABALAN_RECEIPT', negate(event.amount.amount)));
+    } else if (event.type === 'RETAIL_RECEIPT') {
+      chartTransactions.push(transaction(event, 'CUSTOMER_RECEIPT', '0', negate(event.amount.amount), event.amount.amount));
+    } else if (event.type === 'RETAIL_RECEIPT_REVERSED') {
+      chartTransactions.push(transaction(event, 'CUSTOMER_RECEIPT_REVERSAL', '0', event.amount.amount, negate(event.amount.amount)));
+    } else if (event.type === 'CASE_VOIDED') {
+      const voided = revision(event.owner);
+      chartTransactions.push(transaction(event, 'VOID', '0', negate(voided.comparable.retail.amount)));
+    }
+  }
+  return { current: current!, retailSales: sum(sales), retailCollected: periodCollected,
+    netComparableMargin: sum(margins), collectionStatus, chartTransactions } as const;
 }
 
 export function projectReportRow(runtime: ContractRuntime, data: CaseEvidence, purpose: ReportPurpose, period: Period): ReportRow {
@@ -137,6 +164,7 @@ export function projectReportRow(runtime: ContractRuntime, data: CaseEvidence, p
     row.metrics.retailSales = retail.retailSales; row.metrics.retailCollected = retail.retailCollected;
     row.metrics.netComparableMargin = retail.netComparableMargin;
     row.customerPaymentPlan = retail.current.view.customerPaymentPlan; row.collectionStatus = retail.collectionStatus;
+    row.chartTransactions = retail.chartTransactions;
   }
   return row;
 }

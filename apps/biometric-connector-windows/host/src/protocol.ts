@@ -44,6 +44,7 @@ export interface SafeConnectorResult {
   match: { state: 'MATCH' | 'NO_MATCH' | 'NOT_EVALUATED'; score?: number };
   errorCategory: string;
   retryable: boolean;
+  captureImage?: { mimeType: 'image/png'; width: number; height: number; byteLength: number };
 }
 
 export interface ConnectorResponse {
@@ -110,7 +111,7 @@ export const sealTransportEnvelope = (
   key: Buffer,
 ): TransportEnvelope => {
   assertKey(key, 'Biometric transport key');
-  if (!Buffer.isBuffer(material) || material.length === 0 || material.length > 16_384) throw new Error('Biometric transport material is invalid');
+  if (!Buffer.isBuffer(material) || material.length === 0 || material.length > 1_100_000) throw new Error('Biometric transport material is invalid');
   const iv = randomBytes(12);
   const contextDigest = digest(context);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
@@ -138,7 +139,9 @@ export const openTransportEnvelope = (
   const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
   decipher.setAAD(Buffer.from(canonicalize(context)));
   decipher.setAuthTag(Buffer.from(envelope.authenticationTag, 'base64'));
-  return Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()]);
+  const material = Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()]);
+  if (material.length === 0 || material.length > 1_100_000) { material.fill(0); throw new Error('Biometric transport material is invalid'); }
+  return material;
 };
 
 export const signConnectorResponse = (response: ConnectorResponse, secret: Buffer): SignedConnectorResponse => ({ response, signature: hmac(response, secret) });

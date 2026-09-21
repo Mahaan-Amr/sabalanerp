@@ -666,6 +666,7 @@ const loadLoading = (id: string) => {
       project: true,
       driver: true,
       vehiclePair: true,
+      guardQueueTurns: { orderBy: { reservedAt: 'asc' } },
       driverQueueTurns: { include: { vehiclePair: true }, orderBy: { reservedAt: 'asc' } },
       driverAssignments: {
         include: {
@@ -1245,12 +1246,20 @@ router.post('/loadings/:id/corrections', canEdit, canCreateCorrections, [
 
 router.get('/drivers', canView, canViewDrivers, async (req: any, res: Response) => {
   try {
+    const loadingId = String(req.query.loadingId || '').trim();
     const turns = await prisma.guardDriverQueueTurn.findMany({
-      where: { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING },
+      where: loadingId ? {
+        OR: [
+          { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING },
+          { status: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING, loadingId },
+        ],
+      } : { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING },
       include: { loading: { select: { id: true, loadingNumber: true } } },
       orderBy: [{ availableAt: 'asc' }, { admittedAt: 'asc' }, { id: 'asc' }],
     });
-    const eligibleTurns = (await Promise.all(turns.map(async (turn) => await isGuardQueueTurnCurrentlyReady(prisma, turn) ? turn : null)))
+    const eligibleTurns = (await Promise.all(turns.map(async (turn) => (
+      turn.status === GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING || await isGuardQueueTurnCurrentlyReady(prisma, turn)
+    ) ? turn : null)))
       .filter((turn): turn is (typeof turns)[number] => turn !== null);
     res.json({ success: true, data: eligibleTurns.map((turn) => {
       const snapshot = turn.admissionSnapshot as any;

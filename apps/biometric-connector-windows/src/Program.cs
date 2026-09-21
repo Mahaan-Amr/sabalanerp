@@ -107,9 +107,12 @@ internal static class Program
                         "{\"availability\":\"AVAILABLE\",\"device\":" + DeviceObject(device) +
                         ",\"captureQuality\":{\"state\":\"ACCEPTED\",\"score\":" + capture.Quality.ToString(CultureInfo.InvariantCulture) + "}" +
                         ",\"liveness\":{\"state\":\"" + capture.LivenessState + "\",\"score\":" + capture.LivenessScore.ToString(CultureInfo.InvariantCulture) + "}" +
-                        (command == "capture-template" ? ",\"templateFormat\":\"ISO_19794_2\",\"templateLength\":" + capture.TemplateSize.ToString(CultureInfo.InvariantCulture) : ",\"template\":{\"format\":\"ISO_19794_2\",\"extracted\":true,\"materialReturned\":false}") +
-                        ",\"rawImagePersisted\":false,\"errorCategory\":\"NONE\"}";
-                    if (command == "capture-template") WriteTemplateResult(result, capture.Template, capture.TemplateSize);
+                        (command == "capture-template" ? ",\"templateFormat\":\"ISO_19794_2\",\"templateLength\":" + capture.TemplateSize.ToString(CultureInfo.InvariantCulture) +
+                        ",\"imageMimeType\":\"image/png\",\"imageLength\":" + capture.ImagePng.Length.ToString(CultureInfo.InvariantCulture) +
+                        ",\"imageWidth\":" + capture.ImageWidth.ToString(CultureInfo.InvariantCulture) + ",\"imageHeight\":" + capture.ImageHeight.ToString(CultureInfo.InvariantCulture)
+                        : ",\"template\":{\"format\":\"ISO_19794_2\",\"extracted\":true,\"materialReturned\":false}") +
+                        ",\"errorCategory\":\"NONE\"}";
+                    if (command == "capture-template") WriteTemplateResult(result, capture.Template, capture.TemplateSize, capture.ImagePng);
                     else WriteResult(result);
                 }
                 return 0;
@@ -132,12 +135,13 @@ internal static class Program
         Console.WriteLine("SABALAN_RESULT:" + json);
     }
 
-    private static void WriteTemplateResult(string json, byte[] template, int size)
+    private static void WriteTemplateResult(string json, byte[] template, int size, byte[] imagePng)
     {
         Console.WriteLine("SABALAN_TEMPLATE_RESULT:" + json);
         Console.Out.Flush();
         System.IO.Stream output = Console.OpenStandardOutput();
         output.Write(template, 0, size);
+        output.Write(imagePng, 0, imagePng.Length);
         output.Flush();
     }
 

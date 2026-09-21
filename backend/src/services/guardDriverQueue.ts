@@ -287,6 +287,9 @@ export const releaseGuardQueueReservation = async (prisma: PrismaClient, input: 
   }
   const reason = input.reason.trim();
   if (!reason) throw new GuardQueueValidationError('A reservation release reason is required.');
+  const removedDrafts = await tx.logisticsAllocationDraft.deleteMany({
+    where: { queueTurnId: turn.id, loadingId: input.loadingId },
+  });
   const changed = await tx.guardDriverQueueTurn.updateMany({
     where: { id: turn.id, status: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING, loadingId: input.loadingId },
     data: { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, loadingId: null, reservedAt: null, reservedBy: null },
@@ -296,6 +299,7 @@ export const releaseGuardQueueReservation = async (prisma: PrismaClient, input: 
   await appendQueueEvent(tx, {
     turnId: turn.id, eventType: 'RESERVATION_RELEASED', fromStatus: turn.status, toStatus: updated.status,
     actorId: input.actorId, reason, payload: { loadingId: input.loadingId,
+      removedAllocationDraftCount: removedDrafts.count,
       ...(source.value.sourceKind === 'PARTNER_CASE' ? { source: source.value } : {}) },
   });
   return updated;

@@ -4,6 +4,14 @@ import { BiometricWorkstationGateway, readBiometricWorkstationConfig } from '../
 import { digestBiometricValue } from '../biometricProtocol';
 import { signBiometricConnectorResponse, sealBiometricTransportEnvelope } from '../biometricWorkstationProtocol';
 
+const captureMaterial = (template: Buffer, image: Buffer) => {
+  const header = Buffer.alloc(16);
+  Buffer.from('SBIOIMG1').copy(header);
+  header.writeUInt32BE(template.length, 8);
+  header.writeUInt32BE(image.length, 12);
+  return Buffer.concat([header, template, image]);
+};
+
 const commandSecret = Buffer.alloc(32, 3);
 const transportKey = Buffer.alloc(32, 7);
 const now = new Date('2026-09-02T13:00:00.000Z');
@@ -41,11 +49,13 @@ test('enrollment challenge consumes a signed capture once and opens only its bou
   const issued = await gateway.issueEnrollment({ workstationId: 'PILOT-01', actorId: 'hr-01', personnelId: 'person-01', finger: 'RIGHT_INDEX' });
   const context = { commandId: issued.command.commandId, workstationId: 'PILOT-01', purpose: 'ENROLLMENT_CAPTURE' as const, subjectId: 'person-01', finger: 'RIGHT_INDEX' };
   const material = Buffer.from('iso-template-material');
-  const envelope = sealBiometricTransportEnvelope(material, context, 'transport-v1', transportKey);
-  const response = { commandId: issued.command.commandId, result: { availability: 'AVAILABLE' as const, device: { model: 'BioMini SLIM 2', serial: 'SERIAL-01', connectorVersion: '1.0.0', sdkVersion: '3.11.1.595' }, captureQuality: { state: 'ACCEPTED' as const, score: 86 }, liveness: { state: 'LIVE' as const, score: 999 }, match: { state: 'NOT_EVALUATED' as const }, errorCategory: 'NONE', retryable: false }, transportEnvelopeDigest: digestBiometricValue(envelope), completedAt: now.toISOString() };
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+  const envelope = sealBiometricTransportEnvelope(captureMaterial(material, image), context, 'transport-v1', transportKey);
+  const response = { commandId: issued.command.commandId, result: { availability: 'AVAILABLE' as const, device: { model: 'BioMini SLIM 2', serial: 'SERIAL-01', connectorVersion: '1.0.0', sdkVersion: '3.11.1.595' }, captureQuality: { state: 'ACCEPTED' as const, score: 86 }, liveness: { state: 'LIVE' as const, score: 999 }, match: { state: 'NOT_EVALUATED' as const }, errorCategory: 'NONE', retryable: false, captureImage: { mimeType: 'image/png' as const, width: 320, height: 480, byteLength: image.length } }, transportEnvelopeDigest: digestBiometricValue(envelope), completedAt: now.toISOString() };
   const signedResponse = signBiometricConnectorResponse(response, commandSecret);
   const claimed = await gateway.claimEnrollmentCapture({ challengeId: issued.command.commandId, actorId: 'hr-01', signedResponse, transportEnvelope: envelope });
-  assert.deepEqual(claimed.material, material);
+  assert.deepEqual(claimed.templateMaterial, material);
+  assert.deepEqual(claimed.imageMaterial, image);
   await assert.rejects(() => gateway.claimEnrollmentCapture({ challengeId: issued.command.commandId, actorId: 'hr-01', signedResponse, transportEnvelope: envelope }), /already used/i);
 });
 

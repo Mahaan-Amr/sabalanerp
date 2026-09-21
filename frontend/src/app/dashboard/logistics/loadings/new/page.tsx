@@ -30,6 +30,7 @@ import {
   ErpSegmentedControl,
 } from '@/components/erp';
 import { logisticsAPI } from '@/lib/api';
+import { saveCanonicalLoadingDraft } from '@/features/logistics/canonicalLoadingDraftWorkflow';
 import { inputClass, labelClass, numberFa, unitLabels } from '../../logistics-ui';
 
 type WizardStep = 'customer' | 'project' | 'contracts' | 'driver' | 'quantities' | 'review';
@@ -278,14 +279,30 @@ export default function NewLoadingPage() {
     if (response.data.success) setRemaining(response.data.data);
   };
 
-  const loadDrivers = async () => {
-    const response = await logisticsAPI.getDrivers();
+  const loadDrivers = async (loadingId?: string) => {
+    const response = await logisticsAPI.getDrivers(loadingId ? { loadingId } : undefined);
     if (response.data.success) setDrivers(response.data.data);
   };
 
-  const syncDriverState = (loadingDraft: any) => {
-    const assignmentIds = (loadingDraft?.driverAssignments || []).map((assignment: any) => assignment.queueTurnId).filter(Boolean);
-    setSelectedDriverIds(assignmentIds);
+  const syncDriverState = (loadingDraft: any, draftLines: DraftLine[]) => {
+    const canonicalIds = (loadingDraft?.guardQueueTurns || [])
+      .filter((turn: any) => turn.status === 'RESERVED_FOR_LOADING' && turn.loadingId === loadingDraft.id)
+      .map((turn: any) => turn.id);
+    const canonicalDraftIds = (loadingDraft?.canonicalAllocationDrafts || []).map((allocation: any) => allocation.queueTurnId);
+    const legacyIds = (loadingDraft?.driverAssignments || []).map((assignment: any) => assignment.queueTurnId).filter(Boolean);
+    setSelectedDriverIds(Array.from(new Set([...canonicalIds, ...canonicalDraftIds, ...legacyIds])));
+
+    const lineKeyBySourceId = new Map(draftLines.map((line) => [line.source.contractItemId, line.key]));
+    const restoredInputs: Record<string, Record<string, Partial<DraftLine>>> = {};
+    for (const allocation of loadingDraft?.canonicalAllocationDrafts || []) {
+      restoredInputs[allocation.queueTurnId] = {};
+      for (const line of allocation.lines || []) {
+        const lineKey = lineKeyBySourceId.get(line.sourceContractItemId);
+        if (!lineKey) continue;
+        restoredInputs[allocation.queueTurnId][lineKey] = { mode: 'direct', quantity: String(line.quantity) };
+      }
+    }
+    setDriverLineInputs(restoredInputs);
   };
 
   useEffect(() => {
@@ -295,8 +312,8 @@ export default function NewLoadingPage() {
 
   useEffect(() => {
     if (!draft?.id || step !== 'driver') return undefined;
-    void loadDrivers();
-    const handle = window.setInterval(() => { void loadDrivers(); }, 5000);
+    void loadDrivers(draft.id);
+    const handle = window.setInterval(() => { void loadDrivers(draft.id); }, 5000);
     return () => window.clearInterval(handle);
   }, [draft?.id, step]);
 
@@ -323,11 +340,15 @@ export default function NewLoadingPage() {
           customerId: loadingDraft.customerId,
         }]);
         setNotes(loadingDraft.notes || '');
-        syncDriverState(loadingDraft);
-        setLines((loadingDraft.lines || []).map(lineFromLoadingLine));
+        const draftLines = (loadingDraft.lines || []).map(lineFromLoadingLine);
+        syncDriverState(loadingDraft, draftLines);
+        setLines(draftLines);
+        await loadDrivers(loadingDraft.id);
         await loadRemaining(loadingDraft.projectId);
         setMessage('پیش‌نویس بارگیری برای ویرایش باز شد.');
-        setStep((loadingDraft.lines || []).length ? (loadingDraft.vehiclePairId ? 'quantities' : 'driver') : 'contracts');
+        const hasReservedDriver = (loadingDraft.guardQueueTurns || [])
+          .some((turn: any) => turn.status === 'RESERVED_FOR_LOADING' && turn.loadingId === loadingDraft.id);
+        setStep((loadingDraft.lines || []).length ? (hasReservedDriver || loadingDraft.vehiclePairId ? 'quantities' : 'driver') : 'contracts');
       } catch (err: any) {
         setError(err.response?.data?.error || 'دریافت پیش‌نویس ناموفق بود.');
       } finally {
@@ -347,8 +368,9 @@ export default function NewLoadingPage() {
       const loadingDraft = response.data.data;
       setDraft(loadingDraft);
       setNotes(loadingDraft.notes || '');
-      syncDriverState(loadingDraft);
-      setLines((loadingDraft.lines || []).map(lineFromLoadingLine));
+      const draftLines = (loadingDraft.lines || []).map(lineFromLoadingLine);
+      syncDriverState(loadingDraft, draftLines);
+      setLines(draftLines);
       await loadRemaining(projectId);
       setMessage(response.data.resumed ? 'پیش‌نویس فعال این پروژه ادامه داده شد.' : 'پیش‌نویس بارگیری ساخته شد.');
       setStep('contracts');
@@ -418,11 +440,34 @@ export default function NewLoadingPage() {
     });
   };
 
-  const buildPayload = () => ({
+  const buildLoadingPayload = () => ({
     projectId: draft?.projectId,
     notes,
-    driverTurnIds: selectedDriverIds,
-    driverAllocations: selectedDriverIds.map((queueTurnId) => ({
+    lines: lines.map((line) => {
+      const quantity = selectedDriverIds.length ? calculateTotalLineQuantity(line) : calculateLineQuantity(line);
+      return {
+        sourceContractItemId: line.source.contractItemId,
+        unit: line.source.unit,
+        quantity,
+        khatRas: null,
+        pieceCount: null,
+        plus: 0,
+        minus: 0,
+        productSnapshot: line.source.productSnapshot,
+        sourceSnapshot: {
+          contractId: line.source.contractId,
+          contractNumber: line.source.contractNumber,
+          contractItemId: line.source.contractItemId,
+          contractedQuantity: line.source.contractedQuantity,
+          remainingQuantity: line.source.remainingQuantity,
+          groupKey: line.groupKey,
+        },
+        notes: line.notes,
+      };
+    }),
+  });
+
+  const buildCanonicalAllocations = () => selectedDriverIds.map((queueTurnId) => ({
       queueTurnId,
       lines: lines.map((line) => {
         const driverLine = lineWithDriverInput(queueTurnId, line);
@@ -446,22 +491,39 @@ export default function NewLoadingPage() {
           notes: driverLine.notes,
         };
       }),
-    })),
-  });
+    }));
 
   const saveDraft = async () => {
     if (!draft?.id) return false;
     setError('');
     setSaving(true);
     try {
-      const response = await logisticsAPI.updateLoading(draft.id, buildPayload());
+      const reservedTurnIds = (draft.guardQueueTurns || [])
+        .filter((turn: any) => turn.status === 'RESERVED_FOR_LOADING' && turn.loadingId === draft.id)
+        .map((turn: any) => turn.id);
+      const response = await saveCanonicalLoadingDraft({
+        api: logisticsAPI,
+        loadingId: draft.id,
+        loadingPayload: buildLoadingPayload(),
+        selectedTurnIds: selectedDriverIds,
+        reservedTurnIds,
+        allocations: hasValidLineQuantities ? buildCanonicalAllocations() : [],
+      });
       if (response.data.success) {
         setDraft(response.data.data);
+        await loadDrivers(draft.id);
         setMessage('پیش‌نویس ذخیره شد.');
         return true;
       }
     } catch (err: any) {
       setError(err.response?.data?.error || 'ذخیره پیش‌نویس ناموفق بود.');
+      try {
+        const refreshed = await logisticsAPI.getLoading(draft.id);
+        if (refreshed.data.success) setDraft(refreshed.data.data);
+        await loadDrivers(draft.id);
+      } catch {
+        // Keep the original actionable save error when recovery refresh also fails.
+      }
     } finally {
       setSaving(false);
     }

@@ -1,4 +1,7 @@
 using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 using BioMini;
 
 namespace Sabalan.Biometrics
@@ -10,12 +13,19 @@ namespace Sabalan.Biometrics
         internal int Quality;
         internal int LivenessScore;
         internal string LivenessState;
+        internal byte[] ImagePng;
+        internal int ImageWidth;
+        internal int ImageHeight;
 
         public void Dispose()
         {
             if (Template != null) Array.Clear(Template, 0, Template.Length);
             Template = null;
             TemplateSize = 0;
+            if (ImagePng != null) Array.Clear(ImagePng, 0, ImagePng.Length);
+            ImagePng = null;
+            ImageWidth = 0;
+            ImageHeight = 0;
         }
     }
 
@@ -114,13 +124,45 @@ namespace Sabalan.Biometrics
             }
 
             int livenessScore = scanner.LfdScore;
+            byte[] imagePng;
+            int imageWidth;
+            int imageHeight;
+            Bitmap bitmap = null;
+            try
+            {
+                int resolution;
+                RequireScannerOk(scanner.GetCaptureImageBuffer(out bitmap, out resolution), "CAPTURE_IMAGE_UNAVAILABLE");
+                if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0 || bitmap.Width > 2048 || bitmap.Height > 2048)
+                    throw new BioMiniSdkException("CAPTURE_IMAGE_INVALID", "The SDK returned invalid fingerprint image dimensions.");
+                imageWidth = bitmap.Width;
+                imageHeight = bitmap.Height;
+                using (MemoryStream stream = new MemoryStream())
+                {
+                    bitmap.Save(stream, ImageFormat.Png);
+                    if (stream.Length <= 0 || stream.Length > 1048576)
+                        throw new BioMiniSdkException("CAPTURE_IMAGE_INVALID", "The fingerprint PNG exceeds the allowed size.");
+                    imagePng = stream.ToArray();
+                }
+            }
+            catch
+            {
+                Array.Clear(template, 0, template.Length);
+                throw;
+            }
+            finally
+            {
+                if (bitmap != null) bitmap.Dispose();
+            }
             return new CaptureEvidence
             {
                 Template = template,
                 TemplateSize = templateSize,
                 Quality = quality,
                 LivenessScore = livenessScore,
-                LivenessState = "LIVE"
+                LivenessState = "LIVE",
+                ImagePng = imagePng,
+                ImageWidth = imageWidth,
+                ImageHeight = imageHeight
             };
         }
 

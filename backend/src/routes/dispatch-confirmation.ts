@@ -88,7 +88,8 @@ router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: A
         for (const capture of req.body.captures) claimed.push(await gateway.claimEnrollmentCapture({ challengeId: String(capture.challengeId || ''), actorId: req.user!.id,
           signedResponse: capture.signedResponse, transportEnvelope: capture.transportEnvelope }));
         if (claimed.some((item) => item.challenge.subjectId !== req.params.personnelId) || new Set(claimed.map((item) => item.challenge.finger)).size < 2) throw new DispatchConfirmationValidationError('Enrollment captures do not belong to two distinct fingers for this driver.');
-        const templates = claimed.map((item) => ({ finger: item.challenge.finger!, format: 'ISO-19794-2', material: item.material,
+        const templates = claimed.map((item) => ({ finger: item.challenge.finger!, format: 'ISO-19794-2', material: item.templateMaterial,
+          image: { material: item.imageMaterial, mimeType: 'image/png' as const, width: item.response.result.captureImage!.width, height: item.response.result.captureImage!.height },
           deviceEvidence: { commandId: item.challenge.id, deviceModel: item.response.result.device.model, deviceSerial: item.response.result.device.serial,
             captureQuality: item.response.result.captureQuality, liveness: item.response.result.liveness }, provenance: 'APPROVED_CONNECTOR' as const }));
         const data = await service().enrollInternalDriver({ personnelId: req.params.personnelId,
@@ -96,7 +97,7 @@ router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: A
         success = true;
         return res.status(201).json({ success: true, data });
       } finally {
-        claimed.forEach((item) => item.material.fill(0));
+        claimed.forEach((item) => { item.templateMaterial.fill(0); item.imageMaterial.fill(0); });
         if (claimed.length) await gateway.complete(claimed.map((item) => item.challenge.id), success);
       }
     }
@@ -119,6 +120,19 @@ router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: A
 router.post('/enrollments/:enrollmentId/deactivate', hrManage, async (req: AuthRequest, res) => {
   try { return res.json({ success: true, data: await service().deactivateEnrollment({ enrollmentId: req.params.enrollmentId, actorId: req.user!.id, reason: req.body.reason }) }); }
   catch (error) { return handle(res, error); }
+});
+router.get('/enrollments/:enrollmentId/images/:finger', hrManage, async (req: AuthRequest, res) => {
+  try {
+    const result = await service().readEnrollmentImage({ enrollmentId: req.params.enrollmentId, finger: req.params.finger, actorId: req.user!.id });
+    const responseImage = Buffer.from(result.image);
+    result.image.fill(0);
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', responseImage.length);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Disposition', `inline; filename="fingerprint-${req.params.finger}.png"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.end(responseImage, () => responseImage.fill(0));
+  } catch (error) { return handle(res, error); }
 });
 router.post('/waybills/:waybillId/sessions', accountingManage, async (req: AuthRequest, res) => {
   try { return res.status(201).json({ success: true, data: await service().startSession({ waybillId: req.params.waybillId, actorId: req.user!.id, workstationId: req.body.workstationId }) }); }

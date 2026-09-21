@@ -29,6 +29,7 @@ $sources = @(
 $references = @(
     '/reference:System.dll',
     '/reference:System.Core.dll',
+    '/reference:System.Drawing.dll',
     ('/reference:' + (Join-Path $resolvedSdk 'BioMini.UFScanner.dll')),
     ('/reference:' + (Join-Path $resolvedSdk 'BioMini.UFMatcher.dll'))
 )

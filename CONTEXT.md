@@ -290,6 +290,158 @@ _Avoid_: completing the request automatically on Sales save, assigning verificat
 An active Sales Contract that has reached Approved, Signed, or Printed status and therefore requires accountable Accounting processing. Reaching this eligibility creates the Accounting duty exactly once for the current eligible version; Draft creation and visibility alone create no duty, and later ineligibility cancels stale open work rather than leaving it actionable.
 _Avoid_: creating an Accounting duty for every Draft, using the contract-created notification as duty truth, duplicating the duty for repeated reads, processing an inactive Contract, or retaining an actionable duty after eligibility is lost
 
+**Authoritative Accounting Ledger**:
+The single ledger whose posted entries determine Sabalan's accounting balances and statutory financial reports. SabalanERP becomes this authority only after its parallel results reconcile with the outgoing Sepidar ledger and the controlled cutover is accepted.
+_Avoid_: two permanent accounting sources of truth, treating an operational record as a posted entry, cutting over with unexplained differences, or continuing ordinary Sepidar posting after authority transfers
+
+**Accounting Legal Entity**:
+The legally registered reporting entity that owns its statutory books, fiscal years, posted entries, and financial statements. A Branch, Department, Cost Center, Project, Contract, Warehouse, or other internal operating unit is not a separate Accounting Legal Entity unless it is genuinely a distinct legal reporting entity.
+_Avoid_: Organization Group, Branch, Department, Cost Center, Project, Contract, Warehouse, or an internal management boundary
+
+**Primary Accounting Book**:
+The stable statutory ledger owned by one Accounting Legal Entity across its successive Fiscal Years. The current Accounting Legal Entity has one Primary Accounting Book; a future distinct Accounting Legal Entity owns its own book instead of sharing or partitioning this one.
+_Avoid_: recreating the book every year, one book per Branch or Department, duplicating the chart for internal analysis, or sharing posted truth between legal entities
+
+**Accounting Dimension**:
+A typed analytical attribution on an accounting entry that answers which internal business context an amount relates to without splitting the Primary Accounting Book. Dimensions may represent Branch, Department, Cost Center, Project, Contract, Warehouse, Sales Channel, Product, or another governed analytical axis.
+_Avoid_: a separate ledger, a duplicate chart of accounts, free-text Cost Center, using dimensions to replace a genuine account, or turning every operational field into a dimension
+
+**Accounting Party**:
+The stable floating-detail identity of one customer, supplier, employee, related legal entity, or other counterparty within an Accounting Legal Entity. One party may participate in multiple eligible control accounts and Contracts without being duplicated in the chart of accounts.
+_Avoid_: one customer identity per Contract, repeating the same counterparty under every control account, treating a Party as a Branch, or changing historical entry identity when live CRM data changes
+
+**Customer Accounting Profile**:
+The automatically provisioned, balance-free Accounting Party profile created exactly once when a Customer's first active Sales Contract reaches Approved status. It remains as historical identity after cancellation and becomes inactive only when no active accounting relationship remains; creating it never posts revenue, debt, or a zero-value journal entry.
+_Avoid_: customer balance, customer activity, a journal entry, waiting for payment or delivery before provisioning, creating one profile per Contract, deleting identity after cancellation, or exposing floating-detail mechanics as an ordinary User task
+
+**Customer Accounting Balance**:
+The Customer's derived balance from posted accounting entries and their effective settlements, optionally filtered by Contract and other permitted Accounting Dimensions. It is never an editable field on the Customer Accounting Profile.
+_Avoid_: CRM credit estimate, Contract total, draft invoice amount, a separately maintained counter, or a balance changed without posted evidence
+
+**Customer Accounting Activity**:
+The drillable posted invoices, advances, receipts, checks, returns, reversals, corrections, and settlements attributed to one Customer Accounting Profile. Draft operational records remain visible in their own workflow but do not enter this activity as posted truth.
+_Avoid_: every CRM interaction, an unposted payment plan, a mutable summary, or activity without a source document and journal line
+
+**Accounting Base Currency**:
+The single currency in which the Primary Accounting Book balances and statutory reports are maintained; for the current Sabalan book this is Iranian rial. An entered or displayed toman amount retains its original-unit and conversion evidence but never creates a parallel toman balance.
+_Avoid_: mixing rial and toman without explicit evidence, maintaining independent legal balances in both units, discarding the entered unit, or silently changing historical conversions
+
+**Target Chart of Accounts**:
+The governed Group, General, and Subsidiary account structure designed for Sabalan's accounting and reporting needs, with normal side, statement role, contra relationship, currency and tracking behavior, dimension rules, and effective dates. Existing Sepidar accounts and balances enter it only through an explicit reviewed mapping, so neither legacy structure nor legacy evidence is silently discarded.
+_Avoid_: importing Sepidar coding blindly, designing without reconciling legacy accounts, placing floating details inside the account tree, rewriting an account's historical meaning, or leaving an active source account unmapped
+
+**Accounting Fiscal Year**:
+The User-defined reporting interval of one Primary Accounting Book, with custom start and end dates rather than an assumed Persian-calendar year. Its previewed period plan may use the offered twelve-month-plus-adjustment template or custom contiguous non-overlapping boundaries, and becomes governed once posted evidence exists while the Accounting Book remains stable across successive years.
+_Avoid_: hard-coding Farvardin through Esfand, recreating the Accounting Book annually, leaving gaps or overlaps, forcing every entity to use one period template, or changing active boundaries after posted evidence without governed correction
+
+**Accounting Posting Period**:
+A bounded interval within an Accounting Fiscal Year whose lifecycle is Open, Soft Closed, or Hard Closed. Soft Close blocks ordinary posting while permitting governed completion, whereas Hard Close permits reopening only through explicitly authorized, reasoned, strongly confirmed, and audited exception handling.
+_Avoid_: one unstructured date range for the whole ledger, backdating into a closed period, confusing event date with posting time, or silently reopening a period
+
+**Accounting Close Run**:
+The reproducible, explicitly authorized process that Hard Closes a Posting Period or Accounting Fiscal Year only after drafts, exceptions, suspense balances, and every applicable subledger-to-ledger reconciliation are resolved, with its checklist, trial-balance and report hashes, actor, generated vouchers, strong confirmation, and result preserved. One authorized Accounting Manager may close or reopen without a second actor, but reopening creates a reasoned exception record and never erases the completed Close Run.
+_Avoid_: closing with unresolved differences, one-click close without evidence or strong confirmation, deleting the prior close, or treating a status update as a reconciled close
+
+**Official Accounting Report**:
+A reproducible statutory or official balance, ledger, T-account, trial balance, or financial statement derived only from posted vouchers under a recorded book, period, mapping, policy version, and as-of time. Draft vouchers never enter its totals.
+_Avoid_: mixing drafts into official totals, an editable saved balance, a report without drill-down to journal lines, or a result whose filters and rule versions cannot be reproduced
+
+**Draft-Inclusive Accounting Preview**:
+A distinctly labeled management-only projection that shows the effect of selected draft vouchers separately from posted official truth. It never replaces, overwrites, or shares an unlabeled total with an Official Accounting Report.
+_Avoid_: statutory report, default ledger balance, hiding which drafts are included, combining draft and posted amounts in one unexplained figure, or exporting a preview as official evidence
+
+**Late Accounting Event**:
+A business event whose actual occurred time belongs to an earlier period but whose evidence was recorded or accepted later. Its occurred, recorded, discovered, and posted times remain distinct; Soft-Closed completion requires authority, while a Hard-Closed period normally receives a linked adjustment in an open period unless a material-error review approves controlled reopening or restatement.
+_Avoid_: falsifying the occurred time, backdating into Hard Close, ignoring the prior-period reference, silently reopening, or rewriting an earlier Official Accounting Report
+
+**Governed Journal Posting**:
+The only transition that makes a balanced journal voucher authoritative for balances and statutory reports. One explicitly authorized actor may prepare and post a sensitive manual, opening, adjustment, closing, or correction voucher without a second person, subject to strong confirmation, mandatory reason where applicable, immutable audit, and exception notification; a valid operational workflow may post automatically only through an active versioned rule, idempotent source identity, complete evidence, an open period, and a fail-closed exception path.
+_Avoid_: treating automation as uncontrolled posting, reporting drafts as ledger truth, editing or deleting a posted voucher, guessing through incomplete mappings, requiring a second actor, or making an Accountant re-enter valid machine evidence
+
+**Accounting Dimension Assignment**:
+The typed association of a journal line with governed analytical members while Customer, Contract, Branch, Warehouse, and other authoritative operational identities remain first-class entities. Each Subsidiary Account declares every applicable dimension type Required, Optional, or Forbidden, allowing new dimensions without nullable columns or untyped metadata becoming accounting truth.
+_Avoid_: free-text Cost Center, one nullable column per future dimension, opaque EAV values, copying operational identity into strings, or accepting a dimension that the account rule forbids
+
+**Accounting Access Profile**:
+One of the three simple User-facing access bundles for the Accounting workspace: Viewer reads pages, reports, and evidence; Accountant performs routine accounting work; Accounting Manager additionally controls chart, settings, reversal, close and reopen, migration, cutover, and ordinary Accounting access administration. Granular capabilities remain the enforcement truth and optional advanced exception mechanism, while workspace `view`, `edit`, and `admin` map to these profiles respectively.
+_Avoid_: exposing every capability by default, granting financial action from a global MANAGER role, treating profile labels as backend authorization, or letting a workspace level bypass the mapped capability policy
+
+**Accounting Access Administration**:
+The audited grant and revocation of Accounting Access Profiles and exceptional granular capabilities through the canonical access-management surface. A global ADMIN may manage every profile, while an Accounting Manager may manage Viewer and Accountant but cannot appoint another Accounting Manager; no second approver is required, and every change retains reason, effectivity, expiry when set, and complete before/after evidence.
+_Avoid_: multiple grant-writing APIs, inferred permission level from a feature name, unaudited replacement, Accounting Manager self-expansion, or requiring a second actor
+
+**Accounting Emergency Override**:
+The strongly confirmed, reason-bound and audited single-actor exception available to a global ADMIN or Accounting Manager for one scoped Accounting action or resource. It may bypass an ordinary workflow or ownership restriction but never journal balance, posted-voucher immutability, audit preservation, source-evidence integrity, or statutory period invariants.
+_Avoid_: general MANAGER authority, permanent elevated access, unscoped override, second-person approval, silent use, or bypassing a non-overridable accounting invariant
+
+**Contract Control Transfer Policy**:
+The versioned Sales Contract rule identifying the evidence that transfers control for each promised stone or delivery stage and therefore permits revenue recognition. A Customer-appointed carrier transfers control at authoritative Guard exit, a Sabalan-appointed carrier requires Destination Acceptance, staged fulfillment recognizes only each transferred portion, and an earlier receipt remains a Customer advance; Sabalan has no installation-service obligation in this policy.
+_Avoid_: recognizing every Contract at approval, using one global trigger for incompatible carrier responsibility, inventing an installation workflow, treating an advance as revenue, recognizing an untransferred remainder, silently applying today's policy to an older Contract, or using a schedule as transfer evidence
+
+**Destination Acceptance**:
+The immutable evidence that an authorized recipient accepted all or a stated portion of a Sabalan-carried delivery at its destination, recording recipient identity, OTP or digital signature, occurred and recorded times, location, item quantities, and full, partial, damaged, or rejected disposition, with waybill and photographs as supporting evidence. An emergency offline record requires independent dual control.
+_Avoid_: mutable Delivery status, driver confirmation, buyer notification, an unidentified signature, treating a photograph alone as acceptance, or losing rejected and partial quantities
+
+**Delivery Dispute**:
+The accountable exception created when destination delivery lacks valid acceptance because the recipient is absent, refuses confirmation, rejects goods, or contests quantity or damage. No general timeout recognizes revenue; only a versioned contractual constructive-acceptance term or later valid resolution may establish transfer.
+_Avoid_: assuming silence is acceptance, posting revenue from arrival alone, changing Delivery status to hide the dispute, or discarding refusal and damage evidence
+
+**Accounting Operational Evidence Boundary**:
+The boundary in which Accounting consumes versioned evidence from Sales, Logistics, Guard, HR, Inventory, and other owning workspaces without taking ownership of or redesigning their operational workflows. Missing, ambiguous, or unlinked evidence fails closed into an Accounting exception and never authorizes a guessed posting or mutation of the source operation.
+_Avoid_: making Accounting control an external queue, fabricating operational completion, silently repairing source evidence, posting from a mutable schedule, or expanding an accounting change into unrelated operational ownership
+
+**Commercial Sales Realization**:
+The Sales performance fact currently captured when a Contract becomes Signed or Printed and attributed to its snapshotted realized seller. It is distinct from Accounting Recognized Revenue and may never authorize a journal posting by itself.
+_Avoid_: accounting revenue, Customer balance, transfer-of-control evidence, replacing historical seller KPI meaning, or using `realizedAt` and `realizedAmount` in a revenue posting rule
+
+**Accounting Recognized Revenue**:
+The revenue derived only from a satisfied Contract Control Transfer Policy and a posted journal voucher, with source evidence, transferred quantity, allocated consideration, tax treatment, and rule version preserved. It remains separate from Commercial Sales Realization even when both concern the same Contract.
+_Avoid_: signed Contract amount, printed Contract amount, financial-approval KPI, advance receipt, mutable Delivery status, or revenue without a posted source-linked journal
+
+**Returned-Goods Financial Effect**:
+The posted credit note, reversal, or corrective journal that changes recognized revenue, tax, receivable, inventory, and cost after reviewed physical-return evidence. Guard inbound evidence preserves the actual return time but never mutates the ledger directly or substitutes for Accounting's posted decision.
+_Avoid_: posting from Guard entry alone, rewriting the original sale, losing physical effective time, changing a Hard-Closed period silently, or reducing revenue without linked return evidence
+
+**Rial Posting Amount**:
+The whole-rial base-currency debit or credit carried by a posted journal line. Source quantity, unit price, pre-rounding amount, rounding rule and version, and any explicit rounding-difference line remain preserved, while binary floating-point and hidden fractional rial never enter ledger truth.
+_Avoid_: fractional posted rial, floating-point money, silent rounding, discarding source precision, or forcing commercial quantity and unit-price precision onto the ledger amount
+
+**Foreign-Currency Journal Amount**:
+The original currency and amount, rate, rate date, rate source, and whole-rial equivalent preserved on a journal line when the transaction is not denominated in the Accounting Base Currency. Period-end remeasurement and realized exchange differences use separately posted, versioned rules while statutory balances remain rial-denominated.
+_Avoid_: a second statutory ledger, overwriting the historical rate, deriving rial without rate evidence, combining currencies in one balance, or changing balances through an unposted revaluation
+
+**Financial Account**:
+The stable floating-detail identity of one real bank account, cash fund, or other governed financial instrument, carrying its institution, branch, account and IBAN identifiers where applicable, currency, ownership, and active interval. It participates under eligible control accounts without being recreated as a new Subsidiary Account for each use.
+_Avoid_: free-text bank identity, one duplicate detail per control account, rewriting a closed account's identifiers, treating a Financial Account as a separate ledger, or deriving its balance outside posted journal lines
+
+**Accounting Party Role**:
+An effective-dated role such as Customer or Supplier held by one stable Accounting Party without duplicating that counterparty identity. Receivable and payable balances remain separate under their control accounts, and any offset requires an explicit authorized journal rather than automatic netting.
+_Avoid_: separate Party records for the same counterparty, inferring net balance from identity equality, losing role history, or offsetting receivable and payable without posted authority
+
+**Accounting Open Item**:
+An individually traceable posted receivable, payable, advance, credit, check obligation, or other settleable amount with its source, Party, Contract when applicable, currency, due date, original amount, and remaining amount derived from posted Settlement Allocations. It closes only through effective allocations or an authorized corrective event.
+_Avoid_: one mutable aggregate balance, negative receivable used as an advance, closing by editing remaining amount, allocation without a posted source, or losing Contract attribution
+
+**Settlement Allocation**:
+The immutable application of all or part of one posted receipt, payment, credit, or advance to one or more Accounting Open Items. Unallocated value remains a distinct Party advance or credit, transfer to another item requires explicit action, and correction uses a reversing allocation rather than editing the original.
+_Avoid_: silent oldest-first allocation, automatic cross-Contract transfer, negative open items for overpayment, mutable allocation rows, or aging calculated independently from allocations
+
+**Journal Reference Identity**:
+The immutable internal identity and reference assigned when a journal voucher is created, independent of its later statutory sequence. Posting assigns a never-reused number unique within the Primary Accounting Book and Accounting Fiscal Year; voiding, reversal, or an explained sequence gap never releases that number.
+_Avoid_: using a draft number as statutory identity, renumbering posted vouchers silently, reusing a voided number, or treating a daily display order as voucher identity
+
+**Chart Account Retirement**:
+The governed end of new posting eligibility for an account that already has historical activity, optionally naming an effective-dated successor. Its code, nature, and historical meaning remain intact; balance movement or consolidation uses explicit mapped vouchers rather than deletion, identifier replacement, or historical mutation.
+_Avoid_: deleting a used account, changing its nature in place, moving old lines to a new identity, merging by database update, or erasing the reason and effective date
+
+**Chart Code Scheme**:
+The versioned validation pattern for Group, General, and Subsidiary account code segments in one Target Chart of Accounts. A scheme may be configured before use, but posted activity freezes its structural meaning and later structural change requires a reviewed successor version and migration.
+_Avoid_: one universal hard-coded code length, encoding all business meaning only in digits, changing segment structure under posted accounts, or accepting codes outside the active scheme
+
+**Accounting Cutover Dataset**:
+The reconciled opening balances, current-fiscal-year movements when cutover occurs midyear, and detailed open subledger items needed for SabalanERP to continue accounting from the accepted authority-transfer instant. Older Sepidar history remains a searchable read-only archive unless a specific legal or reconciliation requirement justifies a reviewed historical posting migration.
+_Avoid_: replaying all legacy history by default, carrying only control-account totals without open items, cutting over with unexplained differences, losing Sepidar evidence, or treating archived history as newly posted SabalanERP truth
+
 **Accounting Contract Registration Duties**:
 The two sequential one-working-day duties created from an Accounting-Ready Sales Contract: an invoice-candidate preparation duty for Users with candidate-management permission, followed only after successful preparation by a financial-approval duty for Users with record approval/void permission. One User may perform both when independently granted both permissions, but each action remains an explicit, separately timed and audited result rather than automatic approval; a return ends the prior version's deadline and a corrected version starts a fresh preparation deadline, while priority changes require a reason and audit history.
 _Avoid_: one ambiguous duty spanning preparation and approval, creating approval before a candidate exists, requiring different actors without a workflow-specific rule, inferring approval authority from preparation permission, automatically approving after preparation, silently carrying a stale deadline across versions, or changing priority without evidence
@@ -4352,7 +4504,7 @@ The protected record of each successful or failed fingerprint, OTP, or approved 
 _Avoid_: overwriting earlier attempts, treating failure as a waybill state, creating authorization from an unsuccessful attempt, or exposing protected verification evidence broadly
 
 **Dispatch Protected Evidence**:
-The restricted enrollment, confirmation, fallback, outage, device, actor, and audit detail whose workspace-owned portion is visible to that workspace's administrators and whose complete chain is visible only to global managers, global administrators, or explicitly authorized evidence reviewers. Export is a separately authorized, reason-bound, encrypted and audited act; biometric templates, raw images, OTP secrets, cryptographic keys, and connector secrets are never viewable or exportable.
+The restricted enrollment, confirmation, fallback, outage, device, actor, and audit detail whose workspace-owned portion is visible to that workspace's administrators and whose complete chain is visible only to global managers, global administrators, or explicitly authorized evidence reviewers. Fingerprint Capture Images are viewable only through the HR-owned enrollment and are never part of ordinary dispatch evidence export; biometric templates, OTP secrets, cryptographic keys, and connector secrets remain non-viewable and non-exportable.
 _Avoid_: equating ordinary dispatch visibility with evidence access, giving a workspace administrator cross-workspace evidence, exporting without purpose and attribution, or exposing reusable authentication material
 
 **Dispatch Audit Chain**:
@@ -4360,8 +4512,12 @@ The append-only, hash-linked record of every dispatch authority change, domain t
 _Avoid_: logging only successful commands, overwriting audit rows, omitting effective authority or denial evidence, or treating an alert as the authoritative record
 
 **Internal Driver Biometric Enrollment**:
-The HR-owned act of creating or replacing the encrypted reusable fingerprint template for an actively eligible Internal Driver Identity; failed or cancelled enrollment leaves the prior valid template unchanged and creates no dispatch fallback authority. Ending eligibility or deactivating the enrollment disables matching without erasing accountable transaction history.
+The HR-owned act of creating or replacing the encrypted reusable fingerprint template and encrypted Fingerprint Capture Image for an actively eligible Internal Driver Identity; failed or cancelled enrollment leaves the prior valid enrollment unchanged and creates no dispatch fallback authority. Ending eligibility or deactivating the enrollment disables matching without erasing its attached images or accountable transaction history.
 _Avoid_: enrolling an ineligible person, treating an enrollment attempt as waybill confirmation, using driver OTP to bypass enrollment, replacing a valid template after a failed scan, or deleting transaction history when matching is disabled
+
+**Fingerprint Capture Image**:
+The encrypted PNG captured with one enrolled finger and permanently attached to that finger's Internal Driver Biometric Enrollment under its Personnel identity. Authorized HR enrollment operators may view it through an audited, non-cacheable response; it is not the reusable matching template and never belongs to a login User.
+_Avoid_: calling the image a template, attaching it to a User account, placing image bytes in logs or JSON evidence, or silently deleting it when an enrollment is deactivated
 
 **Internal Driver Biometric Fallback**:
 The controlled alternate confirmation path made eligible by a reported scanner or connector failure or by three failed live fingerprint attempts in the current waybill-confirmation session. Accounting initiates it without a waiting period, but success requires driver OTP, approval by a different Guard supervisor, a mandatory reason, device or error context, and a manager alert.

@@ -43,6 +43,8 @@
     "docker:dev:logs": "docker compose -f docker-compose.local.yml -f docker-compose.dev.yml logs -f",
     "docker:dev:ps": "docker compose -f docker-compose.local.yml -f docker-compose.dev.yml ps",
     "docker:verify": "node scripts/verify-local-docker.mjs",
+    "biometric:local:up": "powershell -NoProfile -ExecutionPolicy Bypass -File apps/biometric-connector-windows/start-local-development.ps1",
+    "biometric:local:reset": "powershell -NoProfile -ExecutionPolicy Bypass -File apps/biometric-connector-windows/reset-local-development.ps1",
     "prototype:hr-interview": "docker compose -f docker-compose.local.yml up -d --build frontend",
     "prototype:hr-performance-analytics": "docker compose -f docker-compose.local.yml up -d --build frontend",
     "prototype:accounting-dashboard": "docker compose -f docker-compose.local.yml up -d --build frontend",

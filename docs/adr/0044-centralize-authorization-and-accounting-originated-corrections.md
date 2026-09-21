@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+Accounting access profiles, operational authority, and emergency override are narrowed by ADR-0077; this ADR continues to govern the shared authorization foundation and Accounting-originated Sales Contract correction workflow.
+
 # Centralize authorization and Accounting-originated Contract corrections
 
 Sabalan ERP will resolve effective authorization once in the backend and project route, feature, action, provenance, expiry, and current workflow availability to every frontend surface. ADMIN has complete system-wide authority and audited self-service override of ownership, assignment, and separation rules; workspace administrators have complete authority only inside their workspace, MANAGER has no global bypass, explicit lower direct grants may narrow inherited access, and no actor—including ADMIN—may bypass data-integrity, immutable-evidence, or required-history boundaries. Frontends neither reproduce permission precedence nor render live controls for retired commands, and operational denials expose only a Persian next step plus a safe support reference.

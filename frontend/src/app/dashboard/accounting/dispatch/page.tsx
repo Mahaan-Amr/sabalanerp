@@ -14,6 +14,7 @@ import {
   ErpSection,
 } from '@/components/erp';
 import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
+import { confirmationActionsFor } from '@/features/biometric/dispatchConfirmationPresentation';
 import { accountingAPI, dispatchConfirmationAPI } from '@/lib/api';
 import { biometricConnectorClient } from '@/lib/biometricConnector';
 
@@ -38,6 +39,7 @@ export default function AccountingDispatchPage() {
     canManageAccountingCandidates: false,
     canManageAccountingConfirmation: false,
   });
+  const confirmationActions = confirmationActionsFor(confirmation || {});
 
   const loadDispatch = useCallback(async () => {
     setLoading(true);
@@ -124,7 +126,14 @@ export default function AccountingDispatchPage() {
               return (
                 <ErpCard key={candidate.id} className="p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <strong>{candidate.id}</strong>
+                    <div>
+                      <strong>{candidate.summary?.driverName || 'راننده نامشخص'}</strong>
+                      <p className="sds-text-secondary mt-1 text-sm">
+                        {[candidate.summary?.loadingNumber && `بارگیری ${candidate.summary.loadingNumber}`,
+                          candidate.summary?.plate && `پلاک ${candidate.summary.plate}`].filter(Boolean).join(' · ') || 'جزئیات تخصیص ثبت نشده است'}
+                      </p>
+                      <p className="sds-text-muted mt-1 text-xs" dir="ltr">{candidate.id}</p>
+                    </div>
                     <ErpBadge tone={candidate.status === 'ACCEPTED' ? 'success' : candidate.status === 'REJECTED' ? 'danger' : 'warning'}>
                       {dispatchStatusLabels[candidate.status] || candidate.status}
                     </ErpBadge>
@@ -205,7 +214,7 @@ export default function AccountingDispatchPage() {
           <ErpCard className="mt-4 p-4">
             <strong>نشست تأیید {confirmation.id}</strong>
             <div className="mt-3 flex flex-wrap gap-2">
-              {(['RIGHT_INDEX', 'LEFT_INDEX'] as const).map((finger) => (
+              {confirmationActions.biometric && (['RIGHT_INDEX', 'LEFT_INDEX'] as const).map((finger) => (
                 <ErpButton key={finger} label={finger === 'RIGHT_INDEX' ? 'تطبیق انگشت اشاره راست' : 'تطبیق انگشت اشاره چپ'} disabled={dispatchTimelineStale || dispatchPending} onClick={() => void runDispatch(async () => {
                   const issued = await dispatchConfirmationAPI.createBiometricCommand(confirmation.id, finger);
                   const connectorResult = await biometricConnectorClient.execute(issued.data.data);
@@ -213,13 +222,13 @@ export default function AccountingDispatchPage() {
                     signedResponse: { response: connectorResult.response, signature: connectorResult.signature } });
                 }, 'تلاش بیومتریک ثبت شد.')} />
               ))}
-              <ErpButton label="آغاز مسیر جایگزین" variant="outline" disabled={dispatchTimelineStale || dispatchPending} onClick={() => void runDispatch(() => dispatchConfirmationAPI.beginFallback(confirmation.id), 'مسیر جایگزین آغاز شد.')} />
-              <ErpButton label="ارسال دوباره رمز" variant="ghost" disabled={dispatchTimelineStale || dispatchPending} onClick={() => void runDispatch(() => dispatchConfirmationAPI.resendOtp(confirmation.id), 'رمز دوباره ارسال شد.')} />
+              {confirmationActions.fallback && <ErpButton label="آغاز مسیر جایگزین" variant="outline" disabled={dispatchTimelineStale || dispatchPending} onClick={() => void runDispatch(() => dispatchConfirmationAPI.beginFallback(confirmation.id), 'مسیر جایگزین آغاز شد.')} />}
+              {confirmationActions.otp && <ErpButton label="ارسال دوباره رمز" variant="ghost" disabled={dispatchTimelineStale || dispatchPending} onClick={() => void runDispatch(() => dispatchConfirmationAPI.resendOtp(confirmation.id), 'رمز دوباره ارسال شد.')} />}
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            {confirmationActions.otp && <div className="mt-3 flex flex-wrap gap-2">
               <ErpInput aria-label="رمز یک‌بارمصرف راننده" value={otpCode} onChange={(event) => setOtpCode(event.target.value)} />
               <ErpButton label="تأیید رمز" disabled={dispatchTimelineStale || dispatchPending || !otpCode.trim()} onClick={() => void runDispatch(() => dispatchConfirmationAPI.verifyOtp(confirmation.id, otpCode.trim()), 'رمز راننده تأیید شد.')} />
-            </div>
+            </div>}
             {confirmation.authorization?.id && (
               <div className="mt-3">
                 <ErpButton label="لغو مجوز خروج" tone="danger" variant="outline" disabled={dispatchTimelineStale || dispatchPending || !dispatchReason.trim()} onClick={() => void runDispatch(() => dispatchConfirmationAPI.revokeAuthorization(confirmation.authorization.id, dispatchReason.trim()), 'مجوز خروج لغو شد.')} />

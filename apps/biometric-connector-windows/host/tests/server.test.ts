@@ -79,7 +79,7 @@ test('rejects nonce substitution and concurrent duplicates', () => withServer(as
   assert.equal(device.calls.length, 1);
 }));
 
-test('capture seals the ISO template and never returns plaintext material', () => withServer(async (baseUrl, device, journalPath) => {
+test('capture seals the template and image and never returns plaintext material', () => withServer(async (baseUrl, device, journalPath) => {
   const plain = command('CAPTURE');
   const response = await post(baseUrl, signConnectorCommand(plain, commandSecret));
   assert.equal(response.status, 200);
@@ -90,6 +90,8 @@ test('capture seals the ISO template and never returns plaintext material', () =
   assert.equal(serialized.includes(device.templateMaterial.toString('utf8')), false);
   assert.equal(readFileSync(journalPath, 'utf8').includes('iso-template-material'), false);
   assert.equal(device.templateWasCleared, true);
+  assert.equal(device.imageWasCleared, true);
+  assert.deepEqual(body.response.result.captureImage, { mimeType: 'image/png', width: 320, height: 480, byteLength: device.imageMaterial.length });
 }));
 
 test('verification opens only the signed one-use expected template and clears it after matching', () => withServer(async (baseUrl, device) => {

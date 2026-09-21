@@ -5,6 +5,7 @@ import {
   type ConnectorCommand, type SafeConnectorResult, type SignedConnectorCommand, type TransportContext, type TransportEnvelope,
 } from './protocol';
 import { CommandJournal } from './journal';
+import { encodeEnrollmentCaptureMaterial } from './enrollmentCaptureMaterial';
 
 interface ServerOptions {
   allowedOrigin: string;
@@ -103,12 +104,15 @@ export const createConnectorServer = (options: ServerOptions) => {
       if (command.operation === 'HEALTH') result = safeResult(await exclusive(() => options.device.health()));
       else if (command.operation === 'CAPTURE') {
         const capture = await exclusive(() => options.device.capture());
+        let captureMaterial: Buffer | undefined;
         try {
           const context: TransportContext = { commandId: command.commandId, workstationId: command.workstationId, purpose: 'ENROLLMENT_CAPTURE', subjectId: String(command.payload.subjectId), finger: String(command.payload.finger) };
           const key = options.transportKeys.keys[options.transportKeys.activeKeyId];
-          transportEnvelope = sealTransportEnvelope(capture.template, context, options.transportKeys.activeKeyId, key);
-          result = safeResult(capture.device, { captureQuality: { state: 'ACCEPTED', score: capture.quality }, liveness: { state: 'LIVE', score: capture.livenessScore } });
-        } finally { capture.template.fill(0); }
+          captureMaterial = encodeEnrollmentCaptureMaterial(capture.template, capture.imagePng);
+          transportEnvelope = sealTransportEnvelope(captureMaterial, context, options.transportKeys.activeKeyId, key);
+          result = safeResult(capture.device, { captureQuality: { state: 'ACCEPTED', score: capture.quality }, liveness: { state: 'LIVE', score: capture.livenessScore },
+            captureImage: { mimeType: 'image/png', width: capture.imageWidth, height: capture.imageHeight, byteLength: capture.imagePng.length } });
+        } finally { captureMaterial?.fill(0); capture.template.fill(0); capture.imagePng.fill(0); }
       } else if (command.operation === 'VERIFY') {
         const envelope = requestBody.transportEnvelope;
         if (!envelope || digest(envelope) !== command.payload.transportEnvelopeDigest) throw new Error('Verification envelope digest does not match the signed command');

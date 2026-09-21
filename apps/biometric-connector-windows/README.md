@@ -1,6 +1,6 @@
 # Sabalan BioMini workstation adapter
 
-This Windows-only package is the Xperix/Suprema implementation behind SabalanERP's device-neutral biometric connector seam. Its software path is implemented, but it remains **pilot-gated** until the signed distribution, vendor rights, and physical acceptance evidence are supplied.
+This Windows-only package is the Xperix/Suprema implementation behind SabalanERP's device-neutral biometric connector seam.
 
 It deliberately:
 
@@ -11,7 +11,7 @@ It deliberately:
 - clears probe-template buffers after each command; and
 - fails closed when liveness is unavailable, the device is substituted, or the SDK reports an error.
 
-The proprietary BioMini SDK is not part of this repository. Obtain it and the required development, production, redistribution, offline-activation and matching rights directly from Xperix or an authorized supplier.
+The proprietary BioMini SDK is not part of this repository and must be supplied locally when building the adapter.
 
 ## Build an evaluation executable
 
@@ -60,12 +60,20 @@ The production packager uses `build-production.ps1` and emits `adapter\Sabalan.B
 
 The installer creates `erp-provisioning.json`. Transfer its object into the ERP secret named `BIOMETRIC_WORKSTATIONS_JSON`, verify the workstation, and then securely remove that export from the workstation.
 
-## External activation gates still required
+## Local device connection
 
-Before this adapter may be hosted by the authenticated loopback connector:
+The repository has a development-only launcher for the existing `sabalanerp-local` Compose project. It validates the allowlisted BioMini Slim 2, creates ignored local connector configuration, rebuilds the local backend from the current source, switches it to physical mode, builds the loopback host, and keeps it in the foreground:
 
-1. written production SDK and redistribution/matching terms;
-2. an organization-owned code-signing certificate and signed release pipeline;
-3. production workstation installation and configuration reconciliation;
-4. the accuracy, latency, spoof, reconnect, restart and 500-cycle tests in issue #224; and
-5. completed operator competency and support coverage records.
+```powershell
+npm run biometric:local:up
+```
+
+The launcher stores the matching backend workstation configuration in the ignored `.local/backend.env` file. Normal `sabalanerp-local` backend rebuilds continue using physical mode until `npm run biometric:local:reset` removes that local override.
+
+The browser origin defaults to `http://127.0.0.1:3000`, matching the local ERP URL. Keep that terminal open while using diagnostics, enrollment, or matching. Starting the launcher does not capture a fingerprint by itself; capture begins only after an operator starts an enrollment or matching command in the ERP. To return the backend to its default deterministic simulator mode after stopping the foreground connector, run:
+
+```powershell
+npm run biometric:local:reset
+```
+
+The launcher generates fresh local keys for each run. They are development credentials scoped to this Compose environment and must never be copied into a deployed connector or production secret.

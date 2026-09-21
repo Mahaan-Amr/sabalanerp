@@ -28,7 +28,9 @@ const appendAudit = async (tx: Tx, input: { aggregateType: string; aggregateId: 
     previousHash: previous?.eventHash || null, eventHash } });
 };
 
-export type EnrollmentTemplateInput = { finger: string; format: string; material: Buffer; deviceEvidence: Record<string, unknown>; provenance: 'APPROVED_CONNECTOR' };
+export type EnrollmentTemplateInput = { finger: string; format: string; material: Buffer;
+  image?: { material: Buffer; mimeType: 'image/png'; width: number; height: number };
+  deviceEvidence: Record<string, unknown>; provenance: 'APPROVED_CONNECTOR' };
 type OtpDelivery = (message: { phone: string; code: string; dispatchNumber: string; sessionId: string; expiresAt: Date }) => Promise<void>;
 
 export class DispatchConfirmationService {
@@ -69,6 +71,16 @@ export class DispatchConfirmationService {
       required(template.finger, 'finger'); required(template.format, 'format');
       if (template.provenance !== 'APPROVED_CONNECTOR' || template.format !== 'ISO-19794-2') throw new DispatchConfirmationValidationError('Only approved connector-produced ISO templates are accepted.');
       if (!Buffer.isBuffer(template.material) || template.material.length === 0) throw new DispatchConfirmationValidationError('Protected template material is required.');
+      if (template.image) {
+        const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+        if (template.image.mimeType !== 'image/png' || !Buffer.isBuffer(template.image.material)
+          || template.image.material.length === 0 || template.image.material.length > 1_048_576
+          || !template.image.material.subarray(0, pngSignature.length).equals(pngSignature)
+          || !Number.isInteger(template.image.width) || template.image.width <= 0 || template.image.width > 2048
+          || !Number.isInteger(template.image.height) || template.image.height <= 0 || template.image.height > 2048) {
+          throw new DispatchConfirmationValidationError('Fingerprint capture image is invalid.');
+        }
+      }
       if (Object.keys(template.deviceEvidence).some((key) => /raw.?image|sample|template|blob|base64/i.test(key))) {
         throw new DispatchConfirmationValidationError('Raw biometric material cannot be persisted as evidence.');
       }
@@ -85,14 +97,33 @@ export class DispatchConfirmationService {
       for (const template of input.templates) {
         const reference = `bio:${enrollment.id}:${randomUUID()}`;
         const envelope = this.dependencies.vault.seal(template.material, { personnelId: personnel.id, finger: template.finger, format: template.format });
+        const imageEnvelope = template.image && this.dependencies.vault.sealImage(template.image.material,
+          { personnelId: personnel.id, finger: template.finger, mimeType: template.image.mimeType });
         await tx.driverBiometricTemplate.create({ data: { enrollmentId: enrollment.id, finger: template.finger,
-          format: template.format, templateReference: reference, protectedEnvelope: json(envelope), deviceEvidence: json(template.deviceEvidence) } });
+          format: template.format, templateReference: reference, protectedEnvelope: json(envelope), deviceEvidence: json(template.deviceEvidence),
+          ...(template.image && imageEnvelope ? { protectedImageEnvelope: json(imageEnvelope), imageMimeType: template.image.mimeType,
+            imageWidth: template.image.width, imageHeight: template.image.height, imageByteLength: template.image.material.length } : {}) } });
       }
       await appendAudit(tx, { aggregateType: 'DRIVER_BIOMETRIC_ENROLLMENT', aggregateId: enrollment.id, eventType: 'ENROLLED',
         payload: { personnelId: personnel.id, fingers: input.templates.map((item) => item.finger) }, actorId: input.actorId, at });
       return tx.driverBiometricEnrollment.findUniqueOrThrow({ where: { id: enrollment.id }, select: { id: true, personnelId: true, status: true,
-        enrolledAt: true, templates: { select: { finger: true, format: true, templateReference: true, createdAt: true } } } });
+        enrolledAt: true, templates: { select: { finger: true, format: true, templateReference: true, imageMimeType: true,
+          imageWidth: true, imageHeight: true, imageByteLength: true, createdAt: true } } } });
     });
+  }
+
+  async readEnrollmentImage(input: { enrollmentId: string; finger: string; actorId: string }) {
+    const template = await this.prisma.driverBiometricTemplate.findFirst({ where: { enrollmentId: input.enrollmentId, finger: input.finger },
+      include: { enrollment: { select: { personnelId: true } } } });
+    if (!template?.protectedImageEnvelope || template.imageMimeType !== 'image/png' || !template.imageWidth || !template.imageHeight || !template.imageByteLength) {
+      throw new DispatchConfirmationValidationError('Fingerprint capture image was not found.');
+    }
+    const image = this.dependencies.vault.openImage(template.protectedImageEnvelope as unknown as ProtectedTemplateEnvelope,
+      { personnelId: template.enrollment.personnelId, finger: template.finger, mimeType: 'image/png' });
+    if (image.length !== template.imageByteLength) { image.fill(0); throw new DispatchConfirmationConflictError('Fingerprint capture image integrity is invalid.'); }
+    await this.prisma.$transaction((tx) => appendAudit(tx, { aggregateType: 'DRIVER_BIOMETRIC_ENROLLMENT', aggregateId: input.enrollmentId,
+      eventType: 'BIOMETRIC_CAPTURE_IMAGE_VIEWED', payload: { finger: template.finger }, actorId: required(input.actorId, 'actorId'), at: this.now() }));
+    return { image, mimeType: 'image/png' as const, width: template.imageWidth, height: template.imageHeight };
   }
 
   async deactivateEnrollment(input: { enrollmentId: string; actorId: string; reason: string }) {

@@ -270,6 +270,12 @@ test('protected templates use authenticated encryption and never persist plainte
   assert.equal(JSON.stringify(envelope).includes(material.toString('utf8')), false);
   assert.throws(() => vault.open(envelope, { personnelId: 'personnel-02', finger: 'RIGHT_INDEX', format: 'ISO_19794_2' }));
 
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const imageEnvelope = vault.sealImage(image, { personnelId: 'personnel-01', finger: 'RIGHT_INDEX', mimeType: 'image/png' });
+  assert.deepEqual(vault.openImage(imageEnvelope, { personnelId: 'personnel-01', finger: 'RIGHT_INDEX', mimeType: 'image/png' }), image);
+  assert.equal(JSON.stringify(imageEnvelope).includes(image.toString('base64')), false);
+  assert.throws(() => vault.openImage(imageEnvelope, { personnelId: 'personnel-01', finger: 'LEFT_INDEX', mimeType: 'image/png' }));
+
   const directory = mkdtempSync(join(tmpdir(), 'sabalan-biometric-journal-'));
   const journalPath = join(directory, 'commands.json');
   const journal = new BiometricCommandJournal(journalPath);

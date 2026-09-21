@@ -10,6 +10,9 @@ export interface CaptureResult {
   quality: number;
   livenessScore: number;
   template: Buffer;
+  imagePng: Buffer;
+  imageWidth: number;
+  imageHeight: number;
 }
 
 export interface VerifyResult {
@@ -34,7 +37,9 @@ export class BiometricDeviceError extends Error {
 export class FakeBiometricDevice implements BiometricDevice {
   readonly calls: string[] = [];
   readonly templateMaterial = Buffer.from('iso-template-material');
+  readonly imageMaterial = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
   templateWasCleared = false;
+  imageWasCleared = false;
   private lastExpectedTemplate?: Buffer;
   get expectedTemplateWasCleared() { return Boolean(this.lastExpectedTemplate?.every((byte) => byte === 0)); }
   delayMilliseconds = 0;
@@ -47,7 +52,10 @@ export class FakeBiometricDevice implements BiometricDevice {
     const template = Buffer.from(this.templateMaterial);
     const originalFill = template.fill.bind(template);
     template.fill = ((value: number) => { this.templateWasCleared = value === 0; return originalFill(value); }) as typeof template.fill;
-    return { device: this.identity, quality: 86, livenessScore: 999, template };
+    const imagePng = Buffer.from(this.imageMaterial);
+    const originalImageFill = imagePng.fill.bind(imagePng);
+    imagePng.fill = ((value: number) => { this.imageWasCleared = value === 0; return originalImageFill(value); }) as typeof imagePng.fill;
+    return { device: this.identity, quality: 86, livenessScore: 999, template, imagePng, imageWidth: 320, imageHeight: 480 };
   }
   async verify(expectedTemplate: Buffer) {
     this.calls.push('VERIFY'); await this.delay();

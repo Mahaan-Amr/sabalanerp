@@ -2,6 +2,8 @@
 
 import type { InternalAxiosRequestConfig } from 'axios';
 import { createClientRequestId } from './requestIdentity';
+import { buildLoadingFinalizeRequest } from './loadingFinalizeRequest';
+import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequest';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
@@ -1007,6 +1009,7 @@ export const dispatchConfirmationAPI = {
   enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment`, data),
   createEnrollmentCommand: (personnelId: string, data: { workstationId: string; finger: string }) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-commands`, data),
   deactivateEnrollment: (enrollmentId: string, reason: string) => api.post(`/dispatch-confirmation/enrollments/${enrollmentId}/deactivate`, { reason }),
+  getEnrollmentImage: (enrollmentId: string, finger: string) => api.get(`/dispatch-confirmation/enrollments/${enrollmentId}/images/${finger}`, { responseType: 'blob' }),
   startSession: (waybillId: string, workstationId: string) => api.post(`/dispatch-confirmation/waybills/${waybillId}/sessions`, { workstationId }),
   verifyBiometric: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-attempts`, {}),
   createBiometricCommand: (sessionId: string, finger: 'RIGHT_INDEX' | 'LEFT_INDEX') => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-command`, { finger }),
@@ -1056,10 +1059,19 @@ export const logisticsAPI = {
   getLoading: (id: string) => api.get(`/logistics/loadings/${id}`),
   updateLoading: (id: string, data: any) => api.put(`/logistics/loadings/${id}`, data),
   deleteLoading: (id: string) => api.delete(`/logistics/loadings/${id}`),
-  finalizeLoading: (id: string) => api.post(`/logistics/loadings/${id}/finalize`),
+  finalizeLoading: (id: string) => {
+    const request = buildLoadingFinalizeRequest(id);
+    return api.post(request.path, request.body, request.config);
+  },
   cancelLoading: (id: string, reason: string) => api.post(`/logistics/loadings/${id}/cancel`, { reason }),
   createCorrection: (id: string, data: any) => api.post(`/logistics/loadings/${id}/corrections`, data),
   getDrivers: (params?: any) => api.get('/logistics/drivers', { params }),
+  reserveCanonicalDriver: (queueTurnId: string, loadingId: string) =>
+    api.post(`/logistics/canonical-driver-queue/${queueTurnId}/reserve`, { loadingId }),
+  releaseCanonicalDriver: (queueTurnId: string, loadingId: string, reason: string) =>
+    api.post(`/logistics/canonical-driver-queue/${queueTurnId}/release`, { loadingId, reason }),
+  saveCanonicalAllocation: (loadingId: string, queueTurnId: string, data: { lines: any[] }) =>
+    api.put(`/logistics/loadings/${loadingId}/canonical-allocations/${queueTurnId}`, data),
 };
 
 // Contract Templates API
@@ -1299,7 +1311,10 @@ export const securityAPI = {
   closeCanonicalQueueTurnWithoutLoading: (id: string, reason: string) => api.post(`/security/canonical-driver-queue/${id}/close-without-loading`, { reason }),
   voidCanonicalQueueTurn: (id: string, reason: string, replacementTurnId?: string) => api.post(`/security/canonical-driver-queue/${id}/void`, { reason, replacementTurnId }),
   getAuthorizedPhysicalExits: () => api.get('/security/exit-desk/authorizations'),
-  recordAuthorizedPhysicalExit: (authorizationId: string) => api.post(`/security/exit-desk/authorizations/${authorizationId}/exit`, {}),
+  recordAuthorizedPhysicalExit: (authorizationId: string) => {
+    const request = buildAuthorizedPhysicalExitRequest(authorizationId, createClientRequestId());
+    return api.post(request.path, request.body, request.config);
+  },
   getVehicleMovements: (params?: any) => api.get('/security/vehicle-movements', { params }),
   getReadyExitLoadings: () => api.get('/security/vehicle-movements/ready-exit'),
   createInboundVehicleMovement: (data: any) => api.post('/security/vehicle-movements/inbound', data),

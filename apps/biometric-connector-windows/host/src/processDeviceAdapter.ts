@@ -44,6 +44,7 @@ const runProcess = (invocation: ProcessInvocation, onSpawn: (child: ChildProcess
 type WorkerResult = Record<string, any>;
 const marker = 'SABALAN_RESULT:';
 const templateMarker = Buffer.from('SABALAN_TEMPLATE_RESULT:');
+const maximumWorkerOutputBytes = 1_200_000;
 
 export class ProcessBioMiniDevice implements BiometricDevice {
   private activeChild?: ChildProcessWithoutNullStreams;
@@ -53,7 +54,7 @@ export class ProcessBioMiniDevice implements BiometricDevice {
 
   private async invoke(command: string, stdin?: Buffer): Promise<ProcessResult> {
     try {
-      const invocation = { executable: this.executable, args: [command, '--sdk-worker'], stdin, timeoutMilliseconds: 25_000, maximumOutputBytes: 65_536 };
+      const invocation = { executable: this.executable, args: [command, '--sdk-worker'], stdin, timeoutMilliseconds: 25_000, maximumOutputBytes: maximumWorkerOutputBytes };
       return this.runner ? await this.runner(invocation) : await runProcess(invocation, (child) => { this.activeChild = child; });
     }
     catch (error) {
@@ -68,7 +69,7 @@ export class ProcessBioMiniDevice implements BiometricDevice {
     const output = await this.invoke(command, stdin);
     const stdout = Buffer.isBuffer(output.stdout) ? output.stdout : Buffer.from(output.stdout);
     const stderr = Buffer.isBuffer(output.stderr) ? output.stderr : Buffer.from(output.stderr);
-    if (stdout.length + stderr.length > 65_536) throw new Error('BioMini worker exceeded its output limit');
+    if (stdout.length + stderr.length > maximumWorkerOutputBytes) throw new Error('BioMini worker exceeded its output limit');
     const markerIndex = stdout.lastIndexOf(marker);
     if (markerIndex < 0) throw new Error('BioMini worker did not return a normalized result');
     let result: WorkerResult;
@@ -99,12 +100,18 @@ export class ProcessBioMiniDevice implements BiometricDevice {
     try { result = JSON.parse(bytes.subarray(markerIndex + templateMarker.length, newline).toString('utf8').trim()); }
     catch { bytes.fill(0); throw new Error('BioMini worker returned invalid template evidence'); }
     const length = Number(result.templateLength);
+    const imageLength = Number(result.imageLength);
     const template = Buffer.from(bytes.subarray(newline + 1, newline + 1 + length));
-    const exactFrameLength = newline + 1 + length;
+    const imagePng = Buffer.from(bytes.subarray(newline + 1 + length, newline + 1 + length + imageLength));
+    const exactFrameLength = newline + 1 + length + imageLength;
     bytes.fill(0);
-    if (result.templateFormat !== 'ISO_19794_2' || !Number.isInteger(length) || length <= 0 || length > 4096 || template.length !== length || exactFrameLength !== bytes.length) { template.fill(0); throw new Error('BioMini worker template evidence is invalid'); }
-    if (result.captureQuality?.state !== 'ACCEPTED' || result.liveness?.state !== 'LIVE') { template.fill(0); throw new Error('BioMini capture did not pass quality and liveness checks'); }
-    return { device: this.identity(result), quality: Number(result.captureQuality.score), livenessScore: Number(result.liveness.score), template };
+    const validImage = result.imageMimeType === 'image/png' && Number.isInteger(imageLength) && imageLength > 0 && imageLength <= 1_048_576
+      && imagePng.length === imageLength && imagePng.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      && Number.isInteger(result.imageWidth) && result.imageWidth > 0 && result.imageWidth <= 2048
+      && Number.isInteger(result.imageHeight) && result.imageHeight > 0 && result.imageHeight <= 2048;
+    if (result.templateFormat !== 'ISO_19794_2' || !Number.isInteger(length) || length <= 0 || length > 4096 || template.length !== length || !validImage || exactFrameLength !== bytes.length) { template.fill(0); imagePng.fill(0); throw new Error('BioMini worker capture evidence is invalid'); }
+    if (result.captureQuality?.state !== 'ACCEPTED' || result.liveness?.state !== 'LIVE') { template.fill(0); imagePng.fill(0); throw new Error('BioMini capture did not pass quality and liveness checks'); }
+    return { device: this.identity(result), quality: Number(result.captureQuality.score), livenessScore: Number(result.liveness.score), template, imagePng, imageWidth: Number(result.imageWidth), imageHeight: Number(result.imageHeight) };
   }
 
   async verify(expectedTemplate: Buffer): Promise<VerifyResult> {

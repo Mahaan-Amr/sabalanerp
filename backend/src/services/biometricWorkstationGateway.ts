@@ -6,6 +6,7 @@ import {
   BiometricTransportEnvelope, SignedBiometricConnectorResponse, openBiometricTransportEnvelope,
   sealBiometricTransportEnvelope, verifyBiometricConnectorResponse,
 } from './biometricWorkstationProtocol';
+import { decodeEnrollmentCaptureMaterial } from './biometricEnrollmentCaptureMaterial';
 
 interface WorkstationConfig {
   commandSecretBase64: string;
@@ -109,7 +110,18 @@ export class BiometricWorkstationGateway {
       if (claimed.response.result.captureQuality.state !== 'ACCEPTED' || claimed.response.result.liveness.state !== 'LIVE') throw new Error('Enrollment capture did not pass quality and liveness checks');
       if (claimed.response.transportEnvelopeDigest !== digestBiometricValue(input.transportEnvelope)) throw new Error('Enrollment transport envelope digest is invalid');
       const context = { commandId: claimed.challenge.id, workstationId: claimed.challenge.workstationId, purpose: 'ENROLLMENT_CAPTURE' as const, subjectId: claimed.challenge.subjectId, finger: claimed.challenge.finger! };
-      return { challenge: claimed.challenge, response: claimed.response, material: openBiometricTransportEnvelope(input.transportEnvelope, context, claimed.workstation.transportKeys) };
+      const material = openBiometricTransportEnvelope(input.transportEnvelope, context, claimed.workstation.transportKeys);
+      try {
+        const decoded = decodeEnrollmentCaptureMaterial(material);
+        const image = claimed.response.result.captureImage;
+        if (!image || image.mimeType !== 'image/png' || image.byteLength !== decoded.imageMaterial.length
+          || !Number.isInteger(image.width) || image.width <= 0 || image.width > 2048
+          || !Number.isInteger(image.height) || image.height <= 0 || image.height > 2048) {
+          decoded.templateMaterial.fill(0); decoded.imageMaterial.fill(0);
+          throw new Error('Enrollment capture image metadata is invalid');
+        }
+        return { challenge: claimed.challenge, response: claimed.response, ...decoded };
+      } finally { material.fill(0); }
     } catch (error) { await this.complete([claimed.challenge.id], false); throw error; }
   }
 

@@ -3569,6 +3569,11 @@ model DriverBiometricTemplate {
   format            String
   templateReference String                    @unique
   protectedEnvelope Json
+  protectedImageEnvelope Json?
+  imageMimeType     String?
+  imageWidth        Int?
+  imageHeight       Int?
+  imageByteLength   Int?
   deviceEvidence    Json
   createdAt         DateTime                  @default(now())
   enrollment        DriverBiometricEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)

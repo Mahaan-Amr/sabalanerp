@@ -19,6 +19,7 @@ import { dispatchMasterDataAPI } from '@/lib/api';
 import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
 import HrPersianCalendar from '@/features/hr/HrPersianCalendar';
 import { fromIsoDate, toIsoDate } from '@/features/hr/hrUi';
+import { assignableVehiclesAt, currentEffectivePlate } from '@/features/dispatch-master-data/vehicleAssignmentOptions';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const vehicleInitial = { fleetCode: '', vehicleType: '', make: '', model: '', vin: '', plate: '', effectiveFrom: today(), reason: 'ثبت خودروی ناوگان' };
@@ -82,6 +83,10 @@ export default function VehicleOperationsPage() {
   };
 
   if (loading) return <ErpLoading />;
+  const activeVehicleCount = vehicles.filter((vehicle) => vehicle.status === 'ACTIVE').length;
+  const assignableVehicles = assignableVehiclesAt(vehicles, assignmentForm.effectiveFrom);
+  const unavailableVehicleCount = activeVehicleCount - assignableVehicles.length;
+  const selectedVehicleIsAssignable = assignableVehicles.some((vehicle) => vehicle.id === assignmentForm.vehicleId);
 
   return (
     <ErpWorkspacePage
@@ -153,11 +158,12 @@ export default function VehicleOperationsPage() {
       {section === 'assignments' && capabilities.canManageAssignments && (
         <ErpSection title="تخصیص فعال راننده و خودرو" description="تخصیص جدید، تخصیص فعال قبلی هر دو طرف را در همان زمان می‌بندد و سابقه را نگه می‌دارد.">
           <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void run(() => dispatchMasterDataAPI.assignCompanyVehicle(assignmentForm), 'تخصیص خودرو ثبت شد.').then(() => setAssignmentForm(assignmentInitial)); }}>
+            {unavailableVehicleCount > 0 && <div className="md:col-span-2"><ErpInlineState kind="stale" title={`${unavailableVehicleCount} خودروی فعال در تاریخ انتخاب‌شده پلاک معتبر ندارد و قابل تخصیص نیست؛ ابتدا در بخش «خودروهای شرکت» پلاک و تاریخ شروع اعتبار را ثبت کنید.`} /></div>}
             <label className={field}>راننده<ErpSelect required value={assignmentForm.driverId} onChange={(event) => setAssignmentForm({ ...assignmentForm, driverId: event.target.value })}><option value="">انتخاب کنید</option>{drivers.filter((driver) => driver.currentEligibility?.status === 'ELIGIBLE').map((driver) => <option key={driver.id} value={driver.id}>{driver.personnel.firstName} {driver.personnel.lastName}</option>)}</ErpSelect></label>
-            <label className={field}>خودرو<ErpSelect required value={assignmentForm.vehicleId} onChange={(event) => setAssignmentForm({ ...assignmentForm, vehicleId: event.target.value })}><option value="">انتخاب کنید</option>{vehicles.filter((vehicle) => vehicle.status === 'ACTIVE').map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.fleetCode} · {vehicle.plates[0]?.plate || vehicle.vehicleType}</option>)}</ErpSelect></label>
-            <label className={field}>شروع تخصیص<HrPersianCalendar value={fromIsoDate(assignmentForm.effectiveFrom)} onChange={(value) => setAssignmentForm({ ...assignmentForm, effectiveFrom: toIsoDate(value) })} /></label>
+            <label className={field}>خودرو<ErpSelect required value={assignmentForm.vehicleId} onChange={(event) => setAssignmentForm({ ...assignmentForm, vehicleId: event.target.value })}><option value="">انتخاب کنید</option>{assignableVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.fleetCode} · {currentEffectivePlate(vehicle, assignmentForm.effectiveFrom)?.plate}</option>)}</ErpSelect></label>
+            <label className={field}>شروع تخصیص<HrPersianCalendar value={fromIsoDate(assignmentForm.effectiveFrom)} onChange={(value) => { const effectiveFrom = toIsoDate(value); const vehicleId = assignableVehiclesAt(vehicles, effectiveFrom).some((vehicle) => vehicle.id === assignmentForm.vehicleId) ? assignmentForm.vehicleId : ''; setAssignmentForm({ ...assignmentForm, effectiveFrom, vehicleId }); }} /></label>
             <label className={field}>دلیل<ErpInput required value={assignmentForm.reason} onChange={(event) => setAssignmentForm({ ...assignmentForm, reason: event.target.value })} /></label>
-            <ErpButton label="ثبت تخصیص" icon={FaLink} disabled={dispatchTimelineStale || saving || !assignmentForm.driverId || !assignmentForm.vehicleId} className="md:col-span-2" onClick={() => void run(() => dispatchMasterDataAPI.assignCompanyVehicle(assignmentForm), 'تخصیص خودرو ثبت شد.').then(() => setAssignmentForm(assignmentInitial))} />
+            <ErpButton label="ثبت تخصیص" icon={FaLink} disabled={dispatchTimelineStale || saving || !assignmentForm.driverId || !selectedVehicleIsAssignable} className="md:col-span-2" onClick={() => void run(() => dispatchMasterDataAPI.assignCompanyVehicle(assignmentForm), 'تخصیص خودرو ثبت شد.').then(() => setAssignmentForm(assignmentInitial))} />
           </form>
         </ErpSection>
       )}

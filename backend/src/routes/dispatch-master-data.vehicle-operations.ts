@@ -155,7 +155,7 @@ router.post('/driver-vehicle-assignments', manageAssignments, async (req: AuthRe
       const [driver, vehicle] = await Promise.all([tx.internalDriverProfile.findUnique({ where: { id: driverId } }), tx.companyVehicle.findUnique({ where: { id: vehicleId }, include: { plates: true } })]);
       if (!driver || driver.status !== 'ACTIVE') throw new Error('An active internal driving profile is required.');
       if (!vehicle || vehicle.status !== 'ACTIVE') throw new Error('An active company vehicle is required.');
-      if (!vehicle.plates.some((plate) => plate.effectiveFrom <= effectiveFrom && (!plate.effectiveTo || plate.effectiveTo > effectiveFrom))) throw new Error('The company vehicle requires a current effective plate.');
+      if (!vehicle.plates.some((plate) => plate.effectiveFrom <= effectiveFrom && (!plate.effectiveTo || plate.effectiveTo > effectiveFrom))) throw new Error('خودروی شرکت در تاریخ شروع تخصیص، پلاک معتبر فعال ندارد. ابتدا پلاک و تاریخ شروع اعتبار آن را ثبت کنید.');
       const [driverCurrent, vehicleCurrent] = await Promise.all([tx.driverVehicleAssignment.findFirst({ where: { driverId, ...activeAt(effectiveFrom) } }), tx.driverVehicleAssignment.findFirst({ where: { vehicleId, ...activeAt(effectiveFrom) } })]);
       const currentIds = new Set([driverCurrent?.id, vehicleCurrent?.id].filter(Boolean) as string[]);
       for (const id of currentIds) await tx.driverVehicleAssignment.update({ where: { id }, data: { effectiveTo: effectiveFrom } });

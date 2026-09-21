@@ -29,17 +29,20 @@ test('internal-driver enrollment requires neither consent nor a governance polic
     otpSecret: 'enrollment-policy-test-secret',
     sendOtp: async () => undefined,
   });
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
 
   const result = await service.enrollInternalDriver({
     personnelId: 'personnel-1',
     confirmationPhone: '09121111111',
     templates: [
-      { finger: 'LEFT_INDEX', format: 'ISO-19794-2', material: Buffer.from('left'), deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' },
-      { finger: 'RIGHT_INDEX', format: 'ISO-19794-2', material: Buffer.from('right'), deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' },
+      { finger: 'LEFT_INDEX', format: 'ISO-19794-2', material: Buffer.from('left'), image: { material: Buffer.from(png), mimeType: 'image/png', width: 320, height: 480 }, deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' },
+      { finger: 'RIGHT_INDEX', format: 'ISO-19794-2', material: Buffer.from('right'), image: { material: Buffer.from(png), mimeType: 'image/png', width: 320, height: 480 }, deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' },
     ],
     actorId: 'hr-operator',
   });
 
   assert.equal(result.status, 'ACTIVE');
   assert.equal(result.templates.length, 2);
+  assert.equal(templates.every((item) => item.imageMimeType === 'image/png' && item.imageByteLength === png.length), true);
+  assert.equal(templates.every((item) => !JSON.stringify(item.protectedImageEnvelope).includes(png.toString('base64'))), true);
 });

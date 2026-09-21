@@ -16,10 +16,13 @@ test('process adapter parses only the normalized marker and keeps SDK chatter ou
 
 test('process adapter obtains an enrollment template via private pipe output and validates evidence', async () => {
   const material = Buffer.from('iso-template-material');
-  const header = Buffer.from(`SABALAN_TEMPLATE_RESULT:${JSON.stringify({ availability: 'AVAILABLE', device: identity, captureQuality: { state: 'ACCEPTED', score: 86 }, liveness: { state: 'LIVE', score: 999 }, templateFormat: 'ISO_19794_2', templateLength: material.length, errorCategory: 'NONE' })}\n`);
-  const device = new ProcessBioMiniDevice(async () => ({ exitCode: 0, stderr: '', stdout: Buffer.concat([header, material]) }));
+  const imagePng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const header = Buffer.from(`SABALAN_TEMPLATE_RESULT:${JSON.stringify({ availability: 'AVAILABLE', device: identity, captureQuality: { state: 'ACCEPTED', score: 86 }, liveness: { state: 'LIVE', score: 999 }, templateFormat: 'ISO_19794_2', templateLength: material.length, imageMimeType: 'image/png', imageLength: imagePng.length, imageWidth: 320, imageHeight: 480, errorCategory: 'NONE' })}\n`);
+  const device = new ProcessBioMiniDevice(async () => ({ exitCode: 0, stderr: '', stdout: Buffer.concat([header, material, imagePng]) }));
   const result = await device.capture();
   assert.deepEqual(result.template, material);
+  assert.deepEqual(result.imagePng, imagePng);
+  assert.equal(result.imageWidth, 320);
   assert.equal(result.quality, 86);
 });
 
@@ -43,5 +46,5 @@ test('process adapter sends expected template only over stdin and maps one-to-on
 test('process adapter fails closed on missing marker, nonzero exit and oversized output', async () => {
   await assert.rejects(() => new ProcessBioMiniDevice(async () => ({ exitCode: 0, stdout: 'debug only', stderr: '' })).health(), /normalized result/i);
   await assert.rejects(() => new ProcessBioMiniDevice(async () => ({ exitCode: 2, stdout: 'SABALAN_RESULT:{"availability":"UNAVAILABLE","errorCategory":"DEVICE_DISCONNECTED"}', stderr: '' })).health(), /DEVICE_DISCONNECTED/i);
-  await assert.rejects(() => new ProcessBioMiniDevice(async () => ({ exitCode: 0, stdout: 'x'.repeat(70_000), stderr: '' })).health(), /output limit/i);
+  await assert.rejects(() => new ProcessBioMiniDevice(async () => ({ exitCode: 0, stdout: 'x'.repeat(1_200_001), stderr: '' })).health(), /output limit/i);
 });

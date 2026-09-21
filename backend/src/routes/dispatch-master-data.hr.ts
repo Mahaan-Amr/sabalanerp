@@ -5,6 +5,7 @@ import { FEATURES } from '../middleware/feature';
 import { requireHrFeature } from '../middleware/hrAuthorization';
 import { appendDispatchMasterDataAudit } from '../services/dispatchMasterDataAudit';
 import { authorizeHrUser } from '../services/hrAuthorizationService';
+import { projectBiometricEnrollmentTemplate } from '../services/biometricEnrollmentProjection';
 import { activeAt, actor, fail, internalInclude, parsedDate, prisma, projectDriver, requiredText } from './dispatch-master-data.shared';
 
 const router = express.Router();
@@ -20,11 +21,15 @@ router.get('/internal-drivers/personnel/:personnelId', view, async (req: AuthReq
       authorizeHrUser(prisma, actor(req), { workspaceLevel: 'EDIT', feature: { code: FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE, level: 'EDIT' } }, at),
       authorizeHrUser(prisma, actor(req), { workspaceLevel: 'EDIT', feature: { code: FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE, level: 'EDIT' } }, at),
       prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: req.params.personnelId, status: 'ACTIVE' },
-        select: { id: true, status: true, enrolledAt: true }, orderBy: { enrolledAt: 'desc' } }),
+        select: { id: true, status: true, enrolledAt: true, templates: { select: { finger: true, imageMimeType: true,
+          imageWidth: true, imageHeight: true, imageByteLength: true, deviceEvidence: true } } }, orderBy: { enrolledAt: 'desc' } }),
     ]);
     if (!personnel) return res.status(404).json({ success: false, error: 'Personnel was not found.' });
     return res.json({ success: true, data: { personnel, driver: driver ? projectDriver(driver, at) : null,
-      activeBiometricEnrollment: biometricAccess.allowed ? activeBiometricEnrollment : null },
+      activeBiometricEnrollment: biometricAccess.allowed && activeBiometricEnrollment ? {
+        ...activeBiometricEnrollment,
+        templates: activeBiometricEnrollment.templates.map(projectBiometricEnrollmentTemplate),
+      } : null },
     capabilities: { canManageEligibility: manageAccess.allowed, canManageBiometricEnrollment: biometricAccess.allowed } });
   } catch (error) { return fail(res, error, 'Read Personnel-owned driver eligibility'); }
 });

@@ -78,6 +78,7 @@ import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from '
 import { readPartnerSnapshot } from '../services/partnerSales/authorization/readSnapshot';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { randomUUID } from 'node:crypto';
+import { projectAccountingDispatchCandidateSummary } from '../services/accountingDispatchCandidatePresentation';
 import { readPartnerDispatchAccountingViewCapability } from '../services/partnerSales/accounting/capabilities';
 
 const router = express.Router();
@@ -359,13 +360,16 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
       const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
         id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
+        allocationRevision: { select: { snapshot: true } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true } },
       }, orderBy: { createdAt: 'asc' } });
       const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
       return { manage, candidates: candidates.map(candidate => {
         const owner = ownerById.get(candidate.id);
-        return { ...candidate, canManage: manage.allowed && Boolean(owner && (owner.sourceKind === 'SALES_CONTRACT'
+        const { allocationRevision, ...candidateData } = candidate;
+        return { ...candidateData, summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
+          canManage: manage.allowed && Boolean(owner && (owner.sourceKind === 'SALES_CONTRACT'
           || (owner.sourceKind === 'PARTNER_CASE' && owner.partnerCaseId && writablePartnerCases.has(owner.partnerCaseId)))) };
       }) };
     });

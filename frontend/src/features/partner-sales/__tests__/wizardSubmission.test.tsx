@@ -89,11 +89,11 @@ test('double click checkpoints once and a later explicit save uses the draft rev
 });
 
 test('resuming a numbered Case starts from its current revision and never submits a duplicate Case', async () => {
-  const commandTypes: string[] = [];
+  const commands: PartnerDraftCommand[] = [];
   const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
     initialCase: fixture.partner,
     commands: { execute: async command => {
-      commandTypes.push(command.type);
+      commands.push(command as PartnerDraftCommand);
       return { ok: true, value: { commandId: command.commandId, replayed: false,
         case: { ...fixture.partner, owner: { ...fixture.partner.owner, revision: fixture.partner.owner.revision + 1 } }, eventIds: [] } };
     } },
@@ -104,7 +104,16 @@ test('resuming a numbered Case starts from its current revision and never submit
   assert.equal(submission.getSnapshot().phase, 'created');
   assert.equal(submission.getSnapshot().case?.owner.caseId, fixture.partner.owner.caseId);
   await submission.submit(intent());
-  assert.deepEqual(commandTypes, ['CASE_DRAFT_REVISE']);
+  assert.deepEqual(commands.map(command => command.type), ['CASE_DRAFT_REVISE']);
+  const revised = commands[0];
+  assert.equal(revised?.type, 'CASE_DRAFT_REVISE');
+  if (revised?.type === 'CASE_DRAFT_REVISE') {
+    assert.equal(revised.intent.customerPaymentPlan.predecessorPlanId, fixture.partner.customerPaymentPlan.planId);
+    assert.equal(revised.intent.customerPaymentPlan.version, fixture.partner.customerPaymentPlan.version + 1);
+    assert.notEqual(revised.intent.customerPaymentPlan.planId, fixture.partner.customerPaymentPlan.planId);
+    assert.notEqual(revised.intent.customerPaymentPlan.installments[0]?.installmentId,
+      fixture.partner.customerPaymentPlan.installments[0]?.installmentId);
+  }
   assert.equal(submission.getSnapshot().case?.owner.revision, fixture.partner.owner.revision + 1);
 });
 

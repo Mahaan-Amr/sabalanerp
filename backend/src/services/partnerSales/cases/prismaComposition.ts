@@ -51,7 +51,9 @@ export async function consumePrismaPartnerTechnicalRecovery(tx: Transaction, inp
   if (!current || current.ownerUserId !== input.actorId || current.purpose !== 'PARTNER_TECHNICAL') {
     return { ok: false, error: partnerError('NOT_FOUND') };
   }
-  if ((input.customerContractId && current.contractId !== null && current.contractId !== input.customerContractId) ||
+  const boundCaseId = typeof recovery?.partnerCaseId === 'string' ? recovery.partnerCaseId : undefined;
+  if ((boundCaseId && boundCaseId !== input.caseId) ||
+      (input.customerContractId && current.contractId !== null && current.contractId !== input.customerContractId) ||
       recovery?.recoveryRevision !== input.recoveryRevision) {
     return { ok: false, error: partnerError('ROW_STALE') };
   }
@@ -68,10 +70,19 @@ export async function consumePrismaPartnerTechnicalRecovery(tx: Transaction, inp
   if (!prior) await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: input.actorId,
     operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key: evidenceKey,
     payloadHash, outcome: json(evidence) } });
-  if (!input.customerContractId || current.contractId === input.customerContractId) return { ok: true, value: undefined };
+  const nextRecovery = json({ ...recovery, partnerCaseId: input.caseId });
+  if (!input.customerContractId) {
+    if (boundCaseId === input.caseId) return { ok: true, value: undefined };
+    const updated = await tx.salesContractEditSession.updateMany({ where: { id: current.id, contractId: null,
+      ownerUserId: input.actorId, purpose: 'PARTNER_TECHNICAL', recovery: { equals: json(current.recovery) } },
+      data: { recovery: nextRecovery } });
+    return updated.count === 1 ? { ok: true, value: undefined }
+      : { ok: false, error: partnerError('ROW_STALE') };
+  }
+  if (current.contractId === input.customerContractId && boundCaseId === input.caseId) return { ok: true, value: undefined };
   const updated = await tx.salesContractEditSession.updateMany({ where: { id: current.id, contractId: null,
     ownerUserId: input.actorId, purpose: 'PARTNER_TECHNICAL', recovery: { equals: json(current.recovery) } },
-    data: { contractId: input.customerContractId } });
+    data: { contractId: input.customerContractId, recovery: nextRecovery } });
   return updated.count === 1 ? { ok: true, value: undefined }
     : { ok: false, error: partnerError('ROW_STALE') };
 }
@@ -102,10 +113,15 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     where: { draftId: command.intent.recoveryId },
     select: { id: true, draftId: true, ownerUserId: true, purpose: true, contractId: true, recovery: true },
   });
+  const recovery = decodeTechnicalRecovery(session?.recovery);
+  const boundCaseId = typeof recovery?.partnerCaseId === 'string' ? recovery.partnerCaseId : undefined;
+  const revisionBound = command.type !== 'CASE_DRAFT_REVISE' || (input.revisionAuthority && (
+    (input.expectedCustomerContractId && session?.contractId === input.expectedCustomerContractId) ||
+    (!input.expectedCustomerContractId && session?.contractId === null && boundCaseId === command.expected.caseId)
+  ));
   if (!session || session.ownerUserId !== actorId || session.purpose !== 'PARTNER_TECHNICAL' ||
       (command.type === 'CASE_SUBMIT' && session.contractId) ||
-      (command.type === 'CASE_DRAFT_REVISE' && (!input.expectedCustomerContractId ||
-        session.contractId !== input.expectedCustomerContractId || !input.revisionAuthority))) {
+      !revisionBound) {
     return { ok: false, error: partnerError('NOT_FOUND') };
   }
   if (command.type === 'CASE_DRAFT_REVISE' && input.revisionAuthority === 'CASE_EDIT_LEASE') {
@@ -116,11 +132,12 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     });
     if (!ownership.ok) return { ok: false, error: partnerError(ownership.code === 'revision-conflict'
       ? 'ROW_STALE' : ownership.code === 'edit-session-missing' ? 'NOT_FOUND' : 'FORBIDDEN') };
-    if (ownership.session.contractId !== input.expectedCustomerContractId) {
+    if (input.expectedCustomerContractId
+      ? ownership.session.contractId !== input.expectedCustomerContractId
+      : ownership.session.contractId !== null || boundCaseId !== command.expected.caseId) {
       return { ok: false, error: partnerError('NOT_FOUND') };
     }
   }
-  const recovery = decodeTechnicalRecovery(session.recovery);
   const history = object(session.recovery)?.validatedSnapshots;
   if (!recovery || recovery.recoveryRevision !== command.intent.recoveryRevision || !Array.isArray(history)) {
     return { ok: false, error: partnerError('ROW_STALE') };
@@ -160,15 +177,21 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     return { ok: false, error: partnerError('NOT_FOUND') };
   }
   if (!command.intent.projectId) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
-  {
-    const project = await tx.crmPotentialProject.findUnique({ where: { id: command.intent.projectId },
-      select: { customerId: true, responsibleSellerId: true, wonSalesContractId: true, partnerRevision: true } });
-    if (!project || project.customerId !== customer.id || project.responsibleSellerId !== actorId ||
-        project.partnerRevision === null ||
-        (command.type === 'CASE_SUBMIT' ? project.wonSalesContractId !== null : false)) {
-      return { ok: false, error: partnerError('NOT_FOUND') };
-    }
+  await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${profile.id}, true)`;
+  const customerProject = await tx.projectAddress.findFirst({ where: {
+    id: command.intent.projectId, customerId: customer.id, isActive: true,
+  }, select: { customerId: true, projectName: true, address: true } });
+  const legacyProject = customerProject ? null : await tx.crmPotentialProject.findUnique({ where: { id: command.intent.projectId },
+    select: { customerId: true, responsibleSellerId: true, wonSalesContractId: true, partnerRevision: true,
+      title: true, address: true } });
+  if (!customerProject && (!legacyProject || legacyProject.customerId !== customer.id ||
+      legacyProject.responsibleSellerId !== actorId || legacyProject.partnerRevision === null ||
+      (command.type === 'CASE_SUBMIT' && legacyProject.wonSalesContractId !== null))) {
+    return { ok: false, error: partnerError('NOT_FOUND') };
   }
+  const project = customerProject
+    ? { title: customerProject.projectName?.trim() || customerProject.address, address: customerProject.address }
+    : { title: legacyProject!.title, address: legacyProject!.address };
 
   const materialBindings = command.intent.additionalMaterialApprovals ?? [];
   const approvalRowIds = [...command.intent.rows.flatMap(row => row.approvedRowBinding ? [row.approvedRowBinding.rowId] : []),
@@ -221,7 +244,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     const approvedLegacyHash = definition && await canonicalHash(definition.identity);
     const hash = approval?.row.configurationHash;
     const product = catalogProducts.map(object).find(item => item?.catalogItemId === identityRow?.catalogProductId);
-    if (!view || !identityRow || !intentRow || typeof product?.name !== 'string' ||
+    if (!view || !identityRow || !intentRow || typeof product?.name !== 'string' || typeof product?.code !== 'string' ||
         (approval && (approval.currency !== 'IRT' || !definition || definition.identity.partnerSellerId !== actorId ||
           approvedSubjectHash !== currentSubjectHash ||
           (hash !== approvedSubjectHash && hash !== approvedLegacyHash)))) {
@@ -240,7 +263,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
       saved.graph.layerConfigurations); }
     catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
     rows.push({ productRowId: row.productRowId, configurationHash: hash ?? currentSubjectHash!, quantity: view.quantity,
-      unit: view.unit, precisionPolicyVersion: identityRow.roundingPolicyVersion, description: product.name,
+      unit: view.unit, precisionPolicyVersion: identityRow.roundingPolicyVersion, description: product.name, productCode: product.code,
       retailUnitPriceAmount: new Prisma.Decimal(retail.totalAmount).div(commercialQuantity).toString(),
       ...(wholesale ? { wholesaleUnitPriceAmount: new Prisma.Decimal(wholesale.totalAmount).div(commercialQuantity).toString() } : {}) });
   }
@@ -260,6 +283,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   return { ok: true, value: {
     profileId: profile.id, partnerSellerId: actorId, customerId: customer.id,
     ...(command.intent.projectId ? { projectId: command.intent.projectId } : {}),
+    project: { title: project.title, ...(project.address ? { address: project.address } : {}) },
     commercialAccountId: account.id, departmentId: profile.user.departmentId,
     sabalanTermsVersionId: 'ACCOUNTING_PENDING_V1', graph: saved.graph, technicalSnapshot: saved.view, rows,
     partner: { displayName: identity.tradeName || identity.legalName, phone: identity.phone, address: identity.address },
@@ -290,6 +314,15 @@ export function createPrismaPartnerCaseDependencies(input: {
     },
     authorizeProject: async (tx, request) => {
       if (request.actorId !== input.actorId) return { ok: false, error: partnerError('NOT_FOUND') };
+      const profile = await tx.partnerProfile.findUnique({ where: { userId: input.actorId }, select: { id: true } });
+      if (!profile) return { ok: false, error: partnerError('NOT_FOUND') };
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${profile.id}, true)`;
+      const customerProject = await tx.projectAddress.findFirst({ where: {
+        id: request.projectId, customerId: request.customerId, isActive: true,
+      }, select: { id: true, updatedAt: true } });
+      if (customerProject) return { ok: true, value: {
+        evidenceId: `customer-project:${customerProject.id}:${customerProject.updatedAt.toISOString()}`,
+      } };
       const project = await tx.crmPotentialProject.findUnique({ where: { id: request.projectId },
         select: { customerId: true, responsibleSellerId: true, updatedAt: true, partnerRevision: true } });
       return project && project.customerId === request.customerId && project.responsibleSellerId === input.actorId &&

@@ -27,6 +27,18 @@ export interface PartnerSubmissionState {
   cleanupPending?: boolean;
 }
 
+function revisionIntent(intent: PartnerDraftIntent, savedCase: PartnerCaseView): PartnerDraftIntent {
+  const predecessor = savedCase.customerPaymentPlan;
+  return { ...intent, customerPaymentPlan: {
+    ...intent.customerPaymentPlan,
+    planId: `partner-customer-plan-${crypto.randomUUID()}`,
+    version: predecessor.version + 1,
+    predecessorPlanId: predecessor.planId,
+    installments: intent.customerPaymentPlan.installments.map(item => ({ ...item,
+      installmentId: `partner-installment-${crypto.randomUUID()}` })),
+  } };
+}
+
 export function createPartnerCaseSubmission({ actorId, commands, recovery, initialCase }: {
   actorId: string;
   commands: PartnerCommandPort;
@@ -111,8 +123,9 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
           publish({ phase: 'created', case: savedCase, message: 'این پرونده دیگر در وضعیت پیش‌نویس قابل ویرایش نیست.' }); return;
         }
         const type = revising ? 'CASE_DRAFT_REVISE' as const : 'CASE_SUBMIT' as const;
+        const commandIntent = savedCase ? revisionIntent(parsed.data, savedCase) : parsed.data;
         const editLease = savedCase ? await recovery.prepareEditLease() : undefined;
-        const payloadHash = await canonicalHash({ schemaVersion: 1, type, intent: parsed.data });
+        const payloadHash = await canonicalHash({ schemaVersion: 1, type, intent: commandIntent });
         const identity = crypto.randomUUID();
         const command = PartnerCommandSchema.parse({
           schemaVersion: 1, type, commandId: identity, correlationId: identity,
@@ -120,7 +133,7 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
           ...(editLease ? { editLease } : {}),
           idempotency: { actorId, operation: type,
             targetId: savedCase ? savedCase.owner.caseId : parsed.data.recoveryId, key: identity, payloadHash },
-          intent: parsed.data,
+          intent: commandIntent,
         }) as PartnerDraftCommand;
         await recovery.savePending(command);
         await execute(command);

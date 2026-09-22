@@ -11212,12 +11212,14 @@ enum PartnerCustomerTransferStatus {
   PENDING
   APPROVED
   REJECTED
+  CANCELLED
 }
 
 enum PartnerCustomerTransferEventType {
   REQUESTED
   APPROVED
   REJECTED
+  CANCELLED
 }
 
 model PartnerDuplicateCustomerMatch {

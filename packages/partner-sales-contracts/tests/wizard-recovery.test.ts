@@ -32,3 +32,12 @@ test('wizard recovery persists the seven-step intent with optimistic revision', 
   assert.equal(PartnerWizardRecoverySaveSchema.safeParse({ ...value, unexpected: true }).success, false);
   assert.equal(PartnerWizardRecoverySnapshotSchema.safeParse({ ...snapshot, wizardRevision: 0 }).success, false);
 });
+
+test('wizard recovery persists the Case-scoped pricing gate between products and delivery', () => {
+  const value = { schemaVersion: 1 as const, expectedWizardRevision: 1,
+    editLease: { recoveryId: intent().recoveryId, browserSessionId: 'browser-1', leaseToken: 'lease-1', baseRevision: 0 },
+    step: 'pricing' as const, intent: intent() };
+  assert.equal(PartnerWizardRecoverySaveSchema.safeParse(value).success, true);
+  assert.equal(PartnerWizardRecoverySnapshotSchema.safeParse({ schemaVersion: 1, wizardRevision: 2,
+    step: value.step, intent: value.intent, updatedAt: new Date().toISOString() }).success, true);
+});

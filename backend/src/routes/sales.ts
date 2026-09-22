@@ -42,6 +42,8 @@ import {
   salesContractPrintableInclude
 } from '../utils/salesContractPdf';
 import type { ContractPrintVariant } from '../utils/printTemplate';
+import { CustomerContractOutputSchema } from '@sabalanerp/partner-sales-contracts';
+import { writeValidatedCustomerContractPdfFile } from '../utils/pdf';
 import { assignLegacyRealizedCredit, reassignContractSeller, snapshotRealizedSale } from '../services/salesAttributionService';
 import {
   persistSalesContractProductGraphCommand
@@ -68,6 +70,8 @@ import { resolveWorkspaceRecipientIds } from '../services/domainNotificationReci
 import { ContractPartyIdentityValidationError } from '../services/contractPartyIdentity';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
+import { applyPartnerContractListScope, canPartnerReadSalesContract,
+  readPartnerProfileId } from '../services/partnerSales/contractVisibility';
 import { ensureSalesErrorTracking, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
 
 const sendUnexpectedSalesFailure = (
@@ -617,19 +621,19 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     const search = String(req.query.search || '').trim();
     const lifecycleView = req.query.lifecycleView === 'inactive' ? 'inactive' : 'active';
 
-    // Build where clause based on user role and department
+    // Partner sellers have an ownership boundary independent of their legacy
+    // Sales workspace/department grants. Those grants must never disclose
+    // Sabalan's ordinary contracts.
     let whereClause: any = { isInactive: lifecycleView === 'inactive' };
-    
+    if (statuses.length) whereClause.status = { in: statuses };
+    const partnerProfileId = await readPartnerProfileId(prisma, req.user.id, req.user.role);
+
     if (req.user.role === 'ADMIN') {
-      // Admins can see all contracts
-      if (statuses.length) whereClause.status = { in: statuses };
       if (departmentId) whereClause.departmentId = departmentId;
+    } else if (partnerProfileId) {
+      whereClause = applyPartnerContractListScope(whereClause, partnerProfileId);
     } else if (req.user.departmentId) {
-      // Regular users can only see contracts from their department
       whereClause.departmentId = req.user.departmentId;
-      if (statuses.length) whereClause.status = { in: statuses };
-    } else if (statuses.length) {
-      whereClause.status = { in: statuses };
     }
 
     if (search) {
@@ -755,6 +759,7 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
 
     res.json({
       success: true,
+      scope: partnerProfileId ? 'PARTNER_CASES' : 'SALES_CONTRACTS',
       data: contractsWithAccountingLock,
       pagination: {
         page,
@@ -783,6 +788,15 @@ router.get('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
       return res.status(404).json({
         success: false,
         error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
+      });
+    }
+
+    if (!await canPartnerReadSalesContract(prisma, {
+      userId: req.user.id, role: req.user.role, contractId: contract.id,
+    })) {
+      return res.status(404).json({
+        success: false,
+        error: 'قرارداد پیدا نشد؛ به فهرست قراردادهای خود برگردید.',
       });
     }
 
@@ -874,6 +888,12 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
       });
     }
 
+    if (!await canPartnerReadSalesContract(prisma, {
+      userId: req.user.id, role: req.user.role, contractId: contract.id,
+    })) {
+      return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد؛ به فهرست قراردادهای خود برگردید.' });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: { role: true, departmentId: true }
@@ -941,7 +961,52 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
       }
     }
 
-    const pdfPath = await generateSalesContractPdf(printableContract, variant);
+    const partnerCustomerOutput = contract.partnerKind === 'PARTNER_CUSTOMER' && variant === 'original' && contract.partnerCaseId
+      ? await prisma.$transaction(async tx => {
+          const current = await readCurrentPartnerCaseViews(tx, contract.partnerCaseId!);
+          if (!current || current.row.customerContractId !== contract.id) return undefined;
+          const parsed = CustomerContractOutputSchema.safeParse(current.row.head.customerProjection);
+          if (!parsed.success) return undefined;
+          const graph = parseCanonicalProductGraph(current.row.head.graph);
+          const projected = new Map(projectCanonicalProductGraph(graph, 'pdf').products
+            .map(row => [row.productRowId, row] as const));
+          const catalogIds = [...new Set(graph.rows.map(row => row.catalogProductId))];
+          const catalog = new Map((await tx.product.findMany({ where: { id: { in: catalogIds } },
+            select: { id: true, code: true } })).map(row => [row.id, row.code] as const));
+          const graphRows = new Map<string, (typeof graph.rows)[number]>(graph.rows
+            .map(row => [row.productRowId, row] as const));
+          const customerContent = current.row.head.customerContent && typeof current.row.head.customerContent === 'object'
+            && !Array.isArray(current.row.head.customerContent) ? current.row.head.customerContent as Prisma.JsonObject : undefined;
+          const projectId = typeof customerContent?.projectId === 'string' ? customerContent.projectId : undefined;
+          const project = projectId ? await tx.crmPotentialProject.findUnique({ where: { id: projectId },
+            select: { title: true, address: true } }) : null;
+          return CustomerContractOutputSchema.parse({ ...parsed.data,
+            products: parsed.data.products.map(row => {
+              const facts = projected.get(row.productRowId);
+              const graphRow = graphRows.get(row.productRowId);
+              return { ...row,
+                ...(!row.productCode && graphRow ? { productCode: catalog.get(graphRow.catalogProductId) } : {}),
+                ...(!row.productType && facts?.productType ? { productType: facts.productType } : {}),
+                ...(!row.lengthMeters && facts?.lengthMeters ? { lengthMeters: facts.lengthMeters } : {}),
+                ...(!row.widthMeters && facts?.widthMeters ? { widthMeters: facts.widthMeters } : {}),
+                ...(!row.areaSquareMeters && facts?.areaSquareMeters ? { areaSquareMeters: facts.areaSquareMeters } : {}),
+                ...(!row.count && facts?.quantity ? { count: facts.quantity } : {}),
+                ...(!row.retailLineTotal ? { retailLineTotal: new Prisma.Decimal(row.quantity)
+                  .mul(row.retailUnitPrice).toString() } : {}),
+              };
+            }),
+            ...(!parsed.data.project && project ? { project: { title: project.title,
+              ...(project.address ? { address: project.address } : {}) } } : {}),
+          });
+        }) : undefined;
+    if (contract.partnerKind === 'PARTNER_CUSTOMER' && variant === 'original' && !partnerCustomerOutput) {
+      return res.status(409).json({ success: false,
+        error: 'اطلاعات نسخه مشتری این قرارداد کامل نیست؛ پرونده را باز کنید و دوباره تلاش کنید.' });
+    }
+    const pdfPath = partnerCustomerOutput
+      ? await writeValidatedCustomerContractPdfFile(partnerCustomerOutput,
+          `sales_contract_${contract.contractNumber}_${Date.now()}`)
+      : await generateSalesContractPdf(printableContract, variant);
     const generatedAt = new Date().toISOString();
 
     if (variant === 'original') {
@@ -2314,6 +2379,61 @@ router.post(
       return res.status(500).json({
         success: false,
         error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
+      });
+    }
+  }
+);
+
+// @desc    Reactivate a contract cancelled from the sales editor
+// @route   POST /api/sales/contracts/:contractId/reactivate
+// @access  Private/Sales Workspace
+router.post(
+  '/contracts/:contractId/reactivate',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.SALES_CONTRACTS_DELETE, FEATURE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const contract = await prisma.salesContract.findUnique({
+        where: { id: req.params.contractId }
+      });
+      if (!contract) {
+        return res.status(404).json({
+          success: false,
+          error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
+        });
+      }
+      if (contract.isInactive) {
+        return res.status(409).json({
+          success: false,
+          error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.'
+        });
+      }
+      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+        return res.status(403).json({
+          success: false,
+          error: 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.'
+        });
+      }
+
+      const result = await contractConfirmationService.reactivateContract({
+        contractId: contract.id,
+        requestedBy: req.user.id,
+        meta: getRequestEvidence(req)
+      });
+      if (!result.success) {
+        return res.status(400).json({ success: false, error: result.error });
+      }
+      return res.status(200).json({
+        success: true,
+        message: 'Contract reactivated successfully',
+        data: result.data
+      });
+    } catch (error) {
+      console.error('Reactivate contract error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'فعال‌سازی قرارداد انجام نشد؛ دوباره تلاش کنید.'
       });
     }
   }

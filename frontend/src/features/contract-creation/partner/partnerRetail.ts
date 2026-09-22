@@ -8,6 +8,8 @@ export interface PartnerRetailRow {
   unit: string;
   inquiryRow: PartnerInquiryRow;
   retailUnitPrice: Money;
+  /** Canonical blended rate: Partner material rate plus system-owned components. */
+  retailEffectiveUnitPrice?: Money;
   wholesaleUnitPrice?: Money;
 }
 
@@ -47,6 +49,35 @@ function display(value: Decimal): string {
   return (negative ? '-' : '') + result;
 }
 
+function retailSubtotal(rows: PartnerRetailRow[], currency: Money['currency']): Decimal | null {
+  let subtotal = decimal('0');
+  try {
+    for (const row of rows) {
+      const effectiveRetail = row.retailEffectiveUnitPrice ?? row.retailUnitPrice;
+      if (effectiveRetail.currency !== currency) return null;
+      QuantitySchema.parse(row.quantity);
+      subtotal = add(subtotal, product(row.quantity, effectiveRetail.amount));
+    }
+    return subtotal;
+  } catch { return null; }
+}
+
+/** Derive the frozen customer discount without touching any Sabalan price. */
+export function partnerRetailDiscountFromPercent(rows: PartnerRetailRow[], percent: string,
+  currency: Money['currency']): Money | null {
+  if (!DecimalSchema.safeParse(percent).success || Number(percent) > 100) return null;
+  const subtotal = retailSubtotal(rows, currency);
+  if (!subtotal) return null;
+  const rate = decimal(percent);
+  return { amount: display({ digits: subtotal.digits * rate.digits,
+    scale: subtotal.scale + rate.scale + 2 }), currency };
+}
+
+export function partnerRetailSubtotal(rows: PartnerRetailRow[], currency: Money['currency']): string | null {
+  const subtotal = retailSubtotal(rows, currency);
+  return subtotal ? display(subtotal) : null;
+}
+
 export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) {
   let wholesale = decimal('0'); let retail = decimal('0'); let pricingReady = true;
   for (const row of rows) {
@@ -61,7 +92,9 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) 
       QuantitySchema.parse(row.quantity);
       if (approved) wholesale = add(wholesale, product(row.quantity, approved.amount));
       else pricingReady = false;
-      retail = add(retail, product(row.quantity, row.retailUnitPrice.amount));
+      const effectiveRetail = row.retailEffectiveUnitPrice ?? row.retailUnitPrice;
+      if (effectiveRetail.currency !== discount.currency) throw new Error('currency mismatch');
+      retail = add(retail, product(row.quantity, effectiveRetail.amount));
     } catch {
       return { valid: false as const, field: 'quantity' as const, productRowId: row.productRowId, message: 'مقدار و قیمت تأییدشده را بررسی کنید.' };
     }
@@ -79,7 +112,7 @@ export function partnerRetailRowSummary(row: PartnerRetailRow) {
   if (!row.wholesaleUnitPrice || row.wholesaleUnitPrice.currency !== row.retailUnitPrice.currency) return null;
   try {
     const wholesale = product(row.quantity, row.wholesaleUnitPrice.amount);
-    const retail = product(row.quantity, row.retailUnitPrice.amount);
+    const retail = product(row.quantity, (row.retailEffectiveUnitPrice ?? row.retailUnitPrice).amount);
     const difference = add(retail, wholesale, true);
     return { wholesale: display(wholesale), retail: display(retail), difference: display(difference),
       loss: difference.digits < BigInt(0) };
@@ -95,4 +128,17 @@ export function remainingPartnerAmount(total: string, allocated: readonly string
     for (const amount of allocated) value = add(value, decimal(amount), true);
     return value.digits < BigInt(0) ? null : display(value);
   } catch { return null; }
+}
+
+/** Keep the first customer installment equal to the unallocated retail total.
+ * The numbered Case is created before the payment step, so its provisional
+ * plan must already reconcile with the partner-visible retail envelope. */
+export function alignPartnerCustomerPaymentPlan(rows: PartnerRetailRow[], discount: Money,
+  plan: PartnerDraftIntent['customerPaymentPlan']): PartnerDraftIntent['customerPaymentPlan'] {
+  const summary = partnerRetailSummary(rows, discount);
+  const [first, ...later] = plan.installments;
+  const firstAmount = summary.valid && first
+    ? remainingPartnerAmount(summary.retail, later.map(item => item.amount.amount)) : null;
+  return first && firstAmount !== null ? { ...plan, installments: [{ ...first,
+    amount: { amount: firstAmount, currency: first.amount.currency } }, ...later] } : plan;
 }

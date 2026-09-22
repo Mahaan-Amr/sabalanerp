@@ -28,7 +28,13 @@ export const CaseDraftIntentSchema = PartnerDraftSubmissionRefSchema.extend({
   additionalMaterialApprovals: z.array(z.object({ pricingSubjectId: IdSchema,
     approvedRowBinding: ApprovedRowBindingSchema }).strict()).optional(),
   customerPaymentPlan: CustomerPaymentPlanSchema,
-  retailDiscount: MoneySchema, belowCostConfirmed: z.boolean(), deliveries: z.array(DeliverySchema),
+  // The percentage is the partner's customer-facing commercial choice. The
+  // derived money value remains frozen for calculation/audit compatibility and
+  // must never be applied to the Sabalan wholesale envelope.
+  retailDiscount: MoneySchema,
+  retailDiscountPercent: DecimalSchema.refine(value => Number(value) <= 100,
+    'Retail discount percent must be between zero and one hundred').optional(),
+  belowCostConfirmed: z.boolean(), deliveries: z.array(DeliverySchema),
   pricingRequest: z.object({ inquiryId: IdSchema, rows: inquiryRows }).strict().optional(),
 }).strict();
 export const PartnerDraftEditLeaseSchema = z.object({

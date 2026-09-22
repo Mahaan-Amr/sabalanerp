@@ -5,6 +5,7 @@ import * as contracts from '../../../../packages/partner-sales-contracts';
 import { PartnerReportingService } from '../partnerSales/reporting/service';
 import type { CaseEvidence, Query, ReportingSource, ReportExportStore, FrozenExport, Root } from '../partnerSales/reporting/contracts';
 import { matchesCustomerContractNumber } from '../partnerSales/reporting/customerSearch';
+import { comparableCommercialRevision } from '../partnerSales/reporting/comparable';
 import { registerPartnerReportRoutes, ReportHandler, ReportResponse } from '../../routes/partner-reports';
 
 // Resolve the documented /testing export through package self-reference.
@@ -72,6 +73,15 @@ test('Partner queries keep discounted retail, wholesale and Accounting balances 
   assert.equal(JSON.stringify(report).includes('FIXTURE-INTERNAL-313'), false);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-INTERNAL-313' })).count, 0);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-CUSTOMER-313' })).count, 1);
+});
+
+test('pre-pricing draft revisions are not treated as broken finalized report evidence', () => {
+  const prePricing = { ...fixture.partner, state: 'DRAFT' as const, sabalanTotals: undefined,
+    customerContractNumber: undefined, internalRecordNumber: undefined };
+  assert.equal(comparableCommercialRevision(prePricing, {
+    wholesaleEnvelope: fixture.wholesaleEnvelope,
+    retailEnvelope: fixture.retailEnvelope,
+  }), null);
 });
 
 test('a committed report fails closed when the customer contract identity is missing', async () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft,
   type PartnerTechnicalDraft, type PartnerTechnicalFamily, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
@@ -47,9 +47,10 @@ function productForCanonical(product: PartnerTechnicalProduct): Product {
     qualityNamePersian: product.attributes.quality };
 }
 
-export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKerfMeters = '0.003', preview: suppliedPreview, onChange }: {
+export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKerfMeters = '0.003', preview: suppliedPreview, focusProductRowId, onChange }: {
   draft: PartnerTechnicalDraft; products: PartnerTechnicalProduct[]; operations: PartnerTechnicalOperation[]; sawKerfMeters?: string;
   preview?: ReturnType<typeof previewPartnerTechnicalDraft>;
+  focusProductRowId?: string;
   onChange: (draft: PartnerTechnicalDraft) => void;
 }) {
   const [family, setFamily] = useState<ContractCatalogFamily | null>(null);
@@ -57,6 +58,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
   const [modal, setModal] = useState<{ draft: PartnerTechnicalDraft; productRowId: string; mode: 'create' | 'edit' } | null>(null);
   const [deleteRowId, setDeleteRowId] = useState<string | null>(null);
   const [editingDependentId, setEditingDependentId] = useState<string | null>(null);
+  const focused = useRef<string | undefined>(undefined);
   const available = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('fa-IR');
     return products.filter(product => product.isAvailable
@@ -67,6 +69,12 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
   const preview = useMemo(() => suppliedPreview?.ok && suppliedPreview.value.inputRevision === draft.inputRevision
     ? suppliedPreview : previewPartnerTechnicalDraft(draft, { products, operations, sawKerfMeters }),
   [draft, operations, products, sawKerfMeters, suppliedPreview]);
+  useEffect(() => {
+    if (!focusProductRowId || focused.current === focusProductRowId ||
+        !draft.rows.some(row => row.productRowId === focusProductRowId)) return;
+    focused.current = focusProductRowId;
+    setModal({ draft, productRowId: focusProductRowId, mode: 'edit' });
+  }, [draft, focusProductRowId]);
   const add = (catalogItemId: string) => {
     const product = products.find(item => item.catalogItemId === catalogItemId);
     if (!product) return;
@@ -204,6 +212,8 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
         showValidation onChange={input => { const { inputRevision, motherWidthMeters, sawKerfMeters: _kerf, ...configuration } = input;
           void inputRevision; void motherWidthMeters; void _kerf;
           onDraftChange(replaceRow(state.draft, { ...row, configuration: configuration as typeof row.configuration })); }} />}
+      {row.family === 'longitudinal' && <ErpInlineState kind="empty"
+        title="حکمی طبق تنظیمات همکاری شما توسط سیستم محاسبه می‌شود و نیاز به ورود دستی ندارد." />}
       {row.family === 'slab' && <SlabProductSection input={{ ...row.configuration, inputRevision: state.draft.inputRevision,
         sourceBatchId: parseStableIdentity('source-batch', row.configuration.sourceBatchId),
         lengthMeters: row.configuration.lengthMeters ? parseCanonicalDecimal(row.configuration.lengthMeters) : undefined,

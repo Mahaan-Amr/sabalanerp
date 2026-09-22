@@ -50,18 +50,17 @@ test('re-inquiry continues from the latest rejected successor instead of resubmi
   assert.equal(latest.revision, 2);
 });
 
-test('partial inquiry shows each outcome and only one Dock progression for usable approvals', () => {
+test('partial inquiry shows each outcome without the obsolete manual Wizard entry', () => {
   const { inquiry } = createPartnerFixtures();
   inquiry.rows.push({ rowId: 'pending', revision: 1, description: 'اسلب در انتظار', state: 'PENDING', configuration: [], usedCaseNumbers: [], configurationRef: { ...inquiry.rows[0].configurationRef, productRowId: 'pending-product' } });
   inquiry.rows.push({ rowId: 'rejected', revision: 1, description: 'پله ردشده', state: 'REJECTED', configuration: [], usedCaseNumbers: [], noteOrReason: 'این سنگ موجود نیست', configurationRef: { ...inquiry.rows[0].configurationRef, productRowId: 'rejected-product' } });
   const html = renderToStaticMarkup(<PartnerInquiryPanel
     inquiry={inquiry} now={Date.parse('2026-08-27T09:00:00.000Z')}
     pending={false} onRefresh={() => undefined} onReinquire={() => undefined}
-    onEnterWizard={() => undefined}
   />);
   assert.match(html, /پاسخ جزئی/);
   assert.match(html, /این سنگ موجود نیست/);
-  assert.equal((html.match(/ساخت پرونده و ورود به Wizard/g) || []).length, 1);
+  assert.doesNotMatch(html, /ساخت پرونده و ورود به Wizard/);
   assert.match(html, /۱ ردیف آماده/);
   assert.match(html, /استعلام مجدد/);
   assert.doesNotMatch(html, /materialRate|calculationPolicy|fixture-313-rate/);
@@ -97,7 +96,7 @@ test('a pending successor remains visible while its valid predecessor is still u
   const { inquiry } = createPartnerFixtures();
   inquiry.rows[0].successor = { inquiryId: 'next-inquiry', rowId: 'next-row', revision: 1, state: 'PENDING' };
   const html = renderToStaticMarkup(<PartnerInquiryPanel inquiry={inquiry} now={Date.parse('2026-08-27T09:00:00.000Z')}
-    pending={false} onRefresh={() => undefined} onReinquire={() => undefined} onEnterWizard={() => undefined} onOpenInquiry={() => undefined} />);
+    pending={false} onRefresh={() => undefined} onReinquire={() => undefined} onOpenInquiry={() => undefined} />);
   assert.match(html, /۱ ردیف آماده/);
   assert.match(html, /استعلام بعدی: در انتظار پاسخ/);
   assert.match(html, /مشاهده استعلام بعدی/);
@@ -124,16 +123,15 @@ test('bulk inquiry retry replays safe recovery references and the original succe
   assert.equal(submit.getSnapshot().phase, 'submitted');
 });
 
-test('expiry removes approval readiness but still permits an unpriced Case save', () => {
+test('expiry removes approval readiness without exposing a second Case-creation action', () => {
   const { inquiry } = createPartnerFixtures();
   const html = renderToStaticMarkup(<PartnerInquiryPanel inquiry={inquiry}
     now={Date.parse(inquiry.rows[0].expiresAt!)} pending={false}
-    onRefresh={() => undefined} onReinquire={() => undefined} onEnterWizard={() => undefined} />);
+    onRefresh={() => undefined} onReinquire={() => undefined} />);
   assert.match(html, /۰ ردیف آماده/);
   assert.match(html, /پایان اعتبار/);
   assert.match(html, /۸۰۰ ریال/);
-  assert.match(html, /ساخت پرونده و ورود به Wizard/);
-  assert.doesNotMatch(html, /disabled=""[^>]*><span>ساخت پرونده و ورود به Wizard/);
+  assert.doesNotMatch(html, /ساخت پرونده و ورود به Wizard/);
 });
 
 test('a late earlier refresh cannot replace the latest partial response', async () => {

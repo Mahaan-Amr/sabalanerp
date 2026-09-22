@@ -44,6 +44,18 @@ test('financial preparation keeps the Partner debtor, approved wholesale and Sab
   assert.equal(result.value.products[0].wholesaleUnitPrice, '800');
 });
 
+test('a committed fixed Sabalan debt is queueable before an installment schedule is entered', async () => {
+  const fixture = createPartnerFixtures();
+  const view = { ...fixture.accounting, state: 'COMMITTED' as const,
+    sabalanPaymentPlan: { ...fixture.accounting.sabalanPaymentPlan, installments: [] } };
+  const result = await preparePartnerFinancialSource({ view,
+    partnerSellerId: fixture.case.partnerSellerId }, fixture.case.head);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.value.amount, { amount: '1600', currency: 'IRR' });
+  assert.deepEqual(result.value.paymentPlan.installments, []);
+});
+
 test('commitment queues once and does not create an official receivable', async () => {
   const fixture = new PartnerAccountingFixture();
   const adapter = createPartnerAccountingAdapter(fixture);

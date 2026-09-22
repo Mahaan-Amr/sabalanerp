@@ -279,7 +279,7 @@ export default function ContractsPage() {
         setLoading(false);
       }
     }
-  }, [clearOperationError, debouncedSearchTerm, lifecycleView, reportOperationError, statusFilter]);
+  }, [clearOperationError, debouncedSearchTerm, lifecycleView, reportOperationError, router, statusFilter]);
 
   useEffect(() => {
     loadContracts(1, { append: false });

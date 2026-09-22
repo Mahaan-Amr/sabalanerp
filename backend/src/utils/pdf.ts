@@ -14,6 +14,25 @@ export async function generateCustomerContractPdf(contract: ContractRuntime, inp
     footerTemplate: '<span></span>', margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
 }
 
+export async function generateCustomerContractPdfFile(contract: ContractRuntime, input: Output,
+  fileName: string): Promise<string> {
+  const content = await createCustomerOutputSnapshots(contract).content(input);
+  const template = renderCustomerContractPrint(content);
+  return generatePdfFromHtml({ ...template, displayHeaderFooter: true,
+    footerTemplate: '<span></span>', fileName, landscape: false, scale: 1, widthMm: 210, heightMm: 297,
+    margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
+}
+
+/** File adapter for a customer output that was already schema/hash validated by
+ * the owning Case lifecycle. Render-only enrichment must not be published as a
+ * new customer-output snapshot. */
+export async function writeValidatedCustomerContractPdfFile(input: Output, fileName: string): Promise<string> {
+  const template = renderCustomerContractPrint(input);
+  return generatePdfFromHtml({ ...template, displayHeaderFooter: true,
+    footerTemplate: '<span></span>', fileName, landscape: false, scale: 1, widthMm: 210, heightMm: 297,
+    margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
+}
+
 export interface GeneratePdfOptions {
   htmlContent: string;
   outputDir?: string;

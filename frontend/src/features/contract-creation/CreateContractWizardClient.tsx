@@ -60,6 +60,7 @@ import { Step8DigitalSignature } from '@/features/contract-creation/components/s
 // Import shared components
 import type { WizardStep } from '@/features/contract-creation/components/shared/WizardProgressBar';
 import { ContractWizardStage } from '@/features/contract-creation/components/shared/ContractWizardFrame';
+import { ContractCreationDraftPrompt } from '@/features/contract-creation/components/shared/ContractCreationDraftPrompt';
 import { consumeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
 import { persistContractLocalValue } from '@/features/contract-creation/utils/contractRecoveryJournal';
 
@@ -755,7 +756,6 @@ export default function CreateContractWizard({
   }, [currentStep, errors]);
   const [autosaveHydrated, setAutosaveHydrated] = useState(false);
   const [recoverableDraftOffer, setRecoverableDraftOffer] = useState<ContractAutosaveDraft | null>(null);
-  const [confirmDiscardDraft, setConfirmDiscardDraft] = useState(false);
   const [contractDateChanged, setContractDateChanged] = useState(false);
   const [draftRecoveryActivated, setDraftRecoveryActivated] = useState(false);
   const initialContractDateRef = useRef(wizardData.contractDate);
@@ -4697,11 +4697,42 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       }
       await refreshConfirmationStatus();
       clearSignatureError(errorSource);
-      router.push('/dashboard/sales/contracts');
     } catch (error: any) {
       if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
         failedAction: 'لغو قرارداد',
+        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+        uncertainMutation: true
+      }), getSalesOperationalErrorKind(error));
+    } finally {
+      if (isLatestSignatureOperation(errorSource, requestSequence)) digitalSignature.setSendingCode(false);
+    }
+  };
+
+  const handleReactivateContract = async () => {
+    const errorSource = 'reactivate';
+    const requestSequence = beginSignatureOperation(errorSource);
+    if (!wizardData.signature?.contractId) return;
+
+    digitalSignature.setSendingCode(true);
+    try {
+      const response = await salesAPI.reactivateContract(wizardData.signature.contractId);
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      if (!response.data.success) {
+        const failure = { response };
+        reportSignatureError(errorSource, getSalesOperationalErrorMessage(failure, {
+          failedAction: 'فعال‌سازی قرارداد',
+          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
+          uncertainMutation: true
+        }), getSalesOperationalErrorKind(failure));
+        return;
+      }
+      await refreshConfirmationStatus();
+      clearSignatureError(errorSource);
+    } catch (error: any) {
+      if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
+      reportSignatureError(errorSource, getSalesOperationalErrorMessage(error, {
+        failedAction: 'فعال‌سازی قرارداد',
         nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
         uncertainMutation: true
       }), getSalesOperationalErrorKind(error));
@@ -6068,6 +6099,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             onResendConfirmation={handleResendConfirmation}
             onRefreshStatus={refreshConfirmationStatus}
             onCancelContract={handleCancelContract}
+            onReactivateContract={handleReactivateContract}
             onDownloadContractPdf={handleDownloadContractPdf}
             onPrintContractPdf={handlePrintContractPdf}
             canDownloadPdfAction={canDownloadPdfAction}
@@ -6274,57 +6306,24 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         )}
 
         {!isContractEditMode && creationRecoverySurface === 'DRAFT' && recoverableDraftOffer && (
-          <ErpInlineState
-            kind="stale"
-            title="یک پیش‌نویس ناتمام برای این قرارداد پیدا شد"
+          <ContractCreationDraftPrompt
             className="mb-4"
-            action={{
-              label: 'ادامه پیش‌نویس قبلی',
-              onClick: () => {
-                const offeredDraft = recoverableDraftOffer;
-                setDraftRecoveryActivated(true);
-                void editRecovery.activate().then(activated => {
-                  if (!activated) {
-                    setDraftRecoveryActivated(false);
-                    return;
-                  }
-                  applyContractAutosaveDraft(offeredDraft);
-                  setRecoverableDraftOffer(null);
-                });
-              },
-              tone: 'primary',
-              variant: 'solid'
+            pending={editRecovery.takeoverPending}
+            onResume={() => {
+              const offeredDraft = recoverableDraftOffer;
+              setDraftRecoveryActivated(true);
+              void editRecovery.activate().then(activated => {
+                if (!activated) {
+                  setDraftRecoveryActivated(false);
+                  return;
+                }
+                applyContractAutosaveDraft(offeredDraft);
+                setRecoverableDraftOffer(null);
+              });
             }}
-            actions={[{
-              label: 'شروع قرارداد جدید',
-              onClick: () => setConfirmDiscardDraft(true),
-              variant: 'outline'
-            }]}
+            onStartNew={handleCreateFreshContract}
           />
         )}
-
-        <ErpNeumorphicDialog
-          open={confirmDiscardDraft}
-          onClose={() => setConfirmDiscardDraft(false)}
-          labelledBy="discard-contract-draft-title"
-          className="w-full max-w-md rounded-[var(--sds-radius-dialog)] p-5 text-[var(--sds-text-primary)]"
-        >
-          <h2 id="discard-contract-draft-title" className="text-lg font-bold">شروع قرارداد جدید</h2>
-          <p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">
-            پیش‌نویس قبلی کنار گذاشته می‌شود. آیا برای شروع یک قرارداد خالی مطمئن هستید؟
-          </p>
-          <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <ErpButton label="انصراف" variant="outline" onClick={() => setConfirmDiscardDraft(false)} />
-            <ErpButton
-              label="شروع قرارداد جدید"
-              tone="danger"
-              onClick={() => {
-                setConfirmDiscardDraft(false);
-                void handleCreateFreshContract();
-              }}
-            />
-          </div>
-        </ErpNeumorphicDialog>
 
         <div {...contractEditRecoveryBoundaryProps(editRecovery.blocked && !isContractCreationComplete)}>
 

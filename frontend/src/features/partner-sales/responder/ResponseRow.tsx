@@ -2,7 +2,7 @@
 
 import React from 'react';
 import type { PartnerQueryV2Results } from '@sabalanerp/partner-sales-contracts';
-import { ErpBadge, ErpCard, ErpCheckbox, ErpField, ErpRialInput, ErpSegmentedControl, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpCard, ErpField, ErpRialInput, ErpSegmentedControl, ErpTextarea } from '@/components/erp';
 import { formatPartnerMoney } from '../presentation';
 import type { ResponseDraft } from './responseDraft';
 
@@ -43,8 +43,6 @@ export function ResponseRow({ row, number, canRespond, status, draft, pending, e
     <div className="sds-text-secondary text-sm" role="status">{status}</div>
     {canRespond && <div className="space-y-4 rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4">
       <p className="font-bold text-[var(--sds-text-primary)]">پاسخ قیمت این ردیف</p>
-      <ErpCheckbox checked={draft.selected} onChange={event => onChange({ ...draft, selected: event.target.checked })}
-        disabled={pending} label={`انتخاب ردیف ${number}`} />
       <ErpSegmentedControl value={draft.outcome} onChange={outcome => onChange({ ...draft, outcome })}
         options={[{ value: 'APPROVED', label: 'ثبت قیمت سبلان', disabled: pending }, { value: 'REJECTED', label: 'رد جهت اصلاح', disabled: pending }]} />
       {draft.outcome === 'APPROVED' && <ErpField label={`قیمت هر واحد ردیف ${number} (${currency})`} required error={error}>

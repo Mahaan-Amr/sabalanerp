@@ -391,19 +391,27 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     const stillPreviousProject = await dependencies.authorizeProject(tx, { actorId: dependencies.actorId,
       projectId: previousProjectId, customerId: current.customerId });
     if (!stillPreviousProject.ok) return stillPreviousProject;
-    const unlinked = await tx.crmPotentialProject.updateMany({ where: { id: previousProjectId,
-      customerId: current.customerId,
-      wonSalesContractId: current.customerContractId, partnerRevision: { not: null } },
-      data: { wonSalesContractId: null, partnerRevision: { increment: 1 } } });
-    if (unlinked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
+    const legacyPreviousProject = await tx.crmPotentialProject.findUnique({ where: { id: previousProjectId },
+      select: { id: true } });
+    if (legacyPreviousProject) {
+      const unlinked = await tx.crmPotentialProject.updateMany({ where: { id: previousProjectId,
+        customerId: current.customerId,
+        wonSalesContractId: current.customerContractId, partnerRevision: { not: null } },
+        data: { wonSalesContractId: null, partnerRevision: { increment: 1 } } });
+      if (unlinked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
+    }
   }
   if (resolved.value.projectId && previousProjectId !== resolved.value.projectId && current.customerContractId) {
-    const linked = await tx.crmPotentialProject.updateMany({ where: { id: resolved.value.projectId,
-      customerId: resolved.value.customerId, OR: [
-        { wonSalesContractId: null }, { wonSalesContractId: current.customerContractId },
-      ], partnerRevision: { not: null } }, data: { wonSalesContractId: current.customerContractId,
-        partnerRevision: { increment: 1 } } });
-    if (linked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
+    const legacyNextProject = await tx.crmPotentialProject.findUnique({ where: { id: resolved.value.projectId },
+      select: { id: true } });
+    if (legacyNextProject) {
+      const linked = await tx.crmPotentialProject.updateMany({ where: { id: resolved.value.projectId,
+        customerId: resolved.value.customerId, OR: [
+          { wonSalesContractId: null }, { wonSalesContractId: current.customerContractId },
+        ], partnerRevision: { not: null } }, data: { wonSalesContractId: current.customerContractId,
+          partnerRevision: { increment: 1 } } });
+      if (linked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
+    }
   }
   const consumed = await dependencies.consumeRecovery(tx, { actorId: dependencies.actorId,
     recoveryId: command.intent.recoveryId, recoveryRevision: command.intent.recoveryRevision,

@@ -3,9 +3,15 @@ import {
   destinationDutySourceVersionLabel,
   initialDestinationDutyState,
   reduceDestinationDutyState,
+  uniqueAccessProvenance,
 } from './destinationDutyState';
 
 assert.equal(destinationDutySourceVersionLabel(5), 'نسخه ۵');
+assert.deepEqual(
+  uniqueAccessProvenance(['اختیار مدیر سیستم', 'اختیار مدیر سیستم']),
+  ['اختیار مدیر سیستم'],
+  'Repeated human-readable provenance must not produce duplicate React keys.',
+);
 
 const first = [{ id: 'duty-1', status: 'OPEN' }];
 const available = reduceDestinationDutyState(initialDestinationDutyState, { type: 'success', data: first });

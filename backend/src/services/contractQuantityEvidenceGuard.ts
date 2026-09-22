@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { parseCanonicalProductGraph, projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
+import { CustomerContractOutputSchema } from '@sabalanerp/partner-sales-contracts';
 import {
   canonicalOptimizerDerivedLengthWitness,
   optimizerQuantityPolicyProvenanceFromAudit,
@@ -29,6 +30,38 @@ export const assertContractQuantityEvidenceReadyForFinalization = async (
     },
   });
   if (!contract) throw new ApprovedPricingEvidenceError('Contract was not found at quantity finalization boundary');
+  if (contract.partnerKind === 'PARTNER_CUSTOMER') {
+    if (!contract.partnerCaseId || !contract.partnerRevision || !contract.partnerIntegrityHash) {
+      throw new ApprovedPricingEvidenceError('Partner contract binding is incomplete at quantity finalization boundary');
+    }
+    const partnerCase = await tx.partnerSaleCase.findUnique({
+      where: { id: contract.partnerCaseId },
+      select: {
+        id: true,
+        state: true,
+        headRevision: true,
+        committedRevision: true,
+        integrityHash: true,
+        customerContractId: true,
+        head: { select: { customerProjection: true } },
+      },
+    });
+    const customerProjection = CustomerContractOutputSchema.safeParse(partnerCase?.head.customerProjection);
+    if (!partnerCase || partnerCase.state !== 'COMMITTED' ||
+        partnerCase.customerContractId !== contract.id ||
+        partnerCase.headRevision !== contract.partnerRevision ||
+        partnerCase.committedRevision === null ||
+        partnerCase.integrityHash !== contract.partnerIntegrityHash ||
+        !customerProjection.success ||
+        customerProjection.data.revision !== contract.partnerRevision ||
+        customerProjection.data.contractNumber !== contract.contractNumber) {
+      throw new ApprovedPricingEvidenceError('Partner Case evidence conflicts at quantity finalization boundary');
+    }
+    // Partner-customer contracts intentionally do not duplicate the ordinary
+    // Sales product graph. Their immutable, committed Case projection is the
+    // canonical quantity and pricing witness at this boundary.
+    return [];
+  }
   if (!contract.productGraphState) {
     throw new ApprovedPricingEvidenceError('Canonical product graph is missing at quantity finalization boundary');
   }

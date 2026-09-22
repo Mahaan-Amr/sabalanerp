@@ -40,7 +40,6 @@ export function PartnerMyInquiriesRuntime() {
           const saleHref = `/dashboard/sales/contracts/create?configure=1&inquiryId=${encodeURIComponent(inquiry.inquiryId)}${recoveryId ? `&draftId=${encodeURIComponent(recoveryId)}` : ''}`;
           return <PartnerInquiryPanel key={inquiry.inquiryId} inquiry={inquiry} now={Date.now()} pending={false}
           onRefresh={() => void load()} onReinquire={() => router.push(saleHref)}
-          onEnterWizard={() => router.push(saleHref)}
           onOpenInquiry={inquiryId => router.push(`/dashboard/sales/partner-inquiries?inquiryId=${encodeURIComponent(inquiryId)}`)} />; })}</div>}
     {error && rows.length > 0 && <ErpInlineState kind="error" title={error} />}
   </ErpWorkspacePage>;

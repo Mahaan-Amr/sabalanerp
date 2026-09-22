@@ -15,6 +15,8 @@ export const initialDestinationDutyState: DestinationDutyLoadState<any> = {
 export const destinationDutySourceVersionLabel = (sourceVersion: number) =>
   `نسخه ${sourceVersion.toLocaleString('fa-IR')}`;
 
+export const uniqueAccessProvenance = (items: string[]) => Array.from(new Set(items));
+
 export type DestinationDutyLoadAction<T> =
   | { type: 'start' }
   | { type: 'success'; data: T }

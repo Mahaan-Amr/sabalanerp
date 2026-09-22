@@ -5,7 +5,7 @@ import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { projectPartnerAccount } from '../accounting/account';
 import { readPersistedPartnerEvents } from '../events/persisted';
 import { readPartnerSnapshot } from '../authorization/readSnapshot';
-import { comparableRevision } from './comparable';
+import { comparableCommercialRevision } from './comparable';
 import { caseHistory } from './history';
 import { effectiveThrough, visibleEvents } from './revenue';
 import { readPartnerShipmentQuantityProjection } from '../fulfillment/quantityStore';
@@ -120,11 +120,12 @@ async function caseEvidence(tx: Prisma.TransactionClient, root: Root, purpose: R
       selected.recordId !== row.internalRecordId || fulfillment.recordId !== row.internalRecordId) return integrityConflict();
   const internal = { ...selected, state: history.voided ? 'VOIDED' as const : history.commitment ? 'COMMITTED' as const
     : contracts.CaseStateSchema.parse(stateEvent?.toState) };
-  const commercial = ['PARTNER', 'MANAGEMENT'].includes(purpose) ? row.revisions.map(revision => {
+  const commercial = ['PARTNER', 'MANAGEMENT'].includes(purpose) ? row.revisions.flatMap(revision => {
     const view = contracts.PartnerCaseViewSchema.parse(object(revision.internalProjection)?.partner);
     if (!ownsRevision(view.owner, { caseId: row.id, revision: revision.revision,
       integrityHash: revision.integrityHash })) integrityConflict();
-    return { view, comparable: comparableRevision(view, revision) };
+    const comparable = comparableCommercialRevision(view, revision);
+    return comparable ? [comparable] : [];
   }) : undefined;
   const progress = await readPartnerShipmentQuantityProjection(tx, row.id,
     { cutoff: cutoff.toISOString(), mode: 'OPERATIONAL_AS_OF' });

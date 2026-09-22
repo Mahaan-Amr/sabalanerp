@@ -23,7 +23,12 @@ export async function buildCaseProjections(input: { caseId: string; revision: nu
       contractNumber: input.customerContractNumber, revision: input.revision, status: 'DRAFT' as const,
       contractDate: input.evidence.customerContent.contractDate, seller: input.evidence.partySnapshots.partner,
       customer: input.evidence.partySnapshots.customer,
-      products: input.evidence.products.map(row => ({ ...product(row), retailUnitPrice: row.retailUnitPrice })),
+      products: input.evidence.products.map(row => ({ ...product(row), retailUnitPrice: row.retailUnitPrice,
+        ...(row.productCode ? { productCode: row.productCode } : {}), ...(row.productType ? { productType: row.productType } : {}),
+        ...(row.lengthMeters ? { lengthMeters: row.lengthMeters } : {}), ...(row.widthMeters ? { widthMeters: row.widthMeters } : {}),
+        ...(row.areaSquareMeters ? { areaSquareMeters: row.areaSquareMeters } : {}), ...(row.count ? { count: row.count } : {}),
+        ...(row.retailLineTotal ? { retailLineTotal: row.retailLineTotal } : {}) })),
+      ...(input.evidence.customerContent.project ? { project: input.evidence.customerContent.project } : {}),
       totals: input.evidence.retailEnvelope.totals,
       customerPaymentPlan: input.evidence.paymentEvidence.customerPaymentPlan, deliveries,
       legalText: input.evidence.customerContent.legalText, signatures: [], confirmation: 'NOT_SENT' as const } : undefined;

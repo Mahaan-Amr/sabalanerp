@@ -41,3 +41,22 @@ export async function buildPartnerCustomerCreateCommand(draft: PartnerCustomerDr
   };
   return { ...intent, ...ids, payloadHash: await canonicalHash(intent) };
 }
+
+export async function buildPartnerCustomerUpdateCommand(draft: PartnerCustomerDraft, ids: {
+  customerId: string;
+  expectedRevision: number;
+  commandId: string;
+  correlationId: string;
+  idempotencyKey: string;
+  isBlacklisted?: boolean;
+  isLocked?: boolean;
+}) {
+  const created = await buildPartnerCustomerCreateCommand(draft, ids);
+  const { payloadHash: _createHash, reason: _createReason, ...base } = created;
+  const intent = { ...base, customerId: ids.customerId, expectedRevision: ids.expectedRevision,
+    ...(ids.isBlacklisted === undefined ? {} : { isBlacklisted: ids.isBlacklisted }),
+    ...(ids.isLocked === undefined ? {} : { isLocked: ids.isLocked }),
+    reason: 'ویرایش مشتری توسط فروشنده همکار' };
+  return { ...intent, payloadHash: await canonicalHash(Object.fromEntries(Object.entries(intent)
+    .filter(([key]) => !['commandId', 'correlationId', 'idempotencyKey'].includes(key)))) };
+}

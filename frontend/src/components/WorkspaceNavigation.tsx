@@ -103,7 +103,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   useEffect(() => {
     if (!currentUser) return;
     let active = true;
-    const paths = ['/dashboard/sales/partners', '/dashboard/sales/contracts/create',
+    const paths = ['/dashboard/sales/partners', '/dashboard/sales/contracts', '/dashboard/sales/contracts/create',
       '/dashboard/sales/partner-inquiries', '/dashboard/sales/partner-cases',
       '/dashboard/sales/partner-customers', '/dashboard/sales/partner-reports'];
     Promise.all(paths.map(async path => {
@@ -318,19 +318,18 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
     }
 
     // Workspace-specific navigation
-    if (currentWorkspace === WORKSPACES.SALES &&
-        !accessibleWorkspaces.some(workspace => workspace.id === WORKSPACES.SALES) &&
+    if (currentWorkspace === WORKSPACES.SALES && currentUser?.role !== 'ADMIN' &&
         Object.values(partnerRouteAccess).some(Boolean)) {
       return [
-        { name: 'Create Partner Sale', namePersian: 'ایجاد فروش همکار',
-          href: '/dashboard/sales/contracts/create', icon: FaPlus,
+        { name: 'Create Partner Sale', namePersian: 'ایجاد قرارداد جدید',
+          href: '/dashboard/sales/contracts/create?entry=new-contract', icon: FaPlus,
           show: partnerRouteAccess['/dashboard/sales/contracts/create'] === true },
         { name: 'Partner Inquiries', namePersian: 'استعلام‌های من',
           href: '/dashboard/sales/partner-inquiries', icon: FaClipboardList,
           show: partnerRouteAccess['/dashboard/sales/partner-inquiries'] === true },
-        { name: 'Partner Cases', namePersian: 'پرونده‌های من',
-          href: '/dashboard/sales/partner-cases', icon: FaFileContract,
-          show: partnerRouteAccess['/dashboard/sales/partner-cases'] === true },
+        { name: 'Partner Cases', namePersian: 'مشاهده قراردادها',
+          href: '/dashboard/sales/contracts', icon: FaFileContract,
+          show: partnerRouteAccess['/dashboard/sales/contracts'] === true },
         { name: 'Partner Customers', namePersian: 'مشتریان من',
           href: '/dashboard/sales/partner-customers', icon: FaUsers,
           show: partnerRouteAccess['/dashboard/sales/partner-customers'] === true },
@@ -868,16 +867,17 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   };
 
   const isActivePath = (href: string) => {
-    if (href === "/dashboard") {
+    const hrefPath = href.split('?')[0];
+    if (hrefPath === "/dashboard") {
       return pathname === "/dashboard";
     }
     const workspaceRoot = currentWorkspace
       ? WORKSPACE_CONFIG[currentWorkspace].path
       : null;
-    if (workspaceRoot && href === workspaceRoot) {
+    if (workspaceRoot && hrefPath === workspaceRoot) {
       return pathname === workspaceRoot;
     }
-    return pathname.startsWith(href);
+    return pathname.startsWith(hrefPath);
   };
 
   const renderNavigationItem = (item: NavigationItem, level = 0) => {

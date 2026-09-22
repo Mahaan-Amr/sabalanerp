@@ -72,7 +72,7 @@ export async function preparePartnerFinancialSource(source: PartnerAccountingSou
   const installments = view.sabalanPaymentPlan.installments;
   if (new Set(installments.map(row => row.installmentId)).size !== installments.length ||
       installments.some(row => row.amount.currency !== view.totals.currency || (row.method === 'CHECK' && (!row.check || row.check.dueDate !== row.dueDate))) ||
-      !equalAmounts(sumAmounts(installments.map(row => row.amount.amount)), view.totals.payable)) return failure('INTEGRITY_CONFLICT');
+      (installments.length > 0 && !equalAmounts(sumAmounts(installments.map(row => row.amount.amount)), view.totals.payable))) return failure('INTEGRITY_CONFLICT');
   const evidence = {
     sourceKind: view.sourceKind, internalRecordId: view.recordId,
     debtor: { partnerSellerId: source.partnerSellerId, commercialAccountId: view.commercialAccountId, identity: view.debtor },

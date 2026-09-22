@@ -36,4 +36,11 @@ assert.equal(destinationDutyHref('sales', {
   destinationHref: '/dashboard/sales/partner-inquiries?inquiryId=inquiry-1',
 }), '/dashboard/sales/partner-inquiries?inquiryId=inquiry-1');
 
+assert.equal(destinationDutyHref('sales', {
+  id: 'duty-5',
+  status: 'OPEN',
+  sourceActionCode: 'PARTNER_PRICE_RESULT',
+  destinationHref: '/dashboard/sales/contracts/create?caseId=case-1',
+}), '/dashboard/sales/contracts/create?caseId=case-1');
+
 console.log('cross-workspace duty destination tests passed');

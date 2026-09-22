@@ -1,5 +1,5 @@
 ﻿import React from 'react';
-import { ErpInlineState, ErpNeumorphicCard, ErpNeumorphicDisclosure, ErpPressable } from '@/components/erp';
+import { ErpButton, ErpInlineState, ErpNeumorphicCard, ErpNeumorphicDisclosure, ErpPressable } from '@/components/erp';
 import {
   FaFileContract,
   FaUser,
@@ -18,6 +18,7 @@ import {
 import { formatDisplayNumber, formatPriceWithRial } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { isContractDateOlderThanToday } from '../../utils/contractCreationCompletion';
+import { getContractStatusAction } from '../../utils/contractStatusAction';
 import type {
   ContractWizardData,
   ContractStep8DeliveryDetail,
@@ -36,6 +37,7 @@ interface Step8DigitalSignatureProps {
   onResendConfirmation: () => void;
   onRefreshStatus: () => void;
   onCancelContract: () => void;
+  onReactivateContract: () => void;
   onDownloadContractPdf: () => void;
   onPrintContractPdf: () => void;
   canDownloadPdfAction: boolean;
@@ -140,6 +142,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
   onResendConfirmation,
   onRefreshStatus,
   onCancelContract,
+  onReactivateContract,
   onDownloadContractPdf,
   onPrintContractPdf,
   canDownloadPdfAction,
@@ -159,6 +162,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
     wizardData.contractDate,
     PersianCalendar.now()
   );
+  const contractStatusAction = getContractStatusAction(signature?.contractStatus);
 
   return (
     <div className="space-y-6">
@@ -495,13 +499,16 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
             >
               بروزرسانی وضعیت
             </ErpPressable>
-            <ErpPressable
-              onClick={onCancelContract}
+            <ErpButton
+              label={contractStatusAction.label}
+              onClick={contractStatusAction.action === 'reactivate'
+                ? onReactivateContract
+                : onCancelContract}
               disabled={sendingCode || !signature?.contractId}
-              className="px-4 py-2 bg-[var(--sds-danger-surface)] hover:bg-[var(--sds-danger-surface)] text-[var(--sds-text-inverse)] rounded-lg disabled:opacity-50"
-            >
-              لغو قرارداد
-            </ErpPressable>
+              tone={contractStatusAction.tone}
+              variant="solid"
+              icon={contractStatusAction.action === 'reactivate' ? FaCheckCircle : FaTimesCircle}
+            />
           </div>
 
           {signature?.contractId && (

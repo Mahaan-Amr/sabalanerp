@@ -2559,12 +2559,18 @@ const customerMoney = (amount: string, output: CustomerContractOutput) =>
 
 function renderCustomerProductRows(output: CustomerContractOutput, columns: Array<{ key: ContractPrintColumnKey }>): string {
   const rows = output.products.map((row, index) => {
-    // v1 has a customer-readable configuration, not separate dimensional or
-    // piece-count evidence. Retain the ordinary columns without guessing facts.
     const cells: Partial<Record<ContractPrintColumnKey, string>> = {
       index: escapeHtml(String(index + 1)),
+      code: escapeHtml(row.productCode || EMPTY),
       description: `${escapeHtml(row.description)}<div>مقدار قراردادی: ${escapeHtml(row.quantity)} ${escapeHtml(row.unit)}</div>`,
+      category: escapeHtml(productTypeLabel(row.productType) || row.productType || EMPTY),
+      length: escapeHtml(row.lengthMeters || EMPTY),
+      width: escapeHtml(row.widthMeters || EMPTY),
+      count: escapeHtml(row.count || EMPTY),
+      linearMeasurement: escapeHtml(row.unit === 'm' ? row.quantity : row.lengthMeters || EMPTY),
+      squareMeasurement: escapeHtml(row.areaSquareMeters || (row.unit === 'm2' ? row.quantity : EMPTY)),
       rate: customerMoney(row.retailUnitPrice, output),
+      total: customerMoney(row.retailLineTotal || row.retailUnitPrice, output),
     };
     return `<tr>${columns.map(column => `<td>${cells[column.key] || EMPTY}</td>`).join('')}</tr>`;
   });
@@ -2647,7 +2653,8 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const showSignatures = variant === 'original' || isSummaryVariant;
   const contractData = contract.contractData || {};
   const customer = contract.customer || contractData.customer || {};
-  const project = contractData.project || {};
+  const project = output?.project ? { projectName: output.project.title, address: output.project.address,
+    projectManagerName: output.project.managerName } : contractData.project || {};
 
   const normalizedProducts = normalizeProducts(contract, {
     finishingCodeById: options.finishingCodeById,
@@ -2666,6 +2673,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const customerPhone = output?.customer.phone || getCustomerPhone(customer, contractData);
   const customerNationalCode = customer.nationalCode || contractData.customer?.nationalCode || EMPTY;
   const customerAddress = output?.customer.address || project.address || customer.workAddress || customer.homeAddress || customer.address || EMPTY;
+  const projectAddress = output?.project?.address || project.address || customerAddress;
   const projectName = project.projectName || EMPTY;
   const projectManagerName = project.projectManagerName || customer.projectManagerName || EMPTY;
   const projectManagerNumber = project.projectManagerNumber || customer.projectManagerNumber || EMPTY;
@@ -2725,7 +2733,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
         <div><strong>شماره تماس:</strong> ${escapeHtml(customerPhone)}</div>
         <div><strong>نام برند/شرکت:</strong> ${escapeHtml(customer.companyName || customer.brandName || EMPTY)}</div>
         <div><strong>نام پروژه:</strong> ${escapeHtml(projectName)}</div>
-        <div><strong>آدرس پروژه:</strong> ${escapeHtml(customerAddress)}</div>
+        <div><strong>آدرس پروژه:</strong> ${escapeHtml(projectAddress)}</div>
         <div><strong>مدیر پروژه:</strong> ${escapeHtml(projectManagerName)}</div>
         <div><strong>شماره مدیر پروژه:</strong> ${escapeHtml(projectManagerNumber)}</div>
       </div>

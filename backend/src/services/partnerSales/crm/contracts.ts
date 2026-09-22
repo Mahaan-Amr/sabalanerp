@@ -18,6 +18,56 @@ export const PartnerCrmWorkTypeSchema = z.enum(['فروش سنگ پروژه سا
   'خدمات / ابزار / فرآوری', 'بارگیری یا تحویل مرتبط با فروش قبلی', 'استعلام قیمت', 'سایر']);
 
 const optionalText = TextSchema.max(500).optional();
+const identifierDigits = (value: string) => value
+  .replace(/[۰-۹]/g, character => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(character)))
+  .replace(/[٠-٩]/g, character => String('٠١٢٣٤٥٦٧٨٩'.indexOf(character)))
+  .replace(/\D/g, '');
+const optionalWorkflowText = z.string().trim().max(2000).optional();
+const optionalIranianMobile = z.string().trim().max(30).optional()
+  .refine(value => !value || /^09\d{9}$/.test(identifierDigits(value)), 'شماره موبایل باید معتبر باشد');
+const ContractProjectFieldsSchema = z.object({
+  projectName: TextSchema.max(300), address: TextSchema.max(1000), city: optionalText,
+  projectType: optionalText, projectManagerName: optionalText,
+  projectManagerNumber: optionalIranianMobile, marketerFirstName: optionalText,
+  marketerLastName: optionalText, marketerPhoneNumber: optionalIranianMobile,
+}).strict();
+
+export const PartnerContractCustomerCreateSchema = z.object({
+  schemaVersion: z.literal(1), commandId: IdSchema, correlationId: IdSchema, idempotencyKey: IdSchema,
+  payloadHash: z.string().regex(/^sha256-v1:[a-f0-9]{64}$/), reason: PersianReasonSchema,
+  customer: z.object({
+    firstName: TextSchema.max(120), lastName: TextSchema.max(120),
+    customerType: z.enum(['Individual', 'Company', 'Government']), companyName: optionalText,
+    phoneNumber1: z.string().trim().refine(value => /^09\d{9}$/.test(identifierDigits(value)),
+      'شماره تماس اصلی باید موبایل معتبر ایران باشد'),
+    phoneNumber2: z.string().trim().optional().refine(value => !value || /^09\d{9}$/.test(identifierDigits(value)),
+      'شماره تماس دوم باید موبایل معتبر ایران باشد'),
+    nationalCode: z.string().trim().optional(), brandName: optionalText,
+    homeAddress: optionalWorkflowText, homeNumber: z.string().trim().max(30).optional(),
+    workAddress: optionalWorkflowText, workNumber: z.string().trim().max(30).optional(),
+    whatsappNumber: optionalIranianMobile, birthDate: z.string().trim().max(40).optional(),
+    mainJob: optionalText, referrerFirstName: optionalText, referrerLastName: optionalText,
+    referrerPhoneNumber: optionalIranianMobile,
+  }).strict().superRefine((customer, context) => {
+    const identity = customer.nationalCode ? identifierDigits(customer.nationalCode) : '';
+    if (identity && customer.customerType === 'Individual' && identity.length !== 10) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['nationalCode'], message: 'کد ملی باید ۱۰ رقم باشد' });
+    }
+    if (identity && customer.customerType !== 'Individual' && identity.length !== 11) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['nationalCode'], message: 'شناسه ملی حقوقی باید ۱۱ رقم باشد' });
+    }
+  }),
+  project: ContractProjectFieldsSchema,
+}).strict();
+export type PartnerContractCustomerCreate = z.infer<typeof PartnerContractCustomerCreateSchema>;
+
+export const PartnerContractProjectCreateSchema = z.object({
+  schemaVersion: z.literal(1), commandId: IdSchema, correlationId: IdSchema, idempotencyKey: IdSchema,
+  payloadHash: z.string().regex(/^sha256-v1:[a-f0-9]{64}$/), reason: PersianReasonSchema,
+  customerId: IdSchema, project: ContractProjectFieldsSchema,
+}).strict();
+export type PartnerContractProjectCreate = z.infer<typeof PartnerContractProjectCreateSchema>;
+
 export const PartnerCustomerCreateSchema = z.object({ schemaVersion: z.literal(1), commandId: IdSchema,
   correlationId: IdSchema, firstName: TextSchema.max(120), lastName: TextSchema.max(120),
   companyName: optionalText, customerType: z.enum(['Individual', 'Company']), city: optionalText,
@@ -32,6 +82,7 @@ export const PartnerCustomerUpdateSchema = z.object({ schemaVersion: z.literal(1
   firstName: TextSchema.max(120), lastName: TextSchema.max(120), companyName: optionalText,
   customerType: z.enum(['Individual', 'Company']), city: optionalText, address: TextSchema.max(1000).optional(),
   nationalCode: z.string().trim().min(5).max(30).optional(), phone: z.string().trim().min(7).max(30),
+  isBlacklisted: z.boolean().optional(), isLocked: z.boolean().optional(),
   reason: PersianReasonSchema, idempotencyKey: IdSchema,
   payloadHash: z.string().regex(/^sha256-v1:[a-f0-9]{64}$/),
 }).strict();
@@ -80,8 +131,18 @@ export const PartnerTransferRequestSchema = z.object({ schemaVersion: z.literal(
 }).strict();
 export type PartnerTransferRequest = z.infer<typeof PartnerTransferRequestSchema>;
 
+export const PartnerTransferCancelSchema = z.object({ schemaVersion: z.literal(1), commandId: IdSchema,
+  correlationId: IdSchema, transferId: IdSchema, expectedRevision: RevisionSchema,
+  reason: PersianReasonSchema, idempotencyKey: IdSchema,
+  payloadHash: z.string().regex(/^sha256-v1:[a-f0-9]{64}$/),
+}).strict();
+export type PartnerTransferCancel = z.infer<typeof PartnerTransferCancelSchema>;
+
 export type PartnerCustomerSummary = { schemaVersion: 1; purpose: 'PARTNER_CRM_CUSTOMER'; customerId: string;
-  revision: number; displayName: string; personType: 'NATURAL' | 'LEGAL'; city?: string; phone: string };
+  revision: number; displayName: string; firstName: string; lastName: string; companyName?: string;
+  customerType: 'Individual' | 'Company' | 'Government'; personType: 'NATURAL' | 'LEGAL'; status: string;
+  isBlacklisted: boolean; isLocked: boolean; nationalCode?: string; city?: string; address?: string;
+  phone: string; projectCount: number };
 export type PartnerProjectView = { projectId: string; revision: number; title: string; status: string; workType: string;
   address?: string; probability?: number; expectedCloseDate?: string; description?: string; lostReason?: string;
   dormantReason?: string; revisitDate?: string };

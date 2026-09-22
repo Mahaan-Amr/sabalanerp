@@ -1,7 +1,7 @@
 'use client';
 import { ErpBadge, ErpButton, ErpCard, ErpField as CustomerWorkflowField, ErpInput, ErpPressable, ErpSegmentedControl } from '@/components/erp';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   FaArrowRight,
@@ -19,10 +19,8 @@ import {
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
-import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
-import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { mapAxiosFormErrors } from '@/lib/formErrors';
 import {
   normalizeIranianMobile,
@@ -31,7 +29,9 @@ import {
   validateRequiredIranianMobile
 } from '@/lib/phoneFormat';
 import { CustomerWorkflowPage, CustomerWorkflowSection, hasCustomerDraftChanges } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
+import { CustomerProjectFormFields } from '@/features/crm/customer-workflow/CustomerProjectFormFields';
 import { writeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
+import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
 
 interface ProjectAddress {
   id?: string;
@@ -108,6 +108,9 @@ interface CustomerFormData {
   // Project Manager Information (Step 3.2 - Collapsible)
   projectManagerName: string;
   projectManagerNumber: string;
+  marketerFirstName: string;
+  marketerLastName: string;
+  marketerPhoneNumber: string;
 
   // Security & Access Control
   isBlacklisted: boolean;
@@ -122,6 +125,8 @@ interface User extends PermissionUser {}
 
 export default function CreateCustomerPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const partnerContractMode = searchParams.get('partnerContract') === '1';
   const { hasPermission } = useWorkspace();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [crmPermissions, setCrmPermissions] = useState({
@@ -133,6 +138,17 @@ export default function CreateCustomerPage() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [duplicateCustomers, setDuplicateCustomers] = useState<DuplicateCustomerSuggestion[]>([]);
+  const [partnerDuplicateMatch, setPartnerDuplicateMatch] = useState<{
+    matchReference: string; displayName: string; city: string; maskedWitness: string;
+  } | null>(null);
+  const [partnerOwnedDuplicate, setPartnerOwnedDuplicate] = useState<{
+    customerId: string; displayName: string; phone?: string;
+  } | null>(null);
+  const [transferReason, setTransferReason] = useState('');
+  const [transferNotice, setTransferNotice] = useState('');
+  const [pendingTransfer, setPendingTransfer] = useState<{ transferId: string; revision: number } | null>(null);
+  const transferRequestRef = useRef<{ signature: string; commandId: string; correlationId: string } | null>(null);
+  const transferCancelRef = useRef<{ transferId: string; commandId: string; correlationId: string } | null>(null);
   const [step, setStep] = useState(0);
   const [showAdditionalInfo, setShowAdditionalInfo] = useState(false);
 
@@ -188,6 +204,9 @@ export default function CreateCustomerPage() {
     // Project Manager Information (Step 3.2 - Collapsible)
     projectManagerName: '',
     projectManagerNumber: '',
+    marketerFirstName: '',
+    marketerLastName: '',
+    marketerPhoneNumber: '',
 
     // Security & Access Control
     isBlacklisted: false,
@@ -200,10 +219,10 @@ export default function CreateCustomerPage() {
 
   useEffect(() => {
     const requestedCustomerType = new URLSearchParams(window.location.search).get('customerType');
-    if (requestedCustomerType === 'Collaborative') {
+    if (requestedCustomerType === 'Collaborative' && !partnerContractMode) {
       setFormData(prev => ({ ...prev, customerType: 'Collaborative' }));
     }
-  }, []);
+  }, [partnerContractMode]);
 
   // Step configuration - New structure
   const isCollaborativeCustomer = formData.customerType === 'Collaborative';
@@ -241,8 +260,11 @@ export default function CreateCustomerPage() {
       }
 
       // Optional fields with validation if provided
-      if (formData.nationalCode && formData.nationalCode.length !== 10) {
-        newErrors.nationalCode = 'کد ملی باید 10 رقم باشد';
+      const expectedIdentityLength = formData.customerType === 'Individual' ? 10 : 11;
+      if (formData.nationalCode && formData.nationalCode.length !== expectedIdentityLength) {
+        newErrors.nationalCode = formData.customerType === 'Individual'
+          ? 'کد ملی باید ۱۰ رقم باشد'
+          : 'شناسه ملی حقوقی باید ۱۱ رقم باشد';
       }
       const referrerPhoneNumberError = validateOptionalIranianMobile(formData.referrerPhoneNumber);
       if (referrerPhoneNumberError) newErrors.referrerPhoneNumber = referrerPhoneNumberError;
@@ -268,6 +290,7 @@ export default function CreateCustomerPage() {
       field === 'phoneNumber2' ||
       field === 'whatsappNumber' ||
       field === 'projectManagerNumber' ||
+      field === 'marketerPhoneNumber' ||
       field === 'referrerPhoneNumber'
         ? normalizeIranianMobile(value)
         : field === 'nationalCode' || field === 'homeNumber' || field === 'workNumber'
@@ -281,6 +304,10 @@ export default function CreateCustomerPage() {
   };
 
   useEffect(() => {
+    if (partnerContractMode) {
+      setDuplicateCustomers([]);
+      return;
+    }
     const phoneNumber1 = normalizeIranianMobile(formData.phoneNumber1);
     const phoneNumber2 = normalizeIranianMobile(formData.phoneNumber2);
     const validPhoneNumbers = [phoneNumber1, phoneNumber2]
@@ -322,7 +349,7 @@ export default function CreateCustomerPage() {
     }, 450);
 
     return () => window.clearTimeout(timeoutId);
-  }, [formData.phoneNumber1, formData.phoneNumber2]);
+  }, [formData.phoneNumber1, formData.phoneNumber2, partnerContractMode]);
 
   const handleNext = () => {
     if (validateStep(step) && step < steps.length - 1) {
@@ -409,7 +436,9 @@ export default function CreateCustomerPage() {
     return ownerName || customer.ownerUser?.username || 'بدون مسئول فروش';
   };
 
-  const getContractReturnUrl = (stepParam: string | number = '2') => {
+  const getContractReturnUrl = (stepParam: string | number = '2', selection?: {
+    customerId?: string; projectId?: string;
+  }) => {
     const urlParams = new URLSearchParams(window.location.search);
     let contractKind = urlParams.get('contractKind');
     try {
@@ -419,10 +448,16 @@ export default function CreateCustomerPage() {
     } catch {
       // Fall back to the standard contract route.
     }
-    const route = contractKind === 'collaboration'
+    const route = !partnerContractMode && contractKind === 'collaboration'
       ? '/dashboard/sales/contracts/collaboration/create'
       : '/dashboard/sales/contracts/create';
-    return `${route}?returnTo=contract&step=${stepParam}`;
+    const result = new URLSearchParams({ returnTo: 'contract', step: String(stepParam) });
+    const draftId = urlParams.get('draftId');
+    if (draftId) result.set('draftId', draftId);
+    if (partnerContractMode) result.set('partnerContract', '1');
+    if (selection?.customerId) result.set('customerId', selection.customerId);
+    if (selection?.projectId) result.set('projectId', selection.projectId);
+    return `${route}?${result.toString()}`;
   };
 
   const selectDuplicateForContract = (customer: DuplicateCustomerSuggestion) => {
@@ -469,10 +504,12 @@ export default function CreateCustomerPage() {
     const phone1Error = validateRequiredIranianMobile(formData.phoneNumber1);
     const phone2Error = validateOptionalIranianMobile(formData.phoneNumber2);
     const projectManagerNumberError = validateOptionalIranianMobile(formData.projectManagerNumber);
+    const marketerPhoneNumberError = validateOptionalIranianMobile(formData.marketerPhoneNumber);
     const referrerPhoneNumberError = validateOptionalIranianMobile(formData.referrerPhoneNumber);
     if (phone1Error) submitErrors.phoneNumber1 = phone1Error;
     if (phone2Error) submitErrors.phoneNumber2 = phone2Error;
     if (projectManagerNumberError) submitErrors.projectManagerNumber = projectManagerNumberError;
+    if (marketerPhoneNumberError) submitErrors.marketerPhoneNumber = marketerPhoneNumberError;
     if (referrerPhoneNumberError) submitErrors.referrerPhoneNumber = referrerPhoneNumberError;
     if (duplicateCustomers.length > 0) {
       submitErrors.phoneNumber1 = 'مشتری با این شماره تماس قبلا ثبت شده است.';
@@ -489,7 +526,64 @@ export default function CreateCustomerPage() {
       const phoneNumber1 = normalizeIranianMobile(formData.phoneNumber1);
       const phoneNumber2 = normalizeIranianMobile(formData.phoneNumber2);
       const projectManagerNumber = normalizeIranianMobile(formData.projectManagerNumber);
+      const marketerPhoneNumber = normalizeIranianMobile(formData.marketerPhoneNumber);
       const referrerPhoneNumber = normalizeIranianMobile(formData.referrerPhoneNumber);
+
+      if (partnerContractMode) {
+        const optional = (value: string) => value.trim() || undefined;
+        const intent = {
+          schemaVersion: 1 as const,
+          reason: 'ثبت مشتری و پروژه برای قرارداد فروش همکار',
+          customer: {
+            firstName: formData.firstName.trim(), lastName: formData.lastName.trim(),
+            customerType: formData.customerType as 'Individual' | 'Company' | 'Government',
+            phoneNumber1, ...(phoneNumber2 ? { phoneNumber2 } : {}),
+            ...(optional(formData.nationalCode) ? { nationalCode: optional(formData.nationalCode) } : {}),
+            ...(optional(formData.companyName) ? { companyName: optional(formData.companyName) } : {}),
+            ...(optional(formData.brandName) ? { brandName: optional(formData.brandName) } : {}),
+            ...(optional(formData.homeAddress) ? { homeAddress: optional(formData.homeAddress) } : {}),
+            ...(optional(formData.homeNumber) ? { homeNumber: optional(formData.homeNumber) } : {}),
+            ...(optional(formData.workAddress) ? { workAddress: optional(formData.workAddress) } : {}),
+            ...(optional(formData.workNumber) ? { workNumber: optional(formData.workNumber) } : {}),
+            ...(optional(formData.whatsappNumber) ? { whatsappNumber: optional(formData.whatsappNumber) } : {}),
+            ...(optional(formData.birthDate) ? { birthDate: optional(formData.birthDate) } : {}),
+            ...(optional(formData.mainJob) ? { mainJob: optional(formData.mainJob) } : {}),
+            ...(optional(formData.referrerFirstName) ? { referrerFirstName: optional(formData.referrerFirstName) } : {}),
+            ...(optional(formData.referrerLastName) ? { referrerLastName: optional(formData.referrerLastName) } : {}),
+            ...(referrerPhoneNumber ? { referrerPhoneNumber } : {}),
+          },
+          project: {
+            projectName: formData.projectName.trim(), address: formData.projectAddress.trim(),
+            ...(optional(formData.projectCity) ? { city: optional(formData.projectCity) } : {}),
+            ...(optional(formData.projectType) ? { projectType: optional(formData.projectType) } : {}),
+            ...(optional(formData.projectManagerName) ? { projectManagerName: optional(formData.projectManagerName) } : {}),
+            ...(projectManagerNumber ? { projectManagerNumber } : {}),
+            ...(optional(formData.marketerFirstName) ? { marketerFirstName: optional(formData.marketerFirstName) } : {}),
+            ...(optional(formData.marketerLastName) ? { marketerLastName: optional(formData.marketerLastName) } : {}),
+            ...(marketerPhoneNumber ? { marketerPhoneNumber } : {}),
+          },
+        };
+        const payloadHash = await canonicalHash(intent);
+        const commandId = `partner-contract-customer-${crypto.randomUUID()}`;
+        const response = await crmAPI.createPartnerContractCustomer({ ...intent, commandId,
+          correlationId: `partner-contract-customer-correlation-${crypto.randomUUID()}`,
+          idempotencyKey: commandId, payloadHash });
+        const result = response.data?.data as { customer?: { customerId?: string; displayName?: string; phone?: string };
+          project?: { id?: string }; duplicate?: 'OWNED' } | undefined;
+        const createdCustomerId = result?.customer?.customerId;
+        if (!createdCustomerId) throw new Error('Invalid Partner Customer response');
+        if (result?.duplicate === 'OWNED') {
+          setPartnerOwnedDuplicate({ customerId: createdCustomerId,
+            displayName: result.customer?.displayName || 'مشتری موجود',
+            ...(result.customer?.phone ? { phone: result.customer.phone } : {}) });
+          setErrors({ submit: 'این مشتری قبلاً در فهرست شما ثبت شده است. برای استفاده در قرارداد، او را انتخاب کنید.' });
+          return;
+        }
+        router.push(getContractReturnUrl(result?.project?.id ? '3' : '2', {
+          customerId: createdCustomerId, projectId: result?.project?.id,
+        }));
+        return;
+      }
 
       // Prepare data for API
       const customerData = {
@@ -532,7 +626,10 @@ export default function CreateCustomerPage() {
           projectName: formData.projectName.trim(),
           projectType: formData.projectType.trim() || null,
           projectManagerName: formData.projectManagerName.trim() || null,
-          projectManagerNumber: projectManagerNumber || null
+          projectManagerNumber: projectManagerNumber || null,
+          marketerFirstName: formData.marketerFirstName.trim() || null,
+          marketerLastName: formData.marketerLastName.trim() || null,
+          marketerPhoneNumber: marketerPhoneNumber || null
         }] : [],
 
         // Create phoneNumbers array from individual phone fields
@@ -571,7 +668,21 @@ export default function CreateCustomerPage() {
       }
     } catch (error: any) {
       console.error('Error creating customer:', error);
-      if (error.response?.status === 409 && error.response?.data?.code === 'DUPLICATE_CUSTOMER') {
+      if (partnerContractMode && error.response?.status === 409 && error.response?.data?.code === 'STATE_CONFLICT') {
+        try {
+          const correlationId = `partner-duplicate-correlation-${crypto.randomUUID()}`;
+          const duplicate = await crmAPI.findPartnerDuplicateCustomer({ schemaVersion: 1, correlationId,
+            phone: normalizeIranianMobile(formData.phoneNumber1),
+            ...(formData.nationalCode.trim() ? { nationalCode: formData.nationalCode.trim() } : {}) });
+          const match = duplicate.data?.data;
+          if (match?.matchReference) {
+            setPartnerDuplicateMatch(match);
+            setErrors({ submit: 'این مشتری در اختیار فروشنده دیگری است. در صورت نیاز درخواست انتقال ثبت کنید.' });
+            return;
+          }
+        } catch { /* Preserve the non-disclosing duplicate response below. */ }
+        setErrors({ submit: 'مشتری تکراری است، اما اطلاعات امن انتقال در دسترس نیست.' });
+      } else if (error.response?.status === 409 && error.response?.data?.code === 'DUPLICATE_CUSTOMER') {
         const matches = error.response?.data?.data?.matches || [];
         setDuplicateCustomers(matches);
         setErrors({
@@ -590,6 +701,63 @@ export default function CreateCustomerPage() {
         const { general, ...fieldErrors } = mappedErrors;
         setErrors({ ...fieldErrors, submit: general || error.response?.data?.error || 'خطا در ایجاد مشتری' });
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestPartnerTransfer = async () => {
+    if (!partnerDuplicateMatch || !/[\u0600-\u06ff]/.test(transferReason)) return;
+    setLoading(true);
+    try {
+      const intent = { schemaVersion: 1 as const, matchReference: partnerDuplicateMatch.matchReference,
+        reason: transferReason.trim() };
+      const payloadHash = await canonicalHash(intent);
+      const signature = JSON.stringify(intent);
+      if (!transferRequestRef.current || transferRequestRef.current.signature !== signature) {
+        transferRequestRef.current = { signature, commandId: `partner-transfer-${crypto.randomUUID()}`,
+          correlationId: `partner-transfer-correlation-${crypto.randomUUID()}` };
+      }
+      const { commandId, correlationId } = transferRequestRef.current;
+      const response = await crmAPI.requestPartnerCustomerTransfer({ ...intent, commandId,
+        correlationId,
+        idempotencyKey: commandId, payloadHash });
+      const outcome = response.data?.data as { transferId?: string; revision?: number } | undefined;
+      if (!outcome?.transferId || typeof outcome.revision !== 'number') throw new Error('Invalid transfer response');
+      setPendingTransfer({ transferId: outcome.transferId, revision: outcome.revision });
+      transferRequestRef.current = null;
+      setPartnerDuplicateMatch(null);
+      setTransferReason('');
+      setErrors({});
+      setTransferNotice('درخواست انتقال ثبت شد. تأیید انتقال، مشتری را خودکار به این قرارداد متصل نمی‌کند.');
+    } catch {
+      setErrors({ submit: 'ثبت درخواست انتقال انجام نشد؛ دوباره تلاش کنید.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelPartnerTransfer = async () => {
+    if (!pendingTransfer || loading) return;
+    setLoading(true);
+    try {
+      const intent = { schemaVersion: 1 as const, transferId: pendingTransfer.transferId,
+        expectedRevision: pendingTransfer.revision, reason: 'لغو درخواست انتقال توسط درخواست‌کننده' };
+      const payloadHash = await canonicalHash(intent);
+      if (!transferCancelRef.current || transferCancelRef.current.transferId !== pendingTransfer.transferId) {
+        transferCancelRef.current = { transferId: pendingTransfer.transferId,
+          commandId: `partner-transfer-cancel-${crypto.randomUUID()}`,
+          correlationId: `partner-transfer-cancel-correlation-${crypto.randomUUID()}` };
+      }
+      const { commandId, correlationId } = transferCancelRef.current;
+      await crmAPI.cancelPartnerCustomerTransfer(pendingTransfer.transferId, { ...intent,
+        commandId, correlationId, idempotencyKey: commandId, payloadHash });
+      transferCancelRef.current = null;
+      setPendingTransfer(null);
+      setTransferNotice('درخواست انتقال لغو شد.');
+      setErrors({});
+    } catch {
+      setErrors({ submit: 'لغو درخواست انتقال انجام نشد؛ وضعیت درخواست را دوباره بررسی کنید.' });
     } finally {
       setLoading(false);
     }
@@ -614,7 +782,7 @@ export default function CreateCustomerPage() {
                 { value: 'Individual', label: 'حقیقی', icon: FaUser },
                 { value: 'Company', label: 'حقوقی', icon: FaBuilding },
                 { value: 'Government', label: 'دولتی', icon: FaBuilding },
-                { value: 'Collaborative', label: 'همکاری', icon: FaUser },
+                ...(!partnerContractMode ? [{ value: 'Collaborative', label: 'همکاری', icon: FaUser }] : []),
               ]}
             />
 
@@ -662,13 +830,13 @@ export default function CreateCustomerPage() {
                 />
               </CustomerWorkflowField>
 
-              <CustomerWorkflowField label="کد ملی" error={errors.nationalCode}>
+              <CustomerWorkflowField label={formData.customerType === 'Individual' ? 'کد ملی' : 'شناسه ملی حقوقی'} error={errors.nationalCode}>
                 <ErpInput
                   type="text"
                   value={formData.nationalCode}
                   onChange={(e) => handleInputChange('nationalCode', e.target.value)}
-                  placeholder="کد ملی (10 رقم)"
-                  maxLength={10}
+                  placeholder={formData.customerType === 'Individual' ? 'کد ملی (۱۰ رقم)' : 'شناسه ملی (۱۱ رقم)'}
+                  maxLength={formData.customerType === 'Individual' ? 10 : 11}
                 />
               </CustomerWorkflowField>
             </div>
@@ -808,92 +976,9 @@ export default function CreateCustomerPage() {
 
       case 'project':
         return (
-          <div className="space-y-6">
-            {/* Project Information Fields */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <CustomerWorkflowField label="نام پروژه" error={errors.projectName} required>
-                <ErpInput
-                  type="text"
-                  value={formData.projectName}
-                  onChange={(e) => handleInputChange('projectName', e.target.value)}
-                  placeholder="نام پروژه"
-                />
-              </CustomerWorkflowField>
-
-              <CustomerWorkflowField label="آدرس پروژه" error={errors.projectAddress} required>
-                <ErpInput
-                  type="text"
-                  value={formData.projectAddress}
-                  onChange={(e) => handleInputChange('projectAddress', e.target.value)}
-                  placeholder="آدرس پروژه"
-                />
-              </CustomerWorkflowField>
-
-              <CustomerWorkflowField label="شهر پروژه">
-                <ErpInput
-                  type="text"
-                  value={formData.projectCity}
-                  onChange={(e) => handleInputChange('projectCity', e.target.value)}
-                  placeholder="شهر پروژه"
-                />
-              </CustomerWorkflowField>
-
-              <div className="md:col-span-2">
-                <EnhancedDropdown
-                  label="نوع پروژه"
-                  value={formData.projectType}
-                  onChange={(value) => handleInputChange('projectType', value)}
-                  placeholder="نوع پروژه را انتخاب کنید"
-                  options={PROJECT_TYPE_OPTIONS}
-                  searchable={true}
-                  clearable={true}
-                />
-              </div>
-            </div>
-
-            {/* Collapsible Project Manager Information Section */}
-            <div className="mt-8">
-              <ErpPressable
-                type="button"
-                onClick={() => setShowAdditionalInfo(!showAdditionalInfo)}
-                aria-expanded={showAdditionalInfo}
-                variant="outline"
-                className="w-full justify-between p-4"
-              >
-                <span className="text-lg font-medium">مدیر پروژه</span>
-                <span className={`transform transition-transform ${showAdditionalInfo ? 'rotate-180' : ''}`}>
-                  <FaArrowRight className="h-4 w-4" />
-                </span>
-              </ErpPressable>
-
-              {showAdditionalInfo && (
-                <ErpCard className="mt-4 p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <CustomerWorkflowField label="نام مدیر پروژه">
-                <ErpInput
-                        type="text"
-                        value={formData.projectManagerName}
-                        onChange={(e) => handleInputChange('projectManagerName', e.target.value)}
-                        placeholder="نام مدیر پروژه"
-                      />
-              </CustomerWorkflowField>
-
-                    <CustomerWorkflowField label="شماره تماس مدیر پروژه" error={errors.projectManagerNumber}>
-                <ErpInput
-                        type="text"
-                        value={formData.projectManagerNumber}
-                        onChange={(e) => handleInputChange('projectManagerNumber', e.target.value)}
-                        placeholder="شماره تماس مدیر پروژه"
-                        id="customer-projectManagerNumber"
-                        aria-invalid={Boolean(errors.projectManagerNumber)}
-                        aria-describedby={errors.projectManagerNumber ? 'customer-projectManagerNumber-error' : undefined}
-                      />
-              </CustomerWorkflowField>
-                  </div>
-                </ErpCard>
-              )}
-            </div>
-          </div>
+          <CustomerProjectFormFields value={formData}
+            errors={errors}
+            onChange={(field, value) => handleInputChange(field, value)} />
         );
 
 
@@ -902,7 +987,7 @@ export default function CreateCustomerPage() {
     }
   };
 
-  if (!crmPermissions.canCreateCustomers) {
+  if (!crmPermissions.canCreateCustomers && !partnerContractMode) {
     return (
       <CustomerWorkflowPage title="ایجاد مشتری جدید" backHref="/dashboard/crm/customers" feedback={{ kind: 'permission', title: 'شما دسترسی لازم برای ایجاد مشتری را ندارید.' }} />
     );
@@ -933,6 +1018,8 @@ export default function CreateCustomerPage() {
       progress={{ current: step + 1, total: steps.length, label: steps[step].label }}
       feedback={errors.submit
         ? { kind: 'error', title: errors.submit }
+        : transferNotice
+          ? { kind: 'success', title: transferNotice }
         : hasCustomerDraftChanges(formData)
           ? { kind: 'stale', title: 'اطلاعات واردشده تا زمان ثبت نهایی ذخیره نمی‌شوند.' }
           : undefined}
@@ -942,6 +1029,53 @@ export default function CreateCustomerPage() {
       <CustomerWorkflowSection title={steps[step].label}>
         {renderStepContent()}
       </CustomerWorkflowSection>
+
+      {partnerDuplicateMatch && (
+        <CustomerWorkflowSection title="مشتری مشابه در فروش همکار"
+          description="برای حفظ محرمانگی فقط اطلاعات محدود نمایش داده می‌شود. درخواست انتقال مستقل از پیش‌نویس قرارداد است.">
+          <ErpCard className="space-y-4 p-4">
+            <div>
+              <p className="font-semibold">{partnerDuplicateMatch.displayName}</p>
+              <p className="mt-1 text-sm text-[var(--sds-text-muted)]">
+                {partnerDuplicateMatch.city} · {partnerDuplicateMatch.maskedWitness}
+              </p>
+            </div>
+            <CustomerWorkflowField label="دلیل درخواست انتقال" required>
+              <ErpInput value={transferReason} onChange={(event) => setTransferReason(event.target.value)}
+                placeholder="دلیل فارسی درخواست انتقال را وارد کنید" />
+            </CustomerWorkflowField>
+            <ErpButton label="ثبت درخواست انتقال مشتری" tone="warning" disabled={loading || !/[\u0600-\u06ff]/.test(transferReason)}
+              onClick={() => void requestPartnerTransfer()} />
+          </ErpCard>
+        </CustomerWorkflowSection>
+      )}
+
+      {pendingTransfer && (
+        <CustomerWorkflowSection title="درخواست انتقال در انتظار بررسی"
+          description="این درخواست از پیش‌نویس قرارداد مستقل است و تا پیش از تصمیم مسئول فعلی قابل لغو است.">
+          <ErpCard className="p-4">
+            <ErpButton label="لغو درخواست انتقال" tone="danger" variant="outline" disabled={loading}
+              onClick={() => void cancelPartnerTransfer()} />
+          </ErpCard>
+        </CustomerWorkflowSection>
+      )}
+
+      {partnerOwnedDuplicate && (
+        <CustomerWorkflowSection title="مشتری موجود در فهرست شما"
+          description="برای جلوگیری از انتخاب ناخواسته، ادامه فقط با تأیید شما انجام می‌شود.">
+          <ErpCard className="space-y-4 p-4">
+            <div>
+              <p className="font-semibold">{partnerOwnedDuplicate.displayName}</p>
+              {partnerOwnedDuplicate.phone && <p className="mt-1 text-sm text-[var(--sds-text-muted)]">
+                {partnerOwnedDuplicate.phone}
+              </p>}
+            </div>
+            <ErpButton label="انتخاب این مشتری و بازگشت به قرارداد" onClick={() => router.push(getContractReturnUrl('3', {
+              customerId: partnerOwnedDuplicate.customerId,
+            }))} />
+          </ErpCard>
+        </CustomerWorkflowSection>
+      )}
 
       {duplicateCustomers.length > 0 && (
         <CustomerWorkflowSection title="مشتری مشابه پیدا شد" description="ایجاد مشتری تکراری مجاز نیست. مشتری موجود را انتخاب کنید یا اطلاعات وارد شده را اصلاح کنید.">

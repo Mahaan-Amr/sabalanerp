@@ -223,6 +223,53 @@ test('bulk responder decision commits valid rows independently, preserves stale 
   });
 });
 
+test('responder can decide pending rows in separate commands after an earlier row changes the inquiry revision', async () => {
+  await fixture(async (tx, ids) => {
+    await tx.partnerProfile.update({ where: { id: ids.actorId }, data: {
+      irreversibleAt: new Date('2026-09-21T08:00:00.000Z'),
+    } });
+    const shared = {
+      transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: async () => ({ ok: true as const, value: { evidenceId: 'authorization-fixture' } }),
+      resolveInitialResponder: async () => ({ ok: true as const, value: {
+        responderId: ids.responderId, eligibilityEvidence: { source: 'fixture' },
+      } }),
+      resolveConfiguration: async (_database: Prisma.TransactionClient, request: { reference: { productRowId: string } }) =>
+        ({ ok: true as const, value: { identity: identity(ids.actorId), description: request.reference.productRowId,
+          configuration: [{ label: 'ردیف', value: request.reference.productRowId }] } }),
+    };
+    const partner = createPartnerInquiryService({ actorId: ids.actorId, ...shared });
+    const initial = await submit(ids.actorId, ids.inquiryId);
+    if (initial.type !== 'INQUIRY_SUBMIT') throw new Error('submit command expected');
+    const rows = [initial.rows[0], { ...initial.rows[0], rowId: 'row-2',
+      configuration: { ...initial.rows[0].configuration, productRowId: 'row-2' } }];
+    const payloadHash = await canonicalHash({ schemaVersion: 1, type: 'INQUIRY_SUBMIT',
+      partnerSellerId: ids.actorId, rows });
+    assert.equal((await partner.execute({ ...initial, rows,
+      idempotency: { ...initial.idempotency, payloadHash } })).ok, true);
+
+    const responder = createPartnerInquiryService({ actorId: ids.responderId, ...shared });
+    const decide = async (rowId: string, commandId: string) => {
+      const intent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+        expectedAssignmentRevision: 1, decisions: [{ rowId, expectedRevision: 1, outcome: 'APPROVED' as const,
+          wholesaleUnitPrice: { amount: '2000000', currency: 'IRT' as const } }] };
+      return responder.execute({ ...intent, commandId, correlationId: commandId,
+        idempotency: { actorId: ids.responderId, operation: 'INQUIRY_DECIDE' as const,
+          targetId: ids.inquiryId, key: commandId, payloadHash: await canonicalHash(intent) } });
+    };
+
+    const first = await decide('row-1', 'sequential-decision-1');
+    assert.equal(first.ok, true);
+    const second = await decide('row-2', 'sequential-decision-2');
+    assert.equal(second.ok, true, second.ok ? undefined : second.error.code);
+    assert.deepEqual((await tx.partnerInquiryRow.findMany({ where: { inquiryId: ids.inquiryId },
+      orderBy: { id: 'asc' }, select: { id: true, outcome: true, revision: true } })), [
+      { id: 'row-1', outcome: 'APPROVED', revision: 2 },
+      { id: 'row-2', outcome: 'APPROVED', revision: 2 },
+    ]);
+  });
+});
+
 test('sales management response atomically takes over an open inquiry and preserves the prior responder evidence', async () => {
   await fixture(async (tx, ids) => {
     const managerId = `sales-manager-${randomUUID()}`;

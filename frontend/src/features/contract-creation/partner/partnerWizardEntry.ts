@@ -8,6 +8,34 @@ import type { PartnerDraftIntent } from './partnerCaseSubmission';
 export const shouldPreferLocalPartnerWizard = (localServerRevision: number | undefined, currentServerRevision: number) =>
   localServerRevision === currentServerRevision;
 
+export const shouldStartFreshPartnerCreation = (params: Pick<URLSearchParams, 'get'>) =>
+  params.get('newInquiry') === '1' || params.get('newCustomer') === '1';
+
+export const isExplicitPartnerCreationEntry = (params: Pick<URLSearchParams, 'get'>) =>
+  params.get('entry') === 'new-contract';
+
+export const shouldOfferPartnerDraftChoice = (
+  recoverableDraftCount: number,
+  params: Pick<URLSearchParams, 'get'>,
+  startingFresh: boolean,
+) => recoverableDraftCount > 0 && !startingFresh && !params.get('draftId') && !params.get('caseId');
+
+export function partnerCreationPathAfterCustomerCreate(recoveryId: string | undefined, customerId: string): string {
+  const params = new URLSearchParams({ customerId });
+  if (recoveryId) params.set('draftId', recoveryId);
+  return `/dashboard/sales/contracts/create?${params.toString()}`;
+}
+
+export function partnerProductEditPath(recoveryId: string, caseId?: string, productRowId?: string): string {
+  const params = new URLSearchParams({ configure: '1', draftId: recoveryId });
+  if (caseId) params.set('caseId', caseId);
+  if (productRowId) params.set('focusProductRowId', productRowId);
+  return `/dashboard/sales/contracts/create?${params.toString()}`;
+}
+
+export const partnerCasePendingStorageKey = (actorId: string, recoveryId: string) =>
+  `partner-case-pending:${actorId}:${recoveryId}`;
+
 export function rebasePartnerWizardSnapshot<T extends { serverRevision?: number }>(snapshot: T, serverRevision: number): T {
   return { ...snapshot, serverRevision };
 }

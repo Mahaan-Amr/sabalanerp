@@ -176,6 +176,54 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
   }
 });
 
+test('requesting Partner can cancel their pending Customer transfer independently', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback partner transfer cancellation fixture');
+  try {
+    await assert.rejects(database.$transaction(async tx => {
+      const suffix = randomUUID();
+      const oldOwnerId = `partner-crm-cancel-old-${suffix}`;
+      const partnerId = `partner-crm-cancel-new-${suffix}`;
+      const customerId = `partner-crm-cancel-customer-${suffix}`;
+      for (const id of [oldOwnerId, partnerId]) await tx.user.create({ data: { id, username: id,
+        email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Fixture', lastName: 'Cancel', role: 'SALES' } });
+      await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
+      await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: oldOwnerId, firstName: 'مشتری', lastName: 'قدیمی',
+        phoneNumbers: { create: { number: '09121112233', type: 'mobile', isPrimary: true } } } });
+      const notices: string[] = [];
+      const partner = createPartnerCrmService({ database: transactionDatabase(tx), actorId: partnerId,
+        authorize: authorize(partnerId, partnerId, 'PARTNER'),
+        notifyTransfer: async (_transaction, notice) => { notices.push(notice.kind); } });
+      const match = await partner.findDuplicate({ schemaVersion: 1, correlationId: `cancel-match-${suffix}`,
+        phone: '09121112233' });
+      assert.equal(match.ok, true);
+      if (!match.ok) throw new Error('duplicate match expected');
+      const requestIntent = { schemaVersion: 1 as const, commandId: `cancel-request-${suffix}`,
+        correlationId: `cancel-request-correlation-${suffix}`, matchReference: match.value.matchReference,
+        reason: 'درخواست انتقال برای قرارداد تازه', idempotencyKey: `cancel-request-key-${suffix}` };
+      const requested = await partner.requestTransfer({ ...requestIntent, payloadHash: await intentHash(requestIntent) });
+      assert.equal(requested.ok, true);
+      if (!requested.ok) throw new Error('transfer request expected');
+      const transferId = String(requested.value.transferId);
+      const transferRevision = Number(requested.value.revision);
+      const cancelIntent = { schemaVersion: 1 as const, commandId: `cancel-command-${suffix}`,
+        correlationId: `cancel-correlation-${suffix}`, transferId,
+        expectedRevision: transferRevision, reason: 'لغو درخواست انتقال توسط درخواست‌کننده',
+        idempotencyKey: `cancel-key-${suffix}` };
+      const cancelled = await partner.cancelTransfer({ ...cancelIntent, payloadHash: await intentHash(cancelIntent) });
+      assert.equal(cancelled.ok, true);
+      if (!cancelled.ok) throw new Error('transfer cancellation expected');
+      assert.equal(cancelled.value.status, 'CANCELLED');
+      assert.deepEqual(notices, ['REQUESTED', 'CANCELLED']);
+      assert.deepEqual(await tx.partnerCustomerTransfer.findUnique({ where: { id: transferId },
+        select: { revision: true, status: true } }), { revision: 2, status: 'CANCELLED' });
+      throw rollback;
+    }, { timeout: 30_000 }), error => error === rollback);
+  } finally {
+    await database.$disconnect();
+  }
+});
+
 test('destination deactivation during transfer lock wait defeats approval', async () => {
   const database = new PrismaClient({ datasources: { db: { url: databaseUrl(3) } } });
   const suffix = randomUUID();
@@ -835,6 +883,57 @@ test('Partner CRM commands use CAS and idempotency while list/count/detail remai
       }
       throw rollback;
     }, { timeout: 30_000 }), error => error === rollback);
+  } finally {
+    await database.$disconnect();
+  }
+});
+
+test('Partner contract Customer creation atomically creates one canonical Customer Project and replays safely', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback partner contract customer fixture');
+  try {
+    await assert.rejects(database.$transaction(async tx => {
+      const suffix = randomUUID();
+      const partnerId = `partner-contract-customer-${suffix}`;
+      await tx.user.create({ data: { id: partnerId, username: partnerId,
+        email: `${partnerId}@example.invalid`, password: 'not-a-login', firstName: 'Fixture',
+        lastName: 'Contract Customer', role: 'SALES' } });
+      await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
+      const service = createPartnerCrmService({ database: transactionDatabase(tx), actorId: partnerId,
+        authorize: authorize(partnerId, partnerId, 'PARTNER'), notifyTransfer: async () => undefined });
+      const base = {
+        schemaVersion: 1 as const,
+        commandId: `contract-customer-command-${suffix}`,
+        correlationId: `contract-customer-correlation-${suffix}`,
+        idempotencyKey: `contract-customer-key-${suffix}`,
+        reason: 'ثبت اتمیک مشتری و پروژه قرارداد فروش همکار',
+        customer: { firstName: 'مشتری', lastName: 'قراردادی', customerType: 'Individual' as const,
+          phoneNumber1: '09124445566', nationalCode: '0012345678' },
+        project: { projectName: 'پروژه مشتری', address: 'تهران، نشانی پروژه', city: 'تهران',
+          projectManagerName: 'مدیر پروژه', marketerFirstName: 'بازاریاب' },
+      };
+      const command = { ...base, payloadHash: await intentHash(base) };
+      const created = await service.createContractCustomer(command);
+      assert.equal(created.ok, true);
+      if (!created.ok) throw new Error('contract Customer creation expected');
+      const replay = await service.createContractCustomer(command);
+      assert.equal(replay.ok, true);
+      assert.equal(await tx.crmCustomer.count({ where: { partnerOwnerProfileId: partnerId } }), 1);
+      assert.equal(await tx.projectAddress.count({ where: { customer: { partnerOwnerProfileId: partnerId } } }), 1);
+      assert.equal(await tx.crmPotentialProject.count({ where: { customer: { partnerOwnerProfileId: partnerId } } }), 0);
+      const customerId = (created.value.customer as PartnerCustomerSummary).customerId;
+      const projectBase = { schemaVersion: 1 as const,
+        commandId: `contract-project-command-${suffix}`,
+        correlationId: `contract-project-correlation-${suffix}`,
+        idempotencyKey: `contract-project-key-${suffix}`,
+        customerId, reason: 'ثبت پروژه دوم مشتری قرارداد فروش همکار',
+        project: { projectName: 'پروژه دوم', address: 'تهران، نشانی دوم' } };
+      const projectCommand = { ...projectBase, payloadHash: await intentHash(projectBase) };
+      assert.equal((await service.createContractProject(projectCommand)).ok, true);
+      assert.equal((await service.createContractProject(projectCommand)).ok, true);
+      assert.equal(await tx.projectAddress.count({ where: { customerId } }), 2);
+      throw rollback;
+    }), rollback);
   } finally {
     await database.$disconnect();
   }

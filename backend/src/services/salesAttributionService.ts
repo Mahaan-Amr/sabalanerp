@@ -85,7 +85,7 @@ export const recordContractCancellation = async (
   contractId: string,
   actorId: string,
   effectiveAt = new Date()
-) => {
+): Promise<string | null> => {
   const contract = await tx.salesContract.findUnique({
     where: { id: contractId },
     include: { reportingEvents: true }
@@ -93,15 +93,23 @@ export const recordContractCancellation = async (
   if (!contract) throw new Error('Contract not found');
 
   await tx.salesContract.update({ where: { id: contractId }, data: { lostAt: effectiveAt } });
-  if (!contract.realizedAt) return;
+  if (!contract.realizedAt) return null;
 
   const currentNet = contract.reportingEvents.reduce(
     (sum, event) => sum.plus(event.amount),
     new Prisma.Decimal(0)
   );
-  if (currentNet.isZero()) return;
+  if (currentNet.isZero()) return null;
+  const baseSourceKey = `cancellation:${contract.id}`;
+  const existingCancellation = await tx.salesReportingEvent.findUnique({
+    where: { sourceKey: baseSourceKey },
+    select: { id: true }
+  });
+  const sourceKey = existingCancellation
+    ? `${baseSourceKey}:${effectiveAt.toISOString()}`
+    : baseSourceKey;
   await tx.salesReportingEvent.upsert({
-    where: { sourceKey: `cancellation:${contract.id}` },
+    where: { sourceKey },
     update: {},
     create: {
       contractId: contract.id,
@@ -109,10 +117,43 @@ export const recordContractCancellation = async (
       amount: currentNet.negated(),
       effectiveAt,
       sellerId: contract.realizedSellerId,
-      sourceKey: `cancellation:${contract.id}`,
+      sourceKey,
       reason: 'Realized contract cancelled',
       createdBy: actorId,
       metadata: { previousStatus: contract.status }
+    }
+  });
+  return sourceKey;
+};
+
+export const recordContractReactivation = async (
+  tx: DbClient,
+  contractId: string,
+  actorId: string,
+  cancellationSourceKey: string | null,
+  effectiveAt = new Date()
+): Promise<void> => {
+  await tx.salesContract.update({ where: { id: contractId }, data: { lostAt: null } });
+  if (!cancellationSourceKey) return;
+
+  const cancellation = await tx.salesReportingEvent.findUnique({
+    where: { sourceKey: cancellationSourceKey }
+  });
+  if (!cancellation || cancellation.eventType !== 'CANCELLATION') return;
+
+  await tx.salesReportingEvent.upsert({
+    where: { sourceKey: `reactivation:${cancellationSourceKey}` },
+    update: {},
+    create: {
+      contractId,
+      eventType: 'REACTIVATION',
+      amount: cancellation.amount.negated(),
+      effectiveAt,
+      sellerId: cancellation.sellerId,
+      sourceKey: `reactivation:${cancellationSourceKey}`,
+      reason: 'Realized contract cancellation reversed',
+      createdBy: actorId,
+      metadata: { cancellationSourceKey }
     }
   });
 };

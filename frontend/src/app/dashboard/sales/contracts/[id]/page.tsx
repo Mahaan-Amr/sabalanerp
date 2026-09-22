@@ -1,7 +1,7 @@
-'use client';
-import { ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+"use client";
+import { ErpPressable, ErpSelect, ErpTextarea } from "@/components/erp";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   FaCalendarAlt,
   FaCheck,
@@ -14,7 +14,7 @@ import {
   FaSignature,
   FaTimes,
   FaTruck,
-} from 'react-icons/fa';
+} from "react-icons/fa";
 import {
   ErpBadge,
   ErpEmptyState,
@@ -23,27 +23,77 @@ import {
   ErpLoading,
   ErpPage,
   ErpSection,
+  ErpSegmentedControl,
   ErpTwoColumn,
   type ErpAction,
   type ErpMetric,
   type ErpTone,
-} from '@/components/erp';
-import { dashboardAPI, resolveBackendAssetUrl, salesAPI, salesReportsAPI } from '@/lib/api';
-import { useWorkspace, WORKSPACES, WORKSPACE_PERMISSIONS } from '@/contexts/WorkspaceContext';
-import { downloadBlobResponse } from '@/lib/downloadFile';
-import { formatDisplayNumber, formatPrice, formatSquareMeters, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
-import PersianCalendar from '@/lib/persian-calendar';
-import { getContractPermissions, hasFeatureAccess, User as PermissionUser } from '@/lib/permissions';
-import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
-import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '@/features/contract-creation/utils/preparedProductUtils';
-import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
-import { invoiceStatusLabels, receivableStatusLabels, sourceStatusLabels, StatusBadge, taxStatusLabels } from '@/features/accounting/accountingUi';
-import { buildContractPaymentPresentation } from '@/features/sales/contractPaymentPresentation';
-import { PartnerAccountViewSchema, PartnerCaseViewSchema, type PartnerAccountView, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
-import { PartnerCaseWorkspace } from '@/features/partner-sales/cases/PartnerCaseWorkspace';
-import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
-import { assertSuccessfulSalesDownload, assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
-import { createLatestRequestTracker, hasAnyPendingOperation } from '@/features/sales/latestRequestTracker';
+} from "@/components/erp";
+import {
+  dashboardAPI,
+  resolveBackendAssetUrl,
+  salesAPI,
+  salesReportsAPI,
+} from "@/lib/api";
+import {
+  useWorkspace,
+  WORKSPACES,
+  WORKSPACE_PERMISSIONS,
+} from "@/contexts/WorkspaceContext";
+import { downloadBlobResponse } from "@/lib/downloadFile";
+import {
+  formatDisplayNumber,
+  formatPrice,
+  formatSquareMeters,
+  sumNumericValues,
+  toFiniteNumber,
+} from "@/lib/numberFormat";
+import PersianCalendar from "@/lib/persian-calendar";
+import {
+  getContractPermissions,
+  hasFeatureAccess,
+  User as PermissionUser,
+} from "@/lib/permissions";
+import {
+  sanitizeUiText,
+  sanitizeUiTextWithCandidates,
+} from "@/lib/textSanitizer";
+import {
+  getPreparedKindLabel,
+  getPreparedQuantity,
+  getPreparedUnit,
+  getPreparedUnitLabel,
+  isPreparedProductType,
+} from "@/features/contract-creation/utils/preparedProductUtils";
+import { normalizeProductFinishing } from "@/features/contract-creation/utils/finishingUtils";
+import {
+  invoiceStatusLabels,
+  receivableStatusLabels,
+  sourceStatusLabels,
+  StatusBadge,
+  taxStatusLabels,
+} from "@/features/accounting/accountingUi";
+import { buildContractPaymentPresentation } from "@/features/sales/contractPaymentPresentation";
+import {
+  PartnerAccountViewSchema,
+  PartnerCaseViewSchema,
+  type PartnerAccountView,
+  type PartnerCaseView,
+} from "@sabalanerp/partner-sales-contracts";
+import { PartnerCaseWorkspace } from "@/features/partner-sales/cases/PartnerCaseWorkspace";
+import { resolvePartnerContractRoute } from "@/features/partner-sales/cases/partnerContractRouting";
+import {
+  assertSuccessfulSalesDownload,
+  assertSuccessfulSalesResponse,
+  getSalesOperationalErrorKind,
+  getSalesOperationalErrorMessage,
+  normalizeSalesBlobError,
+} from "@/features/sales/salesOperationalError";
+import {
+  createLatestRequestTracker,
+  hasAnyPendingOperation,
+} from "@/features/sales/latestRequestTracker";
+import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 
 interface Contract {
   id: string;
@@ -66,7 +116,14 @@ interface Contract {
   partnerIntegrityHash?: string | null;
   partnerCaseView?: PartnerCaseView | null;
   partnerAccountView?: PartnerAccountView | null;
-  partnerActions?: { canPreview?: boolean; canIssue?: boolean; canSendConfirmation?: boolean; canRequestCorrection?: boolean; canCancel?: boolean; canRequestVoid?: boolean } | null;
+  partnerActions?: {
+    canPreview?: boolean;
+    canIssue?: boolean;
+    canSendConfirmation?: boolean;
+    canRequestCorrection?: boolean;
+    canCancel?: boolean;
+    canRequestVoid?: boolean;
+  } | null;
   isSigned?: boolean;
   isInactive?: boolean;
   inactiveAt?: string | null;
@@ -114,9 +171,19 @@ interface Contract {
     lastName: string;
     username: string;
   };
-  responsibleSeller: { id: string; firstName: string; lastName: string; username: string };
+  responsibleSeller: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    username: string;
+  };
   responsibleSellerSource: string;
-  realizedSeller?: { id: string; firstName: string; lastName: string; username: string } | null;
+  realizedSeller?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    username: string;
+  } | null;
   realizedSellerSource?: string | null;
   realizedAt?: string | null;
   approvedByUser?: {
@@ -132,42 +199,48 @@ interface Contract {
   payments?: any[];
 }
 
-type SalesContractPrintVariant = 'original' | 'summary';
+type SalesContractPrintVariant = "original" | "summary";
 
-const salesContractPrintVariantLabels: Record<SalesContractPrintVariant, string> = {
-  original: 'قرارداد با جزئیات کامل',
-  summary: 'خلاصه قرارداد',
+const salesContractPrintVariantLabels: Record<
+  SalesContractPrintVariant,
+  string
+> = {
+  original: "قرارداد با جزئیات کامل",
+  summary: "خلاصه قرارداد",
 };
 
 const statusLabels: Record<string, string> = {
-  DRAFT: 'پیش‌نویس',
-  PENDING_APPROVAL: 'در انتظار تایید',
-  APPROVED: 'تایید شده',
-  SIGNED: 'امضا شده',
-  PRINTED: 'چاپ شده',
-  CANCELLED: 'لغو شده',
-  EXPIRED: 'منقضی شده',
+  DRAFT: "پیش‌نویس",
+  PENDING_APPROVAL: "در انتظار تایید",
+  APPROVED: "تایید شده",
+  SIGNED: "امضا شده",
+  PRINTED: "چاپ شده",
+  CANCELLED: "لغو شده",
+  EXPIRED: "منقضی شده",
 };
 
 const statusTones: Record<string, ErpTone> = {
-  DRAFT: 'neutral',
-  PENDING_APPROVAL: 'warning',
-  APPROVED: 'info',
-  SIGNED: 'success',
-  PRINTED: 'purple',
-  CANCELLED: 'danger',
-  EXPIRED: 'neutral',
+  DRAFT: "neutral",
+  PENDING_APPROVAL: "warning",
+  APPROVED: "info",
+  SIGNED: "success",
+  PRINTED: "purple",
+  CANCELLED: "danger",
+  EXPIRED: "neutral",
 };
 
-const formatCurrency = (amount: number | string | null | undefined, currency: string) => formatPrice(amount, currency);
+const formatCurrency = (
+  amount: number | string | null | undefined,
+  currency: string,
+) => formatPrice(amount, currency);
 
 const getCustomerName = (contract: Contract) =>
   sanitizeUiTextWithCandidates(
     [
-      `${contract.customer.firstName || ''} ${contract.customer.lastName || ''}`.trim(),
+      `${contract.customer.firstName || ""} ${contract.customer.lastName || ""}`.trim(),
       contract.customer.companyName,
     ],
-    'نامشخص'
+    "نامشخص",
   );
 
 export default function ContractDetailPage() {
@@ -175,14 +248,20 @@ export default function ContractDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const contractId = params.id as string;
-  const wasJustCreated = searchParams.get('created') === '1';
-  const createdContractNumber = sanitizeUiText(searchParams.get('contractNumber'), '');
+  const wasJustCreated = searchParams.get("created") === "1";
+  const createdContractNumber = sanitizeUiText(
+    searchParams.get("contractNumber"),
+    "",
+  );
 
   const [contract, setContract] = useState<Contract | null>(null);
+  const [detailSection, setDetailSection] = useState<
+    "summary" | "items" | "financial" | "history"
+  >("summary");
   const [currentUser, setCurrentUser] = useState<PermissionUser | null>(null);
   const [sellerOptions, setSellerOptions] = useState<any[]>([]);
-  const [nextSellerId, setNextSellerId] = useState('');
-  const [sellerChangeReason, setSellerChangeReason] = useState('');
+  const [nextSellerId, setNextSellerId] = useState("");
+  const [sellerChangeReason, setSellerChangeReason] = useState("");
   const [contractPermissions, setContractPermissions] = useState({
     canView: false,
     canCreate: false,
@@ -193,31 +272,45 @@ export default function ContractDetailPage() {
     canPrint: false,
   });
   const [loading, setLoading] = useState(true);
-  const [pendingOperations, setPendingOperations] = useState<Set<string>>(() => new Set());
-  const setOperationPending = (source: string, pending: boolean) => setPendingOperations(current => {
-    const next = new Set(current);
-    if (pending) next.add(source); else next.delete(source);
-    return next;
-  });
-  const [operationalErrors, setOperationalErrors] = useState<Array<{
-    source: string;
-    message: string;
-    kind: 'error' | 'permission' | 'stale';
-    order: number;
-  }>>([]);
+  const [pendingOperations, setPendingOperations] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const setOperationPending = (source: string, pending: boolean) =>
+    setPendingOperations((current) => {
+      const next = new Set(current);
+      if (pending) next.add(source);
+      else next.delete(source);
+      return next;
+    });
+  const [operationalErrors, setOperationalErrors] = useState<
+    Array<{
+      source: string;
+      message: string;
+      kind: "error" | "permission" | "stale";
+      order: number;
+    }>
+  >([]);
   const operationalErrorSequenceRef = useRef(0);
   const operationTrackerRef = useRef(createLatestRequestTracker());
   const contractRequestSequenceRef = useRef(0);
-  const [printVariant, setPrintVariant] = useState<SalesContractPrintVariant>('original');
-  const canManageSellers = currentUser?.role === 'ADMIN' || hasPermission(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN);
+  const [printVariant, setPrintVariant] =
+    useState<SalesContractPrintVariant>("original");
+  const canManageSellers =
+    currentUser?.role === "ADMIN" ||
+    hasPermission(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN);
 
-  const actionName = (action: string) => action === 'approve'
-    ? 'تأیید قرارداد'
-    : action === 'reject'
-      ? 'رد قرارداد'
-      : 'امضای قرارداد';
+  const actionName = (action: string) =>
+    action === "approve"
+      ? "تأیید قرارداد"
+      : action === "reject"
+        ? "رد قرارداد"
+        : "امضای قرارداد";
 
-  const showOperationalError = (source: string, message: string, kind: 'error' | 'permission' | 'stale') => {
+  const showOperationalError = (
+    source: string,
+    message: string,
+    kind: "error" | "permission" | "stale",
+  ) => {
     const order = ++operationalErrorSequenceRef.current;
     setOperationalErrors((current) => [
       ...current.filter((item) => item.source !== source),
@@ -226,7 +319,9 @@ export default function ContractDetailPage() {
   };
 
   const clearOperationalError = (source: string) => {
-    setOperationalErrors((current) => current.filter((item) => item.source !== source));
+    setOperationalErrors((current) =>
+      current.filter((item) => item.source !== source),
+    );
   };
 
   const beginOperation = (source: string) => {
@@ -254,19 +349,28 @@ export default function ContractDetailPage() {
       if (requestSequence !== contractRequestSequenceRef.current) return;
       if (response.data.success) {
         setContract(response.data.data);
-        clearOperationalError('load');
+        clearOperationalError("load");
       } else {
-        showOperationalError('load', 'قرارداد پیدا نشد. به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.', 'stale');
+        showOperationalError(
+          "load",
+          "قرارداد پیدا نشد. به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.",
+          "stale",
+        );
       }
     } catch (error: any) {
       if (requestSequence !== contractRequestSequenceRef.current) return;
-      console.error('Error loading contract:', error);
-      showOperationalError('load', getSalesOperationalErrorMessage(error, {
-        failedAction: 'دریافت قرارداد',
-        nextStep: 'به فهرست قراردادها برگردید یا دوباره تلاش کنید.'
-      }), getSalesOperationalErrorKind(error));
+      console.error("Error loading contract:", error);
+      showOperationalError(
+        "load",
+        getSalesOperationalErrorMessage(error, {
+          failedAction: "دریافت قرارداد",
+          nextStep: "به فهرست قراردادها برگردید یا دوباره تلاش کنید.",
+        }),
+        getSalesOperationalErrorKind(error),
+      );
     } finally {
-      if (requestSequence === contractRequestSequenceRef.current) setLoading(false);
+      if (requestSequence === contractRequestSequenceRef.current)
+        setLoading(false);
     }
   };
 
@@ -277,13 +381,17 @@ export default function ContractDetailPage() {
       const user = response.data.data;
       setCurrentUser(user);
       setContractPermissions(getContractPermissions(user));
-      clearOperationalError('profile');
+      clearOperationalError("profile");
     } catch (error) {
-      console.error('Error loading user profile:', error);
-      showOperationalError('profile', getSalesOperationalErrorMessage(error, {
-        failedAction: 'دریافت دسترسی‌های قرارداد',
-        nextStep: 'دوباره روی «دریافت دسترسی‌ها» بزنید.'
-      }), getSalesOperationalErrorKind(error));
+      console.error("Error loading user profile:", error);
+      showOperationalError(
+        "profile",
+        getSalesOperationalErrorMessage(error, {
+          failedAction: "دریافت دسترسی‌های قرارداد",
+          nextStep: "دوباره روی «دریافت دسترسی‌ها» بزنید.",
+        }),
+        getSalesOperationalErrorKind(error),
+      );
     }
   };
 
@@ -292,12 +400,16 @@ export default function ContractDetailPage() {
       const response = await salesReportsAPI.getSellers();
       assertSuccessfulSalesResponse(response);
       setSellerOptions(response.data.data || []);
-      clearOperationalError('sellers');
+      clearOperationalError("sellers");
     } catch (error) {
-      showOperationalError('sellers', getSalesOperationalErrorMessage(error, {
-        failedAction: 'دریافت فهرست فروشندگان',
-        nextStep: 'دوباره روی «دریافت فروشندگان» بزنید.'
-      }), getSalesOperationalErrorKind(error));
+      showOperationalError(
+        "sellers",
+        getSalesOperationalErrorMessage(error, {
+          failedAction: "دریافت فهرست فروشندگان",
+          nextStep: "دوباره روی «دریافت فروشندگان» بزنید.",
+        }),
+        getSalesOperationalErrorKind(error),
+      );
     }
   };
 
@@ -310,13 +422,13 @@ export default function ContractDetailPage() {
     try {
       let response;
       switch (action) {
-        case 'approve':
+        case "approve":
           response = await salesAPI.approveContract(contract.id, note);
           break;
-        case 'reject':
+        case "reject":
           response = await salesAPI.rejectContract(contract.id, note);
           break;
-        case 'sign':
+        case "sign":
           response = await salesAPI.signContract(contract.id, note);
           break;
         default:
@@ -329,79 +441,110 @@ export default function ContractDetailPage() {
         if (!isLatestOperation(errorSource, requestSequence)) return;
         clearOperationalError(errorSource);
       } else {
-        showOperationalError(errorSource, getSalesOperationalErrorMessage({ response }, {
-          failedAction: actionName(action),
-          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
-          uncertainMutation: true
-        }), getSalesOperationalErrorKind({ response }));
+        showOperationalError(
+          errorSource,
+          getSalesOperationalErrorMessage(
+            { response },
+            {
+              failedAction: actionName(action),
+              nextStep: "وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.",
+              uncertainMutation: true,
+            },
+          ),
+          getSalesOperationalErrorKind({ response }),
+        );
       }
     } catch (error: any) {
       if (!isLatestOperation(errorSource, requestSequence)) return;
       console.error(`Error ${action}ing contract:`, error);
-      showOperationalError(errorSource, getSalesOperationalErrorMessage(error, {
-        failedAction: actionName(action),
-        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
-        uncertainMutation: true
-      }), getSalesOperationalErrorKind(error));
+      showOperationalError(
+        errorSource,
+        getSalesOperationalErrorMessage(error, {
+          failedAction: actionName(action),
+          nextStep: "وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.",
+          uncertainMutation: true,
+        }),
+        getSalesOperationalErrorKind(error),
+      );
     } finally {
-      if (isLatestOperation(errorSource, requestSequence)) setOperationPending(errorSource, false);
+      if (isLatestOperation(errorSource, requestSequence))
+        setOperationPending(errorSource, false);
     }
   };
 
   const handleSellerChange = async () => {
     if (!contract || !nextSellerId || !sellerChangeReason.trim()) return;
-    const errorSource = 'seller-change';
+    const errorSource = "seller-change";
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
     try {
-      const response = await salesAPI.reassignResponsibleSeller(contract.id, nextSellerId, sellerChangeReason.trim());
+      const response = await salesAPI.reassignResponsibleSeller(
+        contract.id,
+        nextSellerId,
+        sellerChangeReason.trim(),
+      );
       if (!isLatestOperation(errorSource, requestSequence)) return;
       assertSuccessfulSalesResponse(response);
-      setNextSellerId('');
-      setSellerChangeReason('');
+      setNextSellerId("");
+      setSellerChangeReason("");
       await loadContract();
       if (!isLatestOperation(errorSource, requestSequence)) return;
       clearOperationalError(errorSource);
     } catch (reason: any) {
       if (!isLatestOperation(errorSource, requestSequence)) return;
-      showOperationalError(errorSource, getSalesOperationalErrorMessage(reason, {
-        failedAction: 'تغییر مسئول فروش قرارداد',
-        nextStep: 'فروشنده جدید و دلیل تغییر را بررسی کنید و دوباره تلاش کنید.',
-        uncertainMutation: true
-      }), getSalesOperationalErrorKind(reason));
+      showOperationalError(
+        errorSource,
+        getSalesOperationalErrorMessage(reason, {
+          failedAction: "تغییر مسئول فروش قرارداد",
+          nextStep:
+            "فروشنده جدید و دلیل تغییر را بررسی کنید و دوباره تلاش کنید.",
+          uncertainMutation: true,
+        }),
+        getSalesOperationalErrorKind(reason),
+      );
     } finally {
-      if (isLatestOperation(errorSource, requestSequence)) setOperationPending(errorSource, false);
+      if (isLatestOperation(errorSource, requestSequence))
+        setOperationPending(errorSource, false);
     }
   };
 
   const handleLegacyCreditAssignment = async () => {
     if (!contract || !nextSellerId || !sellerChangeReason.trim()) return;
-    const errorSource = 'legacy-credit';
+    const errorSource = "legacy-credit";
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
     try {
-      const response = await salesAPI.assignLegacyRealizedCredit(contract.id, nextSellerId, sellerChangeReason.trim());
+      const response = await salesAPI.assignLegacyRealizedCredit(
+        contract.id,
+        nextSellerId,
+        sellerChangeReason.trim(),
+      );
       if (!isLatestOperation(errorSource, requestSequence)) return;
       assertSuccessfulSalesResponse(response);
-      setNextSellerId('');
-      setSellerChangeReason('');
+      setNextSellerId("");
+      setSellerChangeReason("");
       await loadContract();
       if (!isLatestOperation(errorSource, requestSequence)) return;
       clearOperationalError(errorSource);
     } catch (reason: any) {
       if (!isLatestOperation(errorSource, requestSequence)) return;
-      showOperationalError(errorSource, getSalesOperationalErrorMessage(reason, {
-        failedAction: 'انتساب فروش قطعی قدیمی',
-        nextStep: 'فروشنده و دلیل انتساب را بررسی کنید و دوباره تلاش کنید.',
-        uncertainMutation: true
-      }), getSalesOperationalErrorKind(reason));
+      showOperationalError(
+        errorSource,
+        getSalesOperationalErrorMessage(reason, {
+          failedAction: "انتساب فروش قطعی قدیمی",
+          nextStep: "فروشنده و دلیل انتساب را بررسی کنید و دوباره تلاش کنید.",
+          uncertainMutation: true,
+        }),
+        getSalesOperationalErrorKind(reason),
+      );
     } finally {
-      if (isLatestOperation(errorSource, requestSequence)) setOperationPending(errorSource, false);
+      if (isLatestOperation(errorSource, requestSequence))
+        setOperationPending(errorSource, false);
     }
   };
 
   const openPdfUrl = (url: string, tryPrint: boolean) => {
-    const win = window.open(url, '_blank', 'noopener,noreferrer');
+    const win = window.open(url, "_blank", "noopener,noreferrer");
     if (!win || !tryPrint) return;
 
     try {
@@ -410,115 +553,160 @@ export default function ContractDetailPage() {
           win.focus();
           win.print();
         } catch (error) {
-          console.error('Print trigger failed:', error);
+          console.error("Print trigger failed:", error);
         }
       };
-      win.addEventListener('load', triggerPrint, { once: true });
+      win.addEventListener("load", triggerPrint, { once: true });
       setTimeout(triggerPrint, 1200);
     } catch (error) {
-      console.error('Print setup failed:', error);
+      console.error("Print setup failed:", error);
     }
   };
 
   const handleDownloadPdf = async () => {
     if (!contract) return;
-    const errorSource = 'download';
+    const errorSource = "download";
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
     try {
-      const response = await salesAPI.downloadContractPdf(contract.id, { fresh: printVariant === 'summary', variant: printVariant });
+      const response = await salesAPI.downloadContractPdf(contract.id, {
+        fresh: printVariant === "summary",
+        variant: printVariant,
+      });
       if (!isLatestOperation(errorSource, requestSequence)) return;
       await assertSuccessfulSalesDownload(response);
-      const suffix = printVariant === 'summary' ? '_summary' : '';
-      downloadBlobResponse(response, `sales_contract_${contract.contractNumber || contract.id}${suffix}.pdf`);
+      const suffix = printVariant === "summary" ? "_summary" : "";
+      downloadBlobResponse(
+        response,
+        `sales_contract_${contract.contractNumber || contract.id}${suffix}.pdf`,
+      );
       clearOperationalError(errorSource);
     } catch (error: any) {
       const normalizedError = await normalizeSalesBlobError(error);
       if (!isLatestOperation(errorSource, requestSequence)) return;
-      showOperationalError(errorSource, getSalesOperationalErrorMessage(normalizedError, {
-        failedAction: 'دانلود PDF قرارداد',
-        nextStep: 'دوباره روی «دانلود PDF» بزنید.'
-      }), getSalesOperationalErrorKind(normalizedError));
+      showOperationalError(
+        errorSource,
+        getSalesOperationalErrorMessage(normalizedError, {
+          failedAction: "دانلود PDF قرارداد",
+          nextStep: "دوباره روی «دانلود PDF» بزنید.",
+        }),
+        getSalesOperationalErrorKind(normalizedError),
+      );
     } finally {
-      if (isLatestOperation(errorSource, requestSequence)) setOperationPending(errorSource, false);
+      if (isLatestOperation(errorSource, requestSequence))
+        setOperationPending(errorSource, false);
     }
   };
 
   const handlePrintContract = async () => {
     if (!contract) return;
-    const errorSource = 'print';
+    const errorSource = "print";
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
     try {
       const response = await salesAPI.printContract(contract.id);
       if (!isLatestOperation(errorSource, requestSequence)) return;
       if (!response.data?.success) {
-        showOperationalError(errorSource, getSalesOperationalErrorMessage({ response }, {
-          failedAction: 'آماده‌سازی پرینت قرارداد',
-          nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
-          uncertainMutation: true
-        }), getSalesOperationalErrorKind({ response }));
+        showOperationalError(
+          errorSource,
+          getSalesOperationalErrorMessage(
+            { response },
+            {
+              failedAction: "آماده‌سازی پرینت قرارداد",
+              nextStep: "وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.",
+              uncertainMutation: true,
+            },
+          ),
+          getSalesOperationalErrorKind({ response }),
+        );
         return;
       }
 
       setContract(response.data.data);
       await loadContract();
       if (!isLatestOperation(errorSource, requestSequence)) return;
-      const pdfResponse = await salesAPI.getContractPdf(contract.id, { fresh: false, variant: 'original' });
+      const pdfResponse = await salesAPI.getContractPdf(contract.id, {
+        fresh: false,
+        variant: "original",
+      });
       if (!isLatestOperation(errorSource, requestSequence)) return;
       if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {
         openPdfUrl(pdfResponse.data.data.url, true);
         clearOperationalError(errorSource);
       } else {
         const failure = { response: pdfResponse };
-        showOperationalError(errorSource, getSalesOperationalErrorMessage(failure, {
-          failedAction: 'دریافت فایل PDF قرارداد',
-          nextStep: 'دوباره روی «پرینت» بزنید.'
-        }), getSalesOperationalErrorKind(failure));
+        showOperationalError(
+          errorSource,
+          getSalesOperationalErrorMessage(failure, {
+            failedAction: "دریافت فایل PDF قرارداد",
+            nextStep: "دوباره روی «پرینت» بزنید.",
+          }),
+          getSalesOperationalErrorKind(failure),
+        );
       }
     } catch (error: any) {
       if (!isLatestOperation(errorSource, requestSequence)) return;
-      showOperationalError(errorSource, getSalesOperationalErrorMessage(error, {
-        failedAction: 'آماده‌سازی پرینت قرارداد',
-        nextStep: 'وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.',
-        uncertainMutation: true
-      }), getSalesOperationalErrorKind(error));
+      showOperationalError(
+        errorSource,
+        getSalesOperationalErrorMessage(error, {
+          failedAction: "آماده‌سازی پرینت قرارداد",
+          nextStep: "وضعیت قرارداد را بررسی کنید و دوباره تلاش کنید.",
+          uncertainMutation: true,
+        }),
+        getSalesOperationalErrorKind(error),
+      );
     } finally {
-      if (isLatestOperation(errorSource, requestSequence)) setOperationPending(errorSource, false);
+      if (isLatestOperation(errorSource, requestSequence))
+        setOperationPending(errorSource, false);
     }
   };
 
   const handlePrintSummaryContract = async () => {
     if (!contract) return;
-    const errorSource = 'print-summary';
+    const errorSource = "print-summary";
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
     try {
-      const pdfResponse = await salesAPI.getContractPdf(contract.id, { fresh: true, variant: 'summary' });
+      const pdfResponse = await salesAPI.getContractPdf(contract.id, {
+        fresh: true,
+        variant: "summary",
+      });
       if (!isLatestOperation(errorSource, requestSequence)) return;
       if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {
         openPdfUrl(pdfResponse.data.data.url, true);
         clearOperationalError(errorSource);
       } else {
-        showOperationalError(errorSource, getSalesOperationalErrorMessage({ response: pdfResponse }, {
-          failedAction: 'آماده‌سازی خلاصه قرارداد',
-          nextStep: 'دوباره روی «پرینت خلاصه» بزنید.'
-        }), getSalesOperationalErrorKind({ response: pdfResponse }));
+        showOperationalError(
+          errorSource,
+          getSalesOperationalErrorMessage(
+            { response: pdfResponse },
+            {
+              failedAction: "آماده‌سازی خلاصه قرارداد",
+              nextStep: "دوباره روی «پرینت خلاصه» بزنید.",
+            },
+          ),
+          getSalesOperationalErrorKind({ response: pdfResponse }),
+        );
       }
     } catch (error: any) {
       if (!isLatestOperation(errorSource, requestSequence)) return;
-      showOperationalError(errorSource, getSalesOperationalErrorMessage(error, {
-        failedAction: 'آماده‌سازی خلاصه قرارداد',
-        nextStep: 'دوباره روی «پرینت خلاصه» بزنید.'
-      }), getSalesOperationalErrorKind(error));
+      showOperationalError(
+        errorSource,
+        getSalesOperationalErrorMessage(error, {
+          failedAction: "آماده‌سازی خلاصه قرارداد",
+          nextStep: "دوباره روی «پرینت خلاصه» بزنید.",
+        }),
+        getSalesOperationalErrorKind(error),
+      );
     } finally {
-      if (isLatestOperation(errorSource, requestSequence)) setOperationPending(errorSource, false);
+      if (isLatestOperation(errorSource, requestSequence))
+        setOperationPending(errorSource, false);
     }
   };
 
   const handleResendConfirmation = async () => {
     if (!contract) return;
-    const errorSource = 'resend-confirmation';
+    const errorSource = "resend-confirmation";
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
     try {
@@ -527,27 +715,43 @@ export default function ContractDetailPage() {
       if (response.data?.success) {
         clearOperationalError(errorSource);
       } else {
-        showOperationalError(errorSource, getSalesOperationalErrorMessage({ response }, {
-          failedAction: 'ارسال دوباره کد تأیید',
-          nextStep: 'شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
-          uncertainMutation: true
-        }), getSalesOperationalErrorKind({ response }));
+        showOperationalError(
+          errorSource,
+          getSalesOperationalErrorMessage(
+            { response },
+            {
+              failedAction: "ارسال دوباره کد تأیید",
+              nextStep:
+                "شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.",
+              uncertainMutation: true,
+            },
+          ),
+          getSalesOperationalErrorKind({ response }),
+        );
       }
     } catch (error: any) {
       if (!isLatestOperation(errorSource, requestSequence)) return;
-      showOperationalError(errorSource, getSalesOperationalErrorMessage(error, {
-        failedAction: 'ارسال دوباره کد تأیید',
-        nextStep: 'شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.',
-        uncertainMutation: true
-      }), getSalesOperationalErrorKind(error));
+      showOperationalError(
+        errorSource,
+        getSalesOperationalErrorMessage(error, {
+          failedAction: "ارسال دوباره کد تأیید",
+          nextStep:
+            "شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.",
+          uncertainMutation: true,
+        }),
+        getSalesOperationalErrorKind(error),
+      );
     } finally {
-      if (isLatestOperation(errorSource, requestSequence)) setOperationPending(errorSource, false);
+      if (isLatestOperation(errorSource, requestSequence))
+        setOperationPending(errorSource, false);
     }
   };
 
   const products = useMemo(() => {
     if (!contract) return [];
-    return contract.contractData?.products?.length ? contract.contractData.products : contract.items || [];
+    return contract.contractData?.products?.length
+      ? contract.contractData.products
+      : contract.items || [];
   }, [contract]);
 
   const serviceRows = useMemo(() => {
@@ -557,23 +761,33 @@ export default function ContractDetailPage() {
 
   const deliveries = useMemo(() => {
     if (!contract) return [];
-    return contract.deliveries?.length ? contract.deliveries : contract.contractData?.deliveries || [];
+    return contract.deliveries?.length
+      ? contract.deliveries
+      : contract.contractData?.deliveries || [];
   }, [contract]);
 
   const paymentPresentation = useMemo(() => {
-    if (!contract) return buildContractPaymentPresentation({ payments: [], contractData: {}, currency: 'تومان' });
+    if (!contract)
+      return buildContractPaymentPresentation({
+        payments: [],
+        contractData: {},
+        currency: "تومان",
+      });
     return buildContractPaymentPresentation({
       payments: contract.payments,
       contractData: contract.contractData,
-      currency: sanitizeUiText(contract.currency, 'تومان')
+      currency: sanitizeUiText(contract.currency, "تومان"),
     });
   }, [contract]);
 
-  const loadError = operationalErrors.find((item) => item.source === 'load');
+  const loadError = operationalErrors.find((item) => item.source === "load");
   const visibleOperationalError = operationalErrors
-    .filter((item) => item.source !== 'load')
+    .filter((item) => item.source !== "load")
     .sort((left, right) => right.order - left.order)[0];
-  const sellerMutationPending = hasAnyPendingOperation(pendingOperations, ['seller-change', 'legacy-credit']);
+  const sellerMutationPending = hasAnyPendingOperation(pendingOperations, [
+    "seller-change",
+    "legacy-credit",
+  ]);
 
   if (loading && !contract) {
     return <ErpLoading />;
@@ -585,61 +799,103 @@ export default function ContractDetailPage() {
         <ErpPage
           eyebrow="قرارداد فروش"
           title="قرارداد با موفقیت ثبت شد"
-          description={createdContractNumber ? `شماره قرارداد: ${createdContractNumber}` : undefined}
+          description={
+            createdContractNumber
+              ? `شماره قرارداد: ${createdContractNumber}`
+              : undefined
+          }
           backHref="/dashboard/sales/contracts"
         >
           <ErpInlineState
             kind="success"
             title="ثبت قرارداد قطعی است، اما جزئیات آن فعلاً بارگذاری نشد. اطلاعات شما از بین نرفته است."
-            action={{ label: 'تلاش مجدد', onClick: () => void loadContract() }}
+            action={{ label: "تلاش مجدد", onClick: () => void loadContract() }}
           />
         </ErpPage>
       );
     }
-    if (loadError) return (
-      <ErpInlineState
-        kind={loadError.kind}
-        title={loadError.message}
-        action={{ label: 'بازگشت به لیست قراردادها', href: '/dashboard/sales/contracts', tone: 'primary', variant: 'solid' }}
-      />
-    );
+    if (loadError)
+      return (
+        <ErpInlineState
+          kind={loadError.kind}
+          title={loadError.message}
+          action={{
+            label: "بازگشت به لیست قراردادها",
+            href: "/dashboard/sales/contracts",
+            tone: "primary",
+            variant: "solid",
+          }}
+        />
+      );
     return (
       <ErpEmptyState
         icon={FaFileContract}
         title="قرارداد یافت نشد"
         description="برای ادامه می‌توانید به لیست قراردادهای فروش برگردید."
-        action={{ label: 'بازگشت به لیست قراردادها', href: '/dashboard/sales/contracts', tone: 'primary', variant: 'solid' }}
+        action={{
+          label: "بازگشت به لیست قراردادها",
+          href: "/dashboard/sales/contracts",
+          tone: "primary",
+          variant: "solid",
+        }}
       />
     );
   }
 
   const partnerRoute = resolvePartnerContractRoute(contract);
-  if (partnerRoute.kind === 'blocked') {
-    return <ErpInlineState kind="error" title="شواهد نسخه پرونده فروش همکار کامل نیست؛ برای جلوگیری از نمایش نادرست، دسترسی متوقف شد. اطلاعات قرارداد را دوباره دریافت کنید."
-      action={{ label: 'دریافت دوباره', onClick: () => void loadContract() }} />;
+  if (partnerRoute.kind === "blocked") {
+    return (
+      <ErpInlineState
+        kind="error"
+        title="شواهد نسخه پرونده فروش همکار کامل نیست؛ برای جلوگیری از نمایش نادرست، دسترسی متوقف شد. اطلاعات قرارداد را دوباره دریافت کنید."
+        action={{ label: "دریافت دوباره", onClick: () => void loadContract() }}
+      />
+    );
   }
-  if (partnerRoute.kind === 'partner') {
-    const projection = PartnerCaseViewSchema.safeParse(contract.partnerCaseView);
-    if (!projection.success || projection.data.owner.caseId !== partnerRoute.caseId
-      || projection.data.owner.revision !== partnerRoute.expected.revision
-      || projection.data.owner.integrityHash !== partnerRoute.expected.integrityHash) {
-      return <ErpInlineState kind="error" title="نمای مجاز پرونده فروش همکار در دسترس نیست؛ اطلاعات قرارداد عادی جایگزین نمی‌شود."
-        action={{ label: 'دریافت دوباره', onClick: () => void loadContract() }} />;
+  if (partnerRoute.kind === "partner") {
+    const projection = PartnerCaseViewSchema.safeParse(
+      contract.partnerCaseView,
+    );
+    if (
+      !projection.success ||
+      projection.data.owner.caseId !== partnerRoute.caseId ||
+      projection.data.owner.revision !== partnerRoute.expected.revision ||
+      projection.data.owner.integrityHash !==
+        partnerRoute.expected.integrityHash
+    ) {
+      return (
+        <ErpInlineState
+          kind="error"
+          title="نمای مجاز پرونده فروش همکار در دسترس نیست؛ اطلاعات قرارداد عادی جایگزین نمی‌شود."
+          action={{
+            label: "دریافت دوباره",
+            onClick: () => void loadContract(),
+          }}
+        />
+      );
     }
     const capabilities = contract.partnerActions || {};
-    const account = PartnerAccountViewSchema.safeParse(contract.partnerAccountView);
-    return <PartnerCaseWorkspace view={projection.data} account={account.success ? account.data : undefined} actions={{
-      canPreview: capabilities.canPreview === true,
-      canIssue: capabilities.canIssue === true,
-      canSendConfirmation: capabilities.canSendConfirmation === true,
-      canRequestCorrection: false,
-      // Command transport for these mutations is registered by the integration owner.
-      canCancel: false,
-      canRequestVoid: false,
-      onPreview: () => void handleDownloadPdf(),
-      onIssue: () => void handlePrintContract(),
-      onSendConfirmation: () => void handleResendConfirmation(),
-    }} />;
+    const account = PartnerAccountViewSchema.safeParse(
+      contract.partnerAccountView,
+    );
+    return (
+      <PartnerCaseWorkspace
+        view={projection.data}
+        account={account.success ? account.data : undefined}
+        actions={{
+          canPreview: capabilities.canPreview === true,
+          canIssue: capabilities.canIssue === true,
+          canSendConfirmation: capabilities.canSendConfirmation === true,
+          canRequestCorrection: false,
+          // Command transport for these mutations is registered by the integration owner.
+          canCancel: false,
+          canRequestVoid: false,
+          onPreview: () => void handleDownloadPdf(),
+          onIssue: () => void handlePrintContract(),
+          onSendConfirmation: () => void handleResendConfirmation(),
+        }}
+      />
+    );
   }
 
   const totalAmount =
@@ -647,64 +903,176 @@ export default function ContractDetailPage() {
     sumNumericValues(products, (item: any) => item.totalPrice) ||
     toFiniteNumber(contract.contractData?.payment?.totalAmount);
 
-  const canEdit = !contract.isInactive && (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) && (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
-  const canApprove = !contract.isInactive && (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove;
-  const canReject = !contract.isInactive && (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canReject;
-  const canSign = !contract.isInactive && contract.status === 'APPROVED' && contractPermissions.canSign;
+  const canEdit =
+    !contract.isInactive &&
+    (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) &&
+    (contractPermissions.canEdit ||
+      contract.createdByUser.id === currentUser?.id);
+  const canApprove =
+    !contract.isInactive &&
+    (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
+    contractPermissions.canApprove;
+  const canReject =
+    !contract.isInactive &&
+    (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
+    contractPermissions.canReject;
+  const canSign =
+    !contract.isInactive &&
+    contract.status === "APPROVED" &&
+    contractPermissions.canSign;
   const canDownloadPdf = contractPermissions.canView;
   const canPrint = contractPermissions.canPrint;
-  const canResendConfirmation = !contract.isInactive &&
-    contract.status !== 'CANCELLED' &&
+  const canResendConfirmation =
+    !contract.isInactive &&
+    contract.status !== "CANCELLED" &&
     !contract.isSigned &&
-    hasFeatureAccess(currentUser, 'sales_verification_send', 'edit');
+    hasFeatureAccess(currentUser, "sales_verification_send", "edit");
 
   const actions: ErpAction[] = [
-    ...(canEdit ? [{
-      label: contract.canOpenCorrectionEdit ? 'اصلاح قرارداد' : 'ویرایش',
-      href: `/dashboard/sales/contracts/${contract.id}/edit`,
-      icon: FaEdit,
-      tone: (contract.canOpenCorrectionEdit ? 'warning' : 'info') as ErpTone,
-      variant: 'soft' as const
-    }] : []),
-    ...(canApprove ? [{ label: 'تایید', onClick: () => handleAction('approve'), icon: FaCheck, tone: 'success' as ErpTone, disabled: pendingOperations.has('action:approve') }] : []),
-    ...(canReject ? [{ label: 'رد', onClick: () => handleAction('reject'), icon: FaTimes, tone: 'danger' as ErpTone, disabled: pendingOperations.has('action:reject') }] : []),
-    ...(canSign ? [{ label: 'امضا', onClick: () => handleAction('sign'), icon: FaSignature, tone: 'success' as ErpTone, disabled: pendingOperations.has('action:sign') }] : []),
-    ...(canPrint ? [{ label: 'دانلود PDF', onClick: handleDownloadPdf, icon: FaDownload, tone: 'success' as ErpTone, disabled: pendingOperations.has('download') }] : []),
-    ...(canPrint ? [{ label: 'پرینت', onClick: printVariant === 'summary' ? handlePrintSummaryContract : handlePrintContract, icon: FaPrint, tone: 'purple' as ErpTone, disabled: pendingOperations.has('print') || pendingOperations.has('print-summary') }] : []),
+    ...(canEdit
+      ? [
+          {
+            label: contract.canOpenCorrectionEdit ? "اصلاح قرارداد" : "ویرایش",
+            href: `/dashboard/sales/contracts/${contract.id}/edit`,
+            icon: FaEdit,
+            tone: (contract.canOpenCorrectionEdit
+              ? "warning"
+              : "info") as ErpTone,
+            variant: "soft" as const,
+          },
+        ]
+      : []),
+    ...(canApprove
+      ? [
+          {
+            label: "تایید",
+            onClick: () => handleAction("approve"),
+            icon: FaCheck,
+            tone: "success" as ErpTone,
+            disabled: pendingOperations.has("action:approve"),
+          },
+        ]
+      : []),
+    ...(canReject
+      ? [
+          {
+            label: "رد",
+            onClick: () => handleAction("reject"),
+            icon: FaTimes,
+            tone: "danger" as ErpTone,
+            disabled: pendingOperations.has("action:reject"),
+          },
+        ]
+      : []),
+    ...(canSign
+      ? [
+          {
+            label: "امضا",
+            onClick: () => handleAction("sign"),
+            icon: FaSignature,
+            tone: "success" as ErpTone,
+            disabled: pendingOperations.has("action:sign"),
+          },
+        ]
+      : []),
+    ...(canPrint
+      ? [
+          {
+            label: "دانلود PDF",
+            onClick: handleDownloadPdf,
+            icon: FaDownload,
+            tone: "success" as ErpTone,
+            disabled: pendingOperations.has("download"),
+          },
+        ]
+      : []),
+    ...(canPrint
+      ? [
+          {
+            label: "پرینت",
+            onClick:
+              printVariant === "summary"
+                ? handlePrintSummaryContract
+                : handlePrintContract,
+            icon: FaPrint,
+            tone: "purple" as ErpTone,
+            disabled:
+              pendingOperations.has("print") ||
+              pendingOperations.has("print-summary"),
+          },
+        ]
+      : []),
   ];
 
   if (!canPrint && canDownloadPdf) {
     actions.push({
-      label: 'دانلود PDF',
+      label: "دانلود PDF",
       onClick: handleDownloadPdf,
       icon: FaDownload,
-      tone: 'success' as ErpTone,
-      disabled: pendingOperations.has('download')
+      tone: "success" as ErpTone,
+      disabled: pendingOperations.has("download"),
     });
   }
 
   if (canResendConfirmation) {
     actions.push({
-      label: 'ارسال دوباره کد تایید',
+      label: "ارسال دوباره کد تایید",
       onClick: handleResendConfirmation,
       icon: FaRedo,
-      tone: 'info' as ErpTone,
-      disabled: pendingOperations.has('resend-confirmation')
+      tone: "info" as ErpTone,
+      disabled: pendingOperations.has("resend-confirmation"),
     });
   }
 
   const metrics: ErpMetric[] = [
-    { label: 'وضعیت', value: statusLabels[contract.status] || contract.status, icon: FaFileContract, tone: statusTones[contract.status] || 'neutral' },
-    { label: 'وضعیت حسابداری', value: contract.accounting ? (sourceStatusLabels[contract.accounting.sourceStatus] || contract.accounting.sourceStatus) : 'ثبت نشده', icon: FaCreditCard, tone: contract.accounting?.sourceStatus === 'NEEDS_CORRECTION' ? 'danger' : contract.accounting?.sourceStatus === 'HAS_FINANCIAL_RECORDS' ? 'info' : 'neutral' },
-    { label: 'مبلغ کل', value: formatCurrency(totalAmount, sanitizeUiText(contract.currency, 'تومان')), icon: FaCreditCard, tone: 'success' },
-    { label: 'اقلام', value: products.length.toLocaleString('fa-IR'), hint: 'محصول ثبت شده', icon: FaFileContract, tone: 'info' },
+    {
+      label: "وضعیت",
+      value:
+        statusLabels[contract.status] ||
+        operationalStatusLabel(contract.status),
+      icon: FaFileContract,
+      tone: statusTones[contract.status] || "neutral",
+    },
+    {
+      label: "وضعیت حسابداری",
+      value: contract.accounting
+        ? sourceStatusLabels[contract.accounting.sourceStatus] ||
+          operationalStatusLabel(contract.accounting.sourceStatus)
+        : "ثبت نشده",
+      icon: FaCreditCard,
+      tone:
+        contract.accounting?.sourceStatus === "NEEDS_CORRECTION"
+          ? "danger"
+          : contract.accounting?.sourceStatus === "HAS_FINANCIAL_RECORDS"
+            ? "info"
+            : "neutral",
+    },
+    {
+      label: "مبلغ کل",
+      value: formatCurrency(
+        totalAmount,
+        sanitizeUiText(contract.currency, "تومان"),
+      ),
+      icon: FaCreditCard,
+      tone: "success",
+    },
+    {
+      label: "اقلام",
+      value: products.length.toLocaleString("fa-IR"),
+      hint: "محصول ثبت شده",
+      icon: FaFileContract,
+      tone: "info",
+    },
   ];
 
   return (
-      <ErpPage
+    <ErpPage
       eyebrow="قرارداد فروش"
-      title={sanitizeUiTextWithCandidates([contract.titlePersian, contract.title, contract.contractNumber], 'قرارداد فروش')}
-      description={`شماره قرارداد: ${sanitizeUiText(contract.contractNumber, '—')}`}
+      title={sanitizeUiTextWithCandidates(
+        [contract.titlePersian, contract.title, contract.contractNumber],
+        "قرارداد فروش",
+      )}
+      description={`شماره قرارداد: ${sanitizeUiText(contract.contractNumber, "—")}`}
       backHref="/dashboard/sales/contracts"
       actions={actions}
       metrics={metrics}
@@ -712,7 +1080,7 @@ export default function ContractDetailPage() {
       {contract.isInactive && (
         <ErpInlineState
           kind="stale"
-          title={`این قرارداد غیرفعال و فقط‌خواندنی است${contract.inactiveReason ? ` — ${contract.inactiveReason}` : ''}`}
+          title={`این قرارداد غیرفعال و فقط‌خواندنی است${contract.inactiveReason ? ` — ${contract.inactiveReason}` : ""}`}
           className="mb-4"
         />
       )}
@@ -720,68 +1088,131 @@ export default function ContractDetailPage() {
         <ErpInlineState
           kind="stale"
           title={`آخرین اطلاعات موفق قرارداد نمایش داده می‌شود. ${loadError.message}`}
-          action={{ label: 'دریافت دوباره', onClick: () => void loadContract() }}
+          action={{
+            label: "دریافت دوباره",
+            onClick: () => void loadContract(),
+          }}
         />
       )}
       {visibleOperationalError && (
         <ErpInlineState
           kind={visibleOperationalError.kind}
           title={visibleOperationalError.message}
-          action={visibleOperationalError.source === 'profile'
-            ? { label: 'دریافت دسترسی‌ها', onClick: () => void loadCurrentUser() }
-            : visibleOperationalError.source === 'sellers'
-              ? { label: 'دریافت فروشندگان', onClick: () => void loadSellerOptions() }
-              : undefined}
+          action={
+            visibleOperationalError.source === "profile"
+              ? {
+                  label: "دریافت دسترسی‌ها",
+                  onClick: () => void loadCurrentUser(),
+                }
+              : visibleOperationalError.source === "sellers"
+                ? {
+                    label: "دریافت فروشندگان",
+                    onClick: () => void loadSellerOptions(),
+                  }
+                : undefined
+          }
         />
       )}
 
-      <ErpSection title="خروجی چاپ قرارداد" description="نوع خروجی فروش را انتخاب کنید و سپس دانلود یا پرینت بگیرید.">
-        <label className="flex max-w-md flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-          نسخه چاپ
-          <ErpSelect
-            value={printVariant}
-            onChange={(event) => setPrintVariant(event.target.value as SalesContractPrintVariant)}
-            className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
-          >
-            <option value="original">{salesContractPrintVariantLabels.original}</option>
-            <option value="summary">{salesContractPrintVariantLabels.summary}</option>
-          </ErpSelect>
-        </label>
-      </ErpSection>
+      <ErpSegmentedControl
+        value={detailSection}
+        onChange={setDetailSection}
+        options={[
+          { value: "summary", label: "خلاصه" },
+          { value: "items", label: "اقلام و تحویل" },
+          { value: "financial", label: "وضعیت مالی" },
+          { value: "history", label: "سوابق" },
+        ]}
+      />
+
+      {detailSection === "summary" && (
+        <ErpSection
+          title="خروجی چاپ قرارداد"
+          description="نوع خروجی فروش را انتخاب کنید و سپس دانلود یا پرینت بگیرید."
+        >
+          <label className="flex max-w-md flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+            نسخه چاپ
+            <ErpSelect
+              value={printVariant}
+              onChange={(event) =>
+                setPrintVariant(event.target.value as SalesContractPrintVariant)
+              }
+              className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
+            >
+              <option value="original">
+                {salesContractPrintVariantLabels.original}
+              </option>
+              <option value="summary">
+                {salesContractPrintVariantLabels.summary}
+              </option>
+            </ErpSelect>
+          </label>
+        </ErpSection>
+      )}
 
       <ErpTwoColumn
         main={
           <>
-            <ErpSection
-              title="اطلاعات قرارداد"
-              description="خلاصه وضعیت، مبلغ، تاریخ‌ها و یادداشت‌های ثبت شده."
-            >
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <ErpFieldView label="شماره قرارداد" value={sanitizeUiText(contract.contractNumber, '—')} tone="primary" />
-                <ErpFieldView
-                  label="وضعیت"
-                  value={<ErpBadge tone={statusTones[contract.status] || 'neutral'}>{statusLabels[contract.status] || contract.status}</ErpBadge>}
-                />
-                <ErpFieldView
-                  label="وضعیت حسابداری"
-                  value={contract.accounting ? (
-                    <StatusBadge
-                      status={contract.accounting.sourceStatus}
-                      label={sourceStatusLabels[contract.accounting.sourceStatus] || contract.accounting.sourceStatus}
-                    />
-                  ) : 'ثبت نشده'}
-                />
-                <ErpFieldView label="تاریخ ایجاد" value={PersianCalendar.formatForDisplay(contract.createdAt)} />
-                <ErpFieldView label="آخرین بروزرسانی" value={PersianCalendar.formatForDisplay(contract.updatedAt)} />
-              </div>
-              {contract.notes && (
-                <div className="mt-3 rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm leading-6 text-[var(--sds-text-primary)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]">
-                  {sanitizeUiText(contract.notes, '—')}
+            {detailSection === "summary" && (
+              <ErpSection
+                title="اطلاعات قرارداد"
+                description="خلاصه وضعیت، مبلغ، تاریخ‌ها و یادداشت‌های ثبت شده."
+              >
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <ErpFieldView
+                    label="شماره قرارداد"
+                    value={sanitizeUiText(contract.contractNumber, "—")}
+                    tone="primary"
+                  />
+                  <ErpFieldView
+                    label="وضعیت"
+                    value={
+                      <ErpBadge
+                        tone={statusTones[contract.status] || "neutral"}
+                      >
+                        {statusLabels[contract.status] ||
+                          operationalStatusLabel(contract.status)}
+                      </ErpBadge>
+                    }
+                  />
+                  <ErpFieldView
+                    label="وضعیت حسابداری"
+                    value={
+                      contract.accounting ? (
+                        <StatusBadge
+                          status={contract.accounting.sourceStatus}
+                          label={
+                            sourceStatusLabels[
+                              contract.accounting.sourceStatus
+                            ] ||
+                            operationalStatusLabel(
+                              contract.accounting.sourceStatus,
+                            )
+                          }
+                        />
+                      ) : (
+                        "ثبت نشده"
+                      )
+                    }
+                  />
+                  <ErpFieldView
+                    label="تاریخ ایجاد"
+                    value={PersianCalendar.formatForDisplay(contract.createdAt)}
+                  />
+                  <ErpFieldView
+                    label="آخرین بروزرسانی"
+                    value={PersianCalendar.formatForDisplay(contract.updatedAt)}
+                  />
                 </div>
-              )}
-            </ErpSection>
+                {contract.notes && (
+                  <div className="mt-3 rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm leading-6 text-[var(--sds-text-primary)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]">
+                    {sanitizeUiText(contract.notes, "—")}
+                  </div>
+                )}
+              </ErpSection>
+            )}
 
-            {contract.accounting && (
+            {detailSection === "financial" && contract.accounting && (
               <ErpSection
                 title="وضعیت حسابداری"
                 description="نمای خواندنی از وضعیت مالی این قرارداد در سیستم حسابداری."
@@ -789,127 +1220,291 @@ export default function ContractDetailPage() {
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <ErpFieldView
                     label="وضعیت حسابداری"
-                    value={<StatusBadge status={contract.accounting.sourceStatus} label={sourceStatusLabels[contract.accounting.sourceStatus] || contract.accounting.sourceStatus} />}
+                    value={
+                      <StatusBadge
+                        status={contract.accounting.sourceStatus}
+                        label={
+                          sourceStatusLabels[
+                            contract.accounting.sourceStatus
+                          ] ||
+                          operationalStatusLabel(
+                            contract.accounting.sourceStatus,
+                          )
+                        }
+                      />
+                    }
                     tone="primary"
                   />
-                  <ErpFieldView label="صورتحساب" value={invoiceStatusLabels[contract.accounting.invoiceStatus] || contract.accounting.invoiceStatus} />
-                  <ErpFieldView label="دریافتنی" value={receivableStatusLabels[contract.accounting.receivableStatus] || contract.accounting.receivableStatus} />
-                  <ErpFieldView label="مالیات" value={taxStatusLabels[contract.accounting.taxStatus] || contract.accounting.taxStatus} />
+                  <ErpFieldView
+                    label="صورتحساب"
+                    value={
+                      invoiceStatusLabels[contract.accounting.invoiceStatus] ||
+                      operationalStatusLabel(contract.accounting.invoiceStatus)
+                    }
+                  />
+                  <ErpFieldView
+                    label="دریافتنی"
+                    value={
+                      receivableStatusLabels[
+                        contract.accounting.receivableStatus
+                      ] ||
+                      operationalStatusLabel(
+                        contract.accounting.receivableStatus,
+                      )
+                    }
+                  />
+                  <ErpFieldView
+                    label="مالیات"
+                    value={
+                      taxStatusLabels[contract.accounting.taxStatus] ||
+                      operationalStatusLabel(contract.accounting.taxStatus)
+                    }
+                  />
                 </div>
                 {contract.accounting.openCorrections > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {contract.accounting.openCorrections > 0 && (
-                      <ErpBadge tone="danger">{contract.accounting.openCorrections.toLocaleString('fa-IR')} اصلاحیه باز</ErpBadge>
+                      <ErpBadge tone="danger">
+                        {contract.accounting.openCorrections.toLocaleString(
+                          "fa-IR",
+                        )}{" "}
+                        اصلاحیه باز
+                      </ErpBadge>
                     )}
                   </div>
                 )}
               </ErpSection>
             )}
 
-            <ErpSection title="اقلام قرارداد" description="محصولات، متراژ و قیمت‌های ثبت شده در قرارداد.">
-              {products.length === 0 ? (
-                <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">اقلامی برای این قرارداد ثبت نشده است.</p>
-              ) : (
-                <div className="space-y-3">
-                  {products.map((item: any, index: number) => {
-                    const product = item.product || item;
-                    const productName = sanitizeUiTextWithCandidates([product.namePersian, product.name, item.namePersian, item.name], `محصول ${index + 1}`);
-                    const quantity = toFiniteNumber(item.quantity);
-                    const squareMeters = item.squareMeters ?? product.squareMeter ?? 0;
-                    const consumedSquareMeters = item.smartCutPlan?.consumedAreaSqm;
-                    const unitPrice = item.unitPrice ?? item.pricePerSquareMeter ?? 0;
-                    const itemTotal = item.totalPrice ?? 0;
-                    const finishing = normalizeProductFinishing(item);
-                    const rowImages = Array.isArray(item.images) ? item.images : [];
-                    const isPreparedRow = isPreparedProductType(item.productType);
-                    const preparedUnit = isPreparedRow ? getPreparedUnit(item) : 'count';
-                    const preparedQuantity = isPreparedRow ? getPreparedQuantity(item) : quantity;
+            {detailSection === "items" && (
+              <ErpSection
+                title="اقلام قرارداد"
+                description="محصولات، متراژ و قیمت‌های ثبت شده در قرارداد."
+              >
+                {products.length === 0 ? (
+                  <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+                    اقلامی برای این قرارداد ثبت نشده است.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {products.map((item: any, index: number) => {
+                      const product = item.product || item;
+                      const productName = sanitizeUiTextWithCandidates(
+                        [
+                          product.namePersian,
+                          product.name,
+                          item.namePersian,
+                          item.name,
+                        ],
+                        `محصول ${index + 1}`,
+                      );
+                      const quantity = toFiniteNumber(item.quantity);
+                      const squareMeters =
+                        item.squareMeters ?? product.squareMeter ?? 0;
+                      const consumedSquareMeters =
+                        item.smartCutPlan?.consumedAreaSqm;
+                      const unitPrice =
+                        item.unitPrice ?? item.pricePerSquareMeter ?? 0;
+                      const itemTotal = item.totalPrice ?? 0;
+                      const finishing = normalizeProductFinishing(item);
+                      const rowImages = Array.isArray(item.images)
+                        ? item.images
+                        : [];
+                      const isPreparedRow = isPreparedProductType(
+                        item.productType,
+                      );
+                      const preparedUnit = isPreparedRow
+                        ? getPreparedUnit(item)
+                        : "count";
+                      const preparedQuantity = isPreparedRow
+                        ? getPreparedQuantity(item)
+                        : quantity;
 
-                    return (
-                      <div key={`${productName}-${index}`} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{productName}</p>
-                            <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                              {product.widthValue && product.thicknessValue ? `${product.widthValue} × ${product.thicknessValue} cm` : 'ابعاد نامشخص'}
-                            </p>
+                      return (
+                        <div
+                          key={`${productName}-${index}`}
+                          className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+                                {productName}
+                              </p>
+                              <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+                                {product.widthValue && product.thicknessValue
+                                  ? `${product.widthValue} × ${product.thicknessValue} cm`
+                                  : "ابعاد نامشخص"}
+                              </p>
+                            </div>
+                            <ErpBadge tone="primary">
+                              {formatCurrency(
+                                itemTotal,
+                                sanitizeUiText(
+                                  item.currency || contract.currency,
+                                  "تومان",
+                                ),
+                              )}
+                            </ErpBadge>
                           </div>
-                          <ErpBadge tone="primary">{formatCurrency(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان'))}</ErpBadge>
-                        </div>
-                        {rowImages.length > 0 && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {rowImages.slice(0, 3).map((image: string, imageIndex: number) => (
-                              <img
-                                key={`${image}-${imageIndex}`}
-                                src={resolveBackendAssetUrl(image)}
-                                alt={productName}
-                                className="h-14 w-14 rounded-md border border-[var(--sds-border-default)] object-cover dark:border-[var(--sds-border-strong)]"
-                              />
-                            ))}
-                            {rowImages.length > 3 && (
-                              <span className="inline-flex h-14 min-w-14 items-center justify-center rounded-md border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 text-xs font-semibold text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]">
-                                +{rowImages.length - 3}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-                          <ErpFieldView label="تعداد" value={formatDisplayNumber(preparedQuantity)} />
-                          <ErpFieldView label={isPreparedRow ? 'واحد' : 'متراژ درخواستی'} value={isPreparedRow ? `${getPreparedKindLabel(item.preparedKind)} / ${getPreparedUnitLabel(preparedUnit)}` : formatSquareMeters(squareMeters)} />
-                          {!isPreparedRow && toFiniteNumber(consumedSquareMeters) > 0 && toFiniteNumber(consumedSquareMeters) !== toFiniteNumber(squareMeters) && (
-                            <ErpFieldView label="مصرف سنگ / مبنای قیمت" value={formatSquareMeters(consumedSquareMeters)} tone="warning" />
+                          {rowImages.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {rowImages
+                                .slice(0, 3)
+                                .map((image: string, imageIndex: number) => (
+                                  <img
+                                    key={`${image}-${imageIndex}`}
+                                    src={resolveBackendAssetUrl(image)}
+                                    alt={productName}
+                                    className="h-14 w-14 rounded-md border border-[var(--sds-border-default)] object-cover dark:border-[var(--sds-border-strong)]"
+                                  />
+                                ))}
+                              {rowImages.length > 3 && (
+                                <span className="inline-flex h-14 min-w-14 items-center justify-center rounded-md border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 text-xs font-semibold text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]">
+                                  +{rowImages.length - 3}
+                                </span>
+                              )}
+                            </div>
                           )}
-                          <ErpFieldView label="قیمت واحد" value={toFiniteNumber(unitPrice) > 0 ? formatPrice(unitPrice, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} />
-                          <ErpFieldView label="جمع" value={toFiniteNumber(itemTotal) > 0 ? formatPrice(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} tone="primary" />
-                        </div>
-                        {finishing && finishing.cost > 0 && (
-                          <div className="mt-3 rounded-md border border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] px-3 py-2 text-xs leading-5 text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
-                            <span className="font-semibold">{sanitizeUiText(item.finishingName || finishing.name || 'پرداخت سنگ')}</span>
-                            <span className="mx-1">•</span>
-                            <span>{finishing.amountLabel}</span>
-                            {finishing.rateLabel && (
-                              <>
-                                <span className="mx-1">×</span>
-                                <span>{finishing.rateLabel}</span>
-                              </>
-                            )}
-                            <span className="mx-1">=</span>
-                            <span className="font-semibold">{formatPrice(finishing.cost, sanitizeUiText(item.currency || contract.currency, 'تومان'))}</span>
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                            <ErpFieldView
+                              label="تعداد"
+                              value={formatDisplayNumber(preparedQuantity)}
+                            />
+                            <ErpFieldView
+                              label={isPreparedRow ? "واحد" : "متراژ درخواستی"}
+                              value={
+                                isPreparedRow
+                                  ? `${getPreparedKindLabel(item.preparedKind)} / ${getPreparedUnitLabel(preparedUnit)}`
+                                  : formatSquareMeters(squareMeters)
+                              }
+                            />
+                            {!isPreparedRow &&
+                              toFiniteNumber(consumedSquareMeters) > 0 &&
+                              toFiniteNumber(consumedSquareMeters) !==
+                                toFiniteNumber(squareMeters) && (
+                                <ErpFieldView
+                                  label="مصرف سنگ / مبنای قیمت"
+                                  value={formatSquareMeters(
+                                    consumedSquareMeters,
+                                  )}
+                                  tone="warning"
+                                />
+                              )}
+                            <ErpFieldView
+                              label="قیمت واحد"
+                              value={
+                                toFiniteNumber(unitPrice) > 0
+                                  ? formatPrice(
+                                      unitPrice,
+                                      sanitizeUiText(
+                                        item.currency || contract.currency,
+                                        "تومان",
+                                      ),
+                                    )
+                                  : "نامشخص"
+                              }
+                            />
+                            <ErpFieldView
+                              label="جمع"
+                              value={
+                                toFiniteNumber(itemTotal) > 0
+                                  ? formatPrice(
+                                      itemTotal,
+                                      sanitizeUiText(
+                                        item.currency || contract.currency,
+                                        "تومان",
+                                      ),
+                                    )
+                                  : "نامشخص"
+                              }
+                              tone="primary"
+                            />
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </ErpSection>
+                          {finishing && finishing.cost > 0 && (
+                            <div className="mt-3 rounded-md border border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] px-3 py-2 text-xs leading-5 text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
+                              <span className="font-semibold">
+                                {sanitizeUiText(
+                                  item.finishingName ||
+                                    finishing.name ||
+                                    "پرداخت سنگ",
+                                )}
+                              </span>
+                              <span className="mx-1">•</span>
+                              <span>{finishing.amountLabel}</span>
+                              {finishing.rateLabel && (
+                                <>
+                                  <span className="mx-1">×</span>
+                                  <span>{finishing.rateLabel}</span>
+                                </>
+                              )}
+                              <span className="mx-1">=</span>
+                              <span className="font-semibold">
+                                {formatPrice(
+                                  finishing.cost,
+                                  sanitizeUiText(
+                                    item.currency || contract.currency,
+                                    "تومان",
+                                  ),
+                                )}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </ErpSection>
+            )}
 
-            {serviceRows.length > 0 && (
-              <ErpSection title="خدمات مستقل" description="خدمات انتخاب‌شده و توضیحات داخلی ثبت‌شده برای قرارداد.">
+            {detailSection === "items" && serviceRows.length > 0 && (
+              <ErpSection
+                title="خدمات مستقل"
+                description="خدمات انتخاب‌شده و توضیحات داخلی ثبت‌شده برای قرارداد."
+              >
                 <div className="space-y-3">
                   {serviceRows.map((row: any, index: number) => {
-                    const rowImages = Array.isArray(row.images) ? row.images : [];
+                    const rowImages = Array.isArray(row.images)
+                      ? row.images
+                      : [];
                     return (
-                      <div key={`${row.id || row.title}-${index}`} className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)]">
+                      <div
+                        key={`${row.id || row.title}-${index}`}
+                        className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)]"
+                      >
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div>
-                            <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{sanitizeUiText(row.title, `خدمت ${index + 1}`)}</p>
+                            <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+                              {sanitizeUiText(row.title, `خدمت ${index + 1}`)}
+                            </p>
                             {row.description && (
-                              <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{sanitizeUiText(row.description)}</p>
+                              <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+                                {sanitizeUiText(row.description)}
+                              </p>
                             )}
                           </div>
-                          <ErpBadge tone="success">{formatCurrency(row.totalPrice || 0, sanitizeUiText(row.currency || contract.currency, 'تومان'))}</ErpBadge>
+                          <ErpBadge tone="success">
+                            {formatCurrency(
+                              row.totalPrice || 0,
+                              sanitizeUiText(
+                                row.currency || contract.currency,
+                                "تومان",
+                              ),
+                            )}
+                          </ErpBadge>
                         </div>
                         {rowImages.length > 0 && (
                           <div className="mt-3 flex flex-wrap gap-2">
-                            {rowImages.slice(0, 3).map((image: string, imageIndex: number) => (
-                              <img
-                                key={`${image}-${imageIndex}`}
-                                src={resolveBackendAssetUrl(image)}
-                                alt={sanitizeUiText(row.title, 'تصویر خدمت')}
-                                className="h-14 w-14 rounded-md border border-[var(--sds-success-border)] object-cover dark:border-[var(--sds-success-border)]"
-                              />
-                            ))}
+                            {rowImages
+                              .slice(0, 3)
+                              .map((image: string, imageIndex: number) => (
+                                <img
+                                  key={`${image}-${imageIndex}`}
+                                  src={resolveBackendAssetUrl(image)}
+                                  alt={sanitizeUiText(row.title, "تصویر خدمت")}
+                                  className="h-14 w-14 rounded-md border border-[var(--sds-success-border)] object-cover dark:border-[var(--sds-success-border)]"
+                                />
+                              ))}
                             {rowImages.length > 3 && (
                               <span className="inline-flex h-14 min-w-14 items-center justify-center rounded-md border border-[var(--sds-success-border)] bg-[var(--sds-surface-raised)] px-2 text-xs font-semibold text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-success)]">
                                 +{rowImages.length - 3}
@@ -918,10 +1513,35 @@ export default function ContractDetailPage() {
                           </div>
                         )}
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-                          <ErpFieldView label="مقدار" value={formatDisplayNumber(row.quantity || 0)} />
-                          <ErpFieldView label="واحد" value={sanitizeUiText(row.unit, 'ثبت نشده')} />
-                          <ErpFieldView label="قیمت واحد" value={formatPrice(row.unitPrice || 0, sanitizeUiText(row.currency || contract.currency, 'تومان'))} />
-                          <ErpFieldView label="جمع" value={formatPrice(row.totalPrice || 0, sanitizeUiText(row.currency || contract.currency, 'تومان'))} tone="success" />
+                          <ErpFieldView
+                            label="مقدار"
+                            value={formatDisplayNumber(row.quantity || 0)}
+                          />
+                          <ErpFieldView
+                            label="واحد"
+                            value={sanitizeUiText(row.unit, "ثبت نشده")}
+                          />
+                          <ErpFieldView
+                            label="قیمت واحد"
+                            value={formatPrice(
+                              row.unitPrice || 0,
+                              sanitizeUiText(
+                                row.currency || contract.currency,
+                                "تومان",
+                              ),
+                            )}
+                          />
+                          <ErpFieldView
+                            label="جمع"
+                            value={formatPrice(
+                              row.totalPrice || 0,
+                              sanitizeUiText(
+                                row.currency || contract.currency,
+                                "تومان",
+                              ),
+                            )}
+                            tone="success"
+                          />
                         </div>
                       </div>
                     );
@@ -930,101 +1550,314 @@ export default function ContractDetailPage() {
               </ErpSection>
             )}
 
-            <ErpSection title="تحویل و پرداخت" description="برنامه‌های تحویل و اطلاعات پرداخت مرتبط با قرارداد.">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">برنامه تحویل</h3>
-                  {deliveries.length === 0 ? (
-                    <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">برنامه تحویلی ثبت نشده است.</p>
-                  ) : (
-                    deliveries.map((delivery: any, index: number) => (
-                      <div key={index} className="rounded-lg border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
-                        <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                          {delivery.deliveryDate || delivery.date
-                            ? PersianCalendar.formatForDisplay(delivery.deliveryDate || delivery.date)
-                            : 'تاریخ نامشخص'}
-                        </p>
-                        <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{sanitizeUiText(delivery.notes || delivery.deliveryAddress, 'بدون توضیحات')}</p>
-                      </div>
-                    ))
-                  )}
+            {detailSection === "items" && (
+              <ErpSection
+                title="تحویل و پرداخت"
+                description="برنامه‌های تحویل و اطلاعات پرداخت مرتبط با قرارداد."
+              >
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+                      برنامه تحویل
+                    </h3>
+                    {deliveries.length === 0 ? (
+                      <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+                        برنامه تحویلی ثبت نشده است.
+                      </p>
+                    ) : (
+                      deliveries.map((delivery: any, index: number) => (
+                        <div
+                          key={index}
+                          className="rounded-lg border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]"
+                        >
+                          <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+                            {delivery.deliveryDate || delivery.date
+                              ? PersianCalendar.formatForDisplay(
+                                  delivery.deliveryDate || delivery.date,
+                                )
+                              : "تاریخ نامشخص"}
+                          </p>
+                          <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+                            {sanitizeUiText(
+                              delivery.notes || delivery.deliveryAddress,
+                              "بدون توضیحات",
+                            )}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+                      پرداخت
+                    </h3>
+                    <ErpFieldView
+                      label="روش پرداخت"
+                      value={paymentPresentation.summaryLabel}
+                      tone="primary"
+                    />
+                    {paymentPresentation.source === "historical-snapshot" && (
+                      <ErpBadge tone="warning">اطلاعات تاریخی</ErpBadge>
+                    )}
+                    {paymentPresentation.rows.length === 0 ? (
+                      <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+                        برنامه پرداختی ثبت نشده است.
+                      </p>
+                    ) : (
+                      paymentPresentation.rows.map((payment) => (
+                        <div
+                          key={payment.id}
+                          className="space-y-2 rounded-lg border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]"
+                        >
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            <ErpFieldView
+                              label="روش"
+                              value={payment.methodLabel}
+                            />
+                            <ErpFieldView
+                              label="مبلغ"
+                              value={formatCurrency(
+                                payment.amount,
+                                payment.currency,
+                              )}
+                              tone="success"
+                            />
+                            {payment.paymentDate && (
+                              <ErpFieldView
+                                label="تاریخ پرداخت/سررسید"
+                                value={PersianCalendar.formatForDisplay(
+                                  payment.paymentDate,
+                                )}
+                              />
+                            )}
+                            {payment.handoverDate && (
+                              <ErpFieldView
+                                label="تاریخ تحویل چک"
+                                value={PersianCalendar.formatForDisplay(
+                                  payment.handoverDate,
+                                )}
+                              />
+                            )}
+                            {payment.checkNumber && (
+                              <ErpFieldView
+                                label="شماره چک"
+                                value={payment.checkNumber}
+                              />
+                            )}
+                            {payment.checkOwnerName && (
+                              <ErpFieldView
+                                label="صاحب چک"
+                                value={payment.checkOwnerName}
+                              />
+                            )}
+                            {payment.status && (
+                              <ErpFieldView
+                                label="وضعیت"
+                                value={operationalStatusLabel(payment.status)}
+                              />
+                            )}
+                          </div>
+                          {payment.notes && (
+                            <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+                              {payment.notes}
+                            </p>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">پرداخت</h3>
-                  <ErpFieldView label="روش پرداخت" value={paymentPresentation.summaryLabel} tone="primary" />
-                  {paymentPresentation.source === 'historical-snapshot' && (
-                    <ErpBadge tone="warning">اطلاعات تاریخی</ErpBadge>
-                  )}
-                  {paymentPresentation.rows.length === 0 ? (
-                    <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">برنامه پرداختی ثبت نشده است.</p>
-                  ) : paymentPresentation.rows.map((payment) => (
-                    <div key={payment.id} className="space-y-2 rounded-lg border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <ErpFieldView label="روش" value={payment.methodLabel} />
-                        <ErpFieldView label="مبلغ" value={formatCurrency(payment.amount, payment.currency)} tone="success" />
-                        {payment.paymentDate && <ErpFieldView label="تاریخ پرداخت/سررسید" value={PersianCalendar.formatForDisplay(payment.paymentDate)} />}
-                        {payment.handoverDate && <ErpFieldView label="تاریخ تحویل چک" value={PersianCalendar.formatForDisplay(payment.handoverDate)} />}
-                        {payment.checkNumber && <ErpFieldView label="شماره چک" value={payment.checkNumber} />}
-                        {payment.checkOwnerName && <ErpFieldView label="صاحب چک" value={payment.checkOwnerName} />}
-                        {payment.status && <ErpFieldView label="وضعیت" value={payment.status} />}
-                      </div>
-                      {payment.notes && <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{payment.notes}</p>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </ErpSection>
+              </ErpSection>
+            )}
           </>
         }
         aside={
           <>
-            <ErpSection title="مشتری">
-              <div className="space-y-3">
-                <ErpFieldView label="نام" value={getCustomerName(contract)} tone="primary" />
-                {contract.customer.companyName && <ErpFieldView label="شرکت" value={sanitizeUiText(contract.customer.companyName, '—')} />}
-                <ErpFieldView label="نوع مشتری" value={sanitizeUiText(contract.customer.customerType, 'نامشخص')} />
-                {contract.customer.primaryContact && (
-                  <ErpFieldView
-                    label="تماس اصلی"
-                    value={`${contract.customer.primaryContact.firstName || ''} ${contract.customer.primaryContact.lastName || ''}`.trim() || 'نامشخص'}
-                    hint={contract.customer.primaryContact.phone || contract.customer.primaryContact.email}
-                  />
-                )}
-              </div>
-            </ErpSection>
-
-            <ErpSection title="بخش و کاربران">
-              <div className="space-y-3">
-                <ErpFieldView label="بخش" value={sanitizeUiText(contract.department.namePersian, '—')} />
-                <ErpFieldView label="ایجاد کننده" value={`${contract.createdByUser.firstName} ${contract.createdByUser.lastName}`} />
-                <ErpFieldView label="مسئول فروش قرارداد" value={`${contract.responsibleSeller.firstName} ${contract.responsibleSeller.lastName}`.trim() || contract.responsibleSeller.username} hint={contract.responsibleSellerSource === 'MIGRATED_CREATOR' ? 'مقدار اولیه مهاجرتی' : 'مستقل از ایجادکننده قرارداد'} tone="primary" />
-                <ErpFieldView label="اعتبار فروش قطعی" value={contract.realizedSeller ? (`${contract.realizedSeller.firstName} ${contract.realizedSeller.lastName}`.trim() || contract.realizedSeller.username) : contract.realizedAt ? 'فروش قطعی تخصیص‌نیافته قدیمی' : 'هنوز فروش قطعی نشده'} hint={contract.realizedAt ? `تاریخ تحقق: ${PersianCalendar.formatForDisplay(contract.realizedAt)}` : undefined} />
-                {contract.approvedByUser && <ErpFieldView label="تایید کننده" value={`${contract.approvedByUser.firstName} ${contract.approvedByUser.lastName}`} />}
-                {contract.signedByUser && <ErpFieldView label="امضا کننده" value={`${contract.signedByUser.firstName} ${contract.signedByUser.lastName}`} />}
-              </div>
-            </ErpSection>
-
-            {canManageSellers && (
-              <ErpSection title="تغییر مسئول فروش قرارداد" description="تغییر مسئول فقط روی پایپ‌لاین فعلی اثر دارد و اعتبار فروش قطعی گذشته را بازنویسی نمی‌کند.">
+            {detailSection === "summary" && (
+              <ErpSection title="مشتری">
                 <div className="space-y-3">
-                  <ErpSelect value={nextSellerId} onChange={(event) => setNextSellerId(event.target.value)} className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-                    <option value="">انتخاب فروشنده جدید</option>
-                    {sellerOptions.map((seller) => <option key={seller.id} value={seller.id}>{`${seller.firstName || ''} ${seller.lastName || ''}`.trim() || seller.username}</option>)}
-                  </ErpSelect>
-                  <ErpTextarea value={sellerChangeReason} onChange={(event) => setSellerChangeReason(event.target.value)} placeholder="دلیل تغییر مسئول (الزامی)" className="min-h-20 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]" />
-                  <ErpPressable type="submit" disabled={sellerMutationPending || !nextSellerId || !sellerChangeReason.trim()} onClick={handleSellerChange} className="w-full rounded-lg bg-[var(--sds-accent)] px-3 py-2 text-sm font-bold text-[var(--sds-text-inverse)] disabled:opacity-50">{pendingOperations.has('seller-change') ? 'در حال ثبت...' : 'ثبت تغییر مسئول با سابقه حسابرسی'}</ErpPressable>
-                  {contract.realizedAt && !contract.realizedSeller && <ErpPressable type="submit" disabled={sellerMutationPending || !nextSellerId || !sellerChangeReason.trim()} onClick={handleLegacyCreditAssignment} className="w-full rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-warning)] disabled:opacity-50">انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی</ErpPressable>}
+                  <ErpFieldView
+                    label="نام"
+                    value={getCustomerName(contract)}
+                    tone="primary"
+                  />
+                  {contract.customer.companyName && (
+                    <ErpFieldView
+                      label="شرکت"
+                      value={sanitizeUiText(contract.customer.companyName, "—")}
+                    />
+                  )}
+                  <ErpFieldView
+                    label="نوع مشتری"
+                    value={sanitizeUiText(
+                      contract.customer.customerType,
+                      "نامشخص",
+                    )}
+                  />
+                  {contract.customer.primaryContact && (
+                    <ErpFieldView
+                      label="تماس اصلی"
+                      value={
+                        `${contract.customer.primaryContact.firstName || ""} ${contract.customer.primaryContact.lastName || ""}`.trim() ||
+                        "نامشخص"
+                      }
+                      hint={
+                        contract.customer.primaryContact.phone ||
+                        contract.customer.primaryContact.email
+                      }
+                    />
+                  )}
                 </div>
               </ErpSection>
             )}
 
-            <ErpSection title="تاریخچه">
-              <div className="space-y-3">
-                <TimelineItem icon={FaCalendarAlt} label="ایجاد شده" value={PersianCalendar.formatForDisplay(contract.createdAt)} tone="primary" />
-                {contract.signedAt && <TimelineItem icon={FaSignature} label="امضا شده" value={PersianCalendar.formatForDisplay(contract.signedAt)} tone="success" />}
-                {contract.printedAt && <TimelineItem icon={FaPrint} label="چاپ شده" value={PersianCalendar.formatForDisplay(contract.printedAt)} tone="purple" />}
-              </div>
-            </ErpSection>
+            {detailSection === "summary" && (
+              <ErpSection title="بخش و کاربران">
+                <div className="space-y-3">
+                  <ErpFieldView
+                    label="بخش"
+                    value={sanitizeUiText(contract.department.namePersian, "—")}
+                  />
+                  <ErpFieldView
+                    label="ایجاد کننده"
+                    value={`${contract.createdByUser.firstName} ${contract.createdByUser.lastName}`}
+                  />
+                  <ErpFieldView
+                    label="مسئول فروش قرارداد"
+                    value={
+                      `${contract.responsibleSeller.firstName} ${contract.responsibleSeller.lastName}`.trim() ||
+                      contract.responsibleSeller.username
+                    }
+                    hint={
+                      contract.responsibleSellerSource === "MIGRATED_CREATOR"
+                        ? "مقدار اولیه مهاجرتی"
+                        : "مستقل از ایجادکننده قرارداد"
+                    }
+                    tone="primary"
+                  />
+                  <ErpFieldView
+                    label="اعتبار فروش قطعی"
+                    value={
+                      contract.realizedSeller
+                        ? `${contract.realizedSeller.firstName} ${contract.realizedSeller.lastName}`.trim() ||
+                          contract.realizedSeller.username
+                        : contract.realizedAt
+                          ? "فروش قطعی تخصیص‌نیافته قدیمی"
+                          : "هنوز فروش قطعی نشده"
+                    }
+                    hint={
+                      contract.realizedAt
+                        ? `تاریخ تحقق: ${PersianCalendar.formatForDisplay(contract.realizedAt)}`
+                        : undefined
+                    }
+                  />
+                  {contract.approvedByUser && (
+                    <ErpFieldView
+                      label="تایید کننده"
+                      value={`${contract.approvedByUser.firstName} ${contract.approvedByUser.lastName}`}
+                    />
+                  )}
+                  {contract.signedByUser && (
+                    <ErpFieldView
+                      label="امضا کننده"
+                      value={`${contract.signedByUser.firstName} ${contract.signedByUser.lastName}`}
+                    />
+                  )}
+                </div>
+              </ErpSection>
+            )}
+
+            {detailSection === "summary" && canManageSellers && (
+              <ErpSection
+                title="تغییر مسئول فروش قرارداد"
+                description="تغییر مسئول فقط روی پایپ‌لاین فعلی اثر دارد و اعتبار فروش قطعی گذشته را بازنویسی نمی‌کند."
+              >
+                <div className="space-y-3">
+                  <ErpSelect
+                    value={nextSellerId}
+                    onChange={(event) => setNextSellerId(event.target.value)}
+                    className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
+                  >
+                    <option value="">انتخاب فروشنده جدید</option>
+                    {sellerOptions.map((seller) => (
+                      <option key={seller.id} value={seller.id}>
+                        {`${seller.firstName || ""} ${seller.lastName || ""}`.trim() ||
+                          seller.username}
+                      </option>
+                    ))}
+                  </ErpSelect>
+                  <ErpTextarea
+                    value={sellerChangeReason}
+                    onChange={(event) =>
+                      setSellerChangeReason(event.target.value)
+                    }
+                    placeholder="دلیل تغییر مسئول (الزامی)"
+                    className="min-h-20 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
+                  />
+                  <ErpPressable
+                    type="submit"
+                    disabled={
+                      sellerMutationPending ||
+                      !nextSellerId ||
+                      !sellerChangeReason.trim()
+                    }
+                    onClick={handleSellerChange}
+                    className="w-full rounded-lg bg-[var(--sds-accent)] px-3 py-2 text-sm font-bold text-[var(--sds-text-inverse)] disabled:opacity-50"
+                  >
+                    {pendingOperations.has("seller-change")
+                      ? "در حال ثبت..."
+                      : "ثبت تغییر مسئول با سابقه حسابرسی"}
+                  </ErpPressable>
+                  {contract.realizedAt && !contract.realizedSeller && (
+                    <ErpPressable
+                      type="submit"
+                      disabled={
+                        sellerMutationPending ||
+                        !nextSellerId ||
+                        !sellerChangeReason.trim()
+                      }
+                      onClick={handleLegacyCreditAssignment}
+                      className="w-full rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-warning)] disabled:opacity-50"
+                    >
+                      انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی
+                    </ErpPressable>
+                  )}
+                </div>
+              </ErpSection>
+            )}
+
+            {detailSection === "history" && (
+              <ErpSection title="تاریخچه">
+                <div className="space-y-3">
+                  <TimelineItem
+                    icon={FaCalendarAlt}
+                    label="ایجاد شده"
+                    value={PersianCalendar.formatForDisplay(contract.createdAt)}
+                    tone="primary"
+                  />
+                  {contract.signedAt && (
+                    <TimelineItem
+                      icon={FaSignature}
+                      label="امضا شده"
+                      value={PersianCalendar.formatForDisplay(
+                        contract.signedAt,
+                      )}
+                      tone="success"
+                    />
+                  )}
+                  {contract.printedAt && (
+                    <TimelineItem
+                      icon={FaPrint}
+                      label="چاپ شده"
+                      value={PersianCalendar.formatForDisplay(
+                        contract.printedAt,
+                      )}
+                      tone="purple"
+                    />
+                  )}
+                </div>
+              </ErpSection>
+            )}
           </>
         }
       />
@@ -1032,15 +1865,28 @@ export default function ContractDetailPage() {
   );
 }
 
-function TimelineItem({ icon: Icon, label, value }: { icon: typeof FaCalendarAlt; label: string; value: string; tone: ErpTone }) {
+function TimelineItem({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof FaCalendarAlt;
+  label: string;
+  value: string;
+  tone: ErpTone;
+}) {
   return (
     <div className="flex items-center gap-3">
       <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
         <Icon className="h-4 w-4" />
       </span>
       <div>
-        <p className="text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{label}</p>
-        <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{value}</p>
+        <p className="text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+          {label}
+        </p>
+        <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+          {value}
+        </p>
       </div>
     </div>
   );

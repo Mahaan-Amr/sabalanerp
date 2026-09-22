@@ -20,6 +20,7 @@ import { formatPrice, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { InlineFieldError } from '@/lib/formErrors';
 import { formatPartnerMoney, readPartnerDecimalInput } from '../partner-sales/presentation';
+import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 
 export type AccountingMetric = {
   count?: number;
@@ -212,7 +213,7 @@ export const toneForStatus = (status?: string): ErpTone => {
 export function StatusBadge({ label, status, tone }: { label?: string; status?: string; tone?: ErpTone }) {
   return (
     <ErpBadge tone={tone || toneForStatus(status)}>
-      {label || (status ? correctionStatusLabels[status] || taxStatusLabels[status] || receivableStatusLabels[status] || invoiceStatusLabels[status] || contractStatusLabels[status] || status : '—')}
+      {label || (status ? correctionStatusLabels[status] || taxStatusLabels[status] || receivableStatusLabels[status] || invoiceStatusLabels[status] || contractStatusLabels[status] || operationalStatusLabel(status) : '—')}
     </ErpBadge>
   );
 }

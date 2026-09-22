@@ -20,7 +20,7 @@ interface ProjectionResponse {
   }>;
 }
 
-const unitLabel = (unit: string) => ({ meter: 'متر طول', squareMeter: 'متر مربع', count: 'عدد', ton: 'تن' }[unit] || unit);
+const unitLabel = (unit: string) => ({ meter: 'متر طول', squareMeter: 'متر مربع', count: 'عدد', ton: 'تن' }[unit] || 'واحد ثبت‌شده');
 
 export function ShipmentQuantitySummary({ contractId, customerId }: { contractId?: string; customerId?: string }) {
   const [data, setData] = useState<ProjectionResponse | null>(null);
@@ -81,7 +81,7 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
               <thead><tr className="border-b border-[var(--sds-border-default)] sds-text-muted"><th className="p-3">قرارداد و ردیف</th><th className="p-3">واحد</th><th className="p-3">قرارداد</th><th className="p-3">رزروشده</th><th className="p-3">خارج‌شده</th><th className="p-3">قابل بارگیری</th><th className="p-3">سلامت</th></tr></thead>
               <tbody>{data.rows.map((row) => {
                 const health = shipmentHealthPresentation(row.health);
-                return <tr key={`${row.contractItemId}:${row.unit}`} className="border-b border-[var(--sds-border-subtle)]"><td className="p-3"><p className="font-medium">{row.contractNumber || '—'} · {row.productName || 'محصول'}</p><p className="sds-text-muted mt-1 text-xs">{row.productRowId}</p></td><td className="p-3">{unitLabel(row.unit)}</td><td className="p-3">{formatShipmentQuantity(row.quantities?.contracted)}</td><td className="p-3">{formatShipmentQuantity(row.quantities?.finalizedReserved)}</td><td className="p-3">{formatShipmentQuantity(row.quantities?.physicallyDispatched)}</td><td className="p-3">{formatShipmentQuantity(row.quantities?.availableToLoad)}</td><td className="p-3"><ErpBadge tone={health.tone}>{health.label}</ErpBadge>{row.healthReasons.length > 0 && <p className="sds-text-muted mt-1 max-w-xs text-xs">{row.healthReasons.join('، ')}</p>}</td></tr>;
+                return <tr key={`${row.contractItemId}:${row.unit}`} className="border-b border-[var(--sds-border-subtle)]"><td className="p-3"><p className="font-medium">{row.contractNumber || '—'} · {row.productName || 'محصول'}</p></td><td className="p-3">{unitLabel(row.unit)}</td><td className="p-3">{formatShipmentQuantity(row.quantities?.contracted)}</td><td className="p-3">{formatShipmentQuantity(row.quantities?.finalizedReserved)}</td><td className="p-3">{formatShipmentQuantity(row.quantities?.physicallyDispatched)}</td><td className="p-3">{formatShipmentQuantity(row.quantities?.availableToLoad)}</td><td className="p-3"><ErpBadge tone={health.tone}>{health.label}</ErpBadge>{row.healthReasons.length > 0 && <p className="sds-text-muted mt-1 max-w-xs text-xs">{row.healthReasons.join('، ')}</p>}</td></tr>;
               })}</tbody>
             </table>
           </div>

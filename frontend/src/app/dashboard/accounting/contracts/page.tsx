@@ -27,6 +27,7 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
+import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import { financialEvidenceReviewFromConflict } from '@/features/accounting/financialEvidenceReview';
 import {
@@ -346,7 +347,7 @@ export default function AccountingContractsPage() {
       cell: (contract) => (
         <div className="flex flex-wrap gap-1">
           <ErpBadge tone={contractStatusTones[contract.status] || 'neutral'}>
-            {contractStatusLabels[contract.status] || contract.status}
+            {contractStatusLabels[contract.status] || operationalStatusLabel(contract.status)}
           </ErpBadge>
           {contract.isInactive && <ErpBadge tone="warning">غیرفعال</ErpBadge>}
         </div>
@@ -359,7 +360,7 @@ export default function AccountingContractsPage() {
       priority: 'secondary',
       cell: (contract) => (
         <div className="flex flex-wrap gap-1">
-          <StatusBadge label={sourceStatusLabels[contract.accounting.sourceStatus] || contract.accounting.sourceStatus} status={contract.accounting.sourceStatus} />
+          <StatusBadge label={sourceStatusLabels[contract.accounting.sourceStatus] || operationalStatusLabel(contract.accounting.sourceStatus)} status={contract.accounting.sourceStatus} />
           {contract.accounting.openCorrections > 0 && <StatusBadge label={`${contract.accounting.openCorrections.toLocaleString('fa-IR')} اصلاحیه`} tone="danger" />}
           {contract.accounting.openFlags > 0 && <StatusBadge label={`${contract.accounting.openFlags.toLocaleString('fa-IR')} پرچم`} tone="warning" />}
         </div>
@@ -372,9 +373,9 @@ export default function AccountingContractsPage() {
       priority: 'meta',
       cell: (contract) => (
         <div className="space-y-1 text-xs">
-          <p>{invoiceStatusLabels[contract.accounting.invoiceStatus] || contract.accounting.invoiceStatus}</p>
-          <p>{receivableStatusLabels[contract.accounting.receivableStatus] || contract.accounting.receivableStatus}</p>
-          <p>{taxStatusLabels[contract.accounting.taxStatus] || contract.accounting.taxStatus}</p>
+          <p>{invoiceStatusLabels[contract.accounting.invoiceStatus] || operationalStatusLabel(contract.accounting.invoiceStatus)}</p>
+          <p>{receivableStatusLabels[contract.accounting.receivableStatus] || operationalStatusLabel(contract.accounting.receivableStatus)}</p>
+          <p>{taxStatusLabels[contract.accounting.taxStatus] || operationalStatusLabel(contract.accounting.taxStatus)}</p>
         </div>
       ),
     },

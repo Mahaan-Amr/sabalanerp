@@ -4,6 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpSheet } from '@/components/erp';
 import { useAuth } from '@/contexts/AuthContext';
 import { dispatchCasesAPI } from '@/lib/api';
+import {
+  dispatchActionLabel,
+  dispatchCaseReference,
+  dispatchDriverName,
+  dispatchEventLabel,
+  dispatchRecoveryLabel,
+  dispatchStationLabel,
+  dispatchStatusLabel,
+  evidenceDetailPresentation,
+} from './dispatchCasePresentation';
 
 type Props = { workspace: 'hr' | 'vehicle-operations' | 'security' | 'logistics' | 'accounting'; subjectId?: string; loadingId?: string;
   onStaleChange?: (stale: boolean) => void };
@@ -17,6 +27,7 @@ export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId
   const [selected, setSelected] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<any>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [technicalDetailsVisible, setTechnicalDetailsVisible] = useState(false);
   const [accessScope, setAccessScope] = useState<string | null>(null);
   const [authorizedUserId, setAuthorizedUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -93,6 +104,7 @@ export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId
     });
   }, [clearAuthorizedCaches, filters, readSaved, save, selected, storageKey, updateStale, workspace]);
   const selectedEvent = timeline?.events?.find((event: any) => event.id === selectedEventId) || null;
+  const selectedEvidence = evidenceDetailPresentation(selectedEvent?.detail || {});
   const authorized = Boolean(user && authorizedUserId === user.id && accessScope);
   const visibleCases = authorized ? cases : [];
 
@@ -101,14 +113,14 @@ export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId
     {denied && <ErpInlineState kind="error" title="دسترسی به پرونده‌های ارسال مجاز نیست." />}
     {stale && <ErpInlineState kind="stale" title="نمای زنده در دسترس نیست؛ آخرین نمای موفق و انتخاب فعلی بدون تغییر نگه داشته شده است." />}
     {loading && !visibleCases.length ? <ErpLoading /> : visibleCases.length ? <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {visibleCases.map((item) => <ErpCard key={item.id} className="min-w-0 p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate">{item.driverName}</strong><span className="text-xs sds-text-secondary">{item.loadingNumber || 'بدون سند بارگیری'}</span></div><ErpBadge tone={item.status === 'EXIT_RECORDED' ? 'success' : 'info'}>{item.status}</ErpBadge></div><div className="mt-3"><ErpButton label="مشاهده خط زمانی" variant="ghost" onClick={() => setSelected(item.id)} /></div></ErpCard>)}
+      {visibleCases.map((item) => <ErpCard key={item.id} className="min-w-0 p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate">{dispatchDriverName(item.driverName)}</strong><span className="text-xs sds-text-secondary">{dispatchCaseReference(item.loadingNumber)}</span></div><ErpBadge tone={item.status === 'EXIT_RECORDED' ? 'success' : 'info'}>{dispatchStatusLabel(item.status)}</ErpBadge></div><div className="mt-3"><ErpButton label="مشاهده مراحل ارسال" variant="ghost" onClick={() => setSelected(item.id)} /></div></ErpCard>)}
     </div> : !denied && <ErpEmptyState title="پرونده ارسالی در این دامنه وجود ندارد" />}
-    <ErpSheet open={authorized && Boolean(selected)} onClose={() => { save({ selected, timeline, selectedEventId }); setSelected(null); setTimeline(null); setSelectedEventId(null); }} title="خط زمانی پرونده ارسال">
+    <ErpSheet open={authorized && Boolean(selected)} onClose={() => { save({ selected, timeline, selectedEventId }); setSelected(null); setTimeline(null); setSelectedEventId(null); setTechnicalDetailsVisible(false); }} title="مراحل ارسال">
       {!timeline ? <ErpLoading /> : <div className="space-y-4" dir="rtl">
-        <ErpInlineState kind="success" title={`اقدام جاری: ${timeline.currentAction}`} />
-        {timeline.recovery && <ErpInlineState kind="stale" title={`بازیابی: ${timeline.recovery}`} />}
-        {selectedEvent && <ErpCard className="p-4"><div className="flex flex-wrap justify-between gap-2"><strong>شواهد ایستگاه {selectedEvent.station}</strong><ErpButton label="بستن شواهد" variant="ghost" onClick={() => setSelectedEventId(null)} /></div><dl className="mt-3 space-y-2 text-sm"><div><dt className="sds-text-secondary">رویداد</dt><dd>{selectedEvent.eventType}</dd></div><div><dt className="sds-text-secondary">زمان</dt><dd>{new Date(selectedEvent.occurredAt).toLocaleString('fa-IR')}</dd></div></dl><pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-xs" dir="ltr">{JSON.stringify(selectedEvent.detail || {}, null, 2)}</pre></ErpCard>}
-        <ol className="space-y-3" aria-label="رویدادهای پرونده ارسال">{timeline.events.map((event: any) => <li key={event.id}><ErpCard className="p-4"><div className="flex flex-wrap justify-between gap-2"><strong>{event.eventType}</strong><ErpBadge tone="neutral">{event.station}</ErpBadge></div><time className="mt-2 block text-xs sds-text-secondary">{new Date(event.occurredAt).toLocaleString('fa-IR')}</time><div className="mt-2"><ErpButton label={`مشاهده شواهد ${event.station}`} variant="ghost" onClick={() => { setSelectedEventId(event.id); save({ selected, timeline, selectedEventId: event.id }); }} /></div></ErpCard></li>)}</ol>
+        <ErpInlineState kind="success" title={dispatchActionLabel(timeline.currentAction)} />
+        {timeline.recovery && <ErpInlineState kind="stale" title={dispatchRecoveryLabel(timeline.recovery)} />}
+        {selectedEvent && <ErpCard className="p-4"><div className="flex flex-wrap justify-between gap-2"><div><strong>جزئیات مرحله</strong><p className="mt-1 text-sm sds-text-muted">{dispatchStationLabel(selectedEvent.station)}</p></div><ErpButton label="بستن جزئیات" variant="ghost" onClick={() => { setSelectedEventId(null); setTechnicalDetailsVisible(false); }} /></div><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="sds-text-secondary">رویداد</dt><dd className="mt-1 font-medium sds-text-primary">{dispatchEventLabel(selectedEvent.eventType)}</dd></div><div><dt className="sds-text-secondary">زمان</dt><dd className="mt-1 font-medium sds-text-primary">{new Date(selectedEvent.occurredAt).toLocaleString('fa-IR')}</dd></div>{selectedEvidence.summary.map((field) => <div key={field.label}><dt className="sds-text-secondary">{field.label}</dt><dd className="mt-1 font-medium sds-text-primary">{field.value}</dd></div>)}</dl>{selectedEvidence.technical.length > 0 && <div className="mt-4 border-t border-[var(--sds-border-subtle)] pt-3"><ErpButton label={technicalDetailsVisible ? 'پنهان‌کردن اطلاعات تخصصی' : 'نمایش اطلاعات تخصصی سامانه'} variant="ghost" onClick={() => setTechnicalDetailsVisible((value) => !value)} />{technicalDetailsVisible && <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">{selectedEvidence.technical.map((field) => <div key={field.label} className="min-w-0"><dt className="sds-text-secondary">{field.label}</dt><dd className="mt-1 break-all font-mono sds-text-primary" dir="ltr">{field.value}</dd></div>)}</dl>}</div>}</ErpCard>}
+        <ol className="space-y-3" aria-label="مراحل پرونده ارسال">{timeline.events.map((event: any) => <li key={event.id}><ErpCard className="p-4"><div className="flex flex-wrap justify-between gap-2"><strong>{dispatchEventLabel(event.eventType)}</strong><ErpBadge tone="neutral">{dispatchStationLabel(event.station)}</ErpBadge></div><time className="mt-2 block text-xs sds-text-secondary">{new Date(event.occurredAt).toLocaleString('fa-IR')}</time><div className="mt-2"><ErpButton label="مشاهده جزئیات این مرحله" variant="ghost" onClick={() => { setTechnicalDetailsVisible(false); setSelectedEventId(event.id); save({ selected, timeline, selectedEventId: event.id }); }} /></div></ErpCard></li>)}</ol>
       </div>}
     </ErpSheet>
   </ErpSection>;

@@ -36,6 +36,7 @@ import { sourceStatusLabels, StatusBadge } from '@/features/accounting/accountin
 import { parseContractStatusQuery } from '@/features/sales/contractListQuery';
 import { assertSuccessfulSalesDownload, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
+import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 
 interface Contract {
   id: string;
@@ -560,7 +561,7 @@ export default function ContractsPage() {
       priority: 'meta',
       cell: (contract) => (
         <ErpBadge tone={statusTones[contract.status] || 'neutral'}>
-          {statusLabels[contract.status] || contract.status}
+          {statusLabels[contract.status] || operationalStatusLabel(contract.status)}
         </ErpBadge>
       ),
     },
@@ -576,7 +577,7 @@ export default function ContractsPage() {
           <div className="flex flex-col items-start gap-1">
             <StatusBadge
               status={accounting.sourceStatus}
-              label={sourceStatusLabels[accounting.sourceStatus] || accounting.sourceStatus}
+              label={sourceStatusLabels[accounting.sourceStatus] || operationalStatusLabel(accounting.sourceStatus)}
             />
             {accounting.openCorrections > 0 && (
               <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">

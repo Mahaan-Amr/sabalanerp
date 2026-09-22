@@ -5,16 +5,11 @@ import { FaFingerprint, FaRedo } from 'react-icons/fa';
 import { ErpFieldView, ErpInlineState, ErpSection, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { biometricConnectorClient } from '@/lib/biometricConnector';
-
-interface Diagnostics {
-  mode: 'SIMULATOR' | 'PHYSICAL';
-  availability: 'AVAILABLE' | 'UNAVAILABLE';
-  liveEnrollmentEnabled: boolean;
-  checkedAt: string;
-  device: { model: string; serial: string; connectorVersion: string; sdkVersion: string };
-  supportedChecks: readonly string[];
-  platform?: Record<'connector' | 'confirmation' | 'authorization' | 'projection' | 'auditIntegrity' | 'outage' | 'sms', number>;
-}
+import {
+  BiometricDiagnosticsResult,
+  BiometricDiagnosticsWorkflowError,
+  loadBiometricDiagnostics,
+} from '@/features/biometric/biometricDiagnosticsWorkflow';
 
 const checkLabels: Record<string, string> = {
   'capture-quality': 'کیفیت ثبت',
@@ -24,10 +19,15 @@ const checkLabels: Record<string, string> = {
   licensing: 'مجوز SDK',
 };
 
-type DiagnosticError = { kind: 'permission' | 'request'; message: string };
+type DiagnosticError = { kind: 'permission' | 'connector' | 'request'; message: string };
+
+const readableDeviceValue = (value?: string | null) => {
+  if (!value || ['UNAVAILABLE', 'UNKNOWN', 'unknown'].includes(value)) return 'در دسترس نیست';
+  return value;
+};
 
 export default function BiometricConnectorDiagnosticsPage() {
-  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
+  const [diagnostics, setDiagnostics] = useState<BiometricDiagnosticsResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<DiagnosticError | null>(null);
 
@@ -35,17 +35,20 @@ export default function BiometricConnectorDiagnosticsPage() {
     setLoading(true);
     setError(null);
     try {
-      const serverDiagnostics = await accountingAPI.getBiometricConnectorDiagnostics(); // Enforces permission and reads platform health.
-      const local = await biometricConnectorClient.status();
-      const issued = await accountingAPI.createBiometricDiagnosticCommand(local.workstationId);
-      const connectorResult = await biometricConnectorClient.execute(issued.data.data);
-      const completed = await accountingAPI.completeBiometricDiagnostic({ challengeId: issued.data.data.command.commandId,
-        signedResponse: { response: connectorResult.response, signature: connectorResult.signature } });
-      setDiagnostics({ ...completed.data.data, platform: serverDiagnostics.data.data.platform });
+      const result = await loadBiometricDiagnostics({
+        getServerDiagnostics: async () => (await accountingAPI.getBiometricConnectorDiagnostics()).data.data,
+        getLocalStatus: biometricConnectorClient.status,
+        issueDiagnosticCommand: async (workstationId) => (await accountingAPI.createBiometricDiagnosticCommand(workstationId)).data.data,
+        executeConnectorCommand: biometricConnectorClient.execute,
+        completeDiagnosticCommand: async (payload) => (await accountingAPI.completeBiometricDiagnostic(payload)).data.data,
+      });
+      setDiagnostics(result);
     } catch (requestError: any) {
-      setError(requestError.response?.status === 403
-        ? { kind: 'permission', message: 'شما اجازه مشاهده وضعیت اتصال اسکنر را ندارید.' }
-        : { kind: 'request', message: 'دریافت وضعیت اتصال اسکنر ناموفق بود.' });
+      setError(requestError instanceof BiometricDiagnosticsWorkflowError
+        ? { kind: requestError.kind, message: requestError.message }
+        : requestError.response?.status === 403
+          ? { kind: 'permission', message: 'شما اجازه مشاهده وضعیت اتصال اسکنر را ندارید.' }
+          : { kind: 'request', message: 'دریافت وضعیت اتصال اسکنر ناموفق بود.' });
     } finally {
       setLoading(false);
     }
@@ -70,20 +73,20 @@ export default function BiometricConnectorDiagnosticsPage() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--sds-radius-control)] bg-[var(--sds-accent-soft)] text-[var(--sds-accent)]"><FaFingerprint aria-hidden="true" /></span>
-                <div className="min-w-0"><p className="font-bold sds-text-primary">{diagnostics.device.model}</p><p className="mt-1 text-xs sds-text-muted">شناسه دستگاه: {diagnostics.device.serial}</p></div>
+                <div className="min-w-0"><p className="font-bold sds-text-primary">{readableDeviceValue(diagnostics.device.model)}</p><p className="mt-1 text-xs sds-text-muted">شناسه دستگاه: {readableDeviceValue(diagnostics.device.serial)}</p></div>
               </div>
               <ErpStatus label={diagnostics.availability === 'AVAILABLE' ? 'در دسترس' : 'قطع'} tone={diagnostics.availability === 'AVAILABLE' ? 'success' : 'danger'} />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <ErpFieldView label="نوع اتصال" value={diagnostics.mode === 'PHYSICAL' ? 'اسکنر فیزیکی محلی' : 'شبیه‌ساز قطعی'} tone="info" />
               <ErpFieldView label="ثبت واقعی" value={diagnostics.liveEnrollmentEnabled ? 'فعال' : 'غیرفعال'} tone={diagnostics.liveEnrollmentEnabled ? 'success' : 'warning'} />
-              <ErpFieldView label="نسخه اتصال" value={diagnostics.device.connectorVersion} />
-              <ErpFieldView label="نسخه SDK" value={diagnostics.device.sdkVersion} />
+              <ErpFieldView label="نسخه اتصال" value={readableDeviceValue(diagnostics.device.connectorVersion)} />
+              <ErpFieldView label="نسخه نرم‌افزار دستگاه" value={readableDeviceValue(diagnostics.device.sdkVersion)} />
             </div>
           </ErpSection>
           <ErpSection title="بررسی‌های پشتیبانی‌شده">
             <div className="grid gap-3 sm:grid-cols-2">
-              {diagnostics.supportedChecks.map((check) => <ErpFieldView key={check} label={checkLabels[check] || check} value="آماده آزمون خودکار" tone="success" />)}
+              {diagnostics.supportedChecks.map((check) => <ErpFieldView key={check} label={checkLabels[check] || 'قابلیت دستگاه'} value={diagnostics.availability === 'AVAILABLE' ? 'آماده استفاده' : 'پشتیبانی می‌شود؛ اتصال برقرار نیست'} tone={diagnostics.availability === 'AVAILABLE' ? 'success' : 'warning'} />)}
             </div>
           </ErpSection>
           {diagnostics.platform && <ErpSection title="پایش زنجیره ارسال" description="مقدار صفر یعنی مورد باز فعلی یا شکست ثبت‌شده در ۲۴ ساعت اخیر دیده نشده است؛ تطبیق روزانه موارد منقضی را به استثنای ممیزی تبدیل می‌کند.">

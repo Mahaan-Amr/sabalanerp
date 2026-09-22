@@ -80,10 +80,10 @@ test('incomplete historical snapshots stay explicit and never become blank ident
       issuedAt: '2026-08-09T12:00:00Z', documentArtifacts: [], printHandoffs: [], statementAdjustments: [] }],
   });
 
-  assert.equal(item.loadingNumber, 'پرونده legacy-candidate');
+  assert.equal(item.loadingNumber, 'بارگیری ثبت‌شده');
   assert.equal(item.customerName, 'مشتری در تصویر ثابت ثبت نشده');
   assert.equal(item.destination, 'مقصد در تصویر ثابت ثبت نشده');
-  assert.equal(item.vehiclePlate, 'ثبت نشده در تصویر ثابت');
-  assert.equal(item.driverName, 'ثبت نشده در تصویر ثابت');
+  assert.equal(item.vehiclePlate, 'پلاک در تصویر ثابت ثبت نشده');
+  assert.equal(item.driverName, 'نام راننده در تصویر ثابت ثبت نشده');
   assert.equal(item.total.amount, 'UNKNOWN');
 });

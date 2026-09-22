@@ -1,5 +1,6 @@
 'use client';
 import { ErpBadge } from '@/components/erp';
+import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 
 export const statusLabels: Record<string, string> = {
   DRAFT: 'پیش‌نویس',
@@ -29,7 +30,7 @@ export const dateFa = (value?: string | Date | null) => {
 
 export const StatusBadge = ({ status }: { status: string }) => {
   const tone = status === 'FINALIZED' ? 'success' : status === 'CANCELLED' ? 'danger' : 'warning';
-  return <ErpBadge tone={tone}>{statusLabels[status] || status}</ErpBadge>;
+  return <ErpBadge tone={tone}>{statusLabels[status] || operationalStatusLabel(status)}</ErpBadge>;
 };
 
 export const driverName = (snapshot: any) => {

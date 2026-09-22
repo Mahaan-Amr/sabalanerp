@@ -7,7 +7,7 @@ import { createFixtureDispatchDocumentsClient } from './dispatchDocumentsFixture
 
 const noop = () => undefined;
 
-test('issued case exposes two retained downloads and exactly three primary print actions', async () => {
+test('issued case exposes two retained downloads and exactly three primary print actions without technical guidance', async () => {
   const workspace = await createFixtureDispatchDocumentsClient('MANAGE').load();
   const item = workspace.cases.find((candidate) => candidate.id === 'dispatch-issued')!;
   const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} rejectionReason="" onRejectionReason={noop} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
@@ -15,7 +15,7 @@ test('issued case exposes two retained downloads and exactly three primary print
   assert.match(html, /دانلود صورت‌حساب/);
   assert.equal((html.match(/چاپ بارنامه/g) || []).length, 1);
   assert.equal((html.match(/چاپ صورت‌حساب/g) || []).length, 1);
-  assert.equal((html.match(/چاپ هر دو/g) || []).length, 2); // action plus retained-bytes guidance
+  assert.equal((html.match(/چاپ هر دو/g) || []).length, 1);
   assert.match(html, /اصلاحیه‌های افزایشی/);
 });
 

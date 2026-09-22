@@ -29,6 +29,7 @@ import {
 import { sanitizeContractDataCustomerSnapshot } from './contractSnapshotBoundary';
 import { assertContractQuantityEvidenceReadyForFinalization } from './contractQuantityEvidenceGuard';
 import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
+import { provisionApprovedSalesContractCustomer } from './accountingCustomerTreasuryPrisma';
 import {
   validateContractPartyChangeCompleteness,
   validateContractPartyIdentity
@@ -1376,20 +1377,25 @@ export async function approveContract(
     throw new Error('Contract cannot be approved in current status');
   }
 
-  const updatedContract = await prisma.salesContract.update({
-    where: { id: contractId },
-    data: {
-      status: 'APPROVED',
-      approvedBy: userId,
-      signatures: {
-        ...(contract.signatures as any || {}),
-        approve: {
-          by: userId,
-          at: new Date().toISOString(),
-          note: note || null
+  const approvedAt = new Date();
+  const updatedContract = await prisma.$transaction(async (tx) => {
+    const updated = await tx.salesContract.update({
+      where: { id: contractId },
+      data: {
+        status: 'APPROVED',
+        approvedBy: userId,
+        signatures: {
+          ...(contract.signatures as any || {}),
+          approve: {
+            by: userId,
+            at: approvedAt.toISOString(),
+            note: note || null
+          }
         }
       }
-    }
+    });
+    await provisionApprovedSalesContractCustomer(tx, { contractId, approvedAt, actorId: userId });
+    return updated;
   });
 
   return updatedContract;

@@ -5,6 +5,7 @@ import smsService from './smsService';
 import { recordContractCancellation } from './salesAttributionService';
 import type { PartnerConfirmationHooks } from './partnerSales/customerOutput/existingFlow';
 import { createPrismaPartnerConfirmationHooks } from './partnerSales/customerOutput/prismaHooks';
+import { provisionApprovedSalesContractCustomer } from './accountingCustomerTreasuryPrisma';
 
 
 const LINK_TTL_DAYS = parseInt(process.env.CONTRACT_CONFIRM_LINK_TTL_DAYS || '60', 10);
@@ -685,6 +686,12 @@ export class ContractConfirmationService {
         }
       });
 
+      await provisionApprovedSalesContractCustomer(tx, {
+        contractId: session.contractId,
+        approvedAt: verifiedAt,
+        actorId: `customer-confirmation:${session.id}`,
+      });
+
       await tx.contractConfirmationAuditLog.create({
         data: {
           contractId: session.contractId,
@@ -831,6 +838,12 @@ export class ContractConfirmationService {
             }
           }
         }
+      });
+
+      await provisionApprovedSalesContractCustomer(tx, {
+        contractId: session.contractId,
+        approvedAt: verifiedAt,
+        actorId: `customer-confirmation:${session.id}`,
       });
 
       await tx.contractConfirmationAuditLog.create({

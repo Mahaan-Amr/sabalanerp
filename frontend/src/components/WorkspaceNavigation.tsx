@@ -8,6 +8,7 @@ import {
   FaUsers,
   FaUserTie,
   FaCalculator,
+  FaMoneyCheckAlt,
   FaWarehouse,
   FaShieldAlt,
   FaChevronLeft,
@@ -577,10 +578,31 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
       case WORKSPACES.ACCOUNTING:
         return [
           {
+            name: "دفترکل",
+            namePersian: "دفترکل و کدینگ",
+            href: "/dashboard/accounting/ledger",
+            icon: FaCalculator,
+            show: true,
+          },
+          {
+            name: "Supply Chain Accounting",
+            namePersian: "خرید، موجودی و بهای تمام‌شده",
+            href: "/dashboard/accounting/supply-chain",
+            icon: FaClipboardList,
+            show: true,
+          },
+          {
             name: "Accounting Dashboard",
             namePersian: "داشبورد حسابداری",
             href: "/dashboard/accounting",
             icon: FaChartLine,
+            show: true,
+          },
+          {
+            name: "Period End",
+            namePersian: "پایان دوره و گزارش قانونی",
+            href: "/dashboard/accounting/period-end",
+            icon: FaClipboardList,
             show: true,
           },
           {
@@ -612,6 +634,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show: true,
           },
           {
+            name: "Customer Accounts",
+            namePersian: "حساب‌های مالی مشتریان",
+            href: "/dashboard/accounting/customer-accounts",
+            icon: FaCalculator,
+            show: true,
+          },
+          {
             name: "Payments",
             namePersian: "دریافت‌ها و چک‌ها",
             href: "/dashboard/accounting/payments",
@@ -619,9 +648,23 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show: true,
           },
           {
+            name: "Treasury Control",
+            namePersian: "کنترل خزانه‌داری",
+            href: "/dashboard/accounting/treasury",
+            icon: FaMoneyCheckAlt,
+            show: true,
+          },
+          {
             name: "Tax",
             namePersian: "مالیات و سامانه مودیان",
             href: "/dashboard/accounting/tax",
+            icon: FaClipboardList,
+            show: true,
+          },
+          {
+            name: "Tax Operations",
+            namePersian: "عملیات مالیاتی قطعی",
+            href: "/dashboard/accounting/tax-center",
             icon: FaClipboardList,
             show: true,
           },

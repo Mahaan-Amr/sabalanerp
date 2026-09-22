@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { publishGuardInboundOperationalEvidence } from './accountingOperationalEvidence';
 
 export class GuardInboundMovementValidationError extends Error {}
 export class GuardInboundMovementConflictError extends Error {}
@@ -68,9 +69,15 @@ export const completeGuardInboundMovement = (prisma: PrismaClient, input: { move
   if (movement.status === 'INFO_COMPLETED') return presentGuardInboundMovement(
     await tx.securityVehicleMovement.findUniqueOrThrow({ where: { id: movement.id }, include: guardInboundMovementInclude }));
   if (movement.status !== 'ENTRY_RECORDED') throw new GuardInboundMovementConflictError('Inbound movement is not open for completion.');
-  return presentGuardInboundMovement(await tx.securityVehicleMovement.update({ where: { id: movement.id }, data: { status: 'INFO_COMPLETED', completedAt: new Date(),
+  const completed = await tx.securityVehicleMovement.update({ where: { id: movement.id }, data: { status: 'INFO_COMPLETED', completedAt: new Date(),
     driverSnapshot: json(input.driverSnapshot) ?? storedJson(movement.driverSnapshot),
     documentSnapshot: json(input.documentSnapshot) ?? storedJson(movement.documentSnapshot),
     settlementSnapshot: json(input.settlementSnapshot) ?? storedJson(movement.settlementSnapshot),
-    notes: input.notes ?? movement.notes }, include: guardInboundMovementInclude }));
+    notes: input.notes ?? movement.notes }, include: guardInboundMovementInclude });
+  const document = completed.documentSnapshot && typeof completed.documentSnapshot === 'object' && !Array.isArray(completed.documentSnapshot)
+    ? completed.documentSnapshot as Record<string, unknown> : {};
+  await publishGuardInboundOperationalEvidence(tx, { sourceId: completed.id, sourceVersion: 1,
+    sourcePayload: { ...document, movementId: completed.id, movementNumber: completed.movementNumber,
+      status: completed.status, occurredAt: completed.occurredAt }, occurredAt: completed.occurredAt });
+  return presentGuardInboundMovement(completed);
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });

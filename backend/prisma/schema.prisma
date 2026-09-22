@@ -3563,20 +3563,20 @@ model DriverBiometricEnrollment {
 }
 
 model DriverBiometricTemplate {
-  id                String                    @id @default(cuid())
-  enrollmentId      String
-  finger            String
-  format            String
-  templateReference String                    @unique
-  protectedEnvelope Json
+  id                     String                    @id @default(cuid())
+  enrollmentId           String
+  finger                 String
+  format                 String
+  templateReference      String                    @unique
+  protectedEnvelope      Json
   protectedImageEnvelope Json?
-  imageMimeType     String?
-  imageWidth        Int?
-  imageHeight       Int?
-  imageByteLength   Int?
-  deviceEvidence    Json
-  createdAt         DateTime                  @default(now())
-  enrollment        DriverBiometricEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  imageMimeType          String?
+  imageWidth             Int?
+  imageHeight            Int?
+  imageByteLength        Int?
+  deviceEvidence         Json
+  createdAt              DateTime                  @default(now())
+  enrollment             DriverBiometricEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
 
   @@unique([enrollmentId, finger])
   @@map("driver_biometric_templates")
@@ -4035,6 +4035,7 @@ model ShipmentQuantityEvidence {
   linkedCorrections     ShipmentQuantityEvidence[]    @relation("ShipmentReturnEvidence")
   dispatchEvidence      ShipmentQuantityEvidence?     @relation("ShipmentReturnDispatch", fields: [dispatchEvidenceId], references: [id], onDelete: Restrict)
   linkedReturns         ShipmentQuantityEvidence[]    @relation("ShipmentReturnDispatch")
+  inventoryValuations   InventoryValuationEvidence[]
 
   @@unique([sourceType, sourceId, sourceVersion], map: "shipment_quantity_evidence_sourceType_sourceId_sourceVersion_ke")
   @@unique([guardReturnMovementId, contractItemId, dispatchEvidenceId], map: "shipment_quantity_evidence_guardReturnMovementId_contractItemId")
@@ -4653,6 +4654,1997 @@ model AccountingAuditLog {
   @@map("accounting_audit_logs")
 }
 
+// Canonical general-ledger foundation. The older AccountingFinancialRecord and
+// JournalVoucher models remain legacy operational evidence until the migration
+// ticket classifies them explicitly; they are not authoritative ledger truth.
+model AccountingLegalEntity {
+  id                String                       @id @default(cuid())
+  code              String                       @unique
+  namePersian       String
+  nationalId        String?
+  economicCode      String?
+  baseCurrency      String                       @default("IRR")
+  activeFrom        DateTime
+  activeTo          DateTime?
+  createdBy         String
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  books             AccountingBook[]
+  parties           AccountingParty[]
+  financialAccounts AccountingFinancialAccount[]
+
+  @@index([activeFrom, activeTo])
+  @@map("accounting_legal_entities")
+}
+
+model AccountingBook {
+  id                         String                                @id @default(cuid())
+  legalEntityId              String
+  code                       String
+  namePersian                String
+  baseCurrency               String                                @default("IRR")
+  isPrimary                  Boolean                               @default(true)
+  createdBy                  String
+  createdAt                  DateTime                              @default(now())
+  updatedAt                  DateTime                              @updatedAt
+  legalEntity                AccountingLegalEntity                 @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  fiscalYears                AccountingFiscalYear[]
+  codeSchemes                AccountingCodeScheme[]
+  accounts                   AccountingLedgerAccount[]
+  dimensionTypes             AccountingDimensionType[]
+  vouchers                   AccountingLedgerVoucher[]
+  sequences                  AccountingVoucherSequence[]
+  operationalReconciliations AccountingOperationalReconciliation[]
+  supplyChainPostingRules    AccountingSupplyChainPostingRule[]
+
+  @@unique([legalEntityId, code])
+  @@index([legalEntityId, isPrimary])
+  @@map("accounting_books")
+}
+
+model AccountingFiscalYear {
+  id                         String                                @id @default(cuid())
+  bookId                     String
+  code                       String
+  titlePersian               String
+  startsAt                   DateTime
+  endsAt                     DateTime
+  status                     AccountingFiscalYearStatus            @default(DRAFT)
+  createdBy                  String
+  createdAt                  DateTime                              @default(now())
+  updatedAt                  DateTime                              @updatedAt
+  book                       AccountingBook                        @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  periods                    AccountingPostingPeriod[]
+  vouchers                   AccountingLedgerVoucher[]
+  sequences                  AccountingVoucherSequence[]
+  operationalReconciliations AccountingOperationalReconciliation[]
+
+  @@unique([bookId, code])
+  @@index([bookId, startsAt, endsAt])
+  @@index([bookId, status])
+  @@map("accounting_fiscal_years")
+}
+
+model AccountingPostingPeriod {
+  id                         String                                @id @default(cuid())
+  fiscalYearId               String
+  code                       String
+  titlePersian               String
+  sequence                   Int
+  startsAt                   DateTime
+  endsAt                     DateTime
+  status                     AccountingPostingPeriodStatus         @default(OPEN)
+  isAdjustment               Boolean                               @default(false)
+  closedAt                   DateTime?
+  closedBy                   String?
+  closeReason                String?
+  createdAt                  DateTime                              @default(now())
+  updatedAt                  DateTime                              @updatedAt
+  fiscalYear                 AccountingFiscalYear                  @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  vouchers                   AccountingLedgerVoucher[]
+  operationalReconciliations AccountingOperationalReconciliation[]
+
+  @@unique([fiscalYearId, code])
+  @@unique([fiscalYearId, sequence])
+  @@index([fiscalYearId, startsAt, endsAt])
+  @@index([fiscalYearId, status])
+  @@map("accounting_posting_periods")
+}
+
+model AccountingCodeScheme {
+  id            String                    @id @default(cuid())
+  bookId        String
+  version       Int
+  effectiveFrom DateTime
+  retiredAt     DateTime?
+  groupLength   Int
+  kolLength     Int
+  moinLength    Int
+  createdBy     String
+  createdAt     DateTime                  @default(now())
+  book          AccountingBook            @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  accounts      AccountingLedgerAccount[]
+
+  @@unique([bookId, version])
+  @@index([bookId, effectiveFrom, retiredAt])
+  @@map("accounting_code_schemes")
+}
+
+model AccountingLedgerAccount {
+  id                          String                                 @id @default(cuid())
+  bookId                      String
+  codeSchemeId                String
+  code                        String
+  titlePersian                String
+  level                       AccountingLedgerAccountLevel
+  normalSide                  AccountingNormalSide
+  statementRole               AccountingStatementRole
+  currencyBehavior            AccountingCurrencyBehavior             @default(BASE_ONLY)
+  partyRequirement            AccountingDimensionRequirement         @default(FORBIDDEN)
+  financialAccountRequirement AccountingDimensionRequirement         @default(FORBIDDEN)
+  parentId                    String?
+  contraAccountId             String?
+  successorAccountId          String?
+  effectiveFrom               DateTime
+  effectiveTo                 DateTime?
+  retiredAt                   DateTime?
+  retiredBy                   String?
+  retirementReason            String?
+  meaningLockedAt             DateTime?
+  createdBy                   String
+  createdAt                   DateTime                               @default(now())
+  updatedAt                   DateTime                               @updatedAt
+  book                        AccountingBook                         @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  codeScheme                  AccountingCodeScheme                   @relation(fields: [codeSchemeId], references: [id], onDelete: Restrict)
+  parent                      AccountingLedgerAccount?               @relation("AccountingLedgerHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children                    AccountingLedgerAccount[]              @relation("AccountingLedgerHierarchy")
+  contraAccount               AccountingLedgerAccount?               @relation("AccountingLedgerContra", fields: [contraAccountId], references: [id], onDelete: Restrict)
+  contraFor                   AccountingLedgerAccount[]              @relation("AccountingLedgerContra")
+  successorAccount            AccountingLedgerAccount?               @relation("AccountingLedgerSuccessor", fields: [successorAccountId], references: [id], onDelete: Restrict)
+  predecessorAccounts         AccountingLedgerAccount[]              @relation("AccountingLedgerSuccessor")
+  dimensionRules              AccountingLedgerAccountDimensionRule[]
+  lines                       AccountingLedgerLine[]
+  supplyChainPostingRules     AccountingSupplyChainPostingRule[]
+
+  @@unique([bookId, code])
+  @@index([bookId, level, retiredAt])
+  @@index([parentId])
+  @@map("accounting_ledger_accounts")
+}
+
+model AccountingDimensionType {
+  id            String                                 @id @default(cuid())
+  bookId        String
+  code          String
+  titlePersian  String
+  sourceKind    String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdBy     String
+  createdAt     DateTime                               @default(now())
+  book          AccountingBook                         @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  members       AccountingDimensionMember[]
+  accountRules  AccountingLedgerAccountDimensionRule[]
+  lineValues    AccountingLedgerLineDimension[]
+
+  @@unique([bookId, code])
+  @@index([bookId, effectiveFrom, effectiveTo])
+  @@map("accounting_dimension_types")
+}
+
+model AccountingDimensionMember {
+  id              String                          @id @default(cuid())
+  dimensionTypeId String
+  sourceId        String
+  code            String?
+  titlePersian    String
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  createdAt       DateTime                        @default(now())
+  dimensionType   AccountingDimensionType         @relation(fields: [dimensionTypeId], references: [id], onDelete: Restrict)
+  lineValues      AccountingLedgerLineDimension[]
+
+  @@unique([dimensionTypeId, sourceId])
+  @@index([dimensionTypeId, effectiveFrom, effectiveTo])
+  @@map("accounting_dimension_members")
+}
+
+model AccountingLedgerAccountDimensionRule {
+  id              String                         @id @default(cuid())
+  accountId       String
+  dimensionTypeId String
+  requirement     AccountingDimensionRequirement
+  createdAt       DateTime                       @default(now())
+  account         AccountingLedgerAccount        @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  dimensionType   AccountingDimensionType        @relation(fields: [dimensionTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([accountId, dimensionTypeId])
+  @@index([dimensionTypeId])
+  @@map("accounting_ledger_account_dimension_rules")
+}
+
+model AccountingParty {
+  id                             String                                    @id @default(cuid())
+  legalEntityId                  String
+  sourceKind                     String
+  sourceId                       String
+  displayName                    String
+  nationalId                     String?
+  activeFrom                     DateTime
+  activeTo                       DateTime?
+  createdAt                      DateTime                                  @default(now())
+  updatedAt                      DateTime                                  @updatedAt
+  legalEntity                    AccountingLegalEntity                     @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  roles                          AccountingPartyRoleAssignment[]
+  ledgerLines                    AccountingLedgerLine[]
+  supplierInvoices               AccountingSupplierInvoice[]
+  supplierOpenItems              AccountingSupplierOpenItem[]
+  supplierSettlementTransactions AccountingSupplierSettlementTransaction[]
+  payableChecks                  AccountingPayableCheck[]
+
+  @@unique([legalEntityId, sourceKind, sourceId])
+  @@index([legalEntityId, activeFrom, activeTo])
+  @@map("accounting_parties")
+}
+
+model AccountingPartyRoleAssignment {
+  id              String                  @id @default(cuid())
+  partyId         String
+  role            AccountingPartyRoleType
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  createdBy       String
+  createdAt       DateTime                @default(now())
+  evidenceType    String?
+  evidenceId      String?
+  evidenceVersion Int?
+  evidenceHash    String?
+  evidencePayload Json?
+  party           AccountingParty         @relation(fields: [partyId], references: [id], onDelete: Restrict)
+
+  @@unique([partyId, role, effectiveFrom])
+  @@index([partyId, role, effectiveTo])
+  @@map("accounting_party_role_assignments")
+}
+
+model AccountingFinancialAccount {
+  id                             String                                    @id @default(cuid())
+  legalEntityId                  String
+  kind                           AccountingFinancialAccountKind
+  titlePersian                   String
+  institutionName                String?
+  branchName                     String?
+  accountNumber                  String?
+  iban                           String?
+  currency                       String                                    @default("IRR")
+  activeFrom                     DateTime
+  activeTo                       DateTime?
+  createdBy                      String
+  createdAt                      DateTime                                  @default(now())
+  legalEntity                    AccountingLegalEntity                     @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  ledgerLines                    AccountingLedgerLine[]
+  payableChecks                  AccountingPayableCheck[]
+  supplierSettlementTransactions AccountingSupplierSettlementTransaction[]
+
+  @@unique([legalEntityId, iban])
+  @@index([legalEntityId, kind, activeTo])
+  @@map("accounting_financial_accounts")
+}
+
+model AccountingLedgerVoucher {
+  id                             String                                    @id @default(cuid())
+  bookId                         String
+  fiscalYearId                   String
+  periodId                       String
+  referenceNumber                String                                    @unique
+  statutoryNumber                Int?
+  idempotencyKey                 String                                    @unique
+  correlationId                  String
+  status                         AccountingLedgerVoucherStatus             @default(DRAFT)
+  description                    String
+  documentDate                   DateTime
+  occurredAt                     DateTime
+  recordedAt                     DateTime
+  discoveredAt                   DateTime?
+  postedAt                       DateTime?
+  reversedAt                     DateTime?
+  sourceType                     String
+  sourceId                       String
+  sourceVersion                  Int
+  sourceHash                     String
+  sourcePayload                  Json
+  debitTotalRials                Decimal                                   @db.Decimal(20, 0)
+  creditTotalRials               Decimal                                   @db.Decimal(20, 0)
+  contentHash                    String
+  reversalOfId                   String?
+  createdBy                      String
+  createdAt                      DateTime                                  @default(now())
+  updatedAt                      DateTime                                  @updatedAt
+  book                           AccountingBook                            @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  fiscalYear                     AccountingFiscalYear                      @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  period                         AccountingPostingPeriod                   @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  reversalOf                     AccountingLedgerVoucher?                  @relation("AccountingLedgerReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversals                      AccountingLedgerVoucher[]                 @relation("AccountingLedgerReversal")
+  lines                          AccountingLedgerLine[]
+  supplierInvoices               AccountingSupplierInvoice[]
+  supplierSettlementTransactions AccountingSupplierSettlementTransaction[]
+  supplyChainExceptions          AccountingSupplyChainException[]
+  inventoryEvents                AccountingInventoryEvent[]
+  productionBatches              AccountingProductionBatch[]
+  inventoryMigrationRuns         AccountingInventoryMigrationRun[]
+
+  @@unique([bookId, fiscalYearId, statutoryNumber])
+  @@unique([bookId, sourceType, sourceId, sourceVersion])
+  @@index([bookId, fiscalYearId, documentDate])
+  @@index([periodId, status])
+  @@index([sourceType, sourceId, sourceVersion])
+  @@index([reversalOfId])
+  @@map("accounting_ledger_vouchers")
+}
+
+model AccountingLedgerLine {
+  id                      String                          @id @default(cuid())
+  voucherId               String
+  sequence                Int
+  accountId               String
+  partyId                 String?
+  financialAccountId      String?
+  debitRials              Decimal                         @default(0) @db.Decimal(20, 0)
+  creditRials             Decimal                         @default(0) @db.Decimal(20, 0)
+  description             String?
+  originalAmount          Decimal?                        @db.Decimal(30, 8)
+  originalCurrency        String?
+  exchangeRate            Decimal?                        @db.Decimal(30, 10)
+  exchangeRateDate        DateTime?
+  exchangeRateSource      String?
+  rawAmountBeforeRounding Decimal?                        @db.Decimal(30, 8)
+  roundingRuleVersion     String?
+  evidenceType            String
+  evidenceId              String
+  evidenceVersion         Int
+  evidenceHash            String
+  evidencePayload         Json
+  createdAt               DateTime                        @default(now())
+  voucher                 AccountingLedgerVoucher         @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  account                 AccountingLedgerAccount         @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  party                   AccountingParty?                @relation(fields: [partyId], references: [id], onDelete: Restrict)
+  financialAccount        AccountingFinancialAccount?     @relation(fields: [financialAccountId], references: [id], onDelete: Restrict)
+  dimensions              AccountingLedgerLineDimension[]
+
+  @@unique([voucherId, sequence])
+  @@index([accountId, voucherId])
+  @@index([partyId, voucherId])
+  @@index([financialAccountId, voucherId])
+  @@map("accounting_ledger_lines")
+}
+
+model AccountingLedgerLineDimension {
+  id              String                    @id @default(cuid())
+  lineId          String
+  dimensionTypeId String
+  memberId        String
+  createdAt       DateTime                  @default(now())
+  line            AccountingLedgerLine      @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  dimensionType   AccountingDimensionType   @relation(fields: [dimensionTypeId], references: [id], onDelete: Restrict)
+  member          AccountingDimensionMember @relation(fields: [memberId], references: [id], onDelete: Restrict)
+
+  @@unique([lineId, dimensionTypeId])
+  @@index([dimensionTypeId, memberId])
+  @@map("accounting_ledger_line_dimensions")
+}
+
+model AccountingVoucherSequence {
+  id           String               @id @default(cuid())
+  bookId       String
+  fiscalYearId String
+  nextNumber   Int                  @default(1)
+  updatedAt    DateTime             @updatedAt
+  book         AccountingBook       @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  fiscalYear   AccountingFiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+
+  @@unique([bookId, fiscalYearId])
+  @@map("accounting_voucher_sequences")
+}
+
+model AccountingLedgerAuditEntry {
+  id               String                @id @default(cuid())
+  sequence         BigInt                @unique
+  action           String
+  result           AccountingAuditResult
+  actorId          String
+  effectiveProfile String
+  entityType       String
+  entityId         String
+  correlationId    String
+  reason           String?
+  payloadHash      String
+  previousHash     String?
+  entryHash        String                @unique
+  sessionContext   Json?
+  createdAt        DateTime              @default(now())
+
+  @@index([entityType, entityId, sequence])
+  @@index([actorId, sequence])
+  @@map("accounting_ledger_audit_entries")
+}
+
+model AccountingPeriodEndResult {
+  id              String   @id @default(cuid())
+  identity        String   @unique
+  bookId          String
+  sourceType      String
+  sourceId        String
+  sourceVersion   Int
+  sourceHash      String
+  resultKind      String
+  resultPayload   Json
+  voucherId       String?
+  statutoryNumber Int?
+  createdAt       DateTime @default(now())
+
+  @@unique([bookId, sourceType, sourceId, sourceVersion])
+  @@index([bookId, resultKind, createdAt])
+  @@map("accounting_period_end_results")
+}
+
+model AccountingAssetClassPolicy {
+  id                               String    @id @default(cuid())
+  bookId                           String
+  classCode                        String
+  version                          Int
+  titlePersian                     String
+  effectiveFrom                    DateTime
+  effectiveTo                      DateTime?
+  capitalizationThresholdRials     Decimal   @db.Decimal(20, 0)
+  bookMethod                       String
+  taxMethod                        String
+  usefulLifeMonths                 Int
+  residualValueBasisPoints         Int       @default(0)
+  decliningRateBasisPoints         Int?
+  assetAccountId                   String
+  cipAccountId                     String
+  depreciationExpenseAccountId     String
+  accumulatedDepreciationAccountId String
+  impairmentExpenseAccountId       String
+  impairmentAllowanceAccountId     String
+  disposalGainAccountId            String
+  disposalLossAccountId            String
+  changeReason                     String?
+  createdBy                        String
+  createdAt                        DateTime  @default(now())
+
+  @@unique([bookId, classCode, version])
+  @@index([bookId, effectiveFrom, effectiveTo])
+  @@map("accounting_asset_class_policies")
+}
+
+model AccountingFixedAsset {
+  id               String                     @id @default(cuid())
+  bookId           String
+  registerNumber   String
+  classPolicyId    String
+  titlePersian     String
+  serialNumber     String?
+  branchId         String?
+  costCenterId     String?
+  location         String?
+  custodianPartyId String?
+  acquisitionAt    DateTime
+  readyForUseAt    DateTime?
+  status           String
+  bookCostRials    Decimal                    @db.Decimal(20, 0)
+  taxCostRials     Decimal                    @db.Decimal(20, 0)
+  createdBy        String
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  components       AccountingAssetComponent[]
+  events           AccountingAssetEvent[]
+
+  @@unique([bookId, registerNumber])
+  @@index([bookId, status, readyForUseAt])
+  @@index([serialNumber])
+  @@map("accounting_fixed_assets")
+}
+
+model AccountingAssetComponent {
+  id                    String               @id @default(cuid())
+  assetId               String
+  componentIdentity     String
+  titlePersian          String
+  serialNumber          String?
+  bookCostRials         Decimal              @db.Decimal(20, 0)
+  taxCostRials          Decimal              @db.Decimal(20, 0)
+  residualValueRials    Decimal              @db.Decimal(20, 0)
+  usefulLifeMonths      Int
+  bookMethod            String
+  taxMethod             String
+  accumulatedBookRials  Decimal              @default(0) @db.Decimal(20, 0)
+  accumulatedTaxRials   Decimal              @default(0) @db.Decimal(20, 0)
+  replacedByComponentId String?
+  retiredAt             DateTime?
+  createdAt             DateTime             @default(now())
+  asset                 AccountingFixedAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([assetId, componentIdentity])
+  @@index([assetId, retiredAt])
+  @@map("accounting_asset_components")
+}
+
+model AccountingAssetEvent {
+  id            String               @id @default(cuid())
+  assetId       String
+  eventIdentity String               @unique
+  eventType     String
+  occurredAt    DateTime
+  sourceType    String
+  sourceId      String
+  sourceVersion Int
+  sourceHash    String
+  payload       Json
+  voucherId     String?
+  createdBy     String
+  createdAt     DateTime             @default(now())
+  asset         AccountingFixedAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceType, sourceId, sourceVersion])
+  @@index([assetId, occurredAt])
+  @@map("accounting_asset_events")
+}
+
+model AccountingPayrollHandoff {
+  id                String                        @id @default(cuid())
+  bookId            String
+  payrollRunId      String
+  payrollRunVersion Int
+  populationHash    String
+  policyHash        String
+  sourceHash        String
+  status            String
+  summaryPayload    Json
+  debitTotalRials   Decimal                       @db.Decimal(20, 0)
+  creditTotalRials  Decimal                       @db.Decimal(20, 0)
+  voucherId         String?
+  returnedReason    String?
+  acceptedBy        String?
+  acceptedAt        DateTime?
+  createdAt         DateTime                      @default(now())
+  obligations       AccountingPayrollObligation[]
+
+  @@unique([bookId, payrollRunId, payrollRunVersion])
+  @@index([bookId, status, createdAt])
+  @@map("accounting_payroll_handoffs")
+}
+
+model AccountingPayrollObligation {
+  id                  String                               @id @default(cuid())
+  handoffId           String
+  obligationIdentity  String                               @unique
+  obligationType      String
+  amountRials         Decimal                              @db.Decimal(20, 0)
+  settledRials        Decimal                              @default(0) @db.Decimal(20, 0)
+  status              String
+  lastAttemptIdentity String?
+  lastAttemptAt       DateTime?
+  createdAt           DateTime                             @default(now())
+  updatedAt           DateTime                             @updatedAt
+  handoff             AccountingPayrollHandoff             @relation(fields: [handoffId], references: [id], onDelete: Restrict)
+  settlementAttempts  AccountingPayrollSettlementAttempt[]
+
+  @@index([handoffId, status])
+  @@map("accounting_payroll_obligations")
+}
+
+model AccountingPayrollSettlementAttempt {
+  id                  String                      @id @default(cuid())
+  obligationId        String
+  attemptIdentity     String                      @unique
+  status              String
+  amountRials         Decimal                     @db.Decimal(20, 0)
+  bankResultHash      String?
+  settlementVoucherId String?
+  failureReason       String?
+  attemptedBy         String
+  attemptedAt         DateTime                    @default(now())
+  obligation          AccountingPayrollObligation @relation(fields: [obligationId], references: [id], onDelete: Restrict)
+
+  @@index([obligationId, attemptedAt])
+  @@map("accounting_payroll_settlement_attempts")
+}
+
+model AccountingRecognitionSchedule {
+  id                  String    @id @default(cuid())
+  bookId              String
+  scheduleIdentity    String
+  version             Int
+  scheduleType        String
+  status              String
+  sourceType          String
+  sourceId            String
+  sourceHash          String
+  effectiveFrom       DateTime
+  effectiveTo         DateTime?
+  recognitionStart    DateTime
+  recognitionEnd      DateTime
+  totalRials          Decimal   @db.Decimal(20, 0)
+  recognizedRials     Decimal   @default(0) @db.Decimal(20, 0)
+  estimateBasis       String
+  debitAccountId      String
+  creditAccountId     String
+  dimensionRules      Json
+  roundingRuleVersion String
+  postingPolicy       String
+  nextReviewAt        DateTime?
+  successorScheduleId String?
+  createdBy           String
+  createdAt           DateTime  @default(now())
+
+  @@unique([bookId, scheduleIdentity, version])
+  @@index([bookId, status, nextReviewAt])
+  @@map("accounting_recognition_schedules")
+}
+
+model AccountingEstimateCase {
+  id                   String   @id @default(cuid())
+  bookId               String
+  caseIdentity         String   @unique
+  classification       String
+  titlePersian         String
+  probability          String
+  reliablyMeasurable   Boolean
+  estimatedAmountRials Decimal? @db.Decimal(20, 0)
+  assumptions          Json
+  evidenceHash         String
+  nextReviewAt         DateTime
+  recognizedVoucherId  String?
+  disclosureSnapshotId String?
+  createdBy            String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([bookId, classification, nextReviewAt])
+  @@map("accounting_estimate_cases")
+}
+
+model AccountingFinancialStatementMapping {
+  id            String                                   @id @default(cuid())
+  bookId        String
+  version       Int
+  titlePersian  String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  contentHash   String
+  createdBy     String
+  createdAt     DateTime                                 @default(now())
+  rows          AccountingFinancialStatementMappingRow[]
+
+  @@unique([bookId, version])
+  @@index([bookId, effectiveFrom, effectiveTo])
+  @@map("accounting_financial_statement_mappings")
+}
+
+model AccountingFinancialStatementMappingRow {
+  id             String                              @id @default(cuid())
+  mappingId      String
+  accountId      String
+  statementType  String
+  sectionCode    String
+  signMultiplier Int                                 @default(1)
+  cashFlowClass  String?
+  noteCode       String?
+  createdAt      DateTime                            @default(now())
+  mapping        AccountingFinancialStatementMapping @relation(fields: [mappingId], references: [id], onDelete: Restrict)
+
+  @@unique([mappingId, accountId, statementType, sectionCode])
+  @@index([mappingId, statementType, sectionCode])
+  @@map("accounting_financial_statement_mapping_rows")
+}
+
+model AccountingOfficialReportSnapshot {
+  id               String   @id @default(cuid())
+  bookId           String
+  snapshotIdentity String   @unique
+  reportType       String
+  parameters       Json
+  cutoffAt         DateTime
+  mappingVersionId String?
+  policyVersions   Json
+  sourceIdentities Json
+  dataset          Json
+  datasetHash      String
+  pdfHash          String?
+  excelHash        String?
+  generatedBy      String
+  generatedAt      DateTime @default(now())
+
+  @@index([bookId, reportType, generatedAt])
+  @@map("accounting_official_report_snapshots")
+}
+
+model AccountingStatutoryFormat {
+  id              String    @id @default(cuid())
+  bookId          String
+  formatCode      String
+  version         Int
+  titlePersian    String
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  schemaPayload   Json
+  validationRules Json
+  officialSource  String
+  contentHash     String
+  createdBy       String
+  createdAt       DateTime  @default(now())
+
+  @@unique([bookId, formatCode, version])
+  @@index([bookId, effectiveFrom, effectiveTo])
+  @@map("accounting_statutory_formats")
+}
+
+model AccountingTaxObligation {
+  id                 String                           @id @default(cuid())
+  bookId             String
+  obligationIdentity String                           @unique
+  taxType            String
+  periodIdentity     String
+  status             String
+  dueAt              DateTime
+  ownerId            String
+  payableRials       Decimal                          @default(0) @db.Decimal(20, 0)
+  paidRials          Decimal                          @default(0) @db.Decimal(20, 0)
+  refundableRials    Decimal                          @default(0) @db.Decimal(20, 0)
+  penaltyRials       Decimal                          @default(0) @db.Decimal(20, 0)
+  adjustmentRials    Decimal                          @default(0) @db.Decimal(20, 0)
+  reconciliationHash String?
+  policyVersion      String
+  receiptEvidence    Json?
+  createdAt          DateTime                         @default(now())
+  updatedAt          DateTime                         @updatedAt
+  attempts           AccountingTaxComplianceAttempt[]
+
+  @@unique([bookId, taxType, periodIdentity])
+  @@index([bookId, status, dueAt])
+  @@map("accounting_tax_obligations")
+}
+
+model AccountingTaxComplianceAttempt {
+  id              String                  @id @default(cuid())
+  obligationId    String
+  attemptIdentity String                  @unique
+  status          String
+  requestHash     String
+  responseCode    String?
+  responsePayload Json?
+  receiptNumber   String?
+  attemptedBy     String
+  attemptedAt     DateTime                @default(now())
+  obligation      AccountingTaxObligation @relation(fields: [obligationId], references: [id], onDelete: Restrict)
+
+  @@index([obligationId, attemptedAt])
+  @@map("accounting_tax_compliance_attempts")
+}
+
+model AccountingCloseRun {
+  id                  String                   @id @default(cuid())
+  bookId              String
+  fiscalYearId        String
+  periodId            String?
+  runIdentity         String                   @unique
+  closeType           String
+  status              String
+  confirmationReason  String?
+  completedBy         String?
+  completedAt         DateTime?
+  evidenceHash        String?
+  predecessorRunId    String?
+  closingVoucherId    String?
+  openingVoucherId    String?
+  openingFiscalYearId String?
+  openingPeriodId     String?
+  yearEndEvidence     Json?
+  createdBy           String
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  steps               AccountingCloseRunStep[]
+
+  @@index([bookId, fiscalYearId, status])
+  @@index([periodId, status])
+  @@map("accounting_close_runs")
+}
+
+model AccountingCloseRunStep {
+  id            String             @id @default(cuid())
+  closeRunId    String
+  stepCode      String
+  status        String
+  evidenceHash  String?
+  blocker       String?
+  invalidatedBy Json?
+  checkedAt     DateTime?
+  updatedAt     DateTime           @updatedAt
+  closeRun      AccountingCloseRun @relation(fields: [closeRunId], references: [id], onDelete: Restrict)
+
+  @@unique([closeRunId, stepCode])
+  @@index([closeRunId, status])
+  @@map("accounting_close_run_steps")
+}
+
+model AccountingOperationalReconciliation {
+  id                    String                   @id @default(cuid())
+  bookId                String
+  fiscalYearId          String
+  periodId              String?
+  reconciliationCode    String
+  sourceSystem          String
+  sourceSnapshotHash    String
+  sourceDebitRials      Decimal                  @db.Decimal(20, 0)
+  sourceCreditRials     Decimal                  @db.Decimal(20, 0)
+  ledgerDebitRials      Decimal                  @db.Decimal(20, 0)
+  ledgerCreditRials     Decimal                  @db.Decimal(20, 0)
+  unresolvedDifferences Json
+  controlPayload        Json
+  evidenceHash          String
+  reconciledAt          DateTime
+  createdAt             DateTime                 @default(now())
+  book                  AccountingBook           @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  fiscalYear            AccountingFiscalYear     @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  period                AccountingPostingPeriod? @relation(fields: [periodId], references: [id], onDelete: Restrict)
+
+  @@unique([bookId, fiscalYearId, periodId, reconciliationCode, sourceSystem, sourceSnapshotHash])
+  @@index([bookId, fiscalYearId, periodId, reconciliationCode, reconciledAt])
+  @@map("accounting_operational_reconciliations")
+}
+
+model AccountingRestatementCase {
+  id                   String   @id @default(cuid())
+  bookId               String
+  caseIdentity         String   @unique
+  originalPeriodId     String
+  classification       String
+  discoveredAt         DateTime
+  amountRials          Decimal  @db.Decimal(20, 0)
+  materialityPolicyId  String
+  decisionReason       String
+  originalSnapshotIds  Json
+  restatedSnapshotIds  Json
+  correctingVoucherIds Json
+  comparativeEffects   Json
+  taxEffects           Json
+  status               String
+  decidedBy            String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([bookId, originalPeriodId, status])
+  @@map("accounting_restatement_cases")
+}
+
+model AccountingArchiveEvidence {
+  id                String    @id @default(cuid())
+  bookId            String
+  evidenceIdentity  String    @unique
+  evidenceType      String
+  sourceEntityType  String
+  sourceEntityId    String
+  contentHash       String
+  storageKey        String
+  mimeType          String
+  sizeBytes         BigInt
+  malwareScanStatus String
+  malwareScanAt     DateTime?
+  retentionPolicyId String
+  retainUntil       DateTime?
+  legalHold         Boolean   @default(false)
+  supersedesId      String?
+  uploadedBy        String
+  uploadedAt        DateTime  @default(now())
+
+  @@index([bookId, evidenceType, uploadedAt])
+  @@index([sourceEntityType, sourceEntityId])
+  @@index([retainUntil, legalHold])
+  @@map("accounting_archive_evidence")
+}
+
+model AccountingCustomerProfile {
+  id                   String                                @id @default(cuid())
+  legalEntityId        String
+  accountingPartyId    String
+  partySourceKind      String
+  partySourceId        String
+  displayName          String
+  openingBalanceRials  Decimal                               @default(0) @db.Decimal(20, 0)
+  activeFrom           DateTime
+  activeTo             DateTime?
+  createdBy            String
+  createdAt            DateTime                              @default(now())
+  relationships        AccountingCustomerRelationship[]
+  invoices             AccountingCommercialCustomerInvoice[]
+  openItems            AccountingCustomerOpenItem[]
+  treasuryTransactions AccountingTreasuryTransaction[]
+
+  @@unique([legalEntityId, partySourceKind, partySourceId])
+  @@index([accountingPartyId, activeTo])
+  @@map("accounting_customer_profiles")
+}
+
+model AccountingCustomerRelationship {
+  id            String                    @id @default(cuid())
+  profileId     String
+  sourceType    String
+  sourceId      String
+  sourceVersion Int
+  approvedAt    DateTime
+  cancelledAt   DateTime?
+  evidenceHash  String
+  createdBy     String
+  createdAt     DateTime                  @default(now())
+  profile       AccountingCustomerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceType, sourceId, sourceVersion])
+  @@index([profileId, cancelledAt])
+  @@map("accounting_customer_relationships")
+}
+
+model AccountingExceptionCase {
+  id                 String    @id @default(cuid())
+  code               String
+  messagePersian     String
+  assignedProfile    String
+  assignedUserId     String?
+  sourceType         String
+  sourceId           String
+  sourceVersion      Int
+  evidenceHash       String
+  status             String    @default("OPEN")
+  resolutionEvidence Json?
+  createdAt          DateTime  @default(now())
+  resolvedAt         DateTime?
+
+  @@unique([sourceType, sourceId, sourceVersion, code])
+  @@index([status, assignedProfile, createdAt])
+  @@map("accounting_exception_cases")
+}
+
+model AccountingControlTransferPolicy {
+  id                  String    @id @default(cuid())
+  contractId          String
+  version             Int
+  carriage            String
+  recognitionPoint    String
+  exceptionReason     String?
+  exceptionTerms      Json?
+  exceptionOccurredAt DateTime?
+  effectiveFrom       DateTime
+  effectiveTo         DateTime?
+  evidenceHash        String
+  createdBy           String
+  createdAt           DateTime  @default(now())
+
+  @@unique([contractId, version])
+  @@index([contractId, effectiveFrom, effectiveTo])
+  @@map("accounting_control_transfer_policies")
+}
+
+model AccountingDestinationAcceptanceEvidence {
+  id               String   @id @default(cuid())
+  sourceId         String
+  sourceVersion    Int
+  contractId       String
+  contractVersion  Int
+  pricingVersionId String
+  occurredAt       DateTime
+  productRows      Json
+  evidenceHash     String   @unique
+  createdBy        String
+  createdAt        DateTime @default(now())
+
+  @@unique([sourceId, sourceVersion])
+  @@index([contractId, occurredAt])
+  @@map("accounting_destination_acceptance_evidence")
+}
+
+model AccountingCustomerPostingRule {
+  id                       String    @id @default(cuid())
+  legalEntityId            String
+  code                     String
+  version                  Int
+  receivableAccountId      String
+  revenueAccountId         String
+  outputTaxAccountId       String
+  inventoryAccountId       String
+  costAccountId            String
+  bankClearingAccountId    String
+  customerAdvanceAccountId String
+  effectiveFrom            DateTime
+  effectiveTo              DateTime?
+  evidenceHash             String
+  createdBy                String
+  createdAt                DateTime  @default(now())
+
+  @@unique([legalEntityId, code, version])
+  @@index([legalEntityId, effectiveFrom, effectiveTo])
+  @@map("accounting_customer_posting_rules")
+}
+
+model AccountingInventoryCostEvidence {
+  id            String   @id @default(cuid())
+  legalEntityId String
+  sourceType    String
+  sourceId      String
+  sourceVersion Int
+  contractId    String
+  productRowId  String
+  quantity      Decimal  @db.Decimal(18, 3)
+  costRials     Decimal  @db.Decimal(20, 0)
+  effectiveAt   DateTime
+  payload       Json
+  evidenceHash  String
+  createdAt     DateTime @default(now())
+
+  @@unique([sourceType, sourceId, sourceVersion])
+  @@index([contractId, productRowId, effectiveAt])
+  @@map("accounting_inventory_cost_evidence")
+}
+
+model InventoryValuationEvidence {
+  id                         String                   @id @default(cuid())
+  shipmentQuantityEvidenceId String
+  valuationVersion           Int
+  valuationMethod            String
+  inventoryDocumentId        String
+  contractId                 String
+  productRowId               String
+  quantity                   Decimal                  @db.Decimal(18, 3)
+  unitCostRials              Decimal                  @db.Decimal(20, 0)
+  totalCostRials             Decimal                  @db.Decimal(20, 0)
+  effectiveAt                DateTime
+  evidenceHash               String
+  createdBy                  String
+  createdAt                  DateTime                 @default(now())
+  shipmentQuantityEvidence   ShipmentQuantityEvidence @relation(fields: [shipmentQuantityEvidenceId], references: [id], onDelete: Restrict)
+
+  @@unique([shipmentQuantityEvidenceId, valuationVersion])
+  @@unique([inventoryDocumentId, productRowId, valuationVersion])
+  @@index([contractId, productRowId, effectiveAt])
+  @@map("inventory_valuation_evidence")
+}
+
+model AccountingCommercialCustomerInvoice {
+  id                     String                       @id @default(cuid())
+  profileId              String
+  contractId             String
+  contractVersion        Int
+  number                 String                       @unique
+  ledgerVoucherId        String                       @unique
+  taxInvoiceId           String?                      @unique
+  referenceInvoiceId     String?
+  controlPolicyId        String
+  controlPolicyVersion   Int
+  controlEvidenceType    String
+  controlEvidenceId      String
+  controlEvidenceVersion Int
+  controlEvidenceHash    String
+  commandHash            String?
+  netRials               Decimal                      @db.Decimal(20, 0)
+  taxRials               Decimal                      @db.Decimal(20, 0)
+  grossRials             Decimal                      @db.Decimal(20, 0)
+  issuedAt               DateTime
+  dueAt                  DateTime
+  status                 String                       @default("POSTED")
+  createdAt              DateTime                     @default(now())
+  profile                AccountingCustomerProfile    @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  openItems              AccountingCustomerOpenItem[]
+
+  @@unique([contractId, contractVersion, controlEvidenceId, controlEvidenceVersion])
+  @@index([profileId, dueAt, status])
+  @@index([referenceInvoiceId])
+  @@map("accounting_commercial_customer_invoices")
+}
+
+model AccountingCustomerOpenItem {
+  id              String                               @id @default(cuid())
+  profileId       String
+  invoiceId       String
+  contractId      String
+  kind            String
+  originalRials   Decimal                              @db.Decimal(20, 0)
+  dueAt           DateTime
+  postedAt        DateTime
+  createdAt       DateTime                             @default(now())
+  profile         AccountingCustomerProfile            @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  invoice         AccountingCommercialCustomerInvoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  allocationLines AccountingSettlementAllocationLine[]
+
+  @@unique([invoiceId, kind])
+  @@index([profileId, dueAt])
+  @@index([contractId, postedAt])
+  @@map("accounting_customer_open_items")
+}
+
+model AccountingTreasuryTransaction {
+  id                 String                              @id @default(cuid())
+  profileId          String?
+  contractId         String?
+  financialAccountId String
+  kind               String
+  direction          String
+  amountRials        Decimal                             @db.Decimal(20, 0)
+  idempotencyKey     String                              @unique
+  sourceType         String
+  sourceId           String
+  sourceVersion      Int
+  sourceHash         String
+  occurredAt         DateTime
+  postedVoucherId    String?
+  createdBy          String
+  createdAt          DateTime                            @default(now())
+  profile            AccountingCustomerProfile?          @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  allocations        AccountingSettlementAllocation[]
+  bankMatches        AccountingBankReconciliationMatch[]
+  pettyCashAdvance   AccountingPettyCashAdvance?
+
+  @@unique([sourceType, sourceId, sourceVersion])
+  @@index([profileId, occurredAt])
+  @@index([financialAccountId, occurredAt])
+  @@map("accounting_treasury_transactions")
+}
+
+model AccountingSupplyChainCommand {
+  id             String                           @id @default(cuid())
+  idempotencyKey String                           @unique
+  commandHash    String
+  outcomeKind    AccountingSupplyChainOutcomeKind
+  outcomePayload Json
+  createdAt      DateTime                         @default(now())
+
+  @@map("accounting_supply_chain_commands")
+}
+
+model AccountingSupplyChainCommandAudit {
+  id               String                                  @id
+  sequence         BigInt                                  @unique
+  commandName      String
+  result           AccountingSupplyChainCommandAuditResult
+  actorId          String
+  effectiveProfile String
+  commandHash      String
+  reason           String?
+  previousHash     String?
+  entryHash        String                                  @unique
+  createdAt        DateTime
+
+  @@index([actorId, createdAt])
+  @@index([commandName, result, createdAt])
+  @@map("accounting_supply_chain_command_audits")
+}
+
+model AccountingOperationalEvidenceReceipt {
+  id             String   @id @default(cuid())
+  ownerWorkspace String
+  sourceType     String
+  sourceId       String
+  sourceVersion  Int
+  sourceHash     String
+  sourcePayload  Json
+  occurredAt     DateTime
+  recordedAt     DateTime @default(now())
+
+  @@unique([sourceType, sourceId, sourceVersion])
+  @@index([ownerWorkspace, recordedAt])
+  @@map("accounting_operational_evidence_receipts")
+}
+
+model AccountingSupplyChainPostingRule {
+  id            String                  @id @default(cuid())
+  bookId        String
+  accountRole   String
+  accountId     String
+  version       Int
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdBy     String
+  createdAt     DateTime                @default(now())
+  book          AccountingBook          @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  account       AccountingLedgerAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@unique([bookId, accountRole, version])
+  @@index([bookId, accountRole, effectiveFrom, effectiveTo])
+  @@map("accounting_supply_chain_posting_rules")
+}
+
+model AccountingSupplyChainException {
+  id                 String                   @id @default(cuid())
+  code               String
+  messagePersian     String
+  sourceType         String
+  sourceId           String
+  sourceVersion      Int
+  sourceHash         String
+  sourcePayload      Json
+  correlationId      String
+  voucherId          String?
+  resolvedAt         DateTime?
+  resolutionEvidence Json?
+  createdAt          DateTime                 @default(now())
+  voucher            AccountingLedgerVoucher? @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceType, sourceId, sourceVersion, code])
+  @@index([resolvedAt, code, createdAt])
+  @@map("accounting_supply_chain_exceptions")
+}
+
+model AccountingSupplierInvoice {
+  id                       String                          @id @default(cuid())
+  bookId                   String
+  supplierPartyId          String
+  supplierInvoiceNumber    String
+  documentDate             DateTime
+  dueDate                  DateTime
+  grossRials               Decimal                         @db.Decimal(20, 0)
+  discountRials            Decimal                         @db.Decimal(20, 0)
+  attributableFreightRials Decimal                         @db.Decimal(20, 0)
+  recoverableTaxRials      Decimal                         @db.Decimal(20, 0)
+  nonRecoverableTaxRials   Decimal                         @db.Decimal(20, 0)
+  deductionRials           Decimal                         @db.Decimal(20, 0)
+  retentionRials           Decimal                         @db.Decimal(20, 0)
+  roundingRials            Decimal                         @db.Decimal(20, 0)
+  netPayableRials          Decimal                         @db.Decimal(20, 0)
+  inventoryValueRials      Decimal                         @db.Decimal(20, 0)
+  voucherId                String                          @unique
+  sourceType               String
+  sourceId                 String
+  sourceVersion            Int
+  sourceHash               String
+  sourcePayload            Json
+  correctionOfId           String?
+  createdBy                String
+  createdAt                DateTime                        @default(now())
+  supplierParty            AccountingParty                 @relation(fields: [supplierPartyId], references: [id], onDelete: Restrict)
+  voucher                  AccountingLedgerVoucher         @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  correctionOf             AccountingSupplierInvoice?      @relation("SupplierInvoiceCorrection", fields: [correctionOfId], references: [id], onDelete: Restrict)
+  corrections              AccountingSupplierInvoice[]     @relation("SupplierInvoiceCorrection")
+  lines                    AccountingSupplierInvoiceLine[]
+  openItem                 AccountingSupplierOpenItem?
+
+  @@unique([supplierPartyId, supplierInvoiceNumber])
+  @@unique([bookId, sourceType, sourceId, sourceVersion])
+  @@index([supplierPartyId, dueDate])
+  @@index([correctionOfId])
+  @@map("accounting_supplier_invoices")
+}
+
+model AccountingSupplierInvoiceLine {
+  id                        String                       @id @default(cuid())
+  invoiceId                 String
+  sourceLineId              String
+  sequence                  Int
+  kind                      AccountingPurchaseLineKind
+  description               String
+  quantity                  Decimal                      @db.Decimal(24, 6)
+  unit                      String
+  unitPriceRials            Decimal                      @db.Decimal(20, 0)
+  grossRials                Decimal                      @db.Decimal(20, 0)
+  discountRials             Decimal                      @db.Decimal(20, 0)
+  attributableFreightRials  Decimal                      @db.Decimal(20, 0)
+  recoverableTaxRials       Decimal                      @db.Decimal(20, 0)
+  nonRecoverableTaxRials    Decimal                      @db.Decimal(20, 0)
+  deductionRials            Decimal                      @db.Decimal(20, 0)
+  retentionRials            Decimal                      @db.Decimal(20, 0)
+  roundingRials             Decimal                      @db.Decimal(20, 0)
+  orderEvidence             Json?
+  receiptEvidence           Json?
+  acceptedServiceEvidence   Json?
+  nonOrderExceptionEvidence Json?
+  inventoryIdentityId       String?
+  createdAt                 DateTime                     @default(now())
+  invoice                   AccountingSupplierInvoice    @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  inventoryIdentity         AccountingInventoryIdentity? @relation(fields: [inventoryIdentityId], references: [id], onDelete: Restrict)
+
+  @@unique([invoiceId, sourceLineId])
+  @@unique([invoiceId, sequence])
+  @@index([inventoryIdentityId])
+  @@map("accounting_supplier_invoice_lines")
+}
+
+model AccountingSupplierOpenItem {
+  id              String                         @id @default(cuid())
+  supplierPartyId String
+  invoiceId       String                         @unique
+  amountRials     Decimal                        @db.Decimal(20, 0)
+  dueDate         DateTime
+  createdAt       DateTime                       @default(now())
+  supplierParty   AccountingParty                @relation(fields: [supplierPartyId], references: [id], onDelete: Restrict)
+  invoice         AccountingSupplierInvoice      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  allocations     AccountingSupplierAllocation[]
+
+  @@index([supplierPartyId, dueDate])
+  @@map("accounting_supplier_open_items")
+}
+
+model AccountingSupplierSettlementTransaction {
+  id                 String                           @id @default(cuid())
+  supplierPartyId    String
+  voucherId          String                           @unique
+  financialAccountId String?
+  kind               AccountingSupplierSettlementKind
+  amountRials        Decimal                          @db.Decimal(20, 0)
+  occurredAt         DateTime
+  sourceType         String
+  sourceId           String
+  sourceVersion      Int
+  sourceHash         String
+  sourcePayload      Json
+  createdBy          String
+  createdAt          DateTime                         @default(now())
+  supplierParty      AccountingParty                  @relation(fields: [supplierPartyId], references: [id], onDelete: Restrict)
+  financialAccount   AccountingFinancialAccount?      @relation(fields: [financialAccountId], references: [id], onDelete: Restrict)
+  voucher            AccountingLedgerVoucher          @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  allocations        AccountingSupplierAllocation[]
+  payableChecks      AccountingPayableCheck[]
+
+  @@unique([sourceType, sourceId, sourceVersion])
+  @@index([supplierPartyId, occurredAt])
+  @@index([financialAccountId])
+  @@map("accounting_supplier_treasury_transactions")
+}
+
+model AccountingSettlementAllocation {
+  id                    String                               @id @default(cuid())
+  treasuryTransactionId String
+  reversesId            String?                              @unique
+  reversedById          String?                              @unique
+  reason                String?
+  idempotencyKey        String                               @unique
+  ledgerVoucherId       String?                              @unique
+  createdBy             String
+  createdAt             DateTime                             @default(now())
+  transaction           AccountingTreasuryTransaction        @relation(fields: [treasuryTransactionId], references: [id], onDelete: Restrict)
+  reverses              AccountingSettlementAllocation?      @relation("AccountingAllocationReversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversedBy            AccountingSettlementAllocation?      @relation("AccountingAllocationReversal")
+  lines                 AccountingSettlementAllocationLine[]
+
+  @@index([treasuryTransactionId, createdAt])
+  @@map("accounting_settlement_allocations")
+}
+
+model AccountingSettlementAllocationLine {
+  id           String                         @id @default(cuid())
+  allocationId String
+  openItemId   String
+  amountRials  Decimal                        @db.Decimal(20, 0)
+  createdAt    DateTime                       @default(now())
+  allocation   AccountingSettlementAllocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+  openItem     AccountingCustomerOpenItem     @relation(fields: [openItemId], references: [id], onDelete: Restrict)
+
+  @@unique([allocationId, openItemId])
+  @@index([openItemId, createdAt])
+  @@map("accounting_settlement_allocation_lines")
+}
+
+model AccountingTaxRule {
+  id              String    @id @default(cuid())
+  legalEntityId   String
+  code            String
+  version         Int
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  citation        String
+  invoiceType     String
+  invoicePattern  String
+  exempt          Boolean   @default(false)
+  exemptionReason String?
+  components      Json
+  allocationRule  String
+  roundingRule    String
+  createdBy       String
+  createdAt       DateTime  @default(now())
+
+  @@unique([legalEntityId, code, version])
+  @@index([legalEntityId, effectiveFrom, effectiveTo])
+  @@map("accounting_tax_rules")
+}
+
+model AccountingTaxInvoice {
+  id                    String                       @id @default(cuid())
+  commercialInvoiceId   String?                      @unique
+  ledgerVoucherId       String?
+  internalSerial        String                       @unique
+  externalUniqueTaxId   String?                      @unique
+  referenceTaxInvoiceId String?
+  documentKind          String
+  protocolVersion       String
+  netRials              Decimal                      @db.Decimal(20, 0)
+  taxRials              Decimal                      @db.Decimal(20, 0)
+  status                String
+  issuedAt              DateTime
+  createdAt             DateTime                     @default(now())
+  lines                 AccountingTaxInvoiceLine[]
+  outboxMessages        AccountingTaxOutboxMessage[]
+
+  @@index([referenceTaxInvoiceId])
+  @@index([status, issuedAt])
+  @@map("accounting_tax_invoices")
+}
+
+model AccountingTaxInvoiceLine {
+  id                 String               @id @default(cuid())
+  taxInvoiceId       String
+  sourceLineId       String
+  productRowId       String
+  quantity           Decimal              @db.Decimal(18, 3)
+  costRials          Decimal              @db.Decimal(20, 0)
+  taxRuleId          String
+  taxRuleVersion     Int
+  citation           String
+  rawBaseAmount      Decimal              @db.Decimal(30, 8)
+  rawTaxAmount       Decimal              @db.Decimal(30, 8)
+  roundedTaxRials    Decimal              @db.Decimal(20, 0)
+  allocationEvidence Json
+  exempt             Boolean
+  createdAt          DateTime             @default(now())
+  taxInvoice         AccountingTaxInvoice @relation(fields: [taxInvoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([taxInvoiceId, sourceLineId])
+  @@map("accounting_tax_invoice_lines")
+}
+
+model AccountingReturnEvidenceConsumption {
+  id                String   @id @default(cuid())
+  evidenceId        String   @unique
+  creditInvoiceId   String
+  originalInvoiceId String
+  originalLineId    String
+  productRowId      String
+  quantity          Decimal  @db.Decimal(18, 3)
+  createdAt         DateTime @default(now())
+
+  @@index([originalInvoiceId, originalLineId])
+  @@map("accounting_return_evidence_consumptions")
+}
+
+model AccountingCustomerStatementExport {
+  id              String   @id @default(cuid())
+  requestIdentity String   @unique
+  profileId       String
+  asOf            DateTime
+  format          String
+  dataset         Json
+  sourceHash      String
+  contentHash     String
+  content         Bytes
+  createdBy       String
+  createdAt       DateTime @default(now())
+
+  @@index([profileId, asOf])
+  @@map("accounting_customer_statement_exports")
+}
+
+model AccountingTaxSubmissionChannel {
+  id              String    @id @default(cuid())
+  legalEntityId   String
+  kind            String
+  providerName    String?
+  safeKeyVersion  String
+  secretReference String
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  healthStatus    String
+  createdBy       String
+  createdAt       DateTime  @default(now())
+
+  @@index([legalEntityId, effectiveFrom, effectiveTo])
+  @@map("accounting_tax_submission_channels")
+}
+
+model AccountingTaxOutboxMessage {
+  id              String                           @id @default(cuid())
+  taxInvoiceId    String
+  channelId       String?
+  payloadHash     String
+  protocolVersion String
+  requestIdentity String                           @unique
+  status          String                           @default("PENDING")
+  availableAt     DateTime
+  claimedAt       DateTime?
+  createdAt       DateTime                         @default(now())
+  taxInvoice      AccountingTaxInvoice             @relation(fields: [taxInvoiceId], references: [id], onDelete: Restrict)
+  attempts        AccountingTaxSubmissionAttempt[]
+
+  @@unique([taxInvoiceId, payloadHash])
+  @@index([status, availableAt])
+  @@map("accounting_tax_outbox_messages")
+}
+
+model AccountingTaxSubmissionAttempt {
+  id              String                     @id @default(cuid())
+  outboxMessageId String
+  attemptNumber   Int
+  requestHash     String
+  safeResponse    Json?
+  receiptNumber   String?
+  errorCode       String?
+  status          String
+  attemptedAt     DateTime
+  completedAt     DateTime?
+  outboxMessage   AccountingTaxOutboxMessage @relation(fields: [outboxMessageId], references: [id], onDelete: Restrict)
+
+  @@unique([outboxMessageId, attemptNumber])
+  @@map("accounting_tax_submission_attempts")
+}
+
+model AccountingBankStatementLine {
+  id                 String                              @id @default(cuid())
+  financialAccountId String
+  adapterType        String
+  mappingVersion     Int
+  mappingId          String?
+  sourceIdentity     String
+  sourceHash         String
+  bookedAt           DateTime
+  amountRials        Decimal                             @db.Decimal(20, 0)
+  direction          String
+  description        String
+  evidence           Json
+  createdAt          DateTime                            @default(now())
+  matches            AccountingBankReconciliationMatch[]
+  mapping            AccountingBankImportMapping?        @relation(fields: [mappingId], references: [id], onDelete: Restrict)
+
+  @@unique([financialAccountId, sourceIdentity])
+  @@index([financialAccountId, bookedAt])
+  @@map("accounting_bank_statement_lines")
+}
+
+model AccountingBankImportMapping {
+  id                 String                        @id @default(cuid())
+  financialAccountId String
+  adapterType        String
+  version            Int
+  columnMapping      Json
+  effectiveFrom      DateTime
+  effectiveTo        DateTime?
+  evidenceHash       String
+  createdBy          String
+  createdAt          DateTime                      @default(now())
+  statementLines     AccountingBankStatementLine[]
+
+  @@unique([financialAccountId, adapterType, version])
+  @@index([financialAccountId, effectiveFrom, effectiveTo])
+  @@map("accounting_bank_import_mappings")
+}
+
+model AccountingBankReconciliationMatch {
+  id                    String                        @id @default(cuid())
+  bankStatementLineId   String
+  treasuryTransactionId String
+  status                String
+  score                 Int?
+  confirmedBy           String?
+  confirmedAt           DateTime?
+  reversedBy            String?
+  reversedAt            DateTime?
+  reason                String?
+  confirmationReason    String?
+  reversalReason        String?
+  createdAt             DateTime                      @default(now())
+  bankStatementLine     AccountingBankStatementLine   @relation(fields: [bankStatementLineId], references: [id], onDelete: Restrict)
+  treasuryTransaction   AccountingTreasuryTransaction @relation(fields: [treasuryTransactionId], references: [id], onDelete: Restrict)
+
+  @@unique([bankStatementLineId, treasuryTransactionId])
+  @@index([status, createdAt])
+  @@map("accounting_bank_reconciliation_matches")
+}
+
+model AccountingCheckInstrument {
+  id            String                           @id @default(cuid())
+  legalEntityId String
+  profileId     String?
+  direction     String
+  sayadId       String?
+  serialNumber  String
+  bankName      String
+  amountRials   Decimal                          @db.Decimal(20, 0)
+  dueAt         DateTime
+  status        String
+  custodianId   String?
+  evidenceHash  String
+  createdBy     String
+  createdAt     DateTime                         @default(now())
+  events        AccountingCheckInstrumentEvent[]
+
+  @@unique([legalEntityId, sayadId])
+  @@index([profileId, dueAt, status])
+  @@map("accounting_check_instruments")
+}
+
+model AccountingCheckInstrumentEvent {
+  id                 String                    @id @default(cuid())
+  checkInstrumentId  String
+  sequence           Int
+  eventType          String
+  occurredAt         DateTime
+  actorId            String
+  fromCustodianId    String?
+  toCustodianId      String?
+  postingRuleVersion Int?
+  ledgerVoucherId    String?                   @unique
+  evidence           Json
+  evidenceHash       String
+  createdAt          DateTime                  @default(now())
+  checkInstrument    AccountingCheckInstrument @relation(fields: [checkInstrumentId], references: [id], onDelete: Restrict)
+
+  @@unique([checkInstrumentId, sequence])
+  @@map("accounting_check_instrument_events")
+}
+
+model AccountingCashCount {
+  id                 String   @id @default(cuid())
+  financialAccountId String
+  custodianId        String
+  countedAt          DateTime
+  expectedRials      Decimal  @db.Decimal(20, 0)
+  countedRials       Decimal  @db.Decimal(20, 0)
+  varianceRials      Decimal  @db.Decimal(20, 0)
+  ledgerVoucherId    String?  @unique
+  evidenceHash       String
+  createdBy          String
+  createdAt          DateTime @default(now())
+
+  @@unique([financialAccountId, countedAt])
+  @@map("accounting_cash_counts")
+}
+
+model AccountingPettyCashAdvance {
+  id                    String                         @id @default(cuid())
+  financialAccountId    String
+  treasuryTransactionId String                         @unique
+  custodianId           String
+  costCenterId          String
+  amountRials           Decimal                        @db.Decimal(20, 0)
+  limitRials            Decimal                        @db.Decimal(20, 0)
+  issuedAt              DateTime
+  settlementDueAt       DateTime
+  settledAt             DateTime?
+  supportingEvidence    Json
+  status                String
+  createdBy             String
+  createdAt             DateTime                       @default(now())
+  treasuryTransaction   AccountingTreasuryTransaction  @relation(fields: [treasuryTransactionId], references: [id], onDelete: Restrict)
+  settlement            AccountingPettyCashSettlement?
+
+  @@index([custodianId, status, settlementDueAt])
+  @@map("accounting_petty_cash_advances")
+}
+
+model AccountingPettyCashSettlement {
+  id              String                     @id @default(cuid())
+  advanceId       String                     @unique
+  ledgerVoucherId String                     @unique
+  settledRials    Decimal                    @db.Decimal(20, 0)
+  evidence        Json
+  evidenceHash    String
+  settledAt       DateTime
+  createdBy       String
+  createdAt       DateTime                   @default(now())
+  advance         AccountingPettyCashAdvance @relation(fields: [advanceId], references: [id], onDelete: Restrict)
+
+  @@map("accounting_petty_cash_settlements")
+}
+
+model AccountingVatReconciliation {
+  id                       String                       @id @default(cuid())
+  legalEntityId            String
+  fiscalYearId             String
+  periodId                 String
+  revision                 Int
+  supersedesId             String?                      @unique
+  sourceHash               String
+  salesTaxRials            Decimal                      @db.Decimal(20, 0)
+  eligiblePurchaseTaxRials Decimal                      @db.Decimal(20, 0)
+  correctionRials          Decimal                      @db.Decimal(20, 0)
+  paymentRials             Decimal                      @db.Decimal(20, 0)
+  carryforwardRials        Decimal                      @db.Decimal(20, 0)
+  penaltyRials             Decimal                      @db.Decimal(20, 0)
+  exemptRials              Decimal                      @db.Decimal(20, 0)
+  nonCreditableRials       Decimal                      @db.Decimal(20, 0)
+  taxpayerStateSnapshot    Json
+  ledgerControlHash        String
+  status                   String
+  createdBy                String
+  createdAt                DateTime                     @default(now())
+  supersedes               AccountingVatReconciliation? @relation("AccountingVatReconciliationRevision", fields: [supersedesId], references: [id], onDelete: Restrict)
+  supersededBy             AccountingVatReconciliation? @relation("AccountingVatReconciliationRevision")
+
+  @@unique([legalEntityId, fiscalYearId, periodId, revision])
+  @@index([legalEntityId, fiscalYearId, periodId, createdAt])
+  @@map("accounting_vat_reconciliations")
+}
+
+model AccountingVatInputEvidence {
+  id            String   @id @default(cuid())
+  legalEntityId String
+  fiscalYearId  String
+  periodId      String
+  kind          String
+  amountRials   Decimal  @db.Decimal(20, 0)
+  sourceType    String
+  sourceId      String
+  sourceVersion Int
+  payload       Json
+  evidenceHash  String
+  occurredAt    DateTime
+  createdAt     DateTime @default(now())
+
+  @@unique([sourceType, sourceId, sourceVersion])
+  @@index([legalEntityId, fiscalYearId, periodId, kind])
+  @@map("accounting_vat_input_evidence")
+}
+
+model AccountingSupplierAllocation {
+  id                    String                                  @id @default(cuid())
+  treasuryTransactionId String
+  openItemId            String
+  amountRials           Decimal                                 @db.Decimal(20, 0)
+  reversalOfId          String?                                 @unique
+  reason                String?
+  createdBy             String
+  createdAt             DateTime                                @default(now())
+  treasuryTransaction   AccountingSupplierSettlementTransaction @relation(fields: [treasuryTransactionId], references: [id], onDelete: Restrict)
+  openItem              AccountingSupplierOpenItem              @relation(fields: [openItemId], references: [id], onDelete: Restrict)
+  reversalOf            AccountingSupplierAllocation?           @relation("SupplierAllocationReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversal              AccountingSupplierAllocation?           @relation("SupplierAllocationReversal")
+
+  @@index([openItemId, createdAt])
+  @@index([treasuryTransactionId, createdAt])
+  @@map("accounting_supplier_allocations")
+}
+
+model AccountingPayableCheck {
+  id                      String                                  @id @default(cuid())
+  sayadId                 String                                  @unique
+  amountRials             Decimal                                 @db.Decimal(20, 0)
+  supplierPartyId         String
+  financialAccountId      String
+  treasuryTransactionId   String                                  @unique
+  dueDate                 DateTime
+  status                  AccountingCheckLifecycleStatus
+  replacementCheckId      String?                                 @unique
+  kind                    AccountingSupplierCheckKind             @default(PAYABLE)
+  sourceCustomerPaymentId String?
+  createdAt               DateTime                                @default(now())
+  supplierParty           AccountingParty                         @relation(fields: [supplierPartyId], references: [id], onDelete: Restrict)
+  financialAccount        AccountingFinancialAccount              @relation(fields: [financialAccountId], references: [id], onDelete: Restrict)
+  treasuryTransaction     AccountingSupplierSettlementTransaction @relation(fields: [treasuryTransactionId], references: [id], onDelete: Restrict)
+  replacementCheck        AccountingPayableCheck?                 @relation("PayableCheckReplacement", fields: [replacementCheckId], references: [id], onDelete: Restrict)
+  replacedCheck           AccountingPayableCheck?                 @relation("PayableCheckReplacement")
+  events                  AccountingCheckCustodyEvent[]
+
+  @@index([supplierPartyId, dueDate, status])
+  @@map("accounting_payable_checks")
+}
+
+model AccountingCheckCustodyEvent {
+  id              String                         @id @default(cuid())
+  checkId         String
+  status          AccountingCheckLifecycleStatus
+  reason          String
+  evidenceType    String
+  evidenceId      String
+  evidenceVersion Int
+  evidenceHash    String
+  evidencePayload Json
+  actorId         String
+  occurredAt      DateTime
+  check           AccountingPayableCheck         @relation(fields: [checkId], references: [id], onDelete: Restrict)
+
+  @@unique([checkId, evidenceType, evidenceId, evidenceVersion])
+  @@index([checkId, occurredAt])
+  @@map("accounting_check_custody_events")
+}
+
+model AccountingInventoryIdentity {
+  id              String                              @id
+  kind            AccountingInventoryIdentityKind
+  originId        String?
+  valuationMethod AccountingInventoryValuationMethod
+  governedUnit    String
+  createdAt       DateTime                            @default(now())
+  invoiceLines    AccountingSupplierInvoiceLine[]
+  layers          AccountingInventoryValuationLayer[]
+  events          AccountingInventoryEvent[]
+  reservations    AccountingInventoryReservation[]
+
+  @@index([originId, kind])
+  @@map("accounting_inventory_identities")
+}
+
+model AccountingInventoryEvent {
+  id                     String                           @id @default(cuid())
+  identityId             String
+  eventType              AccountingInventoryEventType
+  warehouseId            String
+  locationId             String
+  unit                   String
+  quantity               Decimal                          @db.Decimal(24, 6)
+  voucherId              String?
+  sourceType             String
+  sourceId               String
+  sourceVersion          Int
+  sourceHash             String
+  sourcePayload          Json
+  occurredAt             DateTime
+  predecessorEventId     String?
+  sourceWarehouseId      String?
+  sourceLocationId       String?
+  statusAfter            AccountingInventoryCustodyStatus
+  predecessorIdentityIds Json?
+  identity               AccountingInventoryIdentity      @relation(fields: [identityId], references: [id], onDelete: Restrict)
+  voucher                AccountingLedgerVoucher?         @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  predecessorEvent       AccountingInventoryEvent?        @relation("InventoryEventSuccessor", fields: [predecessorEventId], references: [id], onDelete: Restrict)
+  successorEvents        AccountingInventoryEvent[]       @relation("InventoryEventSuccessor")
+
+  @@unique([sourceType, sourceId, sourceVersion, eventType, identityId])
+  @@index([identityId, occurredAt])
+  @@index([warehouseId, locationId, occurredAt])
+  @@map("accounting_inventory_events")
+}
+
+model AccountingInventoryValuationLayer {
+  id              String                                @id @default(cuid())
+  identityId      String
+  warehouseId     String
+  locationId      String
+  unit            String
+  quantity        Decimal                               @db.Decimal(24, 6)
+  valueRials      Decimal                               @db.Decimal(20, 0)
+  valuationMethod AccountingInventoryValuationMethod
+  sourceType      String
+  sourceId        String
+  createdAt       DateTime                              @default(now())
+  identity        AccountingInventoryIdentity           @relation(fields: [identityId], references: [id], onDelete: Restrict)
+  consumptions    AccountingInventoryLayerConsumption[]
+
+  @@index([identityId, createdAt])
+  @@map("accounting_inventory_valuation_layers")
+}
+
+model AccountingInventoryLayerConsumption {
+  id         String                            @id @default(cuid())
+  identityId String
+  layerId    String
+  unit       String
+  quantity   Decimal                           @db.Decimal(24, 6)
+  valueRials Decimal                           @db.Decimal(20, 0)
+  purpose    String
+  sourceId   String
+  createdAt  DateTime                          @default(now())
+  layer      AccountingInventoryValuationLayer @relation(fields: [layerId], references: [id], onDelete: Restrict)
+
+  @@index([identityId, createdAt])
+  @@index([layerId, createdAt])
+  @@map("accounting_inventory_layer_consumptions")
+}
+
+model AccountingInventoryReservation {
+  id                     String                               @id @default(cuid())
+  identityId             String
+  unit                   String
+  quantity               Decimal                              @db.Decimal(24, 6)
+  purposeId              String
+  idempotencyKey         String                               @unique
+  status                 AccountingInventoryReservationStatus
+  evidenceType           String
+  evidenceId             String
+  evidenceVersion        Int
+  evidenceHash           String
+  evidencePayload        Json
+  createdAt              DateTime                             @default(now())
+  releasedAt             DateTime?
+  releaseEvidenceType    String?
+  releaseEvidenceId      String?
+  releaseEvidenceVersion Int?
+  releaseEvidenceHash    String?
+  releaseEvidencePayload Json?
+  releasedBy             String?
+  identity               AccountingInventoryIdentity          @relation(fields: [identityId], references: [id], onDelete: Restrict)
+
+  @@index([identityId, status])
+  @@map("accounting_inventory_reservations")
+}
+
+model AccountingProductionBatch {
+  id                        String                         @id
+  voucherId                 String                         @unique
+  evidenceHash              String
+  inputValueRials           Decimal                        @db.Decimal(20, 0)
+  allocatedCostRials        Decimal                        @db.Decimal(20, 0)
+  outputValueRials          Decimal                        @db.Decimal(20, 0)
+  abnormalWasteExpenseRials Decimal                        @db.Decimal(20, 0)
+  completedAt               DateTime
+  voucher                   AccountingLedgerVoucher        @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  costPools                 AccountingProductionCostPool[]
+  outputs                   AccountingProductionOutput[]
+
+  @@map("accounting_production_batches")
+}
+
+model AccountingProductionCostPool {
+  id              String                       @id @default(cuid())
+  batchId         String
+  kind            AccountingProductionCostKind
+  amountRials     Decimal                      @db.Decimal(20, 0)
+  allocationBasis String
+  basisQuantity   Decimal                      @db.Decimal(24, 6)
+  policyVersion   Int
+  batch           AccountingProductionBatch    @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@index([batchId])
+  @@map("accounting_production_cost_pools")
+}
+
+model AccountingProductionOutput {
+  id         String                    @id @default(cuid())
+  batchId    String
+  identityId String
+  unit       String
+  quantity   Decimal                   @db.Decimal(24, 6)
+  valueRials Decimal                   @db.Decimal(20, 0)
+  batch      AccountingProductionBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, identityId])
+  @@map("accounting_production_outputs")
+}
+
+model AccountingInventoryMigrationRun {
+  id                   String                             @id @default(cuid())
+  sourcePackageHash    String
+  mappingVersion       Int
+  toolVersion          String
+  scope                Json
+  inputCount           Int
+  acceptedCount        Int
+  quarantinedCount     Int
+  rejectedCount        Int
+  outputHash           String
+  sepidarControlRials  Decimal                            @db.Decimal(20, 0)
+  acceptedTotalRials   Decimal                            @db.Decimal(20, 0)
+  status               AccountingInventoryMigrationStatus
+  voucherId            String?                            @unique
+  commitIdempotencyKey String?                            @unique
+  committedAt          DateTime?
+  createdBy            String
+  createdAt            DateTime                           @default(now())
+  successorRunId       String?                            @unique
+  voucher              AccountingLedgerVoucher?           @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  items                AccountingInventoryMigrationItem[]
+  successorRun         AccountingInventoryMigrationRun?   @relation("InventoryMigrationSuccessor", fields: [successorRunId], references: [id], onDelete: Restrict)
+  predecessorRun       AccountingInventoryMigrationRun?   @relation("InventoryMigrationSuccessor")
+
+  @@unique([sourcePackageHash, mappingVersion])
+  @@index([status, createdAt])
+  @@map("accounting_inventory_migration_runs")
+}
+
+model AccountingInventoryMigrationItem {
+  id              String                                  @id @default(cuid())
+  runId           String
+  sourceId        String
+  identityId      String
+  warehouseId     String
+  locationId      String
+  unit            String
+  quantity        Decimal                                 @db.Decimal(24, 6)
+  valueRials      Decimal                                 @db.Decimal(20, 0)
+  valuationMethod AccountingInventoryValuationMethod
+  uncertainty     String?
+  disposition     AccountingInventoryMigrationDisposition
+  rejectionReason String?
+  rawPayload      Json?
+  run             AccountingInventoryMigrationRun         @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, sourceId])
+  @@index([runId, disposition])
+  @@map("accounting_inventory_migration_items")
+}
+
 model JournalVoucher {
   id             String                     @id @default(cuid())
   voucherNumber  String                     @unique
@@ -5258,6 +7250,179 @@ enum JournalVoucherStatus {
   DRAFT
   POSTED
   REVERSED
+}
+
+enum AccountingFiscalYearStatus {
+  DRAFT
+  ACTIVE
+  SOFT_CLOSED
+  HARD_CLOSED
+}
+
+enum AccountingPostingPeriodStatus {
+  OPEN
+  SOFT_CLOSED
+  HARD_CLOSED
+}
+
+enum AccountingLedgerAccountLevel {
+  GROUP
+  KOL
+  MOIN
+}
+
+enum AccountingNormalSide {
+  DEBIT
+  CREDIT
+}
+
+enum AccountingStatementRole {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+  OTHER_COMPREHENSIVE_INCOME
+  MEMO
+}
+
+enum AccountingCurrencyBehavior {
+  BASE_ONLY
+  MULTI_CURRENCY
+}
+
+enum AccountingDimensionRequirement {
+  REQUIRED
+  OPTIONAL
+  FORBIDDEN
+}
+
+enum AccountingPartyRoleType {
+  CUSTOMER
+  SUPPLIER
+  EMPLOYEE
+  OTHER
+}
+
+enum AccountingFinancialAccountKind {
+  BANK
+  CASH
+  OTHER
+}
+
+enum AccountingLedgerVoucherStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+enum AccountingAuditResult {
+  SUCCEEDED
+  DENIED
+}
+
+enum AccountingSupplyChainOutcomeKind {
+  POSTED
+  EXCEPTION
+}
+
+enum AccountingPurchaseLineKind {
+  INVENTORY
+  FIXED_ASSET
+  SERVICE
+  EXPENSE
+}
+
+enum AccountingSupplierSettlementKind {
+  SUPPLIER_PAYMENT
+  PURCHASE_ADVANCE
+  SUPPLIER_CREDIT
+  PAYABLE_CHECK_ISSUANCE
+  PAYABLE_CHECK_REVERSAL
+  ASSIGNED_CUSTOMER_CHECK
+  ASSIGNED_CUSTOMER_CHECK_REVERSAL
+
+  @@map("AccountingTreasuryTransactionKind")
+}
+
+enum AccountingSupplyChainCommandAuditResult {
+  SUCCEEDED
+  DENIED
+}
+
+enum AccountingSupplierCheckKind {
+  PAYABLE
+  ASSIGNED_CUSTOMER
+}
+
+enum AccountingCheckLifecycleStatus {
+  RECEIVED
+  ISSUED
+  ENDORSED
+  DELIVERED
+  DEPOSITED
+  CLEARED
+  BOUNCED
+  RETURNED
+  REPLACED
+  CANCELLED
+}
+
+enum AccountingInventoryIdentityKind {
+  BLOCK
+  SLAB
+  PIECE
+  REMAINDER
+  CONSUMABLE
+  FINISHED_GOOD
+}
+
+enum AccountingInventoryValuationMethod {
+  SPECIFIC_IDENTIFICATION
+  MOVING_WEIGHTED_AVERAGE
+}
+
+enum AccountingInventoryEventType {
+  RECEIPT
+  MOVEMENT
+  TRANSFORMATION_INPUT
+  TRANSFORMATION_OUTPUT
+  SALE_RELIEF
+  RETURN
+  CORRECTION
+  OPENING
+}
+
+enum AccountingInventoryCustodyStatus {
+  AVAILABLE
+  RESERVED
+  CONSUMED
+  RETURNED
+  QUARANTINED
+}
+
+enum AccountingInventoryReservationStatus {
+  ACTIVE
+  RELEASED
+}
+
+enum AccountingProductionCostKind {
+  DIRECT_LABOR
+  MACHINE
+  ENERGY
+  OVERHEAD
+}
+
+enum AccountingInventoryMigrationStatus {
+  PREVIEWED
+  RECONCILED
+  COMMITTED
+}
+
+enum AccountingInventoryMigrationDisposition {
+  ACCEPTED
+  QUARANTINED
+  REJECTED
 }
 
 model ContractVerificationCode {
@@ -9529,7 +11694,7 @@ model PartnerCaseRevision {
   predecessorRevision     Int?
   schemaVersion           Int                                @default(1)
   integrityHash           String
-  pricingState            PartnerPricingState                  @default(INCOMPLETE)
+  pricingState            PartnerPricingState                @default(INCOMPLETE)
   graphHash               String
   graph                   Json
   partySnapshots          Json

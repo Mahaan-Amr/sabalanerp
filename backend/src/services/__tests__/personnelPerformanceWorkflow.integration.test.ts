@@ -393,7 +393,10 @@ const main = async () => {
     });
     assert.equal(firstReviewer.role, 'USER');
     assert.equal(
-      (await filterCurrentlyAuthorizedNotifications(first, firstReviewer, [reviewNotification])).length,
+      // Keep the integration boundary structural. Comparing the fully generated
+      // PrismaClient generic here becomes exponentially complex as independent
+      // domain models are added to the schema.
+      (await filterCurrentlyAuthorizedNotifications(first as any, firstReviewer, [reviewNotification])).length,
       1,
       'an independently authorized non-admin reviewer must see the direct task without a broad HR workspace grant',
     );

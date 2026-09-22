@@ -5,7 +5,7 @@ import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { projectPartnerAccount } from '../accounting/account';
 import { readPersistedPartnerEvents } from '../events/persisted';
 import { readPartnerSnapshot } from '../authorization/readSnapshot';
-import { comparableRevision } from './comparable';
+import { comparableCommercialRevision } from './comparable';
 import { caseHistory } from './history';
 import { effectiveThrough, visibleEvents } from './revenue';
 import { readPartnerShipmentQuantityProjection } from '../fulfillment/quantityStore';
@@ -43,11 +43,11 @@ export function createPrismaPartnerReportingSource(input: {
       const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
       const period = { from: query.from, to: query.to, asOf: clock.now.toISOString() };
       const through = effectiveThrough(period);
-      const roots = await tx.partnerSaleCase.findMany({ where: { events: { some: {
+      const roots = await tx.partnerSaleCase.findMany({ where: { customerContractId: { not: null }, events: { some: {
         effectiveDate: { lte: new Date(`${through}T00:00:00.000Z`) }, recordedAt: { lte: clock.now } } } }, select: { id: true,
         profile: { select: { userId: true } }, customerContract: { select: { departmentId: true } } }, orderBy: { id: 'asc' } });
-      const mapped: Root[] = roots.map(row => ({ caseId: row.id, partnerSellerId: row.profile.userId,
-        departmentId: row.customerContract.departmentId }));
+      const mapped: Root[] = roots.flatMap(row => row.customerContract ? [{ caseId: row.id,
+        partnerSellerId: row.profile.userId, departmentId: row.customerContract.departmentId }] : []);
       const channel = query.search ? 'SEARCH' as const : 'LIST' as const;
       const baseAuthorization = createAuditedPartnerAuthorization(tx, { actorId: input.actorId,
         purpose: query.purpose, channel }, { correlationId: input.correlationId });
@@ -96,7 +96,8 @@ async function caseEvidence(tx: Prisma.TransactionClient, root: Root, purpose: R
     customerContract: { select: { departmentId: true } },
     profile: { select: { userId: true } },
   } });
-  if (!row || row.profile.userId !== root.partnerSellerId || row.customerContract.departmentId !== root.departmentId) {
+  if (!row?.internalRecordId || !row.customerContract || row.profile.userId !== root.partnerSellerId ||
+      row.customerContract.departmentId !== root.departmentId) {
     throw new Error('Partner report root changed during snapshot');
   }
   const currentInternal = contracts.SabalanInternalRecordViewSchema.parse(object(row.head.internalProjection)?.accounting);
@@ -104,7 +105,7 @@ async function caseEvidence(tx: Prisma.TransactionClient, root: Root, purpose: R
   const head = { caseId: row.id, revision: row.headRevision, integrityHash: row.integrityHash };
   if (!ownsRevision(currentInternal.owner, head) || !ownsRevision(currentFulfillment.owner, head) ||
       currentInternal.recordId !== row.internalRecordId || currentFulfillment.recordId !== row.internalRecordId) integrityConflict();
-  const events = readPersistedPartnerEvents(row, row.events);
+  const events = readPersistedPartnerEvents({ ...row, internalRecordId: row.internalRecordId }, row.events);
   const history = caseHistory(contracts, visibleEvents(contracts, events, period));
   const stateEvent = row.events.filter(event => event.toState && event.recordedAt.toISOString() <= period.asOf &&
     event.effectiveDate.toISOString().slice(0, 10) <= through).at(-1);
@@ -119,11 +120,12 @@ async function caseEvidence(tx: Prisma.TransactionClient, root: Root, purpose: R
       selected.recordId !== row.internalRecordId || fulfillment.recordId !== row.internalRecordId) return integrityConflict();
   const internal = { ...selected, state: history.voided ? 'VOIDED' as const : history.commitment ? 'COMMITTED' as const
     : contracts.CaseStateSchema.parse(stateEvent?.toState) };
-  const commercial = ['PARTNER', 'MANAGEMENT'].includes(purpose) ? row.revisions.map(revision => {
+  const commercial = ['PARTNER', 'MANAGEMENT'].includes(purpose) ? row.revisions.flatMap(revision => {
     const view = contracts.PartnerCaseViewSchema.parse(object(revision.internalProjection)?.partner);
     if (!ownsRevision(view.owner, { caseId: row.id, revision: revision.revision,
       integrityHash: revision.integrityHash })) integrityConflict();
-    return { view, comparable: comparableRevision(view, revision) };
+    const comparable = comparableCommercialRevision(view, revision);
+    return comparable ? [comparable] : [];
   }) : undefined;
   const progress = await readPartnerShipmentQuantityProjection(tx, row.id,
     { cutoff: cutoff.toISOString(), mode: 'OPERATIONAL_AS_OF' });

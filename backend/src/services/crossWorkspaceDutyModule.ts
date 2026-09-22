@@ -10,6 +10,11 @@ import {
   HR_HIRING_FINANCE_DUTY_DEFINITIONS,
   syncHrHiringFinanceDutyDefinitions,
 } from './crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
+import {
+  PARTNER_PRICING_DUTY_DEFINITIONS,
+  partnerPricingDutyAdapter,
+  syncPartnerPricingDutyDefinitions,
+} from './crossWorkspaceDutyAdapters/partnerPricingDutyAdapter';
 import type {
   CrossWorkspaceDutyDatabase,
   ClaimCrossWorkspaceDutyInput,
@@ -35,6 +40,7 @@ const sourceAdapters = new Map<string, CrossWorkspaceDutySourceAdapter>([
   [hrWorkItemDutyAdapter.sourceType, hrWorkItemDutyAdapter],
   [salesContractCorrectionDutyAdapter.sourceType, salesContractCorrectionDutyAdapter],
   [hrHiringFinanceDutyAdapter.sourceType, hrHiringFinanceDutyAdapter],
+  [partnerPricingDutyAdapter.sourceType, partnerPricingDutyAdapter],
 ]);
 
 const registeredAdapter = (sourceType: string) => {
@@ -53,6 +59,7 @@ export const CROSS_WORKSPACE_DUTY_DEFINITIONS = Object.freeze({
   ...HR_DUTY_DEFINITIONS,
   ...SALES_CONTRACT_CORRECTION_DUTY_DEFINITIONS,
   ...HR_HIRING_FINANCE_DUTY_DEFINITIONS,
+  ...PARTNER_PRICING_DUTY_DEFINITIONS,
 });
 export const evaluateCrossWorkspaceDutyResponse = evaluateHrDutyResponse;
 export const formatCrossWorkspaceDutyDeadlineTehran = formatHrDutyDeadlineTehran;
@@ -65,7 +72,8 @@ export const synchronizeCrossWorkspaceDutyDefinitions = async (
   const hr = await syncHrDutyEnvelopeDefinitions(database, actorUserId);
   const salesCorrection = await syncSalesContractCorrectionDutyDefinitions(database, actorUserId);
   const hiringFinance = await syncHrHiringFinanceDutyDefinitions(database, actorUserId);
-  return [...hr, ...salesCorrection, ...hiringFinance];
+  const partnerPricing = await syncPartnerPricingDutyDefinitions(database, actorUserId);
+  return [...hr, ...salesCorrection, ...hiringFinance, ...partnerPricing];
 };
 
 export const synchronizeCrossWorkspaceDutySource = async (

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '@/contexts/AuthContext';
+import { resolveSocketUrl, socketConnectionOptions } from './socketConnection';
 
 export const useSocket = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -13,12 +14,14 @@ export const useSocket = () => {
   useEffect(() => {
     if (isAuthenticated && user) {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
-      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (apiUrl.startsWith('/')
-        ? window.location.origin
-        : apiUrl.replace(/\/api\/?$/, ''));
+      const socketUrl = resolveSocketUrl({
+        apiUrl,
+        browserOrigin: window.location.origin,
+        configuredSocketUrl: process.env.NEXT_PUBLIC_SOCKET_URL,
+      });
 
       // Initialize socket connection
-      const newSocket = io(socketUrl, { withCredentials: true });
+      const newSocket = io(socketUrl, socketConnectionOptions);
 
       newSocket.on('connect', () => {
         console.log('Socket connected:', newSocket.id);
@@ -32,7 +35,9 @@ export const useSocket = () => {
       });
 
       newSocket.on('connect_error', (error) => {
-        console.error('Socket connection error:', error);
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn('Realtime connection unavailable; retrying.', error.message);
+        }
         setConnected(false);
       });
 

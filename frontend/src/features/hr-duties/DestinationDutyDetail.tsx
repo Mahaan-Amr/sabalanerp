@@ -20,7 +20,12 @@ import {
   ErpPersianDateField,
 } from '@/components/erp';
 import { hrDutyApi, type DestinationDuty } from './hrDutyApi';
-import { destinationDutySourceVersionLabel, initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
+import {
+  destinationDutySourceVersionLabel,
+  initialDestinationDutyState,
+  reduceDestinationDutyState,
+  uniqueAccessProvenance,
+} from './destinationDutyState';
 import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
 import { getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
@@ -447,7 +452,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
       {duty.accessProvenance.length > 0 && (
         <ErpSection title="منشأ دسترسی مؤثر" description="این تصمیم با نتیجه متمرکز دسترسی و منشأ مجوزهای فعلی کنترل می‌شود.">
           <div className="space-y-2">
-            {duty.accessProvenance.map((item) => <ErpFieldView key={item} label="مجوز مؤثر" value={item} />)}
+            {uniqueAccessProvenance(duty.accessProvenance).map((item) => <ErpFieldView key={item} label="مجوز مؤثر" value={item} />)}
           </div>
         </ErpSection>
       )}

@@ -355,7 +355,7 @@ async function activateShared(tx: Transaction, input: {
     tx.partnerCaseRevision.findUnique({ where: { caseId_revision: { caseId: input.snapshot.caseId,
       revision: input.candidate.owner.revision } } }),
   ]);
-  if (!current || !predecessor || !successor || current.state !== 'COMMITTED' ||
+  if (!current || !current.internalRecordId || !current.customerContractId || !predecessor || !successor || current.state !== 'COMMITTED' ||
       current.headRevision !== input.snapshot.owner.revision || current.integrityHash !== input.snapshot.owner.integrityHash ||
       successor.integrityHash !== input.candidate.owner.integrityHash) return { ok: false, error: partnerError('ROW_STALE') };
   const previousMoney = moneyEnvelope(predecessor.wholesaleEnvelope), nextMoney = moneyEnvelope(successor.wholesaleEnvelope);
@@ -459,6 +459,7 @@ async function voidingSnapshot(tx: Transaction, input: { caseId: string; correct
   }
   const gates = correction ? gatesFrom(correction.gates) : [];
   if (!gates) return null;
+  if (!sale.customerContract || !sale.internalRecord) return null;
   return { caseId: sale.id, state: sale.state, owner: { caseId: sale.id, revision: sale.headRevision,
     integrityHash: sale.integrityHash }, profileStatus: sale.profile.state, partnerSellerId: sale.profile.userId,
     commitmentEventId: sale.commitmentEventId, caseNumber: sale.caseNumber,
@@ -529,7 +530,7 @@ async function finalizeVoid(tx: Transaction, input: {
   const updated = await tx.partnerSaleCase.updateMany({ where: { id: current.id, state: 'COMMITTED',
     stateRevision: current.stateRevision, commitmentEventId: current.commitmentEventId },
     data: { state: 'VOIDED', stateRevision: { increment: 1 } } });
-  if (updated.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
+  if (updated.count !== 1 || !current.customerContractId) return { ok: false, error: partnerError('ROW_STALE') };
   await tx.salesContract.update({ where: { id: current.customerContractId }, data: { status: 'CANCELLED',
     isInactive: true, inactiveAt: new Date(instant), inactiveBy: input.command.idempotency.actorId,
     inactiveReason: input.command.reason } });

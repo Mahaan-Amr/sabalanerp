@@ -299,7 +299,10 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
   const inquiryId = `${ids.caseId}-inquiry`, inquiryRowId = `${ids.caseId}-inquiry-row`;
   const assignmentId = `${ids.caseId}-assignment`, approvalId = `${ids.caseId}-approval`;
   await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
-  await tx.partnerInquiry.create({ data: { id: inquiryId, profileId: ids.profileId, submittedAt: new Date() } });
+  const pricingReadyAt = new Date(Date.now() - 60_000);
+  await tx.partnerInquiry.create({ data: { id: inquiryId, profileId: ids.profileId,
+    caseId: ids.caseId, caseRevision: 1, submittedAt: pricingReadyAt,
+    pricingReadyAt, pricingExpiresAt: new Date(pricingReadyAt.getTime() + 48 * 60 * 60 * 1000) } });
   await tx.partnerInquiryAssignment.create({ data: { id: assignmentId, inquiryId, revision: 1,
     responderId: ids.partnerId, actorId: ids.partnerId, reason: 'آزمون چرخه پرونده', eligibilityEvidence: {} } });
   await tx.partnerInquiryRow.create({ data: { id: inquiryRowId, inquiryId, version: 1, outcome: 'APPROVED',
@@ -387,11 +390,11 @@ test('explicit customer rejection blocks finalization of that revision', () => f
   assert.equal(blocked.ok ? null : blocked.error.code, 'STATE_CONFLICT');
 }));
 
-test('finalization rechecks inquiry expiry inside the locked transaction', () => fixture(async (tx, ids, owner) => {
+test('finalization rechecks inquiry package expiry inside the locked transaction', () => fixture(async (tx, ids, owner) => {
   await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
-  await tx.partnerInquiryApproval.update({ where: { id: `${ids.caseId}-approval` },
-    data: { approvedAt: new Date(Date.now() - 48 * 60 * 60 * 1000 - 1_000),
-      expiresAt: new Date(Date.now() - 1_000) } });
+  await tx.partnerInquiry.update({ where: { id: `${ids.caseId}-inquiry` },
+    data: { pricingReadyAt: new Date(Date.now() - 48 * 60 * 60 * 1000 - 1_000),
+      pricingExpiresAt: new Date(Date.now() - 1_000) } });
   await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
   const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
   const blocked = await service.execute(await commitCommand(ids, owner, 'SIGNED', 'expired-inquiry', 'DRAFT'));
@@ -461,7 +464,7 @@ test('confirmation, approval and both issuance facts create one commitment witho
   assert.equal(lateOtp.ok, true);
 
   const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, include: { customerContract: true } });
-  assert.equal(root.state, 'COMMITTED'); assert.equal(root.customerContract.status, 'PRINTED');
+  assert.equal(root.state, 'COMMITTED'); assert.equal(root.customerContract!.status, 'PRINTED');
   assert.equal(root.customerConfirmationState, 'APPROVED');
   assert.equal(root.commitmentTrigger, 'SIGNED');
   assert.equal(await tx.partnerCaseEvent.count({ where: { caseId: ids.caseId, type: 'CASE_COMMITTED' } }), 1);
@@ -496,7 +499,7 @@ test('suspension and termination block new commitment while committed output obl
       const committed = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId },
         include: { customerContract: true } });
       assert.equal(committed.state, 'COMMITTED');
-      assert.equal(committed.customerContract.status, 'PRINTED');
+      assert.equal(committed.customerContract!.status, 'PRINTED');
     });
   }
 });
@@ -550,7 +553,7 @@ test('operational pause blocks commitment but support cancellation remains atomi
   const replay = await service.execute(await cancelCommand(ids, owner, 'CUSTOMER_APPROVED'));
   assert.equal(replay.ok && replay.value.replayed, true);
   const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, include: { customerContract: true } });
-  assert.equal(root.state, 'CANCELLED'); assert.equal(root.customerContract.status, 'CANCELLED');
+  assert.equal(root.state, 'CANCELLED'); assert.equal(root.customerContract!.status, 'CANCELLED');
   assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
   assert.equal(await tx.partnerCaseRevision.count({ where: { caseId: ids.caseId } }), 1);
   assert.equal(await tx.partnerCustomerOutputSnapshot.count({ where: { caseId: ids.caseId } }), 1);
@@ -658,7 +661,7 @@ test('durable Accounting queue replay returns the original Partner record withou
         retailEnvelope: successor.fields.retailEnvelope as Prisma.InputJsonValue,
         paymentEvidence: successor.fields.paymentEvidence as Prisma.InputJsonValue,
         customerContent: predecessor.customerContent as Prisma.InputJsonValue,
-        customerProjection: successor.projections.customer,
+        customerProjection: successor.projections.customer!,
         internalProjection: { partner: successor.projections.partner, accounting: successor.projections.accounting,
           fulfillment: successor.projections.fulfillment } } });
       await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: { headRevision: 2,
@@ -719,7 +722,7 @@ test('durable Accounting queue replay returns the original Partner record withou
           retailEnvelope: exactRetail.fields.retailEnvelope as Prisma.InputJsonValue,
           paymentEvidence: exactRetail.fields.paymentEvidence as Prisma.InputJsonValue,
           customerContent: prior.customerContent as Prisma.InputJsonValue,
-          customerProjection: exactRetail.projections.customer,
+          customerProjection: exactRetail.projections.customer!,
           internalProjection: { partner: exactRetail.projections.partner, accounting: exactRetail.projections.accounting,
             fulfillment: exactRetail.projections.fulfillment } } });
         const rebuilt = await readPartnerRevisionProjections(tx, exactRetail.owner);
@@ -762,7 +765,7 @@ test('durable Accounting queue replay returns the original Partner record withou
           graph: fields.graph as Prisma.InputJsonValue, partySnapshots: fields.partySnapshots as Prisma.InputJsonValue,
           wholesaleEnvelope: fields.wholesaleEnvelope as Prisma.InputJsonValue,
           retailEnvelope: fields.retailEnvelope as Prisma.InputJsonValue, paymentEvidence: fields.paymentEvidence as Prisma.InputJsonValue,
-          customerContent: fields.customerContent as Prisma.InputJsonValue, customerProjection: projections.value.customer,
+          customerContent: fields.customerContent as Prisma.InputJsonValue, customerProjection: projections.value.customer!,
           internalProjection: { partner: projections.value.partner, accounting: projections.value.accounting, fulfillment: projections.value.fulfillment } } });
         await tx.partnerCorrectionSave.create({ data: { opportunityId: correctionId, caseId: ids.caseId,
           successorRevision: 3, actorId: ids.partnerId, commandId: `${correctionId}-save` } });
@@ -1522,7 +1525,7 @@ test('concurrent SIGNED and PRINTED writers on independent clients create one co
     assert.equal(await setup.partnerCaseEvent.count({ where: { caseId: ids.caseId,
       type: { in: ['CASE_SIGNED', 'CASE_PRINTED'] } } }), 2);
     const root = await setup.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, include: { customerContract: true } });
-    assert.equal(root.state, 'COMMITTED'); assert.equal(root.customerContract.status, 'PRINTED');
+    assert.equal(root.state, 'COMMITTED'); assert.equal(root.customerContract!.status, 'PRINTED');
 
     const pauseIds = idsFor(`partner-lifecycle-pause-race-${temporary.runId}`);
     const pauseOwner = await setup.$transaction(tx => seedCase(tx, pauseIds));
@@ -1547,7 +1550,7 @@ test('concurrent SIGNED and PRINTED writers on independent clients create one co
     const pauseRoot = await setup.partnerSaleCase.findUniqueOrThrow({ where: { id: pauseIds.caseId },
       include: { customerContract: true } });
     assert.equal(pauseRoot.state, 'CUSTOMER_APPROVED');
-    assert.equal(pauseRoot.customerContract.status, 'APPROVED');
+    assert.equal(pauseRoot.customerContract!.status, 'APPROVED');
 
     const competingIds = idsFor(`partner-lifecycle-cancel-race-${temporary.runId}`);
     const competingOwner = await setup.$transaction(tx => seedCase(tx, competingIds));

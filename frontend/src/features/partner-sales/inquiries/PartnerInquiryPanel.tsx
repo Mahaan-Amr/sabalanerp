@@ -13,12 +13,11 @@ export interface PartnerInquiryPanelProps {
   pending: boolean;
   onRefresh: () => void;
   onReinquire: (row: PartnerInquiryRow) => void;
-  onEnterWizard: (rows: PartnerInquiryRow[]) => void;
   onOpenInquiry?: (inquiryId: string) => void;
   mismatchedRowIds?: readonly string[];
 }
 
-export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinquire, onEnterWizard, onOpenInquiry, mismatchedRowIds = [] }: PartnerInquiryPanelProps) {
+export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinquire, onOpenInquiry, mismatchedRowIds = [] }: PartnerInquiryPanelProps) {
   const usable = usableInquiryRows(inquiry, now).filter(row => !mismatchedRowIds.includes(row.rowId));
   return <section dir="rtl" aria-label="استعلام قیمت" className="min-w-0 space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -54,10 +53,8 @@ export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinqu
         </ErpCard>;
       })}
     </div>
-    <div aria-label="آمادگی پرونده" className="sticky bottom-0 z-10 flex flex-col gap-3 rounded-[var(--sds-radius-card)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div aria-label="آمادگی پرونده" className="sticky bottom-0 z-10 rounded-[var(--sds-radius-card)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-4">
       <div><p className="font-bold">{persianCount(usable.length)} ردیف آماده</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">قیمت فروش به مشتری پیش از ثبت قابل تغییر است.</p></div>
-      <ErpButton label="ساخت پرونده و ورود به Wizard" variant="solid" disabled={pending || inquiry.rows.length === 0}
-        onClick={() => onEnterWizard(inquiry.rows)} className="w-full sm:w-auto" />
     </div>
   </section>;
 }

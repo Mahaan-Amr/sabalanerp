@@ -527,6 +527,7 @@ test('the complete Contract Creation wizard uses the shared semantic and accessi
   const wizard = contractWizardSources.find(([path]) => path === 'CreateContractWizardClient.tsx')[1];
   const frame = contractWizardSources.find(([path]) => path === 'ContractWizardFrame.tsx')[1];
   const paymentDialog = contractWizardSources.find(([path]) => path === 'PaymentEntryModal.tsx')[1];
+  const editRecoveryBoundary = read('frontend/src/features/contract-creation/utils/contractEditRecoveryBoundary.ts');
   const progress = contractWizardSources.find(([path]) => path === 'WizardProgressBar.tsx')[1];
   const navigation = contractWizardSources.find(([path]) => path === 'WizardNavigation.tsx')[1];
   const erpPrimitives = read('frontend/src/components/erp/index.tsx');
@@ -536,7 +537,9 @@ test('the complete Contract Creation wizard uses the shared semantic and accessi
   assert.match(frame, /<ErpNeumorphicWorkflowLayout/);
   assert.match(wizard, /contractSubmission\.isSubmitting/);
   assert.match(wizard, /editRecovery\.blocked/);
-  assert.match(wizard, /inert: ''/);
+  assert.match(wizard, /contractEditRecoveryBoundaryProps/);
+  assert.match(editRecoveryBoundary, /inert: true/);
+  assert.doesNotMatch(editRecoveryBoundary, /inert: ''/);
   assert.match(wizard, /<ErpNeumorphicDialog/);
   assert.match(neumorphicPrimitives, /role="dialog"/);
   assert.match(neumorphicPrimitives, /aria-modal="true"/);
@@ -547,6 +550,7 @@ test('the complete Contract Creation wizard uses the shared semantic and accessi
   assert.match(neumorphicPrimitives, /previouslyFocused\?\.focus\(\)/);
   assert.doesNotMatch(wizard, /مراحل ایجاد قرارداد را تکمیل کنید/u);
   assert.match(paymentDialog, /<CentralProductModalShell/);
+  assert.match(paymentDialog, /closeVariant="outline"/);
   assert.match(progress, /<ErpNeumorphicWorkflowProgress/);
   assert.match(navigation, /<ErpNeumorphicWorkflowNavigation/);
   assert.match(erpPrimitives, /aria-current=\{isActive \? 'step' : undefined\}/);

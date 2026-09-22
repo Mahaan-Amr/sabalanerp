@@ -7,7 +7,7 @@ export const destinationDutyHref = (
   const workspacePrefix = `/dashboard/${workspace}/`;
   if (
     duty.status === 'OPEN'
-    && duty.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION'
+    && ['SALES_EDIT_CONTRACT_CORRECTION', 'PARTNER_PRICE_REVIEW', 'PARTNER_PRICE_RESULT'].includes(duty.sourceActionCode)
     && duty.destinationHref?.startsWith(workspacePrefix)
   ) {
     return duty.destinationHref;

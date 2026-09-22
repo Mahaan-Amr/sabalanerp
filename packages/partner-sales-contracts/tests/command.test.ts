@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { PartnerCaseFinalizeRequestSchema, PartnerCommandSchema, compareIdempotency, canonicalHash, canonicalJson } from '../src';
+import { CustomerPaymentPlanSchema, DateSchema, DecimalSchema, PartnerCaseFinalizeRequestSchema, PartnerCommandSchema,
+  compareIdempotency, canonicalHash, canonicalJson } from '../src';
 
 test('commands bind version, expected state/revision and scoped idempotency intent', async () => {
   const hash = 'sha256-v1:' + 'a'.repeat(64);
@@ -83,8 +84,50 @@ test('Partner finalization carries an explicit loss decision', async () => {
 test('Partner finalization request cannot add another signature after commitment', () => {
   const expected = { caseId: 'case-finalize-guard', revision: 1,
     integrityHash: `sha256-v1:${'a'.repeat(64)}` };
-  assert.equal(PartnerCaseFinalizeRequestSchema.safeParse({ expected,
+  assert.equal(PartnerCaseFinalizeRequestSchema.safeParse({ operationId: 'finalize-case-1', expected,
     expectedState: 'DRAFT', lossAccepted: false }).success, true);
-  assert.equal(PartnerCaseFinalizeRequestSchema.safeParse({ expected,
+  assert.equal(PartnerCaseFinalizeRequestSchema.safeParse({ operationId: 'finalize-case-1', expected,
     expectedState: 'COMMITTED', lossAccepted: false }).success, false);
+});
+
+test('Sabalan acceptance carries only the quoted price while rejection requires its reason', () => {
+  const base = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: 'inquiry-381',
+    expectedAssignmentRevision: 1, commandId: 'decision-command-381', correlationId: 'decision-correlation-381',
+    idempotency: { actorId: 'seller-381', operation: 'INQUIRY_DECIDE', targetId: 'inquiry-381',
+      key: 'decision-381', payloadHash: `sha256-v1:${'a'.repeat(64)}` } };
+  const approved = { rowId: 'row-381', expectedRevision: 1, outcome: 'APPROVED' as const,
+    wholesaleUnitPrice: { amount: '220000', currency: 'IRT' as const } };
+  assert.equal(PartnerCommandSchema.safeParse({ ...base, decisions: [approved] }).success, true);
+  assert.equal(PartnerCommandSchema.safeParse({ ...base, decisions: [{ ...approved,
+    wholesaleUnitPrice: { amount: '۰', currency: 'IRT' } }] }).success, false);
+  assert.equal(PartnerCommandSchema.safeParse({ ...base, decisions: [{ ...approved, note: 'توضیح نباید ثبت شود' }] }).success, false);
+  assert.equal(PartnerCommandSchema.safeParse({ ...base, decisions: [{ rowId: 'row-381', expectedRevision: 1,
+    outcome: 'REJECTED' }]}).success, false);
+});
+
+test('a new pricing request is scoped to one numbered Case and one inquiry package', async () => {
+  const rows = [{ rowId: 'pricing-row-381', configuration: { recoveryId: 'recovery-381', recoveryRevision: 2,
+    productRowId: 'product-381' } }];
+  const intent = { schemaVersion: 1 as const, type: 'CASE_PRICING_SUBMIT' as const, caseId: 'case-381',
+    expected: { caseId: 'case-381', revision: 2, integrityHash: `sha256-v1:${'a'.repeat(64)}` }, inquiryId: 'inquiry-381', rows };
+  const parsed = PartnerCommandSchema.parse({ ...intent, commandId: 'pricing-command-381',
+    correlationId: 'pricing-correlation-381', idempotency: { actorId: 'partner-381',
+      operation: 'CASE_PRICING_SUBMIT', targetId: 'case-381', key: 'pricing-381', payloadHash: await canonicalHash(intent) } });
+  assert.equal(parsed.type, 'CASE_PRICING_SUBMIT');
+  assert.equal(parsed.caseId, 'case-381');
+  assert.equal(parsed.expected.revision, 2);
+  assert.equal(PartnerCommandSchema.safeParse({ ...parsed, caseId: undefined }).success, false);
+  assert.equal(PartnerCommandSchema.safeParse({ ...parsed,
+    idempotency: { ...parsed.idempotency, targetId: 'another-case' } }).success, false);
+  assert.equal(PartnerCommandSchema.safeParse({ ...parsed,
+    expected: { ...parsed.expected, caseId: 'another-case' } }).success, false);
+});
+
+test('structured Persian and Arabic numerals normalize at the public contract boundary', () => {
+  assert.equal(DecimalSchema.parse('۱۲٣.۴۵'), '123.45');
+  assert.equal(DateSchema.parse('۲۰۲۶-۰۹-۲۰'), '2026-09-20');
+  assert.equal(CustomerPaymentPlanSchema.parse({ planId: 'plan-numerals', version: 1, effectiveDate: '۲۰۲۶-۰۹-۲۰',
+    installments: [{ installmentId: 'installment-numerals', dueDate: '۲۰۲۶-۰۹-۲۱',
+      amount: { amount: '۱', currency: 'IRT' }, method: 'CASH', nationalCode: '۰۰۱۲۳۴۵۶۷۸' }] }).installments[0].nationalCode,
+  '0012345678');
 });

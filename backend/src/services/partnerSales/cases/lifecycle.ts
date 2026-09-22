@@ -47,7 +47,7 @@ export interface PartnerCaseLifecycleDependencies {
   cancellationPurpose: 'PARTNER' | 'MANAGEMENT';
   transaction<T>(work: (tx: Transaction) => Promise<T>): Promise<T>;
   authorize(tx: Transaction, request: AuthorizationRequest): Promise<Result<{ evidenceId: string }>>;
-  verifyOutputEvidence(tx: Transaction, input: { caseId: string; owner: RevisionRef; trigger: 'SIGNED' | 'PRINTED';
+  verifyOutputEvidence(tx: Transaction, input: { caseId: string; owner: RevisionRef; trigger: 'FINALIZED' | 'SIGNED' | 'PRINTED';
     authenticatedOutputEvidenceId: string }): Promise<Result<{ evidenceId: string; occurredAt: string; outputHash: string }>>;
   cancelConfirmationSessions(tx: Transaction, input: { caseId: string; reason: string }): Promise<Result<{
     invalidatedSessionIds: readonly string[]; preservedSnapshotIds: readonly string[] }>>;
@@ -63,7 +63,7 @@ const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringif
 const object = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Prisma.JsonObject : undefined;
 
-function projectionEvidence(input: { graphHash: string; graph: Prisma.JsonValue; partySnapshots: Prisma.JsonValue;
+export function projectionEvidence(input: { graphHash: string; graph: Prisma.JsonValue; partySnapshots: Prisma.JsonValue;
   wholesaleEnvelope: Prisma.JsonValue; retailEnvelope: Prisma.JsonValue; paymentEvidence: Prisma.JsonValue;
   customerContent: Prisma.JsonValue }): CaseRevisionProjectionEvidence | undefined {
   const wholesale = object(input.wholesaleEnvelope), retail = object(input.retailEnvelope);
@@ -128,6 +128,7 @@ async function lockCase(tx: Transaction, caseId: string) {
 type LockedCase = NonNullable<Awaited<ReturnType<typeof lockCase>>>;
 
 async function parseViews(tx: Transaction, row: LockedCase) {
+  if (!row.internalRecordId || !row.customerContractId || !row.internalRecord || !row.customerContract) return undefined;
   const internal = row.head.internalProjection;
   if (!internal || typeof internal !== 'object' || Array.isArray(internal)) return undefined;
   const source = internal as Prisma.JsonObject;
@@ -169,7 +170,9 @@ async function parseViews(tx: Transaction, row: LockedCase) {
     internalRecordNumber: row.internalRecord.recordNumber, customerContractNumber: row.customerContract.contractNumber,
     commercialAccountId: row.internalRecord.commercialAccountId, state: 'DRAFT', evidence });
   if (!rebuilt.ok) return undefined;
-  if (await canonicalHash(partner.data) !== await canonicalHash(rebuilt.value.partner) ||
+  const { customerContractNumber: _rebuiltContractNumber, ...rebuiltPartnerWithoutContract } = rebuilt.value.partner;
+  const expectedPartner = partner.data.customerContractNumber ? rebuilt.value.partner : rebuiltPartnerWithoutContract;
+  if (await canonicalHash(partner.data) !== await canonicalHash(expectedPartner) ||
       await canonicalHash(customer.data) !== await canonicalHash(rebuilt.value.customer)) return undefined;
   if (pricingReady && (await canonicalHash(accounting.data) !== await canonicalHash(rebuilt.value.accounting) ||
       await canonicalHash(fulfillment.data) !== await canonicalHash(rebuilt.value.fulfillment))) return undefined;
@@ -183,7 +186,7 @@ async function parseViews(tx: Transaction, row: LockedCase) {
       accounting.data.recordId !== row.internalRecordId || fulfillment.data.recordId !== row.internalRecordId)) ||
       customer.data.revision !== row.headRevision || customer.data.contractNumber !== row.customerContract.contractNumber ||
       computedOutputHash !== outputHash) return undefined;
-  return { partner: { ...partner.data, state: row.state,
+  return { partner: { ...partner.data, customerContractNumber: row.customerContract.contractNumber, state: row.state,
     customerConfirmationState: row.customerConfirmationState },
     ...(accounting.success ? { accounting: { ...accounting.data, state: row.state } } : {}) };
 }
@@ -205,7 +208,8 @@ export async function readPartnerRevisionProjections(tx: Transaction, owner: Rev
   const row = await readCase(tx, owner.caseId);
   const revision = await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: {
     caseId: owner.caseId, revision: owner.revision } } });
-  if (!row || !revision || revision.integrityHash !== owner.integrityHash) return undefined;
+  if (!row || !row.internalRecord || !row.customerContract || !row.internalRecordId || !row.customerContractId ||
+      !revision || revision.integrityHash !== owner.integrityHash) return undefined;
   return parseViews(tx, { ...row, headRevision: owner.revision, integrityHash: owner.integrityHash,
     pricingState: revision.pricingState, state: 'DRAFT', head: revision,
     internalRecord: { ...row.internalRecord, pricingState: revision.pricingState,
@@ -219,7 +223,7 @@ async function historicalPartner(tx: Transaction, saved: ReturnType<typeof recei
     where: { caseId_revision: { caseId: saved.caseId, revision: saved.revision } },
     select: { predecessorRevision: true, integrityHash: true, graphHash: true, graph: true, partySnapshots: true,
       wholesaleEnvelope: true, retailEnvelope: true, paymentEvidence: true, customerContent: true,
-      internalProjection: true, case: { select: { caseNumber: true, internalRecordId: true,
+      internalProjection: true, case: { select: { caseNumber: true, internalRecordId: true, customerContractId: true,
         internalRecord: { select: { recordNumber: true, commercialAccountId: true } },
         customerContract: { select: { contractNumber: true } } } } },
   });
@@ -240,6 +244,10 @@ async function historicalPartner(tx: Transaction, saved: ReturnType<typeof recei
     retailEnvelope: revision.retailEnvelope, paymentEvidence: revision.paymentEvidence,
     customerContent: revision.customerContent });
   if (computedHash !== revision.integrityHash) return undefined;
+  if (!revision.case.internalRecordId || !revision.case.customerContractId ||
+      !revision.case.internalRecord || !revision.case.customerContract) {
+    return { ...parsed.data, state: saved.state };
+  }
   const evidence = projectionEvidence({ graphHash: revision.graphHash, graph: revision.graph,
     partySnapshots: revision.partySnapshots, wholesaleEnvelope: revision.wholesaleEnvelope,
     retailEnvelope: revision.retailEnvelope, paymentEvidence: revision.paymentEvidence,
@@ -250,8 +258,11 @@ async function historicalPartner(tx: Transaction, saved: ReturnType<typeof recei
     internalRecordId: revision.case.internalRecordId, internalRecordNumber: revision.case.internalRecord.recordNumber,
     customerContractNumber: revision.case.customerContract.contractNumber,
     commercialAccountId: revision.case.internalRecord.commercialAccountId, state: 'DRAFT', evidence });
-  if (!rebuilt.ok || await canonicalHash(parsed.data) !== await canonicalHash(rebuilt.value.partner)) return undefined;
-  return { ...parsed.data, state: saved.state };
+  if (!rebuilt.ok) return undefined;
+  const { customerContractNumber: _rebuiltContractNumber, ...rebuiltPartnerWithoutContract } = rebuilt.value.partner;
+  const expectedPartner = parsed.data.customerContractNumber ? rebuilt.value.partner : rebuiltPartnerWithoutContract;
+  if (await canonicalHash(parsed.data) !== await canonicalHash(expectedPartner)) return undefined;
+  return { ...parsed.data, customerContractNumber: revision.case.customerContract.contractNumber, state: saved.state };
 }
 
 function expectedOwner(row: LockedCase): RevisionRef {
@@ -279,14 +290,22 @@ async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef
   const [bindings, usages, materialUsages, now] = await Promise.all([
     tx.partnerCaseRowBinding.count({ where: { caseId: owner.caseId, revision: owner.revision } }),
     tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
-      select: { approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } } } } } } } }),
+      select: { approval: { select: { row: { select: { outcome: true, successor: { select: { id: true } },
+        inquiry: { select: { caseId: true, caseRevision: true, pricingReadyAt: true, pricingExpiresAt: true } } } } } } } }),
     tx.partnerMaterialInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
-      select: { approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } } } } } } } }),
+      select: { approval: { select: { row: { select: { outcome: true, successor: { select: { id: true } },
+        inquiry: { select: { caseId: true, caseRevision: true, pricingReadyAt: true, pricingExpiresAt: true } } } } } } } }),
     tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`,
   ]);
   const instant = now[0]?.now;
-  const valid = (usage: (typeof usages)[number]) => Boolean(instant) && usage.approval.row.outcome === 'APPROVED' &&
-    !usage.approval.row.successor && usage.approval.expiresAt.getTime() > instant!.getTime();
+  const valid = (usage: (typeof usages)[number]) => {
+    const inquiry = usage.approval.row.inquiry;
+    return Boolean(instant && inquiry.pricingReadyAt && inquiry.pricingExpiresAt) &&
+      inquiry.caseId === owner.caseId && inquiry.caseRevision !== null &&
+      inquiry.caseRevision > 0 && inquiry.caseRevision <= owner.revision &&
+      usage.approval.row.outcome === 'APPROVED' && !usage.approval.row.successor &&
+      inquiry.pricingExpiresAt!.getTime() > instant!.getTime();
+  };
   return usages.length === bindings && usages.every(valid) && materialUsages.every(valid);
 }
 
@@ -316,9 +335,8 @@ Promise<ExecutionResult> {
     if (prior.payloadHash !== payloadHash) return { ok: false, error: partnerError('IDEMPOTENCY_CONFLICT') };
     const saved = receipt(prior.outcome);
     const current = await lockCase(tx, caseId);
-    const views = current && await parseViews(tx, current);
     const historical = await historicalPartner(tx, saved);
-    if (!saved || saved.commandId !== command.commandId || saved.caseId !== caseId || !current || !views || !historical) {
+    if (!saved || saved.commandId !== command.commandId || saved.caseId !== caseId || !current || !historical) {
       await dependencies.recordEvidenceReview(tx, { caseId, correlationId: command.correlationId,
         code: 'INTEGRITY_CONFLICT', evidence: { receiptRevision: saved?.revision ?? 0 } });
       return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
@@ -329,12 +347,6 @@ Promise<ExecutionResult> {
 
   const row = await lockCase(tx, caseId);
   if (!row) return { ok: false, error: partnerError('NOT_FOUND') };
-  const views = await parseViews(tx, row);
-  if (!views) {
-    await dependencies.recordEvidenceReview(tx, { caseId, correlationId: command.correlationId,
-      code: 'INTEGRITY_CONFLICT', evidence: { headRevision: row.headRevision } });
-    return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-  }
   const expectedError = checkExpectedRevision(command.expected, expectedOwner(row));
   if (expectedError) return { ok: false, error: expectedError };
 
@@ -349,6 +361,9 @@ Promise<ExecutionResult> {
     if (!retained.ok) throw new RollbackLifecycleResult(retained);
     const at = await clock(tx), eventId = randomUUID(), sequence = await nextSequence(tx, caseId);
     const owner = expectedOwner(row);
+    const partner = await historicalPartner(tx, { version: 1, commandId: command.commandId,
+      caseId, revision: owner.revision, integrityHash: owner.integrityHash, state: row.state, eventIds: [] });
+    if (!partner) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     const event = buildCaseCancellationEvent({ eventId, commandId: command.commandId,
       correlationId: command.correlationId, actorId: dependencies.actorId, recordedAt: at.instant,
       effectiveDate: at.date, owner, reason: command.reason });
@@ -356,8 +371,8 @@ Promise<ExecutionResult> {
       stateRevision: row.stateRevision, headRevision: row.headRevision, integrityHash: row.integrityHash },
       data: { state: 'CANCELLED', stateRevision: { increment: 1 } } });
     if (updated.count !== 1) throw new RollbackLifecycleResult({ ok: false, error: partnerError('ROW_STALE') });
-    await tx.salesContract.update({ where: { id: row.customerContractId }, data: { status: 'CANCELLED',
-      lostAt: new Date(at.instant) } });
+    if (row.customerContractId) await tx.salesContract.update({ where: { id: row.customerContractId },
+      data: { status: 'CANCELLED', lostAt: new Date(at.instant) } });
     await tx.partnerCaseEvent.create({ data: { id: eventId, caseId, caseRevision: row.headRevision,
       integrityHash: row.integrityHash, sequence, stateRevision: row.stateRevision + 1, type: event.type,
       fromState: row.state, toState: 'CANCELLED', actorId: dependencies.actorId, commandId: command.commandId,
@@ -368,7 +383,14 @@ Promise<ExecutionResult> {
     await saveOutcome(tx, { ...key, caseId, payloadHash, commandId: command.commandId, owner,
       state: 'CANCELLED', eventIds: [eventId] });
     return { ok: true, value: { commandId: command.commandId, replayed: false,
-      case: { ...views.partner, state: 'CANCELLED' }, eventIds: [eventId] } };
+      case: { ...partner, state: 'CANCELLED' }, eventIds: [eventId] } };
+  }
+
+  const views = await parseViews(tx, row);
+  if (!views || !row.internalRecordId || !row.customerContractId || !row.internalRecord || !row.customerContract) {
+    await dependencies.recordEvidenceReview(tx, { caseId, correlationId: command.correlationId,
+      code: 'INTEGRITY_CONFLICT', evidence: { headRevision: row.headRevision } });
+    return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
 
   if (!['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED', 'COMMITTED'].includes(row.state)) {
@@ -402,7 +424,8 @@ Promise<ExecutionResult> {
   const output = await dependencies.verifyOutputEvidence(tx, { caseId, owner, trigger: command.trigger,
     authenticatedOutputEvidenceId: command.authenticatedOutputEvidenceId });
   if (!output.ok) return output;
-  const factType = command.trigger === 'SIGNED' ? 'CASE_SIGNED' : 'CASE_PRINTED';
+  const factType = command.trigger === 'FINALIZED' ? 'CASE_PURCHASE_FINALIZED'
+    : command.trigger === 'SIGNED' ? 'CASE_SIGNED' : 'CASE_PRINTED';
   const existingFact = await tx.partnerCaseEvent.findFirst({ where: { caseId, type: factType }, orderBy: { sequence: 'asc' } });
   if (existingFact) {
     await saveOutcome(tx, { ...key, caseId, payloadHash, commandId: command.commandId, owner,
@@ -412,8 +435,9 @@ Promise<ExecutionResult> {
   }
   const at = await clock(tx), sequence = await nextSequence(tx, caseId), factEventId = randomUUID();
   const commitmentEventId = firstCommitment ? randomUUID() : undefined;
-  const status = projectCustomerContractStatus(row.customerContract.status, command.trigger);
-  if (!status) {
+  const status = command.trigger === 'FINALIZED' ? row.customerContract.status
+    : projectCustomerContractStatus(row.customerContract.status, command.trigger);
+  if (!status || (command.trigger === 'FINALIZED' && row.customerContract.status !== 'DRAFT')) {
     await dependencies.recordEvidenceReview(tx, { caseId, correlationId: command.correlationId,
       code: 'INTEGRITY_CONFLICT', evidence: { headRevision: row.headRevision } });
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
@@ -429,6 +453,7 @@ Promise<ExecutionResult> {
     status,
     ...(command.trigger === 'SIGNED' ? { isSigned: true, signedAt: new Date(output.value.occurredAt),
       signedBy: dependencies.actorId } : { printedAt: new Date(output.value.occurredAt) }),
+    ...(command.trigger === 'FINALIZED' ? { printedAt: null } : {}),
     ...(firstCommitment ? { realizedSellerId: row.profile.userId, realizedSellerSource: 'PARTNER_CASE_COMMITMENT',
       realizedAt: new Date(output.value.occurredAt), realizedAmount: caseComparableAmount(views.accounting.totals) } : {}),
   } });
@@ -491,6 +516,9 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
             code: 'INTEGRITY_CONFLICT', evidence: { headRevision: row.headRevision } });
           return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         }
+        if (!row.customerContractId || !row.customerContract) {
+          return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+        }
         const prior = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: {
           actorId: dependencies.actorId, operation: transition.operation, targetScope: row.id, key: input.commandId,
         } } });
@@ -520,7 +548,7 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
           return { ok: true, value: { commandId: input.commandId, replayed: false,
             case: { ...views.partner, customerConfirmationState: row.customerConfirmationState }, eventIds: [] } };
         }
-        if ((kind === 'APPROVED' || kind === 'REJECTED') && row.state === 'COMMITTED') {
+        if (row.state === 'COMMITTED') {
           const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CUSTOMER_OUTPUT',
             purpose: 'CUSTOMER_OUTPUT', root: { kind: 'CASE', id: row.id } });
           if (!authorization.ok) return authorization;
@@ -528,6 +556,12 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
             stateRevision: row.stateRevision, headRevision: row.headRevision, integrityHash: row.integrityHash },
             data: { customerConfirmationState: transition.confirmationState, stateRevision: { increment: 1 } } });
           if (updated.count !== 1) throw new RollbackLifecycleResult({ ok: false, error: partnerError('ROW_STALE') });
+          // Customer confirmation may arrive or be replayed after an immutable
+          // signature/print fact. Keep that commercial fact monotonic while
+          // still recording the confirmation state on the Partner Case.
+          if (!['SIGNED', 'PRINTED'].includes(row.customerContract.status)) {
+            await tx.salesContract.update({ where: { id: row.customerContractId }, data: { status: transition.status } });
+          }
           await saveOutcome(tx, { actorId: dependencies.actorId, operation: transition.operation, caseId: row.id,
             key: input.commandId, payloadHash, commandId: input.commandId, owner: expectedOwner(row),
             state: 'COMMITTED', eventIds: [] });

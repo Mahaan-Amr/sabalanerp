@@ -5,7 +5,7 @@ const event = { schemaVersion: z.literal(1), eventId: IdSchema, commandId: IdSch
   actorId: IdSchema, recordedAt: InstantSchema, effectiveDate: DateSchema, owner: RevisionRefSchema };
 export const PartnerEventSchema = z.discriminatedUnion('type', [
   z.object({ ...event, type: z.literal('CASE_COMMITTED'), internalRecordId: IdSchema,
-    trigger: z.enum(['SIGNED', 'PRINTED']), salesCreditOwnerId: IdSchema, sabalanNetAmount: MoneySchema }).strict(),
+    trigger: z.enum(['FINALIZED', 'SIGNED', 'PRINTED']), salesCreditOwnerId: IdSchema, sabalanNetAmount: MoneySchema }).strict(),
   z.object({ ...event, type: z.literal('SABALAN_FINANCIAL_APPROVED'), internalRecordId: IdSchema,
     accountingReceivableId: IdSchema, financialApprovalEvidenceId: IdSchema, amount: MoneySchema }).strict(),
   z.object({ ...event, type: z.literal('SABALAN_RECEIPT'), internalRecordId: IdSchema,

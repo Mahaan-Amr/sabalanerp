@@ -260,28 +260,30 @@ async function main() {
         await prisma.accountingFinancialRecord.update({ where: { id: recordId }, data: { status: record.status } });
       }
       const partnerCase = await prisma.partnerSaleCase.findUniqueOrThrow({ where: { id: (record.metadata as { partnerCaseId: string }).partnerCaseId } });
-      await assert.rejects(executeAccountingAction({ kind: 'REGISTER_RECEIPT', contractId: partnerCase.customerContractId!,
+      assert.ok(partnerCase.customerContractId);
+      const customerContractId = partnerCase.customerContractId;
+      await assert.rejects(executeAccountingAction({ kind: 'REGISTER_RECEIPT', contractId: customerContractId,
         method: 'CASH', amount: '10' }, actor), /دریافتنی داخلی پرونده همکار/);
-      await assert.rejects(executeAccountingAction({ kind: 'CREATE_RECEIVABLE', contractId: partnerCase.customerContractId!,
+      await assert.rejects(executeAccountingAction({ kind: 'CREATE_RECEIVABLE', contractId: customerContractId,
         amount: '10' }, actor), /رکورد داخلی پرونده همکار/);
-      await assert.rejects(executeAccountingAction({ kind: 'CREATE_INVOICE', contractId: partnerCase.customerContractId! }, actor),
+      await assert.rejects(executeAccountingAction({ kind: 'CREATE_INVOICE', contractId: customerContractId }, actor),
         /رکورد داخلی پرونده همکار/);
       const lifecycleBlocked = (error: unknown) => error instanceof ContractLifecycleBlockedError &&
         error.blockers.some(item => item.code === 'PARTNER_CASE_LIFECYCLE');
-      await assert.rejects(executeContractLifecycleAction({ contractId: partnerCase.customerContractId, action: 'DEACTIVATE',
+      await assert.rejects(executeContractLifecycleAction({ contractId: customerContractId, action: 'DEACTIVATE',
         reason: 'آزمون جلوگیری از تغییر مستقل قرارداد مشتری', actorId: actor.userId }), lifecycleBlocked);
-      await assert.rejects(createContractLifecycleRequest({ contractId: partnerCase.customerContractId, kind: 'DEACTIVATE',
+      await assert.rejects(createContractLifecycleRequest({ contractId: customerContractId, kind: 'DEACTIVATE',
         reason: 'آزمون جلوگیری از درخواست مستقل قرارداد مشتری', actorId: actor.userId }), lifecycleBlocked);
-      const legacyRequest = await prisma.contractLifecycleRequest.create({ data: { contractId: partnerCase.customerContractId,
+      const legacyRequest = await prisma.contractLifecycleRequest.create({ data: { contractId: customerContractId,
         contractNumberSnapshot: 'isolated-legacy-request', kind: 'DEACTIVATE', requestedBy: actor.userId,
         reason: 'درخواست قدیمی پیش از اعمال سیاست پرونده همکار', contractSnapshot: {} } });
       await assert.rejects(decideContractLifecycleRequest({ requestId: legacyRequest.id, decision: 'APPROVE', actorId: actor.userId }), lifecycleBlocked);
-      await prisma.salesContract.update({ where: { id: partnerCase.customerContractId }, data: { isInactive: true } });
+      await prisma.salesContract.update({ where: { id: customerContractId }, data: { isInactive: true } });
       try {
-        await assert.rejects(executeContractLifecycleAction({ contractId: partnerCase.customerContractId, action: 'REACTIVATE',
+        await assert.rejects(executeContractLifecycleAction({ contractId: customerContractId, action: 'REACTIVATE',
           reason: 'آزمون وضعیت غیرفعال قدیمی', actorId: actor.userId }), lifecycleBlocked);
       } finally {
-        await prisma.salesContract.update({ where: { id: partnerCase.customerContractId }, data: { isInactive: false } });
+        await prisma.salesContract.update({ where: { id: customerContractId }, data: { isInactive: false } });
       }
       for (const feature of ['accounting_receivables_manage', 'accounting_records_approve_void',
         'accounting_tax_manage', 'accounting_audit_view', 'accounting_dashboard_view', 'accounting_contracts_view']) {
@@ -466,7 +468,7 @@ async function main() {
       } finally {
         await prisma.accountingReceivable.update({ where: { id: receivable.id }, data: { remainingAmount: '1600' } });
       }
-      const customerContract = await prisma.salesContract.findUniqueOrThrow({ where: { id: partnerCase.customerContractId } });
+      const customerContract = await prisma.salesContract.findUniqueOrThrow({ where: { id: customerContractId } });
       const ordinaryContractIds: string[] = [];
       for (const suffix of ['ordinary-history-alpha', 'ordinary-history-beta']) {
         const contract = await prisma.salesContract.create({ data: { contractNumber: `${recordId}-${suffix}`, title: suffix,

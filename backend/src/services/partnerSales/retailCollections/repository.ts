@@ -13,6 +13,9 @@ export type RetailCollectionReceipt = {
   actorId: string;
   commandId: string;
   correlationId: string;
+  method?: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER';
+  reference?: string;
+  note?: string;
   reason?: string;
   allocations: readonly { installmentId: string; amount: string }[];
 };

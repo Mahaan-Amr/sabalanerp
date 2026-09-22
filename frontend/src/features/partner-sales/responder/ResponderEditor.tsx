@@ -30,12 +30,16 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
     onLockChange(locked);
     return () => onLockChange(false);
   }, [locked, onLockChange]);
-  const signature = JSON.stringify([inquiry.assignmentRevision, inquiry.rows.map(row => [row.rowId, row.revision]), editableRowIds]);
+  const editableRowsKey = editableRowIds.join('\u0000');
+  const signature = JSON.stringify([inquiry.assignmentRevision, inquiry.rows.map(row => [row.rowId, row.revision]), editableRowsKey]);
   useEffect(() => {
-    // Reauthorization/reassignment invalidates selection, never silently resends old edits.
-    setDrafts(previous => Object.fromEntries(Object.entries(previous).map(([id, draft]) => [id, { ...draft, selected: false }])));
+    // Drop drafts for rows that are no longer actionable after a refresh, while
+    // preserving unsent input for the remaining pending rows.
+    const editable = new Set(editableRowsKey ? editableRowsKey.split('\u0000') : []);
+    setDrafts(previous => Object.fromEntries(Object.entries(previous)
+      .filter(([id]) => editable.has(id))));
     if (!running.current) setReview(null);
-  }, [signature, setDrafts]);
+  }, [editableRowsKey, signature, setDrafts]);
 
   async function reload() {
     if (running.current) return;
@@ -74,10 +78,10 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
     <div className="grid gap-4 lg:grid-cols-2">
       {inquiry.rows.map((row, index) => <ResponseRow key={row.rowId} row={row} number={index + 1}
         canRespond={editableRowIds.includes(row.rowId)} status={rowStatus[row.rowId]} error={errors[row.rowId]}
-        draft={drafts[row.rowId] || { selected: false, outcome: 'APPROVED', amount: '', note: '' }} pending={locked || needsRefresh}
+        draft={drafts[row.rowId] || { outcome: 'APPROVED', amount: '', note: '' }} pending={locked || needsRefresh}
         onChange={draft => setDrafts(previous => ({ ...previous, [row.rowId]: draft }))} />)}
     </div>
-    {editableRowIds.length > 0 && <ErpButton label="بررسی پاسخ ردیف‌های انتخاب‌شده" disabled={locked || needsRefresh} onClick={() => {
+    {editableRowIds.length > 0 && <ErpButton label="بررسی پاسخ‌های واردشده" disabled={locked || needsRefresh} onClick={() => {
       const result = responseDecisions(inquiry.rows.filter(row => editableRowIds.includes(row.rowId))
         .map(row => ({ rowId: row.rowId, revision: row.revision, currency: row.identity.currency })), drafts);
       if (!result.ok) { setErrors(result.errors); return; }

@@ -24,8 +24,10 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
     sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, financiallyApprovedAt: { not: null, lte: input.asOf } },
     include: { receivables: true } });
   const caseIds = [...new Set(invoices.map(invoice => object(invoice.metadata)?.partnerCaseId).filter((id): id is string => typeof id === 'string'))];
-  const cases = await tx.partnerSaleCase.findMany({ where: { id: { in: caseIds } }, include: { events: { orderBy: { sequence: 'asc' } } } });
-  const eventsByCase = new Map(cases.map(row => [row.id, readPersistedPartnerEvents(row, row.events)]));
+  const cases = await tx.partnerSaleCase.findMany({ where: { id: { in: caseIds }, internalRecordId: { not: null } },
+    include: { events: { orderBy: { sequence: 'asc' } } } });
+  const eventsByCase = new Map(cases.map(row => [row.id,
+    readPersistedPartnerEvents({ ...row, internalRecordId: row.internalRecordId! }, row.events)]));
   const rows: Array<{ invoice: typeof invoices[number]; approval: Extract<PartnerEvent, { type: 'SABALAN_FINANCIAL_APPROVED' }>;
     effectiveAt: Date; preparation: PartnerFinancialPreparation }> = [];
   for (const invoice of invoices) {

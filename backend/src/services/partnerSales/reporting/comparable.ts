@@ -27,3 +27,14 @@ export function comparableRevision(view: PartnerCaseView, envelopes: { wholesale
     sabalan: { amount: caseComparableAmount(view.sabalanTotals), currency: view.sabalanTotals.currency },
     evidenceId: `partner-revision:${view.owner.caseId}:${view.owner.revision}:${view.owner.integrityHash}` };
 }
+
+/** Number allocation is the boundary at which a revision becomes commercial
+ * reporting evidence. Earlier draft revisions intentionally have no Sabalan
+ * totals and must not make an otherwise finalized Case unreadable. */
+export function comparableCommercialRevision(
+  view: PartnerCaseView,
+  envelopes: { wholesaleEnvelope: unknown; retailEnvelope: unknown },
+) {
+  if (!view.sabalanTotals && !view.customerContractNumber) return null;
+  return { view, comparable: comparableRevision(view, envelopes) };
+}

@@ -31,10 +31,15 @@ test('customer check plan keeps ordinary optional number and bank without weaken
     installments: customerPlan.installments } }).success, false);
 });
 
-test('partner wholesale quote exposes only canonical per-row purchase amounts', () => {
+test('partner quote exposes canonical retail immediately and wholesale only when priced', () => {
   const quote = PartnerWholesaleQuoteSchema.parse({ schemaVersion: 1, recoveryId: 'recovery-1', recoveryRevision: 2,
     graphHash: `sha256-v1:${'a'.repeat(64)}`, rows: [{ productRowId: 'row-1',
+      retailEffectiveUnitPrice: { amount: '15000', currency: 'IRT' },
       wholesaleUnitPrice: { amount: '12345.67', currency: 'IRT' } }] });
-  assert.equal(quote.rows[0].wholesaleUnitPrice.amount, '12345.67');
+  assert.equal(quote.rows[0].retailEffectiveUnitPrice.amount, '15000');
+  assert.equal(quote.rows[0].wholesaleUnitPrice?.amount, '12345.67');
+  const unpriced = PartnerWholesaleQuoteSchema.parse({ ...quote,
+    rows: [{ productRowId: 'row-1', retailEffectiveUnitPrice: { amount: '15000', currency: 'IRT' } }] });
+  assert.equal(unpriced.rows[0].wholesaleUnitPrice, undefined);
   assert.equal('catalogRate' in quote.rows[0], false);
 });

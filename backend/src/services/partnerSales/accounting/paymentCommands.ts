@@ -87,7 +87,8 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
     const row = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: caseId }, include: {
       head: true, profile: { select: { userId: true } }, events: { orderBy: { sequence: 'asc' } } } });
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-    const events = readPersistedPartnerEvents(row, row.events);
+    if (!row.internalRecordId) throw conflict();
+    const events = readPersistedPartnerEvents({ ...row, internalRecordId: row.internalRecordId }, row.events);
     const approval = latestPartnerFinancialApproval(events);
     const purchase = await readPartnerOfficialPurchase(tx, { internalRecordId: row.internalRecordId!, approval,
       cutoff: clock.now, asOf: clock.now, voided: row.state === 'VOIDED' });

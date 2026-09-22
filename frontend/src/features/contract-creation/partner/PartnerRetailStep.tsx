@@ -19,16 +19,18 @@ export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled
   return <section aria-label="قیمت فروش به مشتری" className="min-w-0 space-y-4" dir="rtl">
     {rows.map((row, index) => { const rowSummary = partnerRetailRowSummary(row); return <ErpCard key={row.productRowId} className="space-y-3 p-4">
       <h3 className="break-words font-semibold">{row.inquiryRow.description}</h3>
-      <p className="text-sm text-[var(--sds-text-secondary)]">قیمت خرید شما از سبلان: {rowSummary
-        ? partnerMoneyText(rowSummary.wholesale, row.retailUnitPrice.currency) : 'در حال محاسبه'}</p>
+      <p className="text-sm text-[var(--sds-text-secondary)]">نرخ پایه پیشنهادی سبلان: {row.inquiryRow.approvedPrice
+        ? partnerMoneyText(row.inquiryRow.approvedPrice.amount, row.inquiryRow.approvedPrice.currency) : 'در حال محاسبه'}</p>
       <ErpField label={`قیمت فروش به مشتری — ${row.inquiryRow.description}`}
         error={!summary.valid && summary.field === 'price' && summary.productRowId === row.productRowId ? summary.message : undefined}>
         <ErpRialInput dir="ltr" disabled={disabled} value={row.retailUnitPrice.amount} onValueChange={amount => {
           onConfirmLoss(false);
-          onRowsChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, retailUnitPrice: { ...item.retailUnitPrice, amount } } : item));
+          onRowsChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item,
+            retailUnitPrice: { ...item.retailUnitPrice, amount }, retailEffectiveUnitPrice: undefined } : item));
         }} />
       </ErpField>
       {rowSummary && <dl className="grid gap-2 text-sm sm:grid-cols-2">
+        <div><dt className="text-[var(--sds-text-secondary)]">جمع خرید این ردیف از سبلان</dt><dd className="font-semibold">{partnerMoneyText(rowSummary.wholesale, row.retailUnitPrice.currency)}</dd></div>
         <div><dt className="text-[var(--sds-text-secondary)]">فروش این ردیف</dt><dd className="font-semibold">{partnerMoneyText(rowSummary.retail, row.retailUnitPrice.currency)}</dd></div>
         <div><dt className="text-[var(--sds-text-secondary)]">سود/زیان این ردیف</dt><dd className="font-semibold">{partnerMoneyText(rowSummary.difference, row.retailUnitPrice.currency)}</dd></div>
       </dl>}

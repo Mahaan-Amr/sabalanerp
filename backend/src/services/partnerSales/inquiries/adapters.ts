@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import type { CanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { canonicalHash, partnerError, type PartnerTechnicalDraft, type PartnerTechnicalOperation,
   type PartnerTechnicalProduct, type Result } from '@sabalanerp/partner-sales-contracts';
 import { randomUUID } from 'node:crypto';
@@ -88,6 +89,8 @@ export function presentSavedTechnicalConfiguration(input: {
   draftRow?: PartnerTechnicalDraft['rows'][number];
   dependents?: PartnerTechnicalDraft['dependents'];
   operations: readonly PartnerTechnicalOperation[];
+  graphOperations?: Pick<CanonicalProductGraph, 'operationGroups' | 'toolSelections' | 'finishingSelections'>;
+  technicalPolicy?: { mandatoryEnabled: boolean; mandatoryPercentage: string };
 }): DisplayFact[] {
   const { product, draftRow } = input;
   const facts: DisplayFact[] = [];
@@ -115,12 +118,31 @@ export function presentSavedTechnicalConfiguration(input: {
     add(draftRow.configuration.part === 'riser' ? 'ارتفاع' : 'عرض',
       draftRow.configuration.crossDimensionMeters, ' متر');
   }
+  if ((draftRow?.family === 'longitudinal' || draftRow?.family === 'stair') && input.technicalPolicy) {
+    add('حکمی', input.technicalPolicy.mandatoryEnabled
+      ? `فعال · ${input.technicalPolicy.mandatoryPercentage}٪`
+      : 'غیرفعال');
+  }
   const remainder = input.dependents?.find(dependent => dependent.kind === 'remainder' &&
     dependent.productRowId === input.productRowId);
   if (!draftRow && remainder?.kind === 'remainder') {
     add('طول', remainder.lengthMeters, ' متر');
     add('عرض', remainder.widthMeters, ' متر');
   }
+  const groupIds = new Set(input.graphOperations?.operationGroups
+    .filter(group => String(group.productRowId) === input.productRowId)
+    .map(group => String(group.operationGroupId)) ?? []);
+  const operationFact = (label: 'ابزار' | 'پرداخت', selection: {
+    operationGroupId: unknown; catalogItemId: unknown; finalQuantity: unknown;
+  }) => {
+    if (!groupIds.has(String(selection.operationGroupId))) return;
+    const catalog = input.operations.find(item => item.catalogItemId === String(selection.catalogItemId));
+    if (!catalog) return;
+    const unit = catalog.unit === 'meter' ? 'متر' : 'مترمربع';
+    add(label, `${catalog.name} · ${selection.finalQuantity} ${unit}`);
+  };
+  input.graphOperations?.toolSelections.forEach(selection => operationFact('ابزار', selection));
+  input.graphOperations?.finishingSelections.forEach(selection => operationFact('پرداخت', selection));
   return facts;
 }
 
@@ -142,7 +164,9 @@ export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['res
     const identity = snapshot.identities.find(row => row.productRowId === input.reference.productRowId)?.identity;
     const graphRow = snapshot.graph.rows.find(row => row.productRowId === input.reference.productRowId);
     const context = snapshot.context as { catalog?: { products?: PartnerTechnicalProduct[];
-      operations?: PartnerTechnicalOperation[] } };
+      operations?: PartnerTechnicalOperation[] }; technicalPolicy?: {
+        mandatoryEnabled: boolean; mandatoryPercentage: string;
+      } };
     const product = context.catalog?.products?.find(row => row.catalogItemId === identity?.catalogProductId);
     const draftRow = snapshot.draft.rows.find(row => row.productRowId === input.reference.productRowId);
     if (input.reference.productRowId.startsWith('layer-material:')) {
@@ -162,7 +186,8 @@ export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['res
       configuration: presentSavedTechnicalConfiguration({ productRowId: input.reference.productRowId,
         family: identity.family, product, draftRow,
         dependents: snapshot.draft.dependents,
-        operations: context.catalog?.operations ?? [] }) } };
+        operations: context.catalog?.operations ?? [], graphOperations: snapshot.graph,
+        technicalPolicy: context.technicalPolicy }) } };
   }
   return { ok: false, error: partnerError('NOT_FOUND') };
 };

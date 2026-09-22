@@ -85,7 +85,7 @@ Promise<Result<PreparedPrismaSharedSuccessor>> {
   const synthetic = { ...command, type: 'CASE_DRAFT_REVISE' as const } as unknown as Extract<PartnerCommand, { type: 'CASE_DRAFT_REVISE' }>;
   const bound = await tx.partnerSaleCase.findUnique({ where: { id: snapshot.caseId },
     select: { customerContractId: true } });
-  if (!bound) return { ok: false, error: partnerError('NOT_FOUND') };
+  if (!bound?.customerContractId) return { ok: false, error: partnerError('NOT_FOUND') };
   const resolved = await resolvePrismaPartnerCaseDraft(tx, { actorId: command.idempotency.actorId, command: synthetic,
     expectedCustomerContractId: bound.customerContractId, revisionAuthority: 'CORRECTION_WORKFLOW' });
   if (!resolved.ok) return resolved;
@@ -98,7 +98,14 @@ Promise<Result<PreparedPrismaSharedSuccessor>> {
     caseNumber: true, customerContractId: true, internalRecordId: true,
     customerContract: { select: { contractNumber: true } },
     internalRecord: { select: { recordNumber: true, commercialAccountId: true } } } });
-  if (!predecessor || !sale) return { ok: false, error: partnerError('ROW_STALE') };
+  if (!predecessor || !sale?.customerContractId || !sale.internalRecordId || !sale.customerContract || !sale.internalRecord) {
+    return { ok: false, error: partnerError('ROW_STALE') };
+  }
+  const customerContractId = sale.customerContractId;
+  const internalRecordId = sale.internalRecordId;
+  const customerContractNumber = sale.customerContract.contractNumber;
+  const internalRecordNumber = sale.internalRecord.recordNumber;
+  const commercialAccountId = sale.internalRecord.commercialAccountId;
   const previousByRow = new Map(predecessor.rowBindings.map(row => [row.productRowId, row]));
   const approvedRows: ApprovedCaseRow[] = [];
   const pricing: PreparedPrismaSharedSuccessor['pricing'] = [];
@@ -114,10 +121,12 @@ Promise<Result<PreparedPrismaSharedSuccessor>> {
     }
     const approvalResult = frozen?.success ? { ok: true as const, value: frozen.data }
       : await resolveApprovalForUse(tx, { binding: intentRow.approvedRowBinding!,
-        partnerSellerId: command.idempotency.actorId, configurationHash: row.configurationHash });
+        partnerSellerId: command.idempotency.actorId, configurationHash: row.configurationHash,
+        caseId: command.expected.caseId, pricingCaseRevision: command.expected.revision });
     if (!approvalResult.ok) return approvalResult;
     const approval = approvalResult.value;
-    approvedRows.push({ ...row, retailUnitPrice: intentRow.retailUnitPrice, approval, frozen: Boolean(frozen?.success) });
+    approvedRows.push({ ...row, retailUnitPrice: { ...intentRow.retailUnitPrice,
+      amount: row.retailUnitPriceAmount }, approval, frozen: Boolean(frozen?.success) });
     pricing.push({ productRowId: row.productRowId, configurationChanged: !frozen?.success,
       source: frozen?.success ? 'FROZEN' : 'FRESH_EXACT', approvalId: approval.approvalId,
       configurationHash: row.configurationHash, evidenceHash: approval.evidenceHash,
@@ -133,7 +142,7 @@ Promise<Result<PreparedPrismaSharedSuccessor>> {
     return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
   }
   const dependencies = await dependencySnapshot(tx, { caseId: snapshot.caseId,
-    contractId: sale.customerContractId, predecessorRevision: snapshot.owner.revision,
+    contractId: customerContractId, predecessorRevision: snapshot.owner.revision,
     predecessorGraph: predecessor.graph, successorGraph: evidence.value.graph,
     successorProducts: products.map(row => ({ productRowId: row.productRowId, quantity: row.quantity, unit: row.unit })),
     suppliedEvidenceIds: command.dependencyEvidenceIds });
@@ -153,9 +162,9 @@ Promise<Result<PreparedPrismaSharedSuccessor>> {
     products, deliveries: command.intent.deliveries.map(delivery => ({ ...delivery, items: [...delivery.items] })),
     paymentPlans, buildProjections: async owner => {
       const projections = await buildCaseProjections({ caseId: snapshot.caseId, revision: owner.revision,
-        integrityHash: owner.integrityHash, caseNumber: sale.caseNumber, internalRecordId: sale.internalRecordId,
-        internalRecordNumber: sale.internalRecord.recordNumber, customerContractNumber: sale.customerContract.contractNumber,
-        commercialAccountId: sale.internalRecord.commercialAccountId, state: 'DRAFT', evidence: evidence.value });
+        integrityHash: owner.integrityHash, caseNumber: sale.caseNumber, internalRecordId,
+        internalRecordNumber, customerContractNumber,
+        commercialAccountId, state: 'DRAFT', evidence: evidence.value });
       return projections.ok ? { ok: true, value: { internal: json({ partner: projections.value.partner,
         accounting: projections.value.accounting, fulfillment: projections.value.fulfillment }),
         customer: json(projections.value.customer) } } : projections;
@@ -197,7 +206,7 @@ export function createPrismaPartnerFinancialCorrectionComposition(input: {
     revalidateSharedEffect: async (tx, context) => {
       const sale = await tx.partnerSaleCase.findUnique({ where: { id: context.snapshot.caseId }, select: {
         customerContractId: true, head: { select: { graph: true } } } });
-      if (!sale) return { ok: false, error: partnerError('ROW_STALE') };
+      if (!sale?.customerContractId) return { ok: false, error: partnerError('ROW_STALE') };
       return dependencySnapshot(tx, { caseId: context.snapshot.caseId, contractId: sale.customerContractId,
         predecessorRevision: context.snapshot.owner.revision, predecessorGraph: sale.head.graph,
         successorGraph: context.candidate.payload.evidence.graph,

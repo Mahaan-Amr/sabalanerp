@@ -7,7 +7,7 @@ import { TechnicalProductConfiguration } from '../../contract-creation/partner/T
 import { PartnerInquiryPanel } from './PartnerInquiryPanel';
 import { createPartnerInquiryReader } from './partnerInquiryReader';
 import { createPartnerInquirySubmission, type PartnerConfiguredInquiryRows, type PartnerInquiryRecovery } from './partnerInquirySubmission';
-import type { PartnerInquiryRow, PartnerInquiryView } from './inquiryPresentation';
+import type { PartnerInquiryRow } from './inquiryPresentation';
 import { buildPartnerInquiryBulkRows, partnerInquiryBulkStatusLabel, resolveLatestPartnerInquiryRow } from './partnerInquiryBulk';
 
 export interface PartnerInquiryWorkspaceProps {
@@ -22,7 +22,6 @@ export interface PartnerInquiryWorkspaceProps {
   configuredRowLabels?: Readonly<Record<string, string>>;
   configurationEditor: React.ReactNode;
   mismatchedRowIds?: readonly string[];
-  onEnterWizard: (inquiry: PartnerInquiryView) => Promise<void>;
   onOpenInquiry: (inquiryId: string) => void;
   onCreateNewInquiry: () => void;
   /** Returns a newly saved technical recovery ref and a new inquiry row ID;
@@ -31,7 +30,7 @@ export interface PartnerInquiryWorkspaceProps {
 }
 
 export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
-  const { actorId, inquiryId, queries, commands, recovery, writable, configuredRows, knownInquiryRows = [], configuredRowLabels = {}, configurationEditor, mismatchedRowIds, onEnterWizard, onOpenInquiry, onCreateNewInquiry, prepareSuccessor } = props;
+  const { actorId, inquiryId, queries, commands, recovery, writable, configuredRows, knownInquiryRows = [], configuredRowLabels = {}, configurationEditor, mismatchedRowIds, onOpenInquiry, onCreateNewInquiry, prepareSuccessor } = props;
   const reader = useMemo(() => createPartnerInquiryReader(queries, inquiryId), [queries, inquiryId]);
   const submission = useMemo(() => createPartnerInquirySubmission({ actorId, inquiryId, commands, recovery }), [actorId, inquiryId, commands, recovery]);
   const read = useSyncExternalStore(reader.subscribe, reader.getSnapshot, reader.getSnapshot);
@@ -91,13 +90,7 @@ export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
     {!read.inquiry && read.pending && <ErpLoading />}
     {read.inquiry && <PartnerInquiryPanel inquiry={read.inquiry} now={now} pending={blocked || read.pending}
       onRefresh={() => void reader.refresh()} onOpenInquiry={onOpenInquiry} mismatchedRowIds={mismatchedRowIds}
-      onReinquire={row => { setSuccessor(row); setReason(''); setError(null); }}
-      onEnterWizard={() => void act(async () => {
-        await reader.refresh();
-        const latest = reader.getSnapshot().inquiry;
-        if (!latest) throw new Error('Inquiry unavailable');
-        await onEnterWizard(latest);
-      })} />}
+      onReinquire={row => { setSuccessor(row); setReason(''); setError(null); }} />}
     <ErpSheet open={Boolean(successor)} onClose={() => setSuccessor(null)} title="استعلام مجدد" presentation="modal" pending={actionPending || submit.phase === 'submitting' || submit.phase === 'uncertain'}
       footer={<ErpButton label="ارسال استعلام مجدد" disabled={blocked} onClick={() => void act(async () => {
         if (!successor) return;

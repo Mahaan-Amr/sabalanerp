@@ -23,6 +23,7 @@ interface PaymentEntryModalProps {
     entered: string;
   } | null;
   onContinueNationalCodeConflict?: () => void;
+  disabledAmount?: boolean;
 }
 
 export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
@@ -37,7 +38,8 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   isEdit,
   nationalCodeRequired = false,
   nationalCodeConflict = null,
-  onContinueNationalCodeConflict
+  onContinueNationalCodeConflict,
+  disabledAmount = false,
 }) => {
   if (!isOpen) return null;
 
@@ -51,19 +53,21 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
       title={isEdit ? 'ویرایش پرداخت' : 'افزودن پرداخت'}
       view="main"
       onClose={onClose}
+      closeVariant="outline"
       primaryLabel={nationalCodeConflict ? 'ادامه بدون تغییر اطلاعات مشتری' : 'ذخیره'}
       pending={false}
       onPrimary={nationalCodeConflict && onContinueNationalCodeConflict
         ? onContinueNationalCodeConflict
         : onSave}
     >
-        <div className="mx-auto w-full max-w-sm px-0 py-0">
+        <div className="mx-auto w-full max-w-3xl px-0 py-0">
           <div className="space-y-3">
             <ContractPaymentInstallmentFields method={method} amount={String(form.amount ?? '')}
               date={form.paymentDate ?? ''}
               amountLabel={isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : isCheck ? 'مبلغ چک (تومان)' : 'مبلغ (تومان)'}
               dateLabel={isCustomerBalance ? 'تاریخ استفاده از مانده' : isCheck ? 'تاریخ سررسید چک' : 'تاریخ پرداخت'}
               amountError={fieldErrors.amount} dateError={fieldErrors.paymentDate}
+              disabledAmount={disabledAmount}
               onMethodChange={value => onFormChange({ method: value })}
               onAmountChange={value => onFormChange({ amount: Number(value || 0) })}
               onDateChange={value => onFormChange({ paymentDate: value })} />

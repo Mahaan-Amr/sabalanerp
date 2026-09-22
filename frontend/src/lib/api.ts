@@ -677,6 +677,9 @@ export const salesAPI = {
 
   cancelContract: (contractId: string) =>
     api.post(`/sales/contracts/${contractId}/cancel`),
+
+  reactivateContract: (contractId: string) =>
+    api.post(`/sales/contracts/${contractId}/reactivate`),
   
   // Contract Items
   createContractItem: (contractId: string, itemData: any) => api.post(`/sales/contracts/${contractId}/items`, itemData),
@@ -750,6 +753,28 @@ export const crmAPI = {
     api.post('/crm/customers/duplicate-check', payload),
   
   createCustomer: (customerData: any) => api.post('/crm/customers', customerData),
+
+  createPartnerContractCustomer: (command: any) => api.post('/crm/partner/contract-customers', command, {
+    headers: { 'X-Correlation-Id': command.correlationId },
+  }),
+
+  addPartnerContractProject: (customerId: string, command: any) =>
+    api.post(`/crm/partner/contract-customers/${encodeURIComponent(customerId)}/projects`, command, {
+      headers: { 'X-Correlation-Id': command.correlationId },
+    }),
+
+  findPartnerDuplicateCustomer: (payload: any) => api.post('/crm/partner/customer-duplicates/search', payload, {
+    headers: { 'X-Correlation-Id': payload.correlationId },
+  }),
+
+  requestPartnerCustomerTransfer: (command: any) => api.post('/crm/partner/customer-transfers', command, {
+    headers: { 'X-Correlation-Id': command.correlationId },
+  }),
+
+  cancelPartnerCustomerTransfer: (transferId: string, command: any) =>
+    api.post(`/crm/partner/customer-transfers/${encodeURIComponent(transferId)}/cancel`, command, {
+      headers: { 'X-Correlation-Id': command.correlationId },
+    }),
   
   updateCustomer: (id: string, customerData: any) => api.put(`/crm/customers/${id}`, customerData),
 

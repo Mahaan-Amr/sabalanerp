@@ -116,7 +116,7 @@ export async function readPartnerShipmentQuantityProjection(tx: Prisma.Transacti
   // contracted ledger writer, not at midnight of the commercial reporting day.
   const effective = candidates.find(event =>
     (event.type === 'CASE_COMMITTED' ? event.case.committedAt : event.recordedAt)?.getTime()! <= Date.parse(cutoff));
-  if (effective) {
+  if (effective?.case.internalRecordId) {
     const lineages = await tx.partnerFulfillmentLineage.findMany({ where: { caseId, caseRevision: { lte: effective.caseRevision } } });
     const expected = [...effective.revision.rowBindings.map(row => ({ productRowId: row.productRowId, unit: row.unit, quantity: row.quantity })),
       ...lineages.filter(lineage => !effective.revision.rowBindings.some(row => row.productRowId === lineage.productRowId))

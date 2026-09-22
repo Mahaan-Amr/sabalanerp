@@ -65,6 +65,9 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
   const parsed = PartnerTechnicalDraftSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
   const draft = parsed.data;
+  if (draft.rows.some(row => row.family === 'volumetric')) {
+    return { ok: false, error: partnerError('INVALID_PAYLOAD') };
+  }
   const preview = previewPartnerTechnicalDraft(draft, context.catalog);
   if (!preview.ok) return preview;
   if (draft.rows.length === 0 || preview.value.conflicts.length ||

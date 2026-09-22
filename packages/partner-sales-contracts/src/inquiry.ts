@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HashSchema, IdSchema, InstantSchema, MoneySchema, PersianReasonSchema, RevisionSchema, TextSchema } from './primitives';
+import { DateSchema, DecimalSchema, HashSchema, IdSchema, InstantSchema, MoneySchema, PersianReasonSchema, RevisionSchema, TextSchema } from './primitives';
 import { PartnerError, partnerError } from './errors';
 import { canonicalHash } from './integrity';
 
@@ -83,6 +83,7 @@ export const ResponderInquiryViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('RESPONDER_INQUIRY'), inquiryId: IdSchema,
   partnerDisplayName: TextSchema, assignmentId: IdSchema, assignmentRevision: RevisionSchema,
   rows: z.array(z.object({ rowId: IdSchema, revision: RevisionSchema, identity: InquiryIdentitySchema,
+    deliveryFacts: z.array(z.object({ date: DateSchema, quantity: DecimalSchema }).strict()).optional(),
     approvedPrice: MoneySchema.optional(), used: z.boolean(),
   }).strict()),
 }).strict();

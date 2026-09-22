@@ -23,3 +23,38 @@ export function readPartnerDecimalInput(raw: string): string | null {
   const decimals = fraction?.replace(/0+$/, '');
   return `${integer === '-0' && decimals ? '-0' : BigInt(integer)}${decimals ? `.${decimals}` : ''}`;
 }
+
+type ExactDecimal = { digits: bigint; scale: number };
+const exactDecimal = (value: string): ExactDecimal | null => {
+  const normalized = readPartnerDecimalInput(value);
+  if (normalized === null) return null;
+  const negative = normalized.startsWith('-');
+  const [whole, fraction = ''] = (negative ? normalized.slice(1) : normalized).split('.');
+  return { digits: BigInt(`${negative ? '-' : ''}${whole}${fraction}`), scale: fraction.length };
+};
+const exactText = (value: ExactDecimal) => {
+  const negative = value.digits < BigInt(0);
+  const raw = (negative ? -value.digits : value.digits).toString().padStart(value.scale + 1, '0');
+  const text = value.scale ? `${raw.slice(0, -value.scale)}.${raw.slice(-value.scale)}`.replace(/\.?0+$/, '') : raw;
+  return `${negative ? '-' : ''}${text}`;
+};
+
+export function subtractPartnerDecimal(left: string | null, right: string | null): string | null {
+  if (left === null || right === null) return null;
+  const first = exactDecimal(left); const second = exactDecimal(right);
+  if (!first || !second) return null;
+  const scale = Math.max(first.scale, second.scale);
+  const factor = (places: number) => BigInt(`1${'0'.repeat(places)}`);
+  return exactText({ scale, digits: first.digits * factor(scale - first.scale)
+    - second.digits * factor(scale - second.scale) });
+}
+
+export function partnerChartMagnitude(value: string | null | undefined) {
+  if (!value) return 0;
+  const decimal = exactDecimal(value);
+  if (!decimal) return 0;
+  const sign = decimal.digits < BigInt(0) ? -1 : 1;
+  const digits = (decimal.digits < BigInt(0) ? -decimal.digits : decimal.digits).toString();
+  return sign * Number(digits.slice(0, 15)) *
+    (10 ** (digits.length - decimal.scale - Math.min(15, digits.length)));
+}

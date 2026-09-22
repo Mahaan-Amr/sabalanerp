@@ -20,6 +20,9 @@ export async function prepareRetailSuccessor(tx: Prisma.TransactionClient, input
   const sale = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: previous.caseId }, select: {
     caseNumber: true, internalRecordId: true, customerContract: { select: { contractNumber: true } },
     internalRecord: { select: { recordNumber: true, commercialAccountId: true } } } });
+  if (!sale.internalRecordId || !sale.internalRecord || !sale.customerContract) {
+    throw new Error('Partner linked pair is unavailable');
+  }
   const retail = object(previous.retailEnvelope), wholesale = object(previous.wholesaleEnvelope);
   if (!Array.isArray(retail.products) || !Array.isArray(wholesale.products)) throw new Error('Missing retail revision rows');
   const prices = new Map(input.retailPrices.map(row => [row.productRowId, row.retailUnitPrice]));

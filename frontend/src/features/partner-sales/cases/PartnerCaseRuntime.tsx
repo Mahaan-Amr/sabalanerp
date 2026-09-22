@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ErpButton, ErpCheckbox, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSheet, ErpTextarea, ErpWorkspacePage } from '@/components/erp';
+import { ErpButton, ErpCheckbox, ErpEmptyState, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea, ErpWorkspacePage } from '@/components/erp';
 import { FaFileContract } from 'react-icons/fa';
 import { PartnerCaseWorkspace } from './PartnerCaseWorkspace';
 import {
@@ -16,6 +16,7 @@ import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
 import { assertSuccessfulSalesResult, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { normalizePartnerSalesOperationalError } from '../partnerSalesErrorMessage';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
+import { formatPartnerMoney } from '../presentation';
 
 type CaseError = { key: string; message: string; kind: 'error' | 'permission' | 'stale'; caseId: string; order: number };
 
@@ -37,6 +38,9 @@ export function PartnerCaseRuntime() {
   const [lossAccepted, setLossAccepted] = useState(false);
   const [collectionTarget, setCollectionTarget] = useState<PartnerCaseRuntimeRow>();
   const [collectionAmount, setCollectionAmount] = useState('');
+  const [collectionMethod, setCollectionMethod] = useState<'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER'>('BANK_TRANSFER');
+  const [collectionReference, setCollectionReference] = useState('');
+  const [collectionNote, setCollectionNote] = useState('');
   const [collectionDate, setCollectionDate] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()));
   const [reversalTarget, setReversalTarget] = useState<{ row: PartnerCaseRuntimeRow; receiptId: string }>();
   const [reversalReason, setReversalReason] = useState('');
@@ -178,7 +182,7 @@ export function PartnerCaseRuntime() {
         {error && <ErpInlineState kind={error.kind} title={error.message} />}
         <PartnerCaseWorkspace view={row.view} account={index === 0 ? account : undefined}
           collections={collections[caseId]} correction={corrections[caseId]}
-          canRecordCollection={row.view.state === 'COMMITTED'} onRecordCollection={() => { setCollectionTarget(row); setCollectionAmount(''); }}
+          canRecordCollection={row.view.state === 'COMMITTED'} onRecordCollection={() => { setCollectionTarget(row); setCollectionAmount(''); setCollectionMethod('BANK_TRANSFER'); setCollectionReference(''); setCollectionNote(''); }}
           onReverseCollection={receiptId => { setReversalTarget({ row, receiptId }); setReversalReason(''); }}
           onRequestCorrection={scope => void runAction(caseId, `request-correction:${scope}`, 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, scope))}
           onSaveCorrection={input => void runAction(caseId, 'save-correction', 'ذخیره اصلاح فروش همکار', () => savePartnerRetailCorrection(row.view, input))}
@@ -207,6 +211,14 @@ export function PartnerCaseRuntime() {
         title={finalizeTarget?.view.customerConfirmationState === 'APPROVED'
         ? 'مشتری این نسخه را تأیید کرده است.'
         : 'مشتری هنوز این نسخه را تأیید نکرده است. با نهایی‌سازی، تعهد شما به سبلان مستقل از پاسخ مشتری ایجاد می‌شود.'} />
+      {finalizeTarget?.view.sabalanTotals && <div className="grid gap-3 sm:grid-cols-3">
+        <ErpFieldView label="مبلغ قرارداد مشتری" value={formatPartnerMoney(finalizeTarget.view.retailTotals.payable,
+          finalizeTarget.view.retailTotals.currency)} tone="primary" />
+        <ErpFieldView label="مبلغ خرید از سبلان" value={formatPartnerMoney(finalizeTarget.view.sabalanTotals.payable,
+          finalizeTarget.view.sabalanTotals.currency)} tone="info" />
+        <ErpFieldView label="بدهی ایجادشونده به سبلان" value={formatPartnerMoney(finalizeTarget.view.sabalanTotals.payable,
+          finalizeTarget.view.sabalanTotals.currency)} tone="warning" />
+      </div>}
       {finalizeTarget?.view.resaleDifference?.startsWith('-') && <ErpCheckbox
         label="زیان این قرارداد را بررسی کرده‌ام و صریحاً می‌پذیرم"
         checked={lossAccepted} onChange={event => setLossAccepted(event.target.checked)} />}
@@ -222,11 +234,18 @@ export function PartnerCaseRuntime() {
     <ErpSheet open={Boolean(collectionTarget)} onClose={() => { if (!actionPending) setCollectionTarget(undefined); }} title="ثبت وصول مشتری" presentation="modal" pending={actionPending}
       footer={<ErpButton label="ثبت وصول" disabled={actionPending || !collectionAmount || !collectionDate} onClick={() => {
         if (!collectionTarget) return; const caseId = collectionTarget.view.owner.caseId; const history = collections[caseId]; if (!history) return;
-        void runAction(caseId, 'record-collection', 'ثبت وصول مشتری', () => recordPartnerCollection(collectionTarget.view, history, collectionAmount, collectionDate)).then(saved => { if (saved) setCollectionTarget(undefined); });
+        void runAction(caseId, 'record-collection', 'ثبت وصول مشتری', () => recordPartnerCollection(collectionTarget.view, history,
+          collectionAmount, collectionDate, { method: collectionMethod, ...(collectionReference.trim() ? { reference: collectionReference.trim() } : {}),
+            ...(collectionNote.trim() ? { note: collectionNote.trim() } : {}) })).then(saved => { if (saved) setCollectionTarget(undefined); });
       }} />}>
       <ErpInlineState kind="permission" title="این وصول فقط در حساب خصوصی فروش شما ثبت می‌شود و بدهی شما به سبلان را تغییر نمی‌دهد." />
       <div className="grid gap-4 sm:grid-cols-2"><ErpField label="مبلغ وصول" required><ErpRialInput value={collectionAmount} onValueChange={setCollectionAmount} /></ErpField>
-        <ErpField label="تاریخ مؤثر" required><ErpInput type="date" value={collectionDate} onChange={event => setCollectionDate(event.target.value)} /></ErpField></div>
+        <ErpField label="تاریخ مؤثر" required><ErpInput type="date" value={collectionDate} onChange={event => setCollectionDate(event.target.value)} /></ErpField>
+        <ErpField label="روش دریافت" required><ErpSelect value={collectionMethod} onChange={event => setCollectionMethod(event.target.value as typeof collectionMethod)}>
+          <option value="BANK_TRANSFER">واریز بانکی</option><option value="CARD">کارت</option><option value="CASH">نقدی</option><option value="CHEQUE">چک</option><option value="OTHER">سایر</option>
+        </ErpSelect></ErpField>
+        <ErpField label="شماره پیگیری (اختیاری)"><ErpInput value={collectionReference} maxLength={200} onChange={event => setCollectionReference(event.target.value)} /></ErpField></div>
+      <ErpField label="یادداشت (اختیاری)"><ErpTextarea value={collectionNote} maxLength={1000} onChange={event => setCollectionNote(event.target.value)} /></ErpField>
     </ErpSheet>
     <ErpSheet open={Boolean(reversalTarget)} onClose={() => { if (!actionPending) setReversalTarget(undefined); }} title="برگشت وصول مشتری" presentation="modal" pending={actionPending}
       footer={<ErpButton label="ثبت برگشت" tone="danger" disabled={actionPending || !/[\u0600-\u06ff]/.test(reversalReason)} onClick={() => {

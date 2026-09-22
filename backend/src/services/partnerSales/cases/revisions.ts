@@ -1,4 +1,4 @@
-import { parseCanonicalProductGraph, type CanonicalProductGraph } from '@sabalanerp/contract-product-graph';
+import { parseCanonicalProductGraph, projectCanonicalProductGraph, type CanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import {
   CaseDraftIntentSchema, PaymentPlanSchema, canonicalHash, partnerError,
   type ApprovedInquiry, type PartnerCommand, type PartnerTechnicalSavedView, type Result,
@@ -13,8 +13,9 @@ export type ResolvedCaseDraft = {
   graph: CanonicalProductGraph;
   technicalSnapshot: PartnerTechnicalSavedView;
   rows: Array<{ productRowId: string; configurationHash: string; quantity: string; unit: string;
-    precisionPolicyVersion: string; description: string; wholesaleUnitPriceAmount?: string }>;
-  partner: DisplayParty; customer: DisplayParty; legalText: string;
+    precisionPolicyVersion: string; description: string; productCode?: string; retailUnitPriceAmount: string;
+    wholesaleUnitPriceAmount?: string }>;
+  partner: DisplayParty; customer: DisplayParty; project?: { title: string; address?: string }; legalText: string;
   sabalanPaymentPlan: ReturnType<typeof PaymentPlanSchema.parse>;
   additionalMaterialApprovals?: Array<{ pricingSubjectId: string; configurationHash: string;
     catalogProductId: string; wholesaleUnitPriceAmount: string }>;
@@ -67,11 +68,17 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
       (row.approval && row.approval.wholesaleUnitPrice.currency !== currency))) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
   }
-  const products = input.rows.map(row => ({ productRowId: row.productRowId, description: row.description,
+  const graphProducts = new Map(projectCanonicalProductGraph(input.graph, 'pdf').products.map(row => [row.productRowId, row]));
+  const products = input.rows.map(row => { const graph = graphProducts.get(row.productRowId); return ({ productRowId: row.productRowId, description: row.description,
     quantity: row.quantity, unit: row.unit, ...(row.wholesaleUnitPriceAmount !== undefined
       ? { wholesaleUnitPrice: row.wholesaleUnitPriceAmount } : {}),
     retailUnitPrice: row.retailUnitPrice.amount, ...(row.approval ? { approvalEvidenceId: row.approval.approvalId } : {}),
-    configurationHash: row.configurationHash }));
+    configurationHash: row.configurationHash, ...(row.productCode ? { productCode: row.productCode } : {}),
+    ...(graph ? { productType: graph.productType, ...(graph.lengthMeters ? { lengthMeters: graph.lengthMeters } : {}),
+      ...(graph.widthMeters ? { widthMeters: graph.widthMeters } : {}),
+      ...(graph.areaSquareMeters ? { areaSquareMeters: graph.areaSquareMeters } : {}),
+      ...(graph.quantity ? { count: graph.quantity } : {}) } : {}),
+    retailLineTotal: multiply(row.quantity, row.retailUnitPrice.amount) }); });
   const retailNet = sum(input.rows.map(row => multiply(row.quantity, row.retailUnitPrice.amount)));
   const wholesaleNet = pricingReady
     ? sum(input.rows.map(row => multiply(row.quantity, row.wholesaleUnitPriceAmount!))) : undefined;
@@ -113,6 +120,7 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
       ...(pricingReady ? { sabalanPaymentPlan: input.resolved.sabalanPaymentPlan } : {}) },
     customerContent: { contractDate: input.command.intent.contractDate, legalText: input.resolved.legalText,
       ...(input.resolved.projectId ? { projectId: input.resolved.projectId } : {}),
+      ...(input.resolved.project ? { project: input.resolved.project } : {}),
       deliveries: input.command.intent.deliveries, confirmation: 'NOT_SENT', signatures: [] },
     products,
     ...(pricingReady ? { resaleDifference: subtract(retailPayable, wholesaleNet!) } : {}),

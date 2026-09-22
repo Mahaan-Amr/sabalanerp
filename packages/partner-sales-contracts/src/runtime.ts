@@ -34,6 +34,7 @@ export const PartnerCustomerOutputRequestSchema = z.object({
 }).strict();
 
 export const PartnerCaseFinalizeRequestSchema = z.object({
+  operationId: IdSchema,
   expected: RevisionRefSchema,
   expectedState: z.enum(['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED']),
   lossAccepted: z.boolean(),
@@ -53,19 +54,25 @@ export const PartnerCreationContextSchema = z.discriminatedUnion('kind', [
     profileId: IdSchema, writable: z.boolean(), blockedCode: z.string().optional(),
     sabalanTermsVersionId: IdSchema.optional(), latestInquiryId: IdSchema.optional(),
     inquiryIds: z.array(IdSchema).max(100),
-    recoverableDraft: z.object({ recoveryId: IdSchema, baseRevision: z.number().int().nonnegative().safe(),
+    recoverableDraft: z.object({ recoveryId: IdSchema, caseId: IdSchema.optional(), baseRevision: z.number().int().nonnegative().safe(),
       updatedAt: InstantSchema, title: z.string().trim().min(1).max(200).optional() }).strict().optional(),
-    recoverableDrafts: z.array(z.object({ recoveryId: IdSchema, baseRevision: z.number().int().nonnegative().safe(),
+    recoverableDrafts: z.array(z.object({ recoveryId: IdSchema, caseId: IdSchema.optional(), baseRevision: z.number().int().nonnegative().safe(),
       updatedAt: InstantSchema, title: z.string().trim().min(1).max(200).optional() }).strict()).max(50).optional(),
     customers: z.array(z.object({ id: IdSchema, displayName: z.string().min(1).max(240),
       address: z.string().min(1).max(2000), phone: z.string().min(1).max(30).optional() }).strict()),
-    projects: z.array(z.object({ id: IdSchema, customerId: IdSchema, title: z.string().min(1).max(500) }).strict()),
+    projects: z.array(z.object({ id: IdSchema, customerId: IdSchema, title: z.string().min(1).max(500),
+      address: z.string().min(1).max(2000).optional(), city: z.string().min(1).max(500).optional(),
+      projectType: z.string().min(1).max(500).optional(), projectManagerName: z.string().min(1).max(500).optional(),
+      projectManagerNumber: z.string().min(1).max(30).optional(), marketerFirstName: z.string().min(1).max(500).optional(),
+      marketerLastName: z.string().min(1).max(500).optional(), marketerPhoneNumber: z.string().min(1).max(30).optional(),
+      source: z.enum(['CUSTOMER_PROJECT', 'LEGACY_POTENTIAL_PROJECT']).optional(),
+    }).strict()),
   }).strict(),
 ]);
 export type PartnerCreationContext = z.infer<typeof PartnerCreationContextSchema>;
 
 export const PartnerWizardStepSchema = z.enum([
-  'date', 'customer', 'project', 'products', 'delivery', 'payment', 'confirmation',
+  'date', 'customer', 'project', 'products', 'pricing', 'delivery', 'payment', 'confirmation',
 ]);
 export const PartnerWizardRecoverySaveSchema = z.object({
   schemaVersion: z.literal(1),
@@ -87,6 +94,7 @@ export type PartnerWizardRecoverySnapshot = z.infer<typeof PartnerWizardRecovery
 export const PartnerApprovalMatchRequestSchema = z.object({
   schemaVersion: z.literal(1), recoveryId: IdSchema,
   recoveryRevision: z.number().int().positive().safe(),
+  caseId: IdSchema.optional(),
 }).strict();
 export const PartnerApprovalMatchSetSchema = z.object({
   schemaVersion: z.literal(1), recoveryId: IdSchema,

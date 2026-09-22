@@ -34,7 +34,8 @@ test('receipt failure is actionable while successful retry preserves historical 
   } }, 'partner-332');
   const intent = { type: 'RETAIL_RECEIPT' as const, expected: fixture.partner.owner, expectedState: 'COMMITTED' as const,
     planId: fixture.partner.customerPaymentPlan.planId, receiptId: 'receipt-332', amount: { amount: '500', currency: 'IRR' as const },
-    effectiveDate: '2026-08-29', allocations: [{ installmentId: fixture.partner.customerPaymentPlan.installments[0].installmentId, amount: '500' }] };
+    effectiveDate: '2026-08-29', method: 'BANK_TRANSFER' as const, reference: 'پیگیری-۳۳۲', note: 'وصول خصوصی مشتری',
+    allocations: [{ installmentId: fixture.partner.customerPaymentPlan.installments[0].installmentId, amount: '500' }] };
   const failed = await session.submit(intent);
   assert.equal(failed.kind, 'error');
   assert.match(failed.kind === 'error' ? failed.message : '', /تازه/);

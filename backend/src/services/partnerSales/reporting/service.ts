@@ -7,6 +7,37 @@ import { effectiveThrough } from './revenue';
 
 const purposes = ['PARTNER', 'MANAGEMENT', 'ACCOUNTING', 'FULFILLMENT'];
 const states = ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED', 'COMMITTED', 'CANCELLED', 'VOIDED'];
+const jalaliMonth = (date: string) => {
+  const parts = new Intl.DateTimeFormat('en-u-ca-persian', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit' })
+    .formatToParts(new Date(`${date}T12:00:00.000Z`));
+  const year = parts.find(part => part.type === 'year')?.value;
+  const month = parts.find(part => part.type === 'month')?.value;
+  if (!year || !month) throw new ReportingError('INTEGRITY_CONFLICT');
+  return `${year}/${month.padStart(2, '0')}`;
+};
+const jalaliMonthsInRange = (from: string, to: string) => {
+  const keys = new Set<string>([jalaliMonth(from), jalaliMonth(to)]);
+  const cursor = new Date(`${from}T12:00:00.000Z`); const end = new Date(`${to}T12:00:00.000Z`);
+  while (cursor < end) { cursor.setUTCDate(cursor.getUTCDate() + 15); if (cursor <= end) keys.add(jalaliMonth(cursor.toISOString().slice(0, 10))); }
+  return [...keys].sort();
+};
+const reportSeries = (rows: Report['rows'], from: string, to: string) => {
+  const currencies = [...new Set(rows.flatMap(row => row.currency ? [row.currency] : []))].sort();
+  return currencies.map(currency => {
+    const transactions = rows.filter(row => row.currency === currency).flatMap(row => row.chartTransactions || [])
+      .sort((left, right) => left.effectiveDate.localeCompare(right.effectiveDate) || left.caseId.localeCompare(right.caseId));
+    let debt = sum(transactions.filter(item => item.effectiveDate < from).map(item => item.debtDelta));
+    let receivable = sum(transactions.filter(item => item.effectiveDate < from).map(item => item.receivableDelta));
+    const points = jalaliMonthsInRange(from, to).map(month => {
+      const scoped = transactions.filter(item => item.effectiveDate >= from && item.effectiveDate <= to && jalaliMonth(item.effectiveDate) === month);
+      debt = sum([debt, ...scoped.map(item => item.debtDelta)]);
+      receivable = sum([receivable, ...scoped.map(item => item.receivableDelta)]);
+      return { jalaliMonth: month, debtBalance: debt, receivableBalance: receivable,
+        receipts: sum(scoped.map(item => item.receiptDelta)), transactions: scoped };
+    });
+    return { currency, points };
+  });
+};
 
 export class PartnerReportingService {
   constructor(private readonly runtime: ContractRuntime, private readonly source: ReportingSource,
@@ -105,7 +136,7 @@ export class PartnerReportingService {
           accountingReceivedAsOf: group.some(row => row.account) ? sum(group.flatMap(row => row.account ? [row.account.received.amount] : [])) : null,
           accountingCovered: group.filter(row => row.account !== null && row.account !== undefined).length,
           accountingEligible: group.length };
-      }) };
+      }), series: ['PARTNER', 'MANAGEMENT'].includes(query.purpose) ? reportSeries(rows, query.from, query.to) : [] };
     return { report, roots: selectedRoots, actorId: context.actorId };
   }
 

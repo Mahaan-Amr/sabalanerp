@@ -2,15 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { DuplicateCustomerMatchSchema, PartnerCommandSchema, canonicalHash, partnerError,
   type DuplicateCustomerMatch, type PartnerActionV2, type PermissionContext, type Result } from '@sabalanerp/partner-sales-contracts';
-import { PartnerCustomerCreateSchema, PartnerCustomerUpdateSchema, PartnerDuplicateSearchSchema,
+import { PartnerContractCustomerCreateSchema, PartnerContractProjectCreateSchema, PartnerCustomerCreateSchema, PartnerCustomerUpdateSchema, PartnerDuplicateSearchSchema,
   PartnerFollowUpCreateSchema, PartnerNextActionCompleteSchema, PartnerProjectCreateSchema,
-  PartnerProjectUpdateSchema, PartnerTransferRequestSchema, type PartnerCustomerDetail, type PartnerCustomerSummary,
+  PartnerProjectUpdateSchema, PartnerTransferCancelSchema, PartnerTransferRequestSchema, type PartnerCustomerDetail, type PartnerCustomerSummary,
   type PartnerFollowUpView, type PartnerNextActionView, type PartnerProjectView } from './contracts';
 
 type Root = PermissionContext['root'];
 type Authorization = (tx: Prisma.TransactionClient, input: { action: PartnerActionV2; root: Root;
   correlationId: string; reason?: string; target?: { customerTransferId: string } }) => Promise<Result<PermissionContext>>;
-type TransferNotice = (tx: Prisma.TransactionClient, input: { kind: 'REQUESTED' | 'APPROVED' | 'REJECTED';
+type TransferNotice = (tx: Prisma.TransactionClient, input: { kind: 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   transferId: string; recipientIds: string[]; actorId: string; correlationId: string }) => Promise<void>;
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -23,7 +23,7 @@ const digits = (value: string) => value.trim().replace(/[۰-۹]/g, character => 
 const displayName = (customer: { firstName: string; lastName: string; companyName: string | null }) =>
   customer.companyName?.trim() || `${customer.firstName} ${customer.lastName}`.trim();
 const personType = (customerType: string): 'NATURAL' | 'LEGAL' =>
-  ['Company', 'Legal', 'حقوقی'].includes(customerType) ? 'LEGAL' : 'NATURAL';
+  ['Company', 'Government', 'Legal', 'حقوقی', 'دولتی'].includes(customerType) ? 'LEGAL' : 'NATURAL';
 
 async function currentProfile(tx: Prisma.TransactionClient, actorId: string, mutation: boolean) {
   await tx.$queryRaw`SELECT id FROM users WHERE id = ${actorId} FOR UPDATE`;
@@ -41,12 +41,21 @@ async function useProfile(tx: Prisma.TransactionClient, profileId: string) {
 }
 
 function customerSummary(row: { id: string; partnerRevision: number | null; firstName: string; lastName: string;
-  companyName: string | null; customerType: string; city: string | null; phoneNumbers: { number: string; isPrimary: boolean }[] }): PartnerCustomerSummary | undefined {
+  companyName: string | null; customerType: string; status: string; isBlacklisted: boolean; isLocked: boolean;
+  nationalCode: string | null; city: string | null; address: string | null;
+  phoneNumbers: { number: string; isPrimary: boolean }[]; _count: { potentialProjects: number } }): PartnerCustomerSummary | undefined {
   if (!row.partnerRevision) return undefined;
   const phone = row.phoneNumbers.find(item => item.isPrimary)?.number ?? row.phoneNumbers[0]?.number;
   if (!phone) return undefined;
   return { schemaVersion: 1, purpose: 'PARTNER_CRM_CUSTOMER', customerId: row.id, revision: row.partnerRevision,
-    displayName: displayName(row), personType: personType(row.customerType), ...(row.city ? { city: row.city } : {}), phone };
+    displayName: displayName(row), firstName: row.firstName, lastName: row.lastName,
+    ...(row.companyName ? { companyName: row.companyName } : {}),
+    customerType: row.customerType === 'Government' || row.customerType === 'دولتی'
+      ? 'Government' : personType(row.customerType) === 'LEGAL' ? 'Company' : 'Individual',
+    personType: personType(row.customerType), status: row.status, isBlacklisted: row.isBlacklisted,
+    isLocked: row.isLocked, ...(row.nationalCode ? { nationalCode: row.nationalCode } : {}),
+    ...(row.city ? { city: row.city } : {}), ...(row.address ? { address: row.address } : {}),
+    phone, projectCount: row._count.potentialProjects };
 }
 
 function projectView(row: { id: string; partnerRevision: number | null; title: string; status: string; workType: string;
@@ -86,7 +95,9 @@ function nextActionView(row: { id: string; potentialProjectId: string | null; pa
 }
 
 const customerSelect = { id: true, partnerRevision: true, firstName: true, lastName: true, companyName: true,
-  customerType: true, city: true, address: true, ownerUserId: true, partnerOwnerProfileId: true,
+  customerType: true, status: true, isBlacklisted: true, isLocked: true, nationalCode: true,
+  city: true, address: true, ownerUserId: true, partnerOwnerProfileId: true,
+  _count: { select: { potentialProjects: { where: { isActive: true } } } },
   phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' as const }, { id: 'asc' as const }],
     select: { number: true, isPrimary: true } } };
 
@@ -133,7 +144,8 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
         const rows = await tx.crmCustomer.findMany({ where: { partnerOwnerProfileId: profile.id, ownerUserId: profile.userId,
           isActive: true, ...(input.cursor ? { id: { gt: input.cursor } } : {}), ...(query ? { OR: [
             { firstName: { contains: query, mode: 'insensitive' } }, { lastName: { contains: query, mode: 'insensitive' } },
-            { companyName: { contains: query, mode: 'insensitive' } },
+            { companyName: { contains: query, mode: 'insensitive' } }, { nationalCode: { contains: query } },
+            ...(digits(query) ? [{ phoneNumbers: { some: { number: { contains: digits(query) }, isActive: true } } }] : []),
           ] } : {}) }, orderBy: { id: 'asc' }, take: limit + 1, select: customerSelect });
         const refreshed = await authorizeProfile(tx, 'CUSTOMER_LIST', profile.id, input.correlationId);
         if (!refreshed.ok) return refreshed;
@@ -219,6 +231,157 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
       });
     },
 
+    async createContractCustomer(raw: unknown) {
+      const parsed = PartnerContractCustomerCreateSchema.safeParse(raw);
+      if (!parsed.success || !await validatePayloadHash(parsed.data)) {
+        return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+      }
+      const command = parsed.data, operation = 'PARTNER_CONTRACT_CUSTOMER_CREATE';
+      return database.$transaction(async tx => {
+        const profile = await currentProfile(tx, dependencies.actorId, true);
+        if (!profile) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        const replay = await priorOutcome(tx, dependencies.actorId, operation, profile.id,
+          command.idempotencyKey, command.payloadHash);
+        if (replay) return replay;
+        const access = await authorizeProfile(tx, 'CUSTOMER_CREATE', profile.id,
+          command.correlationId, command.reason);
+        if (!access.ok) return access;
+
+        const phoneNumber1 = digits(command.customer.phoneNumber1);
+        const phoneNumber2 = command.customer.phoneNumber2 ? digits(command.customer.phoneNumber2) : undefined;
+        const nationalCode = command.customer.nationalCode ? digits(command.customer.nationalCode) : undefined;
+        const duplicate = await tx.crmCustomer.findFirst({ where: { isActive: true, OR: [
+          { phoneNumbers: { some: { number: { in: [phoneNumber1, ...(phoneNumber2 ? [phoneNumber2] : [])] }, isActive: true } } },
+          ...(nationalCode ? [{ nationalCode }] : []),
+        ] }, select: customerSelect });
+        if (duplicate) {
+          if (duplicate.partnerOwnerProfileId === profile.id && duplicate.ownerUserId === profile.userId) {
+            const customer = customerSummary(duplicate);
+            return customer
+              ? { ok: true as const, value: { commandId: command.commandId, duplicate: 'OWNED' as const, customer } }
+              : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+          }
+          return { ok: false as const, error: partnerError('STATE_CONFLICT') };
+        }
+
+        await useProfile(tx, profile.id);
+        const customerId = randomUUID(), projectId = randomUUID();
+        const created = await tx.crmCustomer.create({ data: {
+          id: customerId,
+          firstName: command.customer.firstName,
+          lastName: command.customer.lastName,
+          companyName: command.customer.companyName,
+          customerType: command.customer.customerType,
+          nationalCode,
+          brandName: command.customer.brandName,
+          homeAddress: command.customer.homeAddress,
+          homeNumber: command.customer.homeNumber ? digits(command.customer.homeNumber) : undefined,
+          workAddress: command.customer.workAddress,
+          workNumber: command.customer.workNumber ? digits(command.customer.workNumber) : undefined,
+          referrerFirstName: command.customer.referrerFirstName,
+          referrerLastName: command.customer.referrerLastName,
+          referrerPhoneNumber: command.customer.referrerPhoneNumber
+            ? digits(command.customer.referrerPhoneNumber) : undefined,
+          address: command.project.address,
+          city: command.project.city,
+          ownerUserId: profile.userId,
+          partnerOwnerProfileId: profile.id,
+          partnerRevision: 1,
+          createdBy: dependencies.actorId,
+          updatedBy: dependencies.actorId,
+          customFields: json({
+            ...(command.customer.whatsappNumber ? { whatsappNumber: digits(command.customer.whatsappNumber) } : {}),
+            ...(command.customer.birthDate ? { birthDate: command.customer.birthDate } : {}),
+            ...(command.customer.mainJob ? { mainJob: command.customer.mainJob } : {}),
+          }),
+          phoneNumbers: { create: [
+            { id: randomUUID(), number: phoneNumber1, type: 'mobile', isPrimary: true },
+            ...(phoneNumber2 ? [{ id: randomUUID(), number: phoneNumber2, type: 'mobile', isPrimary: false }] : []),
+          ] },
+          projectAddresses: { create: {
+            id: projectId,
+            address: command.project.address,
+            city: command.project.city,
+            projectName: command.project.projectName,
+            projectType: command.project.projectType,
+            projectManagerName: command.project.projectManagerName,
+            projectManagerNumber: command.project.projectManagerNumber
+              ? digits(command.project.projectManagerNumber) : undefined,
+            marketerFirstName: command.project.marketerFirstName,
+            marketerLastName: command.project.marketerLastName,
+            marketerPhoneNumber: command.project.marketerPhoneNumber
+              ? digits(command.project.marketerPhoneNumber) : undefined,
+          } },
+        }, select: customerSelect });
+        const customer = customerSummary(created);
+        if (!customer) return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+        const outcome = { commandId: command.commandId, customer,
+          project: { id: projectId, customerId, title: command.project.projectName,
+            address: command.project.address, ...(command.project.city ? { city: command.project.city } : {}) } };
+        await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId,
+          operation, targetScope: profile.id, key: command.idempotencyKey,
+          payloadHash: command.payloadHash, outcome: json(outcome) } });
+        return { ok: true as const, value: outcome };
+      });
+    },
+
+    async createContractProject(raw: unknown) {
+      const parsed = PartnerContractProjectCreateSchema.safeParse(raw);
+      if (!parsed.success || !await validatePayloadHash(parsed.data)) {
+        return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+      }
+      const command = parsed.data, operation = 'PARTNER_CONTRACT_PROJECT_CREATE';
+      return database.$transaction(async tx => {
+        const replay = await priorOutcome(tx, dependencies.actorId, operation, command.customerId,
+          command.idempotencyKey, command.payloadHash);
+        if (replay) return replay;
+        const access = await authorizeCustomer(tx, 'CUSTOMER_WRITE', command.customerId,
+          command.correlationId, command.reason);
+        if (!access.ok) return access;
+        const profile = await currentProfile(tx, dependencies.actorId, true);
+        const customer = profile ? await tx.crmCustomer.findUnique({ where: { id: command.customerId },
+          select: { ownerUserId: true, partnerOwnerProfileId: true, isActive: true } }) : null;
+        if (!profile || !customer?.isActive || customer.ownerUserId !== profile.userId ||
+            customer.partnerOwnerProfileId !== profile.id) {
+          return { ok: false as const, error: partnerError('NOT_FOUND') };
+        }
+        await useProfile(tx, profile.id);
+        const projectId = randomUUID();
+        const project = await tx.projectAddress.create({ data: {
+          id: projectId,
+          customerId: command.customerId,
+          address: command.project.address,
+          city: command.project.city,
+          projectName: command.project.projectName,
+          projectType: command.project.projectType,
+          projectManagerName: command.project.projectManagerName,
+          projectManagerNumber: command.project.projectManagerNumber
+            ? digits(command.project.projectManagerNumber) : undefined,
+          marketerFirstName: command.project.marketerFirstName,
+          marketerLastName: command.project.marketerLastName,
+          marketerPhoneNumber: command.project.marketerPhoneNumber
+            ? digits(command.project.marketerPhoneNumber) : undefined,
+        }, select: { id: true, customerId: true, projectName: true, address: true, city: true,
+          projectType: true, projectManagerName: true, projectManagerNumber: true,
+          marketerFirstName: true, marketerLastName: true, marketerPhoneNumber: true } });
+        const outcome = { commandId: command.commandId, project: {
+          id: project.id, customerId: project.customerId,
+          title: project.projectName ?? command.project.projectName,
+          address: project.address, ...(project.city ? { city: project.city } : {}),
+          ...(project.projectType ? { projectType: project.projectType } : {}),
+          ...(project.projectManagerName ? { projectManagerName: project.projectManagerName } : {}),
+          ...(project.projectManagerNumber ? { projectManagerNumber: project.projectManagerNumber } : {}),
+          ...(project.marketerFirstName ? { marketerFirstName: project.marketerFirstName } : {}),
+          ...(project.marketerLastName ? { marketerLastName: project.marketerLastName } : {}),
+          ...(project.marketerPhoneNumber ? { marketerPhoneNumber: project.marketerPhoneNumber } : {}),
+        } };
+        await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId,
+          operation, targetScope: command.customerId, key: command.idempotencyKey,
+          payloadHash: command.payloadHash, outcome: json(outcome) } });
+        return { ok: true as const, value: outcome };
+      });
+    },
+
     async updateCustomer(raw: unknown) {
       const parsed = PartnerCustomerUpdateSchema.safeParse(raw);
       if (!parsed.success || !await validatePayloadHash(parsed.data)) return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
@@ -240,7 +403,10 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
         const written = await tx.crmCustomer.updateMany({ where: { id: command.customerId, partnerRevision: command.expectedRevision,
           partnerOwnerProfileId: profile.id, ownerUserId: profile.userId }, data: { firstName: command.firstName,
           lastName: command.lastName, companyName: command.companyName, customerType: command.customerType,
-          city: command.city, address: command.address, nationalCode, partnerRevision: { increment: 1 }, updatedBy: dependencies.actorId } });
+          city: command.city, address: command.address, nationalCode,
+          ...(command.isBlacklisted === undefined ? {} : { isBlacklisted: command.isBlacklisted }),
+          ...(command.isLocked === undefined ? {} : { isLocked: command.isLocked }),
+          partnerRevision: { increment: 1 }, updatedBy: dependencies.actorId } });
         if (written.count !== 1) return { ok: false as const, error: partnerError('ROW_STALE') };
         const primary = await tx.phoneNumber.findFirst({ where: { customerId: command.customerId, isPrimary: true, isActive: true },
           orderBy: { id: 'asc' } });
@@ -483,6 +649,56 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           targetScope: command.matchReference, key: command.idempotencyKey, payloadHash: command.payloadHash, outcome: json(outcome) } });
         await dependencies.notifyTransfer(tx, { kind: 'REQUESTED', transferId, recipientIds: [customer.ownerUserId],
           actorId: dependencies.actorId, correlationId: command.correlationId });
+        return { ok: true as const, value: outcome };
+      });
+    },
+
+    async cancelTransfer(raw: unknown) {
+      const parsed = PartnerTransferCancelSchema.safeParse(raw);
+      if (!parsed.success || !await validatePayloadHash(parsed.data)) {
+        return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+      }
+      const command = parsed.data, operation = 'PARTNER_CUSTOMER_TRANSFER_CANCEL';
+      return database.$transaction(async tx => {
+        const profile = await currentProfile(tx, dependencies.actorId, true);
+        if (!profile) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        const replay = await priorOutcome(tx, dependencies.actorId, operation, command.transferId,
+          command.idempotencyKey, command.payloadHash);
+        if (replay) return replay;
+        const access = await authorizeProfile(tx, 'CUSTOMER_TRANSFER_REQUEST', profile.id,
+          command.correlationId, command.reason);
+        if (!access.ok) return access;
+        await tx.$queryRaw`SELECT id FROM partner_customer_transfers WHERE id = ${command.transferId} FOR UPDATE`;
+        const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: command.transferId }, select: {
+          id: true, revision: true, status: true, requestedBy: true, toProfileId: true, fromOwnerUserId: true,
+        } });
+        if (!transfer || transfer.requestedBy !== dependencies.actorId || transfer.toProfileId !== profile.id) {
+          return { ok: false as const, error: partnerError('NOT_FOUND') };
+        }
+        if (transfer.revision !== command.expectedRevision) return { ok: false as const, error: partnerError('ROW_STALE') };
+        if (transfer.status !== 'PENDING') return { ok: false as const, error: partnerError('STATE_CONFLICT') };
+        const revision = transfer.revision + 1;
+        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        await tx.partnerCustomerTransfer.update({ where: { id: transfer.id }, data: {
+          revision, status: 'CANCELLED', decidedBy: dependencies.actorId, decisionReason: command.reason,
+          decidedAt: clock.now, decisionCommandId: command.commandId,
+        } });
+        const eventId = randomUUID();
+        await tx.partnerCustomerTransferEvent.create({ data: { id: eventId, transferId: transfer.id, revision,
+          type: 'CANCELLED', actorId: dependencies.actorId, reason: command.reason,
+          commandId: command.commandId, correlationId: command.correlationId,
+          evidence: json({ cancelledByRequester: true }),
+        } });
+        const outcome = { commandId: command.commandId, transferId: transfer.id, revision,
+          status: 'CANCELLED' as const, eventIds: [eventId] };
+        await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId,
+          operation, targetScope: transfer.id, key: command.idempotencyKey,
+          payloadHash: command.payloadHash, outcome: json(outcome),
+        } });
+        await dependencies.notifyTransfer(tx, { kind: 'CANCELLED', transferId: transfer.id,
+          recipientIds: [transfer.fromOwnerUserId], actorId: dependencies.actorId,
+          correlationId: command.correlationId,
+        });
         return { ok: true as const, value: outcome };
       });
     },

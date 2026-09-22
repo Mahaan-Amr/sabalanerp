@@ -701,6 +701,20 @@ router.post('/partner/customers', protect, partnerCrmEndpoint(async (req: any, r
   sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).createCustomer({ ...req.body, correlationId }));
 }));
 
+router.post('/partner/contract-customers', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).createContractCustomer({
+    ...req.body, correlationId,
+  }));
+}));
+
+router.post('/partner/contract-customers/:id/projects', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).createContractProject({
+    ...req.body, customerId: req.params.id, correlationId,
+  }));
+}));
+
 router.put('/partner/customers/:id', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
   const correlationId = partnerCorrelationId(req);
   sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).updateCustomer({ ...req.body,
@@ -739,6 +753,12 @@ router.post('/partner/customer-duplicates/search', protect, partnerCrmEndpoint(a
 router.post('/partner/customer-transfers', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
   const correlationId = partnerCorrelationId(req);
   sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).requestTransfer({ ...req.body, correlationId }));
+}));
+
+router.post('/partner/customer-transfers/:id/cancel', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).cancelTransfer({ ...req.body,
+    transferId: req.params.id, correlationId }));
 }));
 
 router.post('/partner/customer-transfers/:id/decision', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
@@ -968,9 +988,13 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
   body('firstName').notEmpty().withMessage('First name is required'),
   body('lastName').notEmpty().withMessage('Last name is required'),
   body('customerType').notEmpty().withMessage('Customer type is required'),
-  body('nationalCode').optional().custom((value) => {
-    if (value && value.length !== 10) {
-      throw new Error('National code must be 10 digits');
+  body('nationalCode').optional().custom((value, { req }) => {
+    const normalized = typeof value === 'string' ? normalizeDigits(value) : '';
+    const expectedLength = req.body?.customerType === 'Individual' ? 10 : 11;
+    if (normalized && normalized.length !== expectedLength) {
+      throw new Error(expectedLength === 10
+        ? 'National code must be 10 digits'
+        : 'Legal national identifier must be 11 digits');
     }
     return true;
   }),

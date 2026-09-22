@@ -29,7 +29,7 @@ export function createPartnerInquiryHttpPorts(client: PartnerInquiryHttpClient =
 } {
   const commands: PartnerCommandPort = { async execute(input) {
     const command = PartnerCommandSchema.safeParse(input);
-    if (!command.success || !['INQUIRY_SUBMIT', 'INQUIRY_DECIDE', 'INQUIRY_CANCEL', 'INQUIRY_REASSIGN'].includes(command.data.type)) {
+    if (!command.success || !['INQUIRY_SUBMIT', 'CASE_PRICING_SUBMIT', 'INQUIRY_DECIDE', 'INQUIRY_CANCEL', 'INQUIRY_REASSIGN'].includes(command.data.type)) {
       return { ok: false, error: partnerError('INVALID_PAYLOAD') };
     }
     try {

@@ -1,6 +1,6 @@
 import type { InquiryBatchResult, PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 
-export type ResponseDraft = { selected: boolean; outcome: 'APPROVED' | 'REJECTED'; amount: string; note: string };
+export type ResponseDraft = { outcome: 'APPROVED' | 'REJECTED'; amount: string; note: string };
 export type ResponseDrafts = Record<string, ResponseDraft>;
 type Decision = Extract<PartnerCommand, { type: 'INQUIRY_DECIDE' }>['decisions'][number];
 
@@ -8,7 +8,6 @@ export function settleResponseDrafts(drafts: ResponseDrafts, batch: InquiryBatch
   const next = { ...drafts };
   for (const outcome of batch.outcomes) {
     if (outcome.ok) delete next[outcome.rowId];
-    else if (next[outcome.rowId]) next[outcome.rowId] = { ...next[outcome.rowId], selected: false };
   }
   return next;
 }
@@ -26,7 +25,7 @@ export function responseDecisions(rows: readonly { rowId: string; revision: numb
   const decisions: Decision[] = [];
   for (const row of rows) {
     const draft = drafts[row.rowId];
-    if (!draft?.selected) continue;
+    if (!draft) continue;
     const note = draft.note.trim();
     if (draft.outcome === 'REJECTED') {
       if (!/[\u0600-\u06ff]/.test(note)) errors[row.rowId] = 'دلیل رد را به فارسی بنویسید.';
@@ -35,10 +34,10 @@ export function responseDecisions(rows: readonly { rowId: string; revision: numb
       const amount = exactAmount(draft.amount);
       if (amount === null) errors[row.rowId] = 'قیمت هر واحد را با رقم و بدون جداکننده بنویسید.';
       else decisions.push({ rowId: row.rowId, expectedRevision: row.revision, outcome: 'APPROVED',
-        wholesaleUnitPrice: { amount, currency: row.currency }, ...(note ? { note } : {}) });
+        wholesaleUnitPrice: { amount, currency: row.currency } });
     }
   }
   if (Object.keys(errors).length) return { ok: false, errors };
-  if (!decisions.length) return { ok: false, errors: { selection: 'حداقل یک ردیف را انتخاب کنید.' } };
+  if (!decisions.length) return { ok: false, errors: { selection: 'پاسخ قیمت حداقل یک ردیف را وارد کنید.' } };
   return { ok: true, decisions };
 }

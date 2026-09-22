@@ -69,7 +69,7 @@ export async function cancelPartnerCase(view: PartnerCaseView, reason: string) {
 }
 
 export async function recordPartnerCollection(view: PartnerCaseView, history: RetailCollectionHistory,
-  amount: string, effectiveDate: string) {
+  amount: string, effectiveDate: string, details: { method: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER'; reference?: string; note?: string }) {
   const actorId = await currentActorId();
   let remaining = BigInt(amount);
   const receivedByInstallment = new Map<string, bigint>();
@@ -85,7 +85,9 @@ export async function recordPartnerCollection(view: PartnerCaseView, history: Re
   if (remaining !== BigInt(0) || !allocations.length) throw partnerError('INVALID_PAYLOAD');
   const receiptId = `retail-receipt:${crypto.randomUUID()}`;
   const intent = { type: 'RETAIL_RECEIPT' as const, expected: view.owner, expectedState: 'COMMITTED' as const,
-    planId: history.currentPlan.planId, receiptId, amount: { amount, currency: history.balance.currency }, effectiveDate, allocations };
+    planId: history.currentPlan.planId, receiptId, amount: { amount, currency: history.balance.currency }, effectiveDate,
+    method: details.method, ...(details.reference ? { reference: details.reference } : {}),
+    ...(details.note ? { note: details.note } : {}), allocations };
   const payloadHash = await canonicalHash(intent);
   const commandId = crypto.randomUUID();
   const response = await api.post('/partner/retail-collections/commands', { schemaVersion: 1, ...intent, commandId,
@@ -145,8 +147,9 @@ export async function sendPartnerConfirmation(caseId: string) {
 }
 
 export async function finalizePartnerCase(view: PartnerCaseView, lossAccepted: boolean) {
+  const operationId = `finalize:${view.owner.caseId}:${view.owner.revision}:${view.owner.integrityHash.slice(-24)}:${lossAccepted ? 'loss' : 'standard'}`;
   const response = await api.post(`/partner/cases/${encodeURIComponent(view.owner.caseId)}/finalize`, {
-    expected: view.owner, expectedState: view.state, lossAccepted,
+    operationId, expected: view.owner, expectedState: view.state, lossAccepted,
   });
   return response.data;
 }

@@ -8,6 +8,11 @@ import {
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { parseInquiryDefinition, type ConfigurationRef, type InquiryDefinition } from './definition';
 import { createPartnerInquiryQuery } from './query';
+import {
+  createPartnerPricingDuty,
+  reassignPartnerPricingDuty,
+  reconcilePartnerPricingDuty,
+} from '../../crossWorkspaceDutyAdapters/partnerPricingDutyAdapter';
 type Transaction = Prisma.TransactionClient;
 type AuthorizationRequest = { actorId: string; action: 'INQUIRY_READ' | 'INQUIRY_WRITE' | 'INQUIRY_RESPOND' |
   'RESPONDER_REASSIGN' | 'INTERNAL_REMEDIATION';
@@ -95,11 +100,11 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
     }
     await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${command.inquiryId} FOR UPDATE`;
     const inquiry = await tx.partnerInquiry.findUnique({ where: { id: command.inquiryId },
-      select: { id: true, profileId: true, revision: true } });
+      select: { id: true, profileId: true, revision: true, submittedAt: true } });
     if (!inquiry) return { ok: false, error: partnerError('NOT_FOUND') } as const;
     const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId,
       action: 'INQUIRY_RESPOND', purpose: 'RESPONDER', reason: command.decisions.map(decision =>
-        decision.outcome === 'REJECTED' ? decision.reason : decision.note ?? 'پاسخ قیمت مصوب').join('؛ '),
+        decision.outcome === 'REJECTED' ? decision.reason : 'پاسخ قیمت سبلان').join('؛ '),
       root: { kind: 'INQUIRY', id: inquiry.id } });
     if (!authorization.ok) return authorization;
     const rollout = await authorizePartnerTechnicalRollout(tx, inquiry.profileId, 'MUTATE');
@@ -163,23 +168,31 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
           actorId: dependencies.actorId, commandId: `${command.commandId}:${row.id}`,
           authorizationEvidenceId: authorization.value.evidenceId,
           wholesaleUnitPrice: decision.wholesaleUnitPrice.amount, currency: decision.wholesaleUnitPrice.currency,
-          evidenceHash, ...(decision.note ? { note: decision.note } : {}),
+          evidenceHash,
           ...(definition.predecessorReason ? { supersessionReason: definition.predecessorReason } : {}), approvedAt: clock.now,
           expiresAt: new Date(clock.now.getTime() + 48 * 60 * 60 * 1000) } });
       }
       await tx.partnerInquiryRow.update({ where: { id: row.id }, data: { outcome: decision.outcome, revision } });
       outcomes.push({ ok: true, rowId: row.id, outcomeId, revision, outcome: decision.outcome });
     }
+    const currentLeaves = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id, successor: null },
+      select: { outcome: true, approval: { select: { id: true, approvedAt: true } } } });
+    const completedPackage = currentLeaves.length > 0 &&
+      currentLeaves.every(row => row.outcome === 'APPROVED' && Boolean(row.approval) &&
+        row.approval!.approvedAt.getTime() >= (inquiry.submittedAt?.getTime() ?? Number.POSITIVE_INFINITY));
     const batch = InquiryBatchResultSchema.parse({ schemaVersion: 1, commandId: command.commandId, outcomes });
     const eventIds: string[] = [];
     if (outcomes.some(outcome => outcome.ok)) {
-      const next = await tx.partnerInquiry.update({ where: { id: inquiry.id }, data: { revision: { increment: 1 } }, select: { revision: true } });
+      const next = await tx.partnerInquiry.update({ where: { id: inquiry.id }, data: { revision: { increment: 1 },
+        ...(completedPackage ? { pricingReadyAt: clock.now,
+          pricingExpiresAt: new Date(clock.now.getTime() + 48 * 60 * 60 * 1000) } : {}) }, select: { revision: true } });
       const eventId = randomUUID(); eventIds.push(eventId);
       await tx.partnerInquiryEvent.create({ data: { id: eventId, inquiryId: inquiry.id, revision: next.revision,
         actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,
         type: outcomes.every(outcome => outcome.ok) ? 'INQUIRY_DECIDED' : 'INQUIRY_PARTIALLY_DECIDED',
         evidence: { version: 1, assignmentId: assignment.id, assignmentRevision: assignment.revision,
           ...(managementTakeover ? { managementTakeover } : {}), batch, decisions: command.decisions } } });
+      await reconcilePartnerPricingDuty(tx, { inquiryId: inquiry.id, actorUserId: dependencies.actorId, now: clock.now });
     }
     const receipt = { version: 1, commandId: command.commandId, eventIds, batch };
     await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...identity, payloadHash: expectedHash, outcome: receipt } });
@@ -263,6 +276,13 @@ async function mutateInquiryLifecycle(dependencies: PartnerInquiryDependencies,
         : { version: 1, responderId: notificationAssignment.responderId, assignmentId: notificationAssignment.id,
           assignmentRevision: notificationAssignment.revision,
           authorizationEvidenceId: authorization.value.evidenceId } } });
+    if (command.type === 'INQUIRY_CANCEL') {
+      await reconcilePartnerPricingDuty(tx, { inquiryId: inquiry.id, actorUserId: dependencies.actorId,
+        cancelled: true });
+    } else {
+      await reassignPartnerPricingDuty(tx, { inquiryId: inquiry.id, responderId: notificationAssignment.responderId,
+        actorUserId: dependencies.actorId, reason: command.reason });
+    }
     const receipt = { version: 1, commandId: command.commandId, eventIds: [eventId] };
     await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...identity, payloadHash: expectedHash, outcome: receipt } });
     return { ok: true, value: { commandId: command.commandId, replayed: false, eventIds: [eventId] } } as const;
@@ -281,13 +301,16 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
       if (parsed.data.type === 'INQUIRY_CANCEL' || parsed.data.type === 'INQUIRY_REASSIGN') {
         return publishCommitted(dependencies, mutateInquiryLifecycle(dependencies, parsed.data));
       }
-      if (parsed.data.type !== 'INQUIRY_SUBMIT') return { ok: false, error: partnerError('INVALID_PAYLOAD') };
+      if (parsed.data.type !== 'INQUIRY_SUBMIT' && parsed.data.type !== 'CASE_PRICING_SUBMIT') {
+        return { ok: false, error: partnerError('INVALID_PAYLOAD') };
+      }
       const command = parsed.data;
-      const scope = command.idempotency.targetId;
-      const expectedHash = await canonicalHash({ schemaVersion: 1, type: command.type,
-        partnerSellerId: command.partnerSellerId, rows: command.rows });
-      if (command.partnerSellerId !== dependencies.actorId || command.idempotency.actorId !== dependencies.actorId ||
-          command.idempotency.operation !== command.type || command.idempotency.payloadHash !== expectedHash) {
+      const scope = command.type === 'CASE_PRICING_SUBMIT' ? command.inquiryId : command.idempotency.targetId;
+      const expectedHash = await canonicalHash(commandIntent(command));
+      if ((command.type === 'INQUIRY_SUBMIT' && command.partnerSellerId !== dependencies.actorId) ||
+          (command.type === 'CASE_PRICING_SUBMIT' && command.idempotency.targetId !== command.caseId) ||
+          command.idempotency.actorId !== dependencies.actorId || command.idempotency.operation !== command.type ||
+          command.idempotency.payloadHash !== expectedHash) {
         return { ok: false, error: partnerError('INVALID_PAYLOAD') };
       }
       return publishCommitted(dependencies, dependencies.transaction(async tx => {
@@ -303,7 +326,15 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
         }
         const profile = await tx.partnerProfile.findUnique({ where: { userId: dependencies.actorId }, select: { id: true } });
         if (!profile) return { ok: false, error: partnerError('NOT_FOUND') };
-        let inquiry = await tx.partnerInquiry.findUnique({ where: { id: scope }, select: { id: true, profileId: true, revision: true } });
+        const scopedCase = command.type === 'CASE_PRICING_SUBMIT' ? await tx.partnerSaleCase.findFirst({ where: {
+          id: command.caseId, profileId: profile.id, state: 'DRAFT', pricingState: { in: ['AWAITING_INQUIRY', 'EXPIRED'] },
+          headRevision: command.expected.revision, integrityHash: command.expected.integrityHash,
+        }, select: { id: true, headRevision: true } }) : undefined;
+        if (command.type === 'CASE_PRICING_SUBMIT' && !scopedCase) {
+          return { ok: false, error: partnerError('STATE_CONFLICT') };
+        }
+        let inquiry = await tx.partnerInquiry.findUnique({ where: { id: scope }, select: {
+          id: true, profileId: true, revision: true, caseId: true, caseRevision: true } });
         const root = inquiry ? { kind: 'INQUIRY' as const, id: inquiry.id } : { kind: 'PROFILE' as const, id: profile.id };
         const allowed = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'INQUIRY_WRITE', purpose: 'PARTNER', root });
         if (!allowed.ok) return allowed;
@@ -311,8 +342,13 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
         if (!rollout.ok) return rollout;
         if (inquiry) {
           await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${inquiry.id} FOR UPDATE`;
-          inquiry = await tx.partnerInquiry.findUnique({ where: { id: inquiry.id }, select: { id: true, profileId: true, revision: true } });
-          if (!inquiry || inquiry.profileId !== profile.id) return { ok: false, error: partnerError('NOT_FOUND') };
+          inquiry = await tx.partnerInquiry.findUnique({ where: { id: inquiry.id }, select: {
+            id: true, profileId: true, revision: true, caseId: true, caseRevision: true } });
+          if (!inquiry || inquiry.profileId !== profile.id ||
+              (command.type === 'CASE_PRICING_SUBMIT' && (inquiry.caseId !== command.caseId ||
+                inquiry.caseRevision !== command.expected.revision))) {
+            return { ok: false, error: partnerError('NOT_FOUND') };
+          }
         }
         const definitions: Array<{ rowId: string; version: number; predecessorId?: string; definition: InquiryDefinition; configurationHash: string }> = [];
         for (const row of command.rows) {
@@ -347,7 +383,9 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           ];
           const definition = parseInquiryDefinition({ version: 1, configurationRef: row.configuration,
             identity: resolved.value.identity, description: resolved.value.description,
-            configuration, ...(row.sellerNote ? { sellerNote: row.sellerNote } : {}),
+            configuration, ...(row.deliveryFacts ? { deliveryFacts: row.deliveryFacts } : {}),
+            ...(command.type === 'INQUIRY_SUBMIT' && row.sellerNote
+              ? { sellerNote: row.sellerNote } : {}),
             ...(row.predecessor ? { predecessorReason: row.predecessor.reason } : {}) });
           if (!definition) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           definitions.push({ rowId: row.rowId, version, ...(predecessorId ? { predecessorId } : {}), definition,
@@ -369,8 +407,11 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           const eligible = await tx.user.findUnique({ where: { id: responder.value.responderId },
             select: { isActive: true, partnerProfile: { select: { id: true } } } });
           if (!eligible?.isActive || eligible.partnerProfile) return { ok: false, error: partnerError('NOT_ASSIGNED') };
-          inquiry = await tx.partnerInquiry.create({ data: { id: scope, profileId: profile.id, revision: 1, submittedAt: clock.now },
-            select: { id: true, profileId: true, revision: true } });
+          inquiry = await tx.partnerInquiry.create({ data: { id: scope, profileId: profile.id,
+            ...(command.type === 'CASE_PRICING_SUBMIT' ? { caseId: command.caseId,
+              caseRevision: command.expected.revision } : {}),
+            revision: 1, submittedAt: clock.now },
+            select: { id: true, profileId: true, revision: true, caseId: true, caseRevision: true } });
           assignment = await tx.partnerInquiryAssignment.create({ data: { id: randomUUID(), inquiryId: inquiry.id, revision: 1,
             responderId: responder.value.responderId, actorId: responder.value.assignedByActorId ?? dependencies.actorId,
             reason: 'تخصیص پاسخ‌دهنده مصوب', eligibilityEvidence: { ...responder.value.eligibilityEvidence,
@@ -380,8 +421,9 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           assignment = await tx.partnerInquiryAssignment.findFirst({ where: { inquiryId: inquiry.id }, orderBy: { revision: 'desc' },
             select: { id: true, revision: true } });
           if (!assignment) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-          inquiry = await tx.partnerInquiry.update({ where: { id: inquiry.id }, data: { revision: { increment: 1 }, submittedAt: clock.now },
-            select: { id: true, profileId: true, revision: true } });
+          inquiry = await tx.partnerInquiry.update({ where: { id: inquiry.id }, data: { revision: { increment: 1 },
+            submittedAt: clock.now, pricingReadyAt: null, pricingExpiresAt: null },
+            select: { id: true, profileId: true, revision: true, caseId: true, caseRevision: true } });
         }
         await tx.partnerInquiryRow.createMany({ data: definitions.map(row => ({ id: row.rowId, inquiryId: inquiry!.id,
           version: row.version, revision: 1, ...(row.predecessorId ? { predecessorId: row.predecessorId } : {}),
@@ -390,7 +432,13 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
         await tx.partnerInquiryEvent.create({ data: { id: eventId, inquiryId: inquiry.id, revision: inquiry.revision,
           actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,
           type: 'INQUIRY_SUBMITTED', evidence: { version: 1, assignmentId: assignment.id,
-            assignmentRevision: assignment.revision, rowIds: definitions.map(row => row.rowId) } } });
+            assignmentRevision: assignment.revision, rowIds: definitions.map(row => row.rowId),
+            ...(command.type === 'CASE_PRICING_SUBMIT' ? { caseId: command.caseId,
+              caseRevision: command.expected.revision } : {}) } } });
+        if (command.type === 'CASE_PRICING_SUBMIT') {
+          await createPartnerPricingDuty(tx, { inquiryId: inquiry.id, actorUserId: dependencies.actorId,
+            inquiryRevision: inquiry.revision, now: clock.now });
+        }
         const receipt = { version: 1, commandId: command.commandId, eventIds: [eventId] };
         await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId,
           operation: command.type, targetScope: scope, key: command.idempotency.key, payloadHash: expectedHash,

@@ -70,7 +70,6 @@ export function createResponderFixture(scenario: ResponderScenario) {
         if (decision.outcome === 'APPROVED') {
           row.approvedPrice = decision.wholesaleUnitPrice; row.approvedAt = new Date().toISOString();
           row.expiresAt = new Date(Date.parse(row.approvedAt) + 48 * 60 * 60 * 1000).toISOString();
-          if (decision.note) row.noteOrReason = decision.note;
         } else row.noteOrReason = decision.reason;
         outcomes.push({ ok: true, rowId: row.rowId, revision: row.revision, outcome: decision.outcome, outcomeId: `fixture-331-outcome-${row.rowId}` });
       }

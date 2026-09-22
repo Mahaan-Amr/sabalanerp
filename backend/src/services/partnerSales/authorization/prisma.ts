@@ -315,6 +315,10 @@ export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, b
       // Root before child, matching callers that already authorized the Customer.
       const decision = await authorization.authorize(action, { kind: 'CUSTOMER', id: expectedCustomerId });
       if (!decision.ok) return decision;
+      const customerProject = await tx.projectAddress.findFirst({ where: {
+        id: projectId, customerId: expectedCustomerId, isActive: true,
+      }, select: { id: true } });
+      if (customerProject) return authorization.authorize(action, { kind: 'CUSTOMER', id: expectedCustomerId });
       await tx.$queryRaw`SELECT id FROM crm_potential_projects WHERE id = ${projectId} FOR UPDATE`;
       const project = await tx.crmPotentialProject.findUnique({ where: { id: projectId }, select: {
         customerId: true, responsibleSellerId: true, isActive: true,

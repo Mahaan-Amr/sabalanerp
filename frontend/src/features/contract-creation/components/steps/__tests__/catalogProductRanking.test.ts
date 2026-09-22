@@ -4,6 +4,7 @@ import {
   rankContractCatalogProducts,
   recordSellerProductSelection,
   resolveHighlightedCatalogProduct,
+  scrollHighlightedCatalogItem,
   type SellerProductHistory
 } from '../catalogProductRanking';
 import type { Product } from '../../../types/contract.types';
@@ -41,6 +42,17 @@ const history: SellerProductHistory = {
   'catalog-3': { selectionCount: 8, lastSelectedAt: '2026-07-24T10:00:00.000Z' },
   'catalog-1': { selectionCount: 2, lastSelectedAt: '2026-07-20T10:00:00.000Z' }
 };
+
+{
+  const returned = scrollHighlightedCatalogItem({
+    scrollIntoView: async () => undefined
+  });
+  assert.equal(
+    returned,
+    undefined,
+    'the catalog scroll effect must never return a thenable as React cleanup'
+  );
+}
 
 {
   const ranked = rankContractCatalogProducts({

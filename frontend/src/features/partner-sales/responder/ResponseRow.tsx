@@ -2,7 +2,7 @@
 
 import React from 'react';
 import type { PartnerQueryV2Results } from '@sabalanerp/partner-sales-contracts';
-import { ErpBadge, ErpCard, ErpCheckbox, ErpField, ErpRialInput, ErpSegmentedControl, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpCard, ErpField, ErpRialInput, ErpSegmentedControl, ErpTextarea } from '@/components/erp';
 import { formatPartnerMoney } from '../presentation';
 import type { ResponseDraft } from './responseDraft';
 
@@ -32,24 +32,28 @@ export function ResponseRow({ row, number, canRespond, status, draft, pending, e
         <dd className="mt-1 break-words font-medium text-[var(--sds-text-primary)]">{item.value}</dd>
       </div>)}
     </dl>
+    {row.deliveryFacts?.length ? <div className="space-y-2" aria-label="برنامه تحویل لازم برای قیمت‌گذاری">
+      <p className="text-sm font-bold">برنامه تحویل</p>
+      {row.deliveryFacts.map((fact, index) => <p key={`${fact.date}-${index}`} className="text-sm sds-text-secondary">
+        {fact.date} · مقدار {fact.quantity} {units[row.identity.unit] || row.identity.unit}
+      </p>)}
+    </div> : null}
     {row.sellerNote && <p className="rounded-xl bg-[var(--sds-surface-subtle)] p-3 text-sm">یادداشت فروشنده: {row.sellerNote}</p>}
     {row.approvedPrice && <p>قیمت مصوب هر واحد: <b>{formatPartnerMoney(row.approvedPrice.amount, row.approvedPrice.currency)}</b></p>}
     <div className="sds-text-secondary text-sm" role="status">{status}</div>
     {canRespond && <div className="space-y-4 rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4">
       <p className="font-bold text-[var(--sds-text-primary)]">پاسخ قیمت این ردیف</p>
-      <ErpCheckbox checked={draft.selected} onChange={event => onChange({ ...draft, selected: event.target.checked })}
-        disabled={pending} label={`انتخاب ردیف ${number}`} />
       <ErpSegmentedControl value={draft.outcome} onChange={outcome => onChange({ ...draft, outcome })}
-        options={[{ value: 'APPROVED', label: 'تأیید قیمت', disabled: pending }, { value: 'REJECTED', label: 'رد ردیف', disabled: pending }]} />
+        options={[{ value: 'APPROVED', label: 'ثبت قیمت سبلان', disabled: pending }, { value: 'REJECTED', label: 'رد جهت اصلاح', disabled: pending }]} />
       {draft.outcome === 'APPROVED' && <ErpField label={`قیمت هر واحد ردیف ${number} (${currency})`} required error={error}>
         <ErpRialInput dir="ltr" value={draft.amount} maxDigits={18} disabled={pending}
           onValueChange={amount => onChange({ ...draft, amount })} />
       </ErpField>}
-      <ErpField label={draft.outcome === 'REJECTED' ? `دلیل رد ردیف ${number}` : `یادداشت ردیف ${number} (اختیاری)`}
-        required={draft.outcome === 'REJECTED'} error={draft.outcome === 'REJECTED' ? error : undefined}>
+      {draft.outcome === 'REJECTED' && <ErpField label={`دلیل رد ردیف ${number}`}
+        required error={error}>
         <ErpTextarea rows={2} value={draft.note} maxLength={2000} disabled={pending}
           onChange={event => onChange({ ...draft, note: event.target.value })} />
-      </ErpField>
+      </ErpField>}
     </div>}
   </ErpCard>;
 }

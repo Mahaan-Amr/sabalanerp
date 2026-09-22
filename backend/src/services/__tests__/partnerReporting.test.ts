@@ -5,6 +5,7 @@ import * as contracts from '../../../../packages/partner-sales-contracts';
 import { PartnerReportingService } from '../partnerSales/reporting/service';
 import type { CaseEvidence, Query, ReportingSource, ReportExportStore, FrozenExport, Root } from '../partnerSales/reporting/contracts';
 import { matchesCustomerContractNumber } from '../partnerSales/reporting/customerSearch';
+import { comparableCommercialRevision } from '../partnerSales/reporting/comparable';
 import { registerPartnerReportRoutes, ReportHandler, ReportResponse } from '../../routes/partner-reports';
 
 // Resolve the documented /testing export through package self-reference.
@@ -63,9 +64,30 @@ test('Partner queries keep discounted retail, wholesale and Accounting balances 
     wholesalePurchases: '1600', retailSales: '1800', retailCollected: '0', netComparableMargin: '200',
   }, accountingBalance: '1200', accountingReceivedAsOf: '400', accountingCovered: 1, accountingEligible: 1 });
   assert.equal(report.rows[0].collectionStatus, 'UNPAID');
+  assert.equal(report.series.length, 1);
+  assert.deepEqual(report.series[0].points.map(point => ({ month: point.jalaliMonth, debt: point.debtBalance,
+    receivable: point.receivableBalance, receipts: point.receipts, transactions: point.transactions.length })), [
+    { month: '1405/05', debt: '0', receivable: '0', receipts: '0', transactions: 0 },
+    { month: '1405/06', debt: '1600', receivable: '1800', receipts: '0', transactions: 1 },
+  ]);
   assert.equal(JSON.stringify(report).includes('FIXTURE-INTERNAL-313'), false);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-INTERNAL-313' })).count, 0);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-CUSTOMER-313' })).count, 1);
+});
+
+test('pre-pricing draft revisions are not treated as broken finalized report evidence', () => {
+  const prePricing = { ...fixture.partner, state: 'DRAFT' as const, sabalanTotals: undefined,
+    customerContractNumber: undefined, internalRecordNumber: undefined };
+  assert.equal(comparableCommercialRevision(prePricing, {
+    wholesaleEnvelope: fixture.wholesaleEnvelope,
+    retailEnvelope: fixture.retailEnvelope,
+  }), null);
+});
+
+test('a committed report fails closed when the customer contract identity is missing', async () => {
+  const { service, data } = harness();
+  data.commercial![0].view.customerContractNumber = undefined;
+  await assert.rejects(service.query(query), { code: 'INTEGRITY_CONFLICT' });
 });
 
 test('current reports omit retired zero-obligation lineage without hiding an outstanding retired balance', async () => {

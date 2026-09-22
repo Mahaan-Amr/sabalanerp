@@ -1,0 +1,2 @@
+ALTER TYPE "PartnerCustomerTransferStatus" ADD VALUE IF NOT EXISTS 'CANCELLED';
+ALTER TYPE "PartnerCustomerTransferEventType" ADD VALUE IF NOT EXISTS 'CANCELLED';

@@ -53,7 +53,7 @@ test('an unavailable responder row shows evidence but no editable price or decis
       materialRateHash: `sha256-v1:${'0'.repeat(64)}`, components: [], currency: 'IRR', calculationPolicyVersion: 'v1', roundingPolicyVersion: 'v1' },
     approvedPrice: { amount: '120000', currency: 'IRR' }, used: true, state: 'APPROVED',
     approvedAt: '2026-08-27T08:00:00.000Z', expiresAt: '2026-08-29T08:00:00.000Z', actions: [] }} canRespond={false}
-    status="پاسخ این استعلام به شما واگذار نشده است." draft={{ selected: false, amount: '', outcome: 'APPROVED', note: '' }}
+    status="پاسخ این استعلام به شما واگذار نشده است." draft={{ amount: '', outcome: 'APPROVED', note: '' }}
     pending={false} onChange={() => undefined} />);
   assert.match(html, /۶۰ سانتی‌متر/);
   assert.match(html, /گرانیت نهبندان ممتاز/);
@@ -62,4 +62,18 @@ test('an unavailable responder row shows evidence but no editable price or decis
   assert.match(html, /۱۲۰٬۰۰۰/);
   assert.match(html, /واگذار نشده/);
   assert.doesNotMatch(html, /<input|<textarea|<select|internal-rate|sha256|private-fingerprint|قیمت مشتری|حاشیه سود|>count</);
+});
+
+test('an accepted responder price never asks for an explanation', () => {
+  const html = renderToStaticMarkup(<ResponseRow number={1} row={{ rowId: 'fixture-row', revision: 2,
+    description: 'گرانیت نهبندان', configuration: [],
+    identity: { schemaVersion: 1, partnerSellerId: 'fixture-partner', catalogProductId: 'fixture-stone', family: 'longitudinal',
+      unit: 'squareMeter', configuration: [], materialRateEvidenceId: 'internal-rate',
+      materialRateHash: `sha256-v1:${'0'.repeat(64)}`, components: [], currency: 'IRT',
+      calculationPolicyVersion: 'v1', roundingPolicyVersion: 'v1' },
+    used: false, state: 'PENDING', actions: [{ action: 'RESPOND', enabled: true }] }} canRespond
+    status="در انتظار پاسخ" draft={{ amount: '25000', outcome: 'APPROVED', note: 'نباید ارسال شود' }}
+    pending={false} onChange={() => undefined} />);
+  assert.match(html, /ثبت قیمت سبلان/);
+  assert.doesNotMatch(html, /یادداشت ردیف|<textarea/);
 });

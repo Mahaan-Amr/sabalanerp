@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FaArrowRight, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
-import { formatNumericInputText } from '@/lib/numberFormat';
+import { formatNumericInputText, normalizeDigits } from '@/lib/numberFormat';
 
 type IconType = React.ComponentType<{ className?: string }>;
 
@@ -229,7 +229,7 @@ export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutra
 export const ErpInput = React.forwardRef<
   HTMLInputElement,
   React.InputHTMLAttributes<HTMLInputElement>
->(function ErpInput({ className, type, ...props }, ref) {
+>(function ErpInput({ className, type, inputMode, onChange, ...props }, ref) {
   const controlClassName =
     type === 'checkbox'
       ? 'h-5 w-5 shrink-0 rounded border-[var(--sds-border-default)] accent-[var(--sds-accent)]'
@@ -242,7 +242,14 @@ export const ErpInput = React.forwardRef<
           : type === 'hidden'
             ? undefined
             : erpFieldClassName;
-  return <input ref={ref} type={type} className={cx(controlClassName, className)} {...props} />;
+  return <input ref={ref} type={type} inputMode={inputMode} className={cx(controlClassName, className)} {...props}
+    onChange={event => {
+      if (inputMode === 'numeric' || inputMode === 'decimal' || inputMode === 'tel' ||
+          type === 'number' || type === 'tel' || type === 'date' || type === 'datetime-local') {
+        event.currentTarget.value = normalizeDigits(event.currentTarget.value);
+      }
+      onChange?.(event);
+    }} />;
 });
 
 export function ErpRialInput({

@@ -146,48 +146,20 @@ test('activation package bootstraps and activates one converted seller from immu
     assert.equal(typeof (membership.eligibilityEvidence as Record<string, unknown>).readinessEvidenceId, 'string');
     assert.equal(typeof (membership.eligibilityEvidence as Record<string, unknown>).authorizationEvidenceId, 'string');
     const pausedView = await service.query({ schemaVersion: 3, purpose: 'PARTNER_ACTIVATION', userId });
-    assert.equal(pausedView.ok && pausedView.value.subject?.actions[0]?.enabled, false,
-      'ساخت بسته نباید توقف مستقل عملیات را باز کند');
+    assert.equal(pausedView.ok && pausedView.value.subject?.actions[0]?.enabled, true,
+      'مقدار قدیمی توقف عملیات نباید فعال‌سازی حساب را مسدود کند');
     assert.equal(authorizationCalls.at(-1)?.rootId, bootstrapped.value.profileId,
       'خواندن پس از bootstrap باید به پروفایل واقعی مقید باشد، نه prospective resource');
     const operationsOpened = await operations.pause(await pauseCommand('OPERATIONAL', enrolled.value.revision, false));
-    assert.equal(operationsOpened.ok, true); if (!operationsOpened.ok) return;
-    const activationView = await service.query({ schemaVersion: 3, purpose: 'PARTNER_ACTIVATION', userId });
-    assert.equal(activationView.ok && activationView.value.subject?.actions[0]?.enabled, true);
-    const globallyPaused = await operations.pause(await pauseCommand('OPERATIONAL', operationsOpened.value.revision, true));
-    assert.equal(globallyPaused.ok, true); if (!globallyPaused.ok) return;
-    const pausedControl = await database.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } });
-    const rejectedDuringGlobalPause = await service.execute(await command('PROFILE_ACTIVATE', {
-      profileId: bootstrapped.value.profileId, expectedProfileRevision: bootstrapped.value.profileRevision,
-      expectedControlRevision: pausedControl.revision }));
-    assert.equal(rejectedDuringGlobalPause.ok ? null : rejectedDuringGlobalPause.error.code, 'OPERATIONAL_PAUSE');
-    const refreshedPackageId = `${run}-verified-after-pause`;
-    verifiedPackages.add(refreshedPackageId);
-    const [refreshClock] = await database.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-    const refreshedAt = refreshClock.now;
-    assert.ok(!pausedControl.lastOperationalPauseAt || refreshedAt > pausedControl.lastOperationalPauseAt);
-    releaseEvidence = { ...releaseEvidence, evidenceId: `${run}-readiness-after-pause`,
-      checkedAt: refreshedAt.toISOString(), expiresAt: new Date(refreshedAt.getTime() + 3_600_000).toISOString() };
-    const republished = await service.execute(await command('RELEASE_READINESS_PUBLISH', {
-      verifiedPackageId: refreshedPackageId, expectedControlRevision: globallyPaused.value.revision }));
-    assert.equal(republished.ok, true); if (!republished.ok) return;
-    const enrollmentReopened = await operations.pause(await pauseCommand('ENROLLMENT', republished.value.controlRevision, false));
-    assert.equal(enrollmentReopened.ok, true); if (!enrollmentReopened.ok) return;
-    const reopened = await operations.pause(await pauseCommand('OPERATIONAL', enrollmentReopened.value.revision, false));
-    assert.equal(reopened.ok, true); if (!reopened.ok) return;
+    assert.equal(!operationsOpened.ok && operationsOpened.error.code, 'STATE_CONFLICT');
     const incidentKey = `${run}-open-incident`;
     await database.partnerOperationsIncident.create({ data: { key: incidentKey, category: 'ACTIVATION_TEST',
       evidenceReference: `${run}-incident-evidence`, firstSeenAt: new Date(), lastSeenAt: new Date(), occurrences: 1 } });
     const incidentControl = await database.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } });
     const incidentView = await service.query({ schemaVersion: 3, purpose: 'PARTNER_ACTIVATION', userId });
-    assert.equal(incidentView.ok && incidentView.value.subject?.actions[0]?.enabled, false);
-    const rejectedDuringIncident = await service.execute(await command('PROFILE_ACTIVATE', {
-      profileId: bootstrapped.value.profileId, expectedProfileRevision: bootstrapped.value.profileRevision,
-      expectedControlRevision: incidentControl.revision }));
-    assert.equal(rejectedDuringIncident.ok ? null : rejectedDuringIncident.error.code, 'COHORT_NOT_READY');
-    await database.partnerOperationsIncident.update({ where: { key: incidentKey }, data: {
-      resolution: { resolvedBy: actorId, reason: 'رفع رخداد آزمون پیش از فعال‌سازی' } } });
-    const activationControl = await database.partnerOperationsControl.findUniqueOrThrow({ where: { id: 'partner-operations' } });
+    assert.equal(incidentView.ok && incidentView.value.subject?.actions[0]?.enabled, true,
+      'رخداد فنی سراسری نباید حساب آماده را متوقف کند');
+    const activationControl = incidentControl;
     const activated = await service.execute(await command('PROFILE_ACTIVATE', {
       profileId: bootstrapped.value.profileId, expectedProfileRevision: bootstrapped.value.profileRevision,
       expectedControlRevision: activationControl.revision }));

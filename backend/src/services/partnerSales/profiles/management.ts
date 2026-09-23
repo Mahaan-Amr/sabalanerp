@@ -132,7 +132,6 @@ export function createPartnerProfileManagementService<Transaction = unknown>(
       const concurrent = await dependencies.store.findOutcome(tx, key);
       if (concurrent) return replay(concurrent);
       if (profile.revision !== command.expectedRevision) return { ok: false, error: partnerError('ROW_STALE') };
-      if (profile.state === 'TERMINATED') return { ok: false, error: partnerError('STATE_CONFLICT') };
       const access = authorization(command);
       const authorized = await dependencies.authorize(tx, { actorId: dependencies.actorId, ...access,
         reason: command.reason, root: { kind: 'PROFILE', id: profile.id } });

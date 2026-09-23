@@ -89,6 +89,10 @@ test('suspension preserves approval evidence while termination runs owner remedi
     commercialTermsReady: false, creditTermsReady: false, cohortReady: false } });
   assert.equal((await reactivated.service.execute(await reactivate())).ok, true,
     'a converted suspended profile reactivates without obsolete onboarding gates');
+  const resumed = harness({ state: 'TERMINATED', gates: { identityVerified: false,
+    commercialTermsReady: false, creditTermsReady: false, cohortReady: false } });
+  assert.equal((await resumed.service.execute(await reactivate())).ok, true,
+    'a deactivated profile can resume without repeating initial onboarding');
   const inactive = harness({ state: 'SUSPENDED', gates: { userActive: false } });
   const terminated = await inactive.service.execute(await transition('TERMINATED'));
   assert.equal(terminated.ok, true, 'inactive login never prevents HR termination remediation');

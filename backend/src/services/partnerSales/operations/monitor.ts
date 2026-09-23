@@ -22,10 +22,6 @@ export function createOperationsMonitor(contract: ContractRuntime, store: Operat
           const incident = { key, category: input.category!, evidenceReference: String(projected.evidenceReference),
             firstSeenAt: previous?.firstSeenAt ?? now, lastSeenAt: now, occurrences: (previous?.occurrences ?? 0) + 1 };
           await tx.saveIncident(incident);
-          if (!previous) {
-            const state = await tx.readState();
-            await tx.writeState({ ...state, revision: state.revision + 1, operationalPaused: true, lastOperationalPauseAt: now });
-          }
           // Deduplicate the critical incident notification in the same transaction.
           if (!previous) await tx.enqueueTelemetry({ ...projected, incidentReference: key, recordedAt: now });
         } else {

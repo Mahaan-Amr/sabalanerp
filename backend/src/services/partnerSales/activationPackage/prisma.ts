@@ -134,9 +134,6 @@ export function createPrismaPartnerActivationPackage(input: {
           ...(!profile ? { prospectiveOwnerId: readTarget } : {}) });
         if (!access.ok) return access;
         if (!access.value.isAdmin) return { ok: false as const, error: partnerError('FORBIDDEN') };
-        const openIncident = await tx.partnerOperationsIncident.findFirst({
-          where: { resolution: { equals: Prisma.AnyNull } }, select: { key: true },
-        });
         const policies = await tx.partnerTermsPolicy.findMany({ where: { revokedAt: null,
           issuedAt: { lte: clock.now }, effectiveDate: { lte: clock.now },
           OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] },
@@ -166,8 +163,7 @@ export function createPrismaPartnerActivationPackage(input: {
             ['COHORT', 'cohort آماده عملیات', gates.cohortReady],
             ['USER', 'حساب ورود فعال', gates.userActive],
             ['RELEASE', 'آمادگی انتشار', Boolean(evidence)],
-            ['OPERATIONS', 'عملیات بدون توقف یا رخداد باز', !control.operationalPaused &&
-              !control.cohort?.operationalPaused && !openIncident],
+            ['OPERATIONS', 'کنترل فردی همکاری', true],
           ].map(([id, gateLabel, gateReady]) => ({ id, label: gateLabel, ready: gateReady,
             ...(!gateReady ? { blocker: partnerError('DEPENDENCY_BLOCKED') } : {}) }));
           const activatable = profile.state === 'PENDING' && gateRows.every(gate => gate.ready);
@@ -184,7 +180,7 @@ export function createPrismaPartnerActivationPackage(input: {
               expiresAt: evidence.expiresAt } : {}), actions: [] },
           ...(control.cohort ? { cohort: { id: control.cohort.id, name: control.cohort.name,
             enrollmentOpen: !control.enrollmentPaused && !control.cohort.enrollmentPaused,
-            operationsOpen: !control.operationalPaused && !control.cohort.operationalPaused } } : {}),
+            operationsOpen: true } } : {}),
           ...(subject ? { subject } : {}),
           candidates: candidates.map(user => ({ userId: user.id, displayName: label(user) })),
           identityEvidence: identities.map(identity => ({ id: identity.id, label: identity.legalName,
@@ -397,13 +393,6 @@ export function createPrismaPartnerActivationPackage(input: {
         if (!profile) return { ok: false as const, error: partnerError('NOT_FOUND') };
         if (profile.state !== 'PENDING') return { ok: false as const, error: partnerError('STATE_CONFLICT') };
         if (profile.revision !== command.expectedProfileRevision) return { ok: false as const, error: partnerError('ROW_STALE') };
-        if (control.operationalPaused || control.cohort?.operationalPaused) {
-          return { ok: false as const, error: partnerError('OPERATIONAL_PAUSE') };
-        }
-        const openIncident = await tx.partnerOperationsIncident.findFirst({
-          where: { resolution: { equals: Prisma.AnyNull } }, select: { key: true },
-        });
-        if (openIncident) return { ok: false as const, error: partnerError('COHORT_NOT_READY') };
         const gates = await profileStore.readActivationGates(tx, profile);
         const currentEvidence = [...gates.evidenceIds].sort();
         if (!gates.identityVerified || !gates.commercialTermsReady || !gates.creditTermsReady || !gates.responderReady ||

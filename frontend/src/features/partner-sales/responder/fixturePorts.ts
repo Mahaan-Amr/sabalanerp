@@ -3,7 +3,7 @@ import { createPartnerWorkspaceFixturesV2 } from '@sabalanerp/partner-sales-cont
 import { PartnerCommandSchema, ResponderWorkspaceViewV2Schema, partnerError } from '@sabalanerp/partner-sales-contracts';
 import type { InquiryBatchResult, PartnerCommandPort, PartnerQueryV2Port, PartnerQueryV2Results, Result, ResponderWorkspaceViewV2 } from '@sabalanerp/partner-sales-contracts';
 
-export type ResponderScenario = 'RESPONDER' | 'PARTIAL' | 'UNCERTAIN' | 'PAUSED' | 'REASSIGNED' | 'EXPIRED' | 'UNASSIGNED' | 'MULTIPLE' | 'REFRESH_DENIED';
+export type ResponderScenario = 'RESPONDER' | 'PARTIAL' | 'UNCERTAIN' | 'REASSIGNED' | 'EXPIRED' | 'UNASSIGNED' | 'MULTIPLE' | 'REFRESH_DENIED';
 
 export function createResponderFixture(scenario: ResponderScenario) {
   const seed = createPartnerWorkspaceFixturesV2();
@@ -50,8 +50,8 @@ export function createResponderFixture(scenario: ResponderScenario) {
     let result: CommandResult;
     if (!inquiry) result = { ok: false, error: partnerError('NOT_FOUND') };
     else if (scenario === 'EXPIRED') result = { ok: false, error: partnerError('FORBIDDEN') };
-    else if (scenario === 'PAUSED' || scenario === 'REASSIGNED') {
-      const error = partnerError(scenario === 'PAUSED' ? 'OPERATIONAL_PAUSE' : 'NOT_ASSIGNED');
+    else if (scenario === 'REASSIGNED') {
+      const error = partnerError('NOT_ASSIGNED');
       inquiry.assignmentRevision++; inquiry.actions = [{ action: 'INQUIRY_RESPOND', enabled: false, disabledReason: error }];
       result = { ok: false, error };
     } else if (inquiry.assignmentRevision !== command.expectedAssignmentRevision) result = { ok: false, error: partnerError('NOT_ASSIGNED') };

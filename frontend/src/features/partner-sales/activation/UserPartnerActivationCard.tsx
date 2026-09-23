@@ -81,7 +81,7 @@ export function UserPartnerActivationSection({ userId }: { userId: string }) {
       if (!result.ok) { setMessage({ kind: 'error', text: result.error.message }); return; }
       setLifecycleTarget(undefined); setReason('');
       setMessage({ kind: 'success', text: lifecycleTarget === 'SUSPENDED' ? 'همکاری تعلیق شد.' :
-        lifecycleTarget === 'TERMINATED' ? 'همکاری خاتمه یافت.' : 'همکاری دوباره فعال شد.' });
+        lifecycleTarget === 'TERMINATED' ? 'همکاری غیرفعال شد.' : 'همکاری دوباره فعال شد.' });
       await load();
     } finally { setPending(false); }
   }
@@ -109,21 +109,24 @@ export function UserPartnerActivationSection({ userId }: { userId: string }) {
   if (!view) return message ? <ErpInlineState kind={message.kind} title={message.text} /> : null;
   const { subject } = view;
   const active = subject.partnerState === 'ACTIVE';
+  const reactivationBlocked = subject.blockers.some(blocker => blocker.action === 'REACTIVATE');
   return <ErpSection title="فروشنده همکار">
     <ErpCard className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <ErpBadge tone={active ? 'success' : subject.partnerState === 'SUSPENDED' ? 'warning' : 'neutral'}>
           {active ? 'فروشنده همکار فعال' : subject.partnerState === 'PENDING' ? 'در انتظار تبدیل' :
-            subject.partnerState === 'SUSPENDED' ? 'تعلیق‌شده' : subject.partnerState === 'TERMINATED' ? 'خاتمه‌یافته' : 'کاربر عادی'}
+            subject.partnerState === 'SUSPENDED' ? 'تعلیق‌شده' : subject.partnerState === 'TERMINATED' ? 'غیرفعال' : 'کاربر عادی'}
         </ErpBadge>
         {subject.canActivate && <ErpButton label="تبدیل به فروشنده همکار" onClick={() => setOpen(true)} />}
-        {active && subject.profileId && <ErpButton label="تغییر پاسخ‌دهنده" variant="outline"
+        {subject.profileId && ['ACTIVE', 'SUSPENDED', 'TERMINATED'].includes(subject.partnerState) && <ErpButton label="تغییر پاسخ‌دهنده" variant="outline"
           onClick={() => { setReason(''); setResponderOpen(true); }} />}
         {active && <ErpButton label="تعلیق همکاری" variant="outline" tone="warning"
           onClick={() => { setReason(''); setLifecycleTarget('SUSPENDED'); }} />}
-        {subject.partnerState === 'SUSPENDED' && <ErpButton label="فعال‌سازی دوباره"
+        {subject.partnerState === 'SUSPENDED' && <ErpButton label="فعال‌سازی دوباره" disabled={reactivationBlocked}
           onClick={() => { setReason(''); setLifecycleTarget('ACTIVE'); }} />}
-        {(active || subject.partnerState === 'SUSPENDED') && <ErpButton label="خاتمه همکاری" variant="outline" tone="danger"
+        {subject.partnerState === 'TERMINATED' && <ErpButton label="ازسرگیری همکاری" disabled={reactivationBlocked}
+          onClick={() => { setReason(''); setLifecycleTarget('ACTIVE'); }} />}
+        {(active || subject.partnerState === 'SUSPENDED') && <ErpButton label="غیرفعال‌سازی همکاری" variant="outline" tone="danger"
           onClick={() => { setReason(''); setLifecycleTarget('TERMINATED'); }} />}
         {subject.canRevert && <ErpButton label="بازگردانی تبدیل" tone="danger" variant="outline"
           onClick={() => { setConfirmed(false); setRevertOpen(true); }} />}
@@ -140,6 +143,8 @@ export function UserPartnerActivationSection({ userId }: { userId: string }) {
           { label: 'تبدیل‌کننده', value: subject.convertedBy ?? '—' },
         ]} />}
       {message && <ErpInlineState kind={message.kind} title={message.text} />}
+      {subject.blockers.map(blocker => <ErpInlineState key={`${blocker.action}:${blocker.code}`} kind="stale"
+        title={`${blocker.title} — ${blocker.detail} مسئول پیگیری: ${blocker.owner}. اقدام بعدی: ${blocker.nextStep}`} />)}
       {!subject.canActivate && subject.partnerState === 'NONE' && subject.blocker &&
         <ErpInlineState kind="stale" title={subject.blocker.message} />}
     </ErpCard>
@@ -180,14 +185,15 @@ export function UserPartnerActivationSection({ userId }: { userId: string }) {
       </div>
     </ErpSheet>
     <ErpSheet open={Boolean(lifecycleTarget)} onClose={() => { if (!pending) setLifecycleTarget(undefined); }}
-      title={lifecycleTarget === 'SUSPENDED' ? 'تعلیق همکاری' : lifecycleTarget === 'TERMINATED' ? 'خاتمه همکاری' : 'فعال‌سازی دوباره'}
+      title={lifecycleTarget === 'SUSPENDED' ? 'تعلیق همکاری' : lifecycleTarget === 'TERMINATED' ? 'غیرفعال‌سازی همکاری' :
+        subject.partnerState === 'TERMINATED' ? 'ازسرگیری همکاری' : 'فعال‌سازی دوباره'}
       presentation="modal" pending={pending} footer={<div className="flex justify-end gap-2">
         <ErpButton label="انصراف" variant="ghost" disabled={pending} onClick={() => setLifecycleTarget(undefined)} />
         <ErpButton label="ثبت" tone={lifecycleTarget === 'TERMINATED' ? 'danger' : 'primary'}
           disabled={pending || !/[\u0600-\u06ff]/.test(reason)} onClick={() => void transitionProfile()} />
       </div>}>
       <div className="space-y-4" dir="rtl">
-        {lifecycleTarget === 'TERMINATED' && <ErpInlineState kind="stale" title="خاتمه همکاری برگشت‌پذیر نیست؛ سوابق مالی و تحویل حفظ می‌شوند." />}
+        {lifecycleTarget === 'TERMINATED' && <ErpInlineState kind="stale" title="کار تازه متوقف و موارد باز تعیین‌تکلیف می‌شوند؛ سوابق مالی و تحویل حفظ می‌شوند و مدیر می‌تواند بعداً همکاری را از سر بگیرد." />}
         <ErpTextarea value={reason} onChange={event => setReason(event.target.value)} placeholder="دلیل" maxLength={4000} />
       </div>
     </ErpSheet>

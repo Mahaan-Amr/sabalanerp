@@ -48,6 +48,16 @@ export const PartnerDirectActivationRevertCommandV4Schema = z.object({
 });
 export type PartnerDirectActivationRevertCommandV4 = z.infer<typeof PartnerDirectActivationRevertCommandV4Schema>;
 
+export const PartnerDirectActivationBlockerV4Schema = z.object({
+  action: z.enum(['ACTIVATE', 'REACTIVATE', 'REVERT']),
+  code: IdSchema,
+  title: TextSchema,
+  detail: TextSchema,
+  owner: TextSchema,
+  nextStep: TextSchema,
+}).strict();
+export type PartnerDirectActivationBlockerV4 = z.infer<typeof PartnerDirectActivationBlockerV4Schema>;
+
 export const PartnerDirectActivationViewV4Schema = z.object({
   schemaVersion: z.literal(4),
   purpose: z.literal('PARTNER_DIRECT_ACTIVATION'),
@@ -72,6 +82,7 @@ export const PartnerDirectActivationViewV4Schema = z.object({
     inquiryCount: z.number().int().nonnegative(),
     caseCount: z.number().int().nonnegative(),
     priorResponsibilityCount: z.number().int().nonnegative().default(0),
+    blockers: z.array(PartnerDirectActivationBlockerV4Schema).default([]),
   }).strict().superRefine((subject, context) => {
     if (Boolean(subject.profileId) !== Boolean(subject.profileRevision)) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['profileId'], message: 'Profile identity and revision must travel together' });

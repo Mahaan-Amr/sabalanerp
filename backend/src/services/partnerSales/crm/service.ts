@@ -30,7 +30,7 @@ async function currentProfile(tx: Prisma.TransactionClient, actorId: string, mut
   const actor = await tx.user.findUnique({ where: { id: actorId }, select: { isActive: true,
     partnerProfile: { select: { id: true, userId: true, state: true, revision: true } } } });
   const profile = actor?.partnerProfile;
-  if (!actor?.isActive || !profile || profile.state === 'PENDING' || profile.state === 'TERMINATED' ||
+  if (!actor?.isActive || !profile || profile.state === 'PENDING' ||
       (mutation && profile.state !== 'ACTIVE')) return null;
   await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${profile.id} FOR UPDATE`;
   return profile;

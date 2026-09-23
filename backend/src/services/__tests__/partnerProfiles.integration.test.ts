@@ -92,8 +92,8 @@ test('Prisma profile gates re-read current identity, terms, responder, cohort an
       assert.equal((await store.readActivationGates(tx, profile)).evidenceIds.includes(`${prefix}-future-credit`), false,
         'future terms never replace the latest effective evidence');
       await tx.partnerReleaseCohort.update({ where: { id: ids.cohort }, data: { operationalPaused: true } });
-      assert.equal((await store.readActivationGates(tx, profile)).cohortReady, false,
-        'operational pause freezes activation');
+      assert.equal((await store.readActivationGates(tx, profile)).cohortReady, true,
+        'legacy operational pause is not an activation gate');
       await tx.partnerProfile.update({ where: { id: ids.profile }, data: { irreversibleAt: new Date() } });
       await tx.$executeRawUnsafe('SAVEPOINT partner_persona_guard');
       await assert.rejects(tx.workspacePermission.create({ data: { userId: ids.partner, workspace: 'accounting',

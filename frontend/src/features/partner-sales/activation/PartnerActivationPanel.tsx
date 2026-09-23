@@ -115,10 +115,6 @@ export function PartnerActivationPanel() {
             disabled={pending} onClick={() => void runOperation(() => operations.enroll({ sellerId: activation.userId,
               expectedRevision: view.release.controlRevision, reason: 'عضویت مستقل فروشنده آماده در cohort' }),
             'فروشنده در cohort عضو شد.')} />}
-          {operationAvailability.canOpenOperations && activation && <ErpButton label="بازکردن عملیات فروش همکار"
-            disabled={pending} onClick={() => void runOperation(() => operations.pause({ actorId: view.actorId,
-              kind: 'OPERATIONAL', paused: false, expectedRevision: view.release.controlRevision,
-              reason: 'بازکردن عملیات پس از عضویت و کنترل رخدادهای باز' }), 'عملیات فروش همکار باز شد.')} />}
         </div>}
       </ErpCard>}
       {!activation && <ErpCard className="grid gap-4 p-4 lg:grid-cols-2">

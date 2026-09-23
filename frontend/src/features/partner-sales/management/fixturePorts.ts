@@ -23,7 +23,7 @@ export function createManagementFixture(persona: ManagementPersona) {
   const profile: PartnerManagementProfileViewV2 = {
     profile: { ...seed.profile, profileId: 'fixture-331-profile', status: 'PENDING', identityVerified: false,
       commercialTermsReady: false, creditTermsReady: false, responderReady: false, conversionCleared: true, cohortReady: true },
-    displayName: 'همکار آزمایشی آریا', actions: [],
+    displayName: 'همکار آزمایشی آریا', actions: [], lifecycleBlockers: [],
     identity: { evidenceId: 'fixture-331-identity', legalName: 'همکار آزمایشی آریا', phone: '۰۹۱۲۰۰۰۰۰۰۰۰', address: 'تهران، نشانی آزمایشی', personType: 'LEGAL' },
     commercialTerms: { summary: 'شرایط تجاری هنوز ثبت نشده است.', options: [{ id: 'fixture-331-commercial', label: 'شرایط مصوب فروش همکار' }] },
     creditTerms: { summary: 'شرایط اعتبار هنوز ثبت نشده است.', options: [{ id: 'fixture-331-credit', label: 'پرداخت نقدی مصوب حسابداری' }] },
@@ -47,7 +47,7 @@ export function createManagementFixture(persona: ManagementPersona) {
       ...(allowed.includes('PROFILE_CREATE') ? { identityCandidates: [{ identityEvidenceId: 'fixture-331-new-identity', displayName: 'هویت آزمایشی آماده ایجاد' }] } : {}),
       profiles: visible ? profiles.map(item => {
         const currentActions = allowed.filter(action => action !== 'PROFILE_CREATE' && action !== 'CUSTOMER_TRANSFER_DECIDE')
-          .filter(action => action !== 'PROFILE_ACTIVATE' || item.profile.status === 'PENDING' || item.profile.status === 'SUSPENDED')
+          .filter(action => action !== 'PROFILE_ACTIVATE' || item.profile.status === 'SUSPENDED' || item.profile.status === 'TERMINATED')
           .filter(action => action !== 'PROFILE_SUSPEND' || item.profile.status === 'ACTIVE')
           .filter(action => action !== 'PROFILE_TERMINATE' || item.profile.status !== 'TERMINATED')
           .map(action => availability(action, item));

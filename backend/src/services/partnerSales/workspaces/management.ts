@@ -20,9 +20,10 @@ type Page = { cursor?: string; limit: number };
 type Purpose = 'ONBOARDING' | 'MANAGEMENT' | 'ACCOUNTING' | 'CRM';
 
 const actionGroups: ReadonlyArray<{ purpose: Purpose; actions: readonly PartnerActionV2[] }> = [
-  // PROFILE_ACTIVATE stays unprojected until a separately versioned wire can
-  // carry the exact opaque gate-evidence set required by the owner command.
-  { purpose: 'ONBOARDING', actions: ['IDENTITY_VERIFY', 'PROFILE_SUSPEND', 'PROFILE_TERMINATE'] },
+  // Initial conversion uses the direct activation command. This activation
+  // action is projected here only for resuming an existing inactive profile,
+  // which deliberately requires no opaque onboarding evidence.
+  { purpose: 'ONBOARDING', actions: ['IDENTITY_VERIFY', 'PROFILE_ACTIVATE', 'PROFILE_SUSPEND', 'PROFILE_TERMINATE'] },
   { purpose: 'MANAGEMENT', actions: ['COMMERCIAL_TERMS_MANAGE', 'RESPONDER_ASSIGN', 'PROFILE_CONVERSION_MANAGE'] },
   { purpose: 'ACCOUNTING', actions: ['CREDIT_TERMS_MANAGE'] },
 ];
@@ -57,7 +58,8 @@ export function createPrismaManagementWorkspaceReader(input: {
       { correlationId: input.correlationId, ...(reason ? { reason } : {}) });
   }
 
-  async function profileActions(transaction: Transaction, profileId: string) {
+  async function profileActions(transaction: Transaction, profileId: string,
+    state: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'TERMINATED') {
     const root = { kind: 'PROFILE' as const, id: profileId };
     // This is an advisory read-model projection, not mutation authority. Admin
     // commands are reauthorized later with the actor-entered decision reason;
@@ -67,6 +69,9 @@ export function createPrismaManagementWorkspaceReader(input: {
       projectActionAvailabilityV2(authorization(transaction, group.purpose, projectionReason), root, group.actions)));
     const output = new Map<PartnerActionV2, ActionAvailabilityV2>();
     for (const item of values.flat()) output.set(item.action, item);
+    if (!['SUSPENDED', 'TERMINATED'].includes(state)) output.delete('PROFILE_ACTIVATE');
+    if (state !== 'ACTIVE') output.delete('PROFILE_SUSPEND');
+    if (!['ACTIVE', 'SUSPENDED'].includes(state)) output.delete('PROFILE_TERMINATE');
     return [...output.values()];
   }
 
@@ -150,8 +155,20 @@ export function createPrismaManagementWorkspaceReader(input: {
         if (profileVisibility.error) return { ok: false, error: profileVisibility.error };
         continue;
       }
-      const actions = await profileActions(transaction, profile.id);
+      const actions = await profileActions(transaction, profile.id, profile.state);
       const gates = await profileStore.readActivationGates(transaction, profile);
+      const lifecycleBlockers = ['SUSPENDED', 'TERMINATED'].includes(profile.state) ? [
+        ...(!gates.userActive ? [{ action: 'REACTIVATE' as const, code: 'USER_INACTIVE',
+          title: 'حساب کاربری غیرفعال است', detail: 'این حساب امکان ورود و ادامه همکاری ندارد.',
+          owner: 'مدیریت کاربران', nextStep: 'ابتدا حساب کاربری را فعال کنید.' }] : []),
+        ...(!gates.responderReady ? [{ action: 'REACTIVATE' as const, code: 'RESPONDER_UNAVAILABLE',
+          title: 'پاسخ‌دهنده قیمت آماده نیست', detail: 'پاسخ‌دهنده فعلی حذف شده یا دسترسی لازم را ندارد.',
+          owner: 'مدیریت فروش', nextStep: 'یک پاسخ‌دهنده فعال انتخاب کنید و دوباره تلاش کنید.' }] : []),
+        ...(gates.conflictingInternalAuthority ? [{ action: 'REACTIVATE' as const, code: 'INTERNAL_AUTHORITY',
+          title: 'دسترسی یا مسئولیت داخلی ناسازگار وجود دارد',
+          detail: 'این حساب هنوز نقش، دسترسی یا مسئولیت داخلی ناسازگار با فروشنده همکار دارد.',
+          owner: 'مدیر واحد مربوط', nextStep: 'موارد داخلی را لغو یا منتقل کنید و دوباره تلاش کنید.' }] : []),
+      ] : [];
       const identity = profile.commercialAccount?.identities[0];
       const identitySource = identity ? object(identity.identifiers) : undefined;
       const currentEvidence = typeof identitySource?.evidenceId === 'string'
@@ -204,13 +221,16 @@ export function createPrismaManagementWorkspaceReader(input: {
             assignmentRevision: current.revision, label: 'استعلام در انتظار پاسخ', actions: inquiryActions });
         }
       }
-      const visibleActions = gates.identityVerified && identityRevisionOptions.length === 0
+      let visibleActions = gates.identityVerified && identityRevisionOptions.length === 0
         ? actions.filter(item => item.action !== 'IDENTITY_VERIFY')
         : actions;
+      if (lifecycleBlockers.length) visibleActions = visibleActions.map(item => item.action === 'PROFILE_ACTIVATE'
+        ? { action: item.action, enabled: false, disabledReason: partnerError('DEPENDENCY_BLOCKED') } : item);
       projected.push({
         profile: profileView.data,
         displayName: label(profile.user),
         actions: visibleActions,
+        lifecycleBlockers,
         ...(gates.identityVerified && identity && typeof identitySource?.evidenceId === 'string' &&
           profileVisibility.visible ? { identity: {
             evidenceId: identitySource.evidenceId, legalName: identity.legalName, phone: identity.phone,

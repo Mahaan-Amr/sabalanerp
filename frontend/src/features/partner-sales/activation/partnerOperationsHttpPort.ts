@@ -44,7 +44,7 @@ export function createPartnerOperationsHttpPort(client: Client = api) {
       post('/partner/operations/cohort', input),
     enroll: (input: { sellerId: string; expectedRevision: number; reason: string }) =>
       post('/partner/operations/cohort/enroll', input),
-    pause: async (input: { actorId: string; kind: 'ENROLLMENT' | 'OPERATIONAL'; paused: boolean;
+    pause: async (input: { actorId: string; kind: 'ENROLLMENT'; paused: boolean;
       expectedRevision: number; reason: string }) => {
       const intent = { kind: input.kind, paused: input.paused, expectedRevision: input.expectedRevision, reason: input.reason };
       const commandId = crypto.randomUUID();

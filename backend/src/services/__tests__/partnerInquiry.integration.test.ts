@@ -154,10 +154,9 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     const responder = createPartnerInquiryService({ actorId: ids.responderId, ...shared });
     await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: true } });
     const paused = await responder.execute(command);
-    assert.equal(paused.ok ? null : paused.error.code, 'OPERATIONAL_PAUSE');
-    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: false } });
+    assert.equal(paused.ok, true, JSON.stringify(paused));
     const result = await responder.execute(command);
-    assert.equal(result.ok, true);
+    assert.equal(result.ok && result.value.replayed, true);
     if (!result.ok || !result.value.batch) return;
     assert.equal(result.value.batch.outcomes[0].ok, true);
     assert.equal(result.value.batch.outcomes[1].ok ? null : result.value.batch.outcomes[1].error.code, 'ROW_STALE');

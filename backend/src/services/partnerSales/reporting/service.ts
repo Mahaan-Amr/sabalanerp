@@ -73,7 +73,7 @@ export class PartnerReportingService {
       || context.persona === 'PUBLIC' || (context.grantExpiresAt && context.grantExpiresAt <= now)
       || (context.scope === 'DEPARTMENT' && !context.departmentId)
       || (query.purpose === 'PARTNER' && (context.persona !== 'PARTNER' || context.scope !== 'OWN'
-        || context.actorId !== context.partnerSellerId || !['ACTIVE', 'SUSPENDED'].includes(context.partnerStatus)))
+        || context.actorId !== context.partnerSellerId || !['ACTIVE', 'SUSPENDED', 'TERMINATED'].includes(context.partnerStatus)))
       || (query.purpose !== 'PARTNER' && context.persona !== 'INTERNAL')
       || (query.purpose === 'MANAGEMENT' && !['DEPARTMENT', 'COMPANY'].includes(context.scope))
       || (['ACCOUNTING', 'FULFILLMENT'].includes(query.purpose) && !['PURPOSE_BOUND', 'DEPARTMENT', 'COMPANY'].includes(context.scope))) {

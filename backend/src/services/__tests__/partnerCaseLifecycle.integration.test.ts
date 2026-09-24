@@ -56,6 +56,9 @@ test('multi-Case Accounting list does not deadlock with the Partner writer lock 
       await tx.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
       await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`,
         password: 'not-a-login', firstName: 'Read', lastName: 'Concurrency', role: 'ADMIN' } });
+      await tx.workspacePermission.create({ data: { userId: actorId, workspace: 'accounting', permissionLevel: 'view' } });
+      await tx.featurePermission.create({ data: { userId: actorId, workspace: 'accounting',
+        feature: 'accounting_payments_manage', permissionLevel: 'view', grantedBy: actorId } });
     });
     await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
       'backend/src/services/__tests__/partnerAccountingReadConcurrencyProbe.ts'], { timeout: 30_000, env: { ...process.env,

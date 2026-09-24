@@ -41,7 +41,11 @@ async function main() {
           if (Number(waiting[0].count)) { blocked = true; break; }
           await new Promise(resolve => setTimeout(resolve, 20));
         }
-        assert.equal(blocked, true, 'list reached the competing transaction');
+        if (!blocked) {
+          const completed = await Promise.race([read!.then(async response => ({ status: response.status, body: await response.text() })),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 100))]);
+          assert.fail(`list did not reach the competing transaction: ${JSON.stringify(completed)}`);
+        }
         await tx.$queryRaw`SELECT id FROM users WHERE id = ${actorId} FOR UPDATE`;
       }, { timeout: 10_000 });
       const response = await read!;

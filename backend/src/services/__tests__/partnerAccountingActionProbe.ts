@@ -403,8 +403,11 @@ async function main() {
       await prisma.featurePermission.update({ where: paymentGrantKey, data: { permissionLevel: 'view' } });
       assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, false, 'current narrow permission controls the projected action');
       await prisma.featurePermission.update({ where: paymentGrantKey, data: { permissionLevel: 'edit' } });
+      await prisma.featurePermission.update({ where: { userId_workspace_feature: {
+        userId: actor.userId, workspace: 'accounting', feature: 'accounting_records_approve_void',
+      } }, data: { permissionLevel: 'edit' } });
       const actionReverse = await action({ kind: 'REVERSE_RECEIPT', paymentEventId: actionPaymentId, reason: 'بازگرداندن وجه آزمایش دسترسی' }, `${recordId}-action-reverse`);
-      assert.equal(actionReverse.status, 200);
+      assert.equal(actionReverse.status, 200, JSON.stringify(actionReverse.body));
       assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, false);
       const periodParts = new Intl.DateTimeFormat('en-US-u-ca-persian', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
       const period = `${periodParts.find(part => part.type === 'year')!.value}-${periodParts.find(part => part.type === 'month')!.value}`;

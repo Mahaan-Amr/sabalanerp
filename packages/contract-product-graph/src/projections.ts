@@ -7,6 +7,7 @@ import type {
   CanonicalToolSelection
 } from './productGraph';
 import { parseCanonicalDecimal } from './canonicalDecimal';
+import { normalizeLegacyJson, stableCanonicalJson } from './canonicalJson';
 import Decimal from 'decimal.js';
 import { aggregateSecondaryRemainders, type PaidRemainderStock } from './remainderPolicy';
 
@@ -174,12 +175,24 @@ const operationsFor = (
 const canonicalPricingComponentsFor = (
   row: CanonicalProductRow,
   operations: readonly CanonicalProjectedOperation[],
-  layers: readonly CanonicalLayerConfiguration[]
+  layers: readonly CanonicalLayerConfiguration[],
+  rows: readonly CanonicalProductRow[],
+  effectiveBaseAmountToman: string | undefined
 ): CanonicalProjectedPricingComponent[] => {
   const snapshot = row.commercial.calculationSnapshot;
+  const layerChild = layers.find(layer =>
+    String(layer.layerConfigurationId) === String(row.productRowId) &&
+    layer.parentProductRowId === row.parentProductRowId
+  );
   const rawPricingLines: unknown[] = [];
   if (snapshot) {
-    if (row.productType === 'slab') {
+    if (layerChild) {
+      if (!Array.isArray(snapshot.cuttingPricingLines)) {
+        throw new Error(`Product ${row.productRowId} layer cutting pricing lines are malformed`);
+      }
+      rawPricingLines.push(...snapshot.cuttingPricingLines);
+      if (snapshot.layerPricingLine !== undefined) rawPricingLines.push(snapshot.layerPricingLine);
+    } else if (row.productType === 'slab') {
       if (snapshot.materialPricingLine !== undefined) rawPricingLines.push(snapshot.materialPricingLine);
       if (snapshot.cuttingPricingLines !== undefined) {
         if (!Array.isArray(snapshot.cuttingPricingLines)) {
@@ -217,6 +230,27 @@ const canonicalPricingComponentsFor = (
     };
   };
   let intrinsic = rawPricingLines.map(value => componentFromLine(value));
+  if (layerChild) {
+    const sideOperations = snapshot?.sideOperationResults;
+    if (!Array.isArray(sideOperations)) {
+      throw new Error(`Product ${row.productRowId} layer operation pricing evidence is malformed`);
+    }
+    intrinsic.push(...sideOperations.flatMap(value => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error(`Product ${row.productRowId} layer operation pricing evidence is malformed`);
+      }
+      const operation = value as Record<string, unknown>;
+      const result = operation.result;
+      if (typeof operation.operationCollectionId !== 'string' || !result ||
+        typeof result !== 'object' || Array.isArray(result) ||
+        !Array.isArray((result as Record<string, unknown>).pricingLines)) {
+        throw new Error(`Product ${row.productRowId} layer operation pricing evidence is malformed`);
+      }
+      return ((result as Record<string, unknown>).pricingLines as unknown[]).map(line =>
+        componentFromLine(line, `layer:${layerChild.layerConfigurationId}:operation:${operation.operationCollectionId}`, 'stair-layer-operation')
+      );
+    }));
+  }
   const materialPricing = snapshot?.materialPricing;
   let materialWasPaidInSource = false;
   if (
@@ -280,12 +314,12 @@ const canonicalPricingComponentsFor = (
   const hasProjectedBase = intrinsic.some(component =>
     component.kind === 'base-material' || component.kind === 'slab-material'
   );
-  if (!hasProjectedBase && row.commercial.baseAmountToman !== undefined) {
+  if (!hasProjectedBase && effectiveBaseAmountToman !== undefined) {
     const baseKind = row.productType === 'slab' ? 'slab-material' : 'base-material';
     intrinsic.unshift({
       id: baseKind,
       kind: baseKind,
-      amountToman: row.commercial.baseAmountToman
+      amountToman: effectiveBaseAmountToman
     });
   }
   const attached = operations.map(operation => ({
@@ -294,7 +328,10 @@ const canonicalPricingComponentsFor = (
     amountToman: operation.amountToman
   }));
   const layerComponents = layers
-    .filter(layer => layer.parentProductRowId === row.productRowId)
+    .filter(layer => layer.parentProductRowId === row.productRowId && !rows.some(candidate =>
+      String(candidate.productRowId) === String(layer.layerConfigurationId) &&
+      candidate.parentProductRowId === row.productRowId
+    ))
     .flatMap(layer => {
       const prefix = `layer:${layer.layerConfigurationId}`;
       const result = layer.result;
@@ -315,12 +352,41 @@ const canonicalPricingComponentsFor = (
   return [...intrinsic, ...layerComponents, ...attached];
 };
 
+const verifiedStairLayerBase = (
+  row: CanonicalProductRow,
+  layers: readonly CanonicalLayerConfiguration[]
+): string | undefined => {
+  const layer = layers.find(candidate => String(candidate.layerConfigurationId) === String(row.productRowId));
+  if (!layer) return undefined;
+  const result = layer.result;
+  if (row.productType !== 'stair' || row.parentProductRowId !== layer.parentProductRowId ||
+    row.commercial.totalAmountToman !== result.totalAmountToman ||
+    !row.commercial.calculationSnapshot ||
+    stableCanonicalJson(row.commercial.calculationSnapshot) !== stableCanonicalJson(normalizeLegacyJson(result)) ||
+    (row.commercial.baseAmountToman !== undefined && row.commercial.baseAmountToman !== result.materialAmountToman) ||
+    (result.materialPricingLine?.amountToman ?? '0') !== result.materialAmountToman) {
+    throw new Error(`Product ${row.productRowId} layer pricing evidence conflicts with its replayed configuration`);
+  }
+  return result.materialAmountToman;
+};
+
 export const projectCanonicalProductGraph = (
   graph: CanonicalProductGraph,
   audience: CanonicalProjectionAudience
 ): CanonicalContractProjection => {
   const products = graph.rows.map(row => {
     const operations = operationsFor(row, graph.operationGroups, graph.toolSelections, graph.finishingSelections);
+    const layerBase = audience === 'accounting'
+      ? verifiedStairLayerBase(row, graph.layerConfigurations)
+      : undefined;
+    const effectiveBase = row.commercial.baseAmountToman ?? layerBase;
+    const pricingComponents = audience === 'accounting'
+      ? canonicalPricingComponentsFor(row, operations, graph.layerConfigurations, graph.rows, effectiveBase)
+      : [];
+    if (layerBase !== undefined &&
+      sumCanonicalDecimals(pricingComponents.map(component => component.amountToman)) !== row.commercial.totalAmountToman) {
+      throw new Error(`Product ${row.productRowId} layer pricing components conflict with its total`);
+    }
     return {
     productRowId: row.productRowId,
     ...(row.parentProductRowId ? { parentProductRowId: row.parentProductRowId } : {}),
@@ -336,12 +402,9 @@ export const projectCanonicalProductGraph = (
       ? { widthMeters: row.commercial.requestedWidthMeters } : {}),
     ...(row.commercial.requestedAreaSquareMeters !== undefined
       ? { areaSquareMeters: row.commercial.requestedAreaSquareMeters } : {}),
-    ...(row.commercial.baseAmountToman !== undefined
-      ? { baseAmountToman: row.commercial.baseAmountToman } : {}),
+    ...(effectiveBase !== undefined ? { baseAmountToman: effectiveBase } : {}),
     totalAmountToman: row.commercial.totalAmountToman ?? '0',
-    pricingComponents: audience === 'accounting'
-      ? canonicalPricingComponentsFor(row, operations, graph.layerConfigurations)
-      : [],
+    pricingComponents,
     operations,
     childRowIds: graph.rows
       .filter(candidate => candidate.parentProductRowId === row.productRowId ||

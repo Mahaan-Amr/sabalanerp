@@ -19,6 +19,8 @@ import {
 import { materializePaidRemainderStocks } from '../remainderPolicy';
 import { calculateProductOperations } from '../operationsPolicy';
 import { repairLegacyProductOperationIdentities } from '../operationIdentityRepair';
+import { projectCanonicalProductGraph } from '../projections';
+import { parseCanonicalProductGraph, serializeCanonicalProductGraph } from '../productGraphSerialization';
 
 const policy = {
   calculation: 'calculation-v1',
@@ -892,6 +894,57 @@ for (const prepared of [
     result.graph.rows[1]?.commercial.totalAmountToman,
     expectedLayer.result.totalAmountToman
   );
+  assert.equal(
+    result.graph.rows[1]?.commercial.baseAmountToman,
+    expectedLayer.result.materialAmountToman,
+    'the saved layer row must retain its replayed material amount as its base amount'
+  );
+  const accountingLayer = projectCanonicalProductGraph(result.graph, 'accounting').products[1];
+  const accountingParent = projectCanonicalProductGraph(result.graph, 'accounting').products[0];
+  assert.equal(
+    accountingParent?.pricingComponents.reduce(
+      (sum, component) => sum.plus(component.amountToman), new Decimal(0)
+    ).toString(),
+    accountingParent?.totalAmountToman,
+    'a separately priced layer child must not be charged again on its parent'
+  );
+  assert.equal(accountingLayer?.baseAmountToman, expectedLayer.result.materialAmountToman);
+  assert.equal(
+    accountingLayer?.pricingComponents.reduce(
+      (sum, component) => sum.plus(component.amountToman), new Decimal(0)
+    ).toString(),
+    expectedLayer.result.totalAmountToman,
+    'the layer material, cutting and layer charges must reconcile for accounting'
+  );
+  const savedLayer = result.graph.rows[1]!;
+  const { baseAmountToman: _missingHistoricalBase, ...historicalCommercial } = savedLayer.commercial;
+  const historicalGraph = {
+    ...result.graph,
+    rows: [result.graph.rows[0]!, { ...savedLayer, commercial: historicalCommercial }],
+  };
+  const persistedHistoricalGraph = parseCanonicalProductGraph(serializeCanonicalProductGraph(historicalGraph));
+  const recoveredLayer = projectCanonicalProductGraph(persistedHistoricalGraph, 'accounting').products[1];
+  assert.equal(
+    recoveredLayer?.baseAmountToman,
+    expectedLayer.result.materialAmountToman,
+    'historical missing base is projected only from matching frozen layer evidence'
+  );
+  assert.equal(
+    recoveredLayer?.pricingComponents.reduce(
+      (sum, component) => sum.plus(component.amountToman), new Decimal(0)
+    ).toString(),
+    expectedLayer.result.totalAmountToman
+  );
+  assert.throws(() => projectCanonicalProductGraph({
+    ...historicalGraph,
+    rows: [historicalGraph.rows[0]!, {
+      ...historicalGraph.rows[1]!,
+      commercial: {
+        ...historicalCommercial,
+        calculationSnapshot: { ...historicalCommercial.calculationSnapshot, resultHash: 'conflicting-hash' },
+      },
+    }],
+  }, 'accounting'), /layer pricing evidence conflicts/);
   assert.notEqual(
     result.graph.layerConfigurations[0]?.result.resultHash,
     'untrusted-client-result'

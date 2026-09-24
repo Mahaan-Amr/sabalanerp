@@ -66,6 +66,10 @@ const recoveryMethods = (version: Awaited<ReturnType<typeof preflightApprovedPri
     methods.add('FROZEN_SNAPSHOT_TO_DETERMINISTIC_LEGACY_GRAPH');
   }
   if (compatibility.recoveredAccountingRows) methods.add('FROZEN_GRAPH_ACCOUNTING_ROW_RECOVERY');
+  if (Array.isArray(compatibility.stairLayerPricingRecoveries) &&
+    compatibility.stairLayerPricingRecoveries.length > 0) {
+    methods.add('AUDITED_FROZEN_STAIR_LAYER_MATERIAL_BASE');
+  }
   if (compatibility.recoveredInvoiceAmount) methods.add('ZERO_SENTINEL_FROM_FROZEN_CONTRACT_TOTAL');
   if (Array.isArray(sourceEvidence.quantityNormalizations) && sourceEvidence.quantityNormalizations.length > 0) {
     methods.add('VERSIONED_COMMERCIAL_PRECISION_RECONCILIATION');

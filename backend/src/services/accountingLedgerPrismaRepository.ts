@@ -464,12 +464,23 @@ export const listPostedJournal = async (database: Database, input: {
   select: reportVoucherSelect,
 });
 
+export const postingBlockReasonForVoucherSource = (sourceType: string, sourcePayload: unknown): string | null => (
+  sourceType === 'SEPIDAR_ACC_VOUCHER'
+    && sourcePayload !== null
+    && typeof sourcePayload === 'object'
+    && !Array.isArray(sourcePayload)
+    && (sourcePayload as Record<string, unknown>).authority === 'SEPIDAR_UNTIL_CUTOVER'
+    ? 'این سند از سپیدار وارد شده و تا تطبیق و انتقال مرجعیت فقط پیش‌نویس است.'
+    : null
+);
+
 export const listLedgerVouchers = async (database: Database, input: {
   bookId: string;
   fiscalYearId: string;
   periodId?: string;
   status?: 'DRAFT' | 'POSTED' | 'REVERSED';
-}) => database.accountingLedgerVoucher.findMany({
+}) => {
+  const vouchers = await database.accountingLedgerVoucher.findMany({
   where: {
     bookId: input.bookId,
     fiscalYearId: input.fiscalYearId,
@@ -477,8 +488,13 @@ export const listLedgerVouchers = async (database: Database, input: {
     status: input.status,
   },
   orderBy: [{ documentDate: 'desc' }, { createdAt: 'desc' }],
-  select: reportVoucherSelect,
-});
+    select: { ...reportVoucherSelect, sourceType: true, sourcePayload: true },
+  });
+  return vouchers.map(({ sourceType, sourcePayload, ...voucher }) => ({
+    ...voucher,
+    postingBlockedReason: postingBlockReasonForVoucherSource(sourceType, sourcePayload),
+  }));
+};
 
 export const readLedgerVoucherEvidence = async (database: PrismaClient, input: {
   voucherId: string;

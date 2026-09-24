@@ -79,6 +79,7 @@ services:
       ALLOW_UNSCANNED_HR_FILES: "true"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       RECOVERY_STORAGE_DIR: /app/storage/recovery
+      SEPIDAR_BACKUP_STORAGE_ROOT: /app/storage/sepidar-backups
       RECOVERY_COORDINATION_DIR: /app/recovery-coordination
       INQUIRY_RECOVERY_SOURCE_DIR: /app/recovery-sources/inquiry
       INQUIRY_RECOVERY_COORDINATED: "true"
@@ -99,6 +100,7 @@ services:
       - ${LOCAL_BACKEND_STORAGE_SUPPORT_SOURCE:-backend_storage_support_tickets}:/app/storage/support-tickets
       - ${LOCAL_BACKEND_UPLOADS_SOURCE:-backend_uploads}:/app/uploads
       - ${LOCAL_BACKEND_RECOVERY_SOURCE:-backend_recovery}:/app/storage/recovery
+      - ${LOCAL_BACKEND_SEPIDAR_BACKUP_SOURCE:-backend_storage_sepidar_backups}:/app/storage/sepidar-backups
       - ${LOCAL_RECOVERY_COORDINATION_SOURCE:-recovery_coordination}:/app/recovery-coordination
       - ${LOCAL_INQUIRY_RECOVERY_SOURCE:-inquiry_data}:/app/recovery-sources/inquiry
     depends_on:
@@ -196,5 +198,6 @@ volumes:
   backend_storage_support_tickets:
   backend_uploads:
   backend_recovery:
+  backend_storage_sepidar_backups:
   recovery_coordination:
   inquiry_data:

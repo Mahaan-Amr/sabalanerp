@@ -136,6 +136,18 @@ test('a balanced command posts once and retry returns the same immutable voucher
   assert.equal(repository.vouchers.size, 1);
 });
 
+test('Sepidar parallel drafts cannot become statutory postings through the ordinary voucher route', async () => {
+  const repository = createRepository();
+  const ledger = createAccountingLedgerApplication(repository, { now: () => now, nextReference: () => 'عطف-سپیدار' });
+  const payload = { authority: 'SEPIDAR_UNTIL_CUTOVER', sourceVoucher: '10053' };
+  const draft = await ledger.createManualDraft({ ...balancedDraft,
+    idempotencyKey: 'sepidar-parallel-10053', source: { type: 'SEPIDAR_ACC_VOUCHER', id: '10053', version: 1, payload, hash: hashAccountingEvidence(payload) },
+  });
+  await assert.rejects(() => ledger.postVoucher({ voucherId: draft.id, actor: balancedDraft.actor, reason: 'تلاش ثبت قطعی' }),
+    (error: unknown) => error instanceof AccountingLedgerError && error.code === 'SEPIDAR_PARALLEL_DRAFT_NOT_POSTABLE');
+  assert.equal(repository.vouchers.get(draft.id)?.status, 'DRAFT');
+});
+
 test('the immutable source is idempotent across request keys and rejects changed content', async () => {
   const repository = createRepository();
   const ledger = createAccountingLedgerApplication(repository, { now: () => now, nextReference: () => 'عطف-منشأ' });

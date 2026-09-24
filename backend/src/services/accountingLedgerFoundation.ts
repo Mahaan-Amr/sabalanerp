@@ -197,7 +197,7 @@ const roundPositiveDecimal = (value: { canonical: string }) => {
   return BigInt(whole) + (fraction[0] && fraction[0] >= '5' ? 1n : 0n);
 };
 
-const voucherContentHash = (voucher: {
+export const voucherContentHash = (voucher: {
   bookId: string; fiscalYearId: string; periodId: string; idempotencyKey: string; correlationId: string;
   description: string; documentDate: Date; occurredAt: Date; discoveredAt?: Date | null;
   source: { type: string; id: string; version: number; hash: string; payload: unknown };
@@ -423,6 +423,10 @@ export const createAccountingLedgerApplication = (
       const voucher = await tx.getVoucherForUpdate(input.voucherId);
       if (!voucher) throw new AccountingLedgerError('VOUCHER_NOT_FOUND', 'سند حسابداری پیدا نشد.', 404);
       if (voucher.status === 'POSTED' || voucher.status === 'REVERSED') return voucher;
+      if (voucher.source.type === 'SEPIDAR_ACC_VOUCHER'
+          && (voucher.source.payload as { authority?: string })?.authority === 'SEPIDAR_UNTIL_CUTOVER') {
+        throw new AccountingLedgerError('SEPIDAR_PARALLEL_DRAFT_NOT_POSTABLE', 'تا پایان تطبیق و انتقال مرجعیت، سند واردشده از سپیدار فقط پیش‌نویس است و ثبت قطعی آن مجاز نیست.', 409);
+      }
       const context = await tx.getPostingContext(voucher);
       assertContext(context, { ...voucher, actor: input.actor, override: input.override } as unknown as ManualDraftCommand);
       const totals = validateLines(context, voucher.lines, voucher.documentDate);

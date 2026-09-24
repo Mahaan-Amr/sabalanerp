@@ -1,0 +1,13 @@
+# Sepidar parallel ingestion (development stage)
+
+This procedure keeps Sepidar as the legal accounting authority while Sabalan receives immutable daily snapshots and matching draft vouchers. The current importer does **not** authorize statutory reports or transfer authority.
+
+1. Upload the newest complete `.bak` to `POST /api/accounting/replacement/sepidar-backups` as an Accounting workspace administrator, with multipart fields `bookId` and `file`. The response is `STAGED_UNVERIFIED` and contains the SHA-256. The backup is stored privately by hash; repeat upload of identical bytes returns the same record. Configure `SEPIDAR_BACKUP_STORAGE_ROOT` on the backend and retain the volume across releases.
+2. Restore and verify the staged backup in a governed Sepidar reader before extraction. `RESTORE VERIFYONLY`, database integrity checks, a complete schema manifest, per-table counts, and an export hash are required. Staging alone must never be shown as a complete snapshot.
+3. Import the verified JSONL and manifest using `backend/src/scripts/importSepidarSourceArchive.ts`. Pass `SEPIDAR_TARGET_BOOK_ID`, `SEPIDAR_SOURCE_JSONL`, `SEPIDAR_SOURCE_COUNTS_JSON`, `SEPIDAR_BACKUP_SHA256`, `SEPIDAR_EXPORT_SHA256`, `SEPIDAR_BACKUP_FILENAME`, and for a later backup `SEPIDAR_PREDECESSOR_SNAPSHOT_ID`. The script checks exact table and total counts and refuses source hash mismatch. A completed snapshot is immutable.
+4. Compare two complete snapshots through `GET /api/accounting/replacement/sepidar-snapshots/:id/delta?bookId=...&previousId=...`. Added, amended, and removed rows are visible separately. A changed source row must become a reconciliation case; it must never overwrite a Sabalan voucher.
+5. Run mapping and ledger draft preflight against the new snapshot. Source vouchers carry stable Sepidar identities and evidence hashes. The local development scripts currently handle the first snapshot and require a reviewed successor workflow before importing a changed source voucher. Do not use a daily backup to overwrite a posted or edited target record.
+
+## Current release boundary
+
+The upload endpoint only stages bytes. Native SQL Server restore/extraction and a scheduled processing worker are still required for an unattended production upload. The current source backup has 1404 history missing before 2025-12-22 and unresolved 1405 inventory valuation. Imported accounting vouchers remain drafts, and the archive remains read only. Posting, open-item settlement, statutory completeness, parallel-run acceptance, and authority transfer require verified target reconciliation and separate release gates.

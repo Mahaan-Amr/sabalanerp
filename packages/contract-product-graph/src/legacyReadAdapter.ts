@@ -889,6 +889,7 @@ export const readLegacyProductGraph = ({
       ...rows[rowIndex],
       commercial: {
         ...rows[rowIndex].commercial,
+        baseAmountToman: configuration.result.materialAmountToman,
         totalAmountToman: configuration.result.totalAmountToman,
         calculationSnapshot: normalizeLegacyJson(
           configuration.result

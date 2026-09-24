@@ -91,7 +91,8 @@ export type ApprovedPricingSource = {
           | 'POST_SNAPSHOT_DETERMINISTIC_LEGACY_GRAPH_MIGRATION'
           | 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING'
           | 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION'
-          | 'CANONICAL_WRITER_V2_MONEY_RESIDUE_NORMALIZATION';
+          | 'CANONICAL_WRITER_V2_MONEY_RESIDUE_NORMALIZATION'
+          | 'FROZEN_STAIR_LAYER_BASE_PROJECTION_V1';
         migrationAuditCommandId?: string;
         snapshotOriginallyMissing: boolean;
         rowIdentityAssignments?: readonly {
@@ -132,6 +133,15 @@ export type ApprovedPricingSource = {
           sealedValue: string;
           unit: string;
           rule: 'LEGACY_GRAPH_V1_ROUND_HALF_UP_SCALE_THREE';
+        }[];
+        stairLayerPricingRecoveries?: readonly {
+          productRowId: string;
+          layerConfigurationId: string;
+          rawBaseAmountToman: null;
+          sealedBaseAmountToman: string;
+          layerResultHash: string;
+          graphAuditCommandId: string;
+          rule: 'AUDITED_FROZEN_STAIR_LAYER_MATERIAL_BASE_V1';
         }[];
         discountEligibilityAssignments?: readonly {
           productRowId: string;

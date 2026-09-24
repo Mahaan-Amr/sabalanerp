@@ -18,6 +18,40 @@ import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales
 import { CanonicalStairLayerSummary } from '../../contract-creation/components/product-modal-system/CanonicalStairLayerSummary';
 import { PartnerTechnicalDraftEditor } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
 import { buildPartnerProductionTechnicalDraft } from '../../contract-creation/partner/partnerProductionTechnicalDraft';
+import { refreshPartnerTechnicalProductVersion } from '../../contract-creation/partner/partnerTechnicalDraftAdapter';
+
+test('returned Partner row can adopt a current catalog version without losing row identity', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const product = catalog.products[0];
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 3,
+    rows: [{ productRowId: 'returned-row', catalogItemId: product.catalogItemId,
+      catalogSnapshotVersion: '2026-08-01T00:00:00.000Z', family: 'prepared',
+      configuration: { kind: 'readyPiece', unit: 'squareMeter', quantity: '2' } }],
+  });
+  const html = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft} products={catalog.products}
+    operations={catalog.operations} onChange={() => undefined} />);
+  assert.match(html, /ویرایش با نسخهٔ فعلی/);
+  const refreshed = refreshPartnerTechnicalProductVersion(draft, 'returned-row', product);
+  assert.equal(refreshed.rows[0].productRowId, 'returned-row');
+  assert.equal(refreshed.rows[0].catalogSnapshotVersion, product.catalogSnapshotVersion);
+  assert.equal(refreshed.inputRevision, 4);
+});
+
+test('Partner longitudinal configuration shows the shared mandatory switch and percentage', () => {
+  const input = { inputRevision: 1, sourceBatchId: parseStableIdentity('source-batch', 'mandatory-ui'),
+    lengthMeters: parseCanonicalDecimal('1'), widthMeters: parseCanonicalDecimal('0.4'), quantity: 2,
+    lastManualField: 'quantity' as const, lastManualDimension: 'length' as const,
+    lengthDisplayUnit: 'm' as const, widthDisplayUnit: 'cm' as const,
+    sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual' as const,
+    motherWidthMeters: parseCanonicalDecimal('0.4'), sawKerfMeters: parseCanonicalDecimal('0.003') };
+  const html = renderToStaticMarkup(<TechnicalProductConfiguration><LongitudinalProductSection
+    input={input} onChange={() => undefined}
+    technicalMandatory={{ enabled: true, percentage: '30' }}
+    onTechnicalMandatoryChange={() => undefined} /></TechnicalProductConfiguration>);
+  assert.match(html, /حکمی/);
+  assert.match(html, /درصد حکمی/);
+  assert.doesNotMatch(html, /قیمت پایه|نرخ برش/);
+});
 
 test('layer summary consumes canonical rate-free strips and rejects a preview from an older edit', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();

@@ -11,7 +11,7 @@ import {
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
   type CustomerPaymentPlan,
 } from '@sabalanerp/partner-sales-contracts';
-import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpNeumorphicCard, ErpNeumorphicDisclosure, ErpNeumorphicWorkflowLayout, ErpRialInput, ErpSheet } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpNeumorphicCard, ErpNeumorphicDisclosure, ErpNeumorphicWorkflowLayout, ErpPressable, ErpRialInput, ErpSheet } from '@/components/erp';
 import api from '@/lib/api';
 import { createPartnerTechnicalHttpPorts } from './partnerTechnicalHttpPorts';
 import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/partnerInquiryHttpPorts';
@@ -37,7 +37,7 @@ import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebaseP
   partnerCasePendingStorageKey, shouldPreferLocalPartnerWizard,
   isExplicitPartnerCreationEntry, partnerProductEditPath, shouldOfferPartnerDraftChoice,
   shouldStartFreshPartnerCreation } from './partnerWizardEntry';
-import { alignPartnerCustomerPaymentPlan, partnerMoneyText, partnerRetailIntentRows,
+import { alignPartnerCustomerPaymentPlan, partnerMoneyText, partnerRetailIntentRows, refreshPartnerInquiryRow,
   partnerRetailDiscountFromPercent, partnerRetailSubtotal, partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
 import { finalizePartnerCase, sendPartnerConfirmation } from '../../partner-sales/cases/partnerCaseHttpPort';
@@ -163,9 +163,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   runtimeRef.current = runtime;
   const [catalog, setCatalog] = useState<PartnerTechnicalProduct[]>([]);
   const [operations, setOperations] = useState<PartnerTechnicalOperation[]>([]);
+  const [retainedCatalog, setRetainedCatalog] = useState<{ products: PartnerTechnicalProduct[];
+    operations: PartnerTechnicalOperation[]; sawKerfMeters: string } | null>(null);
   const [inquiryNote, setInquiryNote] = useState('');
   const [quickDimensions, setQuickDimensions] = useState<Record<string, PartnerInquiryDimensions>>({});
   const [technicalDraft, setTechnicalDraft] = useState<PartnerTechnicalDraft>(() => emptyTechnicalDraft());
+  const [mandatoryDefaults, setMandatoryDefaults] = useState({ enabled: false, percentage: '20' });
   const [draftAccess, setDraftAccess] = useState<Access | null>(null);
   const [recoveryRevision, setRecoveryRevision] = useState(0);
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
@@ -219,8 +222,16 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (value) window.localStorage.setItem(runtimeKey(contextActorId, value.inquiryId), JSON.stringify(value));
     else if (runtimeRef.current) window.localStorage.removeItem(runtimeKey(contextActorId, runtimeRef.current.inquiryId));
   }, [contextActorId]);
+  const technicalProducts = useMemo(() => [...catalog, ...(retainedCatalog?.products ?? []).filter(item =>
+    !catalog.some(current => current.catalogItemId === item.catalogItemId &&
+      current.catalogSnapshotVersion === item.catalogSnapshotVersion))], [catalog, retainedCatalog]);
+  const technicalOperations = useMemo(() => [...operations, ...(retainedCatalog?.operations ?? []).filter(item =>
+    !operations.some(current => current.catalogItemId === item.catalogItemId &&
+      current.catalogSnapshotVersion === item.catalogSnapshotVersion))], [operations, retainedCatalog]);
   const technicalPreview = useMemo(() => previewPartnerTechnicalDraft(technicalDraft,
-    { products: catalog, operations, sawKerfMeters: '0.003' }), [catalog, operations, technicalDraft]);
+    { products: technicalProducts, operations: technicalOperations,
+      sawKerfMeters: retainedCatalog?.sawKerfMeters ?? '0.003' }),
+  [technicalProducts, technicalOperations, retainedCatalog, technicalDraft]);
   const technicalReady = technicalPreview.ok && technicalDraft.rows.length > 0 && technicalPreview.value.conflicts.length === 0
     && technicalPreview.value.rows.every(row => row.calculation.ok);
   const contractConfigurationReady = isPartnerContractConfigurationComplete(technicalDraft);
@@ -454,6 +465,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
       const recovered = await ports.recovery.read(access);
       if (!recovered.ok) { setError(recovered.error.message); return; }
+      if (recovered.value.mandatoryDefaults) setMandatoryDefaults(recovered.value.mandatoryDefaults);
+      setRetainedCatalog(recovered.value.retainedCatalog ?? null);
       setDraftAccess(access); setRecoveryRevision(recovered.value.recoveryRevision);
       checkpointedInputRevision.current = recovered.value.draft?.inputRevision ?? 0;
       if (fresh) setTechnicalDraft(emptyTechnicalDraft());
@@ -503,6 +516,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
       const recovered = await ports.recovery.read(access);
       if (!recovered.ok) { setError(recovered.error.message); return; }
+      if (recovered.value.mandatoryDefaults) setMandatoryDefaults(recovered.value.mandatoryDefaults);
+      setRetainedCatalog(recovered.value.retainedCatalog ?? null);
       const empty: PartnerTechnicalDraft = { schemaVersion: 1, inputRevision: Math.max(1,
         (recovered.value.draft?.inputRevision ?? 0) + 1), rows: [], dependents: [], stairSystems: [], editingValues: [] };
       const cleared = await ports.recovery.checkpoint({ ...access, expectedRecoveryRevision: recovered.value.recoveryRevision,
@@ -996,8 +1011,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           .at(-1) ?? previous;
         const rows = current.rows.map(row => {
           const inquiryRow = latestFor(row.productRowId, row.inquiryRow);
-          return { ...row, inquiryRow,
-            ...(inquiryRow.approvedPrice ? { wholesaleUnitPrice: inquiryRow.approvedPrice } : {}) };
+          return refreshPartnerInquiryRow(row, inquiryRow);
         });
         const materialInquiryRows = (current.materialInquiryRows ?? []).map(row => ({ ...row,
           inquiryRow: latestFor(row.pricingSubjectId, row.inquiryRow) }));
@@ -1093,7 +1107,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           deliveries: [...draft.intent.deliveries, { deliveryId: `partner-delivery-${crypto.randomUUID()}`,
             date: addDays(draft.intent.contractDate, 7), destination: context.customers.find(item => item.id === draft.intent.customerId)?.address ?? '',
             receiverName: context.customers.find(item => item.id === draft.intent.customerId)?.displayName,
-            items: draft.rows.map(row => ({ productRowId: row.productRowId, quantity: row.quantity })) }] } })} />
+            items: [] }] } })} />
       </div>{draft.intent.deliveries.map((delivery, index) => <ErpNeumorphicCard key={delivery.deliveryId} className="space-y-4 p-6">
       <div className="flex items-center justify-between"><h3 className="font-semibold">تحویل {(index + 1).toLocaleString('fa-IR')}</h3>
         {draft.intent.deliveries.length > 1 && <ErpButton label="حذف تحویل" tone="danger" variant="outline"
@@ -1117,15 +1131,35 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
             ...(updates.notes !== undefined ? { notes: updates.notes || undefined } : {}),
           } : item),
         } })} />
-      <div className="grid gap-3 sm:grid-cols-2">{delivery.items.map(item => <ErpField key={item.productRowId}
-        label={`مقدار ${draft.rows.find(row => row.productRowId === item.productRowId)?.inquiryRow.description ?? 'محصول'}`}
-        error={showValidationErrors && remainingPartnerAmount(draft.rows.find(row => row.productRowId === item.productRowId)?.quantity ?? '0',
-          draft.intent.deliveries.flatMap(entry => entry.items.filter(product => product.productRowId === item.productRowId)
-            .map(product => product.quantity))) !== '0' ? 'جمع مقدارهای تحویل باید دقیقاً با مقدار قرارداد برابر باشد.' : undefined}>
-        <ErpInput inputMode="decimal" value={item.quantity} onChange={event => updateWizard({ ...draft, intent: { ...draft.intent,
-          deliveries: draft.intent.deliveries.map(row => row.deliveryId === delivery.deliveryId ? { ...row,
-            items: row.items.map(product => product.productRowId === item.productRowId ? { ...product, quantity: event.target.value } : product) } : row) } })} />
-      </ErpField>)}</div>
+      <ErpNeumorphicCard className="space-y-3 p-4"><h4 className="text-sm font-semibold">محصولات این تحویل</h4>
+        {draft.rows.map(row => {
+          const current = delivery.items.find(item => item.productRowId === row.productRowId)?.quantity ?? '0';
+          const others = draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId)
+            .flatMap(item => item.items.filter(product => product.productRowId === row.productRowId).map(product => product.quantity));
+          const maximum = remainingPartnerAmount(row.quantity, others);
+          const unallocated = remainingPartnerAmount(row.quantity, draft.intent.deliveries
+            .flatMap(item => item.items.filter(product => product.productRowId === row.productRowId).map(product => product.quantity)));
+          const updateQuantity = (quantity: string) => {
+            if (remainingPartnerAmount(row.quantity, [...others, quantity]) === null) return;
+            updateWizard({ ...draft, intent: { ...draft.intent, deliveries: draft.intent.deliveries.map(item =>
+              item.deliveryId !== delivery.deliveryId ? item : { ...item,
+                items: [...item.items.filter(product => product.productRowId !== row.productRowId),
+                  ...(Number(quantity) > 0 ? [{ productRowId: row.productRowId, quantity }] : [])] }) } });
+          };
+          return <ErpCard key={row.productRowId} className="space-y-2 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{row.inquiryRow.description}</strong>
+              <ErpField label={`مقدار (${row.unit})`}><ErpInput inputMode="decimal" value={current}
+                onChange={event => updateQuantity(event.target.value)} /></ErpField></div>
+            <div className="sds-text-secondary flex flex-wrap gap-3 text-xs"><span>کل قرارداد: {row.quantity} {row.unit}</span>
+              <span>تحویل‌های دیگر: {maximum === null ? 'نامعتبر' : remainingPartnerAmount(row.quantity, [maximum])} {row.unit}</span>
+              <span>مانده: {unallocated ?? 'نامعتبر'} {row.unit}</span>
+              {maximum !== null && current !== maximum && <ErpPressable type="button"
+                onClick={() => updateQuantity(maximum)}>پر کردن ({maximum})</ErpPressable>}</div>
+            {showValidationErrors && unallocated !== '0' && <ErpInlineState kind="stale"
+              title="جمع مقدارهای تحویل باید دقیقاً با مقدار قرارداد برابر باشد." />}
+          </ErpCard>;
+        })}
+      </ErpNeumorphicCard>
     </ErpNeumorphicCard>)}</div>;
     if (step === 'payment') { const retailSummary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
       const retailSubtotal = partnerRetailSubtotal(draft.rows, draft.intent.retailDiscount.currency); return <div className="space-y-3">
@@ -1307,7 +1341,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     validateStep={(step, draft) => step === 'date' && !draft.intent.contractDate ? 'تاریخ قرارداد را وارد کنید.'
       : step === 'customer' && !draft.intent.customerId ? 'مشتری را انتخاب کنید.'
       : step === 'project' && !draft.intent.projectId ? 'پروژه را انتخاب کنید.'
-      : step === 'delivery' && draft.intent.deliveries.some(item => !item.date || !item.destination.trim()
+      : step === 'delivery' && draft.intent.deliveries.some(item => item.items.length === 0 || !item.date || !item.destination.trim()
         || !item.projectManagerName?.trim() || !item.receiverName?.trim()) ? 'برنامه تحویل را کامل کنید.'
       : step === 'delivery' && draft.rows.some(row => remainingPartnerAmount(row.quantity,
         draft.intent.deliveries.flatMap(delivery => delivery.items.filter(item => item.productRowId === row.productRowId).map(item => item.quantity))) !== '0')
@@ -1437,7 +1471,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           row.configurationRef.productRowId === searchParams.get('focusProductRowId'))?.noteOrReason &&
           <ErpInlineState kind="stale" title={runtime.knownInquiryRows.find(row =>
             row.configurationRef.productRowId === searchParams.get('focusProductRowId'))!.noteOrReason!} />}
-        <PartnerTechnicalDraftEditor draft={technicalDraft} products={catalog} operations={operations}
+        <PartnerTechnicalDraftEditor draft={technicalDraft} products={technicalProducts} currentProducts={catalog}
+          operations={technicalOperations}
+          sawKerfMeters={retainedCatalog?.sawKerfMeters ?? '0.003'}
+          mandatoryDefaults={mandatoryDefaults}
           preview={technicalPreview} focusProductRowId={searchParams.get('focusProductRowId') ?? undefined} onChange={setTechnicalDraft} />
       </>}
       <ErpSheet open={initialInquiryOpen} onClose={() => setInitialInquiryOpen(false)} title="استعلام جدید"

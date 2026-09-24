@@ -124,6 +124,40 @@ test('submission rejects foreign configuration and preserves a linear successor'
   });
 });
 
+test('Sabalan can price a corrected row whose predecessor was rejected', async () => {
+  await fixture(async (tx, ids) => {
+    const shared = {
+      transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: async () => ({ ok: true as const, value: { evidenceId: 'authorization-fixture' } }),
+      resolveInitialResponder: async () => ({ ok: true as const, value: { responderId: ids.responderId, eligibilityEvidence: { source: 'fixture' } } }),
+      resolveConfiguration: async () => ({ ok: true as const, value: { identity: identity(ids.actorId),
+        description: 'سنگ اصلاح‌شده', configuration: [{ label: 'نوع', value: 'آماده' }] } }),
+    };
+    const partner = createPartnerInquiryService({ actorId: ids.actorId, ...shared });
+    const responder = createPartnerInquiryService({ actorId: ids.responderId, ...shared });
+    assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId))).ok, true);
+    const rejectIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions: [{ rowId: 'row-1', expectedRevision: 1,
+        outcome: 'REJECTED' as const, reason: 'مشخصات محصول را اصلاح کنید' }] };
+    const reject = await responder.execute({ ...rejectIntent, commandId: 'reject-before-correction',
+      correlationId: 'reject-before-correction', idempotency: { actorId: ids.responderId,
+        operation: 'INQUIRY_DECIDE', targetId: ids.inquiryId, key: 'reject-before-correction',
+        payloadHash: await canonicalHash(rejectIntent) } });
+    assert.equal(reject.ok, true);
+    assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId, 'row-2',
+      { rowId: 'row-1', revision: 2, reason: 'اصلاح مشخصات محصول' }))).ok, true);
+    const approveIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions: [{ rowId: 'row-2', expectedRevision: 1,
+        outcome: 'APPROVED' as const, wholesaleUnitPrice: { amount: '1500000', currency: 'IRT' as const } }] };
+    const approved = await responder.execute({ ...approveIntent, commandId: 'price-after-correction',
+      correlationId: 'price-after-correction', idempotency: { actorId: ids.responderId,
+        operation: 'INQUIRY_DECIDE', targetId: ids.inquiryId, key: 'price-after-correction',
+        payloadHash: await canonicalHash(approveIntent) } });
+    assert.equal(approved.ok, true);
+    if (approved.ok) assert.equal(approved.value.batch?.outcomes[0].ok, true, JSON.stringify(approved.value.batch));
+  });
+});
+
 test('bulk responder decision commits valid rows independently, preserves stale rows and replays the exact batch', async () => {
   await fixture(async (tx, ids) => {
     const shared = {

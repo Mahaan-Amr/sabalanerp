@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   PartnerTechnicalCheckpointSchema, PartnerTechnicalRecoveryAccessSchema,
   PartnerTechnicalCheckpointReceiptSchema, canonicalHash, canonicalJson,
+  PartnerTechnicalPreviewCatalogSchema,
   partnerError, type Result, type PartnerTechnicalRecoveryPort, type PartnerTechnicalRecoveryAccess,
   type PartnerTechnicalDraft,
 } from '@sabalanerp/partner-sales-contracts';
@@ -10,6 +11,8 @@ import { CONTRACT_EDIT_LEASE_TTL_MS, CONTRACT_CREATION_DRAFT_TTL_MS } from '../.
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../../contractRecoveryProtection';
 import { decodeTechnicalRecovery, decodeTechnicalReceipt, type TechnicalRecoveryRecord } from './technicalRecoveryRecords';
 import { lockPartnerOperationsControl } from '../authorization/technicalRollout';
+import { readPartnerTechnicalSalesPolicy } from './technicalEvidence';
+import { decodeTechnicalSavedSnapshot } from './technicalSavedRecords';
 
 export interface PartnerTechnicalRecoveryDependencies {
   readonly actorId: string;
@@ -76,11 +79,36 @@ export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechn
     async read(input) {
       const parsed = PartnerTechnicalRecoveryAccessSchema.safeParse(input);
       if (!parsed.success) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
-      return underLease(parsed.data, 'READ', async (_tx, session, recovery) => ({ ok: true, value: {
+      return underLease(parsed.data, 'READ', async (tx, session, recovery) => {
+        const policy = await readPartnerTechnicalSalesPolicy(tx, dependencies.actorId);
+        const records = recovery?.validatedSnapshots ?? [];
+        if (!Array.isArray(records)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+        const latest = records.length ? await decodeTechnicalSavedSnapshot(records.at(-1)) : undefined;
+        if (records.length && (!latest || latest.sessionId !== session.id ||
+            latest.view.recoveryId !== session.draftId)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+        const savedContext = latest?.context as { catalog?: unknown; technicalPolicy?: {
+          mandatoryEnabled: boolean; mandatoryPercentage: string } } | undefined;
+        const catalog = savedContext?.catalog
+          ? PartnerTechnicalPreviewCatalogSchema.safeParse(savedContext.catalog) : undefined;
+        if (latest && (!catalog || !catalog.success)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+        const savedPolicy = savedContext?.technicalPolicy;
+        const defaultPercentage = savedPolicy?.mandatoryPercentage ?? (policy.ok ? policy.value.mandatoryPercentage : '20');
+        const retainedIds = catalog && catalog.success ? [...new Set(catalog.data.products.map(item => item.catalogItemId))] : [];
+        const activeProducts = retainedIds.length ? await tx.product.findMany({ where: { id: { in: retainedIds },
+          isActive: true, isAvailable: true, deletedAt: null }, select: { id: true } }) : [];
+        const activeIds = new Set(activeProducts.map(item => item.id));
+        return { ok: true, value: {
         schemaVersion: 1, recoveryId: session.draftId, recoveryRevision: recovery?.recoveryRevision ?? 0,
         updatedAt: recovery ? new Date(recovery.updatedAt).toISOString() : session.updatedAt.toISOString(),
         draft: recovery?.draft ?? null,
-      } }));
+        ...((savedPolicy || policy.ok) ? { mandatoryDefaults: {
+          enabled: savedPolicy?.mandatoryEnabled ?? (policy.ok ? policy.value.mandatoryEnabled : false),
+          percentage: defaultPercentage === '0' ? '20' : defaultPercentage,
+        } } : {}),
+        ...(catalog && catalog.success ? { retainedCatalog: { ...catalog.data,
+          products: catalog.data.products.filter(item => activeIds.has(item.catalogItemId)) } } : {}),
+      } };
+      });
     },
     async checkpoint(input) {
       const parsed = PartnerTechnicalCheckpointSchema.safeParse(input);

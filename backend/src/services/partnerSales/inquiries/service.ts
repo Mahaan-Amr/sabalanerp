@@ -118,7 +118,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
     const rows = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id,
       id: { in: command.decisions.map(decision => decision.rowId) } }, select: {
       id: true, revision: true, outcome: true, definition: true, predecessorId: true,
-      predecessor: { select: { approval: { select: { id: true } } } },
+      predecessor: { select: { outcome: true, approval: { select: { id: true } } } },
     } });
     const hasActionableDecision = command.decisions.some(decision => {
       const row = rows.find(item => item.id === decision.rowId);
@@ -126,7 +126,8 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
       const definition = parseInquiryDefinition(row.definition);
       if (!definition) return false;
       if (decision.outcome === 'APPROVED' && decision.wholesaleUnitPrice.currency !== definition.identity.currency) return false;
-      return !row.predecessorId || Boolean(row.predecessor?.approval?.id);
+      return !row.predecessorId || row.predecessor?.outcome === 'REJECTED' ||
+        (row.predecessor?.outcome === 'APPROVED' && Boolean(row.predecessor.approval?.id));
     });
     let managementTakeover: { previousResponderId: string; assignmentId: string; assignmentRevision: number; reason: string } | undefined;
     if (assignment.responderId !== dependencies.actorId && hasActionableDecision) {
@@ -156,20 +157,23 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         if (decision.wholesaleUnitPrice.currency !== definition.identity.currency) {
           outcomes.push({ ok: false, rowId: row.id, error: partnerError('INVALID_PAYLOAD') }); continue;
         }
-        if (row.predecessorId && !row.predecessor?.approval?.id) {
+        if (row.predecessorId && row.predecessor?.outcome !== 'REJECTED' &&
+            (row.predecessor?.outcome !== 'APPROVED' || !row.predecessor.approval?.id)) {
           outcomes.push({ ok: false, rowId: row.id, error: partnerError('INTEGRITY_CONFLICT') }); continue;
         }
+        const predecessorApprovalId = row.predecessor?.approval?.id;
         const evidenceHash = await canonicalHash({ schemaVersion: 1, identity: definition.identity,
           wholesaleUnitPrice: decision.wholesaleUnitPrice, assignmentId: assignment.id,
           assignmentRevision: assignment.revision, authorizationEvidenceId: authorization.value.evidenceId,
-          ...(row.predecessorId ? { predecessorApprovalId: row.predecessor?.approval?.id,
+          ...(predecessorApprovalId ? { predecessorApprovalId,
             ...(definition.predecessorReason ? { supersessionReason: definition.predecessorReason } : {}) } : {}) });
         await tx.partnerInquiryApproval.create({ data: { id: outcomeId, rowId: row.id, assignmentId: assignment.id,
           actorId: dependencies.actorId, commandId: `${command.commandId}:${row.id}`,
           authorizationEvidenceId: authorization.value.evidenceId,
           wholesaleUnitPrice: decision.wholesaleUnitPrice.amount, currency: decision.wholesaleUnitPrice.currency,
           evidenceHash,
-          ...(definition.predecessorReason ? { supersessionReason: definition.predecessorReason } : {}), approvedAt: clock.now,
+          ...(predecessorApprovalId && definition.predecessorReason
+            ? { supersessionReason: definition.predecessorReason } : {}), approvedAt: clock.now,
           expiresAt: new Date(clock.now.getTime() + 48 * 60 * 60 * 1000) } });
       }
       await tx.partnerInquiryRow.update({ where: { id: row.id }, data: { outcome: decision.outcome, revision } });

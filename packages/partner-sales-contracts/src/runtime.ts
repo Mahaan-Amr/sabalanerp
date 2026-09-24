@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { IdSchema, InstantSchema, RevisionRefSchema } from './primitives';
+import { DecimalSchema, DeliverySchema, IdSchema, InstantSchema, RevisionRefSchema } from './primitives';
 import { PartnerCaseViewSchema } from './projections';
 import { CaseDraftIntentSchema, PartnerDraftEditLeaseSchema } from './commands';
 import { PartnerInquiryRowV2Schema } from './inquiry-v2';
@@ -74,18 +74,25 @@ export type PartnerCreationContext = z.infer<typeof PartnerCreationContextSchema
 export const PartnerWizardStepSchema = z.enum([
   'date', 'customer', 'project', 'products', 'pricing', 'delivery', 'payment', 'confirmation',
 ]);
+// A delivery may be added before its product amounts are assigned. The
+// submission command continues to require positive, nonempty delivery items.
+const PartnerWizardRecoveryIntentSchema = CaseDraftIntentSchema.omit({ deliveries: true }).extend({
+  deliveries: z.array(DeliverySchema.omit({ items: true }).extend({
+    items: z.array(z.object({ productRowId: IdSchema, quantity: DecimalSchema }).strict()),
+  }).strict()),
+}).strict();
 export const PartnerWizardRecoverySaveSchema = z.object({
   schemaVersion: z.literal(1),
   expectedWizardRevision: z.number().int().nonnegative().safe(),
   editLease: PartnerDraftEditLeaseSchema,
   step: PartnerWizardStepSchema,
-  intent: CaseDraftIntentSchema,
+  intent: PartnerWizardRecoveryIntentSchema,
 }).strict();
 export const PartnerWizardRecoverySnapshotSchema = z.object({
   schemaVersion: z.literal(1),
   wizardRevision: z.number().int().positive().safe(),
   step: PartnerWizardStepSchema,
-  intent: CaseDraftIntentSchema,
+  intent: PartnerWizardRecoveryIntentSchema,
   updatedAt: InstantSchema,
 }).strict();
 export type PartnerWizardRecoverySave = z.infer<typeof PartnerWizardRecoverySaveSchema>;

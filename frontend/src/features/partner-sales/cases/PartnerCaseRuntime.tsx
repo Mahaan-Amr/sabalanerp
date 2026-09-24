@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ErpButton, ErpCheckbox, ErpEmptyState, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea, ErpWorkspacePage } from '@/components/erp';
-import { FaFileContract } from 'react-icons/fa';
+import { ErpButton, ErpCheckbox, ErpEmptyState, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpListPage, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea, ErpWorkspacePage,
+  type ErpAction, type ErpColumn } from '@/components/erp';
+import { FaEye, FaFileContract, FaPlus, FaSync } from 'react-icons/fa';
 import { PartnerCaseWorkspace } from './PartnerCaseWorkspace';
 import {
   cancelPartnerCase, finalizePartnerCase, openPartnerPdf, readPartnerAccount, readPartnerCases, readPartnerCollections,
@@ -25,6 +26,7 @@ export function PartnerCaseRuntime() {
   const searchParams = useSearchParams();
   const selectedCaseId = searchParams.get('caseId') || undefined;
   const [rows, setRows] = useState<PartnerCaseRuntimeRow[]>([]);
+  const [search, setSearch] = useState('');
   const [account, setAccount] = useState<PartnerAccountView>();
   const [collections, setCollections] = useState<Record<string, RetailCollectionHistory>>({});
   const [corrections, setCorrections] = useState<Record<string, PartnerCorrectionStatus | null>>({});
@@ -172,6 +174,41 @@ export function PartnerCaseRuntime() {
 
   useEffect(() => { void load(); }, [load]);
   if (busy) return <ErpLoading />;
+  if (!selectedCaseId) {
+    const needle = search.trim().toLocaleLowerCase('fa-IR');
+    const visible = rows.filter(row => !needle || [row.view.caseNumber,
+      row.view.customerContractNumber ?? '', ...row.view.products.map(product => product.description)]
+      .some(value => value.toLocaleLowerCase('fa-IR').includes(needle)));
+    const columns: ErpColumn<PartnerCaseRuntimeRow>[] = [
+      { id: 'number', header: 'قرارداد', priority: 'primary', cell: row => <div>
+        <strong>{row.view.customerContractNumber ?? row.view.caseNumber}</strong>
+        <p className="sds-text-secondary mt-1 text-xs">پرونده {row.view.caseNumber}</p>
+      </div> },
+      { id: 'status', header: 'وضعیت', priority: 'secondary', cell: row => row.view.state === 'COMMITTED'
+        ? 'قطعی' : row.view.state === 'AWAITING_CUSTOMER_CONFIRMATION' ? 'در انتظار تأیید مشتری'
+          : row.view.state === 'CUSTOMER_APPROVED' ? 'تأییدشده مشتری'
+            : row.view.state === 'DRAFT' ? 'پیش‌نویس' : row.view.state === 'VOIDED' ? 'باطل‌شده' : 'لغوشده' },
+      { id: 'products', header: 'اقلام', priority: 'meta', cell: row => row.view.products.length.toLocaleString('fa-IR') },
+      { id: 'retail', header: 'مبلغ فروش مشتری', priority: 'secondary', align: 'end',
+        cell: row => formatPartnerMoney(row.view.retailTotals.payable, row.view.retailTotals.currency) },
+    ];
+    const rowActions = (row: PartnerCaseRuntimeRow): ErpAction[] => [
+      { label: 'بررسی قرارداد', icon: FaEye,
+        href: `/dashboard/sales/partner-cases?caseId=${encodeURIComponent(row.view.owner.caseId)}` },
+      ...(row.actions.canContinue && row.editRecovery ? [{ label: 'ادامه تکمیل',
+        href: `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(row.view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery.recoveryId)}&baseRevision=${row.editRecovery.baseRevision}` }] : []),
+    ];
+    return <ErpListPage eyebrow="فروش همکار" title="قراردادهای فروش همکار"
+      description="پرونده را انتخاب کنید تا جزئیات، تحویل، پرداخت و اقدام‌های مجاز آن را ببینید."
+      actions={[{ label: 'ثبت قرارداد', icon: FaPlus, href: '/dashboard/sales/contracts/create' },
+        { label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' }]}
+      filters={[{ id: 'search', label: 'جستجو', type: 'search', value: search,
+        onChange: setSearch, placeholder: 'شماره قرارداد، پرونده یا محصول...' }]}
+      rows={visible} rowKey={row => row.view.owner.caseId} columns={columns} rowActions={rowActions}
+      emptyState={<ErpEmptyState icon={FaFileContract} title="پرونده‌ای یافت نشد" />}
+      isLoading={false}>{loadError && <ErpInlineState kind={loadError.kind} title={loadError.message}
+        action={{ label: 'تلاش دوباره', onClick: load }} />}</ErpListPage>;
+  }
   return <ErpWorkspacePage title="پرونده‌های فروش همکار" context="حقیقت جاری پرونده، وصول و حساب سبلان">
     {loadError && <ErpInlineState kind={loadError.kind} title={loadError.message} action={{ label: 'تلاش دوباره', onClick: load }} />}
     {!loadError && !rows.length && <ErpEmptyState icon={FaFileContract} title="پرونده‌ای ثبت نشده است" />}

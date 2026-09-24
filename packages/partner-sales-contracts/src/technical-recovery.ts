@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { IdSchema, InstantSchema, RevisionSchema } from './primitives';
 import { PartnerTechnicalDraftSchema } from './technical-draft';
+import { PartnerTechnicalPreviewCatalogSchema } from './technical-draft';
 import type { Result } from './errors';
 
 const revision = z.number().int().nonnegative().safe();
@@ -26,6 +27,8 @@ export const PartnerTechnicalCheckpointReceiptSchema = z.object({
 export const PartnerTechnicalRecoveryViewSchema = z.object({
   schemaVersion: z.literal(1), recoveryId: IdSchema, recoveryRevision: revision,
   updatedAt: InstantSchema, draft: PartnerTechnicalDraftSchema.nullable(),
+  mandatoryDefaults: z.object({ enabled: z.boolean(), percentage: z.string() }).strict().optional(),
+  retainedCatalog: PartnerTechnicalPreviewCatalogSchema.optional(),
 }).strict();
 export type PartnerTechnicalRecoveryAccess = z.infer<typeof PartnerTechnicalRecoveryAccessSchema>;
 export type PartnerTechnicalLeaseRequest = z.infer<typeof PartnerTechnicalLeaseRequestSchema>;

@@ -16,6 +16,7 @@ import {
 } from 'react-icons/fa';
 import {
   ErpBadge,
+  ErpCard,
   ErpEmptyState,
   ErpListPage,
   ErpPagination,
@@ -46,6 +47,7 @@ import {
   contractStatusTones,
   invoiceStatusLabels,
   money,
+  PartnerAccountingIdentity,
   receivableStatusLabels,
   sourceStatusLabels,
   taxStatusLabels,
@@ -82,6 +84,9 @@ export default function AccountingContractsPage() {
   );
   const query = canonicalQuery.state;
   const [rows, setRows] = useState<AccountingContractRow[]>([]);
+  const [partnerRecords, setPartnerRecords] = useState<Array<{ id: string; amount: string; currency: string;
+    status: string; partnerContext: { caseNumber: string; internalRecordNumber: string;
+      debtor: { displayName: string }; actionUrl: string } }>>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
   const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState(query.search);
@@ -127,7 +132,7 @@ export default function AccountingContractsPage() {
   const loadContracts = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await accountingAPI.getContracts({
+      const [response, partnerResponse] = await Promise.all([accountingAPI.getContracts({
         view: query.view || undefined,
         lifecycleView: query.lifecycleView,
         search: query.search || undefined,
@@ -137,7 +142,10 @@ export default function AccountingContractsPage() {
         dateTo: query.dateTo || undefined,
         page: query.page,
         pageSize: pagination.pageSize,
-      });
+      }), accountingAPI.getFinancialRecords({ kind: 'INVOICE_CANDIDATE', search: query.search || undefined,
+        page: 1, pageSize: 100 }).catch(() => null)]);
+      if (partnerResponse?.data.success) setPartnerRecords(
+        partnerResponse.data.data.items.filter((item: { sourceKind?: string }) => item.sourceKind === 'PARTNER_INTERNAL_RECORD'));
       if (response.data.success) {
         setRows(response.data.data.items);
         setPagination({
@@ -514,6 +522,14 @@ export default function AccountingContractsPage() {
           )}
         </div>
       )}
+      {partnerRecords.length > 0 && <ErpSection>
+        <h2 className="sds-text-primary mb-3 text-base font-semibold">قراردادهای همکاری قابل بررسی</h2>
+        <div className="grid gap-3">{partnerRecords.map(record => <ErpCard key={record.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <PartnerAccountingIdentity context={record.partnerContext} />
+          <div className="sds-text-secondary text-sm">{money(record.amount, record.currency)} · {record.status}</div>
+          <ErpButton label="بررسی پرونده مالی" href={record.partnerContext.actionUrl} />
+        </ErpCard>)}</div>
+      </ErpSection>}
       <ErpSection>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label className="block">

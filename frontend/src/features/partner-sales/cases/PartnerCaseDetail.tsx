@@ -38,7 +38,7 @@ export function PartnerCaseDetail({ view, actions, children }: { view: PartnerCa
   const status = stateCopy[view.state];
   const pageActions = partnerCasePageActions(actions);
   return <ErpPage eyebrow="پرونده فروش همکار" title={`پرونده ${view.caseNumber}`} description={`قرارداد مشتری: ${view.customerContractNumber}`}
-    backHref="/dashboard/sales/contracts" actions={pageActions} metrics={partnerCaseMetrics(view, status)}><PartnerCaseDetailContent view={view} actions={actions} />{children}
+    backHref="/dashboard/sales/partner-cases" actions={pageActions} metrics={partnerCaseMetrics(view, status)}><PartnerCaseDetailContent view={view} actions={actions} />{children}
   </ErpPage>;
 }
 
@@ -46,6 +46,10 @@ export function partnerCasePageActions(actions: PartnerCaseActions): ErpAction[]
   return [
     ...(actions.canContinue ? [{ label: 'ادامه تکمیل قرارداد', icon: FaEdit, onClick: actions.onContinue }] : []),
     ...(actions.canPreview ? [{ label: 'پیش‌نمایش قرارداد', icon: FaEye, variant: 'outline' as const, onClick: actions.onPreview }] : []),
+    ...(actions.canSendConfirmation ? [{ label: 'ارسال پیامک تأیید', icon: FaSms,
+      tone: 'info' as const, variant: 'outline' as const, onClick: actions.onSendConfirmation }] : []),
+    ...(actions.canFinalize ? [{ label: 'تأیید و نهایی‌سازی قرارداد', icon: FaFileContract,
+      tone: 'success' as const, onClick: actions.onFinalize }] : []),
     ...(actions.canIssue ? [{ label: 'صدور نهایی PDF', icon: FaFilePdf, tone: 'success' as const, onClick: actions.onIssue }] : []),
   ];
 }
@@ -62,8 +66,17 @@ export function partnerCaseMetrics(view: PartnerCaseView, status = stateCopy[vie
 
 export function PartnerCaseDetailContent({ view, actions }: { view: PartnerCaseView; actions: PartnerCaseActions }) {
   return <>
+    <ErpSection title="اطلاعات قرارداد">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <ErpFieldView label="شماره پرونده" value={view.caseNumber} />
+        <ErpFieldView label="شماره قرارداد مشتری" value={view.customerContractNumber ?? 'در انتظار صدور'} />
+        <ErpFieldView label="وضعیت قرارداد" value={stateCopy[view.state].label} />
+        <ErpFieldView label="تأیید مشتری" value={{ NOT_SENT: 'ارسال نشده', SENT: 'در انتظار تأیید',
+          APPROVED: 'تأییدشده', REJECTED: 'ردشده', RECONFIRMATION_REQUIRED: 'نیازمند تأیید دوباره' }[view.customerConfirmationState]} />
+      </div>
+    </ErpSection>
     <ErpTwoColumn main={<>
-      <ErpSection title="محصولات پرونده">
+      <ErpSection title="اقلام قرارداد" description="مقدار و قیمت‌های ثبت‌شده برای هر ردیف قرارداد.">
         <div className="space-y-3">{view.products.map(product => <ErpCard key={product.productRowId} className="p-4">
           <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-bold text-[var(--sds-text-primary)]">{product.description}</h3>
             <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{product.quantity} {product.unit}</p></div><ErpBadge tone="neutral">ردیف {product.productRowId}</ErpBadge></div>
@@ -72,9 +85,13 @@ export function PartnerCaseDetailContent({ view, actions }: { view: PartnerCaseV
               ? formatPartnerMoney(product.wholesaleUnitPrice, view.sabalanTotals.currency) : 'در انتظار استعلام'} tone="info" /></div>
         </ErpCard>)}</div>
       </ErpSection>
-      <ErpSection title="برنامه تحویل"><div className="space-y-3">{view.deliveries.map(delivery => <ErpCard key={delivery.deliveryId} className="p-4">
-        <div className="flex items-center justify-between gap-2"><strong>{delivery.date}</strong><ErpBadge tone="info"><FaTruck className="ml-1 inline" />{delivery.items.length.toLocaleString('fa-IR')} ردیف</ErpBadge></div>
-        <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{delivery.destination}</p></ErpCard>)}</div></ErpSection>
+      <ErpSection title="تحویل و پرداخت"><div className="space-y-3">{view.deliveries.map((delivery, index) => <ErpCard key={delivery.deliveryId} className="p-4">
+        <div className="flex items-center justify-between gap-2"><strong>تحویل {(index + 1).toLocaleString('fa-IR')} · {delivery.date}</strong><ErpBadge tone="info"><FaTruck className="ml-1 inline" />{delivery.items.length.toLocaleString('fa-IR')} ردیف</ErpBadge></div>
+        <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{delivery.destination}</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">{delivery.items.map(item => <ErpFieldView
+          key={item.productRowId} label={view.products.find(product => product.productRowId === item.productRowId)?.description ?? 'محصول'}
+          value={`${item.quantity} ${view.products.find(product => product.productRowId === item.productRowId)?.unit ?? ''}`} />)}</div>
+      </ErpCard>)}</div></ErpSection>
     </>} aside={<>
       <ErpSection title="پرداخت مشتری"><PaymentPlan plan={view.customerPaymentPlan} /></ErpSection>
       <ErpSection title="پرداخت به سبلان">{view.sabalanPaymentPlan

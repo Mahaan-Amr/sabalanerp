@@ -4,7 +4,21 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures';
 import { PartnerRetailStep } from '../../contract-creation/partner/PartnerRetailStep';
-import { defaultPartnerRetailRows, partnerRetailDiscountFromPercent, partnerRetailSummary } from '../../contract-creation/partner/partnerRetail';
+import { defaultPartnerRetailRows, partnerRetailDiscountFromPercent, partnerRetailSummary, refreshPartnerInquiryRow } from '../../contract-creation/partner/partnerRetail';
+
+test('periodic price refresh keeps the quoted delivery-unit total for the 100329 rate example', () => {
+  const { inquiry, configurationDraft } = createPartnerFixtures();
+  const approved = { ...inquiry.rows[0], approvedPrice: { amount: '1500000', currency: 'IRT' as const } };
+  const row = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '20', unit: 'm',
+    inquiryRow: approved, retailUnitPrice: { amount: '2000000', currency: 'IRT' as const } }])[0];
+  row.retailEffectiveUnitPrice = { amount: '1117500', currency: 'IRT' };
+  row.wholesaleUnitPrice = { amount: '867500', currency: 'IRT' };
+  const summary = partnerRetailSummary([refreshPartnerInquiryRow(row, approved)], { amount: '0', currency: 'IRT' });
+  assert.equal(summary.wholesale, '17350000');
+  assert.equal(summary.retail, '22350000');
+  assert.equal(summary.difference, '5000000');
+  assert.equal(summary.loss, false);
+});
 
 test('retail defaults to approval but a retail-only discount can create a confirmable loss', () => {
   const { inquiry, configurationDraft } = createPartnerFixtures();

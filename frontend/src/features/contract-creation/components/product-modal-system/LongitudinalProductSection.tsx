@@ -189,7 +189,9 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
   calculation: workerCalculation,
   calculating = false,
   liveErrors = {},
-  onEntryValidityChange
+  onEntryValidityChange,
+  technicalMandatory,
+  onTechnicalMandatoryChange
 }: {
   input: Input;
   onChange: (input: Input) => void;
@@ -198,6 +200,8 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
   calculating?: boolean;
   liveErrors?: RemainingStoneDraftFieldErrors;
   onEntryValidityChange?: (fieldId: string, invalid: boolean) => void;
+  technicalMandatory?: { enabled: boolean; percentage: string };
+  onTechnicalMandatoryChange?: (value: { enabled: boolean; percentage: string }) => void;
 }) {
   const pricingVisible = useProductPricingVisibility();
   const pricedInput = isPricedInput(input) ? input : undefined;
@@ -410,6 +414,18 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
             const parsedEntry = parseLongitudinalQuantityEntry(value);
             if (!parsedEntry.accepted) return;
             const nextQuantity = parsedEntry.quantity;
+            if (!pricedInput && technicalMandatory) {
+              const transitioned = transitionLongitudinalQuantity({
+                previousQuantity: input.quantity, nextQuantity,
+                mandatoryEnabled: technicalMandatory.enabled,
+                mandatoryPercentage: parseCanonicalDecimal(technicalMandatory.percentage),
+                rememberedMandatoryPercentage: parseCanonicalDecimal(technicalMandatory.percentage),
+              });
+              onChange({ ...input, quantity: nextQuantity, lastManualField: 'quantity',
+                mandatoryEnabled: transitioned.mandatoryEnabled,
+                mandatoryPercentage: transitioned.mandatoryPercentage } as Input);
+              return;
+            }
             if (!pricedInput) {
               onChange({ ...input, quantity: nextQuantity, lastManualField: 'quantity' });
               return;
@@ -468,6 +484,17 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
       ))}
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-[var(--sds-border-default)] py-2 dark:border-[var(--sds-border-subtle)]">
+        {technicalMandatory && onTechnicalMandatoryChange && <>
+          <label className="inline-flex items-center gap-2 text-xs font-semibold">
+            <CompactSwitch label="حکمی" checked={technicalMandatory.enabled}
+              onChange={enabled => onTechnicalMandatoryChange({ ...technicalMandatory, enabled })} />حکمی
+          </label>
+          <div className="w-28"><CompactDecimalField id="partner-longitudinal-mandatory-percentage"
+            label="درصد حکمی" value={technicalMandatory.percentage}
+            onValueChange={value => { try { const percentage = parseCanonicalDecimal(value);
+              if (Number(percentage) > 0 && Number(percentage) <= 100) onTechnicalMandatoryChange({ ...technicalMandatory, percentage });
+            } catch { /* Keep incomplete input local. */ } }} /></div>
+        </>}
         {showPricing && pricedInput && pricedInput.baseMaterialPricing !== 'paid-source-zero' && (
           <>
             <label className="inline-flex items-center gap-2 text-xs font-semibold">

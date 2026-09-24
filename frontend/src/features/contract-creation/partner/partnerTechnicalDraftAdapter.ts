@@ -37,6 +37,17 @@ export function setPartnerTechnicalRetailUnitPrice(draft: PartnerTechnicalDraft,
   return revise(draft, { rows });
 }
 
+/** A catalog refresh keeps the contractual row identity and requires an
+ * explicit edit action before the new technical version is used. */
+export function refreshPartnerTechnicalProductVersion(draft: PartnerTechnicalDraft, productRowId: string,
+  product: PartnerTechnicalProduct): PartnerTechnicalDraft {
+  const row = draft.rows.find(item => item.productRowId === productRowId);
+  if (!row || row.catalogItemId !== product.catalogItemId || !product.isAvailable ||
+      !product.families.includes(row.family)) throw new Error('Product catalog version is unavailable');
+  return revise(draft, { rows: draft.rows.map(item => item.productRowId === productRowId
+    ? { ...item, catalogSnapshotVersion: product.catalogSnapshotVersion } : item) });
+}
+
 export type PartnerTechnicalProductInput =
   | { family: 'prepared' | 'volumetric'; productRowId: string }
   | { family: 'longitudinal' | 'slab'; productRowId: string; sourceBatchId: string }

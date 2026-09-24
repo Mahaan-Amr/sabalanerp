@@ -13,6 +13,18 @@ export interface PartnerRetailRow {
   wholesaleUnitPrice?: Money;
 }
 
+export function refreshPartnerInquiryRow(row: PartnerRetailRow, inquiryRow: PartnerInquiryRow): PartnerRetailRow {
+  const sameApproval = row.inquiryRow.rowId === inquiryRow.rowId
+    && row.inquiryRow.revision === inquiryRow.revision
+    && JSON.stringify(row.inquiryRow.approvedRowBinding) === JSON.stringify(inquiryRow.approvedRowBinding)
+    && row.inquiryRow.approvedPrice?.amount === inquiryRow.approvedPrice?.amount
+    && row.inquiryRow.approvedPrice?.currency === inquiryRow.approvedPrice?.currency;
+  if (sameApproval && inquiryRow.approvedPrice) return { ...row, inquiryRow };
+  const { wholesaleUnitPrice: _staleQuote, ...withoutStaleQuote } = row;
+  void _staleQuote;
+  return { ...withoutStaleQuote, inquiryRow };
+}
+
 export function defaultPartnerRetailRows(rows: (Omit<PartnerRetailRow, 'retailUnitPrice'> & { retailUnitPrice?: Money })[]): PartnerRetailRow[] {
   return rows.map(row => ({ ...row, retailUnitPrice: row.retailUnitPrice ??
     (row.inquiryRow.approvedPrice ? { ...row.inquiryRow.approvedPrice } : { amount: '', currency: 'IRT' }) }));

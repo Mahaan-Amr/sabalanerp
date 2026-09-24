@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseCanonicalDecimal as c } from '@sabalanerp/contract-product-graph';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
+import { previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { compilePartnerTechnicalGraph } from '../partnerSales/cases/technicalGraph';
 
 test('private graph compilation preserves prepared and legacy volumetric identity and prices the exact selected measure', () => {
@@ -315,6 +316,29 @@ test('longitudinal private graph uses canonical packing and costing without repl
   assert.equal(technical.result.packingPlan.placements.length, 2);
   assert.equal(technical.result.packingPlan.placements[0].lengthMeters, '3.25');
   assert.equal(JSON.stringify(result.value.preview).includes('1700000'), false);
+});
+
+test('Partner row mandatory choice overrides the policy default in the protected graph', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const product = catalog.products[0];
+  const draft = { schemaVersion: 1, inputRevision: 1, rows: [{
+    productRowId: 'mandatory-row', catalogItemId: product.catalogItemId,
+    catalogSnapshotVersion: product.catalogSnapshotVersion, family: 'longitudinal',
+    configuration: { sourceBatchId: 'mandatory-stock', lengthMeters: '1', widthMeters: '0.4', quantity: 2,
+      lastManualField: 'length', lastManualDimension: 'length', lengthDisplayUnit: 'm', widthDisplayUnit: 'cm',
+      sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual',
+      mandatoryEnabled: true, mandatoryPercentage: '30' },
+  }] };
+  const result = compilePartnerTechnicalGraph(draft, { catalog,
+    policy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
+    products: [{ catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
+      longitudinal: { baseRateToman: c('1000000'), mandatoryEnabled: false, mandatoryPercentage: c('25'),
+        rememberedMandatoryPercentage: c('25'), longitudinalCutRateToman: c('20000'), calibrationCutRateToman: c('5000') } }] });
+  if (!result.ok) throw new Error(`${result.error.code}: ${JSON.stringify(previewPartnerTechnicalDraft(draft, catalog))}`);
+  const row = result.value.graph.rows[0];
+  assert.equal(row.commercial.calculationSnapshot?.mandatoryEnabled, true);
+  assert.equal(row.commercial.calculationSnapshot?.mandatoryPercentage, '30');
+  assert.equal(row.commercial.totalAmountToman, '1040000');
 });
 
 test('safe longitudinal measure preserves every supplied decimal digit instead of applying Decimal default precision', () => {

@@ -41,7 +41,7 @@ const handle = (operation: (req: WorkspaceRequest) => Promise<unknown>, created 
 router.get('/overview', access('view'), handle(async (req) => {
   const bookId = String(req.query.bookId ?? '');
   if (!bookId) throw new AccountingReplacementError('BOOK_REQUIRED', 'دفتر حسابداری باید مشخص شود.', 400);
-  const [migrations, parallelRuns, recoveryProofs, cutovers, auditVerification, exceptionCases, supplyExceptions, closeBlockers, taxQueue] = await Promise.all([
+  const [migrations, parallelRuns, recoveryProofs, cutovers, auditVerification, exceptionCases, supplyExceptions, closeBlockers, taxQueue, sepidarLedgerCounts, fiscalYears] = await Promise.all([
     prisma.accountingReplacementMigrationRun.findMany({ where: { bookId }, include: { dispositions: { where: { disposition: 'REJECTED' } } }, orderBy: { previewedAt: 'desc' }, take: 30 }),
     prisma.accountingReplacementParallelRun.findMany({ where: { bookId }, orderBy: { recordedAt: 'desc' }, take: 24 }),
     prisma.accountingReplacementRecoveryProof.findMany({ where: { bookId }, orderBy: { recordedAt: 'desc' }, take: 12 }),
@@ -51,6 +51,8 @@ router.get('/overview', access('view'), handle(async (req) => {
     prisma.accountingSupplyChainException.findMany({ where: { resolvedAt: null }, orderBy: { createdAt: 'desc' }, take: 100 }),
     prisma.accountingCloseRunStep.findMany({ where: { status: 'BLOCKED', closeRun: { bookId } }, include: { closeRun: { select: { id: true, runIdentity: true } } }, orderBy: { updatedAt: 'desc' }, take: 100 }),
     prisma.accountingTaxOutboxMessage.findMany({ where: { status: { in: ['FAILED', 'RETRY'] } }, orderBy: { availableAt: 'asc' }, take: 100 }),
+    prisma.accountingLedgerVoucher.groupBy({ by: ['fiscalYearId', 'status'], where: { bookId, sourceType: 'SEPIDAR_ACC_VOUCHER' }, _count: { _all: true } }),
+    prisma.accountingFiscalYear.findMany({ where: { bookId }, select: { id: true, code: true } }),
   ]);
   const now = Date.now();
   const exceptions = [
@@ -69,7 +71,9 @@ router.get('/overview', access('view'), handle(async (req) => {
     ...(!auditVerification.valid ? [{ id: `audit-${auditVerification.failedSequence ?? 'missing'}`, category: 'ممیزی', title: 'زنجیره شواهد حسابداری آسیب دیده یا ناقص است.', owner: 'مدیر حسابداری', ageHours: 0, status: 'بحرانی', source: auditVerification.failedSequence == null ? 'شاهد ممیزی ثبت نشده' : `ردیف ${auditVerification.failedSequence}`, resolutionHref: '/dashboard/accounting/audit' }] : []),
     ...(!recoveryProofs[0]?.proven ? [{ id: 'recovery-proof-missing', category: 'پشتیبان', title: 'بازیابی کامل و تکرارشده برای آخرین نقطه هماهنگ اثبات نشده است.', owner: 'مدیر سامانه', ageHours: 0, status: 'مسدودکننده انتشار', source: 'کنترل بازیابی حسابداری', resolutionHref: '/dashboard/admin/system-recovery' }] : []),
   ];
-  return { migrations, parallelRuns, recoveryProofs, cutovers, auditVerification, exceptions };
+  const yearCode = new Map(fiscalYears.map((year) => [year.id, year.code]));
+  const sepidarLedger = sepidarLedgerCounts.map((row) => ({ year: yearCode.get(row.fiscalYearId) ?? row.fiscalYearId, status: row.status, count: row._count._all }));
+  return { migrations, parallelRuns, recoveryProofs, cutovers, auditVerification, exceptions, sepidarLedger };
 }));
 
 router.get('/legacy-archive', access('view'), handle((req) => application.searchLegacyArchive({ bookId: String(req.query.bookId ?? ''), query: String(req.query.query ?? '') })));

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0100
 ---
 
 # Stage complete Sepidar snapshots and require reviewed historical posting

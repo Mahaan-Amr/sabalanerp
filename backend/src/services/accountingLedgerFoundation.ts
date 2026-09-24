@@ -87,6 +87,7 @@ export interface AccountingLedgerRepository {
   findVoucherBySource(input: { bookId: string; type: string; id: string; version: number }): Promise<LedgerVoucherRecord | null>;
   createDraftVoucher(input: DraftVoucherPersistence): Promise<LedgerVoucherRecord>;
   getVoucherForUpdate(id: string): Promise<LedgerVoucherRecord | null>;
+  confirmSepidarPostingSource?(voucher: LedgerVoucherRecord): Promise<void>;
   allocateStatutoryNumber(input: { bookId: string; fiscalYearId: string }): Promise<number>;
   markVoucherPosted(input: { id: string; statutoryNumber: number; postedAt: Date; contentHash: string }): Promise<LedgerVoucherRecord>;
   createReversalVoucher(input: {
@@ -423,9 +424,9 @@ export const createAccountingLedgerApplication = (
       const voucher = await tx.getVoucherForUpdate(input.voucherId);
       if (!voucher) throw new AccountingLedgerError('VOUCHER_NOT_FOUND', 'سند حسابداری پیدا نشد.', 404);
       if (voucher.status === 'POSTED' || voucher.status === 'REVERSED') return voucher;
-      if (voucher.source.type === 'SEPIDAR_ACC_VOUCHER'
-          && (voucher.source.payload as { authority?: string })?.authority === 'SEPIDAR_UNTIL_CUTOVER') {
-        throw new AccountingLedgerError('SEPIDAR_PARALLEL_DRAFT_NOT_POSTABLE', 'تا پایان تطبیق و انتقال مرجعیت، سند واردشده از سپیدار فقط پیش‌نویس است و ثبت قطعی آن مجاز نیست.', 409);
+      if (voucher.source.type === 'SEPIDAR_ACC_VOUCHER') {
+        if (!tx.confirmSepidarPostingSource) throw new AccountingLedgerError('SEPIDAR_SOURCE_NOT_VERIFIED', 'پیوند تأییدشدهٔ سند سپیدار برای ثبت عملیاتی در دسترس نیست.', 409);
+        await tx.confirmSepidarPostingSource(voucher);
       }
       const context = await tx.getPostingContext(voucher);
       assertContext(context, { ...voucher, actor: input.actor, override: input.override } as unknown as ManualDraftCommand);

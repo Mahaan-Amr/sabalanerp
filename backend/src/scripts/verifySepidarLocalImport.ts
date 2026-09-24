@@ -28,7 +28,7 @@ const main = async () => {
           FROM accounting_ledger_lines l JOIN accounting_ledger_vouchers v ON v.id=l."voucherId"
           WHERE v."bookId"=${bookId} AND v."fiscalYearId"=${fiscalYear.id} AND v."sourceType"='SEPIDAR_ACC_VOUCHER'`,
         db.accountingSepidarSourceRecord.count({ where: { snapshotId, sourceTable: 'ACC.Voucher', fiscalYearRef: sourceRef } }),
-        db.accountingLedgerVoucher.count({ where: { bookId, fiscalYearId: fiscalYear.id, sourceType: 'SEPIDAR_ACC_VOUCHER', status: 'DRAFT' } }),
+        db.accountingLedgerVoucher.count({ where: { bookId, fiscalYearId: fiscalYear.id, sourceType: 'SEPIDAR_ACC_VOUCHER', status: { in: ['DRAFT', 'POSTED'] } } }),
         db.$queryRaw<Array<{ count: bigint }>>`
           SELECT count(*)::bigint AS count FROM accounting_ledger_vouchers v
           JOIN accounting_posting_periods p ON p.id=v."periodId"
@@ -43,12 +43,14 @@ const main = async () => {
     const [archiveRows, sourceLinks, posted, audit] = await Promise.all([
       db.accountingSepidarSourceRecord.count({ where: { snapshotId } }),
       db.accountingSepidarTargetLink.count({ where: { bookId, sourceTable: 'ACC.Voucher', targetKind: 'LEDGER_DRAFT' } }),
-      db.accountingLedgerVoucher.count({ where: { bookId, sourceType: 'SEPIDAR_ACC_VOUCHER', status: { not: 'DRAFT' } } }),
+      db.accountingLedgerVoucher.count({ where: { bookId, sourceType: 'SEPIDAR_ACC_VOUCHER', status: 'POSTED' } }),
       verifyLedgerAuditChain(db),
     ]);
-    if (archiveRows !== snapshot.expectedRecordCount || sourceLinks !== results.reduce((sum, year) => sum + year.vouchers, 0) || posted !== 0 || !audit.valid) throw new Error('Archive, lineage, posting status, or audit chain mismatch');
+    if (archiveRows !== snapshot.expectedRecordCount || sourceLinks !== results.reduce((sum, year) => sum + year.vouchers, 0) || !audit.valid) throw new Error('Archive, lineage, posting status, or audit chain mismatch');
     const report = { verifiedAt: new Date().toISOString(), snapshotId, bookId, archiveRows, sourceLinks, posted,
-      ledgerAuditEntriesChecked: audit.checkedEntries, years: results, status: 'DRAFTS_RECONCILED_TO_SOURCE_NOT_STATUTORY' };
+      ledgerAuditEntriesChecked: audit.checkedEntries, years: results,
+      status: posted === sourceLinks ? 'SOURCE_LEDGER_VOUCHERS_POSTED' : posted === 0 ? 'DRAFTS_RECONCILED_TO_SOURCE' : 'PARTIALLY_POSTED',
+      limitations: ['ریزگردش ۱۴۰۴ پیش از ۲۰۲۵-۱۲-۲۲ در پشتیبان موجود نیست.', 'قیمت‌گذاری ۱۱۸۰ حوالهٔ خروج و ۱۱۸ موجودی منفی ۱۴۰۵ حل نشده است.', 'ورود اسناد دفترکل به معنی ورود عملیاتی تمام زیرسیستم‌های سپیدار نیست.'] };
     const output = process.env.SEPIDAR_VERIFICATION_OUTPUT;
     if (output) writeFileSync(output, JSON.stringify(report, null, 2) + '\n', { encoding: 'utf8' });
     console.log(JSON.stringify(report));

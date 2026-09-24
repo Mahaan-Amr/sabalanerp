@@ -91,6 +91,8 @@ export default function AccountingReplacementPage() {
   const acceptedParallel = (data?.parallelRuns ?? []).filter((item: any) => item.accepted);
   const fullClose = acceptedParallel.some((item: any) => item.fullClose);
   const latestRecovery = data?.recoveryProofs?.[0];
+  const postedSepidar = (data?.sepidarLedger ?? []).filter((item: any) => item.status === 'POSTED').reduce((sum: number, item: any) => sum + Number(item.count), 0);
+  const draftSepidar = (data?.sepidarLedger ?? []).filter((item: any) => item.status === 'DRAFT').reduce((sum: number, item: any) => sum + Number(item.count), 0);
   const categoryCounts = useMemo(() => (data?.exceptions ?? []).reduce((result: Record<string, number>, item: any) => {
     result[item.category] = (result[item.category] ?? 0) + 1; return result;
   }, {}), [data?.exceptions]);
@@ -100,6 +102,7 @@ export default function AccountingReplacementPage() {
     actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: load, disabled: loading }]}>
     {message && <ErpInlineState kind={message.kind} title={message.title} />}
     <ErpMetricGrid items={[
+      { label: 'اسناد سپیدار در دفترکل', value: postedSepidar.toLocaleString('fa-IR'), hint: `${draftSepidar.toLocaleString('fa-IR')} پیش‌نویس باقی‌مانده`, icon: FaCheckCircle, tone: draftSepidar === 0 && postedSepidar > 0 ? 'success' : 'warning' },
       { label: 'اجرای مهاجرت', value: (data?.migrations?.length ?? 0).toLocaleString('fa-IR'), icon: FaHistory, tone: 'info' },
       { label: 'ماه موازی پذیرفته', value: acceptedParallel.length.toLocaleString('fa-IR'), hint: fullClose ? 'دارای بستن کامل' : 'بستن کامل هنوز ثبت نشده', icon: FaCheckCircle, tone: acceptedParallel.length >= 2 && fullClose ? 'success' : 'warning' },
       { label: 'بازیابی اثبات‌شده', value: latestRecovery?.proven ? 'آماده' : 'ناقص', hint: latestRecovery ? `هدف: ${latestRecovery.rpoMinutes} دقیقه / ${latestRecovery.rtoMinutes} دقیقه` : 'مدرکی ثبت نشده', icon: FaShieldAlt, tone: latestRecovery?.proven ? 'success' : 'danger' },
@@ -113,7 +116,15 @@ export default function AccountingReplacementPage() {
           <div><span className="sds-text-secondary text-sm">سپیدار</span><p className="mt-1 font-semibold">فقط‌خواندنی</p></div>
           <div><span className="sds-text-secondary text-sm">زمان انتقال</span><p className="mt-1 font-semibold">{faDate(transferred.authorityTransferredAt)}</p></div>
           {transferred.status === 'PAUSED_FIX_FORWARD' && <div className="md:col-span-3"><ErpInlineState kind="error" title="ثبت مرجع آغاز شده است؛ عملیات متوقف و فقط اصلاح رو به جلو مجاز است." /></div>}
-        </div> : <ErpInlineState kind="stale" title="مرجعیت هنوز منتقل نشده است؛ هیچ جایگزینی جزئی مجاز نیست." />}
+        </div> : <ErpInlineState kind="stale" title={`دفترکل محلی ${postedSepidar.toLocaleString('fa-IR')} سند سپیدار را قطعی کرده است؛ انتقال مرجعیت تولید هنوز ثبت نشده است.`} />}
+      </ErpCard>
+    </ErpSection>
+
+    <ErpSection title="ثبت عملیاتی اسناد سپیدار" description="اسناد قطعی در دفترکل و تراز آزمایشی سبلان اثر دارند. بایگانی منبع و زیرسیستم‌های فروش، خزانه و انبار جداگانه‌اند.">
+      <ErpCard>
+        <div className="grid gap-2 text-sm sm:grid-cols-2">{['1404', '1405'].map((year) => <p key={year}>سال {year}: {(data?.sepidarLedger ?? []).filter((item: any) => item.year === year && item.status === 'POSTED').reduce((sum: number, item: any) => sum + Number(item.count), 0).toLocaleString('fa-IR')} قطعی · {(data?.sepidarLedger ?? []).filter((item: any) => item.year === year && item.status === 'DRAFT').reduce((sum: number, item: any) => sum + Number(item.count), 0).toLocaleString('fa-IR')} پیش‌نویس</p>)}</div>
+        <div className="mt-3"><ErpButton label="بازکردن دفترکل" href="/dashboard/accounting/ledger" variant="outline" /></div>
+        <ErpInlineState kind="stale" title="ریزگردش آغاز ۱۴۰۴ در پشتیبان نیست؛ بهای خروج و موجودی منفی انبار ۱۴۰۵ نیز حل نشده‌اند." />
       </ErpCard>
     </ErpSection>
 

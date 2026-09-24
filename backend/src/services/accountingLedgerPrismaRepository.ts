@@ -7,7 +7,7 @@ import type {
   LedgerVoucherRecord,
   PostingContext,
 } from './accountingLedgerFoundation';
-import { AccountingLedgerError, type AccountingAccessProfile } from './accountingLedgerFoundation';
+import { AccountingLedgerError, hashAccountingEvidence, type AccountingAccessProfile } from './accountingLedgerFoundation';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 
@@ -322,6 +322,34 @@ export const createAccountingLedgerPrismaRepository = (
       return found ? voucherRecord(found) : null;
     },
 
+    confirmSepidarPostingSource: async (voucher) => {
+      const payload = voucher.source.payload;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+          || hashAccountingEvidence(payload) !== voucher.source.hash) {
+        throw new AccountingLedgerError('SEPIDAR_SOURCE_NOT_VERIFIED', 'اثر انگشت منشأ سند سپیدار معتبر نیست.', 409);
+      }
+      const evidence = payload as Record<string, unknown>;
+      const snapshotId = String(evidence.snapshotId ?? '');
+      const sourceRecordHash = String(evidence.sourceRecordHash ?? '');
+      const link = await database.accountingSepidarTargetLink.findFirst({
+        where: { bookId: voucher.bookId, sourceTable: 'ACC.Voucher', targetKind: 'LEDGER_DRAFT', targetId: voucher.id },
+        select: { sourceKey: true, sourceHash: true, reviewStatus: true, reviewedBy: true, firstSnapshotId: true },
+      });
+      if (!link || link.reviewStatus !== 'USER_APPROVED' || !link.reviewedBy
+          || link.sourceHash !== sourceRecordHash || link.firstSnapshotId !== snapshotId) {
+        throw new AccountingLedgerError('SEPIDAR_SOURCE_NOT_VERIFIED', 'پیوند سند سپیدار یا تأیید نگاشت آن معتبر نیست.', 409);
+      }
+      const [snapshot, record] = await Promise.all([
+        database.accountingSepidarSourceSnapshot.findUnique({ where: { id: snapshotId }, select: { status: true, bookId: true } }),
+        database.accountingSepidarSourceRecord.findUnique({ where: { snapshotId_sourceTable_sourceKey: {
+          snapshotId, sourceTable: 'ACC.Voucher', sourceKey: link.sourceKey,
+        } }, select: { sourceHash: true } }),
+      ]);
+      if (snapshot?.status !== 'COMPLETE' || snapshot.bookId !== voucher.bookId || record?.sourceHash !== sourceRecordHash) {
+        throw new AccountingLedgerError('SEPIDAR_SOURCE_NOT_VERIFIED', 'نسخهٔ کامل منبع و رکورد سند با پیوند مقصد تطبیق ندارند.', 409);
+      }
+    },
+
     allocateStatutoryNumber: async ({ bookId, fiscalYearId }) => {
       const rows = await database.$queryRaw<Array<{ allocated: number }>>`
         INSERT INTO "accounting_voucher_sequences" ("id", "bookId", "fiscalYearId", "nextNumber", "updatedAt")
@@ -464,16 +492,6 @@ export const listPostedJournal = async (database: Database, input: {
   select: reportVoucherSelect,
 });
 
-export const postingBlockReasonForVoucherSource = (sourceType: string, sourcePayload: unknown): string | null => (
-  sourceType === 'SEPIDAR_ACC_VOUCHER'
-    && sourcePayload !== null
-    && typeof sourcePayload === 'object'
-    && !Array.isArray(sourcePayload)
-    && (sourcePayload as Record<string, unknown>).authority === 'SEPIDAR_UNTIL_CUTOVER'
-    ? 'این سند از سپیدار وارد شده و تا تطبیق و انتقال مرجعیت فقط پیش‌نویس است.'
-    : null
-);
-
 export const listLedgerVouchers = async (database: Database, input: {
   bookId: string;
   fiscalYearId: string;
@@ -488,11 +506,11 @@ export const listLedgerVouchers = async (database: Database, input: {
     status: input.status,
   },
   orderBy: [{ documentDate: 'desc' }, { createdAt: 'desc' }],
-    select: { ...reportVoucherSelect, sourceType: true, sourcePayload: true },
+    select: reportVoucherSelect,
   });
-  return vouchers.map(({ sourceType, sourcePayload, ...voucher }) => ({
+  return vouchers.map((voucher) => ({
     ...voucher,
-    postingBlockedReason: postingBlockReasonForVoucherSource(sourceType, sourcePayload),
+    postingBlockedReason: null,
   }));
 };
 

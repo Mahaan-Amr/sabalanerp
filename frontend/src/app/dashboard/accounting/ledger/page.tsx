@@ -227,6 +227,8 @@ export default function AccountingLedgerPage() {
   return (
     <ErpPage eyebrow="حسابداری" title="دفترکل و کدینگ" description={`${context.namePersian} · ارز قانونی: ریال`} backHref="/dashboard/accounting" actions={[{ label: 'به‌روزرسانی', onClick: refreshReports, tone: 'neutral' }]}>
       {message && <ErpInlineState kind={message.kind} title={message.title} />}
+      {year?.code === '1404' && <ErpInlineState kind="stale" title="گزارش این سال تنها اسناد موجود در پشتیبان سپیدار را پوشش می‌دهد؛ ریزگردش ۱۴۰۴ پیش از ۲۰۲۵/۱۲/۲۲ موجود نیست." />}
+      {year?.code === '1405' && <ErpInlineState kind="stale" title="بهای خروج و موجودی منفی انبار ۱۴۰۵ هنوز تطبیق نشده است؛ گردش دفترکل به‌تنهایی وضعیت انبار را تأیید نمی‌کند." />}
       <ErpSection>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label><span className="mb-2 block text-sm">سال مالی</span><ErpSelect value={year?.id || ''} onChange={(event) => { setFiscalYearId(event.target.value); setPeriodId(''); }}>{book?.fiscalYears?.map((item: any) => <option key={item.id} value={item.id}>{item.titlePersian}</option>)}</ErpSelect></label>

@@ -140,9 +140,11 @@ async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, s
         ownerUserId: ids.partnerId, createdBy: ids.partnerId, partnerOwnerProfileId: ids.profileId, partnerRevision: 1 } });
       await tx.crmPotentialProject.createMany({ data: [
         { id: ids.firstProjectId, customerId: ids.customerId, responsibleSellerId: ids.partnerId,
-          createdBy: ids.partnerId, title: 'پروژه نخست', workType: 'سنگ', partnerRevision: 1 },
+          createdBy: ids.partnerId, title: 'پروژه نخست', address: 'تهران، پروژه نخست',
+          workType: 'سنگ', partnerRevision: 1 },
         { id: ids.secondProjectId, customerId: ids.secondCustomerId, responsibleSellerId: ids.partnerId,
-          createdBy: ids.partnerId, title: 'پروژه دوم', workType: 'سنگ', partnerRevision: 1 },
+          createdBy: ids.partnerId, title: 'پروژه دوم', address: 'تهران، پروژه دوم',
+          workType: 'سنگ', partnerRevision: 1 },
       ] });
       await tx.partnerInquiry.create({ data: { id: ids.inquiryId, profileId: ids.profileId, revision: 2, submittedAt: new Date() } });
       await tx.partnerInquiryAssignment.create({ data: { id: ids.assignmentId, inquiryId: ids.inquiryId, revision: 1,
@@ -272,6 +274,10 @@ test('Case-scoped pricing creates the linked pair only during explicit finalizat
     assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
     const head = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: {
       caseId: ids.caseId, revision: 2 } } });
+    assert.equal((head.customerContent as Prisma.JsonObject).projectId, ids.firstProjectId,
+      'legacy project identity remains in immutable Case evidence');
+    assert.equal(await tx.projectAddress.count({ where: { customerId: ids.customerId,
+      address: 'تهران، پروژه نخست' } }), 1);
     assert.ok((head.internalProjection as Prisma.JsonObject).accounting);
     assert.notEqual(head.customerProjection, null);
     const finalizeIntent = { trigger: 'FINALIZED' as const,

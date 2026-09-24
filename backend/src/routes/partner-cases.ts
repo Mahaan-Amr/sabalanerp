@@ -158,7 +158,7 @@ export async function allocatePartnerLinkedPair(tx: Prisma.TransactionClient, in
   if (!existingPartner.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   await tx.partnerCaseRevision.update({ where: { caseId_revision: { caseId: row.id, revision: row.headRevision } },
     data: { internalProjection: json({ partner: existingPartner.data, accounting: projections.value.accounting,
-      fulfillment: projections.value.fulfillment }), customerContent: json(effectiveCustomerContent),
+      fulfillment: projections.value.fulfillment }),
       customerProjection: json(projections.value.customer) } });
   if (legacyProjectId && tracedProjectId) {
       await tx.crmTimelineEvent.create({ data: { customerId: row.customerId,

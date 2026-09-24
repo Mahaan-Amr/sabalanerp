@@ -68,3 +68,32 @@ test('fresh approval use is bound to the pricing source revision, not the succes
     configurationHash: approval.configurationHash, caseId: 'case-usage-replay', pricingCaseRevision: 3 });
   assert.equal(wrongRevision.ok ? null : wrongRevision.error.code, 'NOT_FOUND');
 });
+
+test('a successor to a rejected row uses its own approval clock and omits absent supersession evidence', async () => {
+  const tx = {
+    $queryRaw: async () => [{ now: new Date('2026-08-21T10:00:00.000Z') }],
+    partnerInquiryRow: { findFirst: async () => ({ id: approval.rowId, revision: approval.revision,
+      configurationHash: approval.configurationHash, predecessorId: 'rejected-row',
+      predecessor: { approval: null }, successor: null,
+      inquiry: { id: approval.inquiryId, caseId: 'case-usage-replay', caseRevision: 2,
+        pricingReadyAt: null, pricingExpiresAt: null,
+        profile: { state: 'ACTIVE', userId: approval.partnerSellerId } },
+      approval: { id: approval.approvalId, actorId: approval.decision.actorId,
+        assignmentId: approval.decision.assignmentId, commandId: approval.decision.commandId,
+        authorizationEvidenceId: approval.decision.authorizationEvidenceId,
+        wholesaleUnitPrice: { toString: () => approval.wholesaleUnitPrice.amount },
+        currency: approval.wholesaleUnitPrice.currency, evidenceHash: approval.evidenceHash,
+        note: null, supersessionReason: null, approvedAt: new Date(approval.approvedAt),
+        expiresAt: new Date(approval.expiresAt), assignment: { revision: approval.decision.assignmentRevision } } }) },
+  } as unknown as Prisma.TransactionClient;
+  const result = await resolveApprovalForUse(tx, { binding: { inquiryId: approval.inquiryId,
+    rowId: approval.rowId, revision: approval.revision }, partnerSellerId: approval.partnerSellerId,
+    configurationHash: approval.configurationHash, caseId: 'case-usage-replay', pricingCaseRevision: 2 });
+  assert.equal(result.ok, true, result.ok ? undefined : result.error.code);
+  if (result.ok) {
+    assert.equal(result.value.approvedAt, approval.approvedAt);
+    assert.equal(result.value.expiresAt, approval.expiresAt);
+    assert.equal(result.value.predecessorApprovalId, undefined);
+    assert.equal(result.value.supersessionReason, undefined);
+  }
+});

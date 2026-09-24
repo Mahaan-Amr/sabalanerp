@@ -515,9 +515,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         if (!allowed.ok) return allowed;
         const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
         const candidates = await tx.partnerInquiryRow.findMany({ where: { inquiry: { profileId: profile.id,
-          pricingExpiresAt: { gt: clock.now },
           ...(parsed.data.caseId ? { caseId: parsed.data.caseId } : {}) },
-          outcome: 'APPROVED', approval: { isNot: null } },
+          outcome: 'APPROVED', approval: { is: { expiresAt: { gt: clock.now } } } },
           orderBy: [{ approval: { approvedAt: 'desc' } }, { id: 'desc' }], take: 500,
           select: { id: true, revision: true, configurationHash: true, definition: true,
             inquiry: { select: { caseRevision: true } },

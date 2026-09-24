@@ -5,7 +5,7 @@ import {
   PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft,
   type PartnerTechnicalDraft, type PartnerTechnicalFamily, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
-import { parseCanonicalDecimal, parseStableIdentity, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
+import { parseCanonicalDecimal, parseStableIdentity, resolveStaircaseQuantity, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
 import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpRialInput, ErpSelect } from '@/components/erp';
 import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numberFormat';
 import { PreparedProductSection } from '../components/product-modal-system/PreparedProductSection';
@@ -31,12 +31,22 @@ const nextDraft = (draft: PartnerTechnicalDraft, rows: PartnerTechnicalDraft['ro
 const replaceRow = (draft: PartnerTechnicalDraft, row: PartnerTechnicalDraft['rows'][number]) => nextDraft(draft, draft.rows.map(item => item.productRowId === row.productRowId ? row : item));
 const editText = (draft: PartnerTechnicalDraft, entityId: string, field: NonNullable<PartnerTechnicalDraft['editingValues']>[number]['field'], fallback: unknown) =>
   draft.editingValues?.find(item => item.entityId === entityId && item.field === field)?.text ?? (fallback === undefined ? '' : String(fallback));
+export const partnerStairDisplayLength = (meters: string | undefined, unit: 'cm' | 'm') =>
+  meters ? convertCompactLengthUnit(meters, 'm', unit) : '';
+export const partnerStairCanonicalLength = (text: string, unit: 'cm' | 'm') =>
+  convertCompactLengthUnit(parseCanonicalDecimal(text), unit, 'm');
 const commitText = (draft: PartnerTechnicalDraft, entityId: string,
   field: NonNullable<PartnerTechnicalDraft['editingValues']>[number]['field'], text: string) => {
   const retained = retainPartnerTechnicalFieldText(draft, entityId, field, text);
   if (!text.trim()) return retained;
   try { return commitPartnerTechnicalField(retained, entityId, field, text); } catch { return retained; }
 };
+export function overridePartnerStairQuantity(draft: PartnerTechnicalDraft, productRowId: string, text: string) {
+  const next = commitText(draft, productRowId, 'quantity', text);
+  const row = next.rows.find(item => item.productRowId === productRowId);
+  return row?.family === 'stair' ? replaceRow(next, { ...row,
+    configuration: { ...row.configuration, quantityMode: 'manual' } }) : next;
+}
 const longitudinalTechnicalConfiguration = (configuration: Extract<PartnerTechnicalDraft['rows'][number], { family: 'longitudinal' }>['configuration']) => {
   const { mandatoryEnabled: _enabled, mandatoryPercentage: _percentage, ...technical } = configuration;
   void _enabled; void _percentage;
@@ -131,6 +141,8 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
         && item.families.includes(row.family));
       if (!product || !current) {
         return <ErpCard key={row.productRowId} className="space-y-3 p-4" data-contract-row-id={row.productRowId}>
+          <div className="space-y-1"><strong className="sds-text-primary text-sm">{product?.name ?? row.catalogItemId}</strong>
+            <p className="sds-text-secondary text-xs">{labels[row.family]} · نسخهٔ ثبت‌شدهٔ محصول</p></div>
           <ErpInlineState kind="stale" title={current
             ? 'نسخهٔ کاتالوگ این محصول تغییر کرده است. برای ادامه، نسخهٔ فعلی را بررسی کنید.'
             : 'این محصول دیگر در کاتالوگ فعال نیست. آن را با محصول دیگری جایگزین کنید.'} />
@@ -270,7 +282,7 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
           const { inputRevision, kerfMeters, ...configuration } = input; void inputRevision; void kerfMeters;
           onDraftChange(replaceRow(state.draft, { ...row, configuration: { ...configuration,
             sawKerfEnabled: row.configuration.sawKerfEnabled } as unknown as typeof row.configuration })); }} />}
-      {row.family === 'stair' && <StairEditor draft={state.draft} row={row} product={product}
+      {row.family === 'stair' && <StairEditor key={row.productRowId} draft={state.draft} row={row} product={product}
         mandatoryDefaults={mandatoryDefaults} onChange={onDraftChange} />}
       {!['prepared', 'volumetric'].includes(row.family) && calculation?.ok && <div id="product-operations" tabIndex={-1}>
         <OperationsEditor draft={state.draft} row={row as Extract<typeof row, { family: 'longitudinal' | 'slab' | 'stair' }>}
@@ -481,11 +493,21 @@ function StairEditor({ draft, row, product, mandatoryDefaults, onChange }: { dra
   onChange: (draft: PartnerTechnicalDraft) => void }) {
   const configuration = row.configuration;
   const system = draft.stairSystems?.find(item => item.stairSystemId === configuration.stairSystemId);
+  const [displayDimensions, setDisplayDimensions] = useState(() => ({
+    length: partnerStairDisplayLength(configuration.lengthMeters, configuration.lengthDisplayUnit),
+    crossDimension: partnerStairDisplayLength(configuration.crossDimensionMeters, configuration.crossDimensionDisplayUnit),
+  }));
+  const systemQuantity = (() => {
+    if (!system) return undefined;
+    try { return resolveStaircaseQuantity(system.quantity).totalSteps; } catch { return undefined; }
+  })();
   const partDraft: StairPartFieldDraft = { part: configuration.part, contractualTitle: product.name,
-    length: editText(draft, row.productRowId, 'lengthMeters', configuration.lengthMeters), lengthUnit: configuration.lengthDisplayUnit,
-    crossDimension: editText(draft, row.productRowId, 'crossDimensionMeters', configuration.crossDimensionMeters),
+    length: displayDimensions.length, lengthUnit: configuration.lengthDisplayUnit,
+    crossDimension: displayDimensions.crossDimension,
     crossDimensionUnit: configuration.crossDimensionDisplayUnit,
-    quantity: editText(draft, row.productRowId, 'quantity', configuration.quantity), baseRateToman: '', description: '' };
+    quantity: configuration.quantityMode === 'system' && configuration.part !== 'landing'
+      ? String(systemQuantity ?? '') : editText(draft, row.productRowId, 'quantity', configuration.quantity),
+    baseRateToman: '', description: '' };
   const updateRow = (changes: Partial<typeof configuration>) => onChange(replaceRow(draft, { ...row, configuration: { ...configuration, ...changes } }));
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center gap-4 border-y border-[var(--sds-border-subtle)] py-3">
@@ -499,18 +521,14 @@ function StairEditor({ draft, row, product, mandatoryDefaults, onChange }: { dra
           if (Number(percentage) > 0 && Number(percentage) <= 100) updateRow({ mandatoryPercentage: percentage });
         } catch { /* Keep the last valid committed value. */ } }} /></ErpField>
     </div>
-    <div className="grid gap-4 sm:grid-cols-2"><ErpField label="جزء پله"><ErpSelect value={configuration.part} onChange={event => updateRow({ part: event.target.value as typeof configuration.part })}>
+    <div className="grid gap-4 sm:grid-cols-2"><ErpField label="جزء پله"><ErpSelect value={configuration.part} onChange={event => {
+      const part = event.target.value as typeof configuration.part;
+      updateRow(part === 'landing' && configuration.quantityMode === 'system'
+        ? { part, quantityMode: 'manual', quantity: systemQuantity } : { part });
+    }}>
       <option value="tread">کف پله</option><option value="riser">خیز پله</option><option value="landing">پاگرد</option></ErpSelect></ErpField>
-      <ErpField label="روش تعداد"><ErpSelect value={configuration.quantityMode ?? 'manual'} onChange={event => {
-        const mode = event.target.value as 'manual' | 'system';
-        let next = replaceRow(draft, { ...row, configuration: { ...configuration, quantityMode: mode } });
-        if (mode === 'system' && !next.stairSystems?.some(item => item.stairSystemId === configuration.stairSystemId)) {
-          next = PartnerTechnicalDraftSchema.parse({ ...next, inputRevision: next.inputRevision + 1,
-            stairSystems: [...(next.stairSystems ?? []), { stairSystemId: configuration.stairSystemId, quantity: { mode: 'steps', totalSteps: 1 } }] });
-        }
-        onChange(next);
-      }}><option value="manual">تعداد مستقل این جزء</option><option value="system">تعداد سیستم پله</option></ErpSelect></ErpField></div>
-    {configuration.quantityMode === 'system' && system && <StairQuantityModeSection state={{ mode: system.quantity.mode,
+    </div>
+    {configuration.part !== 'landing' && system && <StairQuantityModeSection state={{ mode: system.quantity.mode,
       totalSteps: String(system.quantity.totalSteps ?? ''), numberOfStaircases: String(system.quantity.numberOfStaircases ?? ''),
       stepsPerStaircase: String(system.quantity.stepsPerStaircase ?? '') }} onChange={value => {
         const quantity = value.mode === 'steps' ? { mode: value.mode, ...(/^\d+$/.test(value.totalSteps) ? { totalSteps: Number(value.totalSteps) } : {}) }
@@ -521,12 +539,22 @@ function StairEditor({ draft, row, product, mandatoryDefaults, onChange }: { dra
       }} />}
     <StairPartSubsection draft={partDraft} onChange={value => {
       let next = draft;
-      const meters = (text: string, unit: 'cm' | 'm') => {
-        try { return convertCompactLengthUnit(parseCanonicalDecimal(text), unit, 'm'); } catch { return text; }
+      const commitLength = (field: 'lengthMeters' | 'crossDimensionMeters', text: string, unit: 'cm' | 'm') => {
+        try { return commitPartnerTechnicalField(next, row.productRowId, field,
+          partnerStairCanonicalLength(text, unit)); }
+        catch { return retainPartnerTechnicalFieldText(next, row.productRowId, field, text); }
       };
-      next = commitText(next, row.productRowId, 'lengthMeters', meters(value.length, value.lengthUnit));
-      next = commitText(next, row.productRowId, 'crossDimensionMeters', meters(value.crossDimension, value.crossDimensionUnit));
-      if (configuration.quantityMode !== 'system') next = commitText(next, row.productRowId, 'quantity', value.quantity);
+      if (value.length !== partDraft.length || value.lengthUnit !== partDraft.lengthUnit) {
+        setDisplayDimensions(current => ({ ...current, length: value.length }));
+        next = commitLength('lengthMeters', value.length, value.lengthUnit);
+      }
+      if (value.crossDimension !== partDraft.crossDimension || value.crossDimensionUnit !== partDraft.crossDimensionUnit) {
+        setDisplayDimensions(current => ({ ...current, crossDimension: value.crossDimension }));
+        next = commitLength('crossDimensionMeters', value.crossDimension, value.crossDimensionUnit);
+      }
+      if (value.quantity !== partDraft.quantity) {
+        next = overridePartnerStairQuantity(next, row.productRowId, value.quantity);
+      }
       const current = next.rows.find(item => item.productRowId === row.productRowId);
       if (current?.family === 'stair') next = replaceRow(next, { ...current, configuration: { ...current.configuration,
         lengthDisplayUnit: value.lengthUnit, crossDimensionDisplayUnit: value.crossDimensionUnit } });

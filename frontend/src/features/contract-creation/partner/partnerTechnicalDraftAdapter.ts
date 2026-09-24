@@ -90,13 +90,16 @@ export function addPartnerTechnicalProduct(
       lengthDisplayUnit: 'm', widthDisplayUnit: 'm', sawKerfEnabled: false, sourceRows: [], verticalCutSides: [] } };
   } else if (input.family === 'stair') {
     row = { ...identity, family: 'stair', configuration: { stairSystemId: input.stairSystemId, part: 'tread',
-      sourceBatchId: input.sourceBatchId, quantityMode: 'manual', lengthDisplayUnit: 'm',
+      sourceBatchId: input.sourceBatchId, quantityMode: 'system', lengthDisplayUnit: 'm',
       crossDimensionDisplayUnit: 'cm', sawKerfEnabled: false, calibrationEnabled: false,
       calibrationSelection: 'manual' } };
   } else {
     throw new Error('Product family is unavailable');
   }
-  return revise(draft, { rows: [...draft.rows, row] });
+  return revise(draft, { rows: [...draft.rows, row], ...(input.family === 'stair' ? {
+    stairSystems: [...(draft.stairSystems ?? []), { stairSystemId: input.stairSystemId,
+      quantity: { mode: 'steps' as const, totalSteps: 1 } }],
+  } : {}) });
 }
 
 /** A standalone rate inquiry needs a canonical stone identity but must not ask

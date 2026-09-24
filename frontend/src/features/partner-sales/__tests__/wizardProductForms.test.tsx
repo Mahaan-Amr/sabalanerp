@@ -16,9 +16,32 @@ import type { ProductOperationsTechnicalInput, LongitudinalTechnicalInput, SlabT
 import { PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { CanonicalStairLayerSummary } from '../../contract-creation/components/product-modal-system/CanonicalStairLayerSummary';
-import { PartnerTechnicalDraftEditor } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
+import { PartnerTechnicalDraftEditor, overridePartnerStairQuantity, partnerStairCanonicalLength, partnerStairDisplayLength } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
 import { buildPartnerProductionTechnicalDraft } from '../../contract-creation/partner/partnerProductionTechnicalDraft';
-import { draftForPartnerTechnicalEdit, refreshPartnerTechnicalProductVersion } from '../../contract-creation/partner/partnerTechnicalDraftAdapter';
+import { addPartnerTechnicalProduct, draftForPartnerTechnicalEdit, refreshPartnerTechnicalProductVersion } from '../../contract-creation/partner/partnerTechnicalDraftAdapter';
+
+test('Partner stair dimensions keep display units separate from canonical meters', () => {
+  assert.equal(partnerStairCanonicalLength('22', 'cm'), '0.22');
+  assert.equal(partnerStairDisplayLength('0.22', 'cm'), '22');
+  assert.equal(partnerStairCanonicalLength('1.2', 'm'), '1.2');
+  assert.equal(partnerStairDisplayLength('1.2', 'm'), '1.2');
+});
+
+test('Partner stair defaults to system quantity and keeps a manually edited quantity independent', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const product = catalog.products.find(item => item.families.includes('stair'))!;
+  const initial = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 0, rows: [] });
+  const draft = addPartnerTechnicalProduct(initial, product, { family: 'stair', productRowId: 'stair-row',
+    sourceBatchId: 'source-batch:stair-test', stairSystemId: 'stair-system:stair-test' });
+  assert.equal(draft.rows[0].family, 'stair');
+  if (draft.rows[0].family !== 'stair') return;
+  assert.equal(draft.rows[0].configuration.quantityMode, 'system');
+  assert.equal(draft.stairSystems?.[0]?.quantity.totalSteps, 1);
+  const edited = overridePartnerStairQuantity(draft, 'stair-row', '7');
+  assert.equal(edited.rows[0].configuration.quantity, 7);
+  assert.equal(edited.rows[0].configuration.quantityMode, 'manual');
+  assert.equal(edited.stairSystems?.[0]?.quantity.totalSteps, 1);
+});
 
 test('returned Partner row can adopt a current catalog version without losing row identity', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();

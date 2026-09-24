@@ -155,6 +155,11 @@ test('Sabalan can price a corrected row whose predecessor was rejected', async (
         payloadHash: await canonicalHash(approveIntent) } });
     assert.equal(approved.ok, true);
     if (approved.ok) assert.equal(approved.value.batch?.outcomes[0].ok, true, JSON.stringify(approved.value.batch));
+    const current = await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-2' } });
+    const usable = await resolveApprovalForUse(tx, { binding: { inquiryId: ids.inquiryId,
+      rowId: current.id, revision: current.revision }, partnerSellerId: ids.actorId,
+      configurationHash: current.configurationHash });
+    assert.equal(usable.ok, true, usable.ok ? undefined : usable.error.code);
   });
 });
 
@@ -300,6 +305,17 @@ test('responder can decide pending rows in separate commands after an earlier ro
       { id: 'row-1', outcome: 'APPROVED', revision: 2 },
       { id: 'row-2', outcome: 'APPROVED', revision: 2 },
     ]);
+    const original = await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'row-1' } });
+    assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId, 'row-3',
+      { rowId: 'row-2', revision: 2, reason: 'اصلاح ردیف دوم' }))).ok, true);
+    assert.equal((await decide('row-3', 'sequential-decision-3')).ok, true);
+    const packageWindow = await tx.partnerInquiry.findUniqueOrThrow({ where: { id: ids.inquiryId },
+      select: { pricingReadyAt: true, pricingExpiresAt: true } });
+    assert.ok(packageWindow.pricingReadyAt, 'valid unchanged approval must keep the revised package ready');
+    assert.equal(packageWindow.pricingExpiresAt?.getTime(), original.expiresAt.getTime(),
+      'the earliest required row expires first');
+    const unchanged = await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'row-1' } });
+    assert.equal(unchanged.id, original.id);
   });
 });
 

@@ -180,16 +180,20 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
       outcomes.push({ ok: true, rowId: row.id, outcomeId, revision, outcome: decision.outcome });
     }
     const currentLeaves = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id, successor: null },
-      select: { outcome: true, approval: { select: { id: true, approvedAt: true } } } });
+      select: { outcome: true, approval: { select: { id: true, approvedAt: true, expiresAt: true } } } });
     const completedPackage = currentLeaves.length > 0 &&
       currentLeaves.every(row => row.outcome === 'APPROVED' && Boolean(row.approval) &&
-        row.approval!.approvedAt.getTime() >= (inquiry.submittedAt?.getTime() ?? Number.POSITIVE_INFINITY));
+        row.approval!.expiresAt.getTime() > clock.now.getTime());
+    const requiredApprovals = currentLeaves.flatMap(row => row.approval ? [row.approval] : []);
     const batch = InquiryBatchResultSchema.parse({ schemaVersion: 1, commandId: command.commandId, outcomes });
     const eventIds: string[] = [];
     if (outcomes.some(outcome => outcome.ok)) {
       const next = await tx.partnerInquiry.update({ where: { id: inquiry.id }, data: { revision: { increment: 1 },
-        ...(completedPackage ? { pricingReadyAt: clock.now,
-          pricingExpiresAt: new Date(clock.now.getTime() + 48 * 60 * 60 * 1000) } : {}) }, select: { revision: true } });
+        pricingReadyAt: completedPackage
+          ? new Date(Math.max(...requiredApprovals.map(approval => approval.approvedAt.getTime()))) : null,
+        pricingExpiresAt: completedPackage
+          ? new Date(Math.min(...requiredApprovals.map(approval => approval.expiresAt.getTime()))) : null,
+      }, select: { revision: true } });
       const eventId = randomUUID(); eventIds.push(eventId);
       await tx.partnerInquiryEvent.create({ data: { id: eventId, inquiryId: inquiry.id, revision: next.revision,
         actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,

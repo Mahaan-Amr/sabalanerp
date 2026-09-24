@@ -430,7 +430,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   };
 
   useEffect(() => {
-    if (context?.kind !== 'PARTNER' || !context.writable || runtime) return;
+    if (context?.kind !== 'PARTNER' || !context.writable) return;
     let active = true;
     void Promise.all([
       readCatalogPages('PRODUCT'), readCatalogPages('TOOL'), readCatalogPages('FINISHING'), readCatalogPages('LAYER'),
@@ -444,7 +444,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         setOperations([...tools, ...finishings, ...layers]);
       }).catch(() => active && setError('دریافت کاتالوگ فنی انجام نشد.'));
     return () => { active = false; };
-  }, [context, runtime]);
+  }, [context]);
 
   const openDraftRecovery = useCallback(async (partner: PartnerContext, takeover: boolean, fresh = false) => {
     if (recoveryStarting.current || (runtime && !fresh)) return;

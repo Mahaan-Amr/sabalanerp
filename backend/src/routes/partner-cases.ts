@@ -754,8 +754,10 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           orderBy: { createdAt: 'desc' }, select: { id: true, state: true, pricingState: true,
             customerConfirmationState: true, headRevision: true, integrityHash: true,
             customerContractId: true,
-            head: { select: { internalProjection: true } }, outputs: { orderBy: { recordedAt: 'desc' }, take: 1,
-              select: { id: true } } } });
+            head: { select: { internalProjection: true, customerProjection: true } },
+            events: { orderBy: { sequence: 'desc' }, take: body.caseId ? undefined : 0,
+              select: { sequence: true, type: true, recordedAt: true } },
+            outputs: { orderBy: { recordedAt: 'desc' }, take: 1, select: { id: true } } } });
         // A list can span several cases belonging to one profile. Acquire every
         // root first, in a deterministic order, before authorization locks any
         // profile. This preserves the global root -> profile lock order when a
@@ -807,8 +809,13 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             },
               select: { draftId: true, baseRevision: true, recovery: true } }) : null;
           const editableRecovery = editSession && decodeTechnicalRecovery(editSession.recovery) ? editSession : null;
+          const customerOutput = output
+            ? partnerContracts.CustomerContractOutputSchema.safeParse(row.head.customerProjection) : null;
           cases.push({ view: { ...view.data, state: row.state,
             pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
+            ...(customerOutput?.success ? { customerOutput: customerOutput.data } : {}),
+            history: row.events.map(event => ({ sequence: event.sequence, type: event.type,
+              recordedAt: event.recordedAt.toISOString() })),
             snapshotId: row.outputs[0]?.id || null,
             ...(editableRecovery ? { editRecovery: { recoveryId: editableRecovery.draftId,
               baseRevision: editableRecovery.baseRevision } } : {}),

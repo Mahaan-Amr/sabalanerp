@@ -217,7 +217,8 @@ export function PartnerCaseRuntime() {
       const error = latestCaseError(caseId);
       return <div key={caseId} className="space-y-2">
         {error && <ErpInlineState kind={error.kind} title={error.message} />}
-        <PartnerCaseWorkspace view={row.view} account={index === 0 ? account : undefined}
+        <PartnerCaseWorkspace view={row.view} customerOutput={row.customerOutput} history={row.history}
+          account={index === 0 ? account : undefined}
           collections={collections[caseId]} correction={corrections[caseId]}
           canRecordCollection={row.view.state === 'COMMITTED'} onRecordCollection={() => { setCollectionTarget(row); setCollectionAmount(''); setCollectionMethod('BANK_TRANSFER'); setCollectionReference(''); setCollectionNote(''); }}
           onReverseCollection={receiptId => { setReversalTarget({ row, receiptId }); setReversalReason(''); }}

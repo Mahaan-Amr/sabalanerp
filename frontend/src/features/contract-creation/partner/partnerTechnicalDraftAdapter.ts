@@ -48,6 +48,20 @@ export function refreshPartnerTechnicalProductVersion(draft: PartnerTechnicalDra
     ? { ...item, catalogSnapshotVersion: product.catalogSnapshotVersion } : item) });
 }
 
+/** Editing a retained row uses the current catalog version while preserving its
+ * stable contract row identity. The historical version remains available for
+ * read-only rendering until the edited draft is saved. */
+export function draftForPartnerTechnicalEdit(draft: PartnerTechnicalDraft, productRowId: string,
+  currentProducts: PartnerTechnicalProduct[]): PartnerTechnicalDraft {
+  const row = draft.rows.find(item => item.productRowId === productRowId);
+  if (!row) throw new Error('Product row is unavailable');
+  const current = currentProducts.find(product => product.catalogItemId === row.catalogItemId
+    && product.isAvailable && product.families.includes(row.family));
+  if (!current) throw new Error('Product catalog version is unavailable');
+  return current.catalogSnapshotVersion === row.catalogSnapshotVersion
+    ? draft : refreshPartnerTechnicalProductVersion(draft, productRowId, current);
+}
+
 export type PartnerTechnicalProductInput =
   | { family: 'prepared' | 'volumetric'; productRowId: string }
   | { family: 'longitudinal' | 'slab'; productRowId: string; sourceBatchId: string }

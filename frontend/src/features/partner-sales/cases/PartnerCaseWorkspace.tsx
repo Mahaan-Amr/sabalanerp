@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import type { PartnerAccountView, PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
+import type { CustomerContractOutput, PartnerAccountView, PartnerCaseView, PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
 import { PartnerAccountPanel } from '../account/PartnerAccountPanel';
 import { RetailCollectionsPanel, type RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import { PartnerCaseDetail, type PartnerCaseActions } from './PartnerCaseDetail';
@@ -9,6 +9,8 @@ import { PartnerCorrectionPanel, type PartnerCorrectionStatus } from './PartnerC
 
 export type PartnerCaseWorkspaceProps = {
   view: PartnerCaseView;
+  customerOutput?: CustomerContractOutput;
+  history?: PartnerCaseRuntimeRow['history'];
   actions: PartnerCaseActions;
   account?: PartnerAccountView;
   collections?: RetailCollectionHistory;
@@ -21,9 +23,9 @@ export type PartnerCaseWorkspaceProps = {
   onSaveCorrection?: Parameters<typeof PartnerCorrectionPanel>[0]['onSave'];
 };
 
-export function PartnerCaseWorkspace({ view, actions, account, collections, correction, correctionPending = false,
+export function PartnerCaseWorkspace({ view, actions, customerOutput, history, account, collections, correction, correctionPending = false,
   canRecordCollection = false, onRecordCollection, onReverseCollection, onRequestCorrection = () => undefined, onSaveCorrection = () => undefined }: PartnerCaseWorkspaceProps) {
-  return <PartnerCaseDetail view={view} actions={actions}>
+  return <PartnerCaseDetail view={view} actions={actions} customerOutput={customerOutput} history={history}>
     <PartnerCaseSupplementary view={view} account={account} collections={collections} correction={correction}
       correctionPending={correctionPending} canRecordCollection={canRecordCollection} onRecordCollection={onRecordCollection} onReverseCollection={onReverseCollection}
       onRequestCorrection={onRequestCorrection} onSaveCorrection={onSaveCorrection} />

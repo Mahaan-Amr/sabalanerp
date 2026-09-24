@@ -450,6 +450,13 @@ async function main() {
       assert.equal(searched.status, 200);
       assert.equal((await searched.json() as any).data.items.some((item: any) => item.id === recordId), true,
         'the authorized Case context links to a searchable official invoice');
+      const partnerOnly = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/financial-records?kind=INVOICE_CANDIDATE&sourceKind=PARTNER_INTERNAL_RECORD&page=1&pageSize=1&search=${encodeURIComponent(displayed.partnerContext.caseNumber)}`,
+        { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
+      assert.equal(partnerOnly.status, 200);
+      const partnerPage = (await partnerOnly.json() as any).data;
+      assert.equal(partnerPage.items[0]?.id, recordId,
+        'source filtering precedes pagination so a Partner invoice is visible on its own first page');
+      assert.equal(partnerPage.total, 1);
       await prisma.accountingFinancialRecord.update({ where: { id: recordId }, data: { amount: '1601' } });
       try {
         for (const path of ['/workspace', '/financial-records']) {

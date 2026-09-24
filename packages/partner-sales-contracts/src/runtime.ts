@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DecimalSchema, DeliverySchema, IdSchema, InstantSchema, RevisionRefSchema } from './primitives';
-import { PartnerCaseViewSchema } from './projections';
+import { CustomerContractOutputSchema, PartnerCaseViewSchema } from './projections';
 import { CaseDraftIntentSchema, PartnerDraftEditLeaseSchema } from './commands';
 import { PartnerInquiryRowV2Schema } from './inquiry-v2';
 
@@ -19,6 +19,9 @@ export const PartnerCaseRuntimeActionsSchema = z.object({
 
 export const PartnerCaseRuntimeRowSchema = z.object({
   view: PartnerCaseViewSchema,
+  customerOutput: CustomerContractOutputSchema.optional(),
+  history: z.array(z.object({ sequence: z.number().int().positive(), type: z.string().min(1),
+    recordedAt: InstantSchema }).strict()).optional(),
   snapshotId: IdSchema.nullable(),
   editRecovery: z.object({ recoveryId: IdSchema, baseRevision: z.number().int().nonnegative().safe() }).strict().optional(),
   actions: PartnerCaseRuntimeActionsSchema,

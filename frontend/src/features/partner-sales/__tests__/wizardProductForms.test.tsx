@@ -18,7 +18,7 @@ import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales
 import { CanonicalStairLayerSummary } from '../../contract-creation/components/product-modal-system/CanonicalStairLayerSummary';
 import { PartnerTechnicalDraftEditor } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
 import { buildPartnerProductionTechnicalDraft } from '../../contract-creation/partner/partnerProductionTechnicalDraft';
-import { refreshPartnerTechnicalProductVersion } from '../../contract-creation/partner/partnerTechnicalDraftAdapter';
+import { draftForPartnerTechnicalEdit, refreshPartnerTechnicalProductVersion } from '../../contract-creation/partner/partnerTechnicalDraftAdapter';
 
 test('returned Partner row can adopt a current catalog version without losing row identity', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
@@ -35,6 +35,25 @@ test('returned Partner row can adopt a current catalog version without losing ro
   assert.equal(refreshed.rows[0].productRowId, 'returned-row');
   assert.equal(refreshed.rows[0].catalogSnapshotVersion, product.catalogSnapshotVersion);
   assert.equal(refreshed.inputRevision, 4);
+});
+
+test('editing a returned row with retained catalog evidence opens the current version and keeps its row identity', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const current = catalog.products[0];
+  const retained = { ...current, catalogSnapshotVersion: '2026-08-01T00:00:00.000Z' };
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 3,
+    rows: [{ productRowId: 'returned-row', catalogItemId: current.catalogItemId,
+      catalogSnapshotVersion: retained.catalogSnapshotVersion, family: 'prepared',
+      configuration: { kind: 'readyPiece', unit: 'squareMeter', quantity: '2' } }],
+  });
+  const html = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft}
+    products={[current, retained]} currentProducts={[current]} operations={catalog.operations}
+    onChange={() => undefined} />);
+  assert.match(html, /نسخهٔ کاتالوگ تغییر کرده است/);
+  const editing = draftForPartnerTechnicalEdit(draft, 'returned-row', [current]);
+  assert.equal(editing.rows[0].productRowId, 'returned-row');
+  assert.equal(editing.rows[0].catalogSnapshotVersion, current.catalogSnapshotVersion);
+  assert.equal(editing.rows[0].configuration.quantity, '2');
 });
 
 test('Partner longitudinal configuration shows the shared mandatory switch and percentage', () => {

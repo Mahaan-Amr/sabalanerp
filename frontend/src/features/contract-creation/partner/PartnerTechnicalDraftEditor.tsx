@@ -6,7 +6,7 @@ import {
   type PartnerTechnicalDraft, type PartnerTechnicalFamily, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
 import { parseCanonicalDecimal, parseStableIdentity, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
-import { ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpRialInput, ErpSelect } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpRialInput, ErpSelect } from '@/components/erp';
 import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numberFormat';
 import { PreparedProductSection } from '../components/product-modal-system/PreparedProductSection';
 import { LongitudinalProductSection } from '../components/product-modal-system/LongitudinalProductSection';
@@ -18,7 +18,7 @@ import { convertCompactLengthUnit } from '../components/product-modal-system/pro
 import type { ContractProduct, Product } from '../types/contract.types';
 import { addPartnerTechnicalDependent, addPartnerTechnicalProduct, commitPartnerTechnicalField, removePartnerTechnicalDependent, removePartnerTechnicalProduct,
   confirmPartnerContractConfiguration, retainPartnerTechnicalFieldText } from './partnerTechnicalDraftAdapter';
-import { refreshPartnerTechnicalProductVersion, setPartnerTechnicalRetailUnitPrice } from './partnerTechnicalDraftAdapter';
+import { draftForPartnerTechnicalEdit, refreshPartnerTechnicalProductVersion, setPartnerTechnicalRetailUnitPrice } from './partnerTechnicalDraftAdapter';
 import { TechnicalProductConfiguration } from './TechnicalProductConfiguration';
 import { partnerRetailPriceUnitLabel, partnerSelectableFamilies } from './partnerPricingUnit';
 import { ContractProductCatalog, type ContractCatalogFamily } from '../components/steps/ContractProductCatalog';
@@ -80,14 +80,12 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
     if (!focusProductRowId || focused.current === focusProductRowId) return;
     const row = draft.rows.find(item => item.productRowId === focusProductRowId);
     if (!row) return;
-    const product = products.find(item => item.catalogItemId === row.catalogItemId
-      && item.catalogSnapshotVersion === row.catalogSnapshotVersion);
-    const current = product ?? products.find(item => item.catalogItemId === row.catalogItemId
+    const current = currentProducts.find(item => item.catalogItemId === row.catalogItemId
       && item.isAvailable && item.families.includes(row.family));
     if (current) { focused.current = focusProductRowId;
-      setModal({ draft: product ? draft : refreshPartnerTechnicalProductVersion(draft, focusProductRowId, current),
+      setModal({ draft: draftForPartnerTechnicalEdit(draft, focusProductRowId, currentProducts),
         productRowId: focusProductRowId, mode: 'edit' }); }
-  }, [draft, focusProductRowId, products]);
+  }, [currentProducts, draft, focusProductRowId]);
   const add = (catalogItemId: string) => {
     const product = currentProducts.find(item => item.catalogItemId === catalogItemId);
     if (!product) return;
@@ -129,9 +127,9 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
     {!draft.rows.length && <div className="sds-text-muted py-5 text-sm">هنوز محصولی اضافه نشده است</div>}
     {draft.rows.map(row => {
       const product = products.find(item => item.catalogItemId === row.catalogItemId && item.catalogSnapshotVersion === row.catalogSnapshotVersion);
-      if (!product) {
-        const current = products.find(item => item.catalogItemId === row.catalogItemId && item.isAvailable
-          && item.families.includes(row.family));
+      const current = currentProducts.find(item => item.catalogItemId === row.catalogItemId && item.isAvailable
+        && item.families.includes(row.family));
+      if (!product || !current) {
         return <ErpCard key={row.productRowId} className="space-y-3 p-4" data-contract-row-id={row.productRowId}>
           <ErpInlineState kind="stale" title={current
             ? 'نسخهٔ کاتالوگ این محصول تغییر کرده است. برای ادامه، نسخهٔ فعلی را بررسی کنید.'
@@ -169,7 +167,12 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
             <ErpPressable type="button" onClick={() => setDeleteRowId(null)}>انصراف</ErpPressable>
             <ErpPressable type="button" tone="danger" onClick={() => { onChange(removePartnerTechnicalProduct(draft, row.productRowId)); setDeleteRowId(null); }}>حذف</ErpPressable></div>
             : <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
-              <ErpPressable type="button" onClick={() => setModal({ draft, productRowId: row.productRowId, mode: 'edit' })}>ویرایش</ErpPressable>
+              {current && current.catalogSnapshotVersion !== row.catalogSnapshotVersion &&
+                <ErpBadge tone="warning">نسخهٔ کاتالوگ تغییر کرده است</ErpBadge>}
+              <ErpPressable type="button" onClick={() => setModal({
+                draft: draftForPartnerTechnicalEdit(draft, row.productRowId, currentProducts),
+                productRowId: row.productRowId, mode: 'edit',
+              })}>ویرایش</ErpPressable>
               <ErpPressable type="button" tone="danger" onClick={() => setDeleteRowId(row.productRowId)}>حذف</ErpPressable>
             </div>}
         </div>

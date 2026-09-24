@@ -87,6 +87,9 @@ export default function AccountingContractsPage() {
   const [partnerRecords, setPartnerRecords] = useState<Array<{ id: string; amount: string; currency: string;
     status: string; partnerContext: { caseNumber: string; internalRecordNumber: string;
       debtor: { displayName: string }; actionUrl: string } }>>([]);
+  const [partnerPage, setPartnerPage] = useState(1);
+  const [partnerTotal, setPartnerTotal] = useState(0);
+  const [partnerError, setPartnerError] = useState<string | null>(null);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
   const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState(query.search);
@@ -114,6 +117,7 @@ export default function AccountingContractsPage() {
   }, [canonicalQuery, replaceQuery, searchParams]);
 
   useEffect(() => setSearchInput(query.search), [query.search]);
+  useEffect(() => setPartnerPage(1), [query.search, query.dateFrom, query.dateTo]);
 
   useEffect(() => {
     if (searchInput.trim() === query.search) return;
@@ -132,7 +136,7 @@ export default function AccountingContractsPage() {
   const loadContracts = useCallback(async () => {
     try {
       setLoading(true);
-      const [response, partnerResponse] = await Promise.all([accountingAPI.getContracts({
+      const [contractsResult, partnerResult] = await Promise.allSettled([accountingAPI.getContracts({
         view: query.view || undefined,
         lifecycleView: query.lifecycleView,
         search: query.search || undefined,
@@ -142,10 +146,20 @@ export default function AccountingContractsPage() {
         dateTo: query.dateTo || undefined,
         page: query.page,
         pageSize: pagination.pageSize,
-      }), accountingAPI.getFinancialRecords({ kind: 'INVOICE_CANDIDATE', search: query.search || undefined,
-        page: 1, pageSize: 100 }).catch(() => null)]);
-      if (partnerResponse?.data.success) setPartnerRecords(
-        partnerResponse.data.data.items.filter((item: { sourceKind?: string }) => item.sourceKind === 'PARTNER_INTERNAL_RECORD'));
+      }), accountingAPI.getFinancialRecords({ kind: 'INVOICE_CANDIDATE', sourceKind: 'PARTNER_INTERNAL_RECORD',
+        search: query.search || undefined, dateFrom: query.dateFrom || undefined, dateTo: query.dateTo || undefined,
+        page: partnerPage, pageSize: 25 })]);
+      if (partnerResult.status === 'fulfilled' && partnerResult.value.data.success) {
+        setPartnerRecords(partnerResult.value.data.data.items);
+        setPartnerTotal(partnerResult.value.data.data.total);
+        setPartnerError(null);
+      } else {
+        setPartnerRecords([]);
+        setPartnerTotal(0);
+        setPartnerError('فهرست قراردادهای همکاری بارگذاری نشد. دوباره تلاش کنید.');
+      }
+      if (contractsResult.status === 'rejected') throw contractsResult.reason;
+      const response = contractsResult.value;
       if (response.data.success) {
         setRows(response.data.data.items);
         setPagination({
@@ -159,7 +173,7 @@ export default function AccountingContractsPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.pageSize, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceStatus, query.status, query.view]);
+  }, [pagination.pageSize, partnerPage, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceStatus, query.status, query.view]);
 
   useEffect(() => {
     loadContracts();
@@ -522,14 +536,20 @@ export default function AccountingContractsPage() {
           )}
         </div>
       )}
-      {partnerRecords.length > 0 && <ErpSection>
+      <ErpSection>
         <h2 className="sds-text-primary mb-3 text-base font-semibold">قراردادهای همکاری قابل بررسی</h2>
+        <p className="sds-text-secondary mb-3 text-sm">جستجو و بازهٔ تاریخ بالا بر این فهرست اعمال می‌شود. وضعیت قراردادهای عادی برای این رکوردهای مالی کاربرد ندارد.</p>
+        {partnerError && <ErpEmptyState icon={FaExclamationTriangle} title={partnerError} />}
+        {!partnerError && !partnerRecords.length && !loading && <ErpEmptyState icon={FaClipboardCheck} title="قرارداد همکاری یافت نشد" />}
         <div className="grid gap-3">{partnerRecords.map(record => <ErpCard key={record.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
           <PartnerAccountingIdentity context={record.partnerContext} />
           <div className="sds-text-secondary text-sm">{money(record.amount, record.currency)} · {record.status}</div>
           <ErpButton label="بررسی پرونده مالی" href={record.partnerContext.actionUrl} />
         </ErpCard>)}</div>
-      </ErpSection>}
+        {!partnerError && partnerTotal > 25 && <ErpPagination currentPage={partnerPage}
+          totalPages={Math.ceil(partnerTotal / 25)} totalItems={partnerTotal} itemsPerPage={25}
+          onPageChange={setPartnerPage} itemLabel="قرارداد همکاری" />}
+      </ErpSection>
       <ErpSection>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label className="block">

@@ -50,6 +50,41 @@ export const financialCommercialSnapshotMatches = (input: {
   if (snapshotTotal == null || input.current.totalAmount == null) return snapshotTotal == null && input.current.totalAmount == null;
   try { return new Prisma.Decimal(String(snapshotTotal)).eq(input.current.totalAmount); } catch { return false; }
 };
+
+export const auditedStairLayerPricingRecoveries = (input: {
+  canonicalRows: readonly {
+    productRowId: string;
+    parentProductRowId?: string;
+    commercial: { baseAmountToman?: string };
+  }[];
+  projectedRows: readonly { productRowId: string; baseAmountToman: string | null }[];
+  layers: readonly {
+    layerConfigurationId: string;
+    parentProductRowId: string;
+    result: { resultHash: string };
+  }[];
+  matchingAuditCommandId: string | null;
+}) => input.projectedRows.flatMap(row => {
+  const canonicalRow = input.canonicalRows.find(candidate => candidate.productRowId === row.productRowId);
+  if (!canonicalRow || canonicalRow.commercial.baseAmountToman !== undefined || row.baseAmountToman == null) return [];
+  const layer = input.layers.find(candidate =>
+    String(candidate.layerConfigurationId) === row.productRowId &&
+    candidate.parentProductRowId === canonicalRow.parentProductRowId
+  );
+  if (!layer) return [];
+  if (!input.matchingAuditCommandId) {
+    throw new ApprovedPricingEvidenceError(`Product ${row.productRowId} layer base recovery has no matching graph audit`);
+  }
+  return [{
+    productRowId: row.productRowId,
+    layerConfigurationId: String(layer.layerConfigurationId),
+    rawBaseAmountToman: null,
+    sealedBaseAmountToman: row.baseAmountToman,
+    layerResultHash: layer.result.resultHash,
+    graphAuditCommandId: input.matchingAuditCommandId,
+    rule: 'AUDITED_FROZEN_STAIR_LAYER_MATERIAL_BASE_V1' as const,
+  }];
+});
 export type ApprovedPricingAuditContext = { reason: string; correlationId: string; idempotencyKey: string;
   effectiveAuthority: { actorRole: string; workspace: string; workspacePermission: string; feature?: string; featurePermission?: string } };
 
@@ -786,7 +821,14 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
       if (graph.schemaVersion !== Number(graphState.schemaVersion) || graph.revision !== Number(graphState.revision)) {
         throw new ApprovedPricingEvidenceError('Canonical product graph version evidence conflicts with persisted state');
       }
-      const projection = projectCanonicalProductGraph(graph, 'accounting');
+      let projection: ReturnType<typeof projectCanonicalProductGraph>;
+      try {
+        projection = projectCanonicalProductGraph(graph, 'accounting');
+      } catch (error) {
+        throw new ApprovedPricingEvidenceError(`Canonical product pricing projection is invalid: ${
+          error instanceof Error ? error.message : String(error)
+        }`);
+      }
       const rawProducts = optionalRecord(snapshot.contractData)?.products;
       const canReconstructLegacyV1 = graph.schemaVersion === 1 && graph.calculationPolicy.rounding === 'rounding-v1';
       const migrationCommand = optionalRecord(migrationAudit?.command);
@@ -1066,6 +1108,22 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
       }
       if (compatibility && legacyQuantityNormalizations.length > 0) {
         compatibility = { ...compatibility, legacyQuantityNormalizations };
+      }
+      const stairLayerPricingRecoveries = auditedStairLayerPricingRecoveries({
+        canonicalRows: graph.rows,
+        projectedRows: graphRows,
+        layers: graph.layerConfigurations,
+        matchingAuditCommandId: (hasMatchingLegacyMigration || hasMatchingCanonicalWriter)
+          ? migrationAudit!.commandId : null,
+      });
+      if (stairLayerPricingRecoveries.length > 0) {
+        compatibility = {
+          ...(compatibility ?? {
+            evidenceOrigin: 'FROZEN_STAIR_LAYER_BASE_PROJECTION_V1' as const,
+            snapshotOriginallyMissing: false as const,
+          }),
+          stairLayerPricingRecoveries,
+        };
       }
       productGraph = {
         schemaVersion: Number(graphState.schemaVersion),

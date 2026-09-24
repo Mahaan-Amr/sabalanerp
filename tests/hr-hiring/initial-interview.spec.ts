@@ -36,6 +36,12 @@ test("schema-two interview completion preserves invalid evidence and atomically 
     companionPresent: ["YES_NO", "COMPANION"].includes(answerType) ? "NO" : null,
     strengths: answerType === "STRENGTHS_WEAKNESSES" ? ["۱", "۲", "۳", "۴", "۵"] : [],
     weaknesses: answerType === "STRENGTHS_WEAKNESSES" ? ["۱", "۲", "۳", "۴", "۵"] : [],
+    personalityTestSummary: answerType === "PERSONALITY_TEST_SUMMARY" ? {
+      discResult: "Di",
+      discNotProvided: false,
+      bigFiveResult: "",
+      eqResult: "",
+    } : undefined,
   });
   const answers = Object.fromEntries(
     criteria.map((criterion) => [criterion.stableId, answerFor(criterion.answerType)]),
@@ -133,6 +139,12 @@ test("completion error names and focuses the invalid criterion before retry succ
     companionPresent: ["YES_NO", "COMPANION"].includes(criterion.answerType) ? "NO" : null,
     strengths: criterion.answerType === "STRENGTHS_WEAKNESSES" ? ["۱", "۲", "۳", "۴", "۵"] : [],
     weaknesses: criterion.answerType === "STRENGTHS_WEAKNESSES" ? ["۱", "۲", "۳", "۴", "۵"] : [],
+    personalityTestSummary: criterion.answerType === "PERSONALITY_TEST_SUMMARY" ? {
+      discResult: "Di",
+      discNotProvided: false,
+      bigFiveResult: "",
+      eqResult: "",
+    } : undefined,
   }]));
   const draft = await page.request.put(`${apiBase}/initial-interview/draft`, {
     data: {

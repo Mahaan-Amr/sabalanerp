@@ -13,7 +13,7 @@ test('voucher list gives the page a posting decision without returning source ev
     { id: 'sepidar-draft', status: 'DRAFT', sourceType: 'SEPIDAR_ACC_VOUCHER', sourcePayload: { authority: 'SEPIDAR_UNTIL_CUTOVER', privateEvidence: 'hidden' } },
     { id: 'manual-draft', status: 'DRAFT', sourceType: 'سند دستی', sourcePayload: { privateEvidence: 'hidden' } },
   ];
-  const database = { accountingLedgerVoucher: { findMany: async () => rows } } as Parameters<typeof listLedgerVouchers>[0];
+  const database = { accountingLedgerVoucher: { findMany: async () => rows } } as unknown as Parameters<typeof listLedgerVouchers>[0];
   const result = await listLedgerVouchers(database, { bookId: 'book-1', fiscalYearId: 'year-1', status: 'DRAFT' });
   assert.match(result[0].postingBlockedReason ?? '', /سپیدار/);
   assert.equal(result[1].postingBlockedReason, null);

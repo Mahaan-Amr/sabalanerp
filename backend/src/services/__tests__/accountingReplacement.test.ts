@@ -101,17 +101,17 @@ test('archive-only final delta cannot satisfy the authority transfer gate', asyn
   const deltaPreview = await application.previewMigration({ bookId: 'book-1', sourceSystem: 'SEPIDAR', sourcePackageHash: hashAccountingReplacementEvidence(deltaPayload),
     packagePayload: deltaPayload, toolVersion: 'extractor/1', mappingVersion: 10, scope: { kind: 'FINAL_DELTA' }, records: sourceRecords.slice(3), actor: manager });
   await application.commitMigration({ runId: deltaPreview.id, expectedOutputHash: deltaPreview.outputHash, acceptanceReason: 'دلتا نهایی تطبیق شد.', actor: manager });
-  await application.recordParallelRun({ bookId: 'book-1', periodIdentity: '1405-05', completeMonth: true, fullClose: false, differences: [], actor: manager });
-  await application.recordParallelRun({ bookId: 'book-1', periodIdentity: '1405-06', completeMonth: true, fullClose: true, differences: [{ code: 'ROUNDING', amountRials: 1n, itemCount: 1, cause: 'گرد کردن قانونی', ownerId: 'manager-1', resolution: 'تأیید اختلاف توضیح‌داده‌شده', evidenceHash: 'a'.repeat(64), resolved: true }], actor: manager });
-  const proof = await application.recordRecoveryProof({
+  await assert.rejects(() => application.recordParallelRun({ bookId: 'book-1', periodIdentity: '1405-05', completeMonth: true, fullClose: false, differences: [], actor: manager }), /رویدادهای واقعی/);
+  await assert.rejects(() => application.recordRecoveryProof({
     bookId: 'book-1', checkpointIdentity: 'checkpoint-final', databaseHash: 'b'.repeat(64), filesHash: 'c'.repeat(64), configurationHash: 'd'.repeat(64),
     encryptedOffsite: true, immutableRecoveryPoint: true, restoreVerified: true, repeatedRestoreVerified: true,
     rpoMinutes: 10, rtoMinutes: 180, drillKind: 'QUARTERLY_FULL', actor: manager,
-  });
+  }), /مشاهده‌شده/);
   await assert.rejects(() => application.prepareCutover({
-    bookId: 'book-1', checkpointIdentity: proof.checkpointIdentity, writesBlocked: true, servicesDrained: true,
+    bookId: 'book-1', checkpointIdentity: 'checkpoint-final', writesBlocked: true, servicesDrained: true,
     finalDeltaRunId: deltaPreview.id, exactReconciliationHash: 'e'.repeat(64), acceptanceHash: 'f'.repeat(64), actor: manager,
   }), /انتقال مرجعیت/);
+  await assert.rejects(() => application.transferAuthority({ cutoverId: 'pretend', confirmed: true, reason: 'manual assertion', actor: manager }), /مسدود است/);
 });
 
 test('audit verification detects changed, missing and reordered evidence', () => {

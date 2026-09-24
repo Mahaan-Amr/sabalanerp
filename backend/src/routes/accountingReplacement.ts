@@ -82,6 +82,7 @@ router.get('/sepidar-backups', access('admin'), handle(async (req) => {
 }));
 
 router.post('/sepidar-backups', access('admin'), (req, res, next) => {
+  if (process.env.NODE_ENV !== 'development' || process.env.SEPIDAR_ALLOW_UNCOORDINATED_STAGING !== 'development-only') return res.status(503).json({ success: false, code: 'COORDINATED_BACKUP_RECOVERY_REQUIRED', message: 'دریافت پشتیبان سپیدار تا پوشش فایل‌های بارگذاری‌شده در بازیابی هماهنگ غیرفعال است.' });
   if (!backupRoot || !path.isAbsolute(backupRoot)) return res.status(503).json({ success: false, code: 'BACKUP_STORAGE_NOT_CONFIGURED', message: 'فضای خصوصی دریافت پشتیبان سپیدار تنظیم نشده است.' });
   next();
 }, backupUpload.single('file'), handle(async (req) => {

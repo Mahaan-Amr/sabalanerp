@@ -2,12 +2,15 @@ import { writeFileSync } from 'node:fs';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { verifyLedgerAuditChain } from '../services/accountingLedgerPrismaRepository';
 
-const bookId = 'cmub2hd63007zrqlphrzi5eey';
-const snapshotId = '107e07de8110cdbe0ceeb995a98c9111a223a738d182dd1c0f0cf4cf43bcd009';
+const bookId = process.env.SEPIDAR_TARGET_BOOK_ID?.trim() ?? '';
+const snapshotId = process.env.SEPIDAR_SNAPSHOT_ID?.trim() ?? '';
+if (!bookId || !snapshotId) throw new Error('SEPIDAR_TARGET_BOOK_ID and SEPIDAR_SNAPSHOT_ID are required');
 type CountAndSums = { count: bigint; debit: Prisma.Decimal; credit: Prisma.Decimal };
 const main = async () => {
   const db = new PrismaClient();
   try {
+    const snapshot = await db.accountingSepidarSourceSnapshot.findUnique({ where: { id: snapshotId }, select: { bookId: true, status: true, expectedRecordCount: true } });
+    if (!snapshot || snapshot.bookId !== bookId || snapshot.status !== 'COMPLETE') throw new Error('Complete snapshot for target book required');
     const results: Array<{ year: string; vouchers: number; lines: number; debitRials: string; creditRials: string }> = [];
     for (const [code, sourceRef] of [['1404', 1], ['1405', 10]] as const) {
       const fiscalYear = await db.accountingFiscalYear.findUniqueOrThrow({ where: { bookId_code: { bookId, code } } });
@@ -43,7 +46,7 @@ const main = async () => {
       db.accountingLedgerVoucher.count({ where: { bookId, sourceType: 'SEPIDAR_ACC_VOUCHER', status: { not: 'DRAFT' } } }),
       verifyLedgerAuditChain(db),
     ]);
-    if (archiveRows !== 223993 || sourceLinks !== 12846 || posted !== 0 || !audit.valid) throw new Error('Archive, lineage, posting status, or audit chain mismatch');
+    if (archiveRows !== snapshot.expectedRecordCount || sourceLinks !== results.reduce((sum, year) => sum + year.vouchers, 0) || posted !== 0 || !audit.valid) throw new Error('Archive, lineage, posting status, or audit chain mismatch');
     const report = { verifiedAt: new Date().toISOString(), snapshotId, bookId, archiveRows, sourceLinks, posted,
       ledgerAuditEntriesChecked: audit.checkedEntries, years: results, status: 'DRAFTS_RECONCILED_TO_SOURCE_NOT_STATUTORY' };
     const output = process.env.SEPIDAR_VERIFICATION_OUTPUT;

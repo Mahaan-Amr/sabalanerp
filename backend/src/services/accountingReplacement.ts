@@ -208,37 +208,20 @@ export const createAccountingReplacementApplication = (repository: AccountingRep
   getMigrationRun: (id: string) => repository.getMigration(id),
   searchLegacyArchive: (query: { bookId: string; query: string }) => repository.searchArchive(query.bookId, query.query),
   recordParallelRun: async (command: { bookId: string; periodIdentity: string; completeMonth: boolean; fullClose: boolean; differences: readonly ParallelDifference[]; actor: ReplacementActor }) => {
-    requireManager(command.actor); const accepted = command.completeMonth && command.differences.every((item) => item.resolved && item.cause.trim() && item.ownerId.trim() && item.resolution.trim() && /^[a-f0-9]{64}$/.test(item.evidenceHash));
-    if (!accepted) throw new AccountingReplacementError('PARALLEL_RUN_UNEXPLAINED_DIFFERENCE', 'همه اختلاف‌های اجرای موازی باید مالک، علت، راه‌حل و شاهد معتبر داشته باشند.', 409);
-    const run: ParallelRun = { id: randomUUID(), bookId: command.bookId, periodIdentity: command.periodIdentity, completeMonth: true, fullClose: command.fullClose, differences: command.differences, accepted, recordedAt: dependencies.now(), actorId: command.actor.id };
-    await repository.saveParallelRun(run); await repository.appendAudit('PARALLEL_RUN_ACCEPTED', run); return run;
+    requireManager(command.actor);
+    throw new AccountingReplacementError('VERIFIED_PARALLEL_RECONCILIATION_REQUIRED', 'پذیرش دورهٔ موازی تا اتصال به رویدادهای واقعی و تطبیق مستقل منبع و مقصد مسدود است.', 409);
   },
   recordRecoveryProof: async (command: Omit<RecoveryProof, 'id' | 'proven' | 'actorId' | 'recordedAt'> & { actor: ReplacementActor }) => {
-    requireManager(command.actor); [command.databaseHash, command.filesHash, command.configurationHash].forEach((hash) => requireHash(hash, 'اثر انگشت بازیابی'));
-    const proven = command.encryptedOffsite && command.immutableRecoveryPoint && command.restoreVerified && command.repeatedRestoreVerified && command.rpoMinutes <= 15 && command.rtoMinutes <= 240;
-    if (!proven) throw new AccountingReplacementError('RECOVERY_PROOF_INCOMPLETE', 'نقطه بازیابی باید رمز‌شده، حفاظت‌شده، دوبار بازیابی‌شده و در هدف زمان بازیابی باشد.', 409);
-    const proof: RecoveryProof = { ...command, id: randomUUID(), proven, actorId: command.actor.id, recordedAt: dependencies.now() };
-    delete (proof as any).actor; await repository.saveRecoveryProof(proof); await repository.appendAudit('RECOVERY_PROVEN', proof); return proof;
+    requireManager(command.actor);
+    throw new AccountingReplacementError('OBSERVED_RECOVERY_DRILL_REQUIRED', 'ثبت اثبات بازیابی تا اتصال به نتیجهٔ مشاهده‌شدهٔ تمرین بازیابی مسدود است.', 409);
   },
   prepareCutover: async (command: { bookId: string; checkpointIdentity: string; writesBlocked: boolean; servicesDrained: boolean; finalDeltaRunId: string; exactReconciliationHash: string; acceptanceHash: string; actor: ReplacementActor }) => repository.transaction(async (tx) => {
-    requireManager(command.actor); requireHash(command.exactReconciliationHash, 'اثر انگشت تطبیق نهایی'); requireHash(command.acceptanceHash, 'اثر انگشت پذیرش');
-    const proof = await tx.findRecoveryProof(command.bookId, command.checkpointIdentity); const parallel = await tx.listParallelRuns(command.bookId);
-    const finalDelta = await tx.getMigration(command.finalDeltaRunId);
-    if (!proof?.proven || finalDelta?.bookId !== command.bookId || finalDelta.status !== 'RECONCILED' || !command.writesBlocked || !command.servicesDrained || parallel.filter((item) => item.accepted && item.completeMonth).length < 2 || !parallel.some((item) => item.accepted && item.fullClose)) {
-      throw new AccountingReplacementError('CUTOVER_GATES_INCOMPLETE', 'انتقال مرجعیت به دو اجرای ماهانه، یک بستن کامل، توقف نوشتن و بازیابی اثبات‌شده نیاز دارد.', 409);
-    }
-    const run: CutoverRun = { id: randomUUID(), bookId: command.bookId, checkpointIdentity: command.checkpointIdentity, finalDeltaRunId: command.finalDeltaRunId,
-      exactReconciliationHash: command.exactReconciliationHash, acceptanceHash: command.acceptanceHash, writesBlocked: true, servicesDrained: true,
-      status: 'PREPARED', authorityTransferredAt: null, authorityTransferReason: null, sepidarReadOnly: false, sabalanAuthoritative: false,
-      firstAuthoritativeVoucherId: null, firstAuthoritativePostingAt: null, rollbackAllowed: true, failureCode: null, failureReason: null };
-    await tx.saveCutover(run); await tx.appendAudit('CUTOVER_PREPARED', run); return run;
+    requireManager(command.actor);
+    throw new AccountingReplacementError('OBSERVED_CUTOVER_GATES_REQUIRED', 'آماده‌سازی انتقال مرجعیت تا اتصال به توقف واقعی نوشتن، نقطهٔ بازیابی و تطبیق مستقل مسدود است.', 409);
   }),
   transferAuthority: async (command: { cutoverId: string; confirmed: boolean; reason: string; actor: ReplacementActor }) => repository.transaction(async (tx) => {
-    requireManager(command.actor); const candidate = await tx.getCutover(command.cutoverId); const already = candidate ? await tx.findTransferredCutover(candidate.bookId) : null;
-    if (already) throw new AccountingReplacementError('AUTHORITY_ALREADY_TRANSFERRED', 'مرجعیت حسابداری قبلاً منتقل شده و تکرار آن مجاز نیست.', 409);
-    const run = candidate; if (!run || run.status !== 'PREPARED' || !command.confirmed || !command.reason.trim()) throw new AccountingReplacementError('AUTHORITY_TRANSFER_NOT_READY', 'انتقال مرجعیت آماده یا صریحاً تأیید نشده است.', 409);
-    run.status = 'AUTHORITY_TRANSFERRED'; run.authorityTransferredAt = dependencies.now(); run.authorityTransferReason = command.reason.trim(); run.sepidarReadOnly = true; run.sabalanAuthoritative = true;
-    await tx.saveCutover(run); await tx.appendAudit('AUTHORITY_TRANSFERRED', { cutoverId: run.id, at: run.authorityTransferredAt }); return run;
+    requireManager(command.actor);
+    throw new AccountingReplacementError('AUTHORITY_TRANSFER_NOT_IMPLEMENTED', 'انتقال مرجعیت تا تکمیل دروازه‌های عملیاتی و ثبت نخستین سند مرجع مسدود است.', 409);
   }),
   acknowledgeAuthoritativeWrite: async (command: { cutoverId: string; voucherId: string; actor: ReplacementActor }) => repository.transaction(async (tx) => {
     requireWriter(command.actor); const run = await tx.getCutover(command.cutoverId);

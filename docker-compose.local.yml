@@ -80,6 +80,7 @@ services:
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       RECOVERY_STORAGE_DIR: /app/storage/recovery
       SEPIDAR_BACKUP_STORAGE_ROOT: /app/storage/sepidar-backups
+      SEPIDAR_ALLOW_UNCOORDINATED_STAGING: development-only
       RECOVERY_COORDINATION_DIR: /app/recovery-coordination
       INQUIRY_RECOVERY_SOURCE_DIR: /app/recovery-sources/inquiry
       INQUIRY_RECOVERY_COORDINATED: "true"

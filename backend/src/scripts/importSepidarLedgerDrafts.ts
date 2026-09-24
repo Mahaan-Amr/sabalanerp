@@ -6,8 +6,9 @@ import { parseSepidarLocalDateTime } from '../services/sepidarCalendar';
 
 type SourceRow = { sourceKey: string; sourceHash: string; payload: unknown };
 const asObject = (value: unknown) => value as Record<string, unknown>;
-const bookId = 'cmub2hd63007zrqlphrzi5eey';
-const snapshotId = '107e07de8110cdbe0ceeb995a98c9111a223a738d182dd1c0f0cf4cf43bcd009';
+const bookId = process.env.SEPIDAR_TARGET_BOOK_ID?.trim() ?? '';
+const snapshotId = process.env.SEPIDAR_SNAPSHOT_ID?.trim() ?? '';
+if (!bookId || !snapshotId) throw new Error('SEPIDAR_TARGET_BOOK_ID and SEPIDAR_SNAPSHOT_ID are required');
 const actor = { id: 'sepidar-user-approved-development-import', profile: 'ACCOUNTING_MANAGER' as const };
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 const idFor = (kind: string, sourceId: string) => sha(`${bookId}:${kind}:${sourceId}`);

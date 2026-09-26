@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates } from './accountingListProjection';
+import { resolveAccountingWorkAttention } from './accountingWorkAttention';
 import { normalizePersianSearchTokens } from './crmCustomerSearch';
 import { randomUUID } from 'node:crypto';
 import { canonicalHash, InstantSchema } from '@sabalanerp/partner-sales-contracts';
@@ -820,6 +821,22 @@ const buildContractRow = async (contract: any, settings: any) => {
     }
   ];
 
+  const attention = resolveAccountingWorkAttention({
+    eligible,
+    invoiceStatus,
+    receivableStatus,
+    taxStatus,
+    hasReceivable: receivables.some((item: any) => item.status !== ReceivableStatus.VOIDED),
+    missingTaxFields: missingFields,
+    openCorrections,
+    openBlockerFlags: openFlags.filter((flag: any) => flag.severity === AccountingFlagSeverity.BLOCKER),
+    openInvoiceCandidates,
+    overdueReceivables,
+    assignedUsers: contract.accountingAssignees || {},
+    signedAt: contract.signedAt,
+    createdAt: contract.createdAt,
+  });
+
   return {
     contractId: contract.id,
     contractNumber: contract.contractNumber,
@@ -853,6 +870,7 @@ const buildContractRow = async (contract: any, settings: any) => {
       remainingAmount: decimalToString(remainingAmount)
     },
     financialRecords: normalizeFinancialRecords(records, contractAmount),
+    attention,
     nextBestActions
   };
 };
@@ -979,15 +997,23 @@ const attachAccountingCollections = async (contracts: any[]) => {
     }),
     prisma.accountingContractFlag.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, severity: true },
+      select: { contractId: true, status: true, severity: true, title: true, createdAt: true, assignedToUserId: true },
       orderBy: { createdAt: 'desc' }
     }),
     prisma.accountingCorrectionRequest.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true },
+      select: { contractId: true, status: true, createdAt: true, assignedToUserId: true },
       orderBy: { createdAt: 'desc' }
     })
   ]);
+
+  const assigneeIds = [...new Set([...flags, ...corrections]
+    .map((item) => item.assignedToUserId).filter((id): id is string => Boolean(id)))];
+  const assignees = assigneeIds.length ? await prisma.user.findMany({
+    where: { id: { in: assigneeIds } }, select: { id: true, firstName: true, lastName: true },
+  }) : [];
+  const assigneeNames = Object.fromEntries(assignees.map((user) =>
+    [user.id, `${user.firstName} ${user.lastName}`.trim()]));
 
   return contracts.map((contract) => ({
     ...contract,
@@ -996,7 +1022,8 @@ const attachAccountingCollections = async (contracts: any[]) => {
     accountingPayments: payments.filter((record) => record.contractId === contract.id),
     accountingTaxRecords: taxRecords.filter((record) => record.contractId === contract.id),
     accountingFlags: flags.filter((record) => record.contractId === contract.id),
-    accountingCorrections: corrections.filter((record) => record.contractId === contract.id)
+    accountingCorrections: corrections.filter((record) => record.contractId === contract.id),
+    accountingAssignees: assigneeNames,
   }));
 };
 
@@ -1109,7 +1136,16 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
       });
     }
   }
-  if (reviewableView || query.sort === 'attention') {
+  if (query.sort === 'work_queue') {
+    items = [...items].sort((left, right) => {
+      const leftPriority = left.attention?.priority ?? Number.MAX_SAFE_INTEGER;
+      const rightPriority = right.attention?.priority ?? Number.MAX_SAFE_INTEGER;
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      const leftSince = left.attention?.waitingSince ? new Date(left.attention.waitingSince).getTime() : Number.MAX_SAFE_INTEGER;
+      const rightSince = right.attention?.waitingSince ? new Date(right.attention.waitingSince).getTime() : Number.MAX_SAFE_INTEGER;
+      return leftSince - rightSince;
+    });
+  } else if (reviewableView || query.sort === 'attention') {
     items = orderReviewableContracts(items);
   }
 
@@ -1147,7 +1183,7 @@ export const getAccountingWorkspace = async (query: any = {}, actor?: Accounting
   const now = new Date();
   const [period, contractResponse, records, receivables, payments, taxRecords, corrections, auditLogs] = await Promise.all([
     getOrCreateCurrentPeriod(),
-    listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }),
+    listAccountingContracts({ view: 'reviewable', sort: 'work_queue', page: 1, pageSize: 12 }),
     prisma.accountingFinancialRecord.findMany({ where: scope.financial(), orderBy: { createdAt: 'desc' }, take: 8 }),
     prisma.accountingReceivable.findMany({ where: scope.receivable(), orderBy: { dueDate: 'asc' }, take: 8 }),
     prisma.accountingPaymentStatus.findMany({ where: scope.payment(), orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }], take: 8 }),

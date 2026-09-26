@@ -52,6 +52,7 @@ import { ErpPressable } from '@/components/erp';
 import { DutyCountBadge } from '@/features/cross-workspace-duties/DutyCountBadge';
 import { useCrossWorkspaceDutyCount } from '@/features/cross-workspace-duties/useCrossWorkspaceDutyCount';
 import { projectHrNavigation } from '@/features/hr/hrAccessNavigation';
+import { accountingGroupHref, accountingNavigationGroups } from '@/features/accounting/accountingNavigation';
 
 interface NavigationItem {
   name: string;
@@ -577,110 +578,19 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
       case WORKSPACES.ACCOUNTING:
         return [
           {
-            name: "دفترکل",
-            namePersian: "دفترکل و کدینگ",
-            href: "/dashboard/accounting/ledger",
-            icon: FaCalculator,
-            show: true,
-          },
-          {
-            name: "Supply Chain Accounting",
-            namePersian: "خرید، موجودی و بهای تمام‌شده",
-            href: "/dashboard/accounting/supply-chain",
-            icon: FaClipboardList,
-            show: true,
-          },
-          {
-            name: "Accounting Dashboard",
-            namePersian: "داشبورد حسابداری",
+            name: "Accounting work",
+            namePersian: "کارهای امروز",
             href: "/dashboard/accounting",
-            icon: FaChartLine,
-            show: true,
-          },
-          {
-            name: "Period End",
-            namePersian: "پایان دوره و گزارش قانونی",
-            href: "/dashboard/accounting/period-end",
             icon: FaClipboardList,
             show: true,
           },
-          {
-            name: "Accounting Dispatch",
-            namePersian: "فرمان‌های ارسال",
-            href: "/dashboard/accounting/dispatch",
-            icon: FaTruck,
+          ...accountingNavigationGroups.map((group) => ({
+            name: group.id,
+            namePersian: group.label,
+            href: accountingGroupHref(group.id),
+            icon: ({ review: FaClipboardList, money: FaMoneyCheckAlt, records: FaCalculator, reports: FaChartLine })[group.id],
             show: true,
-          },
-          {
-            name: "Contracts",
-            namePersian: "قراردادهای قابل بررسی",
-            href: "/dashboard/accounting/contracts",
-            icon: FaFileContract,
-            show: true,
-          },
-          {
-            name: "Invoice Candidates",
-            namePersian: "پیش‌نویس صورتحساب‌ها",
-            href: "/dashboard/accounting/invoice-candidates",
-            icon: FaFileAlt,
-            show: true,
-          },
-          {
-            name: "Receivables",
-            namePersian: "دریافتنی‌ها",
-            href: "/dashboard/accounting/receivables",
-            icon: FaCalculator,
-            show: true,
-          },
-          {
-            name: "Customer Accounts",
-            namePersian: "حساب‌های مالی مشتریان",
-            href: "/dashboard/accounting/customer-accounts",
-            icon: FaCalculator,
-            show: true,
-          },
-          {
-            name: "Payments",
-            namePersian: "دریافت‌ها و چک‌ها",
-            href: "/dashboard/accounting/payments",
-            icon: FaCalculator,
-            show: true,
-          },
-          {
-            name: "Treasury Control",
-            namePersian: "کنترل خزانه‌داری",
-            href: "/dashboard/accounting/treasury",
-            icon: FaMoneyCheckAlt,
-            show: true,
-          },
-          {
-            name: "Tax",
-            namePersian: "مالیات و سامانه مودیان",
-            href: "/dashboard/accounting/tax",
-            icon: FaClipboardList,
-            show: true,
-          },
-          {
-            name: "Tax Operations",
-            namePersian: "عملیات مالیاتی قطعی",
-            href: "/dashboard/accounting/tax-center",
-            icon: FaClipboardList,
-            show: true,
-          },
-          {
-            name: "Audit",
-            namePersian: "سوابق عملیات",
-            href: "/dashboard/accounting/audit",
-            icon: FaChartLine,
-            show: true,
-          },
-          {
-            name: "Accountant Performance",
-            namePersian: "عملکرد حسابداران",
-            href: "/dashboard/accounting/performance",
-            icon: FaUserClock,
-            show: true,
-          },
+          })),
           {
             name: "Biometric Connector",
             namePersian: "وضعیت اسکنر اثر انگشت",
@@ -689,13 +599,6 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show:
               currentUser?.role === "ADMIN" ||
               Boolean(currentUser?.permissions?.features?.some((permission) => permission.feature === "accounting_biometric_diagnostics_view")),
-          },
-          {
-            name: "Settings",
-            namePersian: "تنظیمات حسابداری",
-            href: "/dashboard/accounting/settings",
-            icon: FaCog,
-            show: true,
           },
         ];
 

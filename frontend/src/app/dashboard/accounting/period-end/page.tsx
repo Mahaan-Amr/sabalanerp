@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ErpBadge,
   ErpButton,
@@ -17,6 +18,7 @@ import {
   ErpSheet,
 } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { AccountingFixedAssetsPanel } from '@/features/accounting/AccountingFixedAssetsPanel';
 
 type Tab = 'assets' | 'payroll' | 'schedules' | 'reports' | 'tax' | 'close' | 'archive';
 type Notice = { kind: 'success' | 'error'; title: string };
@@ -51,18 +53,27 @@ const digits = (value: unknown) => {
 const dateFa = (value?: string | null) => value ? new Date(value).toLocaleDateString('fa-IR') : '—';
 
 export default function AccountingPeriodEndPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [context, setContext] = useState<any>();
   const [overview, setOverview] = useState<any>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<Tab>('assets');
+  const requestedTab = searchParams.get('tab');
+  const tab: Tab = requestedTab && ['assets', 'payroll', 'schedules', 'reports', 'tax', 'close', 'archive'].includes(requestedTab)
+    ? requestedTab as Tab : 'assets';
+  const setTab = (next: Tab) => {
+    const query = new URLSearchParams(searchParams.toString());
+    query.set('tab', next);
+    router.replace(`/dashboard/accounting/period-end?${query.toString()}`, { scroll: false });
+  };
   const [notice, setNotice] = useState<Notice>();
   const [closeReason, setCloseReason] = useState('');
   const [pendingClose, setPendingClose] = useState<{ id: string; kind: 'CLOSE' | 'REOPEN' }>();
   const [report, setReport] = useState({ reportKind: 'TRIAL_BALANCE', fiscalYearId: '', mappingVersionId: '', statutoryFormatId: '', from: '', to: '', cutoffAt: '', comparativeFrom: '', comparativeTo: '', cashFlowMethod: 'DIRECT', legalBookKind: 'JOURNAL' });
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const contextResponse = await accountingAPI.getLedgerContext();
       const nextContext = contextResponse.data.data;
@@ -79,7 +90,7 @@ export default function AccountingPeriodEndPage() {
       }
     } catch (error: any) {
       setNotice({ kind: 'error', title: error.response?.data?.error || 'خواندن اطلاعات پایان دوره ناموفق بود.' });
-    } finally { setLoading(false); }
+    } finally { if (!silent) setLoading(false); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -105,7 +116,7 @@ export default function AccountingPeriodEndPage() {
       title="پایان دوره و گزارش‌های قانونی"
       description="دارایی ثابت، حقوق، برنامه‌های شناسایی، مالیات، گزارش رسمی و بستن دوره از یک زنجیره قابل‌ردیابی"
       backHref="/dashboard/accounting"
-      actions={[{ label: 'به‌روزرسانی', onClick: load, tone: 'neutral', variant: 'outline' }]}
+      actions={[{ label: 'به‌روزرسانی', onClick: () => void load(), tone: 'neutral', variant: 'outline' }]}
     >
       {notice && <ErpInlineState kind={notice.kind} title={notice.title} />}
       <ErpMetricGrid items={[
@@ -126,9 +137,10 @@ export default function AccountingPeriodEndPage() {
         />
       </ErpSection>
 
-      {tab === 'assets' && <ErpSection title="دفتر دارایی‌های ثابت" description="استهلاک فقط پس از شاهد آماده‌به‌کار آغاز می‌شود و مبنای دفتری از مبنای مالیاتی جدا می‌ماند.">
-        {!overview?.assets?.length ? <ErpEmptyState title="هنوز دارایی ثابتی ثبت نشده است." description="سیاست طبقه و هویت پایدار دارایی از مسیر مدیر حسابداری ثبت می‌شود." /> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{overview.assets.map((asset: any) => <ErpCard key={asset.id} className="p-4"><div className="flex items-start justify-between gap-3"><div><strong>{asset.registerNumber} · {asset.titlePersian}</strong><span className="mt-1 block text-sm text-[var(--sds-text-secondary)]">{asset.location || 'مکان ثبت نشده'} · {digits(asset.components?.length)} جزء</span></div><ErpBadge tone={toneOf(asset.status) as any}>{statusFa[asset.status] || asset.status}</ErpBadge></div><div className="mt-3 grid gap-1 text-sm"><span>بهای دفتری: {digits(asset.bookCostRials)} ریال</span><span>مبنای مالیاتی: {digits(asset.taxCostRials)} ریال</span><span>آماده‌به‌کار: {dateFa(asset.readyForUseAt)}</span></div></ErpCard>)}</div>}
-      </ErpSection>}
+      {tab === 'assets' && <AccountingFixedAssetsPanel book={book} years={years}
+        policies={overview?.assetPolicies || []} assets={overview?.assets || []}
+        accessProfile={context?.accessProfile || 'VIEWER'}
+        onRefresh={() => load(true)} />}
 
       {tab === 'payroll' && <ErpSection title="تحویل و تسویه حقوق" description="جزئیات فردی در منابع انسانی می‌ماند؛ دفترکل فقط خلاصه متوازن و تعهدات کنترل‌شده را می‌بیند.">
         {!overview?.payroll?.length ? <ErpEmptyState title="تحویل تأییدشده‌ای از منابع انسانی دریافت نشده است." /> : <div className="space-y-3">{overview.payroll.map((handoff: any) => <ErpCard key={handoff.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><strong>دوره حقوق {handoff.payrollRunId} · نسخه {Number(handoff.payrollRunVersion).toLocaleString('fa-IR')}</strong><ErpBadge tone={toneOf(handoff.status) as any}>{statusFa[handoff.status] || handoff.status}</ErpBadge></div><div className="mt-3 grid gap-2 md:grid-cols-3"><span>بدهکار: {digits(handoff.debitTotalRials)} ریال</span><span>بستانکار: {digits(handoff.creditTotalRials)} ریال</span><span>تعهد باز: {digits(handoff.obligations?.filter((item: any) => item.status !== 'SETTLED').length)} مورد</span></div></ErpCard>)}</div>}
@@ -138,7 +150,7 @@ export default function AccountingPeriodEndPage() {
         {!overview?.schedules?.length ? <ErpEmptyState title="برنامه شناسایی فعالی وجود ندارد." /> : <div className="grid gap-3 md:grid-cols-2">{overview.schedules.map((schedule: any) => <ErpCard key={schedule.id} className="p-4"><div className="flex items-center justify-between gap-3"><strong>{schedule.scheduleIdentity} · نسخه {Number(schedule.version).toLocaleString('fa-IR')}</strong><ErpBadge tone={toneOf(schedule.status) as any}>{statusFa[schedule.status] || schedule.status}</ErpBadge></div><div className="mt-3 grid gap-1 text-sm"><span>کل: {digits(schedule.totalRials)} ریال</span><span>شناسایی‌شده: {digits(schedule.recognizedRials)} ریال</span><span>بازبینی بعدی: {dateFa(schedule.nextReviewAt)}</span></div></ErpCard>)}</div>}
       </ErpSection><ErpSection title="برآوردها، ذخایر و موارد احتمالی">{!overview?.estimates?.length ? <ErpEmptyState title="پرونده برآورد یا احتمال بازی وجود ندارد." /> : <div className="grid gap-3 md:grid-cols-2">{overview.estimates.map((item: any) => <ErpCard key={item.id} className="p-4"><div className="flex items-center justify-between gap-3"><strong>{item.titlePersian}</strong><ErpBadge tone={item.classification === 'RECOGNIZED_PROVISION' ? 'warning' : 'info'}>{statusFa[item.classification] || item.classification}</ErpBadge></div><span className="mt-3 block text-sm">بازبینی: {dateFa(item.nextReviewAt)}</span></ErpCard>)}</div>}</ErpSection></div>}
 
-      {tab === 'reports' && <div className="space-y-4"><ErpSection title="ساخت snapshot رسمی" description="PDF و Excel باید از همین dataset منجمد و یک اثر انگشت واحد ساخته شوند.">
+      {tab === 'reports' && <div className="space-y-4"><ErpSection title="ساخت نسخه رسمی" description="نسخه‌های چاپی و صفحه‌گسترده از مجموعه‌داده منجمد و یک اثر انگشت واحد ساخته می‌شوند.">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           <label><span className="mb-2 block text-sm">نوع گزارش</span><ErpSelect value={report.reportKind} onChange={(event) => setReport({ ...report, reportKind: event.target.value })}><option value="TRIAL_BALANCE">تراز آزمایشی</option><option value="FINANCIAL_STATEMENT">صورت‌های مالی</option><option value="CASH_FLOW">جریان وجوه نقد</option><option value="LEGAL_BOOK">دفاتر قانونی</option></ErpSelect></label>
           <label><span className="mb-2 block text-sm">سال مالی</span><ErpSelect value={report.fiscalYearId} onChange={(event) => setReport({ ...report, fiscalYearId: event.target.value })}>{years.map((year: any) => <option key={year.id} value={year.id}>{year.titlePersian}</option>)}</ErpSelect></label>
@@ -151,7 +163,7 @@ export default function AccountingPeriodEndPage() {
           {report.reportKind === 'FINANCIAL_STATEMENT' && <><label><span className="mb-2 block text-sm">ابتدای دوره مقایسه‌ای</span><ErpInput type="date" value={report.comparativeFrom} onChange={(event) => setReport({ ...report, comparativeFrom: event.target.value })} /></label><label><span className="mb-2 block text-sm">انتهای دوره مقایسه‌ای</span><ErpInput type="date" value={report.comparativeTo} onChange={(event) => setReport({ ...report, comparativeTo: event.target.value })} /></label></>}
           <label><span className="mb-2 block text-sm">زمان برش</span><ErpInput type="datetime-local" value={report.cutoffAt} onChange={(event) => setReport({ ...report, cutoffAt: event.target.value })} /></label>
         </div><div className="mt-4 flex justify-end"><ErpButton label={saving ? 'در حال ساخت…' : 'ساخت نسخه رسمی منجمد'} disabled={saving || !report.fiscalYearId || !report.from || !report.to || !report.cutoffAt || (['FINANCIAL_STATEMENT', 'CASH_FLOW'].includes(report.reportKind) && !report.mappingVersionId) || (report.reportKind === 'LEGAL_BOOK' && !report.statutoryFormatId) || (report.reportKind === 'FINANCIAL_STATEMENT' && Boolean(report.comparativeFrom) !== Boolean(report.comparativeTo))} onClick={() => act(() => accountingAPI.createOfficialReportSnapshot({ request: { ...report, mappingVersionId: report.mappingVersionId || undefined, statutoryFormatId: report.statutoryFormatId || undefined, comparativeFrom: report.comparativeFrom || undefined, comparativeTo: report.comparativeTo || undefined, cashFlowMethod: report.reportKind === 'CASH_FLOW' ? report.cashFlowMethod : undefined, legalBookKind: report.reportKind === 'LEGAL_BOOK' ? report.legalBookKind : undefined, bookId: book.id, columns: 8, level: report.reportKind === 'LEGAL_BOOK' && report.legalBookKind === 'GENERAL_LEDGER' ? 'GENERAL' : 'SUBSIDIARY' } }), 'نسخه رسمی با مجموعه‌داده و اثر انگشت واحد ساخته شد.')} /></div>
-      </ErpSection><ErpSection title="نسخه‌های رسمی منجمد">{!overview?.snapshots?.length ? <ErpEmptyState title="هنوز نسخه رسمی منجمد ساخته نشده است." /> : <div className="space-y-2">{overview.snapshots.map((snapshot: any) => <ErpCard key={snapshot.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><strong>{snapshot.snapshotIdentity}</strong><ErpBadge tone="success">رسمی و منجمد</ErpBadge></div><div className="mt-2 grid gap-1 text-sm"><span>نوع: {reportTypeFa[snapshot.reportType] || 'گزارش رسمی'}</span><span>برش: {dateFa(snapshot.cutoffAt)}</span><span className="break-all">اثر انگشت مجموعه‌داده: {snapshot.datasetHash}</span></div><div className="mt-3 flex flex-wrap justify-end gap-2"><ErpButton label="دریافت PDF فارسی" variant="outline" onClick={() => window.open(`/api/accounting/period-end/report-snapshots/${snapshot.id}/export.pdf`, '_blank', 'noopener,noreferrer')} /><ErpButton label="دریافت Excel فارسی" variant="outline" onClick={() => window.open(`/api/accounting/period-end/report-snapshots/${snapshot.id}/export.xlsx`, '_blank', 'noopener,noreferrer')} /></div></ErpCard>)}</div>}</ErpSection></div>}
+      </ErpSection><ErpSection title="نسخه‌های رسمی منجمد">{!overview?.snapshots?.length ? <ErpEmptyState title="هنوز نسخه رسمی منجمد ساخته نشده است." /> : <div className="space-y-2">{overview.snapshots.map((snapshot: any) => <ErpCard key={snapshot.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><strong>{snapshot.snapshotIdentity}</strong><ErpBadge tone="success">رسمی و منجمد</ErpBadge></div><div className="mt-2 grid gap-1 text-sm"><span>نوع: {reportTypeFa[snapshot.reportType] || 'گزارش رسمی'}</span><span>برش: {dateFa(snapshot.cutoffAt)}</span><span className="break-all">اثر انگشت مجموعه‌داده: {snapshot.datasetHash}</span></div><div className="mt-3 flex flex-wrap justify-end gap-2"><ErpButton label="دریافت نسخه چاپی فارسی" variant="outline" onClick={() => window.open(`/api/accounting/period-end/report-snapshots/${snapshot.id}/export.pdf`, '_blank', 'noopener,noreferrer')} /><ErpButton label="دریافت صفحه‌گسترده فارسی" variant="outline" onClick={() => window.open(`/api/accounting/period-end/report-snapshots/${snapshot.id}/export.xlsx`, '_blank', 'noopener,noreferrer')} /></div></ErpCard>)}</div>}</ErpSection></div>}
 
       {tab === 'tax' && <ErpSection title="تقویم تکالیف مالیاتی" description="مالیات ارزش افزوده، حقوق، تکلیفی و عملکرد با تلاش‌ها و رسیدهای مستقل پیگیری می‌شوند.">{!overview?.taxes?.length ? <ErpEmptyState title="تکلیف مالیاتی بازی وجود ندارد." /> : <div className="grid gap-3 md:grid-cols-2">{overview.taxes.map((item: any) => <ErpCard key={item.id} className="p-4"><div className="flex items-center justify-between gap-3"><strong>{item.obligationIdentity}</strong><ErpBadge tone={toneOf(item.status) as any}>{statusFa[item.status] || item.status}</ErpBadge></div><div className="mt-3 grid gap-1 text-sm"><span>مهلت: {dateFa(item.dueAt)}</span><span>پرداختنی: {digits(item.payableRials)} ریال</span><span>پرداخت‌شده: {digits(item.paidRials)} ریال</span><span>آخرین تلاش: {dateFa(item.attempts?.[0]?.attemptedAt)}</span></div></ErpCard>)}</div>}</ErpSection>}
 

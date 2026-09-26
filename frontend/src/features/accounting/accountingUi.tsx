@@ -72,6 +72,14 @@ export type AccountingContractRow = {
     financiallyApprovedAt?: string | null;
     createdAt: string;
   }>;
+  attention?: {
+    priority: number;
+    reason: string;
+    evidence: string;
+    owner: string;
+    waitingSince: string;
+    nextAction: string;
+  } | null;
   nextBestActions?: Array<{
     kind: string;
     labelFa: string;

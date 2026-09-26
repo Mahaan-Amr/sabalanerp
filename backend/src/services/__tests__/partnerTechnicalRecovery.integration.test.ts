@@ -90,7 +90,8 @@ test('real pre-Case authority binds creator-private recovery to the current Part
     const denied = await service.checkpoint(command);
     assert.equal(denied.ok ? null : denied.error.code, 'PARTNER_NOT_ACTIVE', 'even a receipt replay reauthorizes current mutation rights');
     await tx.partnerProfile.update({ where: { id: actorId }, data: { state: 'TERMINATED', revision: { increment: 1 } } });
-    assert.equal((await service.read(access)).ok, false);
+    assert.equal((await service.read(access)).ok, true, 'terminated creators retain private recovery read access');
+    assert.equal((await service.checkpoint(command)).ok, false, 'termination still blocks writes');
   });
 });
 
@@ -164,6 +165,10 @@ test('real database policy and private catalog evidence produce a validated safe
     assert.equal(result.value.rows[0].quantity, '2');
     assert.equal(JSON.stringify(result.value).includes('1200000'), false);
     assert.equal(JSON.stringify(result.value).includes('mandatoryPercentage'), false);
+    const returned = await createPartnerTechnicalRecoveryService(dependencies).read(access);
+    if (!returned.ok) throw new Error(returned.error.code);
+    assert.equal(returned.value.retainedCatalog?.products[0]?.catalogItemId, product.id);
+    assert.equal(JSON.stringify(returned.value.retainedCatalog).includes('1200000'), false);
     const inquiryConfiguration = await resolveSavedTechnicalConfiguration(tx, { actorId,
       reference: result.value.rows[0].configurationRef });
     assert.equal(inquiryConfiguration.ok, true);
@@ -536,7 +541,7 @@ test('validated saves cannot reuse a stable row identity for another product fam
     const rebound = await replacement.save({ ...command, expectedRecoveryRevision: 1, idempotencyKey: 'rebind',
       draft: { ...command.draft, inputRevision: 8, rows: [{ ...command.draft.rows[0], family: 'volumetric' }] } });
     if (rebound.ok) throw new Error('Stable row ID rebound to a different family');
-    assert.equal(rebound.error.code, 'INTEGRITY_CONFLICT');
+    assert.equal(rebound.error.code, 'INVALID_PAYLOAD');
     const current = await createPartnerTechnicalRecoveryService(dependencies).read(access);
     if (!current.ok) throw new Error(current.error.code);
     assert.equal(current.value.recoveryRevision, 1);

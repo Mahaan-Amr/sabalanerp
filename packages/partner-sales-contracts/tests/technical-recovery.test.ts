@@ -3,6 +3,18 @@ import test from 'node:test';
 import { PartnerTechnicalCheckpointSchema, PartnerTechnicalCheckpointReceiptSchema,
   PartnerTechnicalLeaseRequestSchema, PartnerTechnicalLeaseReceiptSchema,
   PartnerTechnicalRecoveryViewSchema } from '@sabalanerp/partner-sales-contracts';
+import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
+
+test('recovery returns only public retained catalog evidence for editing a returned row', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const view = PartnerTechnicalRecoveryViewSchema.parse({ schemaVersion: 1, recoveryId: 'returned',
+    recoveryRevision: 2, updatedAt: '2026-09-24T00:00:00.000Z', draft: null,
+    mandatoryDefaults: { enabled: true, percentage: '25' }, retainedCatalog: catalog });
+  assert.equal(view.retainedCatalog?.products[0].catalogSnapshotVersion,
+    catalog.products[0].catalogSnapshotVersion);
+  assert.equal(PartnerTechnicalRecoveryViewSchema.safeParse({ ...view,
+    retainedCatalog: { ...catalog, privateRates: ['secret'] } }).success, false);
+});
 
 test('technical recovery wire preserves incomplete input but rejects actor authority, private fields and configuration refs', () => {
   const lease = { schemaVersion: 1 as const, recoveryId: 'draft', browserSessionId: 'browser',

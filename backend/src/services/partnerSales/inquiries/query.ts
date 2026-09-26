@@ -42,8 +42,6 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         superseded = false): 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED' | 'SUPERSEDED' | 'CANCELLED' =>
         outcome !== 'APPROVED' ? outcome : superseded ? 'SUPERSEDED'
           : expiresAt && clock.now.getTime() >= expiresAt.getTime() ? 'EXPIRED' : 'APPROVED';
-      const packageApprovedAt = inquiry.pricingReadyAt;
-      const packageExpiresAt = inquiry.pricingExpiresAt;
       const reasons = new Map<string, string>();
       for (const event of inquiry.events) {
         if (event.type === 'INQUIRY_CANCELLED' && event.reason) {
@@ -76,14 +74,14 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         const responseRows = inquiry.rows.map(row => {
           const definition = parseInquiryDefinition(row.definition);
           if (!definition) return null;
-          const currentState = state(row.outcome, packageExpiresAt ?? row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
+          const currentState = state(row.outcome, row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
           return { rowId: row.id, revision: row.revision, identity: definition.identity,
             description: definition.description, configuration: definition.configuration,
             ...(definition.deliveryFacts ? { deliveryFacts: definition.deliveryFacts } : {}),
             ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
             ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
-              approvedAt: (packageApprovedAt ?? row.approval.approvedAt).toISOString(),
-              expiresAt: (packageExpiresAt ?? row.approval.expiresAt).toISOString(),
+              approvedAt: row.approval.approvedAt.toISOString(),
+              expiresAt: row.approval.expiresAt.toISOString(),
               ...(row.approval.note ? { noteOrReason: row.approval.note } : {}) } :
               reasons.get(row.id) ? { noteOrReason: reasons.get(row.id) } : {}),
             used: Boolean(row.approval?.usages.length), state: currentState,
@@ -101,14 +99,14 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
       const rows = inquiry.rows.map(row => {
         const definition = parseInquiryDefinition(row.definition);
         if (!definition) return null;
-        const currentState = state(row.outcome, packageExpiresAt ?? row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
+        const currentState = state(row.outcome, row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
         const successor = row.successor;
         return { rowId: row.id, revision: row.revision, description: definition.description,
           state: currentState, configuration: definition.configuration, configurationRef: definition.configurationRef,
           ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
           ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
-            approvedAt: (packageApprovedAt ?? row.approval.approvedAt).toISOString(),
-            expiresAt: (packageExpiresAt ?? row.approval.expiresAt).toISOString(),
+            approvedAt: row.approval.approvedAt.toISOString(),
+            expiresAt: row.approval.expiresAt.toISOString(),
             ...(row.approval.note ? { noteOrReason: row.approval.note } : {}),
             approvedRowBinding: { inquiryId: inquiry.id, rowId: row.id, revision: row.revision } } : {}),
           ...(!row.approval && definition.predecessorReason ? { noteOrReason: definition.predecessorReason } : {}),
@@ -116,7 +114,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
           ...(row.predecessor ? { predecessor: { inquiryId: inquiry.id, rowId: row.predecessor.id,
             revision: row.predecessor.revision, ...(definition.predecessorReason ? { reason: definition.predecessorReason } : {}) } } : {}),
           ...(successor ? { successor: { inquiryId: inquiry.id, rowId: successor.id, revision: successor.revision,
-            state: state(successor.outcome, packageExpiresAt ?? successor.approval?.expiresAt) } } : {}),
+            state: state(successor.outcome, successor.approval?.expiresAt) } } : {}),
         };
       });
       if (rows.some(row => row === null)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;

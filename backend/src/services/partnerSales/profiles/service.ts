@@ -19,7 +19,7 @@ export interface PartnerProfileStore<Transaction = unknown> {
   lockProfile(transaction: Transaction, profileId: string): Promise<PartnerProfileRecord | null>;
   readActivationGates(transaction: Transaction, profile: PartnerProfileRecord): Promise<PartnerActivationGates>;
   updateProfile(transaction: Transaction, update: { profileId: string; expectedRevision: number; state: ProfileState;
-    revision: number; firstActivatedAt?: Date; irreversibleAt?: Date; disableUser?: boolean }): Promise<PartnerProfileRecord>;
+    revision: number; firstActivatedAt?: Date; irreversibleAt?: Date }): Promise<PartnerProfileRecord>;
   appendProfileEvent(transaction: Transaction, event: { profileId: string; revision: number; fromState: ProfileState;
     toState: ProfileState; actorId: string; reason: string; commandId: string; evidence: Record<string, unknown> }): Promise<string>;
   /** Opens a transaction-local path for already-authorized owner remediation.
@@ -62,8 +62,8 @@ const sameEvidence = (provided: readonly string[], current: readonly string[]) =
   new Set(provided).size === provided.length && provided.every(id => current.includes(id));
 
 function allowedTransition(from: ProfileState, to: Transition['to']): boolean {
-  if (from === 'TERMINATED' || from === to) return false;
-  if (to === 'ACTIVE') return from === 'PENDING' || from === 'SUSPENDED';
+  if (from === to) return false;
+  if (to === 'ACTIVE') return from === 'PENDING' || from === 'SUSPENDED' || from === 'TERMINATED';
   if (to === 'SUSPENDED') return from === 'ACTIVE';
   return true;
 }
@@ -109,7 +109,7 @@ export function createPartnerProfileService<Transaction = unknown>(
       if (!authorized.ok) return authorized;
       const gates = await dependencies.store.readActivationGates(transaction, profile);
       if (command.to === 'ACTIVE') {
-        const reactivation = profile.state === 'SUSPENDED' && Boolean(profile.firstActivatedAt);
+        const reactivation = ['SUSPENDED', 'TERMINATED'].includes(profile.state) && Boolean(profile.firstActivatedAt);
         const ready = reactivation
           ? gates.responderReady && gates.userActive && !gates.conflictingInternalAuthority && command.gateEvidenceIds.length === 0
           : activationReady(gates) && sameEvidence(command.gateEvidenceIds, gates.evidenceIds);
@@ -117,8 +117,8 @@ export function createPartnerProfileService<Transaction = unknown>(
       }
       const now = new Date();
       const revision = profile.revision + 1;
-      // Termination owns the Profile lock, so remediate pending inquiry work
-      // before the lifecycle state becomes terminal. The database guard rejects
+      // Deactivation owns the Profile lock, so remediate pending inquiry work
+      // before the lifecycle state becomes inactive. The database guard rejects
       // every other inquiry writer that resumes after this transaction commits.
       const remediation = command.to === 'TERMINATED'
         ? (await dependencies.store.beginRemediation(transaction, profile.id),
@@ -128,8 +128,7 @@ export function createPartnerProfileService<Transaction = unknown>(
       const updated = await dependencies.store.updateProfile(transaction, { profileId: profile.id,
         expectedRevision: profile.revision, state: command.to, revision,
         ...(command.to === 'ACTIVE' && !profile.firstActivatedAt ? { firstActivatedAt: now } : {}),
-        ...(command.to === 'ACTIVE' && !profile.irreversibleAt ? { irreversibleAt: now } : {}),
-        ...(command.to === 'TERMINATED' ? { disableUser: true } : {}) });
+        ...(command.to === 'ACTIVE' && !profile.irreversibleAt ? { irreversibleAt: now } : {}) });
       if (updated.revision !== revision || updated.state !== command.to) {
         return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
       }

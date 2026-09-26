@@ -36,7 +36,7 @@ test('direct activation HTTP port rejects legacy onboarding fields and validates
       purpose: 'PARTNER_DIRECT_ACTIVATION', actorId: 'admin-1', subject: { userId: 'fariba-1',
         displayName: 'فریبا پورشهید', active: true, role: 'SALES', userUpdatedAt: '2026-09-14T08:00:00.000Z',
         partnerState: 'NONE', canActivate: true, canRevert: false, customerCount: 0, inquiryCount: 0, caseCount: 0,
-        priorResponsibilityCount: 2 }, responders: [{ id: 'responder-1', label: 'پاسخ‌دهنده' }] } } }
+        priorResponsibilityCount: 2, blockers: [] }, responders: [{ id: 'responder-1', label: 'پاسخ‌دهنده' }] } } }
       : { data: { success: true, data: { schemaVersion: 4, commandId: 'activate-1', replayed: false,
         userId: 'fariba-1', profileId: 'profile-1', profileRevision: 1, responderAssignmentId: 'assignment-1',
         commercialAccountId: 'account-1', eventIds: ['event-1'], removedAccessCount: 3,
@@ -54,7 +54,7 @@ test('direct activation HTTP port rejects legacy onboarding fields and validates
   assert.equal((await port.execute({ ...command, cohortId: 'legacy' } as typeof command)).ok, false);
 });
 
-test('activation UI advances from independent enrollment to operational resume without a dead end', () => {
+test('activation UI ends after independent enrollment without a global operational action', () => {
   const base = { schemaVersion: 3 as const, purpose: 'PARTNER_ACTIVATION' as const, actorId: 'admin-1',
     release: { controlRevision: 5, status: 'READY' as const, actions: [] },
     cohort: { id: 'cohort-1', name: 'فروشندگان همکار', enrollmentOpen: true, operationsOpen: false },
@@ -67,10 +67,12 @@ test('activation UI advances from independent enrollment to operational resume w
   const afterEnrollment = { ...beforeEnrollment, subject: { ...beforeEnrollment.subject,
     gates: [{ id: 'ENROLLMENT' as const, label: 'عضویت مستقل در cohort', ready: true }] } };
   assert.equal(activationOperationAvailability(afterEnrollment).canEnroll, false);
-  assert.equal(activationOperationAvailability(afterEnrollment).canOpenOperations, true);
+  assert.deepEqual(activationOperationAvailability(afterEnrollment), {
+    enrolled: true, canDefineCohort: false, canOpenEnrollment: false, canEnroll: false,
+  });
 });
 
-test('activation operations port keeps cohort enrollment and pause as separate authenticated commands', async () => {
+test('activation operations port exposes only enrollment pause commands', async () => {
   const calls: Array<[string, unknown]> = [];
   const client = { post: async (path: string, body: unknown) => {
     calls.push([path, body]);
@@ -83,8 +85,8 @@ test('activation operations port keeps cohort enrollment and pause as separate a
     reason: 'تعریف cohort مستقل برای آزمون رابط' })).ok, true);
   assert.equal((await operations.enroll({ sellerId: 'fariba-1', expectedRevision: 2,
     reason: 'عضویت مستقل فروشنده در آزمون رابط' })).ok, true);
-  assert.equal((await operations.pause({ actorId: 'admin-1', kind: 'OPERATIONAL', paused: false,
-    expectedRevision: 3, reason: 'بازکردن عملیات پس از کنترل آزمون رابط' })).ok, true);
+  assert.equal((await operations.pause({ actorId: 'admin-1', kind: 'ENROLLMENT', paused: false,
+    expectedRevision: 3, reason: 'بازکردن ثبت‌نام پس از کنترل آزمون رابط' })).ok, true);
   assert.deepEqual(calls.map(([path]) => path), ['/partner/operations/cohort',
     '/partner/operations/cohort/enroll', '/partner/operations/pause']);
   const pause = calls[2][1] as { type: string; idempotency: { actorId: string; payloadHash: string } };

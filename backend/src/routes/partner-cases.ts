@@ -158,7 +158,7 @@ export async function allocatePartnerLinkedPair(tx: Prisma.TransactionClient, in
   if (!existingPartner.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   await tx.partnerCaseRevision.update({ where: { caseId_revision: { caseId: row.id, revision: row.headRevision } },
     data: { internalProjection: json({ partner: existingPartner.data, accounting: projections.value.accounting,
-      fulfillment: projections.value.fulfillment }), customerContent: json(effectiveCustomerContent),
+      fulfillment: projections.value.fulfillment }),
       customerProjection: json(projections.value.customer) } });
   if (legacyProjectId && tracedProjectId) {
       await tx.crmTimelineEvent.create({ data: { customerId: row.customerId,
@@ -515,9 +515,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         if (!allowed.ok) return allowed;
         const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
         const candidates = await tx.partnerInquiryRow.findMany({ where: { inquiry: { profileId: profile.id,
-          pricingExpiresAt: { gt: clock.now },
           ...(parsed.data.caseId ? { caseId: parsed.data.caseId } : {}) },
-          outcome: 'APPROVED', approval: { isNot: null } },
+          outcome: 'APPROVED', approval: { is: { expiresAt: { gt: clock.now } } } },
           orderBy: [{ approval: { approvedAt: 'desc' } }, { id: 'desc' }], take: 500,
           select: { id: true, revision: true, configurationHash: true, definition: true,
             inquiry: { select: { caseRevision: true } },
@@ -754,8 +753,10 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           orderBy: { createdAt: 'desc' }, select: { id: true, state: true, pricingState: true,
             customerConfirmationState: true, headRevision: true, integrityHash: true,
             customerContractId: true,
-            head: { select: { internalProjection: true } }, outputs: { orderBy: { recordedAt: 'desc' }, take: 1,
-              select: { id: true } } } });
+            head: { select: { internalProjection: true, customerProjection: true } },
+            events: { orderBy: { sequence: 'desc' }, take: body.caseId ? undefined : 0,
+              select: { sequence: true, type: true, recordedAt: true } },
+            outputs: { orderBy: { recordedAt: 'desc' }, take: 1, select: { id: true } } } });
         // A list can span several cases belonging to one profile. Acquire every
         // root first, in a deterministic order, before authorization locks any
         // profile. This preserves the global root -> profile lock order when a
@@ -807,8 +808,13 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             },
               select: { draftId: true, baseRevision: true, recovery: true } }) : null;
           const editableRecovery = editSession && decodeTechnicalRecovery(editSession.recovery) ? editSession : null;
+          const customerOutput = output
+            ? partnerContracts.CustomerContractOutputSchema.safeParse(row.head.customerProjection) : null;
           cases.push({ view: { ...view.data, state: row.state,
             pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
+            ...(customerOutput?.success ? { customerOutput: customerOutput.data } : {}),
+            history: row.events.map(event => ({ sequence: event.sequence, type: event.type,
+              recordedAt: event.recordedAt.toISOString() })),
             snapshotId: row.outputs[0]?.id || null,
             ...(editableRecovery ? { editRecovery: { recoveryId: editableRecovery.draftId,
               baseRevision: editableRecovery.baseRevision } } : {}),

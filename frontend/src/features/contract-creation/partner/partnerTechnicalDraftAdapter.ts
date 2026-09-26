@@ -37,6 +37,31 @@ export function setPartnerTechnicalRetailUnitPrice(draft: PartnerTechnicalDraft,
   return revise(draft, { rows });
 }
 
+/** A catalog refresh keeps the contractual row identity and requires an
+ * explicit edit action before the new technical version is used. */
+export function refreshPartnerTechnicalProductVersion(draft: PartnerTechnicalDraft, productRowId: string,
+  product: PartnerTechnicalProduct): PartnerTechnicalDraft {
+  const row = draft.rows.find(item => item.productRowId === productRowId);
+  if (!row || row.catalogItemId !== product.catalogItemId || !product.isAvailable ||
+      !product.families.includes(row.family)) throw new Error('Product catalog version is unavailable');
+  return revise(draft, { rows: draft.rows.map(item => item.productRowId === productRowId
+    ? { ...item, catalogSnapshotVersion: product.catalogSnapshotVersion } : item) });
+}
+
+/** Editing a retained row uses the current catalog version while preserving its
+ * stable contract row identity. The historical version remains available for
+ * read-only rendering until the edited draft is saved. */
+export function draftForPartnerTechnicalEdit(draft: PartnerTechnicalDraft, productRowId: string,
+  currentProducts: PartnerTechnicalProduct[]): PartnerTechnicalDraft {
+  const row = draft.rows.find(item => item.productRowId === productRowId);
+  if (!row) throw new Error('Product row is unavailable');
+  const current = currentProducts.find(product => product.catalogItemId === row.catalogItemId
+    && product.isAvailable && product.families.includes(row.family));
+  if (!current) throw new Error('Product catalog version is unavailable');
+  return current.catalogSnapshotVersion === row.catalogSnapshotVersion
+    ? draft : refreshPartnerTechnicalProductVersion(draft, productRowId, current);
+}
+
 export type PartnerTechnicalProductInput =
   | { family: 'prepared' | 'volumetric'; productRowId: string }
   | { family: 'longitudinal' | 'slab'; productRowId: string; sourceBatchId: string }
@@ -65,13 +90,16 @@ export function addPartnerTechnicalProduct(
       lengthDisplayUnit: 'm', widthDisplayUnit: 'm', sawKerfEnabled: false, sourceRows: [], verticalCutSides: [] } };
   } else if (input.family === 'stair') {
     row = { ...identity, family: 'stair', configuration: { stairSystemId: input.stairSystemId, part: 'tread',
-      sourceBatchId: input.sourceBatchId, quantityMode: 'manual', lengthDisplayUnit: 'm',
+      sourceBatchId: input.sourceBatchId, quantityMode: 'system', lengthDisplayUnit: 'm',
       crossDimensionDisplayUnit: 'cm', sawKerfEnabled: false, calibrationEnabled: false,
       calibrationSelection: 'manual' } };
   } else {
     throw new Error('Product family is unavailable');
   }
-  return revise(draft, { rows: [...draft.rows, row] });
+  return revise(draft, { rows: [...draft.rows, row], ...(input.family === 'stair' ? {
+    stairSystems: [...(draft.stairSystems ?? []), { stairSystemId: input.stairSystemId,
+      quantity: { mode: 'steps' as const, totalSteps: 1 } }],
+  } : {}) });
 }
 
 /** A standalone rate inquiry needs a canonical stone identity but must not ask

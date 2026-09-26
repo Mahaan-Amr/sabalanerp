@@ -92,7 +92,7 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
       }
     } finally { running.current = false; setPending(false); }
   }
-  const consequence = choice?.action === 'PROFILE_TERMINATE' ? 'ورود و کار تازه متوقف می‌شود؛ سوابق و کارهای قطعی حسابداری و تحویل حفظ می‌شوند.'
+  const consequence = choice?.action === 'PROFILE_TERMINATE' ? 'کار تازه متوقف و موارد باز تعیین‌تکلیف می‌شوند؛ حساب کاربری و سوابق حفظ می‌شوند و همکاری بعداً قابل ازسرگیری است.'
     : choice?.action === 'PROFILE_SUSPEND' ? 'کار تازه و پاسخ قیمت متوقف می‌شود. مهلت اعتبار قیمت‌ها ادامه دارد.'
       : choice?.action === 'CUSTOMER_TRANSFER_DECIDE' ? 'فقط مالکیت جاری مشتری تعیین می‌شود؛ تاریخچه، مسئولیت پروژه و اعتبار فروش تغییر نمی‌کند.'
         : choice?.action === 'RESPONDER_REASSIGN' ? 'فقط ردیف‌های منتظر پاسخ واگذار می‌شوند؛ سابقه تصمیم‌های قبلی تغییر نمی‌کند.'

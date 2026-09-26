@@ -5,6 +5,7 @@ import { PRICE_APPROVAL_VALIDITY_MS, ResponderInquiryViewSchema } from './inquir
 import { InquiryRowStateV2Schema } from './inquiry-v2';
 import { IdSchema, InstantSchema, PersianReasonSchema, RevisionSchema, TextSchema } from './primitives';
 import { DuplicateCustomerMatchSchema, PartnerProfileViewSchema } from './projections';
+import { PartnerDirectActivationBlockerV4Schema } from './direct-activation-v4';
 
 // Additive vocabulary: v1 action readers and policies still reject unknown actions.
 export const PartnerActionV2Schema = z.enum([...PartnerActionSchema.options,
@@ -30,6 +31,7 @@ const terms = z.object({ currentVersionId: IdSchema.optional(), summary: TextSch
 
 export const PartnerManagementProfileViewV2Schema = z.object({
   profile: PartnerProfileViewSchema, displayName: TextSchema, actions,
+  lifecycleBlockers: z.array(PartnerDirectActivationBlockerV4Schema).default([]),
   identity: z.object({ evidenceId: IdSchema, legalName: TextSchema, phone: TextSchema,
     address: TextSchema, personType: z.enum(['NATURAL', 'LEGAL']) }).strict().optional(),
   identityRevision: z.object({ options: z.array(z.object({ id: IdSchema, label: TextSchema,

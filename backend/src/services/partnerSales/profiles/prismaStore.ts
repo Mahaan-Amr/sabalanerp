@@ -130,7 +130,7 @@ async function readGates(tx: Prisma.TransactionClient, profile: PartnerProfileRe
   const commercialId = currentCommercial?.id;
   const creditId = currentCredit?.id;
   const cohortMembership = cohort.length === 1 && cohort[0].cohort.activationEnabled &&
-    !cohort[0].cohort.enrollmentPaused && !cohort[0].cohort.operationalPaused ? cohort[0] : undefined;
+    !cohort[0].cohort.enrollmentPaused ? cohort[0] : undefined;
   return {
     identityVerified: Boolean(identityId),
     commercialTermsReady: Boolean(commercialId),
@@ -171,11 +171,6 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
         ...(update.firstActivatedAt ? { firstActivatedAt: update.firstActivatedAt } : {}),
         ...(update.irreversibleAt ? { irreversibleAt: update.irreversibleAt } : {}) } });
       if (written.count !== 1) throw new Error('Partner profile CAS failed');
-      if (update.disableUser) {
-        const disabled = await tx.user.updateMany({ where: { id: (await tx.partnerProfile.findUniqueOrThrow({
-          where: { id: update.profileId }, select: { userId: true } })).userId }, data: { isActive: false } });
-        if (disabled.count !== 1) throw new Error('Partner login block failed');
-      }
       const row = await tx.partnerProfile.findUniqueOrThrow({ where: { id: update.profileId }, select: { id: true,
         userId: true, state: true, revision: true, firstActivatedAt: true, irreversibleAt: true } });
       return row;
@@ -195,9 +190,8 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
         select: { userId: true } });
       const replacement = await tx.user.findUnique({ where: { id: input.actorId },
         select: { id: true, role: true, isActive: true, partnerProfile: { select: { id: true } } } });
-      if (!replacement?.isActive || replacement.role !== 'ADMIN' || replacement.partnerProfile
-          || replacement.id === profile.userId) {
-        throw new Error('Partner termination requires an active system administrator as responsibility owner');
+      if (!replacement?.isActive || replacement.partnerProfile || replacement.id === profile.userId) {
+        throw new Error('Partner inactivation requires the authorized active internal actor as responsibility owner');
       }
       const transferEvidenceIds: string[] = [];
       const duties = await tx.crossWorkspaceDuty.findMany({ where: { currentAssigneeUserId: profile.userId, status: 'OPEN' },
@@ -242,7 +236,7 @@ export function createPrismaPartnerProfileStore(database: PrismaClient): Partner
         if (changed.count !== 1) throw new Error('Partner project transfer conflict');
         const audit = await tx.crmTimelineEvent.create({ data: { customerId: project.customerId,
           potentialProjectId: project.id, actorId: input.actorId, eventType: 'PARTNER_TERMINATION_TRANSFER',
-          title: 'انتقال مسئول پروژه پس از خاتمه همکاری', description: input.reason,
+          title: 'انتقال مسئول پروژه پس از غیرفعال‌سازی همکاری', description: input.reason,
           metadata: json({ previousSellerId: profile.userId, nextSellerId: input.actorId,
             profileId: input.profileId, correlationId: input.correlationId }) } });
         transferEvidenceIds.push(audit.id);

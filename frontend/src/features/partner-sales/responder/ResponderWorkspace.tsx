@@ -4,12 +4,14 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ResponderWorkspaceViewV2Schema } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerCommandPort, PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpWorkspacePage } from '@/components/erp';
+import { ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpSegmentedControl, ErpWorkspacePage } from '@/components/erp';
 import { actionPresentation } from '../management/availability';
 import { PartnerCommandSession } from '../management/commandSession';
 import { useWorkspaceQuery } from '../management/useWorkspaceQuery';
 import { ResponderEditor } from './ResponderEditor';
 import type { ResponseDrafts } from './responseDraft';
+import { responderInquiriesForView, type ResponderQueueView } from './responderQueueView';
+import { formatPartnerMoney } from '../presentation';
 
 const states = { PENDING: 'در انتظار پاسخ', APPROVED: 'تأییدشده', REJECTED: 'ردشده', EXPIRED: 'منقضی‌شده', SUPERSEDED: 'جایگزین‌شده', CANCELLED: 'لغوشده' };
 const tehranTime = (instant: string) => new Date(instant).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran', dateStyle: 'short', timeStyle: 'short' });
@@ -25,11 +27,14 @@ export function ResponderWorkspace({ queryPort, commandPort }: { queryPort: Part
   }, [queryPort]);
   const resource = useWorkspaceQuery(load);
   const [selected, setSelected] = useState<string | null>(requestedInquiryId);
+  const [queueView, setQueueView] = useState<ResponderQueueView>('pending');
   const [locked, setLocked] = useState(false);
   const [draftsByInquiry, setDraftsByInquiry] = useState<Record<string, ResponseDrafts>>({});
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
-  const inquiry = resource.view?.inquiries.find(item => item.inquiryId === selected) || resource.view?.inquiries[0];
+  const visibleInquiries = responderInquiriesForView(resource.view?.inquiries ?? [], queueView, now);
+  const historyInquiries = responderInquiriesForView(resource.view?.inquiries ?? [], 'history', now);
+  const inquiry = visibleInquiries.find(item => item.inquiryId === selected) || visibleInquiries[0];
   const activeInquiryId = inquiry?.inquiryId;
   const setDrafts = useCallback<React.Dispatch<React.SetStateAction<ResponseDrafts>>>((update) => {
     if (!activeInquiryId) return;
@@ -54,20 +59,39 @@ export function ResponderWorkspace({ queryPort, commandPort }: { queryPort: Part
     {resource.error && <ErpInlineState kind="error" className="flex-col items-start" title={resource.error}
       action={{ label: 'دریافت وضعیت تازه', disabled: resource.loading || locked, onClick: () => void resource.refresh().catch(() => undefined) }} />}
     {resource.view && <>
+      <ErpSegmentedControl value={queueView} onChange={value => { setQueueView(value); setSelected(null); }} options={[
+        { value: 'pending', label: 'در انتظار استعلام' },
+        { value: 'answered', label: 'استعلام شده' },
+      ]} />
       <div className="flex flex-wrap justify-end gap-2">
         <ErpButton label="تازه‌سازی صف" variant="outline" disabled={locked || resource.loading} onClick={() => void resource.refresh().catch(() => undefined)} />
         {resource.canGoBack && <ErpButton label="صفحه قبل" disabled={locked || resource.loading} onClick={resource.back} />}
         {resource.view.nextCursor && <ErpButton label="صفحه بعد" disabled={locked || resource.loading} onClick={() => resource.next(resource.view!.nextCursor!)} />}
       </div>
-      {resource.view.inquiries.length === 0 ? <ErpEmptyState title="استعلام منتسبی در دسترس نیست." /> : <ErpSection title="صف پاسخ">
-        <div className="flex flex-wrap gap-2">{resource.view.inquiries.map(item => <ErpButton key={item.inquiryId} label={inquiryLabel(item)}
+      {visibleInquiries.length === 0 ? <ErpEmptyState title={queueView === 'pending' ? 'استعلامی در انتظار پاسخ نیست.' : 'پاسخ ثبت‌شده‌ای در دسترس نیست.'} /> : <ErpSection title={queueView === 'pending' ? 'در انتظار استعلام' : 'استعلام شده'}>
+        <div className="flex flex-wrap gap-2">{visibleInquiries.map(item => <ErpButton key={item.inquiryId} label={inquiryLabel(item)}
           variant={inquiry?.inquiryId === item.inquiryId ? 'solid' : 'outline'} disabled={locked || resource.loading}
           onClick={() => setSelected(item.inquiryId)} />)}</div>
       </ErpSection>}
-      {inquiry && <ResponderEditor key={inquiry.inquiryId} inquiry={inquiry}
+      {inquiry && queueView === 'pending' && <ResponderEditor key={inquiry.inquiryId} inquiry={inquiry}
         drafts={draftsByInquiry[inquiry.inquiryId] || {}} onDraftsChange={setDrafts}
         editableRowIds={resource.error || resource.loading ? [] : editableRowIds} rowStatus={rowStatus} session={session}
         refresh={resource.refresh} onLockChange={setLocked} />}
+      {inquiry && queueView === 'answered' && <ErpSection title={inquiry.partnerDisplayName}>
+        <div className="grid gap-3 lg:grid-cols-2">{inquiry.rows.map(row => <ErpCard key={row.rowId} className="p-4">
+          <p className="font-semibold">{row.description}</p>
+          <p className="mt-1 text-sm sds-text-secondary">{states[row.state]} · {tehranTime(inquiry.submittedAt)}</p>
+          {row.approvedPrice && <p className="mt-2 text-sm">قیمت سبلان: {formatPartnerMoney(row.approvedPrice.amount, row.approvedPrice.currency)}</p>}
+          {row.noteOrReason && <p className="mt-2 text-sm">{row.noteOrReason}</p>}
+        </ErpCard>)}</div>
+      </ErpSection>}
+      {historyInquiries.length > 0 && <ErpSection title="تاریخچه استعلام‌ها">
+        <div className="grid gap-3 lg:grid-cols-2">{historyInquiries.flatMap(item => item.rows.map(row => <ErpCard key={row.rowId} className="p-4">
+          <p className="font-semibold">{item.partnerDisplayName} · {row.description}</p>
+          <p className="mt-1 text-sm sds-text-secondary">{states[row.state]} · {tehranTime(item.submittedAt)}</p>
+          {row.noteOrReason && <p className="mt-2 text-sm">{row.noteOrReason}</p>}
+        </ErpCard>))}</div>
+      </ErpSection>}
     </>}
   </ErpWorkspacePage>;
 }

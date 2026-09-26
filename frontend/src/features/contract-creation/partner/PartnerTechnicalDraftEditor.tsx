@@ -5,8 +5,8 @@ import {
   PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft,
   type PartnerTechnicalDraft, type PartnerTechnicalFamily, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
-import { parseCanonicalDecimal, parseStableIdentity, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
-import { ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpRialInput, ErpSelect } from '@/components/erp';
+import { parseCanonicalDecimal, parseStableIdentity, resolveStaircaseQuantity, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpRialInput, ErpSelect } from '@/components/erp';
 import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numberFormat';
 import { PreparedProductSection } from '../components/product-modal-system/PreparedProductSection';
 import { LongitudinalProductSection } from '../components/product-modal-system/LongitudinalProductSection';
@@ -18,11 +18,11 @@ import { convertCompactLengthUnit } from '../components/product-modal-system/pro
 import type { ContractProduct, Product } from '../types/contract.types';
 import { addPartnerTechnicalDependent, addPartnerTechnicalProduct, commitPartnerTechnicalField, removePartnerTechnicalDependent, removePartnerTechnicalProduct,
   confirmPartnerContractConfiguration, retainPartnerTechnicalFieldText } from './partnerTechnicalDraftAdapter';
-import { setPartnerTechnicalRetailUnitPrice } from './partnerTechnicalDraftAdapter';
+import { draftForPartnerTechnicalEdit, refreshPartnerTechnicalProductVersion, setPartnerTechnicalRetailUnitPrice } from './partnerTechnicalDraftAdapter';
 import { TechnicalProductConfiguration } from './TechnicalProductConfiguration';
 import { partnerRetailPriceUnitLabel, partnerSelectableFamilies } from './partnerPricingUnit';
 import { ContractProductCatalog, type ContractCatalogFamily } from '../components/steps/ContractProductCatalog';
-import { CentralProductModalShell } from '../components/product-modal-system/productModalPrimitives';
+import { CentralProductModalShell, CompactSwitch } from '../components/product-modal-system/productModalPrimitives';
 import { partnerRemainderChildren } from './partnerDependentPresentation';
 import { RemainingInventorySelector } from '../components/steps/RemainingInventorySelector';
 
@@ -31,11 +31,26 @@ const nextDraft = (draft: PartnerTechnicalDraft, rows: PartnerTechnicalDraft['ro
 const replaceRow = (draft: PartnerTechnicalDraft, row: PartnerTechnicalDraft['rows'][number]) => nextDraft(draft, draft.rows.map(item => item.productRowId === row.productRowId ? row : item));
 const editText = (draft: PartnerTechnicalDraft, entityId: string, field: NonNullable<PartnerTechnicalDraft['editingValues']>[number]['field'], fallback: unknown) =>
   draft.editingValues?.find(item => item.entityId === entityId && item.field === field)?.text ?? (fallback === undefined ? '' : String(fallback));
+export const partnerStairDisplayLength = (meters: string | undefined, unit: 'cm' | 'm') =>
+  meters ? convertCompactLengthUnit(meters, 'm', unit) : '';
+export const partnerStairCanonicalLength = (text: string, unit: 'cm' | 'm') =>
+  convertCompactLengthUnit(parseCanonicalDecimal(text), unit, 'm');
 const commitText = (draft: PartnerTechnicalDraft, entityId: string,
   field: NonNullable<PartnerTechnicalDraft['editingValues']>[number]['field'], text: string) => {
   const retained = retainPartnerTechnicalFieldText(draft, entityId, field, text);
   if (!text.trim()) return retained;
   try { return commitPartnerTechnicalField(retained, entityId, field, text); } catch { return retained; }
+};
+export function overridePartnerStairQuantity(draft: PartnerTechnicalDraft, productRowId: string, text: string) {
+  const next = commitText(draft, productRowId, 'quantity', text);
+  const row = next.rows.find(item => item.productRowId === productRowId);
+  return row?.family === 'stair' ? replaceRow(next, { ...row,
+    configuration: { ...row.configuration, quantityMode: 'manual' } }) : next;
+}
+const longitudinalTechnicalConfiguration = (configuration: Extract<PartnerTechnicalDraft['rows'][number], { family: 'longitudinal' }>['configuration']) => {
+  const { mandatoryEnabled: _enabled, mandatoryPercentage: _percentage, ...technical } = configuration;
+  void _enabled; void _percentage;
+  return technical;
 };
 
 function productForCanonical(product: PartnerTechnicalProduct): Product {
@@ -47,8 +62,10 @@ function productForCanonical(product: PartnerTechnicalProduct): Product {
     qualityNamePersian: product.attributes.quality };
 }
 
-export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKerfMeters = '0.003', preview: suppliedPreview, focusProductRowId, onChange }: {
+export function PartnerTechnicalDraftEditor({ draft, products, currentProducts = products, operations, mandatoryDefaults = { enabled: false, percentage: '20' }, sawKerfMeters = '0.003', preview: suppliedPreview, focusProductRowId, onChange }: {
   draft: PartnerTechnicalDraft; products: PartnerTechnicalProduct[]; operations: PartnerTechnicalOperation[]; sawKerfMeters?: string;
+  currentProducts?: PartnerTechnicalProduct[];
+  mandatoryDefaults?: { enabled: boolean; percentage: string };
   preview?: ReturnType<typeof previewPartnerTechnicalDraft>;
   focusProductRowId?: string;
   onChange: (draft: PartnerTechnicalDraft) => void;
@@ -61,22 +78,26 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
   const focused = useRef<string | undefined>(undefined);
   const available = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('fa-IR');
-    return products.filter(product => product.isAvailable
+    return currentProducts.filter(product => product.isAvailable
       && (!family || product.families.includes(family))
       && (!needle || `${product.name} ${product.code} ${product.attributes.stoneType} ${product.attributes.quality}`
         .toLocaleLowerCase('fa-IR').includes(needle)));
-  }, [family, products, query]);
+  }, [currentProducts, family, query]);
   const preview = useMemo(() => suppliedPreview?.ok && suppliedPreview.value.inputRevision === draft.inputRevision
     ? suppliedPreview : previewPartnerTechnicalDraft(draft, { products, operations, sawKerfMeters }),
   [draft, operations, products, sawKerfMeters, suppliedPreview]);
   useEffect(() => {
-    if (!focusProductRowId || focused.current === focusProductRowId ||
-        !draft.rows.some(row => row.productRowId === focusProductRowId)) return;
-    focused.current = focusProductRowId;
-    setModal({ draft, productRowId: focusProductRowId, mode: 'edit' });
-  }, [draft, focusProductRowId]);
+    if (!focusProductRowId || focused.current === focusProductRowId) return;
+    const row = draft.rows.find(item => item.productRowId === focusProductRowId);
+    if (!row) return;
+    const current = currentProducts.find(item => item.catalogItemId === row.catalogItemId
+      && item.isAvailable && item.families.includes(row.family));
+    if (current) { focused.current = focusProductRowId;
+      setModal({ draft: draftForPartnerTechnicalEdit(draft, focusProductRowId, currentProducts),
+        productRowId: focusProductRowId, mode: 'edit' }); }
+  }, [currentProducts, draft, focusProductRowId]);
   const add = (catalogItemId: string) => {
-    const product = products.find(item => item.catalogItemId === catalogItemId);
+    const product = currentProducts.find(item => item.catalogItemId === catalogItemId);
     if (!product) return;
     const selectedFamily = family && product.families.includes(family) ? family
       : partnerSelectableFamilies.find(candidate => product.families.includes(candidate));
@@ -93,7 +114,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
     <ContractProductCatalog query={query} onQueryChange={setQuery} activeType={family} onTypeChange={setFamily}
       searchId="partner-contract-product-search"
       typeOptions={partnerSelectableFamilies.map(value => ({ id: value, label: labels[value],
-        count: products.filter(product => product.isAvailable && product.families.includes(value)).length }))}
+        count: currentProducts.filter(product => product.isAvailable && product.families.includes(value)).length }))}
       items={available.map(product => ({ id: product.catalogItemId, name: product.name,
         facts: [product.code, product.attributes.stoneType, product.dimensions.motherWidthCentimeters
           ? `عرض ${product.dimensions.motherWidthCentimeters}cm` : null,
@@ -116,7 +137,29 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
     {!draft.rows.length && <div className="sds-text-muted py-5 text-sm">هنوز محصولی اضافه نشده است</div>}
     {draft.rows.map(row => {
       const product = products.find(item => item.catalogItemId === row.catalogItemId && item.catalogSnapshotVersion === row.catalogSnapshotVersion);
-      if (!product) return <ErpInlineState key={row.productRowId} kind="stale" title="نسخه کاتالوگ این محصول در دسترس نیست." />;
+      const current = currentProducts.find(item => item.catalogItemId === row.catalogItemId && item.isAvailable
+        && item.families.includes(row.family));
+      if (!product || !current) {
+        return <ErpCard key={row.productRowId} className="space-y-3 p-4" data-contract-row-id={row.productRowId}>
+          <div className="space-y-1"><strong className="sds-text-primary text-sm">{product?.name ?? row.catalogItemId}</strong>
+            <p className="sds-text-secondary text-xs">{labels[row.family]} · نسخهٔ ثبت‌شدهٔ محصول</p></div>
+          <ErpInlineState kind="stale" title={current
+            ? 'نسخهٔ کاتالوگ این محصول تغییر کرده است. برای ادامه، نسخهٔ فعلی را بررسی کنید.'
+            : 'این محصول دیگر در کاتالوگ فعال نیست. آن را با محصول دیگری جایگزین کنید.'} />
+          <div className="flex flex-wrap gap-3">
+            {current && <ErpButton type="button" label="ویرایش با نسخهٔ فعلی" onClick={() => setModal({
+              draft: refreshPartnerTechnicalProductVersion(draft, row.productRowId, current),
+              productRowId: row.productRowId, mode: 'edit',
+            })} />}
+            <ErpPressable type="button" tone="danger" onClick={() => setDeleteRowId(row.productRowId)}>
+              حذف و انتخاب محصول دیگر
+            </ErpPressable>
+            {deleteRowId === row.productRowId && <ErpPressable type="button" tone="danger" onClick={() => {
+              onChange(removePartnerTechnicalProduct(draft, row.productRowId)); setDeleteRowId(null);
+            }}>تأیید حذف</ErpPressable>}
+          </div>
+        </ErpCard>;
+      }
       const calculation = preview.ok ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.calculation : undefined;
       const facts = calculation?.ok ? calculation.result as unknown as Record<string, unknown> : undefined;
       const geometry = row.family === 'prepared'
@@ -136,7 +179,12 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
             <ErpPressable type="button" onClick={() => setDeleteRowId(null)}>انصراف</ErpPressable>
             <ErpPressable type="button" tone="danger" onClick={() => { onChange(removePartnerTechnicalProduct(draft, row.productRowId)); setDeleteRowId(null); }}>حذف</ErpPressable></div>
             : <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
-              <ErpPressable type="button" onClick={() => setModal({ draft, productRowId: row.productRowId, mode: 'edit' })}>ویرایش</ErpPressable>
+              {current && current.catalogSnapshotVersion !== row.catalogSnapshotVersion &&
+                <ErpBadge tone="warning">نسخهٔ کاتالوگ تغییر کرده است</ErpBadge>}
+              <ErpPressable type="button" onClick={() => setModal({
+                draft: draftForPartnerTechnicalEdit(draft, row.productRowId, currentProducts),
+                productRowId: row.productRowId, mode: 'edit',
+              })}>ویرایش</ErpPressable>
               <ErpPressable type="button" tone="danger" onClick={() => setDeleteRowId(row.productRowId)}>حذف</ErpPressable>
             </div>}
         </div>
@@ -148,6 +196,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
     </ErpCard></section>
     {preview.ok && preview.value.conflicts.length > 0 && <ErpInlineState kind="stale" title={`پیش از ارسال، تعارض‌های مشخصات فنی را برطرف کنید. ${preview.value.conflicts[0]?.message ?? ''}`} />}
     {modal && <PartnerProductConfigurationFlow state={modal} products={products} operations={operations} sawKerfMeters={sawKerfMeters}
+      mandatoryDefaults={mandatoryDefaults}
       onDraftChange={next => setModal(current => current ? { ...current, draft: next } : current)} onClose={() => setModal(null)}
       onSave={() => { onChange(modal.draft); setModal(null); }} />}
     {editingDependentId && <PartnerRemainderConfigurationFlow draft={draft} productRowId={editingDependentId}
@@ -155,11 +204,12 @@ export function PartnerTechnicalDraftEditor({ draft, products, operations, sawKe
   </section></TechnicalProductConfiguration>;
 }
 
-function PartnerProductConfigurationFlow({ state, products, operations, sawKerfMeters, onDraftChange, onClose, onSave }: {
+function PartnerProductConfigurationFlow({ state, products, operations, sawKerfMeters, mandatoryDefaults, onDraftChange, onClose, onSave }: {
   state: { draft: PartnerTechnicalDraft; productRowId: string; mode: 'create' | 'edit' };
   products: PartnerTechnicalProduct[];
   operations: PartnerTechnicalOperation[];
   sawKerfMeters: string;
+  mandatoryDefaults: { enabled: boolean; percentage: string };
   onDraftChange: (draft: PartnerTechnicalDraft) => void;
   onClose: () => void;
   onSave: () => void;
@@ -201,19 +251,23 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
         onChange={config => onDraftChange(replaceRow(state.draft, { ...row, configuration: { ...row.configuration,
           kind: config.preparedKind ?? row.configuration.kind, unit: config.preparedUnit ?? row.configuration.unit,
           quantity: config.preparedQuantity === null || config.preparedQuantity === undefined ? undefined : String(config.preparedQuantity) } }))} />}
-      {row.family === 'longitudinal' && <LongitudinalProductSection input={{ ...row.configuration, inputRevision: state.draft.inputRevision,
+      {row.family === 'longitudinal' && <LongitudinalProductSection input={{ ...longitudinalTechnicalConfiguration(row.configuration), inputRevision: state.draft.inputRevision,
         sourceBatchId: parseStableIdentity('source-batch', row.configuration.sourceBatchId),
         lengthMeters: row.configuration.lengthMeters ? parseCanonicalDecimal(row.configuration.lengthMeters) : undefined,
         widthMeters: row.configuration.widthMeters ? parseCanonicalDecimal(row.configuration.widthMeters) : undefined,
         requestedAreaSquareMeters: row.configuration.requestedAreaSquareMeters ? parseCanonicalDecimal(row.configuration.requestedAreaSquareMeters) : undefined,
         motherWidthMeters: parseCanonicalDecimal(String(Number(product.dimensions.motherWidthCentimeters ?? '0') / 100)),
         sawKerfMeters: parseCanonicalDecimal(sawKerfMeters) } as LongitudinalTechnicalInput}
+        technicalMandatory={{ enabled: row.configuration.mandatoryEnabled ?? mandatoryDefaults.enabled,
+          percentage: row.configuration.mandatoryPercentage ?? mandatoryDefaults.percentage }}
+        onTechnicalMandatoryChange={value => onDraftChange(replaceRow(state.draft, { ...row,
+          configuration: { ...row.configuration, mandatoryEnabled: value.enabled,
+            mandatoryPercentage: value.percentage } }))}
         calculation={(calculation as LongitudinalTechnicalCalculation | undefined) ?? null}
         showValidation onChange={input => { const { inputRevision, motherWidthMeters, sawKerfMeters: _kerf, ...configuration } = input;
           void inputRevision; void motherWidthMeters; void _kerf;
-          onDraftChange(replaceRow(state.draft, { ...row, configuration: configuration as typeof row.configuration })); }} />}
-      {row.family === 'longitudinal' && <ErpInlineState kind="empty"
-        title="حکمی طبق تنظیمات همکاری شما توسط سیستم محاسبه می‌شود و نیاز به ورود دستی ندارد." />}
+          onDraftChange(replaceRow(state.draft, { ...row, configuration: { ...row.configuration,
+            ...configuration } as typeof row.configuration })); }} />}
       {row.family === 'slab' && <SlabProductSection input={{ ...row.configuration, inputRevision: state.draft.inputRevision,
         sourceBatchId: parseStableIdentity('source-batch', row.configuration.sourceBatchId),
         lengthMeters: row.configuration.lengthMeters ? parseCanonicalDecimal(row.configuration.lengthMeters) : undefined,
@@ -228,7 +282,8 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
           const { inputRevision, kerfMeters, ...configuration } = input; void inputRevision; void kerfMeters;
           onDraftChange(replaceRow(state.draft, { ...row, configuration: { ...configuration,
             sawKerfEnabled: row.configuration.sawKerfEnabled } as unknown as typeof row.configuration })); }} />}
-      {row.family === 'stair' && <StairEditor draft={state.draft} row={row} product={product} onChange={onDraftChange} />}
+      {row.family === 'stair' && <StairEditor key={row.productRowId} draft={state.draft} row={row} product={product}
+        mandatoryDefaults={mandatoryDefaults} onChange={onDraftChange} />}
       {!['prepared', 'volumetric'].includes(row.family) && calculation?.ok && <div id="product-operations" tabIndex={-1}>
         <OperationsEditor draft={state.draft} row={row as Extract<typeof row, { family: 'longitudinal' | 'slab' | 'stair' }>}
           calculation={calculation.result as unknown as Record<string, unknown>} catalog={operations} onChange={onDraftChange} />
@@ -432,30 +487,48 @@ function OperationsEditor({ draft, row, calculation, catalog, onChange }: { draf
     }} />;
 }
 
-function StairEditor({ draft, row, product, onChange }: { draft: PartnerTechnicalDraft;
+function StairEditor({ draft, row, product, mandatoryDefaults, onChange }: { draft: PartnerTechnicalDraft;
   row: Extract<PartnerTechnicalDraft['rows'][number], { family: 'stair' }>; product: PartnerTechnicalProduct;
+  mandatoryDefaults: { enabled: boolean; percentage: string };
   onChange: (draft: PartnerTechnicalDraft) => void }) {
   const configuration = row.configuration;
   const system = draft.stairSystems?.find(item => item.stairSystemId === configuration.stairSystemId);
+  const [displayDimensions, setDisplayDimensions] = useState(() => ({
+    length: partnerStairDisplayLength(configuration.lengthMeters, configuration.lengthDisplayUnit),
+    crossDimension: partnerStairDisplayLength(configuration.crossDimensionMeters, configuration.crossDimensionDisplayUnit),
+  }));
+  const systemQuantity = (() => {
+    if (!system) return undefined;
+    try { return resolveStaircaseQuantity(system.quantity).totalSteps; } catch { return undefined; }
+  })();
   const partDraft: StairPartFieldDraft = { part: configuration.part, contractualTitle: product.name,
-    length: editText(draft, row.productRowId, 'lengthMeters', configuration.lengthMeters), lengthUnit: configuration.lengthDisplayUnit,
-    crossDimension: editText(draft, row.productRowId, 'crossDimensionMeters', configuration.crossDimensionMeters),
+    length: displayDimensions.length, lengthUnit: configuration.lengthDisplayUnit,
+    crossDimension: displayDimensions.crossDimension,
     crossDimensionUnit: configuration.crossDimensionDisplayUnit,
-    quantity: editText(draft, row.productRowId, 'quantity', configuration.quantity), baseRateToman: '', description: '' };
+    quantity: configuration.quantityMode === 'system' && configuration.part !== 'landing'
+      ? String(systemQuantity ?? '') : editText(draft, row.productRowId, 'quantity', configuration.quantity),
+    baseRateToman: '', description: '' };
   const updateRow = (changes: Partial<typeof configuration>) => onChange(replaceRow(draft, { ...row, configuration: { ...configuration, ...changes } }));
   return <div className="space-y-4">
-    <div className="grid gap-4 sm:grid-cols-2"><ErpField label="جزء پله"><ErpSelect value={configuration.part} onChange={event => updateRow({ part: event.target.value as typeof configuration.part })}>
+    <div className="flex flex-wrap items-center gap-4 border-y border-[var(--sds-border-subtle)] py-3">
+      <label className="inline-flex items-center gap-2 text-xs font-semibold">
+        <CompactSwitch label="حکمی" checked={configuration.mandatoryEnabled ?? mandatoryDefaults.enabled}
+          onChange={mandatoryEnabled => updateRow({ mandatoryEnabled })} />حکمی
+      </label>
+      <ErpField label="درصد حکمی"><ErpInput inputMode="decimal"
+        value={configuration.mandatoryPercentage ?? mandatoryDefaults.percentage}
+        onChange={event => { try { const percentage = parseCanonicalDecimal(event.target.value);
+          if (Number(percentage) > 0 && Number(percentage) <= 100) updateRow({ mandatoryPercentage: percentage });
+        } catch { /* Keep the last valid committed value. */ } }} /></ErpField>
+    </div>
+    <div className="grid gap-4 sm:grid-cols-2"><ErpField label="جزء پله"><ErpSelect value={configuration.part} onChange={event => {
+      const part = event.target.value as typeof configuration.part;
+      updateRow(part === 'landing' && configuration.quantityMode === 'system'
+        ? { part, quantityMode: 'manual', quantity: systemQuantity } : { part });
+    }}>
       <option value="tread">کف پله</option><option value="riser">خیز پله</option><option value="landing">پاگرد</option></ErpSelect></ErpField>
-      <ErpField label="روش تعداد"><ErpSelect value={configuration.quantityMode ?? 'manual'} onChange={event => {
-        const mode = event.target.value as 'manual' | 'system';
-        let next = replaceRow(draft, { ...row, configuration: { ...configuration, quantityMode: mode } });
-        if (mode === 'system' && !next.stairSystems?.some(item => item.stairSystemId === configuration.stairSystemId)) {
-          next = PartnerTechnicalDraftSchema.parse({ ...next, inputRevision: next.inputRevision + 1,
-            stairSystems: [...(next.stairSystems ?? []), { stairSystemId: configuration.stairSystemId, quantity: { mode: 'steps', totalSteps: 1 } }] });
-        }
-        onChange(next);
-      }}><option value="manual">تعداد مستقل این جزء</option><option value="system">تعداد سیستم پله</option></ErpSelect></ErpField></div>
-    {configuration.quantityMode === 'system' && system && <StairQuantityModeSection state={{ mode: system.quantity.mode,
+    </div>
+    {configuration.part !== 'landing' && system && <StairQuantityModeSection state={{ mode: system.quantity.mode,
       totalSteps: String(system.quantity.totalSteps ?? ''), numberOfStaircases: String(system.quantity.numberOfStaircases ?? ''),
       stepsPerStaircase: String(system.quantity.stepsPerStaircase ?? '') }} onChange={value => {
         const quantity = value.mode === 'steps' ? { mode: value.mode, ...(/^\d+$/.test(value.totalSteps) ? { totalSteps: Number(value.totalSteps) } : {}) }
@@ -466,12 +539,22 @@ function StairEditor({ draft, row, product, onChange }: { draft: PartnerTechnica
       }} />}
     <StairPartSubsection draft={partDraft} onChange={value => {
       let next = draft;
-      const meters = (text: string, unit: 'cm' | 'm') => {
-        try { return convertCompactLengthUnit(parseCanonicalDecimal(text), unit, 'm'); } catch { return text; }
+      const commitLength = (field: 'lengthMeters' | 'crossDimensionMeters', text: string, unit: 'cm' | 'm') => {
+        try { return commitPartnerTechnicalField(next, row.productRowId, field,
+          partnerStairCanonicalLength(text, unit)); }
+        catch { return retainPartnerTechnicalFieldText(next, row.productRowId, field, text); }
       };
-      next = commitText(next, row.productRowId, 'lengthMeters', meters(value.length, value.lengthUnit));
-      next = commitText(next, row.productRowId, 'crossDimensionMeters', meters(value.crossDimension, value.crossDimensionUnit));
-      if (configuration.quantityMode !== 'system') next = commitText(next, row.productRowId, 'quantity', value.quantity);
+      if (value.length !== partDraft.length || value.lengthUnit !== partDraft.lengthUnit) {
+        setDisplayDimensions(current => ({ ...current, length: value.length }));
+        next = commitLength('lengthMeters', value.length, value.lengthUnit);
+      }
+      if (value.crossDimension !== partDraft.crossDimension || value.crossDimensionUnit !== partDraft.crossDimensionUnit) {
+        setDisplayDimensions(current => ({ ...current, crossDimension: value.crossDimension }));
+        next = commitLength('crossDimensionMeters', value.crossDimension, value.crossDimensionUnit);
+      }
+      if (value.quantity !== partDraft.quantity) {
+        next = overridePartnerStairQuantity(next, row.productRowId, value.quantity);
+      }
       const current = next.rows.find(item => item.productRowId === row.productRowId);
       if (current?.family === 'stair') next = replaceRow(next, { ...current, configuration: { ...current.configuration,
         lengthDisplayUnit: value.lengthUnit, crossDimensionDisplayUnit: value.crossDimensionUnit } });

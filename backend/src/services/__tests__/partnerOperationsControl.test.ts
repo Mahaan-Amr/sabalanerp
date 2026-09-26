@@ -69,17 +69,19 @@ test('pause retries return the recorded outcome and conflicting intents cannot r
   assert.equal(status.ok && status.value.revision, 2);
 });
 
-test('a named cohort enrolls only dedicated eligible profiles after release readiness; fixtures stay closed', async () => {
+test('a named cohort enrolls dedicated eligible profiles; operational pause commands are retired', async () => {
   for (const fixture of [true, false]) {
     const { service } = harness({ ready: true, fixture });
-    assert.equal((await service.defineCohort({ id: 'cohort-333', name: 'همکاران تأییدشده', expectedRevision: 1, reason: 'تعریف گروه انتشار' })).ok, true);
+    const definition = await service.defineCohort({ id: 'cohort-333', name: 'همکاران تأییدشده', expectedRevision: 1, reason: 'تعریف گروه انتشار' });
+    if (fixture) { assert.equal(!definition.ok && definition.error.code, 'COHORT_NOT_READY'); continue; }
+    assert.equal(definition.ok, true);
     const enrollment = await service.pause(await pause('open-enrollment', false, 2));
-    if (fixture) { assert.equal(!enrollment.ok && enrollment.error.code, 'COHORT_NOT_READY'); continue; }
     assert.equal(enrollment.ok, true);
     const command = { ...await pause('open-operations', false, 3), kind: 'OPERATIONAL' as const };
     command.idempotency.payloadHash = await contract.canonicalHash({ kind: command.kind, paused: false, expectedRevision: 3, reason: command.reason });
-    assert.equal((await service.pause(command)).ok, true);
-    const result = await service.enroll({ sellerId: 'partner-333', expectedRevision: 4, reason: 'پذیرش همکار تأییدشده' });
+    const retired = await service.pause(command);
+    assert.equal(!retired.ok && retired.error.code, 'STATE_CONFLICT');
+    const result = await service.enroll({ sellerId: 'partner-333', expectedRevision: 3, reason: 'پذیرش همکار تأییدشده' });
     assert.equal(result.ok, true);
     const status = await service.status();
     assert.deepEqual(status.ok && status.value.cohort?.sellerIds, ['partner-333']);
@@ -95,7 +97,7 @@ test('unauthorized controls fail and audit failure rolls the whole pause back', 
   assert.equal(status.ok && status.value.revision, 1);
 });
 
-test('confirmed faults deduplicate, pause automatically and require corrected evidence before resume', async () => {
+test('confirmed faults deduplicate without globally pausing sellers and retain remediation evidence', async () => {
   const options = { open: true, ready: true, remediated: false };
   const { service, monitor } = harness(options);
   const retry = { metric: 'JOB_RETRY' as const, outcome: 'RETRY' as const, subjectId: 'case-333', evidenceId: 'job-333', correlationId: 'trace-333' };
@@ -105,18 +107,14 @@ test('confirmed faults deduplicate, pause automatically and require corrected ev
   const fault = { ...retry, metric: 'PAIR_HEALTH' as const, outcome: 'CONFIRMED_VIOLATION' as const, category: 'PAIR_INCOMPLETE' as const };
   await Promise.all([monitor.observe(fault), monitor.observe(fault)]);
   state = await service.status();
-  assert.equal(state.ok && state.value.operationalPaused, true);
+  assert.equal(state.ok && state.value.operationalPaused, false);
   const incidents = await service.incidents();
   assert.equal(incidents.ok && incidents.value.length, 1);
   assert.equal(incidents.ok && incidents.value[0].occurrences, 2);
   const key = incidents.ok ? incidents.value[0].key : '';
   assert.equal((await service.resolveIncident(key, 'اصلاح علت و تطبیق شواهد')).ok, false);
-  const resume = { ...await pause('resume-333', false, 2), kind: 'OPERATIONAL' as const };
-  resume.idempotency.payloadHash = await contract.canonicalHash({ kind: resume.kind, paused: false, expectedRevision: 2, reason: resume.reason });
-  assert.equal((await service.pause(resume)).ok, false);
   options.remediated = true;
   assert.equal((await service.resolveIncident(key, 'اصلاح علت و تطبیق شواهد')).ok, true);
-  assert.equal((await service.pause(resume)).ok, true);
   // Delayed delivery of resolved evidence is a replay, not a fresh violation.
   await monitor.observe(fault);
   state = await service.status();
@@ -125,10 +123,10 @@ test('confirmed faults deduplicate, pause automatically and require corrected ev
   // A genuinely new detector evidence identity opens a new incident.
   await monitor.observe({ ...fault, evidenceId: 'new-pair-violation-333' });
   state = await service.status();
-  assert.equal(state.ok && state.value.operationalPaused, true);
+  assert.equal(state.ok && state.value.operationalPaused, false);
 });
 
-test('a pause winning the transaction lock prevents a waiting writer from using stale open state', async () => {
+test('a confirmed incident no longer creates a global operational stop', async () => {
   const { store, monitor } = harness({ open: true });
   const containment = monitor.observe({ metric: 'PAIR_HEALTH', outcome: 'CONFIRMED_VIOLATION', category: 'PAIR_INCOMPLETE',
     correlationId: 'trace-333', subjectId: 'case-333', evidenceId: 'pair-333' });
@@ -140,7 +138,7 @@ test('a pause winning the transaction lock prevents a waiting writer from using 
   }, async () => { writes++; return 'committed'; });
   assert.equal((await containment).ok, true);
   const result = await mutation;
-  assert.equal(!result.ok && result.error.code, 'OPERATIONAL_PAUSE');
+  assert.equal(!result.ok && result.error.code, 'COHORT_NOT_READY');
   assert.equal(writes, 0);
 });
 

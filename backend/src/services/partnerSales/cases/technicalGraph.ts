@@ -112,6 +112,8 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
         if (!pricing || !snapshot.facts.motherWidthMeters) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         intent = { ...intent, productPolicyInput: { ...pricing, ...row.configuration,
           ...versions,
+          mandatoryPercentage: decimal(row.configuration.mandatoryPercentage) ?? pricing.mandatoryPercentage,
+          rememberedMandatoryPercentage: decimal(row.configuration.mandatoryPercentage) ?? pricing.rememberedMandatoryPercentage,
           sourceBatchId: parseStableIdentity('source-batch', row.configuration.sourceBatchId),
           motherWidthMeters: snapshot.facts.motherWidthMeters, sawKerfMeters: parseCanonicalDecimal(context.catalog.sawKerfMeters),
           lengthMeters: decimal(row.configuration.lengthMeters), widthMeters: decimal(row.configuration.widthMeters),
@@ -139,6 +141,8 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
         if (!system) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
         const { quantityMode, ...configuration } = row.configuration;
         intent = { ...intent, stairPartPolicyInput: { ...pricing, ...configuration, ...versions,
+          mandatoryPercentage: decimal(configuration.mandatoryPercentage) ?? pricing.mandatoryPercentage,
+          rememberedMandatoryPercentage: decimal(configuration.mandatoryPercentage) ?? pricing.rememberedMandatoryPercentage,
           stairSystemId: parseStableIdentity('stair-system', configuration.stairSystemId),
           sourceBatchId: parseStableIdentity('source-batch', configuration.sourceBatchId),
           motherWidthMeters: snapshot.facts.motherWidthMeters, motherLengthMeters: decimal(configuration.motherLengthMeters),

@@ -120,10 +120,11 @@ async function main() {
       const otherDraft = await request(`/loadings/${secondLoadingId}/canonical-allocations/${turnId}`, 'PUT', allocation);
       assert.equal(otherDraft.status, 200, JSON.stringify(otherDraft.body));
       const retained = await request(`/loadings/${loadingId}`);
-      assert.equal(retained.body.data.allocations.length, 1,
-        'reusing a released queue turn must not move or erase the prior loading allocation intent');
-      assert.equal(retained.body.data.allocations[0].id, allocated.body.data.id);
-      assert.equal(retained.body.data.allocations[0].reservationActive, false);
+      assert.equal(retained.body.data.allocations.length, 0,
+        'release removes the prior loading allocation draft before the queue turn is reused');
+      const releaseEvents = await prisma.guardDriverQueueEvent.findMany({ where: { turnId, eventType: 'RESERVATION_RELEASED' } });
+      assert.equal(releaseEvents.some(event => (event.payload as { removedAllocationDraftCount?: number }).removedAllocationDraftCount === 1), true,
+        'the release audit records removal of the prior allocation draft');
       assert.notEqual(otherDraft.body.data.id, allocated.body.data.id);
       assert.equal((await request(releasePath, 'POST', { ...release, loadingId: secondLoadingId })).status, 200);
       await prisma.workspacePermission.create({ data: { userId: outsiderId, workspace: 'security', permissionLevel: 'edit' } });

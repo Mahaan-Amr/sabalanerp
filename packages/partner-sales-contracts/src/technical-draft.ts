@@ -30,6 +30,7 @@ const longitudinalConfiguration = z.object({
   requestedAreaSquareMeters: decimal.optional(), quantity: z.number().int().safe().optional(),
   lastManualField: z.enum(['length', 'width', 'area', 'quantity']), lastManualDimension: z.enum(['length', 'width']),
   lengthDisplayUnit: lengthUnit, widthDisplayUnit: lengthUnit, ...calibration,
+  mandatoryEnabled: z.boolean().optional(), mandatoryPercentage: decimal.optional(),
 }).strict();
 const slabConfiguration = z.object({
   sourceBatchId: IdSchema, lengthMeters: decimal.optional(), widthMeters: decimal.optional(),
@@ -48,6 +49,7 @@ const stairConfiguration = z.object({
   motherLengthMeters: decimal.optional(), motherLengthDisplayUnit: lengthUnit.optional(),
   quantityMode: z.enum(['system', 'manual']).optional(),
   lengthDisplayUnit: lengthUnit, crossDimensionDisplayUnit: lengthUnit, ...calibration,
+  mandatoryEnabled: z.boolean().optional(), mandatoryPercentage: decimal.optional(),
 }).strict();
 export const PartnerTechnicalDraftSchema = z.object({
   schemaVersion: z.literal(1), inputRevision: z.number().int().nonnegative().safe(),
@@ -142,8 +144,11 @@ function calculateTechnicalDraft(draft: PartnerTechnicalDraft, catalog: PartnerT
     if (!product) return { productRowId: row.productRowId, family: row.family,
       calculation: { ok: false, inputRevision: draft.inputRevision,
         conflicts: [{ code: 'catalog-unavailable', field: 'catalogItemId', message: 'مشخصات فنی محصول در دسترس نیست.' }] } };
-    if (row.family === 'longitudinal') return { productRowId: row.productRowId, family: row.family,
-      calculation: calculateLongitudinalTechnical({ ...row.configuration, inputRevision: draft.inputRevision,
+    if (row.family === 'longitudinal') {
+      const { mandatoryEnabled: _enabled, mandatoryPercentage: _percentage, ...configuration } = row.configuration;
+      void _enabled; void _percentage;
+      return { productRowId: row.productRowId, family: row.family,
+      calculation: calculateLongitudinalTechnical({ ...configuration, inputRevision: draft.inputRevision,
         sourceBatchId: parseStableIdentity('source-batch', row.configuration.sourceBatchId),
         lengthMeters: optionalCanonicalDecimal(row.configuration.lengthMeters),
         widthMeters: optionalCanonicalDecimal(row.configuration.widthMeters),
@@ -151,8 +156,10 @@ function calculateTechnicalDraft(draft: PartnerTechnicalDraft, catalog: PartnerT
         motherWidthMeters: centimetersToMeters(product.dimensions.motherWidthCentimeters),
         sawKerfMeters: parseCanonicalDecimal(catalog.sawKerfMeters),
       }) };
+    }
     if (row.family === 'stair') {
-      const { quantityMode, ...geometry } = row.configuration;
+      const { quantityMode, mandatoryEnabled: _enabled, mandatoryPercentage: _percentage, ...geometry } = row.configuration;
+      void _enabled; void _percentage;
       const quantity = quantityMode === 'system' ? stairSystems.quantities.get(geometry.stairSystemId) : geometry.quantity;
       if (quantityMode === 'system' && (quantity === undefined || geometry.part === 'landing')) return {
         productRowId: row.productRowId, family: row.family, calculation: { ok: false, inputRevision: draft.inputRevision,

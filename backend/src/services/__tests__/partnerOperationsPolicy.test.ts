@@ -12,15 +12,19 @@ const permission: PermissionContext = {
   lifecycleRevision: 1, evaluatedAt: '2026-08-27T08:00:00.000Z',
 };
 
-test('emergency pause freezes Draft edit and commitment but preserves authorized reads', () => {
-  const state = { ...initialOperationsState(), operationalPaused: true };
+test('legacy operational pause does not freeze an active enrolled seller', () => {
+  const state = { ...initialOperationsState(), operationalPaused: true,
+    cohort: { id: 'cohort-333', name: 'همکاران تأییدشده', sellerIds: [permission.partnerSellerId] } };
   for (const operation of ['CASE_DRAFT_WRITE', 'CASE_COMMIT'] as const) {
-    assert.equal(checkOperationsGate(contract, state, { operation, permission, caseState: 'DRAFT' })?.code, 'OPERATIONAL_PAUSE');
+    const readiness = operation === 'CASE_COMMIT' ? { evidence: null, current: {
+      now: permission.evaluatedAt, releaseId: 'release-333', schemaId: 'schema-333' } } : undefined;
+    const denial = checkOperationsGate(contract, state, { operation, permission, caseState: 'DRAFT', readiness });
+    assert.notEqual(denial?.code, 'OPERATIONAL_PAUSE');
   }
   assert.equal(checkOperationsGate(contract, state, { operation: 'CASE_READ', permission, caseState: 'DRAFT' }), null);
 });
 
-test('activation requires current real evidence for every gate, named membership and both open pauses', () => {
+test('legacy cohort activation requires evidence and enrollment readiness, not operational pause', () => {
   const evidence = {
     source: 'DATABASE_VERIFIED' as const, releaseId: 'release-333', schemaId: 'schema-333',
     checkedAt: '2026-08-27T07:59:00.000Z', expiresAt: '2026-08-27T08:10:00.000Z',
@@ -38,7 +42,7 @@ test('activation requires current real evidence for every gate, named membership
   const input = { operation: 'PROFILE_ACTIVATE' as const, permission, readiness: { evidence, current } };
   assert.equal(checkOperationsGate(contract, state, input), null);
   assert.equal(checkOperationsGate(contract, { ...state, enrollmentPaused: true }, input)?.code, 'COHORT_NOT_READY');
-  assert.equal(checkOperationsGate(contract, { ...state, operationalPaused: true }, input)?.code, 'OPERATIONAL_PAUSE');
+  assert.equal(checkOperationsGate(contract, { ...state, operationalPaused: true }, input), null);
   assert.equal(checkOperationsGate(contract, state, { ...input, operation: 'CASE_COMMIT', readiness: undefined })?.code, 'COHORT_NOT_READY');
 });
 
@@ -57,7 +61,7 @@ test('every action port is classified; new enrollment is separate from active co
   }
   // These mutation ports are not distinct PartnerActions in the v1 foundation.
   for (const operation of ['CUSTOMER_CONFIRMATION_SEND', 'CUSTOMER_OTP_VERIFY', 'RECOVERY_WRITE', 'SHARED_CORRECTION_SAVE'] as const) {
-    assert.equal(checkOperationsGate(contract, initialOperationsState(), { operation, permission })?.code, 'OPERATIONAL_PAUSE');
+    assert.equal(checkOperationsGate(contract, initialOperationsState(), { operation, permission })?.code, 'COHORT_NOT_READY');
   }
   assert.equal(operationForCommand({ type: 'PROFILE_TRANSITION', to: 'ACTIVE' } as contract.PartnerCommand), 'PROFILE_ACTIVATE');
   assert.equal(operationForCommand({ type: 'CASE_DRAFT_REVISE' } as contract.PartnerCommand), 'CASE_DRAFT_WRITE');
@@ -85,10 +89,10 @@ test('pause preserves support cancellation, internal remediation and healthy com
     assert.equal(checkOperationsGate(contract, state, { operation, permission: context, caseState: operation === 'CASE_CANCEL' ? 'DRAFT' : 'COMMITTED', integrityVerified: true }), null);
   }
   assert.equal(checkOperationsGate(contract, state, { operation: 'ACCOUNTING_WRITE', permission: internal, caseState: 'COMMITTED', integrityVerified: false })?.code, 'INTEGRITY_CONFLICT');
-  assert.equal(checkOperationsGate(contract, state, { operation: 'CASE_CANCEL', permission, caseState: 'DRAFT' })?.code, 'OPERATIONAL_PAUSE');
+  assert.equal(checkOperationsGate(contract, state, { operation: 'CASE_CANCEL', permission, caseState: 'DRAFT' })?.code, 'COHORT_NOT_READY');
 });
 
-test('all command ports remain closed during emergency pause, including confirmation and correction successors', () => {
+test('legacy profiles outside a cohort remain closed, including confirmation and correction successors', () => {
   const commands = ['CASE_SUBMIT', 'CASE_DRAFT_REVISE', 'CASE_COMMIT', 'CASE_CANCEL', 'CUSTOMER_CONFIRMATION_SEND',
     'INQUIRY_SUBMIT', 'INQUIRY_DECIDE', 'INQUIRY_CANCEL', 'INQUIRY_REASSIGN', 'CORRECTION_REQUEST',
     'RETAIL_CORRECTION_SAVE', 'SHARED_CORRECTION_SAVE', 'RETAIL_RECEIPT', 'RETAIL_RECEIPT_REVERSE', 'CUSTOMER_TRANSFER_DECIDE'];

@@ -1,0 +1,3 @@
+# Preserve independent Partner quote expiry
+
+Each approved Partner inquiry row keeps its own 48-hour validity, including when another row is rejected, replaced, or resubmitted. A complete Case price package is usable only until the earliest expiry of its required current approvals; renewing an expired or changed row creates successor evidence only for that row and its price-dependent descendants, preserving unchanged valid approvals and their original expiry. This replaces the package-wide renewal and 48-hours-after-final-approval rule in ADR-0062 because that rule could extend an older price without a new responder decision or force needless repricing of unaffected rows.

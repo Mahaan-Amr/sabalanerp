@@ -16,8 +16,84 @@ import type { ProductOperationsTechnicalInput, LongitudinalTechnicalInput, SlabT
 import { PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { CanonicalStairLayerSummary } from '../../contract-creation/components/product-modal-system/CanonicalStairLayerSummary';
-import { PartnerTechnicalDraftEditor } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
+import { PartnerTechnicalDraftEditor, overridePartnerStairQuantity, partnerStairCanonicalLength, partnerStairDisplayLength } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
 import { buildPartnerProductionTechnicalDraft } from '../../contract-creation/partner/partnerProductionTechnicalDraft';
+import { addPartnerTechnicalProduct, draftForPartnerTechnicalEdit, refreshPartnerTechnicalProductVersion } from '../../contract-creation/partner/partnerTechnicalDraftAdapter';
+
+test('Partner stair dimensions keep display units separate from canonical meters', () => {
+  assert.equal(partnerStairCanonicalLength('22', 'cm'), '0.22');
+  assert.equal(partnerStairDisplayLength('0.22', 'cm'), '22');
+  assert.equal(partnerStairCanonicalLength('1.2', 'm'), '1.2');
+  assert.equal(partnerStairDisplayLength('1.2', 'm'), '1.2');
+});
+
+test('Partner stair defaults to system quantity and keeps a manually edited quantity independent', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const product = catalog.products.find(item => item.families.includes('stair'))!;
+  const initial = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 0, rows: [] });
+  const draft = addPartnerTechnicalProduct(initial, product, { family: 'stair', productRowId: 'stair-row',
+    sourceBatchId: 'source-batch:stair-test', stairSystemId: 'stair-system:stair-test' });
+  assert.equal(draft.rows[0].family, 'stair');
+  if (draft.rows[0].family !== 'stair') return;
+  assert.equal(draft.rows[0].configuration.quantityMode, 'system');
+  assert.equal(draft.stairSystems?.[0]?.quantity.totalSteps, 1);
+  const edited = overridePartnerStairQuantity(draft, 'stair-row', '7');
+  assert.equal(edited.rows[0].configuration.quantity, 7);
+  assert.equal(edited.rows[0].configuration.quantityMode, 'manual');
+  assert.equal(edited.stairSystems?.[0]?.quantity.totalSteps, 1);
+});
+
+test('returned Partner row can adopt a current catalog version without losing row identity', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const product = catalog.products[0];
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 3,
+    rows: [{ productRowId: 'returned-row', catalogItemId: product.catalogItemId,
+      catalogSnapshotVersion: '2026-08-01T00:00:00.000Z', family: 'prepared',
+      configuration: { kind: 'readyPiece', unit: 'squareMeter', quantity: '2' } }],
+  });
+  const html = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft} products={catalog.products}
+    operations={catalog.operations} onChange={() => undefined} />);
+  assert.match(html, /ویرایش با نسخهٔ فعلی/);
+  const refreshed = refreshPartnerTechnicalProductVersion(draft, 'returned-row', product);
+  assert.equal(refreshed.rows[0].productRowId, 'returned-row');
+  assert.equal(refreshed.rows[0].catalogSnapshotVersion, product.catalogSnapshotVersion);
+  assert.equal(refreshed.inputRevision, 4);
+});
+
+test('editing a returned row with retained catalog evidence opens the current version and keeps its row identity', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const current = catalog.products[0];
+  const retained = { ...current, catalogSnapshotVersion: '2026-08-01T00:00:00.000Z' };
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 3,
+    rows: [{ productRowId: 'returned-row', catalogItemId: current.catalogItemId,
+      catalogSnapshotVersion: retained.catalogSnapshotVersion, family: 'prepared',
+      configuration: { kind: 'readyPiece', unit: 'squareMeter', quantity: '2' } }],
+  });
+  const html = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft}
+    products={[current, retained]} currentProducts={[current]} operations={catalog.operations}
+    onChange={() => undefined} />);
+  assert.match(html, /نسخهٔ کاتالوگ تغییر کرده است/);
+  const editing = draftForPartnerTechnicalEdit(draft, 'returned-row', [current]);
+  assert.equal(editing.rows[0].productRowId, 'returned-row');
+  assert.equal(editing.rows[0].catalogSnapshotVersion, current.catalogSnapshotVersion);
+  assert.equal(editing.rows[0].configuration.quantity, '2');
+});
+
+test('Partner longitudinal configuration shows the shared mandatory switch and percentage', () => {
+  const input = { inputRevision: 1, sourceBatchId: parseStableIdentity('source-batch', 'mandatory-ui'),
+    lengthMeters: parseCanonicalDecimal('1'), widthMeters: parseCanonicalDecimal('0.4'), quantity: 2,
+    lastManualField: 'quantity' as const, lastManualDimension: 'length' as const,
+    lengthDisplayUnit: 'm' as const, widthDisplayUnit: 'cm' as const,
+    sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual' as const,
+    motherWidthMeters: parseCanonicalDecimal('0.4'), sawKerfMeters: parseCanonicalDecimal('0.003') };
+  const html = renderToStaticMarkup(<TechnicalProductConfiguration><LongitudinalProductSection
+    input={input} onChange={() => undefined}
+    technicalMandatory={{ enabled: true, percentage: '30' }}
+    onTechnicalMandatoryChange={() => undefined} /></TechnicalProductConfiguration>);
+  assert.match(html, /حکمی/);
+  assert.match(html, /درصد حکمی/);
+  assert.doesNotMatch(html, /قیمت پایه|نرخ برش/);
+});
 
 test('layer summary consumes canonical rate-free strips and rejects a preview from an older edit', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();

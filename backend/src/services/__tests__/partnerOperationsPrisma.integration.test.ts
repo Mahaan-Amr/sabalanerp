@@ -17,7 +17,7 @@ function databaseUrl() {
   return url.toString();
 }
 
-test('durable operations control starts without a cohort and persists define, enroll and pause transitions', async () => {
+test('durable operations control persists legacy enrollment while rejecting operational pause commands', async () => {
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()),
     sourceDatabaseUrl: databaseUrl() });
   const database = temporary.client();
@@ -67,13 +67,14 @@ test('durable operations control starts without a cohort and persists define, en
           targetId: 'partner-operations', key: `${run}-${kind}-${paused}`, payloadHash: await contracts.canonicalHash(intent) } };
     };
     assert.equal((await service.pause(await command('ENROLLMENT', 2))).ok, true);
-    assert.equal((await service.pause(await command('OPERATIONAL', 3))).ok, true);
+    const retiredOpen = await service.pause(await command('OPERATIONAL', 3));
+    assert.equal(!retiredOpen.ok && retiredOpen.error.code, 'STATE_CONFLICT');
     await database.partnerProfile.create({ data: { id: profileId, userId: sellerId, state: 'ACTIVE' } });
-    const enrolled = await service.enroll({ sellerId, expectedRevision: 4, reason: 'پذیرش فروشنده واجد شرایط' });
+    const enrolled = await service.enroll({ sellerId, expectedRevision: 3, reason: 'پذیرش فروشنده واجد شرایط' });
     assert.deepEqual(enrolled.ok && enrolled.value.cohort?.sellerIds, [sellerId]);
-    const paused = await service.pause(await command('OPERATIONAL', 5, true));
-    assert.equal(paused.ok && paused.value.operationalPaused, true);
-    assert.equal(await database.partnerOperationsControlEvent.count({ where: { actorId: operatorId } }), 5);
+    const retiredPause = await service.pause(await command('OPERATIONAL', 4, true));
+    assert.equal(!retiredPause.ok && retiredPause.error.code, 'STATE_CONFLICT');
+    assert.equal(await database.partnerOperationsControlEvent.count({ where: { actorId: operatorId } }), 3);
   } finally {
     await database.$disconnect();
     await temporary.cleanup();

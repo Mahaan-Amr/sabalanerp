@@ -290,21 +290,21 @@ async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef
   const [bindings, usages, materialUsages, now] = await Promise.all([
     tx.partnerCaseRowBinding.count({ where: { caseId: owner.caseId, revision: owner.revision } }),
     tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
-      select: { approval: { select: { row: { select: { outcome: true, successor: { select: { id: true } },
-        inquiry: { select: { caseId: true, caseRevision: true, pricingReadyAt: true, pricingExpiresAt: true } } } } } } } }),
+      select: { approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } },
+        inquiry: { select: { caseId: true, caseRevision: true } } } } } } } }),
     tx.partnerMaterialInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
-      select: { approval: { select: { row: { select: { outcome: true, successor: { select: { id: true } },
-        inquiry: { select: { caseId: true, caseRevision: true, pricingReadyAt: true, pricingExpiresAt: true } } } } } } } }),
+      select: { approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } },
+        inquiry: { select: { caseId: true, caseRevision: true } } } } } } } }),
     tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`,
   ]);
   const instant = now[0]?.now;
   const valid = (usage: (typeof usages)[number]) => {
     const inquiry = usage.approval.row.inquiry;
-    return Boolean(instant && inquiry.pricingReadyAt && inquiry.pricingExpiresAt) &&
+    return Boolean(instant) &&
       inquiry.caseId === owner.caseId && inquiry.caseRevision !== null &&
       inquiry.caseRevision > 0 && inquiry.caseRevision <= owner.revision &&
       usage.approval.row.outcome === 'APPROVED' && !usage.approval.row.successor &&
-      inquiry.pricingExpiresAt!.getTime() > instant!.getTime();
+      usage.approval.expiresAt.getTime() > instant!.getTime();
   };
   return usages.length === bindings && usages.every(valid) && materialUsages.every(valid);
 }

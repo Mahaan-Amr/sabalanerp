@@ -30,7 +30,7 @@ function createAuthorization(source: AuthorizationSource<PartnerActionV2>, bindi
     }
     const partner = actor.partnerProfile;
     const admin = !partner && actor.role === 'ADMIN';
-    if (partner && (resource.partnerSellerId !== actor.id || partner.state === 'TERMINATED' ||
+    if (partner && (resource.partnerSellerId !== actor.id ||
         (partner.state === 'PENDING' && !(action === 'PROFILE_READ' && root.kind === 'PROFILE' && binding.purpose === 'ONBOARDING')))) {
       return { ok: false, error: partnerError('NOT_FOUND') };
     }

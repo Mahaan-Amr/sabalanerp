@@ -78,7 +78,7 @@ test('all read channels use the same predicate and availability exposes only can
   assert.deepEqual(availability, [
     { action: 'CASE_READ', enabled: true },
     { action: 'CASE_DRAFT_WRITE', enabled: false, disabledReason: {
-      code: 'PARTNER_NOT_ACTIVE', status: 409, message: 'حساب فروشنده همکار فعال نیست.',
+      code: 'PARTNER_NOT_ACTIVE', status: 409, message: 'حساب فروشنده همکار فعال نیست؛ ابتدا آن را در مدیریت همکاران فعال کنید.',
     } },
   ]);
 });
@@ -216,9 +216,9 @@ test('fixed Partner capabilities ignore internal grants and preserve pending/sus
   for (const state of ['PENDING', 'SUSPENDED', 'TERMINATED'] as const) {
     evidence.actor.partnerProfile!.state = evidence.resource!.partnerStatus = state;
     const read = await port.authorize('CASE_READ', { kind: 'CASE', id: 'case-a' });
-    assert.equal(read.ok, state === 'SUSPENDED', state);
+    assert.equal(read.ok, state === 'SUSPENDED' || state === 'TERMINATED', state);
     const write = await port.authorize('CASE_DRAFT_WRITE', { kind: 'CASE', id: 'case-a' });
     assert.equal(write.ok, false, state);
-    assert.equal(write.ok ? null : write.error.status, state === 'TERMINATED' || state === 'PENDING' ? 404 : 409);
+    assert.equal(write.ok ? null : write.error.status, state === 'PENDING' ? 404 : 409);
   }
 });

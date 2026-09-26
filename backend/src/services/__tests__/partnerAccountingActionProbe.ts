@@ -403,8 +403,11 @@ async function main() {
       await prisma.featurePermission.update({ where: paymentGrantKey, data: { permissionLevel: 'view' } });
       assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, false, 'current narrow permission controls the projected action');
       await prisma.featurePermission.update({ where: paymentGrantKey, data: { permissionLevel: 'edit' } });
+      await prisma.featurePermission.update({ where: { userId_workspace_feature: {
+        userId: actor.userId, workspace: 'accounting', feature: 'accounting_records_approve_void',
+      } }, data: { permissionLevel: 'edit' } });
       const actionReverse = await action({ kind: 'REVERSE_RECEIPT', paymentEventId: actionPaymentId, reason: 'بازگرداندن وجه آزمایش دسترسی' }, `${recordId}-action-reverse`);
-      assert.equal(actionReverse.status, 200);
+      assert.equal(actionReverse.status, 200, JSON.stringify(actionReverse.body));
       assert.equal((await readPayment(actionPaymentId)).partnerActions.reverseReceipt, false);
       const periodParts = new Intl.DateTimeFormat('en-US-u-ca-persian', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
       const period = `${periodParts.find(part => part.type === 'year')!.value}-${periodParts.find(part => part.type === 'month')!.value}`;
@@ -447,6 +450,13 @@ async function main() {
       assert.equal(searched.status, 200);
       assert.equal((await searched.json() as any).data.items.some((item: any) => item.id === recordId), true,
         'the authorized Case context links to a searchable official invoice');
+      const partnerOnly = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/financial-records?kind=INVOICE_CANDIDATE&sourceKind=PARTNER_INTERNAL_RECORD&page=1&pageSize=1&search=${encodeURIComponent(displayed.partnerContext.caseNumber)}`,
+        { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
+      assert.equal(partnerOnly.status, 200);
+      const partnerPage = (await partnerOnly.json() as any).data;
+      assert.equal(partnerPage.items[0]?.id, recordId,
+        'source filtering precedes pagination so a Partner invoice is visible on its own first page');
+      assert.equal(partnerPage.total, 1);
       await prisma.accountingFinancialRecord.update({ where: { id: recordId }, data: { amount: '1601' } });
       try {
         for (const path of ['/workspace', '/financial-records']) {

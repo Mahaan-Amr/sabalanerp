@@ -124,6 +124,45 @@ test('submission rejects foreign configuration and preserves a linear successor'
   });
 });
 
+test('Sabalan can price a corrected row whose predecessor was rejected', async () => {
+  await fixture(async (tx, ids) => {
+    const shared = {
+      transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: async () => ({ ok: true as const, value: { evidenceId: 'authorization-fixture' } }),
+      resolveInitialResponder: async () => ({ ok: true as const, value: { responderId: ids.responderId, eligibilityEvidence: { source: 'fixture' } } }),
+      resolveConfiguration: async () => ({ ok: true as const, value: { identity: identity(ids.actorId),
+        description: 'سنگ اصلاح‌شده', configuration: [{ label: 'نوع', value: 'آماده' }] } }),
+    };
+    const partner = createPartnerInquiryService({ actorId: ids.actorId, ...shared });
+    const responder = createPartnerInquiryService({ actorId: ids.responderId, ...shared });
+    assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId))).ok, true);
+    const rejectIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions: [{ rowId: 'row-1', expectedRevision: 1,
+        outcome: 'REJECTED' as const, reason: 'مشخصات محصول را اصلاح کنید' }] };
+    const reject = await responder.execute({ ...rejectIntent, commandId: 'reject-before-correction',
+      correlationId: 'reject-before-correction', idempotency: { actorId: ids.responderId,
+        operation: 'INQUIRY_DECIDE', targetId: ids.inquiryId, key: 'reject-before-correction',
+        payloadHash: await canonicalHash(rejectIntent) } });
+    assert.equal(reject.ok, true);
+    assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId, 'row-2',
+      { rowId: 'row-1', revision: 2, reason: 'اصلاح مشخصات محصول' }))).ok, true);
+    const approveIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions: [{ rowId: 'row-2', expectedRevision: 1,
+        outcome: 'APPROVED' as const, wholesaleUnitPrice: { amount: '1500000', currency: 'IRT' as const } }] };
+    const approved = await responder.execute({ ...approveIntent, commandId: 'price-after-correction',
+      correlationId: 'price-after-correction', idempotency: { actorId: ids.responderId,
+        operation: 'INQUIRY_DECIDE', targetId: ids.inquiryId, key: 'price-after-correction',
+        payloadHash: await canonicalHash(approveIntent) } });
+    assert.equal(approved.ok, true);
+    if (approved.ok) assert.equal(approved.value.batch?.outcomes[0].ok, true, JSON.stringify(approved.value.batch));
+    const current = await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-2' } });
+    const usable = await resolveApprovalForUse(tx, { binding: { inquiryId: ids.inquiryId,
+      rowId: current.id, revision: current.revision }, partnerSellerId: ids.actorId,
+      configurationHash: current.configurationHash });
+    assert.equal(usable.ok, true, usable.ok ? undefined : usable.error.code);
+  });
+});
+
 test('bulk responder decision commits valid rows independently, preserves stale rows and replays the exact batch', async () => {
   await fixture(async (tx, ids) => {
     const shared = {
@@ -154,10 +193,9 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     const responder = createPartnerInquiryService({ actorId: ids.responderId, ...shared });
     await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: true } });
     const paused = await responder.execute(command);
-    assert.equal(paused.ok ? null : paused.error.code, 'OPERATIONAL_PAUSE');
-    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: false } });
+    assert.equal(paused.ok, true, JSON.stringify(paused));
     const result = await responder.execute(command);
-    assert.equal(result.ok, true);
+    assert.equal(result.ok && result.value.replayed, true);
     if (!result.ok || !result.value.batch) return;
     assert.equal(result.value.batch.outcomes[0].ok, true);
     assert.equal(result.value.batch.outcomes[1].ok ? null : result.value.batch.outcomes[1].error.code, 'ROW_STALE');
@@ -267,6 +305,17 @@ test('responder can decide pending rows in separate commands after an earlier ro
       { id: 'row-1', outcome: 'APPROVED', revision: 2 },
       { id: 'row-2', outcome: 'APPROVED', revision: 2 },
     ]);
+    const original = await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'row-1' } });
+    assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId, 'row-3',
+      { rowId: 'row-2', revision: 2, reason: 'اصلاح ردیف دوم' }))).ok, true);
+    assert.equal((await decide('row-3', 'sequential-decision-3')).ok, true);
+    const packageWindow = await tx.partnerInquiry.findUniqueOrThrow({ where: { id: ids.inquiryId },
+      select: { pricingReadyAt: true, pricingExpiresAt: true } });
+    assert.ok(packageWindow.pricingReadyAt, 'valid unchanged approval must keep the revised package ready');
+    assert.equal(packageWindow.pricingExpiresAt?.getTime(), original.expiresAt.getTime(),
+      'the earliest required row expires first');
+    const unchanged = await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'row-1' } });
+    assert.equal(unchanged.id, original.id);
   });
 });
 

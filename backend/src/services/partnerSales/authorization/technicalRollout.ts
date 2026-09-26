@@ -3,9 +3,8 @@ import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 
 export const PARTNER_OPERATIONS_CONTROL_ID = 'partner-operations';
 
-/** The global operations row is always the first durable lock acquired by a
- * Partner mutation. Callers may safely invoke this again after their entry
- * guard; PostgreSQL retains the same row lock through commit. */
+/** Legacy cohort mutations still serialize through their historical rollout
+ * row. Directly converted profiles do not use this global control. */
 export async function lockPartnerOperationsControl(tx: Prisma.TransactionClient) {
   await tx.$queryRaw`SELECT id FROM partner_operations_controls
     WHERE id = ${PARTNER_OPERATIONS_CONTROL_ID} FOR UPDATE`;
@@ -13,28 +12,24 @@ export async function lockPartnerOperationsControl(tx: Prisma.TransactionClient)
     select: { cohortId: true, operationalPaused: true } });
 }
 
-/** Fail-closed rollout boundary shared by every mounted Partner technical
- * surface. Reads remain available to an enrolled profile during an operational
- * pause; mutations additionally lock and re-read the cohort so pause and write
- * commit have one winner. */
+/** Compatibility rollout boundary shared by mounted Partner technical
+ * surfaces. Direct conversion bypasses it completely; older profiles retain
+ * their named-cohort eligibility until migrated. */
 export async function authorizePartnerTechnicalRollout(tx: Prisma.TransactionClient, profileId: string,
   operation: 'READ' | 'MUTATE' | 'CONTROL' | 'COMMITTED_FULFILLMENT'): Promise<Result<void>> {
   const direct = tx.partnerConversionDisposition && await tx.partnerConversionDisposition.findFirst({ where: {
     profileId, sourceType: 'PARTNER_ACTIVATION', disposition: 'DIRECT_V4',
   }, select: { id: true } });
+  // Direct conversion is the complete availability decision. It must not
+  // depend on the existence or value of a legacy global rollout row.
+  if (direct) return { ok: true, value: undefined };
   const control = operation === 'READ'
     ? await tx.partnerOperationsControl.findUnique({ where: { id: PARTNER_OPERATIONS_CONTROL_ID },
       select: { cohortId: true, operationalPaused: true } })
     : await lockPartnerOperationsControl(tx);
-  // Directly converted sellers are system-wide immediately. Cohorts remain
-  // readable only as historical rollout evidence for older profiles.
-  if (direct) {
-    if (operation === 'MUTATE' && control?.operationalPaused) return { ok: false, error: partnerError('OPERATIONAL_PAUSE') };
-    return { ok: true, value: undefined };
-  }
   if (!control) return { ok: false, error: partnerError('COHORT_NOT_READY') };
   // A committed Case is already a durable Sabalan obligation. Its fulfillment
-  // remains available during emergency pause and after rollout cohort changes;
+  // remains available after legacy rollout cohort changes;
   // the fulfillment boundary separately proves COMMITTED source and current
   // actor authority under the global/Case locks acquired before this call.
   if (operation === 'COMMITTED_FULFILLMENT') return { ok: true, value: undefined };
@@ -48,8 +43,5 @@ export async function authorizePartnerTechnicalRollout(tx: Prisma.TransactionCli
   const cohort = await tx.partnerReleaseCohort.findUnique({ where: { id: cohortId },
     select: { activationEnabled: true, operationalPaused: true } });
   if (!cohort?.activationEnabled) return { ok: false, error: partnerError('COHORT_NOT_READY') };
-  // A pause blocks new commercial facts, not the controls required to cancel
-  // pending work or replace an unavailable responder.
-  if (operation === 'MUTATE' && control.operationalPaused) return { ok: false, error: partnerError('OPERATIONAL_PAUSE') };
   return { ok: true, value: undefined };
 }

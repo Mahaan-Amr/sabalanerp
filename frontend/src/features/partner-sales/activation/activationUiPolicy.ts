@@ -8,6 +8,5 @@ export function activationOperationAvailability(view: PartnerActivationViewV3 | 
     canDefineCohort: Boolean(view?.release.status === 'READY' && !view.cohort),
     canOpenEnrollment: Boolean(view?.release.status === 'READY' && view.cohort && !view.cohort.enrollmentOpen),
     canEnroll: Boolean(subject?.profileId && view?.cohort?.enrollmentOpen && !enrolled),
-    canOpenOperations: Boolean(subject?.profileId && enrolled && view?.cohort && !view.cohort.operationsOpen),
   };
 }

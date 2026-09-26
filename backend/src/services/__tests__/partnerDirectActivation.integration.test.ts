@@ -7,6 +7,7 @@ import { canonicalHash, type PartnerDirectActivationCommandV4,
 import { grantScopedAction } from '../effectiveAuthorization/scopedActions';
 import { createPartnerLifecycleDatabase } from './partnerCaseLifecycleDatabase';
 import { createPrismaPartnerDirectActivation } from '../partnerSales/activationPackage/directPrisma';
+import { authorizePartnerTechnicalRollout } from '../partnerSales/authorization/technicalRollout';
 
 function databaseUrl() {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -64,6 +65,10 @@ test('direct activation converts an eligible user atomically without identity, t
     assert.equal(converted.role, 'USER');
     assert.equal(converted.workspacePermissions[0]?.isActive, false);
     assert.equal(converted.partnerProfile?.state, 'ACTIVE');
+    const rollout = await database.$transaction(tx => authorizePartnerTechnicalRollout(tx,
+      converted.partnerProfile!.id, 'MUTATE'));
+    assert.equal(rollout.ok, true,
+      'فعال‌سازی مستقیم باید حتی با مقدار قدیمی توقف عملیات و بدون cohort فوراً قابل استفاده باشد');
     assert.equal(converted.partnerProfile?.responderAssignments.at(-1)?.responderId, responderId);
     assert.equal(converted.partnerProfile?.commercialAccount?.identities[0]?.legalName, 'فریبا پورشهید');
     assert.equal(converted.partnerProfile?.commercialAccount?.terms.length, 0,

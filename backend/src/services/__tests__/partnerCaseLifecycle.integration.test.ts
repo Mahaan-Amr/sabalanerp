@@ -56,6 +56,9 @@ test('multi-Case Accounting list does not deadlock with the Partner writer lock 
       await tx.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
       await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`,
         password: 'not-a-login', firstName: 'Read', lastName: 'Concurrency', role: 'ADMIN' } });
+      await tx.workspacePermission.create({ data: { userId: actorId, workspace: 'accounting', permissionLevel: 'view' } });
+      await tx.featurePermission.create({ data: { userId: actorId, workspace: 'accounting',
+        feature: 'accounting_payments_manage', permissionLevel: 'view', grantedBy: actorId } });
     });
     await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
       'backend/src/services/__tests__/partnerAccountingReadConcurrencyProbe.ts'], { timeout: 30_000, env: { ...process.env,
@@ -528,7 +531,7 @@ test('an immutable priced revision remains readable after current pricing return
     assert.ok(historical.accounting, 'a historically priced revision must retain its canonical Accounting projection');
   }));
 
-test('operational pause blocks commitment but support cancellation remains atomic and retained', () => fixture(async (tx, ids, owner) => {
+test('legacy operational pause does not block commitment', () => fixture(async (tx, ids, owner) => {
   const cancelled: string[] = [];
   const service = createPartnerCaseLifecycleService(dependencies(tx, ids, cancelled));
   await service.markAwaitingCustomerConfirmation({ expected: owner, commandId: `${ids.caseId}-send`,
@@ -545,15 +548,12 @@ test('operational pause blocks commitment but support cancellation remains atomi
     expiresAt: new Date('2026-09-30T00:00:00.000Z'), content: customerOutput,
     commandId: `${ids.caseId}-snapshot-command` } });
   await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: true } });
-  const blocked = await service.execute(await commitCommand(ids, owner, 'PRINTED'));
-  assert.equal(blocked.ok ? null : blocked.error.code, 'OPERATIONAL_PAUSE');
-  const cancelledResult = await service.execute(await cancelCommand(ids, owner, 'CUSTOMER_APPROVED'));
-  assert.equal(cancelledResult.ok && cancelledResult.value.case?.state, 'CANCELLED');
-  assert.deepEqual(cancelled, ['pending-session']);
-  const replay = await service.execute(await cancelCommand(ids, owner, 'CUSTOMER_APPROVED'));
+  const committed = await service.execute(await commitCommand(ids, owner, 'PRINTED'));
+  assert.equal(committed.ok && committed.value.case?.state, 'COMMITTED');
+  const replay = await service.execute(await commitCommand(ids, owner, 'PRINTED'));
   assert.equal(replay.ok && replay.value.replayed, true);
   const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, include: { customerContract: true } });
-  assert.equal(root.state, 'CANCELLED'); assert.equal(root.customerContract!.status, 'CANCELLED');
+  assert.equal(root.state, 'COMMITTED'); assert.equal(root.customerContract!.status, 'PRINTED');
   assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
   assert.equal(await tx.partnerCaseRevision.count({ where: { caseId: ids.caseId } }), 1);
   assert.equal(await tx.partnerCustomerOutputSnapshot.count({ where: { caseId: ids.caseId } }), 1);
@@ -1546,11 +1546,11 @@ test('concurrent SIGNED and PRINTED writers on independent clients create one co
     await controlLocked;
     const pauseCommitPromise = serviceFor(first, pauseIds).execute(await commitCommand(pauseIds, pauseOwner, 'SIGNED'));
     const [pauseCommit] = await Promise.all([pauseCommitPromise, pauseWinner]);
-    assert.equal(!pauseCommit.ok && pauseCommit.error.code, 'OPERATIONAL_PAUSE');
+    assert.equal(pauseCommit.ok, true, JSON.stringify(pauseCommit));
     const pauseRoot = await setup.partnerSaleCase.findUniqueOrThrow({ where: { id: pauseIds.caseId },
       include: { customerContract: true } });
-    assert.equal(pauseRoot.state, 'CUSTOMER_APPROVED');
-    assert.equal(pauseRoot.customerContract!.status, 'APPROVED');
+    assert.equal(pauseRoot.state, 'COMMITTED');
+    assert.equal(pauseRoot.customerContract!.status, 'SIGNED');
 
     const competingIds = idsFor(`partner-lifecycle-cancel-race-${temporary.runId}`);
     const competingOwner = await setup.$transaction(tx => seedCase(tx, competingIds));

@@ -63,7 +63,9 @@ async function main() {
       assert.equal('allocationRevision' in row, false);
       assert.equal('allocationRevisionId' in row, false);
       assert.equal('workItem' in row, false);
-      assert.deepEqual(Object.keys(row).sort(), ['canManage', 'createdAt', 'dispositionAt', 'dispositionReason', 'id', 'status', 'waybills']);
+      assert.deepEqual(Object.keys(row).sort(), ['canManage', 'createdAt', 'dispositionAt', 'dispositionReason',
+        'id', 'status', 'summary', 'waybills']);
+      assert.deepEqual(Object.keys(row.summary).sort(), ['driverName', 'driverSource', 'loadingNumber', 'plate']);
     }
   } finally {
     server.closeAllConnections();

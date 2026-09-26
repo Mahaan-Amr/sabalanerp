@@ -3559,6 +3559,9 @@ const applyContractSearch = async (where: { contractId?: any; AND?: any }, query
 export const listFinancialRecords = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;
   const where: Prisma.AccountingFinancialRecordWhereInput = scope.financial();
+  // Filter the Partner source before pagination. Filtering contextualized page
+  // results would omit valid cases as soon as ordinary records fill the page.
+  if (query.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) where.sourceKind = PARTNER_INTERNAL_ACCOUNTING_SOURCE;
   const isInvoiceCandidateQuery = query.kind === FinancialRecordKind.INVOICE_CANDIDATE
     || query.view === 'actionable'
     || query.view === 'invoiced';

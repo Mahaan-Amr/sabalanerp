@@ -2,14 +2,14 @@
 
 import React from 'react';
 import type { ActionAvailabilityV2, PartnerActionV2, PartnerManagementProfileViewV2, PartnerManagementWorkspaceViewV2 } from '@sabalanerp/partner-sales-contracts';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpFieldView, ErpMetricGrid, ErpSection, ErpSummaryGrid } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpFieldView, ErpInlineState, ErpMetricGrid, ErpSection, ErpSummaryGrid } from '@/components/erp';
 import { actionPresentation } from './availability';
 
 export type ManagementChoice = { action: PartnerActionV2; profile?: PartnerManagementProfileViewV2;
   transfer?: PartnerManagementWorkspaceViewV2['transfers'][number]; outcome?: 'APPROVE' | 'REJECT' };
 export const actionLabels: Partial<Record<PartnerActionV2, string>> = {
   PROFILE_CREATE: 'ایجاد پروفایل', IDENTITY_VERIFY: 'تأیید هویت', PROFILE_ACTIVATE: 'فعال‌سازی',
-  PROFILE_SUSPEND: 'تعلیق همکاری', PROFILE_TERMINATE: 'خاتمه همکاری',
+  PROFILE_SUSPEND: 'تعلیق همکاری', PROFILE_TERMINATE: 'غیرفعال‌سازی همکاری',
   COMMERCIAL_TERMS_MANAGE: 'تغییر شرایط تجاری', CREDIT_TERMS_MANAGE: 'تغییر شرایط اعتبار',
   RESPONDER_ASSIGN: 'تعیین پاسخ‌دهنده', RESPONDER_REASSIGN: 'تغییر پاسخ‌دهنده',
   PROFILE_CONVERSION_MANAGE: 'تعیین تکلیف تبدیل', CUSTOMER_TRANSFER_DECIDE: 'تصمیم انتقال مشتری',
@@ -58,6 +58,9 @@ export function ManagementView({ view, now, disabled, onChoose }: {
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-3">{action('PROFILE_ACTIVATE')}{action('PROFILE_SUSPEND')}{action('PROFILE_TERMINATE')}</div>
+        {item.lifecycleBlockers.map(blocker => <div className="mt-3" key={`${blocker.action}:${blocker.code}`}>
+          <ErpInlineState kind="stale" title={`${blocker.title} — ${blocker.detail} مسئول پیگیری: ${blocker.owner}. اقدام بعدی: ${blocker.nextStep}`} />
+        </div>)}
       </ErpSection>;
     })}
     {view.transfers.length > 0 && <ErpSection title="تصمیم‌های انتقال مشتری">

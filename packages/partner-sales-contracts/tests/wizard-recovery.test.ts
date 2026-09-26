@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { PartnerWizardRecoverySaveSchema, PartnerWizardRecoverySnapshotSchema } from '../src';
+import { CaseDraftIntentSchema, PartnerWizardRecoverySaveSchema, PartnerWizardRecoverySnapshotSchema } from '../src';
 import { createPartnerFixtures } from '../src/testing';
 
 function intent() {
@@ -40,4 +40,15 @@ test('wizard recovery persists the Case-scoped pricing gate between products and
   assert.equal(PartnerWizardRecoverySaveSchema.safeParse(value).success, true);
   assert.equal(PartnerWizardRecoverySnapshotSchema.safeParse({ schemaVersion: 1, wizardRevision: 2,
     step: value.step, intent: value.intent, updatedAt: new Date().toISOString() }).success, true);
+});
+
+test('an unallocated new delivery survives recovery but cannot be submitted', () => {
+  const base = intent();
+  const draft = { ...base, deliveries: [...base.deliveries, { ...base.deliveries[0],
+    deliveryId: 'new-delivery', items: [] }] };
+  const value = { schemaVersion: 1, expectedWizardRevision: 1,
+    editLease: { recoveryId: base.recoveryId, browserSessionId: 'browser-1', leaseToken: 'lease-1', baseRevision: 0 },
+    step: 'delivery', intent: draft };
+  assert.equal(PartnerWizardRecoverySaveSchema.safeParse(value).success, true);
+  assert.equal(CaseDraftIntentSchema.safeParse(draft).success, false);
 });

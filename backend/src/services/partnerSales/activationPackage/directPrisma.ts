@@ -51,6 +51,31 @@ async function responsibilityCount(tx: Tx, userId: string) {
   return duties + sessions + contracts + projects + corrections;
 }
 
+async function incompatibleAccessCount(tx: Tx, userId: string) {
+  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  const [workspaces, features, grants, profileAssignments, inquiryAssignments] = await Promise.all([
+    tx.workspacePermission.count({ where: { userId, isActive: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] } }),
+    tx.featurePermission.count({ where: { userId, isActive: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] } }),
+    tx.effectiveActionGrant.count({ where: { subjectUserId: userId, revokedAt: null,
+      domain: { not: 'PARTNER' }, effect: 'ALLOW',
+      OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] } }),
+    tx.$queryRaw<Array<{ count: bigint }>>`SELECT count(*)::bigint AS count
+      FROM partner_profile_responder_assignments a WHERE a."responderId" = ${userId}
+        AND a.revision = (SELECT max(b.revision) FROM partner_profile_responder_assignments b
+          WHERE b."profileId" = a."profileId")`,
+    tx.$queryRaw<Array<{ count: bigint }>>`SELECT count(*)::bigint AS count
+      FROM partner_inquiry_assignments a JOIN partner_inquiries i ON i.id = a."inquiryId"
+      WHERE a."responderId" = ${userId}
+        AND a.revision = (SELECT max(b.revision) FROM partner_inquiry_assignments b
+          WHERE b."inquiryId" = a."inquiryId")
+        AND EXISTS (SELECT 1 FROM partner_inquiry_rows r WHERE r."inquiryId" = i.id AND r.outcome = 'PENDING')`,
+  ]);
+  return workspaces + features + grants + Number(profileAssignments[0]?.count ?? 0n) +
+    Number(inquiryAssignments[0]?.count ?? 0n);
+}
+
 async function eligibleResponders(tx: Tx, excludedUserIds: readonly string[] = []) {
   const candidates = await tx.user.findMany({ where: { isActive: true, partnerProfile: null,
     ...(excludedUserIds.length ? { id: { notIn: [...excludedUserIds] } } : {}) },
@@ -93,12 +118,23 @@ export function createPrismaPartnerDirectActivation(input: {
             root: { kind: 'PROFILE', id: profileId ?? `prospective:${user.id}` },
             ...(!profileId ? { prospectiveOwnerId: user.id } : {}) });
           if (!authorization.ok) return authorization;
-          const [responders, priorResponsibilityCount] = await Promise.all([
+          const [responders, priorResponsibilityCount, incompatibleAccesses] = await Promise.all([
             eligibleResponders(tx, [user.id, input.actorId]), responsibilityCount(tx, user.id),
+            incompatibleAccessCount(tx, user.id),
           ]);
           const state = user.partnerProfile?.state ?? 'NONE';
-          const canActivate = user.isActive && input.actorId !== user.id && !['ADMIN', 'MANAGER'].includes(user.role) &&
-            (state === 'NONE' || state === 'PENDING') && responders.length > 0;
+          const activationBlockers = [
+            ...(!user.isActive ? [{ action: 'ACTIVATE' as const, code: 'USER_INACTIVE',
+              title: 'حساب کاربری غیرفعال است', detail: 'کاربر غیرفعال نمی‌تواند به فروشنده همکار تبدیل شود.',
+              owner: 'مدیریت کاربران', nextStep: 'ابتدا حساب کاربری را فعال کنید.' }] : []),
+            ...(input.actorId === user.id ? [{ action: 'ACTIVATE' as const, code: 'SELF_CONVERSION',
+              title: 'تبدیل حساب خود مجاز نیست', detail: 'تبدیل باید توسط مدیر مجاز دیگری ثبت شود.',
+              owner: 'مدیریت فروش', nextStep: 'از مدیر مجاز دیگری بخواهید تبدیل را انجام دهد.' }] : []),
+            ...(responders.length === 0 ? [{ action: 'ACTIVATE' as const, code: 'NO_RESPONDER',
+              title: 'پاسخ‌دهنده قیمت موجود نیست', detail: 'حداقل یک فروشنده داخلی واجد شرایط باید پاسخ‌دهنده قیمت باشد.',
+              owner: 'مدیریت فروش', nextStep: 'دسترسی پاسخ‌گویی یک فروشنده داخلی را فعال کنید.' }] : []),
+          ];
+          const canActivate = (state === 'NONE' || state === 'PENDING') && activationBlockers.length === 0;
           const blocker = canActivate ? undefined : partnerError(!user.isActive ? 'PARTNER_NOT_ACTIVE'
             : responders.length === 0 ? 'RESPONDER_UNAVAILABLE' : 'STATE_CONFLICT');
           const commercialEvidenceCount = user.partnerProfile
@@ -107,6 +143,44 @@ export function createPrismaPartnerDirectActivation(input: {
             user.partnerProfile.conversionDispositions.length && !user.partnerProfile.irreversibleAt &&
             commercialEvidenceCount === 0 && input.actorId !== user.id);
           const revertBlocker = user.partnerProfile?.state === 'ACTIVE' && !canRevert ? partnerError('STATE_CONFLICT') : undefined;
+          const revertBlockers = user.partnerProfile?.state === 'ACTIVE' && !canRevert ? [
+            ...(commercialEvidenceCount > 0 ? [{ action: 'REVERT' as const, code: 'COMMERCIAL_HISTORY',
+              title: 'سابقه تجاری ثبت شده است',
+              detail: `${commercialEvidenceCount.toLocaleString('fa-IR')} مشتری، استعلام یا پرونده به این فروشنده وابسته است.`,
+              owner: 'مدیریت فروش', nextStep: 'به‌جای بازگردانی تبدیل، همکاری را تعلیق یا غیرفعال کنید.' }] : []),
+            ...(input.actorId === user.id ? [{ action: 'REVERT' as const, code: 'SELF_REVERT',
+              title: 'بازگردانی حساب خود مجاز نیست', detail: 'این تصمیم باید توسط مدیر مجاز دیگری ثبت شود.',
+              owner: 'مدیریت فروش', nextStep: 'از مدیر مجاز دیگری بخواهید وضعیت همکاری را تغییر دهد.' }] : []),
+            ...(user.partnerProfile.irreversibleAt ? [{ action: 'REVERT' as const, code: 'IRREVERSIBLE_PARTNER_EVIDENCE',
+              title: 'بازگردانی تبدیل دیگر امن نیست',
+              detail: 'فعال‌سازی قطعی یا شواهد غیرقابل‌بازگشت برای این همکاری ثبت شده است.',
+              owner: 'مدیریت فروش', nextStep: 'برای توقف همکاری از تعلیق یا غیرفعال‌سازی استفاده کنید.' }] : []),
+            ...(!user.partnerProfile.conversionDispositions.length ? [{ action: 'REVERT' as const, code: 'NOT_DIRECT_CONVERSION',
+              title: 'تبدیل از مسیر مستقیم ثبت نشده است', detail: 'این پروفایل با جریان قدیمی ایجاد شده و بازگردانی مستقیم ندارد.',
+              owner: 'مدیریت فروش', nextStep: 'از تعلیق یا غیرفعال‌سازی همکاری استفاده کنید.' }] : []),
+          ] : [];
+          const currentResponderId = user.partnerProfile?.responderAssignments[0]?.responderId;
+          const currentResponder = currentResponderId
+            ? await resolveEligibleResponder(tx, { responderId: currentResponderId }) : null;
+          const reactivationBlockers = ['SUSPENDED', 'TERMINATED'].includes(state) ? [
+            ...(!user.isActive ? [{ action: 'REACTIVATE' as const, code: 'USER_INACTIVE',
+              title: 'حساب کاربری غیرفعال است', detail: 'حساب غیرفعال امکان ورود و ادامه همکاری ندارد.',
+              owner: 'مدیریت کاربران', nextStep: 'ابتدا حساب کاربری را فعال کنید.' }] : []),
+            ...(!currentResponder?.ok ? [{ action: 'REACTIVATE' as const, code: 'RESPONDER_UNAVAILABLE',
+              title: 'پاسخ‌دهنده قیمت آماده نیست', detail: 'پاسخ‌دهنده فعلی حذف شده یا دسترسی لازم را ندارد.',
+              owner: 'مدیریت فروش', nextStep: 'یک پاسخ‌دهنده فعال انتخاب کنید و دوباره تلاش کنید.' }] : []),
+            ...(priorResponsibilityCount > 0 ? [{ action: 'REACTIVATE' as const, code: 'OPEN_INTERNAL_RESPONSIBILITY',
+              title: 'مسئولیت داخلی باز وجود دارد',
+              detail: `${priorResponsibilityCount.toLocaleString('fa-IR')} مسئولیت داخلی هنوز به این حساب وابسته است.`,
+              owner: 'مدیر واحد مربوط', nextStep: 'مسئولیت‌های باز را منتقل یا تعیین‌تکلیف کنید و دوباره تلاش کنید.' }] : []),
+            ...(user.role !== 'USER' ? [{ action: 'REACTIVATE' as const, code: 'INTERNAL_ROLE',
+              title: 'نقش داخلی ناسازگار است', detail: `این حساب اکنون نقش داخلی «${user.role}» دارد.`,
+              owner: 'مدیریت کاربران', nextStep: 'نقش حساب را به کاربر عادی تغییر دهید و دوباره تلاش کنید.' }] : []),
+            ...(incompatibleAccesses > 0 ? [{ action: 'REACTIVATE' as const, code: 'INTERNAL_ACCESS',
+              title: 'دسترسی داخلی ناسازگار وجود دارد',
+              detail: `${incompatibleAccesses.toLocaleString('fa-IR')} دسترسی یا مسئولیت پاسخ‌گویی داخلی هنوز فعال است.`,
+              owner: 'مدیر واحد مربوط', nextStep: 'دسترسی‌ها و مسئولیت‌های داخلی را لغو یا منتقل کنید و دوباره تلاش کنید.' }] : []),
+          ] : [];
           const activation = user.partnerProfile?.events[0];
           const view = PartnerDirectActivationViewV4Schema.parse({ schemaVersion: 4,
             purpose: 'PARTNER_DIRECT_ACTIVATION', actorId: input.actorId,
@@ -118,7 +192,7 @@ export function createPrismaPartnerDirectActivation(input: {
                 caseCount: user.partnerProfile._count.saleCases } : { customerCount: 0, inquiryCount: 0, caseCount: 0 }),
               ...(activation ? { convertedAt: activation.recordedAt.toISOString(), convertedBy: activation.actorId } : {}),
               canActivate, ...(blocker ? { blocker } : {}), canRevert, ...(revertBlocker ? { revertBlocker } : {}),
-              priorResponsibilityCount }, responders });
+              priorResponsibilityCount, blockers: [...activationBlockers, ...revertBlockers, ...reactivationBlockers] }, responders });
           return { ok: true as const, value: view };
         });
       } catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
@@ -167,7 +241,7 @@ export function createPrismaPartnerDirectActivation(input: {
           } });
           if (!user) return { ok: false as const, error: partnerError('NOT_FOUND') };
           if (input.actorId === user.id || command.responderId === user.id || command.responderId === input.actorId ||
-              !user.isActive || ['ADMIN', 'MANAGER'].includes(user.role) ||
+              !user.isActive ||
               (user.partnerProfile && user.partnerProfile.state !== 'PENDING') ||
               user.updatedAt.toISOString() !== command.expectedUserUpdatedAt) {
             return { ok: false as const, error: user.updatedAt.toISOString() !== command.expectedUserUpdatedAt

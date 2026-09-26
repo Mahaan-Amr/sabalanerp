@@ -118,7 +118,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
     const rows = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id,
       id: { in: command.decisions.map(decision => decision.rowId) } }, select: {
       id: true, revision: true, outcome: true, definition: true, predecessorId: true,
-      predecessor: { select: { approval: { select: { id: true } } } },
+      predecessor: { select: { outcome: true, approval: { select: { id: true } } } },
     } });
     const hasActionableDecision = command.decisions.some(decision => {
       const row = rows.find(item => item.id === decision.rowId);
@@ -126,7 +126,8 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
       const definition = parseInquiryDefinition(row.definition);
       if (!definition) return false;
       if (decision.outcome === 'APPROVED' && decision.wholesaleUnitPrice.currency !== definition.identity.currency) return false;
-      return !row.predecessorId || Boolean(row.predecessor?.approval?.id);
+      return !row.predecessorId || row.predecessor?.outcome === 'REJECTED' ||
+        (row.predecessor?.outcome === 'APPROVED' && Boolean(row.predecessor.approval?.id));
     });
     let managementTakeover: { previousResponderId: string; assignmentId: string; assignmentRevision: number; reason: string } | undefined;
     if (assignment.responderId !== dependencies.actorId && hasActionableDecision) {
@@ -156,36 +157,43 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         if (decision.wholesaleUnitPrice.currency !== definition.identity.currency) {
           outcomes.push({ ok: false, rowId: row.id, error: partnerError('INVALID_PAYLOAD') }); continue;
         }
-        if (row.predecessorId && !row.predecessor?.approval?.id) {
+        if (row.predecessorId && row.predecessor?.outcome !== 'REJECTED' &&
+            (row.predecessor?.outcome !== 'APPROVED' || !row.predecessor.approval?.id)) {
           outcomes.push({ ok: false, rowId: row.id, error: partnerError('INTEGRITY_CONFLICT') }); continue;
         }
+        const predecessorApprovalId = row.predecessor?.approval?.id;
         const evidenceHash = await canonicalHash({ schemaVersion: 1, identity: definition.identity,
           wholesaleUnitPrice: decision.wholesaleUnitPrice, assignmentId: assignment.id,
           assignmentRevision: assignment.revision, authorizationEvidenceId: authorization.value.evidenceId,
-          ...(row.predecessorId ? { predecessorApprovalId: row.predecessor?.approval?.id,
+          ...(predecessorApprovalId ? { predecessorApprovalId,
             ...(definition.predecessorReason ? { supersessionReason: definition.predecessorReason } : {}) } : {}) });
         await tx.partnerInquiryApproval.create({ data: { id: outcomeId, rowId: row.id, assignmentId: assignment.id,
           actorId: dependencies.actorId, commandId: `${command.commandId}:${row.id}`,
           authorizationEvidenceId: authorization.value.evidenceId,
           wholesaleUnitPrice: decision.wholesaleUnitPrice.amount, currency: decision.wholesaleUnitPrice.currency,
           evidenceHash,
-          ...(definition.predecessorReason ? { supersessionReason: definition.predecessorReason } : {}), approvedAt: clock.now,
+          ...(predecessorApprovalId && definition.predecessorReason
+            ? { supersessionReason: definition.predecessorReason } : {}), approvedAt: clock.now,
           expiresAt: new Date(clock.now.getTime() + 48 * 60 * 60 * 1000) } });
       }
       await tx.partnerInquiryRow.update({ where: { id: row.id }, data: { outcome: decision.outcome, revision } });
       outcomes.push({ ok: true, rowId: row.id, outcomeId, revision, outcome: decision.outcome });
     }
     const currentLeaves = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id, successor: null },
-      select: { outcome: true, approval: { select: { id: true, approvedAt: true } } } });
+      select: { outcome: true, approval: { select: { id: true, approvedAt: true, expiresAt: true } } } });
     const completedPackage = currentLeaves.length > 0 &&
       currentLeaves.every(row => row.outcome === 'APPROVED' && Boolean(row.approval) &&
-        row.approval!.approvedAt.getTime() >= (inquiry.submittedAt?.getTime() ?? Number.POSITIVE_INFINITY));
+        row.approval!.expiresAt.getTime() > clock.now.getTime());
+    const requiredApprovals = currentLeaves.flatMap(row => row.approval ? [row.approval] : []);
     const batch = InquiryBatchResultSchema.parse({ schemaVersion: 1, commandId: command.commandId, outcomes });
     const eventIds: string[] = [];
     if (outcomes.some(outcome => outcome.ok)) {
       const next = await tx.partnerInquiry.update({ where: { id: inquiry.id }, data: { revision: { increment: 1 },
-        ...(completedPackage ? { pricingReadyAt: clock.now,
-          pricingExpiresAt: new Date(clock.now.getTime() + 48 * 60 * 60 * 1000) } : {}) }, select: { revision: true } });
+        pricingReadyAt: completedPackage
+          ? new Date(Math.max(...requiredApprovals.map(approval => approval.approvedAt.getTime()))) : null,
+        pricingExpiresAt: completedPackage
+          ? new Date(Math.min(...requiredApprovals.map(approval => approval.expiresAt.getTime()))) : null,
+      }, select: { revision: true } });
       const eventId = randomUUID(); eventIds.push(eventId);
       await tx.partnerInquiryEvent.create({ data: { id: eventId, inquiryId: inquiry.id, revision: next.revision,
         actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,

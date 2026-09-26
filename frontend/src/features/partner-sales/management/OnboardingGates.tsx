@@ -5,7 +5,7 @@ import type { PartnerProfileView } from '@sabalanerp/partner-sales-contracts';
 import { ErpBadge, ErpCard, ErpStatus } from '@/components/erp';
 
 export const profileLabels: Record<PartnerProfileView['status'], string> = {
-  PENDING: 'در انتظار تکمیل', ACTIVE: 'فعال', SUSPENDED: 'معلق', TERMINATED: 'خاتمه‌یافته',
+  PENDING: 'در انتظار تکمیل', ACTIVE: 'فعال', SUSPENDED: 'معلق', TERMINATED: 'غیرفعال',
 };
 const gates = [
   ['identityVerified', 'تأیید هویت', 'منابع انسانی'],

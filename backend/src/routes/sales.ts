@@ -72,7 +72,7 @@ import { createAuditedPartnerAuthorization } from '../services/partnerSales/auth
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
 import { applyPartnerContractListScope, canPartnerReadSalesContract,
   readPartnerProfileId } from '../services/partnerSales/contractVisibility';
-import { ensureSalesErrorTracking, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
+import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
 
 const sendUnexpectedSalesFailure = (
   res: Response,
@@ -1386,6 +1386,10 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
         success: false,
         error: salesBusinessErrorMessage(error.message, 'وضعیت قرارداد اجازه تأیید را نمی‌دهد؛ وضعیت را بررسی کنید.')
       });
+    }
+    const knownUpdateFailure = knownContractUpdateBusinessFailure(error.message);
+    if (knownUpdateFailure) {
+      return res.status(knownUpdateFailure.status).json(knownUpdateFailure.body);
     }
     const trackingId = randomUUID();
     console.error('Unexpected update sales contract failure:', { trackingId, error });

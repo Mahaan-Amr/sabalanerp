@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ensureSalesErrorTracking, knownProductCatalogApplyError, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../../utils/salesOperationalError';
+import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, knownProductCatalogApplyError, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../../utils/salesOperationalError';
 
 test('unexpected sales response keeps the technical reference without sending the user to support', () => {
   const response = unexpectedSalesErrorResponse({
@@ -52,4 +52,18 @@ test('known service failures become simple Persian causes with a recovery step',
     salesBusinessErrorMessage('CRM potential project is already linked to a sales contract', 'fallback'),
     'این پروژه قبلاً به یک قرارداد فروش متصل شده است؛ قرارداد متصل را از صفحه پروژه باز کنید.',
   );
+});
+
+test('a signed contract edit requires Accounting correction instead of an unexpected 500', () => {
+  assert.deepEqual(knownContractUpdateBusinessFailure(
+    'Signed contract commercial evidence can only change through an approved formal correction',
+  ), {
+    status: 400,
+    body: {
+      success: false,
+      code: 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED',
+      error: 'این قرارداد امضا یا چاپ شده است و تغییر مبلغ یا تخفیف آن بدون اصلاح رسمی تأییدشده مجاز نیست.',
+    },
+  });
+  assert.equal(knownContractUpdateBusinessFailure('database unavailable'), null);
 });

@@ -46,6 +46,20 @@ export const salesBusinessErrorMessage = (message: unknown, fallback: string): s
         ? message
         : fallback;
 
+export const knownContractUpdateBusinessFailure = (message: unknown): {
+  status: number;
+  body: { success: false; code: string; error: string };
+} | null => message === 'Signed contract commercial evidence can only change through an approved formal correction'
+  ? {
+      status: 400,
+      body: {
+        success: false,
+        code: 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED',
+        error: 'این قرارداد امضا یا چاپ شده است و تغییر مبلغ یا تخفیف آن بدون اصلاح رسمی تأییدشده مجاز نیست.',
+      },
+    }
+  : null;
+
 export const ensureSalesErrorTracking = (
   payload: unknown,
   status: number,

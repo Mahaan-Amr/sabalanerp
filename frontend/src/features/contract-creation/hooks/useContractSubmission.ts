@@ -444,7 +444,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           )
         });
       } else {
-        const recovery = getContractSubmissionRecovery(response.status, isEditMode);
+        const recovery = getContractSubmissionRecovery(response.status, isEditMode, response.data?.code);
         const failure = { response: { status: response.status, data: response.data } };
         setGeneralErrorKind?.(getSalesOperationalErrorKind(failure));
         setErrors({
@@ -465,7 +465,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       const initialMappedErrors = editSessionMessage
         ? { general: editSessionMessage }
         : mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد');
-      const recovery = getContractSubmissionRecovery(error?.response?.status, isEditMode);
+      const recovery = getContractSubmissionRecovery(error?.response?.status, isEditMode, error?.response?.data?.code);
       const operationalMappedErrors = !editSessionMessage && initialMappedErrors.general
         ? {
           ...initialMappedErrors,

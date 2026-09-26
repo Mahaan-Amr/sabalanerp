@@ -181,6 +181,8 @@ export const correctionStatusLabels: Record<string, string> = {
 
 export const money = (amount?: string | number | null, _currency = 'ریال') => {
   if (_currency === 'IRR' || _currency === 'IRT') return formatPartnerMoney(amount, _currency);
+  if (_currency === 'تومان' || _currency === 'TOMAN') return formatPartnerMoney(amount ?? '0', 'IRT');
+  if (_currency === 'ریال') return formatPartnerMoney(amount ?? '0', 'IRR');
   const value = toFiniteNumber(amount);
   return formatPrice(value, 'ریال');
 };

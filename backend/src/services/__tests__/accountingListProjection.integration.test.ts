@@ -6,7 +6,7 @@ async function run() {
   assert(['localhost', '127.0.0.1'].includes(url.hostname) && url.port === '55432',
     'This test only reads the existing sabalanerp-local database');
   const { prisma } = await import('../../lib/prisma');
-  const { listAccountingContracts, buildAccountingSummaryForContracts } = await import('../accountingService');
+  const { listAccountingContracts, buildAccountingSummaryForContracts, listFinancialRecords } = await import('../accountingService');
   const { accountingContractListSelect, attachAccountingListDates } = await import('../accountingListProjection');
   const { withAccountingReadScope } = await import('../partnerSales/accounting/readScope');
   try {
@@ -53,6 +53,15 @@ async function run() {
     const persian = await listAccountingContracts({ search: sample.contractNumber.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]) });
     assert.deepEqual(persian.items.map(row => row.contractId), english.items.map(row => row.contractId),
       'REGRESSION: Persian digits cannot find the same accounting contract');
+    const existingInvoice = await prisma.accountingFinancialRecord.findFirst({
+      where: { kind: 'INVOICE_CANDIDATE' }, select: { id: true },
+    });
+    assert(existingInvoice, 'Local financial-record fixture required');
+    const focusedInvoice = await listFinancialRecords({ kind: 'INVOICE_CANDIDATE', recordId: existingInvoice.id, pageSize: 1 });
+    assert.equal(focusedInvoice.total, 1, 'A financial detail lookup must return only its exact record');
+    assert.equal(focusedInvoice.items[0].id, existingInvoice.id);
+    const missingInvoice = await listFinancialRecords({ kind: 'INVOICE_CANDIDATE', recordId: 'missing-financial-record', pageSize: 1 });
+    assert.equal(missingInvoice.total, 0, 'An unknown detail identity must not fall back to another record');
     // Exercise the actual composed marker query and access predicates, not just
     // the standalone SQL plan fixture. No actor means no authorization audit writes.
     await withAccountingReadScope(prisma, undefined, async scope => {

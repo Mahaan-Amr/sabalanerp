@@ -156,10 +156,13 @@ export default function AccountingContractDetailPage(props: {
       ? (searchParams.get("focus") as "receivable" | "check")
       : null;
   const focusedRecordId = (searchParams.get("recordId") || "").trim();
+  const requestedReturn = searchParams.get("returnTo") || "";
+  const backHref = requestedReturn.startsWith("/dashboard/accounting/") && !requestedReturn.startsWith("//")
+    ? requestedReturn : "/dashboard/accounting/contracts";
   const [data, setData] = useState<any>(null);
   const [detailSection, setDetailSection] = useState<
     "summary" | "items" | "financial" | "collections" | "compliance"
-  >("summary");
+  >(searchParams.get("section") === "financial" ? "financial" : "summary");
   const [lifecycle, setLifecycle] = useState<any>(null);
   const [userRole, setUserRole] = useState<string>("USER");
   const [lifecycleTarget, setLifecycleTarget] = useState<{
@@ -362,6 +365,8 @@ export default function AccountingContractDetailPage(props: {
       systemInvoiceNumber: payload.systemInvoiceNumber,
       systemInvoiceDate: payload.systemInvoiceDate,
       sepidarAmount: payload.sepidarAmount,
+      idempotencyKey: crypto.randomUUID(),
+      correlationId: crypto.randomUUID(),
     });
   };
 
@@ -661,7 +666,7 @@ export default function AccountingContractDetailPage(props: {
       <ErpPage
         eyebrow="حسابداری"
         title="قرارداد یافت نشد"
-        backHref="/dashboard/accounting/contracts"
+        backHref={backHref}
       >
         <ErpSection>این قرارداد در رجیستر حسابداری پیدا نشد.</ErpSection>
       </ErpPage>
@@ -693,7 +698,7 @@ export default function AccountingContractDetailPage(props: {
       eyebrow="حسابداری"
       title={`پرونده حسابداری قرارداد ${contract.contractNumber}`}
       description="نمای عملیاتی حسابداری از قرارداد، بدون تغییر دادن اصل قرارداد فروش."
-      backHref="/dashboard/accounting/contracts"
+      backHref={backHref}
       actions={[
         {
           label: "به‌روزرسانی",

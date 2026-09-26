@@ -1,12 +1,12 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { FaCheckCircle, FaExclamationTriangle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
+import { FaExclamationTriangle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
 import { ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpListPage, ErpPagination, ErpRialInput, ErpSelect, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
-import { emptyAccountingPagination, FinancialInvoiceApprovalForm, type FinancialInvoiceApprovalPayload,
-  readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
+import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money,
+  PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import {
   canonicalizeInvoiceCandidatesQuery,
@@ -53,7 +53,6 @@ export default function AccountingInvoiceCandidatesPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState(query.search);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
-  const [approvalTarget, setApprovalTarget] = useState<any | null>(null);
   const [voidTarget, setVoidTarget] = useState<any | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -88,7 +87,7 @@ export default function AccountingInvoiceCandidatesPage() {
 
   const loadRows = useCallback(async () => {
     const version = ++requestVersion.current;
-    setRows([]); setDeleteTarget(null); setApprovalTarget(null); setLoadError(null);
+    setRows([]); setDeleteTarget(null); setLoadError(null);
     try {
       setLoading(true);
       const [response, candidatesResponse] = await Promise.all([accountingAPI.getFinancialRecords({
@@ -167,24 +166,6 @@ export default function AccountingInvoiceCandidatesPage() {
     }
   };
 
-  const approveFinancialInvoice = async (payload: FinancialInvoiceApprovalPayload) => {
-    if (!approvalTarget) return;
-    setActionError(null);
-    setActionSuccess(null);
-    setActionLoading(approvalTarget.id);
-    try {
-      await accountingAPI.executeAction({ kind: 'APPROVE_FINANCIAL_INVOICE', ...payload });
-      setApprovalTarget(null);
-      setActionSuccess('عملیات حسابداری با موفقیت ثبت شد');
-      await loadRows();
-    } catch (error) {
-      console.error('Financial invoice approval failed:', error);
-      setActionError((error as any)?.response?.data?.error || (error as any)?.response?.data?.message || 'تایید مالی انجام نشد');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const startVoidCase = async (values: Record<string, string | number>) => {
     if (!voidTarget) return;
     setActionError(null); setActionLoading(voidTarget.id);
@@ -204,14 +185,14 @@ export default function AccountingInvoiceCandidatesPage() {
     } finally { setActionLoading(null); }
   };
 
+  const returnTo = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
   const rowActions = (row: any): ErpAction[] => [
     ...(row.contractId ? [{ label: 'مشاهده پرونده', href: `/dashboard/accounting/contracts/${row.contractId}`, icon: FaEye, tone: 'primary' as const }] : []),
     {
-      label: 'تایید مالی',
-      icon: FaCheckCircle,
-      tone: 'success',
-      disabled: ['ISSUED', 'POSTED', 'VOIDED'].includes(row.status) || actionLoading === row.id,
-      onClick: () => { setActionError(null); setActionSuccess(null); setApprovalTarget(row); },
+      label: ['ISSUED', 'POSTED', 'VOIDED'].includes(row.status) ? 'مشاهده رکورد مالی' : 'بررسی و تأیید مالی',
+      icon: FaEye,
+      tone: 'primary',
+      href: `/dashboard/accounting/invoice-candidates/${encodeURIComponent(row.id)}?returnTo=${encodeURIComponent(returnTo)}`,
     },
     {
       label: 'حذف پیش‌نویس',
@@ -283,13 +264,7 @@ export default function AccountingInvoiceCandidatesPage() {
       </div>}
       {actionSuccess && <ErpInlineState kind="success" title={actionSuccess} />}
       {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadRows }} />}
-      {actionError && !deleteTarget && !approvalTarget && !voidTarget && <ErpInlineState kind="error" title={actionError} />}
-      <ErpSheet open={Boolean(approvalTarget)} onClose={() => setApprovalTarget(null)} title="تایید مالی صورتحساب"
-        presentation="modal" pending={Boolean(actionLoading)}>
-        {actionError && <ErpInlineState kind="error" title={actionError} />}
-        <FinancialInvoiceApprovalForm invoice={approvalTarget} busy={Boolean(actionLoading)} compact
-          onApprove={approveFinancialInvoice} />
-      </ErpSheet>
+      {actionError && !deleteTarget && !voidTarget && <ErpInlineState kind="error" title={actionError} />}
       <ErpSheet open={Boolean(planTarget)} onClose={() => setPlanTarget(null)} title="برنامه پرداخت فروشنده به سبلان"
         presentation="modal" pending={Boolean(actionLoading)} footer={<ErpButton label="ثبت برنامه پرداخت" icon={FaSave}
           disabled={!planEffectiveDate || !planInstallments.length || planInstallments.some(item => !item.dueDate || !item.amount ||

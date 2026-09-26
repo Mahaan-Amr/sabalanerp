@@ -883,7 +883,15 @@ router.get('/contracts/:contractId/sales-pdf', accountingContractsView, async (r
 router.get('/financial-records', accountingFinancialRecordsView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await listFinancialRecords(req.query, { userId: req.user!.id });
-    res.json({ success: true, data });
+    const capabilities = req.query.recordId
+      ? await getAccountingActionCapabilities(req.user!.id, req.user!.role)
+      : null;
+    res.json({ success: true, data: {
+      ...data,
+      ...(capabilities ? { actionAvailability: {
+        approve: capabilities.APPROVE_FINANCIAL_INVOICE,
+      } } : {}),
+    } });
   } catch (error) {
     console.error('Accounting records error:', error);
     accountingReadFailure(res, error);

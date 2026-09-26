@@ -24,6 +24,7 @@ import {
   getAccountingSettings,
   getAccountingContractDetail,
   getAccountingFinancialTrend,
+  getAccountingDashboard,
   getAccountingWorkspace,
   listAccountingContracts,
   listAuditLogs,
@@ -547,9 +548,25 @@ export const getAccountingWorkspaceResponse = async (req: AuthRequest, res: Resp
 
 router.get('/workspace', accountingView, getAccountingWorkspaceResponse);
 
+export const createAccountingDashboardResponse = (
+  loadDashboard: typeof getAccountingDashboard = getAccountingDashboard,
+) => async (req: AuthRequest, res: Response) => {
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    const dashboard = await loadDashboard(req.query, req.query.range, new Date(), { userId: req.user!.id });
+    res.json({ success: true, data: dashboard });
+  } catch (error) {
+    console.error('Accounting dashboard error:', error);
+    accountingReadFailure(res, error);
+  }
+};
+
+router.get('/dashboard', accountingView, createAccountingDashboardResponse());
+
 export const createAccountingFinancialTrendResponse = (
   loadTrend: typeof getAccountingFinancialTrend = getAccountingFinancialTrend,
 ) => async (req: AuthRequest, res: Response) => {
+  res.set('Cache-Control', 'private, no-store');
   try {
     const trend = await loadTrend(req.query.range, new Date(), { userId: req.user!.id });
     res.json({ success: true, data: trend });

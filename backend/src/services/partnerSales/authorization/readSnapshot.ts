@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { lockPartnerOperationsControl } from './technicalRollout';
+import { lockPartnerOperationsControlForRead } from './technicalRollout';
 
 /** Multi-root reads enter the same lock graph as Partner writers before any
  * profile/Case authority. A permission or Case changed during the wait requires
@@ -8,7 +8,7 @@ export async function readPartnerSnapshot<T>(database: PrismaClient, read: (tx: 
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await database.$transaction(async tx => {
-        await lockPartnerOperationsControl(tx);
+        await lockPartnerOperationsControlForRead(tx);
         return read(tx);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 });
     } catch (error) {

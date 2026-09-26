@@ -17,14 +17,13 @@ import {
   ErpActionGrid,
   ErpInlineState,
   ErpPage,
-  ErpSkeleton,
 } from '@/components/erp';
 import { accountingAPI, hrHiringMetricsAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { StatusBadge } from '@/features/accounting/accountingUi';
 import { AccountingFinancialTrend } from '@/features/accounting/AccountingFinancialTrend';
+import { AccountingDashboardSkeleton } from '@/features/accounting/AccountingDashboardPresentation';
 import {
-  failFinancialTrend,
   pendingFinancialTrend,
   resolveFinancialTrend,
   type FinancialTrendRange,
@@ -65,6 +64,8 @@ export default function AccountingDashboardPage() {
   const hrRequestGeneration = useRef(0);
   const workspaceRequestGeneration = useRef(0);
   const trendRequestGeneration = useRef(0);
+  const trendRangeRef = useRef<FinancialTrendRange>('6m');
+  const dashboardOwnerRef = useRef<string | null>(null);
   const rawSearchParams = searchParams.toString();
   const dashboardQuery = useMemo(
     () => canonicalizeAccountingDashboardQuery(new URLSearchParams(rawSearchParams)),
@@ -73,24 +74,35 @@ export default function AccountingDashboardPage() {
   const workspace = workspaceState.data;
   const loading = workspaceState.loading;
 
-  const loadWorkspace = useCallback(async () => {
+  const loadDashboard = useCallback(async () => {
     const requestGeneration = ++workspaceRequestGeneration.current;
+    const trendGeneration = ++trendRequestGeneration.current;
+    const requestedRange = trendRangeRef.current;
     dispatchWorkspace({ type: 'start' });
+    setFinancialTrend((previous) => pendingFinancialTrend(previous, requestedRange));
     try {
-      const response = await accountingAPI.getWorkspace({
+      const response = await accountingAPI.getDashboard({
+        range: requestedRange,
         due: dashboardQuery.state.due || undefined,
         deadlineType: dashboardQuery.state.deadlineType === 'all' ? undefined : dashboardQuery.state.deadlineType,
       });
       if (requestGeneration !== workspaceRequestGeneration.current) return;
       if (!response.data.success) {
         dispatchWorkspace({ type: 'failure', message: 'داده‌های حسابداری دریافت نشد.' });
+        if (trendGeneration === trendRequestGeneration.current) setFinancialTrend({ status: 'error', data: null });
         return;
       }
-      dispatchWorkspace({ type: 'success', data: response.data.data });
+      dispatchWorkspace({ type: 'success', data: response.data.data.workspace });
+      if (trendGeneration === trendRequestGeneration.current) {
+        setFinancialTrend(response.data.data.trendError || !response.data.data.trend
+          ? { status: 'error', data: null }
+          : { status: 'available', data: response.data.data.trend });
+      }
     } catch (error) {
       if (requestGeneration !== workspaceRequestGeneration.current) return;
       console.error('Error loading accounting workspace:', error);
       dispatchWorkspace({ type: 'failure', message: 'ارتباط با حسابداری برقرار نشد.' });
+      if (trendGeneration === trendRequestGeneration.current) setFinancialTrend({ status: 'error', data: null });
     }
   }, [dashboardQuery.state.deadlineType, dashboardQuery.state.due]);
 
@@ -120,29 +132,41 @@ export default function AccountingDashboardPage() {
       const response = await accountingAPI.getFinancialTrend(range);
       if (requestGeneration !== trendRequestGeneration.current) return;
       if (!response.data.success) {
-        setFinancialTrend((previous) => failFinancialTrend(previous));
+        setFinancialTrend({ status: 'error', data: null });
         return;
       }
       setFinancialTrend((previous) => resolveFinancialTrend(previous, response.data.data));
     } catch {
       if (requestGeneration === trendRequestGeneration.current) {
-        setFinancialTrend((previous) => failFinancialTrend(previous));
+        setFinancialTrend({ status: 'error', data: null });
       }
     }
   }, []);
 
   useEffect(() => {
-    void loadFinancialTrend(trendRange);
-  }, [loadFinancialTrend, trendRange]);
-
-  useEffect(() => {
+    if (authLoading) return;
+    if (!currentUserId) {
+      dashboardOwnerRef.current = null;
+      workspaceRequestGeneration.current += 1;
+      trendRequestGeneration.current += 1;
+      dispatchWorkspace({ type: 'reset' });
+      setFinancialTrend(pendingFinancialTrend());
+      return;
+    }
+    if (dashboardOwnerRef.current !== currentUserId) {
+      dashboardOwnerRef.current = currentUserId;
+      workspaceRequestGeneration.current += 1;
+      trendRequestGeneration.current += 1;
+      dispatchWorkspace({ type: 'reset' });
+      setFinancialTrend(pendingFinancialTrend());
+    }
     const canonicalSearch = dashboardQuery.params.toString();
     if (canonicalSearch !== rawSearchParams) {
       router.replace(`/dashboard/accounting${canonicalSearch ? `?${canonicalSearch}` : ''}`, { scroll: false });
       return;
     }
-    void loadWorkspace();
-  }, [dashboardQuery.params, loadWorkspace, rawSearchParams, router]);
+    void loadDashboard();
+  }, [authLoading, currentUserId, dashboardQuery.params, loadDashboard, rawSearchParams, router]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -156,36 +180,53 @@ export default function AccountingDashboardPage() {
   }, [authLoading, currentUserId, loadHrMetrics]);
 
   useEffect(() => {
+    let focusTimer: ReturnType<typeof setTimeout> | null = null;
     const revalidateOnFocus = () => {
       if (document.visibilityState === 'visible' && currentUserId) {
-        void loadHrMetrics(currentUserId);
-        void loadWorkspace();
-        void loadFinancialTrend(trendRange);
+        if (focusTimer) clearTimeout(focusTimer);
+        focusTimer = setTimeout(() => {
+          focusTimer = null;
+          if (document.visibilityState !== 'visible') return;
+          void loadHrMetrics(currentUserId);
+          void loadDashboard();
+        }, 100);
       }
     };
     window.addEventListener('focus', revalidateOnFocus);
     document.addEventListener('visibilitychange', revalidateOnFocus);
     return () => {
+      if (focusTimer) clearTimeout(focusTimer);
       window.removeEventListener('focus', revalidateOnFocus);
       document.removeEventListener('visibilitychange', revalidateOnFocus);
     };
-  }, [currentUserId, loadHrMetrics, loadWorkspace, loadFinancialTrend, trendRange]);
+  }, [currentUserId, loadHrMetrics, loadDashboard]);
 
   const financialTrendPanel = (
     <AccountingFinancialTrend
       range={trendRange}
       state={financialTrend}
-      onRangeChange={setTrendRange}
+      onRangeChange={(range) => {
+        trendRangeRef.current = range;
+        setTrendRange(range);
+        void loadFinancialTrend(range);
+      }}
       onRetry={() => void loadFinancialTrend(trendRange)}
       compact
     />
   );
 
-  if (!workspace && loading) {
+  const hrMetricsPending = Boolean(currentUserId &&
+    (hrMetricsOwnerId !== currentUserId || hrMetrics.status === 'pending'));
+  if (!authLoading && !currentUserId) {
+    return <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری" backHref="/dashboard">
+      <ErpInlineState kind="permission" title="برای مشاهده حسابداری وارد حساب خود شوید." />
+    </ErpPage>;
+  }
+  if (authLoading || dashboardOwnerRef.current !== currentUserId || loading ||
+      (workspace && (financialTrend.status === 'loading' || hrMetricsPending))) {
     return (
       <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری" backHref="/dashboard">
-        {financialTrendPanel}
-        <ErpSkeleton lines={4} label="در حال بارگذاری سررسیدهای حسابداری" />
+        <AccountingDashboardSkeleton />
       </ErpPage>
     );
   }
@@ -197,7 +238,7 @@ export default function AccountingDashboardPage() {
         <ErpInlineState
           kind="error"
           title={workspaceState.error || 'داده‌های حسابداری در دسترس نیست.'}
-          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadWorkspace, tone: 'primary' }}
+          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadDashboard, tone: 'primary' }}
         />
       </ErpPage>
     );
@@ -205,8 +246,7 @@ export default function AccountingDashboardPage() {
 
   const commandCenter = workspace?.commandCenter || {};
   const refreshDashboard = () => {
-    void loadWorkspace();
-    void loadFinancialTrend(trendRange);
+    void loadDashboard();
     if (currentUserId) void loadHrMetrics(currentUserId);
   };
   const hrMetricsBelongToCurrentUser = Boolean(currentUserId && hrMetricsOwnerId === currentUserId);
@@ -238,7 +278,7 @@ export default function AccountingDashboardPage() {
         <ErpInlineState
           kind="stale"
           title="آخرین نمایش موفق حفظ شده است؛ به‌روزرسانی انجام نشد."
-          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadWorkspace, tone: 'warning' }}
+          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadDashboard, tone: 'warning' }}
         />
       )}
       {loading && workspace && (

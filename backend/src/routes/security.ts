@@ -6,10 +6,12 @@ import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { body, validationResult } from 'express-validator';
 import { AttendanceIntervalStatus, AttendanceStatus, AttendanceWorkScheduleStatus, ExceptionStatus, ExceptionType, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
-import { protect, AuthRequest } from '../middleware/auth';
+import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
+import { buildPersonnelAttendanceReport, parsePersonnelAttendanceReportOptions, PersonnelAttendanceReportInputError, PersonnelAttendanceReportOptions } from '../services/personnelAttendanceReport';
+import { renderPersonnelAttendanceReportPdf } from '../services/personnelAttendanceReportPdf';
 import { renderSecurityAttendanceReportHtml, securityAttendanceStatusLabel, SecurityAttendanceReportRow } from '../utils/securityAttendanceReport';
 import { addSecurityDays, parseSecurityBusinessDate, securityNowTime, securityPersianDate, securityPersianDateWithWeekday } from '../utils/securityBusinessDate';
 import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay, scheduledStartHasPassed } from '../utils/personnelWorkSchedule';
@@ -3645,6 +3647,51 @@ router.post('/reports/completed-shifts.pdf', protect, securityAdmin, async (req:
     const pdfPath = await generatePdfFromHtml({ fileName: `security-shifts-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش شیفت‌ها · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
     return res.download(pdfPath, 'security-shifts.pdf', () => fs.unlink(pdfPath, () => undefined));
   } catch (error: any) { console.error('Export selected security shifts error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش شیفت‌ها ناموفق بود.' }); }
+});
+
+const loadPersonnelAttendanceReport = async (options: PersonnelAttendanceReportOptions) => {
+  const records = await prisma.attendanceRecord.findMany({
+    where: { date: { gte: options.startDate, lt: addDays(options.endDate, 1) } },
+    select: {
+      id: true, date: true, personnelId: true, employeeId: true, securityPersonnelId: true,
+      personnelFirstName: true, personnelLastName: true,
+      personnel: { select: { firstName: true, lastName: true } },
+      employee: { select: { firstName: true, lastName: true, personnelId: true } },
+      intervals: { select: { enteredAt: true, exitedAt: true, status: true }, orderBy: { enteredAt: 'asc' } },
+    },
+    orderBy: [{ date: 'asc' }, { id: 'asc' }],
+  });
+  return buildPersonnelAttendanceReport(records, options);
+};
+
+router.post('/reports/personnel-attendance-preview', protect, authorize('ADMIN', 'MANAGER'), securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const options = parsePersonnelAttendanceReportOptions(req.body);
+    const report = await loadPersonnelAttendanceReport(options);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ success: true, data: report });
+  } catch (error: any) {
+    if (error instanceof PersonnelAttendanceReportInputError) return res.status(400).json({ success: false, error: error.message });
+    console.error('Preview personnel attendance report error:', error);
+    return res.status(500).json({ success: false, error: 'پیش‌نمایش گزارش کارکرد ناموفق بود.' });
+  }
+});
+
+router.post('/reports/personnel-attendance.pdf', protect, authorize('ADMIN', 'MANAGER'), securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const options = parsePersonnelAttendanceReportOptions(req.body);
+    const report = await loadPersonnelAttendanceReport(options);
+    if (!report.people.length) return res.status(404).json({ success: false, error: 'در بازه و دامنه انتخاب‌شده رکوردی برای گزارش وجود ندارد.' });
+    const pdf = await renderPersonnelAttendanceReportPdf(report);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="personnel-attendance-${report.startDate}-${report.endDate}.pdf"`);
+    return res.send(pdf);
+  } catch (error: any) {
+    if (error instanceof PersonnelAttendanceReportInputError) return res.status(400).json({ success: false, error: error.message });
+    console.error('Export personnel attendance report error:', error);
+    return res.status(500).json({ success: false, error: 'ساخت PDF گزارش کارکرد ناموفق بود.' });
+  }
 });
 
 router.post('/reports/attendance-preview', protect, securityAdmin, async (req: AuthRequest, res: Response) => {

@@ -8,6 +8,7 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import { ErpButton, ErpEmptyState, ErpInlineState, ErpSection, ErpSegmentedControl, ErpShiftTimeline, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
 import { ErpCheckboxControl, ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import PersianCalendar from '@/lib/persian-calendar';
 
 type ReportKind = 'shifts' | 'attendance';
@@ -28,6 +29,7 @@ function ShiftReportPreview({ shift }: { shift: any }) {
 }
 
 export default function ReportsPage() {
+  const { user } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [kind, setKind] = useState<ReportKind>('shifts');
@@ -102,6 +104,9 @@ export default function ReportsPage() {
   const exportLabel = kind === 'shifts' ? `دریافت PDF ${selectedShiftIds.length.toLocaleString('fa-IR')} شیفت` : `دریافت PDF ${selectedShiftIds.length.toLocaleString('fa-IR')} شیفت برای ${selectedPersonnelIds.length ? selectedPersonnelIds.length.toLocaleString('fa-IR') : 'همه'} نفر`;
 
   return <ErpWorkspacePage className="guard-workspace" title="گزارش‌ها" secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadShifts }]}>
+    {(user?.role === 'ADMIN' || user?.role === 'MANAGER') && <ErpSection title="کارکرد پرسنل" actions={[{ label: 'ساخت گزارش کارکرد', icon: FaFilePdf, onClick: () => router.push('/dashboard/security/reports/personnel-attendance'), variant: 'solid' }]}>
+      <p className="text-sm sds-text-secondary">بازه، افراد و زمان استراحت را انتخاب کنید؛ کارکرد روزانه و جمع کارکرد در PDF نمایش داده می‌شود.</p>
+    </ErpSection>}
     <ErpSegmentedControl value={kind} onChange={(value) => { setKind(value); setSelectedPersonnelIds([]); }} options={[{ value: 'shifts', label: 'گزارش شیفت‌ها', icon: FaClock }, { value: 'attendance', label: 'گزارش حضور و غیاب گارد', icon: FaUsers }]} />
     <ErpSection>
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]"><label className="relative"><span className="sr-only">جستجوی شیفت</span><FaSearch className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 sds-text-muted" /><ErpInput className={`${inputClass} pr-10`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="شناسه شیفت، نام نگهبان یا تاریخ شمسی" /></label><ErpSelect value={status} onChange={(event) => setStatus(event.target.value)} className={inputClass} aria-label="وضعیت شیفت"><option value="">همه وضعیت‌ها</option><option value="CLOSED">تکمیل‌شده</option><option value="FORCE_CLOSED">بسته‌شده توسط مدیر</option></ErpSelect><ErpButton label="بازه اختیاری" icon={FaFilter} variant={showAdvanced ? 'soft' : 'outline'} onClick={() => setShowAdvanced((value) => !value)} /></div>

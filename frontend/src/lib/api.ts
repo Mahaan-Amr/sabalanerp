@@ -1392,6 +1392,8 @@ export const securityAPI = {
   downloadCompletedSecurityShiftsPdf: (shiftIds: string[]) => api.post('/security/reports/completed-shifts.pdf', { shiftIds }, { responseType: 'blob' }),
   previewSecurityShiftAttendance: (shiftIds: string[], personnelIds: string[] = []) => api.post('/security/reports/attendance-preview', { shiftIds, personnelIds }),
   downloadSecurityShiftAttendancePdf: (shiftIds: string[], personnelIds: string[] = []) => api.post('/security/reports/attendance.pdf', { shiftIds, personnelIds }, { responseType: 'blob' }),
+  previewPersonnelAttendance: (options: { startDate: string; endDate: string; restMinutes: number; personnelIds: string[]; includeNoMovement: boolean; mergeMatchingNames: boolean }) => api.post('/security/reports/personnel-attendance-preview', options),
+  downloadPersonnelAttendancePdf: (options: { startDate: string; endDate: string; restMinutes: number; personnelIds: string[]; includeNoMovement: boolean; mergeMatchingNames: boolean }) => api.post('/security/reports/personnel-attendance.pdf', options, { responseType: 'blob' }),
   getPersonnelReportDirectory: (params?: any) => api.get('/security/reports/personnel-history', { params }),
   getPersonnelReportHistory: (personnelId: string, params?: any) => api.get(`/security/reports/personnel-history/${personnelId}`, { params }),
   downloadPersonnelReportHistoryPdf: (personnelId: string, filters: any, includeImages: boolean) => api.post(`/security/reports/personnel-history/${personnelId}.pdf`, { filters, includeImages }, { responseType: 'blob' }),

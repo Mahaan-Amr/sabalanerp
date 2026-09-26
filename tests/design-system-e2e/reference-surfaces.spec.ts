@@ -1617,6 +1617,7 @@ test('remaining Guard management routes share one responsive semantic frame', as
     ['/dashboard/security/exceptions', 'استثناها و مأموریت‌ها'],
     ['/dashboard/security/personnel', 'کارکنان گارد'],
     ['/dashboard/security/reports', 'گزارش‌ها'],
+    ['/dashboard/security/reports/personnel-attendance', 'گزارش کارکرد پرسنل'],
     ['/dashboard/security/settings', 'تنظیمات گارد'],
     ['/dashboard/security/settings/attendance-roster', 'فهرست حضور و غیاب'],
     ['/dashboard/security/settings/report-structure', 'ساختار گزارش شیفت'],
@@ -1639,6 +1640,91 @@ test('remaining Guard management routes share one responsive semantic frame', as
         .every((field) => field.classList.contains('sds-field'))
     )).toBe(true);
   }
+});
+
+test('Guard personnel worktime report previews the selected scope and daily rest setting', async ({ page }) => {
+  const unauthenticated = await page.request.post('/api/security/reports/personnel-attendance-preview', { data: {
+    startDate: '2026-07-23', endDate: '2026-07-28', restMinutes: 120,
+    personnelIds: [], includeNoMovement: true, mergeMatchingNames: true,
+  } });
+  expect(unauthenticated.status()).toBe(401);
+  await login(page);
+  const realPreview = await page.request.post('/api/security/reports/personnel-attendance-preview', { data: {
+    startDate: '2026-07-23', endDate: '2026-07-28', restMinutes: 120,
+    personnelIds: [], includeNoMovement: true, mergeMatchingNames: true,
+  } });
+  expect(realPreview.status()).toBe(200);
+  const realReport = await realPreview.json();
+  expect(realReport.success).toBe(true);
+  if (process.env.PERSONNEL_ATTENDANCE_REAL_PDF_QA) {
+    expect(realReport.data.people.length).toBeGreaterThan(0);
+    const realPdf = await page.request.post('/api/security/reports/personnel-attendance.pdf', { data: {
+      startDate: '2026-07-23', endDate: '2026-07-28', restMinutes: 120,
+      personnelIds: [], includeNoMovement: true, mergeMatchingNames: true,
+    } });
+    expect(realPdf.status()).toBe(200);
+    expect((await realPdf.body()).subarray(0, 5).toString()).toBe('%PDF-');
+  }
+  const rejectedRest = await page.request.post('/api/security/reports/personnel-attendance-preview', { data: {
+    startDate: '2026-07-23', endDate: '2026-07-28', restMinutes: 241,
+    personnelIds: [], includeNoMovement: true, mergeMatchingNames: true,
+  } });
+  expect(rejectedRest.status()).toBe(400);
+  const previewBodies: any[] = [];
+  await page.route('**/api/security/reports/personnel-attendance-preview', async (route) => {
+    const body = route.request().postDataJSON();
+    previewBodies.push(body);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
+      availablePeople: [{ id: 'person-1', name: 'آریا متانت' }, { id: 'person-2', name: 'احمد عزیزی' }],
+      people: [{ key: 'آریا متانت', name: 'آریا متانت', grossMinutes: 540, netMinutes: 420, daysWithMovement: 1, days: [{
+        date: '2026-08-23', grossMinutes: 540, netMinutes: 420,
+        intervals: [{ enteredAt: '2026-08-23T05:00:00.000Z', exitedAt: '2026-08-23T14:00:00.000Z' }],
+      }] }],
+      records: 1, validIntervals: 1, openIntervals: 0,
+    } }) });
+  });
+  await page.route('**/api/security/reports/personnel-attendance.pdf', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/pdf', body: Buffer.from('%PDF-1.4\n%%EOF\n') });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard/security/reports/personnel-attendance');
+  const workspace = page.locator('main.sds-workspace');
+  await expect(workspace.getByRole('heading', { name: 'گزارش کارکرد پرسنل' })).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'ماه گذشته' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(workspace.getByText('کارکرد:')).toBeVisible();
+  await expect.poll(() => previewBodies.at(-1)?.restMinutes).toBe(120);
+  await workspace.getByRole('spinbutton', { name: 'استراحت روزانه (دقیقه)' }).fill('90');
+  await expect.poll(() => previewBodies.at(-1)?.restMinutes).toBe(90);
+  await workspace.getByRole('button', { name: 'آریا متانت', exact: true }).click();
+  await expect.poll(() => previewBodies.at(-1)?.personnelIds).toEqual(['person-1']);
+  await workspace.getByRole('button', { name: 'جزئیات روزها' }).click();
+  const dayDetails = page.getByRole('dialog', { name: 'روزهای آریا متانت' });
+  await expect(dayDetails).toBeVisible();
+  await expect(dayDetails.getByText('کارکرد ۹:۰۰ · بدون استراحت ۷:۰۰')).toBeVisible();
+  await dayDetails.getByRole('button', { name: 'بستن' }).last().click();
+  if (process.env.PERSONNEL_ATTENDANCE_QA_SCREENSHOT) {
+    await page.screenshot({ path: process.env.PERSONNEL_ATTENDANCE_QA_SCREENSHOT, fullPage: true });
+  }
+  expect(await workspace.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+  })).toBe(true);
+  await page.setViewportSize({ width: 780, height: 844 });
+  await page.evaluate(() => { document.documentElement.style.zoom = '2'; });
+  expect(await workspace.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+  })).toBe(true);
+  await page.evaluate(() => { document.documentElement.style.zoom = ''; });
+  if (process.env.PERSONNEL_ATTENDANCE_QA_DESKTOP_SCREENSHOT) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.screenshot({ path: process.env.PERSONNEL_ATTENDANCE_QA_DESKTOP_SCREENSHOT, fullPage: true });
+  }
+  const download = page.waitForEvent('download');
+  const exportButton = workspace.getByRole('button', { name: 'دریافت PDF ۱ نفر' }).first();
+  await expect(exportButton).toBeEnabled();
+  await exportButton.click();
+  expect((await download).suggestedFilename()).toMatch(/^personnel-attendance-.*\.pdf$/);
 });
 
 test('Guard exception dialog uses canonical dropdown and calendar interactions', async ({ page }) => {

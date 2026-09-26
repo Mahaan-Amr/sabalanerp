@@ -1083,10 +1083,10 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const selectedPackage = selectPartnerReinquiryRows(sourceRows,
         `partner-case-pricing:${wizard.intent.recoveryId}:${activeOwner.revision}`, requestedRow);
       const selected = selectedPackage.rows;
-      const historicalRows = selected.some(item => item.rowId.endsWith('-awaiting-inquiry'))
+      const historicalRows = selected.some(item => item.submissionState === 'UNSENT')
         ? await readCasePricingRows(runtime.saved, activeOwner.caseId) : [];
       const rows = selected.map(item => {
-        const predecessor = item.rowId.endsWith('-awaiting-inquiry')
+        const predecessor = item.submissionState === 'UNSENT'
           ? historicalRows.find(previous => previous.configurationRef.productRowId === item.configurationRef.productRowId &&
             previous.state === 'REJECTED' && !previous.successor)
           : item;
@@ -1186,6 +1186,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         } })} />
       <ErpNeumorphicCard className="space-y-3 p-4"><h4 className="text-sm font-semibold">محصولات این تحویل</h4>
         {draft.rows.map(row => {
+          const unitLabel = partnerQuantityUnitCopy[row.unit] ?? row.unit;
           const current = delivery.items.find(item => item.productRowId === row.productRowId)?.quantity ?? '0';
           const others = draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId)
             .flatMap(item => item.items.filter(product => product.productRowId === row.productRowId).map(product => product.quantity));
@@ -1201,11 +1202,11 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           };
           return <ErpCard key={row.productRowId} className="space-y-2 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{row.inquiryRow.description}</strong>
-              <ErpField label={`مقدار (${partnerQuantityUnitCopy[row.unit] ?? row.unit})`}><ErpInput inputMode="decimal" value={current}
+              <ErpField label={`مقدار (${unitLabel})`}><ErpInput inputMode="decimal" value={current}
                 onChange={event => updateQuantity(event.target.value)} /></ErpField></div>
-            <div className="sds-text-secondary flex flex-wrap gap-3 text-xs"><span>کل قرارداد: {row.quantity} {partnerQuantityUnitCopy[row.unit] ?? row.unit}</span>
-              <span>تحویل‌های دیگر: {maximum === null ? 'نامعتبر' : remainingPartnerAmount(row.quantity, [maximum])} {partnerQuantityUnitCopy[row.unit] ?? row.unit}</span>
-              <span>مانده: {unallocated ?? 'نامعتبر'} {partnerQuantityUnitCopy[row.unit] ?? row.unit}</span>
+            <div className="sds-text-secondary flex flex-wrap gap-3 text-xs"><span>کل قرارداد: {row.quantity} {unitLabel}</span>
+              <span>تحویل‌های دیگر: {maximum === null ? 'نامعتبر' : remainingPartnerAmount(row.quantity, [maximum])} {unitLabel}</span>
+              <span>مانده: {unallocated ?? 'نامعتبر'} {unitLabel}</span>
               {maximum !== null && current !== maximum && <ErpPressable type="button"
                 onClick={() => updateQuantity(maximum)}>پر کردن ({maximum})</ErpPressable>}</div>
             {showValidationErrors && unallocated !== '0' && <ErpInlineState kind="stale"

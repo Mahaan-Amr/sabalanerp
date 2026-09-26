@@ -25,7 +25,7 @@ import { ContractProductCatalog, type ContractCatalogFamily } from '../component
 import { CentralProductModalShell, CompactSwitch } from '../components/product-modal-system/productModalPrimitives';
 import { partnerRemainderChildren } from './partnerDependentPresentation';
 import { RemainingInventorySelector } from '../components/steps/RemainingInventorySelector';
-import { partnerTechnicalSaveIssue } from './partnerCreationFlow';
+import { partnerTechnicalConflictMessage, partnerTechnicalSaveIssue } from './partnerCreationFlow';
 import { partnerQuantityUnitCopy } from '../../partner-sales/presentation';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
@@ -231,10 +231,10 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
     ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.calculation
     : undefined;
   const rowOperations = preview.ok ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.operations : undefined;
-  const blockingConflict = calculation && !calculation.ok ? calculation.conflicts[0]?.message
-    : rowOperations && !rowOperations.ok ? rowOperations.conflicts[0]?.message
+  const blockingConflict = calculation && !calculation.ok ? partnerTechnicalConflictMessage(calculation.conflicts[0], 'مشخصات این محصول را کامل کنید.')
+    : rowOperations && !rowOperations.ok ? partnerTechnicalConflictMessage(rowOperations.conflicts[0], 'عملیات این محصول را بررسی کنید.')
     : row.family !== 'volumetric' && !row.retailUnitPrice?.amount ? 'قیمت فروش سنگ به مشتری را وارد کنید.'
-      : preview.ok && preview.value.conflicts.length > 0 ? preview.value.conflicts[0]?.message : undefined;
+      : preview.ok && preview.value.conflicts.length > 0 ? partnerTechnicalConflictMessage(preview.value.conflicts[0], 'مشخصات محصول‌ها را بررسی کنید.') : undefined;
   return <CentralProductModalShell open title={state.mode === 'edit' ? 'ویرایش تنظیمات محصول' : 'تنظیمات محصول'}
     view="main" onClose={onClose} primaryLabel={state.mode === 'edit' ? 'ذخیره تغییرات' : 'افزودن محصول'} pending={false}
     onPrimary={() => { if (!blockingConflict) onSave(); }} error={blockingConflict}>

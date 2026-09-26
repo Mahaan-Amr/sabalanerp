@@ -374,7 +374,7 @@ export default function AccountingContractsPage() {
       cell: (contract) => (
         <div className="space-y-1 text-xs">
           <p>{invoiceStatusLabels[contract.accounting.invoiceStatus] || operationalStatusLabel(contract.accounting.invoiceStatus)}</p>
-          <p>{contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'کاربرد ندارد' : receivableStatusLabels[contract.accounting.receivableStatus] || operationalStatusLabel(contract.accounting.receivableStatus)}</p>
+          <p>{receivableStatusLabels[contract.accounting.receivableStatus] || operationalStatusLabel(contract.accounting.receivableStatus)}</p>
           <p>{contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'کاربرد ندارد' : taxStatusLabels[contract.accounting.taxStatus] || operationalStatusLabel(contract.accounting.taxStatus)}</p>
         </div>
       ),

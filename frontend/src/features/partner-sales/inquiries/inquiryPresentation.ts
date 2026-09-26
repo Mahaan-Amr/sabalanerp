@@ -2,7 +2,8 @@ import type { PartnerInquiryViewV2 } from '@sabalanerp/partner-sales-contracts';
 import { formatPartnerMoney } from '../presentation';
 
 export type PartnerInquiryView = PartnerInquiryViewV2;
-export type PartnerInquiryRow = PartnerInquiryView['rows'][number];
+/** Only the wizard creates an unsent placeholder; the inquiry wire never does. */
+export type PartnerInquiryRow = PartnerInquiryView['rows'][number] & { submissionState?: 'UNSENT' };
 
 export function inquiryRowState(row: PartnerInquiryRow, now: number): PartnerInquiryRow['state'] {
   if (row.state !== 'APPROVED') return row.state;

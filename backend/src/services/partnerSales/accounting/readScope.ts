@@ -22,7 +22,7 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
 type ListRow = { id: string; invoiceRecordId?: string | null; receivableId?: string | null;
   recordId?: string | null; entityType?: string | null; entityId?: string | null };
 type ListKind = 'FINANCIAL' | 'RECEIVABLE' | 'PAYMENT' | 'TAX' | 'AUDIT';
-type PartnerAccountingContext = { caseId: string; caseNumber: string; internalRecordNumber: string;
+type PartnerAccountingContext = { caseId: string; caseNumber: string; customerContractNumber: string; internalRecordNumber: string;
   partnerSellerId: string; commercialAccountId: string; debtor: { displayName: string }; revision: number; actionUrl: string };
 type AccountingRowContext = { sourceKind?: string; partnerContext?: PartnerAccountingContext;
   partnerFinancialSource?: PartnerFinancialPreparation['totals']; partnerActions?: {
@@ -170,6 +170,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
       if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||
           invoice.currency !== prepared.value.amount.currency || subtract(invoice.amount.toString(), prepared.value.amount.amount) !== '0') throw conflict();
       contextByInvoice.set(invoice.id, { caseId: row.id, caseNumber: views.accounting.caseNumber,
+        customerContractNumber: views.accounting.customerContractNumber,
         internalRecordNumber: views.accounting.recordNumber, partnerSellerId: row.profile.userId,
         commercialAccountId: views.accounting.commercialAccountId, debtor: views.accounting.debtor,
         revision: owner.data.revision, actionUrl: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(views.accounting.caseNumber)}` });

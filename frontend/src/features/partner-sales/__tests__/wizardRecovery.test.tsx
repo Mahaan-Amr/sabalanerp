@@ -323,7 +323,7 @@ test('a rejected row shows the responder reason and only its correction action',
 
 test('a corrected rejected row offers an explicit inquiry for that row before waiting for Sabalan', () => {
   const corrected = draft.rows.map((row, index) => index === 0 ? { ...row, inquiryRow: {
-    ...row.inquiryRow, rowId: `${row.productRowId}-awaiting-inquiry`, state: 'PENDING' as const,
+    ...row.inquiryRow, rowId: `${row.productRowId}-awaiting-inquiry`, state: 'PENDING' as const, submissionState: 'UNSENT' as const,
     configurationRef: { ...row.inquiryRow.configurationRef, recoveryRevision: row.inquiryRow.configurationRef.recoveryRevision + 1 },
     approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined,
   } } : row);
@@ -338,7 +338,7 @@ test('a corrected rejected row offers an explicit inquiry for that row before wa
 
 test('a pending successor no longer offers a duplicate corrected-row inquiry', () => {
   const corrected = draft.rows.map((row, index) => index === 0 ? { ...row, inquiryRow: {
-    ...row.inquiryRow, rowId: `${row.productRowId}-awaiting-inquiry`, state: 'PENDING' as const,
+    ...row.inquiryRow, rowId: `${row.productRowId}-awaiting-inquiry`, state: 'PENDING' as const, submissionState: 'UNSENT' as const,
     successor: { inquiryId: 'pricing-2', rowId: 'replacement-1', revision: 1, state: 'PENDING' as const },
     approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined,
   } } : row);

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PermissionContext } from '../../../../../packages/partner-sales-contracts';
+import { partnerTrackingCode, type PermissionContext } from '../../../../../packages/partner-sales-contracts';
 import { ContractRuntime, FrozenExport, Query, Report, ReportChannel, ReportExportStore, ReportingError, ReportingSnapshot, ReportingSource, Root } from './contracts';
 import { projectReportRow, totalMetrics } from './projection';
 import { sum } from './money';
@@ -112,7 +112,7 @@ export class PartnerReportingService {
       if (data.root.caseId !== root.caseId || data.root.partnerSellerId !== root.partnerSellerId
         || data.root.departmentId !== root.departmentId) throw new ReportingError('INTEGRITY_CONFLICT');
       const row = projectReportRow(this.runtime, data, query.purpose, { from: query.from, to: query.to, asOf: snapshot.capturedAt });
-      const searchable = [row.caseNumber, row.customerContractNumber,
+      const searchable = [row.caseNumber, partnerTrackingCode(row.caseNumber), row.customerContractNumber,
         ...(['MANAGEMENT', 'ACCOUNTING'].includes(query.purpose) ? [row.internalRecordNumber || ''] : [])];
       if (query.search && !searchable.some(number => number.toLocaleLowerCase('en').includes(query.search!.toLocaleLowerCase('en')))) continue;
       if (query.state && row.state !== query.state) continue;

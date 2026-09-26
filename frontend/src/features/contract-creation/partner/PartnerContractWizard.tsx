@@ -124,10 +124,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const awaitingInitialPricing = !result.case && pricingEntries.length > 0 && pricingEntries.every(({ inquiryRow }) =>
     inquiryRow.state === 'PENDING' && !inquiryRow.approvedRowBinding && !inquiryRow.approvedPrice);
   const unsentRows = result.case ? pricingEntries.filter(({ inquiryRow }) =>
-    inquiryRow.state === 'PENDING' && inquiryRow.rowId.endsWith('-awaiting-inquiry') &&
+    inquiryRow.state === 'PENDING' && inquiryRow.submissionState === 'UNSENT' &&
     inquiryRow.successor?.state !== 'PENDING') : [];
   const waitingForSabalan = Boolean(result.case && pricingEntries.some(({ inquiryRow }) =>
-    inquiryRow.state === 'PENDING' && (!inquiryRow.rowId.endsWith('-awaiting-inquiry') ||
+    inquiryRow.state === 'PENDING' && (inquiryRow.submissionState !== 'UNSENT' ||
       inquiryRow.successor?.state === 'PENDING')));
   const rowReinquiries = result.case ? unusable.filter(({ inquiryRow }) =>
     !['PENDING', 'REJECTED'].includes(inquiryRow.state) && inquiryRow.successor?.state !== 'PENDING') : [];

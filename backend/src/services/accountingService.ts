@@ -1013,6 +1013,9 @@ export const buildAccountingSummaryForContracts = async (contracts: any[]) => {
   return new Map(rows.map((row) => [row.contractId, row.accounting]));
 };
 
+const accountingAmountInRials = (amount: string, currency?: string) =>
+  new Prisma.Decimal(amount).mul(currency === 'IRT' ? 10 : 1);
+
 export const listAccountingContracts = async (query: ListContractsQuery = {}, actor?: AccountingReadActor) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize) || DEFAULT_PAGE_SIZE, 1), 100);
@@ -1060,7 +1063,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       const records = await scope.database.accountingFinancialRecord.findMany({
         where: scope.financial({ sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
           kind: FinancialRecordKind.INVOICE_CANDIDATE, contractId: null, customerId: null }),
-        include: { receivables: { where: scope.receivable(), select: { remainingAmount: true } } },
+        include: { receivables: { where: scope.receivable(), select: { status: true, paidAmount: true, remainingAmount: true } } },
         orderBy: { createdAt: 'desc' },
       });
       return scope.contextualize('FINANCIAL', records);
@@ -1083,6 +1086,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       const haystack = [
         item.contractNumber,
         item.partnerContext?.caseNumber,
+        item.partnerContext?.customerContractNumber,
         item.partnerContext?.internalRecordNumber,
         item.titlePersian,
         item.customer?.displayName,
@@ -1127,8 +1131,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
   if (reviewableView || query.sort === 'attention') {
     items = orderReviewableContracts(items);
   } else {
-    const amountInRials = (item: any) => new Prisma.Decimal(item.accounting.totalContractAmount)
-      .mul(item.accounting.currency === 'IRT' ? 10 : 1);
+    const amountInRials = (item: any) => accountingAmountInRials(item.accounting.totalContractAmount, item.accounting.currency);
     items.sort((left, right) => query.sort === 'amount_desc'
       ? amountInRials(right).comparedTo(amountInRials(left))
       : query.sort === 'amount_asc'
@@ -1141,10 +1144,10 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
   const pagedItems = items.slice(skip, skip + pageSize);
 
   const totals = items.reduce((acc, item) => ({
-    contractAmount: acc.contractAmount.plus(new Prisma.Decimal(item.accounting.totalContractAmount).mul(item.accounting.currency === 'IRT' ? 10 : 1)),
-    invoicedAmount: acc.invoicedAmount.plus(new Prisma.Decimal(item.accounting.invoicedAmount).mul(item.accounting.currency === 'IRT' ? 10 : 1)),
-    receivedAmount: acc.receivedAmount.plus(new Prisma.Decimal(item.accounting.receivedAmount).mul(item.accounting.currency === 'IRT' ? 10 : 1)),
-    remainingAmount: acc.remainingAmount.plus(new Prisma.Decimal(item.accounting.remainingAmount).mul(item.accounting.currency === 'IRT' ? 10 : 1))
+    contractAmount: acc.contractAmount.plus(accountingAmountInRials(item.accounting.totalContractAmount, item.accounting.currency)),
+    invoicedAmount: acc.invoicedAmount.plus(accountingAmountInRials(item.accounting.invoicedAmount, item.accounting.currency)),
+    receivedAmount: acc.receivedAmount.plus(accountingAmountInRials(item.accounting.receivedAmount, item.accounting.currency)),
+    remainingAmount: acc.remainingAmount.plus(accountingAmountInRials(item.accounting.remainingAmount, item.accounting.currency))
   }), {
     contractAmount: new Prisma.Decimal(0),
     invoicedAmount: new Prisma.Decimal(0),

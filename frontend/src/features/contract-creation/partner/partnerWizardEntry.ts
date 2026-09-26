@@ -111,6 +111,7 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
       .sort((left, right) => Number(Boolean(left.successor)) - Number(Boolean(right.successor)) || right.revision - left.revision);
     return matching.find(row => approved.includes(row)) ?? matching[0] ?? {
       rowId: `${subject.configurationRef.productRowId}-awaiting-inquiry`, revision: 1,
+      submissionState: 'UNSENT',
       description: `محصول ${index + 1}`, state: 'PENDING', configuration: [], usedCaseNumbers: [],
       configurationRef: subject.configurationRef,
     };

@@ -33,7 +33,72 @@ import {
   resolveLegacyV1PricingProjection,
   rebindFrozenContractItemIdentities,
   resolveFinancialApprovalGraphEvidence,
+  auditedStairLayerPricingRecoveries,
 } from '../approvedPricing/prismaRepository';
+
+test('records historical stair-layer base recovery only with its matching graph audit', () => {
+  const input = {
+    canonicalRows: [{ productRowId: 'layer-row', parentProductRowId: 'parent-row', commercial: {} }],
+    projectedRows: [{ productRowId: 'layer-row', baseAmountToman: '600000' }],
+    layers: [{ layerConfigurationId: 'layer-row', parentProductRowId: 'parent-row', result: { resultHash: 'layer-hash' } }],
+    matchingAuditCommandId: 'audited-wizard-save',
+  };
+  assert.deepEqual(auditedStairLayerPricingRecoveries(input), [{
+    productRowId: 'layer-row', layerConfigurationId: 'layer-row', rawBaseAmountToman: null,
+    sealedBaseAmountToman: '600000', layerResultHash: 'layer-hash',
+    graphAuditCommandId: 'audited-wizard-save', rule: 'AUDITED_FROZEN_STAIR_LAYER_MATERIAL_BASE_V1',
+  }]);
+  assert.throws(() => auditedStairLayerPricingRecoveries({ ...input, matchingAuditCommandId: null }),
+    /no matching graph audit/);
+  assert.deepEqual(auditedStairLayerPricingRecoveries({
+    ...input,
+    canonicalRows: [{ ...input.canonicalRows[0]!, commercial: { baseAmountToman: '600000' } }],
+  }), []);
+});
+
+test('seals a recovered stair-layer row with its material, cutting and layer charges', () => {
+  const source = approvedPricingSourceFixture();
+  source.leaf.amount = '7603120';
+  source.leaf.invoiceItems = [{ ...source.leaf.invoiceItems[0]!, quantity: '1', totalPrice: '7603120' }];
+  source.contract.items = [{ ...source.contract.items[0]!, productRowId: 'layer-row', productType: 'stair', quantity: '1', totalPrice: '760312' }];
+  source.contract.currentItems = source.contract.items.map(item => ({ ...item }));
+  (source.contract.contractData as any).products = [{
+    rowId: 'layer-row', productId: 'product-1', productType: 'stair', quantity: '1',
+    totalPrice: '760312', meta: { isLayer: true },
+  }];
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '0', percent: '0', amount: '0', currency: 'تومان',
+  };
+  source.contract.productGraph = {
+    ...source.contract.productGraph!,
+    totalAmountToman: '760312',
+    compatibility: {
+      evidenceOrigin: 'FROZEN_STAIR_LAYER_BASE_PROJECTION_V1',
+      snapshotOriginallyMissing: false,
+      stairLayerPricingRecoveries: [{
+        productRowId: 'layer-row', layerConfigurationId: 'layer-row', rawBaseAmountToman: null,
+        sealedBaseAmountToman: '600000', layerResultHash: 'layer-hash',
+        graphAuditCommandId: 'audited-wizard-save', rule: 'AUDITED_FROZEN_STAIR_LAYER_MATERIAL_BASE_V1',
+      }],
+    },
+    rows: [{
+      productRowId: 'layer-row', catalogProductId: 'product-1', contractualTitle: 'Layer',
+      productType: 'stair', baseAmountToman: '600000', totalAmountToman: '760312',
+      requestedQuantity: '1', requestedLengthMeters: null, requestedAreaSquareMeters: null,
+      pricingComponents: [
+        { id: 'base-material', kind: 'base-material', amountToman: '600000' },
+        { id: 'cut', kind: 'stair-cut', amountToman: '120312' },
+        { id: 'layer', kind: 'stair-layer', amountToman: '40000' },
+      ], operations: [],
+    }],
+  };
+  const version = buildApprovedPricingVersion(source, 1, 'recovered-layer-version');
+  assert.equal(version.netAmount, '760312.000000000000');
+  assert.deepEqual(
+    (version.sourceEvidence.graph as any).compatibility.stairLayerPricingRecoveries.map((row: any) => row.rule),
+    ['AUDITED_FROZEN_STAIR_LAYER_MATERIAL_BASE_V1'],
+  );
+});
 import {
   ApprovedPricingEvidenceError,
   asApprovedPricingEvidenceError,

@@ -44,6 +44,23 @@ services:
     logging: *local-logging
     restart: unless-stopped
 
+  clamav:
+    image: clamav/clamav:1.4
+    environment:
+      FRESHCLAM_CHECKS: "12"
+    volumes:
+      - clamav_database:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping=1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 5m
+    mem_limit: 2g
+    cpus: 1
+    logging: *local-logging
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -76,7 +93,8 @@ services:
       SMS_IR_DISPATCH_EXIT_TEMPLATE_ID: "0"
       BIOMETRIC_TEMPLATE_KEY_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       DISPATCH_CONFIRMATION_OTP_SECRET: local-dispatch-confirmation-otp-secret
-      ALLOW_UNSCANNED_HR_FILES: "true"
+      HR_HIRING_ANTIVIRUS_COMMAND: /app/scripts/hr-clamdscan.sh
+      ALLOW_UNSCANNED_HR_FILES: "false"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       RECOVERY_STORAGE_DIR: /app/storage/recovery
       RECOVERY_COORDINATION_DIR: /app/recovery-coordination
@@ -105,6 +123,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/api/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""]
@@ -190,6 +210,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  clamav_database:
   backend_storage_contracts:
   backend_storage_hr_hiring:
   backend_storage_accounting_contracts:

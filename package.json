@@ -36,6 +36,7 @@
     "docker:local:down": "docker compose -f docker-compose.local.yml down",
     "docker:local:logs": "docker compose -f docker-compose.local.yml logs -f",
     "docker:local:ps": "docker compose -f docker-compose.local.yml ps",
+    "docker:local:verify-antivirus": "node scripts/verify-local-antivirus.mjs",
     "docker:local:acceptance:build": "docker compose -f docker-compose.local.yml -f docker-compose.performance-acceptance.yml build",
     "docker:local:acceptance:up": "docker compose -f docker-compose.local.yml -f docker-compose.performance-acceptance.yml up -d --wait",
     "docker:dev": "node scripts/start-docker-dev.mjs",

@@ -297,7 +297,7 @@ export function ErpNeumorphicActionGrid({
 }: {
   title: string;
   items: ErpNeumorphicActionItem[];
-  desktopColumns?: 4 | 5;
+  desktopColumns?: 2 | 4 | 5;
   showTitle?: boolean;
 }) {
   const titleId = useId();
@@ -316,7 +316,7 @@ export function ErpNeumorphicActionGrid({
       <div
         className={cx(
           "grid grid-cols-2 gap-3 xl:gap-4",
-          desktopColumns === 5 ? "xl:grid-cols-5" : "xl:grid-cols-4",
+          desktopColumns === 2 ? "xl:grid-cols-2" : desktopColumns === 5 ? "xl:grid-cols-5" : "xl:grid-cols-4",
         )}
       >
         {items.map((item) => {

@@ -3,33 +3,24 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaBalanceScale,
-  FaClipboardCheck,
-  FaExclamationTriangle,
   FaFileInvoice,
-  FaHistory,
-  FaMoneyCheckAlt,
-  FaReceipt,
   FaSync,
-  FaUserClock,
-  FaUserPlus,
 } from 'react-icons/fa';
 import {
-  ErpActionGrid,
   ErpInlineState,
+  ErpNeumorphicActionGrid,
   ErpPage,
 } from '@/components/erp';
 import { accountingAPI, hrHiringMetricsAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { StatusBadge } from '@/features/accounting/accountingUi';
 import { AccountingFinancialTrend } from '@/features/accounting/AccountingFinancialTrend';
-import { AccountingDashboardSkeleton } from '@/features/accounting/AccountingDashboardPresentation';
+import { AccountingDashboardSkeleton, AccountingOperationalMetricGrid } from '@/features/accounting/AccountingDashboardPresentation';
 import {
   pendingFinancialTrend,
   resolveFinancialTrend,
   type FinancialTrendRange,
   type FinancialTrendState,
 } from '@/features/accounting/accountingFinancialTrendState';
-import { HR_HIRING_METRIC_VIEWS } from '@/features/hr-hiring/hrHiringMetricViews';
 import {
   clearHrHiringMetrics,
   pendingHrHiringMetrics,
@@ -250,10 +241,7 @@ export default function AccountingDashboardPage() {
     if (currentUserId) void loadHrMetrics(currentUserId);
   };
   const hrMetricsBelongToCurrentUser = Boolean(currentUserId && hrMetricsOwnerId === currentUserId);
-  const hrMetricsAvailable = hrMetricsBelongToCurrentUser && hrMetrics.status === 'available';
-  const hrMetricsDescription = !hrMetricsBelongToCurrentUser || hrMetrics.status === 'pending'
-    ? 'در حال بررسی دسترسی'
-    : undefined;
+  const dashboardHrMetrics = hrMetricsBelongToCurrentUser ? hrMetrics : { status: 'unavailable' as const };
   const dashboardHref = (patch: { due?: DeadlineBucket | ''; deadlineType?: 'all' | 'receivable' | 'check' }) => {
     const result = patchAccountingDashboardQuery(new URLSearchParams(rawSearchParams), patch);
     const query = result.params.toString();
@@ -285,6 +273,8 @@ export default function AccountingDashboardPage() {
         <p role="status" className="sds-text-muted text-sm">در حال به‌روزرسانی داده‌های حسابداری…</p>
       )}
 
+      <AccountingOperationalMetricGrid commandCenter={commandCenter} hrMetrics={dashboardHrMetrics} />
+
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,.9fr)]">
         <div className="min-w-0">{financialTrendPanel}</div>
         <div className="min-w-0">
@@ -296,100 +286,23 @@ export default function AccountingDashboardPage() {
         </div>
       </div>
 
-      <ErpActionGrid
-        columns={5}
-        compact
+      <ErpNeumorphicActionGrid
+        title="دسترسی‌های مالی"
+        desktopColumns={2}
         items={[
           {
+            id: 'ledger',
             title: 'دفترکل و کدینگ',
             description: 'اسناد قطعی، دفتر روزنامه و تراز آزمایشی رسمی',
             href: '/dashboard/accounting/ledger',
             icon: FaBalanceScale,
-            tone: 'primary',
           },
           {
-            title: 'قراردادهای قابل بررسی',
-            href: '/dashboard/accounting/contracts?view=reviewable',
-            icon: FaClipboardCheck,
-            tone: 'primary',
-            badge: <StatusBadge label={(commandCenter.reviewableContracts?.count || 0).toLocaleString('fa-IR')} tone="primary" />,
-          },
-          {
-            title: 'پیش‌نویس صورتحساب‌ها',
-            href: '/dashboard/accounting/invoice-candidates?view=actionable',
-            icon: FaFileInvoice,
-            tone: 'info',
-            badge: <StatusBadge label={(commandCenter.invoiceCandidates?.count || 0).toLocaleString('fa-IR')} tone="info" />,
-          },
-          {
+            id: 'dispatch-documents',
             title: 'اسناد ارسال مشتری',
-            description: 'بررسی و صدور هم‌زمان بارنامه و صورت‌حساب محموله',
+            description: 'بررسی و صدور بارنامه و صورت‌حساب محموله',
             href: '/dashboard/accounting/dispatch-documents',
             icon: FaFileInvoice,
-            tone: 'primary',
-          },
-          {
-            title: 'دریافت‌ها و چک‌ها',
-            href: '/dashboard/accounting/payments?view=due-soon',
-            icon: FaMoneyCheckAlt,
-            tone: 'warning',
-            description: 'چک‌های تسویه‌نشدهٔ سررسیدگذشته یا تا ۷ روز آینده',
-            badge: <StatusBadge label={(commandCenter.checksDue?.count || 0).toLocaleString('fa-IR')} tone="warning" />,
-          },
-          {
-            title: 'دریافتنی‌ها',
-            href: '/dashboard/accounting/receivables?view=open',
-            icon: FaReceipt,
-            tone: 'success',
-            badge: <StatusBadge label={(commandCenter.openReceivables?.count || 0).toLocaleString('fa-IR')} tone="success" />,
-          },
-          {
-            title: 'استخدام: وثیقه و قرارداد',
-            href: `/dashboard/hr/hiring?view=${HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts}`,
-            icon: FaUserPlus,
-            tone: 'info',
-            description: hrMetricsDescription,
-            badge: hrMetricsAvailable
-              ? <StatusBadge label={hrMetrics.actionableCollateralOrContractCases.toLocaleString('fa-IR')} tone="info" />
-              : undefined,
-          },
-          {
-            title: 'قالب وثیقه استخدام',
-            href: `/dashboard/hr/hiring/collateral-templates?view=${HR_HIRING_METRIC_VIEWS.activeCollateralTemplates}`,
-            icon: FaClipboardCheck,
-            tone: 'neutral',
-            description: hrMetricsDescription,
-            badge: hrMetricsAvailable
-              ? <StatusBadge label={hrMetrics.activeCollateralTemplates.toLocaleString('fa-IR')} tone="neutral" />
-              : undefined,
-          },
-          {
-            title: 'مالیات و سامانه مودیان',
-            href: '/dashboard/accounting/tax?view=needs-attention',
-            icon: FaBalanceScale,
-            tone: 'purple',
-            badge: <StatusBadge label={(commandCenter.taxNotReady?.count || 0).toLocaleString('fa-IR')} tone="purple" />,
-          },
-          {
-            title: 'بررسی اصلاحات',
-            href: '/dashboard/accounting/correction-requests?view=active',
-            icon: FaExclamationTriangle,
-            tone: 'warning',
-            badge: <StatusBadge label={(commandCenter.correctionRequests?.count || 0).toLocaleString('fa-IR')} tone="warning" />,
-          },
-          {
-            title: 'سوابق عملیات',
-            href: '/dashboard/accounting/audit',
-            icon: FaHistory,
-            tone: 'neutral',
-            badge: <StatusBadge label={(commandCenter.auditHistory?.count || 0).toLocaleString('fa-IR')} tone="neutral" />,
-          },
-          {
-            title: 'عملکرد حسابداران',
-            href: '/dashboard/accounting/performance?view=last30days',
-            icon: FaUserClock,
-            tone: 'primary',
-            badge: <StatusBadge label={(commandCenter.accountantPerformance?.count || 0).toLocaleString('fa-IR')} tone="primary" />,
           },
         ]}
       />

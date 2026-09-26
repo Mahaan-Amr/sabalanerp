@@ -7,14 +7,13 @@ import { AccountingFinancialTrend } from '../AccountingFinancialTrend';
 import { ErpSegmentedControl } from '@/components/erp';
 import type { FinancialTrendState } from '../accountingFinancialTrendState';
 
-test('Partner period summary shows exact currency amounts separately from the ordinary chart', () => {
+test('dashboard chart does not render the Partner account table', () => {
   const html = renderToStaticMarkup(<AccountingFinancialTrend range="1m" onRangeChange={() => undefined} onRetry={() => undefined}
     state={{ status: 'available', data: { range: '1m', currency: 'RIAL', hasLegacyFallback: false, points: [],
       partnerSeries: [{ currency: 'IRT', points: [{ periodKey: '1405-06-12', label: '۱۲', startsAt: '2026-09-02T20:30:00.000Z',
         endsAt: '2026-09-03T12:00:00.000Z', invoiced: '9007199254740993.01', received: '1', outstanding: '9007199254740992.01' }] }] } }} />);
-  assert.match(html, /حساب همکاران/);
-  assert.match(html, /۹٬۰۰۷٬۱۹۹٬۲۵۴٬۷۴۰٬۹۹۳٫۰۱ تومان/);
-  assert.match(html, /۹٬۰۰۷٬۱۹۹٬۲۵۴٬۷۴۰٬۹۹۲٫۰۱ تومان/);
+  assert.doesNotMatch(html, /حساب همکاران/);
+  assert.doesNotMatch(html, /۹٬۰۰۷٬۱۹۹٬۲۵۴٬۷۴۰٬۹۹۳٫۰۱ تومان/);
 });
 
 const point = (periodKey: string, marker: boolean) => ({

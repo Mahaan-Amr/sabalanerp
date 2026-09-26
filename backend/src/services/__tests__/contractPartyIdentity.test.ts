@@ -31,6 +31,22 @@ await validateContractPartyIdentity({
   contractData: { customerId: 'customer-1', customer: { id: 'customer-1', firstName: 'فریبا', lastName: 'پور شهید' }, projectId: 'project-1', project: { id: 'project-1' } }
 }, lookup);
 
+await validateContractPartyIdentity({
+  customerId: 'customer-1',
+  content: '<p>قرارداد عیسی کرمی , یوسف صادقی</p>',
+  contractData: {
+    customerId: 'customer-1',
+    customer: { id: 'customer-1', firstName: 'عیسی', lastName: 'کرمی , یوسف صادقی' },
+    projectId: 'project-1',
+    project: { id: 'project-1' }
+  }
+}, {
+  ...lookup,
+  findCustomer: async (id: string) => id === 'customer-1'
+    ? { id, firstName: 'عیسی', lastName: 'کرمی ، یوسف صادقی', companyName: null }
+    : null
+});
+
 await assert.rejects(
   validateContractPartyIdentity({
     customerId: 'customer-1',

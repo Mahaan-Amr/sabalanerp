@@ -34,6 +34,7 @@ const KNOWN_SALES_ERRORS: Record<string, string> = {
   'CRM potential project not found': 'پروژه انتخاب‌شده پیدا نشد؛ پروژه را دوباره از فهرست انتخاب کنید.',
   'CRM potential project customer does not match contract customer': 'مشتری پروژه با مشتری قرارداد یکسان نیست؛ پروژه یا مشتری قرارداد را اصلاح کنید.',
   'CRM potential project is already linked to a sales contract': 'این پروژه قبلاً به یک قرارداد فروش متصل شده است؛ قرارداد متصل را از صفحه پروژه باز کنید.',
+  'نام مشتری در اطلاعات قرارداد با رکورد اصلی CRM یکسان نیست.': 'نام مشتری در پیش‌نویس با اطلاعات ثبت‌شده یکسان نیست؛ مشتری را دوباره از فهرست انتخاب کنید.',
 };
 
 export const salesBusinessErrorMessage = (message: unknown, fallback: string): string =>

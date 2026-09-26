@@ -54,6 +54,16 @@ test('known service failures become simple Persian causes with a recovery step',
   );
 });
 
+test('customer name mismatch remains actionable instead of becoming a generic response', () => {
+  assert.equal(
+    salesBusinessErrorMessage(
+      'نام مشتری در اطلاعات قرارداد با رکورد اصلی CRM یکسان نیست.',
+      'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.'
+    ),
+    'نام مشتری در پیش‌نویس با اطلاعات ثبت‌شده یکسان نیست؛ مشتری را دوباره از فهرست انتخاب کنید.'
+  );
+});
+
 test('a signed contract edit requires Accounting correction instead of an unexpected 500', () => {
   assert.deepEqual(knownContractUpdateBusinessFailure(
     'Signed contract commercial evidence can only change through an approved formal correction',

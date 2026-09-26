@@ -223,7 +223,7 @@ export default function AccountingDashboardPage() {
     </ErpPage>;
   }
   if (authLoading || dashboardOwnerRef.current !== currentUserId || loading ||
-      (workspace && (financialTrend.status === 'loading' || hrMetricsPending))) {
+      (workspace && hrMetricsPending)) {
     return (
       <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری" backHref="/dashboard">
         <AccountingDashboardSkeleton />

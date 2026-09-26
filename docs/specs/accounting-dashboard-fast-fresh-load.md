@@ -1,5 +1,7 @@
 # Fast, fresh Accounting dashboard
 
+Canonical GitHub Issue: [#390](https://github.com/Mahaan-Amr/sabalanerp/issues/390).
+
 ## User decision
 
 The Accounting dashboard should appear as one complete page on initial entry and on a full refresh. Its financial chart stays present and uses current, authorized financial evidence. The target is a complete page within three seconds for at least 95% of production-scale loads, subject to measurement in the deployed environment. Changing the chart range refreshes only the chart.

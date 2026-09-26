@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures';
-import type { PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
+import { partnerError, type PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerCaseSubmission, type PartnerDraftCommand } from '../../contract-creation/partner/partnerCaseSubmission';
 
 const fixture = createPartnerFixtures();
@@ -115,6 +115,77 @@ test('resuming a numbered Case starts from its current revision and never submit
       fixture.partner.customerPaymentPlan.installments[0]?.installmentId);
   }
   assert.equal(submission.getSnapshot().case?.owner.revision, fixture.partner.owner.revision + 1);
+});
+
+test('a rejected revision retains the numbered Case for the next attempt', async () => {
+  const commandTypes: string[] = [];
+  let fail = true;
+  const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
+    initialCase: fixture.partner,
+    commands: { execute: async command => {
+      commandTypes.push(command.type);
+      if (fail) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+      return { ok: true, value: { commandId: command.commandId, replayed: false,
+        case: fixture.partner, eventIds: [] } };
+    } },
+    recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined,
+      finalizeCommitted: async () => undefined, prepareEditLease },
+  });
+  await submission.submit(intent());
+  assert.equal(submission.getSnapshot().case?.owner.caseId, fixture.partner.owner.caseId);
+  assert.equal(submission.getSnapshot().errorCode, 'INTEGRITY_CONFLICT');
+  fail = false;
+  await submission.submit(intent());
+  assert.deepEqual(commandTypes, ['CASE_DRAFT_REVISE', 'CASE_DRAFT_REVISE']);
+});
+
+test('local intent validation keeps the numbered Case for correction and retry', async () => {
+  const commandTypes: string[] = [];
+  const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
+    initialCase: fixture.partner,
+    commands: { execute: async command => {
+      commandTypes.push(command.type);
+      return { ok: true, value: { commandId: command.commandId, replayed: false,
+        case: fixture.partner, eventIds: [] } };
+    } },
+    recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined,
+      finalizeCommitted: async () => undefined, prepareEditLease },
+  });
+  await submission.submit({ ...intent(), contractDate: '' });
+  assert.equal(submission.getSnapshot().case?.owner.caseId, fixture.partner.owner.caseId);
+  await submission.submit(intent());
+  assert.deepEqual(commandTypes, ['CASE_DRAFT_REVISE']);
+});
+
+test('an uncertain revision retry retains the numbered Case after a later rejection', async () => {
+  let pending: PartnerDraftCommand | null = null;
+  let first = true;
+  const commandTypes: string[] = [];
+  const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId, initialCase: fixture.partner,
+    commands: { execute: async command => {
+      commandTypes.push(command.type);
+      if (first) { first = false; throw new Error('response lost'); }
+      return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    } },
+    recovery: { pending: () => pending, savePending: async command => { pending = command; },
+      clearPending: async () => { pending = null; }, finalizeCommitted: async () => undefined, prepareEditLease },
+  });
+  await submission.submit(intent());
+  assert.equal(submission.getSnapshot().phase, 'uncertain');
+  await submission.retry();
+  assert.equal(submission.getSnapshot().case?.owner.caseId, fixture.partner.owner.caseId);
+  assert.deepEqual(commandTypes, ['CASE_DRAFT_REVISE', 'CASE_DRAFT_REVISE']);
+});
+
+test('reloading a pending revision keeps the numbered Case visible', () => {
+  const pending = { type: 'CASE_DRAFT_REVISE' } as PartnerDraftCommand;
+  const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId, initialCase: fixture.partner,
+    commands: { execute: async () => { throw new Error('not sent'); } },
+    recovery: { pending: () => pending, savePending: async () => undefined, clearPending: async () => undefined,
+      finalizeCommitted: async () => undefined, prepareEditLease },
+  });
+  assert.equal(submission.getSnapshot().phase, 'uncertain');
+  assert.equal(submission.getSnapshot().case?.owner.caseId, fixture.partner.owner.caseId);
 });
 
 test('sent and customer-approved numbered Cases remain editable through revision commands', async () => {

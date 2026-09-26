@@ -398,6 +398,9 @@ test('finalization rechecks inquiry package expiry inside the locked transaction
   await tx.partnerInquiry.update({ where: { id: `${ids.caseId}-inquiry` },
     data: { pricingReadyAt: new Date(Date.now() - 48 * 60 * 60 * 1000 - 1_000),
       pricingExpiresAt: new Date(Date.now() - 1_000) } });
+  await tx.partnerInquiryApproval.update({ where: { id: `${ids.caseId}-approval` },
+    data: { approvedAt: new Date(Date.now() - 48 * 60 * 60 * 1000 - 1_000),
+      expiresAt: new Date(Date.now() - 1_000) } });
   await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
   const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
   const blocked = await service.execute(await commitCommand(ids, owner, 'SIGNED', 'expired-inquiry', 'DRAFT'));

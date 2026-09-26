@@ -109,7 +109,8 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
             expiresAt: row.approval.expiresAt.toISOString(),
             ...(row.approval.note ? { noteOrReason: row.approval.note } : {}),
             approvedRowBinding: { inquiryId: inquiry.id, rowId: row.id, revision: row.revision } } : {}),
-          ...(!row.approval && definition.predecessorReason ? { noteOrReason: definition.predecessorReason } : {}),
+          ...(!row.approval && (reasons.get(row.id) || definition.predecessorReason)
+            ? { noteOrReason: reasons.get(row.id) || definition.predecessorReason } : {}),
           usedCaseNumbers: row.approval?.usages.map(usage => usage.binding.caseRevision.case.caseNumber) ?? [],
           ...(row.predecessor ? { predecessor: { inquiryId: inquiry.id, rowId: row.predecessor.id,
             revision: row.predecessor.revision, ...(definition.predecessorReason ? { reason: definition.predecessorReason } : {}) } } : {}),

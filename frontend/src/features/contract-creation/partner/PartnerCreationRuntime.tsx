@@ -36,7 +36,8 @@ import { selectPartnerReinquiryRows } from './partnerReinquiry';
 import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
   partnerCasePendingStorageKey, shouldPreferLocalPartnerWizard,
   isExplicitPartnerCreationEntry, partnerProductEditPath, shouldOfferPartnerDraftChoice,
-  shouldStartFreshPartnerCreation } from './partnerWizardEntry';
+  shouldStartFreshPartnerCreation, partnerCreationRouteIdentity, partnerCreationRequestedInquiry,
+  partnerCaseResultStep, partnerCaseHasIntegrityError, partnerCaseReviewMessage } from './partnerWizardEntry';
 import { alignPartnerCustomerPaymentPlan, partnerMoneyText, partnerRetailIntentRows, refreshPartnerInquiryRow,
   partnerRetailDiscountFromPercent, partnerRetailSubtotal, partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
@@ -154,6 +155,11 @@ function readStored<T>(key: string): T | null {
 }
 
 export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: React.ReactNode; mode?: 'sale' | 'inquiry' }) {
+  const searchParams = useSearchParams();
+  return <PartnerCreationRuntimeSession key={partnerCreationRouteIdentity(searchParams, mode)} ordinary={ordinary} mode={mode} />;
+}
+
+function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.ReactNode; mode: 'sale' | 'inquiry' }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const freshInquiryRef = useRef(shouldStartFreshPartnerCreation(searchParams));
@@ -345,7 +351,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
             ? requestedProject! : '');
           return;
         }
-        const requestedInquiry = searchParams.get('inquiryId') || parsed.data.latestInquiryId || '';
+        const requestedInquiry = partnerCreationRequestedInquiry(searchParams, parsed.data.latestInquiryId);
         const configureForSale = mode === 'sale' && searchParams.get('configure') === '1';
         if (configureForSale) setSaleStep('products');
         const saved = startFresh || explicitEntry || configureForSale || !requestedInquiry ? null
@@ -450,12 +456,20 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (recoveryStarting.current || (runtime && !fresh)) return;
     recoveryStarting.current = true; setError(null);
     try {
+      const requestedCaseId = searchParams.get('caseId');
       const requestedDraft = searchParams.get('draftId');
       const requestedBase = Number(searchParams.get('baseRevision'));
       const requestedCandidate = requestedDraft ? partner.recoverableDrafts?.find(item => item.recoveryId === requestedDraft)
         ?? { recoveryId: requestedDraft, baseRevision: Number.isSafeInteger(requestedBase) && requestedBase >= 0 ? requestedBase : 0,
           updatedAt: new Date().toISOString() } : undefined;
-      const candidate = fresh ? undefined : requestedCandidate ?? partner.recoverableDraft;
+      const candidate = fresh ? undefined : requestedCaseId
+        ? partner.recoverableDrafts?.find(item => item.caseId === requestedCaseId)
+          ?? (partner.recoverableDraft?.caseId === requestedCaseId ? partner.recoverableDraft : undefined)
+        : requestedCandidate ?? partner.recoverableDraft;
+      if (requestedCaseId && !candidate) {
+        setError('پیش‌نویس این پرونده پیدا نشد؛ شماره پرونده را به پشتیبانی اعلام کنید.');
+        return;
+      }
       const recoveryId = candidate?.recoveryId ?? `partner-recovery-${crypto.randomUUID()}`;
       const browserSessionId = getPartnerBrowserSessionId(window.sessionStorage, partner.actorId);
       const baseRevision = candidate?.baseRevision ?? 0;
@@ -592,7 +606,13 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     const matches = await readApprovalMatches(saved, caseId);
     const inquiryId = `partner-case-pricing:${saved.recoveryId}:1`;
     const inquiry = await inquiryPorts.queries.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId });
-    return inquiry.ok ? inquiry.value.rows : matches.rows;
+    if (!inquiry.ok) throw inquiry.error;
+    const currentRows = inquiry.value.rows;
+    const retained = matches.rows.filter(match => !currentRows.some(row =>
+      row.configurationRef.recoveryId === match.configurationRef.recoveryId &&
+      row.configurationRef.recoveryRevision === match.configurationRef.recoveryRevision &&
+      row.configurationRef.productRowId === match.configurationRef.productRowId && !row.successor));
+    return [...currentRows, ...retained];
   }, [readApprovalMatches]);
 
   const startInquiry = async (partner: PartnerContext, selectedProductRowIds?: ReadonlySet<string>, skipInquiry = false) => {
@@ -707,7 +727,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     } });
   }, [editingCase, reacquireRuntime, submissionActorId, submissionRecoveryId]);
 
-  const enterWizard = async (inquiry: PartnerInquiryView, runtimeOverride?: PersistedRuntime) => {
+  const enterWizard = async (inquiry: PartnerInquiryView, runtimeOverride?: PersistedRuntime,
+    caseIdOverride?: string, caseNumberOverride?: string) => {
     const currentRuntime = runtimeOverride ?? runtime;
     if (!currentRuntime || !context || context.kind !== 'PARTNER') return;
     setError(null);
@@ -716,10 +737,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     const validated = await ports.saved.readSaved({ ...refreshed.access, recoveryRevision: refreshed.saved.recoveryRevision });
     if (!validated.ok) { setError(validated.error.message); return; }
     let inquiryRows: readonly PartnerInquiryRow[] = inquiry.rows;
-    try {
-      const caseId = editingCase?.owner.caseId;
-      inquiryRows = caseId ? await readCasePricingRows(refreshed.saved, caseId) : inquiry.rows;
-    } catch { /* The exact inquiry view remains a safe fallback for older records. */ }
+    const caseId = caseIdOverride ?? editingCase?.owner.caseId;
+    try { inquiryRows = caseId ? await readCasePricingRows(refreshed.saved, caseId) : inquiry.rows; }
+    catch (caught) { setError(partnerCaseHasIntegrityError(caught)
+      ? partnerCaseReviewMessage(caseNumberOverride ?? editingCase?.caseNumber ?? caseId ?? '')
+      : 'نتیجه استعلام این پرونده دریافت نشد؛ صفحه را دوباره باز کنید.'); return; }
+    const openingNumberedResult = Boolean(caseIdOverride && searchParams.get('configure') !== '1');
     const selectedCustomerId = currentRuntime.customerId || customerId || context.customers[0]?.id || '';
     const customer = context.customers.find(item => item.id === selectedCustomerId);
     const selectedProject = context.projects.find(item => item.id === currentRuntime.projectId && item.customerId === selectedCustomerId);
@@ -752,7 +775,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       }
       const rows = draft.rows.map(row => ({ ...row,
         retailUnitPrice: intent.rows.find(item => item.productRowId === row.productRowId)!.retailUnitPrice }));
-      setWizard({ ...draft, step, rows, intent: { ...intent,
+      setWizard({ ...draft, step: partnerCaseResultStep(step, openingNumberedResult), rows, intent: { ...intent,
         rows: partnerRetailIntentRows(rows),
         customerPaymentPlan: alignPartnerCustomerPaymentPlan(rows, intent.retailDiscount, intent.customerPaymentPlan),
         additionalMaterialApprovals: draft.intent.additionalMaterialApprovals } });
@@ -779,7 +802,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         rows: partnerRetailIntentRows(rows),
         additionalMaterialApprovals: draft.intent.additionalMaterialApprovals };
       setCustomerId(nextCustomerId);
-      setWizard({ ...draft, step: 'products', rows, intent: { ...nextIntent,
+      setWizard({ ...draft, step: partnerCaseResultStep('products', openingNumberedResult), rows, intent: { ...nextIntent,
         customerPaymentPlan: alignPartnerCustomerPaymentPlan(rows, nextIntent.retailDiscount,
           nextIntent.customerPaymentPlan) } });
     };
@@ -816,7 +839,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     }
     if (storedIntent?.success) { restoreAcrossProductEdit(storedIntent.data); return; }
     wizardServerRevision.current = 0;
-    setWizard({ ...draft, intent: { ...draft.intent,
+    setWizard({ ...draft, step: partnerCaseResultStep(draft.step, openingNumberedResult), intent: { ...draft.intent,
       customerPaymentPlan: alignPartnerCustomerPaymentPlan(draft.rows, draft.intent.retailDiscount,
         draft.intent.customerPaymentPlan) } });
   };
@@ -828,6 +851,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (!caseId || context?.kind !== 'PARTNER' || !draftAccess || recoveryRevision < 1 || wizard ||
         editingHydrationFlight.current) return;
     editingHydrationFlight.current = true;
+    let caseReference = caseId;
     void (async () => {
       const [caseResponse, wizardResponse, savedResult] = await Promise.all([
         api.post('/partner/cases/query-v2', { caseId }),
@@ -836,9 +860,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       ]);
       const cases = PartnerCaseRuntimeResultSchema.safeParse((caseResponse.data as { data?: unknown })?.data);
       const recoveredWizard = PartnerWizardRecoverySnapshotSchema.safeParse((wizardResponse.data as { data?: unknown })?.data);
+      if (cases.success && cases.data.cases.length === 1 && cases.data.cases[0].view.owner.caseId === caseId) {
+        caseReference = cases.data.cases[0].view.caseNumber;
+      }
       if (!cases.success || cases.data.cases.length !== 1 || !savedResult.ok || !recoveredWizard.success ||
           cases.data.cases[0].view.owner.caseId !== caseId ||
-          recoveredWizard.data.intent.recoveryId !== draftAccess.recoveryId) throw new Error('Invalid editable Case recovery');
+          recoveredWizard.data.intent.recoveryId !== draftAccess.recoveryId) throw partnerError('INTEGRITY_CONFLICT');
       const savedReceipt: PartnerTechnicalSaveReceipt = { ...savedResult.value, replayed: true };
       const matches = await readApprovalMatches(savedReceipt, caseId);
       const inquiryId = matches.rows[0]?.approvedRowBinding?.inquiryId ?? `${draftAccess.recoveryId}-edit`;
@@ -858,8 +885,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       setCustomerId(value.customerId); setContractDate(value.contractDate!); setProjectId(value.projectId ?? '');
       persistRuntime(value);
       if (searchParams.get('configure') === '1') setSaleStep('products');
-      else await enterWizardRef.current({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: matches.rows }, value);
-    })().catch(() => setError('بازیابی پرونده ذخیره‌شده انجام نشد؛ هیچ تغییری ثبت نشده است.'))
+      else await enterWizardRef.current({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: matches.rows },
+        value, caseId, caseReference);
+    })().catch(caught => setError(partnerCaseHasIntegrityError(caught)
+      ? partnerCaseReviewMessage(caseReference)
+      : 'بازیابی پرونده ذخیره‌شده انجام نشد؛ هیچ تغییری ثبت نشده است.'))
       .finally(() => { editingHydrationFlight.current = false; });
   }, [context, draftAccess, persistRuntime, readApprovalMatches, recoveryRevision, searchParams, wizard]);
 

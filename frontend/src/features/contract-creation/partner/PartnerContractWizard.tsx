@@ -9,7 +9,8 @@ import { WIZARD_STEPS } from '../constants/contract.constants';
 import { PartnerRetailStep } from './PartnerRetailStep';
 import { alignPartnerCustomerPaymentPlan, partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
 import type { PartnerDraftIntent, createPartnerCaseSubmission } from './partnerCaseSubmission';
-import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
+import { inquiryRowState, isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
+import { partnerCaseReviewMessage } from './partnerWizardEntry';
 import type { PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 
 export type PartnerWizardStep = 'date' | 'customer' | 'project' | 'products' | 'pricing' | 'delivery' | 'payment' | 'confirmation';
@@ -122,10 +123,11 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     || row.inquiryRow.configurationRef.recoveryId !== draft.intent.recoveryId);
   const awaitingInitialPricing = !result.case && pricingEntries.length > 0 && pricingEntries.every(({ inquiryRow }) =>
     inquiryRow.state === 'PENDING' && !inquiryRow.approvedRowBinding && !inquiryRow.approvedPrice);
-  const waitingForSabalan = result.case?.state === 'DRAFT' && result.case.pricingState === 'AWAITING_INQUIRY';
-  const expiredPackage = result.case?.pricingState === 'EXPIRED';
-  const rowReinquiries = result.case && !expiredPackage ? unusable.filter(({ inquiryRow }) =>
-    inquiryRow.state !== 'PENDING' && inquiryRow.successor?.state !== 'PENDING') : [];
+  const waitingForSabalan = Boolean(result.case && pricingEntries.some(({ inquiryRow }) => inquiryRow.state === 'PENDING'));
+  const rowReinquiries = result.case ? unusable.filter(({ inquiryRow }) =>
+    !['PENDING', 'REJECTED'].includes(inquiryRow.state) && inquiryRow.successor?.state !== 'PENDING') : [];
+  const expiredRows = unusable.filter(({ inquiryRow }) => inquiryRowState(inquiryRow, now) === 'EXPIRED');
+  const rejectedRows = unusable.filter(({ inquiryRow }) => inquiryRow.state === 'REJECTED');
   const mutatePending = result.phase === 'submitting' || result.phase === 'uncertain';
   const disabled = recovery.state !== 'writable' || mutatePending;
   const compactStatus = result.case ? partnerWizardCompactStatus(result.case) : null;
@@ -133,6 +135,19 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     .includes(result.case.customerConfirmationState) && !confirmationSent;
   const pricingReady = Boolean(result.case && pricingEntries.length > 0 && unusable.length === 0 &&
     pricingEntries.every(({ inquiryRow }) => inquiryRow.state === 'APPROVED' && inquiryRow.approvedPrice && inquiryRow.approvedRowBinding));
+  const pricingStatus = result.case?.state === 'DRAFT'
+    ? pricingReady ? 'آماده پذیرش'
+      : rejectedRows.length ? 'نیازمند اصلاح'
+        : expiredRows.length ? 'پایان اعتبار قیمت'
+          : waitingForSabalan ? 'در انتظار پاسخ' : compactStatus?.pricing
+    : compactStatus?.pricing;
+  const requiresReview = result.errorCode === 'INTEGRITY_CONFLICT';
+  const submissionError = result.phase === 'editing' && result.message
+    ? requiresReview && result.case
+      ? partnerCaseReviewMessage(result.case.caseNumber)
+      : result.errorCode === 'APPROVAL_EXPIRED' && expiredRows[0]
+        ? `${expiredRows[0].inquiryRow.description}: اعتبار قیمت پایان یافته است؛ همین ردیف را دوباره استعلام کنید.`
+        : result.message : null;
 
   React.useEffect(() => {
     const required = requiredPartnerWizardStep(draft.step, Boolean(result.case), pricingReady);
@@ -211,7 +226,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     }
   };
   const next = async () => {
-    if (disabled || stepIndex < 0) return;
+    if (disabled || requiresReview || stepIndex < 0) return;
     if (draft.step === 'products' && !canonicalRetailReady) {
       setError('محاسبه مبلغ نهایی محصولات هنوز کامل نشده است؛ چند لحظه صبر کنید.'); return;
     }
@@ -233,7 +248,14 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       return;
     }
     if (draft.step === 'pricing') {
-      if (!pricingReady) { setError('پاسخ قیمت همه محصولات هنوز کامل و معتبر نیست.'); return; }
+      if (!pricingReady) {
+        const blocked = rejectedRows[0] ?? expiredRows[0] ?? unusable[0];
+        setError(blocked ? `${blocked.inquiryRow.description}: ${rejectedRows.includes(blocked)
+          ? 'دلیل رد را بررسی و این محصول را ویرایش کنید.'
+          : expiredRows.includes(blocked) ? 'اعتبار قیمت پایان یافته است؛ همین ردیف را دوباره استعلام کنید.'
+            : 'پاسخ معتبر قیمت این ردیف هنوز آماده نیست.'}` : 'پاسخ قیمت همه محصولات هنوز کامل نیست.');
+        return;
+      }
       await submission.submit({ ...draft.intent, rows: partnerRetailIntentRows(draft.rows) });
       const accepted = submission.getSnapshot();
       if (accepted.phase === 'created' && accepted.case?.pricingState === 'READY_TO_FINALIZE') {
@@ -251,10 +273,12 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     clickableSteps={Boolean(result.case)}
     onStepClick={step => move(step - 1)}
     notices={<div className="mb-4 space-y-3">
-      {result.phase === 'created' && result.case && compactStatus && <ErpCard className="flex flex-wrap items-center gap-2 p-2">
+      {result.case && compactStatus && <ErpCard className="flex flex-wrap items-center gap-2 p-2">
         <span className="text-sm font-bold">{result.case.caseNumber}</span>
         <ErpBadge tone="neutral">قرارداد: {compactStatus.contract}</ErpBadge>
-        <ErpBadge tone={result.case.pricingState === 'READY_TO_FINALIZE' ? 'success' : 'warning'}>قیمت سبلان: {compactStatus.pricing}</ErpBadge>
+        <ErpBadge tone={pricingReady || result.case.pricingState === 'READY_TO_FINALIZE' ? 'success' : rejectedRows.length ? 'danger' : 'warning'}>
+          قیمت سبلان: {pricingStatus}
+        </ErpBadge>
         <ErpBadge tone={!confirmationSent && result.case.customerConfirmationState === 'APPROVED' ? 'success'
           : !confirmationSent && result.case.customerConfirmationState === 'REJECTED' ? 'danger' : 'info'}>
           مشتری: {confirmationSent ? 'ارسال‌شده، بدون پاسخ' : compactStatus.customer}
@@ -278,12 +302,8 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         title="با ادامه از این مرحله، پرونده شماره‌دار می‌شود و استعلام قیمت برای فروشنده سبلان ارسال خواهد شد." />}
       {waitingForSabalan && <ErpInlineState kind="empty"
         title="استعلام قیمت برای فروشنده سبلان ارسال شده است و در وظایف بین‌واحدی او قرار دارد. پس از ثبت پاسخ، قیمت خرید شما در همین پرونده نمایش داده می‌شود." />}
-      {expiredPackage && unusable.length > 0 && <ErpInlineState kind="stale"
-        title={`بسته قیمت این پرونده منقضی شده است؛ هر ${unusable.length.toLocaleString('fa-IR')} ردیف باید دوباره قیمت‌گذاری شود. یک استعلام جانشین برای کل بسته ساخته می‌شود و هیچ قیمت قبلی خودکار منتقل نخواهد شد.`}
-        action={{ label: 'استعلام مجدد کل بسته', disabled: mutatePending,
-          onClick: () => onReinquire() }} />}
       {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
-      {result.phase === 'editing' && result.message && <ErpInlineState kind="error" title={result.message} />}
+      {submissionError && <ErpInlineState kind="error" title={submissionError} />}
       {error && <ErpInlineState kind="error" title={error} />}
     </div>}
     navigation={{
@@ -292,12 +312,12 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       onSubmit: submit,
       loading: mutatePending,
       canGoPrevious: !disabled && stepIndex > 0,
-      canGoNext: !disabled && (draft.step !== 'pricing' || pricingReady)
+      canGoNext: !disabled && !requiresReview && (draft.step !== 'pricing' || pricingReady)
         && (draft.step !== 'products' || canonicalRetailReady),
       showSubmitOnEveryStep: false,
       labels: {
-        next: draft.step === 'products' ? 'ارسال برای استعلام قیمت'
-          : draft.step === 'pricing' ? (pricingReady ? 'ساخت پرونده' : 'در انتظار تکمیل استعلام') : 'بعدی',
+        next: draft.step === 'products' ? (result.case ? 'مشاهده نتیجه استعلام' : 'ارسال برای استعلام قیمت')
+          : draft.step === 'pricing' ? (pricingReady ? 'پذیرش قیمت‌ها و ادامه' : 'در انتظار تکمیل استعلام') : 'بعدی',
         submit: draft.step === 'confirmation' ? 'تأیید و نهایی‌سازی قرارداد' : 'ثبت پرونده',
       }
     }}
@@ -319,16 +339,21 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
           {pricingEntries.map(({ id, inquiryRow }) => {
             const usable = !unusable.some(item => item.id === id);
             const price = inquiryRow.approvedPrice;
+            const rowState = inquiryRowState(inquiryRow, now);
+            const expiresAt = inquiryRow.expiresAt && Number.isFinite(Date.parse(inquiryRow.expiresAt))
+              ? new Date(inquiryRow.expiresAt).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran', dateStyle: 'medium', timeStyle: 'short' }) : null;
             return <ErpCard key={id} className="space-y-3 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <h3 className="font-semibold">{inquiryRow.description}</h3>
-                <ErpBadge tone={usable ? 'success' : inquiryRow.state === 'REJECTED' ? 'danger' : 'info'}>
-                  {usable ? 'قیمت سبلان دریافت شد' : inquiryRow.state === 'REJECTED' ? 'نیازمند اصلاح' : 'در انتظار پاسخ'}
+                <ErpBadge tone={usable ? 'success' : rowState === 'REJECTED' ? 'danger' : rowState === 'EXPIRED' ? 'warning' : 'info'}>
+                  {usable ? 'قیمت سبلان دریافت شد' : rowState === 'REJECTED' ? 'رد شد؛ نیازمند اصلاح'
+                    : rowState === 'EXPIRED' ? 'اعتبار قیمت پایان یافته' : rowState === 'PENDING' ? 'در انتظار پاسخ' : 'نیازمند استعلام'}
                 </ErpBadge>
               </div>
               <p className="text-sm sds-text-secondary">قیمت پیشنهادی سبلان: <strong className="sds-text-primary">
                 {price ? `${price.amount} ${price.currency === 'IRR' ? 'ریال' : 'تومان'}` : '—'}
               </strong></p>
+              {rowState === 'EXPIRED' && expiresAt && <p className="text-sm sds-text-secondary">اعتبار تا {expiresAt}</p>}
               {inquiryRow.noteOrReason && <ErpInlineState kind="stale" title={inquiryRow.noteOrReason} />}
               {inquiryRow.state === 'REJECTED' && onEditProduct && <ErpButton label="ویرایش این محصول" variant="outline"
                 disabled={disabled} onClick={() => onEditProduct(inquiryRow)} />}
@@ -338,7 +363,9 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
           })}
           {pricingReady
             ? <ErpInlineState kind="success" title="قیمت همه محصولات دریافت شده است. با ادامه، این قیمت‌ها را برای پرونده می‌پذیرید." />
-            : <ErpInlineState kind="empty" title="پرونده برای فروشنده سبلان ارسال شده است. پس از پاسخ همه ردیف‌ها، ادامه به برنامه تحویل فعال می‌شود." />}
+            : <ErpInlineState kind="empty" title={rejectedRows.length ? 'دلیل رد را بررسی و همان محصول را ویرایش کنید؛ قیمت ردیف‌های دیگر حفظ می‌شود.'
+              : expiredRows.length ? 'اعتبار برخی قیمت‌ها پایان یافته است؛ همان ردیف‌ها را دوباره استعلام کنید.'
+                : 'پرونده برای فروشنده سبلان ارسال شده است. پس از پاسخ همه ردیف‌ها، ادامه به برنامه تحویل فعال می‌شود.'} />}
         </section> : renderSection(draft.step, draft, Boolean(error))}
       </fieldset>
     </div>

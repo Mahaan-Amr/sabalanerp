@@ -1,4 +1,4 @@
-import { PartnerTechnicalSavedViewSchema, type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
+import { PartnerErrorSchema, PartnerTechnicalSavedViewSchema, type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryRow, PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
 import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import { defaultPartnerRetailRows, partnerRetailIntentRows } from './partnerRetail';
@@ -13,6 +13,31 @@ export const shouldStartFreshPartnerCreation = (params: Pick<URLSearchParams, 'g
 
 export const isExplicitPartnerCreationEntry = (params: Pick<URLSearchParams, 'get'>) =>
   params.get('entry') === 'new-contract';
+
+export function partnerCreationRouteIdentity(params: Pick<URLSearchParams, 'get'>, mode: 'sale' | 'inquiry'): string {
+  return `${mode}:${params.get('caseId') ? `case:${params.get('caseId')}`
+    : params.get('draftId') ? `draft:${params.get('draftId')}`
+      : params.get('inquiryId') ? `inquiry:${params.get('inquiryId')}` : 'new'}`;
+}
+
+export function partnerCreationRequestedInquiry(params: Pick<URLSearchParams, 'get'>, latestInquiryId?: string): string | null {
+  return params.get('caseId') ? null : params.get('inquiryId') || latestInquiryId || null;
+}
+
+export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], openingNumberedResult: boolean): PartnerWizardDraft['step'] {
+  return openingNumberedResult ? 'pricing' : savedStep;
+}
+
+export const partnerCaseReviewMessage = (caseReference: string) =>
+  `این پرونده نیاز به بررسی دارد؛ با پشتیبانی تماس بگیرید و کد پرونده ${caseReference} را اعلام کنید.`;
+
+export function partnerCaseHasIntegrityError(error: unknown): boolean {
+  const direct = PartnerErrorSchema.safeParse(error);
+  if (direct.success) return direct.data.code === 'INTEGRITY_CONFLICT';
+  const responseError = (error as { response?: { data?: { error?: unknown } } } | null)?.response?.data?.error;
+  const nested = PartnerErrorSchema.safeParse(responseError);
+  return nested.success && nested.data.code === 'INTEGRITY_CONFLICT';
+}
 
 export const shouldOfferPartnerDraftChoice = (
   recoverableDraftCount: number,
@@ -78,12 +103,17 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
     .filter(row => !mismatchedRowIds.includes(row.rowId));
   const subjects = saved.data.pricingSubjects ?? saved.data.rows.map(row => ({ configurationRef: row.configurationRef,
     role: 'PRIMARY' as const }));
-  const subjectRows: PartnerInquiryRow[] = subjects.map((subject, index) => approved.find(row =>
-    row.configurationRef.productRowId === subject.configurationRef.productRowId) ?? {
+  const subjectRows: PartnerInquiryRow[] = subjects.map((subject, index) => {
+    const matching = availableRows.filter(row => row.configurationRef.productRowId === subject.configurationRef.productRowId &&
+      row.configurationRef.recoveryId === subject.configurationRef.recoveryId &&
+      row.configurationRef.recoveryRevision === subject.configurationRef.recoveryRevision)
+      .sort((left, right) => Number(Boolean(left.successor)) - Number(Boolean(right.successor)) || right.revision - left.revision);
+    return matching.find(row => approved.includes(row)) ?? matching[0] ?? {
       rowId: `${subject.configurationRef.productRowId}-awaiting-inquiry`, revision: 1,
       description: `محصول ${index + 1}`, state: 'PENDING', configuration: [], usedCaseNumbers: [],
       configurationRef: subject.configurationRef,
-    });
+    };
+  });
   const configured = [];
   for (const row of subjectRows.filter(item => subjects.some(subject => subject.role === 'PRIMARY' &&
     subject.configurationRef.productRowId === item.configurationRef.productRowId))) {

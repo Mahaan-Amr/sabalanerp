@@ -226,11 +226,17 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           contractId: null,
           recovery: { path: ['kind'], equals: PARTNER_TECHNICAL_RECOVERY_KIND } },
           orderBy: { updatedAt: 'desc' }, take: 200, select: { draftId: true, baseRevision: true, recovery: true } });
+        const requestedRecovery = requestedCaseId ? await tx.salesContractEditSession.findFirst({ where: {
+          ownerUserId: request.user!.id, contractId: null,
+          recovery: { path: ['partnerCaseId'], equals: requestedCaseId },
+        }, orderBy: { updatedAt: 'desc' }, select: { draftId: true, baseRevision: true, recovery: true } }) : null;
         const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-        const recoverableDraftRows = rawDrafts.flatMap(item => {
+        const recoverableDraftRows = [...rawDrafts, ...(requestedRecovery && !rawDrafts.some(item =>
+          item.draftId === requestedRecovery.draftId) ? [requestedRecovery] : [])].flatMap(item => {
           const recovery = decodeTechnicalRecovery(item.recovery);
           return recovery && recovery.archived !== true && recovery.updatedAt <= clock.now.getTime() &&
-              clock.now.getTime() - recovery.updatedAt <= 7 * 24 * 60 * 60 * 1000
+              (recovery.partnerCaseId === requestedCaseId ||
+                clock.now.getTime() - recovery.updatedAt <= 7 * 24 * 60 * 60 * 1000)
             ? [{ ...item, updatedAt: new Date(recovery.updatedAt),
               ...(typeof recovery.draftTitle === 'string' && recovery.draftTitle.trim()
                 ? { title: recovery.draftTitle.trim().slice(0, 200) } : {}) }] : [];

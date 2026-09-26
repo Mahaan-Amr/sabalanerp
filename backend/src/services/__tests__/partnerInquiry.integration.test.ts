@@ -144,6 +144,11 @@ test('Sabalan can price a corrected row whose predecessor was rejected', async (
         operation: 'INQUIRY_DECIDE', targetId: ids.inquiryId, key: 'reject-before-correction',
         payloadHash: await canonicalHash(rejectIntent) } });
     assert.equal(reject.ok, true);
+    const rejectedView = await partner.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId: ids.inquiryId });
+    assert.equal(rejectedView.ok, true);
+    if (rejectedView.ok && rejectedView.value.purpose === 'PARTNER_INQUIRY') {
+      assert.equal(rejectedView.value.rows.find(row => row.rowId === 'row-1')?.noteOrReason, 'مشخصات محصول را اصلاح کنید');
+    }
     assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId, 'row-2',
       { rowId: 'row-1', revision: 2, reason: 'اصلاح مشخصات محصول' }))).ok, true);
     const approveIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,

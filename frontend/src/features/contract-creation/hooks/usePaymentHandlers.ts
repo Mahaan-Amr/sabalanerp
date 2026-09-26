@@ -17,6 +17,7 @@ type NationalCodeConflict = {
 };
 
 interface UsePaymentHandlersOptions {
+  existingContract?: boolean;
   wizardData: ContractWizardData;
   updateWizardData: (updates: Partial<ContractWizardData>) => void;
   setErrors: (errors: Record<string, string>) => void;
@@ -24,7 +25,7 @@ interface UsePaymentHandlersOptions {
 }
 
 export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
-  const { wizardData, updateWizardData, setErrors, getCurrentPersianDate } = options;
+  const { wizardData, updateWizardData, setErrors, getCurrentPersianDate, existingContract = false } = options;
 
   const [showPaymentEntryModal, setShowPaymentEntryModal] = useState(false);
   const [editingPaymentEntryId, setEditingPaymentEntryId] = useState<string | null>(null);
@@ -162,9 +163,22 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       return;
     }
 
+    if (!existingContract && method === 'CUSTOMER_BALANCE') {
+      setErrors({ paymentMethod: 'استفاده از باقی مانده مشتری غیرفعال است.' });
+      return;
+    }
+
     const paymentAmount = toFiniteNumber(paymentEntryForm.amount);
     if (paymentAmount <= 0) {
       nextErrors.amount = 'مبلغ باید بیشتر از صفر باشد';
+    }
+
+    const otherPaymentsTotal = sumNumericValues(
+      wizardData.payment.payments.filter(payment => payment.id !== editingPaymentEntryId),
+      payment => payment.amount
+    );
+    if (!existingContract && otherPaymentsTotal + paymentAmount - toFiniteNumber(wizardData.payment.totalContractAmount) > 0.01) {
+      nextErrors.amount = 'جمع پرداخت‌ها نباید از مبلغ قرارداد بیشتر شود.';
     }
 
     if (method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE') {
@@ -275,6 +289,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     }
   }, [
     paymentEntryForm,
+    existingContract,
     editingPaymentEntryId,
     wizardData.payment,
     wizardData.customerId,

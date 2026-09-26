@@ -611,6 +611,8 @@ export interface PaymentMethod {
 
 export interface ContractDiscountSnapshot {
   enabled: boolean;
+  inputMode?: 'AMOUNT_TOMAN';
+  entryMode?: 'PERCENT' | 'AMOUNT_TOMAN';
   rangeId?: string | null;
   rangeMinAmount?: number | null;
   rangeMaxAmount?: number | null;

@@ -2,7 +2,7 @@
 // Payment entries management
 
 import React from 'react';
-import { ErpNeumorphicCard, ErpPressable, ErpSelect } from '@/components/erp';
+import { ErpNeumorphicCard, ErpPressable, ErpSegmentedControl, ErpSelect } from '@/components/erp';
 import { FaPlus, FaTrash, FaEdit, FaCheck } from 'react-icons/fa';
 import { formatPrice, formatDisplayNumber, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../../types/contract.types';
@@ -20,6 +20,7 @@ function getPaymentMethodLabel(payment: PaymentEntry): string {
 }
 
 interface Step7PaymentMethodProps {
+  existingContract?: boolean;
   wizardData: ContractWizardData;
   updateWizardData: (updates: Partial<ContractWizardData>) => void;
   errors: Record<string, string>;
@@ -27,9 +28,14 @@ interface Step7PaymentMethodProps {
   productsTotal: number;
   discountPercent: number;
   maxDiscountPercent: number;
+  maxDiscountAmount: number;
   discountAmount: number;
+  discountEntryMode: 'PERCENT' | 'AMOUNT_TOMAN';
+  discountPercentInput: number;
   hasMatchingDiscountRange: boolean;
+  onDiscountAmountChange: (value: number) => void;
   onDiscountPercentChange: (value: number) => void;
+  onDiscountEntryModeChange: (value: 'PERCENT' | 'AMOUNT_TOMAN') => void;
   showPaymentEntryModal: boolean;
   setShowPaymentEntryModal: (show: boolean) => void;
   onAddPaymentEntry?: () => void;
@@ -37,6 +43,7 @@ interface Step7PaymentMethodProps {
 }
 
 export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
+  existingContract = false,
   wizardData,
   updateWizardData,
   errors,
@@ -44,9 +51,14 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   productsTotal,
   discountPercent,
   maxDiscountPercent,
+  maxDiscountAmount,
   discountAmount,
+  discountEntryMode,
+  discountPercentInput,
   hasMatchingDiscountRange,
+  onDiscountAmountChange,
   onDiscountPercentChange,
+  onDiscountEntryModeChange,
   showPaymentEntryModal,
   setShowPaymentEntryModal,
   onAddPaymentEntry,
@@ -59,6 +71,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   const paymentSumMatchesTotal = Math.abs(remainingAmount) < 0.01;
   const extraPaymentAmount = paymentSum - totalContractAmount;
   const hasExtraPayment = extraPaymentAmount > 0.01;
+  const extraPaymentReasonEnabled = existingContract;
 
   const handleAddPaymentEntry = () => {
     if (onAddPaymentEntry) {
@@ -81,21 +94,35 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   return (
     <div className="space-y-6">
       <p className="text-center text-sm text-[var(--sds-text-secondary)]">
-        جمع پرداخت و مانده مشتری نباید کمتر از مبلغ قرارداد باشد.
+        {existingContract ? 'جمع پرداخت و مانده مشتری نباید کمتر از مبلغ قرارداد باشد.' : 'جمع پرداخت‌ها باید با مبلغ قرارداد برابر باشد.'}
       </p>
       
       <div className="max-w-4xl mx-auto space-y-4">
-        <ContractDiscountEditor mode="percent" value={String(discountPercent)} label="درصد تخفیف"
-          max={String(maxDiscountPercent)} disabled={!hasMatchingDiscountRange || baseSubtotal <= 0}
+        <div className="flex justify-start">
+          <ErpSegmentedControl
+            options={[{ value: 'AMOUNT_TOMAN', label: 'تومان' }, { value: 'PERCENT', label: 'درصد' }]}
+            value={discountEntryMode}
+            onChange={onDiscountEntryModeChange}
+          />
+        </div>
+        <ContractDiscountEditor
+          mode={discountEntryMode === 'PERCENT' ? 'percent' : 'amount'}
+          value={discountEntryMode === 'PERCENT' ? String(discountPercentInput) : String(Math.round(discountAmount))}
+          label={discountEntryMode === 'PERCENT' ? 'درصد تخفیف' : 'مبلغ تخفیف (تومان)'}
+          max={discountEntryMode === 'PERCENT' ? String(maxDiscountPercent) : undefined}
+          disabled={!hasMatchingDiscountRange || baseSubtotal <= 0}
           description="تخفیف فقط روی جمع پایه محصولات سنگی اعمال می‌شود."
           summaryItems={[
-            { label: 'جمع پایه', value: formatPrice(baseSubtotal, wizardData.payment.currency) },
-            { label: 'جمع قبل از تخفیف', value: formatPrice(productsTotal, wizardData.payment.currency) },
-            { label: 'سقف مجاز', value: `${formatDisplayNumber(maxDiscountPercent)}٪` },
+            { label: 'جمع پایه', value: formatPrice(baseSubtotal, 'تومان') },
+            { label: 'جمع قبل از تخفیف', value: formatPrice(productsTotal, 'تومان') },
+            { label: 'سقف مجاز', value: `${formatPrice(maxDiscountAmount, 'تومان')} (${formatDisplayNumber(maxDiscountPercent)}٪)` },
           ]}
           warning={!hasMatchingDiscountRange && baseSubtotal > 0 ? 'برای این مبلغ پایه، بازه تخفیف فعالی تعریف نشده است.' : undefined}
-          result={discountAmount > 0 ? `مبلغ تخفیف: ${formatPrice(discountAmount, wizardData.payment.currency)}` : undefined}
-          onValueChange={value => onDiscountPercentChange(Math.min(Math.max(Number(value) || 0, 0), maxDiscountPercent))} />
+          result={discountAmount > 0 ? `تخفیف اعمال‌شده: ${formatPrice(discountAmount, 'تومان')} (حدود ${formatDisplayNumber(Number(discountPercent.toFixed(2)))}٪)` : undefined}
+          onValueChange={value => {
+            if (discountEntryMode === 'PERCENT') onDiscountPercentChange(Number(value) || 0);
+            else onDiscountAmountChange(Number(value) || 0);
+          }} />
 
         {/* Summary Section */}
         <ErpNeumorphicCard className="p-4">
@@ -116,7 +143,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
             <div>
               <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">جمع پرداخت:</span>
               <div className="mr-2">
-                <span className={`font-semibold ${isPaymentCovered ? 'text-[var(--sds-success)] dark:text-[var(--sds-success)]' : 'text-[var(--sds-warning)] dark:text-[var(--sds-warning)]'}`}>
+                <span className={`font-semibold ${(existingContract ? isPaymentCovered : paymentSumMatchesTotal) ? 'text-[var(--sds-success)] dark:text-[var(--sds-success)]' : hasExtraPayment ? 'text-[var(--sds-danger)]' : 'text-[var(--sds-warning)] dark:text-[var(--sds-warning)]'}`}>
                   {formatPrice(paymentSum, wizardData.payment.currency)}
                 </span>
                 {wizardData.payment.currency === 'تومان' && (
@@ -126,7 +153,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                 )}
               </div>
             </div>
-            <div>
+            {(!hasExtraPayment || existingContract) && <div>
               <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{hasExtraPayment ? 'مبلغ اضافه:' : 'باقیمانده:'}</span>
               <div className="mr-2">
                 <span className={`font-semibold ${
@@ -144,18 +171,24 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                   </span>
                 )}
               </div>
-            </div>
+            </div>}
           </div>
           
           {remainingAmount > 0.01 && (
             <div className="mt-3 p-3 bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-warning-surface)] border border-[var(--sds-warning-border)] dark:border-[var(--sds-warning-border)] rounded">
               <p className="text-[var(--sds-warning)] dark:text-[var(--sds-warning)] text-sm">
-                مجموع پرداخت و مانده مشتری ({formatPrice(paymentSum, wizardData.payment.currency)}) کمتر از مبلغ قرارداد ({formatPrice(totalContractAmount, wizardData.payment.currency)}) است
+                {existingContract ? 'مجموع پرداخت و مانده مشتری' : 'مجموع پرداخت‌ها'} ({formatPrice(paymentSum, wizardData.payment.currency)}) کمتر از مبلغ قرارداد ({formatPrice(totalContractAmount, wizardData.payment.currency)}) است
               </p>
             </div>
           )}
 
-          {hasExtraPayment && (
+          {!existingContract && hasExtraPayment && (
+            <div className="mt-3 rounded border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)]">
+              جمع پرداخت‌ها {formatPrice(extraPaymentAmount, wizardData.payment.currency)} بیشتر از مبلغ قرارداد است. مبلغ پرداخت‌ها را اصلاح کنید.
+            </div>
+          )}
+
+          {extraPaymentReasonEnabled && hasExtraPayment && (
             <div className="mt-3 rounded border border-[var(--sds-info-border)] bg-[var(--sds-info-surface)] p-3 text-sm text-[var(--sds-info)] dark:border-[var(--sds-info-border)] dark:bg-[var(--sds-info-surface)] dark:text-[var(--sds-info)]">
               <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_220px] md:items-end">
                 <div>

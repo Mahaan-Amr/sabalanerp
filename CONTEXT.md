@@ -1943,7 +1943,7 @@ Opening an existing contract for editing and saving it again applies the current
 _Avoid_: silently changing old saved contract pricing without an edit-save action, or preserving an old paid برش charge after a mandatory row has been edited and saved
 
 **تخفیف قرارداد**:
-A percentage reduction applied only to the sum of base stone product subtotals in a sales contract, including کیوبیک و قطعات آماده rows when they are sold as main catalog stone products, before payments are compared to the payable total. It does not reduce ابزار, لایه، پرداخت سنگ, cutting, standalone service rows, or حکمی add-on amounts.
+A toman amount entered by Sales directly or converted from a percentage during contract creation, capped by the matching manager-defined percentage of the sum of base stone product subtotals, including کیوبیک و قطعات آماده rows when they are sold as main catalog stone products. Sales can switch between toman and percentage entry without changing an existing value; editing a percentage converts it to a whole-toman amount. The whole-toman maximum is rounded down, the entered or converted toman amount is authoritative, and the equivalent percentage is saved for explanation. The discount applies before payments are compared to the payable total. It does not reduce ابزار, لایه، پرداخت سنگ, cutting, standalone service rows, or حکمی add-on amounts. Historical percentage-entered discounts retain their saved amounts and interpretation.
 _Avoid_: applying تخفیف to the full contract total including add-ons, or selecting discount limits per individual product row
 
 **خروجی تخفیف قرارداد**:
@@ -1967,7 +1967,7 @@ A manager-defined تومان range over the contract base stone subtotal that ca
 _Avoid_: overlapping ranges or fallback discount caps when no range matches
 
 **سقف تخفیف**:
-The maximum تخفیف قرارداد percentage configured by managers or admins for a matching بازه تخفیف. Sales users may apply a discount up to this cap during contract creation.
+The maximum تخفیف قرارداد percentage configured by managers or admins for a matching بازه تخفیف. The contract payment step converts it into a whole-toman maximum using the eligible base subtotal, and Sales users may enter any whole-toman discount up to that amount.
 _Avoid_: requiring manager approval for every discount that is already within the configured cap
 
 **تاریخ تحویل چاپی**:
@@ -2360,12 +2360,12 @@ A check payment saved during sales contract creation without a check number. It 
 _Avoid_: blocking contract creation only because a check number is empty
 
 **پرداخت مازاد قرارداد**:
-A sales contract may receive real payments whose combined amount is greater than the payable contract amount. The contract remains invalid when the combined payment and accepted credit amount is lower than the payable contract amount, but extra real payment may be accepted. The extra amount is calculated from the payment/credit total minus the payable contract amount, must carry a selected explanation, and currently prints as به علت بدهی از قبل rather than as مازاد پرداخت مشتری.
-_Avoid_: forcing payment rows to equal the payable contract amount exactly, treating a lower-than-payable payment plan as acceptable, manually typing the extra amount when it can be calculated, or labeling the printed reason as مازاد پرداخت مشتری
+A historical sales contract may retain real payments above its payable amount with a selected explanation, printed as به علت بدهی از قبل. A new sales contract requires its payment total to equal its payable amount; excess money belongs to an Accounting receipt and explicit allocation or customer advance.
+_Avoid_: forcing an existing contract to remove its historical extra payment on edit, accepting excess in a new contract payment plan, treating a lower-than-payable payment plan as acceptable, or labeling the historical printed reason as مازاد پرداخت مشتری
 
 **استفاده از باقی مانده مشتری**:
-A manually entered payment-plan method that applies a claimed pre-existing customer credit or balance to a sales contract until the accounting system can verify customer balances automatically. It is distinct from new money collected through نقدی شبا، نقدی، or چک, defaults its date to today when entered, appears in contract print/PDF payment output, and warns the user that the contract may expire if accounting finds a mismatch.
-_Avoid_: using استفاده از باقی مانده مشتری to record new cash collected now, hiding it from printed payment terms, or treating the manually entered balance as automatically accounting-verified
+A historical sales-contract payment-plan method that applies a claimed pre-existing customer credit or balance. Existing contracts may retain and edit it, including its printed payment terms; new contracts cannot select it and Accounting owns verified customer credits and allocations.
+_Avoid_: forcing historical contracts to replace this method on edit, using it in a new contract, using it to record new cash, or treating the manually entered balance as automatically accounting-verified
 
 **نام‌های برنامه تحویل**:
 The project manager and receiver names on a delivery schedule are free-text person names. They may be prefilled from project/customer defaults, but multi-part names with spaces are valid and should remain exactly as the user enters them while preparing the delivery plan.

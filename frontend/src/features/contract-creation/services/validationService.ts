@@ -113,7 +113,8 @@ export const validateDelivery = (
  */
 export const validatePayment = (
   payment: PaymentMethod,
-  totalContractAmount: number
+  totalContractAmount: number,
+  existingContract = false
 ): { isValid: boolean; errors: string[] } => {
   const errors: string[] = [];
   
@@ -130,13 +131,18 @@ export const validatePayment = (
       errors.push(`جمع پرداخت‌ها ${deficit.toLocaleString('fa-IR')} کمتر از مبلغ قرارداد است؛ مبلغ پرداخت‌ها را به ${normalizedContractAmount.toLocaleString('fa-IR')} برسانید.`);
     }
 
-    if (totalPaymentAmount - normalizedContractAmount > 0.01 && !payment.extraPaymentReason) {
-      errors.push('جمع پرداخت‌ها از مبلغ قرارداد بیشتر است؛ دلیل مبلغ اضافه را انتخاب کنید.');
+    if (totalPaymentAmount - normalizedContractAmount > 0.01 && (!existingContract || !payment.extraPaymentReason)) {
+      errors.push(existingContract
+        ? 'جمع پرداخت‌ها از مبلغ قرارداد بیشتر است؛ دلیل مبلغ اضافه را انتخاب کنید.'
+        : 'جمع پرداخت‌ها از مبلغ قرارداد بیشتر است؛ مبلغ پرداخت‌ها را اصلاح کنید.');
     }
     
     // Validate individual payment entries (CASH_CARD | CASH_SHIBA | CHECK)
     for (const paymentEntry of payment.payments) {
       const method = (paymentEntry as { method?: string }).method;
+      if (!existingContract && method === 'CUSTOMER_BALANCE') {
+        errors.push('استفاده از باقی مانده مشتری غیرفعال است؛ روش پرداخت را اصلاح کنید.');
+      }
       if (toFiniteNumber(paymentEntry.amount) <= 0) {
         errors.push('مبلغ پرداخت را بیشتر از صفر وارد کنید.');
       }

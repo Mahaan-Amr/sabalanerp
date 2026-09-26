@@ -1302,9 +1302,17 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     error.includes('کمتر از مبلغ قرارداد است') && error.includes('مبلغ پرداخت‌ها را به')
   ));
   assert.equal(overPaidWithoutReason.isValid, false);
-  assert.ok(overPaidWithoutReason.errors.some((error) => error.includes('دلیل مبلغ اضافه را انتخاب کنید')));
-  assert.equal(overPaidWithReason.isValid, true);
-  assert.equal(customerBalance.isValid, true);
+  assert.ok(overPaidWithoutReason.errors.some((error) => error.includes('مبلغ پرداخت‌ها را اصلاح کنید')));
+  assert.equal(overPaidWithReason.isValid, false);
+  assert.equal(customerBalance.isValid, false);
+  assert.equal(validatePayment({
+    payments: [{ id: 'pay-1', method: 'CUSTOMER_BALANCE', amount: total, paymentDate: '1405/04/02' }],
+    currency: 'تومان', totalContractAmount: total
+  }, total, true).isValid, true);
+  assert.equal(validatePayment({
+    payments: [{ id: 'pay-1', method: 'CASH_CARD', amount: total + 1_000_000, paymentDate: '1405/04/02' }],
+    currency: 'تومان', totalContractAmount: total, extraPaymentReason: 'PREVIOUS_DEBT'
+  }, total, true).isValid, true);
 }
 
 console.log('contractCreationComplexScenarios tests passed');

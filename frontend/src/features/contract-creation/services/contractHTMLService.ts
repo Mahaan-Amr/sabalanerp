@@ -15,6 +15,7 @@ interface ContractHTMLData {
   deliveries: DeliverySchedule[];
   payment: PaymentMethod;
   discount?: {
+    inputMode?: 'AMOUNT_TOMAN';
     percent?: number | null;
     amount?: number | null;
   } | null;
@@ -63,7 +64,9 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
   const totalAmount = toFiniteNumber(data.payment?.totalContractAmount) || 
     getContractGrossPayableTotal(data.products, data.serviceRows || []);
   const discountAmount = toFiniteNumber(data.discount?.amount);
-  const discountPercent = toFiniteNumber(data.discount?.percent);
+  const discountPercent = data.discount?.inputMode === 'AMOUNT_TOMAN'
+    ? Number(toFiniteNumber(data.discount?.percent).toFixed(2))
+    : toFiniteNumber(data.discount?.percent);
   const paymentTotal = sumNumericValues(data.payment?.payments || [], (payment) => payment.amount);
   const extraPaymentAmount = paymentTotal - totalAmount;
   const extraPaymentReasonLabel = data.payment?.extraPaymentReason === 'PREVIOUS_DEBT' ? 'به علت بدهی از قبل' : '';

@@ -896,6 +896,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
 
   const savePartnerPayment = (draft: PartnerWizardDraft) => {
     if (!paymentModal) return;
+    if (!editingCase && paymentForm.method === 'CUSTOMER_BALANCE') {
+      setPaymentModalErrors({ amount: 'استفاده از باقی مانده مشتری غیرفعال است.' });
+      return;
+    }
     const entry: PaymentEntry = {
       id: paymentModal.installment.installmentId,
       method: paymentForm.method ?? 'CASH_SHIBA',
@@ -907,7 +911,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       handoverDate: paymentForm.handoverDate,
     };
     const installment = partnerInstallmentFromPaymentEntry(paymentModal.installment, entry);
-    const validation = validatePartnerPaymentInstallment(installment, today());
+    const validation = validatePartnerPaymentInstallment(installment, today(), Boolean(editingCase));
     if (Object.keys(validation).length > 0) {
       setPaymentModalErrors({
         amount: validation.amount,
@@ -1154,9 +1158,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         checked={draft.intent.belowCostConfirmed}
         onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, belowCostConfirmed: event.target.checked } })} />}
       {draft.intent.customerPaymentPlan.installments.map((installment, installmentIndex) => { const paymentErrors = showValidationErrors
-        ? validatePartnerPaymentInstallment(installment, today()) : {}; const nationalCodeRequired = installment.method !== 'CREDIT'
+        ? validatePartnerPaymentInstallment(installment, today(), Boolean(editingCase)) : {}; const nationalCodeRequired = installment.method !== 'CREDIT'
           && Boolean(installment.dueDate) && installment.dueDate !== today(); return <ErpCard key={installment.installmentId} className="space-y-3 p-4">
       <ContractPaymentInstallmentFields method={partnerPaymentChoice(installment)} amount={installment.amount.amount}
+        existingContract={Boolean(editingCase)}
         amountLabel={`مبلغ قسط ${(installmentIndex + 1).toLocaleString('fa-IR')} (تومان)`} date={installment.dueDate}
         dateLabel="سررسید" disabledAmount={installmentIndex === 0} amountError={paymentErrors.amount} dateError={paymentErrors.date}
         onAmountChange={amount => updateWizard({ ...draft, intent: { ...draft.intent,
@@ -1197,6 +1202,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     }, true, false)} />
       {paymentModal && <PaymentEntryModal
         isOpen
+        existingContract={Boolean(editingCase)}
         onClose={closePartnerPaymentModal}
         form={paymentForm}
         onFormChange={updates => {
@@ -1314,8 +1320,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         ? 'مقدار تحویل هر محصول باید دقیقاً با مقدار قرارداد برابر باشد.'
       : step === 'payment' && !CustomerPaymentPlanSchema.safeParse(draft.intent.customerPaymentPlan).success
         ? 'برنامه پرداخت را کامل کنید.'
-      : step === 'payment' && firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today())
-        ? firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today())
+      : step === 'payment' && firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today(), Boolean(editingCase))
+        ? firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today(), Boolean(editingCase))
       : step === 'payment' && (() => {
         const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
         return remainingPartnerAmount(summary.valid && summary.retail ? summary.retail : '0',

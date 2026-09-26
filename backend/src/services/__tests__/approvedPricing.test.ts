@@ -1658,6 +1658,21 @@ test('freezes a zero discount basis for a non-eligible row', () => {
   assert.equal(version.rows[0]?.componentEvidence.discountBasis, '0.000000000000');
 });
 
+test('seals an exact toman discount entered within a percentage range', () => {
+  const source = approvedPricingSourceFixture();
+  (source.contract.contractData as any).discount = {
+    ...(source.contract.contractData as any).discount,
+    inputMode: 'AMOUNT_TOMAN', amount: '101', percent: '10.100000000001',
+  };
+  source.leaf.amount = '11490';
+  const version = buildApprovedPricingVersion(source, 1, 'amount-discount-version');
+  assert.equal(version.discountAmount, '101.000000000000');
+  assert.equal(version.netAmount, '1149.000000000000');
+
+  (source.contract.contractData as any).discount.amount = '121';
+  assert.throws(() => buildApprovedPricingVersion(source, 1), /toman amount conflicts with approved range/);
+});
+
 test('FROM_SELECTED_ITEMS seals only the financially approved subset and allocates its discount', () => {
   const source = approvedPricingSourceFixture();
   const data = source.contract.contractData as any;

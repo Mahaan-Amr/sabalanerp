@@ -1542,7 +1542,9 @@ const normalizeFinancials = (
   const relationGrandTotal = toNumber(contract.totalAmount);
   const discount = contract.contractData?.discount || {};
   const discountAmount = toNumber(discount.amount);
-  const discountPercent = toNumber(discount.percent);
+  const discountPercent = discount.inputMode === 'AMOUNT_TOMAN'
+    ? Number(toNumber(discount.percent).toFixed(2))
+    : toNumber(discount.percent);
   const discountBaseSubtotal = toNumber(discount.baseSubtotal);
   const grandTotal = relationGrandTotal > 0 ? relationGrandTotal : Math.max(productsTotal + standaloneServicesTotal - discountAmount, 0);
   const paymentRows = Array.isArray(contract.contractData?.payment?.payments)

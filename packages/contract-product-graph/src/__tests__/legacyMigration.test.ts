@@ -910,6 +910,11 @@ for (const prepared of [
   );
   assert.equal(accountingLayer?.baseAmountToman, expectedLayer.result.materialAmountToman);
   assert.equal(
+    accountingLayer?.quantity,
+    String(expectedLayer.result.commercialLayerSets),
+    'accounting must recover the layer commercial quantity from its replayed configuration'
+  );
+  assert.equal(
     accountingLayer?.pricingComponents.reduce(
       (sum, component) => sum.plus(component.amountToman), new Decimal(0)
     ).toString(),
@@ -930,6 +935,11 @@ for (const prepared of [
     'historical missing base is projected only from matching frozen layer evidence'
   );
   assert.equal(
+    recoveredLayer?.quantity,
+    String(expectedLayer.result.commercialLayerSets),
+    'historical missing quantity is projected only from matching frozen layer evidence'
+  );
+  assert.equal(
     recoveredLayer?.pricingComponents.reduce(
       (sum, component) => sum.plus(component.amountToman), new Decimal(0)
     ).toString(),
@@ -942,6 +952,16 @@ for (const prepared of [
       commercial: {
         ...historicalCommercial,
         calculationSnapshot: { ...historicalCommercial.calculationSnapshot, resultHash: 'conflicting-hash' },
+      },
+    }],
+  }, 'accounting'), /layer pricing evidence conflicts/);
+  assert.throws(() => projectCanonicalProductGraph({
+    ...historicalGraph,
+    rows: [historicalGraph.rows[0]!, {
+      ...historicalGraph.rows[1]!,
+      commercial: {
+        ...historicalCommercial,
+        requestedQuantity: parseCanonicalDecimal(String(expectedLayer.result.commercialLayerSets + 1)),
       },
     }],
   }, 'accounting'), /layer pricing evidence conflicts/);

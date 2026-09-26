@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { ErpButton, ErpCard, ErpInlineState, ErpInput, ErpSheet } from '@/components/erp';
 import { formatPriceWithRial, toFiniteNumber } from '@/lib/numberFormat';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
+import ManualContractSummary from './ManualContractSummary';
 import type { CustomerContractOutput } from '../../../../../packages/partner-sales-contracts';
 
 type OrdinaryConfirmationData = {
@@ -44,6 +45,7 @@ type RetailConfirmationData = {
 export type ConfirmationData = OrdinaryConfirmationData | RetailConfirmationData;
 
 interface ConfirmationContractViewProps {
+  fullManualSummary?: boolean;
   data: ConfirmationData;
   code: string;
   error: string;
@@ -82,6 +84,7 @@ const formatRetailMoney = (amount: string, currency: string) => {
 };
 
 export default function ConfirmationContractView({
+  fullManualSummary = false,
   data,
   code,
   error,
@@ -100,7 +103,9 @@ export default function ConfirmationContractView({
   const customerName = retail?.customer.displayName || fullName || ordinary?.contract.customer.companyName || 'مشتری';
   const contractStatus = retailData?.banner === 'CANCELLED' ? 'CANCELLED'
     : retailData?.verifiedAt ? 'APPROVED' : retail?.status || ordinary?.contractStatus || '';
-  const isApproved = retailData?.decision === 'APPROVED' || (!retailData && ['APPROVED', 'SIGNED', 'PRINTED'].includes(contractStatus));
+  const isApproved = fullManualSummary && ordinary
+    ? ordinary.status === 'VERIFIED'
+    : retailData?.decision === 'APPROVED' || (!retailData && ['APPROVED', 'SIGNED', 'PRINTED'].includes(contractStatus));
   const isRejected = retailData?.decision === 'REJECTED';
   const verifiedDate = formatPersianDate(data.verifiedAt);
   const displayItems = retail?.products || (Array.isArray(ordinary?.contract.contractData?.products) && ordinary.contract.contractData.products.length > 0
@@ -125,7 +130,7 @@ export default function ConfirmationContractView({
           title="پیش‌نویس — هنوز توسط فروشنده نهایی نشده" />}
         {isRejected && <ErpInlineState kind="error" title="رد این نسخه توسط مشتری ثبت شده است." />}
 
-        <ErpCard className="p-6">
+        {fullManualSummary && ordinary ? <ManualContractSummary data={ordinary} /> : <ErpCard className="p-6">
           <h2 className="mb-4 text-xl font-semibold">اطلاعات قرارداد</h2>
           <div className="grid gap-3 text-sm sm:grid-cols-2">
             <p>شماره قرارداد: <span className="font-semibold">{data.contract.contractNumber}</span></p>
@@ -141,9 +146,9 @@ export default function ConfirmationContractView({
               <p className="text-xs text-secondary sm:col-span-2">تأمین و تحویل توسط سبلان</p>
             </>}
           </div>
-        </ErpCard>
+        </ErpCard>}
 
-        {displayItems.length > 0 && (
+        {!(fullManualSummary && ordinary) && displayItems.length > 0 && (
           <ErpCard className="p-6">
             <h2 className="mb-4 text-xl font-semibold">اقلام قرارداد</h2>
             <div className="overflow-x-auto">

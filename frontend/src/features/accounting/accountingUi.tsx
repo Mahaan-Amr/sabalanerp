@@ -1,6 +1,7 @@
 'use client';
 import { ErpField, ErpInput, ErpTextarea } from '@/components/erp';
 import React from 'react';
+import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import {
   FaBalanceScale,
   FaBell,
@@ -30,6 +31,8 @@ export type AccountingMetric = {
 
 export type AccountingContractRow = {
   contractId: string;
+  sourceKind?: 'PARTNER_INTERNAL_RECORD';
+  partnerContext?: { caseNumber: string; internalRecordNumber: string; debtor: { displayName: string }; actionUrl: string };
   contractNumber: string;
   titlePersian: string;
   createdAt?: string;
@@ -59,6 +62,7 @@ export type AccountingContractRow = {
     invoicedAmount: string;
     receivedAmount: string;
     remainingAmount: string;
+    currency?: string;
   };
   financialRecords?: Array<{
     id: string;
@@ -195,7 +199,7 @@ export function PartnerAccountingIdentity({ context }: { context?: {
 } | null }) {
   if (!context) return <span className="sds-text-secondary">شواهد پرونده نیاز به بررسی دارد</span>;
   return <div>
-    <p className="font-semibold">پرونده {context.caseNumber}</p>
+    <p className="font-semibold">کد پیگیری {partnerTrackingCode(context.caseNumber)}</p>
     <p className="mt-1 text-xs sds-text-secondary">طرف حساب همکار: {context.debtor.displayName}</p>
     <p className="mt-1 text-xs sds-text-secondary">سند داخلی: {context.internalRecordNumber}</p>
   </div>;

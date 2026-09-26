@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import type { CaseState } from '@sabalanerp/partner-sales-contracts';
+import { partnerTrackingCode, type CaseState } from '@sabalanerp/partner-sales-contracts';
 import { ErpBadge, ErpButton, ErpCard, ErpFieldView, ErpMetricGrid, ErpSheet, ErpWorkspacePage, type ErpAction } from '@/components/erp';
 import { FaChartLine, FaDownload, FaFileInvoiceDollar, FaWallet } from 'react-icons/fa';
 import { formatPartnerMoney, partnerChartMagnitude, subtractPartnerDecimal } from '../presentation';
@@ -106,7 +106,7 @@ export function PartnerReportContent({ report, onOpenCase }: { report: PartnerRe
         onOpenPoint={point => setSelectedPoint({ currency: total.currency, point })} />
     </section>; })}
     <div className="space-y-3">{report.rows.map(row => { const status = row.collectionStatus ? collectionCopy[row.collectionStatus] : null; return <ErpCard key={`${row.caseId}:${row.revision}`} className="p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><strong>پرونده {row.caseNumber}</strong><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">قرارداد مشتری {row.customerContractNumber} · نسخه {row.revision.toLocaleString('fa-IR')}</p></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><strong>پرونده {partnerTrackingCode(row.caseNumber)}</strong><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">قرارداد مشتری {row.customerContractNumber} · نسخه {row.revision.toLocaleString('fa-IR')}</p></div>
         <div className="flex flex-wrap gap-2">{status && <ErpBadge tone={status[1]}>{status[0]}</ErpBadge>}{row.history?.superseded && <ErpBadge tone="purple">نسخه جایگزین‌شده</ErpBadge>}{row.history?.cancelled && <ErpBadge tone="danger">لغوشده</ErpBadge>}</div></div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><ErpFieldView label="فروش retail" value={metricPresentation(row.metrics.retailSales, row.currency)} />
         <ErpFieldView label="وصول مشتری" value={metricPresentation(row.metrics.retailCollected, row.currency)} tone={row.metrics.retailCollected === null ? 'neutral' : 'success'} />
@@ -126,7 +126,7 @@ export function PartnerReportContent({ report, onOpenCase }: { report: PartnerRe
         {selectedPoint.point.transactions.length ? selectedPoint.point.transactions.map((transaction, index) => <ErpCard
           key={`${transaction.caseId}:${transaction.effectiveDate}:${index}`} className="p-3">
           <div className="flex flex-wrap items-center justify-between gap-2"><strong>{transactionLabel[transaction.kind]}</strong><span>{transaction.effectiveDate}</span></div>
-          <p className="mt-2 text-sm">پرونده {transaction.caseNumber} · قرارداد {transaction.customerContractNumber}</p>
+          <p className="mt-2 text-sm">پرونده {partnerTrackingCode(transaction.caseNumber)} · قرارداد {transaction.customerContractNumber}</p>
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
             {transaction.debtDelta !== '0' && <ErpBadge tone="warning">تغییر بدهی: {formatPartnerMoney(transaction.debtDelta, selectedPoint.currency)}</ErpBadge>}
             {transaction.receivableDelta !== '0' && <ErpBadge tone="info">تغییر مطالبات: {formatPartnerMoney(transaction.receivableDelta, selectedPoint.currency)}</ErpBadge>}

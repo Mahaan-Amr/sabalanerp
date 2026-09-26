@@ -11,7 +11,7 @@ import {
   readPartnerCorrection, recordPartnerCollection, requestPartnerCorrection, reversePartnerCollection,
   savePartnerRetailCorrection, sendPartnerConfirmation, type PartnerCaseRuntimeRow,
 } from './partnerCaseHttpPort';
-import type { PartnerAccountView } from '@sabalanerp/partner-sales-contracts';
+import { partnerCustomerContractLabel, partnerTrackingCode, type PartnerAccountView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
 import { assertSuccessfulSalesResult, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
@@ -176,13 +176,13 @@ export function PartnerCaseRuntime() {
   if (busy) return <ErpLoading />;
   if (!selectedCaseId) {
     const needle = search.trim().toLocaleLowerCase('fa-IR');
-    const visible = rows.filter(row => !needle || [row.view.caseNumber,
+    const visible = rows.filter(row => !needle || [row.view.caseNumber, partnerTrackingCode(row.view.caseNumber),
       row.view.customerContractNumber ?? '', ...row.view.products.map(product => product.description)]
       .some(value => value.toLocaleLowerCase('fa-IR').includes(needle)));
     const columns: ErpColumn<PartnerCaseRuntimeRow>[] = [
       { id: 'number', header: 'قرارداد', priority: 'primary', cell: row => <div>
-        <strong>{row.view.customerContractNumber ?? row.view.caseNumber}</strong>
-        <p className="sds-text-secondary mt-1 text-xs">پرونده {row.view.caseNumber}</p>
+        <strong>{partnerCustomerContractLabel(row.view.caseNumber, row.view.customerContractNumber)}</strong>
+        <p className="sds-text-secondary mt-1 text-xs">کد پیگیری {partnerTrackingCode(row.view.caseNumber)}</p>
       </div> },
       { id: 'status', header: 'وضعیت', priority: 'secondary', cell: row => row.view.state === 'COMMITTED'
         ? 'قطعی' : row.view.state === 'AWAITING_CUSTOMER_CONFIRMATION' ? 'در انتظار تأیید مشتری'

@@ -25,6 +25,8 @@ import { ContractProductCatalog, type ContractCatalogFamily } from '../component
 import { CentralProductModalShell, CompactSwitch } from '../components/product-modal-system/productModalPrimitives';
 import { partnerRemainderChildren } from './partnerDependentPresentation';
 import { RemainingInventorySelector } from '../components/steps/RemainingInventorySelector';
+import { partnerTechnicalSaveIssue } from './partnerCreationFlow';
+import { partnerQuantityUnitCopy } from '../../partner-sales/presentation';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
 const nextDraft = (draft: PartnerTechnicalDraft, rows: PartnerTechnicalDraft['rows']) => PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1, rows });
@@ -163,8 +165,11 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
       const calculation = preview.ok ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.calculation : undefined;
       const facts = calculation?.ok ? calculation.result as unknown as Record<string, unknown> : undefined;
       const geometry = row.family === 'prepared'
-        ? `${formatDisplayNumber(Number(row.configuration.quantity) || 0)} ${row.configuration.unit}`
-        : `${formatDisplayNumber(Number(facts?.lengthMeters) || 0)}m × ${formatDisplayNumber(Number(facts && ('widthMeters' in facts ? facts.widthMeters : facts.crossDimensionMeters)) || 0)}m`;
+        ? `${formatDisplayNumber(Number(row.configuration.quantity) || 0)} ${partnerQuantityUnitCopy[row.configuration.unit] ?? row.configuration.unit}`
+        : `${formatDisplayNumber(Number(facts?.lengthMeters) || 0)} متر × ${formatDisplayNumber(Number(facts && ('widthMeters' in facts ? facts.widthMeters : facts.crossDimensionMeters)) || 0)} متر`;
+      const physicalCount = row.family === 'prepared' || row.family === 'volumetric'
+        ? row.configuration.unit === 'count' ? Number(row.configuration.quantity) : null
+        : row.configuration.quantity ?? (typeof facts?.quantity === 'number' ? facts.quantity : null);
       const retailUnitLabel = row.family === 'volumetric' ? null : partnerRetailPriceUnitLabel({ family: row.family,
         ...(row.family === 'stair' ? { part: row.configuration.part } : {}) });
       const confirmingDelete = deleteRowId === row.productRowId;
@@ -173,6 +178,8 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
           <div className="min-w-0"><div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <strong className="sds-text-primary text-sm">{product.name}</strong><span className="sds-text-muted text-xs">{labels[row.family]}</span>
           </div><div className="sds-text-secondary mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"><span>{geometry}</span>
+            {physicalCount !== null && Number.isSafeInteger(physicalCount) && physicalCount > 0 &&
+              <span>تعداد: {formatDisplayNumber(physicalCount)} عدد</span>}
             {row.retailUnitPrice?.amount && retailUnitLabel && <strong className="sds-text-primary">{formatPrice(Number(row.retailUnitPrice.amount), 'تومان')} · {retailUnitLabel}</strong>}
           </div></div>
           {confirmingDelete ? <div className="flex items-center gap-2 text-xs"><span>حذف این محصول؟</span>
@@ -194,7 +201,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
       </div>;
     })}
     </ErpCard></section>
-    {preview.ok && preview.value.conflicts.length > 0 && <ErpInlineState kind="stale" title={`پیش از ارسال، تعارض‌های مشخصات فنی را برطرف کنید. ${preview.value.conflicts[0]?.message ?? ''}`} />}
+    {partnerTechnicalSaveIssue(preview) && <ErpInlineState kind="stale" title={partnerTechnicalSaveIssue(preview)!} />}
     {modal && <PartnerProductConfigurationFlow state={modal} products={products} operations={operations} sawKerfMeters={sawKerfMeters}
       mandatoryDefaults={mandatoryDefaults}
       onDraftChange={next => setModal(current => current ? { ...current, draft: next } : current)} onClose={() => setModal(null)}
@@ -223,7 +230,9 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
   const calculation = preview.ok
     ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.calculation
     : undefined;
+  const rowOperations = preview.ok ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.operations : undefined;
   const blockingConflict = calculation && !calculation.ok ? calculation.conflicts[0]?.message
+    : rowOperations && !rowOperations.ok ? rowOperations.conflicts[0]?.message
     : row.family !== 'volumetric' && !row.retailUnitPrice?.amount ? 'قیمت فروش سنگ به مشتری را وارد کنید.'
       : preview.ok && preview.value.conflicts.length > 0 ? preview.value.conflicts[0]?.message : undefined;
   return <CentralProductModalShell open title={state.mode === 'edit' ? 'ویرایش تنظیمات محصول' : 'تنظیمات محصول'}
@@ -414,7 +423,7 @@ function RemainderEditor({ draft, parentProductRowId, products, inventory, onCha
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><strong className="sds-text-primary text-sm">{product?.name ?? 'محصول باقی‌مانده'}</strong>
           <span className="sds-text-muted text-xs">فرزند باقی‌مانده</span></div>
         <div className="sds-text-secondary mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-          <span>{formatDisplayNumber(Number(item.quantity) || 0)} قطعه × ({formatDisplayNumber(Number(item.lengthMeters) || 0)}m × {formatDisplayNumber((Number(item.widthMeters) || 0) * 100)}cm)</span>
+          <span>{formatDisplayNumber(Number(item.quantity) || 0)} قطعه × ({formatDisplayNumber(Number(item.lengthMeters) || 0)} متر × {formatDisplayNumber((Number(item.widthMeters) || 0) * 100)} سانتی‌متر)</span>
         </div></div><div className="flex flex-wrap items-center gap-3 text-xs font-medium">
           <ErpPressable type="button" onClick={() => onEdit(item.productRowId)}>ویرایش</ErpPressable>
           <ErpPressable type="button" onClick={() => { if (!product) return; const nextId = `product-row:${crypto.randomUUID()}`;

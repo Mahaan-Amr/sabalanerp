@@ -16,7 +16,6 @@ import {
 } from 'react-icons/fa';
 import {
   ErpBadge,
-  ErpCard,
   ErpEmptyState,
   ErpListPage,
   ErpPagination,
@@ -47,7 +46,6 @@ import {
   contractStatusTones,
   invoiceStatusLabels,
   money,
-  PartnerAccountingIdentity,
   receivableStatusLabels,
   sourceStatusLabels,
   taxStatusLabels,
@@ -84,12 +82,6 @@ export default function AccountingContractsPage() {
   );
   const query = canonicalQuery.state;
   const [rows, setRows] = useState<AccountingContractRow[]>([]);
-  const [partnerRecords, setPartnerRecords] = useState<Array<{ id: string; amount: string; currency: string;
-    status: string; partnerContext: { caseNumber: string; internalRecordNumber: string;
-      debtor: { displayName: string }; actionUrl: string } }>>([]);
-  const [partnerPage, setPartnerPage] = useState(1);
-  const [partnerTotal, setPartnerTotal] = useState(0);
-  const [partnerError, setPartnerError] = useState<string | null>(null);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
   const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState(query.search);
@@ -117,7 +109,6 @@ export default function AccountingContractsPage() {
   }, [canonicalQuery, replaceQuery, searchParams]);
 
   useEffect(() => setSearchInput(query.search), [query.search]);
-  useEffect(() => setPartnerPage(1), [query.search, query.dateFrom, query.dateTo]);
 
   useEffect(() => {
     if (searchInput.trim() === query.search) return;
@@ -136,7 +127,7 @@ export default function AccountingContractsPage() {
   const loadContracts = useCallback(async () => {
     try {
       setLoading(true);
-      const [contractsResult, partnerResult] = await Promise.allSettled([accountingAPI.getContracts({
+      const response = await accountingAPI.getContracts({
         view: query.view || undefined,
         lifecycleView: query.lifecycleView,
         search: query.search || undefined,
@@ -146,20 +137,7 @@ export default function AccountingContractsPage() {
         dateTo: query.dateTo || undefined,
         page: query.page,
         pageSize: pagination.pageSize,
-      }), accountingAPI.getFinancialRecords({ kind: 'INVOICE_CANDIDATE', sourceKind: 'PARTNER_INTERNAL_RECORD',
-        search: query.search || undefined, dateFrom: query.dateFrom || undefined, dateTo: query.dateTo || undefined,
-        page: partnerPage, pageSize: 25 })]);
-      if (partnerResult.status === 'fulfilled' && partnerResult.value.data.success) {
-        setPartnerRecords(partnerResult.value.data.data.items);
-        setPartnerTotal(partnerResult.value.data.data.total);
-        setPartnerError(null);
-      } else {
-        setPartnerRecords([]);
-        setPartnerTotal(0);
-        setPartnerError('فهرست قراردادهای همکاری بارگذاری نشد. دوباره تلاش کنید.');
-      }
-      if (contractsResult.status === 'rejected') throw contractsResult.reason;
-      const response = contractsResult.value;
+      });
       if (response.data.success) {
         setRows(response.data.data.items);
         setPagination({
@@ -173,7 +151,7 @@ export default function AccountingContractsPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.pageSize, partnerPage, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceStatus, query.status, query.view]);
+  }, [pagination.pageSize, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceStatus, query.status, query.view]);
 
   useEffect(() => {
     loadContracts();
@@ -368,8 +346,8 @@ export default function AccountingContractsPage() {
       priority: 'secondary',
       cell: (contract) => (
         <div className="flex flex-wrap gap-1">
-          <ErpBadge tone={contractStatusTones[contract.status] || 'neutral'}>
-            {contractStatusLabels[contract.status] || operationalStatusLabel(contract.status)}
+          <ErpBadge tone={contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'success' : contractStatusTones[contract.status] || 'neutral'}>
+            {contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'فروش داخلی ثبت‌شده' : contractStatusLabels[contract.status] || operationalStatusLabel(contract.status)}
           </ErpBadge>
           {contract.isInactive && <ErpBadge tone="warning">غیرفعال</ErpBadge>}
         </div>
@@ -396,8 +374,8 @@ export default function AccountingContractsPage() {
       cell: (contract) => (
         <div className="space-y-1 text-xs">
           <p>{invoiceStatusLabels[contract.accounting.invoiceStatus] || operationalStatusLabel(contract.accounting.invoiceStatus)}</p>
-          <p>{receivableStatusLabels[contract.accounting.receivableStatus] || operationalStatusLabel(contract.accounting.receivableStatus)}</p>
-          <p>{taxStatusLabels[contract.accounting.taxStatus] || operationalStatusLabel(contract.accounting.taxStatus)}</p>
+          <p>{contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'کاربرد ندارد' : receivableStatusLabels[contract.accounting.receivableStatus] || operationalStatusLabel(contract.accounting.receivableStatus)}</p>
+          <p>{contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'کاربرد ندارد' : taxStatusLabels[contract.accounting.taxStatus] || operationalStatusLabel(contract.accounting.taxStatus)}</p>
         </div>
       ),
     },
@@ -408,12 +386,32 @@ export default function AccountingContractsPage() {
       align: 'end',
       priority: 'secondary',
       cell: (contract) => (
-        <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{money(contract.accounting.remainingAmount)}</span>
+        <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{money(contract.accounting.remainingAmount, contract.accounting.currency)}</span>
       ),
     },
   ];
 
-  const rowActions = (contract: AccountingContractRow): ErpAction[] => [
+  const rowActions = (contract: AccountingContractRow): ErpAction[] => contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? [
+    { label: 'مشاهده', href: contract.partnerContext?.actionUrl, icon: FaEye, tone: 'primary' },
+    { label: 'دانلود PDF قرارداد', icon: FaDownload, tone: 'success', disabled: true,
+      title: 'برای این سند داخلی هنوز خروجی PDF پشتیبانی نمی‌شود.' },
+    { label: 'پرینت قرارداد', icon: FaPrint, tone: 'neutral', disabled: true,
+      title: 'برای این سند داخلی هنوز چاپ پشتیبانی نمی‌شود.' },
+    ...(accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.visible ? [{
+      label: 'تایید مالی', icon: FaCheckCircle, tone: 'success',
+      disabled: accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.enabled !== true,
+      title: accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.reason ?? undefined,
+      onClick: () => openApprovalModal(contract),
+    } as ErpAction] : []),
+    { label: 'دریافتنی', icon: FaReceipt, tone: 'success',
+      disabled: !['ISSUED', 'POSTED'].includes(contract.accounting.invoiceStatus),
+      title: !['ISSUED', 'POSTED'].includes(contract.accounting.invoiceStatus) ? 'ابتدا سند را تأیید مالی کنید.' : undefined,
+      href: `/dashboard/accounting/receivables?search=${encodeURIComponent(contract.partnerContext?.caseNumber ?? '')}` },
+    { label: 'پرچم', icon: FaFlag, tone: 'warning', disabled: true,
+      title: 'پرچم قرارداد عادی برای سند داخلی همکار کاربرد ندارد.' },
+    { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', disabled: true,
+      title: 'اصلاح این سند از مسیر بررسی پرونده مالی انجام می‌شود.' },
+  ] : [
     { label: 'مشاهده', href: `/dashboard/accounting/contracts/${contract.contractId}`, icon: FaEye, tone: 'primary' },
     {
       label: 'دانلود PDF قرارداد',
@@ -536,20 +534,6 @@ export default function AccountingContractsPage() {
           )}
         </div>
       )}
-      <ErpSection>
-        <h2 className="sds-text-primary mb-3 text-base font-semibold">قراردادهای همکاری قابل بررسی</h2>
-        <p className="sds-text-secondary mb-3 text-sm">جستجو و بازهٔ تاریخ بالا بر این فهرست اعمال می‌شود. وضعیت قراردادهای عادی برای این رکوردهای مالی کاربرد ندارد.</p>
-        {partnerError && <ErpEmptyState icon={FaExclamationTriangle} title={partnerError} />}
-        {!partnerError && !partnerRecords.length && !loading && <ErpEmptyState icon={FaClipboardCheck} title="قرارداد همکاری یافت نشد" />}
-        <div className="grid gap-3">{partnerRecords.map(record => <ErpCard key={record.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <PartnerAccountingIdentity context={record.partnerContext} />
-          <div className="sds-text-secondary text-sm">{money(record.amount, record.currency)} · {record.status}</div>
-          <ErpButton label="بررسی پرونده مالی" href={record.partnerContext.actionUrl} />
-        </ErpCard>)}</div>
-        {!partnerError && partnerTotal > 25 && <ErpPagination currentPage={partnerPage}
-          totalPages={Math.ceil(partnerTotal / 25)} totalItems={partnerTotal} itemsPerPage={25}
-          onPageChange={setPartnerPage} itemLabel="قرارداد همکاری" />}
-      </ErpSection>
       <ErpSection>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label className="block">

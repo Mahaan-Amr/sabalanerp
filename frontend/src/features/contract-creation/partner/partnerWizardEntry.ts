@@ -15,9 +15,10 @@ export const isExplicitPartnerCreationEntry = (params: Pick<URLSearchParams, 'ge
   params.get('entry') === 'new-contract';
 
 export function partnerCreationRouteIdentity(params: Pick<URLSearchParams, 'get'>, mode: 'sale' | 'inquiry'): string {
-  return `${mode}:${params.get('caseId') ? `case:${params.get('caseId')}`
+  const resource = params.get('caseId') ? `case:${params.get('caseId')}`
     : params.get('draftId') ? `draft:${params.get('draftId')}`
-      : params.get('inquiryId') ? `inquiry:${params.get('inquiryId')}` : 'new'}`;
+      : params.get('inquiryId') ? `inquiry:${params.get('inquiryId')}` : 'new';
+  return `${mode}:${resource}:${params.get('configure') === '1' ? `edit:${params.get('focusProductRowId') ?? ''}` : 'result'}`;
 }
 
 export function partnerCreationRequestedInquiry(params: Pick<URLSearchParams, 'get'>, latestInquiryId?: string): string | null {

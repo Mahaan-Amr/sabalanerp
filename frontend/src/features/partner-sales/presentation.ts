@@ -4,6 +4,15 @@ export const partnerPaymentMethodCopy: Record<string, string> = {
   CASH: 'نقدی', BANK_TRANSFER: 'انتقال بانکی', CHECK: 'چک', CREDIT: 'اعتباری',
 };
 
+export const partnerQuantityUnitCopy: Record<string, string> = {
+  meter: 'متر', m: 'متر', squareMeter: 'متر مربع', m2: 'متر مربع',
+  count: 'عدد', piece: 'عدد', physicalPiece: 'عدد', ton: 'تن',
+};
+
+export const partnerProductTypeCopy: Record<string, string> = {
+  prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله',
+};
+
 export function formatPartnerMoney(amount: string | number | null | undefined, currency: 'IRR' | 'IRT' | string) {
   if (!['IRR', 'IRT'].includes(currency) || (typeof amount === 'number' && !Number.isSafeInteger(amount))) return 'داده معتبر در دسترس نیست';
   const value = readPartnerDecimalInput(amount == null ? '' : String(amount));

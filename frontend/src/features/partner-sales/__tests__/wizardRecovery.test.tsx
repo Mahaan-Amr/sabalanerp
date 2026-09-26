@@ -89,6 +89,14 @@ test('each numbered result duty opens its own Case instead of the seller latest 
   assert.equal(partnerCreationRequestedInquiry(new URLSearchParams(), 'latest-profile-inquiry'), 'latest-profile-inquiry');
 });
 
+test('first product-correction click changes the mounted Partner session to the focused editor', () => {
+  const result = new URLSearchParams('caseId=case-a');
+  const correction = new URL(partnerProductEditPath('recovery-a', 'case-a', 'row-a'), 'https://example.test').searchParams;
+  assert.notEqual(partnerCreationRouteIdentity(result, 'sale'), partnerCreationRouteIdentity(correction, 'sale'));
+  assert.notEqual(partnerCreationRouteIdentity(correction, 'sale'), partnerCreationRouteIdentity(
+    new URLSearchParams('configure=1&draftId=recovery-a&caseId=case-a&focusProductRowId=row-b'), 'sale'));
+});
+
 test('a numbered pricing result opens at pricing even when the saved wizard was on products', () => {
   assert.equal(requiredPartnerWizardStep('products', true, false), 'products');
   assert.equal(partnerCaseResultStep('products', true), 'pricing');
@@ -275,6 +283,20 @@ test('the numbered pricing step blocks delivery while Sabalan has not answered e
   assert.match(html.slice(html.lastIndexOf('<button', actionLabel), actionLabel), /disabled=""/);
 });
 
+test('waiting for Sabalan renders a disabled progression button without an arrow', () => {
+  const pendingRows = draft.rows.map(row => ({ ...row, inquiryRow: { ...row.inquiryRow,
+    state: 'PENDING' as const, approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
+    approvedRowBinding: undefined } }));
+  const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'pricing', rows: pendingRows }}
+    onChange={() => undefined} recovery={{ state: 'writable' }}
+    submission={submission({ ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY' })}
+    now={Date.parse('2026-09-26T08:00:00.000Z')} renderSection={() => null} validateStep={() => null}
+    onReinquire={() => undefined} onOpenCase={() => undefined} />);
+  const button = html.match(/<button[^>]*disabled=""[^>]*>[\s\S]*?در انتظار تکمیل استعلام[\s\S]*?<\/button>/)?.[0];
+  assert.ok(button);
+  assert.doesNotMatch(button, /<svg/);
+});
+
 test('the pricing step reveals each Sabalan offer and exposes explicit partner acceptance', () => {
   const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'pricing' }} onChange={() => undefined}
     recovery={{ state: 'writable' }} submission={submission({ ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY' })}
@@ -297,6 +319,35 @@ test('a rejected row shows the responder reason and only its correction action',
   assert.match(html, /ابعاد این محصول نیاز به اصلاح دارد/);
   assert.match(html, /ویرایش این محصول/);
   assert.doesNotMatch(html, /استعلام مجدد کل بسته|در انتظار پاسخ/);
+});
+
+test('a corrected rejected row offers an explicit inquiry for that row before waiting for Sabalan', () => {
+  const corrected = draft.rows.map((row, index) => index === 0 ? { ...row, inquiryRow: {
+    ...row.inquiryRow, rowId: `${row.productRowId}-awaiting-inquiry`, state: 'PENDING' as const,
+    configurationRef: { ...row.inquiryRow.configurationRef, recoveryRevision: row.inquiryRow.configurationRef.recoveryRevision + 1 },
+    approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined,
+  } } : row);
+  const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'pricing', rows: corrected }} onChange={() => undefined}
+    recovery={{ state: 'writable' }} submission={submission({ ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY' })}
+    now={Date.parse('2026-09-26T08:00:00.000Z')} renderSection={() => null} validateStep={() => null}
+    onReinquire={() => undefined} onEditProduct={() => undefined} onOpenCase={() => undefined} />);
+  assert.match(html, /استعلام مجدد همین محصول/);
+  assert.doesNotMatch(html, /ویرایش این محصول/);
+  assert.match(html, /در انتظار تکمیل استعلام/);
+});
+
+test('a pending successor no longer offers a duplicate corrected-row inquiry', () => {
+  const corrected = draft.rows.map((row, index) => index === 0 ? { ...row, inquiryRow: {
+    ...row.inquiryRow, rowId: `${row.productRowId}-awaiting-inquiry`, state: 'PENDING' as const,
+    successor: { inquiryId: 'pricing-2', rowId: 'replacement-1', revision: 1, state: 'PENDING' as const },
+    approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined,
+  } } : row);
+  const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'pricing', rows: corrected }} onChange={() => undefined}
+    recovery={{ state: 'writable' }} submission={submission({ ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY' })}
+    now={Date.parse('2026-09-26T08:00:00.000Z')} renderSection={() => null} validateStep={() => null}
+    onReinquire={() => undefined} onOpenCase={() => undefined} />);
+  assert.doesNotMatch(html, /استعلام مجدد همین محصول/);
+  assert.match(html, /در انتظار پاسخ/);
 });
 
 test('an evidence conflict gives the Partner a simple review action with the numbered Case', async () => {

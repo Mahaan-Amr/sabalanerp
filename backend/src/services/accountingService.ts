@@ -89,6 +89,7 @@ import {
 } from './partnerSales/accounting/financialApproval';
 import { executePartnerCollectionAction } from './partnerSales/accounting/paymentCommands';
 import { withAccountingReadScope, type AccountingReadActor, type AccountingReadScope } from './partnerSales/accounting/readScope';
+import { partnerAccountingContractRow } from './accountingUnifiedContracts';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend, accountingCurrencyTotals } from './partnerSales/accounting/history';
 import { partnerTaxTransitions } from './partnerSales/accounting/taxPolicy';
 import { hasConflictingPartnerAccountingEvidence } from './partnerSales/accounting/provenance';
@@ -1012,7 +1013,7 @@ export const buildAccountingSummaryForContracts = async (contracts: any[]) => {
   return new Map(rows.map((row) => [row.contractId, row.accounting]));
 };
 
-export const listAccountingContracts = async (query: ListContractsQuery = {}) => {
+export const listAccountingContracts = async (query: ListContractsQuery = {}, actor?: AccountingReadActor) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize) || DEFAULT_PAGE_SIZE, 1), 100);
   const skip = (page - 1) * pageSize;
@@ -1048,17 +1049,29 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
     query.sort === 'oldest' ? { createdAt: 'asc' } :
     { createdAt: 'desc' };
 
-  const [rawContracts, settings] = await Promise.all([
+  const [rawContracts, settings, partnerRecords] = await Promise.all([
     prisma.salesContract.findMany({
       where,
       select: accountingContractListSelect,
       orderBy
     }),
-    getDefaultSettings()
+    getDefaultSettings(),
+    actor ? withAccountingReadScope(prisma, actor, async scope => {
+      const records = await scope.database.accountingFinancialRecord.findMany({
+        where: scope.financial({ sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+          kind: FinancialRecordKind.INVOICE_CANDIDATE, contractId: null, customerId: null }),
+        include: { receivables: { where: scope.receivable(), select: { remainingAmount: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      return scope.contextualize('FINANCIAL', records);
+    }) : Promise.resolve([]),
   ]);
 
   const contracts = await attachAccountingCollections(await attachAccountingListDates(prisma, rawContracts));
-  let items = await Promise.all(contracts.map((contract) => buildContractRow(contract, settings)));
+  let items: any[] = await Promise.all(contracts.map((contract) => buildContractRow(contract, settings)));
+  if (lifecycleView === 'active' && (!query.status || query.status === 'ALL')) {
+    items.push(...partnerRecords.map(record => partnerAccountingContractRow(record)).filter((row): row is NonNullable<typeof row> => row !== null));
+  }
 
   if (search) {
     const lowered = normalizePersianSearchTokens(search).join(' ');
@@ -1069,6 +1082,8 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
         : [];
       const haystack = [
         item.contractNumber,
+        item.partnerContext?.caseNumber,
+        item.partnerContext?.internalRecordNumber,
         item.titlePersian,
         item.customer?.displayName,
         item.customer?.nationalCode,
@@ -1111,16 +1126,25 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
   }
   if (reviewableView || query.sort === 'attention') {
     items = orderReviewableContracts(items);
+  } else {
+    const amountInRials = (item: any) => new Prisma.Decimal(item.accounting.totalContractAmount)
+      .mul(item.accounting.currency === 'IRT' ? 10 : 1);
+    items.sort((left, right) => query.sort === 'amount_desc'
+      ? amountInRials(right).comparedTo(amountInRials(left))
+      : query.sort === 'amount_asc'
+        ? amountInRials(left).comparedTo(amountInRials(right))
+        : (query.sort === 'oldest' ? 1 : -1) *
+          (new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()));
   }
 
   const total = items.length;
   const pagedItems = items.slice(skip, skip + pageSize);
 
   const totals = items.reduce((acc, item) => ({
-    contractAmount: acc.contractAmount.plus(item.accounting.totalContractAmount),
-    invoicedAmount: acc.invoicedAmount.plus(item.accounting.invoicedAmount),
-    receivedAmount: acc.receivedAmount.plus(item.accounting.receivedAmount),
-    remainingAmount: acc.remainingAmount.plus(item.accounting.remainingAmount)
+    contractAmount: acc.contractAmount.plus(new Prisma.Decimal(item.accounting.totalContractAmount).mul(item.accounting.currency === 'IRT' ? 10 : 1)),
+    invoicedAmount: acc.invoicedAmount.plus(new Prisma.Decimal(item.accounting.invoicedAmount).mul(item.accounting.currency === 'IRT' ? 10 : 1)),
+    receivedAmount: acc.receivedAmount.plus(new Prisma.Decimal(item.accounting.receivedAmount).mul(item.accounting.currency === 'IRT' ? 10 : 1)),
+    remainingAmount: acc.remainingAmount.plus(new Prisma.Decimal(item.accounting.remainingAmount).mul(item.accounting.currency === 'IRT' ? 10 : 1))
   }), {
     contractAmount: new Prisma.Decimal(0),
     invoicedAmount: new Prisma.Decimal(0),

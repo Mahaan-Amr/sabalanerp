@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaCheckCircle, FaExclamationTriangle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
 import { ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpListPage, ErpPagination, ErpRialInput, ErpSelect, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import PersianCalendar from '@/lib/persian-calendar';
 import { emptyAccountingPagination, FinancialInvoiceApprovalForm, type FinancialInvoiceApprovalPayload,
   readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
@@ -276,7 +277,7 @@ export default function AccountingInvoiceCandidatesPage() {
     >
       {planCandidates.length > 0 && <div className="space-y-3">
         {planCandidates.map(candidate => <ErpCard key={candidate.expected.caseId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="font-semibold">{candidate.caseNumber} · {candidate.partnerDisplayName}</p>
+          <div><p className="font-semibold">{partnerTrackingCode(candidate.caseNumber)} · {candidate.partnerDisplayName}</p>
             <p className="sds-text-muted text-sm">{money(candidate.payable.amount, candidate.payable.currency)}</p></div>
           <ErpButton label="ثبت برنامه پرداخت به سبلان" icon={FaPlus} onClick={() => openPlan(candidate)} />
         </ErpCard>)}

@@ -12,6 +12,7 @@ interface WizardNavigationProps {
   canGoNext?: boolean;
   canGoPrevious?: boolean;
   showSubmitOnEveryStep?: boolean;
+  hidePrimaryIcon?: boolean;
   labels?: {
     previous?: string;
     next?: string;
@@ -30,7 +31,8 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
   canGoNext = true,
   canGoPrevious = true,
   labels,
-  showSubmitOnEveryStep = false
+  showSubmitOnEveryStep = false,
+  hidePrimaryIcon = false,
 }) => {
   const first = currentStep === 1;
   const submit = currentStep === totalSteps || showSubmitOnEveryStep;
@@ -49,7 +51,7 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
       primaryLabel={primaryLabel}
       previousLabel={previousLabel}
       counterLabel={`مرحله ${currentStep.toLocaleString('fa-IR')} از ${totalSteps.toLocaleString('fa-IR')}`}
-      primaryIcon={PrimaryIcon}
+      primaryIcon={hidePrimaryIcon ? undefined : PrimaryIcon}
       previousIcon={FaArrowRight}
       onPrimary={submit ? () => onSubmit?.() : onNext}
       onPrevious={onPrevious}

@@ -133,14 +133,14 @@ const getAccountingActionCapabilities = async (userId: string, role: string) => 
   ]) as Record<string, boolean>;
 };
 
-const projectAccountingActions = <T extends { nextBestActions?: Array<Record<string, any>> }>(
+const projectAccountingActions = <T extends { sourceKind?: string; nextBestActions?: Array<Record<string, any>> }>(
   record: T,
   capabilities: Record<string, boolean>,
 ): T => ({
   ...record,
   nextBestActions: [
     ...(record.nextBestActions || []),
-    { kind: 'FLAG_CONTRACT', labelFa: 'ثبت پرچم حسابداری', enabled: true },
+    ...(record.sourceKind === 'PARTNER_INTERNAL_RECORD' ? [] : [{ kind: 'FLAG_CONTRACT', labelFa: 'ثبت پرچم حسابداری', enabled: true }]),
   ].map((action) => {
     const visible = Boolean(capabilities[action.kind]);
     return {
@@ -581,7 +581,7 @@ router.get('/financial-trend', accountingView, createAccountingFinancialTrendRes
 router.get('/contracts', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {
     const [data, capabilities] = await Promise.all([
-      listAccountingContracts(req.query as any),
+      listAccountingContracts(req.query as any, { userId: req.user!.id }),
       getAccountingActionCapabilities(req.user!.id, req.user!.role),
     ]);
     res.json({ success: true, data: {

@@ -1,10 +1,10 @@
 'use client';
 
 import React from 'react';
-import type { CustomerContractOutput, PartnerCaseRuntimeRow, PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
+import { partnerCustomerContractLabel, partnerTrackingCode, type CustomerContractOutput, type PartnerCaseRuntimeRow, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import { ErpActionGrid, ErpBadge, ErpButton, ErpCard, ErpFieldView, ErpPage, ErpSection, ErpTwoColumn, type ErpAction, type ErpMetric, type ErpTone } from '@/components/erp';
 import { FaBan, FaCalculator, FaEdit, FaEye, FaFileContract, FaFilePdf, FaMoneyBillWave, FaPrint, FaSms, FaTruck } from 'react-icons/fa';
-import { formatPartnerMoney, partnerPaymentMethodCopy } from '../presentation';
+import { formatPartnerMoney, partnerPaymentMethodCopy, partnerProductTypeCopy, partnerQuantityUnitCopy } from '../presentation';
 
 export type PartnerCaseActions = {
   canPreview: boolean;
@@ -43,7 +43,7 @@ export function PartnerCaseDetail({ view, actions, customerOutput, history, chil
   customerOutput?: CustomerContractOutput; history?: PartnerCaseRuntimeRow['history']; children?: React.ReactNode }) {
   const status = stateCopy[view.state];
   const pageActions = partnerCasePageActions(actions);
-  return <ErpPage eyebrow="پرونده فروش همکار" title={`پرونده ${view.caseNumber}`} description={`قرارداد مشتری: ${view.customerContractNumber}`}
+  return <ErpPage eyebrow="پرونده فروش همکار" title={`پرونده ${partnerCustomerContractLabel(view.caseNumber, view.customerContractNumber)}`} description={`کد پیگیری: ${partnerTrackingCode(view.caseNumber)}`}
     backHref="/dashboard/sales/partner-cases" actions={pageActions} metrics={partnerCaseMetrics(view, status)}><PartnerCaseDetailContent
       view={view} actions={actions} customerOutput={customerOutput} history={history} />{children}
   </ErpPage>;
@@ -76,7 +76,7 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
   return <>
     <ErpSection title="اطلاعات قرارداد">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <ErpFieldView label="شماره پرونده" value={view.caseNumber} />
+        <ErpFieldView label="کد پیگیری" value={partnerTrackingCode(view.caseNumber)} />
         <ErpFieldView label="شماره قرارداد مشتری" value={view.customerContractNumber ?? 'در انتظار صدور'} />
         <ErpFieldView label="وضعیت قرارداد" value={stateCopy[view.state].label} />
         <ErpFieldView label="تأیید مشتری" value={{ NOT_SENT: 'ارسال نشده', SENT: 'در انتظار تأیید',
@@ -96,7 +96,7 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
       <ErpSection title="اقلام قرارداد" description="مقدار و قیمت‌های ثبت‌شده برای هر ردیف قرارداد.">
         <div className="space-y-3">{view.products.map(product => <ErpCard key={product.productRowId} className="p-4">
           <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-bold text-[var(--sds-text-primary)]">{product.description}</h3>
-            <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{product.quantity} {product.unit}</p></div><ErpBadge tone="neutral">ردیف {product.productRowId}</ErpBadge></div>
+            <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{product.quantity} {partnerQuantityUnitCopy[product.unit] ?? product.unit}</p></div><ErpBadge tone="neutral">ردیف {product.productRowId}</ErpBadge></div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2"><ErpFieldView label="قیمت فروش مشتری" value={formatPartnerMoney(product.retailUnitPrice, view.retailTotals.currency)} tone="primary" />
             <ErpFieldView label="قیمت تأییدشده سبلان" value={product.wholesaleUnitPrice && view.sabalanTotals
               ? formatPartnerMoney(product.wholesaleUnitPrice, view.sabalanTotals.currency) : 'در انتظار استعلام'} tone="info" /></div>
@@ -104,7 +104,7 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
             {(() => { const item = customerOutput.products.find(item => item.productRowId === product.productRowId)!;
               return <>
                 {item.productCode && <ErpFieldView label="کد محصول" value={item.productCode} />}
-                {item.productType && <ErpFieldView label="نوع محصول" value={item.productType} />}
+                {item.productType && <ErpFieldView label="نوع محصول" value={partnerProductTypeCopy[item.productType] ?? item.productType} />}
                 {item.lengthMeters && <ErpFieldView label="طول" value={`${item.lengthMeters} متر`} />}
                 {item.widthMeters && <ErpFieldView label="عرض" value={`${item.widthMeters} متر`} />}
                 {item.areaSquareMeters && <ErpFieldView label="مساحت" value={`${item.areaSquareMeters} متر مربع`} />}
@@ -118,7 +118,7 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
         <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{delivery.destination}</p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">{delivery.items.map(item => <ErpFieldView
           key={item.productRowId} label={view.products.find(product => product.productRowId === item.productRowId)?.description ?? 'محصول'}
-          value={`${item.quantity} ${view.products.find(product => product.productRowId === item.productRowId)?.unit ?? ''}`} />)}</div>
+          value={`${item.quantity} ${partnerQuantityUnitCopy[view.products.find(product => product.productRowId === item.productRowId)?.unit ?? ''] ?? ''}`} />)}</div>
       </ErpCard>)}</div></ErpSection>
     </>} aside={<>
       <ErpSection title="پرداخت مشتری"><PaymentPlan plan={view.customerPaymentPlan} /></ErpSection>

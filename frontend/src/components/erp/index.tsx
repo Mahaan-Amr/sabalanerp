@@ -1335,7 +1335,7 @@ export function ErpNeumorphicWorkflowNavigation({
   primaryLabel: React.ReactNode;
   previousLabel: React.ReactNode;
   counterLabel: React.ReactNode;
-  primaryIcon: IconType;
+  primaryIcon?: IconType;
   previousIcon: IconType;
   onPrimary: () => void;
   onPrevious: () => void;
@@ -1355,13 +1355,10 @@ export function ErpNeumorphicWorkflowNavigation({
         variant="solid"
         className="inline-flex min-w-32 flex-nowrap items-center justify-center gap-2 whitespace-nowrap px-5"
       >
-        <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
-          {pending ? (
-            <span className="absolute h-4 w-4 animate-spin rounded-full border-b-2 border-[var(--sds-text-inverse)] motion-reduce:animate-none" />
-          ) : (
-            <PrimaryIcon className="h-4 w-4 shrink-0" />
-          )}
-        </span>
+        {(pending || PrimaryIcon) && <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
+          {pending ? <span className="absolute h-4 w-4 animate-spin rounded-full border-b-2 border-[var(--sds-text-inverse)] motion-reduce:animate-none" />
+            : PrimaryIcon && <PrimaryIcon className="h-4 w-4 shrink-0" />}
+        </span>}
         <span dir="rtl">{primaryLabel}</span>
       </ErpPressable>
 

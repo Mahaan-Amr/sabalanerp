@@ -8,6 +8,7 @@ import {
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { parseInquiryDefinition, type ConfigurationRef, type InquiryDefinition } from './definition';
 import { createPartnerInquiryQuery } from './query';
+import { sameCaseInquiryLineage } from './caseInquiryLineage';
 import {
   createPartnerPricingDuty,
   reassignPartnerPricingDuty,
@@ -370,9 +371,15 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           let version = 1, predecessorId: string | undefined;
           if (row.predecessor) {
             const predecessor = await tx.partnerInquiryRow.findUnique({ where: { id: row.predecessor.rowId },
-              select: { id: true, revision: true, version: true, outcome: true,
-                successor: { select: { id: true } }, inquiry: { select: { id: true, profileId: true } } } });
-            if (!predecessor || predecessor.inquiry.id !== scope || predecessor.inquiry.profileId !== profile.id) {
+              select: { id: true, revision: true, version: true, outcome: true, definition: true,
+                successor: { select: { id: true } }, inquiry: { select: { id: true, profileId: true, caseId: true, caseRevision: true } } } });
+            const predecessorDefinition = predecessor && parseInquiryDefinition(predecessor.definition);
+            if (!predecessor || !predecessorDefinition || predecessor.inquiry.profileId !== profile.id ||
+                !sameCaseInquiryLineage({ inquiryId: scope, caseId: command.type === 'CASE_PRICING_SUBMIT' ? command.caseId : '',
+                  caseRevision: command.type === 'CASE_PRICING_SUBMIT' ? command.expected.revision : 0,
+                  productRowId: row.configuration.productRowId, predecessorInquiryId: predecessor.inquiry.id,
+                  predecessorCaseId: predecessor.inquiry.caseId, predecessorCaseRevision: predecessor.inquiry.caseRevision,
+                  predecessorProductRowId: predecessorDefinition.configurationRef.productRowId })) {
               return { ok: false, error: partnerError('NOT_FOUND') };
             }
             if (predecessor.revision !== row.predecessor.revision) return { ok: false, error: partnerError('ROW_STALE') };

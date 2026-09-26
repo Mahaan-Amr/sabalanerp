@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   CaseDraftIntentSchema, PartnerCaseRuntimeResultSchema, PartnerCaseViewSchema, PartnerCommandSchema, PartnerCreationContextSchema,
   PartnerApprovalMatchSetSchema, PartnerWholesaleQuoteSchema, PartnerWizardRecoverySnapshotSchema,
-  PartnerTechnicalCatalogPageSchema, CustomerPaymentPlanSchema, canonicalHash, partnerError, previewPartnerTechnicalDraft,
+  PartnerTechnicalCatalogPageSchema, CustomerPaymentPlanSchema, canonicalHash, partnerError, partnerTrackingCode, previewPartnerTechnicalDraft,
   type PartnerCaseView, type PartnerCommand, type PartnerCommandPort, type PartnerApprovalMatchSet,
   type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
@@ -18,6 +18,7 @@ import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/par
 import { PartnerInquiryWorkspace } from '../../partner-sales/inquiries/PartnerInquiryWorkspace';
 import type { PartnerConfiguredInquiryRows } from '../../partner-sales/inquiries/partnerInquirySubmission';
 import { isUsableInquiryRow, type PartnerInquiryView, type PartnerInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
+import { partnerQuantityUnitCopy } from '../../partner-sales/presentation';
 import { PartnerContractWizard, partnerWizardPresentationSteps, type PartnerWizardDraft,
   type PartnerWizardStep } from './PartnerContractWizard';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
@@ -47,8 +48,9 @@ import { isPartnerContractConfigurationComplete, removePartnerTechnicalProduct }
 import { normalizeNumericText } from '@/lib/numberFormat';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 import { commitPartnerTechnicalDraft } from './partnerTechnicalCommit';
+import { repairPartnerTechnicalOperationIds } from './partnerTechnicalOperationIds';
 import { getPartnerBrowserSessionId } from './partnerBrowserSession';
-import { canSubmitPartnerTechnicalAction, showPartnerContractConfigurationWarning } from './partnerCreationFlow';
+import { canSubmitPartnerTechnicalAction, partnerTechnicalSaveIssue, showPartnerContractConfigurationWarning } from './partnerCreationFlow';
 import { readPartnerCreationContext } from './partnerCreationContext';
 import { partnerPaymentChoice, partnerPaymentMethodUpdate } from './partnerPaymentMethodAdapter';
 import { paymentEntryFromPartnerInstallment, partnerInstallmentFromPaymentEntry } from './partnerPaymentEntryAdapter';
@@ -238,8 +240,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     { products: technicalProducts, operations: technicalOperations,
       sawKerfMeters: retainedCatalog?.sawKerfMeters ?? '0.003' }),
   [technicalProducts, technicalOperations, retainedCatalog, technicalDraft]);
-  const technicalReady = technicalPreview.ok && technicalDraft.rows.length > 0 && technicalPreview.value.conflicts.length === 0
-    && technicalPreview.value.rows.every(row => row.calculation.ok);
+  const technicalIssue = partnerTechnicalSaveIssue(technicalPreview);
+  const technicalReady = technicalDraft.rows.length > 0 && technicalIssue === null;
   const contractConfigurationReady = isPartnerContractConfigurationComplete(technicalDraft);
   const normalizedQuickDimensions = (productRowId: string) => Object.fromEntries(Object.entries(quickDimensions[productRowId] ?? {})
     .filter((entry): entry is [keyof PartnerInquiryDimensions, string] => Boolean(entry[1]?.trim()))
@@ -484,7 +486,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       setDraftAccess(access); setRecoveryRevision(recovered.value.recoveryRevision);
       checkpointedInputRevision.current = recovered.value.draft?.inputRevision ?? 0;
       if (fresh) setTechnicalDraft(emptyTechnicalDraft());
-      else if (recovered.value.draft) setTechnicalDraft(recovered.value.draft);
+      else if (recovered.value.draft) setTechnicalDraft(repairPartnerTechnicalOperationIds(recovered.value.draft));
       setRecoveryBlocked(false);
     } catch { setError('بازیابی پیش‌نویس فنی انجام نشد.'); }
     finally { recoveryStarting.current = false; }
@@ -604,10 +606,15 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
 
   const readCasePricingRows = useCallback(async (saved: PartnerTechnicalSaveReceipt, caseId: string) => {
     const matches = await readApprovalMatches(saved, caseId);
-    const inquiryId = `partner-case-pricing:${saved.recoveryId}:1`;
-    const inquiry = await inquiryPorts.queries.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId });
-    if (!inquiry.ok) throw inquiry.error;
-    const currentRows = inquiry.value.rows;
+    const caseResponse = await api.post('/partner/cases/query-v2', { caseId });
+    const caseResult = PartnerCaseRuntimeResultSchema.safeParse((caseResponse.data as { data?: unknown })?.data);
+    if (!caseResult.success || caseResult.data.cases.length !== 1) throw partnerError('INTEGRITY_CONFLICT');
+    const revisions = caseResult.data.cases[0].view.owner.revision;
+    const inquiries = await Promise.all(Array.from({ length: revisions }, (_, index) => inquiryPorts.queries.query({
+      schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId: `partner-case-pricing:${saved.recoveryId}:${index + 1}`,
+    })));
+    if (inquiries.some(result => !result.ok && result.error.code !== 'NOT_FOUND')) throw partnerError('INTEGRITY_CONFLICT');
+    const currentRows = inquiries.flatMap(result => result.ok ? result.value.rows : []);
     const retained = matches.rows.filter(match => !currentRows.some(row =>
       row.configurationRef.recoveryId === match.configurationRef.recoveryId &&
       row.configurationRef.recoveryRevision === match.configurationRef.recoveryRevision &&
@@ -627,7 +634,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           idempotencyKey: `partner-save-${crypto.randomUUID()}`, draft: technicalDraft }),
       });
       if (!saved) return;
-      if (!saved.ok) { setError(saved.error.message); return; }
+      if (!saved.ok) {
+        setError(saved.error.code === 'INVALID_PAYLOAD' && editingCase
+          ? technicalIssue ?? partnerCaseReviewMessage(editingCase.caseNumber)
+          : saved.error.message);
+        return;
+      }
       setRecoveryRevision(saved.value.recoveryRevision);
       const subjects = saved.value.pricingSubjects ?? saved.value.rows.map(row => ({ configurationRef: row.configurationRef,
         role: 'PRIMARY' as const }));
@@ -1069,15 +1081,22 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const sourceRows = [...wizard.rows.map(item => item.inquiryRow),
         ...(wizard.materialInquiryRows ?? []).map(item => item.inquiryRow)];
       const selectedPackage = selectPartnerReinquiryRows(sourceRows,
-        `partner-case-pricing:${wizard.intent.recoveryId}:1`, requestedRow);
+        `partner-case-pricing:${wizard.intent.recoveryId}:${activeOwner.revision}`, requestedRow);
       const selected = selectedPackage.rows;
+      const historicalRows = selected.some(item => item.rowId.endsWith('-awaiting-inquiry'))
+        ? await readCasePricingRows(runtime.saved, activeOwner.caseId) : [];
       const rows = selected.map(item => {
+        const predecessor = item.rowId.endsWith('-awaiting-inquiry')
+          ? historicalRows.find(previous => previous.configurationRef.productRowId === item.configurationRef.productRowId &&
+            previous.state === 'REJECTED' && !previous.successor)
+          : item;
+        if (!predecessor) throw new Error('Rejected inquiry row unavailable');
         const deliveryFacts = wizard.intent.deliveries.flatMap(delivery => delivery.items
           .filter(deliveryItem => deliveryItem.productRowId === item.configurationRef.productRowId)
           .map(deliveryItem => ({ date: delivery.date, quantity: deliveryItem.quantity })));
         return { rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: item.configurationRef,
           ...(deliveryFacts.length ? { deliveryFacts } : {}),
-          predecessor: { rowId: item.rowId, revision: item.revision } };
+          predecessor: { rowId: predecessor.rowId, revision: predecessor.revision } };
       });
       const scopedInquiryId = selectedPackage.inquiryId;
       const intent = { schemaVersion: 1 as const, type: 'CASE_PRICING_SUBMIT' as const,
@@ -1182,11 +1201,11 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           };
           return <ErpCard key={row.productRowId} className="space-y-2 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{row.inquiryRow.description}</strong>
-              <ErpField label={`مقدار (${row.unit})`}><ErpInput inputMode="decimal" value={current}
+              <ErpField label={`مقدار (${partnerQuantityUnitCopy[row.unit] ?? row.unit})`}><ErpInput inputMode="decimal" value={current}
                 onChange={event => updateQuantity(event.target.value)} /></ErpField></div>
-            <div className="sds-text-secondary flex flex-wrap gap-3 text-xs"><span>کل قرارداد: {row.quantity} {row.unit}</span>
-              <span>تحویل‌های دیگر: {maximum === null ? 'نامعتبر' : remainingPartnerAmount(row.quantity, [maximum])} {row.unit}</span>
-              <span>مانده: {unallocated ?? 'نامعتبر'} {row.unit}</span>
+            <div className="sds-text-secondary flex flex-wrap gap-3 text-xs"><span>کل قرارداد: {row.quantity} {partnerQuantityUnitCopy[row.unit] ?? row.unit}</span>
+              <span>تحویل‌های دیگر: {maximum === null ? 'نامعتبر' : remainingPartnerAmount(row.quantity, [maximum])} {partnerQuantityUnitCopy[row.unit] ?? row.unit}</span>
+              <span>مانده: {unallocated ?? 'نامعتبر'} {partnerQuantityUnitCopy[row.unit] ?? row.unit}</span>
               {maximum !== null && current !== maximum && <ErpPressable type="button"
                 onClick={() => updateQuantity(maximum)}>پر کردن ({maximum})</ErpPressable>}</div>
             {showValidationErrors && unallocated !== '0' && <ErpInlineState kind="stale"
@@ -1294,7 +1313,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         <h3 className="text-2xl font-bold">خلاصه قرارداد</h3>
         <div className="grid gap-4 md:grid-cols-2">
           <ErpNeumorphicCard className="grid gap-3 p-4 sm:grid-cols-2">
-            <ErpFieldView label="شماره پرونده" value={caseView?.caseNumber ?? 'پس از ثبت'} tone="primary" />
+            <ErpFieldView label="کد پیگیری" value={caseView ? partnerTrackingCode(caseView.caseNumber) : 'پس از ثبت'} tone="primary" />
             <ErpFieldView label="تاریخ قرارداد" value={draft.intent.contractDate} />
           </ErpNeumorphicCard>
           <ErpNeumorphicCard className="grid gap-3 p-4 sm:grid-cols-2">
@@ -1314,7 +1333,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         <summary className="cursor-pointer px-4 py-3 font-semibold">محصولات قرارداد ({draft.rows.length.toLocaleString('fa-IR')})</summary>
         <div className="space-y-3 px-4 pb-4">{draft.rows.map(row => <ErpCard key={row.productRowId} className="p-4">
           <p className="font-semibold">{row.inquiryRow.description}</p>
-          <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">مقدار: {row.quantity} {row.unit} · قیمت فروش واحد: {partnerMoneyText(row.retailUnitPrice.amount, row.retailUnitPrice.currency)}</p>
+          <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">مقدار: {row.quantity} {partnerQuantityUnitCopy[row.unit] ?? row.unit} · قیمت فروش واحد: {partnerMoneyText(row.retailUnitPrice.amount, row.retailUnitPrice.currency)}</p>
         </ErpCard>)}</div>
       </ErpNeumorphicDisclosure>
       <ErpNeumorphicDisclosure>
@@ -1511,7 +1530,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           operations={technicalOperations}
           sawKerfMeters={retainedCatalog?.sawKerfMeters ?? '0.003'}
           mandatoryDefaults={mandatoryDefaults}
-          preview={technicalPreview} focusProductRowId={searchParams.get('focusProductRowId') ?? undefined} onChange={setTechnicalDraft} />
+          preview={technicalPreview} focusProductRowId={searchParams.get('focusProductRowId') ?? undefined}
+          onChange={next => setTechnicalDraft(repairPartnerTechnicalOperationIds(next))} />
       </>}
       <ErpSheet open={initialInquiryOpen} onClose={() => setInitialInquiryOpen(false)} title="استعلام جدید"
         presentation="modal" pending={pending} footer={<div className="flex flex-wrap gap-2"><ErpButton

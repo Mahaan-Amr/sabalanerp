@@ -200,6 +200,18 @@ test('Partner product configuration includes one compact customer unit-price fie
   assert.doesNotMatch(html, /قیمت خرید شما از سبلان/);
 });
 
+test('Partner selected product shows its own physical count beside dimensions', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const product = catalog.products.find(item => item.families.includes('longitudinal'))!;
+  const draft = buildPartnerProductionTechnicalDraft({ family: 'longitudinal', product, quantity: '10',
+    lengthMeters: '2', widthMeters: '0.35', sourceLengthMeters: '3', sourceWidthMeters: '1',
+    products: catalog.products, operationsCatalog: catalog.operations, includeRemainder: false,
+  }, kind => `count-${kind}`);
+  const html = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft} products={catalog.products}
+    operations={catalog.operations} onChange={() => undefined} />);
+  assert.match(html, /۲ متر × ۰٫۳۵ متر[\s\S]*تعداد: ۱۰ عدد/);
+});
+
 test('Partner remainder children use the ordinary Sales nested inventory and contract-row interaction', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
   const product = catalog.products.find(item => item.families.includes('longitudinal'))!;

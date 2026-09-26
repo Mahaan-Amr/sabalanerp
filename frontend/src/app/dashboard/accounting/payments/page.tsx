@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaMoneyCheckAlt, FaSync } from 'react-icons/fa';
 import { ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -217,7 +218,7 @@ export default function AccountingPaymentsPage() {
         open={Boolean(checkTarget)}
         title={checkTarget?.status === 'REVERSE_RECEIPT' ? 'برگشت دریافت' : checkTarget?.status === 'RETURNED' ? 'عودت چک' : 'به‌روزرسانی وضعیت چک'}
         description={checkTarget?.row.sourceKind === 'PARTNER_INTERNAL_RECORD'
-          ? `پرونده ${checkTarget.row.partnerContext?.caseNumber} · ${money(checkTarget.row.amount, checkTarget.row.currency)}${['RETURNED', 'REVERSE_RECEIPT'].includes(checkTarget.status) ? ' — با تأیید این اقدام، اثر وصول برگشت می‌خورد و مانده حساب به‌روزرسانی می‌شود.' : ''}`
+          ? `پرونده ${partnerTrackingCode(checkTarget.row.partnerContext?.caseNumber ?? '')} · ${money(checkTarget.row.amount, checkTarget.row.currency)}${['RETURNED', 'REVERSE_RECEIPT'].includes(checkTarget.status) ? ' — با تأیید این اقدام، اثر وصول برگشت می‌خورد و مانده حساب به‌روزرسانی می‌شود.' : ''}`
           : checkTarget?.status === 'REVERSE_RECEIPT'
             ? `دریافت ${money(checkTarget.row.amount, checkTarget.row.currency)} · قرارداد ${checkTarget.row.contract?.contractNumber || checkTarget.row.contractId || '—'} — اثر وصول برگشت می‌خورد و مانده دریافتنی به‌روزرسانی می‌شود.`
             : checkTarget ? `چک ${checkTarget.row.checkNumber || ''} - ${checkTarget.row.contract?.contractNumber || ''}` : undefined}

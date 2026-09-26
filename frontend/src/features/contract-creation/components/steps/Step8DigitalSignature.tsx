@@ -248,7 +248,9 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                   {financialSummary.discountAmount && financialSummary.discountAmount > 0 && (
                     <div className="flex justify-between">
                       <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                        تخفیف ({financialSummary.discountPercent || 0}٪):
+                        تخفیف {wizardData.discount?.inputMode === 'AMOUNT_TOMAN'
+                          ? `(حدود ${Number((financialSummary.discountPercent || 0).toFixed(2))}٪)`
+                          : `(${financialSummary.discountPercent || 0}٪)`}:
                       </span>
                       <span className="font-medium text-[var(--sds-success)] dark:text-[var(--sds-success)]">
                         {formatPriceWithRial(financialSummary.discountAmount, financialSummary.currency)}

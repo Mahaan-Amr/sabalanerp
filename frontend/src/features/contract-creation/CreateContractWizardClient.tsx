@@ -123,6 +123,7 @@ import {
 } from '@/features/contract-creation/services/contractCreationDraftPolicy';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
+import { clampContractDiscountToman, contractDiscountDisplayPercent, contractDiscountEquivalentPercent, contractDiscountTomanFromPercent, maximumContractDiscountToman } from '@/features/contract-creation/utils/contractDiscountAmount';
 import { assertSuccessfulSalesDownload, assertSuccessfulSalesResponse, getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
@@ -760,7 +761,18 @@ export default function CreateContractWizard({
   const [draftRecoveryActivated, setDraftRecoveryActivated] = useState(false);
   const initialContractDateRef = useRef(wizardData.contractDate);
   const [discountRanges, setDiscountRanges] = useState<DiscountRange[]>([]);
-  const [discountPercentInput, setDiscountPercentInput] = useState<number>(0);
+  const [discountAmountInput, setDiscountAmountInput] = useState<number>(
+    () => Math.round(toFiniteNumber(initialWizardData?.discount?.amount))
+  );
+  const [discountPercentInput, setDiscountPercentInput] = useState<number>(
+    () => toFiniteNumber(initialWizardData?.discount?.percent)
+  );
+  const [discountEntryMode, setDiscountEntryMode] = useState<'PERCENT' | 'AMOUNT_TOMAN'>(
+    () => initialWizardData?.discount?.entryMode
+      ?? (initialWizardData?.discount && !initialWizardData.discount.inputMode ? 'PERCENT' : 'AMOUNT_TOMAN')
+  );
+  const [discountTouched, setDiscountTouched] = useState(false);
+  const [discountRangesLoaded, setDiscountRangesLoaded] = useState(false);
   const [serviceSearchTerm, setServiceSearchTerm] = useState('');
   const [serviceSourceType, setServiceSourceType] = useState<ContractServiceRowSourceType>('tool');
   const [productSaveFeedback, setProductSaveFeedback] = useState<{
@@ -914,10 +926,13 @@ export default function CreateContractWizard({
   const maxDiscountPercent = matchingDiscountRange
     ? toFiniteNumber(matchingDiscountRange.maxDiscountPercent)
     : 0;
-  const appliedDiscountPercent = Math.min(Math.max(toFiniteNumber(discountPercentInput), 0), maxDiscountPercent);
-  const appliedDiscountAmount = discountBaseSubtotal > 0
-    ? discountBaseSubtotal * (appliedDiscountPercent / 100)
-    : 0;
+  const maxDiscountAmount = maximumContractDiscountToman(discountBaseSubtotal, maxDiscountPercent);
+  const appliedDiscountAmount = isContractEditMode && !discountTouched
+    ? toFiniteNumber(wizardData.discount?.amount)
+    : clampContractDiscountToman(discountAmountInput, maxDiscountAmount);
+  const appliedDiscountPercent = isContractEditMode && !discountTouched
+    ? toFiniteNumber(wizardData.discount?.percent)
+    : contractDiscountEquivalentPercent(appliedDiscountAmount, discountBaseSubtotal);
   const deliverableProductEntries = useMemo(
     () => getDeliverableProductEntries(wizardData.products),
     [wizardData.products]
@@ -961,6 +976,8 @@ export default function CreateContractWizard({
       })
       .catch((error) => {
         console.error('Failed to load discount ranges:', error);
+      }).finally(() => {
+        if (isMounted) setDiscountRangesLoaded(true);
       });
     return () => {
       isMounted = false;
@@ -968,15 +985,24 @@ export default function CreateContractWizard({
   }, []);
 
   useEffect(() => {
-    if (discountPercentInput > maxDiscountPercent) {
-      setDiscountPercentInput(maxDiscountPercent);
+    if (discountRangesLoaded && !isContractEditMode && discountAmountInput > maxDiscountAmount) {
+      setDiscountAmountInput(maxDiscountAmount);
     }
-  }, [discountPercentInput, maxDiscountPercent]);
+  }, [discountAmountInput, discountRangesLoaded, isContractEditMode, maxDiscountAmount]);
 
   useEffect(() => {
-    const discountSnapshot = appliedDiscountPercent > 0 && matchingDiscountRange
+    if (discountRangesLoaded && !isContractEditMode && discountPercentInput > maxDiscountPercent) {
+      setDiscountPercentInput(maxDiscountPercent);
+    }
+  }, [discountPercentInput, discountRangesLoaded, isContractEditMode, maxDiscountPercent]);
+
+  useEffect(() => {
+    if (!discountRangesLoaded || (isContractEditMode && !discountTouched)) return;
+    const discountSnapshot = appliedDiscountAmount > 0 && matchingDiscountRange
       ? {
           enabled: true,
+          inputMode: 'AMOUNT_TOMAN' as const,
+          entryMode: discountEntryMode,
           rangeId: matchingDiscountRange.id,
           rangeMinAmount: matchingDiscountRange.minAmount,
           rangeMaxAmount: matchingDiscountRange.maxAmount,
@@ -1001,6 +1027,10 @@ export default function CreateContractWizard({
     appliedDiscountAmount,
     appliedDiscountPercent,
     discountBaseSubtotal,
+    discountRangesLoaded,
+    discountTouched,
+    discountEntryMode,
+    isContractEditMode,
     matchingDiscountRange,
     maxDiscountPercent,
     payableContractTotal,
@@ -1938,6 +1968,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         contractStatus: initialContractStatus || initialWizardData.signature?.contractStatus || null
       }
     }));
+    setDiscountAmountInput(Math.round(toFiniteNumber(initialWizardData.discount?.amount)));
+    setDiscountPercentInput(toFiniteNumber(initialWizardData.discount?.percent));
+    setDiscountEntryMode(initialWizardData.discount?.entryMode
+      ?? (initialWizardData.discount && !initialWizardData.discount.inputMode ? 'PERCENT' : 'AMOUNT_TOMAN'));
+    setDiscountTouched(false);
     setCurrentStep(1);
     setStateRestored(true);
     setAutosaveHydrated(true);
@@ -2326,6 +2361,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   // Initialize payment handlers hook
   const paymentHandlers = usePaymentHandlers({
+    existingContract: isContractEditMode,
     wizardData,
     updateWizardData,
     setErrors,
@@ -2482,6 +2518,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const applyContractAutosaveDraft = useCallback((draft: ReturnType<typeof createContractAutosaveDraft>) => {
     setCurrentStep(clampContractDraftStep(draft.currentStep, WIZARD_STEPS.length));
     const normalizedWizardData = normalizeWizardFinishingProducts(draft.wizardData);
+    setDiscountAmountInput(Math.round(toFiniteNumber(normalizedWizardData.discount?.amount)));
+    setDiscountPercentInput(toFiniteNumber(normalizedWizardData.discount?.percent));
+    setDiscountEntryMode(normalizedWizardData.discount?.entryMode
+      ?? (normalizedWizardData.discount && !normalizedWizardData.discount.inputMode ? 'PERCENT' : 'AMOUNT_TOMAN'));
+    setDiscountTouched(true);
     const identityNormalization = normalizeContractProductRowIdentities(
       normalizedWizardData.products
     );
@@ -3017,6 +3058,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             // Use the saved step instead of URL step parameter
             setCurrentStep(normalizeWizardStep(savedStep));
             setWizardData(normalizeWizardFinishingProducts(savedWizardData));
+            setDiscountAmountInput(Math.round(toFiniteNumber(savedWizardData.discount?.amount)));
+            setDiscountPercentInput(toFiniteNumber(savedWizardData.discount?.percent));
+            setDiscountEntryMode(savedWizardData.discount?.entryMode
+              ?? (savedWizardData.discount && !savedWizardData.discount.inputMode ? 'PERCENT' : 'AMOUNT_TOMAN'));
+            setDiscountTouched(true);
             setStateRestored(true);
             restorationAttempted.current = true;
 
@@ -5731,6 +5777,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               newErrors.paymentMethod = `نوع پرداخت برای پرداخت ${index + 1} الزامی است`;
               return;
             }
+            if (!isContractEditMode && method === 'CUSTOMER_BALANCE') {
+              newErrors.paymentMethod = `استفاده از باقی مانده مشتری برای پرداخت ${index + 1} غیرفعال است؛ روش پرداخت را اصلاح کنید.`;
+              return;
+            }
             if (!payment.amount || payment.amount <= 0) {
               newErrors.paymentMethod = `مبلغ پرداخت ${index + 1} باید بیشتر از صفر باشد`;
               return;
@@ -5777,8 +5827,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
           if (remainingPaymentAmount > 0.01) {
             newErrors.paymentMethod = `مجموع پرداخت‌ها ${formatPrice(paymentTotal, wizardData.payment.currency)} است و ${formatPrice(remainingPaymentAmount, wizardData.payment.currency)} از مبلغ قرارداد ${formatPrice(payableTotal, wizardData.payment.currency)} کمتر است؛ مبلغ پرداخت‌ها را به اندازه مانده افزایش دهید.`;
-          } else if (extraPaymentAmount > 0.01 && !wizardData.payment.extraPaymentReason) {
-            newErrors.paymentMethod = `مجموع پرداخت‌ها ${formatPrice(extraPaymentAmount, wizardData.payment.currency)} بیشتر از مبلغ قرارداد است؛ دلیل مبلغ اضافه را انتخاب کنید.`;
+          } else if (extraPaymentAmount > 0.01 && (isContractEditMode ? !wizardData.payment.extraPaymentReason : true)) {
+            newErrors.paymentMethod = isContractEditMode
+              ? `مجموع پرداخت‌ها ${formatPrice(extraPaymentAmount, wizardData.payment.currency)} بیشتر از مبلغ قرارداد است؛ دلیل مبلغ اضافه را انتخاب کنید.`
+              : `مجموع پرداخت‌ها ${formatPrice(extraPaymentAmount, wizardData.payment.currency)} بیشتر از مبلغ قرارداد است؛ مبلغ پرداخت‌ها را اصلاح کنید.`;
           }
         }
         break;
@@ -5892,6 +5944,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       case 6: // Payment Method
         return (
           <Step7PaymentMethod
+            existingContract={isContractEditMode}
             wizardData={wizardData}
             updateWizardData={updateWizardData}
             errors={errors}
@@ -5899,9 +5952,32 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             productsTotal={grossContractTotal}
             discountPercent={appliedDiscountPercent}
             maxDiscountPercent={maxDiscountPercent}
+            maxDiscountAmount={maxDiscountAmount}
             discountAmount={appliedDiscountAmount}
+            discountEntryMode={discountEntryMode}
+            discountPercentInput={isContractEditMode && !discountTouched
+              ? toFiniteNumber(wizardData.discount?.percent)
+              : discountPercentInput}
             hasMatchingDiscountRange={!!matchingDiscountRange}
-            onDiscountPercentChange={setDiscountPercentInput}
+            onDiscountAmountChange={value => {
+              setDiscountTouched(true);
+              const amount = clampContractDiscountToman(value, maxDiscountAmount);
+              setDiscountAmountInput(amount);
+              setDiscountPercentInput(contractDiscountDisplayPercent(amount, discountBaseSubtotal));
+            }}
+            onDiscountPercentChange={value => {
+              setDiscountTouched(true);
+              const percent = Math.min(Math.max(value, 0), maxDiscountPercent);
+              setDiscountPercentInput(percent);
+              setDiscountAmountInput(contractDiscountTomanFromPercent(discountBaseSubtotal, percent, maxDiscountAmount));
+            }}
+            onDiscountEntryModeChange={mode => {
+              if (mode === discountEntryMode) return;
+              setDiscountTouched(true);
+              setDiscountAmountInput(clampContractDiscountToman(Math.round(appliedDiscountAmount), maxDiscountAmount));
+              setDiscountPercentInput(contractDiscountDisplayPercent(appliedDiscountAmount, discountBaseSubtotal));
+              setDiscountEntryMode(mode);
+            }}
             showPaymentEntryModal={paymentHandlers.showPaymentEntryModal}
             setShowPaymentEntryModal={paymentHandlers.setShowPaymentEntryModal}
             onAddPaymentEntry={paymentHandlers.handleAddPaymentEntry}
@@ -10960,6 +11036,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
         {paymentHandlers.showPaymentEntryModal && (
           <PaymentEntryModal
+            existingContract={isContractEditMode}
             isOpen={paymentHandlers.showPaymentEntryModal}
             onClose={paymentHandlers.handleClosePaymentEntryModal}
             form={paymentHandlers.paymentEntryForm}

@@ -437,6 +437,9 @@ const validateContractDiscountEvidence = (
   const discountPercent = money(discount.percent, 'Contract discount percent');
   const contractDiscountAmount = money(discount.amount, 'Contract discount amount');
   const discountValue = new Prisma.Decimal(contractDiscountAmount);
+  if (discount.inputMode !== undefined && discount.inputMode !== 'AMOUNT_TOMAN') {
+    throw new ApprovedPricingEvidenceError('Contract discount input mode is invalid');
+  }
   if (discount.enabled !== discountValue.gt(0)) throw new ApprovedPricingEvidenceError('Contract discount enabled flag conflicts with amount');
   if (!discountValue.gte(0)) throw new ApprovedPricingEvidenceError('Contract discount amount cannot be negative');
   if (!discount.enabled && (new Prisma.Decimal(discountPercent).gt(0) || new Prisma.Decimal(discountBase).lt(0))) {
@@ -449,7 +452,13 @@ const validateContractDiscountEvidence = (
     const maximumPercent = new Prisma.Decimal(money(discount.maxDiscountPercent, 'Contract maximum discount percent'));
     const appliedPercent = new Prisma.Decimal(discountPercent);
     if (appliedPercent.lte(0) || appliedPercent.gt(maximumPercent) || maximumPercent.gt(100)) throw new ApprovedPricingEvidenceError('Contract discount percent conflicts with approved range');
-    if (!new Prisma.Decimal(discountBase).mul(appliedPercent).div(100).eq(discountValue)) {
+    const percentDerivedAmount = new Prisma.Decimal(discountBase).mul(appliedPercent).div(100);
+    if (discount.inputMode === 'AMOUNT_TOMAN') {
+      if (!discountValue.isInteger() || discountValue.gt(new Prisma.Decimal(discountBase).mul(maximumPercent).div(100).floor()) ||
+          !percentDerivedAmount.toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP).eq(discountValue)) {
+        throw new ApprovedPricingEvidenceError('Contract discount toman amount conflicts with approved range or equivalent percent');
+      }
+    } else if (!percentDerivedAmount.eq(discountValue)) {
       throw new ApprovedPricingEvidenceError('Contract discount amount conflicts with base subtotal and percent');
     }
   }
@@ -591,7 +600,12 @@ export const buildApprovedPricingVersion = (
     throw new ApprovedPricingEvidenceError('Canonical graph total conflicts with ordered all-in rows');
   }
   const selectedDiscountValue = discount.enabled
-    ? selectedEligibleBase.mul(new Prisma.Decimal(discountPercent)).div(100)
+    ? discount.inputMode === 'AMOUNT_TOMAN'
+      ? selectedEligibleBase.eq(contractEligibleBase)
+        ? discountValue
+        : selectedEligibleBase.mul(discountValue).div(contractEligibleBase)
+          .toDecimalPlaces(12, Prisma.Decimal.ROUND_HALF_UP)
+      : selectedEligibleBase.mul(new Prisma.Decimal(discountPercent)).div(100)
     : new Prisma.Decimal(0);
   const discountAmount = money(selectedDiscountValue, 'Approved pricing discount amount');
   const netAmount = money(gross.minus(selectedDiscountValue), 'Approved pricing net amount');

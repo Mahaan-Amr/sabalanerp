@@ -1153,6 +1153,8 @@ test('Contract Creation keeps early and consequential steps accessible and respo
   await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=7');
 
   const consequentialWorkspace = page.locator('main.sds-workspace');
+  await expect(consequentialWorkspace.getByText('مبلغ تخفیف (تومان)')).toBeVisible();
+  await expect(consequentialWorkspace.getByRole('button', { name: /افزودن پرداخت/ })).toBeDisabled();
   await expect(consequentialWorkspace.locator('button[aria-current="step"]')).toHaveCount(1);
   const consequentialFields = consequentialWorkspace.locator(
     'input:not([type="checkbox"]), select, textarea'
@@ -1165,6 +1167,52 @@ test('Contract Creation keeps early and consequential steps accessible and respo
     const rect = element.getBoundingClientRect();
     return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
   })).toBe(true);
+});
+
+test('Contract payment converts the active percentage range to a toman cap', async ({ page }) => {
+  await login(page);
+  await page.route('**/api/sales/discount-ranges**', async route => route.fulfill({ json: {
+    success: true,
+    data: [{ id: 'range-4-5', minAmount: 50_000_000, maxAmount: 100_000_000,
+      maxDiscountPercent: 4.5, isActive: true }]
+  } }));
+  await page.evaluate(() => {
+    localStorage.setItem('contractWizardState', JSON.stringify({
+      currentStep: 7,
+      wizardData: {
+        contractKind: 'standard', contractDate: '1405/05/05', contractNumber: '',
+        creatorSequenceNumber: null, customerId: '', customer: null, projectId: '', project: null,
+        selectedProductTypeForAddition: null,
+        products: [{ rowId: 'discount-stone', productId: 'discount-stone', product: {},
+          productType: 'slab', stoneCode: 'TEST', stoneName: 'سنگ تخفیف آزمایشی',
+          quantity: 1, squareMeters: 1, pricePerSquareMeter: 87_596_923,
+          originalTotalPrice: 87_596_923, totalPrice: 101_956_923,
+          currency: 'تومان', lengthUnit: 'm', widthUnit: 'cm',
+          isMandatory: false, mandatoryPercentage: 0, meta: { isLayer: false },
+          remainingStones: [], cutDetails: [], appliedSubServices: [] }],
+        serviceRows: [], deliveries: [],
+        payment: { payments: [], currency: 'تومان', totalContractAmount: 0 },
+        discount: null, signature: null
+      }
+    }));
+  });
+  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=7');
+
+  const workspace = page.locator('main.sds-workspace');
+  await expect(workspace.getByText('مبلغ تخفیف (تومان)')).toBeVisible();
+  await expect(workspace.getByText(/۳.۹۴۱.۸۶۱ تومان/)).toBeVisible();
+  const amount = workspace.getByRole('textbox', { name: 'مبلغ تخفیف (تومان)' });
+  await amount.fill('3000000');
+  await expect(workspace.getByText(/تخفیف اعمال‌شده/)).toContainText(/۳.۰۰۰.۰۰۰ تومان/);
+  await workspace.getByRole('button', { name: 'درصد', exact: true }).click();
+  await expect(workspace.getByRole('textbox', { name: 'درصد تخفیف' })).toHaveValue('3.42');
+  await expect(workspace.getByText(/تخفیف اعمال‌شده/)).toContainText(/۳.۰۰۰.۰۰۰ تومان/);
+  await workspace.getByRole('textbox', { name: 'درصد تخفیف' }).fill('4.5');
+  await expect(workspace.getByText(/تخفیف اعمال‌شده/)).toContainText(/۳.۹۴۱.۸۶۱ تومان/);
+  await workspace.getByRole('button', { name: 'تومان', exact: true }).click();
+  await expect(workspace.getByRole('textbox', { name: 'مبلغ تخفیف (تومان)' })).toHaveValue(/3,941,861|۳٬۹۴۱٬۸۶۱/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(workspace.getByRole('button', { name: 'درصد', exact: true })).toBeVisible();
 });
 
 test('Contract submission preserves input across an invalid response, succeeds on retry, and exits without resubmitting', async ({ page }) => {

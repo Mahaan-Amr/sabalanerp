@@ -24,6 +24,7 @@ interface PaymentEntryModalProps {
   } | null;
   onContinueNationalCodeConflict?: () => void;
   disabledAmount?: boolean;
+  existingContract?: boolean;
 }
 
 export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
@@ -40,6 +41,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   nationalCodeConflict = null,
   onContinueNationalCodeConflict,
   disabledAmount = false,
+  existingContract = false,
 }) => {
   if (!isOpen) return null;
 
@@ -63,6 +65,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
         <div className="mx-auto w-full max-w-3xl px-0 py-0">
           <div className="space-y-3">
             <ContractPaymentInstallmentFields method={method} amount={String(form.amount ?? '')}
+              existingContract={existingContract}
               date={form.paymentDate ?? ''}
               amountLabel={isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : isCheck ? 'مبلغ چک (تومان)' : 'مبلغ (تومان)'}
               dateLabel={isCustomerBalance ? 'تاریخ استفاده از مانده' : isCheck ? 'تاریخ سررسید چک' : 'تاریخ پرداخت'}

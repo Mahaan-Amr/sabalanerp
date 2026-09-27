@@ -51,12 +51,13 @@ export const knownContractUpdateBusinessFailure = (message: unknown): {
   status: number;
   body: { success: false; code: string; error: string };
 } | null => message === 'Signed contract commercial evidence can only change through an approved formal correction'
+  || message === 'Existing accounting financial record requires an approved formal correction'
   ? {
       status: 400,
       body: {
         success: false,
         code: 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED',
-        error: 'این قرارداد امضا یا چاپ شده است و تغییر مبلغ یا تخفیف آن بدون اصلاح رسمی تأییدشده مجاز نیست.',
+        error: 'این قرارداد امضا یا چاپ شده یا رکورد مالی دارد؛ تغییر آن باید از مسیر اصلاح رسمی تأییدشده انجام شود.',
       },
     }
   : null;

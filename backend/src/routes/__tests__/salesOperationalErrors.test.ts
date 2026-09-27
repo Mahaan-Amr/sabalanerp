@@ -72,8 +72,11 @@ test('a signed contract edit requires Accounting correction instead of an unexpe
     body: {
       success: false,
       code: 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED',
-      error: 'این قرارداد امضا یا چاپ شده است و تغییر مبلغ یا تخفیف آن بدون اصلاح رسمی تأییدشده مجاز نیست.',
+      error: 'این قرارداد امضا یا چاپ شده یا رکورد مالی دارد؛ تغییر آن باید از مسیر اصلاح رسمی تأییدشده انجام شود.',
     },
   });
+  assert.equal(knownContractUpdateBusinessFailure(
+    'Existing accounting financial record requires an approved formal correction',
+  )?.body.code, 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED');
   assert.equal(knownContractUpdateBusinessFailure('database unavailable'), null);
 });

@@ -504,7 +504,7 @@ const isReceivedPaymentStatus = (status: PaymentAccountingStatus) => ([
   PaymentAccountingStatus.RECONCILED
 ] as PaymentAccountingStatus[]).includes(status);
 
-const buildCorrectionReplacementWorkflow = (
+export const buildCorrectionReplacementWorkflow = (
   contractAmount: Prisma.Decimal,
   financialRecords: any[],
   receivables: any[],
@@ -526,16 +526,47 @@ const buildCorrectionReplacementWorkflow = (
         record.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
         record.financiallyApprovedAt &&
         !isReplacementForCorrection(record)
-      ));
+      )) ?? financialRecords.find((record) =>
+        record.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
+        record.status !== AccountingRecordStatus.VOIDED
+      );
 
   if (!sourceRecord) {
+    const successor = correction.recordId ? financialRecords.find((record) =>
+      record.id !== correction.recordId &&
+      record.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
+      record.status !== AccountingRecordStatus.VOIDED &&
+      (!correction.updatedAt || new Date(record.createdAt).getTime() > new Date(correction.updatedAt).getTime())
+    ) : null;
+    const successorMatches = Boolean(successor && amountsEqual(toDecimal(successor.amount), contractAmount));
+    const needsSuccessor = Boolean(correction.recordId);
     return {
       correctionRequestId: correction.id,
-      status: 'NO_SOURCE_RECORD',
-      amountChanged: false,
+      status: needsSuccessor ? 'DRAFT_SOURCE_RETIRED' : 'NO_SOURCE_RECORD',
+      amountChanged: needsSuccessor,
       correctedAmount: decimalToString(contractAmount),
+      replacementRecordId: successor?.id ?? null,
+      replacementRecordStatus: successor?.status ?? null,
+      nextStep: !needsSuccessor ? 'REVIEW_NO_AMOUNT_IMPACT'
+        : !successor ? 'CREATE_NEW_DRAFT' : successorMatches ? 'READY_TO_RESOLVE' : 'REPLACE_STALE_DRAFT',
+      canResolve: !needsSuccessor || successorMatches,
+      blockingReasons: needsSuccessor && !successorMatches
+        ? ['پیش‌نویس تازه با مبلغ اصلاح‌شدهٔ قرارداد لازم است.'] : []
+    };
+  }
+
+  if (!sourceRecord.financiallyApprovedAt) {
+    return {
+      correctionRequestId: correction.id,
+      sourceRecordId: sourceRecord.id,
+      sourceRecordStatus: sourceRecord.status,
+      status: 'DRAFT_SOURCE_MUST_BE_RECREATED',
+      amountChanged: !amountsEqual(toDecimal(sourceRecord.amount), contractAmount),
+      oldAmount: decimalToString(sourceRecord.amount),
+      correctedAmount: decimalToString(contractAmount),
+      nextStep: 'DELETE_DRAFT_SOURCE',
       canResolve: false,
-      blockingReasons: ['No approved source invoice was found for this correction']
+      blockingReasons: ['پیش‌نویس قبلی باید حذف و از قرارداد اصلاح‌شده دوباره ایجاد شود.'],
     };
   }
 
@@ -562,16 +593,16 @@ const buildCorrectionReplacementWorkflow = (
   const blockingReasons: string[] = [];
   if (amountChanged) {
     if (sourceRecord.status !== AccountingRecordStatus.VOIDED) {
-      blockingReasons.push('Old approved invoice must be voided or reversed first');
+      blockingReasons.push('رکورد مالی تأییدشدهٔ قبلی باید ابتدا ابطال یا برگشت داده شود.');
     }
     if (sourceRecord.status === AccountingRecordStatus.VOIDED && !replacementRecord) {
-      blockingReasons.push('Replacement invoice candidate must be created');
+      blockingReasons.push('پیش‌نویس رکورد مالی جایگزین باید ایجاد شود.');
     }
     if (replacementRecord && !replacementRecord.financiallyApprovedAt) {
-      blockingReasons.push('Replacement invoice candidate must be financially approved');
+      blockingReasons.push('رکورد مالی جایگزین باید تأیید مالی شود.');
     }
     if ((hasReceivedPayments || hasSubmittedTax) && !downstreamEvidencePresent) {
-      blockingReasons.push('Downstream payment or tax correction evidence is required');
+      blockingReasons.push('شواهد اصلاح دریافت یا مالیات وابسته لازم است.');
     }
   }
 
@@ -608,6 +639,38 @@ const buildCorrectionReplacementWorkflow = (
     openReceivableCount: openReceivables.length,
     blockingReasons
   };
+};
+
+/** Keep the Accounting duty decision behind the same financial workflow shown on the contract page. */
+export const assertCorrectionFinancialWorkflowReady = async (
+  database: Prisma.TransactionClient,
+  correctionId: string,
+) => {
+  const correction = await database.accountingCorrectionRequest.findUnique({
+    where: { id: correctionId },
+    select: { id: true, contractId: true, status: true, recordId: true, updatedAt: true },
+  });
+  if (!correction?.contractId || correction.status !== CorrectionRequestStatus.SALES_EDITED) {
+    throw new Error('CORRECTION_NOT_READY_FOR_VERIFICATION');
+  }
+  const contract = await database.salesContract.findUnique({
+    where: { id: correction.contractId }, select: { totalAmount: true, currency: true },
+  });
+  if (!contract) throw new Error('Contract not found');
+  const [financialRecords, receivables, paymentEvents, taxRecords] = await Promise.all([
+    database.accountingFinancialRecord.findMany({ where: { contractId: correction.contractId }, orderBy: { createdAt: 'desc' } }),
+    database.accountingReceivable.findMany({ where: { contractId: correction.contractId } }),
+    database.accountingPaymentStatus.findMany({ where: { contractId: correction.contractId } }),
+    database.accountingTaxRecord.findMany({ where: { contractId: correction.contractId } }),
+  ]);
+  const workflow = buildCorrectionReplacementWorkflow(
+    toRialDecimal(getContractAmount(contract), contract.currency),
+    financialRecords, receivables, paymentEvents, taxRecords, [correction],
+  );
+  if (!workflow?.canResolve) {
+    throw new Error(`CORRECTION_FINANCIAL_WORKFLOW_INCOMPLETE: ${workflow?.blockingReasons.join('; ') || 'unknown state'}`);
+  }
+  return workflow;
 };
 
 const getOrCreateCurrentPeriod = async () => {

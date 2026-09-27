@@ -142,3 +142,13 @@ export const getContractGrossPayableTotal = (
   standaloneServiceRows: ContractServiceRow[] = []
 ): number => getContractProductsPayableTotal(products) +
   sumNumericValues(standaloneServiceRows, (row) => row.totalPrice);
+
+export const getContractPayableTotal = (
+  products: ContractProduct[],
+  standaloneServiceRows: ContractServiceRow[] = [],
+  discountAmount = 0
+): number => Math.max(
+  getContractGrossPayableTotal(products, standaloneServiceRows) -
+    Math.max(toFiniteNumber(discountAmount), 0),
+  0
+);

@@ -80,13 +80,20 @@ const run = async () => {
       };
     });
     contractData.discount = discount;
+    const amount = discount && typeof discount === 'object' && !Array.isArray(discount)
+      ? Number((discount as { amount?: unknown }).amount || 0) : 0;
+    const expectedTotal = source.totalAmount == null ? undefined
+      : Number(source.totalAmount.toString()) - (Number.isFinite(amount) ? amount : 0);
+    if (contractData.payment && expectedTotal !== undefined) {
+      contractData.payment.totalContractAmount = expectedTotal;
+    }
     return createContract({
       title: `${source.title} QA ${label}`,
       titlePersian: `${source.titlePersian} آزمون`,
       customerId: source.customerId,
       departmentId: source.departmentId,
       content: source.content,
-      totalAmount: source.totalAmount == null ? undefined : Number(source.totalAmount.toString()),
+      totalAmount: expectedTotal,
       currency: source.currency,
       contractData,
       _relations: {

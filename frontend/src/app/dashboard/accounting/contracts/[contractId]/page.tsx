@@ -159,7 +159,7 @@ export default function AccountingContractDetailPage(props: {
   const [data, setData] = useState<any>(null);
   const [detailSection, setDetailSection] = useState<
     "summary" | "items" | "financial" | "collections" | "compliance"
-  >("summary");
+  >(searchParams.get("section") === "financial" ? "financial" : "summary");
   const [lifecycle, setLifecycle] = useState<any>(null);
   const [userRole, setUserRole] = useState<string>("USER");
   const [lifecycleTarget, setLifecycleTarget] = useState<{
@@ -1160,7 +1160,26 @@ export default function AccountingContractDetailPage(props: {
                       ]}
                     />
 
-                    {!replacementWorkflow.amountChanged ? (
+                    {replacementWorkflow.status?.startsWith("DRAFT_SOURCE") ? (
+                      <div className="space-y-3">
+                        <ErpInlineState
+                          kind="stale"
+                          title={replacementWorkflow.status === "DRAFT_SOURCE_MUST_BE_RECREATED"
+                            ? "پیش‌نویس مالی قبلی را از بخش رکوردهای مالی حذف کنید؛ سپس از مبلغ اصلاح‌شده پیش‌نویس تازه بسازید."
+                            : "پیش‌نویس قبلی حذف شد. از بخش اقدام سریع، پیش‌نویس تازه با مبلغ اصلاح‌شده بسازید."}
+                        />
+                        {replacementWorkflow.replacementRecordId && (
+                          <ErpInlineState kind="success" title="پیش‌نویس تازه با مبلغ اصلاح‌شده ثبت شده است." />
+                        )}
+                        <ErpButton
+                          label="بستن اصلاح پس از بررسی پیش‌نویس تازه"
+                          icon={FaCheckCircle}
+                          tone="success"
+                          disabled={!replacementWorkflow.canResolve || actionLoading}
+                          onClick={() => setResolveTarget({ id: replacementWorkflow.correctionRequestId })}
+                        />
+                      </div>
+                    ) : !replacementWorkflow.amountChanged ? (
                       <div className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
                         مبلغ تایید شده با مبلغ اصلاح‌شده برابر است. پس از بررسی
                         مدیریتی، اصلاح را با یادداشت بستن ثبت کنید.

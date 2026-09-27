@@ -1,4 +1,4 @@
-import { Prisma, type UserRole } from '@prisma/client';
+import { AccountingRecordStatus, FinancialRecordKind, Prisma, type UserRole } from '@prisma/client';
 import type { CrossWorkspaceDutySourceAdapter } from './types';
 import { addTehranWorkingDays } from '../tehranBusinessCalendar';
 import { resolveNarrowFeatureAccess } from '../narrowFeatureAccess';
@@ -6,6 +6,7 @@ import { getEffectiveUserAccess } from '../effectiveAccessService';
 import { lockCrossWorkspaceDuty } from '../crossWorkspaceDutyLock';
 import { resolveWorkspaceDutyAuthority } from '../crossWorkspaceDutyAuthority';
 import { publishNotificationEvent } from '../notificationService';
+import { assertCorrectionFinancialWorkflowReady } from '../accountingService';
 
 const ACCOUNTING_CORRECTION_FEATURES = Object.freeze({
   PROCESS: ['accounting_corrections_manage'],
@@ -708,6 +709,7 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   } else if (duty.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION') {
     await assertAccountingActor(database, input.actorUserId, ACCOUNTING_CORRECTION_FEATURES.VERIFY, now);
     if (input.actionCode === 'VERIFY') {
+      await assertCorrectionFinancialWorkflowReady(database, correction.id);
       nextStatus = 'RESOLVED';
       nextAction = null;
       nextAssignee = null;
@@ -889,10 +891,19 @@ export const completeSalesCorrectionEditDuty = async (
     policyVersion: input.policyVersion, reason: input.note,
     afterJson: asJson({ status: 'COMPLETED', actionCode: 'SALES_EDIT_SAVED' }),
   } });
+  const financialCandidates = correction.recordId ? [] : await database.accountingFinancialRecord.findMany({
+    where: { contractId: input.contractId, kind: FinancialRecordKind.INVOICE_CANDIDATE },
+    select: { id: true, status: true, financiallyApprovedAt: true }, orderBy: { createdAt: 'desc' },
+  });
+  const sourceRecordId = correction.recordId ??
+    (financialCandidates.find(record => record.financiallyApprovedAt && record.status !== AccountingRecordStatus.VOIDED)
+      ?? financialCandidates.find(record => record.status !== AccountingRecordStatus.VOIDED)
+      ?? financialCandidates.find(record => record.financiallyApprovedAt))?.id ?? null;
   const updatedCorrection = await database.accountingCorrectionRequest.update({
     where: { id: correction.id },
     data: {
       status: 'SALES_EDITED', assignedToUserId: verifierUserId,
+      recordId: sourceRecordId,
       dutySourceVersion: { increment: 1 },
       resolutionNote: [correction.resolutionNote, input.note].filter(Boolean).join('\n') || null,
     },
@@ -980,9 +991,13 @@ export const salesContractCorrectionDutyAdapter = {
     if (!contract) throw new Error('DUTY_SOURCE_CHANGED');
     return {
       title: `اصلاح قرارداد ${contract.contractNumber}`,
-      description: correction.accountantNote,
+      description: input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
+        ? `${correction.accountantNote}\nمبلغ اصلاح‌شده و رکورد مالی قبلی را در قرارداد بررسی کنید؛ در صورت نیاز ابطال و جایگزینی را پیش از تأیید تکمیل کنید.`
+        : correction.accountantNote,
       ...(input.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION'
         ? { destinationHref: `/dashboard/sales/contracts/${correction.contractId}/edit` }
+        : input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
+          ? { destinationHref: `/dashboard/accounting/contracts/${correction.contractId}?section=financial` }
         : {}),
       sourceIsCurrent: input.sourceVersion === correction.dutySourceVersion,
     };

@@ -29,6 +29,7 @@ import {
 import { sanitizeContractDataCustomerSnapshot } from './contractSnapshotBoundary';
 import { assertContractQuantityEvidenceReadyForFinalization } from './contractQuantityEvidenceGuard';
 import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
+import { assertContractPayableTotal } from './contractPayableTotal';
 import { provisionApprovedSalesContractCustomer } from './accountingCustomerTreasuryPrisma';
 import {
   validateContractPartyChangeCompleteness,
@@ -392,6 +393,11 @@ const writeCanonicalGraphSnapshot = async (
   if (!plan.ok) {
     throw new ContractProductGraphValidationError(plan.conflicts, input.contractData);
   }
+  assertContractPayableTotal(
+    plan.reconciliation.canonicalTotalAmountToman,
+    input.contractData,
+    input.totalAmount,
+  );
   const graph = toJsonValue(JSON.parse(serializeCanonicalProductGraph(plan.graph)));
   await tx.salesContractProductGraphState.upsert({
     where: { contractId: input.contractId },
@@ -969,6 +975,9 @@ export async function updateContract(
     },
     select: { id: true }
   });
+  const existingFinancialRecord = await client.accountingFinancialRecord.findFirst({
+    where: { contractId }, select: { id: true },
+  });
   const approvedSalesCorrection = await getApprovedSalesCorrection(contractId, client);
 
   if ((contract.status === 'SIGNED' || contract.status === 'PRINTED') && !approvedSalesCorrection) {
@@ -977,6 +986,9 @@ export async function updateContract(
 
   if (financiallyApprovedRecord && !approvedSalesCorrection) {
     throw new Error('Contract cannot be modified after accounting financial approval');
+  }
+  if (existingFinancialRecord && !approvedSalesCorrection) {
+    throw new Error('Existing accounting financial record requires an approved formal correction');
   }
 
   const relations = data._relations;
@@ -1004,11 +1016,17 @@ export async function updateContract(
       where: { contractId, financiallyApprovedAt: { not: null } },
       select: { id: true },
     });
+    const transactionFinancialRecord = await tx.accountingFinancialRecord.findFirst({
+      where: { contractId }, select: { id: true },
+    });
     if ((transactionContract.status === 'SIGNED' || transactionContract.status === 'PRINTED') && !transactionCorrection) {
       throw new Error('Signed contract commercial evidence can only change through an approved formal correction');
     }
     if (transactionFinancialApproval && !transactionCorrection) {
       throw new Error('Contract cannot be modified after accounting financial approval');
+    }
+    if (transactionFinancialRecord && !transactionCorrection) {
+      throw new Error('Existing accounting financial record requires an approved formal correction');
     }
 
     const nextCustomerId = data.customerId || transactionContract.customerId;

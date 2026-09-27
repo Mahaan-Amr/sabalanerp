@@ -352,10 +352,41 @@ test('financial statements preserve multiple mapping rows and contra signs', () 
     mapping: { id: 'mapping-1', effectiveFrom: new Date('2026-01-01'), rows: [
       { accountId: 'account-1', statement: 'FINANCIAL_POSITION', sectionCode: 'دارایی', signMultiplier: 1 },
       { accountId: 'account-1', statement: 'NOTES', sectionCode: 'یادداشت-یک', signMultiplier: -1 },
+      { accountId: 'account-1', statement: 'CASH_FLOW_DIRECT', sectionCode: 'نقد عملیاتی', cashFlowClass: 'OPERATING' },
     ] },
     lines: [{ id: 'line-1', voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED', accountId: 'account-1', accountCode: '101', accountTitlePersian: 'صندوق', accountPath: { group: 'دارایی', general: 'نقد', subsidiary: 'صندوق' }, debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} }],
   });
   assert.equal(dataset.rows.length, 2);
   assert.equal(dataset.rows.find((row) => row.key.startsWith('FINANCIAL_POSITION'))?.amounts.endingDebit, 100n);
   assert.equal(dataset.rows.find((row) => row.key.startsWith('NOTES'))?.amounts.endingCredit, 100n);
+});
+
+test('an official financial statement rejects posted balances without a statement mapping', () => {
+  assert.throws(() => buildOfficialAccountingDataset({
+    request: { reportKind: 'FINANCIAL_STATEMENT', bookId: 'book-1', fiscalYearId: 'year-1', from: new Date('2026-09-01'), to: new Date('2026-09-30'), cutoffAt: new Date('2026-09-30T23:59:59Z'), mappingVersionId: 'mapping-1' },
+    mapping: { id: 'mapping-1', effectiveFrom: new Date('2026-01-01'), rows: [] },
+    lines: [{ id: 'unmapped-line', voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED', accountId: 'account-1', accountCode: '101', accountTitlePersian: 'صندوق', accountPath: { group: 'دارایی', general: 'نقد', subsidiary: 'صندوق' }, debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} }],
+  }), /نگاشت.*101/);
+});
+
+test('a cash-flow-only mapping cannot satisfy a financial statement', () => {
+  assert.throws(() => buildOfficialAccountingDataset({
+    request: { reportKind: 'FINANCIAL_STATEMENT', bookId: 'book-1', fiscalYearId: 'year-1', from: new Date('2026-09-01'), to: new Date('2026-09-30'), cutoffAt: new Date('2026-09-30T23:59:59Z'), mappingVersionId: 'mapping-1' },
+    mapping: { id: 'mapping-1', effectiveFrom: new Date('2026-01-01'), rows: [{ accountId: 'account-1', statement: 'CASH_FLOW_DIRECT', sectionCode: 'OPERATING', cashFlowClass: 'OPERATING' }] },
+    lines: [{ id: 'line-1', voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED', accountId: 'account-1', accountCode: '101', accountTitlePersian: 'صندوق', accountPath: { group: 'دارایی', general: 'نقد', subsidiary: 'صندوق' }, debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} }],
+  }), /نگاشت.*101/);
+});
+
+test('detail trial balance separates stable floating-detail identities under the same subsidiary account', () => {
+  const base = { voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED' as const, accountId: 'receivable', accountCode: '1101', accountTitlePersian: 'دریافتنی', debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} };
+  const dataset = buildOfficialAccountingDataset({
+    request: { reportKind: 'TRIAL_BALANCE', bookId: 'book-1', fiscalYearId: 'year-1', from: new Date('2026-09-01'), to: new Date('2026-09-30'), cutoffAt: new Date('2026-09-30T23:59:59Z'), level: 'DETAIL' },
+    mapping: { id: 'بدون-نگاشت', effectiveFrom: new Date('2026-01-01'), rows: [] },
+    lines: [
+      { ...base, id: 'line-1', accountPath: { group: 'دارایی', general: 'جاری', subsidiary: 'دریافتنی', detailIdentity: 'party-1', detail: 'مشتری اول' } },
+      { ...base, id: 'line-2', accountPath: { group: 'دارایی', general: 'جاری', subsidiary: 'دریافتنی', detailIdentity: 'party-2', detail: 'مشتری دوم' } },
+    ],
+  });
+  assert.deepEqual(dataset.rows.map((row) => row.titlePersian), ['مشتری اول', 'مشتری دوم']);
+  assert.deepEqual(dataset.rows.map((row) => row.amounts.endingDebit), [100n, 100n]);
 });

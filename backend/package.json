@@ -127,7 +127,7 @@
     "test:accounting-dispatch-documents:api-contract": "tsx --test ../scripts/__tests__/accountingDispatchDocumentsApiContract.test.ts",
     "test:accounting-ledger": "tsx src/services/__tests__/accountingLedgerAccess.test.ts && tsx --test src/services/__tests__/accountingLedgerAdministration.test.ts src/services/__tests__/accountingLedgerFoundation.test.ts",
     "test:accounting-ledger:db": "tsx --test src/services/__tests__/accountingLedgerPrisma.integration.test.ts",
-    "test:accounting-period-end": "tsx --test src/services/__tests__/accountingPeriodEnd.test.ts src/services/__tests__/accountingPeriodClose.test.ts src/services/__tests__/accountingLedgerAdministration.test.ts",
+    "test:accounting-period-end": "tsx --test src/services/__tests__/accountingPeriodEnd.test.ts src/services/__tests__/accountingOfficialReportExport.test.ts src/services/__tests__/accountingPeriodClose.test.ts src/services/__tests__/accountingLedgerAdministration.test.ts",
     "test:accounting-period-end:db": "tsx --test src/services/__tests__/accountingPeriodEndPrisma.integration.test.ts src/services/__tests__/accountingLedgerPrisma.integration.test.ts",
     "accounting:reconciliation:submit": "tsx src/scripts/submit-accounting-reconciliation.ts",
     "test:accounting-supply-chain": "tsx --test src/services/__tests__/accountingSupplyChain.test.ts",

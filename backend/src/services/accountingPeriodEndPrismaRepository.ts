@@ -297,9 +297,36 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
     include: {
       voucher: { select: { id: true, statutoryNumber: true, status: true, documentDate: true, postedAt: true } },
       account: { include: { parent: { include: { parent: true } } } },
+      party: { select: { displayName: true } },
+      financialAccount: { select: { titlePersian: true } },
       dimensions: { include: { dimensionType: true, member: true } },
     },
     orderBy: [{ voucher: { documentDate: 'asc' } }, { voucher: { statutoryNumber: 'asc' } }, { sequence: 'asc' }],
+  });
+  const reportLines = lines.map((line) => {
+    const group = line.account.level === 'GROUP' ? line.account : line.account.parent?.parent ?? line.account.parent ?? line.account;
+    const general = line.account.level === 'KOL' ? line.account : line.account.parent ?? line.account;
+    const details = line.dimensions.map((dimension) => ({
+      identity: `${dimension.dimensionType.code}:${dimension.memberId}`,
+      title: `${dimension.dimensionType.titlePersian}: ${dimension.member.titlePersian}`,
+    })).sort((left, right) => left.identity.localeCompare(right.identity));
+    const detailIdentity = [line.partyId && `طرف:${line.partyId}`, line.financialAccountId && `مالی:${line.financialAccountId}`, ...details.map((detail) => detail.identity)].filter(Boolean).join('|') || 'بدون-تفصیل';
+    const detail = [line.party?.displayName, line.financialAccount?.titlePersian, ...details.map((item) => item.title)].filter(Boolean).join(' · ') || 'بدون تفصیل';
+    return {
+      id: line.id,
+      voucherId: line.voucher.id,
+      voucherNumber: line.voucher.statutoryNumber,
+      status: line.voucher.status,
+      accountId: line.accountId,
+      accountCode: line.account.code,
+      accountTitlePersian: line.account.titlePersian,
+      accountPath: { group: group.titlePersian, general: general.titlePersian, subsidiary: line.account.titlePersian, detailIdentity, detail },
+      debitRials: BigInt(line.debitRials.toFixed(0)),
+      creditRials: BigInt(line.creditRials.toFixed(0)),
+      documentDate: line.voucher.documentDate,
+      postedAt: line.voucher.postedAt,
+      dimensions: Object.fromEntries(line.dimensions.map((dimension) => [dimension.dimensionType.code, dimension.member.titlePersian])),
+    };
   });
   const dataset = buildOfficialAccountingDataset({
     request: input.request,
@@ -314,29 +341,7 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
         cashFlowClass: row.cashFlowClass as 'OPERATING' | 'INVESTING' | 'FINANCING' | 'INTERNAL_TRANSFER' | undefined,
       })),
     },
-    lines: lines.map((line) => {
-      const group = line.account.level === 'GROUP' ? line.account : line.account.parent?.parent ?? line.account.parent ?? line.account;
-      const general = line.account.level === 'KOL' ? line.account : line.account.parent ?? line.account;
-      return {
-        id: line.id,
-        voucherId: line.voucher.id,
-        voucherNumber: line.voucher.statutoryNumber,
-        status: line.voucher.status,
-        accountId: line.accountId,
-        accountCode: line.account.code,
-        accountTitlePersian: line.account.titlePersian,
-        accountPath: {
-          group: group.titlePersian,
-          general: general.titlePersian,
-          subsidiary: line.account.titlePersian,
-        },
-        debitRials: BigInt(line.debitRials.toFixed(0)),
-        creditRials: BigInt(line.creditRials.toFixed(0)),
-        documentDate: line.voucher.documentDate,
-        postedAt: line.voucher.postedAt,
-        dimensions: Object.fromEntries(line.dimensions.map((dimension) => [dimension.dimensionType.code, dimension.member.titlePersian])),
-      };
-    }),
+    lines: reportLines,
   });
   if (input.request.reportKind === 'CASH_FLOW' && input.request.cashFlowMethod === 'INDIRECT' && dataset.rows.length === 0) {
     throw new Error('نگاشت مستقل روش غیرمستقیم جریان وجوه نقد ثبت نشده است.');
@@ -351,14 +356,7 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
         sectionCode: row.sectionCode, signMultiplier: row.signMultiplier,
         cashFlowClass: row.cashFlowClass as 'OPERATING' | 'INVESTING' | 'FINANCING' | 'INTERNAL_TRANSFER' | undefined,
       })) },
-      lines: lines.map((line) => {
-        const group = line.account.level === 'GROUP' ? line.account : line.account.parent?.parent ?? line.account.parent ?? line.account;
-        const general = line.account.level === 'KOL' ? line.account : line.account.parent ?? line.account;
-        return { id: line.id, voucherId: line.voucher.id, voucherNumber: line.voucher.statutoryNumber, status: line.voucher.status, accountId: line.accountId,
-          accountCode: line.account.code, accountTitlePersian: line.account.titlePersian, accountPath: { group: group.titlePersian, general: general.titlePersian, subsidiary: line.account.titlePersian },
-          debitRials: BigInt(line.debitRials.toFixed(0)), creditRials: BigInt(line.creditRials.toFixed(0)), documentDate: line.voucher.documentDate,
-          postedAt: line.voucher.postedAt, dimensions: Object.fromEntries(line.dimensions.map((dimension) => [dimension.dimensionType.code, dimension.member.titlePersian])) };
-      }),
+      lines: reportLines,
     });
     const comparison = { from: input.request.comparativeFrom, to: input.request.comparativeTo, rows: comparative.rows, integrityHash: comparative.integrityHash };
     finalDataset = { ...dataset, comparative: comparison, integrityHash: hashAccountingEvidence({ current: dataset.integrityHash, comparative: comparison }) };

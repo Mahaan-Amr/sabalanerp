@@ -68,6 +68,15 @@ export default function TreasuryControlPage() {
     description: "",
     rawRecord: "",
   });
+  const [bankFile, setBankFile] = useState<File | null>(null);
+  const [exceptionCorrections, setExceptionCorrections] = useState<Record<string, {
+    runId: string; rowNumber: string; reason: string; attestUnlinkedCorrection: boolean;
+  }>>({});
+  const updateExceptionCorrection = (id: string, change: Partial<{ runId: string; rowNumber: string;
+    reason: string; attestUnlinkedCorrection: boolean }>) => setExceptionCorrections((current) => {
+    const previous = current[id] ?? { runId: "", rowNumber: "", reason: "", attestUnlinkedCorrection: false };
+    return { ...current, [id]: { ...previous, ...change } };
+  });
   const [bankMapping, setBankMapping] = useState({
     financialAccountId: "",
     adapterType: "CSV",
@@ -1220,6 +1229,7 @@ export default function TreasuryControlPage() {
                       setBankLine({
                         ...bankLine,
                         financialAccountId: event.target.value,
+                        mappingVersion: bankLine.adapterType === "MANUAL" ? "1" : "",
                       })
                     }
                   >
@@ -1238,6 +1248,7 @@ export default function TreasuryControlPage() {
                       setBankLine({
                         ...bankLine,
                         adapterType: event.target.value,
+                        mappingVersion: event.target.value === "MANUAL" ? "1" : "",
                       })
                     }
                   >
@@ -1248,16 +1259,17 @@ export default function TreasuryControlPage() {
                   </ErpSelect>
                 </ErpField>
                 <ErpField label="نسخه نگاشت" required>
-                  <ErpInput
-                    inputMode="numeric"
-                    value={bankLine.mappingVersion}
-                    onChange={(event) =>
-                      setBankLine({
-                        ...bankLine,
-                        mappingVersion: event.target.value,
-                      })
-                    }
-                  />
+                  {bankLine.adapterType === "MANUAL" ? (
+                    <ErpInput inputMode="numeric" value={bankLine.mappingVersion}
+                      onChange={(event) => setBankLine({ ...bankLine, mappingVersion: event.target.value })} />
+                  ) : (
+                    <ErpSelect value={bankLine.mappingVersion}
+                      onChange={(event) => setBankLine({ ...bankLine, mappingVersion: event.target.value })}>
+                      <option value="">انتخاب نگاشت</option>
+                      {data.bankMappings?.filter((item: any) => item.financialAccountId === bankLine.financialAccountId && item.adapterType === bankLine.adapterType)
+                        .map((item: any) => <option key={item.id} value={item.version}>نسخه {Number(item.version).toLocaleString("fa-IR")}</option>)}
+                    </ErpSelect>
+                  )}
                 </ErpField>
                 {bankLine.adapterType === "MANUAL" ? (
                   <>
@@ -1322,7 +1334,7 @@ export default function TreasuryControlPage() {
                       />
                     </ErpField>
                   </>
-                ) : (
+                ) : bankLine.adapterType === "API" ? (
                   <ErpField
                     label="رکورد خام منبع"
                     hint="یک شیء JSON مطابق نگاشت نسخه‌دار"
@@ -1338,29 +1350,50 @@ export default function TreasuryControlPage() {
                       }
                     />
                   </ErpField>
+                ) : (
+                  <ErpField label="فایل صورت‌حساب بانک" hint="حداکثر ۲ مگابایت و ۱۰۰۰ ردیف؛ تاریخ باید به شکل 2026-09-25T08:00:00Z و مبلغ به ریالِ بدون جداکننده باشد." required>
+                    <ErpInput
+                      type="file"
+                      accept={bankLine.adapterType === "CSV" ? ".csv,text/csv" : ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+                      onChange={(event) => {
+                        setBankFile(event.target.files?.[0] || null);
+                      }}
+                    />
+                  </ErpField>
                 )}
-                <ErpField label="دلیل تأیید یا برگشت" required>
-                  <ErpInput
-                    value={matchReason}
-                    onChange={(event) => setMatchReason(event.target.value)}
-                  />
-                </ErpField>
                 <div className="md:col-span-3 flex justify-end">
                   <ErpButton
-                    label="ثبت ردیف بانکی"
+                    label={bankLine.adapterType === "CSV" || bankLine.adapterType === "XLSX" ? "ورود فایل بانکی" : "ثبت ردیف بانکی"}
                     disabled={
                       !bankLine.financialAccountId ||
+                      !bankLine.mappingVersion ||
                       (bankLine.adapterType === "MANUAL"
                         ? !bankLine.sourceIdentity ||
                           !bankLine.bookedAt ||
                           !bankLine.amountRials ||
                           !bankLine.description
-                        : !bankLine.rawRecord)
+                        : bankLine.adapterType === "API" ? !bankLine.rawRecord : !bankFile)
                     }
                     onClick={() =>
                       void run(
-                        async () =>
-                          accountingAPI.importBankStatementLine(
+                        async () => {
+                          if (bankLine.adapterType === "CSV" || bankLine.adapterType === "XLSX") {
+                            if (!bankFile || bankFile.size > 2_000_000) throw new Error("فایل بانکی باید حداکثر ۲ مگابایت باشد.");
+                            const fileBase64 = await new Promise<string>((resolve, reject) => {
+                              const reader = new FileReader();
+                              reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+                              reader.onerror = () => reject(new Error("خواندن فایل بانکی ممکن نشد."));
+                              reader.readAsDataURL(bankFile);
+                            });
+                            await accountingAPI.importBankStatementFile({
+                              financialAccountId: bankLine.financialAccountId,
+                              adapterType: bankLine.adapterType,
+                              mappingVersion: Number(bankLine.mappingVersion),
+                              fileBase64,
+                            });
+                            return;
+                          }
+                          await accountingAPI.importBankStatementLine(
                             bankLine.adapterType === "MANUAL"
                               ? {
                                   ...bankLine,
@@ -1388,16 +1421,88 @@ export default function TreasuryControlPage() {
                                     rawRecord: JSON.parse(bankLine.rawRecord),
                                   },
                                 },
-                          ),
-                        "ردیف بانکی با نگاشت نسخه‌دار ثبت شد.",
+                          );
+                        },
+                        bankLine.adapterType === "CSV" || bankLine.adapterType === "XLSX"
+                          ? "پردازش فایل بانکی پایان یافت؛ نتیجه هر ردیف را بررسی کنید."
+                          : "ردیف بانکی با نگاشت نسخه‌دار ثبت شد.",
                       )
                     }
                   />
                 </div>
               </div>
             )}
+            {data.bankFileImports?.length > 0 && (
+              <div className="mb-4 grid gap-3">
+                {data.bankFileImports.map((item: any) => (
+                  <ErpCard key={item.id} className="p-4">
+                    <strong>گزارش ورود فایل بانکی</strong>
+                    <p>ثبت‌شده: {Number(item.imported).toLocaleString("fa-IR")}، ردشده: {Number(item.rejected).toLocaleString("fa-IR")}</p>
+                    <p className="break-all text-sm">اثر انگشت فایل: {item.fileHash}</p>
+                    {item.results?.filter((row: any) => row.status === "REJECTED").map((row: any) => (
+                      <p key={row.rowNumber}>ردیف {Number(row.rowNumber).toLocaleString("fa-IR")}: {row.reason}</p>
+                    ))}
+                  </ErpCard>
+                ))}
+              </div>
+            )}
+            {data.bankExceptions?.length > 0 && (
+              <ErpCard className="mb-4 p-4">
+                <strong>استثناهای باز صورتحساب بانک</strong>
+                {data.bankExceptions.map((item: any) => {
+                  const correction = exceptionCorrections[item.id] || { runId: "", rowNumber: "", reason: "", attestUnlinkedCorrection: false };
+                  return (
+                  <div key={item.id} className="mt-3 grid gap-2 border-t border-[var(--sds-border-default)] pt-3">
+                    <p className="text-sm">{item.messagePersian} · مسئول: حسابدار · {dateFa(item.createdAt)}</p>
+                    {data.capabilities?.canManage && (
+                      <div className="grid gap-2 md:grid-cols-4">
+                        <ErpField label="فایل اصلاح‌شده">
+                          <ErpSelect value={correction.runId}
+                            onChange={(event) => updateExceptionCorrection(item.id, { runId: event.target.value })}>
+                            <option value="">انتخاب فایل</option>
+                            {data.bankFileChoices?.filter((run: any) => run.financialAccountId === item.sourceId.split(":")[0]).map((run: any) => (
+                              <option key={run.id} value={run.id}>{run.fileHash.slice(0, 12)} · نسخه {run.mappingVersion} · {dateFa(run.createdAt)}</option>
+                            ))}
+                          </ErpSelect>
+                        </ErpField>
+                        <ErpField label="شماره ردیف اصلاح‌شده">
+                          <ErpInput inputMode="numeric" value={correction.rowNumber}
+                            onChange={(event) => updateExceptionCorrection(item.id, { rowNumber: event.target.value })} />
+                        </ErpField>
+                        <ErpField label="دلیل رفع استثنا">
+                          <ErpInput value={correction.reason}
+                            onChange={(event) => updateExceptionCorrection(item.id, { reason: event.target.value })} />
+                        </ErpField>
+                        {data.capabilities?.canConfigure && (
+                          <ErpField label="روش پیوند ردیف">
+                            <ErpSelect value={correction.attestUnlinkedCorrection ? "ATTESTED" : "SOURCE"}
+                              onChange={(event) => updateExceptionCorrection(item.id, { attestUnlinkedCorrection: event.target.value === "ATTESTED" })}>
+                              <option value="SOURCE">شناسه یا ردیف منبع یکسان</option>
+                              <option value="ATTESTED">تأیید مدیر برای ردیف بدون شناسه</option>
+                            </ErpSelect>
+                          </ErpField>
+                        )}
+                        <div className="flex items-end">
+                          <ErpButton label="ثبت رفع استثنا" disabled={!correction.runId || !correction.rowNumber || correction.reason.trim().length < (correction.attestUnlinkedCorrection ? 20 : 8)}
+                            onClick={() => void run(() => accountingAPI.resolveBankFileException(item.id, {
+                              correctedRunId: correction.runId, correctedRowNumber: Number(correction.rowNumber),
+                              reason: correction.reason, attestUnlinkedCorrection: correction.attestUnlinkedCorrection,
+                            }), "رفع استثنا با ردیف فایل اصلاح‌شده ثبت شد.")} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  );
+                })}
+              </ErpCard>
+            )}
             {data.bankLines.length ? (
               <div className="grid gap-3">
+                {data.capabilities?.canManage && (
+                  <ErpField label="دلیل تأیید یا برگشت تطبیق">
+                    <ErpInput value={matchReason} onChange={(event) => setMatchReason(event.target.value)} />
+                  </ErpField>
+                )}
                 {data.bankLines.map((row: any) => (
                   <ErpCard key={row.id} className="p-4">
                     <div className="flex flex-wrap justify-between gap-3">
@@ -1416,7 +1521,7 @@ export default function TreasuryControlPage() {
                         تطبیق
                       </span>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    {data.capabilities?.canManage && <div className="mt-3 flex flex-wrap gap-2">
                       <ErpButton
                         label="یافتن تطبیق"
                         variant="outline"
@@ -1466,7 +1571,7 @@ export default function TreasuryControlPage() {
                           />
                         ) : null,
                       )}
-                    </div>
+                    </div>}
                   </ErpCard>
                 ))}
               </div>

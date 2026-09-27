@@ -3,6 +3,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { createAccountingLedgerAdministration } from '../accountingLedgerAdministration';
 import { hashCustomerTreasuryEvidence } from '../accountingCustomerTreasury';
+import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../accountingBankFileImport';
+import { listPostedJournal, listPostedTrialBalance } from '../accountingLedgerPrismaRepository';
 import {
   allocateCustomerReceiptPrisma,
   bindTaxOutboxChannelPrisma,
@@ -17,6 +19,9 @@ import {
   projectCustomerAccountPrisma,
   provisionCustomerAccountingProfile,
   importBankStatementLinePrisma,
+  proposeBankMatchesPrisma,
+  confirmBankMatchPrisma,
+  listTreasuryOverviewPrisma,
   recognizeCustomerSalePrisma,
   recordCustomerReceiptPrisma,
 } from '../accountingCustomerTreasuryPrisma';
@@ -121,11 +126,114 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
     const bankLineRetry = await importBankStatementLinePrisma(database, { financialAccountId: financial.id, adapterType: 'CSV', mappingVersion: 1,
       sourceIdentity: '', bookedAt: new Date(0), amountRials: 0n, direction: 'INBOUND', description: '', evidence: rawBankEvidence });
     assert.equal(bankLine.id, bankLineRetry.id);
+    await assert.rejects(() => importBankStatementLinePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, sourceIdentity: '', bookedAt: new Date(0), amountRials: 0n,
+      direction: 'INBOUND', description: '', evidence: { ...rawBankEvidence, note: 'changed untrusted evidence' } }),
+    /شناسه منبع ردیف بانکی/);
+    await assert.rejects(() => importBankStatementLinePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'MANUAL', mappingVersion: 1, sourceIdentity: 'bank-line-1', bookedAt: new Date('2026-09-25T08:00:00Z'),
+      amountRials: 1_200n, direction: 'INBOUND', description: 'واریز مشتری نمونه', evidence: rawBankEvidence }),
+    /شناسه منبع ردیف بانکی/);
+    const officialBeforeImport = await listPostedTrialBalance(database, { bookId: book.id, fiscalYearId: year.id });
+    assert.ok(officialBeforeImport.some((item) => BigInt(item.debitRials.toFixed(0)) === 1_200n));
+    const postedJournal = await listPostedJournal(database, { bookId: book.id, fiscalYearId: year.id });
+    assert.ok(postedJournal.some((item) => item.id === receipt.postedVoucherId));
+    const fileBase64 = Buffer.from('reference,date,amount,direction,description\nfile-line-1,2026-09-25T08:00:00Z,1200,credit,واریز مشتری نمونه\nfile-line-bad,2026-09-25T08:00:00Z,unknown,credit,ردیف ناسازگار\n').toString('base64');
+    const importedFile = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, fileBase64, actorId: actor.id });
+    assert.equal(importedFile.imported, 1);
+    assert.equal(importedFile.rejected, 1);
+    assert.match(String((importedFile.results as any[])[1].reason || ''), /ردیف منبع بانکی/);
+    const rejectedCase = await database.accountingExceptionCase.findUniqueOrThrow({ where: {
+      sourceType_sourceId_sourceVersion_code: { sourceType: 'BANK_STATEMENT_FILE',
+        sourceId: `${financial.id}:${importedFile.fileHash}:3`, sourceVersion: 1, code: 'BANK_SOURCE_ROW_INVALID' },
+    } });
+    assert.equal(rejectedCase.assignedUserId, actor.id);
+    const repeatedFile = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, fileBase64, actorId: actor.id });
+    assert.equal(repeatedFile.id, importedFile.id);
+    assert.equal((repeatedFile.results as any[])[0].lineId, (importedFile.results as any[])[0].lineId);
+    const overlappingFile = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, actorId: actor.id,
+      fileBase64: Buffer.from('reference,date,amount,direction,description\nfile-line-1,2026-09-25T08:00:00Z,1200,credit,واریز مشتری نمونه\n').toString('base64') });
+    assert.equal(overlappingFile.rejected, 0);
+    assert.equal((overlappingFile.results as any[])[0].lineId, (importedFile.results as any[])[0].lineId);
+    const proposed = await proposeBankMatchesPrisma(database, (importedFile.results as any[])[0].lineId!);
+    const matchingReceipt = proposed.find((item) => item.treasuryTransactionId === receipt.id);
+    assert.ok(matchingReceipt);
+    await confirmBankMatchPrisma(database, { matchId: matchingReceipt.id, actor, reason: 'تطبیق صورت‌حساب و دریافت مشتری' });
+    const treasury = await listTreasuryOverviewPrisma(database);
+    assert.equal(treasury.bankMappings[0].version, 1);
+    assert.equal(treasury.bankLines.find((item) => item.id === (importedFile.results as any[])[0].lineId)?.matches[0].status, 'CONFIRMED');
+    assert.ok(treasury.bankFileImports.some((item) => item.id === importedFile.id));
+    assert.equal(treasury.bankExceptions[0].id, rejectedCase.id);
+    const correctedFile = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, actorId: actor.id,
+      fileBase64: Buffer.from('reference,date,amount,direction,description\nfile-line-bad,2026-09-25T08:00:00Z,1200,credit,ردیف اصلاح‌شده\n').toString('base64') });
+    await assert.rejects(() => resolveBankFileExceptionPrisma(database, { exceptionId: rejectedCase.id,
+      correctedRunId: overlappingFile.id, correctedRowNumber: 2, reason: 'ارجاع اشتباه به ردیف دیگر', actorId: actor.id,
+      actorProfile: 'ACCOUNTANT' }),
+    /شناسه ردیف اصلاح‌شده/);
+    const resolvedCase = await resolveBankFileExceptionPrisma(database, { exceptionId: rejectedCase.id,
+      correctedRunId: correctedFile.id, correctedRowNumber: 2, reason: 'اصلاح مبلغ در فایل جدید بانک', actorId: actor.id,
+      actorProfile: 'ACCOUNTANT' });
+    assert.equal(resolvedCase.status, 'RESOLVED');
+    assert.equal((resolvedCase.resolutionEvidence as any).correctedLineId, (correctedFile.results as any[])[0].lineId);
+    assert.equal((await listTreasuryOverviewPrisma(database)).bankExceptions.length, 0);
+    const identitylessFile = Buffer.from('reference,actualReference,date,amount,direction,description\n,corrected-identity,2026-09-25T08:00:00Z,1200,credit,ردیف بدون شناسه در نگاشت نخست\n').toString('base64');
+    const rejectedIdentity = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, fileBase64: identitylessFile, actorId: actor.id });
+    assert.equal(rejectedIdentity.rejected, 1);
+    await createBankImportMappingPrisma(database, { financialAccountId: financial.id, adapterType: 'CSV', version: 2,
+      effectiveFrom: year.startsAt, columnMapping: { sourceIdentityField: 'actualReference', bookedAtField: 'date', amountField: 'amount',
+        directionField: 'direction', descriptionField: 'description', inboundValues: ['credit'], outboundValues: ['debit'] }, actor });
+    const remappedIdentity = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 2, fileBase64: identitylessFile, actorId: actor.id });
+    assert.equal(remappedIdentity.imported, 1);
+    const identityCase = await database.accountingExceptionCase.findUniqueOrThrow({ where: { id: (rejectedIdentity.results as any[])[0].exceptionId } });
+    const remappedResolution = await resolveBankFileExceptionPrisma(database, { exceptionId: identityCase.id,
+      correctedRunId: remappedIdentity.id, correctedRowNumber: 2, reason: 'اصلاح نگاشت شناسه منبع بانکی', actorId: actor.id,
+      actorProfile: 'ACCOUNTANT' });
+    assert.equal((remappedResolution.resolutionEvidence as any).linkBasis, 'UNCHANGED_SOURCE_ROW');
+    assert.equal((await listTreasuryOverviewPrisma(database)).bankExceptions.length, 0);
+    const missingIdentity = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, actorId: actor.id,
+      fileBase64: Buffer.from('reference,actualReference,date,amount,direction,description\n,,2026-09-25T08:00:00Z,1200,credit,بدون شناسه\n').toString('base64') });
+    const amendedIdentity = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 2, actorId: actor.id,
+      fileBase64: Buffer.from('reference,actualReference,date,amount,direction,description\n,attested-identity,2026-09-25T08:00:00Z,1200,credit,بدون شناسه\n').toString('base64') });
+    const missingCaseId = (missingIdentity.results as any[])[0].exceptionId;
+    await assert.rejects(() => resolveBankFileExceptionPrisma(database, { exceptionId: missingCaseId,
+      correctedRunId: amendedIdentity.id, correctedRowNumber: 2, reason: 'اصلاح شناسه با تایید مدیر حسابداری',
+      actorId: actor.id, actorProfile: 'ACCOUNTANT', attestUnlinkedCorrection: true }), /شناسه ردیف اصلاح‌شده/);
+    const attested = await resolveBankFileExceptionPrisma(database, { exceptionId: missingCaseId,
+      correctedRunId: amendedIdentity.id, correctedRowNumber: 2, reason: 'اصلاح شناسه با تایید مدیر حسابداری',
+      actorId: actor.id, actorProfile: 'ACCOUNTING_MANAGER', attestUnlinkedCorrection: true });
+    assert.equal((attested.resolutionEvidence as any).linkBasis, 'MANAGER_ATTESTATION');
+    assert.equal((await listTreasuryOverviewPrisma(database)).bankExceptions.length, 0);
+    const savedRun = await database.accountingBankFileImportRun.findUniqueOrThrow({ where: { id: importedFile.id } });
+    assert.equal((savedRun.sourceRows as any[])[1].rawRecord.reference, 'file-line-bad');
+    assert.deepEqual(Buffer.from(savedRun.sourceFile), Buffer.from(fileBase64, 'base64'));
+    await database.$executeRawUnsafe(`CREATE FUNCTION reject_bank_file_run_test() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'injected bank run persistence failure'; END; $$ LANGUAGE plpgsql`);
+    await database.$executeRawUnsafe(`CREATE TRIGGER reject_bank_file_run_test BEFORE INSERT ON accounting_bank_file_import_runs
+      FOR EACH ROW EXECUTE FUNCTION reject_bank_file_run_test()`);
+    const failedFileBase64 = Buffer.from('reference,date,amount,direction,description\nfile-line-failure,2026-09-25T08:00:00Z,1200,credit,شکست آزمون\n').toString('base64');
+    await assert.rejects(() => importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, fileBase64: failedFileBase64, actorId: actor.id }), /injected bank run persistence failure/);
+    assert.equal(await database.accountingBankStatementLine.count({ where: { sourceIdentity: 'file-line-failure' } }), 0);
+    await database.$executeRawUnsafe('DROP TRIGGER reject_bank_file_run_test ON accounting_bank_file_import_runs');
+    await database.$executeRawUnsafe('DROP FUNCTION reject_bank_file_run_test()');
+    await assert.rejects(() => database.accountingBankFileImportRun.update({ where: { id: importedFile.id },
+      data: { rejected: 0 } }), /Accounting bank file import evidence is immutable/);
+    assert.equal(await database.accountingLedgerVoucher.count({ where: { sourceType: 'BANK_STATEMENT_FILE' } }), 0);
+    const officialAfterImport = await listPostedTrialBalance(database, { bookId: book.id, fiscalYearId: year.id });
+    assert.deepEqual(officialAfterImport, officialBeforeImport);
     const allocation = await allocateCustomerReceiptPrisma(database, { treasuryTransactionId: receipt.id, allocations: [{ openItemId: sale.openItem.id, amountRials: 1_100n }],
       bookId: book.id, fiscalYearId: year.id, periodId: year.periods[0].id, customerAdvanceLedgerId: advance.id,
       receivableLedgerId: receivable.id, documentDate: new Date('2026-09-25T08:01:00Z'), idempotencyKey: `allocation-${temporary.runId}`,
       correlationId: `allocation-correlation-${temporary.runId}`, actor });
-    const projection = await projectCustomerAccountPrisma(database, { profileId: profile.id, asOf: new Date('2026-09-26T00:00:00Z') });
+    const projection = await projectCustomerAccountPrisma(database, { profileId: profile.id, asOf: new Date(Date.now() + 1_000) });
     assert.equal(projection.receivableRials, 0n);
     assert.equal(projection.unallocatedCreditRials, 100n);
     assert.equal(projection.openItems.length, 0);

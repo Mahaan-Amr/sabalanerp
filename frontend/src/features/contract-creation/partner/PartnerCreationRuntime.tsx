@@ -261,6 +261,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     const refreshed = { ...value, access: { ...value.access, leaseToken: lease.value.leaseToken,
       baseRevision: lease.value.baseRevision } };
     persistRuntime(refreshed);
+    setDraftAccess(current => current?.recoveryId === refreshed.access.recoveryId ? refreshed.access : current);
     return refreshed;
   }, [persistRuntime]);
 
@@ -337,13 +338,15 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         const startFresh = shouldStartFreshPartnerCreation(searchParams);
         const recoverableDraftCount = parsed.data.recoverableDrafts?.length ?? (parsed.data.recoverableDraft ? 1 : 0);
         const explicitEntry = isExplicitPartnerCreationEntry(searchParams);
-        freshInquiryRef.current = startFresh || (explicitEntry && recoverableDraftCount === 0);
+        // A route asking for a new inquiry is not consent to discard an
+        // unfinished draft. Only the explicit start-new action sets this ref.
+        if (recoverableDraftCount === 0) freshInquiryRef.current = startFresh || explicitEntry;
         if (explicitEntry) {
           setRuntime(null); setWizard(null); setDraftAccess(null); setRecoveryRevision(0); setRecoveryBlocked(false);
           recoveryRevisionRef.current = 0; checkpointedInputRevision.current = 0; inquiryHydrationFlight.current = false;
           setTechnicalDraft(emptyTechnicalDraft()); setSaleStep('date'); setEditingCase(null);
         }
-        if (shouldOfferPartnerDraftChoice(recoverableDraftCount, searchParams, startFresh)) {
+        if (shouldOfferPartnerDraftChoice(recoverableDraftCount, searchParams, freshInquiryRef.current)) {
           const requestedCustomer = searchParams.get('customerId');
           const nextCustomerId = parsed.data.customers.some(customer => customer.id === requestedCustomer)
             ? requestedCustomer! : parsed.data.customers[0]?.id || '';
@@ -627,16 +630,21 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     setPending(true); setError(null);
     technicalCommitFlight.current = true;
     try {
+      const activeRuntime = runtimeRef.current;
+      const refreshed = activeRuntime?.access.recoveryId === draftAccess.recoveryId
+        ? await reacquireRuntime(activeRuntime) : null;
+      if (activeRuntime && !refreshed) return;
+      const activeAccess = refreshed?.access ?? draftAccess;
       const saved = await commitPartnerTechnicalDraft({
         checkpointRequired: technicalDraft.inputRevision > checkpointedInputRevision.current,
-        checkpoint: () => checkpointTechnicalDraft(technicalDraft, draftAccess),
-        save: () => ports.saved.save({ ...draftAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
+        checkpoint: () => checkpointTechnicalDraft(technicalDraft, activeAccess),
+        save: () => ports.saved.save({ ...activeAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
           idempotencyKey: `partner-save-${crypto.randomUUID()}`, draft: technicalDraft }),
       });
       if (!saved) return;
       if (!saved.ok) {
         setError(saved.error.code === 'INVALID_PAYLOAD' && editingCase
-          ? technicalIssue ?? partnerCaseReviewMessage(editingCase.caseNumber)
+          ? technicalIssue ?? partnerCaseReviewMessage(editingCase.caseNumber, editingCase.trackingNumber)
           : saved.error.message);
         return;
       }
@@ -656,7 +664,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         .filter(Boolean);
       if (skipInquiry && mode === 'sale') {
         const inquiryId = `${saved.value.recoveryId}-unpriced`;
-        const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
+        const value = { actorId: partner.actorId, inquiryId, access: activeAccess, saved: saved.value,
           configuredRows: allConfiguredRows, knownInquiryRows: [], customerId, contractDate, projectId };
         persistRuntime(value);
         setInitialInquiryOpen(false);
@@ -666,7 +674,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       }
       if (!availableRows.length && matches?.rows.length) {
         const inquiryId = matches.rows[0].approvedRowBinding!.inquiryId;
-        persistRuntime({ actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
+        persistRuntime({ actorId: partner.actorId, inquiryId, access: activeAccess, saved: saved.value,
           configuredRows: allConfiguredRows, knownInquiryRows: matches.rows,
           customerId, contractDate, projectId });
         setInitialInquiryOpen(false);
@@ -687,7 +695,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       window.localStorage.setItem(inquiryPendingKey(partner.actorId), JSON.stringify(command));
       const submitted = await inquiryPorts.commands.execute(command);
       if (!submitted.ok) { window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); setError(submitted.error.message); return; }
-      const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
+      const value = { actorId: partner.actorId, inquiryId, access: activeAccess, saved: saved.value,
         configuredRows: allConfiguredRows, knownInquiryRows: matches?.rows,
         customerId, ...(mode === 'sale' ? { contractDate, projectId } : {}) };
       window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); persistRuntime(value);
@@ -1314,7 +1322,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         <h3 className="text-2xl font-bold">خلاصه قرارداد</h3>
         <div className="grid gap-4 md:grid-cols-2">
           <ErpNeumorphicCard className="grid gap-3 p-4 sm:grid-cols-2">
-            <ErpFieldView label="کد پیگیری" value={caseView ? partnerTrackingCode(caseView.caseNumber) : 'پس از ثبت'} tone="primary" />
+            <ErpFieldView label="کد پیگیری" value={caseView ? partnerTrackingCode(caseView.caseNumber, caseView.trackingNumber) : 'پس از ثبت'} tone="primary" />
             <ErpFieldView label="تاریخ قرارداد" value={draft.intent.contractDate} />
           </ErpNeumorphicCard>
           <ErpNeumorphicCard className="grid gap-3 p-4 sm:grid-cols-2">
@@ -1469,6 +1477,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     if (saleStepIndex < partnerSaleEntrySteps.length - 1) {
       setSaleStep(partnerSaleEntrySteps[saleStepIndex + 1]); return;
     }
+    // A corrected numbered Case is saved first. The price step then offers
+    // an explicit per-row reinquiry; saving alone must not send a duty.
+    if (editingCase && context?.kind === 'PARTNER') {
+      void startInquiry(context, new Set(), true);
+      return;
+    }
     void openInitialInquiry();
   };
   return <ContractWizardFrame
@@ -1489,7 +1503,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       loading: pending,
       canGoPrevious: !pending && saleStepIndex > 0,
       canGoNext: !pending && (saleStep !== 'products' || technicalActionReady),
-      labels: { next: saleStep === 'products' ? 'ادامه تکمیل قرارداد' : 'بعدی' }
+      labels: { next: saleStep === 'products'
+        ? editingCase ? 'ذخیره تغییرات و مشاهده استعلام' : 'ادامه تکمیل قرارداد' : 'بعدی' }
     }}
   >
     <div className="space-y-4">

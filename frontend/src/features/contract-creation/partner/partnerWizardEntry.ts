@@ -1,4 +1,5 @@
-import { PartnerErrorSchema, PartnerTechnicalSavedViewSchema, type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
+import { PartnerErrorSchema, PartnerTechnicalSavedViewSchema, partnerTrackingCode,
+  type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryRow, PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
 import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import { defaultPartnerRetailRows, partnerRetailIntentRows } from './partnerRetail';
@@ -29,8 +30,8 @@ export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], ope
   return openingNumberedResult ? 'pricing' : savedStep;
 }
 
-export const partnerCaseReviewMessage = (caseReference: string) =>
-  `این پرونده نیاز به بررسی دارد؛ با پشتیبانی تماس بگیرید و کد پرونده ${caseReference} را اعلام کنید.`;
+export const partnerCaseReviewMessage = (caseReference: string, trackingNumber?: number) =>
+  `این پرونده نیاز به بررسی دارد؛ با پشتیبانی تماس بگیرید و کد پرونده ${partnerTrackingCode(caseReference, trackingNumber)} را اعلام کنید.`;
 
 export function partnerCaseHasIntegrityError(error: unknown): boolean {
   const direct = PartnerErrorSchema.safeParse(error);

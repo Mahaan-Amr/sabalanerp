@@ -47,7 +47,8 @@ export async function projectPartnerAccount(snapshot: PartnerAccountSnapshot, re
       balance = { amount: '0', currency: source.amount.currency };
     }
     const plan = source.paymentPlan;
-    purchases.push({ owner: source.owner, caseNumber: row.source.view.caseNumber, amount, received, balance, status,
+    purchases.push({ owner: source.owner, caseNumber: row.source.view.caseNumber,
+      trackingNumber: row.trackingNumber, amount, received, balance, status,
       sabalanPaymentPlan: {
         planId: plan.planId, version: plan.version, effectiveDate: plan.effectiveDate,
         ...(plan.predecessorPlanId ? { predecessorPlanId: plan.predecessorPlanId } : {}),

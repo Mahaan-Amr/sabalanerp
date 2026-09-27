@@ -758,7 +758,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const rows = await tx.partnerSaleCase.findMany({ where: body.caseId ? { id: body.caseId } : undefined,
           orderBy: { createdAt: 'desc' }, select: { id: true, state: true, pricingState: true,
             customerConfirmationState: true, headRevision: true, integrityHash: true,
-            customerContractId: true,
+            customerContractId: true, trackingCode: { select: { number: true } },
             head: { select: { internalProjection: true, customerProjection: true } },
             events: { orderBy: { sequence: 'desc' }, take: body.caseId ? undefined : 0,
               select: { sequence: true, type: true, recordedAt: true } },
@@ -816,8 +816,15 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           const editableRecovery = editSession && decodeTechnicalRecovery(editSession.recovery) ? editSession : null;
           const customerOutput = output
             ? partnerContracts.CustomerContractOutputSchema.safeParse(row.head.customerProjection) : null;
-          cases.push({ view: { ...view.data, state: row.state,
+          const accountingCorrectionRequests = row.customerContractId ?
+            await tx.accountingContractFlag.findMany({ where: { contractId: row.customerContractId,
+              status: 'OPEN', trackingCode: { startsWith: 'partner-internal-correction:' } },
+              select: { id: true, note: true, createdAt: true }, orderBy: { createdAt: 'desc' } }) : [];
+          cases.push({ view: { ...view.data, ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
             pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
+            accountingCorrectionRequests: accountingCorrectionRequests.map(item => ({ id: item.id,
+              reason: item.note || 'سند داخلی این پرونده نیازمند اصلاح است.',
+              createdAt: item.createdAt.toISOString() })),
             ...(customerOutput?.success ? { customerOutput: customerOutput.data } : {}),
             history: row.events.map(event => ({ sequence: event.sequence, type: event.type,
               recordedAt: event.recordedAt.toISOString() })),

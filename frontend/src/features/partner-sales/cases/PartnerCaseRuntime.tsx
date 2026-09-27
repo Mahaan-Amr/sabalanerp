@@ -176,13 +176,13 @@ export function PartnerCaseRuntime() {
   if (busy) return <ErpLoading />;
   if (!selectedCaseId) {
     const needle = search.trim().toLocaleLowerCase('fa-IR');
-    const visible = rows.filter(row => !needle || [row.view.caseNumber, partnerTrackingCode(row.view.caseNumber),
+    const visible = rows.filter(row => !needle || [row.view.caseNumber, partnerTrackingCode(row.view.caseNumber, row.view.trackingNumber),
       row.view.customerContractNumber ?? '', ...row.view.products.map(product => product.description)]
       .some(value => value.toLocaleLowerCase('fa-IR').includes(needle)));
     const columns: ErpColumn<PartnerCaseRuntimeRow>[] = [
       { id: 'number', header: 'قرارداد', priority: 'primary', cell: row => <div>
-        <strong>{partnerCustomerContractLabel(row.view.caseNumber, row.view.customerContractNumber)}</strong>
-        <p className="sds-text-secondary mt-1 text-xs">کد پیگیری {partnerTrackingCode(row.view.caseNumber)}</p>
+        <strong>{partnerCustomerContractLabel(row.view.caseNumber, row.view.customerContractNumber, row.view.trackingNumber)}</strong>
+        <p className="sds-text-secondary mt-1 text-xs">کد پیگیری {partnerTrackingCode(row.view.caseNumber, row.view.trackingNumber)}</p>
       </div> },
       { id: 'status', header: 'وضعیت', priority: 'secondary', cell: row => row.view.state === 'COMMITTED'
         ? 'قطعی' : row.view.state === 'AWAITING_CUSTOMER_CONFIRMATION' ? 'در انتظار تأیید مشتری'
@@ -218,6 +218,7 @@ export function PartnerCaseRuntime() {
       return <div key={caseId} className="space-y-2">
         {error && <ErpInlineState kind={error.kind} title={error.message} />}
         <PartnerCaseWorkspace view={row.view} customerOutput={row.customerOutput} history={row.history}
+          accountingCorrectionRequests={row.accountingCorrectionRequests}
           account={index === 0 ? account : undefined}
           collections={collections[caseId]} correction={corrections[caseId]}
           canRecordCollection={row.view.state === 'COMMITTED'} onRecordCollection={() => { setCollectionTarget(row); setCollectionAmount(''); setCollectionMethod('BANK_TRANSFER'); setCollectionReference(''); setCollectionNote(''); }}

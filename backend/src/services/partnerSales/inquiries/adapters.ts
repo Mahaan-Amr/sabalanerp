@@ -104,6 +104,7 @@ export function presentSavedTechnicalConfiguration(input: {
   add('ضخامت', product.dimensions.thicknessCentimeters, ' سانتی‌متر');
 
   if (draftRow?.family === 'prepared' || draftRow?.family === 'volumetric') {
+    if (draftRow.configuration.unit === 'count') add('تعداد', draftRow.configuration.quantity, ' عدد');
     add('ابعاد کاتالوگی', product.attributes.cuttingDimension);
     add('طول', product.dimensions.motherLengthMeters, ' متر');
     add('عرض', product.dimensions.motherWidthCentimeters, ' سانتی‌متر');
@@ -114,6 +115,7 @@ export function presentSavedTechnicalConfiguration(input: {
     add('طول', draftRow.configuration.lengthMeters, ' متر');
     add('عرض', draftRow.configuration.widthMeters, ' متر');
   } else if (draftRow?.family === 'stair') {
+    if (draftRow.configuration.quantity !== undefined) add('تعداد', draftRow.configuration.quantity, ' عدد');
     add('طول', draftRow.configuration.lengthMeters, ' متر');
     add(draftRow.configuration.part === 'riser' ? 'ارتفاع' : 'عرض',
       draftRow.configuration.crossDimensionMeters, ' متر');

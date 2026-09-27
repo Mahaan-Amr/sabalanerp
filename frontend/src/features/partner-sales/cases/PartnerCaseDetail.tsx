@@ -43,7 +43,7 @@ export function PartnerCaseDetail({ view, actions, customerOutput, history, chil
   customerOutput?: CustomerContractOutput; history?: PartnerCaseRuntimeRow['history']; children?: React.ReactNode }) {
   const status = stateCopy[view.state];
   const pageActions = partnerCasePageActions(actions);
-  return <ErpPage eyebrow="پرونده فروش همکار" title={`پرونده ${partnerCustomerContractLabel(view.caseNumber, view.customerContractNumber)}`} description={`کد پیگیری: ${partnerTrackingCode(view.caseNumber)}`}
+  return <ErpPage eyebrow="پرونده فروش همکار" title={`پرونده ${partnerCustomerContractLabel(view.caseNumber, view.customerContractNumber, view.trackingNumber)}`} description={`کد پیگیری: ${partnerTrackingCode(view.caseNumber, view.trackingNumber)}`}
     backHref="/dashboard/sales/partner-cases" actions={pageActions} metrics={partnerCaseMetrics(view, status)}><PartnerCaseDetailContent
       view={view} actions={actions} customerOutput={customerOutput} history={history} />{children}
   </ErpPage>;
@@ -76,7 +76,7 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
   return <>
     <ErpSection title="اطلاعات قرارداد">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <ErpFieldView label="کد پیگیری" value={partnerTrackingCode(view.caseNumber)} />
+        <ErpFieldView label="کد پیگیری" value={partnerTrackingCode(view.caseNumber, view.trackingNumber)} />
         <ErpFieldView label="شماره قرارداد مشتری" value={view.customerContractNumber ?? 'در انتظار صدور'} />
         <ErpFieldView label="وضعیت قرارداد" value={stateCopy[view.state].label} />
         <ErpFieldView label="تأیید مشتری" value={{ NOT_SENT: 'ارسال نشده', SENT: 'در انتظار تأیید',
@@ -100,6 +100,10 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
           <div className="mt-4 grid gap-3 sm:grid-cols-2"><ErpFieldView label="قیمت فروش مشتری" value={formatPartnerMoney(product.retailUnitPrice, view.retailTotals.currency)} tone="primary" />
             <ErpFieldView label="قیمت تأییدشده سبلان" value={product.wholesaleUnitPrice && view.sabalanTotals
               ? formatPartnerMoney(product.wholesaleUnitPrice, view.sabalanTotals.currency) : 'در انتظار استعلام'} tone="info" /></div>
+          {product.wholesaleUnitPrice && view.catalogLayerRates?.filter(layer => layer.parentProductRowId === product.productRowId)
+            .map((layer, index) => <ErpFieldView key={`${layer.parentProductRowId}:${index}`}
+              label={`نرخ کاتالوگ لایهٔ ${layer.layerTitle}`}
+              value={`${formatPartnerMoney(layer.rateToman, 'IRT')} · ${{ set: 'هر مجموعه', physicalPiece: 'هر قطعه', meter: 'هر متر', squareMeter: 'هر مترمربع' }[layer.layerUnit]}`} />)}
           {customerOutput?.products.find(item => item.productRowId === product.productRowId) && <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {(() => { const item = customerOutput.products.find(item => item.productRowId === product.productRowId)!;
               return <>

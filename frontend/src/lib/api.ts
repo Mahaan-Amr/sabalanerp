@@ -1082,6 +1082,23 @@ export const accountingAPI = {
       params: { download: true },
       responseType: 'blob'
     }),
+  getPartnerInternalPdf: (caseId: string) =>
+    api.get(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/internal-pdf`),
+  getPartnerInternalDocument: (caseId: string) =>
+    api.get(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/internal`),
+  createPartnerInternalCorrectionRequest: (caseId: string,
+    data: { category: string; priority: string; reason: string }, idempotencyKey: string) =>
+    api.post(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/correction-requests`, data,
+      { headers: { 'X-Idempotency-Key': idempotencyKey } }),
+  flagPartnerInternalRecord: (caseId: string,
+    data: { category: string | number; severity: string | number; title: string; note: string }) =>
+    api.post(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/flags`, data),
+  resolvePartnerInternalFlag: (caseId: string, flagId: string, reason: string) =>
+    api.post(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/flags/${encodeURIComponent(flagId)}/resolve`, { reason }),
+  downloadPartnerInternalPdf: (caseId: string) =>
+    api.get(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/internal-pdf`, {
+      params: { download: true }, responseType: 'blob'
+    }),
   getSalesContractPdf: (contractId: string, params?: any) =>
     api.get(`/accounting/contracts/${contractId}/sales-pdf`, { params }),
   downloadSalesContractPdf: (contractId: string, params?: any) =>

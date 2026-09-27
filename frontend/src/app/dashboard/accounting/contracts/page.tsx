@@ -38,6 +38,7 @@ import {
 import {
   AccountingContractRow,
   accountingActionAvailability,
+  accountingFailureMessage,
   FinancialInvoiceApprovalForm,
   FinancialInvoiceApprovalPayload,
   StatusBadge,
@@ -267,6 +268,26 @@ export default function AccountingContractsPage() {
     }
   };
 
+  const openPartnerInternalPdf = async (contract: AccountingContractRow, tryPrint = false) => {
+    const caseId = contract.partnerContext?.caseId;
+    if (!caseId) return;
+    const actionKey = `${contract.contractId}:${tryPrint ? 'PRINT_SALES_PDF' : 'DOWNLOAD_SALES_PDF'}`;
+    setActionLoading(actionKey); setActionError(null);
+    try {
+      if (tryPrint) {
+        const response = await accountingAPI.getPartnerInternalPdf(caseId);
+        const url = response.data?.data?.url;
+        if (!response.data?.success || !url) throw new Error('Internal PDF URL missing');
+        openPdfUrl(url, true);
+      } else {
+        const response = await accountingAPI.downloadPartnerInternalPdf(caseId);
+        downloadBlobResponse(response, `partner_internal_${contract.partnerContext?.internalRecordNumber}.pdf`);
+      }
+    } catch {
+      setActionError(tryPrint ? 'چاپ سند داخلی انجام نشد.' : 'دریافت PDF سند داخلی انجام نشد.');
+    } finally { setActionLoading(null); }
+  };
+
   const requestCorrection = async (values: Record<string, string | number>) => {
     if (!correctionTarget) return;
     const reason = String(values.reason || '').trim();
@@ -274,16 +295,20 @@ export default function AccountingContractsPage() {
     setActionLoading(`${correctionTarget.contractId}:CREATE_CORRECTION_REQUEST`);
     try {
       setActionError(null);
-      await accountingAPI.createCorrectionRequest(correctionTarget.contractId, {
+      const request = {
         category: String(values.category || 'OTHER'),
         priority: String(values.priority || 'MEDIUM'),
         reason,
-      }, crypto.randomUUID());
+      };
+      const idempotencyKey = crypto.randomUUID();
+      if (correctionTarget.sourceKind === 'PARTNER_INTERNAL_RECORD' && correctionTarget.partnerContext?.caseId)
+        await accountingAPI.createPartnerInternalCorrectionRequest(correctionTarget.partnerContext.caseId, request, idempotencyKey);
+      else await accountingAPI.createCorrectionRequest(correctionTarget.contractId, request, idempotencyKey);
       await loadContracts();
       setCorrectionTarget(null);
     } catch (error) {
       const response = (error as any)?.response?.data;
-      setActionError(response?.message || 'ثبت درخواست اصلاح انجام نشد. دوباره تلاش کنید.');
+      setActionError(response?.message || (error as Error).message || 'ثبت درخواست اصلاح انجام نشد. دوباره تلاش کنید.');
     } finally {
       setActionLoading(null);
     }
@@ -293,6 +318,19 @@ export default function AccountingContractsPage() {
     if (!flagTarget) return;
     const note = String(values.note || '').trim();
     if (!note) return;
+    if (flagTarget.sourceKind === 'PARTNER_INTERNAL_RECORD' && flagTarget.partnerContext?.caseId) {
+      setActionLoading(`${flagTarget.contractId}:FLAG_CONTRACT`); setActionError(null);
+      try {
+        await accountingAPI.flagPartnerInternalRecord(flagTarget.partnerContext.caseId, {
+          category: values.category || 'OTHER', severity: values.severity || 'MEDIUM',
+          title: String(values.title || 'نیازمند بررسی حسابداری'), note,
+        });
+        await loadContracts(); setFlagTarget(null);
+      } catch (error) {
+        setActionError(accountingFailureMessage(error, 'ثبت پرچم سند داخلی انجام نشد.'));
+      } finally { setActionLoading(null); }
+      return;
+    }
     const applied = await execute(flagTarget, {
       kind: 'FLAG_CONTRACT',
       contractId: flagTarget.contractId,
@@ -318,7 +356,8 @@ export default function AccountingContractsPage() {
       header: 'نام مشتری',
       mobileLabel: 'نام مشتری',
       priority: 'secondary',
-      cell: (contract) => contract.customer.displayName,
+      cell: (contract) => <div>{contract.customer.displayName}{contract.partnerContext &&
+        <p className="mt-1 text-xs sds-text-secondary">طرف‌حساب سبلان: {contract.partnerContext.debtor.displayName}</p>}</div>,
     },
     {
       id: 'date',
@@ -335,7 +374,9 @@ export default function AccountingContractsPage() {
         <div className="min-w-0">
           <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{contract.contractNumber}</p>
           <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{contract.titlePersian}</p>
-          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{contract.customer.displayName}</p>
+          <ErpBadge tone={contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'purple' : 'warning'}>
+            {contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'همکار' : 'داخلی'}
+          </ErpBadge>
         </div>
       ),
     },
@@ -392,11 +433,15 @@ export default function AccountingContractsPage() {
   ];
 
   const rowActions = (contract: AccountingContractRow): ErpAction[] => contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? [
-    { label: 'مشاهده', href: contract.partnerContext?.actionUrl, icon: FaEye, tone: 'primary' },
-    { label: 'دانلود PDF قرارداد', icon: FaDownload, tone: 'success', disabled: true,
-      title: 'برای این سند داخلی هنوز خروجی PDF پشتیبانی نمی‌شود.' },
-    { label: 'پرینت قرارداد', icon: FaPrint, tone: 'neutral', disabled: true,
-      title: 'برای این سند داخلی هنوز چاپ پشتیبانی نمی‌شود.' },
+    { label: 'مشاهده', href: contract.partnerContext?.caseId
+      ? `/dashboard/accounting/contracts/partner/${encodeURIComponent(contract.partnerContext.caseId)}` : undefined,
+      icon: FaEye, tone: 'primary' },
+    { label: 'دانلود PDF سند داخلی', icon: FaDownload, tone: 'success',
+      disabled: actionLoading === `${contract.contractId}:DOWNLOAD_SALES_PDF`,
+      onClick: () => void openPartnerInternalPdf(contract) },
+    { label: 'پرینت سند داخلی', icon: FaPrint, tone: 'neutral',
+      disabled: actionLoading === `${contract.contractId}:PRINT_SALES_PDF`,
+      onClick: () => void openPartnerInternalPdf(contract, true) },
     ...(accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.visible ? [{
       label: 'تایید مالی', icon: FaCheckCircle, tone: 'success',
       disabled: accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.enabled !== true,
@@ -407,10 +452,18 @@ export default function AccountingContractsPage() {
       disabled: !['ISSUED', 'POSTED'].includes(contract.accounting.invoiceStatus),
       title: !['ISSUED', 'POSTED'].includes(contract.accounting.invoiceStatus) ? 'ابتدا سند را تأیید مالی کنید.' : undefined,
       href: `/dashboard/accounting/receivables?search=${encodeURIComponent(contract.partnerContext?.caseNumber ?? '')}` },
-    { label: 'پرچم', icon: FaFlag, tone: 'warning', disabled: true,
-      title: 'پرچم قرارداد عادی برای سند داخلی همکار کاربرد ندارد.' },
-    { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', disabled: true,
-      title: 'اصلاح این سند از مسیر بررسی پرونده مالی انجام می‌شود.' },
+    { label: 'پیش‌نویس صورتحساب', icon: FaFileInvoice, tone: 'info',
+      href: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(contract.partnerContext?.caseNumber ?? '')}` },
+    ...(accountingActionAvailability(contract, 'FLAG_CONTRACT')?.visible ? [
+      { label: 'پرچم', icon: FaFlag, tone: 'warning',
+        disabled: accountingActionAvailability(contract, 'FLAG_CONTRACT')?.enabled !== true,
+        title: accountingActionAvailability(contract, 'FLAG_CONTRACT')?.reason || undefined,
+        onClick: () => setFlagTarget(contract) } as ErpAction] : []),
+    ...(accountingActionAvailability(contract, 'CREATE_CORRECTION_REQUEST')?.visible ? [
+      { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger',
+        disabled: accountingActionAvailability(contract, 'CREATE_CORRECTION_REQUEST')?.enabled !== true,
+        title: accountingActionAvailability(contract, 'CREATE_CORRECTION_REQUEST')?.reason || undefined,
+        onClick: () => setCorrectionTarget(contract) } as ErpAction] : []),
   ] : [
     { label: 'مشاهده', href: `/dashboard/accounting/contracts/${contract.contractId}`, icon: FaEye, tone: 'primary' },
     {
@@ -509,6 +562,9 @@ export default function AccountingContractsPage() {
       ]}
       rows={rows}
       rowKey={(contract) => contract.contractId}
+      rowClassName={(contract) => contract.sourceKind === 'PARTNER_INTERNAL_RECORD'
+        ? 'border-2 border-[var(--sds-purple-border)]'
+        : 'border-2 border-[var(--sds-warning-border)]'}
       columns={columns}
       rowActions={rowActions}
       isLoading={loading}

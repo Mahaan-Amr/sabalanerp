@@ -19,6 +19,8 @@ export const PartnerCaseRuntimeActionsSchema = z.object({
 
 export const PartnerCaseRuntimeRowSchema = z.object({
   view: PartnerCaseViewSchema,
+  accountingCorrectionRequests: z.array(z.object({ id: IdSchema, reason: z.string().min(1),
+    createdAt: InstantSchema }).strict()).optional(),
   customerOutput: CustomerContractOutputSchema.optional(),
   history: z.array(z.object({ sequence: z.number().int().positive(), type: z.string().min(1),
     recordedAt: InstantSchema }).strict()).optional(),

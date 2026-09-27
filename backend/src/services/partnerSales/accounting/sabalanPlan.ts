@@ -57,7 +57,7 @@ async function authorizedCommittedCase(tx: Prisma.TransactionClient, actorId: st
   correlationId: string, lock = true) {
   if (lock) await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
   const row = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
-    id: true, caseNumber: true, state: true, headRevision: true, integrityHash: true, internalRecordId: true,
+    id: true, caseNumber: true, trackingCode: { select: { number: true } }, state: true, headRevision: true, integrityHash: true, internalRecordId: true,
     profile: { select: { userId: true } }, head: { select: { internalProjection: true } },
     internalRecord: { select: { recordNumber: true } },
     events: { where: { type: 'CASE_COMMITTED' }, orderBy: { sequence: 'asc' }, take: 1,
@@ -101,6 +101,7 @@ export async function listSabalanPlanCandidates(database: PrismaClient, actorId:
     if (!source.ok) continue;
     if (!source.value.row.internalRecord) continue;
     result.push({ expected: source.value.rawView.owner, caseNumber: source.value.row.caseNumber,
+      ...(source.value.row.trackingCode ? { trackingNumber: source.value.row.trackingCode.number } : {}),
       internalRecordNumber: source.value.row.internalRecord.recordNumber,
       partnerDisplayName: source.value.rawView.debtor.displayName,
       payable: { amount: source.value.rawView.totals.payable, currency: source.value.rawView.totals.currency } });

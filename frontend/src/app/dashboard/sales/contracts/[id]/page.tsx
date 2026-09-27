@@ -80,7 +80,7 @@ import {
   type PartnerAccountView,
   type PartnerCaseView,
 } from "@sabalanerp/partner-sales-contracts";
-import { PartnerCaseWorkspace } from "@/features/partner-sales/cases/PartnerCaseWorkspace";
+import { PartnerSalesContractWorkspace } from "@/features/partner-sales/cases/PartnerSalesContractWorkspace";
 import { resolvePartnerContractRoute } from "@/features/partner-sales/cases/partnerContractRouting";
 import {
   assertSuccessfulSalesDownload,
@@ -874,26 +874,13 @@ export default function ContractDetailPage() {
         />
       );
     }
-    const capabilities = contract.partnerActions || {};
     const account = PartnerAccountViewSchema.safeParse(
       contract.partnerAccountView,
     );
     return (
-      <PartnerCaseWorkspace
+      <PartnerSalesContractWorkspace
         view={projection.data}
         account={account.success ? account.data : undefined}
-        actions={{
-          canPreview: capabilities.canPreview === true,
-          canIssue: capabilities.canIssue === true,
-          canSendConfirmation: capabilities.canSendConfirmation === true,
-          canRequestCorrection: false,
-          // Command transport for these mutations is registered by the integration owner.
-          canCancel: false,
-          canRequestVoid: false,
-          onPreview: () => void handleDownloadPdf(),
-          onIssue: () => void handlePrintContract(),
-          onSendConfirmation: () => void handleResendConfirmation(),
-        }}
       />
     );
   }

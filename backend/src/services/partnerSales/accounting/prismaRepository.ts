@@ -159,6 +159,7 @@ export function createPrismaPartnerAccountingRepository(input: {
             if (!allowed.ok) return allowed;
             const cases = await tx.partnerSaleCase.findMany({ where: { profileId: profile.id, state: { in: ['COMMITTED', 'VOIDED'] } },
               select: { id: true, state: true, headRevision: true, integrityHash: true, internalRecordId: true,
+                trackingCode: { select: { number: true } },
                 profile: { select: { userId: true } }, head: { select: { internalProjection: true } },
                 events: { orderBy: { sequence: 'asc' },
                   select: { id: true, type: true, caseRevision: true, integrityHash: true, evidence: true } } } });
@@ -188,7 +189,7 @@ export function createPrismaPartnerAccountingRepository(input: {
                   from: '0001-01-01', to: '9999-12-31', asOf: clock.now.toISOString() })),
                 cutoff: clock.now, asOf: clock.now, voided: row.state === 'VOIDED' });
               if (!covered) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-              purchases.push({ source, official });
+              purchases.push({ source, official, trackingNumber: row.trackingCode?.number });
             }
             return { ok: true, value: { partnerSellerId: input.actorId, purchases } };
           },

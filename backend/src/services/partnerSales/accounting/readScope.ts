@@ -22,8 +22,9 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
 type ListRow = { id: string; invoiceRecordId?: string | null; receivableId?: string | null;
   recordId?: string | null; entityType?: string | null; entityId?: string | null };
 type ListKind = 'FINANCIAL' | 'RECEIVABLE' | 'PAYMENT' | 'TAX' | 'AUDIT';
-type PartnerAccountingContext = { caseId: string; caseNumber: string; customerContractNumber: string; internalRecordNumber: string;
-  partnerSellerId: string; commercialAccountId: string; debtor: { displayName: string }; revision: number; actionUrl: string };
+type PartnerAccountingContext = { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string; internalRecordNumber: string;
+  partnerSellerId: string; commercialAccountId: string; debtor: { displayName: string };
+  endCustomer: { displayName: string }; revision: number; actionUrl: string; accountingWritable: boolean };
 type AccountingRowContext = { sourceKind?: string; partnerContext?: PartnerAccountingContext;
   partnerFinancialSource?: PartnerFinancialPreparation['totals']; partnerActions?: {
     registerReceipt?: boolean; reverseReceipt?: boolean; checkStatuses?: string[]; taxStatuses?: string[];
@@ -46,8 +47,10 @@ export function withAccountingReadScope<T>(database: PrismaClient, actor: Accoun
 async function createScope(database: Prisma.TransactionClient, actor: AccountingReadActor | undefined) {
   const caseRows = await database.partnerSaleCase.findMany({ where: { internalRecordId: { not: null },
     customerContractId: { not: null } }, orderBy: { id: 'asc' }, select: {
-    id: true, caseNumber: true, internalRecordId: true, internalRecord: { select: { recordNumber: true } },
-    customerContractId: true, customerContract: { select: { contractNumber: true } }, profile: { select: { userId: true } } } });
+    id: true, caseNumber: true, trackingCode: { select: { number: true } }, internalRecordId: true, internalRecord: { select: { recordNumber: true } },
+    customerContractId: true, customerContract: { select: { contractNumber: true } },
+    customer: { select: { companyName: true, firstName: true, lastName: true } },
+    profile: { select: { userId: true } } } });
   const cases = caseRows.filter((row): row is typeof row & { internalRecordId: string; customerContractId: string;
     internalRecord: NonNullable<typeof row.internalRecord>; customerContract: NonNullable<typeof row.customerContract> } =>
     Boolean(row.internalRecordId && row.customerContractId && row.internalRecord && row.customerContract));
@@ -170,10 +173,14 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
       if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||
           invoice.currency !== prepared.value.amount.currency || subtract(invoice.amount.toString(), prepared.value.amount.amount) !== '0') throw conflict();
       contextByInvoice.set(invoice.id, { caseId: row.id, caseNumber: views.accounting.caseNumber,
+        trackingNumber: row.trackingCode?.number,
         customerContractNumber: views.accounting.customerContractNumber,
         internalRecordNumber: views.accounting.recordNumber, partnerSellerId: row.profile.userId,
         commercialAccountId: views.accounting.commercialAccountId, debtor: views.accounting.debtor,
-        revision: owner.data.revision, actionUrl: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(views.accounting.caseNumber)}` });
+        endCustomer: { displayName: row.customer.companyName ||
+          `${row.customer.firstName} ${row.customer.lastName}`.trim() },
+        revision: owner.data.revision, accountingWritable: writableCases.has(row.id) && committedCases.has(row.id),
+        actionUrl: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(views.accounting.caseNumber)}` });
       preparationByInvoice.set(invoice.id, preparation);
     }
     return rows.map(row => {
@@ -274,7 +281,11 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     search: async (kind: ListKind | 'CORRECTION', ordinaryContractIds: string[], text: string) => {
       const normalized = text.toLocaleLowerCase();
       const matchedSources = cases.filter(row => allowedInternalIds.includes(row.internalRecordId) &&
-        [row.caseNumber, row.internalRecord.recordNumber, row.customerContract.contractNumber].some(value => value.toLocaleLowerCase().includes(normalized)))
+        [row.caseNumber, row.internalRecord.recordNumber, row.customerContract.contractNumber,
+          row.trackingCode?.number ? `همکار-${row.trackingCode.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 })}` : '',
+          row.customer.companyName ?? '', row.customer.firstName, row.customer.lastName,
+          `${row.customer.firstName} ${row.customer.lastName}`]
+          .some(value => value.toLocaleLowerCase().includes(normalized)))
         .map(row => row.internalRecordId);
       const invoices = await database.accountingFinancialRecord.findMany({ where: { AND: [financialAccess,
         { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE }, { OR: [
@@ -303,7 +314,9 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     payment: (where: Prisma.AccountingPaymentStatusWhereInput = {}): Prisma.AccountingPaymentStatusWhereInput => ({ AND: [paymentAccess, where] }),
     tax: (where: Prisma.AccountingTaxRecordWhereInput = {}): Prisma.AccountingTaxRecordWhereInput => ({ AND: [taxAccess, where] }),
     audit: (where: Prisma.AccountingAuditLogWhereInput = {}): Prisma.AccountingAuditLogWhereInput => ({ AND: [auditAccess, where] }),
-    correction: (where: Prisma.AccountingCorrectionRequestWhereInput = {}): Prisma.AccountingCorrectionRequestWhereInput => ({ AND: [ordinaryContract,
+    correction: (where: Prisma.AccountingCorrectionRequestWhereInput = {}): Prisma.AccountingCorrectionRequestWhereInput => ({ AND: [{ OR: [ordinaryContract,
+      { recordId: { in: invoiceIds }, contractId: { in: cases.filter(row =>
+        allowedInternalIds.includes(row.internalRecordId)).map(row => row.customerContractId) } }] },
       { OR: [{ recordId: null }, { recordId: { notIn: recordIds } }] }, where] }),
   };
 }

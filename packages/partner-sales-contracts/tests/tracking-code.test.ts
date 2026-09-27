@@ -10,4 +10,6 @@ test('the same Case always has one shorter, collision-free tracking label', () =
   assert.equal(partnerTrackingCode(first), partnerTrackingCode(first));
   assert.equal(partnerCustomerContractLabel(first, '100329'), '100329');
   assert.equal(partnerCustomerContractLabel(first), partnerTrackingCode(first));
+  assert.equal(partnerTrackingCode(first, 329), 'همکار-۰۰۳۲۹');
+  assert.equal(partnerCustomerContractLabel(first, null, 329), 'همکار-۰۰۳۲۹');
 });

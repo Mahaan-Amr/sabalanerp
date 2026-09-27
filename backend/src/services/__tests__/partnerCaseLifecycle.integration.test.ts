@@ -282,9 +282,12 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
     cohortId: ids.cohortId, actorId: ids.partnerId, eligibilityEvidence: { fixture: true } } });
   await tx.crmCustomer.create({ data: { id: ids.customerId, firstName: 'Customer', lastName: 'Lifecycle',
     ownerUserId: ids.partnerId, createdBy: ids.partnerId } });
-  await tx.partnerSaleCase.create({ data: { id: ids.caseId, caseNumber: partner.caseNumber, profileId: ids.profileId,
+  const [tracking] = await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('partner_case_tracking_number_seq') AS number`;
+  await tx.partnerSaleCase.create({ data: { id: ids.caseId, caseNumber: partner.caseNumber,
+    profileId: ids.profileId,
     customerId: ids.customerId, internalRecordId: ids.internalId, customerContractId: ids.contractId,
     headRevision: 1, integrityHash, pricingState: 'READY_TO_FINALIZE' } });
+  await tx.partnerCaseTrackingCode.create({ data: { caseId: ids.caseId, number: Number(tracking.number) } });
   await tx.partnerCaseRevision.create({ data: { caseId: ids.caseId, revision: 1, integrityHash, graphHash,
     graph: storedGraph, partySnapshots, wholesaleEnvelope, retailEnvelope, paymentEvidence, customerContent: revisionCustomerContent,
     pricingState: 'READY_TO_FINALIZE', internalProjection: { partner, accounting: storedAccounting, fulfillment }, customerProjection: customer,

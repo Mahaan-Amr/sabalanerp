@@ -10,7 +10,7 @@ import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContai
 
 type Currency = 'IRR' | 'IRT';
 type Metrics = { wholesalePurchases: string | null; retailSales: string | null; retailCollected: string | null; netComparableMargin: string | null };
-type ChartTransaction = { caseId: string; caseNumber: string; customerContractNumber: string; effectiveDate: string;
+type ChartTransaction = { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string; effectiveDate: string;
   kind: 'COMMITMENT' | 'CORRECTION' | 'VOID' | 'SABALAN_RECEIPT' | 'CUSTOMER_RECEIPT' | 'CUSTOMER_RECEIPT_REVERSAL';
   debtDelta: string; receivableDelta: string; receiptDelta: string };
 type MonthlyPoint = { jalaliMonth: string; debtBalance: string; receivableBalance: string; receipts: string; transactions: ChartTransaction[] };
@@ -19,7 +19,7 @@ export type PartnerReportPresentation = {
   scopeLabel: string; from: string; effectiveThrough: string;
   totals: Array<{ currency: Currency; metrics: Metrics; accountingBalance: string | null; accountingReceivedAsOf: string | null; accountingCovered: number; accountingEligible: number }>;
   series?: Array<{ currency: Currency; points: MonthlyPoint[] }>;
-  rows: Array<{ caseId: string; revision: number; caseNumber: string; customerContractNumber: string; state: CaseState; currency: Currency; metrics: Metrics;
+  rows: Array<{ caseId: string; revision: number; caseNumber: string; trackingNumber?: number; customerContractNumber: string; state: CaseState; currency: Currency; metrics: Metrics;
     accountingBalance?: string | null;
     collectionStatus?: 'UNPAID' | 'PARTIAL' | 'SETTLED' | 'OVERPAID';
     history?: { receiptCount: number; revisionCount: number; superseded: boolean; cancelled: boolean } }>;
@@ -106,7 +106,7 @@ export function PartnerReportContent({ report, onOpenCase }: { report: PartnerRe
         onOpenPoint={point => setSelectedPoint({ currency: total.currency, point })} />
     </section>; })}
     <div className="space-y-3">{report.rows.map(row => { const status = row.collectionStatus ? collectionCopy[row.collectionStatus] : null; return <ErpCard key={`${row.caseId}:${row.revision}`} className="p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><strong>پرونده {partnerTrackingCode(row.caseNumber)}</strong><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">قرارداد مشتری {row.customerContractNumber} · نسخه {row.revision.toLocaleString('fa-IR')}</p></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><strong>پرونده {partnerTrackingCode(row.caseNumber, row.trackingNumber)}</strong><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">قرارداد مشتری {row.customerContractNumber} · نسخه {row.revision.toLocaleString('fa-IR')}</p></div>
         <div className="flex flex-wrap gap-2">{status && <ErpBadge tone={status[1]}>{status[0]}</ErpBadge>}{row.history?.superseded && <ErpBadge tone="purple">نسخه جایگزین‌شده</ErpBadge>}{row.history?.cancelled && <ErpBadge tone="danger">لغوشده</ErpBadge>}</div></div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><ErpFieldView label="فروش retail" value={metricPresentation(row.metrics.retailSales, row.currency)} />
         <ErpFieldView label="وصول مشتری" value={metricPresentation(row.metrics.retailCollected, row.currency)} tone={row.metrics.retailCollected === null ? 'neutral' : 'success'} />
@@ -126,7 +126,7 @@ export function PartnerReportContent({ report, onOpenCase }: { report: PartnerRe
         {selectedPoint.point.transactions.length ? selectedPoint.point.transactions.map((transaction, index) => <ErpCard
           key={`${transaction.caseId}:${transaction.effectiveDate}:${index}`} className="p-3">
           <div className="flex flex-wrap items-center justify-between gap-2"><strong>{transactionLabel[transaction.kind]}</strong><span>{transaction.effectiveDate}</span></div>
-          <p className="mt-2 text-sm">پرونده {partnerTrackingCode(transaction.caseNumber)} · قرارداد {transaction.customerContractNumber}</p>
+          <p className="mt-2 text-sm">پرونده {partnerTrackingCode(transaction.caseNumber, transaction.trackingNumber)} · قرارداد {transaction.customerContractNumber}</p>
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
             {transaction.debtDelta !== '0' && <ErpBadge tone="warning">تغییر بدهی: {formatPartnerMoney(transaction.debtDelta, selectedPoint.currency)}</ErpBadge>}
             {transaction.receivableDelta !== '0' && <ErpBadge tone="info">تغییر مطالبات: {formatPartnerMoney(transaction.receivableDelta, selectedPoint.currency)}</ErpBadge>}

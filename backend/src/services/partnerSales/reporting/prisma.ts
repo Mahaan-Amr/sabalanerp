@@ -45,9 +45,11 @@ export function createPrismaPartnerReportingSource(input: {
       const through = effectiveThrough(period);
       const roots = await tx.partnerSaleCase.findMany({ where: { customerContractId: { not: null }, events: { some: {
         effectiveDate: { lte: new Date(`${through}T00:00:00.000Z`) }, recordedAt: { lte: clock.now } } } }, select: { id: true,
-        profile: { select: { userId: true } }, customerContract: { select: { departmentId: true } } }, orderBy: { id: 'asc' } });
+        trackingCode: { select: { number: true } }, profile: { select: { userId: true } },
+        customerContract: { select: { departmentId: true } } }, orderBy: { id: 'asc' } });
       const mapped: Root[] = roots.flatMap(row => row.customerContract ? [{ caseId: row.id,
-        partnerSellerId: row.profile.userId, departmentId: row.customerContract.departmentId }] : []);
+        partnerSellerId: row.profile.userId, departmentId: row.customerContract.departmentId,
+        ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}) }] : []);
       const channel = query.search ? 'SEARCH' as const : 'LIST' as const;
       const baseAuthorization = createAuditedPartnerAuthorization(tx, { actorId: input.actorId,
         purpose: query.purpose, channel }, { correlationId: input.correlationId });

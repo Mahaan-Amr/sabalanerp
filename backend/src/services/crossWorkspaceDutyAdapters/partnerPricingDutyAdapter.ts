@@ -193,13 +193,14 @@ export const reassignPartnerPricingDuty = async (database: any, input: {
 
 const loadInboxProjection: CrossWorkspaceDutySourceAdapter['loadInboxProjection'] = async (database, input) => {
   const inquiry = await database.partnerInquiry.findUnique({ where: { id: input.sourceId }, include: {
-    case: { select: { caseNumber: true } }, rows: { where: { successor: null }, select: { id: true, outcome: true } },
+    case: { select: { caseNumber: true, trackingCode: { select: { number: true } } } },
+    rows: { where: { successor: null }, select: { id: true, outcome: true } },
   } });
   if (!inquiry?.caseId || !inquiry.case) throw new Error('DUTY_SOURCE_CHANGED');
   if (input.sourceActionCode === resultDefinition.sourceActionCode) {
     const approved = inquiry.rows.filter((row: any) => row.outcome === 'APPROVED').length;
     const rejected = inquiry.rows.filter((row: any) => row.outcome === 'REJECTED').length;
-    return { title: `نتیجه استعلام قیمت پرونده ${inquiry.case.caseNumber}`,
+    return { title: `نتیجه استعلام قیمت پرونده همکار-${inquiry.case.trackingCode?.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 }) ?? '—'}`,
       description: rejected > 0
         ? `${rejected.toLocaleString('fa-IR')} ردیف نیازمند اصلاح و ${approved.toLocaleString('fa-IR')} ردیف قیمت‌گذاری‌شده`
         : `قیمت ${approved.toLocaleString('fa-IR')} ردیف از فروشنده سبلان دریافت شد`,
@@ -207,7 +208,7 @@ const loadInboxProjection: CrossWorkspaceDutySourceAdapter['loadInboxProjection'
       sourceIsCurrent: inquiry.revision === input.sourceVersion && inquiry.rows.every((row: any) => row.outcome !== 'PENDING') };
   }
   const pending = inquiry.rows.filter((row: any) => row.outcome === 'PENDING');
-  return { title: `بررسی قیمت پرونده ${inquiry.case.caseNumber}`,
+  return { title: `بررسی قیمت پرونده همکار-${inquiry.case.trackingCode?.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 }) ?? '—'}`,
     description: `${pending.length.toLocaleString('fa-IR')} ردیف فنی در انتظار قیمت سبلان`,
     destinationHref: `/dashboard/sales/partner-inquiries?inquiryId=${encodeURIComponent(inquiry.id)}`,
     sourceIsCurrent: pending.length > 0 };

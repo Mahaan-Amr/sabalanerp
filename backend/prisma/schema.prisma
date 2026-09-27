@@ -11621,6 +11621,7 @@ enum PartnerCustomerConfirmationState {
 model PartnerSaleCase {
   id                  String                          @id
   caseNumber          String                          @unique
+  trackingCode        PartnerCaseTrackingCode?
   profileId           String
   customerId          String
   internalRecordId    String?                         @unique
@@ -11688,6 +11689,14 @@ model PartnerCommercialNumber {
 
   @@unique([caseId, purpose])
   @@map("partner_commercial_numbers")
+}
+
+model PartnerCaseTrackingCode {
+  caseId String          @id
+  number Int             @unique
+  case   PartnerSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@map("partner_case_tracking_codes")
 }
 
 model PartnerCaseRevision {

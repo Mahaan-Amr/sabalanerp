@@ -873,17 +873,23 @@ export const calculatePackingPlan = (request: PackingRequest): PackingResult => 
     const sourceLength = sources[0]?.free[0]?.length;
     const sourceWidth = sources[0]?.free[0]?.width;
     const distinctSegmentLengths = new Set(pieces.map(piece => piece.length.toFixed()));
+    const isLargeUniformGridSet = pieces.length > 12 && sourceLength !== undefined && sourceWidth !== undefined &&
+      sources.every(source => source.free.length === 1 && source.free[0].length.eq(sourceLength) &&
+        source.free[0].width.eq(sourceWidth)) &&
+      pieces.every(piece => piece.length.eq(pieces[0].length) && piece.width.eq(pieces[0].width));
     const isLargeSegmentedStripSet = pieces.length > 12 && sourceLength !== undefined && sourceWidth !== undefined &&
       sources.every(source => source.free.length === 1 && source.free[0].length.eq(sourceLength) &&
         source.free[0].width.eq(sourceWidth)) &&
       new Set(pieces.map(piece => piece.width.toFixed())).size === 1 &&
       distinctSegmentLengths.size === 2 &&
       pieces.some(piece => piece.length.eq(sourceLength));
-    const bestState =
-      calculateUniformGridState({ sources, pieces, kerf }) ??
+    const fastState = calculateUniformGridState({ sources, pieces, kerf }) ??
       calculatePriorityFirstFitState({ sources, pieces, kerf,
-        allowUniformPriority: isLargeSegmentedStripSet }) ??
-      searchBestPackingState({ sources, pieces, kerf });
+        allowUniformPriority: isLargeSegmentedStripSet || isLargeUniformGridSet });
+    // Uniform demands above the exact-search bound must stay on the bounded
+    // path. Exhaustive search here ran synchronously during each keystroke.
+    const bestState = fastState ?? (isLargeUniformGridSet ? undefined :
+      searchBestPackingState({ sources, pieces, kerf }));
     if (!bestState) return {
       ok: false,
       conflict: { code: 'insufficient-source-capacity', message: 'Entered sources cannot satisfy exact demand.' }

@@ -131,8 +131,13 @@ export function partnerRetailRowSummary(row: PartnerRetailRow) {
   } catch { return null; }
 }
 
-export const partnerMoneyText = (amount: string, currency: Money['currency']) =>
-  `${amount.replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} ${currency === 'IRR' ? 'ریال' : 'تومان'}`;
+export const partnerMoneyText = (amount: string, currency: Money['currency']) => {
+  const [whole, fraction] = amount.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const formatted = (fraction === undefined ? grouped : `${grouped}.${fraction}`)
+    .replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
+  return `${formatted} ${currency === 'IRR' ? 'ریال' : 'تومان'}`;
+};
 
 export function remainingPartnerAmount(total: string, allocated: readonly string[]): string | null {
   try {

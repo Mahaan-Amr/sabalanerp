@@ -550,7 +550,10 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         graphHash: evidence.value.graphHash, graph: evidence.value.graph, partySnapshots: evidence.value.partySnapshots,
         wholesaleEnvelope: evidence.value.wholesaleEnvelope, retailEnvelope: evidence.value.retailEnvelope,
         paymentEvidence: evidence.value.paymentEvidence, customerContent: evidence.value.customerContent });
-      const ids = { eventId: randomUUID(), caseNumber: `PC-${randomUUID()}` };
+      const [tracking] = await tx.$queryRaw<Array<{ number: bigint }>>`
+        SELECT nextval('partner_case_tracking_number_seq') AS number`;
+      const ids = { eventId: randomUUID(), caseNumber: `PC-${randomUUID()}`,
+        trackingNumber: Number(tracking.number) };
       const projections = await buildCaseProjections({ caseId, revision: 1, integrityHash, caseNumber: ids.caseNumber,
         commercialAccountId: resolved.value.commercialAccountId,
         state: 'DRAFT', evidence: evidence.value });
@@ -561,9 +564,11 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         return projections;
       }
       mutated = true;
-      await tx.partnerSaleCase.create({ data: { id: caseId, caseNumber: ids.caseNumber, profileId: resolved.value.profileId,
+      await tx.partnerSaleCase.create({ data: { id: caseId, caseNumber: ids.caseNumber,
+        profileId: resolved.value.profileId,
         customerId: resolved.value.customerId, headRevision: 1, integrityHash,
         pricingState: evidence.value.pricingState } });
+      await tx.partnerCaseTrackingCode.create({ data: { caseId, number: ids.trackingNumber } });
       dependencies.failpoint?.('AFTER_CASE_ROOT');
       await tx.partnerCaseRevision.create({ data: { caseId, revision: 1, integrityHash,
         pricingState: evidence.value.pricingState,
@@ -629,7 +634,7 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
       const outcome = { version: 1, commandId: command.commandId, caseId, revision: 1, integrityHash, eventIds: [ids.eventId] };
       await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...key, payloadHash: intentHash, outcome: json(outcome) } });
       return { ok: true, value: { commandId: command.commandId, replayed: false,
-        case: projections.value.partner, eventIds: [ids.eventId] } };
+        case: { ...projections.value.partner, trackingNumber: ids.trackingNumber }, eventIds: [ids.eventId] } };
       })();
       if (!result.ok && mutated) throw new RollbackCaseResult(result);
       return result;

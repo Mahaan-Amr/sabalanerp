@@ -38,6 +38,7 @@ function parseReport(value: unknown): PartnerReportPresentation | null {
           receivableBalance: String(point.receivableBalance), receipts: String(point.receipts),
           transactions: Array.isArray(point.transactions) ? (point.transactions as Record<string, unknown>[]).map(transaction => ({
             caseId: String(transaction.caseId), caseNumber: String(transaction.caseNumber),
+            ...(Number.isSafeInteger(transaction.trackingNumber) ? { trackingNumber: Number(transaction.trackingNumber) } : {}),
             customerContractNumber: String(transaction.customerContractNumber), effectiveDate: String(transaction.effectiveDate),
             kind: transaction.kind as never, debtDelta: String(transaction.debtDelta),
             receivableDelta: String(transaction.receivableDelta), receiptDelta: String(transaction.receiptDelta),
@@ -45,7 +46,9 @@ function parseReport(value: unknown): PartnerReportPresentation | null {
         })) : [],
       })) : [],
       rows: (report.rows as Record<string, unknown>[]).map(row => ({ caseId: String(row.caseId), revision: Number(row.revision),
-        caseNumber: String(row.caseNumber), customerContractNumber: String(row.customerContractNumber), state: row.state as never,
+        caseNumber: String(row.caseNumber),
+        ...(Number.isSafeInteger(row.trackingNumber) ? { trackingNumber: Number(row.trackingNumber) } : {}),
+        customerContractNumber: String(row.customerContractNumber), state: row.state as never,
         currency: row.currency as 'IRR' | 'IRT', metrics: metric(row.metrics),
         accountingBalance: row.account && typeof row.account === 'object' && !Array.isArray(row.account)
           && (row.account as Record<string, unknown>).balance && typeof (row.account as Record<string, unknown>).balance === 'object'

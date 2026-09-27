@@ -237,7 +237,7 @@ export default function AccountingReceivablesPage() {
       <AccountingActionModal
         open={Boolean(receiptTarget)}
         title="ثبت دریافت"
-        description={receiptTarget ? `${receiptTarget.partnerContext?.caseNumber ? partnerTrackingCode(receiptTarget.partnerContext.caseNumber) : receiptTarget.contract?.contractNumber || 'قرارداد'} - مانده ${money(receiptTarget.remainingAmount, receiptTarget.currency)}` : undefined}
+        description={receiptTarget ? `${receiptTarget.partnerContext?.caseNumber ? partnerTrackingCode(receiptTarget.partnerContext.caseNumber, receiptTarget.partnerContext.trackingNumber) : receiptTarget.contract?.contractNumber || 'قرارداد'} - مانده ${money(receiptTarget.remainingAmount, receiptTarget.currency)}` : undefined}
         fields={[
           { id: 'amount', label: 'مبلغ دریافت', type: receiptTarget?.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'text' : 'number', required: true, defaultValue: receiptTarget?.remainingAmount || 0 },
           { id: 'method', label: 'روش دریافت', type: 'select', defaultValue: 'CASH', options: [

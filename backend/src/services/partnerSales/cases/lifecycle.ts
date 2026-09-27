@@ -106,7 +106,8 @@ async function clock(tx: Transaction) {
 
 async function readCase(tx: Transaction, caseId: string) {
   return tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
-    id: true, caseNumber: true, profileId: true, headRevision: true, integrityHash: true, state: true,
+    id: true, caseNumber: true, trackingCode: { select: { number: true } },
+    profileId: true, headRevision: true, integrityHash: true, state: true,
     pricingState: true, customerConfirmationState: true,
     stateRevision: true, internalRecordId: true, customerContractId: true, commitmentEventId: true,
     profile: { select: { userId: true } },
@@ -186,7 +187,8 @@ async function parseViews(tx: Transaction, row: LockedCase) {
       accounting.data.recordId !== row.internalRecordId || fulfillment.data.recordId !== row.internalRecordId)) ||
       customer.data.revision !== row.headRevision || customer.data.contractNumber !== row.customerContract.contractNumber ||
       computedOutputHash !== outputHash) return undefined;
-  return { partner: { ...partner.data, customerContractNumber: row.customerContract.contractNumber, state: row.state,
+  return { partner: { ...partner.data, trackingNumber: row.trackingCode?.number,
+    customerContractNumber: row.customerContract.contractNumber, state: row.state,
     customerConfirmationState: row.customerConfirmationState },
     ...(accounting.success ? { accounting: { ...accounting.data, state: row.state } } : {}) };
 }

@@ -932,12 +932,13 @@ export function ErpLoading() {
   );
 }
 
-export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
+export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions, rowClassName, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
   rows: T[];
   rowKey: (row: T) => string;
   columns: ErpColumn<T>[];
   filters?: ErpFilter[];
   rowActions?: (row: T) => ErpAction[];
+  rowClassName?: (row: T) => string;
   focusedRowKey?: string;
   emptyState?: React.ReactNode;
   isLoading?: boolean;
@@ -971,7 +972,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                 <div key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined}>
                 <ErpCard
                   interactive
-                  className={cx('scroll-mt-24 p-4', focusedRowKey === rowKey(row) && 'ring-2 ring-[var(--sds-focus-ring)]')}
+                  className={cx('scroll-mt-24 p-4', rowClassName?.(row), focusedRowKey === rowKey(row) && 'ring-2 ring-[var(--sds-focus-ring)]')}
                 >
                   <div className="space-y-3">
                     {columns.filter((column) => column.priority !== 'hidden-mobile').map((column) => (
@@ -1004,7 +1005,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined} className={cx('border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]', focusedRowKey === rowKey(row) && 'bg-[var(--sds-accent-soft)] ring-2 ring-inset ring-[var(--sds-focus-ring)]')}>
+                    <tr key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined} className={cx('border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]', rowClassName?.(row), focusedRowKey === rowKey(row) && 'bg-[var(--sds-accent-soft)] ring-2 ring-inset ring-[var(--sds-focus-ring)]')}>
                       {columns.map((column) => (
                         <td key={column.id} className={cx('px-3 py-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
                           {column.cell(row)}

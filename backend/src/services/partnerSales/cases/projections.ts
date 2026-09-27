@@ -51,6 +51,10 @@ export async function buildCaseProjections(input: { caseId: string; revision: nu
       caseNumber: input.caseNumber, ...(input.customerContractNumber
         ? { customerContractNumber: input.customerContractNumber } : {}), state: input.state,
       pricingState: input.evidence.pricingState, customerConfirmationState: 'NOT_SENT',
+      ...(priced && input.evidence.graph.layerConfigurations.length ? { catalogLayerRates:
+        input.evidence.graph.layerConfigurations.map(layer => ({ parentProductRowId: layer.parentProductRowId,
+          layerTitle: layer.input.layerTitle, layerUnit: layer.input.layerUnit,
+          rateToman: layer.input.layerRateToman })) } : {}),
       products: input.evidence.products.map(row => ({ ...product(row), ...(priced
         ? { wholesaleUnitPrice: row.wholesaleUnitPrice } : {}), retailUnitPrice: row.retailUnitPrice })),
       retailTotals: input.evidence.retailEnvelope.totals,

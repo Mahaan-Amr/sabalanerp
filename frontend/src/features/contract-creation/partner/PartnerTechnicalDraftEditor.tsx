@@ -46,8 +46,17 @@ const commitText = (draft: PartnerTechnicalDraft, entityId: string,
 export function overridePartnerStairQuantity(draft: PartnerTechnicalDraft, productRowId: string, text: string) {
   const next = commitText(draft, productRowId, 'quantity', text);
   const row = next.rows.find(item => item.productRowId === productRowId);
-  return row?.family === 'stair' ? replaceRow(next, { ...row,
-    configuration: { ...row.configuration, quantityMode: 'manual' } }) : next;
+  if (row?.family !== 'stair') return next;
+  const previous = draft.rows.find(item => item.productRowId === productRowId);
+  const oldQuantity = previous?.family === 'stair' ? previous.configuration.quantity : undefined;
+  const newQuantity = row.configuration.quantity;
+  const groups = row.operations?.groups;
+  const operations = groups?.length === 1 && oldQuantity !== undefined && newQuantity !== undefined
+    && groups[0].scope === String(oldQuantity)
+    ? { ...row.operations!, groups: [{ ...groups[0], scope: String(newQuantity) }] }
+    : row.operations;
+  return replaceRow(next, { ...row, operations,
+    configuration: { ...row.configuration, quantityMode: 'manual' } });
 }
 const longitudinalTechnicalConfiguration = (configuration: Extract<PartnerTechnicalDraft['rows'][number], { family: 'longitudinal' }>['configuration']) => {
   const { mandatoryEnabled: _enabled, mandatoryPercentage: _percentage, ...technical } = configuration;
@@ -309,15 +318,18 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
         label="مشخصات واقعی قرارداد تأیید شد"
         onChange={event => onDraftChange(confirmPartnerContractConfiguration(state.draft, row.productRowId, event.target.checked))} />}
       {preview.ok && <LayerEditor draft={state.draft} products={products} operations={operations} previewRows={preview.value.rows}
+        previewDependents={preview.value.dependents}
         inventory={preview.value.inventory} onChange={onDraftChange} />}
     </div>
   </CentralProductModalShell>;
 }
 
-function LayerEditor({ draft, products, operations, previewRows, inventory, onChange }: { draft: PartnerTechnicalDraft; products: PartnerTechnicalProduct[];
+function LayerEditor({ draft, products, operations, previewRows, previewDependents, inventory, onChange }: { draft: PartnerTechnicalDraft; products: PartnerTechnicalProduct[];
   operations: PartnerTechnicalOperation[]; previewRows: readonly { productRowId: string; calculation: { ok: boolean; result?: unknown } }[];
+  previewDependents: readonly { kind: string; layerConfigurationId?: string; calculation: { ok: boolean; result?: unknown } }[];
   inventory: readonly { remainingStoneId: string; ownerProductRowId: string; catalogProductId: string; lengthMeters: string; widthMeters: string; quantity: number }[];
   onChange: (draft: PartnerTechnicalDraft) => void }) {
+  const [selectedLayerByParent, setSelectedLayerByParent] = useState<Record<string, string>>({});
   const parents = draft.rows.filter((row): row is Extract<typeof row, { family: 'stair' }> => row.family === 'stair');
   const layers = (draft.dependents ?? []).filter((item): item is Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'layer' }> => item.kind === 'layer');
   const layerCatalog = operations.filter((item): item is Extract<PartnerTechnicalOperation, { kind: 'LAYER' }> => item.kind === 'LAYER');
@@ -327,15 +339,19 @@ function LayerEditor({ draft, products, operations, previewRows, inventory, onCh
   const asDraft = (layer: typeof layers[number]): StairLayerConfigurationDraft => { const item = layerCatalog.find(candidate => candidate.catalogItemId === layer.catalogItemId);
     return { draftId: layer.layerConfigurationId, layerTitle: item?.name ?? 'لایه', layerUnit: item?.unit ?? null, layerRateToman: '',
       layersPerParentPiece: editText(draft, layer.layerConfigurationId, 'layersPerParentPiece', layer.layersPerParentPiece),
-      width: editText(draft, layer.layerConfigurationId, 'widthMeters', layer.widthMeters), widthUnit: layer.widthDisplayUnit,
+      width: partnerStairDisplayLength(layer.widthMeters, layer.widthDisplayUnit), widthUnit: layer.widthDisplayUnit,
       targetSides: layer.targetSides, source: layer.source?.kind === 'paid-remainder' ? 'contract-remainder'
         : layer.source?.kind === 'parent-material' ? 'parent-material' : layer.source?.kind === 'new-material' ? 'new-material' : null,
       sourceLabel: '', description: layer.description ?? '' }; };
   if (!parents.length && !layers.length) return null;
   return <ErpCard className="space-y-4 p-4"><h2 className="font-bold">لایه‌های پله</h2>{parents.map(parent => <div key={parent.productRowId} className="space-y-2">
     <p className="text-sm font-semibold">{products.find(item => item.catalogItemId === parent.catalogItemId)?.name ?? 'پله'}</p>
+    <ErpCombobox label="نوع لایه" value={selectedLayerByParent[parent.productRowId] ?? layerCatalog[0]?.catalogItemId ?? ''}
+      options={layerCatalog.map(layer => ({ value: layer.catalogItemId, label: layer.name }))}
+      onChange={catalogItemId => setSelectedLayerByParent(current => ({ ...current, [parent.productRowId]: catalogItemId }))} />
     <StairLayersSection drafts={layers.filter(layer => layer.parentProductRowId === parent.productRowId).map(asDraft)} parentQuantity={parentQuantity(parent.productRowId)}
-      onAdd={() => { const layer = layerCatalog[0]; const product = products.find(item => item.catalogItemId === parent.catalogItemId); if (!layer || !product) return;
+      onAdd={() => { const layer = layerCatalog.find(item => item.catalogItemId === selectedLayerByParent[parent.productRowId]) ?? layerCatalog[0];
+        const product = products.find(item => item.catalogItemId === parent.catalogItemId); if (!layer || !product) return;
         onChange(addPartnerTechnicalDependent(draft, { kind: 'layer', parentProductRowId: parent.productRowId, layer,
           layerConfigurationId: `layer-configuration:${crypto.randomUUID()}`, sourceBatchId: `source-batch:${crypto.randomUUID()}`,
           creationOrder: (draft.dependents?.length ?? 0) + 1 })); }}
@@ -352,15 +368,19 @@ function LayerEditor({ draft, products, operations, previewRows, inventory, onCh
         next = commitText(next, id, 'widthMeters', width);
         const updated = next.dependents?.find(item => item.kind === 'layer' && item.layerConfigurationId === id);
         if (!updated || updated.kind !== 'layer' || !product) { onChange(next); return; }
+        const sourceKind = value.source === 'contract-remainder' ? 'paid-remainder'
+          : value.source === 'parent-material' ? 'parent-material'
+          : value.source === 'new-material' ? 'new-material' : null;
         const sourceRows = [{ sourceRowId: `layer-source-row:${crypto.randomUUID()}`,
           lengthMeters: product.dimensions.motherLengthMeters ?? parent.configuration.motherLengthMeters,
           widthMeters: product.dimensions.motherWidthCentimeters ? String(Number(product.dimensions.motherWidthCentimeters) / 100) : parent.configuration.crossDimensionMeters,
           quantity: Math.max(1, parentQuantity(parent.productRowId)) }];
-        const source = value.source === 'contract-remainder' ? { kind: 'paid-remainder' as const, selectedRemainingStoneIds: [] }
-          : value.source === 'parent-material' ? { kind: 'parent-material' as const, selectedRemainingStoneIds: [], catalogItemId: product.catalogItemId,
+        const source = sourceKind && current.source?.kind === sourceKind ? current.source
+          : sourceKind === 'paid-remainder' ? { kind: 'paid-remainder' as const, selectedRemainingStoneIds: [] }
+          : sourceKind === 'parent-material' ? { kind: 'parent-material' as const, selectedRemainingStoneIds: [], catalogItemId: product.catalogItemId,
               catalogSnapshotVersion: product.catalogSnapshotVersion, sourceRows }
-            : value.source === 'new-material' ? { kind: 'new-material' as const, catalogItemId: product.catalogItemId,
-                catalogSnapshotVersion: product.catalogSnapshotVersion, sourceRows } : undefined;
+          : sourceKind === 'new-material' ? { kind: 'new-material' as const, catalogItemId: product.catalogItemId,
+              catalogSnapshotVersion: product.catalogSnapshotVersion, sourceRows } : undefined;
         onChange(PartnerTechnicalDraftSchema.parse({ ...next, inputRevision: next.inputRevision + 1,
           dependents: next.dependents?.map(item => item === updated ? { ...updated, widthDisplayUnit: value.widthUnit,
             targetSides: [...value.targetSides], description: value.description, ...(source ? { source } : {}) } : item) }));
@@ -383,7 +403,7 @@ function LayerEditor({ draft, products, operations, previewRows, inventory, onCh
     {layers.filter(layer => layer.parentProductRowId === parent.productRowId && layer.source?.kind === 'paid-remainder').map(layer =>
       <ErpField key={`paid-stock:${layer.layerConfigurationId}`} label="قطعات باقی‌مانده برای لایه" required
         hint="یک یا چند قطعه از موجودی canonical همین فروش را انتخاب کنید.">
-        <div className="grid gap-2 sm:grid-cols-2">{inventory.map(stock => {
+        <div className="grid gap-2 sm:grid-cols-2">{inventory.filter(stock => stock.ownerProductRowId === parent.productRowId).map(stock => {
           const checked = layer.source?.kind === 'paid-remainder' && layer.source.selectedRemainingStoneIds.includes(stock.remainingStoneId);
           return <ErpCheckbox key={stock.remainingStoneId} checked={checked}
             label={`${stock.lengthMeters} × ${stock.widthMeters} متر · ${stock.quantity.toLocaleString('fa-IR')} قطعه`}
@@ -394,6 +414,32 @@ function LayerEditor({ draft, products, operations, previewRows, inventory, onCh
                   : item.source.selectedRemainingStoneIds.filter(id => id !== stock.remainingStoneId) } } : item) }))} />;
         })}</div>
       </ErpField>)}
+    {layers.filter(layer => layer.parentProductRowId === parent.productRowId).map(layer => {
+      const result = previewDependents.find(item => item.kind === 'layer' && item.layerConfigurationId === layer.layerConfigurationId)?.calculation.result;
+      const strips = result && typeof result === 'object' && 'physicalStrips' in result && Array.isArray(result.physicalStrips)
+        ? result.physicalStrips as Array<{ side: 'front' | 'back' | 'left' | 'right'; lengthMeters: string; widthMeters: string; quantity: number }> : [];
+      if (!strips.length) return null;
+      const sideLabels = { front: 'جلو', back: 'عقب', left: 'چپ', right: 'راست' } as const;
+      return <ErpCard key={`operations:${layer.layerConfigurationId}`} className="space-y-3 p-3">
+        <h3 className="font-semibold">عملیات لایهٔ {layerCatalog.find(item => item.catalogItemId === layer.catalogItemId)?.name ?? 'پله'}</h3>
+        {strips.map(strip => {
+          const side = layer.sideOperations?.find(item => item.side === strip.side);
+          return <div key={strip.side} className="border-t border-[var(--sds-border-subtle)] pt-3">
+            <p className="mb-2 text-sm font-semibold">سمت {sideLabels[strip.side]} · {strip.quantity.toLocaleString('fa-IR')} نوار</p>
+            <OperationsEditor draft={draft} row={parent} calculation={strip as unknown as Record<string, unknown>}
+              catalog={operations} intentOverride={side?.operations ?? { groups: [], tools: [], finishings: [] }}
+              onChange={onChange} onOperationsChange={nextOperations => {
+                const operationCollectionId = side?.operationCollectionId ?? `layer-operation-collection:${crypto.randomUUID()}`;
+                const nextSide = { side: strip.side, operationCollectionId, scopeIntent: 'side' as const, operations: nextOperations };
+                onChange(PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1,
+                  dependents: (draft.dependents ?? []).map(item => item.kind === 'layer' && item.layerConfigurationId === layer.layerConfigurationId
+                    ? { ...item, sideOperations: [...(item.sideOperations ?? []).filter(entry => entry.side !== strip.side), nextSide] }
+                    : item) }));
+              }} />
+          </div>;
+        })}
+      </ErpCard>;
+    })}
   </div>)}</ErpCard>;
 }
 
@@ -454,10 +500,12 @@ function PartnerRemainderConfigurationFlow({ draft, productRowId, onChange, onCl
   </CentralProductModalShell>;
 }
 
-function OperationsEditor({ draft, row, calculation, catalog, onChange }: { draft: PartnerTechnicalDraft;
+function OperationsEditor({ draft, row, calculation, catalog, onChange, intentOverride, onOperationsChange }: { draft: PartnerTechnicalDraft;
   row: Extract<PartnerTechnicalDraft['rows'][number], { family: 'longitudinal' | 'slab' | 'stair' }>;
-  calculation: Record<string, unknown>; catalog: PartnerTechnicalOperation[]; onChange: (draft: PartnerTechnicalDraft) => void }) {
-  const intent = row.operations ?? { groups: [], tools: [], finishings: [] };
+  calculation: Record<string, unknown>; catalog: PartnerTechnicalOperation[]; onChange: (draft: PartnerTechnicalDraft) => void;
+  intentOverride?: NonNullable<Extract<PartnerTechnicalDraft['rows'][number], { family: 'stair' }>['operations']>;
+  onOperationsChange?: (operations: NonNullable<Extract<PartnerTechnicalDraft['rows'][number], { family: 'stair' }>['operations']>) => void }) {
+  const intent = intentOverride ?? row.operations ?? { groups: [], tools: [], finishings: [] };
   const length = String(calculation.lengthMeters ?? '0');
   const width = String(calculation.widthMeters ?? calculation.crossDimensionMeters ?? '0');
   const quantity = typeof calculation.quantity === 'number' ? calculation.quantity : undefined;
@@ -492,7 +540,8 @@ function OperationsEditor({ draft, row, calculation, catalog, onChange }: { draf
           ...(finishing.quantityOverride ? { quantityOverride: { value: String(finishing.quantityOverride.value),
             automaticQuantitySnapshot: String(finishing.quantityOverride.automaticQuantitySnapshot),
             ...(finishing.quantityOverride.resolution ? { resolution: finishing.quantityOverride.resolution } : {}) } } : {}) })) };
-      onChange(replaceRow(draft, { ...row, operations }));
+      if (onOperationsChange) onOperationsChange(operations);
+      else onChange(replaceRow(draft, { ...row, operations }));
     }} />;
 }
 

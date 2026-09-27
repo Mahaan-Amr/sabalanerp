@@ -277,7 +277,7 @@ export default function AccountingInvoiceCandidatesPage() {
     >
       {planCandidates.length > 0 && <div className="space-y-3">
         {planCandidates.map(candidate => <ErpCard key={candidate.expected.caseId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="font-semibold">{partnerTrackingCode(candidate.caseNumber)} · {candidate.partnerDisplayName}</p>
+          <div><p className="font-semibold">{partnerTrackingCode(candidate.caseNumber, candidate.trackingNumber)} · {candidate.partnerDisplayName}</p>
             <p className="sds-text-muted text-sm">{money(candidate.payable.amount, candidate.payable.currency)}</p></div>
           <ErpButton label="ثبت برنامه پرداخت به سبلان" icon={FaPlus} onClick={() => openPlan(candidate)} />
         </ErpCard>)}

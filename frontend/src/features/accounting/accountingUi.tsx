@@ -32,8 +32,8 @@ export type AccountingMetric = {
 export type AccountingContractRow = {
   contractId: string;
   sourceKind?: 'PARTNER_INTERNAL_RECORD';
-  partnerContext?: { caseNumber: string; customerContractNumber: string; internalRecordNumber: string;
-    debtor: { displayName: string }; actionUrl: string };
+  partnerContext?: { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string; internalRecordNumber: string;
+    debtor: { displayName: string }; endCustomer: { displayName: string }; actionUrl: string };
   contractNumber: string;
   titlePersian: string;
   createdAt?: string;
@@ -196,11 +196,11 @@ export const dateFa = (value?: string | Date | null) => {
 };
 
 export function PartnerAccountingIdentity({ context }: { context?: {
-  caseNumber: string; internalRecordNumber: string; debtor: { displayName: string };
+  caseNumber: string; trackingNumber?: number; internalRecordNumber: string; debtor: { displayName: string };
 } | null }) {
   if (!context) return <span className="sds-text-secondary">شواهد پرونده نیاز به بررسی دارد</span>;
   return <div>
-    <p className="font-semibold">کد پیگیری {partnerTrackingCode(context.caseNumber)}</p>
+    <p className="font-semibold">کد پیگیری {partnerTrackingCode(context.caseNumber, context.trackingNumber)}</p>
     <p className="mt-1 text-xs sds-text-secondary">طرف حساب همکار: {context.debtor.displayName}</p>
     <p className="mt-1 text-xs sds-text-secondary">سند داخلی: {context.internalRecordNumber}</p>
   </div>;

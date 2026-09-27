@@ -218,7 +218,7 @@ export default function AccountingPaymentsPage() {
         open={Boolean(checkTarget)}
         title={checkTarget?.status === 'REVERSE_RECEIPT' ? 'برگشت دریافت' : checkTarget?.status === 'RETURNED' ? 'عودت چک' : 'به‌روزرسانی وضعیت چک'}
         description={checkTarget?.row.sourceKind === 'PARTNER_INTERNAL_RECORD'
-          ? `پرونده ${partnerTrackingCode(checkTarget.row.partnerContext?.caseNumber ?? '')} · ${money(checkTarget.row.amount, checkTarget.row.currency)}${['RETURNED', 'REVERSE_RECEIPT'].includes(checkTarget.status) ? ' — با تأیید این اقدام، اثر وصول برگشت می‌خورد و مانده حساب به‌روزرسانی می‌شود.' : ''}`
+          ? `پرونده ${partnerTrackingCode(checkTarget.row.partnerContext?.caseNumber ?? '', checkTarget.row.partnerContext?.trackingNumber)} · ${money(checkTarget.row.amount, checkTarget.row.currency)}${['RETURNED', 'REVERSE_RECEIPT'].includes(checkTarget.status) ? ' — با تأیید این اقدام، اثر وصول برگشت می‌خورد و مانده حساب به‌روزرسانی می‌شود.' : ''}`
           : checkTarget?.status === 'REVERSE_RECEIPT'
             ? `دریافت ${money(checkTarget.row.amount, checkTarget.row.currency)} · قرارداد ${checkTarget.row.contract?.contractNumber || checkTarget.row.contractId || '—'} — اثر وصول برگشت می‌خورد و مانده دریافتنی به‌روزرسانی می‌شود.`
             : checkTarget ? `چک ${checkTarget.row.checkNumber || ''} - ${checkTarget.row.contract?.contractNumber || ''}` : undefined}

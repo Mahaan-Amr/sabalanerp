@@ -1066,7 +1066,16 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
         include: { receivables: { where: scope.receivable(), select: { status: true, paidAmount: true, remainingAmount: true } } },
         orderBy: { createdAt: 'desc' },
       });
-      return scope.contextualize('FINANCIAL', records);
+      const contextualized = await scope.contextualize('FINANCIAL', records);
+      const flags = await scope.database.accountingContractFlag.findMany({ where: {
+        sourceFinancialRecordId: { in: contextualized.map(record => record.id) }, status: 'OPEN' },
+        select: { sourceFinancialRecordId: true, severity: true } });
+      const corrections = await scope.database.accountingCorrectionRequest.findMany({ where: scope.correction({
+        recordId: { in: contextualized.map(record => record.id) },
+        status: { in: activeCorrectionStatuses() } }), select: { recordId: true } });
+      return contextualized.map(record => ({ ...record, partnerFlags: flags.filter(flag =>
+        flag.sourceFinancialRecordId === record.id), partnerOpenCorrections: corrections.filter(item =>
+          item.recordId === record.id).length }));
     }) : Promise.resolve([]),
   ]);
 
@@ -1088,6 +1097,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
         item.partnerContext?.caseNumber,
         item.partnerContext?.customerContractNumber,
         item.partnerContext?.internalRecordNumber,
+        item.partnerContext?.debtor?.displayName,
         item.titlePersian,
         item.customer?.displayName,
         item.customer?.nationalCode,
@@ -2103,6 +2113,19 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
             note: 'Legacy draft gross amount normalized to the frozen contract net amount before financial approval.',
           });
         }
+      }
+    }
+    if (before.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
+      const blockerFlag = await tx.accountingContractFlag.findFirst({ where: {
+        sourceFinancialRecordId: before.id, status: AccountingFlagStatus.OPEN,
+        severity: AccountingFlagSeverity.BLOCKER } });
+      if (blockerFlag) throw new Error('Open blocker flags must be closed before financial approval');
+      const caseRow = await tx.partnerSaleCase.findFirst({ where: { internalRecordId: before.sourceId },
+        select: { customerContractId: true } });
+      if (caseRow?.customerContractId) {
+        const openCorrection = await tx.accountingCorrectionRequest.findFirst({ where: {
+          contractId: caseRow.customerContractId, status: { in: activeCorrectionStatuses() } } });
+        if (openCorrection) throw new Error('Open correction requests must be completed before financial approval');
       }
     }
     if (before.contractId) {

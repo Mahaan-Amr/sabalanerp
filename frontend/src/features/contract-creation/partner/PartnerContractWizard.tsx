@@ -149,7 +149,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const requiresReview = result.errorCode === 'INTEGRITY_CONFLICT';
   const submissionError = result.phase === 'editing' && result.message
     ? requiresReview && result.case
-      ? partnerCaseReviewMessage(result.case.caseNumber)
+      ? partnerCaseReviewMessage(result.case.caseNumber, result.case.trackingNumber)
       : result.errorCode === 'APPROVAL_EXPIRED' && expiredRows[0]
         ? `${expiredRows[0].inquiryRow.description}: اعتبار قیمت پایان یافته است؛ همین ردیف را دوباره استعلام کنید.`
         : result.message : null;
@@ -279,7 +279,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     onStepClick={step => move(step - 1)}
     notices={<div className="mb-4 space-y-3">
       {result.case && compactStatus && <ErpCard className="flex flex-wrap items-center gap-2 p-2">
-        <span className="text-sm font-bold">{partnerTrackingCode(result.case.caseNumber)}</span>
+        <span className="text-sm font-bold">{partnerTrackingCode(result.case.caseNumber, result.case.trackingNumber)}</span>
         <ErpBadge tone="neutral">قرارداد: {compactStatus.contract}</ErpBadge>
         <ErpBadge tone={pricingReady || result.case.pricingState === 'READY_TO_FINALIZE' ? 'success' : rejectedRows.length ? 'danger' : 'warning'}>
           قیمت سبلان: {pricingStatus}

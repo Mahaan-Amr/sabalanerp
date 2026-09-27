@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { FaDownload, FaPrint, FaReceipt } from 'react-icons/fa';
 import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpFieldView, ErpInlineState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpCard, ErpFieldView, ErpInlineState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl, ErpSheet, ErpTextarea } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { invoiceStatusLabels, money, taxStatusLabels } from '@/features/accounting/accountingUi';
@@ -12,6 +12,7 @@ import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPre
 
 type InternalDocument = {
   id: string; status: string; amount: string; currency: string; systemInvoiceNumber: string | null;
+  actions: { canResolveFlag: boolean };
   partnerContext: { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string;
     internalRecordNumber: string; debtor: { displayName: string }; endCustomer: { displayName: string } };
   items: Array<{ description: string; quantity: string; unitPrice: string; totalPrice: string }>;
@@ -95,11 +96,11 @@ export default function PartnerInternalAccountingContractPage() {
     {section === 'items' && <ErpSection title="اقلام سند داخلی">
       {!document.items.length ? <p className="sds-text-secondary">ریز اقلام در این سند مالی ثبت نشده است.</p>
         : <div className="space-y-3">{document.items.map((item, index) =>
-          <div key={index} className="sds-border-default rounded-xl border p-3">
+          <ErpCard key={index} className="p-3">
             <strong>{item.description}</strong>
             <p className="sds-text-secondary mt-1 text-sm">مقدار {item.quantity} · نرخ {money(item.unitPrice, document.currency)}
               {' · '}جمع {money(item.totalPrice, document.currency)}</p>
-          </div>)}</div>}
+          </ErpCard>)}</div>}
     </ErpSection>}
     {section === 'financial' && <ErpSection title="رکوردهای مالی">
       <div className="grid gap-3 sm:grid-cols-3">
@@ -111,27 +112,27 @@ export default function PartnerInternalAccountingContractPage() {
     {section === 'collections' && <ErpSection title="دریافتنی‌ها و دریافت‌ها">
       {!document.receivables.length ? <p className="sds-text-secondary">دریافتنی ثبت نشده است.</p>
         : <div className="space-y-3">{document.receivables.map((item, index) =>
-          <div key={index} className="sds-border-default rounded-xl border p-3">
+          <ErpCard key={index} className="p-3">
             <ErpFieldView label="مانده" value={money(item.remainingAmount, document.currency)} />
             <p className="sds-text-secondary mt-1 text-sm">دریافت‌شده: {money(item.paidAmount, document.currency)}</p>
             {item.payments.map((payment, paymentIndex) => <p key={paymentIndex} className="sds-text-secondary mt-1 text-sm">
               دریافت {money(payment.amount, document.currency)} · {operationalStatusLabel(payment.method)} · {operationalStatusLabel(payment.status)}
             </p>)}
-          </div>)}</div>}
+          </ErpCard>)}</div>}
     </ErpSection>}
     {section === 'compliance' && <ErpSection title="مالیات و اصلاحات">
-      {document.flags?.map(flag => <div key={flag.id} className="sds-border-default mb-3 rounded-xl border p-3">
+      {document.flags?.map(flag => <ErpCard key={flag.id} className="mb-3 p-3">
         <strong>{flag.title}</strong><p className="sds-text-secondary text-sm">{flag.note || 'بدون توضیح'} · {operationalStatusLabel(flag.status)}</p>
-        {flag.status === 'OPEN' && <ErpButton label="رفع پس از بررسی اصلاح" variant="outline"
+        {flag.status === 'OPEN' && document.actions.canResolveFlag && <ErpButton label="رفع پس از بررسی اصلاح" variant="outline"
           disabled={pending} onClick={() => { setFlagTarget(flag); setResolutionReason(''); }} />}
-      </div>)}
+      </ErpCard>)}
       {!document.taxRecords.length ? <p className="sds-text-secondary">رکورد مالیاتی ثبت نشده است.</p>
         : <div className="space-y-3">{document.taxRecords.map((item, index) =>
-          <div key={index} className="sds-border-default rounded-xl border p-3">
+          <ErpCard key={index} className="p-3">
             <ErpFieldView label="وضعیت مالیات" value={taxStatusLabels[item.readinessStatus] || operationalStatusLabel(item.readinessStatus)} />
             <ErpFieldView label="ارسال" value={taxStatusLabels[item.submissionStatus] || operationalStatusLabel(item.submissionStatus)} />
             <ErpFieldView label="مالیات ارزش افزوده" value={money(item.vatAmount, document.currency)} />
-          </div>)}</div>}
+          </ErpCard>)}</div>}
     </ErpSection>}
     <ErpButton label="به‌روزرسانی" variant="outline" disabled={pending} onClick={() => void load()} />
     <ErpSheet open={Boolean(flagTarget)} onClose={() => { if (!pending) setFlagTarget(undefined); }}

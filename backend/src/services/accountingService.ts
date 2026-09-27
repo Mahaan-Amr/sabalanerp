@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma';
 import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates } from './accountingListProjection';
 import { normalizePersianSearchTokens } from './crmCustomerSearch';
 import { randomUUID } from 'node:crypto';
-import { canonicalHash, InstantSchema } from '@sabalanerp/partner-sales-contracts';
+import { canonicalHash, InstantSchema, partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import { buildAccountingContractSourceSnapshot } from './contractSnapshotBoundary';
 import { publishCustomerPaymentOperationalEvidence } from './accountingOperationalEvidence';
 import {
@@ -1095,6 +1095,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       const haystack = [
         item.contractNumber,
         item.partnerContext?.caseNumber,
+        item.partnerContext && partnerTrackingCode(item.partnerContext.caseNumber, item.partnerContext.trackingNumber),
         item.partnerContext?.customerContractNumber,
         item.partnerContext?.internalRecordNumber,
         item.partnerContext?.debtor?.displayName,

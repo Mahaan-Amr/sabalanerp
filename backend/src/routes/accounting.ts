@@ -722,7 +722,12 @@ router.get('/contracts/partner/:caseId/internal', accountingContractsView, async
   try {
     const document = await readPartnerInternalDocument(req.params.caseId, req.user!.id);
     if (!document) return res.status(404).json({ success: false, error: 'سند داخلی در دسترس نیست.' });
-    return res.json({ success: true, data: document });
+    const access = await getEffectiveUserAccess(prisma, { userId: req.user!.id, userRole: req.user!.role });
+    const canResolveFlag = ['edit', 'admin'].includes((req as WorkspaceRequest).workspacePermission || '')
+      && access.features.some(feature => feature.workspace === WORKSPACES.ACCOUNTING
+        && feature.feature === FEATURES.ACCOUNTING_ACTIONS_MANAGE
+        && ['edit', 'admin'].includes(feature.permission));
+    return res.json({ success: true, data: { ...document, actions: { canResolveFlag } } });
   } catch (error) {
     console.error('Partner internal document error:', error);
     return res.status(500).json({ success: false, error: 'نمایش سند داخلی انجام نشد.' });

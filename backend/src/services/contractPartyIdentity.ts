@@ -49,6 +49,7 @@ const normalizePartyText = (value: unknown): string =>
     .normalize('NFKC')
     .replace(/ي/g, 'ی')
     .replace(/ك/g, 'ک')
+    .replace(/,/g, '،')
     .replace(/&nbsp;|&#160;/gi, ' ')
     .replace(/<[^>]*>/g, ' ')
     .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, ' ')

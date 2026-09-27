@@ -53,6 +53,7 @@ export function AccountingFixedAssetsPanel({ book, years, policies, assets, acce
   const [readyFile, setReadyFile] = useState<File | null>(null);
   const [proofs, setProofs] = useState<any[]>([]);
   const [proofsLoading, setProofsLoading] = useState(false);
+  const [downloadingProof, setDownloadingProof] = useState(false);
   const [periodUnits, setPeriodUnits] = useState('');
   const [totalExpectedUnits, setTotalExpectedUnits] = useState('');
   const [costAmount, setCostAmount] = useState('');
@@ -117,6 +118,29 @@ export function AccountingFixedAssetsPanel({ book, years, policies, assets, acce
     } catch (failure) { setError(accountingFailureMessage(failure, 'ثبت مدرک دارایی انجام نشد.')); }
     finally { setSaving(false); }
   };
+  const downloadProof = async () => {
+    if (!target || !targetArchive) return;
+    setDownloadingProof(true); setError(null);
+    try {
+      const response = await accountingAPI.downloadAssetEvidence(target.id, targetArchive.id, book.id);
+      const url = URL.createObjectURL(response.data as Blob);
+      const link = document.createElement('a');
+      const extension = ({ 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png',
+        'image/webp': '.webp' } as Record<string, string>)[targetArchive.mimeType] || '';
+      link.href = url;
+      link.download = `مدرک-دارایی-${target.registerNumber}${extension}`;
+      document.body.appendChild(link);
+      link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (failure) { setError(accountingFailureMessage(failure, 'دریافت مدرک دارایی انجام نشد.')); }
+    finally { setDownloadingProof(false); }
+  };
+  const selectedProof = targetArchive && <ErpCard className="mt-3 space-y-2 p-3">
+    <p className="sds-text-secondary break-all text-xs">اثر انگشت مدرک: {targetArchive.contentHash}</p>
+    <p className="sds-text-secondary text-sm">اندازه: {Number(targetArchive.sizeBytes).toLocaleString('fa-IR')} بایت · زمان ثبت: {dateFa(targetArchive.uploadedAt)}</p>
+    <ErpButton label="دریافت و بررسی مدرک" variant="outline" disabled={downloadingProof || saving}
+      onClick={() => void downloadProof()} />
+  </ErpCard>;
   const proofUpload = <div className="mb-3 flex flex-wrap items-end gap-3">
     <ErpField label="بارگذاری مدرک دارایی"><ErpInput key={archiveId || 'new'} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"
       onChange={event => setReadyFile(event.target.files?.[0] || null)} /></ErpField>
@@ -230,8 +254,9 @@ export function AccountingFixedAssetsPanel({ book, years, policies, assets, acce
         <ErpField label="دوره مالی باز" required><ErpSelect value={periodId} onChange={event => setPeriodId(event.target.value)}><option value="">انتخاب دوره</option>{periods.map((row: any) => <option key={row.id} value={row.id}>{row.yearTitle} · {row.titlePersian}</option>)}</ErpSelect></ErpField>
         <ErpField label="تاریخ بهای مستند" required><ErpInput type="date" value={costDate} onChange={event => setCostDate(event.target.value)} /></ErpField>
         <ErpField label="مبلغ به ریال" required><ErpRialInput value={costAmount} onValueChange={setCostAmount} /></ErpField>
-        <ErpField label="حساب بستانکار" required><ErpSelect value={costCreditAccountId} onChange={event => setCostCreditAccountId(event.target.value)}><option value="">انتخاب حساب معین</option>{accounts.map((row: any) => <option key={row.id} value={row.id}>{row.code} · {row.titlePersian}</option>)}</ErpSelect></ErpField>
+        <ErpField label="حساب بستانکار" required><ErpSelect value={costCreditAccountId} onChange={event => setCostCreditAccountId(event.target.value)}><option value="">انتخاب حساب معین</option>{accounts.filter((row: any) => row.id !== targetPolicy?.cipAccountId).map((row: any) => <option key={row.id} value={row.id}>{row.code} · {row.titlePersian}</option>)}</ErpSelect></ErpField>
       </div>
+      {selectedProof}
     </ErpSheet>
 
     <ErpSheet open={sheet === 'ready'} onClose={() => !saving && setSheet(null)} title="آماده‌به‌کار شدن دارایی" presentation="modal" pending={saving}
@@ -265,6 +290,7 @@ export function AccountingFixedAssetsPanel({ book, years, policies, assets, acce
         <ErpField label="دوره مالی باز" required><ErpSelect value={periodId} onChange={event => setPeriodId(event.target.value)}><option value="">انتخاب دوره</option>{periods.map((row: any) => <option key={row.id} value={row.id}>{row.yearTitle} · {row.titlePersian}</option>)}</ErpSelect></ErpField>
         <ErpField label="تاریخ آماده‌به‌کار" required><ErpInput type="date" value={readyAt} onChange={event => setReadyAt(event.target.value)} /></ErpField>
       </div>
+      {selectedProof}
     </ErpSheet>
 
     <ErpSheet open={sheet === 'depreciation'} onClose={() => !saving && setSheet(null)} title="استهلاک دوره‌ای" presentation="modal" pending={saving}

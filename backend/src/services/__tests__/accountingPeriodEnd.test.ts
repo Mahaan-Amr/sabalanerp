@@ -92,6 +92,22 @@ test('ready-for-use asset evidence capitalizes components while payment alone fa
   assert.equal(repository.posts.length, 1);
 });
 
+test('asset cost cannot debit and credit the same construction-in-progress account', async () => {
+  const repository = createRepository();
+  const application = createAccountingPeriodEndApplication(repository, { now: () => now });
+  const source = {
+    kind: 'ASSET_COST' as const, sourceId: 'cost-proof-1', sourceVersion: 1,
+    occurredAt: now, assetId: 'asset-1', costKind: 'PURCHASE' as const,
+    amountRials: 100_000n, constructionInProgressAccountId: 'cip', creditAccountId: 'cip',
+    documentIds: ['cost-proof-1'],
+  };
+  const result = await application.acceptEvidence({ bookId: 'book-1', fiscalYearId: 'year-1',
+    periodId: 'period-1', actorId: 'accountant-1',
+    evidence: { ...source, sourceHash: hashPeriodEndEvidence(source) } });
+  assert.equal(result.kind, 'EXCEPTION');
+  assert.equal(repository.posts.length, 0);
+});
+
 test('component depreciation posts the book charge while tax basis remains analytical', () => {
   const calculation = calculateAssetDepreciation({
     assetId: 'asset-1', periodIdentity: '1405-06',

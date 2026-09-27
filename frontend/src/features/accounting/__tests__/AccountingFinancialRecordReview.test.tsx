@@ -66,6 +66,22 @@ test('partner witness products remain visible when no invoice items exist', () =
   assert.doesNotMatch(html, /meter/);
 });
 
+test('financial review links to source case and shows witness fingerprint without leaking unknown English units', () => {
+  const html = renderToStaticMarkup(<AccountingFinancialRecordReview
+    record={{ id: 'partner-evidence', sourceKind: 'PARTNER_INTERNAL_RECORD', status: 'DRAFT', amount: '9000',
+      currency: 'IRR', createdAt: '2026-09-20T10:00:00.000Z', partnerContext: {
+        caseId: 'case-1', caseNumber: '۱۲۳', internalRecordNumber: '۳۴۵', debtor: { displayName: 'همکار' },
+      }, sourceSnapshot: { partnerPreparation: { evidenceHash: 'aabbcc', products: [{
+        productRowId: 'row-1', description: 'سنگ', quantity: '1', unit: 'mysteryUnit',
+      }] } } }}
+    auditRows={[]} canApprove={false} showAccountingDetails={false} onApprove={async () => {}}
+  />);
+  assert.match(html, /partner-cases\?caseId=case-1/);
+  assert.match(html, /اثر انگشت شاهد منشأ: aabbcc/);
+  assert.match(html, /واحد نیازمند بررسی/);
+  assert.doesNotMatch(html, /mysteryUnit/);
+});
+
 test('multiple receivables are not summed with floating-point arithmetic', () => {
   const html = renderToStaticMarkup(<AccountingFinancialRecordReview
     record={{ id: 'financial-3', sourceKind: 'SALES_CONTRACT', status: 'DRAFT', amount: '9000',

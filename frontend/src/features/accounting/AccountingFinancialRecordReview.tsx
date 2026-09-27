@@ -24,7 +24,7 @@ export type FinancialRecordForReview = {
   createdAt: string;
   contractId?: string | null;
   contract?: { contractNumber?: string | null; customer?: { displayName?: string | null } | null } | null;
-  partnerContext?: { caseNumber: string; internalRecordNumber: string; debtor: { displayName: string } } | null;
+  partnerContext?: { caseId?: string; caseNumber: string; internalRecordNumber: string; debtor: { displayName: string } } | null;
   systemInvoiceNumber?: string | null;
   systemInvoiceDate?: string | null;
   sepidarAmount?: string | null;
@@ -77,6 +77,9 @@ export function AccountingFinancialRecordReview({ record, auditRows, auditTotal 
     ? money(receivables[0].remainingAmount, record.currency)
     : receivables.length > 1 ? 'مانده هر دریافتنی در پایین آمده است' : 'هنوز دریافتنی ثبت نشده';
   const approvalOpen = !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status);
+  const sourceHref = partner && record.partnerContext?.caseId
+    ? `/dashboard/sales/partner-cases?caseId=${encodeURIComponent(record.partnerContext.caseId)}`
+    : record.contractId ? `/dashboard/accounting/contracts/${encodeURIComponent(record.contractId)}` : null;
 
   return <div className="space-y-4">
     <ErpSection title="مبلغ و وضعیت">
@@ -101,12 +104,15 @@ export function AccountingFinancialRecordReview({ record, auditRows, auditTotal 
         ? <div className="space-y-2">{record.sourceSnapshot.partnerPreparation.products.map((item) =>
           <ErpCard key={item.productRowId} className="p-3">
             <p className="sds-text-primary font-semibold">{item.description}</p>
-            <p className="sds-text-secondary text-sm">مقدار: {exactPersianDecimal(item.quantity)} {unitLabel[item.unit.toLowerCase()] || item.unit}</p>
+            <p className="sds-text-secondary text-sm">مقدار: {exactPersianDecimal(item.quantity)} {unitLabel[item.unit.toLowerCase()] || 'واحد نیازمند بررسی'}</p>
           </ErpCard>)}</div> : partner && record.sourceSnapshot?.partnerPreparation
         ? <ErpInlineState kind="empty" title="در شاهد فروش داخلی قلمی ثبت نشده است." />
         : <ErpInlineState kind="empty" title="برای این رکورد قلم صورتحساب ثبت نشده است." />}
       {partner && !record.sourceSnapshot?.partnerPreparation &&
         <ErpInlineState kind="error" title="شاهد فروش داخلی در این رکورد در دسترس نیست؛ پیش از تأیید پرونده را بررسی کنید." />}
+      {sourceHref && <div className="mt-3"><ErpButton label={partner ? 'مشاهده پرونده منشأ' : 'مشاهده قرارداد و مدارک منشأ'} href={sourceHref} variant="outline" /></div>}
+      {partner && record.sourceSnapshot?.partnerPreparation?.evidenceHash &&
+        <p className="sds-text-secondary mt-2 break-all text-xs">اثر انگشت شاهد منشأ: {record.sourceSnapshot.partnerPreparation.evidenceHash}</p>}
     </ErpSection>
 
     {installments.length > 0 && <ErpSection title="برنامه پرداخت به سبلان">

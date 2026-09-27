@@ -20,6 +20,7 @@ import { createAccountingLedgerPrismaRepository } from '../services/accountingLe
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { HR_HIRING_ALLOWED_MIME, scanHiringFile, sha256File, validateHiringFileSignature } from '../services/hrHiringFileStorage';
 import { recordOperationalReconciliation } from '../services/accountingOperationalReconciliation';
+import { archiveWritePath, resolveArchiveReadPath } from '../services/accountingArchiveStorage';
 
 const router = express.Router();
 const viewAccess = [protect, requireWorkspaceAccessWithClient(prisma, WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW)];
@@ -53,15 +54,6 @@ const jsonHash = (value: unknown) => createHash('sha256').update(JSON.stringify(
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[character]!));
-const accountingArchivePath = (storageKey: string) => {
-  // This directory is inside the existing protected Accounting volume and recovery checkpoint.
-  const root = path.resolve(process.cwd(), 'storage', 'accounting-contracts', 'accounting-archive');
-  const normalized = storageKey.replace(/\\/g, '/');
-  if (!normalized || normalized.startsWith('/') || /^[a-z]:/i.test(normalized) || normalized.split('/').includes('..')) throw new Error('نشانی فایل بایگانی معتبر نیست.');
-  const resolved = path.resolve(root, normalized);
-  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('نشانی فایل بایگانی معتبر نیست.');
-  return resolved;
-};
 
 const reportTypeFa: Record<string, string> = {
   TRIAL_BALANCE: 'تراز آزمایشی', FINANCIAL_STATEMENT: 'صورت‌های مالی', CASH_FLOW: 'صورت جریان وجوه نقد',
@@ -272,6 +264,7 @@ router.post('/evidence', ...editAccess, run(async (req) => {
         && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
       const otherCost = postedCost - (priorUse ? BigInt(String((priorUse.payload as any)?.amountRials || 0)) : 0n);
       if (evidence.constructionInProgressAccountId !== policy.cipAccountId
+        || evidence.creditAccountId === policy.cipAccountId
         || evidence.amountRials <= 0n || otherCost + evidence.amountRials > BigInt(asset.bookCostRials.toFixed(0))) {
         throw new Error('حساب یا جمع بهای دارایی با سیاست و پرونده دارایی هم‌خوان نیست.');
       }
@@ -1182,6 +1175,43 @@ router.get('/assets/:id/evidence', ...viewAccess, run(async (req) => {
   return rows.map(({ storageKey: _protectedStorageKey, ...row }) => row);
 }));
 
+router.get('/assets/:id/evidence/:evidenceId/download', ...editAccess, async (req: WorkspaceRequest, res: Response) => {
+  try {
+    const bookId = positiveText(req.query.bookId, 'دفتر حسابداری');
+    const asset = await prisma.accountingFixedAsset.findUnique({ where: { id: req.params.id } });
+    if (!asset || asset.bookId !== bookId) throw new Error('دارایی در دفتر انتخاب‌شده پیدا نشد.');
+    const evidence = await prisma.accountingArchiveEvidence.findFirst({ where: {
+      id: req.params.evidenceId, bookId, sourceEntityType: 'FIXED_ASSET', sourceEntityId: asset.id,
+    } });
+    if (!evidence) throw new Error('مدرک این دارایی پیدا نشد.');
+    if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) {
+      throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل دریافت نیست.');
+    }
+    const filePath = await resolveArchiveReadPath(evidence.storageKey);
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile() || BigInt(stat.size) !== evidence.sizeBytes || await sha256File(filePath) !== evidence.contentHash) {
+      throw new Error('تمامیت فایل مدرک دارایی تأیید نشد.');
+    }
+    await createAccountingLedgerPrismaRepository(prisma).transaction((tx) => tx.appendAudit({
+      action: 'ASSET_EVIDENCE_DOWNLOAD', result: 'SUCCEEDED', actorId: req.user!.id,
+      effectiveProfile: req.workspacePermission === 'admin' ? 'ACCOUNTING_MANAGER' : 'ACCOUNTANT',
+      entityType: 'ACCOUNTING_ARCHIVE_EVIDENCE', entityId: evidence.id,
+      correlationId: String(req.get('X-Correlation-ID') || randomUUID()),
+      reason: 'بررسی مدرک دارایی پیش از ثبت اثر حسابداری', payloadHash: evidence.contentHash,
+      sessionContext: { assetId: asset.id, bookId },
+    }));
+    const extension = path.extname(evidence.storageKey).replace(/[^.a-zA-Z0-9]/g, '');
+    res.type(evidence.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="asset-evidence-${evidence.id}${extension}"`);
+    return res.sendFile(filePath);
+  } catch (error) {
+    const trackingId = `ACC-ASSET-${Date.now().toString(36).toUpperCase()}`;
+    console.error('Accounting asset evidence download failed:', { trackingId, error });
+    return res.status(400).json({ success: false,
+      error: error instanceof Error && /[\u0600-\u06ff]/.test(error.message) ? error.message : 'دریافت مدرک دارایی انجام نشد.', trackingId });
+  }
+});
+
 router.post('/assets/:id/evidence', ...editAccess, assetEvidenceUpload.single('file'), run(async (req) => {
   const asset = await prisma.accountingFixedAsset.findUnique({ where: { id: req.params.id } });
   if (!asset || asset.bookId !== req.body.bookId || asset.status !== 'UNDER_CONSTRUCTION') {
@@ -1192,7 +1222,7 @@ router.post('/assets/:id/evidence', ...editAccess, assetEvidenceUpload.single('f
     : req.body.purpose === 'READY' ? 'ASSET_READY_FOR_USE' : null;
   if (!evidenceType) throw new Error('نوع مدرک دارایی معتبر نیست.');
   const storageKey = `${randomUUID()}${path.extname(req.file.originalname).toLowerCase()}`;
-  const filePath = accountingArchivePath(storageKey);
+  const filePath = archiveWritePath(storageKey);
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   await fs.promises.writeFile(filePath, req.file.buffer, { flag: 'wx' });
   try {
@@ -1217,7 +1247,7 @@ router.post('/assets/:id/evidence', ...editAccess, assetEvidenceUpload.single('f
 
 router.post('/archive-evidence', ...managerAccess, run(async (req) => {
   const storageKey = positiveText(req.body.storageKey, 'نشانی امن مدرک');
-  const filePath = accountingArchivePath(storageKey);
+  const filePath = await resolveArchiveReadPath(storageKey);
   const stat = await fs.promises.stat(filePath).catch(() => null);
   if (!stat?.isFile()) throw new Error('فایل بایگانی در مخزن امن پیدا نشد.');
   const [contentHash, malwareScanStatus] = await Promise.all([sha256File(filePath), scanHiringFile(filePath)]);
@@ -1274,7 +1304,7 @@ router.get('/archive-evidence/:id/download', ...managerAccess, async (req: Works
   try {
     const evidence = await prisma.accountingArchiveEvidence.findUniqueOrThrow({ where: { id: req.params.id } });
     if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل دریافت نیست.');
-    const filePath = accountingArchivePath(evidence.storageKey);
+    const filePath = await resolveArchiveReadPath(evidence.storageKey);
     const contentHash = await sha256File(filePath);
     if (contentHash !== evidence.contentHash) throw new Error('تمامیت فایل بایگانی تأیید نشد.');
     await createAccountingLedgerPrismaRepository(prisma).transaction((tx) => tx.appendAudit({

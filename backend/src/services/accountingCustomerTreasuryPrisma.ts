@@ -1029,7 +1029,8 @@ export const importBankStatementLineWithTx = async (tx: Prisma.TransactionClient
     const rawAmount = String(rawRecord[String(columns.amountField)] ?? '').trim();
     const rawDirection = String(rawRecord[String(columns.directionField)] ?? '').trim();
     const mappedDate = new Date(String(rawRecord[String(columns.bookedAtField)] ?? ''));
-    if (!/^\d+$/.test(rawAmount) || Number.isNaN(mappedDate.getTime())) throw new AccountingCustomerTreasuryError('BANK_SOURCE_ROW_INVALID', 'ردیف منبع بانکی با نگاشت انتخاب‌شده سازگار نیست.', 400);
+    if (!/^\d+$/.test(rawAmount)) throw new AccountingCustomerTreasuryError('BANK_SOURCE_ROW_INVALID', 'مبلغ ردیف بانکی نامعتبر است؛ مبلغ را به ریال و بدون جداکننده وارد کنید.', 400);
+    if (Number.isNaN(mappedDate.getTime())) throw new AccountingCustomerTreasuryError('BANK_SOURCE_ROW_INVALID', 'تاریخ ردیف بانکی نامعتبر است؛ تاریخ و ساعت معتبر بانک لازم است.', 400);
     if (mapping.effectiveFrom > mappedDate || (mapping.effectiveTo != null && mapping.effectiveTo < mappedDate)) {
       throw new AccountingCustomerTreasuryError('BANK_MAPPING_NOT_EFFECTIVE', 'نگاشت نسخه‌دار در تاریخ ردیف بانکی مؤثر نیست.', 409);
     }

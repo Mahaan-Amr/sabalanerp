@@ -1502,9 +1502,9 @@ export default function TreasuryControlPage() {
                   </div>
                   );
                 })}
-              {actionFeedback?.scope === "treasury-7" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
 </ErpCard>
             )}
+            {actionFeedback?.scope === "treasury-7" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
             {data.bankLines.length ? (
               <div className="grid gap-3">
                 {data.capabilities?.canManage && (

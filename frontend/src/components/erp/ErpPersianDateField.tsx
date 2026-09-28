@@ -20,7 +20,7 @@ export default function ErpPersianDateField({
   placeholder?: string;
   required?: boolean;
   valueFormat?: PersianDateFieldValueFormat;
-} & Omit<PersianCalendarProps, 'value' | 'onChange'>) {
+} & Omit<PersianCalendarProps, 'value' | 'onChange' | 'valueFormat'>) {
   const calendar = <PersianCalendarComponent {...calendarProps} value={toPersianDateFieldValue(value, valueFormat)}
     onChange={(next) => onChange(fromPersianDateFieldValue(next, valueFormat))} placeholder={placeholder}
     enableYearSelection={calendarProps.enableYearSelection ?? valueFormat !== 'persian'}

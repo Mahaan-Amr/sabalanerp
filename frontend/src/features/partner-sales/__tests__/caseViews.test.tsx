@@ -73,17 +73,18 @@ test('private retail collection keeps historical plans visible and explains inde
 
 test('account panel is read-only and contains only accounting-backed partner-safe facts', () => {
   const fixture = createPartnerFixtures();
-  const purchase = { owner: fixture.partner.owner, caseNumber: fixture.partner.caseNumber,
+  const purchase = { owner: fixture.partner.owner, caseNumber: fixture.partner.caseNumber, trackingNumber: 313,
     amount: { amount: '1600', currency: 'IRR' as const }, sabalanPaymentPlan: fixture.partner.sabalanPaymentPlan,
     received: { amount: '600', currency: 'IRR' as const }, balance: { amount: '1000', currency: 'IRR' as const },
     status: 'PARTIALLY_PAID' as const };
-  const tomanPurchase = { ...purchase, owner: { ...purchase.owner, revision: 2 }, caseNumber: 'CASE-IRT',
+  const tomanPurchase = { ...purchase, owner: { ...purchase.owner, revision: 2 }, caseNumber: 'CASE-IRT', trackingNumber: 314,
     amount: { amount: '200', currency: 'IRT' as const }, received: { amount: '50', currency: 'IRT' as const }, balance: { amount: '150', currency: 'IRT' as const } };
   const html = renderToStaticMarkup(<PartnerAccountPanel view={{ ...fixture.account, purchases: [purchase, tomanPurchase] }} />);
   assert.match(html, /حساب من با سبلان/);
   assert.match(html, /فقط‌خواندنی/);
-  assert.match(html, /FIXTURE-CASE-313/);
-  assert.match(html, /CASE-IRT/);
+  assert.match(html, /همکار-۰۰۳۱۳/);
+  assert.match(html, /همکار-۰۰۳۱۴/);
+  assert.doesNotMatch(html, /FIXTURE-CASE-313|CASE-IRT/);
   assert.match(html, /تومان/);
   assert.match(html, /برنامه پرداخت به سبلان/);
   assert.match(html, /سررسید 2026-08-28/);

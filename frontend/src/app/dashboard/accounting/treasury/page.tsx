@@ -1,4 +1,5 @@
 "use client";
+import { ErpPersianDateField } from "@/components/erp";
 
 import { useCallback, useEffect, useState } from "react";
 import { FaMoneyCheckAlt, FaSync } from "react-icons/fa";
@@ -432,13 +433,13 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="زمان دریافت" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={receipt.occurredAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setReceipt({
                           ...receipt,
-                          occurredAt: event.target.value,
+                          occurredAt: value,
                         })
                       }
                     />
@@ -680,13 +681,13 @@ export default function TreasuryControlPage() {
                     </ErpSelect>
                   </ErpField>
                   <ErpField label="تاریخ سند" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={allocation.documentDate}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setAllocation({
                           ...allocation,
-                          documentDate: event.target.value,
+                          documentDate: value,
                         })
                       }
                     />
@@ -911,13 +912,13 @@ export default function TreasuryControlPage() {
                     </ErpSelect>
                   </ErpField>
                   <ErpField label="زمان انتقال" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={transfer.occurredAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setTransfer({
                           ...transfer,
-                          occurredAt: event.target.value,
+                          occurredAt: value,
                         })
                       }
                     />
@@ -1081,13 +1082,13 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="شروع اثر" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={bankMapping.effectiveFrom}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setBankMapping({
                           ...bankMapping,
-                          effectiveFrom: event.target.value,
+                          effectiveFrom: value,
                         })
                       }
                     />
@@ -1273,13 +1274,13 @@ export default function TreasuryControlPage() {
                       />
                     </ErpField>
                     <ErpField label="زمان ثبت بانک" required>
-                      <ErpInput
-                        type="datetime-local"
+                      <ErpPersianDateField
+                        valueFormat="local-datetime"
                         value={bankLine.bookedAt}
-                        onChange={(event) =>
+                        onChange={(value) =>
                           setBankLine({
                             ...bankLine,
-                            bookedAt: event.target.value,
+                            bookedAt: value,
                           })
                         }
                       />
@@ -1531,11 +1532,11 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="سررسید" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={check.dueAt}
-                      onChange={(event) =>
-                        setCheck({ ...check, dueAt: event.target.value })
+                      onChange={(value) =>
+                        setCheck({ ...check, dueAt: value })
                       }
                     />
                   </ErpField>
@@ -1604,13 +1605,13 @@ export default function TreasuryControlPage() {
                     </ErpSelect>
                   </ErpField>
                   <ErpField label="زمان رویداد" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={checkEvent.occurredAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setCheckEvent({
                           ...checkEvent,
-                          occurredAt: event.target.value,
+                          occurredAt: value,
                         })
                       }
                     />
@@ -1737,13 +1738,13 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="زمان شمارش" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={cashCount.countedAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setCashCount({
                           ...cashCount,
-                          countedAt: event.target.value,
+                          countedAt: value,
                         })
                       }
                     />
@@ -1874,22 +1875,22 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="تاریخ پرداخت" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={petty.issuedAt}
-                      onChange={(event) =>
-                        setPetty({ ...petty, issuedAt: event.target.value })
+                      onChange={(value) =>
+                        setPetty({ ...petty, issuedAt: value })
                       }
                     />
                   </ErpField>
                   <ErpField label="سررسید تسویه" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={petty.settlementDueAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setPetty({
                           ...petty,
-                          settlementDueAt: event.target.value,
+                          settlementDueAt: value,
                         })
                       }
                     />
@@ -2037,13 +2038,13 @@ export default function TreasuryControlPage() {
                 />
               </ErpField>
               <ErpField label="زمان تسویه">
-                <ErpInput
-                  type="datetime-local"
+                <ErpPersianDateField
+                  valueFormat="local-datetime"
                   value={pettySettlement.settledAt}
-                  onChange={(event) =>
+                  onChange={(value) =>
                     setPettySettlement({
                       ...pettySettlement,
-                      settledAt: event.target.value,
+                      settledAt: value,
                     })
                   }
                 />

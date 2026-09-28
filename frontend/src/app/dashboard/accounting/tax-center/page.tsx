@@ -1,4 +1,5 @@
 "use client";
+import { ErpPersianDateField } from "@/components/erp";
 
 import { useCallback, useEffect, useState } from "react";
 import { FaBalanceScale, FaSync } from "react-icons/fa";
@@ -171,11 +172,11 @@ export default function TaxOperationsPage() {
                   />
                 </ErpField>
                 <ErpField label="شروع اثر" required>
-                  <ErpInput
-                    type="datetime-local"
+                  <ErpPersianDateField
+                    valueFormat="local-datetime"
                     value={rule.effectiveFrom}
-                    onChange={(event) =>
-                      setRule({ ...rule, effectiveFrom: event.target.value })
+                    onChange={(value) =>
+                      setRule({ ...rule, effectiveFrom: value })
                     }
                   />
                 </ErpField>
@@ -368,13 +369,13 @@ export default function TaxOperationsPage() {
                   />
                 </ErpField>
                 <ErpField label="زمان شروع اثر" required>
-                  <ErpInput
-                    type="datetime-local"
+                  <ErpPersianDateField
+                    valueFormat="local-datetime"
                     value={channel.effectiveFrom}
-                    onChange={(event) =>
+                    onChange={(value) =>
                       setChannel({
                         ...channel,
-                        effectiveFrom: event.target.value,
+                        effectiveFrom: value,
                       })
                     }
                   />

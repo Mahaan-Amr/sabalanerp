@@ -1,4 +1,5 @@
 'use client';
+import { ErpPersianDateField } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaCheckCircle, FaExclamationTriangle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
@@ -296,11 +297,11 @@ export default function AccountingInvoiceCandidatesPage() {
             (item.method === 'CHECK' && (!item.checkNumber?.trim() || !item.checkBank?.trim())))} onClick={() => void savePlan()} />}>
         <div className="space-y-4">
           {actionError && <ErpInlineState kind="error" title={actionError} />}
-          <ErpField label="تاریخ شروع" required><ErpInput type="date" value={planEffectiveDate} onChange={event => setPlanEffectiveDate(event.target.value)} /></ErpField>
+          <ErpField label="تاریخ شروع" required><ErpPersianDateField valueFormat="iso-date" value={planEffectiveDate} onChange={(value) => setPlanEffectiveDate(value)} /></ErpField>
           {planInstallments.map((item, index) => <ErpCard key={item.id} className="space-y-3 p-3">
             <div className="grid gap-3 sm:grid-cols-3">
-              <ErpField label={`سررسید ${(index + 1).toLocaleString('fa-IR')}`} required><ErpInput type="date" value={item.dueDate}
-                onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, dueDate: event.target.value } : row))} /></ErpField>
+              <ErpField label={`سررسید ${(index + 1).toLocaleString('fa-IR')}`} required><ErpPersianDateField valueFormat="iso-date" value={item.dueDate}
+                onChange={(value) => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, dueDate: value } : row))} /></ErpField>
               <ErpField label="مبلغ" required><ErpRialInput value={item.amount}
                 onValueChange={amount => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, amount } : row))} /></ErpField>
               <ErpField label="روش"><ErpSelect value={item.method} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id

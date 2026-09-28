@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FaArchive, FaCheckCircle, FaExclamationTriangle, FaHistory, FaSearch, FaShieldAlt, FaSync } from 'react-icons/fa';
 import { accountingAPI } from '@/lib/api';
 import AccountingSepidarSourceRecord, { sepidarTableTitle } from '@/features/accounting/AccountingSepidarSourceRecord';
+import AccountingParallelComparison from '@/features/accounting/AccountingParallelComparison';
 import { evidenceTypeTitle } from '@/features/accounting/AccountingLedgerEvidence';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpMetricGrid, ErpPage, ErpSection, ErpSearchableSelect } from '@/components/erp';
 
@@ -132,6 +133,7 @@ export default function AccountingReplacementPage() {
       </ErpCard>
     </ErpSection>
 
+    <AccountingParallelComparison bookId={bookId} snapshots={sourceSnapshots} />
     <ErpSection title="اجراهای مهاجرت و تطبیق">
       {!data?.migrations?.length ? <ErpEmptyState title="اجرای مهاجرتی ثبت نشده است." description="ابتدا بستهٔ هش‌شدهٔ سپیدار و نسخهٔ نگاشت را در مسیر عملیاتی بارگذاری کنید." /> :
         <div className="grid gap-3 lg:grid-cols-2">{data.migrations.map((run: any) => <ErpCard key={run.id}>

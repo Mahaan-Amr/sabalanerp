@@ -1174,7 +1174,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         ? await readCasePricingRows(runtime.saved, activeOwner.caseId) : [];
       const retryKey = JSON.stringify({ owner: activeOwner, rows: selected.map(item => ({
         rowId: item.rowId, revision: item.revision, configuration: item.configurationRef })), reason });
-      const retainedCommand = reinquiryCommands.current.get(retryKey);
+      const pendingKey = `partner-case-reinquiry-pending:${runtime.actorId}:${activeOwner.caseId}`;
+      const stored = readStored<{ retryKey: string; command: unknown }>(pendingKey);
+      const storedCommand = stored?.retryKey === retryKey ? PartnerCommandSchema.safeParse(stored.command) : undefined;
+      const retainedCommand = reinquiryCommands.current.get(retryKey) ??
+        (storedCommand?.success && storedCommand.data.type === 'CASE_PRICING_SUBMIT' &&
+          storedCommand.data.idempotency.actorId === runtime.actorId && storedCommand.data.caseId === activeOwner.caseId
+          ? storedCommand.data : undefined);
       const rows = selected.map(item => {
         const predecessor = item.submissionState === 'UNSENT'
           ? historicalRows.find(previous => previous.configurationRef.productRowId === item.configurationRef.productRowId &&
@@ -1194,9 +1200,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           targetId: activeOwner.caseId,
           key: payloadHash, payloadHash } });
       reinquiryCommands.current.set(retryKey, command);
+      window.localStorage.setItem(pendingKey, JSON.stringify({ retryKey, command }));
       const result = await inquiryPorts.commands.execute(command);
-      if (!result.ok) { reinquiryCommands.current.delete(retryKey); setError(result.error.message); throw new Error(result.error.message); }
+      if (!result.ok) { reinquiryCommands.current.delete(retryKey); window.localStorage.removeItem(pendingKey);
+        setError(result.error.message); throw new Error(result.error.message); }
       reinquiryCommands.current.delete(retryKey);
+      window.localStorage.removeItem(pendingKey);
       if (command.type !== 'CASE_PRICING_SUBMIT') throw new Error('Invalid retained inquiry');
       const pendingByProductRowId = new Map(command.rows.map(item => [item.configuration.productRowId, {
         inquiryId: command.inquiryId, rowId: item.rowId, revision: 1, state: 'PENDING' as const,

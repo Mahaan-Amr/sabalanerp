@@ -103,8 +103,12 @@ The evidence condition attached to each Shipment Quantity Reconciliation: `CURRE
 _Avoid_: converting missing or conflicting evidence to zero, presenting a partial subtotal as complete, or allowing stale projection cache to authorize a reservation
 
 **Displayed Monetary Amount**:
-A monetary value presented to a user in Sabalan ERP, including interactive screens, print/PDF output, and Excel exports, rounded to the nearest whole unit of its stated currency. Storage and intermediate calculations retain their full precision so display rounding never changes business results. Each authoritative total is rounded directly for presentation and is never recomputed from already rounded display rows, even when the visible line-item arithmetic differs by a minor rounding residue.
-_Avoid_: displaying fractional currency units, rounding persisted values or intermediate calculations, rebuilding authoritative totals from rounded rows, or allowing different user-facing outputs to disagree
+A monetary value presented to a user in Sabalan ERP, including interactive screens, print/PDF output, and Excel exports. Contract product unit prices and row amounts retain their commercial precision; the final payable Contract total follows Contract Monetary Rounding. Other monetary presentation uses the nearest whole unit of its stated currency, and display formatting alone never changes a commercial obligation.
+_Avoid_: rounding Contract product rows to reconstruct a payable total, changing commercial obligations through display formatting alone, or allowing different user-facing outputs to disagree about the same payable amount
+
+**Contract Monetary Rounding**:
+The conversion of the final payable sales Contract total to the nearest whole unit of its stated contractual currency, with a half unit rounded upward, after summing the contributing amounts at their existing precision. Product unit prices, row amounts, and physical quantities retain their existing precision. The rounded total is the actual commercial obligation used consistently by Sales, the Payment Plan, and Accounting, while the precise source total and rounding difference remain internal evidence without a user-facing rounding-adjustment field. The rule covers both the Sabalan-to-Partner wholesale agreement and the Partner-to-Customer retail agreement as separate obligations; Sabalan Accounting uses the wholesale obligation. New Contracts and editable Drafts use the rule, while finalized Contracts and Contracts with financial documents retain their existing agreement unless formally corrected.
+_Avoid_: treating the rounded payable total as display-only formatting, summing rounded Product rows, using a different obligation in Accounting or the Payment Plan, rounding physical quantities as money, discarding the source calculation, showing a rounding-adjustment parameter, or requiring an operational User to resolve a difference caused solely by this rounding rule
 
 **Personnel List Context**:
 The restorable logical state of the Human Resources Personnel collection: active or archived view, committed search and filters, server page, expanded Personnel, and return scroll position. Shareable state lives in the URL and replaces the current history entry as it changes; scroll remains session-scoped. In-app return uses the recorded logical origin rather than replaying intermediate list-state changes, while refresh and direct links reconstruct the URL-owned portion.
@@ -3835,8 +3839,12 @@ _Avoid_: تغییر خودکار حقوق یا رابطه استخدامی از 
 _Avoid_: بازنویسی سطح تاریخی، نگاشت خاموش پنج سطح به هفت سطح، استفاده رسمی از همراه بدون نتیجه، یا نمایش تاریخچه بدون نسخه سیاست
 
 **سطح هفت‌گانه عملکرد**:
-زبان ترتیبی و مثبت نتیجه عملکرد آینده است که از پایین به بالا `همراه`، `کوشا`، `شایسته`، `توانمند`، `برتر`، `سرآمد` و `الگو` نام دارد. هر نام معنای مصوب و آستانه نسخه‌دار خود را دارد و مثبت‌بودن نام، فاصله از انتظارهای Job یا زمینه بهبود را در جزئیات مجاز پنهان نمی‌کند.
+زبان ترتیبی و مثبت نشان عملکرد جاری است که از پایین به بالا `همراه`، `هم‌ریشه`، `کارساز`، `مانا`، `ستون`، `اثرگذار` و `الگو` نام دارد. هر نام معنای مصوب و آستانه نسخه‌دار خود را دارد و مثبت‌بودن نام، فاصله از انتظارهای Job یا زمینه بهبود را در جزئیات مجاز پنهان نمی‌کند.
 _Avoid_: نام منفی یا تحقیرآمیز، تغییر ترتیب بدون نسخه سیاست، یکی‌گرفتن نام مثبت با تحقق انتظار، یا بازطبقه‌بندی نتیجه تاریخی پنج‌سطحی
+
+**نقشه هفت نشان عملکرد**:
+نمای شخصی و RTL همه هفت نشان است که فقط نشان جاری Personnel را برجسته می‌کند و نشان‌های دیگر را کم‌رنگ، خوانا و قابل انتخاب برای دیدن نام و معنای ثابت آن‌ها نگه می‌دارد. مسیر هیچ نشان گذشته‌ای را تکمیل‌شده نمی‌خواند و درباره افزایش، کاهش یا فاصله تا سطح بعدی ادعا نمی‌کند؛ نتیجه رسمی تازه می‌تواند جایگاه جاری را در هر دو جهت تغییر دهد. `بدون نتیجه رسمی` فقط همراهِ پیش‌فرض فاقد نتیجه معتبر را توصیف می‌کند، نه هر نتیجه رسمی در سطح `همراه`.
+_Avoid_: نمایش نشان‌های دیگر به‌عنوان دستاورد، نوار پیشرفت، قفل‌کردن معنای نشان‌های دیگر، افشای نتیجه اشخاص دیگر، یا یکی‌گرفتن همراه پیش‌فرض با همراه رسمی
 
 **همراه بدون نتیجه رسمی**:
 نمای Badge پیش‌فرض برای Personnel فعال پیش از نخستین نتیجه معتبر عملکرد است که نام قابل‌مشاهده آن در همه‌جا فقط `همراه` است، اما نتیجه ارزیابی یا پایین‌ترین سطح امتیازدار نیست. این حالت از رقابت، تحلیل، حقوق، ترفیع، تنبیه و هر تصمیم رسمی کنار گذاشته می‌شود و جزئیات شخصی فقط اعلام می‌کند نخستین ارزیابی هنوز تکمیل نشده است.
@@ -4258,16 +4266,16 @@ _Avoid_: ساخت خودکار از امتیاز یا سطح، ترکیب چند
 استثنای صریح و حسابرسی‌شده‌ای است که فقط هنگام نبود تصمیم‌گیرنده واجد شرایط دیگر، به Userی غیر از Personnel موضوع اجازه می‌دهد ارجاع پیامد عملکرد ساخته خود را از مسیر جداگانه تصمیم‌گیری کند، مشروط به داشتن هم‌زمان مجوزهای مؤثر ایجاد، تصمیم‌گیری و خودتصمیمی همان نوع، ثبت دلیل ضرورت و پذیرش هشدار تعارض. این استثنا هیچ کنترل شواهد، سیاست، حقوق، بودجه، محدوده پرداخت، اطلاع‌رسانی یا اعتراض را حذف نمی‌کند و اقدام نامساعد همچنان پیش از اجرا به کنترل حقوقی یا سیاستی یک شخص مستقل نیاز دارد.
 _Avoid_: خودتصمیمی از نقش یا دسترسی عمومی، استفاده با وجود تصمیم‌گیرنده واجد شرایط دیگر، تصمیم درباره خود، استثنای بی‌دلیل یا بی‌نشان، حذف بازبینی مستقل اقدام نامساعد، یا تبدیل استثنا به مسیر عادی
 
-**سیاست سطح‌بندی عملکرد**:
-سیاست سازمانی، نسخه‌دار و تغییرناپذیری است که امتیاز دقیق را به پنج سطح فارسی نگاشت می‌کند: `نیازمند بهبود فوری` برای کمتر از شصت، `نیازمند بهبود` برای شصت تا کمتر از هفتادوپنج، `مطابق انتظار` برای هفتادوپنج تا کمتر از نود، `فراتر از انتظار` برای نود تا کمتر از صد و `عملکرد برجسته` فقط برای صد است. مرزها بر مقدار دقیق محاسباتی اعمال می‌شوند و تغییر آینده آن‌ها نسخه تازه می‌خواهد؛ نتیجه تاریخی با نسخه سیاست خودش باقی می‌ماند.
+**سیاست پنج‌سطحی پیشین عملکرد**:
+سیاست سازمانی و نسخه‌دارِ نتایج تاریخی است که امتیاز دقیق را به پنج سطح فارسی نگاشت می‌کرد: `نیازمند بهبود فوری`، `نیازمند بهبود`، `مطابق انتظار`، `فراتر از انتظار` و `عملکرد برجسته`. این سطح‌ها نشان جاری Personnel یا مرحله‌های نقشه هفت نشان نیستند؛ نتیجه تاریخی با نام و نسخه سیاست خودش باقی می‌ماند.
 _Avoid_: نام‌گذاری با فلز، رتبه یا عنوان مبهم، یکی‌گرفتن سطح با درجه یک معیار، طبقه‌بندی از مقدار گرد‌شده، ویرایش نسخه فعال، بازنویسی سطح تاریخی، یا اعمال پنهانی آستانه تازه به گذشته
 
 **سطح عملکرد جاری**:
-سطح فارسی Personnel در Employment Relationship فعال یا معلق است که فقط از تازه‌ترین نتیجه نهایی مؤثر همان رابطه به دست می‌آید و با نهایی‌شدن نتیجه ماهانه تازه یا نسخه اصلاحی آن تغییر می‌کند. تا پیش از نخستین نتیجه مدل ساده، آخرین Badge معتبر مدل قبلی باقی می‌ماند؛ پس از آن نتایج قدیمی فقط سابقه‌اند و در میانگین یا وزن‌دهی Badge وارد نمی‌شوند. رابطه Planned سطح جاری ندارد، رابطه Ended فقط تاریخچه مجاز دارد و استخدام مجدد از `ارزیابی‌نشده` آغاز می‌شود.
+سطح فارسی Personnel در Employment Relationship فعال یا معلق است که از تازه‌ترین نتیجه رسمی هفت‌سطحی مؤثر همان رابطه به دست می‌آید. تا پیش از نخستین نتیجه معتبر، `همراه` فقط نشان پیش‌فرض با وضعیت `بدون نتیجه رسمی` است؛ نتیجه پنج‌سطحی پیشین به نشان جاری برنمی‌گردد و فقط در تاریخچه مجاز باقی می‌ماند. نتیجه رسمی تازه یا اصلاحی می‌تواند سطح جاری را در هر دو جهت تغییر دهد؛ استخدام مجدد نیز بدون نتیجه رسمی آغاز می‌شود.
 _Avoid_: میانگین‌گیری یا وزن‌دهی چند ماه، ساخت سطح از پیش‌نویس، تبدیل داده مفقود به سطح، انتقال سطح به استخدام مجدد، یا تغییر خودکار جبران خدمت و استخدام
 
 **نشان سطح عملکرد**:
-نمای پایدار، فارسی، RTL و دسترس‌پذیر سطح عملکرد جاری در جای ثابتی از سرآیند User مرتبط در همه Workspaceهای مجاز و کنار هویت Personnel در فهرست‌های دارای مجوز است. حالت فشرده نشان تصویری متمایز و نام کامل سطح را بدون عدد ترتیبی، کسر پیشرفت یا جهت تغییر نمایش می‌دهد؛ حالت بازشده همان نام و نشان، معنای استاندارد، پایان تازه‌ترین بازه سنجش مؤثر و تاریخ بازبینی بعدی را می‌افزاید. `ارزیابی‌نشده` و `نیازمند ارزیابی جدید` نشان‌های خنثی و غیرترتیبی‌اند و پایین‌تر از سطح یک تصویر نمی‌شوند. Badge شخصی و مجوز ساده نمایش فهرست، سطح قبلی یا افزایش و کاهش را افشا نمی‌کنند؛ روند فقط با مجوز مستقل تحلیل نام‌دار یا سابقه محرمانه دیده می‌شود. معنا به رنگ، Hover یا Tooltip وابسته نیست و شکل، رنگ و اندازه دقیق در Prototype مبتنی بر Sabalan Design System تعیین می‌شود. نشان در جست‌وجوی عمومی User، انتخاب‌گرها، گفت‌وگو، وظایف یا اعلان صفحه قفل تکرار نمی‌شود.
+نمای پایدار، فارسی، RTL و دسترس‌پذیر سطح عملکرد جاری در جای ثابتی از سرآیند User مرتبط در همه Workspaceهای مجاز و کنار هویت Personnel در فهرست‌های دارای مجوز است. حالت فشرده نشان تصویری هفت‌گانه، نام کامل سطح و عدد رومی همان تصویر را نمایش می‌دهد؛ حالت بازشده نقشه هفت نشان، جایگاه فعلی، معنای استاندارد، پایان تازه‌ترین بازه سنجش مؤثر و تاریخ بازبینی بعدی را می‌افزاید. Badge شخصی و مجوز ساده نمایش فهرست، سطح قبلی یا افزایش و کاهش را افشا نمی‌کنند؛ روند فقط با مجوز مستقل تحلیل نام‌دار یا سابقه محرمانه دیده می‌شود. معنا به رنگ، Hover یا Tooltip وابسته نیست و نشان در جست‌وجوی عمومی User، انتخاب‌گرها، گفت‌وگو، وظایف یا اعلان صفحه قفل تکرار نمی‌شود.
 _Avoid_: `۴ از ۵`، نوار پیشرفت، فلش افزایش یا کاهش در Badge عادی، نمایش حالت‌های بدون سطح به‌عنوان شکست، معنای فقط‌رنگی، متن فقط در Hover، کنترل ناسازگار با Design System، تکرار سطح در سطح همکاری نامرتبط، یا افشای امتیاز، رتبه، معیار و روایت Supervisor
 
 **خلاصه شخصی سطح عملکرد**:

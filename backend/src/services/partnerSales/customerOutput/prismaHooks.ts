@@ -1,3 +1,4 @@
+import { confirmationResendCooldownError } from '../../contractConfirmationPolicy';
 import crypto, { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import * as contracts from '@sabalanerp/partner-sales-contracts';
@@ -144,8 +145,12 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
       const previous = await tx.contractPublicConfirmation.findFirst({ where: { contractId: input.contractId, status: 'PENDING' },
         orderBy: { createdAt: 'desc' } });
       let snapshot = previous && await readSnapshot(tx, previous);
-      if (!snapshot || contracts.checkExpectedRevision(snapshot.owner, source.owner) || snapshot.normalizedRecipient !== recipient) {
+      if (!snapshot || new Date(snapshot.expiresAt) <= now || contracts.checkExpectedRevision(snapshot.owner, source.owner) || snapshot.normalizedRecipient !== recipient) {
         snapshot = undefined;
+      }
+      if (input.resend && previous && snapshot) {
+        const cooldownError = confirmationResendCooldownError(previous.lastSentAt, now);
+        if (cooldownError) throw new Rollback({ success: false, error: cooldownError });
       }
       if (!snapshot) {
         const { seller, outputHash: _outputHash, ...retail } = source.content;
@@ -181,6 +186,8 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
         eventType: 'PARTNER_CONFIRMATION_QUEUED', eventPayloadJson: json({ snapshotId: snapshot.snapshotId,
           linkExpiresAt: snapshot.expiresAt, otpExpiresAt: otpExpiresAt.toISOString(), resend: Boolean(input.resend) }),
         ipAddress: input.meta?.ipAddress, userAgent: input.meta?.userAgent } });
+      // Validate deferred Case history/output bindings before scheduling any external delivery.
+      await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
       delivery = { phone: localPhone(recipient), otp, contractNumber: source.contract.contractNumber,
         customerName: source.content.customer.displayName, contractId: source.contract.id, sessionId: session.id };
       return { success: true, data: { contractId: input.contractId, status: 'PENDING_APPROVAL', phoneNumber: localPhone(recipient),

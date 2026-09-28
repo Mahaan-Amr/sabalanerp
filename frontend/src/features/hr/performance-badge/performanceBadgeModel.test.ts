@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   performanceBadgePresentation,
   performanceLevelTone,
+  PERFORMANCE_BADGE_ROADMAP,
   type PerformanceLevelCode,
 } from './performanceBadgeModel';
 
@@ -43,8 +44,9 @@ assert.equal(performanceBadgePresentation({
 }).romanNumeral, undefined, 'no official result uses rank 01 artwork without a Roman numeral');
 
 assert.equal(performanceBadgePresentation({ state: 'TEMPORARILY_UNAVAILABLE', labelFa: 'خلاصه عملکرد موقتاً در دسترس نیست', meaningFa: 'معنا', version: 3 }).tone, 'neutral');
-assert.equal(performanceBadgePresentation({ state: 'LEVEL', levelCode: 'MEETS', labelFa: 'مطابق انتظار', meaningFa: 'معنا', version: 3 }).lightAsset,
-  '/assets/performance-rank-badges-v2/light/emerald-v2.png', 'historical five-level display remains available');
+assert.deepEqual(PERFORMANCE_BADGE_ROADMAP.map(({ code }) => code), codes, 'every current badge has one roadmap position');
+assert.equal(performanceBadgePresentation({ state: 'LEVEL', levelCode: 'MEETS' as PerformanceLevelCode, labelFa: 'مطابق انتظار', meaningFa: 'معنا', version: 3 }).lightAsset,
+  '/assets/performance-rank-badges-v2/light/neutral-frame.png', 'obsolete five-level codes never become a current badge');
 assert.deepEqual(codes.map(performanceLevelTone), ['neutral', 'warning', 'success', 'success', 'primary', 'purple', 'purple']);
 assert.equal(performanceLevelTone('UNKNOWN_PRIVATE_LEVEL'), 'neutral');
 

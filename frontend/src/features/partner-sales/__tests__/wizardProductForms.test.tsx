@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { partnerProductCartSummary } from '../../contract-creation/partner/partnerProductCartSummary';
+import { presentPartnerRetailRows } from '../../contract-creation/partner/partnerRetailPresentation';
+import { defaultPartnerRetailRows, partnerPriceLineTotal } from '../../contract-creation/partner/partnerRetail';
+import { createWizardFixtures } from './wizardFixtures';
 import { PreparedProductSection } from '../../contract-creation/components/product-modal-system/PreparedProductSection';
 import { TechnicalProductConfiguration } from '../../contract-creation/partner/TechnicalProductConfiguration';
 import type { Product } from '../../contract-creation/types/contract.types';
 import { StairPartSubsection } from '../../contract-creation/components/product-modal-system/StairProductSection';
 import { LongitudinalProductSection } from '../../contract-creation/components/product-modal-system/LongitudinalProductSection';
-import { createNewLongitudinalProductInput, parseCanonicalDecimal, parseStableIdentity } from '@sabalanerp/contract-product-graph';
+import { calculateSlabTechnical, calculateProductOperationsTechnical, createNewLongitudinalProductInput, parseCanonicalDecimal, parseStableIdentity } from '@sabalanerp/contract-product-graph';
 import { SlabProductSection } from '../../contract-creation/components/product-modal-system/SlabProductSection';
 import { createEmptySlabDraft } from '../../contract-creation/components/product-modal-system/slabProductState';
 import { StairLayerDraftRow } from '../../contract-creation/components/product-modal-system/StairLayersSection';
@@ -16,7 +20,7 @@ import type { ProductOperationsTechnicalInput, LongitudinalTechnicalInput, SlabT
 import { PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { CanonicalStairLayerSummary } from '../../contract-creation/components/product-modal-system/CanonicalStairLayerSummary';
-import { PartnerTechnicalDraftEditor, overridePartnerStairQuantity, partnerStairCanonicalLength, partnerStairDisplayLength } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
+import { PartnerTechnicalDraftEditor, PartnerStairLayerEditor, partnerSlabTechnicalInput, createPartnerTechnicalOperationInput, overridePartnerStairQuantity, partnerStairCanonicalLength, partnerStairDisplayLength, syncPartnerFullCoverageGroup } from '../../contract-creation/partner/PartnerTechnicalDraftEditor';
 import { buildPartnerProductionTechnicalDraft } from '../../contract-creation/partner/partnerProductionTechnicalDraft';
 import { addPartnerTechnicalProduct, draftForPartnerTechnicalEdit, refreshPartnerTechnicalProductVersion } from '../../contract-creation/partner/partnerTechnicalDraftAdapter';
 
@@ -25,6 +29,41 @@ test('Partner stair dimensions keep display units separate from canonical meters
   assert.equal(partnerStairDisplayLength('0.22', 'cm'), '22');
   assert.equal(partnerStairCanonicalLength('1.2', 'm'), '1.2');
   assert.equal(partnerStairDisplayLength('1.2', 'm'), '1.2');
+});
+
+test('Partner layer controls belong only to the stair currently being configured in a mixed contract', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const stone = catalog.products.find(item => item.families.includes('stair'))!;
+  const first = { ...stone, catalogItemId: 'first-stair-stone', name: 'پله اول' };
+  const second = { ...stone, catalogItemId: 'second-stair-stone', name: 'پله دوم' };
+  const slab = catalog.products.find(item => item.families.includes('slab'))!;
+  let draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 0, rows: [] });
+  draft = addPartnerTechnicalProduct(draft, first, { family: 'stair', productRowId: 'first-stair',
+    sourceBatchId: 'source-batch:first', stairSystemId: 'stair-system:first' });
+  draft = addPartnerTechnicalProduct(draft, second, { family: 'stair', productRowId: 'second-stair',
+    sourceBatchId: 'source-batch:second', stairSystemId: 'stair-system:second' });
+  draft = addPartnerTechnicalProduct(draft, slab, { family: 'slab', productRowId: 'slab-row',
+    sourceBatchId: 'source-batch:slab' });
+  const prepared = catalog.products.find(item => item.families.includes('prepared'))!;
+  draft = addPartnerTechnicalProduct(draft, prepared, { family: 'prepared', productRowId: 'prepared-row',
+    sourceBatchId: 'source-batch:prepared' });
+  const longitudinal = catalog.products.find(item => item.families.includes('longitudinal'))!;
+  draft = addPartnerTechnicalProduct(draft, longitudinal, { family: 'longitudinal', productRowId: 'longitudinal-row',
+    sourceBatchId: 'source-batch:longitudinal' });
+  const before = JSON.stringify(draft);
+  const render = (parentProductRowId: string) => renderToStaticMarkup(<PartnerStairLayerEditor
+    parentProductRowId={parentProductRowId} draft={draft} products={[first, second, slab, prepared, longitudinal]}
+    operations={catalog.operations} previewRows={[]} previewDependents={[]} inventory={[]}
+    onChange={() => assert.fail('Viewing layer controls must not mutate saved products')} />);
+  assert.equal(render('slab-row'), '');
+  assert.equal(render('prepared-row'), '');
+  assert.equal(render('longitudinal-row'), '');
+  assert.match(render('first-stair'), /لایه‌های پله/);
+  assert.match(render('first-stair'), /پله اول/);
+  assert.doesNotMatch(render('first-stair'), /پله دوم/);
+  assert.match(render('second-stair'), /پله دوم/);
+  assert.doesNotMatch(render('second-stair'), /پله اول/);
+  assert.equal(JSON.stringify(draft), before);
 });
 
 test('Partner stair defaults to system quantity and keeps a manually edited quantity independent', () => {
@@ -41,6 +80,49 @@ test('Partner stair defaults to system quantity and keeps a manually edited quan
   assert.equal(edited.rows[0].configuration.quantity, 7);
   assert.equal(edited.rows[0].configuration.quantityMode, 'manual');
   assert.equal(edited.stairSystems?.[0]?.quantity.totalSteps, 1);
+});
+
+test('reducing a longitudinal product from five pieces to four adjusts its full-coverage operation group', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const product = catalog.products.find(item => item.families.includes('longitudinal'))!;
+  const draft = buildPartnerProductionTechnicalDraft({ family: 'longitudinal', product, quantity: '5',
+    lengthMeters: '1', widthMeters: '0.25', sourceLengthMeters: '2', sourceWidthMeters: '1',
+    products: catalog.products, operationsCatalog: catalog.operations,
+  }, kind => `partner-quantity-${kind}`);
+  const row = draft.rows[0];
+  assert.equal(row.family, 'longitudinal');
+  if (row.family !== 'longitudinal') return;
+  const group = { operationGroupId: 'operation-group:five-pieces', scope: '5' };
+  const withGroup = { ...row, operations: { groups: [group], tools: [], finishings: [] } };
+  assert.equal(syncPartnerFullCoverageGroup(withGroup, 4).operations.groups[0].scope, '4');
+  assert.equal(syncPartnerFullCoverageGroup({ ...withGroup, operations: { ...withGroup.operations,
+    groups: [{ ...group, scope: '3' }] } }, 4).operations.groups[0].scope, '3');
+  // A previous increase to six can leave the original five-piece group intact.
+  // Reducing that saved row to four must not retain a five-piece operation.
+  const savedAfterIncrease = { ...withGroup, configuration: { ...withGroup.configuration, quantity: 6 } };
+  const corrected = syncPartnerFullCoverageGroup(savedAfterIncrease, 4);
+  assert.equal(corrected.operations.groups[0].scope, '4');
+  const updatedDraft = PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1,
+    rows: [{ ...corrected, configuration: { ...corrected.configuration, quantity: 4 } }] });
+  const preview = previewPartnerTechnicalDraft(updatedDraft, catalog);
+  assert.equal(preview.ok, true);
+  for (const nextQuantity of [3, 2, 1]) {
+    const reduced = syncPartnerFullCoverageGroup(savedAfterIncrease, nextQuantity);
+    const candidate = PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + nextQuantity + 1,
+      rows: [{ ...reduced, configuration: { ...reduced.configuration, quantity: nextQuantity } }] });
+    const result = previewPartnerTechnicalDraft(candidate, catalog);
+    assert.equal(result.ok, true, `quantity ${nextQuantity}: ${JSON.stringify(result.ok ? [] : result.conflicts)}`);
+    assert.equal(reduced.operations.groups[0].scope, String(nextQuantity));
+    const emptied = syncPartnerFullCoverageGroup(savedAfterIncrease, undefined);
+    const enteredAfterBackspace = syncPartnerFullCoverageGroup({ ...emptied,
+      configuration: { ...emptied.configuration, quantity: undefined } }, nextQuantity);
+    const afterBackspace = PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + nextQuantity + 10,
+      rows: [{ ...enteredAfterBackspace, configuration: { ...enteredAfterBackspace.configuration, quantity: nextQuantity } }] });
+    const afterBackspacePreview = previewPartnerTechnicalDraft(afterBackspace, catalog);
+    assert.equal(afterBackspacePreview.ok, true,
+      `backspace then ${nextQuantity}: ${JSON.stringify(afterBackspacePreview.ok ? [] : afterBackspacePreview.conflicts)}`);
+    assert.equal(enteredAfterBackspace.operations.groups[0].scope, String(nextQuantity));
+  }
 });
 
 test('returned Partner row can adopt a current catalog version without losing row identity', () => {
@@ -243,6 +325,12 @@ test('Partner layer and operation forms retain source, edge, and processing choi
     }} onChange={() => undefined} loadTools={async () => []} loadFinishings={async () => []} />
   </TechnicalProductConfiguration>);
   assert.match(html, /تعداد لایه برای هر پله/);
+  const frontButton = html.match(/<button\b[^>]*>جلو<\/button>/)?.[0] ?? '';
+  const backButton = html.match(/<button\b[^>]*>عقب<\/button>/)?.[0] ?? '';
+  assert.match(frontButton, /aria-pressed="true"/);
+  assert.match(frontButton, /sds-tone-primary sds-action-solid/);
+  assert.match(backButton, /aria-pressed="false"/);
+  assert.match(backButton, /sds-tone-neutral sds-action-outline/);
   assert.match(html, /نیم لول/);
   assert.match(html, /ساب سطح/);
   assert.doesNotMatch(html, /قیمت نوع لایه|نرخ ثبت نشده|نرخ در موجودی|987654321/);
@@ -307,4 +395,120 @@ test('Partner stair parts retain dimension/copy controls without the internal ba
   assert.match(html, /کپی از کف پله/);
   assert.match(html, /ارتفاع/);
   assert.doesNotMatch(html, /فی خیز|987654321/);
+});
+
+
+test('adding a tool to a stair layer keeps its generated group independent of the parent and other sides', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const version = catalog.products[0].catalogSnapshotVersion;
+  const tool = catalog.operations.find(item => item.kind === 'TOOL')!;
+  const empty = { groups: [], tools: [], finishings: [] };
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 10,
+    rows: [{ productRowId: 'layer-parent', catalogItemId: 'fixture-technical-stone', catalogSnapshotVersion: version,
+      family: 'stair', operations: empty, configuration: { stairSystemId: 'stairs', part: 'tread', sourceBatchId: 'parent-stock',
+        lengthMeters: '1', crossDimensionMeters: '0.3', quantity: 2, lengthDisplayUnit: 'm', crossDimensionDisplayUnit: 'cm',
+        sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual' } }],
+    dependents: [{ kind: 'layer', creationOrder: 0, layerConfigurationId: 'technical-layer', parentProductRowId: 'layer-parent',
+      sourceBatchId: 'layer-stock', catalogItemId: 'fixture-technical-layer', catalogSnapshotVersion: version,
+      layersPerParentPiece: 1, widthMeters: '0.04', widthDisplayUnit: 'cm', targetSides: ['front', 'back'],
+      source: { kind: 'new-material', catalogItemId: 'fixture-technical-stone', catalogSnapshotVersion: version,
+        sourceRows: [{ sourceRowId: 'layer-source', lengthMeters: '1', widthMeters: '0.1', quantity: 2 }] },
+      sawKerfEnabled: false, calibrationEnabled: false }],
+  });
+  const sideOperations = (['front', 'back'] as const).map(side => {
+    const operationCollectionId = `technical-layer:operations:${side}`;
+    const input = createPartnerTechnicalOperationInput({ inputRevision: 10, productRowId: 'layer-parent',
+      calculation: { lengthMeters: '1', widthMeters: '0.04', quantity: 2 }, catalog: catalog.operations,
+      intent: empty, operationScopeId: operationCollectionId });
+    const calculation = calculateProductOperationsTechnical(input);
+    assert.ok(calculation.ok);
+    const group = calculation.result.groups.find(item => item.automaticNoOperations)!;
+    assert.ok(group);
+    assert.notEqual(String(group.operationGroupId), 'layer-parent:no-operations');
+    return { side, operationCollectionId, scopeIntent: 'side', operations: {
+      groups: [{ operationGroupId: String(group.operationGroupId), scope: '2' }],
+      tools: [{ operationGroupId: String(group.operationGroupId), toolSelectionId: `layer-tool:${side}`,
+        catalogItemId: tool.catalogItemId, catalogSnapshotVersion: tool.catalogSnapshotVersion, edges: ['front'] }], finishings: [],
+    } };
+  });
+  const result = previewPartnerTechnicalDraft(PartnerTechnicalDraftSchema.parse({ ...draft,
+    dependents: draft.dependents?.map(item => ({ ...item, sideOperations })) }), catalog);
+  assert.ok(result.ok, JSON.stringify(result));
+});
+
+
+test('Partner slab modal adapts persisted geometry without sending the kerf flag to the strict calculator', () => {
+  for (const sawKerfEnabled of [false, true]) {
+    const input = partnerSlabTechnicalInput({ sourceBatchId: 'source-batch:partner-slab',
+      lengthMeters: '1', widthMeters: '1', quantity: 50, lastManualField: 'length',
+      lastManualDimension: 'length', lengthDisplayUnit: 'm', widthDisplayUnit: 'm', verticalCutSides: [],
+      sourceRows: [{ sourceRowId: 'slab-source-row:partner-slab', lengthMeters: '1', widthMeters: '1',
+        quantity: 50, lengthDisplayUnit: 'm', widthDisplayUnit: 'm' }], sawKerfEnabled,
+    }, 1, '0.003');
+    assert.equal('sawKerfEnabled' in input, false);
+    assert.equal(input.kerfMeters, sawKerfEnabled ? '0.003' : '0');
+    const result = calculateSlabTechnical(input);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const html = renderToStaticMarkup(<SlabProductSection input={input}
+      sawKerfMeters={parseCanonicalDecimal('0.003')} showValidation onChange={() => undefined} />);
+    assert.doesNotMatch(html, /اطلاعات فنی اسلب قابل خواندن نیست/);
+  }
+});
+
+
+test('cart summary uses derived area and customer material basis for each family', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  for (const family of ['longitudinal', 'stair', 'slab', 'prepared'] as const) {
+    const product = catalog.products.find(item => item.families.includes(family))!;
+    const draft = buildPartnerProductionTechnicalDraft({ family, product, quantity: '2',
+      lengthMeters: '1', widthMeters: family === 'slab' ? '1' : '0.1', sourceLengthMeters: '2', sourceWidthMeters: '2',
+      products: catalog.products, operationsCatalog: catalog.operations, includeRemainder: false }, kind => `${family}-${kind}`);
+    draft.rows[0].retailUnitPrice = { amount: '100', currency: 'IRT' };
+    const preview = previewPartnerTechnicalDraft(draft, catalog);
+    const summary = partnerProductCartSummary(draft, preview);
+    assert.ok(summary, family);
+    assert.ok(summary.area !== null);
+    if (family === 'longitudinal') { assert.equal(summary.area, '0.2'); assert.equal(summary.materialTotal, '20'); }
+    if (family === 'stair' || family === 'prepared') assert.equal(summary.materialTotal, '200');
+    if (family === 'slab' && preview.ok) {
+      const calculation = preview.value.rows[0].calculation;
+      assert.ok(calculation.ok);
+      if (calculation.ok && 'finishedAreaSquareMeters' in calculation.result)
+        assert.equal(summary.materialTotal, String(calculation.result.packingPlan.consumedSources.length * 100));
+    }
+    assert.equal(partnerProductCartSummary({ ...draft, inputRevision: draft.inputRevision + 1 }, preview), null);
+  }
+  assert.equal(partnerPriceLineTotal([{ quantity: '0.1', rate: { amount: '9007199254740993.02', currency: 'IRT' } }], 'IRT'), '900719925474099.302');
+});
+
+test('legacy wizard checkpoints recover product names and child links from exact technical identities', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const product = catalog.products.find(item => item.families.includes('longitudinal'))!;
+  let sequence = 0;
+  const draft = buildPartnerProductionTechnicalDraft({ family: 'longitudinal', product, quantity: '2',
+    lengthMeters: '1', widthMeters: '0.1', sourceLengthMeters: '2', sourceWidthMeters: '1',
+    products: catalog.products, operationsCatalog: catalog.operations, includeRemainder: true }, kind => `legacy-${kind}-${sequence++}`);
+  const child = draft.dependents?.find(item => item.kind === 'remainder');
+  assert.ok(child && child.kind === 'remainder');
+  const fixture = createWizardFixtures();
+  const rows = defaultPartnerRetailRows([draft.rows[0].productRowId, child.productRowId].map(productRowId => ({
+    productRowId, quantity: '1', unit: 'meter', inquiryRow: fixture.inquiry.rows[0], retailUnitPrice: { amount: '0', currency: 'IRT' as const } })));
+  const presented = presentPartnerRetailRows(rows, draft, catalog.products);
+  assert.equal(presented[0].inquiryRow.description, product.name);
+  assert.equal(presented[1].parentProductRowId, draft.rows[0].productRowId);
+  assert.deepEqual(presented[1].retailUnitPrice, rows[1].retailUnitPrice);
+});
+
+
+test('cart header displays only the canonical final payable including services and discount', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 1, rows: [] });
+  const html = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft} products={catalog.products}
+    operations={catalog.operations} finalTotal={{ amount: '887125000', currency: 'IRT' }} onChange={() => undefined} />);
+  assert.match(html, /جمع کل نهایی:.*۸۸۷,۱۲۵,۰۰۰ تومان/);
+  assert.doesNotMatch(html, /جمع قیمت پایهٔ سنگ/);
+  const pending = renderToStaticMarkup(<PartnerTechnicalDraftEditor draft={draft} products={catalog.products}
+    operations={catalog.operations} finalTotalStatus="در حال محاسبه" onChange={() => undefined} />);
+  assert.match(pending, /جمع کل نهایی:.*در حال محاسبه/);
+  assert.doesNotMatch(pending, /۸۸۷,۱۲۵,۰۰۰/);
 });

@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { PartnerManagementWorkspaceViewV2, Result } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerInquiryQuery } from '../inquiries/query';
+import { resolveSavedTechnicalConfiguration } from '../inquiries/adapters';
 import type { PartnerInquiryDependencies } from '../inquiries/service';
 import { createPrismaManagementWorkspaceReader } from './management';
 import { createPartnerWorkspaceQuery } from './query';
@@ -56,7 +57,8 @@ export function createPrismaPartnerWorkspaceQuery(input: {
     },
     readResponderInquiry(transaction, inquiryId) {
       const query = createPartnerInquiryQuery({ actorId: input.actorId,
-        transaction: work => work(transaction), authorize: input.authorize } as PartnerInquiryDependencies);
+        transaction: work => work(transaction), authorize: input.authorize,
+        resolveConfiguration: resolveSavedTechnicalConfiguration } as PartnerInquiryDependencies);
       return query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId });
     },
     readManagementWorkspace,

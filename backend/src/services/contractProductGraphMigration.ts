@@ -4,6 +4,7 @@ import {
   serializeCanonicalProductGraph,
   type CalculationPolicySnapshot
 } from '@sabalanerp/contract-product-graph';
+import { PRECISE_PREPARED_GRAPH_PRICING_POLICY } from '@sabalanerp/contract-product-graph';
 import { Prisma, PrismaClient } from '@prisma/client';
 
 export const CURRENT_CONTRACT_PRODUCT_POLICY: CalculationPolicySnapshot = {
@@ -18,6 +19,11 @@ export const CURRENT_CONTRACT_PRODUCT_POLICY_V2: CalculationPolicySnapshot = {
   packing: 'packing-v1',
   pricing: 'pricing-v1',
   rounding: 'rounding-v2'
+};
+
+// Quantity precision stays at rounding-v2; only prepared monetary rows gain precision.
+export const CURRENT_CONTRACT_PRODUCT_POLICY_V3: CalculationPolicySnapshot = {
+  ...CURRENT_CONTRACT_PRODUCT_POLICY_V2, pricing: PRECISE_PREPARED_GRAPH_PRICING_POLICY
 };
 
 const json = (value: unknown): Prisma.InputJsonValue =>

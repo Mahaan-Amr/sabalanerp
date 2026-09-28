@@ -1506,7 +1506,7 @@ export function useErpOverlayPortalContainer() {
   return React.useContext(ErpOverlayPortalContext);
 }
 
-export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', size = 'default', dismissible = true, pending = false, returnFocusElement = null }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; size?: 'default' | 'wide'; dismissible?: boolean; pending?: boolean; returnFocusElement?: HTMLElement | null }) {
+export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', size = 'default', scope = 'default', dismissible = true, pending = false, returnFocusElement = null }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; size?: 'default' | 'wide'; scope?: 'default' | 'workspace'; dismissible?: boolean; pending?: boolean; returnFocusElement?: HTMLElement | null }) {
   const [mounted, setMounted] = React.useState(false);
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   const dialogRef = React.useRef<HTMLDivElement>(null);
@@ -1557,7 +1557,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
   const sheet = (
     <AnimatePresence>
       {open && (
-        <div ref={overlayRootRef} data-erp-overlay-root data-erp-sheet-root className={isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"} role="presentation">
+        <div ref={overlayRootRef} data-erp-overlay-root data-erp-sheet-root className={`${scope === 'workspace' ? 'sds-neumorphic-scope ' : ''}${isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"}`} role="presentation">
           <motion.button type="button" aria-label="بستن" disabled={!effectiveDismissible} onClick={onClose} className="absolute inset-0 bg-[var(--sds-surface-overlay)] backdrop-blur-sm disabled:cursor-wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
           <motion.div
             ref={dialogRef}

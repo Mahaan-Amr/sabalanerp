@@ -11,11 +11,13 @@ import { alignPartnerCustomerPaymentPlan, defaultPartnerRetailRows, partnerRetai
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
 import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
 import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
-import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
+import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, reconcilePartnerDeliveriesToProducts, rebasePartnerWizardSnapshot,
   partnerCasePendingStorageKey, partnerCreationPathAfterCustomerCreate, shouldPreferLocalPartnerWizard,
   isExplicitPartnerCreationEntry, partnerProductEditPath, shouldOfferPartnerDraftChoice,
   shouldStartFreshPartnerCreation, partnerCreationRouteIdentity, partnerCreationRequestedInquiry,
-  partnerCaseResultStep, partnerCaseHasIntegrityError, partnerCaseReviewMessage } from '../../contract-creation/partner/partnerWizardEntry';
+  partnerCaseResultStep, partnerCaseHasIntegrityError, partnerCaseReviewMessage,
+  latestMatchingPartnerInquiryRow } from '../../contract-creation/partner/partnerWizardEntry';
+import { partnerProductEditEntry, partnerSaleEntryIssue } from '../../contract-creation/partner/partnerProductEditEntry';
 import { WIZARD_STEPS } from '../../contract-creation/constants/contract.constants';
 import { partnerError, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import { selectPartnerReinquiryRows } from '../../contract-creation/partner/partnerReinquiry';
@@ -104,12 +106,23 @@ test('a numbered pricing result opens at pricing even when the saved wizard was 
   assert.equal(partnerCaseResultStep('products', false), 'products');
 });
 
+test('background pricing refresh preserves a corrected row until its new inquiry is sent', () => {
+  const oldRejected = { ...fixture.inquiry.rows[0], state: 'REJECTED' as const };
+  const newRevision = oldRejected.configurationRef.recoveryRevision + 1;
+  const unsent = { ...oldRejected, rowId: 'corrected-row-awaiting-inquiry',
+    state: 'PENDING' as const, submissionState: 'UNSENT' as const,
+    configurationRef: { ...oldRejected.configurationRef, recoveryRevision: newRevision } };
+  assert.equal(latestMatchingPartnerInquiryRow([oldRejected], unsent), unsent);
+  const submitted = { ...unsent, rowId: 'new-inquiry-row', submissionState: undefined };
+  assert.equal(latestMatchingPartnerInquiryRow([oldRejected, submitted], unsent), submitted);
+});
+
 test('numbered Case integrity failures identify the Case for support while transport failures remain retryable', () => {
   assert.equal(partnerCaseHasIntegrityError(partnerError('INTEGRITY_CONFLICT')), true);
   assert.equal(partnerCaseHasIntegrityError({ response: { data: { error: partnerError('INTEGRITY_CONFLICT') } } }), true);
   assert.equal(partnerCaseHasIntegrityError(new Error('offline')), false);
-  assert.match(partnerCaseReviewMessage('PC-123'), /PC-123/);
-  assert.match(partnerCaseReviewMessage('PC-123'), /پشتیبانی/);
+  assert.match(partnerCaseReviewMessage('PC-123', 313), /همکار-۰۰۳۱۳/);
+  assert.match(partnerCaseReviewMessage('PC-123', 313), /پشتیبانی/);
 });
 
 test('recovering a numbered result keeps an expired quote visible instead of changing it to pending', () => {
@@ -155,6 +168,16 @@ test('product editing preserves split and grouped deliveries while adding only n
     { ...previous[0] },
     { ...previous[1], items: [{ productRowId: 'row-a', quantity: '3' }] },
     defaults[1],
+  ]);
+});
+
+test('a corrected product quantity trims stale delivery allocations before price acceptance', () => {
+  const deliveries = [{ deliveryId: 'delivery-a', date: '2026-09-01', destination: 'مقصد',
+    items: [{ productRowId: 'stone-row', quantity: '500' }, { productRowId: 'other-row', quantity: '100' }] }];
+  assert.deepEqual(reconcilePartnerDeliveriesToProducts(deliveries,
+    [{ productRowId: 'stone-row', quantity: '300' }, { productRowId: 'other-row', quantity: '100' }]), [
+    { ...deliveries[0], items: [{ productRowId: 'stone-row', quantity: '300' },
+      { productRowId: 'other-row', quantity: '100' }] },
   ]);
 });
 
@@ -267,6 +290,17 @@ test('a changed technical row keeps the wizard inputs and defers its first inqui
   assert.doesNotMatch(html, /استعلام مجدد/);
 });
 
+test('inquiry send stays clickable when the background retail quote has not populated yet', () => {
+  const unquoted = draft.rows.map(({ retailEffectiveUnitPrice: _quote, ...row }) => row);
+  const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, rows: unquoted }}
+    onChange={() => undefined} recovery={{ state: 'writable' }} submission={submission()}
+    now={Date.parse('2026-08-27T09:00:00.000Z')} canonicalRetailReady={false}
+    onPreparePricingQuote={async current => current} renderSection={() => null}
+    validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
+  const action = html.slice(0, html.indexOf('ارسال برای استعلام قیمت')).split('<button').at(-1) ?? '';
+  assert.doesNotMatch(action, /\bdisabled\b/);
+});
+
 test('the numbered pricing step blocks delivery while Sabalan has not answered every product', () => {
   const pendingRows = draft.rows.map(row => ({ ...row, inquiryRow: { ...row.inquiryRow,
     state: 'PENDING' as const, approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
@@ -351,7 +385,7 @@ test('a pending successor no longer offers a duplicate corrected-row inquiry', (
 });
 
 test('an evidence conflict gives the Partner a simple review action with the numbered Case', async () => {
-  const existing = { ...fixture.partner, state: 'DRAFT' as const };
+  const existing = { ...fixture.partner, state: 'DRAFT' as const, trackingNumber: 313 };
   const rejected = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId, initialCase: existing,
     commands: { execute: async () => ({ ok: false, error: partnerError('INTEGRITY_CONFLICT') }) },
     recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined,
@@ -363,7 +397,8 @@ test('an evidence conflict gives the Partner a simple review action with the num
     recovery={{ state: 'writable' }} submission={rejected} now={Date.parse('2026-08-27T09:00:00.000Z')}
     renderSection={() => null} validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /این پرونده نیاز به بررسی دارد/);
-  assert.match(html, new RegExp(existing.caseNumber));
+  assert.match(html, /همکار-۰۰۳۱۳/);
+  assert.doesNotMatch(html, new RegExp(existing.caseNumber));
   assert.doesNotMatch(html, /شواهد پرونده با نسخه فعلی سازگار نیست/);
 });
 
@@ -381,4 +416,18 @@ test('reloading an uncertain inquiry exposes a reachable retry without a new sub
   assert.match(html, /بررسی نتیجه ارسال/);
   assert.match(html, /preserved-configuration/);
   assert.match(html, /استعلام جدید/);
+});
+
+
+test('returning to product edits restores the same recovery customer, project and date', () => {
+  const intent = { ...draft.intent, projectId: 'project-edit' };
+  const snapshot = { schemaVersion: 1, wizardRevision: 4, step: 'pricing', intent,
+    updatedAt: '2026-09-28T08:00:00.000Z' };
+  const expected = { customerId: intent.customerId, projectId: intent.projectId, contractDate: intent.contractDate };
+  assert.deepEqual(partnerProductEditEntry(intent.recoveryId, snapshot), expected);
+  assert.deepEqual(partnerProductEditEntry(intent.recoveryId, undefined, intent), expected);
+  assert.throws(() => partnerProductEditEntry('another-recovery', snapshot));
+  assert.equal(partnerSaleEntryIssue(expected), null);
+  assert.deepEqual(partnerSaleEntryIssue({ ...expected, projectId: '' }), {
+    step: 'project', message: 'پروژه را انتخاب کنید.' });
 });

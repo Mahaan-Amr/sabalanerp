@@ -294,7 +294,8 @@ import {
   parseStableIdentity,
   refreshProductOperationsGeometry,
   resolveStaircaseQuantity,
-  type ProductOperationsInput
+  type ProductOperationsInput,
+  multiplyContractMonetaryAmounts,
 } from '@sabalanerp/contract-product-graph';
 
 const refreshOperationGeometry = (
@@ -714,6 +715,8 @@ export default function CreateContractWizard({
 }: CreateContractWizardProps = {}) {
   const router = useRouter();
   const isContractEditMode = mode === 'edit';
+  const applyContractMonetaryRounding = !isContractEditMode || initialContractStatus === 'DRAFT' ||
+    Boolean(initialWizardData?.monetaryRounding);
 
   const normalizeWizardStep = (step: number): number => {
     if (Number.isNaN(step)) return 1;
@@ -966,7 +969,7 @@ export default function CreateContractWizard({
   }, [currentStep, setCurrentStep, shouldSkipDeliveryStep]);
   const grossContractTotal = getContractGrossPayableTotal(wizardData.products, wizardData.serviceRows || []);
   const payableContractTotal = getContractPayableTotal(
-    wizardData.products, wizardData.serviceRows || [], appliedDiscountAmount
+    wizardData.products, wizardData.serviceRows || [], appliedDiscountAmount, applyContractMonetaryRounding
   );
 
   useEffect(() => {
@@ -4841,7 +4844,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       }
 
       const squareMeters = preparedUnit === 'squareMeter' ? preparedQuantity : 0;
-      const totalPrice = preparedQuantity * unitPrice;
+      const totalPrice = Number(multiplyContractMonetaryAmounts(preparedQuantity, unitPrice));
       const finalProduct: ContractProduct = {
         rowId: previousPreparedProduct?.rowId || createContractProductRowId(),
         productId: selectedProduct.id,
@@ -6214,6 +6217,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   // Contract submission is now provided by useContractSubmission hook
   const contractSubmission = useContractSubmission({
+    applyMonetaryRounding: applyContractMonetaryRounding,
     wizardData,
     updateWizardData,
     setCurrentStep,

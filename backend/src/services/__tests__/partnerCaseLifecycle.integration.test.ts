@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -1583,4 +1583,62 @@ test('concurrent SIGNED and PRINTED writers on independent clients create one co
     await Promise.all([setup.$disconnect(), first.$disconnect(), second.$disconnect()]);
     await temporary.cleanup();
   }
+});
+
+test('Partner customer SMS uses the customer recipient, immutable public details, resend cooldown and OTP verification', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
+  const database = temporary.client();
+  const ids = idsFor(`partner-sms-${temporary.runId}`);
+  let providerFails = false;
+  const messages: Array<{ phoneNumber: string; code: string; customerName: string; contractNumber: string }> = [];
+  try {
+    await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+    await database.$transaction(async tx => {
+      const owner = await seedCase(tx, ids);
+      const lifecycle = createPartnerCaseLifecycleService(dependencies(tx, ids));
+      const committed = await lifecycle.execute(await commitCommand(ids, owner, 'SIGNED', 'sms-finalize', 'DRAFT'));
+      assert.equal(committed.ok, true, JSON.stringify(committed));
+    });
+    const hooks = createPrismaPartnerConfirmationHooks({ database, sms: {
+      sendContractConfirmationMessage: async message => { messages.push(message); return providerFails ? { success: false, error: 'test-provider-failure' } : { success: true, messageId: 12345 }; },
+    } });
+    const sent = await hooks.sendForConfirmation({ contractId: ids.contractId, requestedBy: ids.partnerId });
+    assert.equal(sent?.success, true, sent?.error);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].phoneNumber, createPartnerFixtures().customer.customer.phone);
+    assert.equal(messages[0].customerName, createPartnerFixtures().customer.customer.displayName);
+    assert.match(messages[0].code, /^\d{6}$/);
+    assert.ok(sent?.data?.publicLink);
+    const token = new URL(sent.data.publicLink).pathname.split('/').at(-1)!;
+    assert.equal(token.length, 64, 'public confirmation URL retains its complete token');
+    assert.equal((await database.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } })).partnerKind, 'PARTNER_CUSTOMER');
+    assert.deepEqual({ sessions: await database.contractPublicConfirmation.count(), snapshots: await database.partnerCustomerOutputSnapshot.count(), audit: await database.contractConfirmationAuditLog.count() }, { sessions: 1, snapshots: 1, audit: 2 }, 'confirmation evidence persists together');
+    const storedSession = await database.contractPublicConfirmation.findFirstOrThrow({ where: { contractId: ids.contractId } });
+    assert.equal(storedSession.tokenHash, createHash('sha256').update(token).digest('hex'), 'returned link resolves to the persisted session');
+    const view = await hooks.getPublicContractByToken(token);
+    assert.equal(view?.success, true, view?.error);
+    assert.equal(view?.data?.contract.products[0].retailUnitPrice, '1000');
+    assert.ok(!JSON.stringify(view).includes('wholesaleUnitPrice'));
+    const manual = await hooks.getPublicContractByManualLookup({ contractNumber: messages[0].contractNumber, phoneNumber: messages[0].phoneNumber });
+    assert.equal(manual?.data?.contract.outputHash, view?.data?.contract.outputHash);
+    assert.equal((await hooks.verifyPublicOtp({ token, code: '000000' }))?.success, false);
+    assert.equal((await hooks.resendFromPublicToken({ token }))?.success, false);
+    assert.equal(messages.length, 1, 'cooldown must prevent a second provider call');
+    await database.contractPublicConfirmation.updateMany({ where: { contractId: ids.contractId, status: 'PENDING' },
+      data: { lastSentAt: new Date(Date.now() - 120_000) } });
+    providerFails = true;
+    assert.equal((await hooks.resendFromPublicToken({ token }))?.success, false);
+    assert.equal(await database.contractConfirmationAuditLog.count({ where: { eventType: 'PARTNER_SMS_FAILED' } }), 1);
+    providerFails = false;
+    await database.contractPublicConfirmation.updateMany({ where: { contractId: ids.contractId, status: 'PENDING' },
+      data: { lastSentAt: new Date(Date.now() - 120_000) } });
+    assert.equal((await hooks.resendFromPublicToken({ token }))?.success, true);
+    assert.equal(messages.length, 3);
+    const resentView = await hooks.getPublicContractByToken(token);
+    assert.equal(resentView?.data?.contract.outputHash, view?.data?.contract.outputHash);
+    assert.equal(resentView?.data?.linkExpiresAt, view?.data?.linkExpiresAt);
+    const verified = await hooks.verifyPublicOtp({ token, code: messages[2].code });
+    assert.equal(verified?.success, true, verified?.error);
+    assert.equal((await hooks.getPublicContractByToken(token))?.data?.decision, 'APPROVED');
+  } finally { await database.$disconnect(); await temporary.cleanup(); }
 });

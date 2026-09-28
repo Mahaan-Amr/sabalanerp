@@ -1,3 +1,5 @@
+import { resolveSavedTechnicalConfiguration } from '../partnerSales/inquiries/adapters';
+import { parseInquiryDefinition } from '../partnerSales/inquiries/definition';
 import { Prisma } from '@prisma/client';
 import type { CrossWorkspaceDutySourceAdapter } from './types';
 
@@ -105,14 +107,28 @@ export const createPartnerPricingDuty = async (database: any, input: {
   return duty;
 };
 
+async function materialPriceRows(database: any, inquiry: any) {
+  const rows: typeof inquiry.rows = [];
+  for (const row of inquiry.rows) {
+    const definition = parseInquiryDefinition(row.definition);
+    const resolved = definition && inquiry.profile?.userId && await resolveSavedTechnicalConfiguration(database, {
+      actorId: inquiry.profile.userId, reference: definition.configurationRef,
+    });
+    if (resolved?.ok && resolved.value.paidSourceProductRowId) continue;
+    rows.push(row);
+  }
+  return rows;
+}
+
 export const createPartnerPricingResultDuty = async (database: any, input: {
   inquiryId: string; actorUserId: string; now?: Date;
 }) => {
   const now = input.now ?? new Date();
   const inquiry = await database.partnerInquiry.findUniqueOrThrow({ where: { id: input.inquiryId }, include: {
     case: { select: { caseNumber: true } }, profile: { select: { userId: true } },
-    rows: { where: { successor: null }, select: { outcome: true } },
+    rows: { where: { successor: null }, select: { definition: true, outcome: true } },
   } });
+  inquiry.rows = await materialPriceRows(database, inquiry);
   if (!inquiry.caseId || !inquiry.case || !inquiry.rows.length || inquiry.rows.some((row: any) => row.outcome === 'PENDING')) {
     return null;
   }
@@ -140,9 +156,11 @@ export const reconcilePartnerPricingDuty = async (database: any, input: {
   inquiryId: string; actorUserId: string; cancelled?: boolean; now?: Date;
 }) => {
   const now = input.now ?? new Date();
-  const pending = await database.partnerInquiryRow.count({ where: {
-    inquiryId: input.inquiryId, successor: null, outcome: 'PENDING',
+  const inquiry = await database.partnerInquiry.findUnique({ where: { id: input.inquiryId }, include: {
+    profile: { select: { userId: true } },
+    rows: { where: { successor: null, outcome: 'PENDING' }, select: { definition: true, outcome: true } },
   } });
+  const pending = inquiry ? (await materialPriceRows(database, inquiry)).length : 0;
   if (pending && !input.cancelled) return null;
   const closed = await closeOpenDuties(database, { inquiryId: input.inquiryId, actorUserId: input.actorUserId,
     status: input.cancelled ? 'CANCELLED' : 'COMPLETED', eventCode: input.cancelled ? 'CANCELLED' : 'COMPLETED',
@@ -194,9 +212,11 @@ export const reassignPartnerPricingDuty = async (database: any, input: {
 const loadInboxProjection: CrossWorkspaceDutySourceAdapter['loadInboxProjection'] = async (database, input) => {
   const inquiry = await database.partnerInquiry.findUnique({ where: { id: input.sourceId }, include: {
     case: { select: { caseNumber: true, trackingCode: { select: { number: true } } } },
-    rows: { where: { successor: null }, select: { id: true, outcome: true } },
+    profile: { select: { userId: true } },
+    rows: { where: { successor: null }, select: { id: true, definition: true, outcome: true } },
   } });
   if (!inquiry?.caseId || !inquiry.case) throw new Error('DUTY_SOURCE_CHANGED');
+  inquiry.rows = await materialPriceRows(database, inquiry);
   if (input.sourceActionCode === resultDefinition.sourceActionCode) {
     const approved = inquiry.rows.filter((row: any) => row.outcome === 'APPROVED').length;
     const rejected = inquiry.rows.filter((row: any) => row.outcome === 'REJECTED').length;

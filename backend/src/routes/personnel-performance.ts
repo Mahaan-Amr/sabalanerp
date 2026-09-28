@@ -94,8 +94,6 @@ import {
   getPerformanceHistory,
   listPerformanceEvaluators,
   listEligibleConsequenceResults,
-  getPersonalPerformanceBadge,
-  getPersonnelPerformanceBadges,
   requestPerformanceExport,
 } from '../services/personnelPerformanceDisclosureStore';
 import {
@@ -564,14 +562,12 @@ router.get('/badge/me', async (req: AuthRequest, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
     const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { personnelId: true } });
-    if (user?.personnelId) {
-      const simple = await getSimplePerformanceBadges(prisma, [user.personnelId]);
-      if (simple[user.personnelId]) return res.json({
-        success: true,
-        badge: { ...(simple[user.personnelId] as object), details: await getSimplePersonalPerformanceDetails(prisma, user.personnelId) },
-      });
-    }
-    return res.json({ success: true, badge: await getPersonalPerformanceBadge(prisma, req.user.id) });
+    if (!user?.personnelId) return res.json({ success: true, badge: null });
+    const badges = await getSimplePerformanceBadges(prisma, [user.personnelId]);
+    const badge = badges[user.personnelId];
+    return res.json({ success: true, badge: badge
+      ? { ...(badge as object), details: await getSimplePersonalPerformanceDetails(prisma, user.personnelId) }
+      : null });
   } catch (error) { return next(error); }
 });
 
@@ -581,13 +577,9 @@ router.post('/badges', viewBadgeList, async (req: AuthRequest, res, next) => {
     const personnelIds = await visibleSimplePerformancePersonnelIds(prisma, {
       actorUserId: req.user!.id, personnelIds: requestedPersonnelIds,
     });
-    const [legacy, simple] = await Promise.all([
-      getPersonnelPerformanceBadges(prisma, { actorUserId: req.user!.id, personnelIds }),
-      getSimplePerformanceBadges(prisma, personnelIds),
-    ]);
-    const legacyByPersonnel = new Map(legacy.map((item) => [item.personnelId, item.badge]));
+    const simple = await getSimplePerformanceBadges(prisma, personnelIds);
     const badges = personnelIds.flatMap((personnelId) => {
-      const badge = simple[personnelId] ?? legacyByPersonnel.get(personnelId);
+      const badge = simple[personnelId];
       return badge ? [{ personnelId, badge }] : [];
     });
     return res.json({ success: true, badges });

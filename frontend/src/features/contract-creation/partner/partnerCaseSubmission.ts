@@ -31,7 +31,11 @@ export interface PartnerSubmissionState {
 
 function revisionIntent(intent: PartnerDraftIntent, savedCase: PartnerCaseView): PartnerDraftIntent {
   const predecessor = savedCase.customerPaymentPlan;
-  return { ...intent, customerPaymentPlan: {
+  // The initial request is already attached to the numbered Case. A pricing
+  // acceptance revises that Case and must not submit the request again.
+  const { pricingRequest: _initialPricingRequest, ...revision } = intent;
+  void _initialPricingRequest;
+  return { ...revision, customerPaymentPlan: {
     ...intent.customerPaymentPlan,
     planId: `partner-customer-plan-${crypto.randomUUID()}`,
     version: predecessor.version + 1,

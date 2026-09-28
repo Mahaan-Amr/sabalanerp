@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
+import { roundPartnerContractTotals } from '@sabalanerp/partner-sales-contracts';
 import { preparePartnerFinancialSource } from '../partnerSales/accounting/source';
 import { createPartnerAccountingAdapter } from '../partnerSales/accounting/adapter';
 import { PartnerAccountingFixture } from './partnerAccountingFixture';
@@ -8,6 +9,21 @@ import {
   hasConflictingPartnerAccountingEvidence,
   hasPartnerAccountingEvidence,
 } from '../partnerSales/accounting/provenance';
+
+test('Accounting prepares the rounded wholesale debt without rounding product rates', async () => {
+  const fixture = new PartnerAccountingFixture();
+  const view = fixture.source.view;
+  view.totals = roundPartnerContractTotals({ net: '200.8', discount: '0', tax: '0', charges: '0', currency: 'IRR' });
+  view.products[0].wholesaleUnitPrice = '100.4';
+  view.products[0].quantity = '2';
+  view.sabalanPaymentPlan.installments[0].amount = { amount: '201', currency: 'IRR' };
+  const prepared = await preparePartnerFinancialSource(fixture.source, view.owner);
+  assert.equal(prepared.ok, true, JSON.stringify(prepared));
+  if (prepared.ok) assert.equal(prepared.value.amount.amount, '201');
+  assert.equal(view.products[0].wholesaleUnitPrice, '100.4');
+  view.totals.monetaryRounding!.difference = '0';
+  assert.equal((await preparePartnerFinancialSource(fixture.source, view.owner)).ok, false);
+});
 
 test('ordinary Contract snapshot null ownership is not private Partner evidence', () => {
   const ordinary = {

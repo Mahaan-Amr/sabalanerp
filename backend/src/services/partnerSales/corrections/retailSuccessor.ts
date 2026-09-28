@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { canonicalHash, TotalsSchema, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
+import { canonicalHash, TotalsSchema, roundPartnerContractTotals, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
 import { buildCaseProjections, type CaseRevisionProjectionEvidence } from '../cases/projections';
 import type { RetailCorrectionRevision } from './retailCorrection';
 import { multiply, subtract, sum } from '../reporting/money';
@@ -34,10 +34,14 @@ export async function prepareRetailSuccessor(tx: Prisma.TransactionClient, input
   });
   if (prices.size !== products.length) throw new Error('Retail successor row set conflict');
   const net = sum(products.map(row => multiply(String(row.quantity), row.retailUnitPrice)));
-  const payable = sum([subtract(net, oldTotals.discount), oldTotals.tax, oldTotals.charges]);
+  // A successor explicitly changes commercial evidence; its predecessor stays immutable.
+  const successorTotals = oldTotals.monetaryRounding ? roundPartnerContractTotals({ net,
+    discount: oldTotals.discount, tax: oldTotals.tax, charges: oldTotals.charges, currency: oldTotals.currency })
+    : { ...oldTotals, net, payable: sum([subtract(net, oldTotals.discount), oldTotals.tax, oldTotals.charges]) };
+  const payable = successorTotals.payable;
   const planTotal = sum(input.customerPaymentPlan.installments.map(row => row.amount.amount));
   if (planTotal !== payable) throw new Error('Retail successor payment plan does not reconcile');
-  const retailEnvelope = { ...retail, products, totals: { ...oldTotals, net, payable } };
+  const retailEnvelope = { ...retail, products, totals: successorTotals };
   const fields = { graphHash: previous.graphHash, graph: previous.graph, partySnapshots: previous.partySnapshots,
     wholesaleEnvelope: previous.wholesaleEnvelope, retailEnvelope,
     paymentEvidence: { ...object(previous.paymentEvidence), customerPaymentPlan: input.customerPaymentPlan },

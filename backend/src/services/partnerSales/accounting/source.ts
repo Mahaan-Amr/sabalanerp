@@ -65,6 +65,10 @@ export async function preparePartnerFinancialSource(source: PartnerAccountingSou
   if (!parsed.success || !contracts.IdSchema.safeParse(source.partnerSellerId).success ||
       !contracts.RevisionRefSchema.safeParse(expected).success) return failure('INVALID_PAYLOAD');
   const view = parsed.data;
+  if (view.totals.monetaryRounding !== undefined) {
+    try { contracts.partnerContractPayableTotal(view.totals); }
+    catch { return failure('INTEGRITY_CONFLICT'); }
+  }
   const conflict = contracts.checkExpectedRevision(expected, view.owner);
   if (conflict) return { ok: false, error: conflict };
   if (view.state !== 'COMMITTED' && view.state !== 'VOIDED') return failure('STATE_CONFLICT');

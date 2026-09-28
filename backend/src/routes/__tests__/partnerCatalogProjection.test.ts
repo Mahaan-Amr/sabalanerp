@@ -58,9 +58,25 @@ test('inactive/deleted inventory is unavailable while missing geometry remains m
   if (!missing.ok) throw new Error(missing.error.code);
   assert.equal(missing.value.dimensions.motherLengthMeters, undefined);
   assert.equal(missing.value.dimensions.motherWidthCentimeters, undefined);
-  for (const widthValue of ['0', '-4', 'private-malformed-value']) {
+  for (const widthValue of ['-4', 'private-malformed-value']) {
     const result = projectPartnerTechnicalProduct({ ...stone, widthValue });
     assert.equal(result.ok, false);
     assert.equal(JSON.stringify(result).includes(widthValue === 'private-malformed-value' ? widthValue : 'widthValue'), false);
+  }
+});
+
+test('slab and prepared catalog rows retain eligibility when inventory uses zero for unspecified dimensions', () => {
+  for (const family of ['slab', 'prepared'] as const) {
+    const result = projectPartnerTechnicalProduct({ ...stone,
+      availableInLongitudinalContracts: false, availableInStairContracts: false,
+      availableInSlabContracts: family === 'slab', availableInVolumetricContracts: family === 'prepared',
+      widthValue: '0.000', motherLengthValue: '0', thicknessValue: family === 'slab' ? '2.00' : '0.00' });
+    assert.equal(result.ok, true, `${family} must remain selectable like ordinary Sales`);
+    if (!result.ok) throw new Error('Catalog projection failed');
+    assert.ok(result.value.families.includes(family));
+    assert.equal(result.value.dimensions.motherWidthCentimeters, undefined);
+    assert.equal(result.value.dimensions.motherLengthMeters, undefined);
+    assert.equal(result.value.dimensions.thicknessCentimeters, family === 'slab' ? '2' : undefined);
+    assert.doesNotMatch(JSON.stringify(result), /private-|basePrice|financialEvidence/);
   }
 });

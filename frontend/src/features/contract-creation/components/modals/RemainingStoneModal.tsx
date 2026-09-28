@@ -30,6 +30,11 @@ import {
 } from '../product-modal-system';
 
 interface RemainingStoneModalProps {
+  operationsContent?: React.ReactNode;
+  productTitleReadOnly?: boolean;
+  hideDescription?: boolean;
+  primaryLabel?: string;
+  sawKerfCm?: number;
   isOpen: boolean;
   onClose: () => void;
   remainingStone: RemainingStone | null;
@@ -85,6 +90,11 @@ const SummaryRow = ({
 );
 
 export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
+  operationsContent,
+  productTitleReadOnly = false,
+  hideDescription = false,
+  primaryLabel = 'افزودن از باقی‌مانده',
+  sawKerfCm = SAW_KERF_CM,
   isOpen,
   onClose,
   remainingStone,
@@ -135,7 +145,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
     });
   const preview = allocateRemainingStonePartitions(normalizedRows, remainingStone, {
     sawKerfEnabled: remainingStoneSawKerfEnabled,
-    sawKerfCm: SAW_KERF_CM
+    sawKerfCm
   });
   const previewIsValid = normalizedRows.length > 0 && preview.rowErrors.size === 0;
   const remainders = previewIsValid
@@ -219,7 +229,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
       title={`ساخت از باقی‌مانده · ${formatDisplayNumber(remainingStone.width)}cm × ${formatDisplayNumber(remainingStone.length)}m`}
       view="main"
       onClose={resetAndClose}
-      primaryLabel="افزودن از باقی‌مانده"
+      primaryLabel={primaryLabel}
       pending={false}
       error={previewIsValid ? errors.products : undefined}
       onPrimary={submit}
@@ -235,6 +245,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
               عنوان محصول
               <ErpInput
                 value={remainingStoneConfig.stoneName || ''}
+                readOnly={productTitleReadOnly}
                 onChange={event => setRemainingStoneConfig(current => ({
                   ...current,
                   stoneName: event.target.value
@@ -355,7 +366,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
             </div>
           </section>
 
-          <label className="block border-b border-[var(--sds-border-default)] py-3 text-xs font-semibold text-[var(--sds-text-secondary)] border-[var(--sds-border-subtle)] text-[var(--sds-text-secondary)]">
+          {!hideDescription && <label className="block border-b border-[var(--sds-border-default)] py-3 text-xs font-semibold text-[var(--sds-text-secondary)] border-[var(--sds-border-subtle)] text-[var(--sds-text-secondary)]">
             توضیحات
             <AutoGrowingDescription
               value={remainingStoneConfig.description || ''}
@@ -365,9 +376,9 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
               }))}
               className="mt-1"
             />
-          </label>
+          </label>}
 
-          {operationInput && (
+          {operationsContent !== undefined ? operationsContent : operationInput && (
             <OperationCollectionsSection
               input={operationInput}
               onChange={next => setRemainingStoneConfig(current => ({

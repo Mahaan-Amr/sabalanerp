@@ -7,6 +7,7 @@ import { ErpBadge, ErpButton, ErpCard, ErpField, ErpInlineState, ErpPressable, E
 import { personnelPerformanceAPI } from '@/lib/api';
 import { dateFa } from '@/features/hr/hrUi';
 import { performanceBadgePresentation, type PerformanceBadgeSummary } from './performanceBadgeModel';
+import { PerformanceBadgeRoadmap } from './PerformanceBadgeRoadmap';
 
 function RomanNumeral({ value }: { value?: 'I' | 'II' | 'III' }) {
   return value ? <bdi
@@ -40,19 +41,9 @@ export function PerformanceBadge({ badge, onAppeal }: { badge: PerformanceBadgeS
       <span className="text-xs font-bold text-[var(--sds-text-primary)]">{presentation.labelFa}</span>
       <span className="sr-only">{presentation.meaningFa}</span>
     </ErpPressable>
-    <ErpSheet open={open} onClose={() => !appealPending && setOpen(false)} title="خلاصه سطح عملکرد" presentation="modal" pending={appealPending}>
+    <ErpSheet open={open} onClose={() => !appealPending && setOpen(false)} title="خلاصه سطح عملکرد" presentation="modal" size="wide" scope="workspace" pending={appealPending}>
       <div className="space-y-4" dir="rtl">
-        <ErpCard className="flex flex-col items-center p-4 text-center">
-          <span className="flex shrink-0 flex-col items-center gap-1" aria-hidden="true">
-            <span className="relative block h-20 w-20">
-              <Image src={presentation.lightAsset} alt="" fill sizes="80px" style={{ filter: presentation.imageFilter }} className="object-contain dark:hidden" unoptimized />
-              <Image src={presentation.darkAsset} alt="" fill sizes="80px" style={{ filter: presentation.imageFilter }} className="hidden object-contain dark:block" unoptimized />
-            </span>
-            <RomanNumeral value={presentation.romanNumeral} />
-          </span>
-          <div className="mt-2"><ErpBadge tone={presentation.tone}>{presentation.labelFa}</ErpBadge><p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">{presentation.meaningFa}</p></div>
-        </ErpCard>
-        {badge.officialResult === false && <ErpCard className="p-4"><p className="font-bold">بدون نتیجه رسمی</p><p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">نشان «همراه» تا ثبت نخستین نتیجه معتبر نمایش داده می‌شود و در تصمیم‌های رسمی یا تحلیل رقابتی محاسبه نمی‌شود.</p></ErpCard>}
+        <PerformanceBadgeRoadmap badge={badge} />
         {badge.details && <>
           {badge.details.status === 'PENDING_APPEAL' && <ErpInlineState kind="stale" title="این نتیجه پیشنهادی است و هنوز Badge رسمی را تغییر نداده است." />}
           {badge.details.periodLabelFa && <ErpCard className="p-3"><p className="text-xs text-[var(--sds-text-muted)]">دوره ارزیابی</p><p className="mt-1 text-sm font-bold">{badge.details.periodLabelFa}</p></ErpCard>}

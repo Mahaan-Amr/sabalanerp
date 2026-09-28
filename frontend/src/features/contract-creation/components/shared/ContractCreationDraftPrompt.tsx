@@ -8,12 +8,16 @@ export function ContractCreationDraftPrompt({
   onStartNew,
   pending = false,
   mode = 'resume',
+  preservePrevious = false,
+  draftLabel,
   className,
 }: {
   onResume: () => void | Promise<void>;
   onStartNew: () => void | Promise<void>;
   pending?: boolean;
   mode?: 'resume' | 'takeover';
+  preservePrevious?: boolean;
+  draftLabel?: string;
   className?: string;
 }) {
   const [confirmStartNew, setConfirmStartNew] = useState(false);
@@ -25,7 +29,7 @@ export function ContractCreationDraftPrompt({
       className={className}
       title={takeover
         ? 'این پیش‌نویس در محل دیگری در حال ویرایش است'
-        : 'یک پیش‌نویس ناتمام برای این قرارداد پیدا شد'}
+        : draftLabel ? `پیش‌نویس ناتمام ${draftLabel} پیدا شد` : 'یک پیش‌نویس ناتمام برای این قرارداد پیدا شد'}
       action={{
         label: takeover ? 'ادامه ویرایش در اینجا' : 'ادامه پیش‌نویس قبلی',
         onClick: () => void onResume(),
@@ -53,7 +57,9 @@ export function ContractCreationDraftPrompt({
           onClick={() => { setConfirmStartNew(false); void onStartNew(); }} />
       </div>}
     >
-      <p>پیش‌نویس قبلی در همه محل‌های ویرایش کنار گذاشته می‌شود. آیا اطمینان دارید؟</p>
+      <p>{preservePrevious
+        ? 'پرونده شماره‌دار قبلی ذخیره می‌ماند و می‌توانید بعداً آن را ادامه دهید.'
+        : 'پیش‌نویس قبلی در همه محل‌های ویرایش کنار گذاشته می‌شود. آیا اطمینان دارید؟'}</p>
     </ErpSheet>
   </>;
 }

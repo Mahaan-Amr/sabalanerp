@@ -34,7 +34,7 @@ export function technicalGraphLayer(intent: Extract<PartnerTechnicalDependent, {
     widthMeters: decimal(intent.widthMeters!), widthDisplayUnit: intent.widthDisplayUnit, targetSides: intent.targetSides,
     source,
     kerfMeters: decimal(intent.sawKerfEnabled ? context.catalog.sawKerfMeters : '0'), calibrationEnabled: intent.calibrationEnabled,
-    description: intent.description,
+    ...(intent.description?.trim() ? { description: intent.description.trim() } : {}),
     sideOperations: (intent.sideOperations ?? []).map(side => {
       const strip = preview.calculation.ok ? preview.calculation.result.physicalStrips.find(strip => strip.side === side.side) : undefined;
       if (!strip) throw new Error('Missing layer strip');

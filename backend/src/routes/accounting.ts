@@ -8,7 +8,7 @@ import { FeatureRequest, FEATURE_PERMISSIONS, FEATURES, requireAnyNarrowFeatureA
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import { readPartnerInternalDocument, renderPartnerInternalDocumentHtml,
-  withPartnerInternalAccountingTarget } from '../services/partnerSales/accounting/internalDocument';
+  withPartnerInternalAccountingTarget, renderPartnerInternalDocumentHeader } from '../services/partnerSales/accounting/internalDocument';
 import {
   buildSalesContractPdfDownloadName,
   buildSalesContractPdfFingerprint,
@@ -727,7 +727,12 @@ router.get('/contracts/partner/:caseId/internal', accountingContractsView, async
       && access.features.some(feature => feature.workspace === WORKSPACES.ACCOUNTING
         && feature.feature === FEATURES.ACCOUNTING_ACTIONS_MANAGE
         && ['edit', 'admin'].includes(feature.permission));
-    return res.json({ success: true, data: { ...document, actions: { canResolveFlag } } });
+    const capabilities = await getAccountingActionCapabilities(req.user!.id, req.user!.role);
+    const writable = document.partnerContext.accountingWritable;
+    return res.json({ success: true, data: { ...document, actions: { canResolveFlag: canResolveFlag && writable,
+      canCreateInvoice: capabilities.CREATE_INVOICE && writable, canFlag: capabilities.FLAG_CONTRACT && writable, canRequestCorrection: capabilities.CREATE_CORRECTION_REQUEST && writable,
+      canReviewInvoice: capabilities.APPROVE_FINANCIAL_INVOICE && writable,
+      canCreateReceivable: capabilities.CREATE_RECEIVABLE && writable } } });
   } catch (error) {
     console.error('Partner internal document error:', error);
     return res.status(500).json({ success: false, error: 'نمایش سند داخلی انجام نشد.' });
@@ -738,10 +743,14 @@ router.get('/contracts/partner/:caseId/internal-pdf', accountingContractsView, a
   try {
     const document = await readPartnerInternalDocument(req.params.caseId, req.user!.id);
     if (!document) return res.status(404).json({ success: false, error: 'سند داخلی در دسترس نیست.' });
-    const pdfPath = await generatePdfFromHtml({ htmlContent: renderPartnerInternalDocumentHtml(document),
+    const variant = ['original', 'accounting', 'workshop', 'custom'].includes(String(req.query.variant))
+      ? String(req.query.variant) as 'original' | 'accounting' | 'workshop' | 'custom' : 'accounting';
+    const printOptions = { variant, customPrint: variant === 'custom' ? customPrintOptionsFromQuery(req.query) : undefined };
+    const pdfPath = await generatePdfFromHtml({ htmlContent: renderPartnerInternalDocumentHtml(document, printOptions),
       outputDir: ACCOUNTING_PDF_DIR, fileName: `partner_internal_${document.id}_${Date.now()}`,
-      landscape: true, scale: 0.94, widthMm: 297, heightMm: 210,
-      margin: { top: '6mm', right: '6mm', bottom: '6mm', left: '6mm' } });
+      landscape: false, scale: 1, widthMm: 210, heightMm: 297, displayHeaderFooter: true,
+      headerTemplate: renderPartnerInternalDocumentHeader(document), footerTemplate: '<span></span>',
+      margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
     if (String(req.query.download || 'false').toLowerCase() === 'true') {
       return res.download(pdfPath, `partner_internal_${document.partnerContext.internalRecordNumber}.pdf`);
     }

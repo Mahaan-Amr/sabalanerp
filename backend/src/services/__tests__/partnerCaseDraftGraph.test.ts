@@ -51,7 +51,7 @@ test('explicit different layer material binds its own catalog dimensions and nev
       layersPerParentPiece: 2, widthMeters: '0.05', widthDisplayUnit: 'cm', targetSides: ['front'],
       source: { kind: 'new-material', catalogItemId: material.catalogItemId, catalogSnapshotVersion: version,
         sourceRows: [{ sourceRowId: 'new-source', lengthMeters: '1', widthMeters: '0.2', quantity: 1 }] },
-      sawKerfEnabled: false, calibrationEnabled: false,
+      sawKerfEnabled: false, calibrationEnabled: false, description: '',
     }] };
   const context = { catalog, policy: { calculation: 'calc-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
     products: [{ catalogItemId: parent.catalogItemId, catalogSnapshotVersion: version,
@@ -63,6 +63,7 @@ test('explicit different layer material binds its own catalog dimensions and nev
   const result = compilePartnerTechnicalGraph(draft, context);
   if (!result.ok) throw new Error(result.error.code);
   const layer = result.value.graph.layerConfigurations[0];
+  assert.equal(layer.input.description, undefined, 'an empty optional note must not invalidate the canonical layer command');
   assert.equal(layer.result.materialAmountToman, '40000');
   assert.equal(layer.input.source.kind, 'new-material');
   assert.ok(result.value.graph.catalogSnapshots.some(item => item.catalogProductId === material.catalogItemId));

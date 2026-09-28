@@ -76,5 +76,21 @@ test('responder facts include system-owned mandatory policy, tools and finishing
     { label: 'ابزار', value: 'چسب سنگ · 4 متر' },
     { label: 'پرداخت', value: 'ساب صیقلی · 0.8 مترمربع' },
   ]);
+  assert.deepEqual(facts.find(fact => fact.label === 'تعداد'), { label: 'تعداد', value: '1 عدد' });
   assert.equal(JSON.stringify(facts).includes('rate'), false);
+});
+
+test('responder facts describe a stair layer with its count and selected sides', () => {
+  const facts = presentSavedTechnicalConfiguration({
+    productRowId: 'stair-row', family: 'stair',
+    product: { code: 'STONE-2', attributes: { stoneType: 'مرمریت' }, dimensions: { thicknessCentimeters: '3' } } as never,
+    draftRow: { family: 'stair', configuration: { quantity: 5, part: 'tread', lengthMeters: '2', crossDimensionMeters: '0.3' } } as never,
+    dependents: [{ kind: 'layer', parentProductRowId: 'stair-row', catalogItemId: 'layer-1', layersPerParentPiece: 2,
+      widthMeters: '0.05', targetSides: ['front', 'back'] }] as never,
+    operations: [{ kind: 'LAYER', catalogItemId: 'layer-1', name: 'لایه مرمریت' }] as never,
+  });
+  assert.deepEqual(facts.filter(fact => fact.label === 'تعداد' || fact.label === 'لایه'), [
+    { label: 'تعداد', value: '5 عدد' },
+    { label: 'لایه', value: 'لایه مرمریت · 2 لایه برای هر پله · عرض 0.05 متر · جلو، عقب' },
+  ]);
 });

@@ -1,4 +1,5 @@
 export * from './primitives';
+export * from './monetary-rounding';
 export * from './projections';
 export * from './errors';
 export * from './case';

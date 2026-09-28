@@ -216,11 +216,9 @@ export function StairLayerDraftRow({
               type="button"
               aria-pressed={draft.targetSides.includes(side)}
               onClick={() => onChange(toggleStairLayerSide(draft, side))}
-              className={`rounded-md px-2 py-1 text-xs ${
-                draft.targetSides.includes(side)
-                  ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent-on-soft)]'
-                  : 'border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]'
-              }`}
+              tone={draft.targetSides.includes(side) ? 'primary' : 'neutral'}
+              variant={draft.targetSides.includes(side) ? 'solid' : 'outline'}
+              className="rounded-md px-2 py-1 text-xs"
             >
               {SIDE_LABELS[side]}
             </ErpPressable>

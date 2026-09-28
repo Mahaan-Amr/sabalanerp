@@ -88,6 +88,26 @@ test('double click checkpoints once and a later explicit save uses the draft rev
   assert.equal(blocked.getSnapshot().phase, 'editing');
 });
 
+test('accepting prices on a numbered Case does not resend its initial pricing request', async () => {
+  const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
+    initialCase: fixture.partner,
+    commands: { execute: async command => {
+      assert.equal(command.type, 'CASE_DRAFT_REVISE');
+      if (command.type !== 'CASE_DRAFT_REVISE') throw new Error('revision expected');
+      // The /partner/cases/commands route rejects pricingRequest on revisions.
+      if (command.intent.pricingRequest) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
+      return { ok: true, value: { commandId: command.commandId, replayed: false,
+        case: fixture.partner, eventIds: [] } };
+    } },
+    recovery: { pending: () => null, savePending: async () => undefined,
+      clearPending: async () => undefined, finalizeCommitted: async () => undefined,
+      prepareEditLease },
+  });
+  await submission.submit({ ...intent(), pricingRequest: { inquiryId: fixture.inquiry.inquiryId,
+    rows: [{ rowId: fixture.inquiry.rows[0].rowId, configuration: fixture.configurationDraft }] } });
+  assert.equal(submission.getSnapshot().phase, 'created');
+});
+
 test('resuming a numbered Case starts from its current revision and never submits a duplicate Case', async () => {
   const commands: PartnerDraftCommand[] = [];
   const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,

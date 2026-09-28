@@ -564,12 +564,22 @@ export function createPartnerCaseLifecycleService(dependencies: PartnerCaseLifec
           if (!['SIGNED', 'PRINTED'].includes(row.customerContract.status)) {
             await tx.salesContract.update({ where: { id: row.customerContractId }, data: { status: transition.status } });
           }
+          const at = await clock(tx), eventId = randomUUID(), sequence = await nextSequence(tx, row.id);
+          await tx.partnerCaseEvent.create({ data: { id: eventId, caseId: row.id, caseRevision: row.headRevision,
+            integrityHash: row.integrityHash, sequence, stateRevision: row.stateRevision + 1,
+            type: transition.eventType, fromState: 'COMMITTED', toState: 'COMMITTED',
+            actorId: dependencies.actorId, commandId: input.commandId, correlationId: input.correlationId,
+            effectiveDate: new Date(`${(input.verifiedAt ?? input.rejectedAt ?? at.date).slice(0, 10)}T00:00:00.000Z`),
+            recordedAt: new Date(at.instant), evidence: json({ version: 1, snapshotId: input.snapshotId,
+              ...(input.verifiedAt ? { verifiedAt: input.verifiedAt } : {}),
+              ...(input.rejectedAt ? { rejectedAt: input.rejectedAt } : {}),
+              authorizationEvidenceId: authorization.value.evidenceId }) } });
           await saveOutcome(tx, { actorId: dependencies.actorId, operation: transition.operation, caseId: row.id,
             key: input.commandId, payloadHash, commandId: input.commandId, owner: expectedOwner(row),
-            state: 'COMMITTED', eventIds: [] });
+            state: 'COMMITTED', eventIds: [eventId] });
           return { ok: true, value: { commandId: input.commandId, replayed: false,
             case: { ...views.partner, state: 'COMMITTED',
-              customerConfirmationState: transition.confirmationState }, eventIds: [] } };
+              customerConfirmationState: transition.confirmationState }, eventIds: [eventId] } };
         }
         if (row.state !== transition.from) return { ok: false, error: partnerError('STATE_CONFLICT') };
         const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CUSTOMER_OUTPUT',

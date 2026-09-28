@@ -175,7 +175,7 @@ export function PartnerCustomersRuntime() {
         <ErpButton label="پاک کردن فیلترها" tone="neutral" variant="outline" onClick={() => { setSearch(''); setStatus(''); setCustomerType(''); setBlacklist(''); setLocked(''); }} />
       </div> : undefined} />
 
-    <ErpSheet open={Boolean(detail)} onClose={() => setDetail(undefined)} title="مشاهده مشتری">
+    <ErpSheet open={Boolean(detail)} onClose={() => setDetail(undefined)} title="مشاهده مشتری" presentation="modal">
       {detail && <div className="space-y-4" dir="rtl"><div className="grid gap-3 sm:grid-cols-2">
         <ErpFieldView label="نام مشتری" value={detail.displayName} /><ErpFieldView label="شماره تماس" value={detail.phone} />
         <ErpFieldView label="نوع مشتری" value={typeLabel(detail.customerType)} /><ErpFieldView label="نشانی" value={detail.address ?? '—'} />

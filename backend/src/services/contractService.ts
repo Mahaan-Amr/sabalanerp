@@ -18,7 +18,8 @@ import {
 import {
   buildLegacyContractMigrationPlan,
   CURRENT_CONTRACT_PRODUCT_POLICY,
-  CURRENT_CONTRACT_PRODUCT_POLICY_V2
+  CURRENT_CONTRACT_PRODUCT_POLICY_V2,
+  CURRENT_CONTRACT_PRODUCT_POLICY_V3
 } from './contractProductGraphMigration';
 import { repairContractDataOperationIdentities } from './contractOperationIdentityRepair';
 import { repairContractDataProductSemantics } from './contractProductSemanticRepair';
@@ -29,7 +30,7 @@ import {
 import { sanitizeContractDataCustomerSnapshot } from './contractSnapshotBoundary';
 import { assertContractQuantityEvidenceReadyForFinalization } from './contractQuantityEvidenceGuard';
 import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
-import { assertContractPayableTotal } from './contractPayableTotal';
+import { assertContractPayableTotal, sealContractPayableTotal } from './contractPayableTotal';
 import { provisionApprovedSalesContractCustomer } from './accountingCustomerTreasuryPrisma';
 import {
   validateContractPartyChangeCompleteness,
@@ -244,7 +245,7 @@ const normalizeNewContractNoDiscountEvidence = (
     id: 'new-contract-discount-evidence',
     totalAmount,
     contractData,
-  }, 1, CURRENT_CONTRACT_PRODUCT_POLICY_V2, true);
+  }, 1, CURRENT_CONTRACT_PRODUCT_POLICY_V3, true);
   if (!plan.ok) throw new ContractProductGraphValidationError(plan.conflicts, contractData);
   if (!shouldNormalize) return contractData;
   const projection = projectCanonicalProductGraph(plan.graph, 'accounting');
@@ -752,13 +753,20 @@ export async function createContract(
         );
         const contractDataWithDiscountEligibility =
           normalizeNewContractDiscountEligibilityEvidence(productSemanticRepair.contractData);
-        const contractData = sanitizeContractDataCustomerSnapshot(
+        let contractData = sanitizeContractDataCustomerSnapshot(
           normalizeNewContractNoDiscountEvidence(
             contractDataWithDiscountEligibility,
             data.currency || 'تومان',
             data.totalAmount ?? null,
           )
         ) as any;
+        const monetaryPlan = buildLegacyContractMigrationPlan({ id: `new-contract:${contractNumber}`,
+          totalAmount: data.totalAmount ?? null, contractData }, 1, CURRENT_CONTRACT_PRODUCT_POLICY_V3, true);
+        if (!monetaryPlan.ok) throw new ContractProductGraphValidationError(monetaryPlan.conflicts, contractData);
+        const monetary = sealContractPayableTotal(monetaryPlan.reconciliation.canonicalTotalAmountToman,
+          contractData, data.totalAmount, data.currency || 'تومان');
+        contractData = monetary.contractData;
+        data.totalAmount = Number(monetary.totalAmount);
         assertNoAmbiguousOperationIdentityRepair(
           operationIdentityRepair.blockedProductRowIds,
           contractData
@@ -798,7 +806,7 @@ export async function createContract(
             createdBy: userId,
             responsibleSellerId: potentialProject?.responsibleSellerId || userId,
             responsibleSellerSource: potentialProject ? 'CRM_PROJECT_DEFAULT' : 'CREATOR_DEFAULT',
-            totalAmount: data.totalAmount ? parseFloat(String(data.totalAmount)) : null,
+            totalAmount: data.totalAmount == null ? null : parseFloat(String(data.totalAmount)),
             currency: data.currency || 'تومان',
             notes: data.notes || null,
             contractData
@@ -832,7 +840,7 @@ export async function createContract(
               productId: item.productId,
               productRowId: item.productRowId || null,
               productType: item.productType || null,
-              quantity: persistContractQuantityAtPolicyScale(item.quantity, CURRENT_CONTRACT_PRODUCT_POLICY_V2),
+              quantity: persistContractQuantityAtPolicyScale(item.quantity, CURRENT_CONTRACT_PRODUCT_POLICY_V3),
               unitPrice: toDecimalNumber(item.unitPrice),
               totalPrice: toDecimalNumber(item.totalPrice),
               description: item.description || null,
@@ -857,7 +865,7 @@ export async function createContract(
                 create: delivery.products.map(product => ({
                   productId: product.productId,
                   productRowId: product.productRowId || null,
-                  quantity: persistContractQuantityAtPolicyScale(product.quantity, CURRENT_CONTRACT_PRODUCT_POLICY_V2),
+                  quantity: persistContractQuantityAtPolicyScale(product.quantity, CURRENT_CONTRACT_PRODUCT_POLICY_V3),
                   notes: product.notes || null
                 }))
               }
@@ -888,7 +896,7 @@ export async function createContract(
           contractData,
           totalAmount: data.totalAmount ?? null,
           revision: 1,
-          calculationPolicy: CURRENT_CONTRACT_PRODUCT_POLICY_V2,
+          calculationPolicy: CURRENT_CONTRACT_PRODUCT_POLICY_V3,
           operationIdentityRepairEvidence,
           operationIdentityRepairStages: [
             ...(reportedOperationRepairEvidence.length
@@ -1051,9 +1059,10 @@ export async function updateContract(
       where: { contractId },
       select: { revision: true, graph: true }
     });
-    const calculationPolicy = existingGraph
-      ? parseCanonicalProductGraph(existingGraph.graph).calculationPolicy
-      : CURRENT_CONTRACT_PRODUCT_POLICY_V2;
+    const calculationPolicy = transactionContract.status === 'DRAFT' && !transactionFinancialRecord
+      ? CURRENT_CONTRACT_PRODUCT_POLICY_V3
+      : existingGraph ? parseCanonicalProductGraph(existingGraph.graph).calculationPolicy
+        : CURRENT_CONTRACT_PRODUCT_POLICY_V2;
     const operationIdentityRepair = repairContractDataOperationIdentities(
       data.contractData ?? transactionContract.contractData
     );
@@ -1062,11 +1071,17 @@ export async function updateContract(
       contractId,
       (existingGraph?.revision ?? 0) + 1
     );
-    const nextContractData = productSemanticRepair.contractData as any;
+    let nextContractData = productSemanticRepair.contractData as any;
     const preparedGraph = buildLegacyContractMigrationPlan({ id: contractId,
       totalAmount: data.totalAmount ?? transactionContract.totalAmount, contractData: nextContractData },
       (existingGraph?.revision ?? 0) + 1, calculationPolicy, true);
     if (!preparedGraph.ok) throw new ContractProductGraphValidationError(preparedGraph.conflicts, nextContractData);
+    if (transactionContract.status === 'DRAFT' && !transactionFinancialRecord) {
+      const monetary = sealContractPayableTotal(preparedGraph.reconciliation.canonicalTotalAmountToman,
+        nextContractData, data.totalAmount ?? transactionContract.totalAmount, data.currency || transactionContract.currency || 'تومان');
+      nextContractData = monetary.contractData;
+      data.totalAmount = Number(monetary.totalAmount);
+    }
     assertNoAmbiguousOperationIdentityRepair(
       operationIdentityRepair.blockedProductRowIds,
       nextContractData

@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { multiplyContractMonetaryAmounts, sumContractMonetaryAmounts, PRECISE_PREPARED_MATERIAL_POLICY } from './contractMonetaryRounding';
 import { parseCanonicalDecimal, type CanonicalDecimal } from './canonicalDecimal';
 import { hashCanonicalValue } from './canonicalHash';
 import { parseStableIdentity, type StableIdentity } from './stableIdentity';
@@ -996,7 +997,9 @@ export const calculatePricing = (request: PricingRequest): PricingResult => {
     lineIdentities.add(line.lineId);
     return {
       ...line,
-      amountToman: canonical(quantity.times(rate).toDecimalPlaces(0, Decimal.ROUND_HALF_UP))
+      amountToman: request.policyVersion === PRECISE_PREPARED_MATERIAL_POLICY
+        ? parseCanonicalDecimal(multiplyContractMonetaryAmounts(line.quantity, line.rateToman))
+        : canonical(quantity.times(rate).toDecimalPlaces(0, Decimal.ROUND_HALF_UP))
     };
   });
   const resultBase = {
@@ -1004,7 +1007,9 @@ export const calculatePricing = (request: PricingRequest): PricingResult => {
     roundingPolicyVersion: request.roundingPolicyVersion,
     inputHash: hashCanonicalValue(request),
     lines,
-    totalAmountToman: canonical(lines.reduce((sum, line) => sum.plus(line.amountToman), d('0')))
+    totalAmountToman: request.policyVersion === PRECISE_PREPARED_MATERIAL_POLICY
+      ? parseCanonicalDecimal(sumContractMonetaryAmounts(lines.map(line => line.amountToman)))
+      : canonical(lines.reduce((sum, line) => sum.plus(line.amountToman), d('0')))
   };
   return { ...resultBase, resultHash: hashCanonicalValue(resultBase) };
 };

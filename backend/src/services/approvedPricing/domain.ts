@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import { roundContractPayableTotal, verifyContractMonetaryRounding } from '@sabalanerp/contract-product-graph';
 import { isValidFinanciallyApprovedInvoice } from '../accountingStatus';
 import {
   reconcileOptimizerDerivedLongitudinalQuantity,
@@ -608,7 +609,28 @@ export const buildApprovedPricingVersion = (
       : selectedEligibleBase.mul(new Prisma.Decimal(discountPercent)).div(100)
     : new Prisma.Decimal(0);
   const discountAmount = money(selectedDiscountValue, 'Approved pricing discount amount');
-  const netAmount = money(gross.minus(selectedDiscountValue), 'Approved pricing net amount');
+  const rawNetAmount = money(gross.minus(selectedDiscountValue), 'Approved pricing net amount');
+  // Replay the Contract's sealed policy, never round historical obligations on read.
+  let netAmount = rawNetAmount;
+  if (data.monetaryRounding !== undefined) {
+    try {
+      const services = Array.isArray(data.serviceRows) ? data.serviceRows : [];
+      const completePayable = completeGraphTotal.plus(services.reduce((sum, row) =>
+        sum.plus(money(record(row, 'Contract service row').totalPrice, 'Contract service amount')), new Prisma.Decimal(0)))
+        .minus(discountValue);
+      const agreed = verifyContractMonetaryRounding(Prisma.Decimal.max(completePayable, 0).toFixed(), currency, data.monetaryRounding);
+      if (!new Prisma.Decimal(agreed).eq(String(payment.totalContractAmount))) throw new Error('Contract payment total conflict');
+      // Partial invoices retain their precise selected-row obligation. The policy
+      // rounds the final Contract total, never individual rows or subsets.
+      if (mode === 'FROM_CONTRACT_TOTAL') {
+        const rounded = roundContractPayableTotal(Prisma.Decimal.max(completePayable, 0).toFixed(), currency);
+        netAmount = money(rounded.roundedAmount, 'Rounded approved pricing net amount');
+        financialAmountNormalizations.push({ scope: 'contract-payable', ...rounded });
+      }
+    } catch {
+      throw new ApprovedPricingEvidenceError('Contract payable rounding evidence conflicts with financial approval');
+    }
+  }
   const rowByItem = new Map(rows.map(row => [row.contractItemId, row]));
   for (const invoiceItem of source.leaf.invoiceItems) {
     const sourceItem = source.contract.items.find(item => item.id === invoiceItem.contractItemId);

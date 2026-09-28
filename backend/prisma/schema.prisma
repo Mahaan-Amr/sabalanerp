@@ -1921,7 +1921,7 @@ model SalesContractProductGraphState {
   policySnapshot   Json
   inputHash        String
   resultHash       String
-  totalAmountToman Decimal       @db.Decimal(20, 0)
+  totalAmountToman Decimal       @db.Decimal(32, 12)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   contract         SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
@@ -2380,13 +2380,13 @@ model ContractItem {
   productRowId                      String?
   productType                       String? // نوع محصول: 'longitudinal' | 'stair' | etc.
   quantity                          Decimal                            @db.Decimal(18, 3)
-  unitPrice                         Decimal                            @db.Decimal(15, 2)
-  totalPrice                        Decimal                            @db.Decimal(15, 2)
+  unitPrice                         Decimal                            @db.Decimal(25, 12)
+  totalPrice                        Decimal                            @db.Decimal(25, 12)
   description                       String?
   // Mandatory pricing fields
   isMandatory                       Boolean                            @default(false)
   mandatoryPercentage               Decimal?                           @db.Decimal(5, 2)
-  originalTotalPrice                Decimal?                           @db.Decimal(15, 2)
+  originalTotalPrice                Decimal?                           @db.Decimal(25, 12)
   // Stair system linking fields
   stairSystemId                     String? // ID to link multiple items belonging to same stair system
   stairPartType                     String? // نوع بخش پله: 'tread' | 'riser' | 'landing' (کف پله, خیز پله, پاگرد)
@@ -4432,8 +4432,8 @@ model AccountingInvoiceCandidateItem {
   productId      String?
   description    String
   quantity       Decimal                   @default(1) @db.Decimal(12, 3)
-  unitPrice      Decimal                   @default(0) @db.Decimal(18, 2)
-  totalPrice     Decimal                   @default(0) @db.Decimal(18, 2)
+  unitPrice      Decimal                   @default(0) @db.Decimal(28, 12)
+  totalPrice     Decimal                   @default(0) @db.Decimal(28, 12)
   taxRate        Decimal                   @default(0) @db.Decimal(5, 2)
   metadata       Json?
   createdAt      DateTime                  @default(now())

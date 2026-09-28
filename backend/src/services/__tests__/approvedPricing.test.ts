@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AccountingRecordStatus, FinancialRecordKind, Prisma } from '@prisma/client';
-import { projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
+import { projectCanonicalProductGraph, roundContractPayableTotal } from '@sabalanerp/contract-product-graph';
 import {
   buildApprovedPricingVersion,
   canonicalApprovedPricingHash,
@@ -22,6 +22,26 @@ import {
   optimizerQuantityPolicyProvenanceFromAudit,
   OptimizerQuantityEvidenceConflictError,
 } from '../optimizerDerivedQuantityEvidence';
+
+test('seals the rounded contractual obligation while retaining precise rows and discount evidence', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as Record<string, any>;
+  data.discount.amount = '100.4';
+  data.discount.percent = '10.04';
+  data.payment.totalContractAmount = '1150';
+  data.monetaryRounding = roundContractPayableTotal('1149.6', 'تومان');
+  const result = buildApprovedPricingVersion(source, 1, 'whole-payable-version');
+  assert.equal(new Prisma.Decimal(result.netAmount).toString(), '1150');
+  assert.equal(new Prisma.Decimal(result.discountAmount).toString(), '100.4');
+  assert.equal(new Prisma.Decimal(result.rows[0].canonicalAllInTotal).toString(), '1250');
+  source.leaf.amount = '11496';
+  assert.throws(() => buildApprovedPricingVersion(source, 1, 'wrong-obligation'), /invoice amount conflicts/);
+  data.serviceRows = [{ totalPrice: '42.4' }];
+  data.payment.totalContractAmount = '1192';
+  data.monetaryRounding = roundContractPayableTotal('1192', 'تومان');
+  source.leaf.amount = '11920';
+  assert.equal(new Prisma.Decimal(buildApprovedPricingVersion(source, 1, 'with-services').netAmount).toString(), '1192');
+});
 import {
   bindFrozenRowsToPostSnapshotCanonicalGraph,
   bindLegacyRowsToMigratedGraph,
@@ -1777,6 +1797,14 @@ test('FROM_SELECTED_ITEMS seals only the financially approved subset and allocat
   assert.equal(version.grossAmount, '600.000000000000');
   assert.equal(version.discountAmount, '50.000000000000');
   assert.equal(version.netAmount, '550.000000000000');
+
+  data.discount.amount = '150.6';
+  data.discount.percent = '10.04';
+  data.payment.totalContractAmount = '1699';
+  data.monetaryRounding = roundContractPayableTotal('1699.4', 'تومان');
+  source.leaf.amount = '5498';
+  const preciseSubset = buildApprovedPricingVersion(source, 1, 'precise-selected-version');
+  assert.equal(preciseSubset.netAmount, '549.800000000000');
 });
 
 test('financial-record evidence and post-candidate contract edits fail closed', () => {

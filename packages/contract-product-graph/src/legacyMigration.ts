@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { PRECISE_PREPARED_GRAPH_PRICING_POLICY } from './contractMonetaryRounding';
 import { hashCanonicalValue } from './canonicalHash';
 import { parseCanonicalDecimal, type CanonicalDecimal } from './canonicalDecimal';
 import { readLegacyProductGraph, type LegacyProductGraphInput, type LegacyProductGraphConflict } from './legacyReadAdapter';
@@ -81,6 +82,9 @@ export const planLegacyProductGraphMigration = (
   input: LegacyProductGraphInput,
   expectedLegacyTotalAmountToman?: unknown
 ): LegacyMigrationPlan => {
+  const money = input.calculationPolicy.pricing === PRECISE_PREPARED_GRAPH_PRICING_POLICY
+    ? (value: unknown) => new Decimal(String(value ?? '0'))
+    : (value: unknown) => new Decimal(String(value ?? '0')).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   const semanticRepair = repairRecoverableLegacyProductSemantics(input);
   const normalizedInput = {
     ...input,

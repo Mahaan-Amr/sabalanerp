@@ -58,6 +58,12 @@ export function subtractPartnerDecimal(left: string | null, right: string | null
     - second.digits * factor(scale - second.scale) });
 }
 
+/** Exact display subtotal from the frozen quantity and customer rate. */
+export function multiplyPartnerDecimal(left: string, right: string): string | null {
+  const first = exactDecimal(left); const second = exactDecimal(right);
+  return first && second ? exactText({ digits: first.digits * second.digits, scale: first.scale + second.scale }) : null;
+}
+
 export function partnerChartMagnitude(value: string | null | undefined) {
   if (!value) return 0;
   const decimal = exactDecimal(value);

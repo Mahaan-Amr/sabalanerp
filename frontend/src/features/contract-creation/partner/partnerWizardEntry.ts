@@ -2,7 +2,7 @@ import { PartnerErrorSchema, PartnerTechnicalSavedViewSchema, partnerTrackingCod
   type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryRow, PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
 import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
-import { defaultPartnerRetailRows, partnerRetailIntentRows } from './partnerRetail';
+import { defaultPartnerRetailRows, partnerRetailIntentRows, remainingPartnerAmount } from './partnerRetail';
 import type { PartnerWizardDraft } from './PartnerContractWizard';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
@@ -32,6 +32,15 @@ export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], ope
 
 export const partnerCaseReviewMessage = (caseReference: string, trackingNumber?: number) =>
   `این پرونده نیاز به بررسی دارد؛ با پشتیبانی تماس بگیرید و کد پرونده ${partnerTrackingCode(caseReference, trackingNumber)} را اعلام کنید.`;
+
+export function latestMatchingPartnerInquiryRow(
+  rows: readonly PartnerInquiryRow[], previous: PartnerInquiryRow,
+): PartnerInquiryRow {
+  return rows.filter(row => row.configurationRef.productRowId === previous.configurationRef.productRowId &&
+    row.configurationRef.recoveryId === previous.configurationRef.recoveryId &&
+    row.configurationRef.recoveryRevision === previous.configurationRef.recoveryRevision &&
+    row.state !== 'SUPERSEDED').at(-1) ?? previous;
+}
 
 export function partnerCaseHasIntegrityError(error: unknown): boolean {
   const direct = PartnerErrorSchema.safeParse(error);
@@ -85,16 +94,42 @@ export function preservePartnerDeliveriesAcrossProductEdit(
   return [...preserved, ...additions];
 }
 
+/** A technical correction can reduce a row after the delivery plan was saved.
+ * Keep the existing schedule and trim only quantities beyond the new total;
+ * the delivery step remains responsible for any unallocated remainder. */
+export function reconcilePartnerDeliveriesToProducts(
+  deliveries: PartnerDraftIntent['deliveries'],
+  rows: readonly { productRowId: string; quantity: string }[],
+): PartnerDraftIntent['deliveries'] {
+  const limits = new Map(rows.map(row => [row.productRowId, row.quantity]));
+  const allocated = new Map<string, string[]>();
+  return deliveries.flatMap(delivery => {
+    const items = delivery.items.flatMap(item => {
+      const limit = limits.get(item.productRowId);
+      if (!limit) return [];
+      const prior = allocated.get(item.productRowId) ?? [];
+      const remaining = remainingPartnerAmount(limit, prior);
+      if (!remaining || remaining === '0') return [];
+      const quantity = remainingPartnerAmount(remaining, [item.quantity]) === null
+        ? remaining : item.quantity;
+      allocated.set(item.productRowId, [...prior, quantity]);
+      return [{ ...item, quantity }];
+    });
+    return items.length ? [{ ...delivery, items }] : [];
+  });
+}
+
 /** Quantity is supplied by the canonical graph's display projection; it is not
  * an inquiry fingerprint. No catalog-ID or array-position matching is allowed.
  */
-export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated, mismatchedRowIds = [], retailUnitPrices }: {
+export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated, mismatchedRowIds = [], retailUnitPrices, productPresentation }: {
   inquiry?: PartnerInquiryView;
   inquiryRows?: readonly PartnerInquiryRow[];
   now: number;
   base: Omit<PartnerDraftIntent, 'rows' | 'belowCostConfirmed' | 'graphHash'>;
   validated: PartnerTechnicalSavedView;
   mismatchedRowIds?: readonly string[];
+  productPresentation?: ReadonlyMap<string, { title: string; parentProductRowId?: string }>;
   retailUnitPrices?: ReadonlyMap<string, { amount: string; currency: 'IRR' | 'IRT' }>;
 }): PartnerWizardDraft | null {
   const saved = PartnerTechnicalSavedViewSchema.safeParse(validated);
@@ -118,14 +153,21 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
     };
   });
   const configured = [];
-  for (const row of subjectRows.filter(item => subjects.some(subject => subject.role === 'PRIMARY' &&
-    subject.configurationRef.productRowId === item.configurationRef.productRowId))) {
-    const technical = saved.data.rows.find(item => item.configurationRef.productRowId === row.configurationRef.productRowId);
-    if (!technical || technical.configurationRef.recoveryId !== row.configurationRef.recoveryId ||
-        technical.configurationRef.recoveryRevision !== row.configurationRef.recoveryRevision) return null;
+  for (const technical of saved.data.rows) {
+    if (!subjectRows.some(item => item.configurationRef.productRowId === technical.configurationRef.productRowId) &&
+        !productPresentation?.get(technical.configurationRef.productRowId)?.parentProductRowId) return null;
+    const row = subjectRows.find(item => item.configurationRef.productRowId === technical.configurationRef.productRowId) ?? {
+      rowId: `${technical.configurationRef.productRowId}-paid-remainder`, revision: 1,
+      submissionState: 'UNSENT' as const, description: 'فرزند باقی‌مانده', state: 'PENDING' as const,
+      configuration: [], usedCaseNumbers: [], configurationRef: technical.configurationRef,
+    };
     configured.push({ productRowId: technical.configurationRef.productRowId,
-      quantity: technical.quantity, unit: technical.unit, inquiryRow: row,
-      retailUnitPrice: retailUnitPrices?.get(technical.configurationRef.productRowId) });
+      quantity: technical.quantity, unit: technical.unit, inquiryRow: productPresentation?.get(technical.configurationRef.productRowId)
+        ? { ...row, description: productPresentation.get(technical.configurationRef.productRowId)!.title } : row,
+      parentProductRowId: productPresentation?.get(technical.configurationRef.productRowId)?.parentProductRowId,
+      retailUnitPrice: saved.data.rows.some(parent => parent.configurationRef.productRowId ===
+        productPresentation?.get(technical.configurationRef.productRowId)?.parentProductRowId)
+        ? { amount: '0', currency: 'IRT' as const } : retailUnitPrices?.get(technical.configurationRef.productRowId) });
   }
   if (configured.length !== saved.data.rows.length || new Set(configured.map(row => row.productRowId)).size !== configured.length) return null;
   const rows = defaultPartnerRetailRows(configured);

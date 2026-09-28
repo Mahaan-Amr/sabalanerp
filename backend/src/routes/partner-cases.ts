@@ -1,3 +1,7 @@
+import { z } from 'zod';
+import { createPartnerTechnicalEvidenceResolver } from '../services/partnerSales/cases/technicalEvidence';
+import { compilePartnerTechnicalGraph } from '../services/partnerSales/cases/technicalGraph';
+import { partnerCustomerGraphTotal } from '../services/partnerSales/cases/customerGraphTotal';
 import { createHash, randomUUID } from 'node:crypto';
 import { Router, type Request, type Response, type RequestHandler } from 'express';
 import { Prisma, type PrismaClient } from '@prisma/client';
@@ -68,7 +72,7 @@ export async function allocatePartnerLinkedPair(tx: Prisma.TransactionClient, in
       user: { select: { departmentId: true } } } },
     head: { select: { graphHash: true, graph: true, partySnapshots: true, wholesaleEnvelope: true,
       retailEnvelope: true, paymentEvidence: true, customerContent: true, internalProjection: true } },
-    events: { where: { type: 'CASE_CREATED' }, orderBy: { sequence: 'asc' }, take: 1,
+    events: { where: { type: { in: ['CASE_CREATED', 'CASE_DRAFT_REVISED'] } }, orderBy: { sequence: 'desc' }, take: 1,
       select: { evidence: true } },
   } });
   if (!row) return { ok: false, error: partnerError('NOT_FOUND') };
@@ -152,12 +156,8 @@ export async function allocatePartnerLinkedPair(tx: Prisma.TransactionClient, in
     customerContractId: null, headRevision: row.headRevision, integrityHash: row.integrityHash },
     data: { internalRecordId, customerContractId, stateRevision: { increment: 1 } } });
   if (linked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
-  const existingProjection = row.head.internalProjection && typeof row.head.internalProjection === 'object' &&
-    !Array.isArray(row.head.internalProjection) ? row.head.internalProjection as Prisma.JsonObject : undefined;
-  const existingPartner = partnerContracts.PartnerCaseViewSchema.safeParse(existingProjection?.partner);
-  if (!existingPartner.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   await tx.partnerCaseRevision.update({ where: { caseId_revision: { caseId: row.id, revision: row.headRevision } },
-    data: { internalProjection: json({ partner: existingPartner.data, accounting: projections.value.accounting,
+    data: { internalProjection: json({ partner: (row.head.internalProjection as Prisma.JsonObject).partner, accounting: projections.value.accounting,
       fulfillment: projections.value.fulfillment }),
       customerProjection: json(projections.value.customer) } });
   if (legacyProjectId && tracedProjectId) {
@@ -171,14 +171,15 @@ export async function allocatePartnerLinkedPair(tx: Prisma.TransactionClient, in
       data: { wonSalesContractId: customerContractId, partnerRevision: { increment: 1 } } });
       if (project.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
   }
-  const createdEvidence = row.events[0]?.evidence;
-  const created = createdEvidence && typeof createdEvidence === 'object' && !Array.isArray(createdEvidence)
-    ? createdEvidence as Prisma.JsonObject : undefined;
-  if (typeof created?.recoveryId !== 'string' || typeof created.recoveryRevision !== 'number') {
+  const latestEvidence = row.events[0]?.evidence;
+  const technical = latestEvidence && typeof latestEvidence === 'object' && !Array.isArray(latestEvidence)
+    ? latestEvidence as Prisma.JsonObject : undefined;
+  if (typeof technical?.recoveryId !== 'string' || typeof technical.recoveryRevision !== 'number' ||
+      technical.graphHash !== row.head.graphHash) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
   return consumePrismaPartnerTechnicalRecovery(tx, { actorId: input.actorId,
-    recoveryId: created.recoveryId, recoveryRevision: created.recoveryRevision,
+    recoveryId: technical.recoveryId, recoveryRevision: technical.recoveryRevision,
     caseId: row.id, customerContractId });
 }
 
@@ -235,7 +236,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           item.draftId === requestedRecovery.draftId) ? [requestedRecovery] : [])].flatMap(item => {
           const recovery = decodeTechnicalRecovery(item.recovery);
           return recovery && recovery.archived !== true && recovery.updatedAt <= clock.now.getTime() &&
-              (recovery.partnerCaseId === requestedCaseId ||
+              (Boolean(recovery.partnerCaseId) ||
                 clock.now.getTime() - recovery.updatedAt <= 7 * 24 * 60 * 60 * 1000)
             ? [{ ...item, updatedAt: new Date(recovery.updatedAt),
               ...(typeof recovery.draftTitle === 'string' && recovery.draftTitle.trim()
@@ -270,21 +271,26 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           const caseId = decodeTechnicalRecovery(item.recovery)?.partnerCaseId;
           return typeof caseId === 'string' ? [caseId] : [];
         }))];
-        const editableOwnedCaseIds = new Set((boundCaseIds.length ? await tx.partnerSaleCase.findMany({ where: {
+        const editableOwnedCases = boundCaseIds.length ? await tx.partnerSaleCase.findMany({ where: {
           id: { in: boundCaseIds }, profileId: profile.id,
           state: { in: [...partnerContracts.PARTNER_EDITABLE_CASE_STATES] },
-        }, select: { id: true } }) : []).map(row => row.id));
+        }, select: { id: true, trackingCode: { select: { number: true } } } }) : [];
+        const editableOwnedCaseIds = new Set(editableOwnedCases.map(row => row.id));
+        const trackingByCaseId = new Map(editableOwnedCases.map(row => [row.id, row.trackingCode?.number]));
         const visibleRecoveries = retainedDraftRows.flatMap(item => {
           const rawCaseId = decodeTechnicalRecovery(item.recovery)?.partnerCaseId;
           const caseId = typeof rawCaseId === 'string' ? rawCaseId : undefined;
           return shouldExposePartnerRecovery(caseId, editableOwnedCaseIds)
-            ? [{ ...item, ...(caseId ? { caseId } : {}) }]
+            ? [{ ...item, ...(caseId ? { caseId,
+              ...(trackingByCaseId.get(caseId) ? { trackingNumber: trackingByCaseId.get(caseId) } : {}) } : {}) }]
             : [];
         });
         const recoverableDraft = requestedCaseId
           ? visibleRecoveries.find(item => item.caseId === requestedCaseId)
-          : visibleRecoveries.find(item => !item.caseId);
-        const recoverableDrafts = recoverableDraft ? [recoverableDraft] : [];
+          : visibleRecoveries[0];
+        const recoverableDrafts = requestedCaseId
+          ? visibleRecoveries.filter(item => item.caseId === requestedCaseId)
+          : visibleRecoveries;
         const retainedWizard = recoverableDraft
           ? partnerContracts.PartnerWizardRecoverySnapshotSchema.safeParse(
             decodeTechnicalRecovery(recoverableDraft.recovery)?.wizardDraft)
@@ -306,10 +312,12 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           inquiryIds: profile.inquiries.map(inquiry => inquiry.id),
           ...(recoverableDraft ? { recoverableDraft: { recoveryId: recoverableDraft.draftId,
             ...(recoverableDraft.caseId ? { caseId: recoverableDraft.caseId } : {}),
+            ...(recoverableDraft.trackingNumber ? { trackingNumber: recoverableDraft.trackingNumber } : {}),
             baseRevision: recoverableDraft.baseRevision, updatedAt: recoverableDraft.updatedAt.toISOString(),
             ...(recoverableDraft.title ? { title: recoverableDraft.title } : {}) } } : {}),
           recoverableDrafts: recoverableDrafts.map(item => ({ recoveryId: item.draftId,
             ...(item.caseId ? { caseId: item.caseId } : {}),
+            ...(item.trackingNumber ? { trackingNumber: item.trackingNumber } : {}),
             baseRevision: item.baseRevision, updatedAt: item.updatedAt.toISOString(), ...(item.title ? { title: item.title } : {}) })),
           customers: profile.customers.map(customer => ({ id: customer.id,
             displayName: customer.companyName || `${customer.firstName} ${customer.lastName}`.trim(),
@@ -534,6 +542,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const rows: partnerContracts.PartnerApprovalMatchSet['rows'] = [];
         const missingPricingSubjectIds: string[] = [];
         for (const identityRow of saved.identities) {
+          if (saved.draft.dependents?.some(item => item.kind === 'remainder' && item.productRowId === identityRow.productRowId)) continue;
           const subjectHash = await partnerContracts.inquiryConfigurationHash(identityRow.identity);
           const primarySubject = saved.view.rows.some(row =>
             row.configurationRef.productRowId === identityRow.productRowId);
@@ -578,6 +587,50 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       });
       respond(response, result);
     } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+  });
+  router.post('/customer-total-preview', async (request: AuthRequest, response) => {
+    if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+    const parsed = z.object({ recoveryId: partnerContracts.IdSchema,
+      draft: partnerContracts.PartnerTechnicalDraftSchema,
+    }).strict().safeParse(request.body);
+    if (!parsed.success) { respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return; }
+    try {
+      const result = await prisma.$transaction(async tx => {
+        const profile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: { id: true } });
+        if (!profile) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'MUTATE');
+        if (!rollout.ok) return rollout;
+        const allowed = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id,
+          purpose: 'PARTNER', channel: 'API' }, { correlationId: correlation(request) })
+          .authorize('CASE_DRAFT_WRITE', { kind: 'PROFILE', id: profile.id });
+        if (!allowed.ok) return allowed;
+        const session = await tx.salesContractEditSession.findUnique({ where: { draftId: parsed.data.recoveryId },
+          select: { id: true, ownerUserId: true, purpose: true, recovery: true } });
+        if (!session || session.ownerUserId !== request.user!.id || session.purpose !== 'PARTNER_TECHNICAL')
+          return { ok: false as const, error: partnerError('NOT_FOUND') };
+        const recovery = decodeTechnicalRecovery(session.recovery);
+        if (!recovery) return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+        const history = recovery.validatedSnapshots;
+        if (history !== undefined && !Array.isArray(history)) return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+        const latest = Array.isArray(history) && history.length ? await decodeTechnicalSavedSnapshot(history.at(-1)) : undefined;
+        if (Array.isArray(history) && history.length && (!latest || latest.sessionId !== session.id || latest.view.recoveryId !== parsed.data.recoveryId))
+          return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+        const evidence = await createPartnerTechnicalEvidenceResolver()(tx, { actorId: request.user!.id,
+          recoveryId: parsed.data.recoveryId, draft: parsed.data.draft, previous: latest ?? null });
+        if (!evidence.ok) return evidence;
+        const compiled = compilePartnerTechnicalGraph(parsed.data.draft, evidence.value.context);
+        if (!compiled.ok) return compiled;
+        const wizard = partnerContracts.PartnerWizardRecoverySnapshotSchema.safeParse(recovery.wizardDraft);
+        if (recovery.wizardDraft !== undefined && (!wizard.success || wizard.data.intent.recoveryId !== parsed.data.recoveryId))
+          return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+        const intent = wizard.success ? wizard.data.intent : undefined;
+        const total = partnerCustomerGraphTotal(compiled.value.graph, parsed.data.draft,
+          intent?.retailDiscount ?? { amount: '0', currency: 'IRT' }, intent?.retailDiscountPercent);
+        return { ok: true as const, value: { inputRevision: parsed.data.draft.inputRevision,
+          draftHash: await canonicalHash(parsed.data.draft), total } };
+      });
+      respond(response, result);
+    } catch { respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); }
   });
   router.post('/quote', async (request: AuthRequest, response) => {
     if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }

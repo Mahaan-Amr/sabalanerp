@@ -99,6 +99,7 @@ const receipt = (value: unknown) => {
 async function readPartnerView(tx: Transaction, caseId: string) {
   const row = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
     id: true, profileId: true, customerId: true, headRevision: true, integrityHash: true,
+    trackingCode: { select: { number: true } },
     head: { select: { internalProjection: true, customerContent: true } },
   } });
   const source = row?.head.internalProjection;
@@ -111,7 +112,7 @@ async function readPartnerView(tx: Transaction, caseId: string) {
   const projectId = content && typeof content === 'object' && !Array.isArray(content) &&
     typeof (content as Prisma.JsonObject).projectId === 'string'
     ? (content as Prisma.JsonObject).projectId as string : undefined;
-  return { view: parsed.data, root: row, projectId };
+  return { view: { ...parsed.data, ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}) }, root: row, projectId };
 }
 
 async function readPartnerRevisionView(tx: Transaction, caseId: string, revision: number, integrityHash: string) {
@@ -152,6 +153,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
         approvalSnapshot: true, evidenceHash: true } } } },
     internalRecord: { select: { recordNumber: true } },
     customerContract: { select: { contractNumber: true } },
+    trackingCode: { select: { number: true } },
   } });
   if (!current) return { ok: false, error: partnerError('NOT_FOUND') } as const;
   if (!isPartnerCaseEditableState(current.state) ||
@@ -420,7 +422,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   const outcome = { version: 1, commandId: command.commandId, caseId, revision, integrityHash, eventIds: [eventId] };
   await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...key, payloadHash: intentHash, outcome: json(outcome) } });
   return { ok: true, value: { commandId: command.commandId, replayed: false,
-    case: { ...projections.value.partner, state: nextState,
+    case: { ...projections.value.partner, ...(current.trackingCode ? { trackingNumber: current.trackingCode.number } : {}), state: nextState,
       customerConfirmationState: nextConfirmationState }, eventIds: [eventId] } } as const;
 }
 

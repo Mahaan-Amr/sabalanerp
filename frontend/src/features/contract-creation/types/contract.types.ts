@@ -1,7 +1,7 @@
 ﻿// Contract Creation Types
 // All TypeScript interfaces and types for contract creation feature
 
-import type { ProductOperationsInput } from '@sabalanerp/contract-product-graph';
+import type { ProductOperationsInput, ContractMonetaryRounding } from '@sabalanerp/contract-product-graph';
 
 export interface CrmCustomer {
   id: string;
@@ -635,6 +635,7 @@ export interface PaymentInstallment {
 export type ContractKind = 'standard' | 'collaboration';
 
 export interface ContractWizardData {
+  monetaryRounding?: ContractMonetaryRounding;
   contractKind?: ContractKind;
   productGraphRevision?: number;
 

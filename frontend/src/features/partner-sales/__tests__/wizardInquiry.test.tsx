@@ -164,3 +164,39 @@ test('recovered inquiry command cannot be replayed into a different inquiry scop
   assert.equal(sent, false);
   assert.ok(pending);
 });
+
+
+test('wizard product presentation keeps exact approvals and financial rows intact', () => {
+  const fixture = createPartnerFixtures();
+  const { graphHash: _hash, ...reference } = fixture.draftSubmissionReference;
+  const draft = enterPartnerWizard({ inquiry: fixture.inquiry, now: Date.parse('2026-08-27T09:00:00.000Z'),
+    base: { ...reference, customerId: '', contractDate: '2026-08-27', customerPaymentPlan: fixture.partner.customerPaymentPlan,
+      deliveries: [], retailDiscount: { amount: '0', currency: 'IRR' } }, validated: fixture.technicalSaved,
+    productPresentation: new Map([[fixture.configurationDraft.productRowId, { title: 'نام واقعی سنگ', parentProductRowId: 'parent-row' }]]) });
+  assert.equal(draft?.rows[0].inquiryRow.description, 'نام واقعی سنگ');
+  assert.equal(draft?.rows[0].parentProductRowId, 'parent-row');
+  assert.deepEqual(draft?.intent.rows[0].approvedRowBinding, fixture.inquiry.rows[0].approvedRowBinding);
+  assert.equal('parentProductRowId' in draft!.intent.rows[0], false);
+});
+
+test('four material subjects retain a paid remainder child as a zero-material financial row', () => {
+  const fixture = createPartnerFixtures();
+  const { graphHash: _hash, ...reference } = fixture.draftSubmissionReference;
+  const refs = Array.from({ length: 4 }, (_, index) => ({ ...fixture.configurationDraft, productRowId: `root-${index}` }));
+  const child = { ...fixture.configurationDraft, productRowId: 'paid-child' };
+  const inquiryRows = refs.map((configurationRef, index) => ({ ...fixture.inquiry.rows[0], rowId: `approval-${index}`,
+    configurationRef, approvedRowBinding: { ...fixture.inquiry.rows[0].approvedRowBinding!, rowId: `approval-${index}` } }));
+  const validated = { ...fixture.technicalSaved,
+    rows: [...refs, child].map(configurationRef => ({ ...fixture.technicalSaved.rows[0], configurationRef })),
+    pricingSubjects: refs.map(configurationRef => ({ configurationRef, role: 'PRIMARY' as const })) };
+  const wizard = enterPartnerWizard({ inquiryRows, now: Date.parse('2026-08-27T09:00:00.000Z'),
+    base: { ...reference, customerId: '', contractDate: '2026-08-27', customerPaymentPlan: fixture.partner.customerPaymentPlan,
+      deliveries: [], retailDiscount: { amount: '0', currency: 'IRT' } }, validated,
+    productPresentation: new Map([['paid-child', { title: 'فرزند', parentProductRowId: 'root-0' }]]) });
+  assert.ok(wizard);
+  assert.equal(wizard.rows.filter(row => !row.parentProductRowId).length, 4);
+  assert.equal(wizard.intent.rows.length, 5, 'physical and financial child is preserved');
+  assert.deepEqual(wizard.intent.rows.at(-1)?.retailUnitPrice, { amount: '0', currency: 'IRT' });
+  assert.deepEqual(wizard.intent.rows.at(-1)?.approvedRowBinding, wizard.intent.rows[0].approvedRowBinding,
+    'paid child retains source material approval, without another inquiry');
+});

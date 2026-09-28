@@ -109,6 +109,8 @@ interface NormalizedLayerDetails {
 }
 
 interface NormalizedProduct {
+  billingUnit?: string;
+  billingQuantity?: number;
   id: string;
   rowId: string;
   code: string;
@@ -1326,8 +1328,9 @@ const normalizeProducts = (
     preparedUnit: preparedUnitLabel(item?.preparedUnit),
     preparedQuantity: toNumber(item?.preparedQuantity || item?.quantity),
     stairPart: stairPartLabel(item?.stairPartType),
-    dimensions: EMPTY,
-    quantity: toNumber(item?.quantity),
+    dimensions: item?.dimensions || EMPTY,
+    billingUnit: item?.billingUnit, billingQuantity: toNumber(item?.quantity),
+    quantity: toNumber(item?.pieceCount ?? item?.quantity),
     squareMeters: 0,
     unitPrice: toNumber(item?.unitPrice),
     originalTotalPrice: toNumber(item?.originalTotalPrice),
@@ -1733,6 +1736,12 @@ function measurementCellsFromLabel(value: string): Pick<FlatProductRow, 'linearM
 }
 
 const buildProductQuantityColumns = (product: NormalizedProduct): Pick<FlatProductRow, 'linearMeasurement' | 'squareMeasurement' | 'count'> => {
+  if (product.billingUnit) {
+    const quantity = toFaNumber(product.billingQuantity, 4);
+    return { ...emptyMeasurementCells(), count: product.billingUnit === 'count' ? quantity : toFaNumber(product.quantity, 4),
+      linearMeasurement: product.billingUnit === 'meter' ? quantity : '',
+      squareMeasurement: product.billingUnit === 'squareMeter' ? quantity : '' };
+  }
   if (isPreparedProductType(product.productType)) {
     const quantity = toFaNumber(product.preparedQuantity || product.quantity, product.preparedUnit === 'تعداد' ? 0 : 2);
     if (product.preparedUnit === 'تعداد') {

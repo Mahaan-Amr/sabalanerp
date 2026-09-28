@@ -1,5 +1,7 @@
 'use client';
 
+import PersianCalendarComponent from '@/components/PersianCalendar';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ErpButton, ErpCheckbox, ErpEmptyState, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpListPage, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea, ErpWorkspacePage,
@@ -279,7 +281,7 @@ export function PartnerCaseRuntime() {
       }} />}>
       <ErpInlineState kind="permission" title="این وصول فقط در حساب خصوصی فروش شما ثبت می‌شود و بدهی شما به سبلان را تغییر نمی‌دهد." />
       <div className="grid gap-4 sm:grid-cols-2"><ErpField label="مبلغ وصول" required><ErpRialInput value={collectionAmount} onValueChange={setCollectionAmount} /></ErpField>
-        <ErpField label="تاریخ مؤثر" required><ErpInput type="date" value={collectionDate} onChange={event => setCollectionDate(event.target.value)} /></ErpField>
+        <ErpField label="تاریخ مؤثر" required><PersianCalendarComponent valueFormat="gregorian" value={collectionDate} onChange={setCollectionDate} className="w-full" /></ErpField>
         <ErpField label="روش دریافت" required><ErpSelect value={collectionMethod} onChange={event => setCollectionMethod(event.target.value as typeof collectionMethod)}>
           <option value="BANK_TRANSFER">واریز بانکی</option><option value="CARD">کارت</option><option value="CASH">نقدی</option><option value="CHEQUE">چک</option><option value="OTHER">سایر</option>
         </ErpSelect></ErpField>
@@ -293,7 +295,7 @@ export function PartnerCaseRuntime() {
       }} />}>
       <ErpInlineState kind="stale" title="برگشت به همان receipt و نسخه برنامه پرداخت متصل می‌ماند و سابقه حذف نمی‌شود." />
       <div className="grid gap-4 sm:grid-cols-2"><ErpField label="دلیل برگشت" required><ErpTextarea value={reversalReason} maxLength={4000} onChange={event => setReversalReason(event.target.value)} /></ErpField>
-        <ErpField label="تاریخ مؤثر" required><ErpInput type="date" value={collectionDate} onChange={event => setCollectionDate(event.target.value)} /></ErpField></div>
+        <ErpField label="تاریخ مؤثر" required><PersianCalendarComponent valueFormat="gregorian" value={collectionDate} onChange={setCollectionDate} className="w-full" /></ErpField></div>
     </ErpSheet>
   </ErpWorkspacePage>;
 }

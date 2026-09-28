@@ -19,3 +19,29 @@ test('Partner payment validation rejects a customer balance installment', () => 
   assert.match(errors.amount ?? '', /غیرفعال است/);
   assert.deepEqual(validatePartnerPaymentInstallment(installment, '2026-09-16', true), {});
 });
+
+test('national ID is optional today and required for dated bank transfers and checks', () => {
+  for (const method of ['BANK_TRANSFER', 'CHECK'] as const) {
+    const installment = { installmentId: 'payment', dueDate: '2026-09-28', amount: { amount: '100', currency: 'IRT' as const },
+      method, ...(method === 'CHECK' ? { check: { dueDate: '2026-09-28', ownerName: 'صاحب چک', handoverDate: '2026-09-28' } } : {}) };
+    assert.equal(validatePartnerPaymentInstallment(installment, '2026-09-28').nationalCode, undefined);
+    assert.match(validatePartnerPaymentInstallment(installment, '2026-09-27').nationalCode!, /الزامی/);
+    assert.equal(validatePartnerPaymentInstallment({ ...installment, nationalCode: '0012345678' }, '2026-09-27').nationalCode, undefined);
+  }
+});
+
+test('same Tehran payment day accepts Gregorian or Persian display digits consistently', () => {
+  const installment = { installmentId: 'today', dueDate: '۱۴۰۵/۰۷/۰۶',
+    amount: { amount: '100', currency: 'IRT' as const }, method: 'BANK_TRANSFER' as const };
+  assert.equal(validatePartnerPaymentInstallment(installment, '2026-09-28').nationalCode, undefined);
+});
+
+test('6 Aban is a future payment, while 6 Mehr in either numeral set is today', () => {
+  const amount = { amount: '500000000', currency: 'IRT' as const };
+  for (const dueDate of ['2026-09-28', '۲۰۲۶-۰۹-۲۸', '۱۴۰۵/۰۷/۰۶', '١٤٠٥/٠٧/٠٦']) {
+    assert.equal(validatePartnerPaymentInstallment({ installmentId: 'same-day', dueDate, amount,
+      method: 'BANK_TRANSFER' }, '2026-09-28').nationalCode, undefined);
+  }
+  assert.match(validatePartnerPaymentInstallment({ installmentId: 'future', dueDate: '2026-10-28', amount,
+    method: 'BANK_TRANSFER' }, '2026-09-28').nationalCode!, /الزامی/);
+});

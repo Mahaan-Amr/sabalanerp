@@ -89,7 +89,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
               parent.recoveryRevision === definition.configurationRef.recoveryRevision);
           })) return undefined;
           if (technical.ok) configuration = [...configuration, ...technical.value.configuration.filter(fact =>
-            (fact.label === 'فرزند از سنگ پرداخت‌شده' || fact.label.startsWith('فرزند ·')) &&
+            (fact.label === 'مساحت' || fact.label === 'فرزند از سنگ پرداخت‌شده' || fact.label.startsWith('فرزند ·')) &&
             !configuration.some(existing => existing.label === fact.label && existing.value === fact.value))];
           if (!configuration.some(fact => fact.label === 'تعداد')) {
             const resolved = await dependencies.resolveConfiguration(tx, {

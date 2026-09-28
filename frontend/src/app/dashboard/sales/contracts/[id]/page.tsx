@@ -842,6 +842,54 @@ export default function ContractDetailPage() {
     );
   }
 
+  const canApprove =
+    !contract.isInactive &&
+    (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
+    contractPermissions.canApprove;
+  const canReject =
+    !contract.isInactive &&
+    (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
+    contractPermissions.canReject;
+  const canSign =
+    !contract.isInactive &&
+    contract.status === "APPROVED" &&
+    contractPermissions.canSign;
+  const decisionActions: ErpAction[] = [
+    ...(canApprove
+      ? [
+          {
+            label: "تایید",
+            onClick: () => handleAction("approve"),
+            icon: FaCheck,
+            tone: "success" as ErpTone,
+            disabled: pendingOperations.has("action:approve"),
+          },
+        ]
+      : []),
+    ...(canReject
+      ? [
+          {
+            label: "رد",
+            onClick: () => handleAction("reject"),
+            icon: FaTimes,
+            tone: "danger" as ErpTone,
+            disabled: pendingOperations.has("action:reject"),
+          },
+        ]
+      : []),
+    ...(canSign
+      ? [
+          {
+            label: "امضا",
+            onClick: () => handleAction("sign"),
+            icon: FaSignature,
+            tone: "success" as ErpTone,
+            disabled: pendingOperations.has("action:sign"),
+          },
+        ]
+      : []),
+  ];
+
   const partnerRoute = resolvePartnerContractRoute(contract);
   if (partnerRoute.kind === "blocked") {
     return (
@@ -878,10 +926,18 @@ export default function ContractDetailPage() {
       contract.partnerAccountView,
     );
     return (
+      <>
+      {visibleOperationalError && <ErpInlineState kind={visibleOperationalError.kind} title={visibleOperationalError.message} />}
       <PartnerSalesContractWorkspace
         view={projection.data}
+        decisionActions={decisionActions}
         account={account.success ? account.data : undefined}
+        canDownload={contractPermissions.canView}
+        canPrint={contractPermissions.canPrint}
+        onDownload={() => void handleDownloadPdf()}
+        onPrint={() => void handlePrintContract()}
       />
+      </>
     );
   }
 
@@ -895,18 +951,6 @@ export default function ContractDetailPage() {
     (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) &&
     (contractPermissions.canEdit ||
       contract.createdByUser.id === currentUser?.id);
-  const canApprove =
-    !contract.isInactive &&
-    (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
-    contractPermissions.canApprove;
-  const canReject =
-    !contract.isInactive &&
-    (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
-    contractPermissions.canReject;
-  const canSign =
-    !contract.isInactive &&
-    contract.status === "APPROVED" &&
-    contractPermissions.canSign;
   const canDownloadPdf = contractPermissions.canView;
   const canPrint = contractPermissions.canPrint;
   const canResendConfirmation =
@@ -929,39 +973,7 @@ export default function ContractDetailPage() {
           },
         ]
       : []),
-    ...(canApprove
-      ? [
-          {
-            label: "تایید",
-            onClick: () => handleAction("approve"),
-            icon: FaCheck,
-            tone: "success" as ErpTone,
-            disabled: pendingOperations.has("action:approve"),
-          },
-        ]
-      : []),
-    ...(canReject
-      ? [
-          {
-            label: "رد",
-            onClick: () => handleAction("reject"),
-            icon: FaTimes,
-            tone: "danger" as ErpTone,
-            disabled: pendingOperations.has("action:reject"),
-          },
-        ]
-      : []),
-    ...(canSign
-      ? [
-          {
-            label: "امضا",
-            onClick: () => handleAction("sign"),
-            icon: FaSignature,
-            tone: "success" as ErpTone,
-            disabled: pendingOperations.has("action:sign"),
-          },
-        ]
-      : []),
+    ...decisionActions,
     ...(canPrint
       ? [
           {

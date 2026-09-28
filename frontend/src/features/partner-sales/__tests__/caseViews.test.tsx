@@ -34,7 +34,7 @@ test('an editable numbered Case exposes one safe continuation action and wire me
     canContinue: true, canPreview: false, canIssue: false, canFinalize: false,
     canSendConfirmation: false, canRequestCorrection: false, canCancel: true, canRequestVoid: false,
   };
-  assert.deepEqual(partnerCasePageActions(actions).map(action => action.label), ['ادامه تکمیل قرارداد']);
+  assert.deepEqual(partnerCasePageActions(actions).map(action => action.label), ['ویرایش', 'رد']);
   const runtime = { cases: [{ view: fixture.partner, snapshotId: null,
     editRecovery: { recoveryId: 'recovery-editable-1', baseRevision: 0 },
     actions: { canContinue: true, canPreview: false, canIssue: false, canFinalize: false,

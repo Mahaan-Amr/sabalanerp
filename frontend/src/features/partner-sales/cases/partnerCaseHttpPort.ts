@@ -1,4 +1,4 @@
-import { PartnerAccountViewSchema, PartnerCaseRuntimeResultSchema, canonicalHash, partnerError,
+import { PartnerAccountViewSchema, PartnerCaseRuntimeResultSchema, partnerInputHash as canonicalHash, partnerError,
   type PartnerCaseRuntimeRow, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';

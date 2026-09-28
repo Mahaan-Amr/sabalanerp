@@ -516,3 +516,74 @@ test('legacy five-row inquiry displays four material offers and completes after 
     assert.equal((await partner.execute(await submit(ids.actorId, `new-${ids.inquiryId}`, 'new-paid-child', undefined, 'row-5'))).ok, false);
   });
 });
+
+test('browser command session submits mixed prices and Persian-number rejection through the HTTP boundary', async () => {
+  const commandModule = '../../../../frontend/src/features/partner-sales/management/commandSession';
+  const { PartnerCommandSession } = await import(commandModule);
+  const draftModule = '../../../../frontend/src/features/partner-sales/responder/responseDraft';
+  const { responseDecisions } = await import(draftModule);
+  const { normalizeStructuredNumeralsMiddleware } = await import('../../middleware/normalizeStructuredNumerals');
+  await fixture(async (tx, ids) => {
+    const shared = {
+      transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: async () => ({ ok: true as const, value: { evidenceId: 'authorization-fixture' } }),
+      resolveInitialResponder: async () => ({ ok: true as const, value: { responderId: ids.responderId, eligibilityEvidence: { source: 'fixture' } } }),
+      resolveConfiguration: async () => ({ ok: true as const, value: { identity: identity(ids.actorId),
+        description: 'سنگ تست', configuration: [{ label: 'تعداد', value: '1' }] } }),
+    };
+    const partner = createPartnerInquiryService({ actorId: ids.actorId, ...shared });
+    const command = await submit(ids.actorId, ids.inquiryId);
+    if (command.type !== 'INQUIRY_SUBMIT') throw new Error('submit expected');
+    const rows = ['wire-approved', 'wire-rejected'].map(rowId => ({ ...command.rows[0], rowId }));
+    assert.equal((await partner.execute({ ...command, rows, idempotency: { ...command.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: command.type, partnerSellerId: ids.actorId, rows }) } })).ok, true);
+    const responder = createPartnerInquiryService({ actorId: ids.responderId, ...shared });
+    const session = new PartnerCommandSession({ execute: async (body: PartnerCommand) => {
+      const request = { originalUrl: '/api/partner/inquiries/commands', body: JSON.parse(JSON.stringify(body)) };
+      normalizeStructuredNumeralsMiddleware(request as never, {} as never, () => undefined);
+      return responder.execute(request.body);
+    } }, ids.responderId);
+    const result = responseDecisions(rows.map(row => ({ rowId: row.rowId, revision: 1, currency: 'IRT' as const })), {
+      'wire-approved': { outcome: 'APPROVED', amount: '۵۰۰۰۰۰۰', note: '' },
+      'wire-rejected': { outcome: 'REJECTED', amount: '', note: 'عرض ۳۰، تعداد ۵ اصلاح شود' },
+    });
+    assert.ok(result.ok);
+    const submitted = await session.submit({ type: 'INQUIRY_DECIDE', inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions: result.decisions }, ids.inquiryId);
+    assert.equal(submitted.kind, 'success', JSON.stringify(submitted));
+    if (submitted.kind === 'success') assert.ok(submitted.batch?.outcomes.every((row: { ok: boolean }) => row.ok));
+    assert.equal((await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'wire-rejected' } })).outcome, 'REJECTED');
+    assert.equal((await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'wire-approved' } })).wholesaleUnitPrice.toString(), '5000000');
+    const view = await responder.query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: ids.inquiryId });
+    assert.ok(view.ok);
+    assert.equal(view.value.rows.find(row => row.rowId === 'wire-rejected')?.noteOrReason, 'عرض 30, تعداد 5 اصلاح شود');
+  });
+});
+
+test('a repeated pricing submission replaces its duty without violating response constraints', async () => {
+  await fixture(async (tx, ids) => {
+    const { createPartnerPricingDuty } = await import('../crossWorkspaceDutyAdapters/partnerPricingDutyAdapter');
+    let revision = 1;
+    // Source facts are isolated fixtures; duty writes and database constraints are real.
+    const database = new Proxy(tx, { get(target, property, receiver) {
+      if (property === 'partnerInquiry') return { findUniqueOrThrow: async () => ({
+        id: ids.inquiryId, caseId: 'case-fixture', revision, case: { caseNumber: 'fixture' },
+        assignments: [{ responderId: ids.responderId }],
+      }) };
+      return Reflect.get(target, property, receiver);
+    } });
+    const first = await createPartnerPricingDuty(database, { inquiryId: ids.inquiryId,
+      actorUserId: ids.actorId, inquiryRevision: revision });
+    revision = 2;
+    const next = await createPartnerPricingDuty(database, { inquiryId: ids.inquiryId,
+      actorUserId: ids.actorId, inquiryRevision: revision });
+    const previous = await tx.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: first.id } });
+    assert.equal(previous.status, 'WAIVED');
+    assert.equal(previous.respondedAt, null);
+    assert.equal(previous.respondedByUserId, null);
+    assert.equal(next.status, 'OPEN');
+    assert.equal(next.predecessorDutyId, first.id);
+    assert.equal(next.currentAssigneeUserId, ids.responderId);
+    assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: first.id, eventCode: 'WAIVED' } }), 1);
+  });
+});

@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PartnerAccountView, PartnerCaseView, PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpCheckbox, ErpFieldView, ErpInlineState, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpCheckbox, ErpFieldView, ErpInlineState, ErpSheet, ErpTextarea, type ErpAction } from '@/components/erp';
 import { formatPartnerMoney } from '../presentation';
 import { PartnerCaseWorkspace } from './PartnerCaseWorkspace';
 import { cancelPartnerCase, finalizePartnerCase, openPartnerPdf, readPartnerCases, requestPartnerCorrection, sendPartnerConfirmation } from './partnerCaseHttpPort';
 
 /** Uses the same Case permissions and commands as the Partner workspace. */
-export function PartnerSalesContractWorkspace({ view, account }: {
+export function PartnerSalesContractWorkspace({ view, account, canDownload, canPrint, onDownload, onPrint, decisionActions }: {
   view: PartnerCaseView; account?: PartnerAccountView;
+  canDownload?: boolean; canPrint?: boolean; onDownload?: () => void; onPrint?: () => void;
+  decisionActions?: ErpAction[];
 }) {
   const router = useRouter();
   const [row, setRow] = useState<PartnerCaseRuntimeRow>();
@@ -51,6 +53,7 @@ export function PartnerSalesContractWorkspace({ view, account }: {
       accountingCorrectionRequests={row?.accountingCorrectionRequests}
       onRequestCorrection={scope => { if (!pending) void run(() => requestPartnerCorrection(currentView, scope)); }}
       actions={{
+        canDownload, canPrint, onDownload, onPrint, pending, decisionActions,
         canPreview: Boolean(actions?.canPreview), canIssue: Boolean(actions?.canIssue),
         canContinue: Boolean(actions?.canContinue), canFinalize: Boolean(actions?.canFinalize),
         canSendConfirmation: Boolean(actions?.canSendConfirmation),

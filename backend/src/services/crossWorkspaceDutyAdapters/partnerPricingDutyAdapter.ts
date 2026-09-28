@@ -54,7 +54,9 @@ const closeOpenDuties = async (database: any, input: { inquiryId: string; actorU
   } });
   for (const duty of duties) {
     const changed = await database.crossWorkspaceDuty.updateMany({ where: { id: duty.id, status: 'OPEN' }, data: {
-      status: input.status, respondedAt: input.now, respondedByUserId: input.actorUserId,
+      status: input.status,
+      respondedAt: input.status === 'COMPLETED' ? input.now : null,
+      respondedByUserId: input.status === 'COMPLETED' ? input.actorUserId : null,
       structuredResultJson: asJson({ result: input.eventCode }),
     } });
     if (!changed.count) continue;

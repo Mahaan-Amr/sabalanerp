@@ -398,6 +398,31 @@ test('Partner stair parts retain dimension/copy controls without the internal ba
 });
 
 
+test('layer tools and finishings remain editable before its material preview succeeds', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const version = catalog.products[0].catalogSnapshotVersion;
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 10,
+    rows: [{ productRowId: 'layer-parent', catalogItemId: 'fixture-technical-stone', catalogSnapshotVersion: version,
+      family: 'stair', configuration: { stairSystemId: 'stairs', part: 'tread', sourceBatchId: 'parent-stock',
+        lengthMeters: '1', crossDimensionMeters: '0.3', quantity: 2, lengthDisplayUnit: 'm', crossDimensionDisplayUnit: 'cm',
+        sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual' } }],
+    dependents: [{ kind: 'layer', creationOrder: 0, layerConfigurationId: 'technical-layer', parentProductRowId: 'layer-parent',
+      sourceBatchId: 'layer-stock', catalogItemId: 'fixture-technical-layer', catalogSnapshotVersion: version,
+      layersPerParentPiece: 1, widthMeters: '0.04', widthDisplayUnit: 'cm', targetSides: ['front', 'left'],
+      sawKerfEnabled: false, calibrationEnabled: false }],
+  });
+  const preview = previewPartnerTechnicalDraft(draft, catalog);
+  assert.ok(preview.ok);
+  assert.equal(preview.value.dependents[0].calculation.ok, false);
+  const html = renderToStaticMarkup(<PartnerStairLayerEditor parentProductRowId="layer-parent" draft={draft}
+    products={catalog.products} operations={catalog.operations} previewRows={preview.value.rows}
+    previewDependents={preview.value.dependents} inventory={preview.value.inventory} onChange={() => undefined} />);
+  assert.equal((html.match(/افزودن ابزار/g) ?? []).length, 2);
+  assert.equal((html.match(/افزودن پرداخت/g) ?? []).length, 2);
+  assert.match(html, /سمت جلو/);
+  assert.match(html, /سمت چپ/);
+});
+
 test('adding a tool to a stair layer keeps its generated group independent of the parent and other sides', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
   const version = catalog.products[0].catalogSnapshotVersion;

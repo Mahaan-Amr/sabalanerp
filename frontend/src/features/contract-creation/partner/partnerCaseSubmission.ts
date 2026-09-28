@@ -1,5 +1,5 @@
 import {
-  canonicalHash, CaseDraftIntentSchema, PartnerCaseViewSchema, PartnerCommandSchema,
+  partnerInputHash as canonicalHash, CaseDraftIntentSchema, PartnerCaseViewSchema, PartnerCommandSchema,
   PartnerErrorSchema, isPartnerCaseEditableState, type PartnerCaseView, type PartnerCommand, type PartnerCommandPort,
   type PartnerErrorCode,
 } from '@sabalanerp/partner-sales-contracts';

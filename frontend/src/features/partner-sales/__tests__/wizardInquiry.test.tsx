@@ -200,3 +200,37 @@ test('four material subjects retain a paid remainder child as a zero-material fi
   assert.deepEqual(wizard.intent.rows.at(-1)?.approvedRowBinding, wizard.intent.rows[0].approvedRowBinding,
     'paid child retains source material approval, without another inquiry');
 });
+
+test('saving one correction retains both rejected products and their reasons across recovery revisions', () => {
+  const fixture = createPartnerFixtures();
+  const original = fixture.inquiry.rows[0];
+  const secondRef = { ...original.configurationRef, productRowId: 'second-rejected-product' };
+  const rejected = [original, { ...original, rowId: 'second-rejected-row', configurationRef: secondRef }]
+    .map((row, index) => ({ ...row, state: 'REJECTED' as const, approvedPrice: undefined,
+      approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined,
+      noteOrReason: `اصلاح محصول ${index + 1}` }));
+  const recoveryRevision = fixture.technicalSaved.recoveryRevision + 1;
+  const validated = { ...fixture.technicalSaved, recoveryRevision,
+    rows: [fixture.technicalSaved.rows[0], { ...fixture.technicalSaved.rows[0], configurationRef: secondRef }]
+      .map(row => ({ ...row, configurationRef: { ...row.configurationRef, recoveryRevision } })) };
+  const draft = enterPartnerWizard({ inquiryRows: rejected, now: Date.parse('2026-08-27T09:00:00.000Z'), validated,
+    base: { recoveryId: validated.recoveryId, recoveryRevision, customerId: '', contractDate: '2026-08-27',
+      customerPaymentPlan: fixture.partner.customerPaymentPlan, deliveries: [] } });
+  assert.ok(draft);
+  assert.equal(draft.rows.length, 2);
+  draft.rows.forEach((row, index) => {
+    assert.equal(row.inquiryRow.state, 'REJECTED');
+    assert.equal(row.inquiryRow.rowId, rejected[index].rowId);
+    assert.equal(row.inquiryRow.noteOrReason, rejected[index].noteOrReason);
+    assert.equal(row.inquiryRow.configurationRef.recoveryRevision, recoveryRevision);
+    assert.equal(row.inquiryRow.submissionState, 'UNSENT');
+    assert.equal(row.inquiryRow.approvedRowBinding, undefined);
+  });
+  const pending = { ...rejected[0], rowId: 'submitted-successor', state: 'PENDING' as const };
+  const afterResubmission = enterPartnerWizard({ inquiryRows: [pending, rejected[1]],
+    now: Date.parse('2026-08-27T09:00:00.000Z'), validated,
+    base: draft.intent });
+  assert.equal(afterResubmission?.rows[0].inquiryRow.rowId, 'submitted-successor');
+  assert.equal(afterResubmission?.rows[0].inquiryRow.submissionState, undefined);
+  assert.equal(afterResubmission?.rows[1].inquiryRow.state, 'REJECTED');
+});

@@ -3,7 +3,7 @@
 import React from 'react';
 import { partnerCustomerContractLabel, partnerTrackingCode, type CustomerContractOutput, type PartnerCaseRuntimeRow, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import { ErpActionGrid, ErpBadge, ErpButton, ErpCard, ErpFieldView, ErpPage, ErpSection, ErpTwoColumn, type ErpAction, type ErpMetric, type ErpTone } from '@/components/erp';
-import { FaBan, FaCalculator, FaEdit, FaEye, FaFileContract, FaFilePdf, FaMoneyBillWave, FaPrint, FaSms, FaTruck } from 'react-icons/fa';
+import { FaBan, FaCalculator, FaCheck, FaDownload, FaEdit, FaEye, FaFileContract, FaFilePdf, FaMoneyBillWave, FaPrint, FaSms, FaTruck } from 'react-icons/fa';
 import { formatPartnerMoney, partnerPaymentMethodCopy, partnerProductTypeCopy, partnerQuantityUnitCopy } from '../presentation';
 
 export type PartnerCaseActions = {
@@ -23,6 +23,12 @@ export type PartnerCaseActions = {
   onRequestCorrection?: () => void;
   onCancel?: () => void;
   onRequestVoid?: () => void;
+  canDownload?: boolean;
+  canPrint?: boolean;
+  onDownload?: () => void;
+  onPrint?: () => void;
+  pending?: boolean;
+  decisionActions?: ErpAction[];
 };
 
 const stateCopy: Record<PartnerCaseView['state'], { label: string; tone: ErpTone }> = {
@@ -51,11 +57,20 @@ export function PartnerCaseDetail({ view, actions, customerOutput, history, chil
 
 export function partnerCasePageActions(actions: PartnerCaseActions): ErpAction[] {
   return [
-    ...(actions.canContinue ? [{ label: 'ادامه تکمیل قرارداد', icon: FaEdit, onClick: actions.onContinue }] : []),
+    ...(actions.decisionActions ?? []),
+    ...(actions.canContinue ? [{ label: 'ویرایش', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
+    ...(!actions.canContinue && actions.canRequestCorrection ? [{ label: 'ویرایش', icon: FaEdit,
+      tone: 'info' as const, onClick: actions.onRequestCorrection, disabled: actions.pending }] : []),
+    ...(!actions.decisionActions && actions.canCancel ? [{ label: 'رد', icon: FaBan, tone: 'danger' as const,
+      onClick: actions.onCancel, disabled: actions.pending }] : []),
+    ...(actions.canDownload ? [{ label: 'دانلود PDF', icon: FaDownload, tone: 'success' as const,
+      onClick: actions.onDownload, disabled: actions.pending }] : []),
+    ...(actions.canPrint ? [{ label: 'پرینت', icon: FaPrint, tone: 'purple' as const,
+      onClick: actions.onPrint, disabled: actions.pending }] : []),
     ...(actions.canPreview ? [{ label: 'پیش‌نمایش قرارداد', icon: FaEye, variant: 'outline' as const, onClick: actions.onPreview }] : []),
     ...(actions.canSendConfirmation ? [{ label: 'ارسال پیامک تأیید', icon: FaSms,
       tone: 'info' as const, variant: 'outline' as const, onClick: actions.onSendConfirmation }] : []),
-    ...(actions.canFinalize ? [{ label: 'تأیید و نهایی‌سازی قرارداد', icon: FaFileContract,
+    ...(!actions.decisionActions && actions.canFinalize ? [{ label: 'تأیید', icon: FaCheck,
       tone: 'success' as const, onClick: actions.onFinalize }] : []),
     ...(actions.canIssue ? [{ label: 'صدور نهایی PDF', icon: FaFilePdf, tone: 'success' as const, onClick: actions.onIssue }] : []),
   ];

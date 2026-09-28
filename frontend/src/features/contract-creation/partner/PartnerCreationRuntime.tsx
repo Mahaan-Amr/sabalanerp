@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   MoneySchema, CaseDraftIntentSchema, PartnerCaseRuntimeResultSchema, PartnerCaseViewSchema, PartnerCommandSchema, PartnerCreationContextSchema,
   PartnerApprovalMatchSetSchema, PartnerWholesaleQuoteSchema, PartnerWizardRecoverySnapshotSchema,
-  PartnerTechnicalCatalogPageSchema, CustomerPaymentPlanSchema, canonicalHash, partnerError, partnerTrackingCode, previewPartnerTechnicalDraft,
+  PartnerTechnicalCatalogPageSchema, CustomerPaymentPlanSchema, partnerInputHash as canonicalHash, partnerError, partnerTrackingCode, previewPartnerTechnicalDraft,
   type PartnerCaseView, type PartnerCommand, type PartnerCommandPort, type PartnerApprovalMatchSet, type PartnerWholesaleQuote,
   type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
@@ -36,14 +36,14 @@ import type { PaymentEntry } from '../types/contract.types';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { createPartnerCaseSubmission, type PartnerDraftCommand } from './partnerCaseSubmission';
 import { selectPartnerReinquiryRows } from './partnerReinquiry';
-import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
+import { enterPartnerWizard, partnerDeliveryPlanIssue, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
   partnerCasePendingStorageKey, shouldPreferLocalPartnerWizard,
   isExplicitPartnerCreationEntry, partnerProductEditPath, shouldOfferPartnerDraftChoice,
-  shouldStartFreshPartnerCreation, partnerCreationRouteIdentity, partnerCreationRequestedInquiry,
+  shouldStartFreshPartnerCreation, partnerCreationRouteIdentity, partnerCreationRequestedInquiry, partnerSaleReturnStep,
   partnerCaseResultStep, partnerCaseHasIntegrityError, partnerCaseReviewMessage,
-  latestMatchingPartnerInquiryRow } from './partnerWizardEntry';
+  latestMatchingPartnerInquiryRow, partnerCasePricingInquiryIds, partnerFinalizedContractPath } from './partnerWizardEntry';
 import { alignPartnerCustomerPaymentPlan, partnerMoneyText, partnerRetailIntentRows, refreshPartnerInquiryRow,
-  partnerRetailDiscountFromPercent, partnerRetailSubtotal, partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
+  partnerRetailDiscountFromPercent, partnerRetailSubtotal, partnerRetailSummary, remainingPartnerAmount, newPartnerPaymentInstallment } from './partnerRetail';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
 import { finalizePartnerCase, sendPartnerConfirmation } from '../../partner-sales/cases/partnerCaseHttpPort';
 import { PartnerQuickInquiryEditor, type PartnerInquiryDimensions } from './PartnerQuickInquiryEditor';
@@ -58,7 +58,7 @@ import { readPartnerCreationContext } from './partnerCreationContext';
 import { partnerProductEditEntry, partnerSaleEntryIssue } from './partnerProductEditEntry';
 import { partnerPaymentChoice, partnerPaymentMethodUpdate } from './partnerPaymentMethodAdapter';
 import { paymentEntryFromPartnerInstallment, partnerInstallmentFromPaymentEntry } from './partnerPaymentEntryAdapter';
-import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment } from './partnerPaymentValidation';
+import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment, partnerPaymentNeedsNationalCode } from './partnerPaymentValidation';
 import { buildPartnerInquirySubjectOptions, type PartnerInquirySubjectOption } from './partnerInquirySubjectOptions';
 import { validateOptionalIranianMobile } from '@/lib/phoneFormat';
 
@@ -201,10 +201,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const searchParams = useSearchParams();
   const freshInquiryRef = useRef(shouldStartFreshPartnerCreation(searchParams));
   const [context, setContext] = useState<PartnerCreationContext | null>(null);
+  const [discountEntryMode, setDiscountEntryMode] = useState<'percent' | 'amount'>('amount');
   const [cartTotalAttempt, setCartTotalAttempt] = useState(0);
   const [cartTotal, setCartTotal] = useState<{ key: string; total?: ReturnType<typeof MoneySchema.parse>; failed?: boolean } | null>(null);
   const [runtime, setRuntime] = useState<PersistedRuntime | null>(null);
   const runtimeRef = useRef<PersistedRuntime | null>(null);
+  const finalizationFlight = useRef(false);
   runtimeRef.current = runtime;
   const [catalog, setCatalog] = useState<PartnerTechnicalProduct[]>([]);
   const [operations, setOperations] = useState<PartnerTechnicalOperation[]>([]);
@@ -339,12 +341,14 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   }, [runtime, wizard, wizardRecoveryId]);
 
   const persistWizardServer = useCallback(async (next: PartnerWizardDraft) => {
+    if (finalizationFlight.current) return false;
     if (!runtime || next.intent.recoveryId !== runtime.saved.recoveryId) return false;
     wizardSavePending.current = next;
     if (!wizardSaveFlight.current) {
       wizardSaveFlight.current = (async () => {
         try {
           while (wizardSavePending.current) {
+            if (finalizationFlight.current) { wizardSavePending.current = null; break; }
             const current = wizardSavePending.current;
             wizardSavePending.current = null;
             const active = runtimeRef.current;
@@ -397,9 +401,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       setContext(parsed.data);
       setError(null);
       if (parsed.data.kind === 'PARTNER') {
-        const returnedStep = searchParams.get('step');
-        if (returnedStep === '2') setSaleStep('customer');
-        if (returnedStep === '3') setSaleStep('project');
+        const returnedStep = partnerSaleReturnStep(searchParams);
+        if (returnedStep) setSaleStep(returnedStep);
         const startFresh = shouldStartFreshPartnerCreation(searchParams);
         const recoverableDraftCount = parsed.data.recoverableDrafts?.length ?? (parsed.data.recoverableDraft ? 1 : 0);
         const explicitEntry = isExplicitPartnerCreationEntry(searchParams);
@@ -448,7 +451,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         if (saved?.actorId === parsed.data.actorId) {
           setRuntime(saved); setCustomerId(saved.customerId);
           setDraftAccess(saved.access); setRecoveryRevision(saved.saved.recoveryRevision);
-          setSaleStep('products');
+          setSaleStep(returnedStep ?? 'products');
           if (saved.contractDate) setContractDate(saved.contractDate);
           if (saved.projectId) setProjectId(saved.projectId);
         }
@@ -666,7 +669,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     if (context?.kind !== 'PARTNER' || runtime || freshInquiryRef.current || !draftAccess || recoveryRevision < 1 ||
         searchParams.get('caseId') ||
         inquiryHydrationFlight.current || (mode === 'sale' && searchParams.get('configure') === '1')) return;
-    const inquiryId = searchParams.get('inquiryId') || context.latestInquiryId;
+    const inquiryId = partnerCreationRequestedInquiry(searchParams, context.latestInquiryId);
     if (!inquiryId) return;
     inquiryHydrationFlight.current = true;
     void inquiryPorts.queries.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId }).then(async result => {
@@ -693,12 +696,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
 
   const readCasePricingRows = useCallback(async (saved: PartnerTechnicalSaveReceipt, caseId: string) => {
     const matches = await readApprovalMatches(saved, caseId);
-    const caseResponse = await api.post('/partner/cases/query-v2', { caseId });
-    const caseResult = PartnerCaseRuntimeResultSchema.safeParse((caseResponse.data as { data?: unknown })?.data);
-    if (!caseResult.success || caseResult.data.cases.length !== 1) throw partnerError('INTEGRITY_CONFLICT');
-    const revisions = caseResult.data.cases[0].view.owner.revision;
-    const inquiries = await Promise.all(Array.from({ length: revisions }, (_, index) => inquiryPorts.queries.query({
-      schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId: `partner-case-pricing:${saved.recoveryId}:${index + 1}`,
+    // Case revisions also record payments/deliveries. They are not inquiry IDs.
+    const response = await api.get(`/partner/cases/creation-context?caseId=${encodeURIComponent(caseId)}`);
+    const available = PartnerCreationContextSchema.safeParse((response.data as { data?: unknown })?.data);
+    if (!available.success || available.data.kind !== 'PARTNER') throw partnerError('INTEGRITY_CONFLICT');
+    const inquiryIds = partnerCasePricingInquiryIds(saved.recoveryId, available.data.inquiryIds, matches.rows);
+    const inquiries = await Promise.all(inquiryIds.map(inquiryId => inquiryPorts.queries.query({
+      schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId,
     })));
     if (inquiries.some(result => !result.ok && result.error.code !== 'NOT_FOUND')) throw partnerError('INTEGRITY_CONFLICT');
     const currentRows = inquiries.flatMap(result => result.ok ? result.value.rows : []);
@@ -873,11 +877,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         contractDate: selectedContractDate, projectId: selectedProject.id,
         customerPaymentPlan: { planId: `partner-customer-plan-${crypto.randomUUID()}`, version: 1,
           effectiveDate: selectedContractDate, installments: [{ installmentId: `partner-installment-${crypto.randomUUID()}`,
-            dueDate: addDays(selectedContractDate, 30), amount: { amount: '0', currency }, method: 'BANK_TRANSFER', subtype: 'SHIBA' }] },
-        deliveries: currentRuntime.saved.rows.map((row, index) => ({ deliveryId: `partner-delivery-${crypto.randomUUID()}`,
-          date: addDays(selectedContractDate, 7 + index), destination: customer.address,
-          receiverName: customer.displayName,
-          items: [{ productRowId: row.configurationRef.productRowId, quantity: row.quantity }] })),
+            dueDate: today(), amount: { amount: '0', currency }, method: 'BANK_TRANSFER', subtype: 'SHIBA' }] },
+        deliveries: [],
         retailDiscount: { amount: '0', currency }, retailDiscountPercent: '0',
       } });
     if (!draft) { setError('همه ردیف‌های فنی باید پاسخ معتبر و جاری داشته باشند.'); return; }
@@ -905,7 +906,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         return previous?.retailUnitPrice.currency === row.retailUnitPrice.currency
           ? { ...row, retailUnitPrice: previous.retailUnitPrice } : row;
       });
-      const deliveries = preservePartnerDeliveriesAcrossProductEdit(intent.deliveries, draft.intent.deliveries,
+      const deliveries = preservePartnerDeliveriesAcrossProductEdit(intent.deliveries,
         rows.map(row => row.productRowId));
       const paymentPlan = intent.customerPaymentPlan.installments.every(item => item.amount.currency === currency)
         ? intent.customerPaymentPlan : draft.intent.customerPaymentPlan;
@@ -1022,7 +1023,9 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         next.intent.retailDiscount.currency) ?? next.intent.retailDiscount;
     setWizard({ ...next, intent: { ...next.intent, retailDiscount,
       customerPaymentPlan: alignPartnerCustomerPaymentPlan(next.rows, retailDiscount,
-        next.intent.customerPaymentPlan) } });
+        next.intent.customerPaymentPlan, !wizard ||
+          partnerRetailSummary(wizard.rows, wizard.intent.retailDiscount).retail !==
+          partnerRetailSummary(next.rows, retailDiscount).retail) } });
     if (context?.kind === 'PARTNER' && next.intent.projectId && next.intent.recoveryId) {
       const customer = context.customers.find(item => item.id === next.intent.customerId)?.displayName;
       const project = context.projects.find(item => item.id === next.intent.projectId)?.title;
@@ -1135,7 +1138,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const activeCaseId = submission?.getSnapshot().case?.owner.caseId;
       if (!activeCaseId) return;
       const rowsFromCase = await readCasePricingRows(runtime.saved, activeCaseId);
-      if (cancelled) return;
+      if (cancelled || finalizationFlight.current) return;
       setWizard(current => {
         if (!current) return current;
         const rows = current.rows.map(row => {
@@ -1208,7 +1211,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     showValidationErrors: boolean) => {
     if (!context || context.kind !== 'PARTNER') return null;
     if (step === 'date') return <ContractDateStepView creatorName={context.actorDisplayName}
-      dateControl={<PersianCalendarComponent value={draft.intent.contractDate} className="w-full"
+      dateControl={<PersianCalendarComponent valueFormat="gregorian" value={draft.intent.contractDate} className="w-full"
         onChange={contractDate => updateWizard({ ...draft, intent: { ...draft.intent, contractDate } })} />}
       numberNotice="شماره پس از ثبت موفق قرارداد تخصیص داده می‌شود." />;
     if (step === 'customer') return <ContractCustomerStepView
@@ -1238,7 +1241,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       </div>;
     }
     if (step === 'delivery') return <div className="mx-auto max-w-4xl space-y-4">
-      <div className="flex items-center justify-between gap-3"><h3 className="text-lg font-medium">لیست تحویل‌ها</h3>
+      <div className="flex items-center justify-between gap-3"><h3 className="text-lg font-medium">برنامه تحویل (اختیاری)</h3>
         <ErpButton label="افزودن تحویل" onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
           deliveries: [...draft.intent.deliveries, { deliveryId: `partner-delivery-${crypto.randomUUID()}`,
             date: addDays(draft.intent.contractDate, 7), destination: context.customers.find(item => item.id === draft.intent.customerId)?.address ?? '',
@@ -1246,10 +1249,10 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             items: [] }] } })} />
       </div>{draft.intent.deliveries.map((delivery, index) => <ErpNeumorphicCard key={delivery.deliveryId} className="space-y-4 p-6">
       <div className="flex items-center justify-between"><h3 className="font-semibold">تحویل {(index + 1).toLocaleString('fa-IR')}</h3>
-        {draft.intent.deliveries.length > 1 && <ErpButton label="حذف تحویل" tone="danger" variant="outline"
+        <ErpButton label="حذف تحویل" tone="danger" variant="outline"
           onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
-            deliveries: draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId) } })} />}</div>
-      <ContractDeliveryDetailsFields value={{ date: delivery.date, address: delivery.destination,
+            deliveries: draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId) } })} /></div>
+      <ContractDeliveryDetailsFields dateFormat="gregorian" value={{ date: delivery.date, address: delivery.destination,
         projectManagerName: delivery.projectManagerName ?? '', receiverName: delivery.receiverName ?? '',
         notes: delivery.notes ?? '' }} errors={showValidationErrors ? {
           ...(!delivery.date ? { date: 'تاریخ تحویل الزامی است.' } : {}),
@@ -1300,8 +1303,14 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     </ErpNeumorphicCard>)}</div>;
     if (step === 'payment') { const retailSummary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
       const retailSubtotal = partnerRetailSubtotal(draft.rows, draft.intent.retailDiscount.currency); return <div className="space-y-3">
-      <ContractDiscountEditor mode="percent" value={draft.intent.retailDiscountPercent ?? '0'}
-        label="درصد تخفیف فروش به مشتری" max="100"
+      <ContractDiscountEditor mode={discountEntryMode}
+        value={discountEntryMode === 'amount' ? draft.intent.retailDiscount.amount : draft.intent.retailDiscountPercent ??
+          (retailSubtotal && Number(retailSubtotal) > 0 ? String(Number((Number(draft.intent.retailDiscount.amount) * 100 / Number(retailSubtotal)).toFixed(2))) : '0')}
+        label={discountEntryMode === 'amount' ? 'مبلغ تخفیف (تومان)' : 'درصد تخفیف'} max="100"
+        onModeChange={mode => {
+          setDiscountEntryMode(mode);
+          if (mode === 'amount') updateWizard({ ...draft, intent: { ...draft.intent, retailDiscountPercent: undefined } });
+        }}
         description="این تخفیف فقط از قیمت فروش شما به مشتری کم می‌شود و قیمت توافق‌شده سبلان را تغییر نمی‌دهد."
         summaryItems={retailSummary.valid ? [
           { label: 'جمع قبل از تخفیف', value: retailSubtotal
@@ -1312,6 +1321,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         ] : []}
         error={!retailSummary.valid && retailSummary.field === 'discount' ? retailSummary.message : undefined}
         onValueChange={percent => {
+          if (discountEntryMode === 'amount') {
+            const amount = normalizeNumericText(percent).replace(/,/g, '') || '0';
+            updateWizard({ ...draft, intent: { ...draft.intent, retailDiscount: { ...draft.intent.retailDiscount, amount },
+              retailDiscountPercent: undefined, belowCostConfirmed: false } });
+            return;
+          }
           const normalizedPercent = String(Math.min(Math.max(Number(percent) || 0, 0), 100));
           const retailDiscount = partnerRetailDiscountFromPercent(draft.rows, normalizedPercent,
             draft.intent.retailDiscount.currency);
@@ -1325,12 +1340,11 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         checked={draft.intent.belowCostConfirmed}
         onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, belowCostConfirmed: event.target.checked } })} />}
       {draft.intent.customerPaymentPlan.installments.map((installment, installmentIndex) => { const paymentErrors = showValidationErrors
-        ? validatePartnerPaymentInstallment(installment, today(), Boolean(editingCase)) : {}; const nationalCodeRequired = installment.method !== 'CREDIT'
-          && Boolean(installment.dueDate) && installment.dueDate !== today(); return <ErpCard key={installment.installmentId} className="space-y-3 p-4">
-      <ContractPaymentInstallmentFields method={partnerPaymentChoice(installment)} amount={installment.amount.amount}
+        ? validatePartnerPaymentInstallment(installment, today(), Boolean(editingCase)) : {}; const nationalCodeRequired = partnerPaymentNeedsNationalCode(installment.method, installment.dueDate, today()); return <ErpCard key={installment.installmentId} className="space-y-3 p-4">
+      <ContractPaymentInstallmentFields dateFormat="gregorian" method={partnerPaymentChoice(installment)} amount={installment.amount.amount}
         existingContract={Boolean(editingCase)}
         amountLabel={`مبلغ قسط ${(installmentIndex + 1).toLocaleString('fa-IR')} (تومان)`} date={installment.dueDate}
-        dateLabel="سررسید" disabledAmount={installmentIndex === 0} amountError={paymentErrors.amount} dateError={paymentErrors.date}
+        dateLabel="سررسید" amountError={paymentErrors.amount} dateError={paymentErrors.date}
         onAmountChange={amount => updateWizard({ ...draft, intent: { ...draft.intent,
           customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
             installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
@@ -1343,7 +1357,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             const method = partnerPaymentMethodUpdate(value, item.dueDate);
             return { ...item, ...method, ...(value === 'CHECK' && item.check ? { check: item.check } : {}) };
           })() : item) } } })} />
-      {(installment.method === 'CHECK' || nationalCodeRequired) && <ContractPaymentCheckFields
+      {installment.method !== 'CREDIT' && <ContractPaymentCheckFields dateFormat="gregorian" showNationalCode
         showCheckFields={installment.method === 'CHECK'} nationalCodeRequired={nationalCodeRequired}
         value={{ number: installment.check?.number ?? '', bank: installment.check?.bank ?? '',
           ownerName: installment.check?.ownerName ?? '', handoverDate: installment.check?.handoverDate ?? '',
@@ -1351,7 +1365,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         onChange={updates => updateWizard({ ...draft, intent: { ...draft.intent,
           customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
             installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
-              ? { ...item, ...(updates.nationalCode !== undefined ? { nationalCode: updates.nationalCode } : {}),
+              ? { ...item, ...(updates.nationalCode !== undefined ? { nationalCode: normalizeNumericText(updates.nationalCode).replace(/\D/g, '') || undefined } : {}),
                 ...(item.method === 'CHECK' ? { check: { number: updates.number ?? item.check?.number ?? '',
                   bank: updates.bank ?? item.check?.bank ?? '', dueDate: item.dueDate,
                   ...(updates.ownerName !== undefined || item.check?.ownerName !== undefined
@@ -1361,13 +1375,17 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       {installmentIndex > 0 && <ErpButton label="حذف قسط" tone="danger" variant="outline" onClick={() => updateWizard({ ...draft,
         intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
           installments: draft.intent.customerPaymentPlan.installments.filter(item => item.installmentId !== installment.installmentId) } } })} />}
-    </ErpCard>; })}<ErpButton label="افزودن پرداخت" variant="outline" onClick={() => openPartnerPaymentModal({
-      installmentId: `partner-installment-${crypto.randomUUID()}`,
-      dueDate: addDays(draft.intent.contractDate, 30),
-      amount: { amount: '0', currency: draft.intent.customerPaymentPlan.installments[0].amount.currency },
-      method: 'BANK_TRANSFER', subtype: 'SHIBA',
-    }, true, false)} />
-      {paymentModal && <PaymentEntryModal
+    </ErpCard>; })}
+      {retailSummary.valid && <ErpFieldView label="مانده قابل تخصیص" value={(() => {
+        const remaining = remainingPartnerAmount(retailSummary.retail, draft.intent.customerPaymentPlan.installments.map(item => item.amount.amount));
+        return remaining === null ? 'مجموع اقساط از جمع نهایی بیشتر است.'
+          : partnerMoneyText(remaining, draft.intent.retailDiscount.currency);
+      })()} />}
+      <ErpButton label="افزودن پرداخت" variant="outline" disabled={!retailSummary.valid}
+        onClick={() => retailSummary.valid && openPartnerPaymentModal(newPartnerPaymentInstallment(
+          { amount: retailSummary.retail, currency: draft.intent.retailDiscount.currency }, draft.intent.customerPaymentPlan,
+          `partner-installment-${crypto.randomUUID()}`, today()), true, false)} />
+      {paymentModal && <PaymentEntryModal dateFormat="gregorian"
         isOpen
         existingContract={Boolean(editingCase)}
         onClose={closePartnerPaymentModal}
@@ -1384,9 +1402,9 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         currency={paymentModal.installment.amount.currency}
         fieldErrors={paymentModalErrors}
         isEdit={!paymentModal.isNew}
-        disabledAmount={paymentModal.isFirst}
-        nationalCodeRequired={paymentForm.method !== 'CUSTOMER_BALANCE'
-          && Boolean(paymentForm.paymentDate) && paymentForm.paymentDate !== today()}
+        showNationalCode={paymentForm.method !== 'CUSTOMER_BALANCE'}
+        nationalCodeRequired={partnerPaymentNeedsNationalCode(paymentForm.method === 'CUSTOMER_BALANCE' ? 'CREDIT' : 'BANK_TRANSFER',
+          paymentForm.paymentDate ?? '', today())}
       />}
     </div>; }
     const customer = context.customers.find(item => item.id === draft.intent.customerId);
@@ -1410,7 +1428,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             ? partnerMoneyText(retailSummary.retail, draft.intent.retailDiscount.currency) : '—'} tone="primary" />
           <ErpFieldView label="مبلغ توافق‌شده با سبلان" value={retailSummary.valid && retailSummary.wholesale
             ? partnerMoneyText(retailSummary.wholesale, draft.intent.retailDiscount.currency) : '—'} tone="info" />
-          <ErpFieldView label="تخفیف مشتری" value={`${draft.intent.retailDiscountPercent ?? '0'}٪`} tone="success" />
+          <ErpFieldView label="تخفیف مشتری" value={partnerMoneyText(draft.intent.retailDiscount.amount, draft.intent.retailDiscount.currency)} tone="success" />
         </ErpNeumorphicCard>
       </ErpNeumorphicCard>
       <ErpNeumorphicDisclosure open>
@@ -1504,11 +1522,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     validateStep={(step, draft) => step === 'date' && !draft.intent.contractDate ? 'تاریخ قرارداد را وارد کنید.'
       : step === 'customer' && !draft.intent.customerId ? 'مشتری را انتخاب کنید.'
       : step === 'project' && !draft.intent.projectId ? 'پروژه را انتخاب کنید.'
-      : step === 'delivery' && draft.intent.deliveries.some(item => item.items.length === 0 || !item.date || !item.destination.trim()
-        || !item.projectManagerName?.trim() || !item.receiverName?.trim()) ? 'برنامه تحویل را کامل کنید.'
-      : step === 'delivery' && draft.rows.some(row => remainingPartnerAmount(row.quantity,
-        draft.intent.deliveries.flatMap(delivery => delivery.items.filter(item => item.productRowId === row.productRowId).map(item => item.quantity))) !== '0')
-        ? 'مقدار تحویل هر محصول باید دقیقاً با مقدار قرارداد برابر باشد.'
+      : step === 'delivery' ? partnerDeliveryPlanIssue(draft.intent.deliveries, draft.rows)
       : step === 'payment' && !CustomerPaymentPlanSchema.safeParse(draft.intent.customerPaymentPlan).success
         ? 'برنامه پرداخت را کامل کنید.'
       : step === 'payment' && firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today(), Boolean(editingCase))
@@ -1537,10 +1551,19 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       });
     }} onSendConfirmation={caseId => sendPartnerConfirmation(caseId).then(() => undefined)}
     onFinalize={async view => {
-      const response = await finalizePartnerCase(view, Boolean(partnerRetailSummary(wizard.rows,
-        wizard.intent.retailDiscount).loss));
-      if (!(response as { success?: boolean })?.success) throw new Error('finalization-failed');
-      router.replace('/dashboard/sales/contracts');
+      finalizationFlight.current = true;
+      wizardSavePending.current = null;
+      try {
+        // Finish any in-flight draft write before the commit consumes its lease.
+        await wizardSaveFlight.current;
+        const response = await finalizePartnerCase(view, Boolean(partnerRetailSummary(wizard.rows,
+          wizard.intent.retailDiscount).loss));
+        const destination = partnerFinalizedContractPath(response, view.owner.caseId);
+        if (runtime) window.localStorage.removeItem(wizardDraftKey(runtime.actorId, wizard.intent.recoveryId));
+        setWizard(null);
+        persistRuntime(null);
+        router.replace(destination);
+      } catch (error) { finalizationFlight.current = false; throw error; }
     }}
     onCaseNumbered={caseId => router.replace(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(caseId)}`)}
     onOpenCase={() => router.push('/dashboard/sales/contracts')} />;
@@ -1608,7 +1631,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   >
     <div className="space-y-4">
       {saleStep === 'date' && <ContractDateStepView creatorName={context.actorDisplayName}
-        dateControl={<PersianCalendarComponent value={contractDate} onChange={value => {
+        dateControl={<PersianCalendarComponent valueFormat="gregorian" value={contractDate} onChange={value => {
           setContractDate(value); if (runtime) persistRuntime({ ...runtime, contractDate: value });
         }} className="w-full" />}
         numberNotice="شماره پس از ثبت موفق قرارداد تخصیص داده می‌شود." />}

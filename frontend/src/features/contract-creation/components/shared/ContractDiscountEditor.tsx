@@ -2,7 +2,7 @@
 
 import React from 'react';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
-import { ErpField, ErpNeumorphicCard, ErpRialInput } from '@/components/erp';
+import { ErpField, ErpNeumorphicCard, ErpRialInput, ErpSegmentedControl } from '@/components/erp';
 
 export interface ContractDiscountSummaryItem {
   label: string;
@@ -10,7 +10,7 @@ export interface ContractDiscountSummaryItem {
 }
 
 export function ContractDiscountEditor({ mode, value, label, max, disabled = false, description,
-  summaryItems, result, warning, error, onValueChange }: {
+  summaryItems, result, warning, error, onModeChange, onValueChange }: {
   mode: 'percent' | 'amount';
   value: string;
   label: string;
@@ -21,10 +21,13 @@ export function ContractDiscountEditor({ mode, value, label, max, disabled = fal
   result?: string;
   warning?: string;
   error?: string;
+  onModeChange?: (mode: 'percent' | 'amount') => void;
   onValueChange: (value: string) => void;
 }) {
   const maximum = max === undefined ? undefined : Number(max);
   return <ErpNeumorphicCard className="space-y-3 p-4">
+    {onModeChange && <ErpSegmentedControl options={[{ value: 'amount', label: 'تومان', disabled }, { value: 'percent', label: 'درصد', disabled }]}
+      value={mode} onChange={onModeChange} />}
     {description && <p className="text-sm text-[var(--sds-text-muted)]">{description}</p>}
     {summaryItems.length > 0 && <dl className="grid gap-2 text-sm sm:grid-cols-3">
       {summaryItems.map(item => <div key={item.label}><dt className="text-[var(--sds-text-secondary)]">{item.label}</dt>

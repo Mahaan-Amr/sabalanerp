@@ -400,7 +400,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       const session = await prisma.salesContractEditSession.findUnique({ where: { draftId: request.params.recoveryId },
         select: { ownerUserId: true, purpose: true, recovery: true } });
       const recovery = decodeTechnicalRecovery(session?.recovery);
-      const wizard = recovery && partnerContracts.PartnerWizardRecoverySnapshotSchema.safeParse(recovery.wizardDraft);
+      const wizard = recovery?.wizardDraft === undefined ? undefined
+        : partnerContracts.PartnerWizardRecoverySnapshotSchema.safeParse(recovery.wizardDraft);
       respond(response, !session || session.ownerUserId !== request.user.id || session.purpose !== 'PARTNER_TECHNICAL'
         ? { ok: false, error: partnerError('NOT_FOUND') }
         : wizard?.success ? { ok: true, value: wizard.data }
@@ -1000,7 +1001,10 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         if (!finalized.ok) throw Object.assign(new Error('Partner finalization rejected'), { result: finalized });
         const queued = await enqueueCommittedPartnerCase(tx, { caseId: request.params.caseId, actorId: request.user!.id });
         if (!queued.ok) throw Object.assign(new Error('Partner accounting handoff rejected'), { result: queued });
-        return finalized;
+        const linked = await tx.partnerSaleCase.findUnique({ where: { id: request.params.caseId },
+          select: { customerContractId: true } });
+        if (!linked?.customerContractId) throw new Error('Committed Partner contract link missing');
+        return { ...finalized, value: { ...finalized.value, customerContractId: linked.customerContractId } };
       });
       respond(response, result);
     } catch (error) {

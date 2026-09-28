@@ -22,3 +22,13 @@ test('shared contract discount editor preserves ordinary percent and Partner amo
   assert.match(amount, /aria-invalid="true"/);
   assert.match(amount, /تخفیف نمی‌تواند/);
 });
+
+test('shared discount editor offers the Sabalan toman and percent choices', () => {
+  for (const mode of ['amount', 'percent'] as const) {
+    const html = renderToStaticMarkup(<ContractDiscountEditor mode={mode} value="100" label="تخفیف"
+      summaryItems={[]} onValueChange={() => undefined} onModeChange={() => undefined} />);
+    assert.match(html, /تومان/);
+    assert.match(html, /درصد/);
+    assert.match(html, /role="group"/);
+  }
+});

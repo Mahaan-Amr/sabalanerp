@@ -22,7 +22,7 @@ import { draftForPartnerTechnicalEdit, refreshPartnerTechnicalProductVersion, se
 import { TechnicalProductConfiguration } from './TechnicalProductConfiguration';
 import { partnerRetailPriceUnitLabel, partnerSelectableFamilies } from './partnerPricingUnit';
 import { ContractProductCatalog, type ContractCatalogFamily } from '../components/steps/ContractProductCatalog';
-import { CentralProductModalShell, CompactSwitch } from '../components/product-modal-system/productModalPrimitives';
+import { CentralProductModalShell, CompactSwitch, CompactUnitSwitch } from '../components/product-modal-system/productModalPrimitives';
 import { partnerRemainderChildren } from './partnerDependentPresentation';
 import { RemainingInventorySelector } from '../components/steps/RemainingInventorySelector';
 import { partnerTechnicalConflictMessage, partnerTechnicalSaveIssue } from './partnerCreationFlow';
@@ -40,6 +40,21 @@ export const partnerStairDisplayLength = (meters: string | undefined, unit: 'cm'
   meters ? convertCompactLengthUnit(meters, 'm', unit) : '';
 export const partnerStairCanonicalLength = (text: string, unit: 'cm' | 'm') =>
   convertCompactLengthUnit(parseCanonicalDecimal(text), unit, 'm');
+export function updatePartnerStairMotherLength(draft: PartnerTechnicalDraft, productRowId: string, text: string, unit: 'cm' | 'm') {
+  let next = draft;
+  if (!text.trim()) {
+    next = PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1,
+      editingValues: (draft.editingValues ?? []).filter(item => item.entityId !== productRowId || item.field !== 'motherLengthMeters'),
+      rows: draft.rows.map(row => row.productRowId === productRowId && row.family === 'stair'
+        ? { ...row, configuration: { ...row.configuration, motherLengthMeters: undefined, motherLengthDisplayUnit: unit } } : row) });
+  } else {
+    try { next = commitPartnerTechnicalField(draft, productRowId, 'motherLengthMeters', partnerStairCanonicalLength(text, unit)); }
+    catch { next = retainPartnerTechnicalFieldText(draft, productRowId, 'motherLengthMeters', text); }
+    next = PartnerTechnicalDraftSchema.parse({ ...next, rows: next.rows.map(row => row.productRowId === productRowId && row.family === 'stair'
+      ? { ...row, configuration: { ...row.configuration, motherLengthDisplayUnit: unit } } : row) });
+  }
+  return next;
+}
 const commitText = (draft: PartnerTechnicalDraft, entityId: string,
   field: NonNullable<PartnerTechnicalDraft['editingValues']>[number]['field'], text: string) => {
   const retained = retainPartnerTechnicalFieldText(draft, entityId, field, text);
@@ -402,7 +417,7 @@ export function PartnerStairLayerEditor({ parentProductRowId, draft, products, o
           : value.source === 'parent-material' ? 'parent-material'
           : value.source === 'new-material' ? 'new-material' : null;
         const sourceRows = [{ sourceRowId: `layer-source-row:${crypto.randomUUID()}`,
-          lengthMeters: product.dimensions.motherLengthMeters ?? parent.configuration.motherLengthMeters,
+          lengthMeters: product.dimensions.motherLengthMeters ?? parent.configuration.motherLengthMeters ?? parent.configuration.lengthMeters,
           widthMeters: product.dimensions.motherWidthCentimeters ? String(Number(product.dimensions.motherWidthCentimeters) / 100) : parent.configuration.crossDimensionMeters,
           quantity: Math.max(1, parentQuantity(parent.productRowId)) }];
         const source = sourceKind && current.source?.kind === sourceKind ? current.source
@@ -447,7 +462,13 @@ export function PartnerStairLayerEditor({ parentProductRowId, draft, products, o
     {layers.filter(layer => layer.parentProductRowId === parent.productRowId).map(layer => {
       const result = previewDependents.find(item => item.kind === 'layer' && item.layerConfigurationId === layer.layerConfigurationId)?.calculation.result;
       const strips = result && typeof result === 'object' && 'physicalStrips' in result && Array.isArray(result.physicalStrips)
-        ? result.physicalStrips as Array<{ side: 'front' | 'back' | 'left' | 'right'; lengthMeters: string; widthMeters: string; quantity: number }> : [];
+        ? result.physicalStrips as Array<{ side: 'front' | 'back' | 'left' | 'right'; lengthMeters: string; widthMeters: string; quantity: number }>
+        // Material allocation may still be incomplete; operations belong to the
+        // selected sides and must remain editable using their requested dimensions.
+        : layer.targetSides.map(side => ({ side,
+          lengthMeters: (side === 'front' || side === 'back' ? parent.configuration.lengthMeters : parent.configuration.crossDimensionMeters) ?? '0',
+          widthMeters: layer.widthMeters ?? '0',
+          quantity: parentQuantity(parent.productRowId) * (layer.layersPerParentPiece ?? 1) }));
       if (!strips.length) return null;
       const sideLabels = { front: 'جلو', back: 'عقب', left: 'چپ', right: 'راست' } as const;
       return <ErpCard key={`operations:${layer.layerConfigurationId}`} className="space-y-3 p-3">
@@ -585,6 +606,8 @@ function StairEditor({ draft, row, product, mandatoryDefaults, onChange }: { dra
     length: partnerStairDisplayLength(configuration.lengthMeters, configuration.lengthDisplayUnit),
     crossDimension: partnerStairDisplayLength(configuration.crossDimensionMeters, configuration.crossDimensionDisplayUnit),
   }));
+  const motherUnit = configuration.motherLengthDisplayUnit ?? configuration.lengthDisplayUnit;
+  const [motherLengthText, setMotherLengthText] = useState(() => partnerStairDisplayLength(configuration.motherLengthMeters, motherUnit));
   const systemQuantity = (() => {
     if (!system) return undefined;
     try { return resolveStaircaseQuantity(system.quantity).totalSteps; } catch { return undefined; }
@@ -648,8 +671,12 @@ function StairEditor({ draft, row, product, mandatoryDefaults, onChange }: { dra
         lengthDisplayUnit: value.lengthUnit, crossDimensionDisplayUnit: value.crossDimensionUnit } });
       onChange(next);
     }} />
-    <ErpField label="طول سنگ مادر (متر)" required><ErpInput inputMode="decimal"
-      value={editText(draft, row.productRowId, 'motherLengthMeters', configuration.motherLengthMeters)}
-      onChange={event => onChange(commitText(draft, row.productRowId, 'motherLengthMeters', event.target.value))} /></ErpField>
+    <div className="space-y-1">
+      <div className="flex items-center justify-end"><CompactUnitSwitch label="واحد طول سنگ مادر" value={motherLengthText} unit={motherUnit}
+        onChange={value => { setMotherLengthText(value.value); onChange(updatePartnerStairMotherLength(draft, row.productRowId, value.value, value.unit)); }} /></div>
+      <ErpField label="طول سنگ مادر" hint="در صورت خالی‌بودن، طول درخواستی استفاده می‌شود."><ErpInput inputMode="decimal" value={motherLengthText}
+        placeholder={partnerStairDisplayLength(configuration.lengthMeters, motherUnit)}
+        onChange={event => { setMotherLengthText(event.target.value); onChange(updatePartnerStairMotherLength(draft, row.productRowId, event.target.value, motherUnit)); }} /></ErpField>
+    </div>
   </div>;
 }

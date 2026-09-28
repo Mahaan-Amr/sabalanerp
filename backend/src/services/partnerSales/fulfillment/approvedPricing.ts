@@ -47,7 +47,10 @@ Promise<LockedPartnerApprovedPricingVersion & { preparationEvidenceHash: string 
   }
   const rows = await Promise.all(preparation.products.map(async (row, ordinal) => {
     const total = fixedMoney(multiply(row.quantity, row.wholesaleUnitPrice));
-    return { id: `partner-price:${await canonicalHash({ owner: preparation.owner, productRowId: row.productRowId, approvalEvidenceId: row.approvalEvidenceId })}`, productRowId: row.productRowId, ordinal,
+    const priceRowId = preparation.products.slice(0, ordinal).some(previous => previous.approvalEvidenceId === row.approvalEvidenceId)
+      ? `partner-price:${await canonicalHash({ owner: preparation.owner, productRowId: row.productRowId, approvalEvidenceId: row.approvalEvidenceId })}`
+      : row.approvalEvidenceId;
+    return { id: priceRowId, productRowId: row.productRowId, ordinal,
       contractedQuantity: new Prisma.Decimal(row.quantity).toFixed(3), unit: row.unit,
       canonicalAllInTotal: total, discountEligible: false, componentEvidence: {
         wholesaleUnitPrice: row.wholesaleUnitPrice, approvalEvidenceId: row.approvalEvidenceId,

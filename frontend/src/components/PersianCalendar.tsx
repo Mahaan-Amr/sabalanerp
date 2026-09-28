@@ -13,11 +13,14 @@ import { resolveDateTimeSelection } from './persianCalendarCommitPolicy';
 import { persianCalendarLayout } from './persianCalendarLayout';
 import { normalizeYearOnlyValue, yearOnlyOptions } from './persianCalendarYearPolicy';
 
+import { calendarDisplayDate, calendarStoredDate, type CalendarValueFormat } from './persianCalendarValueFormat';
+
 export interface PersianCalendarProps {
   id?: string;
   'aria-describedby'?: string;
   'aria-invalid'?: boolean | 'true' | 'false';
   value?: string;
+  valueFormat?: CalendarValueFormat;
   onChange: (date: string) => void;
   placeholder?: string;
   className?: string;
@@ -47,6 +50,7 @@ export default function PersianCalendarComponent({
   'aria-invalid': ariaInvalid,
   value,
   onChange,
+  valueFormat = 'jalali',
   placeholder = 'انتخاب تاریخ',
   className = '',
   disabled = false,
@@ -61,9 +65,10 @@ export default function PersianCalendarComponent({
   yearOnly = false,
 }: PersianCalendarProps) {
   const overlayPortalContainer = useErpOverlayPortalContainer();
+  const pickerValue = yearOnly ? value : calendarDisplayDate(value || '', valueFormat);
   const initial = yearOnly
     ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
-    : splitDateTime(value);
+    : splitDateTime(pickerValue);
   const [open, setOpen] = useState(false);
   const [draftDate, setDraftDate] = useState(initial.date);
   const [draftTime, setDraftTime] = useState(initial.time);
@@ -94,11 +99,11 @@ export default function PersianCalendarComponent({
     if (open) return;
     const next = yearOnly
       ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
-      : splitDateTime(value);
+      : splitDateTime(pickerValue);
     setDraftDate(next.date);
     setDraftTime(next.time);
     if (next.date) setCurrentMonth(yearOnly ? `${next.date}/01` : next.date.slice(0, 7));
-  }, [maxYear, minYear, open, value, yearOnly]);
+  }, [maxYear, minYear, open, pickerValue, value, yearOnly]);
 
   const updateLayout = useCallback(() => {
     const isMobile = window.matchMedia('(max-width: 639px)').matches;
@@ -142,7 +147,8 @@ export default function PersianCalendarComponent({
   }, [draftDate, draftTime, showTime, yearOnly]);
 
   const commit = (date: string, time = draftTime) => {
-    onChange(showTime && time ? `${date} ${time}` : date);
+    const storedDate = calendarStoredDate(date, valueFormat);
+    onChange(showTime && time ? `${storedDate} ${time}` : storedDate);
     setOpen(false);
   };
 
@@ -150,7 +156,7 @@ export default function PersianCalendarComponent({
     if (isPast(date) || isFuture(date)) return;
     if (showTime && autoCommitDateTime) {
       const selection = resolveDateTimeSelection({
-        initialValue: value || '', draftDate, draftTime,
+        initialValue: pickerValue || '', draftDate, draftTime,
         changedPart: 'date', nextValue: date,
       });
       setDraftDate(selection.date);
@@ -167,7 +173,7 @@ export default function PersianCalendarComponent({
       return;
     }
     const selection = resolveDateTimeSelection({
-      initialValue: value || '', draftDate, draftTime,
+      initialValue: pickerValue || '', draftDate, draftTime,
       changedPart: 'time', nextValue: time,
     });
     setDraftTime(selection.time);
@@ -194,7 +200,7 @@ export default function PersianCalendarComponent({
     if (disabled) return;
     const next = yearOnly
       ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
-      : splitDateTime(value);
+      : splitDateTime(pickerValue);
     setDraftDate(next.date);
     setDraftTime(next.time);
     setCurrentMonth(yearOnly

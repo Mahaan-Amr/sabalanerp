@@ -127,11 +127,11 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const awaitingInitialPricing = !result.case && pricingEntries.length > 0 && pricingEntries.every(({ inquiryRow }) =>
     inquiryRow.state === 'PENDING' && !inquiryRow.approvedRowBinding && !inquiryRow.approvedPrice);
   const unsentRows = result.case ? pricingEntries.filter(({ inquiryRow }) =>
-    inquiryRow.state === 'PENDING' && inquiryRow.submissionState === 'UNSENT' &&
+    (inquiryRow.state === 'REJECTED' || inquiryRow.state === 'PENDING' && inquiryRow.submissionState === 'UNSENT') &&
     inquiryRow.successor?.state !== 'PENDING') : [];
   const waitingForSabalan = Boolean(result.case && pricingEntries.some(({ inquiryRow }) =>
-    inquiryRow.state === 'PENDING' && (inquiryRow.submissionState !== 'UNSENT' ||
-      inquiryRow.successor?.state === 'PENDING')));
+    inquiryRow.successor?.state === 'PENDING' ||
+    inquiryRow.state === 'PENDING' && inquiryRow.submissionState !== 'UNSENT'));
   const rowReinquiries = result.case ? unusable.filter(({ inquiryRow }) =>
     !['PENDING', 'REJECTED'].includes(inquiryRow.state) && inquiryRow.successor?.state !== 'PENDING') : [];
   const expiredRows = unusable.filter(({ inquiryRow }) => inquiryRowState(inquiryRow, now) === 'EXPIRED');
@@ -324,7 +324,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         title="با ادامه از این مرحله، پرونده شماره‌دار می‌شود و استعلام قیمت برای فروشنده سبلان ارسال خواهد شد." />}
       {waitingForSabalan && <ErpInlineState kind="empty"
         title="استعلام قیمت برای فروشنده سبلان ارسال شده است و در وظایف بین‌واحدی او قرار دارد. پس از ثبت پاسخ، قیمت خرید شما در همین پرونده نمایش داده می‌شود." />}
-      {unsentRows.length > 0 && <ErpInlineState kind="stale"
+      {unsentRows.some(row => row.inquiryRow.submissionState === 'UNSENT') && <ErpInlineState kind="stale"
         title="محصول اصلاح‌شده ذخیره شده است. برای دریافت قیمت تازه، استعلام همان محصول را ارسال کنید." />}
       {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
       {submissionError && <ErpInlineState kind="error" title={submissionError} />}
@@ -380,7 +380,8 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
               </strong></p>
               {rowState === 'EXPIRED' && expiresAt && <p className="text-sm sds-text-secondary">اعتبار تا {expiresAt}</p>}
               {inquiryRow.noteOrReason && <ErpInlineState kind="stale" title={inquiryRow.noteOrReason} />}
-              {inquiryRow.state === 'REJECTED' && onEditProduct && <ErpButton label="ویرایش این محصول" variant="outline"
+              {(inquiryRow.state === 'REJECTED' || unsentRows.some(item => item.id === id)) &&
+                inquiryRow.successor?.state !== 'PENDING' && onEditProduct && <ErpButton label="ویرایش این محصول" variant="outline"
                 disabled={disabled} onClick={() => onEditProduct(inquiryRow)} />}
               {unsentRows.some(item => item.id === id) && <ErpButton label="استعلام مجدد همین محصول" variant="outline"
                 disabled={disabled} onClick={() => onReinquire(inquiryRow)} />}

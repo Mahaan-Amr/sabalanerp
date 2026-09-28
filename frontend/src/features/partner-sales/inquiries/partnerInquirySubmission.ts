@@ -1,4 +1,4 @@
-import { canonicalHash, PartnerCommandSchema, PartnerErrorSchema, type PartnerCommand, type PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
+import { partnerInputHash as canonicalHash, PartnerCommandSchema, PartnerErrorSchema, type PartnerCommand, type PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
 import { getPartnerSalesErrorMessage } from '../partnerSalesErrorMessage';
 
 export type PartnerInquirySubmitCommand = Extract<PartnerCommand, { type: 'INQUIRY_SUBMIT' }>;

@@ -18,6 +18,7 @@ interface PaymentEntryModalProps {
   fieldErrors?: Partial<Record<'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode', string>>;
   isEdit?: boolean;
   nationalCodeRequired?: boolean;
+  showNationalCode?: boolean;
   nationalCodeConflict?: {
     existing: string;
     entered: string;
@@ -25,6 +26,7 @@ interface PaymentEntryModalProps {
   onContinueNationalCodeConflict?: () => void;
   disabledAmount?: boolean;
   existingContract?: boolean;
+  dateFormat?: 'jalali' | 'gregorian';
 }
 
 export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
@@ -38,10 +40,12 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   fieldErrors = {},
   isEdit,
   nationalCodeRequired = false,
+  showNationalCode = nationalCodeRequired,
   nationalCodeConflict = null,
   onContinueNationalCodeConflict,
   disabledAmount = false,
   existingContract = false,
+  dateFormat = 'jalali',
 }) => {
   if (!isOpen) return null;
 
@@ -64,7 +68,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
     >
         <div className="mx-auto w-full max-w-3xl px-0 py-0">
           <div className="space-y-3">
-            <ContractPaymentInstallmentFields method={method} amount={String(form.amount ?? '')}
+            <ContractPaymentInstallmentFields dateFormat={dateFormat} method={method} amount={String(form.amount ?? '')}
               existingContract={existingContract}
               date={form.paymentDate ?? ''}
               amountLabel={isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : isCheck ? 'مبلغ چک (تومان)' : 'مبلغ (تومان)'}
@@ -75,8 +79,8 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
               onAmountChange={value => onFormChange({ amount: Number(value || 0) })}
               onDateChange={value => onFormChange({ paymentDate: value })} />
 
-            {(isCheck || nationalCodeRequired) && <ContractPaymentCheckFields showCheckFields={isCheck}
-              nationalCodeRequired={nationalCodeRequired}
+            {(isCheck || showNationalCode) && <ContractPaymentCheckFields dateFormat={dateFormat} showCheckFields={isCheck}
+              nationalCodeRequired={nationalCodeRequired} showNationalCode={showNationalCode}
               value={{ number: form.checkNumber ?? '', ownerName: form.checkOwnerName ?? '',
                 handoverDate: form.handoverDate ?? '', nationalCode: form.nationalCode ?? '' }}
               errors={{ number: fieldErrors.checkNumber, ownerName: fieldErrors.checkOwnerName,

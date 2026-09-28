@@ -10,7 +10,7 @@ test('Partner contract detail exposes applicable contract actions and delivery a
     canFinalize: true, canSendConfirmation: true, canRequestCorrection: true,
     canCancel: false, canRequestVoid: false };
   const labels = partnerCasePageActions(actions).map(action => action.label);
-  assert.ok(labels.includes('تأیید و نهایی‌سازی قرارداد'));
+  assert.ok(labels.includes('تأیید'));
   assert.ok(labels.includes('ارسال پیامک تأیید'));
   const { partner: view, customer } = createPartnerFixtures();
   const html = renderToStaticMarkup(<PartnerCaseDetailContent view={view} actions={actions}
@@ -21,4 +21,26 @@ test('Partner contract detail exposes applicable contract actions and delivery a
   assert.match(html, /مشتری و پروژه/);
   assert.match(html, /تاریخچه پرونده/);
   assert.match(html, /ایجاد پرونده/);
+});
+
+test('Partner contract toolbar uses existing actions and keeps the SMS label', () => {
+  const called: string[] = [];
+  const actions = partnerCasePageActions({ canPreview: false, canIssue: false, canContinue: false,
+    canFinalize: false, canCancel: false, canRequestVoid: false, canRequestCorrection: true,
+    canSendConfirmation: true, canDownload: true, canPrint: true,
+    onRequestCorrection: () => { called.push('edit'); }, onDownload: () => { called.push('pdf'); },
+    onPrint: () => { called.push('print'); }, onSendConfirmation: () => { called.push('sms'); } });
+  assert.deepEqual(actions.map(item => item.label), ['ویرایش', 'دانلود PDF', 'پرینت', 'ارسال پیامک تأیید']);
+  actions.forEach(action => action.onClick?.());
+  assert.deepEqual(called, ['edit', 'pdf', 'print', 'sms']);
+  assert.equal(partnerCasePageActions({ canPreview: false, canIssue: false, canRequestCorrection: false,
+    canCancel: false, canRequestVoid: false }).length, 0);
+});
+
+test('customer contract decisions replace Case commit and cancellation actions in the Sales header', () => {
+  const actions = { canPreview: false, canIssue: false, canFinalize: true, canCancel: true,
+    canRequestCorrection: false, canRequestVoid: false };
+  const decisionActions = [{ label: 'امضا', onClick: () => undefined }];
+  assert.deepEqual(partnerCasePageActions({ ...actions, decisionActions }).map(action => action.label), ['امضا']);
+  assert.deepEqual(partnerCasePageActions({ ...actions, decisionActions: [] }), []);
 });

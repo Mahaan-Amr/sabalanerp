@@ -1,9 +1,11 @@
 'use client';
 
+import PersianCalendarComponent from '@/components/PersianCalendar';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import moment from 'moment-jalaali';
-import { ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpSegmentedControl, ErpSelect, ErpToolbar } from '@/components/erp';
+import { ErpEmptyState, ErpField, ErpInlineState, ErpLoading, ErpSegmentedControl, ErpSelect, ErpToolbar } from '@/components/erp';
 import { FaChartLine } from 'react-icons/fa';
 import api from '@/lib/api';
 import { PartnerReportView, type PartnerReportPresentation } from './PartnerReportView';
@@ -98,9 +100,7 @@ export function PartnerReportRuntime() {
   };
   const periodControl = <div className="space-y-3"><ErpSegmentedControl value={periodPreset} onChange={choosePeriod}
     options={[{ value: '3', label: '۳ ماه' }, { value: '6', label: '۶ ماه' }, { value: '12', label: '۱۲ ماه' }, { value: 'custom', label: 'بازه دلخواه' }]} />
-    {periodPreset === 'custom' && <div className="grid gap-4 sm:grid-cols-2"><ErpField label="از"><ErpInput type="date" value={from}
-      onChange={event => setFrom(event.target.value)} /></ErpField><ErpField label="تا"><ErpInput type="date" value={to}
-      onChange={event => setTo(event.target.value)} /></ErpField></div>}</div>;
+    {periodPreset === 'custom' && <div className="grid gap-4 sm:grid-cols-2"><ErpField label="از"><PersianCalendarComponent valueFormat="gregorian" value={from} onChange={setFrom} className="w-full" /></ErpField><ErpField label="تا"><PersianCalendarComponent valueFormat="gregorian" value={to} onChange={setTo} className="w-full" /></ErpField></div>}</div>;
   const filters = <ErpToolbar search={{ value: search, placeholder: 'شماره پرونده یا قرارداد مشتری', onChange: setSearch }}
     filters={<ErpSelect aria-label="وضعیت" value={state} onChange={event => setState(event.target.value as StateFilter)}>
       <option value="">همه وضعیت‌ها</option><option value="DRAFT">پیش‌نویس</option><option value="AWAITING_CUSTOMER_CONFIRMATION">در انتظار تأیید مشتری</option>

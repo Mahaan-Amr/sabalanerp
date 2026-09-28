@@ -84,6 +84,7 @@ type DisplayFact = { label: string; value: string };
  * and canonical graph internals are deliberately impossible to append here. */
 export function presentSavedTechnicalConfiguration(input: {
   productRowId: string;
+  areaSquareMeters?: string;
   family: keyof typeof familyLabels;
   product: PartnerTechnicalProduct;
   draftRow?: PartnerTechnicalDraft['rows'][number];
@@ -100,6 +101,7 @@ export function presentSavedTechnicalConfiguration(input: {
   };
   add('خانواده محصول', familyLabels[input.family] ?? input.family);
   add('کد محصول', product.code);
+  add('مساحت', input.areaSquareMeters, ' متر مربع');
   add('نوع سنگ', product.attributes.stoneType);
   add('ضخامت', product.dimensions.thicknessCentimeters, ' سانتی‌متر');
 
@@ -214,7 +216,7 @@ export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['res
     return { ok: true, value: { identity, description: product.name,
       ...(paidChild?.kind === 'remainder' ? { paidSourceProductRowId: paidChild.sourceProductRowId } : {}),
       configuration: [...presentSavedTechnicalConfiguration({ productRowId: input.reference.productRowId,
-        family: identity.family, product, draftRow,
+        family: identity.family, product, draftRow, areaSquareMeters: graphRow.commercial?.requestedAreaSquareMeters,
         dependents: snapshot.draft.dependents,
         operations: context.catalog?.operations ?? [], graphOperations: snapshot.graph,
         technicalPolicy: context.technicalPolicy }), ...childFacts] } };

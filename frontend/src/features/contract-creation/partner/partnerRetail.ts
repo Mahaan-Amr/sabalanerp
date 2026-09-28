@@ -198,11 +198,22 @@ export function remainingPartnerAmount(total: string, allocated: readonly string
  * The numbered Case is created before the payment step, so its provisional
  * plan must already reconcile with the partner-visible retail envelope. */
 export function alignPartnerCustomerPaymentPlan(rows: PartnerRetailRow[], discount: Money,
-  plan: PartnerDraftIntent['customerPaymentPlan']): PartnerDraftIntent['customerPaymentPlan'] {
+  plan: PartnerDraftIntent['customerPaymentPlan'], adjustAmount = true): PartnerDraftIntent['customerPaymentPlan'] {
+  if (!adjustAmount) return plan;
   const summary = partnerRetailSummary(rows, discount);
   const [first, ...later] = plan.installments;
   const firstAmount = summary.valid && first
     ? remainingPartnerAmount(summary.retail, later.map(item => item.amount.amount)) : null;
   return first && firstAmount !== null ? { ...plan, installments: [{ ...first,
     amount: { amount: firstAmount, currency: first.amount.currency } }, ...later] } : plan;
+}
+
+/** Prefill a new installment from the final discounted total without modifying existing payments. */
+export function newPartnerPaymentInstallment(total: Money, plan: PartnerDraftIntent['customerPaymentPlan'],
+  installmentId: string, currentDate: string): PartnerDraftIntent['customerPaymentPlan']['installments'][number] {
+  return {
+    installmentId, dueDate: currentDate,
+    amount: { amount: remainingPartnerAmount(total.amount, plan.installments.map(item => item.amount.amount)) ?? '0', currency: total.currency },
+    method: 'BANK_TRANSFER', subtype: 'SHIBA',
+  };
 }

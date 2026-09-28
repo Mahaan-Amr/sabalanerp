@@ -8,10 +8,11 @@ import { ContractPaymentMethodSelect } from './ContractPaymentMethodSelect';
 
 export function ContractPaymentInstallmentFields({ method, amount, date, amountLabel = 'مبلغ (تومان)',
   dateLabel = 'تاریخ پرداخت', disabledAmount = false, disabled = false, existingContract = false, amountError, dateError,
-  onMethodChange, onAmountChange, onDateChange }: {
+  dateFormat = 'jalali', onMethodChange, onAmountChange, onDateChange }: {
   method: PaymentEntryMethod;
   amount: string;
   date: string;
+  dateFormat?: 'jalali' | 'gregorian';
   amountLabel?: string;
   dateLabel?: string;
   disabledAmount?: boolean;
@@ -28,7 +29,7 @@ export function ContractPaymentInstallmentFields({ method, amount, date, amountL
       onChange={onMethodChange} /></ErpField>
     <ErpField label={amountLabel} error={amountError}><ErpRialInput dir="ltr" value={amount}
       disabled={disabled || disabledAmount} onValueChange={onAmountChange} /></ErpField>
-    <ErpField label={dateLabel} error={dateError}><PersianCalendarComponent value={date}
+    <ErpField label={dateLabel} error={dateError}><PersianCalendarComponent valueFormat={dateFormat} value={date}
       onChange={onDateChange} className="w-full" disablePastDates disabled={disabled} /></ErpField>
     {method === 'CUSTOMER_BALANCE' && <div className="sm:col-span-3"><ErpInlineState kind="stale"
       title="در صورت مغایرت مانده مشتری با حسابداری، قرارداد منقضی می‌شود." /></div>}

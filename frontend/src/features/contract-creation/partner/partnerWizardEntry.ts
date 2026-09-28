@@ -1,10 +1,30 @@
-import { PartnerErrorSchema, PartnerTechnicalSavedViewSchema, partnerTrackingCode,
+import { IdSchema, PartnerCaseViewSchema, PartnerErrorSchema, PartnerTechnicalSavedViewSchema, partnerTrackingCode,
   type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryRow, PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
 import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import { defaultPartnerRetailRows, partnerRetailIntentRows, remainingPartnerAmount } from './partnerRetail';
 import type { PartnerWizardDraft } from './PartnerContractWizard';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
+
+export function partnerCasePricingInquiryIds(recoveryId: string, publishedIds: readonly string[],
+  rows: readonly PartnerInquiryRow[]): string[] {
+  const ids = new Set(publishedIds.filter(id => id.startsWith(`partner-case-pricing:${recoveryId}:`)));
+  for (const row of rows) for (const binding of [row.approvedRowBinding, row.predecessor, row.successor]) {
+    if (binding) ids.add(binding.inquiryId);
+  }
+  return Array.from(ids);
+}
+
+export function partnerFinalizedContractPath(result: unknown, caseId: string): string {
+  const response = result as { success?: boolean; data?: { customerContractId?: unknown; case?: unknown } } | null;
+  const linkedId = IdSchema.safeParse(response?.data?.customerContractId);
+  const view = PartnerCaseViewSchema.safeParse(response?.data?.case);
+  if (!response?.success || !linkedId.success || !view.success ||
+      view.data.owner.caseId !== caseId || view.data.state !== 'COMMITTED') {
+    throw new Error('Finalized contract identity unavailable');
+  }
+  return `/dashboard/sales/contracts/${encodeURIComponent(linkedId.data)}`;
+}
 
 export const shouldPreferLocalPartnerWizard = (localServerRevision: number | undefined, currentServerRevision: number) =>
   localServerRevision === currentServerRevision;
@@ -23,7 +43,8 @@ export function partnerCreationRouteIdentity(params: Pick<URLSearchParams, 'get'
 }
 
 export function partnerCreationRequestedInquiry(params: Pick<URLSearchParams, 'get'>, latestInquiryId?: string): string | null {
-  return params.get('caseId') ? null : params.get('inquiryId') || latestInquiryId || null;
+  if (params.get('caseId')) return null;
+  return params.get('inquiryId') || (params.get('draftId') ? null : latestInquiryId) || null;
 }
 
 export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], openingNumberedResult: boolean): PartnerWizardDraft['step'] {
@@ -78,7 +99,6 @@ export function rebasePartnerWizardSnapshot<T extends { serverRevision?: number 
 
 export function preservePartnerDeliveriesAcrossProductEdit(
   previous: PartnerDraftIntent['deliveries'],
-  defaults: PartnerDraftIntent['deliveries'],
   currentProductRowIds: readonly string[],
 ): PartnerDraftIntent['deliveries'] {
   const currentIds = new Set(currentProductRowIds);
@@ -86,12 +106,21 @@ export function preservePartnerDeliveriesAcrossProductEdit(
     const items = delivery.items.filter(item => currentIds.has(item.productRowId));
     return items.length > 0 ? [{ ...delivery, items }] : [];
   });
-  const represented = new Set(preserved.flatMap(delivery => delivery.items.map(item => item.productRowId)));
-  const additions = defaults.flatMap(delivery => {
-    const items = delivery.items.filter(item => currentIds.has(item.productRowId) && !represented.has(item.productRowId));
-    return items.length > 0 ? [{ ...delivery, items }] : [];
-  });
-  return [...preserved, ...additions];
+  return preserved;
+}
+
+export function partnerDeliveryPlanIssue(
+  deliveries: PartnerDraftIntent['deliveries'],
+  rows: readonly { productRowId: string; quantity: string }[],
+): string | null {
+  if (!deliveries.length) return null;
+  if (deliveries.some(item => !item.items.length || !item.date || !item.destination.trim() ||
+      !item.projectManagerName?.trim() || !item.receiverName?.trim())) return 'برنامه تحویل را کامل کنید.';
+  if (rows.some(row => remainingPartnerAmount(row.quantity, deliveries.flatMap(delivery => delivery.items
+    .filter(item => item.productRowId === row.productRowId).map(item => item.quantity))) !== '0')) {
+    return 'مقدار تحویل هر محصول باید دقیقاً با مقدار قرارداد برابر باشد.';
+  }
+  return null;
 }
 
 /** A technical correction can reduce a row after the delivery plan was saved.
@@ -145,12 +174,27 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
       row.configurationRef.recoveryId === subject.configurationRef.recoveryId &&
       row.configurationRef.recoveryRevision === subject.configurationRef.recoveryRevision)
       .sort((left, right) => Number(Boolean(left.successor)) - Number(Boolean(right.successor)) || right.revision - left.revision);
-    return matching.find(row => approved.includes(row)) ?? matching[0] ?? {
+    // A recovery revision changes for the whole graph. Keep each rejected leaf's
+    // identity and reason while sending its corrected, current configuration.
+    // Historical approvals must still pass the exact configuration match above.
+    const historicalLeaf = availableRows.filter(row => ['REJECTED', 'PENDING'].includes(row.state) && !row.successor &&
+      row.configurationRef.productRowId === subject.configurationRef.productRowId &&
+      row.configurationRef.recoveryId === subject.configurationRef.recoveryId &&
+      row.configurationRef.recoveryRevision < subject.configurationRef.recoveryRevision)
+      .sort((left, right) => right.configurationRef.recoveryRevision - left.configurationRef.recoveryRevision ||
+        right.revision - left.revision)[0];
+    const selected = matching.find(row => approved.includes(row)) ?? matching[0] ?? (historicalLeaf?.state === 'REJECTED' ? {
+      ...historicalLeaf, submissionState: 'UNSENT' as const, configurationRef: subject.configurationRef,
+    } : historicalLeaf) ?? {
       rowId: `${subject.configurationRef.productRowId}-awaiting-inquiry`, revision: 1,
       submissionState: 'UNSENT',
       description: `محصول ${index + 1}`, state: 'PENDING', configuration: [], usedCaseNumbers: [],
       configurationRef: subject.configurationRef,
     };
+    if (selected.state === 'APPROVED' && !approved.includes(selected)) {
+      return { ...selected, approvedPrice: undefined, approvedRowBinding: undefined };
+    }
+    return selected;
   });
   const configured = [];
   for (const technical of saved.data.rows) {
@@ -181,4 +225,9 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
     subject.configurationRef.productRowId === row.configurationRef.productRowId)
     ? [{ pricingSubjectId: row.configurationRef.productRowId, inquiryRow: row }] : []);
   return { intent, rows, materialInquiryRows, step: 'date' };
+}
+
+export function partnerSaleReturnStep(params: Pick<URLSearchParams, 'get'>): 'customer' | 'project' | null {
+  if (params.get('returnTo') !== 'contract') return null;
+  return params.get('step') === '3' ? 'project' : params.get('step') === '2' ? 'customer' : null;
 }

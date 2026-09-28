@@ -269,3 +269,17 @@ test('recovery replay refuses a different actor or changed intent without cleari
   assert.equal(sent, false);
   assert.ok(pending);
 });
+
+test('final submission hashes optional blank payment and discount fields as their JSON transport', async () => {
+  let executed = false;
+  const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId, initialCase: fixture.partner,
+    commands: { execute: async command => { executed = true;
+      return { ok: true, value: { commandId: command.commandId, replayed: false, case: fixture.partner, eventIds: [] } };
+    } }, recovery: { pending: () => null, savePending: async () => undefined,
+      clearPending: async () => undefined, finalizeCommitted: async () => undefined, prepareEditLease },
+  });
+  await submission.submit({ ...intent(), retailDiscountPercent: undefined,
+    customerPaymentPlan: { ...intent().customerPaymentPlan,
+      installments: intent().customerPaymentPlan.installments.map(item => ({ ...item, nationalCode: undefined })) } });
+  assert.equal(executed, true, submission.getSnapshot().message);
+});

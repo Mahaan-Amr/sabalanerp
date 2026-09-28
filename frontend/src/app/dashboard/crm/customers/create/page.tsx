@@ -31,7 +31,7 @@ import {
 import { CustomerWorkflowPage, CustomerWorkflowSection, hasCustomerDraftChanges } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 import { CustomerProjectFormFields } from '@/features/crm/customer-workflow/CustomerProjectFormFields';
 import { writeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
-import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
+import { partnerInputHash as canonicalHash } from '@sabalanerp/partner-sales-contracts';
 
 interface ProjectAddress {
   id?: string;
@@ -1000,6 +1000,10 @@ export default function CreateCustomerPage() {
   const returnToContract = () => {
     const urlParams = new URLSearchParams(window.location.search);
     const requestedStep = urlParams.get('step');
+    if (partnerContractMode) {
+      router.push(getContractReturnUrl('2'));
+      return;
+    }
     const savedState = localStorage.getItem('contractWizardState');
     if (savedState) {
       const { currentStep } = JSON.parse(savedState);

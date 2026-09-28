@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { canonicalHash, type PartnerDirectActivationViewV4 } from '@sabalanerp/partner-sales-contracts';
+import { partnerInputHash as canonicalHash, type PartnerDirectActivationViewV4 } from '@sabalanerp/partner-sales-contracts';
 import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpInlineState, ErpSection,
   ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
 import { createPartnerDirectActivationHttpPort } from './partnerDirectActivationHttpPort';

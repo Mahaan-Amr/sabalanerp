@@ -11,18 +11,38 @@ import { alignPartnerCustomerPaymentPlan, defaultPartnerRetailRows, partnerRetai
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
 import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
 import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
-import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, reconcilePartnerDeliveriesToProducts, rebasePartnerWizardSnapshot,
+import { enterPartnerWizard, partnerDeliveryPlanIssue, preservePartnerDeliveriesAcrossProductEdit, reconcilePartnerDeliveriesToProducts, rebasePartnerWizardSnapshot,
   partnerCasePendingStorageKey, partnerCreationPathAfterCustomerCreate, shouldPreferLocalPartnerWizard,
   isExplicitPartnerCreationEntry, partnerProductEditPath, shouldOfferPartnerDraftChoice,
-  shouldStartFreshPartnerCreation, partnerCreationRouteIdentity, partnerCreationRequestedInquiry,
+  shouldStartFreshPartnerCreation, partnerCreationRouteIdentity, partnerCreationRequestedInquiry, partnerSaleReturnStep,
   partnerCaseResultStep, partnerCaseHasIntegrityError, partnerCaseReviewMessage,
-  latestMatchingPartnerInquiryRow } from '../../contract-creation/partner/partnerWizardEntry';
+  latestMatchingPartnerInquiryRow, partnerCasePricingInquiryIds, partnerFinalizedContractPath } from '../../contract-creation/partner/partnerWizardEntry';
 import { partnerProductEditEntry, partnerSaleEntryIssue } from '../../contract-creation/partner/partnerProductEditEntry';
 import { WIZARD_STEPS } from '../../contract-creation/constants/contract.constants';
 import { partnerError, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import { selectPartnerReinquiryRows } from '../../contract-creation/partner/partnerReinquiry';
 
 const fixture = createPartnerFixtures();
+
+test('successful finalization opens exactly the linked customer contract and rejects a mismatched result', () => {
+  const result = { success: true, data: { customerContractId: 'created-contract-1',
+    case: { ...fixture.partner, state: 'COMMITTED' } } };
+  assert.equal(partnerFinalizedContractPath(result, fixture.partner.owner.caseId),
+    '/dashboard/sales/contracts/created-contract-1');
+  assert.throws(() => partnerFinalizedContractPath(result, 'another-case'));
+  assert.throws(() => partnerFinalizedContractPath({ ...result, success: false }, fixture.partner.owner.caseId));
+  assert.throws(() => partnerFinalizedContractPath({ success: true, data: { case: result.data.case } },
+    fixture.partner.owner.caseId));
+});
+
+test('pricing refresh reads published inquiry identities without inventing IDs from Case revisions', () => {
+  const root = 'recovery-1';
+  const actual = ['partner-case-pricing:recovery-1:1', 'partner-case-pricing:recovery-1:5',
+    'partner-case-pricing:recovery-2:2'];
+  assert.deepEqual(partnerCasePricingInquiryIds(root, actual, []), actual.slice(0, 2));
+  assert.deepEqual(partnerCasePricingInquiryIds(root, [], [fixture.inquiry.rows[0]]),
+    [fixture.inquiry.rows[0].approvedRowBinding!.inquiryId]);
+});
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
 rows[0].wholesaleUnitPrice = { amount: '800', currency: 'IRR' };
 const draft: PartnerWizardDraft = { step: 'products', rows, intent: {
@@ -151,7 +171,7 @@ test('an acknowledged earlier save rebases the newer queued local snapshot befor
   assert.equal(rebased.draft.marker, 'newer-B');
 });
 
-test('product editing preserves split and grouped deliveries while adding only new product defaults', () => {
+test('product editing preserves user deliveries without adding schedules for new products', () => {
   const previous = [
     { deliveryId: 'delivery-a', date: '2026-09-01', destination: 'مقصد اول', items: [
       { productRowId: 'row-a', quantity: '1' }, { productRowId: 'row-b', quantity: '2' },
@@ -160,15 +180,11 @@ test('product editing preserves split and grouped deliveries while adding only n
       { productRowId: 'row-a', quantity: '3' }, { productRowId: 'removed-row', quantity: '1' },
     ] },
   ];
-  const defaults = [
-    { deliveryId: 'default-a', date: '2026-09-10', destination: 'پیش‌فرض', items: [{ productRowId: 'row-a', quantity: '4' }] },
-    { deliveryId: 'default-c', date: '2026-09-11', destination: 'پیش‌فرض جدید', items: [{ productRowId: 'row-c', quantity: '5' }] },
-  ];
-  assert.deepEqual(preservePartnerDeliveriesAcrossProductEdit(previous, defaults, ['row-a', 'row-b', 'row-c']), [
+  assert.deepEqual(preservePartnerDeliveriesAcrossProductEdit(previous, ['row-a', 'row-b', 'row-c']), [
     { ...previous[0] },
     { ...previous[1], items: [{ productRowId: 'row-a', quantity: '3' }] },
-    defaults[1],
   ]);
+  assert.deepEqual(preservePartnerDeliveriesAcrossProductEdit([], ['row-a', 'row-c']), []);
 });
 
 test('a corrected product quantity trims stale delivery allocations before price acceptance', () => {
@@ -342,7 +358,7 @@ test('the pricing step reveals each Sabalan offer and exposes explicit partner a
   assert.doesNotMatch(html, /در انتظار تکمیل استعلام|ساخت پرونده و ورود به Wizard/);
 });
 
-test('a rejected row shows the responder reason and only its correction action', () => {
+test('a rejected row shows the responder reason and both correction and re-inquiry actions', () => {
   const rejected = draft.rows.map(row => ({ ...row, inquiryRow: { ...row.inquiryRow,
     state: 'REJECTED' as const, approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
     approvedRowBinding: undefined, noteOrReason: 'ابعاد این محصول نیاز به اصلاح دارد' } }));
@@ -351,6 +367,7 @@ test('a rejected row shows the responder reason and only its correction action',
     now={Date.parse('2026-09-26T08:00:00.000Z')} renderSection={() => null} validateStep={() => null}
     onReinquire={() => undefined} onEditProduct={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /ابعاد این محصول نیاز به اصلاح دارد/);
+  assert.match(html, /استعلام مجدد همین محصول/);
   assert.match(html, /ویرایش این محصول/);
   assert.doesNotMatch(html, /استعلام مجدد کل بسته|در انتظار پاسخ/);
 });
@@ -366,7 +383,7 @@ test('a corrected rejected row offers an explicit inquiry for that row before wa
     now={Date.parse('2026-09-26T08:00:00.000Z')} renderSection={() => null} validateStep={() => null}
     onReinquire={() => undefined} onEditProduct={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /استعلام مجدد همین محصول/);
-  assert.doesNotMatch(html, /ویرایش این محصول/);
+  assert.match(html, /ویرایش این محصول/);
   assert.match(html, /در انتظار تکمیل استعلام/);
 });
 
@@ -430,4 +447,26 @@ test('returning to product edits restores the same recovery customer, project an
   assert.equal(partnerSaleEntryIssue(expected), null);
   assert.deepEqual(partnerSaleEntryIssue({ ...expected, projectId: '' }), {
     step: 'project', message: 'پروژه را انتخاب کنید.' });
+});
+
+
+test('delivery scheduling is optional but a user-added plan must remain complete', () => {
+  const rows = [{ productRowId: 'row-a', quantity: '5' }];
+  assert.equal(partnerDeliveryPlanIssue([], rows), null);
+  const delivery = { deliveryId: 'user-delivery', date: '2026-09-30', destination: 'مقصد',
+    receiverName: 'گیرنده', projectManagerName: 'مدیر', items: [{ productRowId: 'row-a', quantity: '5' }] };
+  assert.equal(partnerDeliveryPlanIssue([delivery], rows), null);
+  assert.match(partnerDeliveryPlanIssue([{ ...delivery, items: [] }], rows)!, /کامل کنید/);
+  assert.match(partnerDeliveryPlanIssue([{ ...delivery, items: [{ productRowId: 'row-a', quantity: '4' }] }], rows)!, /دقیقاً/);
+  assert.equal(partnerDeliveryPlanIssue([], rows), null);
+});
+
+test('returning to a specific customer draft never restores the latest unrelated inquiry', () => {
+  assert.equal(partnerCreationRequestedInquiry(new URLSearchParams('returnTo=contract&step=2&draftId=current-draft&partnerContract=1'), 'previous-inquiry'), null);
+});
+
+test('explicit customer and project return steps take precedence over a saved product step', () => {
+  assert.equal(partnerSaleReturnStep(new URLSearchParams('returnTo=contract&step=2')), 'customer');
+  assert.equal(partnerSaleReturnStep(new URLSearchParams('returnTo=contract&step=3')), 'project');
+  assert.equal(partnerSaleReturnStep(new URLSearchParams()), null);
 });

@@ -1,4 +1,5 @@
-﻿import axios from 'axios';
+﻿import { normalizePartnerInput } from '@sabalanerp/partner-sales-contracts';
+import axios from 'axios';
 
 import type { InternalAxiosRequestConfig } from 'axios';
 import { createClientRequestId } from './requestIdentity';
@@ -131,6 +132,10 @@ const clearRetryKey = (config?: RetryAwareConfig) => {
 };
 
 api.interceptors.request.use(async (config) => {
+  if (config.url?.startsWith('/partner/') && config.data && typeof config.data === 'object'
+      && !(typeof FormData !== 'undefined' && config.data instanceof FormData)) {
+    config.data = normalizePartnerInput(config.data);
+  }
   const method = String(config.method || 'get').toUpperCase();
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   if (!config.headers.has('x-correlation-id')) {

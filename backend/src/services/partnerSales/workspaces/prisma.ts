@@ -21,7 +21,7 @@ export function createPrismaPartnerWorkspaceQuery(input: {
   const readManagementWorkspace = input.readManagementWorkspace ?? createPrismaManagementWorkspaceReader(input);
   return createPartnerWorkspaceQuery<Transaction>({
     actorId: input.actorId,
-    transaction: work => readPartnerSnapshot(input.database, work),
+    transaction: work => readPartnerSnapshot(input.database, work, { multiRootAuthority: true }),
     async listResponderInquiryIds(transaction, page) {
       const take = Math.min(page.limit * 4 + 1, 401);
       const workspaceAuthority = await resolvePartnerWorkspaceAuthority(transaction, input.actorId);

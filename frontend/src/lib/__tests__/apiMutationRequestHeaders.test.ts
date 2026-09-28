@@ -63,3 +63,23 @@ test('an explicit correlation id is preserved while retry idempotency remains st
   assert.ok(observedHeaders[0]['x-idempotency-key']);
   assert.equal(observedHeaders[1]['x-idempotency-key'], observedHeaders[0]['x-idempotency-key']);
 });
+
+test('all Partner text and numeric JSON inputs are normalized before transport and keep the intended hash', async () => {
+  const { partnerInputHash, canonicalHash } = await import('@sabalanerp/partner-sales-contracts');
+  const previousAdapter = api.defaults.adapter;
+  const intent = { type: 'INQUIRY_DECIDE', reason: 'عرض ۳۰، تعداد ۵', amount: '۱۲۳٫۴۵', nested: ['٠٩١٢٣'] };
+  const payloadHash = await partnerInputHash(intent);
+  let wire: typeof intent & { payloadHash: string } | undefined;
+  api.defaults.adapter = async config => {
+    wire = JSON.parse(config.data);
+    return { data: { success: true }, status: 200, statusText: 'OK', headers: {}, config };
+  };
+  try { await api.post('/partner/inquiries/commands', { ...intent, payloadHash }); }
+  finally { api.defaults.adapter = previousAdapter; }
+  assert.ok(wire);
+  const { payloadHash: sentHash, ...received } = wire;
+  assert.equal(received.reason, 'عرض 30, تعداد 5');
+  assert.equal(received.amount, '123.45');
+  assert.deepEqual(received.nested, ['09123']);
+  assert.equal(sentHash, await canonicalHash(received));
+});

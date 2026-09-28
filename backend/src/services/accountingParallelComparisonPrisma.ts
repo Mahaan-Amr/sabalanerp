@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { compareAccountingParallelEvents, type ParallelEventPair } from './accountingParallelComparison';
 import { AccountingReplacementError, hashAccountingReplacementEvidence } from './accountingReplacement';
 import { createAccountingReplacementPrismaRepository } from './accountingReplacementPrismaRepository';
@@ -10,6 +10,18 @@ const code = 'PARALLEL_EVENTS';
 const object = (value: unknown) => value as Record<string, unknown>;
 const day = (date: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
+
+/** Retry the whole transaction only after PostgreSQL has rolled back a serialization conflict. */
+export const runAccountingParallelTransaction = async <T>(db: PrismaClient, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try { return await db.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 20_000, timeout: 120_000 }); }
+    catch (error) {
+      if ((error as { code?: string }).code !== 'P2034') throw error;
+      if (attempt === 2) throw new AccountingReplacementError('PARALLEL_CONCURRENT_CHANGE', 'داده‌ها هم‌زمان تغییر کردند؛ عملیات را دوباره اجرا کنید.', 409);
+    }
+  }
+  throw new Error('Unreachable parallel transaction state');
+};
 
 /** Caller passes identities only; all amounts, mappings and evidence are read from their owners. */
 export const recordAccountingParallelComparison = async (tx: Prisma.TransactionClient, command: {

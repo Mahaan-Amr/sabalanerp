@@ -12,7 +12,8 @@ import { accountingAccessProfileFromPermission } from '../services/accountingLed
 import { AccountingReplacementError, createAccountingReplacementApplication, type MigrationRecordKind } from '../services/accountingReplacement';
 import { createAccountingReplacementPrismaRepository } from '../services/accountingReplacementPrismaRepository';
 import { compareSepidarSnapshots } from '../services/sepidarSnapshotDelta';
-import { recordAccountingParallelComparison } from '../services/accountingParallelComparisonPrisma';
+import { recordAccountingParallelComparison, runAccountingParallelTransaction } from '../services/accountingParallelComparisonPrisma';
+import { manageAccountingParallelDifference } from '../services/accountingParallelDifferences';
 import { Prisma } from '@prisma/client';
 
 const router = express.Router();
@@ -60,7 +61,7 @@ router.get('/overview', access('view'), handle(async (req) => {
   const exceptions = [
     ...exceptionCases.map((item) => ({ id: item.id, category: item.code.includes('TAX') ? 'مالیات' : item.code.includes('BANK') ? 'بانک' : item.code.includes('CHECK') ? 'چک' : 'ثبت',
       title: item.messagePersian, owner: item.assignedUserId ?? item.assignedProfile, ageHours: Math.floor((now - item.createdAt.getTime()) / 3_600_000), status: item.status,
-      source: `${item.sourceType}:${item.sourceId}`, resolutionHref: `/dashboard/accounting/customer-accounts` })),
+      source: `${item.sourceType}:${item.sourceId}`, resolutionHref: item.sourceType === 'ACCOUNTING_PARALLEL_DIFFERENCE' ? '/dashboard/accounting/replacement' : '/dashboard/accounting/customer-accounts' })),
     ...supplyExceptions.map((item) => ({ id: item.id, category: item.code.includes('INVENTORY') ? 'موجودی' : item.code.includes('CHECK') ? 'چک' : 'ثبت',
       title: item.messagePersian, owner: 'حسابدار', ageHours: Math.floor((now - item.createdAt.getTime()) / 3_600_000), status: 'باز',
       source: `${item.sourceType}:${item.sourceId}`, resolutionHref: '/dashboard/accounting/supply-chain' })),
@@ -282,16 +283,30 @@ router.get('/parallel-comparisons/context', access('admin'), handle(async (req) 
     select: { id: true, description: true, documentDate: true, referenceNumber: true }, orderBy: { documentDate: 'asc' } }) : [];
   const reports = periodId ? await prisma.accountingOperationalReconciliation.findMany({ where: { bookId, periodId, reconciliationCode: 'PARALLEL_EVENTS' },
     select: { id: true, reconciledAt: true, controlPayload: true }, orderBy: { reconciledAt: 'desc' }, take: 20 }) : [];
-  return { periods: periods.map((period) => ({ id: period.id, title: `${period.fiscalYear.code} · ${period.titlePersian}` })), targets, reports };
+  const cases = periodId ? await prisma.accountingExceptionCase.findMany({ where: { sourceType: 'ACCOUNTING_PARALLEL_DIFFERENCE',
+    AND: [{ resolutionEvidence: { path: ['bookId'], equals: bookId } }, { resolutionEvidence: { path: ['periodId'], equals: periodId } }] }, orderBy: { createdAt: 'desc' } }) : [];
+  const owners = cases.length ? await prisma.user.findMany({ where: { id: { in: cases.flatMap((item) => item.assignedUserId ? [item.assignedUserId] : []) } }, select: { id: true, firstName: true, lastName: true } }) : [];
+  return { periods: periods.map((period) => ({ id: period.id, title: `${period.fiscalYear.code} · ${period.titlePersian}` })), targets, reports,
+    cases: cases.map((item) => ({ ...item, ownerName: owners.find((user) => user.id === item.assignedUserId) ? `${owners.find((user) => user.id === item.assignedUserId)!.firstName} ${owners.find((user) => user.id === item.assignedUserId)!.lastName}` : 'مدیر حسابداری' })) };
 }));
 router.post('/parallel-comparisons', access('admin'), handle((req) => {
   const { bookId, periodId, snapshotId } = req.body;
   if (![bookId, periodId, snapshotId].every((value) => typeof value === 'string' && value.trim())) throw new AccountingReplacementError('PARALLEL_SCOPE_REQUIRED', 'دفتر، دوره و نسخهٔ سپیدار الزامی‌اند.', 400);
   const pair = req.body.pair;
   if (pair && ![pair.sourceKey, pair.targetId, pair.reason].every((value) => typeof value === 'string' && value.trim())) throw new AccountingReplacementError('PARALLEL_PAIR_INVALID', 'شناسه دو رویداد و دلیل بررسی الزامی‌اند.', 400);
-  return prisma.$transaction((tx) => recordAccountingParallelComparison(tx, { bookId, periodId, snapshotId, actorId: actor(req).id,
-    pair: pair ? { sourceKey: pair.sourceKey, targetId: pair.targetId, reason: pair.reason } : undefined }),
-  { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 20_000, timeout: 120_000 });
+  return runAccountingParallelTransaction(prisma, (tx) => recordAccountingParallelComparison(tx, { bookId, periodId, snapshotId, actorId: actor(req).id,
+    pair: pair ? { sourceKey: pair.sourceKey, targetId: pair.targetId, reason: pair.reason } : undefined }));
+}, true));
+router.post('/parallel-differences', access('admin'), handle(async (req) => {
+  const { bookId, comparisonId, differenceIdentity, action, cause, resolution } = req.body;
+  if (![bookId, comparisonId, differenceIdentity].every((value) => typeof value === 'string' && value.trim())
+    || !['OPEN', 'NOTE', 'RESOLVE'].includes(action) || (action !== 'OPEN' && ![cause, resolution].every((value) => typeof value === 'string'))) {
+    throw new AccountingReplacementError('PARALLEL_DIFFERENCE_INPUT_INVALID', 'گزارش، اختلاف و اقدام معتبر باید مشخص شوند.', 400);
+  }
+  const saved = await runAccountingParallelTransaction(prisma, (tx) => manageAccountingParallelDifference(tx, { bookId, comparisonId, differenceIdentity,
+    action, cause, resolution, actorId: actor(req).id }));
+  const owner = saved.assignedUserId ? await prisma.user.findUnique({ where: { id: saved.assignedUserId }, select: { firstName: true, lastName: true } }) : null;
+  return { ...saved, ownerName: owner ? `${owner.firstName} ${owner.lastName}` : 'مدیر حسابداری', assignedToCaller: saved.assignedUserId === actor(req).id };
 }, true));
 router.post('/recovery-proofs', access('admin'), handle((req) => application.recordRecoveryProof({ ...req.body, bookId: String(req.body.bookId), rpoMinutes: Number(req.body.rpoMinutes), rtoMinutes: Number(req.body.rtoMinutes), actor: actor(req) }), true));
 router.post('/cutovers', access('admin'), handle((req) => application.prepareCutover({ ...req.body, bookId: String(req.body.bookId), actor: actor(req) }), true));

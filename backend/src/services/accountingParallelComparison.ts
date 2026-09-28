@@ -64,12 +64,22 @@ export const compareAccountingParallelEvents = (input: ParallelComparisonInput) 
   const sourceTotals = totals(input.sources.flatMap((source) => source.lines));
   const targetTotals = totals(input.targets.flatMap((target) => target.lines));
   differences.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  const observedDifferences = differences.map((item) => {
+    const source = input.sources.find((row) => row.key === item.sourceKey);
+    const target = input.targets.find((row) => row.id === item.targetId);
+    const sourceDebit = source ? totals(source.lines).debit : 0n;
+    const targetDebit = target ? totals(target.lines).debit : 0n;
+    return { ...item, identity: hashAccountingReplacementEvidence({ code: item.code, sourceKey: item.sourceKey, targetId: item.targetId }),
+      sourceDebitRials: source ? sourceDebit.toString() : null, targetDebitRials: target ? targetDebit.toString() : null,
+      amountRials: item.code === 'EVENTS_MISSING' ? null : (sourceDebit - targetDebit).toString(),
+      itemCount: (source?.lines.length ?? 0) + (target?.lines.length ?? 0) };
+  });
   const evidence = {
-    format: 'accounting-parallel-events-v1', bookId: input.bookId, periodId: input.periodId, snapshotId: input.snapshotId,
+    format: 'accounting-parallel-events-v2', bookId: input.bookId, periodId: input.periodId, snapshotId: input.snapshotId,
     sourcePackageHash: input.sourcePackageHash, acceptedPeriod: false as const,
     exact: differences.length === 0, sourceCount: input.sources.length, targetCount: input.targets.length,
     sourceDebitRials: sourceTotals.debit.toString(), sourceCreditRials: sourceTotals.credit.toString(),
-    targetDebitRials: targetTotals.debit.toString(), targetCreditRials: targetTotals.credit.toString(), differences,
+    targetDebitRials: targetTotals.debit.toString(), targetCreditRials: targetTotals.credit.toString(), differences: observedDifferences,
     pairs: [...input.pairs].sort((a, b) => a.sourceKey.localeCompare(b.sourceKey)),
     sourceEvidence: input.sources.map((item) => ({ key: item.key, hash: item.hash, observedHash: hashAccountingReplacementEvidence({ ...item, lines: item.lines.map(lineKey).sort() }) })).sort((a, b) => a.key.localeCompare(b.key)),
     targetEvidence: input.targets.map((item) => ({ id: item.id, hash: item.hash, observedHash: hashAccountingReplacementEvidence({ ...item, lines: item.lines.map(lineKey).sort() }) })).sort((a, b) => a.id.localeCompare(b.id)),

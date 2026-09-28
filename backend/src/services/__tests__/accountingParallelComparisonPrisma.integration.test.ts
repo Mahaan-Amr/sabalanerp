@@ -6,6 +6,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1 } from '../accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository } from '../accountingLedgerPrismaRepository';
 import { recordAccountingParallelComparison } from '../accountingParallelComparisonPrisma';
+import { manageAccountingParallelDifference } from '../accountingParallelDifferences';
 import { parseSepidarLocalDateTime } from '../sepidarCalendar';
 
 const databaseUrl = process.env.ACCOUNTING_PARALLEL_TEST_DATABASE_URL;
@@ -55,14 +56,49 @@ test('independent native posting compares against archived source, retains disag
       });
       await ledger.postVoucher({ voucherId: draft.id, actor: { id: tag, profile: 'ACCOUNTING_MANAGER' }, reason: 'آزمون بازگشت‌پذیر سند مستقل' });
       const command = { bookId, periodId: period.id, snapshotId, actorId: tag, pair: { sourceKey: '1', targetId: draft.id, reason: 'دو شاهد مصنوعی یک رویداد آزمون' } };
+      const unmatched = await recordAccountingParallelComparison(tx, { ...command, pair: undefined });
+      const difference = unmatched.differences.find((item) => item.code === 'SOURCE_UNMATCHED' && item.sourceKey === '1')!;
+      const caseCommand = { bookId, comparisonId: unmatched.id, differenceIdentity: difference.identity, actorId: tag };
+      const opened = await manageAccountingParallelDifference(tx, { ...caseCommand, action: 'OPEN' });
+      assert.equal(opened.assignedUserId, tag);
+      assert.equal((await manageAccountingParallelDifference(tx, { ...caseCommand, action: 'OPEN' })).id, opened.id);
+      assert.equal((await manageAccountingParallelDifference(tx, { ...caseCommand, actorId: `${tag}:other-manager`, action: 'OPEN' })).assignedUserId, tag);
+      await assert.rejects(manageAccountingParallelDifference(tx, { ...caseCommand, action: 'RESOLVE', cause: 'پیوند ثبت نشده', resolution: 'ادعای رفع بدون اصلاح' }),
+        (error: unknown) => (error as { code?: string }).code === 'PARALLEL_DIFFERENCE_STILL_PRESENT');
+      const noted = await manageAccountingParallelDifference(tx, { ...caseCommand, actorId: `${tag}:other-manager`, action: 'NOTE', cause: 'پیوند ثبت نشده', resolution: 'بررسی شاهد و پیوند رویداد' });
+      assert.equal(noted.status, 'IN_PROGRESS');
+      assert.equal(noted.assignedUserId, tag);
+      const noteAuditCount = await tx.accountingReplacementAuditEntry.count();
+      const noteRetry = await manageAccountingParallelDifference(tx, { ...caseCommand, actorId: `${tag}:other-manager`, action: 'NOTE', cause: 'پیوند ثبت نشده', resolution: 'بررسی شاهد و پیوند رویداد' });
+      assert.deepEqual(noteRetry.resolutionEvidence, noted.resolutionEvidence);
+      assert.equal(await tx.accountingReplacementAuditEntry.count(), noteAuditCount);
+      await tx.accountingSepidarTargetLink.updateMany({ where: { latestSnapshotId: snapshotId, sourceKey: '11' }, data: { reviewStatus: 'PROPOSED' } });
+      const unmapped = await recordAccountingParallelComparison(tx, { ...command, pair: undefined });
+      const mappingDifference = unmapped.differences.find((item) => item.code === 'SOURCE_MAPPING_MISSING')!;
+      const mappingCase = { ...caseCommand, comparisonId: unmapped.id, differenceIdentity: mappingDifference.identity };
+      await manageAccountingParallelDifference(tx, { ...mappingCase, action: 'OPEN' });
+      await recordAccountingParallelComparison(tx, command);
+      await assert.rejects(manageAccountingParallelDifference(tx, { ...mappingCase, action: 'RESOLVE', cause: 'نگاشت تأیید نشده', resolution: 'فقط ثبت پیوند' }),
+        (error: unknown) => (error as { code?: string }).code === 'PARALLEL_DIFFERENCE_STILL_PRESENT');
+      await tx.accountingSepidarTargetLink.updateMany({ where: { latestSnapshotId: snapshotId, sourceKey: '11' }, data: { reviewStatus: 'USER_APPROVED' } });
       const first = await recordAccountingParallelComparison(tx, command);
       assert.equal(first.acceptedPeriod, false); assert.equal(first.sourceCount, 1);
       assert.equal(first.differences.filter((item) => item.sourceKey === '1').length, 0);
       const audits = await tx.accountingReplacementAuditEntry.count();
+      const reportCount = await tx.accountingOperationalReconciliation.count({ where: { sourceSystem: snapshotId } });
       const retry = await recordAccountingParallelComparison(tx, command);
       assert.equal(first.id, retry.id); assert.equal(first.outputHash, retry.outputHash);
       assert.equal(await tx.accountingReplacementAuditEntry.count(), audits);
-      assert.equal(await tx.accountingOperationalReconciliation.count({ where: { sourceSystem: snapshotId } }), 1);
+      assert.equal(await tx.accountingOperationalReconciliation.count({ where: { sourceSystem: snapshotId } }), reportCount);
+      assert.equal((await manageAccountingParallelDifference(tx, { ...mappingCase, action: 'RESOLVE', cause: 'نگاشت تأیید نشده', resolution: 'تأیید نگاشت و مقایسهٔ دقیق' })).status, 'RESOLVED');
+      const resolved = await manageAccountingParallelDifference(tx, { ...caseCommand, action: 'RESOLVE', cause: 'پیوند ثبت نشده', resolution: 'ثبت پیوند با شاهد یکسان' });
+      assert.equal(resolved.status, 'RESOLVED');
+      assert.equal((resolved.resolutionEvidence as { correction: { id: string } }).correction.id, first.id);
+      const resolvedAuditCount = await tx.accountingReplacementAuditEntry.count();
+      await manageAccountingParallelDifference(tx, { ...caseCommand, action: 'RESOLVE', cause: 'پیوند ثبت نشده', resolution: 'ثبت پیوند با شاهد یکسان' });
+      assert.equal(await tx.accountingReplacementAuditEntry.count(), resolvedAuditCount);
+      await assert.rejects(manageAccountingParallelDifference(tx, { ...caseCommand, action: 'NOTE', cause: 'بازنویسی', resolution: 'تغییر شاهد قبلی' }),
+        (error: unknown) => (error as { code?: string }).code === 'PARALLEL_RESOLUTION_IMMUTABLE');
       const secondPayload = { event: `${tag}:second` };
       const second = await ledger.createManualDraft({ bookId, fiscalYearId: year.id, periodId: period.id, idempotencyKey: `${tag}:second`, correlationId: tag,
         description: tag, documentDate: date, occurredAt: date, actor: { id: tag, profile: 'ACCOUNTING_MANAGER' },

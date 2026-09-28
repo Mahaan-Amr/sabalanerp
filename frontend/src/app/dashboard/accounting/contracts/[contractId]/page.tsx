@@ -1,5 +1,5 @@
 "use client";
-import { ErpInput, ErpSelect } from "@/components/erp";
+import { ErpInput, ErpSearchableSelect } from "@/components/erp";
 import { useCallback, useEffect, useState, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -902,7 +902,7 @@ export default function AccountingContractDetailPage(props: {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
               نسخه چاپ
-              <ErpSelect
+              <ErpSearchableSelect
                 value={salesPdfVariant}
                 onChange={(event) =>
                   setSalesPdfVariant(event.target.value as SalesPdfVariant)
@@ -919,7 +919,7 @@ export default function AccountingContractDetailPage(props: {
                   {salesPdfVariantLabels.workshop}
                 </option>
                 <option value="custom">{salesPdfVariantLabels.custom}</option>
-              </ErpSelect>
+              </ErpSearchableSelect>
             </label>
             <div className="flex flex-wrap gap-2">
               <ErpButton
@@ -943,7 +943,7 @@ export default function AccountingContractDetailPage(props: {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="flex flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   الگوی چاپ
-                  <ErpSelect
+                  <ErpSearchableSelect
                     value={customPrintSettings.preset}
                     onChange={(event) =>
                       applyCustomPreset(event.target.value as CustomPrintPreset)
@@ -956,11 +956,11 @@ export default function AccountingContractDetailPage(props: {
                     <option value="summarized">
                       خلاصه گروه‌بندی‌شده افزونه‌ها
                     </option>
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </label>
                 <label className="flex flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   نمایش محصولات
-                  <ErpSelect
+                  <ErpSearchableSelect
                     value={customPrintSettings.productRowsMode}
                     onChange={(event) =>
                       setCustomPrintSettings((current) => ({
@@ -973,7 +973,7 @@ export default function AccountingContractDetailPage(props: {
                   >
                     <option value="detailed">جزئیات کامل</option>
                     <option value="summarized">ردیف‌های خلاصه افزونه‌ها</option>
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </label>
               </div>
 

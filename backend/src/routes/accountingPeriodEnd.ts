@@ -19,6 +19,9 @@ import { createAccountingLedgerPrismaRepository } from '../services/accountingLe
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { scanHiringFile, sha256File } from '../services/hrHiringFileStorage';
 import { recordOperationalReconciliation } from '../services/accountingOperationalReconciliation';
+import { buildOfficialReportExportRows, officialReportPeriodLabels, officialReportPdfPageSize } from '../services/accountingOfficialReportExport';
+import { parseOfficialReportDate } from '../services/accountingOfficialReportDates';
+import { retainOfficialReportArtifact } from '../services/accountingOfficialReportArtifact';
 
 const router = express.Router();
 const viewAccess = [protect, requireWorkspaceAccessWithClient(prisma, WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW)];
@@ -64,21 +67,8 @@ const reportTypeFa: Record<string, string> = {
   LEGAL_BOOK: 'دفتر قانونی', T_ACCOUNT: 'حساب تی',
 };
 
-const amountColumnFa: Record<string, string> = {
-  openingDebit: 'مانده بدهکار اول دوره', openingCredit: 'مانده بستانکار اول دوره',
-  turnoverDebit: 'گردش بدهکار', turnoverCredit: 'گردش بستانکار',
-  endingDebit: 'مانده بدهکار پایان دوره', endingCredit: 'مانده بستانکار پایان دوره',
-  periodNetDebit: 'خالص بدهکار دوره', periodNetCredit: 'خالص بستانکار دوره',
-};
-const snapshotRows = (dataset: any) => {
-  const columnKeys = Array.isArray(dataset?.columnKeys) ? dataset.columnKeys : Object.keys(amountColumnFa);
-  return (Array.isArray(dataset?.rows) ? dataset.rows : []).map((row: any) => Object.fromEntries([
-    ['عنوان', row.titlePersian],
-    ...columnKeys.map((key: string) => [amountColumnFa[key] || key, row.amounts?.[key] ?? '0']),
-  ]));
-};
 
-const auditSnapshotExport = async (req: WorkspaceRequest, snapshot: { id: string; datasetHash: string }, kind: 'PDF' | 'EXCEL') => {
+const auditSnapshotExport = async (req: WorkspaceRequest, snapshot: { id: string; datasetHash: string }, kind: 'PDF' | 'EXCEL', artifactHash: string) => {
   await createAccountingLedgerPrismaRepository(prisma).transaction((tx) => tx.appendAudit({
     action: `OFFICIAL_REPORT_${kind}_EXPORTED`,
     result: 'SUCCEEDED',
@@ -89,9 +79,19 @@ const auditSnapshotExport = async (req: WorkspaceRequest, snapshot: { id: string
     correlationId: String(req.get('X-Correlation-ID') || randomUUID()),
     reason: 'دریافت خروجی رسمی گزارش',
     payloadHash: snapshot.datasetHash,
-    sessionContext: { exportKind: kind },
+    sessionContext: { exportKind: kind, artifactHash },
   }));
 };
+
+const frozenExport = (snapshotId: string, format: 'pdf' | 'xlsx', render: () => Promise<Buffer>) => prisma.$transaction(async (tx) => {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'official-report:' + snapshotId + ':' + format}, 0))`;
+  const stored = await tx.accountingOfficialReportSnapshot.findUniqueOrThrow({ where: { id: snapshotId } });
+  const field = format === 'pdf' ? 'pdfHash' : 'excelHash';
+  return retainOfficialReportArtifact({ snapshotId, format, existingHash: stored[field],
+    root: path.join(process.cwd(), 'storage', 'accounting-contracts', '.official-reports'), render,
+    recordHash: async (hash) => { await tx.accountingOfficialReportSnapshot.update({ where: { id: snapshotId }, data: { [field]: hash } }); },
+  });
+}, { timeout: 180_000, maxWait: 180_000 });
 
 const run = (handler: (req: WorkspaceRequest) => Promise<unknown>, created = false) => async (req: WorkspaceRequest, res: Response) => {
   try {
@@ -546,11 +546,11 @@ router.post('/report-snapshots', ...editAccess, run((req) => createOfficialAccou
   actorId: req.user!.id,
   request: {
     ...req.body.request,
-    from: date(req.body.request?.from, 'ابتدای گزارش'),
-    to: date(req.body.request?.to, 'انتهای گزارش'),
-    cutoffAt: date(req.body.request?.cutoffAt, 'زمان برش گزارش'),
-    comparativeFrom: req.body.request?.comparativeFrom ? date(req.body.request.comparativeFrom, 'ابتدای دوره مقایسه‌ای') : undefined,
-    comparativeTo: req.body.request?.comparativeTo ? date(req.body.request.comparativeTo, 'انتهای دوره مقایسه‌ای') : undefined,
+    from: parseOfficialReportDate(req.body.request?.from, 'ابتدای گزارش', 'start'),
+    to: parseOfficialReportDate(req.body.request?.to, 'انتهای گزارش', 'end'),
+    cutoffAt: parseOfficialReportDate(req.body.request?.cutoffAt, 'زمان برش گزارش', 'cutoff'),
+    comparativeFrom: req.body.request?.comparativeFrom ? parseOfficialReportDate(req.body.request.comparativeFrom, 'ابتدای دوره مقایسه‌ای', 'start') : undefined,
+    comparativeTo: req.body.request?.comparativeTo ? parseOfficialReportDate(req.body.request.comparativeTo, 'انتهای دوره مقایسه‌ای', 'end') : undefined,
   },
   policyVersions: req.body.policyVersions,
 }), true));
@@ -601,50 +601,58 @@ router.get('/t-accounts', ...viewAccess, run(async (req) => {
 router.get('/report-snapshots/:id/export.xlsx', ...editAccess, async (req: WorkspaceRequest, res: Response) => {
   try {
     const snapshot = await prisma.accountingOfficialReportSnapshot.findUniqueOrThrow({ where: { id: req.params.id } });
-    const rows = snapshotRows(snapshot.dataset);
-    const worksheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 'وضعیت': 'داده‌ای برای نمایش وجود ندارد.' }]);
-    worksheet['!cols'] = Object.keys(rows[0] || { 'وضعیت': '' }).map((key) => ({ wch: Math.max(18, key.length + 4) }));
+    const dataset = snapshot.dataset as Parameters<typeof buildOfficialReportExportRows>[0];
+    const rows = buildOfficialReportExportRows(dataset);
+    const periods = officialReportPeriodLabels(dataset);
+    const displayRows = rows.length ? rows : [{ 'وضعیت': 'داده‌ای برای نمایش وجود ندارد.' }];
+    const headers = Object.keys(displayRows[0]);
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ['دوره گزارش', periods.current],
+      ...(periods.comparative ? [['دوره مقایسه‌ای', periods.comparative]] : []),
+      [], headers,
+      ...displayRows.map((row) => headers.map((header) => row[header] ?? '')),
+    ]);
+    worksheet['!cols'] = headers.map((key) => ({ wch: Math.max(18, key.length + 4) }));
     const workbook = XLSX.utils.book_new();
     workbook.Workbook = { Views: [{ RTL: true }] };
     XLSX.utils.book_append_sheet(workbook, worksheet, 'گزارش رسمی');
-    const bytes = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
-    const excelHash = createHash('sha256').update(bytes).digest('hex');
-    await prisma.accountingOfficialReportSnapshot.update({ where: { id: snapshot.id }, data: { excelHash } });
-    await auditSnapshotExport(req, snapshot, 'EXCEL');
+    const { bytes, hash } = await frozenExport(snapshot.id, 'xlsx', async () => XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer);
+    await auditSnapshotExport(req, snapshot, 'EXCEL', hash);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="accounting-report-${snapshot.id}.xlsx"`);
     res.send(bytes);
   } catch (error) {
     console.error('Official Accounting Excel export failed:', error);
-    res.status(400).json({ success: false, error: 'ساخت فایل Excel گزارش رسمی ناموفق بود.' });
+    res.status(400).json({ success: false, error: 'ساخت صفحه‌گستردهٔ گزارش رسمی ناموفق بود.' });
   }
 });
 
 router.get('/report-snapshots/:id/export.pdf', ...editAccess, async (req: WorkspaceRequest, res: Response) => {
   try {
     const snapshot = await prisma.accountingOfficialReportSnapshot.findUniqueOrThrow({ where: { id: req.params.id } });
-    const rows = snapshotRows(snapshot.dataset);
+    const dataset = snapshot.dataset as Parameters<typeof buildOfficialReportExportRows>[0];
+    const rows = buildOfficialReportExportRows(dataset);
+    const periods = officialReportPeriodLabels(dataset);
     const headers = Object.keys(rows[0] || { 'وضعیت': '' });
+    const pdfPage = officialReportPdfPageSize(headers.length);
     const html = `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><style>
       body{font-family:Tahoma,Arial,sans-serif;direction:rtl;color:#172033;padding:24px}h1{font-size:20px;margin:0 0 8px}
       .meta{font-size:12px;color:#536174;margin-bottom:18px}.hash{direction:ltr;text-align:left;word-break:break-all}
-      table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #cbd5e1;padding:7px;text-align:right}th{background:#eef2f7}
-      @page{size:A4 landscape;margin:12mm}
+      table{width:100%;border-collapse:collapse;font-size:11px}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #cbd5e1;padding:7px;text-align:right}th{background:#eef2f7}
+      @page{size:${pdfPage.cssSize};margin:12mm}
     </style></head><body><h1>${escapeHtml(reportTypeFa[snapshot.reportType] || 'گزارش رسمی حسابداری')}</h1>
-      <div class="meta">زمان برش: ${escapeHtml(snapshot.cutoffAt.toLocaleString('fa-IR'))} · زمان تولید: ${escapeHtml(snapshot.generatedAt.toLocaleString('fa-IR'))}</div>
+      <div class="meta">دوره گزارش: ${escapeHtml(periods.current)}${periods.comparative ? ` · دوره مقایسه‌ای: ${escapeHtml(periods.comparative)}` : ''}<br>زمان برش: ${escapeHtml(snapshot.cutoffAt.toLocaleString('fa-IR'))} · زمان تولید: ${escapeHtml(snapshot.generatedAt.toLocaleString('fa-IR'))}</div>
       <table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead><tbody>
       ${(rows.length ? rows : [{ 'وضعیت': 'داده‌ای برای نمایش وجود ندارد.' }]).map((row: any) => `<tr>${headers.map((header) => `<td>${escapeHtml(row[header])}</td>`).join('')}</tr>`).join('')}
-      </tbody></table><p class="meta hash">اثر انگشت dataset: ${escapeHtml(snapshot.datasetHash)}</p></body></html>`;
-    const bytes = await generatePdfBufferFromHtml({ htmlContent: html, landscape: true });
-    const pdfHash = createHash('sha256').update(bytes).digest('hex');
-    await prisma.accountingOfficialReportSnapshot.update({ where: { id: snapshot.id }, data: { pdfHash } });
-    await auditSnapshotExport(req, snapshot, 'PDF');
+      </tbody></table><p class="meta hash">اثر انگشت مجموعه‌داده: ${escapeHtml(snapshot.datasetHash)}</p></body></html>`;
+    const { bytes, hash } = await frozenExport(snapshot.id, 'pdf', () => generatePdfBufferFromHtml({ htmlContent: html, landscape: true, widthMm: pdfPage.widthMm, heightMm: pdfPage.heightMm, assertNoOverflowSelector: 'body, th, td' }));
+    await auditSnapshotExport(req, snapshot, 'PDF', hash);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="accounting-report-${snapshot.id}.pdf"`);
     res.send(bytes);
   } catch (error) {
     console.error('Official Accounting PDF export failed:', error);
-    res.status(400).json({ success: false, error: 'ساخت فایل PDF گزارش رسمی ناموفق بود.' });
+    res.status(400).json({ success: false, error: error instanceof Error && /فایل منجمد|اثر انگشت/.test(error.message) ? error.message : 'ساخت فایل PDF گزارش رسمی ناموفق بود.' });
   }
 });
 

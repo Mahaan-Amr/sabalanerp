@@ -1,4 +1,5 @@
 'use client';
+export { default as ErpSearchableSelect } from './ErpSearchableSelect';
 
 import React from 'react';
 export { default as ErpPersianDateField } from './ErpPersianDateField';

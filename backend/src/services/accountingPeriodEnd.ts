@@ -457,7 +457,7 @@ export type OfficialPostedLine = {
   accountId: string;
   accountCode: string;
   accountTitlePersian: string;
-  accountPath: { group: string; general: string; subsidiary: string; detail?: string };
+  accountPath: { group: string; general: string; subsidiary: string; groupCode?: string; generalCode?: string; detailIdentity?: string; detail?: string };
   debitRials: bigint;
   creditRials: bigint;
   documentDate: Date;
@@ -510,6 +510,7 @@ type TrialBalanceAmounts = {
 type OfficialDatasetRow = {
   key: string;
   titlePersian: string;
+  accountCode: string;
   accountIds: string[];
   mappingSectionCodes: string[];
   amounts: TrialBalanceAmounts;
@@ -535,6 +536,8 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
   const cashFlowRows = (rows: FinancialStatementMapping['rows']) => request.cashFlowMethod === 'INDIRECT'
     ? rows.filter((row) => row.statement === 'CASH_FLOW_INDIRECT')
     : rows.filter((row) => row.statement !== 'CASH_FLOW_INDIRECT');
+  const financialStatementRows = (rows: FinancialStatementMapping['rows']) => rows.filter((row) => !['CASH_FLOW_DIRECT', 'CASH_FLOW_INDIRECT'].includes(row.statement));
+  const primaryFinancialStatementRows = (rows: FinancialStatementMapping['rows']) => financialStatementRows(rows).filter((row) => row.statement !== 'NOTES');
   const primaryMappingByAccount = new Map([...mappingsByAccount].map(([accountId, rows]) => [accountId, cashFlowRows(rows)[0] ?? rows[0]]));
   const included = lines.filter((line) => (
     (line.status === 'POSTED' || line.status === 'REVERSED')
@@ -547,24 +550,28 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
       && primaryMappingByAccount.get(line.accountId)?.cashFlowClass !== 'INTERNAL_TRANSFER'
     ))
   ));
+  if (request.reportKind === 'FINANCIAL_STATEMENT') {
+    const unmapped = included.find((line) => primaryFinancialStatementRows(mappingsByAccount.get(line.accountId) ?? []).length === 0);
+    if (unmapped) throw new Error(`نگاشت صورت مالی برای حساب ${unmapped.accountCode} کامل نیست.`);
+  }
   const level = request.reportKind === 'LEGAL_BOOK' && request.legalBookKind === 'GENERAL_LEDGER' ? 'GENERAL'
     : request.reportKind === 'LEGAL_BOOK' && request.legalBookKind === 'SUBSIDIARY_LEDGER' ? 'SUBSIDIARY'
       : request.level ?? 'SUBSIDIARY';
   const buckets = new Map<string, { title: string; entries: Array<{ line: OfficialPostedLine; signMultiplier: number }> }>();
   for (const line of included) {
     const applicableMappings = request.reportKind === 'FINANCIAL_STATEMENT'
-      ? (mappingsByAccount.get(line.accountId) ?? [undefined])
+      ? financialStatementRows(mappingsByAccount.get(line.accountId) ?? [])
       : request.reportKind === 'CASH_FLOW'
         ? cashFlowRows(mappingsByAccount.get(line.accountId) ?? [])
-      : [primaryMappingByAccount.get(line.accountId)];
+      : [undefined];
     for (const mappingRow of applicableMappings) {
       const key = request.reportKind === 'LEGAL_BOOK' && (request.legalBookKind ?? 'JOURNAL') === 'JOURNAL'
         ? `${line.documentDate.toISOString()}:${line.voucherNumber ?? 0}:${line.id}`
       : request.reportKind === 'CASH_FLOW' ? request.cashFlowMethod === 'INDIRECT' ? mappingRow!.sectionCode : mappingRow!.cashFlowClass!
       : request.reportKind === 'FINANCIAL_STATEMENT' ? `${mappingRow?.statement ?? 'UNMAPPED'}:${mappingRow?.sectionCode ?? 'UNMAPPED'}`
-      : level === 'GROUP' ? line.accountPath.group
-      : level === 'GENERAL' ? `${line.accountPath.group}/${line.accountPath.general}`
-        : level === 'DETAIL' ? `${line.accountCode}/${line.accountPath.detail ?? line.accountTitlePersian}`
+      : level === 'GROUP' ? (line.accountPath.groupCode ?? line.accountId)
+      : level === 'GENERAL' ? (line.accountPath.generalCode ?? line.accountId)
+      : level === 'DETAIL' ? `${line.accountCode}/${line.accountPath.detailIdentity ?? 'بدون-تفصیل'}`
           : line.accountCode;
       const title = request.reportKind === 'LEGAL_BOOK' && (request.legalBookKind ?? 'JOURNAL') === 'JOURNAL'
         ? `${line.voucherNumber?.toLocaleString('fa-IR') ?? 'بدون شماره'} · ${line.accountCode} · ${line.accountTitlePersian}`
@@ -575,7 +582,7 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
       : request.reportKind === 'FINANCIAL_STATEMENT' ? mappingRow?.sectionCode ?? 'فاقد نگاشت'
       : level === 'GROUP' ? line.accountPath.group
       : level === 'GENERAL' ? line.accountPath.general
-        : level === 'DETAIL' ? line.accountPath.detail ?? line.accountTitlePersian
+      : level === 'DETAIL' ? `${line.accountTitlePersian} · ${line.accountPath.detail ?? 'بدون تفصیل'}`
           : line.accountPath.subsidiary;
       const bucket: { title: string; entries: Array<{ line: OfficialPostedLine; signMultiplier: number }> }
         = buckets.get(key) ?? { title, entries: [] };
@@ -599,6 +606,7 @@ export const buildOfficialAccountingDataset = ({ request, mapping, lines }: {
     return {
       key,
       titlePersian: bucket.title,
+      accountCode: request.reportKind === 'TRIAL_BALANCE' ? level === 'GROUP' ? (bucket.entries[0].line.accountPath.groupCode ?? '') : level === 'GENERAL' ? (bucket.entries[0].line.accountPath.generalCode ?? '') : bucket.entries[0].line.accountCode : '',
       accountIds,
       mappingSectionCodes,
       amounts: {

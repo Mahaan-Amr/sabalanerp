@@ -6211,6 +6211,28 @@ model AccountingBankImportMapping {
   @@map("accounting_bank_import_mappings")
 }
 
+model AccountingBankFileImportRun {
+  id                    String   @id @default(cuid())
+  financialAccountId    String
+  adapterType           String
+  mappingVersion        Int
+  mappingEvidenceHash   String
+  fileHash              String
+  outputHash            String
+  totalRows             Int
+  imported              Int
+  rejected              Int
+  sourceFile            Bytes
+  sourceRows            Json
+  results               Json
+  createdBy             String
+  createdAt             DateTime @default(now())
+
+  @@unique([financialAccountId, adapterType, mappingVersion, fileHash], map: "bank_file_import_identity_key")
+  @@index([createdAt], map: "bank_file_import_created_at_idx")
+  @@map("accounting_bank_file_import_runs")
+}
+
 model AccountingBankReconciliationMatch {
   id                    String                        @id @default(cuid())
   bankStatementLineId   String

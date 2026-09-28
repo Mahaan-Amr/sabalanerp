@@ -913,7 +913,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const retailDiscount = intent.retailDiscount.currency === currency ? intent.retailDiscount : draft.intent.retailDiscount;
       const nextIntent = { ...draft.intent, contractDate: intent.contractDate, customerId: nextCustomerId,
         ...(preservedProject ? { projectId: preservedProject.id } : {}), deliveries, customerPaymentPlan: paymentPlan,
-        retailDiscount, belowCostConfirmed: false,
+        retailDiscount, preparationCompleted: intent.preparationCompleted ?? false, belowCostConfirmed: false,
         rows: partnerRetailIntentRows(rows),
         additionalMaterialApprovals: draft.intent.additionalMaterialApprovals };
       setCustomerId(nextCustomerId);
@@ -1158,7 +1158,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [readCasePricingRows, runtime, submission, wizardRecoveryId]);
 
-  const reinquireFromWizard = async (requestedRow?: PartnerInquiryRow) => {
+  const reinquiryCommands = useRef(new Map<string, ReturnType<typeof PartnerCommandSchema.parse>>());
+  const reinquireFromWizard = async (requestedRow?: PartnerInquiryRow, reason?: string) => {
     if (!runtime || !wizard) return;
     setError(null);
     try {
@@ -1171,31 +1172,34 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const selected = selectedPackage.rows;
       const historicalRows = selected.some(item => item.submissionState === 'UNSENT')
         ? await readCasePricingRows(runtime.saved, activeOwner.caseId) : [];
+      const retryKey = JSON.stringify({ owner: activeOwner, rows: selected.map(item => ({
+        rowId: item.rowId, revision: item.revision, configuration: item.configurationRef })), reason });
+      const retainedCommand = reinquiryCommands.current.get(retryKey);
       const rows = selected.map(item => {
         const predecessor = item.submissionState === 'UNSENT'
           ? historicalRows.find(previous => previous.configurationRef.productRowId === item.configurationRef.productRowId &&
             previous.state === 'REJECTED' && !previous.successor)
           : item;
         if (!predecessor) throw new Error('Rejected inquiry row unavailable');
-        const deliveryFacts = wizard.intent.deliveries.flatMap(delivery => delivery.items
-          .filter(deliveryItem => deliveryItem.productRowId === item.configurationRef.productRowId)
-          .map(deliveryItem => ({ date: delivery.date, quantity: deliveryItem.quantity })));
         return { rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: item.configurationRef,
-          ...(deliveryFacts.length ? { deliveryFacts } : {}),
-          predecessor: { rowId: predecessor.rowId, revision: predecessor.revision } };
+          predecessor: { rowId: predecessor.rowId, revision: predecessor.revision,
+            ...(reason ? { reason } : {}) } };
       });
-      const scopedInquiryId = selectedPackage.inquiryId;
+      const scopedInquiryId = `${selectedPackage.inquiryId}:requote-${crypto.randomUUID()}`;
       const intent = { schemaVersion: 1 as const, type: 'CASE_PRICING_SUBMIT' as const,
         caseId: activeOwner.caseId, expected: activeOwner, inquiryId: scopedInquiryId, rows };
       const payloadHash = await canonicalHash(intent);
-      const command = PartnerCommandSchema.parse({ ...intent, commandId: payloadHash, correlationId: payloadHash,
+      const command = retainedCommand ?? PartnerCommandSchema.parse({ ...intent, commandId: payloadHash, correlationId: payloadHash,
         idempotency: { actorId: runtime.actorId, operation: intent.type,
           targetId: activeOwner.caseId,
           key: payloadHash, payloadHash } });
+      reinquiryCommands.current.set(retryKey, command);
       const result = await inquiryPorts.commands.execute(command);
-      if (!result.ok) { setError(result.error.message); return; }
-      const pendingByProductRowId = new Map(rows.map(item => [item.configuration.productRowId, {
-        inquiryId: scopedInquiryId, rowId: item.rowId, revision: 1, state: 'PENDING' as const,
+      if (!result.ok) { reinquiryCommands.current.delete(retryKey); setError(result.error.message); throw new Error(result.error.message); }
+      reinquiryCommands.current.delete(retryKey);
+      if (command.type !== 'CASE_PRICING_SUBMIT') throw new Error('Invalid retained inquiry');
+      const pendingByProductRowId = new Map(command.rows.map(item => [item.configuration.productRowId, {
+        inquiryId: command.inquiryId, rowId: item.rowId, revision: 1, state: 'PENDING' as const,
       }]));
       setWizard(current => current ? { ...current,
         rows: current.rows.map(item => ({ ...item, inquiryRow: pendingByProductRowId.has(item.productRowId)
@@ -1204,7 +1208,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           inquiryRow: pendingByProductRowId.has(item.pricingSubjectId)
             ? { ...item.inquiryRow, successor: pendingByProductRowId.get(item.pricingSubjectId) } : item.inquiryRow })),
       } : current);
-    } catch { setError('ارسال استعلام مجدد انجام نشد؛ اطلاعات Wizard حفظ شده است.'); }
+    } catch (caught) { setError('ارسال استعلام مجدد انجام نشد؛ اطلاعات پیش‌نویس حفظ شده است.'); if (reason) throw caught; }
   };
 
   const renderSection = (step: Exclude<PartnerWizardStep, 'products' | 'pricing'>, draft: PartnerWizardDraft,
@@ -1533,6 +1537,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           draft.intent.customerPaymentPlan.installments.map(item => item.amount.amount)) !== '0';
       })() ? 'جمع اقساط باید با مبلغ فروش برابر باشد.'
         : null}
+    onRejectPrice={(row, reason) => reinquireFromWizard(row, reason)}
     onReinquire={row => void reinquireFromWizard(row)} onEditProduct={row => {
       const current = wizard;
       void persistWizardServer(current).then(saved => {

@@ -32,6 +32,7 @@ export const PartnerCaseViewSchema = z.object({
   caseNumber: IdSchema, trackingNumber: z.number().int().positive().optional(),
   customerContractNumber: IdSchema.optional(), state: CaseStateSchema,
   pricingState: PartnerPricingStateSchema.default('READY_TO_FINALIZE'),
+  preparationCompleted: z.boolean().optional(),
   customerConfirmationState: PartnerCustomerConfirmationStateSchema.default('NOT_SENT'),
   catalogLayerRates: z.array(z.object({ parentProductRowId: IdSchema, layerTitle: TextSchema,
     layerUnit: z.enum(['set', 'physicalPiece', 'meter', 'squareMeter']),

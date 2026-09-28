@@ -23,7 +23,6 @@ import {
   ErpLoading,
   ErpPage,
   ErpSection,
-  ErpSegmentedControl,
   ErpTwoColumn,
   type ErpAction,
   type ErpMetric,
@@ -94,6 +93,7 @@ import {
   hasAnyPendingOperation,
 } from "@/features/sales/latestRequestTracker";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
+import { ContractDetailNavigation } from "@/features/sales/ContractDetailNavigation";
 
 interface Contract {
   id: string;
@@ -1113,15 +1113,9 @@ export default function ContractDetailPage() {
         />
       )}
 
-      <ErpSegmentedControl
+      <ContractDetailNavigation
         value={detailSection}
         onChange={setDetailSection}
-        options={[
-          { value: "summary", label: "خلاصه" },
-          { value: "items", label: "اقلام و تحویل" },
-          { value: "financial", label: "وضعیت مالی" },
-          { value: "history", label: "سوابق" },
-        ]}
       />
 
       {detailSection === "summary" && (

@@ -84,7 +84,8 @@ export async function allocatePartnerLinkedPair(tx: Prisma.TransactionClient, in
       ? { ok: true, value: undefined }
       : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
-  if (row.pricingState !== 'READY_TO_FINALIZE' || !row.profile.commercialAccount) {
+  if (row.pricingState !== 'READY_TO_FINALIZE' ||
+      (row.head.retailEnvelope as Prisma.JsonObject)?.preparationCompleted === false || !row.profile.commercialAccount) {
     return { ok: false, error: partnerError('STATE_CONFLICT') };
   }
   const evidence = projectionEvidence(row.head);
@@ -887,7 +888,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
               baseRevision: editableRecovery.baseRevision } } : {}),
             actions: { canContinue: Boolean(editableRecovery), canPreview: output && Boolean(row.outputs[0]),
               canIssue: output && row.state === 'COMMITTED' && Boolean(row.outputs[0]),
-              canFinalize: commit && row.pricingState === 'READY_TO_FINALIZE' &&
+              canFinalize: commit && view.data.preparationCompleted !== false && row.pricingState === 'READY_TO_FINALIZE' &&
                 row.customerConfirmationState !== 'REJECTED' &&
                 partnerContracts.isPartnerCaseEditableState(row.state),
               canSendConfirmation: output && row.state === 'COMMITTED' &&

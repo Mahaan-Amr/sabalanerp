@@ -533,6 +533,64 @@ async function createApprovedInquiryForCase(tx: Prisma.TransactionClient, ids: R
   return { inquiryId, rowId, revision: 2 };
 }
 
+test('asynchronous preparation finishes before the original inquiry is answered without allocating a contract', async () => {
+  await fixture(async (tx, ids) => {
+    const base = await command(ids);
+    const intent = { ...base.intent, preparationCompleted: false };
+    const submitted = { ...base, intent, idempotency: { ...base.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent }) } };
+    const first = await service(tx, ids).execute(submitted);
+    assert.equal(first.ok, true, JSON.stringify(first));
+    if (!first.ok || !first.value.case) return;
+    const revision = await reviseCommand(ids, submitted, 1, first.value.case.owner.integrityHash, 'prepared');
+    const completedIntent = { ...revision.intent, preparationCompleted: true };
+    const completed = await service(tx, ids).execute({ ...revision, intent: completedIntent,
+      idempotency: { ...revision.idempotency, payloadHash: await canonicalHash({ schemaVersion: 1,
+        type: 'CASE_DRAFT_REVISE', intent: completedIntent }) } });
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+    if (!completed.ok || !completed.value.case) return;
+    assert.equal(completed.value.case.preparationCompleted, true);
+    assert.equal(completed.value.case.pricingState, 'AWAITING_INQUIRY');
+    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 0);
+    assert.equal(await tx.sabalanToPartnerSaleRecord.count({ where: { caseId: ids.caseId } }), 0);
+    await bindInquiryToCase(tx, ids, ids.caseId, 1);
+    const acceptance = await withApprovedBinding(ids, await reviseCommand(ids,
+      { ...submitted, intent: completedIntent }, 2, completed.value.case.owner.integrityHash, 'accept-late-price'));
+    const accepted = await service(tx, ids).execute(acceptance);
+    assert.equal(accepted.ok, true, JSON.stringify(accepted));
+    if (!accepted.ok || !accepted.value.case) return;
+    assert.equal(accepted.value.case.pricingState, 'READY_TO_FINALIZE');
+    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 0);
+    await allocateFixturePair(tx, ids, { ...submitted, intent: acceptance.intent }, accepted.value.case.owner);
+    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 1);
+  });
+});
+
+test('accepting a price with unfinished payments cannot allocate a commercial contract', async () => {
+  await fixture(async (tx, ids) => {
+    const base = await command(ids);
+    const intent = { ...base.intent, preparationCompleted: false,
+      customerPaymentPlan: { ...base.intent.customerPaymentPlan, installments: [] } };
+    const submitted = { ...base, intent, idempotency: { ...base.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent }) } };
+    const first = await service(tx, ids).execute(submitted);
+    assert.equal(first.ok, true, JSON.stringify(first));
+    if (!first.ok || !first.value.case) return;
+    await bindInquiryToCase(tx, ids);
+    const priced = await withApprovedBinding(ids, await reviseCommand(ids, submitted, 1,
+      first.value.case.owner.integrityHash, 'early-accept'));
+    const accepted = await service(tx, ids).execute(priced);
+    assert.equal(accepted.ok, true, JSON.stringify(accepted));
+    if (!accepted.ok || !accepted.value.case) return;
+    assert.equal(accepted.value.case.preparationCompleted, false);
+    const allocation = await allocatePartnerLinkedPair(tx, { caseId: ids.caseId,
+      actorId: ids.partnerId, expected: accepted.value.case.owner });
+    assert.equal(allocation.ok ? null : allocation.error.code, 'STATE_CONFLICT');
+    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 0);
+    assert.equal(await tx.sabalanToPartnerSaleRecord.count({ where: { caseId: ids.caseId } }), 0);
+  });
+});
+
 test('a customer-visible revision invalidates the sent version and requires confirmation again', async () => {
   await fixture(async (tx, ids) => {
     const base = await command(ids);

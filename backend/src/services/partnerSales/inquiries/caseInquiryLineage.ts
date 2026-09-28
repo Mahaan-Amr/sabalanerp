@@ -8,6 +8,6 @@ export function sameCaseInquiryLineage(input: {
   return input.productRowId === input.predecessorProductRowId && (
     input.predecessorInquiryId === input.inquiryId ||
     (input.predecessorCaseId === input.caseId && input.predecessorCaseRevision !== null &&
-      input.predecessorCaseRevision < input.caseRevision)
+      input.predecessorCaseRevision <= input.caseRevision)
   );
 }

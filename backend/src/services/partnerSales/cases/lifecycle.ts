@@ -398,7 +398,7 @@ Promise<ExecutionResult> {
   if (!['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED', 'COMMITTED'].includes(row.state)) {
     return { ok: false, error: partnerError('STATE_CONFLICT') };
   }
-  if (row.pricingState !== 'READY_TO_FINALIZE' || !views.accounting) {
+  if (row.pricingState !== 'READY_TO_FINALIZE' || views.partner.preparationCompleted === false || !views.accounting) {
     return { ok: false, error: partnerError('STATE_CONFLICT') };
   }
   const firstCommitment = row.state !== 'COMMITTED';

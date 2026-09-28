@@ -94,7 +94,8 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
   const sabalanPlanTotal = sum(input.resolved.sabalanPaymentPlan.installments.map(item => item.amount.amount));
   if (input.command.intent.customerPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
       input.resolved.sabalanPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
-      planTotal !== retailPayable || (pricingReady && input.resolved.sabalanPaymentPlan.installments.length > 0 && sabalanPlanTotal !== wholesaleTotals!.payable)) {
+      (input.command.intent.preparationCompleted !== false && planTotal !== retailPayable) ||
+      (pricingReady && input.resolved.sabalanPaymentPlan.installments.length > 0 && sabalanPlanTotal !== wholesaleTotals!.payable)) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
   }
   const quantities = new Map(input.rows.map(row => [row.productRowId, row.quantity]));
@@ -116,7 +117,9 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
       : { schemaVersion: 1, status: 'UNPRICED' as const, products: [] },
     retailEnvelope: { schemaVersion: 1, products: products.map(({ wholesaleUnitPrice: _wholesale, approvalEvidenceId: _approval,
       configurationHash: _configuration, ...row }) => row), totals: retailTotals,
-      belowCostConfirmed: input.command.intent.belowCostConfirmed },
+      belowCostConfirmed: input.command.intent.belowCostConfirmed,
+      ...(input.command.intent.preparationCompleted !== undefined
+        ? { preparationCompleted: input.command.intent.preparationCompleted } : {}) },
     paymentEvidence: { customerPaymentPlan: input.command.intent.customerPaymentPlan,
       ...(pricingReady ? { sabalanPaymentPlan: input.resolved.sabalanPaymentPlan } : {}) },
     customerContent: { contractDate: input.command.intent.contractDate, legalText: input.resolved.legalText,

@@ -206,9 +206,9 @@ test('Partner inserts Case-scoped pricing immediately after the ordinary product
   assert.equal(partnerWizardStepsForDraft(draft).some(step => step.id === 'delivery'), true);
 });
 
-test('legacy late-step recovery returns to products before numbering and to pricing after numbering', () => {
+test('late-step recovery requires numbering but never waits for Sabalan pricing', () => {
   assert.equal(requiredPartnerWizardStep('confirmation', false, false), 'products');
-  assert.equal(requiredPartnerWizardStep('confirmation', true, false), 'pricing');
+  assert.equal(requiredPartnerWizardStep('confirmation', true, false), 'confirmation');
   assert.equal(requiredPartnerWizardStep('confirmation', true, true), 'confirmation');
 });
 
@@ -317,7 +317,7 @@ test('inquiry send stays clickable when the background retail quote has not popu
   assert.doesNotMatch(action, /\bdisabled\b/);
 });
 
-test('the numbered pricing step blocks delivery while Sabalan has not answered every product', () => {
+test('the numbered pricing step allows delivery while Sabalan has not answered every product', () => {
   const pendingRows = draft.rows.map(row => ({ ...row, inquiryRow: { ...row.inquiryRow,
     state: 'PENDING' as const, approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
     approvedRowBinding: undefined } }));
@@ -327,13 +327,12 @@ test('the numbered pricing step blocks delivery while Sabalan has not answered e
     now={Date.parse('2026-08-27T09:00:00.000Z')} renderSection={() => null} validateStep={() => null}
     onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /در انتظار پاسخ/);
-  assert.match(html, /پس از پاسخ همه ردیف‌ها، ادامه به برنامه تحویل فعال می‌شود/);
-  const actionLabel = html.indexOf('در انتظار تکمیل استعلام');
+  const actionLabel = html.indexOf('مرحله بعدی');
   assert.ok(actionLabel > 0);
-  assert.match(html.slice(html.lastIndexOf('<button', actionLabel), actionLabel), /disabled=""/);
+  assert.doesNotMatch(html.slice(html.lastIndexOf('<button', actionLabel), actionLabel), /disabled=""/);
 });
 
-test('waiting for Sabalan renders a disabled progression button without an arrow', () => {
+test('waiting for Sabalan keeps the shared progression action available', () => {
   const pendingRows = draft.rows.map(row => ({ ...row, inquiryRow: { ...row.inquiryRow,
     state: 'PENDING' as const, approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
     approvedRowBinding: undefined } }));
@@ -342,9 +341,9 @@ test('waiting for Sabalan renders a disabled progression button without an arrow
     submission={submission({ ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY' })}
     now={Date.parse('2026-09-26T08:00:00.000Z')} renderSection={() => null} validateStep={() => null}
     onReinquire={() => undefined} onOpenCase={() => undefined} />);
-  const button = html.match(/<button[^>]*disabled=""[^>]*>[\s\S]*?در انتظار تکمیل استعلام[\s\S]*?<\/button>/)?.[0];
-  assert.ok(button);
-  assert.doesNotMatch(button, /<svg/);
+  const actionLabel = html.indexOf('مرحله بعدی');
+  assert.ok(actionLabel > 0);
+  assert.doesNotMatch(html.slice(html.lastIndexOf('<button', actionLabel), actionLabel), /disabled=""/);
 });
 
 test('the pricing step reveals each Sabalan offer and exposes explicit partner acceptance', () => {
@@ -354,7 +353,7 @@ test('the pricing step reveals each Sabalan offer and exposes explicit partner a
     onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /قیمت پیشنهادی سبلان/);
   assert.match(html, /800 ریال/);
-  assert.match(html, /پذیرش قیمت‌ها و ادامه/);
+  assert.match(html, /پذیرش قیمت‌ها/);
   assert.doesNotMatch(html, /در انتظار تکمیل استعلام|ساخت پرونده و ورود به Wizard/);
 });
 
@@ -384,7 +383,7 @@ test('a corrected rejected row offers an explicit inquiry for that row before wa
     onReinquire={() => undefined} onEditProduct={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /استعلام مجدد همین محصول/);
   assert.match(html, /ویرایش این محصول/);
-  assert.match(html, /در انتظار تکمیل استعلام/);
+  assert.match(html, /مرحله بعدی/);
 });
 
 test('a pending successor no longer offers a duplicate corrected-row inquiry', () => {

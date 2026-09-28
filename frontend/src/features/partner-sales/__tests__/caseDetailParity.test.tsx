@@ -10,17 +10,25 @@ test('Partner contract detail exposes applicable contract actions and delivery a
     canFinalize: true, canSendConfirmation: true, canRequestCorrection: true,
     canCancel: false, canRequestVoid: false };
   const labels = partnerCasePageActions(actions).map(action => action.label);
-  assert.ok(labels.includes('تأیید'));
+  assert.ok(labels.includes('پذیرش قیمت‌ها و نهایی‌سازی'));
   assert.ok(labels.includes('ارسال پیامک تأیید'));
   const { partner: view, customer } = createPartnerFixtures();
   const html = renderToStaticMarkup(<PartnerCaseDetailContent view={view} actions={actions}
     customerOutput={customer} history={[{ sequence: 1, type: 'CASE_CREATED', recordedAt: '2026-01-01T00:00:00.000Z' }]} />);
   assert.match(html, /اطلاعات قرارداد/);
-  assert.match(html, /اقلام قرارداد/);
-  assert.match(html, /تحویل و پرداخت/);
   assert.match(html, /مشتری و پروژه/);
-  assert.match(html, /تاریخچه پرونده/);
-  assert.match(html, /ایجاد پرونده/);
+  assert.match(html, /خلاصه/);
+  assert.match(html, /اقلام و تحویل/);
+  assert.match(html, /وضعیت مالی/);
+  assert.match(html, /سوابق/);
+  const items = renderToStaticMarkup(<PartnerCaseDetailContent view={view} actions={actions}
+    customerOutput={customer} initialSection="items" />);
+  assert.match(items, /اقلام قرارداد/);
+  assert.match(items, /برنامه تحویل/);
+  assert.doesNotMatch(items, new RegExp(view.products[0].productRowId));
+  const history = renderToStaticMarkup(<PartnerCaseDetailContent view={view} actions={actions} initialSection="history"
+    history={[{ sequence: 1, type: 'CASE_CREATED', recordedAt: '2026-01-01T00:00:00.000Z' }]} />);
+  assert.match(history, /ایجاد پرونده/);
 });
 
 test('Partner contract toolbar uses existing actions and keeps the SMS label', () => {

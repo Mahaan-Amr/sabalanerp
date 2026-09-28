@@ -351,8 +351,11 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
         }
         const profile = await tx.partnerProfile.findUnique({ where: { userId: dependencies.actorId }, select: { id: true } });
         if (!profile) return { ok: false, error: partnerError('NOT_FOUND') };
+        if (command.type === 'CASE_PRICING_SUBMIT') {
+          await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${command.caseId} FOR UPDATE`;
+        }
         const scopedCase = command.type === 'CASE_PRICING_SUBMIT' ? await tx.partnerSaleCase.findFirst({ where: {
-          id: command.caseId, profileId: profile.id, state: 'DRAFT', pricingState: { in: ['AWAITING_INQUIRY', 'EXPIRED'] },
+          id: command.caseId, profileId: profile.id, state: 'DRAFT', pricingState: { in: ['AWAITING_INQUIRY', 'EXPIRED', 'READY_TO_FINALIZE'] },
           headRevision: command.expected.revision, integrityHash: command.expected.integrityHash,
         }, select: { id: true, headRevision: true } }) : undefined;
         if (command.type === 'CASE_PRICING_SUBMIT' && !scopedCase) {

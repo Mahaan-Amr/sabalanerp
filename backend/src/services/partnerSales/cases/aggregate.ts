@@ -53,9 +53,6 @@ async function resolveAdditionalMaterialApprovals(tx: Transaction, command: Draf
       approvals.push({ material, binding, approval: frozen.data, frozen: true });
       continue;
     }
-    if (frozen.success && frozen.data.configurationHash === material.configurationHash) {
-      return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
-    }
     const approval = await resolveApprovalForUse(tx, { binding, partnerSellerId: resolved.partnerSellerId,
       caseId: command.type === 'CASE_DRAFT_REVISE' ? command.expected.caseId : command.idempotency.targetId,
       pricingCaseRevision: command.type === 'CASE_DRAFT_REVISE' ? command.expected.revision : 1,
@@ -234,12 +231,6 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       approvedRows.push({ ...saved, retailUnitPrice: { ...row.retailUnitPrice, amount: saved.retailUnitPriceAmount },
         approval: frozen.data, frozen: true });
       continue;
-    }
-    if (previous?.configurationHash === saved.configurationHash && previous.inquiryUsages.length > 0) {
-      await dependencies.recordEvidenceReview(tx, { caseId, profileId: current.profileId,
-        correlationId: command.correlationId, code: 'INTEGRITY_CONFLICT',
-        evidence: { expectedRevision: command.expected.revision, productRowId: row.productRowId } });
-      return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
     }
     const approval = await resolveApprovalForUse(tx, { binding: row.approvedRowBinding,
       partnerSellerId: dependencies.actorId, configurationHash: saved.configurationHash,

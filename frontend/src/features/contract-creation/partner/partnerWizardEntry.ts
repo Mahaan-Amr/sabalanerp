@@ -218,7 +218,7 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
   const additionalMaterialApprovals = subjectRows.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&
     subject.configurationRef.productRowId === row.configurationRef.productRowId) && row.approvedRowBinding
     ? [{ pricingSubjectId: row.configurationRef.productRowId, approvedRowBinding: row.approvedRowBinding }] : []);
-  const intent = { ...base, graphHash: saved.data.graphHash, belowCostConfirmed: false, additionalMaterialApprovals,
+  const intent = { ...base, preparationCompleted: base.preparationCompleted ?? false, graphHash: saved.data.graphHash, belowCostConfirmed: false, additionalMaterialApprovals,
     rows: partnerRetailIntentRows(rows),
   };
   const materialInquiryRows = subjectRows.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&

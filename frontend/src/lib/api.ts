@@ -1044,6 +1044,7 @@ export const accountingAPI = {
   createEstimateCase: (data: any) => api.post('/accounting/period-end/estimate-cases', data),
   createFinancialStatementMapping: (data: any) => api.post('/accounting/period-end/mappings', data),
   createStatutoryFormat: (data: any) => api.post('/accounting/period-end/statutory-formats', data),
+  downloadOfficialReportSnapshot: (id: string, format: 'pdf' | 'xlsx') => api.get(`/accounting/period-end/report-snapshots/${encodeURIComponent(id)}/export.${format}`, { responseType: 'blob' }),
   createOfficialReportSnapshot: (data: any) => api.post('/accounting/period-end/report-snapshots', data),
   createTaxObligation: (data: any) => api.post('/accounting/period-end/tax-obligations', data),
   createTaxPaymentVoucher: (id: string, data: any) => api.post(`/accounting/period-end/tax-obligations/${id}/payment-voucher`, data),

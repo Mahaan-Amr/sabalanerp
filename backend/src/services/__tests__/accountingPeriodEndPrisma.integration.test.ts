@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { prisma } from '../../lib/prisma';
 import { createAccountingPeriodEndApplication, hashPeriodEndEvidence } from '../accountingPeriodEnd';
-import { createAccountingPeriodEndPrismaRepository } from '../accountingPeriodEndPrismaRepository';
+import { createOfficialAccountingSnapshot, createAccountingPeriodEndPrismaRepository } from '../accountingPeriodEndPrismaRepository';
 
 const rollback = Symbol('rollback');
 
@@ -78,4 +78,42 @@ test('ready-for-use evidence posts once and persists immutable asset lineage in 
     assert.equal((await tx.accountingFixedAsset.findUniqueOrThrow({ where: { id: asset.id } })).status, 'ACTIVE');
     throw rollback;
   }), (error) => error === rollback);
+});
+
+
+test('official comparison retrieves prior-year postings without adding them to current opening balances', async () => {
+  await assert.rejects(() => prisma.$transaction(async (tx) => {
+    const suffix = randomUUID();
+    const entity = await tx.accountingLegalEntity.create({ data: { code: 'report-' + suffix, namePersian: 'آزمون گزارش', activeFrom: new Date('2025-01-01'), createdBy: 'test' } });
+    const book = await tx.accountingBook.create({ data: { legalEntityId: entity.id, code: 'primary', namePersian: 'دفتر آزمون گزارش', createdBy: 'test' } });
+    const scheme = await tx.accountingCodeScheme.create({ data: { bookId: book.id, version: 1, effectiveFrom: new Date('2025-01-01'), groupLength: 1, kolLength: 2, moinLength: 3, createdBy: 'test' } });
+    const accounts = await Promise.all(['111', '211'].map((code, index) => tx.accountingLedgerAccount.create({ data: { bookId: book.id, codeSchemeId: scheme.id, code, titlePersian: index ? 'سرمایه' : 'صندوق', level: 'MOIN', normalSide: index ? 'CREDIT' : 'DEBIT', statementRole: index ? 'EQUITY' : 'ASSET', effectiveFrom: new Date('2025-01-01'), createdBy: 'test' } })));
+    const years: Array<{ id: string; startsAt: Date; endsAt: Date }> = [];
+    for (const year of [2025, 2026]) {
+      const fiscalYear = await tx.accountingFiscalYear.create({ data: { bookId: book.id, code: String(year), titlePersian: String(year), startsAt: new Date(year + '-01-01'), endsAt: new Date(year + '-12-31T23:59:59.999Z'), status: 'ACTIVE', createdBy: 'test' } });
+      years.push(fiscalYear);
+      const period = await tx.accountingPostingPeriod.create({ data: { fiscalYearId: fiscalYear.id, code: '01', titlePersian: 'دوره آزمون', sequence: 1, startsAt: fiscalYear.startsAt, endsAt: fiscalYear.endsAt, status: 'OPEN' } });
+      for (const [index, amount] of (year === 2025 ? [40, 10] : [100, 20]).entries()) {
+        const date = new Date(year + (index ? '-02-10' : '-01-10'));
+        const identity = suffix + '-' + year + '-' + index;
+        const voucher = await tx.accountingLedgerVoucher.create({ data: { bookId: book.id, fiscalYearId: fiscalYear.id, periodId: period.id, referenceNumber: identity, statutoryNumber: index + 1, idempotencyKey: identity, correlationId: identity, status: 'DRAFT', description: 'آزمون مقایسه', documentDate: date, occurredAt: date, recordedAt: date, postedAt: date, sourceType: 'REPORT_TEST', sourceId: identity, sourceVersion: 1, sourceHash: 'a'.repeat(64), sourcePayload: {}, debitTotalRials: amount, creditTotalRials: amount, contentHash: 'b'.repeat(64), createdBy: 'test', lines: { create: accounts.map((account, accountIndex) => ({ sequence: accountIndex + 1, accountId: account.id, debitRials: accountIndex ? 0 : amount, creditRials: accountIndex ? amount : 0, evidenceType: 'REPORT_TEST', evidenceId: identity, evidenceVersion: 1, evidenceHash: 'a'.repeat(64), evidencePayload: {} })) } } });
+        await tx.accountingLedgerVoucher.update({ where: { id: voucher.id }, data: { status: 'POSTED' } });
+      }
+    }
+    const mapping = await tx.accountingFinancialStatementMapping.create({ data: { bookId: book.id, version: 1, titlePersian: 'نگاشت آزمون', effectiveFrom: new Date('2024-01-01'), contentHash: 'c'.repeat(64), createdBy: 'test', rows: { create: accounts.map((account, index) => ({ accountId: account.id, statementType: 'FINANCIAL_POSITION', sectionCode: index ? 'equity' : 'cash' })) } } });
+    const request = { reportKind: 'FINANCIAL_STATEMENT' as const, bookId: book.id, fiscalYearId: years[1].id, mappingVersionId: mapping.id, from: new Date('2026-02-01'), to: new Date('2026-02-28T23:59:59.999Z'), comparativeFrom: new Date('2025-02-01'), comparativeTo: new Date('2025-02-28T23:59:59.999Z'), cutoffAt: new Date('2026-09-28'), columns: 2 as const };
+    const { dataset } = await createOfficialAccountingSnapshot(tx, { request, actorId: 'test' });
+    const cash = dataset.rows.find((row) => row.key === 'FINANCIAL_POSITION:cash')!;
+    const priorCash = dataset.comparative!.rows.find((row) => row.key === 'FINANCIAL_POSITION:cash')!;
+    assert.equal(cash.amounts.openingDebit, 100n);
+    assert.equal(cash.amounts.endingDebit, 120n);
+    assert.equal(priorCash.amounts.openingDebit, 40n);
+    assert.equal(priorCash.amounts.endingDebit, 50n);
+    assert.equal(dataset.sourceLineIds.length, 8);
+    assert.equal(new Set([...dataset.rows.flatMap((row) => row.drilldownLineIds), ...dataset.comparative!.rows.flatMap((row) => row.drilldownLineIds)]).size, 8);
+    const missing = await createOfficialAccountingSnapshot(tx, { request: { ...request, comparativeFrom: new Date('2024-02-01'), comparativeTo: new Date('2024-02-28') }, actorId: 'test' });
+    assert.equal(missing.dataset.comparative!.rows.length, 0);
+    assert.equal(missing.dataset.rows.find((row) => row.key === 'FINANCIAL_POSITION:cash')!.amounts.endingDebit, 120n);
+    throw rollback;
+  }, { timeout: 30000 }), (error) => error === rollback);
 });

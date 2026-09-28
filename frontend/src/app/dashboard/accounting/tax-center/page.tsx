@@ -13,7 +13,7 @@ import {
   ErpInput,
   ErpPage,
   ErpSection,
-  ErpSelect,
+  ErpSearchableSelect,
 } from "@/components/erp";
 import { accountingAPI } from "@/lib/api";
 import {
@@ -39,7 +39,8 @@ export default function TaxOperationsPage() {
   const [data, setData] = useState<any>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ scope: string; kind: "success" | "error"; title: string }>();
+  const [actionPending, setActionPending] = useState(false);
   const [channel, setChannel] = useState({
     legalEntityId: "",
     kind: "DIRECT",
@@ -67,19 +68,15 @@ export default function TaxOperationsPage() {
     fiscalYearId: "",
     periodId: "",
   });
-  const run = async (operation: () => Promise<unknown>, success: string) => {
-    setError(null);
-    setNotice(null);
-    try {
-      await operation();
-      setNotice(success);
-      await load();
-    } catch (reason) {
-      setError(accountingFailureMessage(reason, "عملیات مالیاتی انجام نشد."));
-    }
+  const run = async (operation: () => Promise<unknown>, success: string, scope: string) => {
+    if (actionPending) return;
+    setActionPending(true); setActionFeedback(undefined);
+    try { await operation(); setActionFeedback({ scope, kind: "success", title: success }); await load(true); }
+    catch (reason) { const local = reason instanceof Error && /[\u0600-\u06ff]/.test(reason.message) ? reason.message : "عملیات مالیاتی انجام نشد."; setActionFeedback({ scope, kind: "error", title: accountingFailureMessage(reason, local) }); }
+    finally { setActionPending(false); }
   };
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
     setError(null);
     try {
       setData((await accountingAPI.getTaxOverview()).data.data);
@@ -97,7 +94,7 @@ export default function TaxOperationsPage() {
       eyebrow="مالیات"
       title="عملیات مالیاتی قطعی"
       description="صورتحساب مالیاتی، صف ارسال، تلاش‌ها، کانال مؤثر و تطبیق ارزش افزوده مستقل از سند اقتصادی پیگیری می‌شوند."
-      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: load }]}
+      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: () => load() }]}
       metrics={
         data
           ? [
@@ -137,7 +134,7 @@ export default function TaxOperationsPage() {
           action={{ label: "تلاش دوباره", onClick: load }}
         />
       )}
-      {notice && <ErpInlineState kind="success" title={notice} />}
+
       {data && (
         <>
           {data.capabilities?.canConfigure && (
@@ -205,7 +202,7 @@ export default function TaxOperationsPage() {
                   />
                 </ErpField>
                 <ErpField label="وضعیت معافیت">
-                  <ErpSelect
+                  <ErpSearchableSelect
                     value={rule.exempt}
                     onChange={(event) =>
                       setRule({ ...rule, exempt: event.target.value })
@@ -213,7 +210,7 @@ export default function TaxOperationsPage() {
                   >
                     <option value="false">مشمول مالیات</option>
                     <option value="true">معاف</option>
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </ErpField>
                 <ErpField label="دلیل معافیت">
                   <ErpInput
@@ -233,7 +230,7 @@ export default function TaxOperationsPage() {
                   />
                 </ErpField>
                 <ErpField label="روش تخصیص">
-                  <ErpSelect
+                  <ErpSearchableSelect
                     value={rule.allocationRule}
                     onChange={(event) =>
                       setRule({ ...rule, allocationRule: event.target.value })
@@ -241,10 +238,10 @@ export default function TaxOperationsPage() {
                   >
                     <option value="PER_LINE">به تفکیک ردیف</option>
                     <option value="PROPORTIONAL">تخصیص نسبی</option>
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </ErpField>
                 <ErpField label="روش گردکردن">
-                  <ErpSelect
+                  <ErpSearchableSelect
                     value={rule.roundingRule}
                     onChange={(event) =>
                       setRule({ ...rule, roundingRule: event.target.value })
@@ -252,18 +249,18 @@ export default function TaxOperationsPage() {
                   >
                     <option value="HALF_UP_IRR">نیم‌به‌بالا به ریال</option>
                     <option value="DOWN_IRR">رو به پایین به ریال</option>
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </ErpField>
               </div>
               <div className="mt-3 flex justify-end">
                 <ErpButton
                   label="ثبت نسخه قاعده"
                   disabled={
-                    !rule.legalEntityId ||
+                    actionPending || (!rule.legalEntityId ||
                     !rule.code ||
                     !rule.effectiveFrom ||
                     !rule.citation ||
-                    (rule.exempt === "true" && !rule.exemptionReason)
+                    (rule.exempt === "true" && !rule.exemptionReason))
                   }
                   onClick={() =>
                     void run(
@@ -278,7 +275,7 @@ export default function TaxOperationsPage() {
                           ).toISOString(),
                           exemptionReason: rule.exemptionReason || undefined,
                         }),
-                      "نسخه قاعده مالیاتی ثبت شد.",
+                      "نسخه قاعده مالیاتی ثبت شد.", "tax-center-1"
                     )
                   }
                 />
@@ -301,7 +298,8 @@ export default function TaxOperationsPage() {
                   </ErpCard>
                 ))}
               </div>
-            </ErpSection>
+            {actionFeedback?.scope === "tax-center-1" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpSection>
           )}
           {data.capabilities?.canConfigure && (
             <ErpSection
@@ -321,7 +319,7 @@ export default function TaxOperationsPage() {
                   />
                 </ErpField>
                 <ErpField label="روش ارسال">
-                  <ErpSelect
+                  <ErpSearchableSelect
                     value={channel.kind}
                     onChange={(event) =>
                       setChannel({ ...channel, kind: event.target.value })
@@ -329,7 +327,7 @@ export default function TaxOperationsPage() {
                   >
                     <option value="DIRECT">ارسال مستقیم</option>
                     <option value="TRUSTED_COMPANY">شرکت معتمد</option>
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </ErpField>
                 <ErpField label="نام ارائه‌دهنده">
                   <ErpInput
@@ -385,10 +383,10 @@ export default function TaxOperationsPage() {
                 <ErpButton
                   label="ثبت کانال ارسال"
                   disabled={
-                    !channel.legalEntityId ||
+                    actionPending || (!channel.legalEntityId ||
                     !channel.safeKeyVersion ||
                     !channel.secretReference ||
-                    !channel.effectiveFrom
+                    !channel.effectiveFrom)
                   }
                   onClick={() =>
                     void run(
@@ -400,12 +398,13 @@ export default function TaxOperationsPage() {
                           ).toISOString(),
                           providerName: channel.providerName || undefined,
                         }),
-                      "کانال مالیاتی ثبت شد.",
+                      "کانال مالیاتی ثبت شد.", "tax-center-2"
                     )
                   }
                 />
               </div>
-            </ErpSection>
+            {actionFeedback?.scope === "tax-center-2" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpSection>
           )}
           <ErpSection
             title="صورتحساب‌ها و صف ارسال"
@@ -454,7 +453,7 @@ export default function TaxOperationsPage() {
                             key={message.id}
                             className="mt-3 flex flex-wrap items-center gap-2"
                           >
-                            <ErpSelect
+                            <ErpSearchableSelect
                               aria-label="انتخاب کانال ارسال"
                               defaultValue=""
                               onChange={(event) => {
@@ -465,7 +464,7 @@ export default function TaxOperationsPage() {
                                         message.id,
                                         event.target.value,
                                       ),
-                                    "صورتحساب به کانال مؤثر متصل شد.",
+                                    "صورتحساب به کانال مؤثر متصل شد.", ("tax-center-3" + String(row.id))
                                   );
                               }}
                             >
@@ -482,10 +481,11 @@ export default function TaxOperationsPage() {
                                         : "شرکت معتمد")}
                                   </option>
                                 ))}
-                            </ErpSelect>
+                            </ErpSearchableSelect>
                           </div>
                         ))}
-                  </ErpCard>
+                  {actionFeedback?.scope === ("tax-center-3" + String(row.id)) && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
                 ))}
               </div>
             ) : (
@@ -554,12 +554,12 @@ export default function TaxOperationsPage() {
                   <ErpButton
                     label="اجرای تطبیق دوره"
                     disabled={
-                      !vat.legalEntityId || !vat.fiscalYearId || !vat.periodId
+                      actionPending || (!vat.legalEntityId || !vat.fiscalYearId || !vat.periodId)
                     }
                     onClick={() =>
                       void run(
                         () => accountingAPI.reconcileVatPeriod(vat),
-                        "تطبیق ارزش افزوده ثبت شد.",
+                        "تطبیق ارزش افزوده ثبت شد.", "tax-center-4"
                       )
                     }
                   />
@@ -590,7 +590,8 @@ export default function TaxOperationsPage() {
             ) : (
               <ErpEmptyState title="تطبیق ارزش افزوده ثبت نشده است" />
             )}
-          </ErpSection>
+          {actionFeedback?.scope === "tax-center-4" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpSection>
         </>
       )}
     </ErpPage>

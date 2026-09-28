@@ -105,7 +105,7 @@ test('receipt remains an advance until immutable allocations settle several open
   const receipt = await service.recordReceipt({ profileId: profile.id, contractId: 'contract-1', amountRials: 1_700_000n,
     occurredAt: at('2026-09-25T08:00:00Z'), financialAccountId: 'bank-1', source: { type: 'BANK_RECEIPT', id: 'receipt-1', version: 1 },
     idempotencyKey: 'receipt-1', actor });
-  let projection = await service.projectCustomerAccount({ profileId: profile.id, asOf: at('2026-09-26T00:00:00Z') });
+  let projection = await service.projectCustomerAccount({ profileId: profile.id, asOf: new Date(Date.now() + 1_000) });
   assert.equal(projection.receivableRials, 1_500_000n);
   assert.equal(projection.unallocatedCreditRials, 1_700_000n);
 
@@ -113,13 +113,13 @@ test('receipt remains an advance until immutable allocations settle several open
   const allocation = await service.allocateReceipt({ receiptId: receipt.id, actor, allocations: [
     { openItemId: items[0].id, amountRials: 1_000_000n }, { openItemId: items[1].id, amountRials: 500_000n },
   ] });
-  projection = await service.projectCustomerAccount({ profileId: profile.id, asOf: at('2026-09-26T00:00:00Z') });
+  projection = await service.projectCustomerAccount({ profileId: profile.id, asOf: new Date(Date.now() + 1_000) });
   assert.equal(projection.receivableRials, 0n);
   assert.equal(projection.unallocatedCreditRials, 200_000n);
   assert.equal(projection.openItems.length, 0);
 
   await service.reverseAllocation({ allocationId: allocation.id, reason: 'تخصیص به فاکتور نادرست انجام شده بود', actor });
-  projection = await service.projectCustomerAccount({ profileId: profile.id, asOf: at('2026-09-26T00:00:00Z') });
+  projection = await service.projectCustomerAccount({ profileId: profile.id, asOf: new Date(Date.now() + 1_000) });
   assert.equal(projection.receivableRials, 1_500_000n);
   assert.equal(projection.unallocatedCreditRials, 1_700_000n);
 });

@@ -896,17 +896,28 @@ export const listCustomerAccountsPrisma = async (database: PrismaClient, input: 
 };
 
 export const listTreasuryOverviewPrisma = async (database: PrismaClient) => {
-  const [transactions, bankLines, checks, cashCounts, pettyCash] = await Promise.all([
+  const [transactions, bankLines, bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash] = await Promise.all([
     database.accountingTreasuryTransaction.findMany({ orderBy: { occurredAt: 'desc' }, take: 100,
       include: { profile: { select: { displayName: true } }, allocations: { include: { lines: true } } } }),
     database.accountingBankStatementLine.findMany({ orderBy: { bookedAt: 'desc' }, take: 100,
       include: { matches: { orderBy: { createdAt: 'desc' } } } }),
+    database.accountingBankImportMapping.findMany({ orderBy: { createdAt: 'desc' },
+      select: { id: true, financialAccountId: true, adapterType: true, version: true, effectiveFrom: true, effectiveTo: true } }),
+    database.accountingBankFileImportRun.findMany({ orderBy: { createdAt: 'desc' }, take: 20,
+      select: { id: true, financialAccountId: true, adapterType: true, mappingVersion: true, fileHash: true,
+        outputHash: true, totalRows: true, imported: true, rejected: true, results: true, createdAt: true } }),
+    database.accountingBankFileImportRun.findMany({ where: { imported: { gt: 0 } }, orderBy: { createdAt: 'desc' },
+      select: { id: true, financialAccountId: true, fileHash: true, mappingVersion: true, imported: true, createdAt: true } }),
+    database.accountingExceptionCase.findMany({ where: { sourceType: 'BANK_STATEMENT_FILE', status: 'OPEN' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, code: true, messagePersian: true, sourceId: true, sourceVersion: true,
+        assignedProfile: true, assignedUserId: true, createdAt: true } }),
     database.accountingCheckInstrument.findMany({ orderBy: { dueAt: 'asc' }, take: 100,
       include: { events: { orderBy: { sequence: 'asc' } } } }),
     database.accountingCashCount.findMany({ orderBy: { countedAt: 'desc' }, take: 50 }),
     database.accountingPettyCashAdvance.findMany({ orderBy: { settlementDueAt: 'asc' }, take: 100 }),
   ]);
-  return { transactions, bankLines, checks, cashCounts, pettyCash };
+  return { transactions, bankLines, bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash };
 };
 
 export const listTaxOverviewPrisma = async (database: PrismaClient) => {
@@ -995,10 +1006,13 @@ export const createBankImportMappingPrisma = async (database: PrismaClient, inpu
     effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo, evidenceHash, createdBy: input.actor.id } });
 };
 
-export const importBankStatementLinePrisma = async (database: PrismaClient, input: {
+type BankStatementLineInput = {
   financialAccountId: string; adapterType: 'API' | 'CSV' | 'XLSX' | 'MANUAL'; mappingVersion: number; sourceIdentity: string;
   bookedAt: Date; amountRials: bigint; direction: 'INBOUND' | 'OUTBOUND'; description: string; evidence: unknown;
-}) => database.$transaction(async (tx) => {
+};
+
+export const importBankStatementLineWithTx = async (tx: Prisma.TransactionClient, input: BankStatementLineInput,
+  options: { allowOverlappingFileOccurrence?: boolean } = {}) => {
   let normalized = { sourceIdentity: input.sourceIdentity, bookedAt: input.bookedAt, amountRials: input.amountRials,
     direction: input.direction, description: input.description };
   let mappingId: string | undefined;
@@ -1034,9 +1048,10 @@ export const importBankStatementLinePrisma = async (database: PrismaClient, inpu
     financialAccountId: input.financialAccountId, sourceIdentity: normalized.sourceIdentity,
   } } });
   if (prior) {
-    if (prior.adapterType !== input.adapterType || prior.mappingVersion !== input.mappingVersion
-      || prior.bookedAt.getTime() !== normalized.bookedAt.getTime() || toBigInt(prior.amountRials) !== normalized.amountRials
-      || prior.direction !== normalized.direction || prior.description !== normalized.description || prior.sourceHash !== sourceHash) {
+    if (prior.bookedAt.getTime() !== normalized.bookedAt.getTime() || toBigInt(prior.amountRials) !== normalized.amountRials
+      || prior.direction !== normalized.direction || prior.description !== normalized.description
+      || (!options.allowOverlappingFileOccurrence && (prior.adapterType !== input.adapterType
+        || prior.mappingVersion !== input.mappingVersion || prior.sourceHash !== sourceHash))) {
       throw new AccountingCustomerTreasuryError('BANK_SOURCE_IDENTITY_CONFLICT', 'شناسه منبع ردیف بانکی با محتوای متفاوت تکرار شده است.', 409);
     }
     return prior;
@@ -1044,7 +1059,11 @@ export const importBankStatementLinePrisma = async (database: PrismaClient, inpu
   return tx.accountingBankStatementLine.create({ data: { financialAccountId: input.financialAccountId,
     adapterType: input.adapterType, mappingVersion: input.mappingVersion, mappingId, ...normalized,
     amountRials: normalized.amountRials.toString(), evidence: json(input.evidence), sourceHash } });
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+};
+
+export const importBankStatementLinePrisma = async (database: PrismaClient, input: BankStatementLineInput) =>
+  database.$transaction((tx) => importBankStatementLineWithTx(tx, input),
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
 export const proposeBankMatchesPrisma = async (database: PrismaClient, bankStatementLineId: string) => database.$transaction(async (tx) => {
   const line = await tx.accountingBankStatementLine.findUnique({ where: { id: bankStatementLineId } });

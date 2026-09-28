@@ -3,7 +3,7 @@ import { ErpPersianDateField } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaCheckCircle, FaExclamationTriangle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
-import { ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpListPage, ErpPagination, ErpRialInput, ErpSelect, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
+import { ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpListPage, ErpPagination, ErpRialInput, ErpSearchableSelect, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import { emptyAccountingPagination, FinancialInvoiceApprovalForm, type FinancialInvoiceApprovalPayload,
@@ -304,10 +304,10 @@ export default function AccountingInvoiceCandidatesPage() {
                 onChange={(value) => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, dueDate: value } : row))} /></ErpField>
               <ErpField label="مبلغ" required><ErpRialInput value={item.amount}
                 onValueChange={amount => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, amount } : row))} /></ErpField>
-              <ErpField label="روش"><ErpSelect value={item.method} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id
+              <ErpField label="روش"><ErpSearchableSelect value={item.method} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id
                 ? { ...row, method: event.target.value as typeof item.method } : row))}>
                 <option value="BANK_TRANSFER">واریز بانکی</option><option value="CASH">نقدی</option><option value="CHECK">چک</option>
-              </ErpSelect></ErpField>
+              </ErpSearchableSelect></ErpField>
             </div>
             {item.method === 'CHECK' && <div className="grid gap-3 sm:grid-cols-2">
               <ErpField label="شماره چک" required><ErpInput value={item.checkNumber ?? ''} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, checkNumber: event.target.value } : row))} /></ErpField>

@@ -16,7 +16,7 @@ import {
   ErpPage,
   ErpSection,
   ErpSegmentedControl,
-  ErpSelect,
+  ErpSearchableSelect,
 } from '@/components/erp';
 
 type Tab = 'payables' | 'inventory' | 'checks' | 'exceptions' | 'settings';
@@ -47,6 +47,8 @@ export default function SupplyChainAccountingPage() {
   const [tab, setTab] = useState<Tab>('payables');
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; title: string }>();
+  const [ruleMessage, setRuleMessage] = useState<{ kind: 'success' | 'error'; title: string }>();
+  const [rulePending, setRulePending] = useState(false);
   const [rule, setRule] = useState({ accountRole: '', accountId: '', effectiveFrom: new Date().toISOString().slice(0, 10) });
 
   const load = useCallback(async () => {
@@ -82,14 +84,15 @@ export default function SupplyChainAccountingPage() {
   }, [data?.postingRules]);
 
   const saveRule = async () => {
+    if (rulePending) return; setRulePending(true); setRuleMessage(undefined);
     try {
       await accountingAPI.createSupplyChainPostingRule({ ...rule, bookId: book.id, effectiveFrom: `${rule.effectiveFrom}T00:00:00.000Z` });
-      setMessage({ kind: 'success', title: 'نسخه جدید قاعده ثبت فعال شد.' });
+      setRuleMessage({ kind: 'success', title: 'نسخه جدید قاعده ثبت فعال شد.' });
       setRule((current) => ({ ...current, accountRole: '', accountId: '' }));
       await load();
     } catch (error: any) {
-      setMessage({ kind: 'error', title: error.response?.data?.message || 'ثبت قاعده حسابداری انجام نشد.' });
-    }
+      setRuleMessage({ kind: 'error', title: error.response?.data?.message || 'ثبت قاعده حسابداری انجام نشد.' });
+    } finally { setRulePending(false); }
   };
 
   if (loading && !data) return <ErpPage title="خرید، موجودی و بهای تمام‌شده" backHref="/dashboard/accounting"><ErpLoading /></ErpPage>;
@@ -146,7 +149,7 @@ export default function SupplyChainAccountingPage() {
 
       {tab === 'settings' && <>
         <ErpSection title="نسخه جدید قاعده ثبت" description="نسخه پیشین تا لحظه اثر نسخه جدید حفظ می‌شود و سندهای گذشته بازنویسی نمی‌شوند.">
-          {!book ? <ErpEmptyState title="ابتدا دفتر اصلی را در بخش دفترکل ایجاد کنید." /> : <><div className="grid gap-3 md:grid-cols-3"><label><span className="mb-2 block text-sm">نقش حسابی</span><ErpSelect value={rule.accountRole} onChange={(event) => setRule({ ...rule, accountRole: event.target.value })}><option value="">انتخاب نقش حسابی</option>{Object.entries(postingRoleFa).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSelect></label><label><span className="mb-2 block text-sm">حساب معین</span><ErpSelect value={rule.accountId} onChange={(event) => setRule({ ...rule, accountId: event.target.value })}><option value="">انتخاب حساب</option>{accounts.map((account: any) => <option key={account.id} value={account.id}>{account.code} · {account.titlePersian}</option>)}</ErpSelect></label><label><span className="mb-2 block text-sm">تاریخ اثر</span><ErpPersianDateField valueFormat="iso-date" value={rule.effectiveFrom} onChange={(value) => setRule({ ...rule, effectiveFrom: value })} /></label></div><div className="mt-4 flex justify-end"><ErpButton label="فعال‌سازی نسخه" disabled={!rule.accountRole.trim() || !rule.accountId || !rule.effectiveFrom} onClick={saveRule} /></div></>}
+          {!book ? <ErpEmptyState title="ابتدا دفتر اصلی را در بخش دفترکل ایجاد کنید." /> : <><div className="grid gap-3 md:grid-cols-3"><label><span className="mb-2 block text-sm">نقش حسابی</span><ErpSearchableSelect value={rule.accountRole} onChange={(event) => setRule({ ...rule, accountRole: event.target.value })}><option value="">انتخاب نقش حسابی</option>{Object.entries(postingRoleFa).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSearchableSelect></label><label><span className="mb-2 block text-sm">حساب معین</span><ErpSearchableSelect value={rule.accountId} onChange={(event) => setRule({ ...rule, accountId: event.target.value })}><option value="">انتخاب حساب</option>{accounts.map((account: any) => <option key={account.id} value={account.id}>{account.code} · {account.titlePersian}</option>)}</ErpSearchableSelect></label><label><span className="mb-2 block text-sm">تاریخ اثر</span><ErpPersianDateField valueFormat="iso-date" value={rule.effectiveFrom} onChange={(value) => setRule({ ...rule, effectiveFrom: value })} /></label></div><div className="mt-4 flex justify-end"><ErpButton label="فعال‌سازی نسخه" disabled={rulePending || !rule.accountRole.trim() || !rule.accountId || !rule.effectiveFrom} onClick={saveRule} /></div>{ruleMessage && <ErpInlineState kind={ruleMessage.kind} title={ruleMessage.title} />}</>}
         </ErpSection>
         <ErpSection title="قواعد فعال">{!activeRules.length ? <ErpEmptyState title="قاعده ثبتی تعریف نشده است." /> : <div className="grid gap-3 md:grid-cols-2">{activeRules.map((item: any) => <ErpCard key={item.id} className="p-4"><strong>{postingRoleFa[item.accountRole] || 'نقش حسابی تعریف‌شده'}</strong><span className="mt-2 block text-sm">{item.account.code} · {item.account.titlePersian}</span><span className="mt-1 block text-xs text-[var(--sds-text-muted)]">نسخه {Number(item.version).toLocaleString('fa-IR')} · از {dateFa(item.effectiveFrom)}</span></ErpCard>)}</div>}</ErpSection>
       </>}

@@ -10,6 +10,7 @@ import PersianCalendar from '@/lib/persian-calendar';
 import PersianTimePicker from './PersianTimePicker';
 import { isCalendarOwnedInteraction } from './calendarOverlayPolicy';
 import { resolveDateTimeSelection } from './persianCalendarCommitPolicy';
+import { persianCalendarLayout } from './persianCalendarLayout';
 import { normalizeYearOnlyValue, yearOnlyOptions } from './persianCalendarYearPolicy';
 
 export interface PersianCalendarProps {
@@ -104,11 +105,8 @@ export default function PersianCalendarComponent({
     setMobile(isMobile);
     if (isMobile || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
-    const width = Math.min(Math.max(rect.width, 344), window.innerWidth - 32);
     const height = yearOnly ? 360 : showTime ? 510 : 440;
-    const top = rect.bottom + height + 12 <= window.innerHeight ? rect.bottom + 8 : Math.max(16, rect.top - height - 8);
-    const left = Math.max(16, Math.min(rect.left, window.innerWidth - width - 16));
-    setPosition({ top, left, width, maxHeight: Math.min(height, window.innerHeight - 32) });
+    setPosition(persianCalendarLayout(rect, { width: window.innerWidth, height: window.innerHeight }, height));
   }, [showTime, yearOnly]);
 
   useEffect(() => {
@@ -228,7 +226,7 @@ export default function PersianCalendarComponent({
       aria-label={yearOnly ? "انتخاب سال شمسی" : "انتخاب تاریخ شمسی"}
       dir="rtl"
     >
-      <div className="max-h-[92dvh] overflow-y-auto p-4">
+      <div className="overflow-y-auto overscroll-contain p-4" style={{ maxHeight: mobile ? '92dvh' : position.maxHeight }}>
         {mobile && <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]" />}
         {yearOnly ? (
           <div className="space-y-3">

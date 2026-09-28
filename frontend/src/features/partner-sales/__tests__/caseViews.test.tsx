@@ -22,9 +22,11 @@ test('Partner case detail separates retail, wholesale and margin without exposin
   assert.match(html, /خرید از سبلان/);
   assert.match(html, /سود بازفروش/);
   assert.match(html, /پیش‌نمایش/);
-  assert.match(html, /تأیید و نهایی‌سازی قرارداد/);
   assert.match(html, /صدور PDF نهایی/);
-  assert.match(html, /ارسال پیامک تأیید/);
+  const toolbar = partnerCasePageActions({ canPreview: true, canIssue: true, canFinalize: true,
+    canSendConfirmation: true, canRequestCorrection: true, canCancel: true, canRequestVoid: false });
+  assert.ok(toolbar.some(action => action.label === 'پذیرش قیمت‌ها و نهایی‌سازی'));
+  assert.ok(toolbar.some(action => action.label === 'ارسال پیامک تأیید'));
   assert.doesNotMatch(html, /FIXTURE-INTERNAL-313|شماره سند داخلی|approvalEvidenceId|commercialAccountId/);
 });
 
@@ -34,7 +36,7 @@ test('an editable numbered Case exposes one safe continuation action and wire me
     canContinue: true, canPreview: false, canIssue: false, canFinalize: false,
     canSendConfirmation: false, canRequestCorrection: false, canCancel: true, canRequestVoid: false,
   };
-  assert.deepEqual(partnerCasePageActions(actions).map(action => action.label), ['ویرایش', 'رد']);
+  assert.deepEqual(partnerCasePageActions(actions).map(action => action.label), ['ویرایش', 'لغو پیش‌نویس']);
   const runtime = { cases: [{ view: fixture.partner, snapshotId: null,
     editRecovery: { recoveryId: 'recovery-editable-1', baseRevision: 0 },
     actions: { canContinue: true, canPreview: false, canIssue: false, canFinalize: false,

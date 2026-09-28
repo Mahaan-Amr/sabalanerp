@@ -166,9 +166,6 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
       </ErpSection>}
       <ErpSection title="خروجی مشتری" description="ارسال برای مشتری و نهایی‌سازی فروشنده دو اقدام مستقل هستند.">
         <div className="grid gap-2"><ErpButton label="پیش‌نمایش" icon={FaEye} variant="outline" disabled={!actions.canPreview} onClick={actions.onPreview} />
-          {actions.canSendConfirmation && <ErpButton label="ارسال پیامک تأیید" icon={FaSms} tone="info" variant="outline" onClick={actions.onSendConfirmation} />}
-          {actions.canFinalize && <ErpButton label="تأیید و نهایی‌سازی قرارداد" icon={FaFileContract}
-            tone="success" onClick={actions.onFinalize} />}
           <ErpButton label="صدور PDF نهایی" icon={FaPrint} tone="success" disabled={!actions.canIssue} onClick={actions.onIssue} /></div>
       </ErpSection>
     </>}

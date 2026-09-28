@@ -17,6 +17,7 @@ import {
   ErpSearchableSelect,
 } from "@/components/erp";
 import { accountingAPI } from "@/lib/api";
+import { treasuryLedgerAccounts } from '@/features/accounting/treasuryLedgerAccounts';
 import { parseBankApiRecord } from '@/features/accounting/bankStatementInput';
 import {
   accountingFailureMessage,
@@ -328,6 +329,8 @@ export default function TreasuryControlPage() {
                         setReceipt({
                           ...receipt,
                           bookId: event.target.value,
+                          bankAccountLedgerId: "",
+                          customerAdvanceLedgerId: "",
                           fiscalYearId: "",
                           periodId: "",
                         })
@@ -393,7 +396,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, receipt.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -417,7 +420,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, receipt.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -586,6 +589,8 @@ export default function TreasuryControlPage() {
                         setAllocation({
                           ...allocation,
                           bookId: event.target.value,
+                          customerAdvanceLedgerId: "",
+                          receivableLedgerId: "",
                           fiscalYearId: "",
                           periodId: "",
                         })
@@ -654,7 +659,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, allocation.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -678,7 +683,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, allocation.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -818,6 +823,8 @@ export default function TreasuryControlPage() {
                         setTransfer({
                           ...transfer,
                           bookId: event.target.value,
+                          fromLedgerAccountId: "",
+                          toLedgerAccountId: "",
                           fiscalYearId: "",
                           periodId: "",
                         })
@@ -886,7 +893,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, transfer.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -910,7 +917,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, transfer.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -2019,6 +2026,8 @@ export default function TreasuryControlPage() {
                         setPetty({
                           ...petty,
                           bookId: event.target.value,
+                          cashLedgerId: "",
+                          pettyCashAdvanceLedgerId: "",
                           fiscalYearId: "",
                           periodId: "",
                         })
@@ -2081,7 +2090,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, petty.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -2105,7 +2114,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, petty.bookId)
                         ?.filter((item: any) => item.level === "MOIN")
                         .map((item: any) => (
                           <option key={item.id} value={item.id}>

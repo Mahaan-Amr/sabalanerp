@@ -499,7 +499,7 @@ async function withApprovedBinding(ids: Record<string, string>, draft: Extract<P
 }
 
 async function allocateFixturePair(tx: Prisma.TransactionClient, ids: Record<string, string>,
-  submitted: Extract<PartnerCommand, { type: 'CASE_SUBMIT' }>,
+  submitted: Pick<Extract<PartnerCommand, { type: 'CASE_SUBMIT' | 'CASE_DRAFT_REVISE' }>, 'intent'>,
   expected: Parameters<typeof allocatePartnerLinkedPair>[1]['expected'], caseId = ids.caseId) {
   await tx.user.update({ where: { id: ids.partnerId }, data: { departmentId: ids.departmentId } });
   await tx.salesContractEditSession.create({ data: { draftId: submitted.intent.recoveryId,
@@ -606,7 +606,7 @@ test('a customer-visible revision invalidates the sent version and requires conf
     const priced = await service(tx, ids).execute(pricedCommand);
     assert.equal(priced.ok, true, JSON.stringify(priced));
     if (!priced.ok || !priced.value.case) return;
-    await allocateFixturePair(tx, ids, submitted, priced.value.case.owner);
+    await allocateFixturePair(tx, ids, pricedCommand, priced.value.case.owner);
     const lifecycle = createPartnerCaseLifecycleService({ actorId: ids.partnerId, cancellationPurpose: 'PARTNER',
       transaction: work => work(tx),
       authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
@@ -762,7 +762,7 @@ test('a Project already won by another Case cannot be stolen by submit or Draft 
     const otherPriced = await service(tx, ids).execute(otherPricedCommand);
     assert.equal(otherPriced.ok, true, JSON.stringify(otherPriced));
     if (!otherPriced.ok || !otherPriced.value.case) return;
-    await allocateFixturePair(tx, ids, other, otherPriced.value.case.owner, otherCaseId);
+    await allocateFixturePair(tx, ids, otherPricedCommand, otherPriced.value.case.owner, otherCaseId);
 
     const base = await command(ids);
     const initialIntent = { ...base.intent, projectId: ids.firstProjectId };
@@ -777,7 +777,7 @@ test('a Project already won by another Case cannot be stolen by submit or Draft 
     const priced = await service(tx, ids).execute(pricedCommand);
     assert.equal(priced.ok, true, JSON.stringify(priced));
     if (!priced.ok || !priced.value.case) return;
-    await allocateFixturePair(tx, ids, submitted, priced.value.case.owner);
+    await allocateFixturePair(tx, ids, pricedCommand, priced.value.case.owner);
     const draft = await reviseCommand(ids, { ...submitted, intent: pricedCommand.intent }, 2,
       priced.value.case.owner.integrityHash, 'steal-project');
     const intent = { ...draft.intent, customerId: ids.secondCustomerId, projectId: ids.secondProjectId };
@@ -806,7 +806,7 @@ test('an unchanged Project binding must still belong to the exact current custom
     const priced = await service(tx, ids).execute(pricedCommand);
     assert.equal(priced.ok, true, JSON.stringify(priced));
     if (!priced.ok || !priced.value.case) return;
-    await allocateFixturePair(tx, ids, submitted, priced.value.case.owner);
+    await allocateFixturePair(tx, ids, pricedCommand, priced.value.case.owner);
     await tx.crmPotentialProject.update({ where: { id: ids.firstProjectId }, data: {
       wonSalesContractId: null, partnerRevision: { increment: 1 } } });
     const revised = await service(tx, ids).execute(await withApprovedBinding(ids,

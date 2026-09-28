@@ -14,6 +14,12 @@ const amountColumnFa: Record<string, string> = {
   periodNetDebit: 'خالص بدهکار دوره', periodNetCredit: 'خالص بستانکار دوره',
 };
 
+// Comparative reports can have eighteen columns. Keep every frozen column at
+// readable size instead of cropping the left-hand side of an A4 table.
+export const officialReportPdfPageSize = (columnCount: number) => columnCount > 10
+  ? { widthMm: 420, heightMm: 297, cssSize: 'A3 landscape' }
+  : { widthMm: 297, heightMm: 210, cssSize: 'A4 landscape' };
+
 const persianDate = (value: string | Date | undefined): string => {
   const day = value instanceof Date ? value.toISOString().slice(0, 10) : String(value ?? '').slice(0, 10);
   const date = new Date(`${day}T12:00:00.000Z`);

@@ -19,7 +19,7 @@ import { createAccountingLedgerPrismaRepository } from '../services/accountingLe
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { scanHiringFile, sha256File } from '../services/hrHiringFileStorage';
 import { recordOperationalReconciliation } from '../services/accountingOperationalReconciliation';
-import { buildOfficialReportExportRows, officialReportPeriodLabels } from '../services/accountingOfficialReportExport';
+import { buildOfficialReportExportRows, officialReportPeriodLabels, officialReportPdfPageSize } from '../services/accountingOfficialReportExport';
 import { parseOfficialReportDate } from '../services/accountingOfficialReportDates';
 import { retainOfficialReportArtifact } from '../services/accountingOfficialReportArtifact';
 
@@ -634,17 +634,18 @@ router.get('/report-snapshots/:id/export.pdf', ...editAccess, async (req: Worksp
     const rows = buildOfficialReportExportRows(dataset);
     const periods = officialReportPeriodLabels(dataset);
     const headers = Object.keys(rows[0] || { 'وضعیت': '' });
+    const pdfPage = officialReportPdfPageSize(headers.length);
     const html = `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><style>
       body{font-family:Tahoma,Arial,sans-serif;direction:rtl;color:#172033;padding:24px}h1{font-size:20px;margin:0 0 8px}
       .meta{font-size:12px;color:#536174;margin-bottom:18px}.hash{direction:ltr;text-align:left;word-break:break-all}
       table{width:100%;border-collapse:collapse;font-size:11px}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #cbd5e1;padding:7px;text-align:right}th{background:#eef2f7}
-      @page{size:A4 landscape;margin:12mm}
+      @page{size:${pdfPage.cssSize};margin:12mm}
     </style></head><body><h1>${escapeHtml(reportTypeFa[snapshot.reportType] || 'گزارش رسمی حسابداری')}</h1>
       <div class="meta">دوره گزارش: ${escapeHtml(periods.current)}${periods.comparative ? ` · دوره مقایسه‌ای: ${escapeHtml(periods.comparative)}` : ''}<br>زمان برش: ${escapeHtml(snapshot.cutoffAt.toLocaleString('fa-IR'))} · زمان تولید: ${escapeHtml(snapshot.generatedAt.toLocaleString('fa-IR'))}</div>
       <table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead><tbody>
       ${(rows.length ? rows : [{ 'وضعیت': 'داده‌ای برای نمایش وجود ندارد.' }]).map((row: any) => `<tr>${headers.map((header) => `<td>${escapeHtml(row[header])}</td>`).join('')}</tr>`).join('')}
       </tbody></table><p class="meta hash">اثر انگشت مجموعه‌داده: ${escapeHtml(snapshot.datasetHash)}</p></body></html>`;
-    const { bytes, hash } = await frozenExport(snapshot.id, 'pdf', () => generatePdfBufferFromHtml({ htmlContent: html, landscape: true }));
+    const { bytes, hash } = await frozenExport(snapshot.id, 'pdf', () => generatePdfBufferFromHtml({ htmlContent: html, landscape: true, widthMm: pdfPage.widthMm, heightMm: pdfPage.heightMm, assertNoOverflowSelector: 'body, th, td' }));
     await auditSnapshotExport(req, snapshot, 'PDF', hash);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="accounting-report-${snapshot.id}.pdf"`);

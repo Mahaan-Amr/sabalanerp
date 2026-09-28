@@ -605,6 +605,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show: true,
           },
           {
+            name: "جایگزینی حسابداری",
+            namePersian: "مهاجرت، تطبیق و بازیابی",
+            href: "/dashboard/accounting/replacement",
+            icon: FaHistory,
+            show: true,
+          },
+          {
             name: "Accounting Dispatch",
             namePersian: "فرمان‌های ارسال",
             href: "/dashboard/accounting/dispatch",

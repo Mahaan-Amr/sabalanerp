@@ -87,6 +87,7 @@ export interface AccountingLedgerRepository {
   findVoucherBySource(input: { bookId: string; type: string; id: string; version: number }): Promise<LedgerVoucherRecord | null>;
   createDraftVoucher(input: DraftVoucherPersistence): Promise<LedgerVoucherRecord>;
   getVoucherForUpdate(id: string): Promise<LedgerVoucherRecord | null>;
+  confirmSepidarPostingSource?(voucher: LedgerVoucherRecord): Promise<void>;
   allocateStatutoryNumber(input: { bookId: string; fiscalYearId: string }): Promise<number>;
   markVoucherPosted(input: { id: string; statutoryNumber: number; postedAt: Date; contentHash: string }): Promise<LedgerVoucherRecord>;
   createReversalVoucher(input: {
@@ -197,7 +198,7 @@ const roundPositiveDecimal = (value: { canonical: string }) => {
   return BigInt(whole) + (fraction[0] && fraction[0] >= '5' ? 1n : 0n);
 };
 
-const voucherContentHash = (voucher: {
+export const voucherContentHash = (voucher: {
   bookId: string; fiscalYearId: string; periodId: string; idempotencyKey: string; correlationId: string;
   description: string; documentDate: Date; occurredAt: Date; discoveredAt?: Date | null;
   source: { type: string; id: string; version: number; hash: string; payload: unknown };
@@ -423,6 +424,10 @@ export const createAccountingLedgerApplication = (
       const voucher = await tx.getVoucherForUpdate(input.voucherId);
       if (!voucher) throw new AccountingLedgerError('VOUCHER_NOT_FOUND', 'سند حسابداری پیدا نشد.', 404);
       if (voucher.status === 'POSTED' || voucher.status === 'REVERSED') return voucher;
+      if (voucher.source.type === 'SEPIDAR_ACC_VOUCHER') {
+        if (!tx.confirmSepidarPostingSource) throw new AccountingLedgerError('SEPIDAR_SOURCE_NOT_VERIFIED', 'پیوند تأییدشدهٔ سند سپیدار برای ثبت عملیاتی در دسترس نیست.', 409);
+        await tx.confirmSepidarPostingSource(voucher);
+      }
       const context = await tx.getPostingContext(voucher);
       assertContext(context, { ...voucher, actor: input.actor, override: input.override } as unknown as ManualDraftCommand);
       const totals = validateLines(context, voucher.lines, voucher.documentDate);

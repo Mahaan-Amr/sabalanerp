@@ -1,5 +1,5 @@
 "use client";
-import { ErpInput, ErpSelect } from "@/components/erp";
+import { ErpInput, ErpSearchableSelect } from "@/components/erp";
 import { useCallback, useEffect, useState, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {

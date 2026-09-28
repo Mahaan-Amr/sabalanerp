@@ -306,6 +306,14 @@ _Avoid_: creating an Accounting duty for every Draft, using the contract-created
 The single ledger whose posted entries determine Sabalan's accounting balances and statutory financial reports. SabalanERP becomes this authority only after its parallel results reconcile with the outgoing Sepidar ledger and the controlled cutover is accepted.
 _Avoid_: two permanent accounting sources of truth, treating an operational record as a posted entry, cutting over with unexplained differences, or continuing ordinary Sepidar posting after authority transfers
 
+**Sepidar Source Snapshot**:
+A complete, immutable extraction of one Sepidar backup, identified by the backup hash and retaining every source table row with its source key and content hash. Daily successors are compared to the preceding complete snapshot; changed or missing source rows require reconciliation and never silently rewrite Sabalan postings.
+_Avoid_: treating a partial extraction as complete, merging snapshots in place, or interpreting source changes as authorization to repost.
+
+**Sepidar Mapping Proposal**:
+The versioned, source-linked suggestion connecting Sepidar accounts and master-data identities to Sabalan identities. An accountant reviews account role, normal side, contra meaning, dimensions, opening balances, and exceptions before statutory posting.
+_Avoid_: inferring legal meaning solely from numeric code or marking a proposal as approved because its source and destination totals match.
+
 **Accounting Legal Entity**:
 The legally registered reporting entity that owns its statutory books, fiscal years, posted entries, and financial statements. A Branch, Department, Cost Center, Project, Contract, Warehouse, or other internal operating unit is not a separate Accounting Legal Entity unless it is genuinely a distinct legal reporting entity.
 _Avoid_: Organization Group, Branch, Department, Cost Center, Project, Contract, Warehouse, or an internal management boundary

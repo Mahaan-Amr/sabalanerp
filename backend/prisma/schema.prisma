@@ -4696,6 +4696,14 @@ model AccountingBook {
   sequences                  AccountingVoucherSequence[]
   operationalReconciliations AccountingOperationalReconciliation[]
   supplyChainPostingRules    AccountingSupplyChainPostingRule[]
+  replacementMigrationRuns   AccountingReplacementMigrationRun[]
+  legacyArchiveRecords       AccountingLegacyArchiveRecord[]
+  sepidarSourceSnapshots     AccountingSepidarSourceSnapshot[]
+  sepidarTargetLinks         AccountingSepidarTargetLink[]
+  sepidarBackupUploads       AccountingSepidarBackupUpload[]
+  replacementParallelRuns    AccountingReplacementParallelRun[]
+  replacementRecoveryProofs  AccountingReplacementRecoveryProof[]
+  replacementCutoverRuns     AccountingReplacementCutoverRun[]
 
   @@unique([legalEntityId, code])
   @@index([legalEntityId, isPrimary])
@@ -5544,6 +5552,238 @@ model AccountingArchiveEvidence {
   @@map("accounting_archive_evidence")
 }
 
+model AccountingReplacementMigrationRun {
+  id                String                                 @id
+  bookId            String
+  sourceSystem      String
+  sourcePackageHash String
+  toolVersion       String
+  mappingVersion    Int
+  scope             Json
+  status            String
+  inputCount        Int
+  acceptedCount     Int
+  rejectedCount     Int
+  outputHash        String
+  reconciliation    Json?
+  predecessorRunId  String?
+  successorRunId    String?                                @unique
+  previewedAt       DateTime
+  committedAt       DateTime?
+  acceptedBy        String?
+  acceptanceReason  String?
+  book              AccountingBook                         @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  predecessorRun    AccountingReplacementMigrationRun?     @relation("AccountingReplacementSuccessor", fields: [predecessorRunId], references: [id], onDelete: Restrict)
+  successorRuns     AccountingReplacementMigrationRun[]    @relation("AccountingReplacementSuccessor")
+  dispositions      AccountingReplacementMigrationRecord[]
+  archiveRecords    AccountingLegacyArchiveRecord[]
+
+  @@unique([bookId, sourcePackageHash, mappingVersion])
+  @@index([bookId, status, previewedAt])
+  @@index([predecessorRunId])
+  @@map("accounting_replacement_migration_runs")
+}
+
+model AccountingReplacementMigrationRecord {
+  id              String                            @id
+  runId           String
+  sequence        Int
+  sourceId        String
+  kind            String
+  disposition     String
+  targetIdentity  String?
+  rejectionReason String?
+  sourceHash      String
+  targetHash      String?
+  debitRials      Decimal                           @default(0) @db.Decimal(20, 0)
+  creditRials     Decimal                           @default(0) @db.Decimal(20, 0)
+  quantity        String?
+  valueRials      Decimal?                          @db.Decimal(20, 0)
+  sourcePayload   Json
+  run             AccountingReplacementMigrationRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, sequence])
+  @@unique([runId, sourceId])
+  @@index([sourceId, kind])
+  @@map("accounting_replacement_migration_records")
+}
+
+model AccountingLegacyArchiveRecord {
+  id             String                            @id
+  bookId         String
+  migrationRunId String
+  sourceId       String
+  sourceHash     String
+  payload        Json
+  searchText     String                            @db.Text
+  createdAt      DateTime                          @default(now())
+  book           AccountingBook                    @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  migrationRun   AccountingReplacementMigrationRun @relation(fields: [migrationRunId], references: [id], onDelete: Restrict)
+
+  @@unique([bookId, sourceId, sourceHash])
+  @@index([bookId, createdAt])
+  @@map("accounting_legacy_archive_records")
+}
+
+model AccountingSepidarSourceSnapshot {
+  id                  String                       @id
+  bookId              String
+  sourcePackageHash   String
+  sourceDatabase      String
+  schemaManifestHash  String
+  schemaManifest      Json
+  sourceMetadata      Json
+  tableCount          Int
+  expectedRecordCount Int
+  importedRecordCount Int                          @default(0)
+  status              String
+  startedAt           DateTime                     @default(now())
+  completedAt         DateTime?
+  book                AccountingBook               @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  records             AccountingSepidarSourceRecord[]
+
+  @@unique([bookId, sourcePackageHash])
+  @@index([bookId, status, startedAt])
+  @@map("accounting_sepidar_source_snapshots")
+}
+
+model AccountingSepidarSourceRecord {
+  id             String                          @id
+  snapshotId     String
+  sourceTable    String
+  sourceKey      String
+  sourceHash     String
+  fiscalYearRef  Int?
+  documentDate   DateTime?
+  payload        Json
+  searchText     String                          @db.Text
+  snapshot       AccountingSepidarSourceSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+
+  @@unique([snapshotId, sourceTable, sourceKey])
+  @@index([snapshotId, fiscalYearRef, sourceTable])
+  @@map("accounting_sepidar_source_records")
+}
+
+model AccountingSepidarTargetLink {
+  id               String         @id
+  bookId           String
+  sourceTable      String
+  sourceKey        String
+  sourceHash       String
+  firstSnapshotId  String
+  latestSnapshotId String
+  targetKind       String
+  targetId         String
+  mappingVersion   Int
+  reviewStatus     String
+  reviewedBy       String?
+  reviewEvidence   String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  book             AccountingBook @relation(fields: [bookId], references: [id], onDelete: Restrict)
+
+  @@unique([bookId, sourceTable, sourceKey, targetKind])
+  @@index([bookId, targetKind, targetId])
+  @@index([firstSnapshotId, sourceTable])
+  @@map("accounting_sepidar_target_links")
+}
+
+model AccountingSepidarBackupUpload {
+  id                String         @id
+  bookId            String
+  sourcePackageHash String
+  originalName      String
+  storageName       String
+  sizeBytes         BigInt
+  status            String
+  uploadedBy        String
+  uploadedAt        DateTime       @default(now())
+  book              AccountingBook @relation(fields: [bookId], references: [id], onDelete: Restrict)
+
+  @@unique([bookId, sourcePackageHash])
+  @@index([bookId, uploadedAt])
+  @@map("accounting_sepidar_backup_uploads")
+}
+
+model AccountingReplacementParallelRun {
+  id             String         @id
+  bookId         String
+  periodIdentity String
+  completeMonth  Boolean
+  fullClose      Boolean
+  differences    Json
+  accepted       Boolean
+  actorId        String
+  recordedAt     DateTime
+  book           AccountingBook @relation(fields: [bookId], references: [id], onDelete: Restrict)
+
+  @@unique([bookId, periodIdentity])
+  @@index([bookId, accepted, recordedAt])
+  @@map("accounting_replacement_parallel_runs")
+}
+
+model AccountingReplacementRecoveryProof {
+  id                      String         @id
+  bookId                  String
+  checkpointIdentity      String
+  databaseHash            String
+  filesHash               String
+  configurationHash       String
+  encryptedOffsite        Boolean
+  immutableRecoveryPoint  Boolean
+  restoreVerified         Boolean
+  repeatedRestoreVerified Boolean
+  rpoMinutes              Int
+  rtoMinutes              Int
+  drillKind               String
+  proven                  Boolean
+  actorId                 String
+  recordedAt              DateTime
+  book                    AccountingBook @relation(fields: [bookId], references: [id], onDelete: Restrict)
+
+  @@unique([bookId, checkpointIdentity])
+  @@index([bookId, proven, recordedAt])
+  @@map("accounting_replacement_recovery_proofs")
+}
+
+model AccountingReplacementCutoverRun {
+  id                          String         @id
+  bookId                      String
+  checkpointIdentity          String
+  finalDeltaRunId             String
+  exactReconciliationHash     String
+  acceptanceHash              String
+  writesBlocked               Boolean
+  servicesDrained             Boolean
+  status                      String
+  authorityTransferredAt      DateTime?
+  authorityTransferReason     String?
+  sepidarReadOnly             Boolean        @default(false)
+  sabalanAuthoritative        Boolean        @default(false)
+  firstAuthoritativeVoucherId String?
+  firstAuthoritativePostingAt DateTime?
+  rollbackAllowed             Boolean        @default(true)
+  failureCode                 String?
+  failureReason               String?
+  book                        AccountingBook @relation(fields: [bookId], references: [id], onDelete: Restrict)
+
+  @@index([bookId, status])
+  @@map("accounting_replacement_cutover_runs")
+}
+
+model AccountingReplacementAuditEntry {
+  id           String   @id
+  sequence     BigInt   @unique
+  action       String
+  payloadHash  String
+  previousHash String?
+  entryHash    String   @unique
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("accounting_replacement_audit_entries")
+}
+
 model AccountingCustomerProfile {
   id                   String                                @id @default(cuid())
   legalEntityId        String
@@ -6209,6 +6449,28 @@ model AccountingBankImportMapping {
   @@unique([financialAccountId, adapterType, version])
   @@index([financialAccountId, effectiveFrom, effectiveTo])
   @@map("accounting_bank_import_mappings")
+}
+
+model AccountingBankFileImportRun {
+  id                    String   @id @default(cuid())
+  financialAccountId    String
+  adapterType           String
+  mappingVersion        Int
+  mappingEvidenceHash   String
+  fileHash              String
+  outputHash            String
+  totalRows             Int
+  imported              Int
+  rejected              Int
+  sourceFile            Bytes
+  sourceRows            Json
+  results               Json
+  createdBy             String
+  createdAt             DateTime @default(now())
+
+  @@unique([financialAccountId, adapterType, mappingVersion, fileHash], map: "bank_file_import_identity_key")
+  @@index([createdAt], map: "bank_file_import_created_at_idx")
+  @@map("accounting_bank_file_import_runs")
 }
 
 model AccountingBankReconciliationMatch {

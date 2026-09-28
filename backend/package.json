@@ -65,7 +65,7 @@
     "test:personnel-performance-disclosure:db": "tsx src/services/__tests__/personnelPerformanceDisclosure.integration.test.ts && tsx src/services/__tests__/personnelPerformanceExportLineage.integration.test.ts",
     "test:user-deletion-policy": "tsx src/services/__tests__/userDeletionPolicy.test.ts",
     "test:system-recovery": "tsx src/services/__tests__/systemRecoveryPolicy.test.ts && tsx src/services/__tests__/systemRecoveryFileReferences.test.ts && tsx src/services/__tests__/recoveryCrypto.test.ts",
-    "test:deployment-control": "tsx src/services/__tests__/deploymentControl.test.ts && tsx src/services/__tests__/deploymentMaintenance.test.ts && tsx src/services/__tests__/deploymentCheckpointPolicy.test.ts && tsx src/services/__tests__/deploymentCheckpointStorage.test.ts && tsx src/services/__tests__/deploymentCheckpointRuntime.test.ts && tsx src/services/__tests__/deploymentBuildCapacity.test.ts && tsx src/services/__tests__/productionEnvironment.test.ts && node ../scripts/performance-deployment-environment.test.mjs && tsx src/services/__tests__/deploymentGates.test.ts && tsx src/services/__tests__/deploymentHostJournal.test.ts && tsx src/services/__tests__/deploymentDrillPolicy.test.ts && tsx src/services/__tests__/deploymentProxyRefresh.test.ts",
+    "test:deployment-control": "tsx src/services/__tests__/deploymentControl.test.ts && tsx src/services/__tests__/deploymentMaintenance.test.ts && tsx src/services/__tests__/deploymentCheckpointPolicy.test.ts && tsx src/services/__tests__/deploymentCheckpointStorage.test.ts && tsx src/services/__tests__/deploymentCheckpointRuntime.test.ts && tsx src/services/__tests__/deploymentBuildCapacity.test.ts && tsx src/services/__tests__/productionEnvironment.test.ts && node ../scripts/performance-deployment-environment.test.mjs && tsx src/services/__tests__/deploymentGates.test.ts && tsx src/services/__tests__/deploymentHostJournal.test.ts && tsx src/services/__tests__/deploymentDrillPolicy.test.ts && tsx src/services/__tests__/deploymentProxyRefresh.test.ts && tsx --test src/services/__tests__/deploymentDrillMetadata.test.ts && tsx --test src/services/__tests__/nativePostgresCli.test.ts",
     "test:notifications": "tsx src/services/__tests__/notificationPolicy.test.ts && tsx src/services/__tests__/notificationPolicyConcurrency.test.ts && tsx src/services/__tests__/performanceOperationalNotificationAccess.test.ts",
     "test:notifications:db": "tsx --test src/services/__tests__/notificationPolicyConcurrency.integration.test.ts",
     "test:support-tickets": "tsx src/services/__tests__/supportTicketPolicy.test.ts",
@@ -127,7 +127,8 @@
     "test:accounting-dispatch-documents:api-contract": "tsx --test ../scripts/__tests__/accountingDispatchDocumentsApiContract.test.ts",
     "test:accounting-ledger": "tsx src/services/__tests__/accountingLedgerAccess.test.ts && tsx --test src/services/__tests__/accountingLedgerAdministration.test.ts src/services/__tests__/accountingLedgerFoundation.test.ts",
     "test:accounting-ledger:db": "tsx --test src/services/__tests__/accountingLedgerPrisma.integration.test.ts",
-    "test:accounting-period-end": "tsx --test src/services/__tests__/accountingPeriodEnd.test.ts src/services/__tests__/accountingPeriodClose.test.ts src/services/__tests__/accountingLedgerAdministration.test.ts",
+    "test:accounting-financial-account:local": "tsx --test src/services/__tests__/accountingFinancialAccountBlankFields.integration.test.ts",
+    "test:accounting-period-end": "tsx --test src/services/__tests__/accountingPeriodEnd.test.ts src/services/__tests__/accountingOfficialReportExport.test.ts src/services/__tests__/accountingOfficialReportArtifact.test.ts src/services/__tests__/accountingOfficialReportDates.test.ts src/services/__tests__/accountingPeriodClose.test.ts src/services/__tests__/accountingLedgerAdministration.test.ts",
     "test:accounting-period-end:db": "tsx --test src/services/__tests__/accountingPeriodEndPrisma.integration.test.ts src/services/__tests__/accountingLedgerPrisma.integration.test.ts",
     "accounting:reconciliation:submit": "tsx src/scripts/submit-accounting-reconciliation.ts",
     "test:accounting-supply-chain": "tsx --test src/services/__tests__/accountingSupplyChain.test.ts",
@@ -142,7 +143,12 @@
     "preflight:legacy-approved-pricing": "tsx scripts/preflight-seal-legacy-pricing.ts",
     "seal:legacy-approved-pricing": "tsx scripts/preflight-seal-legacy-pricing.ts --apply",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
-    "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
+    "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply",
+    "test:accounting-sepidar-reconciliation": "tsx --test src/services/__tests__/accountingSepidarLedgerReconciliation.test.ts src/services/__tests__/sepidarHistoricalPostingBoundary.test.ts src/services/__tests__/sepidarArchiveIntegrity.test.ts",
+    "accounting:sepidar:reconcile-ledger": "tsx src/scripts/reportSepidarLedgerReconciliation.ts",
+    "test:accounting-sepidar-posting:db": "tsx --test src/services/__tests__/sepidarHistoricalPostingPrisma.integration.test.ts",
+    "test:accounting-parallel": "tsx --test src/services/__tests__/accountingParallelComparison.test.ts",
+    "test:accounting-parallel:db": "tsx --test src/services/__tests__/accountingParallelComparisonPrisma.integration.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",

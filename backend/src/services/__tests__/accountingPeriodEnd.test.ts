@@ -257,10 +257,10 @@ test('posted lines and an effective mapping produce a reproducible eight-column 
       rows: [{ accountId: 'cash', statement: 'FINANCIAL_POSITION', sectionCode: 'CURRENT_ASSETS', cashFlowClass: 'OPERATING' }],
     },
     lines: [
-      { id: 'opening', voucherId: 'v0', voucherNumber: 1, status: 'POSTED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 50_000n, creditRials: 0n, documentDate: new Date('2026-08-31T00:00:00.000Z'), postedAt: new Date('2026-08-31T08:00:00.000Z'), dimensions: {} },
-      { id: 'receipt', voucherId: 'v1', voucherNumber: 2, status: 'POSTED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 30_000n, creditRials: 0n, documentDate: new Date('2026-09-10T00:00:00.000Z'), postedAt: new Date('2026-09-10T08:00:00.000Z'), dimensions: { branch: 'مرکزی' } },
-      { id: 'payment', voucherId: 'v2', voucherNumber: 3, status: 'REVERSED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 0n, creditRials: 10_000n, documentDate: new Date('2026-09-15T00:00:00.000Z'), postedAt: new Date('2026-09-15T08:00:00.000Z'), dimensions: { branch: 'مرکزی' } },
-      { id: 'draft', voucherId: 'v3', voucherNumber: null, status: 'DRAFT', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 999_000n, creditRials: 0n, documentDate: new Date('2026-09-20T00:00:00.000Z'), postedAt: null, dimensions: {} },
+      { id: 'opening', voucherId: 'v0', voucherNumber: 1, status: 'POSTED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 50_000n, creditRials: 0n, documentDate: new Date('2026-08-31T00:00:00.000Z'), postedAt: new Date('2026-08-31T08:00:00.000Z'), dimensions: {} },
+      { id: 'receipt', voucherId: 'v1', voucherNumber: 2, status: 'POSTED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 30_000n, creditRials: 0n, documentDate: new Date('2026-09-10T00:00:00.000Z'), postedAt: new Date('2026-09-10T08:00:00.000Z'), dimensions: { branch: 'مرکزی' } },
+      { id: 'payment', voucherId: 'v2', voucherNumber: 3, status: 'REVERSED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 0n, creditRials: 10_000n, documentDate: new Date('2026-09-15T00:00:00.000Z'), postedAt: new Date('2026-09-15T08:00:00.000Z'), dimensions: { branch: 'مرکزی' } },
+      { id: 'draft', voucherId: 'v3', voucherNumber: null, status: 'DRAFT', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 999_000n, creditRials: 0n, documentDate: new Date('2026-09-20T00:00:00.000Z'), postedAt: null, dimensions: {} },
     ],
   });
 
@@ -303,8 +303,8 @@ test('T-account keeps chronological running balance and drill-down to posted evi
     openingDebitRials: 5_000n,
     openingCreditRials: 0n,
     lines: [
-      { id: 'later', voucherId: 'v2', voucherNumber: 2, status: 'POSTED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 0n, creditRials: 3_000n, documentDate: new Date('2026-09-20T00:00:00.000Z'), postedAt: new Date('2026-09-20T08:00:00.000Z'), dimensions: {} },
-      { id: 'earlier', voucherId: 'v1', voucherNumber: 1, status: 'POSTED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 10_000n, creditRials: 0n, documentDate: new Date('2026-09-10T00:00:00.000Z'), postedAt: new Date('2026-09-10T08:00:00.000Z'), dimensions: {} },
+      { id: 'later', voucherId: 'v2', voucherNumber: 2, status: 'POSTED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 0n, creditRials: 3_000n, documentDate: new Date('2026-09-20T00:00:00.000Z'), postedAt: new Date('2026-09-20T08:00:00.000Z'), dimensions: {} },
+      { id: 'earlier', voucherId: 'v1', voucherNumber: 1, status: 'POSTED', accountId: 'cash', accountCode: '1101', accountTitlePersian: 'وجه نقد', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'دارایی جاری', subsidiary: 'وجه نقد' }, debitRials: 10_000n, creditRials: 0n, documentDate: new Date('2026-09-10T00:00:00.000Z'), postedAt: new Date('2026-09-10T08:00:00.000Z'), dimensions: {} },
     ],
   });
   assert.deepEqual(projection.entries.map((entry) => ({ id: entry.lineId, debit: entry.runningDebitRials, credit: entry.runningCreditRials })), [
@@ -317,7 +317,7 @@ test('T-account keeps chronological running balance and drill-down to posted evi
 test('cash-flow dataset excludes internal transfers and keeps the mapping version', () => {
   const base = {
     voucherNumber: 1, status: 'POSTED' as const, accountCode: '1101', accountTitlePersian: 'بانک',
-    accountPath: { group: 'دارایی', general: 'دارایی جاری', subsidiary: 'بانک' },
+    accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'دارایی جاری', subsidiary: 'بانک' },
     debitRials: 10_000n, creditRials: 0n, documentDate: new Date('2026-09-10T00:00:00.000Z'),
     postedAt: new Date('2026-09-10T08:00:00.000Z'), dimensions: {},
   };
@@ -352,10 +352,70 @@ test('financial statements preserve multiple mapping rows and contra signs', () 
     mapping: { id: 'mapping-1', effectiveFrom: new Date('2026-01-01'), rows: [
       { accountId: 'account-1', statement: 'FINANCIAL_POSITION', sectionCode: 'دارایی', signMultiplier: 1 },
       { accountId: 'account-1', statement: 'NOTES', sectionCode: 'یادداشت-یک', signMultiplier: -1 },
+      { accountId: 'account-1', statement: 'CASH_FLOW_DIRECT', sectionCode: 'نقد عملیاتی', cashFlowClass: 'OPERATING' },
     ] },
-    lines: [{ id: 'line-1', voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED', accountId: 'account-1', accountCode: '101', accountTitlePersian: 'صندوق', accountPath: { group: 'دارایی', general: 'نقد', subsidiary: 'صندوق' }, debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} }],
+    lines: [{ id: 'line-1', voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED', accountId: 'account-1', accountCode: '101', accountTitlePersian: 'صندوق', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'نقد', subsidiary: 'صندوق' }, debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} }],
   });
   assert.equal(dataset.rows.length, 2);
   assert.equal(dataset.rows.find((row) => row.key.startsWith('FINANCIAL_POSITION'))?.amounts.endingDebit, 100n);
   assert.equal(dataset.rows.find((row) => row.key.startsWith('NOTES'))?.amounts.endingCredit, 100n);
+});
+
+test('an official financial statement rejects posted balances without a statement mapping', () => {
+  assert.throws(() => buildOfficialAccountingDataset({
+    request: { reportKind: 'FINANCIAL_STATEMENT', bookId: 'book-1', fiscalYearId: 'year-1', from: new Date('2026-09-01'), to: new Date('2026-09-30'), cutoffAt: new Date('2026-09-30T23:59:59Z'), mappingVersionId: 'mapping-1' },
+    mapping: { id: 'mapping-1', effectiveFrom: new Date('2026-01-01'), rows: [] },
+    lines: [{ id: 'unmapped-line', voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED', accountId: 'account-1', accountCode: '101', accountTitlePersian: 'صندوق', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'نقد', subsidiary: 'صندوق' }, debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} }],
+  }), /نگاشت.*101/);
+});
+
+test('a cash-flow-only mapping cannot satisfy a financial statement', () => {
+  assert.throws(() => buildOfficialAccountingDataset({
+    request: { reportKind: 'FINANCIAL_STATEMENT', bookId: 'book-1', fiscalYearId: 'year-1', from: new Date('2026-09-01'), to: new Date('2026-09-30'), cutoffAt: new Date('2026-09-30T23:59:59Z'), mappingVersionId: 'mapping-1' },
+    mapping: { id: 'mapping-1', effectiveFrom: new Date('2026-01-01'), rows: [{ accountId: 'account-1', statement: 'CASH_FLOW_DIRECT', sectionCode: 'OPERATING', cashFlowClass: 'OPERATING' }] },
+    lines: [{ id: 'line-1', voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED', accountId: 'account-1', accountCode: '101', accountTitlePersian: 'صندوق', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'نقد', subsidiary: 'صندوق' }, debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} }],
+  }), /نگاشت.*101/);
+});
+
+test('detail trial balance separates stable floating-detail identities under the same subsidiary account', () => {
+  const base = { voucherId: 'voucher-1', voucherNumber: 1, status: 'POSTED' as const, accountId: 'receivable', accountCode: '1101', accountTitlePersian: 'دریافتنی', debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} };
+  const dataset = buildOfficialAccountingDataset({
+    request: { reportKind: 'TRIAL_BALANCE', bookId: 'book-1', fiscalYearId: 'year-1', from: new Date('2026-09-01'), to: new Date('2026-09-30'), cutoffAt: new Date('2026-09-30T23:59:59Z'), level: 'DETAIL' },
+    mapping: { id: 'بدون-نگاشت', effectiveFrom: new Date('2026-01-01'), rows: [] },
+    lines: [
+      { ...base, id: 'line-1', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'جاری', subsidiary: 'دریافتنی', detailIdentity: 'party-1', detail: 'مشتری اول' } },
+      { ...base, id: 'line-2', accountPath: { group: 'دارایی', groupCode: '1', generalCode: '11', general: 'جاری', subsidiary: 'دریافتنی', detailIdentity: 'party-2', detail: 'مشتری دوم' } },
+    ],
+  });
+  assert.deepEqual(dataset.rows.map((row) => row.titlePersian), ['دریافتنی · مشتری اول', 'دریافتنی · مشتری دوم']);
+  assert.deepEqual(dataset.rows.map((row) => row.amounts.endingDebit), [100n, 100n]);
+});
+
+
+test('group and general trial balances aggregate by chart codes even when titles are identical', () => {
+  const base = { voucherId: 'v', voucherNumber: 1, status: 'POSTED' as const, accountTitlePersian: 'نقد', debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} };
+  const lines = [
+    { ...base, id: 'a', accountId: 'a', accountCode: '111', accountPath: { group: 'عنوان یکسان', groupCode: '1', general: 'عنوان کل یکسان', generalCode: '11', subsidiary: 'نقد' } },
+    { ...base, id: 'b', accountId: 'b', accountCode: '112', accountPath: { group: 'عنوان یکسان', groupCode: '1', general: 'عنوان کل یکسان', generalCode: '11', subsidiary: 'بانک' } },
+    { ...base, id: 'c', accountId: 'c', accountCode: '211', accountPath: { group: 'عنوان یکسان', groupCode: '2', general: 'عنوان کل یکسان', generalCode: '21', subsidiary: 'دیگر' } },
+  ];
+  for (const level of ['GROUP', 'GENERAL'] as const) {
+    const result = buildOfficialAccountingDataset({ request: { reportKind: 'TRIAL_BALANCE', bookId: 'book', fiscalYearId: 'year', from: new Date('2026-09-01'), to: new Date('2026-09-30'), cutoffAt: new Date('2026-09-30'), level }, mapping: { id: 'none', effectiveFrom: new Date('2026-01-01'), rows: [] }, lines });
+    assert.equal(result.rows.length, 2);
+    assert.deepEqual(result.rows.map((row) => row.accountCode), level === 'GROUP' ? ['1', '2'] : ['11', '21']);
+    assert.deepEqual(result.rows.map((row) => row.amounts.endingDebit), [200n, 100n]);
+  }
+});
+
+
+test('retained financial mapping selection cannot reverse trial balance or legal book debit and credit', () => {
+  for (const reportKind of ['TRIAL_BALANCE', 'LEGAL_BOOK'] as const) {
+    const dataset = buildOfficialAccountingDataset({
+      request: { reportKind, bookId: 'book', fiscalYearId: 'year', from: new Date('2026-09-01'), to: new Date('2026-09-30'), cutoffAt: new Date('2026-09-30'), mappingVersionId: 'contra' },
+      mapping: { id: 'contra', effectiveFrom: new Date('2026-01-01'), rows: [{ accountId: 'cash', statement: 'FINANCIAL_POSITION', sectionCode: 'cash', signMultiplier: -1 }] },
+      lines: [{ id: 'line', voucherId: 'v', voucherNumber: 1, status: 'POSTED', accountId: 'cash', accountCode: '111', accountTitlePersian: 'صندوق', accountPath: { group: 'دارایی', groupCode: '1', general: 'نقد', generalCode: '11', subsidiary: 'صندوق' }, debitRials: 100n, creditRials: 0n, documentDate: new Date('2026-09-10'), postedAt: new Date('2026-09-10'), dimensions: {} }],
+    });
+    assert.equal(dataset.rows[0].amounts.turnoverDebit, 100n);
+    assert.equal(dataset.rows[0].amounts.turnoverCredit, 0n);
+  }
 });

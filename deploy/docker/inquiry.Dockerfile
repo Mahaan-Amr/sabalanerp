@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.npm \
   && npm config set fetch-retry-factor 2 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000 \
-  && npm ci --prefer-offline --no-audit --fund=false
+  && npm ci --include=dev --prefer-offline --no-audit --fund=false
 
 COPY apps/sabalan-inquiry ./
 COPY deploy/scripts/run-inquiry-with-recovery.sh /app/run-inquiry-with-recovery.sh

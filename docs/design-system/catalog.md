@@ -10,7 +10,7 @@ Import from `@/components/erp`. Prefer a workflow-sized composition over rebuild
 | --- | --- |
 | Workspace frame and hierarchy | `ErpWorkspacePage`, `ErpPage`, `ErpSection`, `ErpTwoColumn` |
 | Actions | `ErpButton`, `ErpPressable`, `ErpIconButton`, `ErpActionMenu`, `ErpActionGrid` |
-| Fields | `ErpField`, `ErpInput`, `ErpSelect`, `ErpTextarea`, `ErpCheckbox`, `ErpCheckboxControl` |
+| Fields | `ErpField`, `ErpInput`, `ErpSelect`, `ErpSearchableSelect` for searchable option lists, `ErpTextarea`, `ErpCheckbox`, `ErpCheckboxControl` |
 | Choice | `ErpSegmentedControl`; focused product compositions may use `CompactSegmentedControl`, `CompactSwitch`, and `CompactUnitSwitch` |
 | Data and summaries | `ErpListPage`, `ErpCard`, `ErpMetricGrid`, `ErpSummaryGrid`, `ErpFieldView`, `ErpStatusSummary` |
 | Feedback | `ErpInlineState`, `ErpEmptyState`, `ErpLoading`, `ErpSkeleton`, `ErpStatus`, `ErpBadge` |

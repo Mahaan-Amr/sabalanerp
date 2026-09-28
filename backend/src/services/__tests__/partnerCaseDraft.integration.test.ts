@@ -368,7 +368,7 @@ test('customer-complete save creates one numbered unpriced Case without operatio
 });
 
 test('concurrent first-save retries create one numbered unpriced Case and one durable outcome', async () => {
-  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()),
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(__dirname, '../../../../'),
     sourceDatabaseUrl: databaseUrl() });
   const setup = temporary.client(), firstClient = temporary.client(), secondClient = temporary.client();
   const prefix = `partner-case-concurrent-${temporary.runId}`;
@@ -505,7 +505,7 @@ async function allocateFixturePair(tx: Prisma.TransactionClient, ids: Record<str
   await tx.salesContractEditSession.create({ data: { draftId: submitted.intent.recoveryId,
     ownerUserId: ids.partnerId, browserSessionId: `${caseId}-allocation`, leaseToken: randomUUID(),
     schemaVersion: 2, baseRevision: 0, purpose: 'PARTNER_TECHNICAL', recovery: {
-      kind: 'partner-technical-recovery', version: 1, recoveryRevision: submitted.intent.recoveryRevision,
+      kind: 'partner-technical-recovery', version: 1, recoveryRevision: expected.revision,
       updatedAt: Date.now(), draft: { schemaVersion: 1, inputRevision: 1, rows: [] }, validatedSnapshots: [],
     } } });
   const allocated = await allocatePartnerLinkedPair(tx, { caseId, actorId: ids.partnerId, expected });

@@ -146,7 +146,9 @@
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply",
     "test:accounting-sepidar-reconciliation": "tsx --test src/services/__tests__/accountingSepidarLedgerReconciliation.test.ts src/services/__tests__/sepidarHistoricalPostingBoundary.test.ts src/services/__tests__/sepidarArchiveIntegrity.test.ts",
     "accounting:sepidar:reconcile-ledger": "tsx src/scripts/reportSepidarLedgerReconciliation.ts",
-    "test:accounting-sepidar-posting:db": "tsx --test src/services/__tests__/sepidarHistoricalPostingPrisma.integration.test.ts"
+    "test:accounting-sepidar-posting:db": "tsx --test src/services/__tests__/sepidarHistoricalPostingPrisma.integration.test.ts",
+    "test:accounting-parallel": "tsx --test src/services/__tests__/accountingParallelComparison.test.ts",
+    "test:accounting-parallel:db": "tsx --test src/services/__tests__/accountingParallelComparisonPrisma.integration.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",

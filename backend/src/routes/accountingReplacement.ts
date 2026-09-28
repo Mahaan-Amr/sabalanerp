@@ -12,6 +12,8 @@ import { accountingAccessProfileFromPermission } from '../services/accountingLed
 import { AccountingReplacementError, createAccountingReplacementApplication, type MigrationRecordKind } from '../services/accountingReplacement';
 import { createAccountingReplacementPrismaRepository } from '../services/accountingReplacementPrismaRepository';
 import { compareSepidarSnapshots } from '../services/sepidarSnapshotDelta';
+import { recordAccountingParallelComparison } from '../services/accountingParallelComparisonPrisma';
+import { Prisma } from '@prisma/client';
 
 const router = express.Router();
 const repository = createAccountingReplacementPrismaRepository(prisma);
@@ -270,6 +272,27 @@ router.post('/migrations/preview', access('admin'), handle((req) => application.
 router.post('/migrations/:id/commit', access('admin'), handle((req) => application.commitMigration({ runId: req.params.id, expectedOutputHash: String(req.body.expectedOutputHash), acceptanceReason: String(req.body.acceptanceReason), actor: actor(req) })));
 router.post('/parallel-runs', access('admin'), handle((req) => application.recordParallelRun({ bookId: String(req.body.bookId), periodIdentity: String(req.body.periodIdentity), completeMonth: Boolean(req.body.completeMonth), fullClose: Boolean(req.body.fullClose), actor: actor(req),
   differences: (req.body.differences ?? []).map((item: any) => ({ ...item, amountRials: rials(item.amountRials), itemCount: Number(item.itemCount), resolved: Boolean(item.resolved) })) }), true));
+router.get('/parallel-comparisons/context', access('admin'), handle(async (req) => {
+  const bookId = String(req.query.bookId ?? '');
+  const periodId = String(req.query.periodId ?? '');
+  if (!bookId) throw new AccountingReplacementError('BOOK_REQUIRED', 'دفتر حسابداری باید مشخص شود.', 400);
+  const periods = await prisma.accountingPostingPeriod.findMany({ where: { fiscalYear: { bookId } }, include: { fiscalYear: { select: { code: true } } }, orderBy: { startsAt: 'desc' } });
+  if (periodId && !periods.some((period) => period.id === periodId)) throw new AccountingReplacementError('PERIOD_NOT_FOUND', 'دوره در این دفتر پیدا نشد.', 404);
+  const targets = periodId ? await prisma.accountingLedgerVoucher.findMany({ where: { bookId, periodId, status: 'POSTED', sourceType: { not: 'SEPIDAR_ACC_VOUCHER' } },
+    select: { id: true, description: true, documentDate: true, referenceNumber: true }, orderBy: { documentDate: 'asc' } }) : [];
+  const reports = periodId ? await prisma.accountingOperationalReconciliation.findMany({ where: { bookId, periodId, reconciliationCode: 'PARALLEL_EVENTS' },
+    select: { id: true, reconciledAt: true, controlPayload: true }, orderBy: { reconciledAt: 'desc' }, take: 20 }) : [];
+  return { periods: periods.map((period) => ({ id: period.id, title: `${period.fiscalYear.code} · ${period.titlePersian}` })), targets, reports };
+}));
+router.post('/parallel-comparisons', access('admin'), handle((req) => {
+  const { bookId, periodId, snapshotId } = req.body;
+  if (![bookId, periodId, snapshotId].every((value) => typeof value === 'string' && value.trim())) throw new AccountingReplacementError('PARALLEL_SCOPE_REQUIRED', 'دفتر، دوره و نسخهٔ سپیدار الزامی‌اند.', 400);
+  const pair = req.body.pair;
+  if (pair && ![pair.sourceKey, pair.targetId, pair.reason].every((value) => typeof value === 'string' && value.trim())) throw new AccountingReplacementError('PARALLEL_PAIR_INVALID', 'شناسه دو رویداد و دلیل بررسی الزامی‌اند.', 400);
+  return prisma.$transaction((tx) => recordAccountingParallelComparison(tx, { bookId, periodId, snapshotId, actorId: actor(req).id,
+    pair: pair ? { sourceKey: pair.sourceKey, targetId: pair.targetId, reason: pair.reason } : undefined }),
+  { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 20_000, timeout: 120_000 });
+}, true));
 router.post('/recovery-proofs', access('admin'), handle((req) => application.recordRecoveryProof({ ...req.body, bookId: String(req.body.bookId), rpoMinutes: Number(req.body.rpoMinutes), rtoMinutes: Number(req.body.rtoMinutes), actor: actor(req) }), true));
 router.post('/cutovers', access('admin'), handle((req) => application.prepareCutover({ ...req.body, bookId: String(req.body.bookId), actor: actor(req) }), true));
 router.post('/cutovers/:id/transfer', access('admin'), handle((req) => application.transferAuthority({ cutoverId: req.params.id, confirmed: Boolean(req.body.confirmed), reason: String(req.body.reason), actor: actor(req) })));

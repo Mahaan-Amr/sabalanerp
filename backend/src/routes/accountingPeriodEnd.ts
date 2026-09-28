@@ -637,7 +637,7 @@ router.get('/report-snapshots/:id/export.pdf', ...editAccess, async (req: Worksp
     const html = `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><style>
       body{font-family:Tahoma,Arial,sans-serif;direction:rtl;color:#172033;padding:24px}h1{font-size:20px;margin:0 0 8px}
       .meta{font-size:12px;color:#536174;margin-bottom:18px}.hash{direction:ltr;text-align:left;word-break:break-all}
-      table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #cbd5e1;padding:7px;text-align:right}th{background:#eef2f7}
+      table{width:100%;border-collapse:collapse;font-size:11px}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #cbd5e1;padding:7px;text-align:right}th{background:#eef2f7}
       @page{size:A4 landscape;margin:12mm}
     </style></head><body><h1>${escapeHtml(reportTypeFa[snapshot.reportType] || 'گزارش رسمی حسابداری')}</h1>
       <div class="meta">دوره گزارش: ${escapeHtml(periods.current)}${periods.comparative ? ` · دوره مقایسه‌ای: ${escapeHtml(periods.comparative)}` : ''}<br>زمان برش: ${escapeHtml(snapshot.cutoffAt.toLocaleString('fa-IR'))} · زمان تولید: ${escapeHtml(snapshot.generatedAt.toLocaleString('fa-IR'))}</div>

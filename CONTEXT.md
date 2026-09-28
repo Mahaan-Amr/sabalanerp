@@ -2012,8 +2012,8 @@ An explicit null discount snapshot from the legacy Sales wizard is affirmative h
 _Avoid_: normalizing unreconciled absence, reopening or resaving the Contract, inventing a positive discount, recalculating from current بازه تخفیف rules, changing the payable total, or weakening fail-closed review for conflicting evidence
 
 **Legacy Discount Eligibility Evidence**:
-For a Product snapshot attached to Legacy No-Discount Evidence, explicit `isLayer: true` means the row is a non-discountable layer, while an omitted `isLayer` means the legacy wizard treated it as a non-layer; normalization records every row for which that historical omission is made explicit. A non-boolean value or contradictory layer evidence remains blocked for human review.
-_Avoid_: treating omission as non-layer outside the legacy no-discount boundary, discounting an explicit layer, normalizing malformed eligibility, or reopening the Contract to manufacture current evidence
+For a Product snapshot attached to Legacy No-Discount Evidence or a disabled zero-discount snapshot whose frozen payable and gross totals reconcile without conflicting adjustments, explicit `isLayer: true` means the row is a non-discountable layer, while an omitted `isLayer` means the legacy wizard treated it as a non-layer; normalization records every row for which that historical omission is made explicit. A non-boolean value or contradictory layer evidence remains blocked for human review.
+_Avoid_: treating omission as non-layer outside the reconciled no-discount boundary, discounting an explicit layer, normalizing malformed eligibility, or reopening the Contract to manufacture current evidence
 
 **Current Contract Discount Eligibility Evidence**:
 Every Product snapshot in a newly saved Contract explicitly identifies whether it is a layer: `isLayer: true` is non-discountable and `isLayer: false` is an ordinary row whose eligible base stone amount may receive a Contract Discount. An in-progress Contract Creation Draft from the prior wizard shape may upgrade an omitted flag to explicit `false`, while preserving explicit layers and blocking non-boolean or contradictory evidence.

@@ -10,6 +10,7 @@ import {
   contractDiscountEligibilityEvidence,
   hasConflictingDiscountOrNonProductAdjustmentEvidence,
   isContractRowDiscountEligible,
+  isExplicitZeroDiscountInput,
   LEGACY_DISCOUNT_ELIGIBILITY_EVIDENCE_ORIGIN,
   LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN,
 } from '../contractDiscountEvidence';
@@ -395,21 +396,27 @@ const validateContractDiscountEvidence = (
   currency: string,
   contractEligibleBase: Prisma.Decimal,
   completeGrossTotal: string,
+  reconcileExplicitZeroEligibility = false,
 ) => {
   const hasDiscountField = Object.prototype.hasOwnProperty.call(data, 'discount');
   const isLegacyWizardNull = hasDiscountField && data.discount === null;
   const isLegacyWizardAbsent = !hasDiscountField;
-  const reconciledPayableTotal = isLegacyWizardAbsent
+  const reconciledPayableTotal = isLegacyWizardAbsent || reconcileExplicitZeroEligibility
     ? money(payment.totalContractAmount, 'Legacy contract payable total')
     : null;
-  const reconciledGrossTotal = isLegacyWizardAbsent
+  const reconciledGrossTotal = isLegacyWizardAbsent || reconcileExplicitZeroEligibility
     ? money(completeGrossTotal, 'Legacy contract gross total')
     : null;
   if (reconciledPayableTotal !== null && reconciledPayableTotal !== reconciledGrossTotal) {
     throw new ApprovedPricingEvidenceError('Legacy contract without discount evidence does not reconcile to zero discount');
   }
-  if (isLegacyWizardAbsent && hasConflictingDiscountOrNonProductAdjustmentEvidence(data)) {
+  if ((isLegacyWizardAbsent || reconcileExplicitZeroEligibility) && hasConflictingDiscountOrNonProductAdjustmentEvidence(data)) {
     throw new ApprovedPricingEvidenceError('Legacy contract contains conflicting discount or non-product adjustment evidence');
+  }
+  if (reconcileExplicitZeroEligibility && new Prisma.Decimal(
+    money(record(data.discount, 'Contract discount evidence').baseSubtotal, 'Raw contract discount base subtotal'),
+  ).lt(0)) {
+    throw new ApprovedPricingEvidenceError('Explicit zero-discount raw basis cannot be negative');
   }
   const discount = isLegacyWizardNull
     ? {
@@ -431,7 +438,16 @@ const validateContractDiscountEvidence = (
           reconciledPayableTotal,
           reconciledGrossTotal,
         }
-    : record(data.discount, 'Contract discount evidence');
+    : reconcileExplicitZeroEligibility
+      ? {
+          ...record(data.discount, 'Contract discount evidence'),
+          rawBaseSubtotal: money(record(data.discount, 'Contract discount evidence').baseSubtotal, 'Raw contract discount base subtotal'),
+          baseSubtotal: contractEligibleBase.toString(),
+          evidenceOrigin: LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN.EXPLICIT_ZERO_RECONCILED,
+          reconciledPayableTotal,
+          reconciledGrossTotal,
+        }
+      : record(data.discount, 'Contract discount evidence');
   if (typeof discount.enabled !== 'boolean') throw new ApprovedPricingEvidenceError('Contract discount enabled evidence is missing');
   if (requiredString(discount.currency, 'Contract discount currency') !== currency) throw new ApprovedPricingEvidenceError('Contract discount currency conflicts with contract currency');
   const discountBase = money(discount.baseSubtotal, 'Contract discount base subtotal');
@@ -549,14 +565,17 @@ export const buildApprovedPricingVersion = (
   const financialAmountNormalizations: Array<Record<string, string>> = [];
 
   const hasDiscountField = Object.prototype.hasOwnProperty.call(data, 'discount');
-  const isLegacyNoDiscountShape = !hasDiscountField || data.discount === null;
+  const isExplicitZeroNoDiscount = isExplicitZeroDiscountInput(data.discount) &&
+    !hasConflictingDiscountOrNonProductAdjustmentEvidence(data);
+  const isLegacyNoDiscountShape = !hasDiscountField || data.discount === null || isExplicitZeroNoDiscount;
   const discountEligibility = contractDiscountEligibilityEvidence(snapshotByRow, graph.rows.map(row => ({
     productRowId: row.productRowId,
     baseAmountToman: money(row.baseAmountToman, `Product ${row.productRowId} base amount`),
   })), { allowLegacyMissingNonLayer: isLegacyNoDiscountShape });
   const contractEligibleBase = discountEligibility.eligibleBase;
   const { discount, discountBase, discountPercent, contractDiscountAmount, discountValue } =
-    validateContractDiscountEvidence(data, payment, currency, contractEligibleBase, graph.totalAmountToman);
+    validateContractDiscountEvidence(data, payment, currency, contractEligibleBase, graph.totalAmountToman,
+      isExplicitZeroNoDiscount && discountEligibility.normalizedNonLayerProductRowIds.length > 0);
   if (!contractEligibleBase.eq(discountBase)) throw new ApprovedPricingEvidenceError('Contract discount base subtotal conflicts with canonical eligible rows');
   if (discountValue.gt(contractEligibleBase)) throw new ApprovedPricingEvidenceError('Contract discount exceeds eligible pricing');
 

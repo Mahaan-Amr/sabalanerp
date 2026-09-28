@@ -5,6 +5,7 @@ import { ApprovedPricingEvidenceError } from './approvedPricing/evidenceError';
 
 export const LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN = {
   EXPLICIT_NULL: 'LEGACY_WIZARD_NULL',
+  EXPLICIT_ZERO_RECONCILED: 'LEGACY_WIZARD_EXPLICIT_ZERO_RECONCILED',
   ABSENT_RECONCILED: 'LEGACY_WIZARD_ABSENT_RECONCILED',
 } as const;
 
@@ -118,6 +119,11 @@ export const isContractRowDiscountEligible = (
   }
   const isLayer = (meta as Record<string, unknown>).isLayer;
   if (isLayer === undefined && normalizeMissingNonLayer) {
+    const layerMeta = meta as Record<string, unknown>;
+    if (layerMeta.layerInfo != null || layerMeta.layerType != null ||
+      snapshot.layerTypeId != null || snapshot.layerTypeName != null || snapshot.layerTypePrice != null) {
+      throw new ApprovedPricingEvidenceError(`Product ${productRowId} omitted layer flag conflicts with layer evidence`);
+    }
     normalizeMissingNonLayer();
     if (baseAmount === null) throw new ApprovedPricingEvidenceError(`Product ${productRowId} base amount is missing or null`);
     return baseAmount.gt(0);

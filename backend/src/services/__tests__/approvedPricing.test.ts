@@ -1958,3 +1958,65 @@ test('missing and conflicting evidence fail closed', () => {
   };
   assert.throws(() => buildApprovedPricingVersion(conflictingQuantity, 1, 'v1'), /canonical quantity conflicts/);
 });
+
+const explicitZeroMissingEligibilitySource = () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  delete data.products[0].meta.isLayer;
+  data.discount = { enabled: false, amount: 0, percent: 0, currency: 'تومان', baseSubtotal: '0' };
+  data.payment.totalContractAmount = '1250';
+  source.leaf.amount = '12500';
+  return source;
+};
+
+test('reconciles explicit zero discount with omitted legacy eligibility and stale basis (100566)', () => {
+  const source = explicitZeroMissingEligibilitySource();
+  const original = structuredClone(source.contract.contractData);
+  const version = buildApprovedPricingVersion(source, 1, 'explicit-zero-recovered');
+  assert.equal(version.discountAmount, '0.000000000000');
+  assert.equal(version.netAmount, '1250.000000000000');
+  assert.equal(version.rows[0]?.discountEligible, true);
+  const discount = version.sourceEvidence.discount as Record<string, unknown>;
+  assert.equal(discount.baseSubtotal, '1000.000000000000');
+  assert.equal(discount.rawBaseSubtotal, '0.000000000000');
+  assert.equal(discount.evidenceOrigin, 'LEGACY_WIZARD_EXPLICIT_ZERO_RECONCILED');
+  assert.deepEqual((version.sourceEvidence.discountEligibility as Record<string, unknown>).normalizedNonLayerProductRowIds, ['row-1']);
+  assert.deepEqual(source.contract.contractData, original);
+});
+
+test('explicit-zero eligibility recovery rejects unreconciled totals and conflicting evidence', () => {
+  for (const mutate of [
+    (data: any) => { data.payment.totalContractAmount = '1200'; },
+    (data: any) => { data.discountAmount = '100'; },
+    (data: any) => { data.products[0].meta.isLayer = 'false'; },
+    (data: any) => { data.products[0].meta.layerInfo = {}; },
+    (data: any) => { data.discount.baseSubtotal = '-1'; },
+    (data: any) => { data.discount.enabled = true; data.discount.amount = '100'; data.discount.percent = '10'; },
+  ]) {
+    const source = explicitZeroMissingEligibilitySource();
+    mutate(source.contract.contractData);
+    assert.throws(() => buildApprovedPricingVersion(source, 1, 'invalid-zero-recovery'));
+  }
+});
+
+test('explicit zero-discount recovery preserves explicit layer exclusions and selected-item approval', () => {
+  const source = explicitZeroMissingEligibilitySource();
+  const data = source.contract.contractData as any;
+  data.products.push({ ...data.products[0], rowId: 'layer-row', meta: { isLayer: true } });
+  source.contract.items = [...source.contract.items, { ...source.contract.items[0]!, id: 'layer-item', productRowId: 'layer-row' }];
+  source.contract.currentItems = structuredClone(source.contract.items);
+  source.contract.productGraph!.rows = [...source.contract.productGraph!.rows, { ...source.contract.productGraph!.rows[0]!, productRowId: 'layer-row' }];
+  source.contract.productGraph!.totalAmountToman = '2500';
+  data.payment.totalContractAmount = '2500';
+  source.leaf.amount = '25000';
+  source.leaf.invoiceItems = [...source.leaf.invoiceItems, { ...source.leaf.invoiceItems[0]!, id: 'layer-invoice-item', contractItemId: 'layer-item' }];
+  const full = buildApprovedPricingVersion(source, 1, 'zero-full');
+  assert.equal(full.rows[1]?.discountEligible, false);
+  assert.equal((full.sourceEvidence.discount as Record<string, unknown>).baseSubtotal, '1000.000000000000');
+  source.leaf.metadata = { mode: 'FROM_SELECTED_ITEMS', selectedContractItemIds: ['item-1'] };
+  source.leaf.invoiceItems = [source.leaf.invoiceItems[0]!];
+  source.leaf.amount = '12500';
+  const selected = buildApprovedPricingVersion(source, 1, 'zero-selected');
+  assert.equal(selected.rows.length, 1);
+  assert.equal(selected.netAmount, '1250.000000000000');
+});

@@ -45,3 +45,13 @@ The user confirmed that only the existing Sepidar backup is available. Missing e
 Observed parallel reconciliation, coordinated recovery/cutover and authority-transfer workflows remain unfinished in #387; the corresponding commands fail closed. #388 remains open. Merging this integration must not close either issue or imply that the entire replacement is ready for production.
 
 Production checks and repair of the independent backup connection are authorized separately; deployment itself is not authorized in this request. The repaired connection and observed recovery results must be recorded as operational evidence, not inferred from code tests. The offsite connection currently depends on the user's laptop and must not be described as unattended infrastructure.
+
+## Observed recovery verification
+
+The failed production recovery mount was repaired by restoring the existing authenticated reverse connection. The latest encrypted checkpoint was completely read through the production mount and independently through SFTP; both matched SHA256 `da99aa07478853d4b1c26bb958ae09ec696a842119f07f8cbe30d6f483fba80d`.
+
+An isolated monthly recovery drill on the existing local PostgreSQL service finished **HEALTHY** at `2026-09-28T11:53:58.728Z`, duration **135,422 ms**. Independent-key decryption, database restore, current migration compatibility, coordinated file and SQLite recovery, marker verification, promotion, erasure replay, finalization and the health probe succeeded. Its full report SHA256 is `68574a3c7d02a2c7fc8755feb96682ea6b8804c38f879145d951e88a148841d3`. The observed result was atomically published to the actual offsite sidecar and read back, preserving checkpoint identity, ciphertext checksum, remote path and verification. Temporary drill data and keys were cleaned; the application database was untouched.
+
+The drill exposed and verified a fix for Prisma-only URI options being sent to native `psql`. Native CLI connections now retain libpq options while removing Prisma options and supplying the password through the child process environment.
+
+This is a monthly recovery drill, not a quarterly deployment rehearsal. Quarterly evidence and a verified 15-minute RPO are absent; the source PostgreSQL version is unknown. The repaired offsite connection still depends on the laptop tunnel. Production application code was not deployed.

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import type { ContractProduct } from '../../types/contract.types';
+import { prepareContractSubmissionFinancials } from '../../utils/contractSubmissionFinancials';
 import {
   getContractProductPriceComponents,
   getContractGrossPayableTotal,
+  getContractPayableTotal,
   getContractProductNonServiceSubtotal,
   getContractProductPayableTotal,
   reconcileContractProductPricing
@@ -47,6 +49,36 @@ const product = (overrides: Partial<ContractProduct> = {}): ContractProduct => (
   usedSquareMetersForSubServices: 0,
   ...overrides
 } as ContractProduct);
+
+{
+  const previouslySavedPaymentTotal = 875_000_000;
+  const rowsAfterEdit = [
+    product({ rowId: 'longitudinal', totalPrice: previouslySavedPaymentTotal, originalTotalPrice: previouslySavedPaymentTotal, cuttingCost: 0, cuttingBreakdown: [] }),
+    product({ rowId: 'stair-tread', productType: 'stair', totalPrice: 33_120_000, originalTotalPrice: 33_120_000, cuttingCost: 0, cuttingBreakdown: [] }),
+    product({ rowId: 'stair-riser', productType: 'stair', totalPrice: 12_576_000, originalTotalPrice: 12_576_000, cuttingCost: 0, cuttingBreakdown: [] })
+  ];
+  assert.equal(getContractPayableTotal(rowsAfterEdit, [], 0), 920_696_000);
+  assert.notEqual(getContractPayableTotal(rowsAfterEdit, [], 0), previouslySavedPaymentTotal);
+  assert.equal(getContractPayableTotal(rowsAfterEdit, [], 2_000_000), 918_696_000);
+  const oldPaymentPlan = {
+    payments: [{
+      id: 'original-payment',
+      method: 'CASH_SHIBA' as const,
+      amount: previouslySavedPaymentTotal,
+      paymentDate: '1405/07/04'
+    }],
+    currency: 'تومان',
+    totalContractAmount: previouslySavedPaymentTotal
+  };
+  const submission = prepareContractSubmissionFinancials(
+    rowsAfterEdit, [], 0, oldPaymentPlan, true
+  );
+  assert.equal(submission.totalAmount, 920_696_000);
+  assert.equal(submission.payment.totalContractAmount, 920_696_000);
+  assert.equal(submission.payment.payments[0].amount, 875_000_000);
+  assert.equal(submission.validation.isValid, false,
+    'the old payment plan must not validate against the newly priced rows');
+}
 
 {
   const inconsistent = product();

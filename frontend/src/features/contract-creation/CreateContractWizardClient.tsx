@@ -226,6 +226,7 @@ import {
 } from '@/features/contract-creation/utils/contractRecoveryJournal';
 import {
   getContractGrossPayableTotal,
+  getContractPayableTotal,
   getContractProductNonServiceSubtotal,
   getContractProductPayableTotal,
   getContractProductsPayableTotal,
@@ -964,7 +965,9 @@ export default function CreateContractWizard({
     }
   }, [currentStep, setCurrentStep, shouldSkipDeliveryStep]);
   const grossContractTotal = getContractGrossPayableTotal(wizardData.products, wizardData.serviceRows || []);
-  const payableContractTotal = Math.max(grossContractTotal - appliedDiscountAmount, 0);
+  const payableContractTotal = getContractPayableTotal(
+    wizardData.products, wizardData.serviceRows || [], appliedDiscountAmount
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -997,7 +1000,16 @@ export default function CreateContractWizard({
   }, [discountPercentInput, discountRangesLoaded, isContractEditMode, maxDiscountPercent]);
 
   useEffect(() => {
-    if (!discountRangesLoaded || (isContractEditMode && !discountTouched)) return;
+    if (!discountRangesLoaded) return;
+    if (isContractEditMode && !discountTouched) {
+      setWizardData(prev => prev.payment.totalContractAmount === payableContractTotal
+        ? prev
+        : {
+            ...prev,
+            payment: { ...prev.payment, totalContractAmount: payableContractTotal }
+          });
+      return;
+    }
     const discountSnapshot = appliedDiscountAmount > 0 && matchingDiscountRange
       ? {
           enabled: true,
@@ -5819,9 +5831,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
         if (wizardData.payment.payments.length > 0 && !newErrors.paymentMethod) {
           const paymentTotal = sumNumericValues(wizardData.payment.payments, (payment) => payment.amount);
-          const payableTotal = toFiniteNumber(wizardData.payment.totalContractAmount) ||
-            sumNumericValues(wizardData.products, (product) => product.totalPrice) +
-            sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
+          const payableTotal = payableContractTotal;
           const remainingPaymentAmount = payableTotal - paymentTotal;
           const extraPaymentAmount = paymentTotal - payableTotal;
 
@@ -6147,7 +6157,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         const standaloneServicesTotal = standaloneServiceDetails.reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);
         const paymentTotal = paymentDetails.reduce((sum, payment) => sum + toFiniteNumber(payment.amount), 0);
         const discountAmount = toFiniteNumber(wizardData.discount?.amount);
-        const grandTotal = toFiniteNumber(wizardData.payment.totalContractAmount) || Math.max(productsTotal + standaloneServicesTotal - discountAmount, 0);
+        const grandTotal = payableContractTotal;
         const financialSummary: ContractStep8FinancialSummary = {
           productsTotal,
           servicesTotal: servicesTotal + standaloneServicesTotal,

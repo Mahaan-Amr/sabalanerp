@@ -39,6 +39,7 @@ logs
 
 # Codex scratch space
 .codex-tmp/
+tmp/pdfs/
 .scratch/hr-hiring-e2e/
 .scratch/hr-hiring-reliability/
 .scratch/design-system-e2e/

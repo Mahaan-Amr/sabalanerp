@@ -10,6 +10,7 @@ import {
   type ProductGraphCommandResult
 } from '@sabalanerp/contract-product-graph';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { assertContractPayableTotal } from './contractPayableTotal';
 
 export interface StoredProductGraphState {
   readonly graph: CanonicalProductGraph;
@@ -184,6 +185,14 @@ class PrismaProductGraphTransaction implements ProductGraphTransaction {
     state: StoredProductGraphState,
     totalAmountToman: string
   ): Promise<boolean> {
+    const contract = await this.transaction.salesContract.findUnique({
+      where: { id: contractId },
+      select: { totalAmount: true, contractData: true }
+    });
+    if (!contract) throw new Error('Sales contract not found');
+    // A graph command has no contract snapshot or payment plan. It may update
+    // nonfinancial graph evidence, but cannot change a payable amount on its own.
+    assertContractPayableTotal(totalAmountToman, contract.contractData, contract.totalAmount);
     const graphJson = toJson(JSON.parse(serializeCanonicalProductGraph(state.graph)));
     const stateData = {
       schemaVersion: state.graph.schemaVersion,
@@ -209,10 +218,6 @@ class PrismaProductGraphTransaction implements ProductGraphTransaction {
       written = updated.count;
     }
     if (written !== 1) return false;
-    await this.transaction.salesContract.update({
-      where: { id: contractId },
-      data: { totalAmount: new Prisma.Decimal(totalAmountToman) }
-    });
     return true;
   }
 

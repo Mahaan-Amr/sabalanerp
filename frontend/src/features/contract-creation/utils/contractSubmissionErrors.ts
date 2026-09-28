@@ -5,8 +5,15 @@ export const CONTRACT_PRODUCT_GRAPH_ERROR_CODE =
 
 export const getContractSubmissionRecovery = (
   status: unknown,
-  isEditMode: boolean
+  isEditMode: boolean,
+  code?: unknown
 ): { nextStep: string; uncertainMutation: boolean } => {
+  if (code === 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED') {
+    return {
+      nextStep: 'درخواست اصلاح رسمی را از حسابداری آغاز کنید و پس از تأیید دوباره قرارداد را ویرایش کنید.',
+      uncertainMutation: false
+    };
+  }
   const isValidationResponse = [400, 422].includes(Number(status));
   return {
     nextStep: isEditMode || isValidationResponse

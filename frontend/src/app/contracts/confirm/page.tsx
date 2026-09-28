@@ -99,6 +99,7 @@ export default function ManualContractConfirmationPage() {
   if (data) {
     return (
       <ConfirmationContractView
+        fullManualSummary
         data={data}
         code={code}
         error={error}

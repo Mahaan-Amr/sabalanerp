@@ -352,10 +352,10 @@ const canonicalPricingComponentsFor = (
   return [...intrinsic, ...layerComponents, ...attached];
 };
 
-const verifiedStairLayerBase = (
+const verifiedStairLayerEvidence = (
   row: CanonicalProductRow,
   layers: readonly CanonicalLayerConfiguration[]
-): string | undefined => {
+): { baseAmountToman: string; quantity: string } | undefined => {
   const layer = layers.find(candidate => String(candidate.layerConfigurationId) === String(row.productRowId));
   if (!layer) return undefined;
   const result = layer.result;
@@ -363,11 +363,16 @@ const verifiedStairLayerBase = (
     row.commercial.totalAmountToman !== result.totalAmountToman ||
     !row.commercial.calculationSnapshot ||
     stableCanonicalJson(row.commercial.calculationSnapshot) !== stableCanonicalJson(normalizeLegacyJson(result)) ||
+    (row.commercial.requestedQuantity !== undefined &&
+      row.commercial.requestedQuantity !== String(result.commercialLayerSets)) ||
     (row.commercial.baseAmountToman !== undefined && row.commercial.baseAmountToman !== result.materialAmountToman) ||
     (result.materialPricingLine?.amountToman ?? '0') !== result.materialAmountToman) {
     throw new Error(`Product ${row.productRowId} layer pricing evidence conflicts with its replayed configuration`);
   }
-  return result.materialAmountToman;
+  return {
+    baseAmountToman: result.materialAmountToman,
+    quantity: String(result.commercialLayerSets)
+  };
 };
 
 export const projectCanonicalProductGraph = (
@@ -376,14 +381,15 @@ export const projectCanonicalProductGraph = (
 ): CanonicalContractProjection => {
   const products = graph.rows.map(row => {
     const operations = operationsFor(row, graph.operationGroups, graph.toolSelections, graph.finishingSelections);
-    const layerBase = audience === 'accounting'
-      ? verifiedStairLayerBase(row, graph.layerConfigurations)
+    const layerEvidence = audience === 'accounting'
+      ? verifiedStairLayerEvidence(row, graph.layerConfigurations)
       : undefined;
-    const effectiveBase = row.commercial.baseAmountToman ?? layerBase;
+    const effectiveBase = row.commercial.baseAmountToman ?? layerEvidence?.baseAmountToman;
+    const effectiveQuantity = row.commercial.requestedQuantity ?? layerEvidence?.quantity;
     const pricingComponents = audience === 'accounting'
       ? canonicalPricingComponentsFor(row, operations, graph.layerConfigurations, graph.rows, effectiveBase)
       : [];
-    if (layerBase !== undefined &&
+    if (layerEvidence !== undefined &&
       sumCanonicalDecimals(pricingComponents.map(component => component.amountToman)) !== row.commercial.totalAmountToman) {
       throw new Error(`Product ${row.productRowId} layer pricing components conflict with its total`);
     }
@@ -394,8 +400,7 @@ export const projectCanonicalProductGraph = (
     productType: row.productType,
     contractualTitle: row.contractualTitle,
     description: descriptionFor(row),
-    ...(row.commercial.requestedQuantity !== undefined
-      ? { quantity: row.commercial.requestedQuantity } : {}),
+    ...(effectiveQuantity !== undefined ? { quantity: effectiveQuantity } : {}),
     ...(row.commercial.requestedLengthMeters !== undefined
       ? { lengthMeters: row.commercial.requestedLengthMeters } : {}),
     ...(row.commercial.requestedWidthMeters !== undefined

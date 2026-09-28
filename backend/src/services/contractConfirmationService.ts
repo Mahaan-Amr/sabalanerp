@@ -212,7 +212,9 @@ export class ContractConfirmationService {
             product: true
           }
         },
-        deliveries: true,
+        deliveries: {
+          include: { products: true }
+        },
         payments: {
           include: {
             installments: true

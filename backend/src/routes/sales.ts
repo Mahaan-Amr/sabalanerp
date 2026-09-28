@@ -45,9 +45,7 @@ import type { ContractPrintVariant } from '../utils/printTemplate';
 import { CustomerContractOutputSchema } from '@sabalanerp/partner-sales-contracts';
 import { writeValidatedCustomerContractPdfFile } from '../utils/pdf';
 import { assignLegacyRealizedCredit, reassignContractSeller, snapshotRealizedSale } from '../services/salesAttributionService';
-import {
-  persistSalesContractProductGraphCommand
-} from '../services/contractProductGraphPersistence';
+import { ContractPayableTotalError } from '../services/contractPayableTotal';
 import {
   migrateLegacyContractProductGraph,
   readContractProductGraphWithoutWriting
@@ -72,7 +70,7 @@ import { createAuditedPartnerAuthorization } from '../services/partnerSales/auth
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
 import { applyPartnerContractListScope, canPartnerReadSalesContract,
   readPartnerProfileId } from '../services/partnerSales/contractVisibility';
-import { ensureSalesErrorTracking, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
+import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
 
 const sendUnexpectedSalesFailure = (
   res: Response,
@@ -1154,6 +1152,10 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
       return res.status(422).json({ success: false, code: error.code, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
     }
     console.error('Create sales contract error:', error);
+    if (error instanceof ContractPayableTotalError) {
+      return res.status(422).json({ success: false, code: error.code, error: error.message,
+        expected: error.expected, received: error.received, field: error.field });
+    }
     if (error instanceof ContractProductGraphValidationError) {
       return res.status(422).json({
         success: false,
@@ -1215,18 +1217,17 @@ router.post(
       if (!editOwnership.ok) {
         return res.status(409).json({ success: false, conflict: editOwnership });
       }
-      const result = await persistSalesContractProductGraphCommand({
-        contractId: contract.id,
-        actorId: req.user.id,
-        command: req.body
+      return res.status(409).json({
+        success: false,
+        code: 'CONTRACT_GRAPH_REQUIRES_ATOMIC_EDIT',
+        error: 'تغییر اقلام قرارداد باید از ویرایش کامل قرارداد انجام شود تا مبلغ، برنامه پرداخت و گردش حسابداری هم‌زمان ثبت شوند.'
       });
-      if (!result.ok) {
-        const stale = result.conflicts.some(conflict => conflict.code === 'revision-conflict');
-        return res.status(stale ? 409 : 422).json({ success: false, conflicts: result.conflicts });
-      }
-      return res.json({ success: true, data: result });
     } catch (error) {
       console.error('Persist contract product graph command error:', error);
+      if (error instanceof ContractPayableTotalError) {
+        return res.status(422).json({ success: false, code: error.code, error: error.message,
+          expected: error.expected, received: error.received, field: error.field });
+      }
       return res.status(400).json({
         success: false,
         error: error instanceof Error ? error.message : 'Invalid product graph command'
@@ -1347,6 +1348,10 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
     return;
   } catch (error: any) {
     console.error('Update sales contract error:', error);
+    if (error instanceof ContractPayableTotalError) {
+      return res.status(422).json({ success: false, code: error.code, error: error.message,
+        expected: error.expected, received: error.received, field: error.field });
+    }
     if (error instanceof ContractProductGraphValidationError) {
       return res.status(422).json({
         success: false,
@@ -1386,6 +1391,10 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
         success: false,
         error: salesBusinessErrorMessage(error.message, 'وضعیت قرارداد اجازه تأیید را نمی‌دهد؛ وضعیت را بررسی کنید.')
       });
+    }
+    const knownUpdateFailure = knownContractUpdateBusinessFailure(error.message);
+    if (knownUpdateFailure) {
+      return res.status(knownUpdateFailure.status).json(knownUpdateFailure.body);
     }
     const trackingId = randomUUID();
     console.error('Unexpected update sales contract failure:', { trackingId, error });

@@ -34,6 +34,7 @@ const KNOWN_SALES_ERRORS: Record<string, string> = {
   'CRM potential project not found': 'پروژه انتخاب‌شده پیدا نشد؛ پروژه را دوباره از فهرست انتخاب کنید.',
   'CRM potential project customer does not match contract customer': 'مشتری پروژه با مشتری قرارداد یکسان نیست؛ پروژه یا مشتری قرارداد را اصلاح کنید.',
   'CRM potential project is already linked to a sales contract': 'این پروژه قبلاً به یک قرارداد فروش متصل شده است؛ قرارداد متصل را از صفحه پروژه باز کنید.',
+  'نام مشتری در اطلاعات قرارداد با رکورد اصلی CRM یکسان نیست.': 'نام مشتری در پیش‌نویس با اطلاعات ثبت‌شده یکسان نیست؛ مشتری را دوباره از فهرست انتخاب کنید.',
 };
 
 export const salesBusinessErrorMessage = (message: unknown, fallback: string): string =>
@@ -45,6 +46,21 @@ export const salesBusinessErrorMessage = (message: unknown, fallback: string): s
       && !/[A-Za-z{}[\]<>]|پشتیبانی|تماس بگیرید|خطای سرور|پایگاه داده/i.test(message)
         ? message
         : fallback;
+
+export const knownContractUpdateBusinessFailure = (message: unknown): {
+  status: number;
+  body: { success: false; code: string; error: string };
+} | null => message === 'Signed contract commercial evidence can only change through an approved formal correction'
+  || message === 'Existing accounting financial record requires an approved formal correction'
+  ? {
+      status: 400,
+      body: {
+        success: false,
+        code: 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED',
+        error: 'این قرارداد امضا یا چاپ شده یا رکورد مالی دارد؛ تغییر آن باید از مسیر اصلاح رسمی تأییدشده انجام شود.',
+      },
+    }
+  : null;
 
 export const ensureSalesErrorTracking = (
   payload: unknown,

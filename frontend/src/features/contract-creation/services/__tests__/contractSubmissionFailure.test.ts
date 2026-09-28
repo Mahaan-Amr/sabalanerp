@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mapAxiosFormErrors } from '../../../../lib/formErrors';
+import { getSalesOperationalErrorMessage } from '../../../sales/salesOperationalError';
 import {
   getContractSubmissionRecovery,
   isContractProductValidationFailure,
@@ -44,6 +45,28 @@ assert.deepEqual(getContractSubmissionRecovery(500, false), {
   nextStep: 'ابتدا فهرست قراردادها را بررسی کنید؛ فقط اگر قرارداد ثبت نشده بود دوباره تلاش کنید.',
   uncertainMutation: true
 });
+assert.deepEqual(getContractSubmissionRecovery(400, true, 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED'), {
+  nextStep: 'درخواست اصلاح رسمی را از حسابداری آغاز کنید و پس از تأیید دوباره قرارداد را ویرایش کنید.',
+  uncertainMutation: false
+});
+const signedEditFailure = {
+  response: {
+    status: 400,
+    data: { success: false, code: 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED',
+      error: 'این قرارداد امضا یا چاپ شده است و تغییر مبلغ یا تخفیف آن بدون اصلاح رسمی تأییدشده مجاز نیست.' }
+  }
+};
+const signedEditRecovery = getContractSubmissionRecovery(
+  signedEditFailure.response.status, true, signedEditFailure.response.data.code
+);
+const signedEditMessage = getSalesOperationalErrorMessage(signedEditFailure, {
+  failedAction: 'ذخیره تغییرات قرارداد',
+  nextStep: signedEditRecovery.nextStep,
+  preserveInput: true,
+  uncertainMutation: signedEditRecovery.uncertainMutation
+});
+assert.match(signedEditMessage, /درخواست اصلاح رسمی را از حسابداری آغاز کنید/);
+assert.doesNotMatch(signedEditMessage, /پاسخ قابل‌استفاده‌ای|فقط اگر عملیات انجام نشده بود/);
 
 assert.equal(
   isContractProductValidationFailure(globalProductError, {

@@ -83,11 +83,13 @@ import { readPartnerDispatchAccountingViewCapability } from '../services/partner
 import accountingLedgerRouter from './accountingLedger';
 import accountingPeriodEndRouter from './accountingPeriodEnd';
 import accountingSupplyChainRouter from './accountingSupplyChain';
+import accountingReplacementRouter from './accountingReplacement';
 
 const router = express.Router();
 router.use('/ledger', accountingLedgerRouter);
 router.use('/period-end', accountingPeriodEndRouter);
 router.use('/supply-chain', accountingSupplyChainRouter);
+router.use('/replacement', accountingReplacementRouter);
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
 
 const accountingActionFeature: Record<string, string[]> = {

@@ -102,6 +102,7 @@ export default function AccountingLedgerPage() {
   const [saving, setSaving] = useState(false);
   const [postTarget, setPostTarget] = useState<any>();
   const [postReason, setPostReason] = useState('');
+  const [postError, setPostError] = useState('');
   const [postOverride, setPostOverride] = useState(false);
   const [overrideReason, setOverrideReason] = useState('');
   const [reverseTarget, setReverseTarget] = useState<any>();
@@ -177,6 +178,28 @@ export default function AccountingLedgerPage() {
     finally { setSaving(false); }
   };
 
+  const submitPost = async () => {
+    if (!postTarget || postTarget.postingBlockedReason) return;
+    setSaving(true);
+    setPostError('');
+    try {
+      const response = await accountingAPI.postLedgerVoucher(postTarget.id, {
+        reason: postReason.trim(),
+        override: postOverride ? { confirmed: true, reason: overrideReason.trim() } : undefined,
+      });
+      if (createdVoucher?.id === postTarget.id) setCreatedVoucher(response.data.data);
+      setPostTarget(undefined);
+      setPostReason('');
+      setPostOverride(false);
+      setOverrideReason('');
+      setCommandFeedback({ scope: 'ledger-7', kind: 'success', title: 'سند قطعی و شماره قانونی تخصیص داده شد.' });
+      await refreshReports();
+      await loadContext();
+    } catch (error: any) {
+      setPostError(error.response?.data?.error || 'قطعی‌سازی سند انجام نشد.');
+    } finally { setSaving(false); }
+  };
+
   const openEvidence = async (voucherId: string) => {
     setEvidenceLoading(true); setMessage(undefined);
     try {
@@ -212,6 +235,8 @@ export default function AccountingLedgerPage() {
   return (
     <ErpPage eyebrow="حسابداری" title="دفترکل و کدینگ" description={`${context.namePersian} · ارز قانونی: ریال`} backHref="/dashboard/accounting" actions={[{ label: 'به‌روزرسانی', onClick: refreshReports, tone: 'neutral' }]}>
       {message && <ErpInlineState kind={message.kind} title={message.title} />}
+      {year?.code === '1404' && <ErpInlineState kind="stale" title="گزارش این سال تنها اسناد موجود در پشتیبان سپیدار را پوشش می‌دهد؛ ریزگردش ۱۴۰۴ پیش از ۲۰۲۵/۱۲/۲۲ موجود نیست." />}
+      {year?.code === '1405' && <ErpInlineState kind="stale" title="بهای خروج و موجودی منفی انبار ۱۴۰۵ هنوز تطبیق نشده است؛ گردش دفترکل به‌تنهایی وضعیت انبار را تأیید نمی‌کند." />}
       <ErpSection>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label><span className="mb-2 block text-sm">سال مالی</span><ErpSearchableSelect value={year?.id || ''} onChange={(event) => { setFiscalYearId(event.target.value); setPeriodId(''); }}>{book?.fiscalYears?.map((item: any) => <option key={item.id} value={item.id}>{item.titlePersian}</option>)}</ErpSearchableSelect></label>
@@ -282,11 +307,11 @@ export default function AccountingLedgerPage() {
                 setCreatedVoucher(response.data.data); setDrafts((current) => [response.data.data, ...current]); setMessage({ kind: 'success', title: 'پیش‌نویس متوازن ثبت شد.' });
               } catch (error: any) { setMessage({ kind: 'error', title: error.response?.data?.error || 'ثبت پیش‌نویس ناموفق بود.' }); }
               finally { setSaving(false); }
-            }} />{createdVoucher?.status === 'DRAFT' && <ErpButton label="قطعی‌سازی سند" tone="success" onClick={() => setPostTarget(createdVoucher)} />}</div>
+            }} />{createdVoucher?.status === 'DRAFT' && <ErpButton label="قطعی‌سازی سند" tone="success" onClick={() => { setPostError(''); setPostTarget(createdVoucher); }} />}</div>
           </>}
         </ErpSection>}
         <ErpSection title="پیش‌نمایش پیش‌نویس‌ها" description="این ارقام رسمی نیستند و در مانده‌ها و دفاتر قانونی محاسبه نمی‌شوند.">
-          {drafts.length === 0 ? <ErpEmptyState title="پیش‌نویس تعیین‌تکلیف‌نشده‌ای وجود ندارد." /> : <div className="grid gap-2 md:grid-cols-2">{drafts.map((item) => <ErpCard key={item.id} className="p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><strong>{item.description}</strong><span className="mt-1 block text-sm text-[var(--sds-text-muted)]">{dateFa(item.documentDate)} · {digits(item.debitTotalRials)} ریال</span></div>{canWrite && <ErpButton label="قطعی‌سازی" tone="success" variant="outline" onClick={() => setPostTarget(item)} />}</div></ErpCard>)}</div>}
+          {drafts.length === 0 ? <ErpEmptyState title="پیش‌نویس تعیین‌تکلیف‌نشده‌ای وجود ندارد." /> : <div className="grid gap-2 md:grid-cols-2">{drafts.map((item) => <ErpCard key={item.id} className="p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><strong>{item.description}</strong><span className="mt-1 block text-sm text-[var(--sds-text-muted)]">{dateFa(item.documentDate)} · {digits(item.debitTotalRials)} ریال</span></div>{item.postingBlockedReason ? <ErpBadge tone="warning">در انتظار انتقال مرجعیت</ErpBadge> : canWrite && <ErpButton label="قطعی‌سازی" tone="success" variant="outline" onClick={() => { setPostError(''); setPostTarget(item); }} />}</div>{item.postingBlockedReason && <p className="mt-2 text-sm text-[var(--sds-text-muted)]">{item.postingBlockedReason}</p>}</ErpCard>)}</div>}
         </ErpSection>
         <ErpSection title="دفتر روزنامه قطعی">
           {journal.length === 0 ? <ErpEmptyState title="سند قطعی در این محدوده وجود ندارد." /> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-[var(--sds-border-default)]"><th className="p-3 text-right">شماره سند</th><th className="p-3 text-right">تاریخ</th><th className="p-3 text-right">شرح و آرتیکل‌ها</th><th className="p-3 text-right">وضعیت</th><th className="p-3 text-left">بدهکار</th><th className="p-3 text-left">بستانکار</th>{(canManage || canOverride) && <th className="p-3 text-right">عملیات</th>}</tr></thead><tbody>{journal.map((item) => <tr key={item.id} className="border-b border-[var(--sds-border-default)] align-top"><td className="p-3">{Number(item.statutoryNumber).toLocaleString('fa-IR')}</td><td className="p-3">{dateFa(item.documentDate)}</td><td className="p-3"><strong>{item.description}</strong><div className="mt-2 space-y-1 text-xs text-[var(--sds-text-muted)]">{item.lines?.map((line: any) => <div key={line.id}>{line.account?.code} · {line.account?.titlePersian} · بدهکار {digits(line.debitRials)} · بستانکار {digits(line.creditRials)}{line.description ? ` · ${line.description}` : ''}</div>)}</div></td><td className="p-3"><ErpBadge tone={item.status === 'POSTED' ? 'success' : 'warning'}>{statusFa[item.status]}</ErpBadge></td><td className="p-3 text-left">{digits(item.debitTotalRials)}</td><td className="p-3 text-left">{digits(item.creditTotalRials)}</td>{(canManage || canOverride) && <td className="p-3"><div className="flex flex-wrap gap-2">{canManage && <ErpButton label="مشاهده شواهد" variant="outline" disabled={evidenceLoading} onClick={() => void openEvidence(item.id)} />}{canOverride && item.status === 'POSTED' && <ErpButton label="برگشت سند" tone="danger" variant="outline" onClick={() => setReverseTarget(item)} />}</div></td>}</tr>)}</tbody></table></div>}
@@ -364,7 +389,9 @@ export default function AccountingLedgerPage() {
       <ErpSheet open={Boolean(evidenceDetail)} onClose={() => setEvidenceDetail(undefined)} title="شواهد و منشأ سند" presentation="modal" footer={<div className="flex justify-end"><ErpButton label="بستن" variant="outline" onClick={() => setEvidenceDetail(undefined)} /></div>}>
         {evidenceDetail && <AccountingLedgerEvidence evidence={evidenceDetail} />}
       </ErpSheet>
-      <ErpSheet open={Boolean(postTarget)} onClose={() => { if (!saving) { setPostTarget(undefined); setPostReason(''); setPostOverride(false); setOverrideReason(''); } }} title="تأیید قطعی‌سازی سند" presentation="modal" pending={saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setPostTarget(undefined)} /><ErpButton label="قطعی‌سازی" tone="success" disabled={saving || postReason.trim().length < 3 || (postOverride && overrideReason.trim().length < 8)} onClick={() => run(async () => { const response = await accountingAPI.postLedgerVoucher(postTarget.id, { reason: postReason.trim(), override: postOverride ? { confirmed: true, reason: overrideReason.trim() } : undefined }); if (createdVoucher?.id === postTarget.id) setCreatedVoucher(response.data.data); setPostTarget(undefined); setPostReason(''); setPostOverride(false); setOverrideReason(''); await refreshReports(); }, 'سند قطعی و شماره قانونی تخصیص داده شد.', undefined, "ledger-7")} /></div>}>
+      <ErpSheet open={Boolean(postTarget)} onClose={() => { if (!saving) { setPostTarget(undefined); setPostReason(''); setPostOverride(false); setOverrideReason(''); setPostError(''); } }} title="تأیید قطعی‌سازی سند" presentation="modal" pending={saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => { setPostTarget(undefined); setPostError(''); }} /><ErpButton label="قطعی‌سازی" tone="success" disabled={saving || Boolean(postTarget?.postingBlockedReason) || postReason.trim().length < 3 || (postOverride && overrideReason.trim().length < 8)} onClick={submitPost} /></div>}>
+        {postError && <ErpInlineState kind="error" title={postError} />}
+        {postTarget?.postingBlockedReason && <ErpInlineState kind="permission" title={postTarget.postingBlockedReason} />}
         <p className="text-sm text-[var(--sds-text-secondary)]">پس از قطعی‌سازی، سند قابل ویرایش یا حذف نیست و اصلاح فقط با سند برگشت انجام می‌شود.</p>
         <label className="mt-4 block"><span className="mb-2 block text-sm">دلیل قطعی‌سازی</span><ErpInput value={postReason} onChange={(event) => setPostReason(event.target.value)} /></label>
         {canOverride && <div className="mt-4"><ErpCheckbox label="ثبت استثنایی در دوره بسته موقت" checked={postOverride} onChange={(event) => setPostOverride(event.target.checked)} />{postOverride && <label className="mt-3 block"><span className="mb-2 block text-sm">دلیل استثنا و تأیید دوباره</span><ErpInput value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></label>}</div>}

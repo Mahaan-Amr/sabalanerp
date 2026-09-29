@@ -1,13 +1,20 @@
 "use client";
 import {
+  ErpCheckboxControl,
   ErpField,
   ErpInput,
-  ErpPressable,
+  ErpNeumorphicInteractiveCard,
+  ErpNeumorphicWorkflowProgress,
+  ErpNeumorphicWorkflowNavigation,
   ErpTextarea,
 } from "@/components/erp";
+import { LogisticsPage } from "@/features/logistics/LogisticsWorkspace";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  FaBuilding,
+  FaFileContract,
+  FaRulerCombined,
   FaArrowLeft,
   FaArrowRight,
   FaCheck,
@@ -30,7 +37,7 @@ import {
   ErpEmptyState,
   ErpInlineState,
   ErpLoading,
-  ErpPage,
+  ErpSummaryGrid,
   ErpSection,
   ErpSegmentedControl,
 } from "@/components/erp";
@@ -39,8 +46,6 @@ import { saveCanonicalLoadingDraft } from "@/features/logistics/canonicalLoading
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
 import {
-  inputClass,
-  labelClass,
   numberFa,
   unitLabels,
 } from "../../logistics-ui";
@@ -213,6 +218,7 @@ export default function NewLoadingPage() {
   const searchParams = useSearchParams();
   const draftId = searchParams.get("draftId");
 
+  const [activeQuantityDriverId, setActiveQuantityDriverId] = useState("");
   const [step, setStep] = useState<WizardStep>("customer");
   const [customerSearch, setCustomerSearch] = useState("");
   const [customers, setCustomers] = useState<any[]>([]);
@@ -239,6 +245,8 @@ export default function NewLoadingPage() {
   const [selectingProjectId, setSelectingProjectId] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const selectedProject = remaining?.project || draft?.project || projects.find(project => project.id === draft?.projectId);
 
   const selectedSourceIds = useMemo(
     () => new Set(lines.map((line) => line.source.contractItemId)),
@@ -826,27 +834,17 @@ export default function NewLoadingPage() {
   };
 
   const renderStepNav = () => (
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
-      {steps.map((item, index) => {
-        const active = item.id === step;
-        const done =
-          steps.findIndex((candidate) => candidate.id === step) > index;
-        return (
-          <ErpButton
-            key={item.id}
-            label={item.label}
-            disabled={!canEnterStep(item.id)}
-            title={blockedStepReason(item.id)}
-            onClick={() => {
-              void navigateToStep(item.id);
-            }}
-            tone={active ? "primary" : done ? "success" : "neutral"}
-            variant={active ? "solid" : done ? "soft" : "outline"}
-            className="min-h-12 text-xs"
-          />
-        );
-      })}
-    </div>
+    <ErpNeumorphicWorkflowProgress
+      ariaLabel="مراحل بارگیری"
+      currentStep={steps.findIndex(item => item.id === step)}
+      clickable
+      steps={steps.map((item, index) => ({
+        id: index, label: item.label,
+        icon: [FaUser, FaBuilding, FaFileContract, FaTruck, FaRulerCombined, FaCheck][index],
+        disabled: !canEnterStep(item.id), disabledReason: blockedStepReason(item.id),
+      }))}
+      onStepClick={index => { void navigateToStep(steps[index].id); }}
+    />
   );
 
   const renderCustomerStep = () => (
@@ -854,10 +852,9 @@ export default function NewLoadingPage() {
       title="انتخاب مشتری"
       description="فقط مشتری‌هایی نمایش داده می‌شوند که حداقل یک پروژه با مانده مثبت بارگیری دارند."
     >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
         <ErpField label="جستجوی مشتری">
           <ErpInput
-            className={inputClass}
             value={customerSearch}
             onChange={(event) => setCustomerSearch(event.target.value)}
             onKeyDown={(event) => {
@@ -867,19 +864,20 @@ export default function NewLoadingPage() {
         </ErpField>
         <ErpButton label="جستجو" icon={FaSearch} onClick={loadCustomers} />
       </div>
-      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <div className="mt-4 flex flex-col gap-2">
         {customers.map((customer) => (
-          <ErpPressable
+          <ErpNeumorphicInteractiveCard
             key={customer.id}
             type="button"
             onClick={() => loadCustomerProjects(customer)}
-            className={`rounded-lg border bg-[var(--sds-surface-raised)] p-4 text-right shadow-sm transition hover:border-[var(--sds-accent)]/40 dark:bg-[var(--sds-surface-raised)] ${
+            aria-pressed={selectedCustomer?.id === customer.id}
+            className={`min-w-0 p-4 text-right ${
               selectedCustomer?.id === customer.id
-                ? "border-[var(--sds-accent)]"
+                ? "border-[var(--sds-accent)] bg-[var(--sds-accent-soft)]"
                 : "border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]"
             }`}
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   {customer.customerName}
@@ -906,7 +904,7 @@ export default function NewLoadingPage() {
                 {numberFa(customer.loadableProjectCount, 0)} پروژه قابل بارگیری
               </ErpBadge>
             </div>
-          </ErpPressable>
+          </ErpNeumorphicInteractiveCard>
         ))}
         {!customers.length && (
           <ErpEmptyState icon={FaUser} title="مشتری قابل بارگیری پیدا نشد" />
@@ -927,9 +925,9 @@ export default function NewLoadingPage() {
           title={`مشتری انتخاب‌شده: ${selectedCustomer.customerName || selectedCustomer.companyName}`}
         />
       )}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <div className="flex flex-col gap-2">
         {projects.map((project) => (
-          <ErpCard key={project.id} interactive className="p-4">
+          <ErpNeumorphicInteractiveCard key={project.id} onClick={() => selectProject(project.id)} disabled={Boolean(selectingProjectId)} aria-pressed={draft?.projectId === project.id} className="p-4 text-right disabled:opacity-60">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
@@ -952,20 +950,10 @@ export default function NewLoadingPage() {
                 <ErpBadge tone="success">
                   {numberFa(project.remainingCount, 0)} گروه مانده
                 </ErpBadge>
-                <ErpButton
-                  label={
-                    selectingProjectId === project.id
-                      ? "در حال انتخاب..."
-                      : "انتخاب"
-                  }
-                  icon={FaTruck}
-                  onClick={() => selectProject(project.id)}
-                  disabled={Boolean(selectingProjectId)}
-                  variant="solid"
-                />
+                <ErpBadge tone="primary">{selectingProjectId === project.id ? "در حال انتخاب..." : "انتخاب"}</ErpBadge>
               </div>
             </div>
-          </ErpCard>
+          </ErpNeumorphicInteractiveCard>
         ))}
         {!projects.length && (
           <ErpEmptyState
@@ -980,7 +968,7 @@ export default function NewLoadingPage() {
   const renderContractsStep = () => (
     <ErpSection
       title="انتخاب ردیف‌های قرارداد"
-      description="قرارداد را باز کنید، جزئیات محصول را ببینید، و فقط ردیف‌های کاندید بارگیری را انتخاب کنید. مقداردهی در مرحله بعد انجام می‌شود."
+      description="فقط ردیف‌های دارای مانده قابل انتخاب‌اند."
     >
       {!remaining ? (
         <ErpEmptyState
@@ -1025,12 +1013,10 @@ export default function NewLoadingPage() {
                 </div>
                 {isOpen && (
                   <div className="mt-4 overflow-x-auto">
-                    <table className="w-full min-w-[820px] text-sm">
+                    <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-[var(--sds-border-default)] text-xs text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)]">
                           <th className="px-3 py-3 text-right">محصول</th>
-                          <th className="px-3 py-3 text-right">مشخصات</th>
-                          <th className="px-3 py-3 text-right">جزئیات</th>
                           <th className="px-3 py-3 text-center">مانده</th>
                           <th className="px-3 py-3 text-left">انتخاب</th>
                         </tr>
@@ -1051,13 +1037,9 @@ export default function NewLoadingPage() {
                               <td className="px-3 py-4 font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                                 {source.productSnapshot?.name ||
                                   source.groupDisplayName}
-                              </td>
-                              <td className="px-3 py-4 text-xs leading-6 text-[var(--sds-text-secondary)]">
-                                {productIdentityParts(
+                                <p className="mt-1 text-xs font-normal leading-6 sds-text-secondary">{productIdentityParts(
                                   source.productSnapshot,
-                                ).join(" · ") || "بدون مشخصات"}
-                              </td>
-                              <td className="px-3 py-4">
+                                ).join(" · ") || "بدون مشخصات"}</p>
                                 <div className="flex max-w-md flex-wrap gap-1">
                                   {details.length ? (
                                     details.slice(0, 5).map((detail) => (
@@ -1079,13 +1061,9 @@ export default function NewLoadingPage() {
                                 </ErpBadge>
                               </td>
                               <td className="px-3 py-4 text-left">
-                                <ErpButton
-                                  label={selected ? "حذف از انتخاب" : "انتخاب"}
-                                  icon={selected ? FaTrash : FaPlus}
-                                  onClick={() => toggleSource(source)}
-                                  tone={selected ? "danger" : "primary"}
-                                  variant={selected ? "soft" : "solid"}
-                                />
+                                <label className="inline-flex min-h-11 min-w-11 items-center justify-center">
+                                  <ErpCheckboxControl aria-label={`انتخاب ${source.productSnapshot?.name || source.groupDisplayName} از قرارداد ${contract.contractNumber}`} checked={selected} onChange={() => toggleSource(source)} />
+                                </label>
                               </td>
                             </tr>
                           );
@@ -1103,7 +1081,7 @@ export default function NewLoadingPage() {
   );
 
   const renderLineQuantityInputs = (line: DraftLine) => (
-    <div className="mt-3 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
+    <div className="sds-neumorphic-card mt-3 min-w-0 p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
@@ -1201,7 +1179,7 @@ export default function NewLoadingPage() {
     const update = (patch: Partial<DraftLine>) =>
       updateDriverLineInput(driver.id, line.key, patch);
     return (
-      <div className="mt-3 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
+      <div className="sds-neumorphic-card mt-3 min-w-0 p-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
@@ -1306,7 +1284,12 @@ export default function NewLoadingPage() {
         />
       ) : (
         <div className="space-y-4">
-          {selectedDrivers.map((driver) => (
+          <ErpSegmentedControl
+            value={selectedDrivers.some(driver => driver.id === activeQuantityDriverId) ? activeQuantityDriverId : selectedDrivers[0]?.id || ""}
+            onChange={setActiveQuantityDriverId}
+            options={selectedDrivers.map(driver => ({ value: driver.id, label: [driver.firstName, driver.lastName].filter(Boolean).join(" ") }))}
+          />
+          {selectedDrivers.filter(driver => driver.id === (selectedDrivers.some(candidate => candidate.id === activeQuantityDriverId) ? activeQuantityDriverId : selectedDrivers[0]?.id)).map((driver) => (
             <ErpCard key={driver.id} className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -1376,15 +1359,16 @@ export default function NewLoadingPage() {
   const renderDriverStep = () => (
     <ErpSection
       title="انتخاب رانندگان آماده بارگیری"
-      description="فقط رانندگانی نمایش داده می‌شوند که گارد با «ورود برای بارگیری» وارد محوطه بارگیری کرده است. می‌توانید چند راننده انتخاب کنید."
+      description="می‌توانید چند راننده آماده بارگیری انتخاب کنید."
     >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <ErpField label="جستجوی راننده">
         <ErpInput
-          className={`${inputClass} placeholder:text-[var(--sds-text-secondary)]`}
           value={driverSearch}
           onChange={(event) => setDriverSearch(event.target.value)}
-          placeholder="جستجوی راننده، موبایل، کد ملی، پلاک یا نوع خودرو"
+          placeholder="نام، موبایل، کد ملی، پلاک یا نوع خودرو"
         />
+        </ErpField>
         <ErpButton
           label="به‌روزرسانی"
           icon={FaSearch}
@@ -1402,18 +1386,19 @@ export default function NewLoadingPage() {
             driver.reservedLoading?.id !== draft?.id &&
             !selected;
           return (
-            <ErpPressable
+            <ErpNeumorphicInteractiveCard
               key={driver.id}
               type="button"
               onClick={() => toggleSelectedDriver(driver)}
               disabled={reservedForOther}
-              className={`rounded-lg border bg-[var(--sds-surface-raised)] p-4 text-right shadow-sm transition hover:border-[var(--sds-accent)]/40 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[var(--sds-surface-raised)] ${
+              aria-pressed={selected}
+              className={`min-w-0 p-4 text-right disabled:cursor-not-allowed disabled:opacity-60 ${
                 selected
-                  ? "border-[var(--sds-accent)]"
+                  ? "border-[var(--sds-accent)] bg-[var(--sds-accent-soft)]"
                   : "border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]"
               }`}
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                     {driver.firstName} {driver.lastName}
@@ -1453,7 +1438,7 @@ export default function NewLoadingPage() {
                       : "آماده بارگیری"}
                 </ErpBadge>
               </div>
-            </ErpPressable>
+            </ErpNeumorphicInteractiveCard>
           );
         })}
         {!filteredDrivers.length && (
@@ -1491,88 +1476,18 @@ export default function NewLoadingPage() {
 
   const renderReviewStep = () => (
     <ErpSection title="بازبینی و نهایی‌سازی">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="space-y-4">
         <div className="space-y-3">
-          <ErpCard className="p-4">
-            <p className="text-sm text-[var(--sds-text-secondary)]">
-              مشتری و پروژه
-            </p>
-            <p className="mt-1 font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-              {selectedCustomer?.customerName ||
-                remaining?.project?.customerName ||
-                "انتخاب نشده"}
-            </p>
-            <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
-              {remaining?.project?.projectName ||
-                remaining?.project?.address ||
-                draft?.project?.projectName ||
-                ""}
-            </p>
-          </ErpCard>
-          <ErpCard className="p-4">
-            <p className="text-sm text-[var(--sds-text-secondary)]">رانندگان</p>
-            <div className="mt-2 space-y-2">
-              {selectedDrivers.map((driver) => (
-                <div
-                  key={driver.id}
-                  className="rounded-lg bg-[var(--sds-surface-subtle)] p-2 text-sm dark:bg-[var(--sds-surface-raised)]"
-                >
-                  <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                    {driver.firstName} {driver.lastName}
-                  </span>
-                  <span className="block text-xs text-[var(--sds-text-secondary)]">
-                    {driver.vehicleType} · {driver.vehiclePlate}
-                  </span>
-                </div>
-              ))}
-              {!selectedDrivers.length && (
-                <p className="text-sm text-[var(--sds-text-secondary)]">
-                  انتخاب نشده
-                </p>
-              )}
-            </div>
-          </ErpCard>
-          <ErpCard className="p-4">
-            <p className="mb-3 text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-              خلاصه ردیف‌ها
-            </p>
-            <div className="space-y-2">
-              {groupedLines.map((group) => (
-                <div
-                  key={group.key}
-                  className="rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm dark:bg-[var(--sds-surface-raised)]"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <span>
-                      {group.displayName}
-                      <span className="mt-1 block text-xs text-[var(--sds-text-secondary)]">
-                        {group.lines
-                          .map(
-                            (line) =>
-                              `قرارداد ${line.source.contractNumber}: ${numberFa(calculateTotalLineQuantity(line))}`,
-                          )
-                          .join(" · ")}
-                      </span>
-                    </span>
-                    <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
-                      {numberFa(
-                        group.lines.reduce(
-                          (sum, line) => sum + calculateTotalLineQuantity(line),
-                          0,
-                        ),
-                      )}{" "}
-                      {group.unitLabel}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {!groupedLines.length && (
-                <p className="text-sm text-[var(--sds-text-secondary)]">
-                  ردیفی اضافه نشده است.
-                </p>
-              )}
-            </div>
-          </ErpCard>
+          <ErpSummaryGrid columns={4} items={[
+            { label: "مشتری", value: selectedCustomer?.customerName || remaining?.project?.customerName || "انتخاب نشده" },
+            { label: "پروژه", value: selectedProject?.projectName || selectedProject?.address || "—" },
+            { label: "رانندگان", value: selectedDrivers.length ? selectedDrivers.map(driver => [driver.firstName, driver.lastName, driver.vehiclePlate, driver.vehicleType].filter(Boolean).join(" · ")).join("، ") : "انتخاب نشده" },
+            { label: "اقلام بار", value: `${numberFa(lines.length, 0)} ردیف` },
+          ]} />
+          <div className="overflow-x-auto"><table className="w-full text-right text-sm">
+            <thead><tr className="sds-text-secondary"><th className="p-3">محصول / قرارداد</th>{selectedDrivers.map(driver => <th key={driver.id} className="p-3">{driver.firstName} {driver.lastName}</th>)}<th className="p-3">جمع</th></tr></thead>
+            <tbody>{lines.map(line => <tr key={line.key} className="border-t border-[var(--sds-border-subtle)]"><td className="p-3">{line.groupDisplayName}<p className="text-xs sds-text-secondary">قرارداد {line.source.contractNumber}</p></td>{selectedDrivers.map(driver => <td key={driver.id} className="p-3">{numberFa(calculateDriverLineQuantity(driver.id, line))}</td>)}<td className="p-3">{numberFa(calculateTotalLineQuantity(line))} {unitLabels[line.source.unit] || "واحد ثبت‌شده"}</td></tr>)}</tbody>
+          </table></div>
           <ErpField label="یادداشت">
             <ErpTextarea
               className="min-h-28"
@@ -1602,10 +1517,9 @@ export default function NewLoadingPage() {
   if (loading) return <ErpLoading />;
 
   return (
-    <ErpPage
+    <LogisticsPage
       eyebrow="لجستیک"
       title="بارگیری جدید"
-      description="مراحل را به‌ترتیب کامل کنید؛ در پایان، خلاصه بارگیری را بازبینی و ثبت نهایی کنید."
       backHref="/dashboard/logistics/loadings"
       actions={[
         {
@@ -1621,6 +1535,13 @@ export default function NewLoadingPage() {
       {message && <ErpInlineState kind="success" title={message} />}
       {error && <ErpInlineState kind="error" title={error} />}
 
+      {selectedCustomer && selectedProject && !["customer", "project"].includes(step) && (
+        <div className="flex flex-wrap gap-6 text-sm sds-text-secondary">
+          <div>مشتری: <strong className="sds-text-primary">{selectedCustomer.customerName || selectedCustomer.companyName}</strong></div>
+          <div>پروژه: <strong className="sds-text-primary">{selectedProject.projectName || selectedProject.address}</strong></div>
+          {draft?.loadingNumber && <div>{dispatchCaseReference(draft.loadingNumber)}</div>}
+        </div>
+      )}
       {step === "customer" && renderCustomerStep()}
       {step === "project" && renderProjectStep()}
       {step === "contracts" && renderContractsStep()}
@@ -1628,43 +1549,17 @@ export default function NewLoadingPage() {
       {step === "driver" && renderDriverStep()}
       {step === "review" && renderReviewStep()}
 
-      <div className="sticky bottom-3 z-10 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-3 shadow-lg backdrop-blur dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-        <div className="flex items-center justify-between gap-3">
-          <ErpButton
-            label="قبلی"
-            icon={FaArrowRight}
-            onClick={goBack}
-            disabled={step === "customer" || saving}
-            tone="neutral"
-            variant="outline"
-          />
-          <div className="text-center text-xs text-[var(--sds-text-secondary)]">
-            {draft?.loadingNumber ? (
-              <span>{dispatchCaseReference(draft.loadingNumber)}</span>
-            ) : (
-              <span>ابتدا مشتری و پروژه قابل بارگیری را انتخاب کنید</span>
-            )}
-          </div>
-          {step === "review" ? (
-            <ErpButton
-              label="نهایی‌سازی"
-              icon={FaCheck}
-              onClick={finalize}
-              disabled={blockers.length > 0 || saving}
-              tone="success"
-              variant="solid"
-            />
-          ) : (
-            <ErpButton
-              label="بعدی"
-              icon={FaArrowLeft}
-              onClick={goNext}
-              disabled={saving}
-              variant="solid"
-            />
-          )}
-        </div>
-      </div>
-    </ErpPage>
+      <ErpNeumorphicWorkflowNavigation
+        primaryLabel={step === "review" ? "نهایی‌سازی" : "بعدی"}
+        primaryIcon={step === "review" ? FaCheck : FaArrowLeft}
+        previousLabel="قبلی" previousIcon={FaArrowRight}
+        counterLabel={`مرحله ${(steps.findIndex(item => item.id === step) + 1).toLocaleString("fa-IR")} از ۶`}
+        onPrimary={() => { void (step === "review" ? finalize() : goNext()); }}
+        onPrevious={() => { void goBack(); }}
+        primaryDisabled={step === "review" && blockers.length > 0}
+        previousDisabled={step === "customer" || saving}
+        pending={saving}
+      />
+    </LogisticsPage>
   );
 }

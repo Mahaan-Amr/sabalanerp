@@ -163,6 +163,11 @@
   --sds-neu-shadow-inset: inset 2px 2px 5px rgb(0 0 0 / 30%), inset -2px -2px 5px rgb(255 255 255 / 3%);
 }
 
+/* Scoped workspace presentation keeps small supporting text readable. */
+[data-erp-presentation="workspace"] {
+  --sds-text-muted: var(--sds-text-secondary);
+}
+
 .sds-neumorphic-card,
 .sds-neumorphic-bottom-nav {
   border: 1px solid var(--sds-border-subtle);

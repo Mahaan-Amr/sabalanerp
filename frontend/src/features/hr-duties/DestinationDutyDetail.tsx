@@ -81,7 +81,7 @@ const failureMessage = (error: any) => {
   });
 };
 
-export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string; dutyId: string }) {
+export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'default' }: { workspace: string; dutyId: string; overlayScope?: 'default' | 'workspace' }) {
   const [state, dispatch] = useReducer(
     reduceDestinationDutyState<DestinationDuty>,
     initialDestinationDutyState as typeof initialDestinationDutyState & { data: DestinationDuty | null },
@@ -461,6 +461,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
         onClose={() => setReassignmentConfirmationOpen(false)}
         title="تأیید انتقال مسئولیت"
         presentation="modal"
+        scope={overlayScope}
         pending={pendingAction === 'REASSIGN'}
         footer={(
           <div className="flex gap-2">

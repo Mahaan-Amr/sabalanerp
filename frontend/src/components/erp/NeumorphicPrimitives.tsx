@@ -246,7 +246,7 @@ export function ErpNeumorphicMetricGrid({
                 {item.value}
               </p>
               {item.hint && (
-                <p className="mt-1 text-xs text-[var(--sds-text-muted)]">{item.hint}</p>
+                <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{item.hint}</p>
               )}
             </div>
             <span

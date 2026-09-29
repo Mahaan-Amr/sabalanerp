@@ -2,6 +2,10 @@
 export { default as ErpSearchableSelect } from './ErpSearchableSelect';
 
 import React from 'react';
+import ErpFloatingActionMenu from './ErpFloatingActionMenu';
+import { ErpPresentationProvider, useErpPresentationScope } from './ErpPresentation';
+import { ErpNeumorphicMetricGrid } from './NeumorphicPrimitives';
+export { ErpPresentationProvider, useErpPresentationScope } from './ErpPresentation';
 export { default as ErpPersianDateField } from './ErpPersianDateField';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -490,7 +494,11 @@ export function ErpSection({ title, description, actions, children, className }:
 }
 
 export function ErpMetricGrid({ items }: { items: ErpMetric[] }) {
+  const presentationScope = useErpPresentationScope();
   if (!items.length) return null;
+  if (presentationScope === 'workspace') {
+    return <ErpNeumorphicMetricGrid mobileColumns={1} items={items.map((item) => ({ ...item, id: item.label, icon: item.icon || FaInfoCircle }))} />;
+  }
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {items.map((item) => {
@@ -780,11 +788,11 @@ export function ErpPagination({ currentPage, totalPages, totalItems, itemsPerPag
 
 export function ErpSummaryGrid({ items, columns = 2 }: {
   items: Array<{ label: React.ReactNode; value: React.ReactNode; hint?: React.ReactNode; tone?: ErpTone }>;
-  columns?: 2 | 3;
+  columns?: 2 | 3 | 4;
 }) {
   if (!items.length) return null;
   return (
-    <div className={cx('grid grid-cols-1 gap-3', columns === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2')}>
+    <div className={cx('grid grid-cols-1 gap-3', columns === 4 ? 'sm:grid-cols-2 xl:grid-cols-4' : columns === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2')}>
       {items.map((item, index) => (
         <ErpFieldView key={index} label={item.label} value={item.value} hint={item.hint} tone={item.tone} />
       ))}
@@ -1135,6 +1143,8 @@ export type ErpNeumorphicWorkflowStep = {
   id: number;
   label: string;
   icon: IconType;
+  disabled?: boolean;
+  disabledReason?: string;
 };
 
 export function ErpNeumorphicWorkflowLayout({
@@ -1183,7 +1193,7 @@ export function ErpNeumorphicWorkflowProgress({
           <ActiveIcon className="h-5 w-5 shrink-0" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-[var(--sds-text-muted)]">
+          <p className="text-xs text-[var(--sds-text-secondary)]">
             مرحله {(currentIndex + 1).toLocaleString('fa-IR')} از {steps.length.toLocaleString('fa-IR')}
           </p>
           <h2 className="mt-1 truncate text-base font-bold text-[var(--sds-text-primary)]">
@@ -1252,11 +1262,12 @@ export function ErpNeumorphicWorkflowProgress({
                 <ErpPressable
                   type="button"
                   aria-current={isActive ? 'step' : undefined}
-                  disabled={!clickable}
+                  disabled={!clickable || step.disabled}
+                  title={step.disabledReason}
                   onClick={() => onStepClick?.(step.id)}
                   tone={isActive || completed ? 'primary' : 'neutral'}
                   variant={isActive ? 'solid' : completed ? 'soft' : 'outline'}
-                  className="relative h-11 w-11 rounded-full p-0 disabled:cursor-default disabled:opacity-100"
+                  className="relative h-11 w-11 !rounded-full p-0 disabled:cursor-default disabled:opacity-100"
                 >
                   {completed ? (
                     <FaCheck className="absolute left-1/2 top-1/2 h-4 w-4 shrink-0 -translate-x-1/2 -translate-y-1/2" />
@@ -1269,7 +1280,7 @@ export function ErpNeumorphicWorkflowProgress({
               <span
                 className={cx(
                   'mt-2 max-w-24 text-center text-xs',
-                  isActive ? 'font-bold text-[var(--sds-accent)]' : 'text-[var(--sds-text-muted)]',
+                  isActive ? 'font-bold text-[var(--sds-accent)]' : 'text-[var(--sds-text-secondary)]',
                 )}
               >
                 {step.label}
@@ -1293,6 +1304,8 @@ export function ErpNeumorphicWorkflowProgress({
                 key={step.id}
                 type="button"
                 aria-current={isActive ? 'step' : undefined}
+                disabled={step.disabled}
+                title={step.disabledReason}
                 onClick={() => selectMobileStep(step.id)}
                 tone={isActive ? 'primary' : 'neutral'}
                 variant={isActive ? 'soft' : 'outline'}
@@ -1364,7 +1377,7 @@ export function ErpNeumorphicWorkflowNavigation({
         <span dir="rtl">{primaryLabel}</span>
       </ErpPressable>
 
-      <span className="order-3 w-full text-center text-xs text-[var(--sds-text-muted)] sm:order-none sm:w-auto">
+      <span className="order-3 w-full text-center text-xs text-[var(--sds-text-secondary)] sm:order-none sm:w-auto">
         {counterLabel}
       </span>
 
@@ -1463,7 +1476,11 @@ export function ErpInlineState({
   );
 }
 
-export function ErpActionMenu({ label, actions }: { label: string; actions: ErpAction[] }) {
+export function ErpActionMenu({ label, actions, portal = false }: { label: string; actions: ErpAction[]; portal?: boolean }) {
+  return portal ? <ErpFloatingActionMenu label={label} actions={actions} /> : <ErpInlineActionMenu label={label} actions={actions} />;
+}
+
+function ErpInlineActionMenu({ label, actions }: { label: string; actions: ErpAction[] }) {
   const [open, setOpen] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -1476,8 +1493,8 @@ export function ErpActionMenu({ label, actions }: { label: string; actions: ErpA
   }, [open]);
   return (
     <div ref={rootRef} className="relative">
-      <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={label} className="sds-action sds-action-outline inline-flex h-11 w-11 items-center justify-center">
-        <FaEllipsisV className="h-4 w-4" />
+      <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={label} className="sds-action sds-action-outline relative inline-flex h-11 w-11 items-center justify-center p-0">
+        <FaEllipsisV aria-hidden="true" className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2" />
       </button>
       <AnimatePresence>
         {open && (
@@ -1507,7 +1524,10 @@ export function useErpOverlayPortalContainer() {
   return React.useContext(ErpOverlayPortalContext);
 }
 
-export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', size = 'default', scope = 'default', dismissible = true, pending = false, returnFocusElement = null }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; size?: 'default' | 'wide'; scope?: 'default' | 'workspace'; dismissible?: boolean; pending?: boolean; returnFocusElement?: HTMLElement | null }) {
+export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', size = 'default', scope, dismissible = true, pending = false, returnFocusElement = null }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; size?: 'default' | 'wide'; scope?: 'default' | 'workspace'; dismissible?: boolean; pending?: boolean; returnFocusElement?: HTMLElement | null }) {
+  const inheritedScope = useErpPresentationScope();
+  const presentationScope = scope ?? inheritedScope;
+  const childPresentationScope = inheritedScope === 'workspace' ? presentationScope : 'default';
   const [mounted, setMounted] = React.useState(false);
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   const dialogRef = React.useRef<HTMLDivElement>(null);
@@ -1556,9 +1576,10 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
     };
   }, [open]);
   const sheet = (
+    <ErpPresentationProvider scope={childPresentationScope}>
     <AnimatePresence>
       {open && (
-        <div ref={overlayRootRef} data-erp-overlay-root data-erp-sheet-root className={`${scope === 'workspace' ? 'sds-neumorphic-scope ' : ''}${isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"}`} role="presentation">
+        <div ref={overlayRootRef} data-erp-overlay-root data-erp-sheet-root data-erp-presentation={childPresentationScope} className={`${presentationScope === 'workspace' ? 'sds-neumorphic-scope ' : ''}${presentationScope === 'workspace' && inheritedScope === 'workspace' ? 'sds-neumorphic-workflow-scope ' : ''}${isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"}`} role="presentation">
           <motion.button type="button" aria-label="بستن" disabled={!effectiveDismissible} onClick={onClose} className="absolute inset-0 bg-[var(--sds-surface-overlay)] backdrop-blur-sm disabled:cursor-wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
           <motion.div
             ref={dialogRef}
@@ -1586,6 +1607,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
         </div>
       )}
     </AnimatePresence>
+    </ErpPresentationProvider>
   );
   return mounted ? createPortal(sheet, document.body) : null;
 }

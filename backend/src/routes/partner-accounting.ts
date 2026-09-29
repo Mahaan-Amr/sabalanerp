@@ -78,7 +78,8 @@ router.post('/enqueue', guarded(async (request, response) => {
   }
   respond(response, await serviceFor(request).enqueueCommitted({ ...view.data, state: source.state }, event.data));
 }));
-router.post('/approve', guarded(async (request, response) => {
+// Compatibility endpoint; both paths are explicit receivable commands, never invoice approval hooks.
+router.post(['/receivables', '/approve'], guarded(async (request, response) => {
   if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
   const body = request.body as Record<string, unknown>;
   const expected = RevisionRefSchema.safeParse(body?.expected);

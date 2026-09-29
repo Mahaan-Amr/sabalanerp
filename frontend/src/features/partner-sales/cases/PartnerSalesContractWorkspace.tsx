@@ -1,22 +1,24 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { PartnerAccountView, PartnerCaseView, PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
+import type { PartnerCaseView, PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
 import { ErpButton, ErpCheckbox, ErpFieldView, ErpInlineState, ErpSheet, ErpTextarea, type ErpAction } from '@/components/erp';
+import { partnerSalesActionFeedback } from '../partnerSalesErrorMessage';
 import { formatPartnerMoney } from '../presentation';
 import { PartnerCaseWorkspace } from './PartnerCaseWorkspace';
 import { cancelPartnerCase, finalizePartnerCase, openPartnerPdf, readPartnerCases, requestPartnerCorrection, sendPartnerConfirmation } from './partnerCaseHttpPort';
 
 /** Uses the same Case permissions and commands as the Partner workspace. */
-export function PartnerSalesContractWorkspace({ view, account, canDownload, canPrint, onDownload, onPrint, decisionActions }: {
-  view: PartnerCaseView; account?: PartnerAccountView;
+export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onDownload, onPrint, decisionActions }: {
+  view: PartnerCaseView;
   canDownload?: boolean; canPrint?: boolean; onDownload?: () => void; onPrint?: () => void;
   decisionActions?: ErpAction[];
 }) {
   const router = useRouter();
   const [row, setRow] = useState<PartnerCaseRuntimeRow>();
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<ReturnType<typeof partnerSalesActionFeedback>>();
+  const actionFlight = useRef(false);
   const [pending, setPending] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -27,28 +29,29 @@ export function PartnerSalesContractWorkspace({ view, account, canDownload, canP
       const next = (await readPartnerCases(view.owner.caseId))[0];
       if (!next || (!allowNewRevision && (next.view.owner.revision !== view.owner.revision ||
           next.view.owner.integrityHash !== view.owner.integrityHash))) {
-        setError('نسخهٔ پرونده تغییر کرده است. صفحه را دوباره باز کنید.');
+        setError({ kind: 'stale', message: 'نسخهٔ پرونده تغییر کرده است. صفحه را دوباره باز کنید.' });
         return;
       }
       setRow(next); setError(undefined);
-    } catch {
-      setError('اقدام‌های این پرونده دریافت نشد. دوباره تلاش کنید.');
+    } catch (failure) {
+      setError(partnerSalesActionFeedback(failure, 'دریافت اقدام‌های پرونده'));
     }
   }, [view.owner.caseId, view.owner.revision, view.owner.integrityHash]);
   useEffect(() => { void load(); }, [load]);
 
   const run = async (action: () => Promise<unknown>): Promise<boolean> => {
+    if (actionFlight.current) return false;
+    actionFlight.current = true;
     setPending(true); setError(undefined);
     try { await action(); await load(true); router.refresh(); return true; }
-    catch { setError('انجام اقدام کامل نشد. وضعیت پرونده را بررسی و دوباره تلاش کنید.'); return false; }
-    finally { setPending(false); }
+    catch (failure) { setError(partnerSalesActionFeedback(failure, 'انجام اقدام پرونده')); return false; }
+    finally { actionFlight.current = false; setPending(false); }
   };
   const actions = row?.actions;
   const currentView = row?.view ?? view;
   return <>
-    {error && <ErpInlineState kind="stale" title={error} action={{ label: 'دریافت دوباره', onClick: () => void load() }} />}
+    {error && <ErpInlineState kind={error.kind} title={error.message} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
     <PartnerCaseWorkspace view={currentView}
-      account={currentView.owner.revision === view.owner.revision ? account : undefined}
       customerOutput={row?.customerOutput} history={row?.history}
       accountingCorrectionRequests={row?.accountingCorrectionRequests}
       onRequestCorrection={scope => { if (!pending) void run(() => requestPartnerCorrection(currentView, scope)); }}
@@ -59,8 +62,8 @@ export function PartnerSalesContractWorkspace({ view, account, canDownload, canP
         canSendConfirmation: Boolean(actions?.canSendConfirmation),
         canRequestCorrection: Boolean(actions?.canRequestCorrection),
         canCancel: Boolean(actions?.canCancel), canRequestVoid: Boolean(actions?.canRequestVoid),
-        onPreview: row?.snapshotId ? () => void run(() => openPartnerPdf(currentView.owner.caseId, row.snapshotId!, 'PREVIEW')) : undefined,
-        onIssue: row?.snapshotId ? () => void run(() => openPartnerPdf(currentView.owner.caseId, row.snapshotId!, 'FINAL')) : undefined,
+        onPreview: () => void run(() => openPartnerPdf(currentView.owner.caseId, currentView.state === 'COMMITTED' ? undefined : row?.snapshotId ?? undefined, 'PREVIEW', currentView.owner)),
+        onIssue: () => void run(() => openPartnerPdf(currentView.owner.caseId, undefined, 'FINAL', currentView.owner)),
         onSendConfirmation: () => { if (!pending) void run(() => sendPartnerConfirmation(currentView.owner.caseId)); },
         onContinue: row?.editRecovery ? () => router.push(
           `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}`) : undefined,

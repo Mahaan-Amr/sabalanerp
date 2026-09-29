@@ -33,14 +33,14 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
     const projection = matchingRevision?.internalProjection as { fulfillment?: unknown } | null;
     const fulfillment = views ? FulfillmentViewSchema.safeParse(projection?.fulfillment) : undefined;
     const contextContent = matchingRevision?.customerContent as { contractDate?: string; project?: { title?: string; address?: string } } | undefined;
-    const sale = await scope.database.partnerSaleCase.findUnique({ where: { id: caseId }, select: { state: true } });
+    const sale = await scope.database.partnerSaleCase.findUnique({ where: { id: caseId }, select: { state: true, headRevision: true, integrityHash: true } });
     const received = record.receivables.reduce((sum, row) => sum.add(row.paidAmount), new Prisma.Decimal(0));
     const remaining = record.receivables.length ? record.receivables.reduce((sum, row) => sum.add(row.remainingAmount), new Prisma.Decimal(0)) : record.amount;
     const flags = await scope.database.accountingContractFlag.findMany({
       where: { sourceFinancialRecordId: record.id }, orderBy: { createdAt: 'desc' } });
     return {
       caseState: sale?.state, receivedAmount: received.toFixed(), remainingAmount: remaining.toFixed(),
-      id: record.id, status: record.status, amount: record.amount.toString(),
+      id: record.id, owner: sale ? { caseId, revision: sale.headRevision, integrityHash: sale.integrityHash } : undefined, status: record.status, amount: record.amount.toString(),
       currency: record.currency, createdAt: record.createdAt,
       systemInvoiceNumber: record.systemInvoiceNumber,
       systemInvoiceDate: record.systemInvoiceDate,

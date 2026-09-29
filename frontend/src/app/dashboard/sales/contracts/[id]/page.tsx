@@ -74,7 +74,6 @@ import {
 } from "@/features/accounting/accountingUi";
 import { buildContractPaymentPresentation } from "@/features/sales/contractPaymentPresentation";
 import {
-  PartnerAccountViewSchema,
   PartnerCaseViewSchema,
   type PartnerAccountView,
   type PartnerCaseView,
@@ -922,16 +921,12 @@ export default function ContractDetailPage() {
         />
       );
     }
-    const account = PartnerAccountViewSchema.safeParse(
-      contract.partnerAccountView,
-    );
     return (
       <>
       {visibleOperationalError && <ErpInlineState kind={visibleOperationalError.kind} title={visibleOperationalError.message} />}
       <PartnerSalesContractWorkspace
         view={projection.data}
         decisionActions={decisionActions}
-        account={account.success ? account.data : undefined}
         canDownload={contractPermissions.canView}
         canPrint={contractPermissions.canPrint}
         onDownload={() => void handleDownloadPdf()}

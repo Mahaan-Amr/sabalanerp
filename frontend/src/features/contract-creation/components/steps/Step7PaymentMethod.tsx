@@ -3,21 +3,11 @@
 
 import React from 'react';
 import { ErpNeumorphicCard, ErpPressable, ErpSegmentedControl, ErpSelect } from '@/components/erp';
-import { FaPlus, FaTrash, FaEdit, FaCheck } from 'react-icons/fa';
+import { FaPlus, FaCheck } from 'react-icons/fa';
 import { formatPrice, formatDisplayNumber, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../../types/contract.types';
+import { ContractPaymentEntriesList } from '../shared/ContractPaymentEntriesList';
 import { ContractDiscountEditor } from '../shared/ContractDiscountEditor';
-
-function getPaymentMethodLabel(payment: PaymentEntry): string {
-  const m = (payment as PaymentEntry & { method?: string }).method;
-  if (m === 'CASH_CARD') return 'نقد (کارت)';
-  if (m === 'CASH_SHIBA') return 'نقد (شبا)';
-  if (m === 'CHECK') return 'چک';
-  if (m === 'CUSTOMER_BALANCE') return 'استفاده از باقی مانده مشتری';
-  if (m === 'CASH') return payment.cashType === 'CARD' ? 'نقد (کارت)' : 'نقد (شبا)';
-  if (m === 'RECEIPT') return 'رسید';
-  return 'نامشخص';
-}
 
 interface Step7PaymentMethodProps {
   existingContract?: boolean;
@@ -262,65 +252,11 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
               </ErpPressable>
             </div>
           ) : (
-            <div className="space-y-3">
-              {wizardData.payment.payments.map((payment, index) => (
-                <ErpNeumorphicCard
-                  key={index}
-                  className="p-4"
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <span className="font-semibold text-[var(--sds-text-primary)]">
-                          پرداخت {index + 1}
-                        </span>
-                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-[var(--sds-info-surface)] text-[var(--sds-info)] dark:bg-[var(--sds-info-surface)] dark:text-[var(--sds-info)]">
-                          {getPaymentMethodLabel(payment)}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                        <div>
-                          <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">مبلغ: </span>
-                          <span className="font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
-                            {formatPrice(payment.amount, wizardData.payment.currency)}
-                          </span>
-                        </div>
-                        {payment.paymentDate && (
-                          <div>
-                            <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">تاریخ: </span>
-                            <span className="font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
-                              {payment.paymentDate}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 ml-4">
-                      <ErpPressable
-                        onClick={() => {
-                          if (onEditPaymentEntry && payment.id) {
-                            onEditPaymentEntry(payment.id);
-                          } else {
-                            setShowPaymentEntryModal(true);
-                          }
-                        }}
-                        className="p-2 text-[var(--sds-info)] dark:text-[var(--sds-info)] hover:bg-[var(--sds-info-surface)] dark:hover:bg-[var(--sds-info-surface)] rounded-lg transition-colors"
-                        title="ویرایش"
-                      >
-                        <FaEdit className="w-4 h-4" />
-                      </ErpPressable>
-                      <ErpPressable
-                        onClick={() => handleRemovePayment(index)}
-                        className="p-2 text-[var(--sds-danger)] dark:text-[var(--sds-danger)] hover:bg-[var(--sds-danger-surface)] dark:hover:bg-[var(--sds-danger-surface)] rounded-lg transition-colors"
-                        title="حذف"
-                      >
-                        <FaTrash className="w-4 h-4" />
-                      </ErpPressable>
-                    </div>
-                  </div>
-                </ErpNeumorphicCard>
-              ))}
-            </div>
+            <ContractPaymentEntriesList payments={wizardData.payment.payments} currency={wizardData.payment.currency}
+              onEdit={payment => {
+                if (onEditPaymentEntry && payment.id) onEditPaymentEntry(payment.id);
+                else setShowPaymentEntryModal(true);
+              }} onRemove={handleRemovePayment} />
           )}
         </div>
 

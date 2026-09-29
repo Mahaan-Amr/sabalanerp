@@ -242,21 +242,35 @@
       "id": "crm-customer-registry",
       "status": "migrated",
       "acceptanceStatus": "accepted",
-      "reason": "Customer discovery, details, creation, editing, contacts, project context, and duplicate handling use canonical interfaces without the redundant tutorial overlay.",
+      "reason": "Customer discovery, details, creation, editing, contacts, project context, and duplicate handling use canonical interfaces without the redundant tutorial overlay. CRM-only workspace presentation now aligns with operational HR cards, forms, mobile navigation, and focused confirmations while Sales and Partner entry points retain their presentation.",
       "files": [
         "frontend/src/app/dashboard/crm/customers/**"
-      ]
+      ],
+      "acceptanceEvidence": {
+        "semantic": "test:design-system-foundation",
+        "composition": "design-system:check and frontend/src/features/crm/crmPresentation.test.tsx",
+        "interactionAccessibility": "tests/design-system-e2e/crm-hr-design-alignment.spec.ts and crm-inventory-sales-convergence.spec.ts CRM customer journeys",
+        "responsiveTheme": "tests/design-system-e2e/crm-hr-design-alignment.spec.ts: light/dark, 390px and 200% zoom",
+        "visual": "tests/design-system-e2e/crm-hr-design-alignment.spec.ts dashboard screenshot attachments; docs/implementation/crm-hr-design-alignment.md"
+      }
     },
     {
       "id": "crm-pipeline",
       "status": "migrated",
       "acceptanceStatus": "accepted",
-      "reason": "CRM overview, potential projects, follow-ups, filtering, lifecycle state, and contract handoff use canonical interfaces while retaining existing domain behavior.",
+      "reason": "CRM overview, potential projects, follow-ups, filtering, lifecycle state, and contract handoff use canonical interfaces while retaining existing domain behavior. CRM-only workspace presentation now aligns with operational HR cards, forms, mobile navigation, and focused confirmations while Sales and Partner entry points retain their presentation.",
       "files": [
         "frontend/src/app/dashboard/crm/page.tsx",
         "frontend/src/app/dashboard/crm/follow-ups/**",
         "frontend/src/app/dashboard/crm/potential-projects/**"
-      ]
+      ],
+      "acceptanceEvidence": {
+        "semantic": "test:design-system-foundation",
+        "composition": "design-system:check and frontend/src/features/crm/crmPresentation.test.tsx",
+        "interactionAccessibility": "tests/design-system-e2e/crm-hr-design-alignment.spec.ts and crm-inventory-sales-convergence.spec.ts CRM customer journeys",
+        "responsiveTheme": "tests/design-system-e2e/crm-hr-design-alignment.spec.ts: light/dark, 390px and 200% zoom",
+        "visual": "tests/design-system-e2e/crm-hr-design-alignment.spec.ts dashboard screenshot attachments; docs/implementation/crm-hr-design-alignment.md"
+      }
     },
     {
       "id": "sales-workspace",

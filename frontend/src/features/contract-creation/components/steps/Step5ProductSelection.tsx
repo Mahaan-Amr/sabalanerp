@@ -391,7 +391,7 @@ const ServiceRow: React.FC<{
       </label>
       <label className="text-xs">
         نرخ
-        <ErpInput
+        <ErpInput numberFormat="money"
           type="text"
           inputMode="decimal"
           value={formatDisplayNumber(row.unitPrice)}

@@ -22,12 +22,13 @@ import { draftForPartnerTechnicalEdit, refreshPartnerTechnicalProductVersion, se
 import { TechnicalProductConfiguration } from './TechnicalProductConfiguration';
 import { partnerRetailPriceUnitLabel, partnerSelectableFamilies } from './partnerPricingUnit';
 import { ContractProductCatalog, type ContractCatalogFamily } from '../components/steps/ContractProductCatalog';
-import { CentralProductModalShell, CompactSwitch, CompactUnitSwitch } from '../components/product-modal-system/productModalPrimitives';
+import { CentralProductModalShell, CompactSegmentedControl, CompactSwitch, CompactUnitSwitch } from '../components/product-modal-system/productModalPrimitives';
 import { partnerRemainderChildren } from './partnerDependentPresentation';
 import { RemainingInventorySelector } from '../components/steps/RemainingInventorySelector';
 import { partnerTechnicalConflictMessage, partnerTechnicalSaveIssue } from './partnerCreationFlow';
 import { PartnerRemainderConfigurationFlow, type PartnerRemainderSelection } from './PartnerRemainderConfigurationFlow';
 import { partnerProductCartSummary } from './partnerProductCartSummary';
+import { clonePartnerLayerOperations, partnerLayerSharedOperations } from './partnerLayerOperations';
 import { partnerMoneyText } from './partnerRetail';
 import { partnerQuantityUnitCopy } from '../../partner-sales/presentation';
 
@@ -83,6 +84,35 @@ export function overridePartnerStairQuantity(draft: PartnerTechnicalDraft, produ
     ? syncPartnerFullCoverageGroup(previous, row.configuration.quantity) : row;
   return replaceRow(next, { ...row, operations: adjusted.operations,
     configuration: { ...row.configuration, quantityMode: 'manual' } });
+}
+export function updatePartnerStairSystemQuantity(draft: PartnerTechnicalDraft, stairSystemId: string,
+  quantity: NonNullable<PartnerTechnicalDraft['stairSystems']>[number]['quantity']) {
+  const previous = draft.stairSystems?.find(item => item.stairSystemId === stairSystemId);
+  let oldCount: number | undefined;
+  let newCount: number | undefined;
+  try { if (previous) oldCount = resolveStaircaseQuantity(previous.quantity).totalSteps; } catch { /* Incomplete input remains editable. */ }
+  try { newCount = resolveStaircaseQuantity(quantity).totalSteps; } catch { /* Do not resize operations until the count is valid. */ }
+  const changedParents = new Set(draft.rows.filter(row => row.family === 'stair' &&
+    row.configuration.stairSystemId === stairSystemId && row.configuration.quantityMode === 'system' &&
+    row.configuration.part !== 'landing').map(row => row.productRowId));
+  // The system may be temporarily incomplete while its textbox is cleared.
+  // Keep the last valid count as the comparison witness, never as the active
+  // system quantity: preview still requires a valid staircase system.
+  const cachedParent = draft.rows.find(row => row.family === 'stair' && changedParents.has(row.productRowId));
+  if (oldCount === undefined && cachedParent?.family === 'stair') oldCount = cachedParent.configuration.quantity;
+  const resize = <T extends { groups: { scope: string }[] }>(operations: T | undefined, multiplier = 1): T | undefined => {
+    if (!operations || oldCount === undefined || newCount === undefined || newCount < 1 ||
+        operations.groups.length !== 1 || Number(operations.groups[0].scope) !== oldCount * multiplier) return operations;
+    return { ...operations, groups: [{ ...operations.groups[0], scope: String(newCount * multiplier) }] };
+  };
+  return PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1,
+    rows: draft.rows.map(row => row.family === 'stair' && changedParents.has(row.productRowId)
+      ? { ...row, configuration: { ...row.configuration, quantity: newCount ?? oldCount },
+          operations: resize(row.operations) } : row),
+    dependents: draft.dependents?.map(item => item.kind === 'layer' && changedParents.has(item.parentProductRowId)
+      ? { ...item, sideOperations: item.sideOperations?.map(side => ({ ...side,
+          operations: resize(side.operations, item.layersPerParentPiece ?? 1)! })) } : item),
+    stairSystems: (draft.stairSystems ?? []).map(item => item.stairSystemId === stairSystemId ? { ...item, quantity } : item) });
 }
 const longitudinalTechnicalConfiguration = (configuration: Extract<PartnerTechnicalDraft['rows'][number], { family: 'longitudinal' }>['configuration']) => {
   const { mandatoryEnabled: _enabled, mandatoryPercentage: _percentage, ...technical } = configuration;
@@ -375,6 +405,7 @@ export function PartnerStairLayerEditor({ parentProductRowId, draft, products, o
   inventory: readonly { remainingStoneId: string; ownerProductRowId: string; catalogProductId: string; lengthMeters: string; widthMeters: string; quantity: number }[];
   onChange: (draft: PartnerTechnicalDraft) => void }) {
   const [selectedLayerByParent, setSelectedLayerByParent] = useState<Record<string, string>>({});
+  const [operationSideByLayer, setOperationSideByLayer] = useState<Record<string, string>>({});
   const parents = draft.rows.filter((row): row is Extract<typeof row, { family: 'stair' }> => row.family === 'stair' && row.productRowId === parentProductRowId);
   const layers = (draft.dependents ?? []).filter((item): item is Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'layer' }> => item.kind === 'layer');
   const layerCatalog = operations.filter((item): item is Extract<PartnerTechnicalOperation, { kind: 'LAYER' }> => item.kind === 'LAYER');
@@ -470,21 +501,33 @@ export function PartnerStairLayerEditor({ parentProductRowId, draft, products, o
           widthMeters: layer.widthMeters ?? '0',
           quantity: parentQuantity(parent.productRowId) * (layer.layersPerParentPiece ?? 1) }));
       if (!strips.length) return null;
+      const selectedSide = operationSideByLayer[layer.layerConfigurationId] === 'all' ? 'all' : strips.find(strip => strip.side === operationSideByLayer[layer.layerConfigurationId])?.side ?? strips[0].side;
+      const bulkView = selectedSide === 'all' ? partnerLayerSharedOperations(strips.map(strip => layer.sideOperations?.find(item => item.side === strip.side)?.operations ?? { groups: [], tools: [], finishings: [] })) : null;
       const sideLabels = { front: 'جلو', back: 'عقب', left: 'چپ', right: 'راست' } as const;
       return <ErpCard key={`operations:${layer.layerConfigurationId}`} className="space-y-3 p-3">
         <h3 className="font-semibold">عملیات لایهٔ {layerCatalog.find(item => item.catalogItemId === layer.catalogItemId)?.name ?? 'پله'}</h3>
-        {strips.map(strip => {
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm font-semibold">عملیات لایه</span>
+          <CompactSegmentedControl label="اعمال روی" value={selectedSide}
+            options={[{ value: 'all', label: 'همه نوارها' }, ...strips.map(strip => ({ value: strip.side, label: sideLabels[strip.side] }))]}
+            onChange={side => setOperationSideByLayer(current => ({ ...current, [layer.layerConfigurationId]: side }))} />
+        </div>
+        {bulkView?.mixed && <ErpInlineState kind="stale" title="عملیات نوارها یکسان نیست؛ تغییرات این بخش روی همه نوارهای انتخاب‌شده اعمال می‌شود." />}
+        {(selectedSide === 'all' ? strips.slice(0, 1) : strips.filter(strip => strip.side === selectedSide)).map(strip => {
           const side = layer.sideOperations?.find(item => item.side === strip.side);
           const operationCollectionId = side?.operationCollectionId ?? `${layer.layerConfigurationId}:operations:${strip.side}`;
           return <div key={strip.side} className="border-t border-[var(--sds-border-subtle)] pt-3">
-            <p className="mb-2 text-sm font-semibold">سمت {sideLabels[strip.side]} · {strip.quantity.toLocaleString('fa-IR')} نوار</p>
+            <p className="mb-2 text-sm font-semibold">{selectedSide === 'all' ? 'همه نوارها' : `سمت ${sideLabels[strip.side]}`} · {strip.quantity.toLocaleString('fa-IR')} نوار</p>
             <OperationsEditor draft={draft} row={parent} calculation={strip as unknown as Record<string, unknown>}
-              operationScopeId={operationCollectionId} catalog={operations} intentOverride={side?.operations ?? { groups: [], tools: [], finishings: [] }}
+              operationScopeId={operationCollectionId} catalog={operations} intentOverride={bulkView?.operations ?? side?.operations ?? { groups: [], tools: [], finishings: [] }}
               onChange={onChange} onOperationsChange={nextOperations => {
                 const nextSide = { side: strip.side, operationCollectionId, scopeIntent: 'side' as const, operations: nextOperations };
                 onChange(PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1,
                   dependents: (draft.dependents ?? []).map(item => item.kind === 'layer' && item.layerConfigurationId === layer.layerConfigurationId
-                    ? { ...item, sideOperations: [...(item.sideOperations ?? []).filter(entry => entry.side !== strip.side), nextSide] }
+                    ? { ...item, sideOperations: selectedSide === 'all' ? strips.map(target => ({ side: target.side,
+                      operationCollectionId: item.sideOperations?.find(entry => entry.side === target.side)?.operationCollectionId ?? `${layer.layerConfigurationId}:operations:${target.side}`,
+                      scopeIntent: 'all-strips' as const, operations: clonePartnerLayerOperations(nextOperations, target.side) }))
+                      : [...(item.sideOperations ?? []).filter(entry => entry.side !== strip.side), nextSide] }
                     : item) }));
               }} />
           </div>;
@@ -645,8 +688,7 @@ function StairEditor({ draft, row, product, mandatoryDefaults, onChange }: { dra
         const quantity = value.mode === 'steps' ? { mode: value.mode, ...(/^\d+$/.test(value.totalSteps) ? { totalSteps: Number(value.totalSteps) } : {}) }
           : { mode: value.mode, ...(/^\d+$/.test(value.numberOfStaircases) ? { numberOfStaircases: Number(value.numberOfStaircases) } : {}),
               ...(/^\d+$/.test(value.stepsPerStaircase) ? { stepsPerStaircase: Number(value.stepsPerStaircase) } : {}) };
-        onChange(PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1,
-          stairSystems: (draft.stairSystems ?? []).map(item => item.stairSystemId === system.stairSystemId ? { ...item, quantity } : item) }));
+        onChange(updatePartnerStairSystemQuantity(draft, system.stairSystemId, quantity));
       }} />}
     <StairPartSubsection draft={partDraft} onChange={value => {
       let next = draft;

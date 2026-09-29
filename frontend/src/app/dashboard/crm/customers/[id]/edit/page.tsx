@@ -1,6 +1,7 @@
 'use client';
-import { ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpTextarea } from '@/components/erp';
+import { ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpTextarea, useErpPresentationScope } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
+import { CustomerRemovalConfirmation } from '@/features/crm/customer-workflow/CustomerRemovalConfirmation';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -156,6 +157,8 @@ export default function EditCustomerPage() {
     isBlacklisted: false,
     isLocked: false
   });
+  const presentationScope = useErpPresentationScope();
+  const [projectRemovalIndex, setProjectRemovalIndex] = useState<number | null>(null);
   const [projects, setProjects] = useState<EditableProject[]>([]);
   const [phones, setPhones] = useState<EditablePhone[]>([]);
   const [contacts, setContacts] = useState<EditableContact[]>([]);
@@ -310,10 +313,14 @@ export default function EditCustomerPage() {
     setDirty(true);
   };
 
-  const removeProject = (index: number) => {
+  const removeProject = (index: number, confirmed = false) => {
     const activeCount = projects.filter((project) => project.isActive).length;
-    if (projects[index].isActive && activeCount === 1 && !confirm('این آخرین پروژه فعال مشتری است. حذف شود؟')) {
-      return;
+    if (!confirmed && projects[index].isActive && activeCount === 1) {
+      if (presentationScope === 'workspace') {
+        setProjectRemovalIndex(index);
+        return;
+      }
+      if (!confirm('این آخرین پروژه فعال مشتری است. حذف شود؟')) return;
     }
     setProjects((prev) => prev.map((project, itemIndex) => itemIndex === index ? { ...project, isActive: false } : project));
     setDirty(true);
@@ -540,7 +547,7 @@ export default function EditCustomerPage() {
         </div>
       </CustomerWorkflowSection>
 
-      <CustomerWorkflowSection title="اطلاعات تکمیلی">
+      <CustomerWorkflowSection title="اطلاعات تکمیلی" collapsible>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <CustomerWorkflowField label="نام شرکت / سازمان"><ErpInput value={formData.companyName} onChange={(e) => updateField('companyName', e.target.value)} /></CustomerWorkflowField>
           <CustomerWorkflowField label="نام برند"><ErpInput value={formData.brandName} onChange={(e) => updateField('brandName', e.target.value)} /></CustomerWorkflowField>
@@ -675,7 +682,7 @@ export default function EditCustomerPage() {
         </div>
       </CustomerWorkflowSection>
 
-      <CustomerWorkflowSection title="کنترل دسترسی">
+      <CustomerWorkflowSection title="کنترل دسترسی" collapsible>
         <div className="flex flex-wrap gap-4">
           <ErpPressable type="button"
             onClick={() => updateField('isBlacklisted', !formData.isBlacklisted)}
@@ -714,6 +721,14 @@ export default function EditCustomerPage() {
           {saving ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
         </ErpPressable>
       </div>
+      <CustomerRemovalConfirmation open={projectRemovalIndex !== null} title="حذف آخرین پروژه فعال"
+        description="این آخرین پروژه فعال مشتری است. حذف شود؟ تغییر پس از ذخیره فرم ثبت می‌شود."
+        onClose={() => setProjectRemovalIndex(null)}
+        onConfirm={() => {
+          if (projectRemovalIndex === null) return;
+          removeProject(projectRemovalIndex, true);
+          setProjectRemovalIndex(null);
+        }} />
     </CustomerWorkflowPage>
   );
 }

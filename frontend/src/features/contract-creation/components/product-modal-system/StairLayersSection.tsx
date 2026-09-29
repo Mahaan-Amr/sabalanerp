@@ -209,7 +209,18 @@ export function StairLayerDraftRow({
         <span className="mb-1 block text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
           سمت‌ها
         </span>
-        <div className="flex flex-wrap gap-1">
+        <div role="group" aria-label="سمت‌های لایه" className="flex flex-wrap gap-1">
+          {([
+            { label: 'دو طول', sides: ['front', 'back'] },
+            { label: 'محیط کامل', sides: ['front', 'back', 'left', 'right'] }
+          ] as const).map(preset => {
+            const selected = draft.targetSides.length === preset.sides.length
+              && preset.sides.every(side => draft.targetSides.includes(side));
+            return <ErpPressable key={preset.label} type="button" aria-pressed={selected}
+              onClick={() => onChange({ ...draft, targetSides: selected ? [] : [...preset.sides] })}
+              tone={selected ? 'primary' : 'neutral'} variant={selected ? 'solid' : 'outline'}
+              className="rounded-md px-2 py-1 text-xs">{preset.label}</ErpPressable>;
+          })}
           {(Object.keys(SIDE_LABELS) as StairLayerSide[]).map(side => (
             <ErpPressable
               key={side}

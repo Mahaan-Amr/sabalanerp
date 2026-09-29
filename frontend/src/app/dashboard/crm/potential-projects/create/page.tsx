@@ -3,9 +3,10 @@ import { ErpInput, ErpTextarea } from '@/components/erp';
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FaSave } from 'react-icons/fa';
-import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection, useErpPresentationScope } from '@/components/erp';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
+import { CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 import { crmAPI } from '@/lib/api';
 import { crmPersonName, CRM_WORK_TYPES, persianDateToApiDate, POTENTIAL_PROJECT_STATUSES } from '@/lib/crmPipeline';
 
@@ -133,7 +134,7 @@ export default function CreatePotentialProjectPage() {
           </div>
         </ErpSection>
 
-        <ErpSection title="اطلاعات تکمیلی" className="space-y-4">
+        <CustomerWorkflowSection title="اطلاعات تکمیلی" collapsible className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>آدرس/موقعیت
               <ErpInput className={`${inputClass} mt-2`} value={form.address} onChange={(e) => update('address', e.target.value)} />
@@ -156,7 +157,7 @@ export default function CreatePotentialProjectPage() {
               <ErpTextarea className={`${inputClass} mt-2 min-h-28`} value={form.description} onChange={(e) => update('description', e.target.value)} />
             </label>
           </div>
-        </ErpSection>
+        </CustomerWorkflowSection>
 
         <div className="flex justify-end">
           <ErpButton

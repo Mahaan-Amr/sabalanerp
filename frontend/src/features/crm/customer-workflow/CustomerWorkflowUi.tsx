@@ -1,7 +1,9 @@
 'use client';
 
 import React from 'react';
-import { ErpCard, ErpInlineState, ErpPage, ErpSection, type ErpAction } from '@/components/erp';
+import { ErpCard, ErpDisclosure, ErpInlineState, ErpPage, ErpSection, useErpPresentationScope, type ErpAction } from '@/components/erp';
+
+import { WizardProgressBar, type WizardStep } from '@/features/contract-creation/components/shared/WizardProgressBar';
 
 type WorkflowFeedback = {
   kind: 'empty' | 'success' | 'error' | 'stale' | 'permission';
@@ -12,6 +14,7 @@ type WorkflowProgress = {
   current: number;
   total: number;
   label: React.ReactNode;
+  steps?: WizardStep[];
 };
 
 export function hasCustomerDraftChanges<T extends object>(values: T) {
@@ -26,7 +29,9 @@ export function CustomerWorkflowFeedback({ feedback }: { feedback: WorkflowFeedb
   return <ErpInlineState kind={feedback.kind} title={feedback.title} />;
 }
 
-export function CustomerWorkflowProgress({ current, total, label }: WorkflowProgress) {
+export function CustomerWorkflowProgress({ current, total, label, steps }: WorkflowProgress) {
+  const scope = useErpPresentationScope();
+  if (scope === 'workspace' && steps) return <WizardProgressBar currentStep={current} steps={steps} />;
   const percent = Math.round((current / Math.max(total, 1)) * 100);
   return (
     <ErpCard className="p-4">
@@ -65,19 +70,26 @@ export function CustomerWorkflowPage({
   progress?: WorkflowProgress;
   feedback?: WorkflowFeedback;
 }>) {
+  const scope = useErpPresentationScope();
   return (
     <ErpPage title={title} description={description} backHref={backHref} actions={actions}>
       {feedback && <CustomerWorkflowFeedback feedback={feedback} />}
-      {progress && <CustomerWorkflowProgress {...progress} />}
-      {children}
+      <div className={scope === 'workspace' ? "mx-auto w-full max-w-[850px] space-y-5" : "space-y-5"}>
+        {progress && <CustomerWorkflowProgress {...progress} />}
+        {children}
+      </div>
     </ErpPage>
   );
 }
 
-export function CustomerWorkflowSection({ title, description, children, className }: React.PropsWithChildren<{
+export function CustomerWorkflowSection({ title, description, children, className, collapsible, expanded }: React.PropsWithChildren<{
   title?: React.ReactNode;
   description?: React.ReactNode;
   className?: string;
+  collapsible?: boolean;
+  expanded?: boolean;
 }>) {
+  const scope = useErpPresentationScope();
+  if (collapsible && scope === 'workspace') return <ErpDisclosure title={title} expanded={expanded} className={className}>{description && <p className="sds-text-secondary mb-4 text-sm">{description}</p>}{children}</ErpDisclosure>;
   return <ErpSection title={title} description={description} className={className}>{children}</ErpSection>;
 }

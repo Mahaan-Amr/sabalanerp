@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures';
 import { PartnerContractWizard, partnerCaseNeedsAutomaticPricingInquiry, partnerWizardStepsForDraft,
   requiredPartnerWizardStep, type PartnerWizardDraft } from '../../contract-creation/partner/PartnerContractWizard';
-import { createPartnerCaseSubmission } from '../../contract-creation/partner/partnerCaseSubmission';
+import { createPartnerCaseSubmission, saveCompletedPartnerDraft } from '../../contract-creation/partner/partnerCaseSubmission';
 import { alignPartnerCustomerPaymentPlan, defaultPartnerRetailRows, partnerRetailIntentRows,
   partnerRetailSummary } from '../../contract-creation/partner/partnerRetail';
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
@@ -468,4 +468,49 @@ test('explicit customer and project return steps take precedence over a saved pr
   assert.equal(partnerSaleReturnStep(new URLSearchParams('returnTo=contract&step=2')), 'customer');
   assert.equal(partnerSaleReturnStep(new URLSearchParams('returnTo=contract&step=3')), 'project');
   assert.equal(partnerSaleReturnStep(new URLSearchParams()), null);
+});
+
+test('a correction to one rejected product retains the matched price and original expiry of the other product', () => {
+  const { graphHash: _graph, rows: _rows, belowCostConfirmed: _confirmed, ...base } = draft.intent;
+  const nextRevision = fixture.technicalSaved.recoveryRevision + 1;
+  const approved = { ...fixture.inquiry.rows[0], configurationRef: {
+    ...fixture.inquiry.rows[0].configurationRef, recoveryRevision: nextRevision } };
+  const rejected = { ...fixture.inquiry.rows[0], rowId: 'rejected-other-row', state: 'REJECTED' as const,
+    approvedPrice: undefined, approvedRowBinding: undefined, noteOrReason: 'اصلاح مشخصات',
+    configurationRef: { ...fixture.inquiry.rows[0].configurationRef, productRowId: 'product-row:rejected' } };
+  const saved = { ...fixture.technicalSaved, recoveryRevision: nextRevision, rows: [
+    { ...fixture.technicalSaved.rows[0], configurationRef: approved.configurationRef },
+    { ...fixture.technicalSaved.rows[0], configurationRef: { ...rejected.configurationRef, recoveryRevision: nextRevision } },
+  ] };
+  const recovered = enterPartnerWizard({ inquiryRows: [rejected, approved],
+    now: Date.parse(approved.approvedAt!) + 1000, base: { ...base, recoveryRevision: nextRevision }, validated: saved });
+  assert.ok(recovered);
+  assert.equal(recovered.rows[0].inquiryRow.state, 'APPROVED');
+  assert.deepEqual(recovered.rows[0].inquiryRow.approvedPrice, approved.approvedPrice);
+  assert.deepEqual(recovered.rows[0].inquiryRow.approvedRowBinding, approved.approvedRowBinding);
+  assert.equal(recovered.rows[0].inquiryRow.expiresAt, approved.expiresAt);
+  assert.equal(recovered.rows[1].inquiryRow.state, 'REJECTED');
+  assert.equal(recovered.rows[1].inquiryRow.submissionState, 'UNSENT');
+});
+
+test('completed draft navigation waits for successful persistence and opens the returned Case identity', async () => {
+  for (const succeeds of [true, false]) {
+    const opened: string[] = [];
+    let persisted = false;
+    const controller = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
+      commands: { execute: async command => {
+        persisted = succeeds;
+        return succeeds ? { ok: true as const, value: { commandId: command.commandId, case: fixture.partner } }
+          : { ok: false as const, error: partnerError('FORBIDDEN') };
+      } },
+      recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined,
+        finalizeCommitted: async () => undefined, prepareEditLease: async () => { throw new Error('unused'); } },
+    });
+    const result = await saveCompletedPartnerDraft(controller, { ...draft.intent, preparationCompleted: true }, caseId => {
+      assert.equal(persisted, true);
+      opened.push(caseId);
+    });
+    assert.equal(result, succeeds);
+    assert.deepEqual(opened, succeeds ? [fixture.partner.owner.caseId] : []);
+  }
 });

@@ -1,3 +1,7 @@
+import { casePdfAvailability, resolveCasePdfSnapshot } from '../services/partnerSales/customerOutput/casePdf';
+import { createCustomerOutputSnapshots } from '../services/partnerSales/customerOutput/snapshots';
+import { CustomerOutputError } from '../services/partnerSales/customerOutput/contracts';
+import { readCasePricingResponse } from '../services/partnerSales/cases/pricingResponse';
 import { z } from 'zod';
 import { createPartnerTechnicalEvidenceResolver } from '../services/partnerSales/cases/technicalEvidence';
 import { compilePartnerTechnicalGraph } from '../services/partnerSales/cases/technicalGraph';
@@ -6,7 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Router, type Request, type Response, type RequestHandler } from 'express';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import * as partnerContracts from '@sabalanerp/partner-sales-contracts';
-import { CustomerOutputSnapshotSchema, canonicalHash, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
+import { canonicalHash, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { prisma as applicationPrisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { createPartnerCaseService, createPrismaPartnerCaseService } from '../services/partnerSales/cases/aggregate';
@@ -22,7 +26,7 @@ import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../services/contractRecoveryProtection';
 import { decodeTechnicalRecovery } from '../services/partnerSales/cases/technicalRecoveryRecords';
 import { consumePrismaPartnerTechnicalRecovery, resolvePrismaPartnerCaseDraft } from '../services/partnerSales/cases/prismaComposition';
-import { resolveApprovalForUse } from '../services/partnerSales/inquiries/approvalUsage';
+import { canRetainCasePricingApproval, resolveApprovalForUse } from '../services/partnerSales/inquiries/approvalUsage';
 import { decodeTechnicalSavedSnapshot } from '../services/partnerSales/cases/technicalSavedRecords';
 import { parseInquiryDefinition } from '../services/partnerSales/inquiries/definition';
 import { assertContractEditOwnership, PrismaContractEditSessionStore } from '../services/contractEditSessionService';
@@ -546,8 +550,6 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         for (const identityRow of saved.identities) {
           if (saved.draft.dependents?.some(item => item.kind === 'remainder' && item.productRowId === identityRow.productRowId)) continue;
           const subjectHash = await partnerContracts.inquiryConfigurationHash(identityRow.identity);
-          const primarySubject = saved.view.rows.some(row =>
-            row.configurationRef.productRowId === identityRow.productRowId);
           let matched: typeof candidates[number] | undefined;
           let definition: ReturnType<typeof parseInquiryDefinition>;
           for (const candidate of candidates) {
@@ -555,13 +557,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             const decoded = parseInquiryDefinition(candidate.definition);
             if (!decoded || decoded.identity.partnerSellerId !== request.user!.id ||
                 await partnerContracts.inquiryConfigurationHash(decoded.identity) !== subjectHash) continue;
-            const retainedByCurrentRevision = parsed.data.caseId && ownedCase && (primarySubject
-              ? candidate.approval.usages.some(usage => usage.caseId === ownedCase.id &&
-                usage.caseRevision === ownedCase.headRevision && usage.productRowId === identityRow.productRowId)
-              : candidate.approval.materialUsages.some(usage => usage.caseId === ownedCase.id &&
-                usage.caseRevision === ownedCase.headRevision && usage.pricingSubjectId === identityRow.productRowId));
-            if (parsed.data.caseId && ownedCase && candidate.inquiry.caseRevision !== ownedCase.headRevision &&
-                !retainedByCurrentRevision) continue;
+            if (parsed.data.caseId && ownedCase &&
+                !canRetainCasePricingApproval(candidate.inquiry.caseRevision, ownedCase.headRevision)) continue;
             const usable = await resolveApprovalForUse(tx, { binding: { inquiryId: candidate.inquiryId,
               rowId: candidate.id, revision: candidate.revision }, partnerSellerId: request.user!.id,
               ...(parsed.data.caseId && ownedCase ? { caseId: parsed.data.caseId,
@@ -875,7 +872,10 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             await tx.accountingContractFlag.findMany({ where: { contractId: row.customerContractId,
               status: 'OPEN', trackingCode: { startsWith: 'partner-internal-correction:' } },
               select: { id: true, note: true, createdAt: true }, orderBy: { createdAt: 'desc' } }) : [];
-          cases.push({ view: { ...view.data, ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
+          const pricingResponseState = row.state === 'DRAFT' && actorProfile && editableRecovery
+            ? await readCasePricingResponse(tx, { caseId: row.id, headRevision: row.headRevision,
+              profileId: actorProfile.id, actorId: request.user!.id, recovery: editableRecovery.recovery }) : undefined;
+          cases.push({ ...(pricingResponseState ? { pricingResponseState } : {}), view: { ...view.data, ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
             pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
             accountingCorrectionRequests: accountingCorrectionRequests.map(item => ({ id: item.id,
               reason: item.note || 'سند داخلی این پرونده نیازمند اصلاح است.',
@@ -886,8 +886,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             snapshotId: row.outputs[0]?.id || null,
             ...(editableRecovery ? { editRecovery: { recoveryId: editableRecovery.draftId,
               baseRevision: editableRecovery.baseRevision } } : {}),
-            actions: { canContinue: Boolean(editableRecovery), canPreview: output && Boolean(row.outputs[0]),
-              canIssue: output && row.state === 'COMMITTED' && Boolean(row.outputs[0]),
+            actions: { canContinue: Boolean(editableRecovery),
+              ...casePdfAvailability({ authorized: output, state: row.state, hasContent: Boolean(customerOutput?.success), hasSnapshot: Boolean(row.outputs[0]) }),
               canFinalize: commit && view.data.preparationCompleted !== false && row.pricingState === 'READY_TO_FINALIZE' &&
                 row.customerConfirmationState !== 'REJECTED' &&
                 partnerContracts.isPartnerCaseEditableState(row.state),
@@ -1024,26 +1024,38 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
     const correlationId = correlation(request);
     try {
       const prepared = await prisma.$transaction(async tx => {
-        const snapshotRecord = await tx.partnerCustomerOutputSnapshot.findUnique({ where: { id: snapshotIdValue } });
-        const snapshot = CustomerOutputSnapshotSchema.safeParse(snapshotRecord?.content);
-        const row = await tx.partnerSaleCase.findUnique({ where: { id: request.params.caseId }, select: {
+        await lockPartnerOperationsControl(tx);
+        const caseId = request.params.caseId;
+        await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
+        const row = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
           id: true, state: true, pricingState: true, headRevision: true, integrityHash: true,
           customerContractId: true, profile: { select: { userId: true } },
         } });
-        if (!snapshotRecord || !snapshot.success || !row || snapshotRecord.caseId !== row.id ||
-            snapshot.data.owner.caseId !== row.id) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        if (!row) return { ok: false as const, error: partnerError('NOT_FOUND') };
         const allowed = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id,
           purpose: 'CUSTOMER_OUTPUT', channel: 'PDF' }, { correlationId }).authorize('CUSTOMER_OUTPUT', { kind: 'CASE', id: row.id });
         if (!allowed.ok) return allowed;
+        let snapshot;
+        if (snapshotIdValue) {
+          const record = await tx.partnerCustomerOutputSnapshot.findUnique({ where: { id: snapshotIdValue } });
+          if (!record || record.caseId !== row.id) return { ok: false as const, error: partnerError('NOT_FOUND') };
+          snapshot = await createCustomerOutputSnapshots(partnerContracts).read(record.content);
+        } else {
+          if (mode === 'DOWNLOAD_EXISTING' || !parsed.data.expected) return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+          snapshot = await resolveCasePdfSnapshot(tx, row.id, parsed.data.expected, mode);
+        }
+        if (snapshot.owner.caseId !== row.id) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        if (parsed.data.expected && partnerContracts.checkExpectedRevision(parsed.data.expected, snapshot.owner)) {
+          return { ok: false as const, error: partnerError('ROW_STALE') };
+        }
         if (mode === 'FINAL' && (row.state !== 'COMMITTED' ||
-            snapshot.data.owner.revision !== row.headRevision ||
-            snapshot.data.owner.integrityHash !== row.integrityHash ||
-            snapshot.data.content.status !== 'SIGNED')) {
+            snapshot.owner.revision !== row.headRevision || snapshot.owner.integrityHash !== row.integrityHash ||
+            !['SIGNED', 'PRINTED'].includes(snapshot.content.status))) {
           return { ok: false as const, error: partnerError('STATE_CONFLICT') };
         }
         const existing = mode === 'PREVIEW' ? null : await tx.partnerCustomerArtifact.findUnique({
-          where: { snapshotId_mode: { snapshotId: snapshot.data.snapshotId, mode: 'FINAL' } } });
-        return { ok: true as const, value: { snapshot: snapshot.data, row, existing } };
+          where: { snapshotId_mode: { snapshotId: snapshot.snapshotId, mode: 'FINAL' } } });
+        return { ok: true as const, value: { snapshot, row, existing } };
       });
       if (!prepared.ok) { respond(response, prepared); return; }
       if (mode === 'DOWNLOAD_EXISTING' && !prepared.value.existing) {
@@ -1065,7 +1077,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const committed = await prisma.$transaction(async tx => {
           await lockPartnerOperationsControl(tx);
           const artifactId = randomUUID();
-          const artifact = await tx.partnerCustomerArtifact.create({ data: { id: artifactId,
+          const artifact = await tx.partnerCustomerArtifact.upsert({ where: { snapshotId_mode: { snapshotId: prepared.value.snapshot.snapshotId, mode: 'FINAL' } }, update: {}, create: { id: artifactId,
             snapshotId: prepared.value.snapshot.snapshotId, caseId: prepared.value.row.id,
             caseRevision: prepared.value.snapshot.owner.revision, mode: 'FINAL',
             outputHash: prepared.value.snapshot.content.outputHash, byteHash, content: bytes,
@@ -1087,8 +1099,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             verifyOutputEvidence: async (_tx, input) => {
               const current = await tx.partnerCustomerArtifact.findUnique({ where: { id: input.authenticatedOutputEvidenceId } });
               if (!current || current.id !== artifact.id || current.caseId !== input.caseId || current.mode !== 'FINAL' ||
-                  current.outputHash !== prepared.value.snapshot.content.outputHash || current.byteHash !== byteHash ||
-                  `sha256-v1:${createHash('sha256').update(current.content).digest('hex')}` !== byteHash) {
+                  current.outputHash !== prepared.value.snapshot.content.outputHash || current.byteHash !== artifact.byteHash ||
+                  `sha256-v1:${createHash('sha256').update(current.content).digest('hex')}` !== artifact.byteHash) {
                 return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
               }
               return { ok: true, value: { evidenceId: current.id, occurredAt: new Date().toISOString(), outputHash: current.outputHash } };
@@ -1105,9 +1117,9 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
               targetId: prepared.value.row.id, key: artifact.id,
               payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_COMMIT', ...intent }) } });
           if (!result.ok) throw Object.assign(new Error('Partner print commitment failed'), { result });
-          return result;
+          return { ...result, content: artifact.content };
         });
-        if (!committed.ok) { respond(response, committed); return; }
+        bytes = committed.content;
       }
       response.setHeader('Cache-Control', 'private, no-store');
       response.setHeader('Content-Type', 'application/pdf');
@@ -1115,7 +1127,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       response.send(bytes);
     } catch (error) {
       const result = error && typeof error === 'object' && 'result' in error ? (error as { result: Result<unknown> }).result : undefined;
-      respond(response, result ?? { ok: false, error: partnerError('INTEGRITY_CONFLICT') });
+      respond(response, result ?? { ok: false, error: partnerError(error instanceof CustomerOutputError ? error.code : 'INTEGRITY_CONFLICT') });
     }
   });
   return router;

@@ -39,6 +39,7 @@ import {
   ErpMobileBottomNavigation,
   ErpPage,
   ErpPressable,
+  ErpPresentationProvider,
   ErpSheet,
 } from '@/components/erp';
 import { NotificationCenter } from "@/components/NotificationCenter";
@@ -46,6 +47,7 @@ import { readContractSubmissionDiagnostic } from "@/features/contract-creation/u
 import { hasHrFeature, type HrBaseFeature } from '@/features/hr/hrAccessNavigation';
 import { PersonalPerformanceBadge } from '@/features/hr/performance-badge/PerformanceBadge';
 import { deniesDashboardWorkspaceRoute } from './dashboardRouteGuard';
+import { usesCrmPresentation } from '@/features/crm/crmPresentation';
 
 interface User {
   id: string;
@@ -162,6 +164,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     left: 0,
   });
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const topbarRef = useRef<HTMLElement | null>(null);
+  const [topbarHeight, setTopbarHeight] = useState(64);
   const [loading, setLoading] = useState(true);
   const [sanitizedEnvironment, setSanitizedEnvironment] = useState(false);
   const [routeAvailability, setRouteAvailability] = useState<{ allowed: boolean; reason: string | null } | null>(null);
@@ -171,6 +175,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [selectedSensitiveItemIds, setSelectedSensitiveItemIds] = useState<string[]>([]);
   const router = useRouter();
   const pathname = usePathname();
+
+  useEffect(() => {
+    const topbar = topbarRef.current;
+    if (!topbar) return;
+    const updateHeight = () => setTopbarHeight(topbar.offsetHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(topbar);
+    return () => observer.disconnect();
+  }, [loading, user]);
   const searchParams = useSearchParams();
   const { currentWorkspace, accessibleWorkspaces, loading: workspaceAccessLoading } = useWorkspace();
   const isHrWorkspace = pathname.startsWith("/dashboard/hr");
@@ -180,8 +194,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     pathname === "/dashboard/crm/customers" &&
     searchParams.get("workspace") === "sales";
   const showsSalesMobileNavigation = isSalesWorkspace || isSalesCustomerIndex;
-  const isNeumorphicWorkspace = isHrWorkspace || isSalesLanding;
-  const hasMobileBottomNavigation = isHrWorkspace || showsSalesMobileNavigation;
+  const isCrmWorkspace = usesCrmPresentation(pathname, searchParams);
+  const isNeumorphicWorkspace = isHrWorkspace || isSalesLanding || isCrmWorkspace;
+  const hasMobileBottomNavigation = isHrWorkspace || showsSalesMobileNavigation || isCrmWorkspace;
   const isWorkspaceDetail = pathname !== "/dashboard";
   const effectiveHrFeatures = user?.permissions?.features || [];
   const deniesHrRoute = Boolean(isHrWorkspace && routeAvailability?.allowed === false);
@@ -250,6 +265,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const visibleHrMobileNavigation = hrMobileNavigation.filter(({ feature }) => (
     hasHrFeature(effectiveHrFeatures, feature)
   ));
+  const crmMobileNavigation = [
+    { id: 'dashboard', label: 'داشبورد', href: '/dashboard/crm', icon: FaChartLine, exact: true },
+    { id: 'customers', label: 'مشتریان', href: '/dashboard/crm/customers', icon: FaUsers },
+    { id: 'projects', label: 'پروژه‌ها', href: '/dashboard/crm/potential-projects', icon: FaBuilding },
+    { id: 'follow-ups', label: 'پیگیری‌ها', href: '/dashboard/crm/follow-ups', icon: FaHistory },
+    { id: 'duties', label: 'وظایف', href: '/dashboard/crm/duties', icon: FaClipboardList },
+  ];
   const salesMobileNavigation = [
     {
       id: "dashboard",
@@ -502,7 +524,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   return (
+    <ErpPresentationProvider scope={isCrmWorkspace ? 'workspace' : 'default'}>
     <div
+      data-erp-presentation={isCrmWorkspace ? 'workspace' : undefined}
       className="dashboard-shell sds-neumorphic-scope min-h-screen overflow-x-hidden bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)]"
     >
       <SecurityNoticeHost />
@@ -512,7 +536,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           type="button"
           aria-label="بستن منوی اصلی"
           data-dashboard-overlay
-          className="fixed inset-x-0 bottom-0 top-16 z-40 min-h-0 rounded-none !bg-[var(--sds-surface-overlay)] p-0 hover:!bg-[var(--sds-surface-overlay)] lg:hidden"
+          style={{ top: topbarHeight }}
+          className="fixed inset-x-0 bottom-0 z-40 min-h-0 rounded-none !bg-[var(--sds-surface-overlay)] p-0 hover:!bg-[var(--sds-surface-overlay)] lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -520,7 +545,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Sidebar */}
       <div
         data-dashboard-sidebar
-        className={`sds-dashboard-sidebar fixed bottom-0 right-0 top-[4.5rem] z-50 w-[min(86vw,288px)] transform overflow-y-auto transition-[width,transform] duration-300 ease-in-out lg:overflow-visible ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-20" : "lg:w-64"}`}
+        style={{ top: topbarHeight + 8 }}
+        className={`sds-dashboard-sidebar fixed bottom-0 right-0 z-50 w-[min(86vw,288px)] transform overflow-y-auto transition-[width,transform] duration-300 ease-in-out lg:overflow-visible ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-20" : "lg:w-64"}`}
       >
         <ErpPressable
           type="button"
@@ -619,15 +645,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main Content */}
       <div
         data-dashboard-content
-        className={`transition-all duration-300 ${isWorkspaceDetail ? "dashboard-workspace-detail" : ""}`}
+        data-erp-presentation={isCrmWorkspace ? 'workspace' : undefined}
+        className={`transition-all duration-300 ${isCrmWorkspace ? 'sds-neumorphic-workflow-scope' : ''} ${isWorkspaceDetail ? "dashboard-workspace-detail" : ""}`}
       >
         {/* Top Bar */}
         <header
+          ref={topbarRef}
           data-dashboard-topbar
-          className="sds-dashboard-topbar flex h-16 items-center px-3 sm:px-4"
+          className="sds-dashboard-topbar flex min-h-16 items-center px-3 py-2 sm:h-16 sm:px-4 sm:py-0"
         >
-          <div className="flex w-full items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-4">
+            <div className="order-1 flex shrink-0 items-center gap-2 sm:order-none sm:gap-4">
               <ErpPressable
                 type="button"
                 aria-label="بازکردن منوی اصلی"
@@ -644,9 +672,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   className="h-full w-full object-cover"
                 />
               </div>
-              <div>
+            </div>
+              <div className="order-3 w-full min-w-0 sm:order-none sm:col-start-2 sm:row-start-1 sm:w-auto">
                 <h1
-                  className="text-xl font-bold text-[var(--sds-text-primary)] sm:text-2xl"
+                  className="truncate text-sm font-bold text-[var(--sds-text-primary)] sm:text-xl lg:text-2xl"
                 >
                   {currentWorkspace
                     ? accessibleWorkspaces.find(
@@ -654,7 +683,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                       )?.namePersian || "داشبورد اصلی"
                     : "داشبورد اصلی"}
                 </h1>
-                <p className="sds-text-secondary text-sm">
+                <p className="sds-text-secondary hidden truncate text-sm sm:block">
                   {currentWorkspace
                     ? accessibleWorkspaces.find(
                         (w) => w.id === currentWorkspace,
@@ -662,9 +691,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                     : "خوش آمدید " + user.firstName + " " + user.lastName}
                 </p>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
+            <div className="order-2 ms-auto flex max-w-full flex-wrap items-center justify-end gap-1 sm:order-none sm:col-start-3 sm:row-start-1 sm:ms-0 sm:flex-nowrap sm:gap-2">
               {user.personnelId && <PersonalPerformanceBadge />}
               <NotificationCenter />
               <div className="relative profile-dropdown-container">
@@ -719,6 +747,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           items={visibleHrMobileNavigation}
           ariaLabel="ناوبری منابع انسانی"
         />
+      )}
+      {isCrmWorkspace && !deniesWorkspaceRoute && accessibleWorkspaces.some((workspace) => workspace.id === 'crm') && (
+        <ErpMobileBottomNavigation items={crmMobileNavigation} ariaLabel="ناوبری مدیریت ارتباط با مشتری" />
       )}
       {showsSalesMobileNavigation && (
         <ErpMobileBottomNavigation
@@ -848,5 +879,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </div>
       </ErpSheet>
     </div>
+    </ErpPresentationProvider>
   );
 }

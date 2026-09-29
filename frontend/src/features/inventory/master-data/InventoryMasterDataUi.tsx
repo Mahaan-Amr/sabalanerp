@@ -110,7 +110,7 @@ export function InventoryMasterDataForm({
           hint={price.hint}
           required={price.required}
         >
-          <ErpInput id={`${kind}-price`} type="number" min={0} step={1000} value={priceValue || ''} onChange={(event) => onChange({ [price.key]: event.target.value })} />
+          <ErpInput numberFormat="money" id={`${kind}-price`} type="number" min={0} step={1000} value={priceValue || ''} onChange={(event) => onChange({ [price.key]: event.target.value })} />
         </ErpField>
       )}
       {copy.calculationBase && (

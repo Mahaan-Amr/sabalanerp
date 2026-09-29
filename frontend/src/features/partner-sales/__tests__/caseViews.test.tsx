@@ -10,8 +10,16 @@ import { PartnerAccountPanel } from '../account/PartnerAccountPanel';
 import { PartnerReportContent, partnerReportPrimaryAction, partnerReportReceivable, type PartnerReportPresentation } from '../reports/PartnerReportView';
 import { RetailCollectionsPanel, type RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import { PartnerCorrectionPanel } from '../cases/PartnerCorrectionPanel';
+import { PartnerCaseSupplementary } from '../cases/PartnerCaseWorkspace';
 import ConfirmationContractView from '../../../app/contracts/confirm/ConfirmationContractView';
 import { partnerWizardCompactStatus } from '../../contract-creation/partner/PartnerContractWizard';
+
+test('Case details keep correction labels in Persian and do not contain the global account', () => {
+  const fixture = createPartnerFixtures();
+  const html = renderToStaticMarkup(<PartnerCaseSupplementary view={fixture.partner} correction={null} />);
+  assert.match(html, /اصلاح قیمت فروش و پرداخت مشتری/);
+  assert.doesNotMatch(html, /retail|حساب من با سبلان/);
+});
 
 test('Partner case detail separates retail, wholesale and margin without exposing the internal record', () => {
   const fixture = createPartnerFixtures();

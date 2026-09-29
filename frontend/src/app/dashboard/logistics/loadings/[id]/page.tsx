@@ -1,4 +1,5 @@
 "use client";
+import { LogisticsPage } from "@/features/logistics/LogisticsWorkspace";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -19,7 +20,6 @@ import {
   ErpInlineState,
   ErpInput,
   ErpLoading,
-  ErpPage,
   ErpSection,
   ErpSegmentedControl,
   ErpSelect,
@@ -44,6 +44,7 @@ type DetailAction = "finalize" | "delete" | "cancel" | "correct" | null;
 
 export default function LoadingDetailPage() {
   const mutationLock = useRef(false);
+  const requestedActionHandled = useRef(false);
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -123,15 +124,24 @@ export default function LoadingDetailPage() {
     }
   };
 
+  useEffect(() => {
+    if (isLoading || !loading || requestedActionHandled.current) return;
+    requestedActionHandled.current = true;
+    const requested = searchParams.get('action');
+    if (requested === 'finalize' && loading.status === 'DRAFT' && actionAvailability.FINALIZE_LOADING?.enabled === true) setAction('finalize');
+    if (requested === 'delete' && loading.status === 'DRAFT' && actionAvailability.EDIT_LOADING?.enabled === true) setAction('delete');
+    if (requested === 'cancel' && loading.status !== 'CANCELLED' && actionAvailability.CANCEL_LOADING?.enabled === true) setAction('cancel');
+  }, [isLoading, loading, actionAvailability, searchParams]);
+
   if (isLoading) return <ErpLoading />;
   if (!loading)
     return (
-      <ErpPage
+      <LogisticsPage
         title="بارگیری پیدا نشد"
         backHref="/dashboard/logistics/loadings"
       >
         <div />
-      </ErpPage>
+      </LogisticsPage>
     );
 
   const driver = loading.driverSnapshot || {};
@@ -227,7 +237,7 @@ export default function LoadingDetailPage() {
   ) : null;
 
   return (
-    <ErpPage
+    <LogisticsPage printPreview={section === "print"}
       eyebrow="لجستیک"
       title={dispatchCaseReference(loading.loadingNumber)}
       description={`${loading.customer?.firstName || ""} ${loading.customer?.lastName || ""} · ${loading.project?.projectName || loading.project?.address || ""}`}
@@ -274,7 +284,7 @@ export default function LoadingDetailPage() {
         <ErpSection title="وضعیت بارگیری">
           {actionMenu.length > 0 && (
             <div className="mb-4 flex justify-end">
-              <ErpActionMenu label="عملیات بارگیری" actions={actionMenu} />
+              <ErpActionMenu portal label="عملیات بارگیری" actions={actionMenu} />
             </div>
           )}
           <ErpSummaryGrid
@@ -417,6 +427,7 @@ export default function LoadingDetailPage() {
         }}
         title="نهایی‌سازی بارگیری"
         presentation="modal"
+        scope="workspace"
         pending={saving}
         footer={
           <div className="flex justify-end gap-2">
@@ -456,6 +467,7 @@ export default function LoadingDetailPage() {
         }}
         title="حذف پیش‌نویس"
         presentation="modal"
+        scope="workspace"
         pending={saving}
         footer={
           <div className="flex justify-end gap-2">
@@ -491,6 +503,7 @@ export default function LoadingDetailPage() {
         }}
         title="لغو بارگیری"
         presentation="modal"
+        scope="workspace"
         pending={saving}
         footer={
           <div className="flex justify-end gap-2">
@@ -540,6 +553,7 @@ export default function LoadingDetailPage() {
         }}
         title="اصلاح مقدار بارگیری"
         presentation="modal"
+        scope="workspace"
         pending={saving}
         footer={
           <div className="flex justify-end gap-2">
@@ -630,6 +644,6 @@ export default function LoadingDetailPage() {
           </ErpField>
         </div>
       </ErpSheet>
-    </ErpPage>
+    </LogisticsPage>
   );
 }

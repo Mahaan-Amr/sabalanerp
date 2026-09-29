@@ -36,6 +36,6 @@ export const partnerAccountingTimeFields: AccountingActionField[] = [
     { value: 'NOW', label: 'هم‌اکنون' }, { value: 'HISTORICAL', label: 'تاریخ و ساعت مشخص' },
   ] },
   { id: 'eventDate', label: 'تاریخ رخداد به وقت تهران', type: 'date', required: true, visibleWhen: { fieldId: 'timing', equals: 'HISTORICAL' } },
-  { id: 'eventTime', label: 'ساعت رخداد به وقت تهران', type: 'text', placeholder: 'HH:mm:ss', required: true,
+  { id: 'eventTime', label: 'ساعت رخداد به وقت تهران', type: 'time', placeholder: 'انتخاب ساعت', required: true,
     visibleWhen: { fieldId: 'timing', equals: 'HISTORICAL' } },
 ];

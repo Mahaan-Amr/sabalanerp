@@ -180,7 +180,8 @@ export async function validatePartnerSharedAccountingEffect(tx: Prisma.Transacti
     if (!authorization.ok) return authorization;
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
     const receivables = await tx.accountingReceivable.findMany({ where: { invoiceRecordId: invoice.id }, include: { paymentStatuses: true } });
-    if (invoice.financiallyApprovedAt && receivables.length !== 1) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    if (invoice.financiallyApprovedAt && receivables.length !== 1 &&
+        !(object(invoice.metadata)?.partnerReceivablePending === true && receivables.length === 0)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     for (const receivable of receivables) {
       const source = object(object(receivable.metadata)?.partnerReceivable);
       const debtor = object(historical.debtor), amount = object(source?.originalAmount);

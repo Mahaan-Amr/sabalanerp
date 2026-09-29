@@ -9,6 +9,7 @@ import AccountingCustomPrintSettings, { defaultCustomPrintSettings, salesPdfVari
 import AccountingContractPrintActions, { accountingContractTabs } from './AccountingContractPrintActions';
 
 export type PartnerInternalDocument = {
+  owner?: { caseId: string; revision: number; integrityHash: string };
   id: string; caseState?: string; status: string; amount: string; receivedAmount: string; remainingAmount: string;
   currency: string; systemInvoiceNumber: string | null; contractDate?: string; technicalEvidenceAvailable?: boolean;
   systemInvoiceDate?: string | null; sepidarAmount?: string | null; metadata?: { mode?: string };
@@ -28,7 +29,8 @@ export type PartnerInternalDocument = {
 export type PartnerDetailSection = typeof accountingContractTabs[number]['value'];
 export const partnerQuantityLabel = (unit: string) => ({ meter: 'متر طول', count: 'عدد', squareMeter: 'متر مربع', ton: 'تن' } as Record<string, string>)[unit] || unit;
 
-export function PartnerAccountingDetailView({ document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+export function PartnerAccountingDetailView({ document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+  onCreateReceivable?: () => void;
   invoiceOpen?: boolean; onOpenInvoice?: () => void; onApproveInvoice?: (payload: FinancialInvoiceApprovalPayload) => void | Promise<void>;
   printVariant?: SalesPdfVariant; onPrintVariant?: (value: SalesPdfVariant) => void; customPrintSettings?: CustomPrintSettings;
   setCustomPrintSettings?: React.Dispatch<React.SetStateAction<CustomPrintSettings>>; applyCustomPreset?: (preset: CustomPrintPreset) => void;
@@ -38,16 +40,15 @@ export function PartnerAccountingDetailView({ document: doc, section, onSection,
 }) {
   const context = doc.partnerContext;
   const issued = ['ISSUED', 'POSTED'].includes(doc.status);
-  const financialHref = `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(context.caseNumber)}`;
   const receivableHref = `/dashboard/accounting/receivables?search=${encodeURIComponent(context.caseNumber)}`;
   const lifecycleReason = 'پرونده همکار قطعی است؛ تغییر آن از مسیر اصلاح یا ابطال بررسی‌شده انجام می‌شود.';
   const quickActions = <ErpSection title="اقدام سریع"><div className="space-y-2">
     <ErpButton label="ایجاد پیش‌نویس صورتحساب" icon={FaFileInvoice} tone="info" onClick={onOpenInvoice}
       disabled={pending || !doc.actions.canCreateInvoice || issued || doc.status === 'VOIDED'}
       title={issued ? 'صورتحساب صادر شده است.' : 'پیش‌نویس سند داخلی برای ثبت رکورد مالی باز می‌شود.'} />
-    <ErpButton label="ایجاد دریافتنی" icon={FaReceipt} tone="success" href={financialHref}
-      disabled={pending || !doc.actions.canCreateReceivable || doc.receivables.length > 0 || !issued}
-      title={doc.receivables.length ? 'دریافتنی موجود است؛ سند تکراری ایجاد نمی‌شود.' : !issued ? 'ابتدا صورتحساب را تأیید مالی کنید.' : 'دریافتنی در مسیر تأیید مالی سند داخلی ایجاد می‌شود.'} />
+    <ErpButton label="ایجاد دریافتنی" icon={FaReceipt} tone="success" onClick={onCreateReceivable}
+      disabled={pending || !doc.actions.canCreateReceivable || !doc.owner || doc.receivables.length > 0 || !issued}
+      title={doc.receivables.length ? 'دریافتنی موجود است؛ سند تکراری ایجاد نمی‌شود.' : !issued ? 'ابتدا صورتحساب را تأیید مالی کنید.' : 'دریافتنی با تأیید جداگانه برای این صورتحساب ایجاد می‌شود.'} />
     {doc.receivables.length > 0 && <ErpButton label="مشاهده دریافتنی" icon={FaReceipt} tone="success" variant="outline" href={receivableHref} />}
     <ErpButton label="پرچم حسابداری" icon={FaFlag} tone="warning" onClick={onFlag} disabled={pending || !doc.actions.canFlag} />
     <ErpButton label="درخواست اصلاح" icon={FaExclamationTriangle} tone="danger" onClick={onCorrection} disabled={pending || !doc.actions.canRequestCorrection} />

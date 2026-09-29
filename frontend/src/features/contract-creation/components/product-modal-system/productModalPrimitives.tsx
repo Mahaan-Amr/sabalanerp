@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   ErpInlineState,
+  ErpOverlayPortalProvider,
   ErpPressable,
   ErpSkeleton,
   ErpTextarea
@@ -75,13 +76,12 @@ export function CompactSegmentedControl<Value extends string>({
           role="radio"
           aria-checked={option.value === value}
           disabled={option.disabled}
+          tone={!compactVisual && option.value === value ? 'primary' : 'neutral'}
+          variant={!compactVisual && option.value === value ? 'solid' : 'ghost'}
           onClick={() => onChange(option.value)}
           className={cx(
             'rounded-[var(--sds-radius-control)] text-xs font-semibold transition-colors',
             compactVisual ? 'min-h-11 border-transparent bg-transparent px-0.5' : 'min-h-10 px-2.5',
-            !compactVisual && (option.value === value
-              ? 'sds-tone-primary sds-action-solid'
-              : 'sds-action-ghost sds-text-secondary'),
             option.disabled && 'cursor-not-allowed opacity-40'
           )}
         >
@@ -123,8 +123,7 @@ export function CompactUnitSwitch({
         unit: nextUnit,
         value: convertCompactLengthUnit(value, unit, nextUnit)
       })}
-      compactVisual
-      className="min-h-11 rounded-full border-0 bg-transparent p-0"
+      className="sds-unit-switch"
     />
   );
 }
@@ -436,6 +435,7 @@ export function CentralProductModalShell({
             exit={{ opacity: 0, y: 6, scale: 0.99 }}
             transition={{ duration: reducedMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
           >
+            <ErpOverlayPortalProvider container={dialogRef}>
             <header className="sticky top-0 z-10 flex min-h-14 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4">
               <div className="flex min-w-0 items-center gap-3">
                 {view !== 'main' && onBack && (
@@ -483,6 +483,7 @@ export function CentralProductModalShell({
                 </ErpPressable>
               </div>
             </footer>
+            </ErpOverlayPortalProvider>
           </motion.section>
         </motion.div>
       )}

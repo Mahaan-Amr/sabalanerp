@@ -7,7 +7,7 @@ import type { PaymentEntryMethod } from '../../types/contract.types';
 import { ContractPaymentMethodSelect } from './ContractPaymentMethodSelect';
 
 export function ContractPaymentInstallmentFields({ method, amount, date, amountLabel = 'مبلغ (تومان)',
-  dateLabel = 'تاریخ پرداخت', disabledAmount = false, disabled = false, existingContract = false, amountError, dateError,
+  dateLabel = 'تاریخ پرداخت', disabledAmount = false, disabled = false, existingContract = false, allowCustomerBalance = false, amountError, dateError,
   dateFormat = 'jalali', onMethodChange, onAmountChange, onDateChange }: {
   method: PaymentEntryMethod;
   amount: string;
@@ -18,6 +18,7 @@ export function ContractPaymentInstallmentFields({ method, amount, date, amountL
   disabledAmount?: boolean;
   disabled?: boolean;
   existingContract?: boolean;
+  allowCustomerBalance?: boolean;
   amountError?: string;
   dateError?: string;
   onMethodChange: (method: PaymentEntryMethod) => void;
@@ -25,12 +26,12 @@ export function ContractPaymentInstallmentFields({ method, amount, date, amountL
   onDateChange: (date: string) => void;
 }) {
   return <div className="grid gap-3 sm:grid-cols-3">
-    <ErpField label="روش پرداخت"><ContractPaymentMethodSelect value={method} disabled={disabled} existingContract={existingContract}
+    <ErpField className="[&>label]:mb-0" label="روش پرداخت"><ContractPaymentMethodSelect value={method} disabled={disabled} existingContract={existingContract} allowCustomerBalance={allowCustomerBalance} className="h-12"
       onChange={onMethodChange} /></ErpField>
-    <ErpField label={amountLabel} error={amountError}><ErpRialInput dir="ltr" value={amount}
+    <ErpField className="[&>label]:mb-0" label={amountLabel} error={amountError}><ErpRialInput className="h-12" dir="ltr" value={amount}
       disabled={disabled || disabledAmount} onValueChange={onAmountChange} /></ErpField>
-    <ErpField label={dateLabel} error={dateError}><PersianCalendarComponent valueFormat={dateFormat} value={date}
-      onChange={onDateChange} className="w-full" disablePastDates disabled={disabled} /></ErpField>
+    <ErpField className="[&>label]:mb-0" label={dateLabel} error={dateError}><PersianCalendarComponent valueFormat={dateFormat} value={date}
+      onChange={onDateChange} className="w-full [&>button]:h-12" disablePastDates disabled={disabled} /></ErpField>
     {method === 'CUSTOMER_BALANCE' && <div className="sm:col-span-3"><ErpInlineState kind="stale"
       title="در صورت مغایرت مانده مشتری با حسابداری، قرارداد منقضی می‌شود." /></div>}
   </div>;

@@ -19,6 +19,7 @@ export const PartnerCaseRuntimeActionsSchema = z.object({
 
 export const PartnerCaseRuntimeRowSchema = z.object({
   view: PartnerCaseViewSchema,
+  pricingResponseState: z.enum(['READY', 'PARTIAL', 'WAITING', 'REJECTED', 'EXPIRED']).optional(),
   accountingCorrectionRequests: z.array(z.object({ id: IdSchema, reason: z.string().min(1),
     createdAt: InstantSchema }).strict()).optional(),
   customerOutput: CustomerContractOutputSchema.optional(),
@@ -35,8 +36,9 @@ export const PartnerCaseRuntimeResultSchema = z.object({
 
 export const PartnerCustomerOutputRequestSchema = z.object({
   mode: z.enum(['PREVIEW', 'FINAL', 'DOWNLOAD_EXISTING']),
-  snapshotId: IdSchema,
-}).strict();
+  snapshotId: IdSchema.optional(),
+  expected: RevisionRefSchema.optional(),
+}).strict().refine(value => Boolean(value.snapshotId || value.expected), { message: 'Snapshot or expected Case revision required' });
 
 export const PartnerCaseFinalizeRequestSchema = z.object({
   operationId: IdSchema,

@@ -1,6 +1,6 @@
 'use client';
 
-import { ErpButton, ErpPressable, ErpSelect, useErpOverlayPortalContainer } from '@/components/erp';
+import { ErpButton, ErpPressable, ErpSelect, useErpOverlayPortalContainer, useErpPresentationScope } from '@/components/erp';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -65,6 +65,7 @@ export default function PersianCalendarComponent({
   yearOnly = false,
 }: PersianCalendarProps) {
   const overlayPortalContainer = useErpOverlayPortalContainer();
+  const presentationScope = useErpPresentationScope();
   const pickerValue = yearOnly ? value : calendarDisplayDate(value || '', valueFormat);
   const initial = yearOnly
     ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
@@ -220,8 +221,9 @@ export default function PersianCalendarComponent({
   const panel = (
     <motion.div
       data-erp-overlay-root
+      data-erp-presentation={presentationScope}
       ref={panelRef}
-      className="persian-calendar-portal fixed z-[99999] overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] shadow-[var(--sds-shadow-raised)]"
+      className={`persian-calendar-portal fixed z-[99999] overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] shadow-[var(--sds-shadow-raised)] ${presentationScope === 'workspace' ? 'sds-neumorphic-scope sds-neumorphic-workflow-scope' : ''}`}
       style={mobile ? { inset: 'auto 0 0 0', maxHeight: '92dvh' } : { top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight }}
       initial={reduceMotion ? false : mobile ? { opacity: 0, y: 28 } : { opacity: 0, y: -6, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}

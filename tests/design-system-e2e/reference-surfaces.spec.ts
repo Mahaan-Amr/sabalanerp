@@ -1211,6 +1211,26 @@ test('Contract payment converts the active percentage range to a toman cap', asy
   await expect(workspace.getByText(/تخفیف اعمال‌شده/)).toContainText(/۳.۹۴۱.۸۶۱ تومان/);
   await workspace.getByRole('button', { name: 'تومان', exact: true }).click();
   await expect(workspace.getByRole('textbox', { name: 'مبلغ تخفیف (تومان)' })).toHaveValue(/3,941,861|۳٬۹۴۱٬۸۶۱/);
+  await workspace.getByRole('button', { name: /^افزودن پرداخت/ }).click();
+  const paymentDialog = page.getByRole('dialog', { name: 'افزودن پرداخت', exact: true });
+  await expect(paymentDialog).toBeVisible();
+  await expect(paymentDialog.getByRole('textbox', { name: 'کد ملی' })).toHaveCount(0);
+  const method = paymentDialog.getByRole('combobox', { name: 'نوع پرداخت' });
+  await expect(method.locator('option[value="CUSTOMER_BALANCE"]')).toHaveCount(0);
+  const paymentAmount = paymentDialog.getByRole('textbox', { name: 'مبلغ (تومان)', exact: true });
+  const dateControl = paymentDialog.locator('button[aria-haspopup="dialog"]');
+  const boxes = await Promise.all([method.boundingBox(), paymentAmount.boundingBox(), dateControl.boundingBox()]);
+  expect(boxes.every(box => box !== null)).toBe(true);
+  expect(Math.max(...boxes.map(box => box!.y)) - Math.min(...boxes.map(box => box!.y))).toBeLessThanOrEqual(2);
+  expect(Math.max(...boxes.map(box => box!.height)) - Math.min(...boxes.map(box => box!.height))).toBeLessThanOrEqual(2);
+  await paymentAmount.fill('1000000');
+  await paymentDialog.getByRole('button', { name: 'ذخیره', exact: true }).click();
+  await expect(paymentDialog).toHaveCount(0);
+  await expect(workspace.getByRole('button', { name: 'ویرایش پرداخت 1' })).toBeVisible();
+  await workspace.getByRole('button', { name: 'ویرایش پرداخت 1' }).click();
+  await expect(page.getByRole('dialog', { name: 'ویرایش پرداخت', exact: true })).toBeVisible();
+  await page.getByRole('dialog', { name: 'ویرایش پرداخت', exact: true }).getByRole('button', { name: 'انصراف', exact: true }).click();
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(workspace.getByRole('button', { name: 'درصد', exact: true })).toBeVisible();
 });

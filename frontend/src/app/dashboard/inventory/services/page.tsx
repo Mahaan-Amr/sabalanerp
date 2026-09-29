@@ -895,7 +895,7 @@ const ServicesPage: React.FC = () => {
                     <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-1">
                       قیمت هر لایه (تومان)
                     </label>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       type="number"
                       min="0"
                       step="1000"

@@ -12204,10 +12204,17 @@ model PartnerCaseEvent {
   @@map("partner_case_events")
 }
 
+enum PartnerOutputSnapshotPurpose {
+  CUSTOMER_CONFIRMATION
+  PDF_PREVIEW
+  PDF_FINAL
+}
+
 model PartnerCustomerOutputSnapshot {
   id             String                    @id
   caseId         String
   caseRevision   Int
+  purpose        PartnerOutputSnapshotPurpose @default(CUSTOMER_CONFIRMATION)
   schemaVersion  Int                       @default(1)
   integrityHash  String
   contentHash    String
@@ -12222,7 +12229,7 @@ model PartnerCustomerOutputSnapshot {
   artifacts      PartnerCustomerArtifact[]
 
   @@unique([id, caseId, caseRevision])
-  @@unique([caseId, caseRevision, recipient])
+  @@unique([caseId, caseRevision, recipient, purpose], map: "partner_output_snapshot_purpose_key")
   @@map("partner_customer_output_snapshots")
 }
 

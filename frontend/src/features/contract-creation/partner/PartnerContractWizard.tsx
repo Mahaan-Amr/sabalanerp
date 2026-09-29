@@ -8,9 +8,10 @@ import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
 import { WIZARD_STEPS } from '../constants/contract.constants';
 import { PartnerRetailStep } from './PartnerRetailStep';
 import { alignPartnerCustomerPaymentPlan, partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
-import type { PartnerDraftIntent, createPartnerCaseSubmission } from './partnerCaseSubmission';
+import { saveCompletedPartnerDraft, type PartnerDraftIntent, type createPartnerCaseSubmission } from './partnerCaseSubmission';
 import { inquiryRowState, isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import { partnerCaseReviewMessage, reconcilePartnerDeliveriesToProducts } from './partnerWizardEntry';
+import { partnerSalesActionFeedback } from '../../partner-sales/partnerSalesErrorMessage';
 import { formatPartnerMoney } from '../../partner-sales/presentation';
 import { partnerTrackingCode, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 
@@ -117,6 +118,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const [rejectTarget, setRejectTarget] = useState<PartnerRetailRow['inquiryRow']>();
   const [rejectReason, setRejectReason] = useState('');
   const recoveryFlight = useRef(false);
+  const confirmationFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const visibleSteps = partnerWizardStepsForDraft(draft);
   const requestedStepIndex = visibleSteps.findIndex(step => step.id === draft.step);
@@ -241,12 +243,13 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     }
     if (pricingReady) { setCommitOpen(true); return; }
     const intent = currentIntent(true);
-    await submission.submit(intent);
-    const saved = submission.getSnapshot();
-    if (saved.phase === 'created') {
-      onChange({ ...draft, intent });
-      setError(null);
-    }
+    try {
+      await saveCompletedPartnerDraft(submission, intent, caseId => {
+        onChange({ ...draft, intent });
+        setError(null);
+        return onOpenCase(caseId);
+      });
+    } catch { setError('پیش‌نویس ذخیره شده است؛ باز کردن جزئیات را دوباره امتحان کنید.'); }
   };
   const commit = async () => {
     if (disabled || !pricingReady || !summary.valid || summary.wholesale === undefined) return;
@@ -307,6 +310,14 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     if (stepIndex < visibleSteps.length - 1) { move(stepIndex + 1); return; }
     await submit();
   };
+  const sendConfirmation = async () => {
+    if (!onSendConfirmation || !result.case || confirmationFlight.current || disabled) return;
+    confirmationFlight.current = true;
+    setActionPending(true); setError(null);
+    try { await onSendConfirmation(result.case.owner.caseId); setConfirmationSent(true); }
+    catch (failure) { setError(partnerSalesActionFeedback(failure, 'ارسال پیامک تأیید').message); }
+    finally { confirmationFlight.current = false; setActionPending(false); }
+  };
   return <ContractWizardFrame
     title="ایجاد فروش همکار"
     currentStep={stepIndex + 1}
@@ -325,14 +336,9 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
           مشتری: {confirmationSent ? 'ارسال‌شده، بدون پاسخ' : compactStatus.customer}
         </ErpBadge>
         {onSendConfirmation && result.case.state === 'COMMITTED' && result.case.customerConfirmationState !== 'REJECTED' &&
-          (customerNotSent ? <ErpButton variant="solid" label="ارسال پیامک تأیید" onClick={() => {
-            setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
-              .then(() => setConfirmationSent(true)).catch(() => setError('ارسال پیامک انجام نشد؛ پرونده ذخیره شده و می‌توانید دوباره تلاش کنید.'));
-          }} /> : <ErpButton variant="outline" label="ارسال پیامک تأیید" onClick={() => {
-            setError(null); void Promise.resolve().then(() => onSendConfirmation(result.case!.owner.caseId))
-              .then(() => setConfirmationSent(true)).catch(() => setError('ارسال مجدد پیامک انجام نشد؛ پرونده ذخیره شده است.'));
-          }} />)}
-        <ErpButton variant={customerNotSent ? 'outline' : 'solid'} label="باز کردن پرونده" onClick={() => {
+          <ErpButton variant={customerNotSent ? 'solid' : 'outline'} label="ارسال پیامک تأیید"
+            disabled={disabled} onClick={() => void sendConfirmation()} />}
+        <ErpButton variant={customerNotSent ? 'outline' : 'solid'} label="باز کردن پرونده" disabled={disabled} onClick={() => {
           void Promise.resolve().then(() => onOpenCase(result.case!.owner.caseId))
             .catch(() => setError('پرونده ذخیره شده است؛ باز کردن جزئیات را دوباره امتحان کنید.'));
         }} />

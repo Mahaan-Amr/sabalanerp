@@ -434,7 +434,7 @@ export default function TreasuryControlPage() {
                     </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="مبلغ ریال" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={receipt.amountRials}
                       onChange={(event) =>
@@ -571,7 +571,7 @@ export default function TreasuryControlPage() {
                     </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="مبلغ تخصیص" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={allocation.amountRials}
                       onChange={(event) =>
@@ -805,7 +805,7 @@ export default function TreasuryControlPage() {
                     </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="مبلغ ریال" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={transfer.amountRials}
                       onChange={(event) =>
@@ -1310,7 +1310,7 @@ export default function TreasuryControlPage() {
                       />
                     </ErpField>
                     <ErpField label="مبلغ ریال" required>
-                      <ErpInput
+                      <ErpInput numberFormat="money"
                         inputMode="numeric"
                         value={bankLine.amountRials}
                         onChange={(event) =>
@@ -1644,7 +1644,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="مبلغ ریال" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={check.amountRials}
                       onChange={(event) =>
@@ -1873,7 +1873,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="مانده مورد انتظار" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={cashCount.expectedRials}
                       onChange={(event) =>
@@ -1885,7 +1885,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="مبلغ شمارش‌شده" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={cashCount.countedRials}
                       onChange={(event) =>
@@ -1981,7 +1981,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="مبلغ" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={petty.amountRials}
                       onChange={(event) =>
@@ -1990,7 +1990,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="سقف مصوب" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={petty.limitRials}
                       onChange={(event) =>

@@ -1,9 +1,10 @@
 'use client';
+import { partnerSalesActionFeedback } from '../partnerSalesErrorMessage';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ErpBadge, ErpButton, ErpEmptyState, ErpField, ErpFieldView, ErpInput, ErpListPage,
-  ErpSelect, ErpSheet, ErpTextarea, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
+  ErpInlineState, ErpSelect, ErpSheet, ErpTextarea, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
 import { FaBan, FaBuilding, FaCheckCircle, FaEdit, FaExclamationTriangle, FaEye,
   FaFileContract, FaLock, FaMapMarkerAlt, FaPhone, FaPlus, FaUser, FaUsers } from 'react-icons/fa';
 import api from '@/lib/api';
@@ -38,7 +39,7 @@ export function PartnerCustomersRuntime() {
   const [locked, setLocked] = useState('');
   const [pending, setPending] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<ReturnType<typeof partnerSalesActionFeedback>>();
   const [detail, setDetail] = useState<PartnerCustomerDetail>();
   const [editing, setEditing] = useState<PartnerCustomer>();
   const [draft, setDraft] = useState<PartnerCustomerDraft>(emptyPartnerCustomerDraft);
@@ -57,7 +58,7 @@ export function PartnerCustomersRuntime() {
         if (!cursor) break;
       }
       setCustomers(collected);
-    } catch { setError('دریافت مشتریان شما انجام نشد.'); }
+    } catch (failure) { setError(partnerSalesActionFeedback(failure, 'دریافت مشتریان')); }
     finally { setPending(false); }
   }, [search]);
 
@@ -74,7 +75,7 @@ export function PartnerCustomersRuntime() {
       const value = (response.data as { data?: PartnerCustomerDetail })?.data;
       if (!value?.customerId) throw new Error('invalid customer');
       setDetail(value);
-    } catch { setError('دریافت جزئیات مشتری انجام نشد.'); }
+    } catch (failure) { setError(partnerSalesActionFeedback(failure, 'دریافت جزئیات مشتری')); }
   };
   const beginEdit = (customer: PartnerCustomer) => { setEditing(customer); setDraft(toDraft(customer)); };
   const saveEdit = async () => {
@@ -88,7 +89,7 @@ export function PartnerCustomersRuntime() {
       await api.put(`/crm/partner/customers/${encodeURIComponent(editing.customerId)}`, command,
         { headers: { 'X-Correlation-Id': command.correlationId } });
       setEditing(undefined); await load();
-    } catch { setError('ذخیره تغییرات مشتری انجام نشد.'); }
+    } catch (failure) { setError(partnerSalesActionFeedback(failure, 'ذخیره تغییرات مشتری')); }
     finally { setSaving(false); }
   };
   const toggleRestriction = async (customer: PartnerCustomer, kind: 'blacklist' | 'lock') => {
@@ -103,7 +104,7 @@ export function PartnerCustomersRuntime() {
       await api.put(`/crm/partner/customers/${encodeURIComponent(customer.customerId)}`, command,
         { headers: { 'X-Correlation-Id': command.correlationId } });
       await load();
-    } catch { setError(kind === 'blacklist' ? 'تغییر وضعیت بلک‌لیست انجام نشد.' : 'تغییر وضعیت قفل انجام نشد.'); }
+    } catch (failure) { setError(partnerSalesActionFeedback(failure, kind === 'blacklist' ? 'تغییر وضعیت بلک‌لیست' : 'تغییر وضعیت قفل')); }
     finally { setSaving(false); }
   };
 
@@ -139,8 +140,8 @@ export function PartnerCustomersRuntime() {
     </div> },
   ];
 
-  if (error && !customers.length) return <ErpEmptyState icon={FaExclamationTriangle} title="خطا در دریافت اطلاعات"
-    description={error} action={{ label: 'تلاش مجدد', onClick: () => void load(), tone: 'primary', variant: 'solid' }} />;
+  if (error && !customers.length) return <ErpInlineState kind={error.kind} title={error.message}
+    action={{ label: 'تلاش دوباره', onClick: () => void load() }} />;
 
   return <>
     <ErpListPage eyebrow="CRM" title="مدیریت مشتریان" metrics={metrics}
@@ -182,9 +183,10 @@ export function PartnerCustomersRuntime() {
       </div><ErpFieldView label="پروژه‌ها" value={(detail.projects?.length ?? detail.projectCount).toLocaleString('fa-IR')} /></div>}
     </ErpSheet>
 
-    <ErpSheet open={Boolean(editing)} onClose={() => setEditing(undefined)} title="ویرایش مشتری" pending={saving}
-      footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="outline" onClick={() => setEditing(undefined)} />
+    <ErpSheet open={Boolean(editing)} onClose={() => setEditing(undefined)} title="ویرایش مشتری" presentation="modal" pending={saving}
+      footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="outline" disabled={saving} onClick={() => setEditing(undefined)} />
         <ErpButton label="ذخیره تغییرات" icon={FaCheckCircle} disabled={saving || !validatePartnerCustomerDraft(draft)} onClick={() => void saveEdit()} /></div>}>
+      {error && <ErpInlineState kind={error.kind} title={error.message} />}
       <div className="grid gap-4 sm:grid-cols-2" dir="rtl">
         <ErpField label="نام"><ErpInput value={draft.firstName} onChange={event => setDraft(value => ({ ...value, firstName: event.target.value }))} /></ErpField>
         <ErpField label="نام خانوادگی"><ErpInput value={draft.lastName} onChange={event => setDraft(value => ({ ...value, lastName: event.target.value }))} /></ErpField>
@@ -196,6 +198,6 @@ export function PartnerCustomersRuntime() {
         <ErpField label="نشانی" className="sm:col-span-2"><ErpTextarea value={draft.address} onChange={event => setDraft(value => ({ ...value, address: event.target.value }))} /></ErpField>
       </div>
     </ErpSheet>
-    {error && customers.length > 0 && <div className="mt-4"><ErpEmptyState icon={FaExclamationTriangle} title="عملیات انجام نشد" description={error} /></div>}
+    {error && !editing && customers.length > 0 && <div className="mt-4"><ErpInlineState kind={error.kind} title={error.message} /></div>}
   </>;
 }

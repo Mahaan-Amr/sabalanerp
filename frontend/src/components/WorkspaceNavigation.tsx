@@ -48,7 +48,7 @@ import {
   WORKSPACE_PERMISSIONS,
 } from "@/contexts/WorkspaceContext";
 import { dashboardAPI, securityAPI } from "@/lib/api";
-import { ErpPressable } from '@/components/erp';
+import { ErpPressable, useErpPresentationScope } from '@/components/erp';
 import { DutyCountBadge } from '@/features/cross-workspace-duties/DutyCountBadge';
 import { useCrossWorkspaceDutyCount } from '@/features/cross-workspace-duties/useCrossWorkspaceDutyCount';
 import { projectHrNavigation } from '@/features/hr/hrAccessNavigation';
@@ -92,6 +92,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
     useState(false);
   const [partnerRouteAccess, setPartnerRouteAccess] = useState<Record<string, boolean>>({});
   const pathname = usePathname();
+  const crmPresentation = useErpPresentationScope() === 'workspace';
   const dutyCount = useCrossWorkspaceDutyCount(currentWorkspace || null);
 
   const collapsed = !!collapsedProp;
@@ -330,6 +331,9 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         { name: 'Partner Cases', namePersian: 'مشاهده قراردادها',
           href: '/dashboard/sales/contracts', icon: FaFileContract,
           show: partnerRouteAccess['/dashboard/sales/contracts'] === true },
+        { name: 'Partner Drafts', namePersian: 'پیش‌نویس‌ها و پرونده‌های من',
+          href: '/dashboard/sales/partner-cases', icon: FaFileContract,
+          show: partnerRouteAccess['/dashboard/sales/partner-cases'] === true },
         { name: 'Partner Customers', namePersian: 'مشتریان من',
           href: '/dashboard/sales/partner-customers', icon: FaUsers,
           show: partnerRouteAccess['/dashboard/sales/partner-customers'] === true },
@@ -502,6 +506,20 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             href: "/dashboard/crm",
             icon: FaChartLine,
             show: true,
+          },
+          {
+            name: "Potential Projects",
+            namePersian: "پروژه‌های احتمالی",
+            href: "/dashboard/crm/potential-projects",
+            icon: FaBuilding,
+            show: crmPresentation,
+          },
+          {
+            name: "Follow Ups",
+            namePersian: "پیگیری‌ها",
+            href: "/dashboard/crm/follow-ups",
+            icon: FaHistory,
+            show: crmPresentation,
           },
           {
             name: "Customers",

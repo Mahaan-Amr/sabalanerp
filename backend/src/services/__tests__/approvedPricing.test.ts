@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { normalizeCurrentContractDiscountEligibilityEvidence } from '../contractService';
+import { recoverAuditedDiscountEligibility } from '../contractDiscountEvidence';
 import test from 'node:test';
 import { AccountingRecordStatus, FinancialRecordKind, Prisma } from '@prisma/client';
 import { projectCanonicalProductGraph, roundContractPayableTotal } from '@sabalanerp/contract-product-graph';
@@ -2019,4 +2021,140 @@ test('explicit zero-discount recovery preserves explicit layer exclusions and se
   const selected = buildApprovedPricingVersion(source, 1, 'zero-selected');
   assert.equal(selected.rows.length, 1);
   assert.equal(selected.netAmount, '1250.000000000000');
+});
+
+const recoverActiveDiscountFixture = (source: ApprovedPricingSource) => {
+  const graph = source.contract.productGraph!;
+  const recovered = recoverAuditedDiscountEligibility({
+    contractData: source.contract.contractData,
+    graphRows: graph.rows,
+    layerRowIds: [],
+    graphAuditCommandId: graph.quantityPolicyProvenance?.graphAuditCommandId ?? null,
+  });
+  source.contract.contractData = recovered.contractData;
+  return recovered;
+};
+
+test('recovers omitted eligibility for active discount using audited graph evidence (100579)', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  delete data.products[0].meta.isLayer;
+  const before = structuredClone(data);
+  const recovered = recoverActiveDiscountFixture(source);
+  const version = buildApprovedPricingVersion(source, 1, 'active-discount-recovered');
+  assert.equal(version.discountAmount, '100.000000000000');
+  assert.equal(version.netAmount, '1150.000000000000');
+  assert.equal(version.rows[0]?.discountEligible, true);
+  assert.deepEqual(recovered.assignments, [{ productRowId: 'row-1', rawIsLayer: null,
+    sealedIsLayer: false, graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+    rule: 'AUDITED_CANONICAL_GRAPH_DISCOUNT_ELIGIBILITY_V1' }]);
+  assert.deepEqual(data, before);
+});
+
+test('audited active-discount recovery rejects absent audit, malformed flags and conflicting identities', () => {
+  const initial = approvedPricingSourceFixture();
+  const data = initial.contract.contractData as any;
+  delete data.products[0].meta.isLayer;
+  const input = { contractData: data, graphRows: initial.contract.productGraph!.rows,
+    layerRowIds: [], graphAuditCommandId: 'matching-audit' };
+  assert.throws(() => recoverAuditedDiscountEligibility({ ...input, graphAuditCommandId: null }), /no matching graph audit/);
+  for (const mutate of [
+    (product: any) => { product.meta.isLayer = 'false'; },
+    (product: any) => { product.meta.layerInfo = {}; },
+    (product: any) => { product.productId = 'wrong'; },
+    (product: any) => { product.rowId = 'wrong'; },
+    (product: any) => { product.productRowId = 'wrong'; },
+    (product: any) => { product.meta = null; },
+  ]) {
+    const snapshot = structuredClone(data);
+    mutate(snapshot.products[0]);
+    assert.throws(() => recoverAuditedDiscountEligibility({ ...input, contractData: snapshot }));
+  }
+});
+
+test('active-discount recovery keeps discount basis, amount and approved range validation strict', () => {
+  for (const mutate of [
+    (data: any) => { data.discount.baseSubtotal = '900'; },
+    (data: any) => { data.discount.amount = '99'; },
+    (data: any) => { data.discount.maxDiscountPercent = '5'; },
+  ]) {
+    const source = approvedPricingSourceFixture();
+    const data = source.contract.contractData as any;
+    delete data.products[0].meta.isLayer;
+    mutate(data);
+    recoverActiveDiscountFixture(source);
+    assert.throws(() => buildApprovedPricingVersion(source, 1, 'bad-discount-evidence'));
+  }
+});
+
+test('audited recovery identifies omitted layers and rejects contradictory explicit flags', () => {
+  const input = { contractData: { products: [
+    { rowId: 'main', productId: 'stone', productType: 'stair', meta: {} },
+    { rowId: 'layer', productId: 'stone', productType: 'stair', meta: { layerInfo: {} } },
+  ] }, graphRows: [
+    { productRowId: 'main', catalogProductId: 'stone', productType: 'stair' },
+    { productRowId: 'layer', catalogProductId: 'stone', productType: 'stair' },
+  ], layerRowIds: ['layer'], graphAuditCommandId: 'matching-audit' };
+  const recovered = recoverAuditedDiscountEligibility(input);
+  assert.deepEqual(recovered.assignments.map(row => row.sealedIsLayer), [false, true]);
+  const conflicting = structuredClone(input.contractData) as any;
+  conflicting.products[1].meta.isLayer = false;
+  assert.throws(() => recoverAuditedDiscountEligibility({ ...input, contractData: conflicting }), /canonical layer evidence/);
+});
+
+test('100579 monetary witnesses reconcile after audited eligibility recovery', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  delete data.products[0].meta.isLayer;
+  data.discount = { enabled: true, amount: '250000', percent: '1.098901098901', baseSubtotal: '22750000',
+    maxDiscountPercent: '5.5', rangeId: 'saved-range', appliedAt: '2026-09-28T13:22:44.092Z',
+    inputMode: 'AMOUNT_TOMAN', currency: 'تومان' };
+  data.payment.totalContractAmount = '26000000';
+  source.leaf.amount = '260000000';
+  source.leaf.invoiceItems = [{ ...source.leaf.invoiceItems[0]!, totalPrice: '262500000' }];
+  source.contract.items = [{ ...source.contract.items[0]!, totalPrice: '26250000' }];
+  source.contract.currentItems = structuredClone(source.contract.items);
+  source.contract.productGraph!.totalAmountToman = '26250000';
+  source.contract.productGraph!.rows = [{ ...source.contract.productGraph!.rows[0]!, baseAmountToman: '22750000',
+    totalAmountToman: '26250000', operations: [{ id: 'tool', kind: 'tool', amountToman: '3500000' }] }];
+  recoverActiveDiscountFixture(source);
+  const version = buildApprovedPricingVersion(source, 1, '100579-witnesses');
+  assert.equal(version.netAmount, '26000000.000000000000');
+  assert.equal(version.discountAmount, '250000.000000000000');
+});
+
+test('current contract write normalization prevents omitted eligibility without changing discounts or layers', () => {
+  const data = { discount: { enabled: true, amount: 250000 }, products: [
+    { productType: 'longitudinal', meta: {} },
+    { productType: 'stair', meta: { isLayer: true, layerInfo: {} } },
+    { productType: 'stair', meta: { layerInfo: {} } },
+    { productType: 'longitudinal', meta: { isLayer: 'false' } },
+  ] };
+  const original = structuredClone(data);
+  const normalized = normalizeCurrentContractDiscountEligibilityEvidence(data) as typeof data;
+  assert.equal((normalized.products[0]!.meta as any).isLayer, false);
+  assert.equal(normalized.products[1]!.meta.isLayer, true);
+  assert.equal(normalized.products[2]!.meta.isLayer, undefined);
+  assert.equal(normalized.products[3]!.meta.isLayer, 'false');
+  assert.deepEqual(normalized.discount, data.discount);
+  assert.deepEqual(data, original);
+});
+
+test('audited active-discount recovery preserves selected-item discount allocation', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  delete data.products[0].meta.isLayer;
+  data.products.push({ ...data.products[0], rowId: 'row-2', meta: {} });
+  source.contract.items = [...source.contract.items, { ...source.contract.items[0]!, id: 'item-2', productRowId: 'row-2' }];
+  source.contract.currentItems = structuredClone(source.contract.items);
+  source.contract.productGraph!.rows = [...source.contract.productGraph!.rows,
+    { ...source.contract.productGraph!.rows[0]!, productRowId: 'row-2' }];
+  source.contract.productGraph!.totalAmountToman = '2500';
+  data.discount.baseSubtotal = '2000'; data.discount.amount = '200';
+  source.leaf.metadata = { mode: 'FROM_SELECTED_ITEMS', selectedContractItemIds: ['item-1'] };
+  recoverActiveDiscountFixture(source);
+  const version = buildApprovedPricingVersion(source, 1, 'active-selected');
+  assert.equal(version.rows.length, 1);
+  assert.equal(version.discountAmount, '100.000000000000');
+  assert.equal(version.netAmount, '1150.000000000000');
 });

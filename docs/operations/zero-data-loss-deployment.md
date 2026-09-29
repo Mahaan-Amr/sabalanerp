@@ -65,6 +65,8 @@ Before mutation, the deployment locally decrypt-validates and restore-validates 
 
 Capacity decisions use measured component sizes and worst-case staging needs rather than a rigid free-space percentage. Preflight estimates checkpoint, restore staging, rollback safety, PostgreSQL working space, Docker working space, and operational headroom.
 
+Immutable application images are built sequentially before maintenance. After each successful image export, unused builder cache is reclaimed and its result retained in a per-service deployment log. This prevents compiler caches from accumulating until the next image export exhausts the disk. Cleanup failure aborts before maintenance; release images, containers, business volumes, and checkpoint archives remain protected. The complete release and all checkpoint gates are still required before promotion.
+
 Before blocking a deployment, cleanup proceeds in this order:
 
 1. Remove expired incomplete artifacts whose lease is proven stale.

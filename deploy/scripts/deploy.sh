@@ -592,8 +592,13 @@ export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMA
 compose config --quiet
 echo "Building immutable release ${DEPLOYMENT_RELEASE_ID} before maintenance..."
 # Keep compiler heaps from competing with the live release on the production host.
+# Export each image completely before reclaiming its unused builder records.
+# Accumulating all compiler caches can exhaust the disk during the next export,
+# before the post-build capacity check can run. Tagged release images, running
+# containers, volumes, and checkpoint archives are not builder cache.
 for release_service in backend frontend inquiry; do
   compose build "${release_service}"
+  docker builder prune --all --force >"${REPO_ROOT}/.deploy-state/build-${release_service}-cache-prune.log"
 done
 DEPLOYMENT_BACKEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_BACKEND_IMAGE}")"
 DEPLOYMENT_FRONTEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_FRONTEND_IMAGE}")"

@@ -135,3 +135,61 @@ export const isContractRowDiscountEligible = (
   if (baseAmount === null) throw new ApprovedPricingEvidenceError(`Product ${productRowId} base amount is missing or null`);
   return baseAmount.gt(0);
 };
+
+export const recoverAuditedDiscountEligibility = (input: {
+  contractData: unknown;
+  graphRows: readonly { productRowId: string; catalogProductId: string; productType: string }[];
+  layerRowIds: readonly string[];
+  graphAuditCommandId: string | null;
+}) => {
+  const data = input.contractData as Record<string, unknown> | null;
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.products)) {
+    throw new ApprovedPricingEvidenceError('Audited discount recovery has no product snapshots');
+  }
+  const rowById = new Map(input.graphRows.map(row => [row.productRowId, row]));
+  const layers = new Set(input.layerRowIds);
+  if (rowById.size !== input.graphRows.length || data.products.length !== rowById.size ||
+    [...layers].some(id => !rowById.has(id))) {
+    throw new ApprovedPricingEvidenceError('Audited discount recovery has conflicting graph identities');
+  }
+  const seen = new Set<string>();
+  const assignments: Array<{
+    productRowId: string; rawIsLayer: null; sealedIsLayer: boolean; graphAuditCommandId: string;
+    rule: 'AUDITED_CANONICAL_GRAPH_DISCOUNT_ELIGIBILITY_V1';
+  }> = [];
+  const products = data.products.map(raw => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new ApprovedPricingEvidenceError('Audited discount recovery has malformed product evidence');
+    }
+    const product = raw as Record<string, unknown>;
+    const id = String(product.rowId ?? product.productRowId ?? '');
+    const row = rowById.get(id);
+    if (!row || seen.has(id) || product.productId !== row.catalogProductId || product.productType !== row.productType ||
+      (product.rowId != null && product.productRowId != null && product.rowId !== product.productRowId)) {
+      throw new ApprovedPricingEvidenceError('Audited discount recovery product identities conflict');
+    }
+    seen.add(id);
+    const meta = product.meta as Record<string, unknown> | null;
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+      throw new ApprovedPricingEvidenceError(`Product ${id} discount metadata is missing or null`);
+    }
+    const isLayer = layers.has(id);
+    if (meta.isLayer !== undefined) {
+      if (typeof meta.isLayer !== 'boolean' || meta.isLayer !== isLayer) {
+        throw new ApprovedPricingEvidenceError(`Product ${id} discount eligibility conflicts with canonical layer evidence`);
+      }
+      return product;
+    }
+    if (!input.graphAuditCommandId) {
+      throw new ApprovedPricingEvidenceError(`Product ${id} discount eligibility recovery has no matching graph audit`);
+    }
+    if (!isLayer && (meta.layerInfo != null || meta.layerType != null ||
+      product.layerTypeId != null || product.layerTypeName != null || product.layerTypePrice != null)) {
+      throw new ApprovedPricingEvidenceError(`Product ${id} omitted layer flag conflicts with layer evidence`);
+    }
+    assignments.push({ productRowId: id, rawIsLayer: null, sealedIsLayer: isLayer,
+      graphAuditCommandId: input.graphAuditCommandId, rule: 'AUDITED_CANONICAL_GRAPH_DISCOUNT_ELIGIBILITY_V1' });
+    return { ...product, meta: { ...meta, isLayer } };
+  });
+  return { contractData: assignments.length ? { ...data, products } : data, assignments };
+};

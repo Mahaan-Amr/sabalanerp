@@ -1,5 +1,5 @@
 'use client';
-import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSheet, ErpTextarea, useErpPresentationScope } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSection, ErpSheet, ErpTextarea, useErpPresentationScope } from '@/components/erp';
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -145,6 +145,8 @@ export default function CustomerDetailPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'projects' | 'contacts' | 'leads' | 'contracts'>('overview');
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
   const presentationScope = useErpPresentationScope();
+  const DetailFrame = presentationScope === 'workspace' ? 'div' : ErpCard;
+  const DetailSection = presentationScope === 'workspace' ? ErpSection : 'div';
   const [removal, setRemoval] = useState<{ kind: 'project' | 'contact'; id: string } | null>(null);
   const [removing, setRemoving] = useState(false);
   const [removalError, setRemovalError] = useState<string | null>(null);
@@ -598,7 +600,7 @@ export default function CustomerDetailPage() {
       </div>
 
       {/* Tabs */}
-      <ErpCard>
+      <DetailFrame>
         {presentationScope !== 'workspace' && <ErpSegmentedControl
           value={activeTab}
           onChange={setActiveTab}
@@ -613,7 +615,7 @@ export default function CustomerDetailPage() {
 
         <div className={presentationScope === 'workspace' ? "p-4 sm:p-6 space-y-6" : "p-4 sm:p-6"}>
           {(presentationScope === 'workspace' || activeTab === 'overview') && (
-            <div className="space-y-6">
+            <DetailSection className="space-y-6">
               {/* Basic Information */}
               <div>
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات پایه</h3>
@@ -706,11 +708,11 @@ export default function CustomerDetailPage() {
                   <ErpFieldView label="آخرین بروزرسانی" value={<>{formatDate(customer.updatedAt)}</>} />
                 </div>
               </CustomerWorkflowSection>
-            </div>
+            </DetailSection>
           )}
 
           {(presentationScope === 'workspace' || activeTab === 'projects') && (
-            <div className="space-y-6">
+            <DetailSection className="space-y-6">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">آدرس‌های پروژه</h3>
                 {hasPermission('crm' as any, 'edit' as any) && (
@@ -824,11 +826,11 @@ export default function CustomerDetailPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </DetailSection>
           )}
 
           {(presentationScope === 'workspace' || activeTab === 'contacts') && (
-            <div className="space-y-6">
+            <DetailSection className="space-y-6">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">مخاطبین</h3>
                 {hasPermission('crm' as any, 'edit' as any) && (
@@ -910,11 +912,11 @@ export default function CustomerDetailPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </DetailSection>
           )}
 
           {(presentationScope === 'workspace' || activeTab === 'leads') && (
-            <div className="space-y-6">
+            <DetailSection className="space-y-6">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">سرنخ‌ها</h3>
 
               {(!customer.leads || customer.leads.length === 0) ? (
@@ -942,11 +944,11 @@ export default function CustomerDetailPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </DetailSection>
           )}
 
           {(presentationScope === 'workspace' || activeTab === 'contracts') && (
-            <div className="space-y-6">
+            <DetailSection className="space-y-6">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">قراردادها</h3>
 
               {(!customer.salesContracts || customer.salesContracts.length === 0) ? (
@@ -975,10 +977,10 @@ export default function CustomerDetailPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </DetailSection>
           )}
         </div>
-      </ErpCard>
+      </DetailFrame>
 
       {/* Admin Actions */}
       {hasPermission('crm' as any, 'admin' as any) && (

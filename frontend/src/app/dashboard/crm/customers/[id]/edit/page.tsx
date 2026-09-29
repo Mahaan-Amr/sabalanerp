@@ -547,7 +547,7 @@ export default function EditCustomerPage() {
         </div>
       </CustomerWorkflowSection>
 
-      <CustomerWorkflowSection title="اطلاعات تکمیلی" collapsible>
+      <CustomerWorkflowSection title="اطلاعات تکمیلی" collapsible expanded={Boolean(errors.projectManagerNumber || errors.referrerPhoneNumber)}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <CustomerWorkflowField label="نام شرکت / سازمان"><ErpInput value={formData.companyName} onChange={(e) => updateField('companyName', e.target.value)} /></CustomerWorkflowField>
           <CustomerWorkflowField label="نام برند"><ErpInput value={formData.brandName} onChange={(e) => updateField('brandName', e.target.value)} /></CustomerWorkflowField>

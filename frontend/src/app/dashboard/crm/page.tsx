@@ -134,7 +134,7 @@ export default function CrmWorkspacePage() {
         />
       </div>
 
-      <ErpTwoColumn
+      <ErpTwoColumn balanced
         main={
           <>
 

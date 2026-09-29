@@ -1071,11 +1071,11 @@ export function ErpFieldView({ label, value, hint, tone = 'neutral' }: {
   );
 }
 
-export function ErpTwoColumn({ main, aside }: { main: React.ReactNode; aside: React.ReactNode }) {
+export function ErpTwoColumn({ main, aside, balanced = false }: { main: React.ReactNode; aside: React.ReactNode; balanced?: boolean }) {
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]">
+    <div className={balanced ? "grid grid-cols-1 gap-5 lg:grid-cols-2" : "grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]"}>
       <div className="space-y-5">{main}</div>
-      <aside className="space-y-5 lg:sticky lg:top-4 lg:self-start">{aside}</aside>
+      <aside className={balanced ? "space-y-5" : "space-y-5 lg:sticky lg:top-4 lg:self-start"}>{aside}</aside>
     </div>
   );
 }

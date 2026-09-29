@@ -646,8 +646,8 @@ export default function CustomerDetailPage() {
               </div>
 
               {/* Contact Information */}
-              <div>
-                <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات تماس</h3>
+              <CustomerWorkflowSection title="اطلاعات تماس" collapsible>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   <ErpFieldView label="کد ملی" value={<>{customer.nationalCode || 'تعریف نشده'}</>} />
                   <ErpFieldView label="آدرس منزل" value={<>{customer.homeAddress || 'تعریف نشده'}</>} />
@@ -655,27 +655,27 @@ export default function CustomerDetailPage() {
                   <ErpFieldView label="آدرس محل کار" value={<>{customer.workAddress || 'تعریف نشده'}</>} />
                   <ErpFieldView label="شماره محل کار" value={<>{customer.workNumber || 'تعریف نشده'}</>} />
                 </div>
-              </div>
+              </CustomerWorkflowSection>
 
               {/* Project Management */}
-              <div>
-                <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">مدیریت پروژه</h3>
+              <CustomerWorkflowSection title="مدیریت پروژه" collapsible>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <ErpFieldView label="نام مدیر پروژه" value={<>{customer.projectManagerName || 'تعریف نشده'}</>} />
                   <ErpFieldView label="شماره تماس مدیر پروژه" value={<>{customer.projectManagerNumber || 'تعریف نشده'}</>} />
                 </div>
-              </div>
+              </CustomerWorkflowSection>
 
               {/* Brand Information */}
-              <div>
-                <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات برند</h3>
+              <CustomerWorkflowSection title="اطلاعات برند" collapsible>
+
                 <div className="grid grid-cols-1 gap-6">
                   <ErpFieldView label="نام برند" value={<>{customer.brandName || 'تعریف نشده'}</>} />
                   {customer.brandNameDescription && (
                     <ErpFieldView label="توضیحات برند" value={<>{customer.brandNameDescription}</>} />
                   )}
                 </div>
-              </div>
+              </CustomerWorkflowSection>
 
               {/* Phone Numbers */}
               {customer.phoneNumbers && customer.phoneNumbers.length > 0 && (
@@ -699,13 +699,13 @@ export default function CustomerDetailPage() {
               )}
 
               {/* System Information */}
-              <div>
-                <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات سیستم</h3>
+              <CustomerWorkflowSection title="اطلاعات سیستم" collapsible>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <ErpFieldView label="تاریخ ایجاد" value={<>{formatDate(customer.createdAt)}</>} />
                   <ErpFieldView label="آخرین بروزرسانی" value={<>{formatDate(customer.updatedAt)}</>} />
                 </div>
-              </div>
+              </CustomerWorkflowSection>
             </div>
           )}
 

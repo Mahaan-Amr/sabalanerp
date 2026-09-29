@@ -19,6 +19,7 @@ const labelClass = 'block text-sm font-semibold text-[var(--sds-text-primary)] d
 export default function CreatePotentialProjectPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const presentationScope = useErpPresentationScope();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,11 +92,11 @@ export default function CreatePotentialProjectPage() {
       eyebrow="CRM"
       description="پروژه یا فرصتی که هنوز به قرارداد فروش تبدیل نشده است."
       backHref="/dashboard/crm/potential-projects"
-      actions={[{ label: saving ? 'در حال ذخیره...' : 'ذخیره', onClick: () => document.getElementById('potential-project-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })), icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving }]}
+      actions={presentationScope === 'workspace' ? [] : [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', onClick: () => document.getElementById('potential-project-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })), icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving }]}
     >
 
       {error && <ErpEmptyState title="خطا" description={error} />}
-      <form id="potential-project-form" onSubmit={submit} className="space-y-5">
+      <form id="potential-project-form" onSubmit={submit} className={presentationScope === 'workspace' ? "mx-auto max-w-[850px] space-y-5" : "space-y-5"}>
         <ErpSection title="اطلاعات اصلی" description="این فیلدها برای ایجاد پروژه احتمالی الزامی هستند." className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>مخاطب CRM
@@ -159,7 +160,8 @@ export default function CreatePotentialProjectPage() {
           </div>
         </CustomerWorkflowSection>
 
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <ErpButton label="انصراف" href="/dashboard/crm/potential-projects" variant="ghost" disabled={saving} />
           <ErpButton
             label={saving ? 'در حال ذخیره...' : 'ذخیره پروژه'}
             icon={FaSave}

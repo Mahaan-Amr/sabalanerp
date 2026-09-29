@@ -2,8 +2,16 @@
 set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)}"
+OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${1:-deploy/.env.prod}"
+DEPLOYMENT_MODE="${DEPLOYMENT_MODE:-release}"
+case "${DEPLOYMENT_MODE}" in
+  release|configuration) ;;
+  *) echo "DEPLOYMENT_MODE must be release or configuration." >&2; exit 1 ;;
+esac
+CONFIGURATION_STATE="${REPO_ROOT}/.deploy-state/biometric-configuration.json"
+CONFIGURATION_ACTIVE=0
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 COMPOSE_FILE="docker-compose.prod.yml"
@@ -257,7 +265,22 @@ cleanup_locks() {
   flock -u 9 >/dev/null 2>&1 || true
 }
 
+cleanup_configuration_snapshot() {
+  if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
+    if node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" cleanup "${REPO_ROOT}"; then
+      CONFIGURATION_ACTIVE=0
+    else
+      echo "Verified release retained; protected configuration state requires inspection before another deployment." >&2
+    fi
+  fi
+}
+
 switch_to_previous_images() {
+  if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
+    node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}" previous || return 1
+    configuration_exports="$(node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" exports "${REPO_ROOT}" previous)" || return 1
+    eval "${configuration_exports}"
+  fi
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}"
   DEPLOYMENT_FRONTEND_IMAGE="${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}"
   DEPLOYMENT_INQUIRY_IMAGE="${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}"
@@ -309,6 +332,10 @@ recover_failure() {
   echo "Deployment failed; entering deterministic recovery (exit ${exit_code})." >&2
 
   if [ "${SESSION_PREPARED}" -eq 0 ]; then
+    if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
+      node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}" previous || exit 1
+      node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" cleanup "${REPO_ROOT}" || exit 1
+    fi
     cleanup_locks
     exit "${exit_code}"
   fi
@@ -354,6 +381,7 @@ recover_failure() {
         DEPLOYMENT_RESULT=ABORTED run_backend node dist/scripts/deployment-notify.js || true
       fi
       cleanup_locks
+      cleanup_configuration_snapshot
       echo "Deployment aborted before mutation; the unchanged previous release passed gates and was reopened." >&2
       exit "${exit_code}"
     fi
@@ -398,6 +426,7 @@ recover_failure() {
         MAINTENANCE_ACTIVE=0
         finish_with_notification_result ROLLED_BACK || true
         cleanup_locks
+        cleanup_configuration_snapshot
         echo "Automatic rollback completed and the verified previous release was reopened." >&2
         exit "${exit_code}"
       fi
@@ -491,6 +520,17 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   [ "${bootstrap_value}" = "true" ] && BOOTSTRAP=1 || BOOTSTRAP=0
   export DEPLOYMENT_ID DEPLOYMENT_RELEASE_ID DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_OWNER DEPLOYMENT_PHASE DEPLOYMENT_TARGET_BACKEND_IMAGE
   export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE DEPLOYMENT_PREVIOUS_NGINX_IMAGE DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE
+  if [ -f "${CONFIGURATION_STATE}" ]; then
+    CONFIGURATION_ACTIVE=1
+    configuration_traffic_state="$(node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" recovery-state "${REPO_ROOT}" "${DEPLOYMENT_ID}")"
+    if [ "${DEPLOYMENT_PHASE}" = "TRAFFIC_OPENED" ] || [ "${configuration_traffic_state}" = "open" ]; then
+      configuration_exports="$(node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" exports "${REPO_ROOT}")"
+      eval "${configuration_exports}"
+      SESSION_PREPARED=1
+      PUBLIC_TRAFFIC_OPEN=1
+      recover_failure 1
+    fi
+  fi
   SESSION_PREPARED=1
   [ "${DEPLOYMENT_PHASE}" = "PREFLIGHT" ] || DB_LEASE_ACQUIRED=1
   switch_to_previous_images
@@ -509,6 +549,7 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
         DEPLOYMENT_RESULT=ABORTED run_backend node dist/scripts/deployment-notify.js || true
         cleanup_locks
         trap - EXIT INT TERM
+        cleanup_configuration_snapshot
         echo "Interrupted pre-mutation deployment was aborted only after the previous release passed every unchanged-release gate." >&2
         exit 1
       fi
@@ -532,18 +573,22 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   esac
 fi
 
+if [ -f "${CONFIGURATION_STATE}" ]; then
+  echo "Unfinished configuration state exists without a deployment session; inspect and recover it before a new release." >&2
+  exit 1
+fi
+
+if [ "${DEPLOYMENT_MODE}" = "release" ]; then
 echo "Fetching ${DEPLOY_REMOTE}/${DEPLOY_BRANCH} and requiring a fast-forward update..."
 git fetch --prune "${DEPLOY_REMOTE}"
 git checkout "${DEPLOY_BRANCH}"
 git pull --ff-only "${DEPLOY_REMOTE}" "${DEPLOY_BRANCH}"
 git submodule update --init --recursive
+fi
 
 DEPLOYMENT_TARGET_COMMIT="$(git rev-parse HEAD)"
-DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short=12 HEAD)"
-DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
-APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
-export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT
 
+if [ "${DEPLOYMENT_MODE}" = "release" ]; then
 backend_repository="$(env_value DEPLOYMENT_BACKEND_IMAGE_REPOSITORY)"
 frontend_repository="$(env_value DEPLOYMENT_FRONTEND_IMAGE_REPOSITORY)"
 inquiry_repository="$(env_value DEPLOYMENT_INQUIRY_IMAGE_REPOSITORY)"
@@ -551,6 +596,7 @@ inquiry_repository="$(env_value DEPLOYMENT_INQUIRY_IMAGE_REPOSITORY)"
   echo "Immutable image repositories are mandatory." >&2
   exit 1
 }
+fi
 
 DEPLOYMENT_PREVIOUS_BACKEND_IMAGE="$(image_of_service backend)"
 DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE="$(image_of_service frontend)"
@@ -563,6 +609,16 @@ export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE DEPL
 DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT="$(docker inspect "$(compose ps -q backend)" | node scripts/performance-deployment-environment.mjs capture)"
 export DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT
 
+if [ "${DEPLOYMENT_MODE}" = "configuration" ]; then
+  existing_exports="$(docker inspect "$(compose ps -q backend)" "$(compose ps -q frontend)" "$(compose ps -q inquiry)" "$(compose ps -q nginx)" "$(compose ps -q postgres)" "$(compose ps -q clamav)" | node "${OPERATIONS_ROOT}/scripts/deployment-existing-release.mjs")"
+  eval "${existing_exports}"
+fi
+DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TARGET_COMMIT}" | cut -c1-12)-${DEPLOYMENT_MODE}"
+DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
+APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
+export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT
+
+if [ "${DEPLOYMENT_MODE}" = "release" ]; then
 backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")"
 frontend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}")"
 inquiry_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}")"
@@ -617,6 +673,20 @@ PERFORMANCE_RELEASE_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
 PERFORMANCE_RELEASE_FRONTEND_IMAGE="${DEPLOYMENT_FRONTEND_IMAGE}"
 PERFORMANCE_RELEASE_INQUIRY_IMAGE="${DEPLOYMENT_INQUIRY_IMAGE}"
 export PERFORMANCE_RELEASE_COMMIT PERFORMANCE_RELEASE_SOURCE_HASH PERFORMANCE_RELEASE_BACKEND_IMAGE PERFORMANCE_RELEASE_FRONTEND_IMAGE PERFORMANCE_RELEASE_INQUIRY_IMAGE
+else
+  [ -n "${DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE:-}" ] && [ -f "${DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE}" ] || {
+    echo "Configuration release requires a private biometric workstation provisioning file." >&2
+    exit 1
+  }
+  docker inspect "$(compose ps -q backend)" | node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" prepare "${REPO_ROOT}" "${ENV_FILE}" "${DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE}" "${DEPLOYMENT_ID}"
+  CONFIGURATION_ACTIVE=1
+  configuration_exports="$(node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" exports "${REPO_ROOT}")"
+  eval "${configuration_exports}"
+  DEPLOYMENT_TARGET_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
+  export DEPLOYMENT_TARGET_BACKEND_IMAGE
+  compose config --quiet
+  echo "Applying workstation configuration to the existing immutable release ${DEPLOYMENT_TARGET_COMMIT}; no source fetch or image build."
+fi
 refresh_performance_database_identity
 
 run_backend node dist/scripts/validate-production-environment.js
@@ -694,6 +764,9 @@ phase REMOTE_CHECKPOINT_VERIFIED
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"
+if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
+  node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}"
+fi
 
 echo "Applying migrations with a two-connection deployment identity..."
 remaining="$(remaining_mutation_seconds)" || exit 1
@@ -829,11 +902,15 @@ timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FIL
 remaining_mutation_seconds >/dev/null
 phase GATES_PASSED
 
+if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
+  node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" mark-open "${REPO_ROOT}"
+fi
 phase TRAFFIC_OPENED
+PUBLIC_TRAFFIC_OPEN=1
 control maintenance-off
 MAINTENANCE_ACTIVE=0
-PUBLIC_TRAFFIC_OPEN=1
 finish_with_notification_result COMPLETED
+cleanup_configuration_snapshot
 
 FINISHED=1
 cleanup_locks

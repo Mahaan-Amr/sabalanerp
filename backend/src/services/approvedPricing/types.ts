@@ -92,7 +92,8 @@ export type ApprovedPricingSource = {
           | 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING'
           | 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION'
           | 'CANONICAL_WRITER_V2_MONEY_RESIDUE_NORMALIZATION'
-          | 'FROZEN_STAIR_LAYER_BASE_PROJECTION_V1';
+          | 'FROZEN_STAIR_LAYER_BASE_PROJECTION_V1'
+          | 'AUDITED_GRAPH_DISCOUNT_ELIGIBILITY_RECOVERY';
         migrationAuditCommandId?: string;
         snapshotOriginallyMissing: boolean;
         rowIdentityAssignments?: readonly {
@@ -142,6 +143,13 @@ export type ApprovedPricingSource = {
           layerResultHash: string;
           graphAuditCommandId: string;
           rule: 'AUDITED_FROZEN_STAIR_LAYER_MATERIAL_BASE_V1';
+        }[];
+        auditedDiscountEligibilityAssignments?: readonly {
+          productRowId: string;
+          rawIsLayer: null;
+          sealedIsLayer: boolean;
+          graphAuditCommandId: string;
+          rule: 'AUDITED_CANONICAL_GRAPH_DISCOUNT_ELIGIBILITY_V1';
         }[];
         discountEligibilityAssignments?: readonly {
           productRowId: string;

@@ -9,15 +9,6 @@ import { dateFa } from '@/features/hr/hrUi';
 import { performanceBadgePresentation, type PerformanceBadgeSummary } from './performanceBadgeModel';
 import { PerformanceBadgeRoadmap } from './PerformanceBadgeRoadmap';
 
-function RomanNumeral({ value }: { value?: 'I' | 'II' | 'III' }) {
-  return value ? <bdi
-    dir="ltr"
-    aria-hidden="true"
-    className="block bg-clip-text text-center text-[11px] font-bold leading-none text-transparent"
-    style={{ fontFamily: 'Georgia, "Times New Roman", serif', backgroundImage: 'linear-gradient(180deg, var(--sds-artwork-metal-gold-highlight) 0%, var(--sds-artwork-metal-gold-mid) 45%, var(--sds-artwork-metal-gold-shadow) 100%)' }}
-  >{value}</bdi> : null;
-}
-
 export function PerformanceBadge({ badge, onAppeal }: { badge: PerformanceBadgeSummary; compact?: boolean; onAppeal?: (text: string) => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [appealText, setAppealText] = useState('');
@@ -29,16 +20,20 @@ export function PerformanceBadge({ badge, onAppeal }: { badge: PerformanceBadgeS
       type="button"
       onClick={(event) => { event.stopPropagation(); setOpen(true); }}
       aria-label={`سطح عملکرد: ${presentation.labelFa}${badge.officialResult === false ? '، بدون نتیجه رسمی' : ''}`}
-      className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 py-1 text-right dark:border-[var(--sds-border-strong)]"
+      title={presentation.labelFa}
+      className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 py-1 text-right dark:border-[var(--sds-border-strong)]"
     >
       <span className="flex w-9 shrink-0 flex-col items-center gap-0.5" aria-hidden="true">
         <span className="relative block h-9 w-9">
           <Image src={presentation.lightAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="object-contain dark:hidden" unoptimized />
           <Image src={presentation.darkAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="hidden object-contain dark:block" unoptimized />
         </span>
-        <RomanNumeral value={presentation.romanNumeral} />
+        {presentation.romanNumeral && <bdi
+          dir="ltr"
+          className="block bg-clip-text text-center text-[11px] font-bold leading-none text-transparent"
+          style={{ fontFamily: 'Georgia, "Times New Roman", serif', backgroundImage: 'linear-gradient(180deg, var(--sds-artwork-metal-gold-highlight) 0%, var(--sds-artwork-metal-gold-mid) 45%, var(--sds-artwork-metal-gold-shadow) 100%)' }}
+        >{presentation.romanNumeral}</bdi>}
       </span>
-      <span className="text-xs font-bold text-[var(--sds-text-primary)]">{presentation.labelFa}</span>
       <span className="sr-only">{presentation.meaningFa}</span>
     </ErpPressable>
     <ErpSheet open={open} onClose={() => !appealPending && setOpen(false)} title="خلاصه سطح عملکرد" presentation="modal" size="wide" scope="workspace" pending={appealPending}>

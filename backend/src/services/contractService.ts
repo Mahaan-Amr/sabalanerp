@@ -202,7 +202,7 @@ const hasCurrentLayerEvidence = (
   product.layerTypeName != null ||
   product.layerTypePrice != null;
 
-const normalizeNewContractDiscountEligibilityEvidence = (contractData: unknown) => {
+export const normalizeCurrentContractDiscountEligibilityEvidence = (contractData: unknown) => {
   if (!contractData || typeof contractData !== 'object' || Array.isArray(contractData)) return contractData;
   const data = contractData as Record<string, unknown>;
   if (!Array.isArray(data.products)) return contractData;
@@ -752,7 +752,7 @@ export async function createContract(
           0
         );
         const contractDataWithDiscountEligibility =
-          normalizeNewContractDiscountEligibilityEvidence(productSemanticRepair.contractData);
+          normalizeCurrentContractDiscountEligibilityEvidence(productSemanticRepair.contractData);
         let contractData = sanitizeContractDataCustomerSnapshot(
           normalizeNewContractNoDiscountEvidence(
             contractDataWithDiscountEligibility,
@@ -1071,7 +1071,7 @@ export async function updateContract(
       contractId,
       (existingGraph?.revision ?? 0) + 1
     );
-    let nextContractData = productSemanticRepair.contractData as any;
+    let nextContractData = normalizeCurrentContractDiscountEligibilityEvidence(productSemanticRepair.contractData) as any;
     const preparedGraph = buildLegacyContractMigrationPlan({ id: contractId,
       totalAmount: data.totalAmount ?? transactionContract.totalAmount, contractData: nextContractData },
       (existingGraph?.revision ?? 0) + 1, calculationPolicy, true);

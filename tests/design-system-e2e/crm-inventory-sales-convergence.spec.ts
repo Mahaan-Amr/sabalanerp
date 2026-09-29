@@ -146,9 +146,11 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
       { label: 'فرآوری سنگ', action: 'غیرفعال کردن فرآوری' },
     ];
     for (const tab of tabs) {
-      await page.getByRole('button', { name: new RegExp(tab.label) }).first().click();
+      await page.getByRole('button', { name: new RegExp(`^${tab.label}(?:\\s|$)`) }).first().click();
       await expect(page.getByText('فعال', { exact: true }).last()).toBeVisible();
-      await expect(page.getByRole('button', { name: tab.action })).toBeVisible();
+      await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'غیرفعال کردن', exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
     }
     await assertNoSeriousAxeViolations(page);
   });
@@ -218,7 +220,7 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
     await page.goto('/dashboard/sales/products/create');
     await expect(page.getByRole('heading', { name: 'ایجاد محصول سنگ' })).toBeVisible();
     await expect(page.getByRole('alert').filter({
-      hasText: 'دریافت گزینه‌های ساخت محصول انجام نشد. اتصال را بررسی کنید و دوباره تلاش کنید.'
+      hasText: /دریافت گزینه‌های ساخت محصول انجام نشد.*اتصال را بررسی کنید و دوباره تلاش کنید/
     })).toBeVisible();
     await expect(page.getByRole('button', { name: 'تلاش دوباره' })).toBeVisible();
     await expect(page.getByText('هیچ آیتمی موجود نیست')).toBeVisible();

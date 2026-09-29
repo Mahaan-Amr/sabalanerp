@@ -1,10 +1,10 @@
 'use client';
-import { ErpBadge, ErpField, ErpIconButton, ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
+import { ErpBadge, ErpField, ErpInput, ErpSelect } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaTools, FaCut, FaLayerGroup, FaRuler, FaShapes, FaPaintBrush, FaFileExcel } from 'react-icons/fa';
+import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaFileExcel } from 'react-icons/fa';
 import { dashboardAPI, servicesAPI } from '@/lib/api';
-import { ErpButton, ErpInlineState, ErpLoading, ErpPage, ErpQuickFilters, ErpSection } from '@/components/erp';
+import { ErpButton, ErpInlineState, ErpLoading, ErpQuickFilters, ErpListPage, ErpEmptyState, ErpSheet } from '@/components/erp';
 import CatalogExcelSyncModal from '@/components/CatalogExcelSyncModal';
 import { formatPrice } from '@/lib/numberFormat';
 
@@ -93,6 +93,10 @@ const mutationTab: Record<'service' | 'cutting-type' | 'sub-service' | 'stair-le
 
 const ServicesPage: React.FC = () => {
   const router = useRouter();
+  const [showInlineForm, setShowInlineForm] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<{ type: keyof typeof mutationTab; id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('services');
   const [services, setServices] = useState<Service[]>([]);
   const [cuttingTypes, setCuttingTypes] = useState<CuttingType[]>([]);
@@ -249,9 +253,6 @@ const ServicesPage: React.FC = () => {
 
   const handleDelete = async (type: 'service' | 'cutting-type' | 'sub-service' | 'stair-length' | 'layer-type' | 'stone-finishing', id: string) => {
     if (!can('DELETE', mutationTab[type])) return;
-    if (!confirm('آیا از حذف این مورد اطمینان دارید؟')) {
-      return;
-    }
 
     try {
       const response = type === 'service'
@@ -287,6 +288,8 @@ const ServicesPage: React.FC = () => {
   };
 
   const resetStairLengthForm = () => {
+    setShowInlineForm(false);
+    setFormError('');
     setEditingStairLengthId(null);
     setStairLengthForm({
       label: '',
@@ -298,6 +301,8 @@ const ServicesPage: React.FC = () => {
 
   const handleEditStairLength = (item: StairStandardLength) => {
     if (!can('EDIT', 'stair-lengths')) return;
+    setShowInlineForm(true);
+    setFormError('');
     setEditingStairLengthId(item.id);
     setStairLengthForm({
       id: item.id,
@@ -311,12 +316,12 @@ const ServicesPage: React.FC = () => {
   const handleSaveStairLength = async () => {
     if (!can(editingStairLengthId ? 'EDIT' : 'CREATE', 'stair-lengths')) return;
     if (!stairLengthForm.value?.trim()) {
-      alert('مقدار استاندارد را وارد کنید');
+      setFormError('مقدار استاندارد را وارد کنید');
       return;
     }
     const numericValue = parseFloat(stairLengthForm.value);
     if (isNaN(numericValue) || numericValue <= 0) {
-      alert('مقدار باید عددی مثبت باشد');
+      setFormError('مقدار باید عددی مثبت باشد');
       return;
     }
 
@@ -337,13 +342,15 @@ const ServicesPage: React.FC = () => {
       resetStairLengthForm();
     } catch (error) {
       console.error('Error saving stair standard length:', error);
-      alert('خطا در ذخیره طول استاندارد');
+      setFormError('خطا در ذخیره طول استاندارد');
     } finally {
       setSavingStairLength(false);
     }
   };
 
   const resetLayerTypeForm = () => {
+    setShowInlineForm(false);
+    setFormError('');
     setEditingLayerTypeId(null);
     setLayerTypeForm({
       name: '',
@@ -355,6 +362,8 @@ const ServicesPage: React.FC = () => {
 
   const handleEditLayerType = (item: LayerType) => {
     if (!can('EDIT', 'layer-types')) return;
+    setShowInlineForm(true);
+    setFormError('');
     setEditingLayerTypeId(item.id);
     setLayerTypeForm({
       id: item.id,
@@ -368,16 +377,16 @@ const ServicesPage: React.FC = () => {
   const handleSaveLayerType = async () => {
     if (!can(editingLayerTypeId ? 'EDIT' : 'CREATE', 'layer-types')) return;
     if (!layerTypeForm.name.trim()) {
-      alert('نام نوع لایه را وارد کنید');
+      setFormError('نام نوع لایه را وارد کنید');
       return;
     }
     if (!layerTypeForm.pricePerLayer.trim()) {
-      alert('قیمت هر لایه را وارد کنید');
+      setFormError('قیمت هر لایه را وارد کنید');
       return;
     }
     const numericValue = parseFloat(layerTypeForm.pricePerLayer);
     if (isNaN(numericValue) || numericValue <= 0) {
-      alert('قیمت باید عددی مثبت باشد');
+      setFormError('قیمت باید عددی مثبت باشد');
       return;
     }
 
@@ -400,7 +409,7 @@ const ServicesPage: React.FC = () => {
       resetLayerTypeForm();
     } catch (error) {
       console.error('Error saving layer type:', error);
-      alert('خطا در ذخیره نوع لایه');
+      setFormError('خطا در ذخیره نوع لایه');
     } finally {
       setSavingLayerType(false);
     }
@@ -455,643 +464,78 @@ const ServicesPage: React.FC = () => {
 
   const searchPlaceholder = `جستجو در ${tabLabels[activeTab]}...`;
 
-  if (loading) {
+  if (loading && !savingStairLength && !savingLayerType) {
     return <ErpLoading />;
   }
 
+  type CatalogRow = { id: string; title: string; code?: string; englishName?: string; description?: string; isActive: boolean; rate?: number | null; unit?: string; edit: () => void };
+  const rowsByTab: Record<ActiveTab, CatalogRow[]> = {
+    services: filteredServices.map(item => ({ ...item, title: item.namePersian, englishName: item.name, edit: () => router.push(`/dashboard/inventory/services/services/edit/${item.id}`) })),
+    'cutting-types': filteredCuttingTypes.map(item => ({ ...item, title: item.namePersian, englishName: item.name, rate: item.pricePerMeter, unit: 'متر طول', edit: () => router.push(`/dashboard/inventory/services/cutting-types/edit/${item.id}`) })),
+    'sub-services': filteredSubServices.map(item => ({ ...item, title: item.namePersian, englishName: item.name, rate: item.pricePerMeter, unit: item.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر طول', edit: () => router.push(`/dashboard/inventory/services/sub-services/edit/${item.id}`) })),
+    'stair-lengths': stairLengths.map(item => ({ ...item, title: item.label || 'طول استاندارد', unit: `${item.value.toLocaleString('fa-IR')} ${item.unit === 'cm' ? 'سانتی‌متر' : 'متر'}`, edit: () => handleEditStairLength(item) })),
+    'layer-types': filteredLayerTypes.map(item => ({ ...item, title: item.name, rate: item.pricePerLayer, unit: { set: 'هر مجموعه', physicalPiece: 'هر قطعه فیزیکی', meter: 'متر طول', squareMeter: 'مترمربع' }[item.calculationUnit || 'set'], edit: () => handleEditLayerType(item) })),
+    'stone-finishings': filteredStoneFinishings.map(item => ({ ...item, title: item.namePersian, englishName: item.name, rate: item.unitPrice ?? item.pricePerSquareMeter, unit: item.calculationBase === 'length' ? 'متر طول' : 'متر مربع', edit: () => router.push(`/dashboard/inventory/services/stone-finishings/edit/${item.id}`) })),
+  };
+  const typeByTab: Record<ActiveTab, keyof typeof mutationTab> = { services: 'service', 'cutting-types': 'cutting-type', 'sub-services': 'sub-service', 'stair-lengths': 'stair-length', 'layer-types': 'layer-type', 'stone-finishings': 'stone-finishing' };
+  const inline = activeTab === 'stair-lengths' || activeTab === 'layer-types';
+  const editingInline = activeTab === 'stair-lengths' ? Boolean(editingStairLengthId) : Boolean(editingLayerTypeId);
+  const savingInline = activeTab === 'stair-lengths' ? savingStairLength : savingLayerType;
+  const closeInline = () => activeTab === 'stair-lengths' ? resetStairLengthForm() : resetLayerTypeForm();
+  const addItem = () => {
+    if (inline) { closeInline(); setShowInlineForm(true); }
+    else router.push(`/dashboard/inventory/services/${activeTab}/create`);
+  };
   return (
-    <ErpPage
-      eyebrow="انبار"
-      title="مدیریت خدمات"
-      backHref="/dashboard/inventory"
-      metrics={[
-        { label: 'خدمات', value: services.length.toLocaleString('fa-IR'), icon: FaTools, tone: 'primary' },
-        { label: 'انواع ابزار', value: cuttingTypes.length.toLocaleString('fa-IR'), icon: FaCut, tone: 'info' },
-        { label: 'ابزارها', value: subServices.length.toLocaleString('fa-IR'), icon: FaLayerGroup, tone: 'success' },
-        { label: 'فرآوری سنگ', value: stoneFinishings.length.toLocaleString('fa-IR'), icon: FaPaintBrush, tone: 'neutral' },
+    <>
+    <ErpListPage<CatalogRow>
+      title="خدمات" eyebrow="انبار" backHref="/dashboard/inventory" rowActionMode="menu"
+      actions={[
+        ...(can('CREATE') || can('EDIT') ? [{ label: 'اکسل', icon: FaFileExcel, onClick: () => setShowExcelModal(true), tone: 'neutral' as const, variant: 'outline' as const }] : []),
+        ...(can('CREATE') ? [{ label: `افزودن ${tabLabels[activeTab]}`, icon: FaPlus, onClick: addItem }] : []),
       ]}
+      sectionNavigation={<ErpQuickFilters value={activeTab} onChange={value => { closeInline(); setActiveTab(value as ActiveTab); }} items={tabOptions} />}
+      filters={[{ id: 'search', label: 'جست‌وجو', type: 'search', value: searchTerm, onChange: setSearchTerm, placeholder: searchPlaceholder }]}
+      rows={can('VIEW') ? rowsByTab[activeTab] : []} rowKey={item => item.id}
+      isLoading={loading}
+      columns={[
+        { id: 'name', header: 'نام', priority: 'primary', cell: item => <div className="min-w-0"><p className="break-words font-semibold">{item.title}</p>{item.code && <p dir="ltr" className="mt-1 break-all text-xs text-[var(--sds-text-secondary)]">{item.code}</p>}</div> },
+        ...(!inline ? [{ id: 'englishName', header: 'نام انگلیسی', cell: (item: CatalogRow) => item.englishName || '—' }] : []),
+        ...(activeTab !== 'services' && activeTab !== 'stair-lengths' ? [{ id: 'rate', header: 'قیمت (تومان)', cell: (item: CatalogRow) => item.rate == null ? '—' : formatPrice(item.rate) }] : []),
+        ...(activeTab !== 'services' ? [{ id: 'unit', header: activeTab === 'stair-lengths' ? 'طول / واحد' : 'واحد محاسبه', cell: (item: CatalogRow) => item.unit || '—' }] : []),
+        { id: 'description', header: 'توضیحات', cell: item => <span className="break-words">{item.description || '—'}</span> },
+        { id: 'status', header: 'وضعیت', cell: item => <ErpBadge tone={item.isActive ? 'success' : 'neutral'}>{item.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge> },
+      ]}
+      rowActions={item => [
+        ...(can('EDIT') ? [{ label: 'ویرایش', icon: FaEdit, onClick: item.edit, tone: 'neutral' as const }] : []),
+        ...(can('TOGGLE') ? [{ label: item.isActive ? 'غیرفعال کردن' : 'فعال کردن', icon: item.isActive ? FaToggleOn : FaToggleOff, onClick: () => handleToggleStatus(typeByTab[activeTab], item.id), tone: 'neutral' as const }] : []),
+        ...(can('DELETE') ? [{ label: 'حذف', icon: FaTrash, onClick: () => setDeleteTarget({ type: typeByTab[activeTab], id: item.id, name: item.title }), tone: 'danger' as const }] : []),
+      ]}
+      emptyState={<ErpEmptyState title={can('VIEW') ? 'موردی یافت نشد' : 'دسترسی مشاهده این بخش را ندارید'} description={can('VIEW') ? 'عبارت جست‌وجو را تغییر دهید یا مورد جدید اضافه کنید.' : undefined} />}
     >
-      {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadData }} />}
-      <ErpSection title="بخش خدمات">
-        <ErpQuickFilters value={activeTab} onChange={(value) => setActiveTab(value as ActiveTab)} items={tabOptions} />
-      </ErpSection>
-
-      <ErpSection title={`فیلتر ${tabLabels[activeTab]}`}>
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <ErpField label="جست‌وجو">
-            <ErpInput
-              id="inventory-master-data-search"
-              type="text"
-              placeholder={searchPlaceholder}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </ErpField>
-          {(can('CREATE') || can('EDIT')) && <ErpButton
-            label="وارد/صادر کردن"
-            onClick={() => setShowExcelModal(true)}
-            icon={FaFileExcel}
-            variant="outline"
-            tone="neutral"
-          />}
-          {can('CREATE') && activeTab !== 'stair-lengths' && activeTab !== 'layer-types' && (
-            <ErpButton
-              label={`افزودن ${
-                activeTab === 'services'
-                  ? 'خدمت'
-                  : activeTab === 'cutting-types'
-                  ? 'نوع ابزار'
-                  : activeTab === 'sub-services'
-                  ? 'ابزار'
-                  : 'فرآوری'
-              }`}
-              onClick={() => router.push(`/dashboard/inventory/services/${activeTab}/create`)}
-              icon={FaPlus}
-              variant="solid"
-            />
-          )}
-        </div>
-      </ErpSection>
-
-      <ErpSection title={tabLabels[activeTab]}>
-          {activeTab === 'services' ? (
-            <div className="p-6">
-              <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
-                فهرست خدمات
-              </h2>
-
-              {filteredServices.length === 0 ? (
-                <div className="text-center py-8">
-                  <FaTools className="w-12 h-12 text-[var(--sds-text-muted)] mx-auto mb-4" />
-                  <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                    {searchTerm ? 'نتیجه‌ای یافت نشد' : 'هنوز خدمتی ثبت نشده است'}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">کد خدمت</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام فارسی</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام انگلیسی</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">توضیحات</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">وضعیت</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredServices.map((service) => (
-                        <tr key={service.id} className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] font-mono text-sm">
-                            {service.code}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                            {service.namePersian}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {service.name || '-'}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {service.description || '-'}
-                          </td>
-                          <td className="py-3 px-4"><ErpBadge tone={service.isActive ? 'success' : 'danger'}>{service.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <ErpIconButton label={service.isActive ? 'غیرفعال کردن خدمت' : 'فعال کردن خدمت'} icon={service.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('service', service.id)} tone={service.isActive ? 'warning' : 'success'} disabled={!can('TOGGLE', 'services')} />
-                              <ErpIconButton label="ویرایش خدمت" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/services/edit/${service.id}`)} disabled={!can('EDIT', 'services')} />
-                              <ErpIconButton label="حذف خدمت" icon={FaTrash} onClick={() => handleDelete('service', service.id)} tone="danger" disabled={!can('DELETE', 'services')} />
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ) : activeTab === 'cutting-types' ? (
-            <div className="p-6">
-              <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
-                فهرست انواع ابزار
-              </h2>
-
-              {filteredCuttingTypes.length === 0 ? (
-                <div className="text-center py-8">
-                  <FaCut className="w-12 h-12 text-[var(--sds-text-muted)] mx-auto mb-4" />
-                  <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                    {searchTerm ? 'نتیجه‌ای یافت نشد' : 'هنوز نوع ابزاری ثبت نشده است'}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">کد ابزار</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام فارسی</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام انگلیسی</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">توضیحات</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">وضعیت</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredCuttingTypes.map((cuttingType) => (
-                        <tr key={cuttingType.id} className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] font-mono text-sm">
-                            {cuttingType.code}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                            {cuttingType.namePersian}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {cuttingType.name || '-'}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {cuttingType.description || '-'}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                            {cuttingType.pricePerMeter
-                              ? formatPrice(cuttingType.pricePerMeter)
-                              : '-'}
-                          </td>
-                          <td className="py-3 px-4"><ErpBadge tone={cuttingType.isActive ? 'success' : 'danger'}>{cuttingType.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <ErpIconButton label={cuttingType.isActive ? 'غیرفعال کردن نوع ابزار' : 'فعال کردن نوع ابزار'} icon={cuttingType.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('cutting-type', cuttingType.id)} tone={cuttingType.isActive ? 'warning' : 'success'} disabled={!can('TOGGLE', 'cutting-types')} />
-                              <ErpIconButton label="ویرایش نوع ابزار" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/cutting-types/edit/${cuttingType.id}`)} disabled={!can('EDIT', 'cutting-types')} />
-                              <ErpIconButton label="حذف نوع ابزار" icon={FaTrash} onClick={() => handleDelete('cutting-type', cuttingType.id)} tone="danger" disabled={!can('DELETE', 'cutting-types')} />
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ) : activeTab === 'sub-services' ? (
-            <div className="p-6">
-              <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
-                فهرست ابزارها
-              </h2>
-
-              {filteredSubServices.length === 0 ? (
-                <div className="text-center py-8">
-                  <FaLayerGroup className="w-12 h-12 text-[var(--sds-text-muted)] mx-auto mb-4" />
-                  <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                    {searchTerm ? 'نتیجه‌ای یافت نشد' : 'هنوز ابزاری ثبت نشده است'}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">کد ابزار</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام فارسی</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام انگلیسی</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">توضیحات</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">قیمت/متر</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبنای محاسبه</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">وضعیت</th>
-                    <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredSubServices.map((subService) => (
-                        <tr key={subService.id} className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] font-mono text-sm">
-                            {subService.code}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                            {subService.namePersian}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {subService.name || '-'}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {subService.description || '-'}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                            {formatPrice(subService.pricePerMeter)}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {subService.calculationBase === 'length' ? 'طول' : 'متر مربع'}
-                          </td>
-                          <td className="py-3 px-4"><ErpBadge tone={subService.isActive ? 'success' : 'danger'}>{subService.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <ErpIconButton label={subService.isActive ? 'غیرفعال کردن ابزار' : 'فعال کردن ابزار'} icon={subService.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('sub-service', subService.id)} tone={subService.isActive ? 'warning' : 'success'} disabled={!can('TOGGLE', 'sub-services')} />
-                              <ErpIconButton label="ویرایش ابزار" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/sub-services/edit/${subService.id}`)} disabled={!can('EDIT', 'sub-services')} />
-                              <ErpIconButton label="حذف ابزار" icon={FaTrash} onClick={() => handleDelete('sub-service', subService.id)} tone="danger" disabled={!can('DELETE', 'sub-services')} />
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ) : activeTab === 'stair-lengths' ? (
-            <div className="p-6">
-              <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
-                طول استاندارد پله
-              </h2>
-              <div className="mb-6 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-1">
-                      برچسب (اختیاری)
-                    </label>
-                    <ErpInput
-                      type="text"
-                      value={stairLengthForm.label}
-                      onChange={(e) => setStairLengthForm(prev => ({ ...prev, label: e.target.value }))}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
-                      placeholder="مثال: کف پله ۱.۲۰"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-1">
-                      مقدار طول
-                    </label>
-                    <ErpInput
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={stairLengthForm.value}
-                      onChange={(e) => setStairLengthForm(prev => ({ ...prev, value: e.target.value }))}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
-                      placeholder="مثال: 1.20"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-1">
-                      واحد
-                    </label>
-                    <ErpSelect
-                      value={stairLengthForm.unit}
-                      onChange={(e) => setStairLengthForm(prev => ({ ...prev, unit: e.target.value as 'm' | 'cm' }))}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
-                    >
-                      <option value="m">متر</option>
-                      <option value="cm">سانتی‌متر</option>
-                    </ErpSelect>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-1">
-                      توضیحات
-                    </label>
-                    <ErpInput
-                      type="text"
-                      value={stairLengthForm.description}
-                      onChange={(e) => setStairLengthForm(prev => ({ ...prev, description: e.target.value }))}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
-                      placeholder="مثال: طول رایج برای کف پله"
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-3 mt-4">
-                  <ErpPressable type="submit"
-                    onClick={handleSaveStairLength}
-                    disabled={savingStairLength || !can(editingStairLengthId ? 'EDIT' : 'CREATE', 'stair-lengths')}
-                    className="rounded-lg bg-[var(--sds-accent)] px-6 py-2 text-[var(--sds-text-inverse)] transition-colors hover:bg-[var(--sds-accent-hover)] disabled:bg-[var(--sds-accent)]/60"
-                  >
-                    {savingStairLength ? 'در حال ذخیره...' : editingStairLengthId ? 'به‌روزرسانی طول' : 'افزودن طول'}
-                  </ErpPressable>
-                  {editingStairLengthId && (
-                    <ErpPressable type="submit"
-                      onClick={resetStairLengthForm}
-                      className="px-4 py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-                    >
-                      انصراف از ویرایش
-                    </ErpPressable>
-                  )}
-                  <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                    طول استاندارد برای محاسبات پله و قرارداد استفاده می‌شود.
-                  </p>
-                </div>
-              </div>
-              {stairLengths.length === 0 ? (
-                <div className="text-center py-8">
-                  <FaRuler className="w-12 h-12 text-[var(--sds-text-muted)] mx-auto mb-4" />
-                  <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                    {savingStairLength ? 'در حال ذخیره...' : 'طولی ثبت نشده است'}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">برچسب</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مقدار</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">توضیحات</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stairLengths.map((length) => (
-                        <tr key={length.id} className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                            {length.label || '-'}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] font-mono">
-                            {length.value.toLocaleString('fa-IR', { maximumFractionDigits: 2 })} {length.unit === 'm' ? 'متر' : 'سانتی‌متر'}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {length.description || '-'}
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              length.isActive
-                                ? 'bg-[var(--sds-success-surface)] dark:bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:text-[var(--sds-success)]'
-                                : 'bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:text-[var(--sds-danger)]'
-                            }`}>
-                              {length.isActive ? 'فعال' : 'غیرفعال'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center space-x-2 space-x-reverse">
-                              <ErpPressable type="submit"
-                                onClick={() => handleToggleStatus('stair-length', length.id)}
-                                disabled={!can('TOGGLE', 'stair-lengths')}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-                                title={length.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
-                              >
-                                {length.isActive ? (
-                                  <FaToggleOn className="w-4 h-4 text-[var(--sds-success)]" />
-                                ) : (
-                                  <FaToggleOff className="w-4 h-4 text-[var(--sds-danger)]" />
-                                )}
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => handleEditStairLength(length)}
-                                disabled={!can('EDIT', 'stair-lengths')}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-info)] dark:hover:text-[var(--sds-info)] transition-colors"
-                                title="ویرایش"
-                              >
-                                <FaEdit className="w-4 h-4" />
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => handleDelete('stair-length', length.id)}
-                                disabled={!can('DELETE', 'stair-lengths')}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors"
-                                title="حذف"
-                              >
-                                <FaTrash className="w-4 h-4" />
-                              </ErpPressable>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ) : activeTab === 'layer-types' ? (
-            <div className="p-6">
-              <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
-                نوع لایه
-              </h2>
-              <div className="mb-6 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-1">
-                      واحد محاسبه
-                    </label>
-                    <ErpSelect
-                      value={layerTypeForm.calculationUnit}
-                      onChange={(e) => setLayerTypeForm(prev => ({
-                        ...prev,
-                        calculationUnit: e.target.value as LayerType['calculationUnit']
-                      }))}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
-                    >
-                      <option value="set">هر مجموعه</option>
-                      <option value="physicalPiece">هر قطعه فیزیکی</option>
-                      <option value="meter">متر طول</option>
-                      <option value="squareMeter">مترمربع</option>
-                    </ErpSelect>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-1">
-                      نام نوع لایه
-                    </label>
-                    <ErpInput
-                      type="text"
-                      value={layerTypeForm.name}
-                      onChange={(e) => setLayerTypeForm(prev => ({ ...prev, name: e.target.value }))}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
-                      placeholder="مثال: لایه دوبل"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-1">
-                      قیمت هر لایه (تومان)
-                    </label>
-                    <ErpInput numberFormat="money"
-                      type="number"
-                      min="0"
-                      step="1000"
-                      value={layerTypeForm.pricePerLayer}
-                      onChange={(e) => setLayerTypeForm(prev => ({ ...prev, pricePerLayer: e.target.value }))}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
-                      placeholder="مثال: 50000"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-1">
-                      توضیحات
-                    </label>
-                    <ErpInput
-                      type="text"
-                      value={layerTypeForm.description}
-                      onChange={(e) => setLayerTypeForm(prev => ({ ...prev, description: e.target.value }))}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
-                      placeholder="مثال: هزینه اضافه برای هر لایه"
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-3 mt-4">
-                  <ErpPressable type="submit"
-                    onClick={handleSaveLayerType}
-                    disabled={savingLayerType || !can(editingLayerTypeId ? 'EDIT' : 'CREATE', 'layer-types')}
-                    className="rounded-lg bg-[var(--sds-accent)] px-6 py-2 text-[var(--sds-text-inverse)] transition-colors hover:bg-[var(--sds-accent-hover)] disabled:bg-[var(--sds-accent)]/60"
-                  >
-                    {savingLayerType ? 'در حال ذخیره...' : editingLayerTypeId ? 'به‌روزرسانی نوع لایه' : 'افزودن نوع لایه'}
-                  </ErpPressable>
-                  {editingLayerTypeId && (
-                    <ErpPressable type="submit"
-                      onClick={resetLayerTypeForm}
-                      className="px-4 py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-                    >
-                      انصراف از ویرایش
-                    </ErpPressable>
-                  )}
-                  <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                    نوع لایه برای محاسبه هزینه لایه‌های اضافه استفاده می‌شود.
-                  </p>
-                </div>
-              </div>
-              {filteredLayerTypes.length === 0 ? (
-                <div className="text-center py-8">
-                  <FaShapes className="w-12 h-12 text-[var(--sds-text-muted)] mx-auto mb-4" />
-                  <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                    {savingLayerType ? 'در حال ذخیره...' : 'نوع لایه‌ای ثبت نشده است'}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نرخ موجودی</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">واحد</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">توضیحات</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredLayerTypes.map((layerType) => (
-                        <tr key={layerType.id} className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                            {layerType.name}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] font-mono">
-                            {formatPrice(layerType.pricePerLayer)}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {{
-                              set: 'هر مجموعه',
-                              physicalPiece: 'هر قطعه فیزیکی',
-                              meter: 'متر طول',
-                              squareMeter: 'مترمربع'
-                            }[layerType.calculationUnit || 'set']}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {layerType.description || '-'}
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              layerType.isActive
-                                ? 'bg-[var(--sds-success-surface)] dark:bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:text-[var(--sds-success)]'
-                                : 'bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:text-[var(--sds-danger)]'
-                            }`}>
-                              {layerType.isActive ? 'فعال' : 'غیرفعال'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center space-x-2 space-x-reverse">
-                              <ErpPressable type="submit"
-                                onClick={() => handleToggleStatus('layer-type', layerType.id)}
-                                disabled={!can('TOGGLE', 'layer-types')}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-                                title={layerType.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
-                              >
-                                {layerType.isActive ? (
-                                  <FaToggleOn className="w-4 h-4 text-[var(--sds-success)]" />
-                                ) : (
-                                  <FaToggleOff className="w-4 h-4 text-[var(--sds-danger)]" />
-                                )}
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => handleEditLayerType(layerType)}
-                                disabled={!can('EDIT', 'layer-types')}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-info)] dark:hover:text-[var(--sds-info)] transition-colors"
-                                title="ویرایش"
-                              >
-                                <FaEdit className="w-4 h-4" />
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => handleDelete('layer-type', layerType.id)}
-                                disabled={!can('DELETE', 'layer-types')}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors"
-                                title="حذف"
-                              >
-                                <FaTrash className="w-4 h-4" />
-                              </ErpPressable>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="p-6">
-              <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
-                فرآوری سنگ
-              </h2>
-              {filteredStoneFinishings.length === 0 ? (
-                <div className="text-center py-8">
-                  <FaPaintBrush className="w-12 h-12 text-[var(--sds-text-muted)] mx-auto mb-4" />
-                  <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                    {searchTerm ? 'نتیجه‌ای یافت نشد' : 'فرآوری سنگی ثبت نشده است'}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">کد فرآوری سنگ</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام فارسی</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام انگلیسی</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">واحد</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">قیمت واحد</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">توضیحات</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredStoneFinishings.map((finishing) => (
-                        <tr key={finishing.id} className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] font-mono">
-                            {finishing.code}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                            {finishing.namePersian}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {finishing.name || '-'}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {finishing.calculationBase === 'length' ? 'متر طول' : 'متر مربع'}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] font-mono">
-                            {formatPrice(finishing.unitPrice ?? finishing.pricePerSquareMeter)}
-                          </td>
-                          <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                            {finishing.description || '-'}
-                          </td>
-                          <td className="py-3 px-4"><ErpBadge tone={finishing.isActive ? 'success' : 'danger'}>{finishing.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <ErpIconButton label={finishing.isActive ? 'غیرفعال کردن فرآوری' : 'فعال کردن فرآوری'} icon={finishing.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('stone-finishing', finishing.id)} tone={finishing.isActive ? 'warning' : 'success'} disabled={!can('TOGGLE', 'stone-finishings')} />
-                              <ErpIconButton label="ویرایش فرآوری" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/stone-finishings/edit/${finishing.id}`)} disabled={!can('EDIT', 'stone-finishings')} />
-                              <ErpIconButton label="حذف فرآوری" icon={FaTrash} onClick={() => handleDelete('stone-finishing', finishing.id)} tone="danger" disabled={!can('DELETE', 'stone-finishings')} />
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-      </ErpSection>
+      {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش مجدد', onClick: loadData }} />}
+    </ErpListPage>
+    <ErpSheet open={showInlineForm && inline} onClose={closeInline} title={`${editingInline ? 'ویرایش' : 'افزودن'} ${tabLabels[activeTab]}`} presentation="modal" size="wide" pending={savingInline}
+      footer={<div className="flex flex-wrap justify-end gap-3"><ErpButton label="انصراف" variant="outline" disabled={savingInline} onClick={closeInline} /><ErpButton label={savingInline ? 'در حال ذخیره…' : editingInline ? 'ذخیره تغییرات' : 'ثبت'} disabled={savingInline || !can(editingInline ? 'EDIT' : 'CREATE')} onClick={activeTab === 'stair-lengths' ? handleSaveStairLength : handleSaveLayerType} /></div>}
+    >
+      {formError && <ErpInlineState kind="error" title={formError} />}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {activeTab === 'stair-lengths' ? <>
+          <ErpField label="برچسب (اختیاری)"><ErpInput id="stair-label" value={stairLengthForm.label} onChange={event => setStairLengthForm(prev => ({ ...prev, label: event.target.value }))} /></ErpField>
+          <ErpField label="مقدار طول" required><ErpInput id="stair-value" type="number" step="0.01" min="0" value={stairLengthForm.value} onChange={event => setStairLengthForm(prev => ({ ...prev, value: event.target.value }))} /></ErpField>
+          <ErpField label="واحد"><ErpSelect id="stair-unit" value={stairLengthForm.unit} onChange={event => setStairLengthForm(prev => ({ ...prev, unit: event.target.value as 'm' | 'cm' }))}><option value="m">متر</option><option value="cm">سانتی‌متر</option></ErpSelect></ErpField>
+          <ErpField label="توضیحات"><ErpInput id="stair-description" value={stairLengthForm.description} onChange={event => setStairLengthForm(prev => ({ ...prev, description: event.target.value }))} /></ErpField>
+        </> : <>
+          <ErpField label="نام نوع لایه" required><ErpInput id="layer-name" value={layerTypeForm.name} onChange={event => setLayerTypeForm(prev => ({ ...prev, name: event.target.value }))} /></ErpField>
+          <ErpField label="قیمت هر لایه (تومان)" required><ErpInput id="layer-price" numberFormat="money" type="number" min="0" step="1000" value={layerTypeForm.pricePerLayer} onChange={event => setLayerTypeForm(prev => ({ ...prev, pricePerLayer: event.target.value }))} /></ErpField>
+          <ErpField label="واحد محاسبه"><ErpSelect id="layer-unit" value={layerTypeForm.calculationUnit} onChange={event => setLayerTypeForm(prev => ({ ...prev, calculationUnit: event.target.value as LayerType['calculationUnit'] }))}><option value="set">هر مجموعه</option><option value="physicalPiece">هر قطعه فیزیکی</option><option value="meter">متر طول</option><option value="squareMeter">مترمربع</option></ErpSelect></ErpField>
+          <ErpField label="توضیحات"><ErpInput id="layer-description" value={layerTypeForm.description} onChange={event => setLayerTypeForm(prev => ({ ...prev, description: event.target.value }))} /></ErpField>
+        </>}
+      </div>
+    </ErpSheet>
+    <ErpSheet open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} title="تأیید حذف" presentation="modal" pending={deleting}
+      footer={<div className="flex flex-wrap gap-3"><ErpButton label="حذف" tone="danger" disabled={deleting} onClick={async () => { if (!deleteTarget) return; setDeleting(true); try { await handleDelete(deleteTarget.type, deleteTarget.id); setDeleteTarget(null); } finally { setDeleting(false); } }} /><ErpButton label="انصراف" variant="outline" disabled={deleting} onClick={() => setDeleteTarget(null)} /></div>}
+    ><p>آیا از حذف «{deleteTarget?.name}» اطمینان دارید؟</p></ErpSheet>
 
       <CatalogExcelSyncModal
         isOpen={showExcelModal}
@@ -1104,7 +548,7 @@ const ServicesPage: React.FC = () => {
         applyImport={(importId) => servicesAPI.applyCatalogImport(activeTab, importId)}
         filenamePrefix={activeTab}
       />
-    </ErpPage>
+    </>
   );
 };
 

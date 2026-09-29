@@ -12,7 +12,7 @@ import {
   FaUserPlus,
   FaUsers,
 } from 'react-icons/fa';
-import { ErpNeumorphicActionGrid, ErpCard, ErpMetricGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, ErpTwoColumn, type ErpMetric } from '@/components/erp';
+import { ErpNeumorphicActionGrid, ErpCard, ErpMetricGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, type ErpMetric } from '@/components/erp';
 import { crmAPI } from '@/lib/api';
 import { crmPersonName, crmUserName, formatToman, isActionOverdue, potentialProjectStatusTone } from '@/lib/crmPipeline';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -134,12 +134,8 @@ export default function CrmWorkspacePage() {
         />
       </div>
 
-      <ErpTwoColumn balanced
-        main={
-          <>
-
-            <div>
-              <ErpSection title="پروژه‌های احتمالی اخیر" actions={[{ label: 'مشاهده همه', href: '/dashboard/crm/potential-projects', tone: 'neutral', variant: 'outline' }]}>
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
+<ErpSection title="پروژه‌های احتمالی اخیر" actions={[{ label: 'مشاهده همه', href: '/dashboard/crm/potential-projects', tone: 'neutral', variant: 'outline' }]}>
                 <div className="space-y-3">
                   {data.recentProjects.map((project) => (
                     <Link key={project.id} href={`/dashboard/crm/potential-projects/${project.id}`} className="block rounded-[var(--sds-radius-card)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]">
@@ -156,30 +152,21 @@ export default function CrmWorkspacePage() {
                   ))}
                 </div>
               </ErpSection>
-            </div>
-          </>
-        }
-        aside={
-          <>
-            <ErpSection title="وضعیت پروژه‌ها">
+<ErpSection title="وضعیت پروژه‌ها">
               <div className="space-y-2">
                 {data.projects.byStatus.map((row) => (
                   <ErpFieldView key={row.status} label={row.status} value={row.count.toLocaleString('fa-IR')} tone={potentialProjectStatusTone(row.status)} />
                 ))}
               </div>
             </ErpSection>
-
-            {data.permissions.canManage && (
-              <ErpSection title="نمای فروشنده‌ها">
+{data.permissions.canManage && (<ErpSection title="نمای فروشنده‌ها">
                 <div className="space-y-2">
                   {data.projects.bySeller.slice(0, 8).map((row) => (
                     <ErpFieldView key={row.sellerId} label={row.sellerName} value={`${row.count.toLocaleString('fa-IR')} پروژه فعال`} />
                   ))}
                 </div>
-              </ErpSection>
-            )}
-
-            <ErpSection title="آخرین رخدادها">
+              </ErpSection>)}
+<ErpSection title="آخرین رخدادها">
               <div className="space-y-3">
                 {data.recentTimeline.map((event) => (
                   <ErpCard key={event.id} className="p-3 text-sm">
@@ -189,9 +176,7 @@ export default function CrmWorkspacePage() {
                 ))}
               </div>
             </ErpSection>
-          </>
-        }
-      />
+      </div>
     </ErpPage>
   );
 }

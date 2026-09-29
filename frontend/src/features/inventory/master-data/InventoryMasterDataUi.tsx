@@ -35,7 +35,7 @@ export function InventoryMasterDataPage({
   return (
     <ErpPage title={title} description={description} backHref={backHref} actions={actions}>
       {error && <ErpInlineState kind="error" title={error} />}
-      <ErpSection className="mx-auto w-full max-w-2xl">{children}</ErpSection>
+      <ErpSection className="mx-auto w-full max-w-3xl">{children}</ErpSection>
     </ErpPage>
   );
 }
@@ -91,6 +91,7 @@ export function InventoryMasterDataForm({
   const priceError = price ? errors[price.key] || (price.legacyError ? errors[price.legacyError] : undefined) : undefined;
   return (
     <form onSubmit={onSubmit} className="space-y-6" data-inventory-master-data-kind={kind}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <ErpField label={copy.code} error={errors.code} required>
         <ErpInput id={`${kind}-code`} value={values.code} onChange={(event) => onChange({ code: event.target.value })} placeholder="کد یکتا" />
       </ErpField>
@@ -100,7 +101,7 @@ export function InventoryMasterDataForm({
       <ErpField label="نام انگلیسی">
         <ErpInput id={`${kind}-name`} value={values.name} onChange={(event) => onChange({ name: event.target.value })} placeholder={`${copy.entity} (English)`} />
       </ErpField>
-      <ErpField label="توضیحات">
+      <ErpField label="توضیحات" className="sm:col-span-2">
         <ErpTextarea id={`${kind}-description`} value={values.description} onChange={(event) => onChange({ description: event.target.value })} rows={3} />
       </ErpField>
       {price && (
@@ -121,6 +122,7 @@ export function InventoryMasterDataForm({
           </ErpSelect>
         </ErpField>
       )}
+      </div>
       <CatalogImagePicker images={values.images} onChange={(images) => onChange({ images })} />
       <ErpCheckbox label="فعال" checked={values.isActive} onChange={(event) => onChange({ isActive: event.target.checked })} />
       <InventoryMasterDataActions pending={pending} submitLabel={submitLabel} onCancel={onCancel} deleteAction={deleteAction} />
@@ -136,9 +138,9 @@ export function InventoryMasterDataActions({ pending, submitLabel, onCancel, del
 }) {
   return (
     <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-      {deleteAction ? <ErpButton label={deleteAction.label} onClick={deleteAction.onClick} tone="danger" variant="ghost" /> : <span />}
+      {deleteAction ? <ErpButton label={deleteAction.label} onClick={deleteAction.onClick} tone="danger" variant="ghost" disabled={pending} /> : <span />}
       <div className="flex flex-col-reverse gap-3 sm:flex-row">
-        <ErpButton label="انصراف" variant="ghost" tone="neutral" onClick={onCancel} />
+        <ErpButton label="انصراف" variant="ghost" tone="neutral" onClick={onCancel} disabled={pending} />
         <ErpButton type="submit" disabled={pending} label={pending ? 'در حال ذخیره…' : submitLabel} variant="solid" />
       </div>
     </div>

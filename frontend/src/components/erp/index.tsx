@@ -957,12 +957,23 @@ export function ErpLoading() {
   );
 }
 
-export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions, rowClassName, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
+function ErpListRowActions({ actions, mode }: { actions: ErpAction[]; mode: 'icons' | 'menu' }) {
+  if (mode === 'icons') return <>{actions.map((action) => <ErpIconButton key={action.label} {...action} />)}</>;
+  const [primary, ...additional] = actions;
+  return <>
+    {primary && <ErpButton {...primary} variant={primary.variant || 'outline'} />}
+    {additional.length > 0 && <ErpActionMenu label="سایر عملیات" actions={additional} portal />}
+  </>;
+}
+
+export function ErpListPage<T>({ rows, rowKey, columns, filters = [], sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
   rows: T[];
   rowKey: (row: T) => string;
   columns: ErpColumn<T>[];
   filters?: ErpFilter[];
+  sectionNavigation?: React.ReactNode;
   rowActions?: (row: T) => ErpAction[];
+  rowActionMode?: 'icons' | 'menu';
   rowClassName?: (row: T) => string;
   focusedRowKey?: string;
   emptyState?: React.ReactNode;
@@ -983,6 +994,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
 
   return (
     <ErpPage {...pageProps}>
+      {sectionNavigation}
       <ErpFilters filters={filters} />
       {children}
       <ErpSection>
@@ -1003,12 +1015,12 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                     {columns.filter((column) => column.priority !== 'hidden-mobile').map((column) => (
                       <div key={column.id} className={column.priority === 'primary' ? '' : 'flex items-start justify-between gap-3 text-sm'}>
                         {column.priority !== 'primary' && <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{column.mobileLabel || column.header}</span>}
-                        <div className={cx(column.priority === 'primary' ? '' : 'text-left text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]')}>{column.cell(row)}</div>
+                        <div className={cx('min-w-0 break-words', column.priority === 'primary' ? '' : 'text-left text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]')}>{column.cell(row)}</div>
                       </div>
                     ))}
                     {rowActions && (
                       <div className="flex flex-wrap gap-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-strong)]">
-                        {rowActions(row).map((action) => <ErpIconButton key={action.label} {...action} />)}
+                        <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
                       </div>
                     )}
                   </div>
@@ -1039,7 +1051,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                       {rowActions && (
                         <td className="px-3 py-4">
                           <div className="flex justify-end gap-1">
-                            {rowActions(row).map((action) => <ErpIconButton key={action.label} {...action} />)}
+                            <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
                           </div>
                         </td>
                       )}
@@ -1071,11 +1083,11 @@ export function ErpFieldView({ label, value, hint, tone = 'neutral' }: {
   );
 }
 
-export function ErpTwoColumn({ main, aside, balanced = false }: { main: React.ReactNode; aside: React.ReactNode; balanced?: boolean }) {
+export function ErpTwoColumn({ main, aside }: { main: React.ReactNode; aside: React.ReactNode }) {
   return (
-    <div className={balanced ? "grid grid-cols-1 gap-5 lg:grid-cols-2" : "grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]"}>
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]">
       <div className="space-y-5">{main}</div>
-      <aside className={balanced ? "space-y-5" : "space-y-5 lg:sticky lg:top-4 lg:self-start"}>{aside}</aside>
+      <aside className="space-y-5 lg:sticky lg:top-4 lg:self-start">{aside}</aside>
     </div>
   );
 }

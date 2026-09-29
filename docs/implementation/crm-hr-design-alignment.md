@@ -97,3 +97,24 @@ The failed journeys were:
 The Stair layer summary journey was interrupted when the broad run was stopped. Broad-run traces remain under `test-results/design-system`; final CRM evidence is under `test-results/crm-final`, and final shared-overlay evidence is under `test-results/crm-shared-final`. Generated runtime evidence is not a source artifact.
 
 These failures were not silently reclassified as passing, and unrelated workflows were not changed to make the CRM acceptance green. Their root causes beyond the observed local navigation failures remain outside this redesign's verification.
+
+## Approved simple CRM layout and Sales wizard revision
+
+The user approved the six visual boards in `output/crm-ui-proposal` before this revision was implemented. The boards cover all 13 CRM route templates. This revision uses the established ERP presentation, not new business behavior.
+
+- Customer creation now uses the actual Sales `WizardProgressBar` and `WizardNavigation` in CRM scope, with an explicit customer-specific accessible navigation label. Existing validation and handlers are retained. Ordinary customers keep three steps; Collaborative customers keep two. Contract return and Partner contexts retain their original presentation.
+- Customer detail now presents overview, projects, contacts, leads and contracts together as distinct sections in CRM scope. Supplemental contact, project-manager, brand, system and administrative information can be expanded. Shared consumers retain the tab presentation and original plain overview groups.
+- Customer forms have an 850px maximum reading width. Optional project-manager and marketer details use the canonical mounted `ErpDisclosure`, which retains children/draft values and opens for field errors. Customer edit supplemental and access groups use the same composition.
+- Potential-project and follow-up creation remain single-page forms, with one main save action and a cancel link. Supplemental potential-project fields can be expanded. No request payload, persisted field, validation, authorization or audit rule changed.
+- Dashboard supporting sections now form two balanced columns and stack on narrow screens. Existing counts, links, manager-only seller data and event histories are retained. Registry lists, project detail, shipment evidence, duties and overlays continue to use the platform presentation already established for these routes.
+
+### Revision acceptance
+
+- `design-system:check`: no new violations; no baseline regeneration.
+- Foundation: 25 passing; adoption: 14 passing.
+- Focused CRM workflow/presentation and duty/shipment behavior: 7 passing tests.
+- Frontend production build passed against delivery source.
+- Ten CRM browser journeys passed, including the Sales-style wizard's unchanged required-field validation, supplemental draft preservation across previous/next, exact request payload after closing supplemental fields, failed-save recovery, Collaborative two-step flow, Sales isolation, deletion safety, modal pending state, both themes, narrow-screen layout and route smoke checks. Evidence: `test-results/crm-approved`.
+- The final dashboard-only composition adjustment was rebuilt and its live backend/rendering and responsive/theme checks were rerun in `test-results/crm-approved-dashboard-final`.
+- A separate full TypeScript test-source check reported errors in Accounting, Partner Sales and Sales test fixtures outside this task; it was not reported as green. The production build and focused CRM checks passed. This revision did not rerun or claim success for the broader suite documented above.
+- The local frontend was rebuilt in the existing `sabalanerp-local` project. No backend/database change or production deployment was performed by this revision.

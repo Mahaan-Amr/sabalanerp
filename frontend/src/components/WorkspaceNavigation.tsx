@@ -40,6 +40,7 @@ import {
   FaTruck,
   FaBell,
   FaFingerprint,
+  FaTools,
 } from "react-icons/fa";
 import {
   useWorkspace,
@@ -62,6 +63,7 @@ interface NavigationItem {
   separatorBefore?: boolean;
   children?: NavigationItem[];
   badgeCount?: number;
+  unavailable?: boolean;
 }
 
 interface WorkspaceNavigationProps {
@@ -747,10 +749,12 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             icon: FaWarehouse,
             show: true,
           },
+          { name: 'Services', namePersian: 'خدمات', href: '/dashboard/inventory/services', icon: FaTools, show: true },
           {
             name: "Stock Movements",
             namePersian: "گردش موجودی",
             href: "/dashboard/inventory/movements",
+            unavailable: true,
             icon: FaClipboardList,
             show: true,
           },
@@ -758,6 +762,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             name: "Reports",
             namePersian: "گزارش‌های انبار",
             href: "/dashboard/inventory/reports",
+            unavailable: true,
             icon: FaChartLine,
             show: true,
           },
@@ -953,6 +958,10 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
                 ) : (
                   <FaChevronRight className="h-4 w-4 shrink-0" />
                 ))}
+            </ErpPressable>
+          ) : item.unavailable ? (
+            <ErpPressable disabled aria-label={`${item.namePersian}؛ به‌زودی`} variant="ghost" className="sds-dashboard-nav-control flex min-w-0 flex-1 items-center gap-3">
+              <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span><span className={labelClassName}>{item.namePersian}</span>{!collapsed && <span className="shrink-0 text-xs">به‌زودی</span>}
             </ErpPressable>
           ) : (
             <Link

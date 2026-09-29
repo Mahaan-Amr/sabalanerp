@@ -611,7 +611,7 @@ export default function CustomerDetailPage() {
           ]}
         />}
 
-        <div className="p-4 sm:p-6 space-y-6">
+        <div className={presentationScope === 'workspace' ? "p-4 sm:p-6 space-y-6" : "p-4 sm:p-6"}>
           {(presentationScope === 'workspace' || activeTab === 'overview') && (
             <div className="space-y-6">
               {/* Basic Information */}
@@ -646,7 +646,7 @@ export default function CustomerDetailPage() {
               </div>
 
               {/* Contact Information */}
-              <CustomerWorkflowSection title="اطلاعات تماس" collapsible>
+              <CustomerWorkflowSection title="اطلاعات تماس" collapsible legacyPlain>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   <ErpFieldView label="کد ملی" value={<>{customer.nationalCode || 'تعریف نشده'}</>} />
@@ -658,7 +658,7 @@ export default function CustomerDetailPage() {
               </CustomerWorkflowSection>
 
               {/* Project Management */}
-              <CustomerWorkflowSection title="مدیریت پروژه" collapsible>
+              <CustomerWorkflowSection title="مدیریت پروژه" collapsible legacyPlain>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <ErpFieldView label="نام مدیر پروژه" value={<>{customer.projectManagerName || 'تعریف نشده'}</>} />
@@ -667,7 +667,7 @@ export default function CustomerDetailPage() {
               </CustomerWorkflowSection>
 
               {/* Brand Information */}
-              <CustomerWorkflowSection title="اطلاعات برند" collapsible>
+              <CustomerWorkflowSection title="اطلاعات برند" collapsible legacyPlain>
 
                 <div className="grid grid-cols-1 gap-6">
                   <ErpFieldView label="نام برند" value={<>{customer.brandName || 'تعریف نشده'}</>} />
@@ -699,7 +699,7 @@ export default function CustomerDetailPage() {
               )}
 
               {/* System Information */}
-              <CustomerWorkflowSection title="اطلاعات سیستم" collapsible>
+              <CustomerWorkflowSection title="اطلاعات سیستم" collapsible legacyPlain>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <ErpFieldView label="تاریخ ایجاد" value={<>{formatDate(customer.createdAt)}</>} />

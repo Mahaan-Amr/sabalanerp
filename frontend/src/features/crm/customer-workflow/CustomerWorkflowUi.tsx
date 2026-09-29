@@ -31,7 +31,7 @@ export function CustomerWorkflowFeedback({ feedback }: { feedback: WorkflowFeedb
 
 export function CustomerWorkflowProgress({ current, total, label, steps }: WorkflowProgress) {
   const scope = useErpPresentationScope();
-  if (scope === 'workspace' && steps) return <WizardProgressBar currentStep={current} steps={steps} />;
+  if (scope === 'workspace' && steps) return <WizardProgressBar currentStep={current} steps={steps} ariaLabel="مراحل ثبت مشتری" />;
   const percent = Math.round((current / Math.max(total, 1)) * 100);
   return (
     <ErpCard className="p-4">
@@ -82,14 +82,16 @@ export function CustomerWorkflowPage({
   );
 }
 
-export function CustomerWorkflowSection({ title, description, children, className, collapsible, expanded }: React.PropsWithChildren<{
+export function CustomerWorkflowSection({ title, description, children, className, collapsible, expanded, legacyPlain }: React.PropsWithChildren<{
   title?: React.ReactNode;
   description?: React.ReactNode;
   className?: string;
   collapsible?: boolean;
   expanded?: boolean;
+  legacyPlain?: boolean;
 }>) {
   const scope = useErpPresentationScope();
+  if (legacyPlain && scope !== 'workspace') return <div><h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">{title}</h3>{children}</div>;
   if (collapsible && scope === 'workspace') return <ErpDisclosure title={title} expanded={expanded} className={className}>{description && <p className="sds-text-secondary mb-4 text-sm">{description}</p>}{children}</ErpDisclosure>;
   return <ErpSection title={title} description={description} className={className}>{children}</ErpSection>;
 }

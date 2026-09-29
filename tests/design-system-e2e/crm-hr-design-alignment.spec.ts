@@ -81,7 +81,7 @@ test('CRM customer modal retains focus and pending protection through failed sav
     return route.fulfill({ json: { success: true, data: {} } });
   });
   await page.goto('/dashboard/crm/customers/crm-parity');
-  await page.getByRole('button', { name: 'مخاطبین', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'مخاطبین', exact: true })).toBeVisible();
   const add = page.getByRole('button', { name: 'افزودن مخاطب', exact: true });
   await add.click();
   const dialog = page.getByRole('dialog', { name: 'افزودن مخاطب' });
@@ -123,7 +123,7 @@ test('CRM removal confirmations preserve cancellation, failure recovery, and the
     return route.fulfill({ json: { success: true, data: {} } });
   });
   await page.goto('/dashboard/crm/customers/crm-removal');
-  await page.getByRole('button', { name: 'مخاطبین', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'مخاطبین', exact: true })).toBeVisible();
   const remove = page.getByRole('button', { name: 'حذف مخاطب', exact: true });
   await remove.click();
   const dialog = page.getByRole('dialog', { name: 'حذف مخاطب', exact: true });
@@ -150,4 +150,67 @@ test('CRM removal confirmations preserve cancellation, failure recovery, and the
   await warning.getByRole('button', { name: 'حذف', exact: true }).click();
   await expect(removeProject).toHaveCount(0);
   await expect(page.getByRole('status').filter({ hasText: 'تغییرات ذخیره‌نشده' })).toBeVisible();
+});
+
+
+test('CRM Sales-style wizard preserves validation, supplementary draft fields and submission payload', async ({ page }, testInfo) => {
+  let submitted: any;
+  await page.route('**/api/crm/customers', async route => {
+    if (route.request().method() === 'POST') {
+      submitted = route.request().postDataJSON();
+      return route.fulfill({ status: 500, json: { success: false, error: 'خطای آزمایشی ذخیره' } });
+    }
+    return route.continue();
+  });
+  await page.route('**/api/crm/**duplicate**', route => route.fulfill({ json: { success: true, data: { matches: [] } } }));
+  await page.goto('/dashboard/crm/customers/create');
+  const progress = page.getByRole('navigation', { name: 'مراحل ثبت مشتری' });
+  await expect(progress.locator('ol li')).toHaveCount(3);
+  await expect(progress.locator('[aria-current="step"]')).toHaveAccessibleName('نوع مشتری');
+  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'نام الزامی است' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'نام', exact: true }).fill('مینا');
+  await page.getByRole('textbox', { name: 'نام خانوادگی', exact: true }).fill('آزمایشی');
+  await page.getByRole('textbox', { name: 'شماره تماس اول', exact: true }).fill('09129876543');
+  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('textbox', { name: 'نام پروژه', exact: true }).fill('پروژه نمونه');
+  await page.getByRole('textbox', { name: 'آدرس پروژه', exact: true }).fill('تهران');
+  const additional = page.getByRole('button', { name: /مدیر پروژه و بازاریاب/ });
+  await additional.click();
+  await page.getByRole('textbox', { name: 'نام مدیر پروژه', exact: true }).fill('حسین رضایی');
+  await additional.click();
+  await expect(page.getByRole('textbox', { name: 'نام مدیر پروژه', exact: true })).toBeHidden();
+  await page.getByRole('button', { name: 'قبلی', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'نام', exact: true })).toHaveValue('مینا');
+  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: 'ثبت مشتری', exact: true }).click();
+  await expect.poll(() => submitted?.projectAddresses?.[0]?.projectManagerName).toBe('حسین رضایی');
+  expect(submitted.phoneNumbers[0].number).toBe('09129876543');
+  expect(submitted.projectAddresses[0].projectName).toBe('پروژه نمونه');
+  await expect(page.getByRole('alert').filter({ hasText: 'خطای آزمایشی ذخیره' })).toBeVisible();
+  await additional.click();
+  await expect(page.getByRole('textbox', { name: 'نام مدیر پروژه', exact: true })).toHaveValue('حسین رضایی');
+  for (const theme of ['light', 'dark'] as const) {
+    await setTheme(page, theme);
+    await setViewportAndZoom(page, { width: 1440, height: 1000 });
+    await assertNoSeriousAxeViolations(page);
+    await page.screenshot({ path: testInfo.outputPath(`crm-wizard-${theme}.png`), fullPage: true });
+    await setViewportAndZoom(page, { width: 390, height: 844 });
+    await assertNoHorizontalOverflow(page);
+    await assertNoSeriousAxeViolations(page);
+    await page.screenshot({ path: testInfo.outputPath(`crm-wizard-mobile-${theme}.png`), fullPage: true });
+  }
+});
+
+test('CRM collaborative wizard retains two steps while Sales keeps the original customer flow', async ({ page }) => {
+  await page.goto('/dashboard/crm/customers/create?customerType=Collaborative');
+  await expect(page.getByRole('navigation', { name: 'مراحل ثبت مشتری' }).locator('ol li')).toHaveCount(2);
+  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'ثبت مشتری', exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'نام پروژه', exact: true })).toHaveCount(0);
+  await page.goto('/dashboard/crm/customers/create?returnTo=contract&step=3');
+  await expect(page.getByRole('progressbar', { name: 'نوع مشتری' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'مراحل ثبت مشتری' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'لغو و بازگشت به قرارداد' })).toBeVisible();
 });

@@ -8,7 +8,7 @@ Import from `@/components/erp`. Prefer a workflow-sized composition over rebuild
 
 | Need | Canonical interface |
 | --- | --- |
-| Workspace frame and hierarchy | `ErpWorkspacePage`, `ErpPage`, `ErpSection`, `ErpTwoColumn` |
+| Workspace frame and hierarchy | `ErpWorkspacePage`, `ErpPage`, `ErpSection`, `ErpTwoColumn` (`balanced` for equal columns), `ErpDisclosure` for mounted supplementary sections |
 | Workspace presentation through shared views and body portals | `ErpPresentationProvider scope="workspace"`; default consumers retain their existing presentation, and `ErpSheet` can explicitly override its scope |
 | Actions | `ErpButton`, `ErpPressable`, `ErpIconButton`, `ErpActionMenu`, `ErpActionGrid` |
 | Fields | `ErpField`, `ErpInput`, `ErpSelect`, `ErpSearchableSelect` for searchable option lists, `ErpTextarea`, `ErpCheckbox`, `ErpCheckboxControl` |

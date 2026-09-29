@@ -9,6 +9,7 @@ import { ErpEmptyState, ErpField, ErpInlineState, ErpLoading, ErpSegmentedContro
 import { FaChartLine } from 'react-icons/fa';
 import api from '@/lib/api';
 import { PartnerReportView, type PartnerReportPresentation } from './PartnerReportView';
+import { PartnerAccountRuntime } from '../account/PartnerAccountRuntime';
 
 const tehranDate = (date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 const jalaliRangeFrom = (months: number) => moment().subtract(months - 1, 'jMonth').startOf('jMonth').format('YYYY-MM-DD');
@@ -60,6 +61,15 @@ function parseReport(value: unknown): PartnerReportPresentation | null {
 }
 
 export function PartnerReportRuntime() {
+  const [section, setSection] = useState<'reports' | 'account'>('reports');
+  return <div className="space-y-4">
+    <ErpSegmentedControl value={section} onChange={setSection}
+      options={[{ value: 'reports', label: 'گزارش فروش' }, { value: 'account', label: 'حساب من با سبلان' }]} />
+    {section === 'account' ? <PartnerAccountRuntime /> : <PartnerSalesReportRuntime />}
+  </div>;
+}
+
+function PartnerSalesReportRuntime() {
   const router = useRouter();
   const [from, setFrom] = useState(initialFrom);
   const [to, setTo] = useState(tehranDate);

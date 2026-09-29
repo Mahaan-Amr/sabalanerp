@@ -163,3 +163,13 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
     }),
   };
 }
+
+/** Leave the wizard only after the server has acknowledged the completed draft. */
+export async function saveCompletedPartnerDraft(submission: ReturnType<typeof createPartnerCaseSubmission>,
+  intent: PartnerDraftIntent, onSaved: (caseId: string) => Promise<void> | void): Promise<boolean> {
+  await submission.submit(intent);
+  const saved = submission.getSnapshot();
+  if (saved.phase !== 'created' || !saved.case) return false;
+  await onSaved(saved.case.owner.caseId);
+  return true;
+}

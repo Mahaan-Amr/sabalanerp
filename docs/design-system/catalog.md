@@ -8,13 +8,18 @@ Import from `@/components/erp`. Prefer a workflow-sized composition over rebuild
 
 | Need | Canonical interface |
 | --- | --- |
-| Workspace frame and hierarchy | `ErpWorkspacePage`, `ErpPage`, `ErpSection`, `ErpTwoColumn` |
+| Workspace frame and hierarchy | `ErpWorkspacePage`, `ErpPage`, `ErpSection`, `ErpTwoColumn`, `ErpDisclosure` for mounted supplementary sections |
+| Workspace presentation through shared views and body portals | `ErpPresentationProvider scope="workspace"`; default consumers retain their existing presentation, and `ErpSheet` can explicitly override its scope |
 | Actions | `ErpButton`, `ErpPressable`, `ErpIconButton`, `ErpActionMenu`, `ErpActionGrid` |
 | Fields | `ErpField`, `ErpInput`, `ErpSelect`, `ErpSearchableSelect` for searchable option lists, `ErpTextarea`, `ErpCheckbox`, `ErpCheckboxControl` |
 | Choice | `ErpSegmentedControl`; focused product compositions may use `CompactSegmentedControl`, `CompactSwitch`, and `CompactUnitSwitch` |
 | Data and summaries | `ErpListPage`, `ErpCard`, `ErpMetricGrid`, `ErpSummaryGrid`, `ErpFieldView`, `ErpStatusSummary` |
 | Feedback | `ErpInlineState`, `ErpEmptyState`, `ErpLoading`, `ErpSkeleton`, `ErpStatus`, `ErpBadge` |
 | Focused work | `ErpSheet` with `presentation="modal"` for dialogs and `pending` for protected actions; product configuration uses `CentralProductModalShell` |
+
+`ErpListPage` supports `sectionNavigation` before filters and `rowActionMode="menu"` for a labeled primary row action with secondary actions in the canonical portal menu. Its default icon presentation remains available.
+
+`ErpActionMenu portal` escapes scrolling containers on desktop and uses the canonical focused sheet on mobile. `ErpNeumorphicWorkflowProgress` steps may specify `disabled` and `disabledReason` to preserve workflow prerequisites. `ErpSummaryGrid` supports two, three or four columns.
 
 If a canonical interface owns behavior, do not reproduce that behavior locally. Add a generic capability to the canonical module when it benefits multiple domains. Keep domain compositions close to their feature.
 

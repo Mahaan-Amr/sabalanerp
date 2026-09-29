@@ -1,8 +1,8 @@
 'use client';
-import { ErpInput, ErpSelect, ErpTextarea } from '@/components/erp';
+import { ErpInput, ErpSelect, ErpTextarea, ErpSheet, ErpField } from '@/components/erp';
 import React, { useEffect, useState } from 'react';
-import { FaBoxes, FaCog, FaEdit, FaEye, FaPlus, FaToggleOff, FaToggleOn, FaTrash, FaWarehouse } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpEmptyState, ErpIconButton, ErpListPage, ErpLoading, ErpQuickFilters } from '@/components/erp';
+import { FaBoxes, FaCog, FaEdit, FaPlus, FaToggleOff, FaToggleOn, FaTrash, FaWarehouse } from 'react-icons/fa';
+import { ErpBadge, ErpButton, ErpEmptyState, ErpListPage, ErpLoading, ErpQuickFilters } from '@/components/erp';
 import { dashboardAPI, inventoryAPI } from '@/lib/api';
 import SuccessModal from '@/components/SuccessModal';
 import ErrorModal from '@/components/ErrorModal';
@@ -80,7 +80,7 @@ const createSections = (): MasterDataSection[] => [
   { id: 'colors', title: 'Colors', titlePersian: 'رنگ/طرح', description: 'مدیریت رنگ ها و طرح های سنگ', icon: FaCog, apiMethod: inventoryAPI.getColors, createMethod: inventoryAPI.createColor, updateMethod: inventoryAPI.updateColor, deleteMethod: inventoryAPI.deleteColor, canView: false, canCreate: false, canEdit: false, canDelete: false, fields: baseFields },
 ];
 
-const inputClass = 'min-h-11 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
+
 const sectionActionKey: Record<string, string> = {
   'cut-types': 'CUT_TYPES',
   'stone-materials': 'STONE_MATERIALS',
@@ -92,6 +92,11 @@ const sectionActionKey: Record<string, string> = {
 };
 
 const MasterDataManagement: React.FC = () => {
+  const [deleteItem, setDeleteItem] = useState<MasterDataItem | null>(null);
+  useEffect(() => {
+    const section = new URLSearchParams(window.location.search).get('section');
+    if (section && createSections().some(item => item.id === section)) setActiveSection(section);
+  }, []);
   const [initialLoading, setInitialLoading] = useState(true);
   const [actionAvailability, setActionAvailability] = useState<any>({});
   const [activeSection, setActiveSection] = useState<string>('cut-types');
@@ -192,7 +197,6 @@ const MasterDataManagement: React.FC = () => {
   };
 
   const handleDelete = async (item: MasterDataItem) => {
-    if (!confirm(`آیا از حذف "${item.namePersian}" مطمئن هستید؟`)) return;
     const section = masterDataSections.find((item) => item.id === activeSection);
     if (!section || !section.canDelete) return;
 
@@ -284,21 +288,25 @@ const MasterDataManagement: React.FC = () => {
     <>
       <ErpListPage
         eyebrow="انبار"
-        title="مدیریت اطلاعات پایه"
-        description="مدیریت داده های پایه انبار، سنگ، برش و فرآوری با دسترسی های کنترل شده."
+        title="داده‌های پایه"
         backHref="/dashboard/inventory"
         actions={currentSection?.canCreate ? [{ label: 'ایجاد مورد جدید', onClick: handleCreate, icon: FaPlus, tone: 'primary', variant: 'solid' }] : []}
-        metrics={[
-          { label: 'بخش ها', value: masterDataSections.length.toLocaleString('fa-IR'), icon: FaCog, tone: 'primary' },
-          { label: 'دارای دسترسی', value: masterDataSections.filter((section) => section.canView).length.toLocaleString('fa-IR'), icon: FaEye, tone: 'success' },
-          { label: 'رکوردهای بخش', value: data.length.toLocaleString('fa-IR'), icon: FaBoxes, tone: 'info' },
-          { label: 'نتیجه جستجو', value: filteredData.length.toLocaleString('fa-IR'), icon: FaWarehouse, tone: 'neutral' },
-        ]}
         filters={[
           { id: 'search', label: 'جستجو', type: 'search', value: searchTerm, placeholder: 'جستجو بر اساس کد، نام فارسی یا نام انگلیسی...', onChange: setSearchTerm },
         ]}
+        sectionNavigation={<ErpQuickFilters
+          value={activeSection}
+          onChange={handleSectionChange}
+          items={masterDataSections.map((section) => ({
+            id: section.id,
+            label: section.titlePersian,
+            value: section.id,
+            tone: section.canView ? 'primary' : 'neutral',
+          }))}
+        />}
         rows={currentSection?.canView ? filteredData : []}
         rowKey={(item) => item.id}
+        rowActionMode="menu"
         isLoading={dataLoading}
         columns={[
           {
@@ -323,25 +331,13 @@ const MasterDataManagement: React.FC = () => {
             id: 'status',
             header: 'وضعیت',
             mobileLabel: 'وضعیت',
-            cell: (item) => (
-              <div className="flex items-center gap-2">
-                <ErpBadge tone={item.isActive ? 'success' : 'danger'}>{item.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>
-                {currentSection?.canEdit && (
-                  <ErpIconButton
-                    label={item.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
-                    onClick={() => handleToggleStatus(item)}
-                    icon={item.isActive ? FaToggleOn : FaToggleOff}
-                    tone={item.isActive ? 'success' : 'danger'}
-                    disabled={loading}
-                  />
-                )}
-              </div>
-            ),
+            cell: (item) => <ErpBadge tone={item.isActive ? 'success' : 'neutral'}>{item.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>,
           },
         ]}
         rowActions={(item) => [
           ...(currentSection?.canEdit ? [{ label: 'ویرایش', onClick: () => handleEdit(item), icon: FaEdit, tone: 'info' as const }] : []),
-          ...(currentSection?.canDelete ? [{ label: 'حذف', onClick: () => handleDelete(item), icon: FaTrash, tone: 'danger' as const }] : []),
+          ...(currentSection?.canEdit ? [{ label: item.isActive ? 'غیرفعال کردن' : 'فعال کردن', onClick: () => handleToggleStatus(item), icon: item.isActive ? FaToggleOn : FaToggleOff, disabled: loading, tone: 'neutral' as const }] : []),
+          ...(currentSection?.canDelete ? [{ label: 'حذف', onClick: () => setDeleteItem(item), icon: FaTrash, tone: 'danger' as const }] : []),
         ]}
         emptyState={
           currentSection?.canView ? (
@@ -356,84 +352,24 @@ const MasterDataManagement: React.FC = () => {
           )
         }
       >
-        <ErpQuickFilters
-          value={activeSection}
-          onChange={handleSectionChange}
-          items={masterDataSections.map((section) => ({
-            id: section.id,
-            label: section.titlePersian,
-            value: section.id,
-            count: section.canView ? 1 : 0,
-            tone: section.canView ? 'primary' : 'neutral',
-          }))}
-        />
       </ErpListPage>
 
-      {showCreateModal && currentSection && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-4">
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-6 shadow-xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-            <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-              {editingItem ? 'ویرایش' : 'ایجاد'} {currentSection.titlePersian}
-            </h3>
-            <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-              اطلاعات مورد را وارد کنید و سپس ذخیره کنید.
-            </p>
-
-            <div className="mt-5 space-y-4">
-              {currentSection.fields.map((field) => (
-                <div key={field.key}>
-                  <label htmlFor={field.key} className="mb-1 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
-                    {field.label}
-                    {field.required && <span className="mr-1 text-[var(--sds-danger)]">*</span>}
-                  </label>
-                  {field.type === 'textarea' ? (
-                    <ErpTextarea
-                      id={field.key}
-                      value={formData[field.key] || ''}
-                      onChange={(event) => setFormData({ ...formData, [field.key]: event.target.value })}
-                      className={inputClass}
-                      placeholder={`${field.label} را وارد کنید`}
-                      rows={3}
-                    />
-                  ) : field.type === 'select' ? (
-                    <ErpSelect
-                      id={field.key}
-                      value={formData[field.key] !== undefined ? String(formData[field.key]) : ''}
-                      onChange={(event) => {
-                        const value = field.key === 'isActive' ? event.target.value === 'true' : event.target.value;
-                        setFormData({ ...formData, [field.key]: value });
-                      }}
-                      className={inputClass}
-                    >
-                      <option value="">انتخاب کنید</option>
-                      {field.options?.map((option) => (
-                        <option key={typeof option === 'string' ? option : String(option.value)} value={typeof option === 'string' ? option : String(option.value)}>
-                          {typeof option === 'string' ? option : option.label}
-                        </option>
-                      ))}
-                    </ErpSelect>
-                  ) : (
-                    <ErpInput
-                      id={field.key}
-                      type={field.type}
-                      value={formData[field.key] || ''}
-                      onChange={(event) => setFormData({ ...formData, [field.key]: event.target.value })}
-                      className={inputClass}
-                      placeholder={`${field.label} را وارد کنید`}
-                    />
-                  )}
-                  {formErrors[field.key] && <p className="mt-1 text-sm text-[var(--sds-danger)]">{formErrors[field.key]}</p>}
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-              <ErpButton label="بازگشت" onClick={() => { setShowCreateModal(false); setFormData({}); setFormErrors({}); setEditingItem(null); }} tone="neutral" variant="outline" />
-              <ErpButton label={loading ? 'در حال ذخیره...' : editingItem ? 'ذخیره تغییرات' : 'ایجاد'} onClick={handleSave} tone="primary" variant="solid" disabled={loading} />
-            </div>
-          </div>
+      {currentSection && <ErpSheet open={showCreateModal} onClose={() => { setShowCreateModal(false); setFormData({}); setFormErrors({}); setEditingItem(null); }} presentation="modal" size="wide" pending={loading}
+        title={`${editingItem ? 'ویرایش' : 'افزودن'} ${currentSection.titlePersian}`}
+        footer={<div className="flex flex-wrap justify-end gap-3"><ErpButton label="انصراف" tone="neutral" variant="outline" disabled={loading} onClick={() => { setShowCreateModal(false); setEditingItem(null); setFormData({}); setFormErrors({}); }} /><ErpButton label={loading ? 'در حال ذخیره…' : editingItem ? 'ذخیره تغییرات' : 'ثبت'} onClick={handleSave} disabled={loading} /></div>}
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {currentSection.fields.map((field) => <ErpField key={field.key} label={field.label} required={field.required} error={formErrors[field.key]} className={field.type === 'textarea' ? 'sm:col-span-2' : undefined}>
+            {field.type === 'textarea' ? <ErpTextarea id={field.key} value={formData[field.key] || ''} onChange={event => setFormData({ ...formData, [field.key]: event.target.value })} rows={3} />
+            : field.type === 'select' ? <ErpSelect id={field.key} value={formData[field.key] !== undefined ? String(formData[field.key]) : ''} onChange={event => setFormData({ ...formData, [field.key]: field.key === 'isActive' ? event.target.value === 'true' : event.target.value })}>
+              <option value="">انتخاب کنید</option>{field.options?.map(option => <option key={typeof option === 'string' ? option : String(option.value)} value={typeof option === 'string' ? option : String(option.value)}>{typeof option === 'string' ? option : option.label}</option>)}
+            </ErpSelect> : <ErpInput id={field.key} type={field.type} value={formData[field.key] || ''} onChange={event => setFormData({ ...formData, [field.key]: event.target.value })} />}
+          </ErpField>)}
         </div>
-      )}
+      </ErpSheet>}
+      <ErpSheet open={Boolean(deleteItem)} onClose={() => setDeleteItem(null)} presentation="modal" title="غیرفعال‌سازی داده پایه" pending={loading}
+        footer={<div className="flex flex-wrap gap-3"><ErpButton label="تأیید غیرفعال‌سازی" tone="danger" disabled={loading} onClick={async () => { if (deleteItem) { await handleDelete(deleteItem); setDeleteItem(null); } }} /><ErpButton label="انصراف" variant="outline" disabled={loading} onClick={() => setDeleteItem(null)} /></div>}
+      ><p>«{deleteItem?.namePersian}» غیرفعال می‌شود؛ سوابق مرتبط حفظ خواهند شد.</p></ErpSheet>
 
       <SuccessModal isOpen={showSuccessModal} onClose={() => setShowSuccessModal(false)} title="عملیات موفق" message={modalMessage} buttonText="باشه" autoClose autoCloseDelay={2000} />
       <ErrorModal isOpen={showErrorModal} onClose={() => setShowErrorModal(false)} title="خطا" message={modalMessage} details={modalDetails} buttonText="باشه" />

@@ -127,7 +127,7 @@ test('Partner creation consumes the shared eight-step date, customer, and projec
   await assertNoSeriousAxeViolations(page);
 });
 
-test('a resumed Partner inquiry stays inside the same seven-step contract wizard', async ({ page }) => {
+test('a resumed Partner inquiry stays inside the shared eight-step contract wizard', async ({ page }) => {
   await loginAsAdmin(page);
   await page.addInitScript(() => {
     window.localStorage.setItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e', JSON.stringify({
@@ -165,45 +165,34 @@ test('a resumed Partner inquiry stays inside the same seven-step contract wizard
     contentType: 'application/json',
     body: JSON.stringify({ code: 'STATE_CONFLICT', status: 409, message: 'fixture inquiry remains pending' }),
   }));
-  await page.route('**/api/crm/partner/customers', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ success: true, data: {
-      customer: { customerId: 'partner-customer-created', displayName: 'مشتری تازه همکار' },
-    } }),
-  }));
-
   await page.goto('/dashboard/sales/contracts/create');
   await setTheme(page, 'light');
   const workflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
   await expect(workflow.getByRole('heading', { name: 'ایجاد فروش همکار', exact: true })).toBeVisible();
-  await expect(workflow.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' }).getByRole('button')).toHaveCount(7);
+  await expect(workflow.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' }).getByRole('button')).toHaveCount(8);
   await expect(workflow).toHaveCSS('direction', 'rtl');
   const previous = workflow.getByRole('button', { name: 'قبلی', exact: true });
   await expect(previous).toBeEnabled();
   await previous.click();
   await expect(workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ })).toHaveAttribute('aria-pressed', 'true');
   await previous.click();
-  await workflow.getByRole('button', { name: 'ایجاد مشتری', exact: true }).first().click();
-  await page.getByRole('textbox', { name: 'نام', exact: true }).fill('مشتری');
-  await page.getByRole('textbox', { name: 'نام خانوادگی', exact: true }).fill('تازه');
-  await page.getByRole('textbox', { name: 'شماره تماس', exact: true }).fill('09121111111');
-  await page.getByRole('textbox', { name: 'نشانی تحویل', exact: true }).fill('تهران');
-  await page.getByRole('button', { name: 'ثبت مشتری و ادامه', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => JSON.parse(window.localStorage
-    .getItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e') || '{}')))
-    .toMatchObject({ customerId: 'partner-customer-created' });
+  // Customer creation uses the shared CRM route; its cancellation/return is
+  // exercised separately below. This test keeps the resumed inquiry identity.
+  await expect(workflow.getByRole('button', { name: 'ایجاد مشتری', exact: true }).first()).toBeVisible();
   await workflow.getByRole('button', { name: /مشتری همکار آزمایشی/ }).click();
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
   await workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ }).click();
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
-  await expect(workflow.getByText('مشخصات فنی ذخیره‌شده برای ۰ ردیف', { exact: true })).toBeVisible();
+  await expect(workflow.getByText('جستجوی محصول', { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => JSON.parse(window.localStorage
+    .getItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e') || '{}')))
+    .toMatchObject({ inquiryId: 'partner-inquiry-e2e', customerId: 'partner-customer-e2e', projectId: 'partner-project-e2e' });
   await setTheme(page, 'dark');
   await setViewportAndZoom(page, { width: 390, height: 844 });
   expect(await workflow.evaluate(element => element.getBoundingClientRect().right <= document.documentElement.clientWidth + 1)).toBe(true);
 });
 
-test('the independent price inquiry remains outside customer and project selection', async ({ page }) => {
+test('a new price inquiry directs the Partner into numbered contract preparation', async ({ page }) => {
   await loginAsAdmin(page);
   await page.route('**/api/partner/cases/creation-context', route => route.fulfill({
     status: 200,
@@ -229,15 +218,26 @@ test('the independent price inquiry remains outside customer and project selecti
   });
 
   await page.goto('/dashboard/sales/partner-inquiries?newInquiry=1');
-  await expect(page.getByRole('heading', { name: 'استعلام قیمت جدید', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'استعلام‌های قیمت', exact: true })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' })).toHaveCount(0);
   await expect(page.getByRole('searchbox', { name: 'جستجوی مشتری' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /پروژه/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'ایجاد قرارداد فروش همکار', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard\/sales\/contracts\/create$/);
+  await expect(page.getByRole('heading', { name: 'ایجاد فروش همکار', exact: true })).toBeVisible();
 });
 
 
-test('cancelling Partner customer creation returns to customer selection without restoring another inquiry', async ({ page }) => {
+for (const expireLease of [false, true]) test(expireLease
+  ? 'Partner product editing retains the draft after its lease expires during configuration'
+  : 'cancelling Partner customer creation returns to customer selection without restoring another inquiry', async ({ page }) => {
   await loginAsAdmin(page);
+  let leaseExpired = false;
+  let leaseToken = 'return-lease';
+  let recoveryRevision = 0;
+  let checkpointAttempts = 0;
+  const leaseRequests: Array<{ recoveryId: string; takeover: boolean }> = [];
+  const checkpoints: Array<{ recoveryId: string; leaseToken: string; draft: { inputRevision: number } }> = [];
   await page.addInitScript(() => {
     localStorage.setItem('contractWizardState', JSON.stringify({ currentStep: 4 }));
     localStorage.setItem('partner-creation-runtime:partner-return-e2e:old-inquiry', JSON.stringify({
@@ -273,9 +273,22 @@ test('cancelling Partner customer creation returns to customer selection without
     } }) }));
   await page.route('**/api/partner/technical/recoveries/acquire', route => {
     const request = route.request().postDataJSON();
+    leaseRequests.push(request);
+    if (leaseExpired) { leaseToken = 'renewed-return-lease'; leaseExpired = false; }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
       schemaVersion: 1, recoveryId: request.recoveryId, browserSessionId: request.browserSessionId,
-      leaseToken: 'return-lease', baseRevision: 0, updatedAt: new Date().toISOString(), takenOver: false,
+      leaseToken, baseRevision: 0, updatedAt: new Date().toISOString(), takenOver: false,
+    } }) });
+  });
+  await page.route('**/api/partner/technical/recoveries/checkpoint', route => {
+    const request = route.request().postDataJSON();
+    checkpointAttempts++;
+    if (leaseExpired || request.leaseToken !== leaseToken) return route.fulfill({ status: 403,
+      contentType: 'application/json', body: JSON.stringify({ code: 'FORBIDDEN' }) });
+    checkpoints.push(request);
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
+      schemaVersion: 1, recoveryId: request.recoveryId, recoveryRevision: ++recoveryRevision,
+      inputRevision: request.draft.inputRevision, updatedAt: new Date().toISOString(), replayed: false,
     } }) });
   });
   await page.route('**/api/partner/technical/recoveries/read', route => route.fulfill({ status: 200,
@@ -305,17 +318,120 @@ test('cancelling Partner customer creation returns to customer selection without
   await expect(mother).toHaveValue('');
   await expect(mother).toHaveAttribute('placeholder', '200');
   await page.locator('label').filter({ has: page.getByRole('radiogroup', { name: 'واحد عمق', exact: true }) }).getByRole('textbox').fill('30');
+  const stairCount = page.getByRole('textbox', { name: 'تعداد کل پله', exact: true });
+  await stairCount.fill('50');
+  await page.getByRole('button', { name: 'افزودن ابزار', exact: true }).first().click();
+  await page.getByRole('button', { name: /ابزار آزمایشی/ }).click();
+  await page.locator('#product-operations').getByRole('button', { name: 'جلو', exact: true }).click();
   await page.getByRole('button', { name: 'افزودن لایه', exact: true }).click();
   await page.getByRole('textbox', { name: 'تعداد لایه برای هر پله', exact: true }).fill('1');
   await page.locator('label').filter({ has: page.getByRole('radiogroup', { name: 'واحد عرض لایه', exact: true }) }).getByRole('textbox').fill('5');
-  await page.getByRole('button', { name: 'جلو', exact: true }).click();
+  const layerSides = page.getByRole('group', { name: 'سمت‌های لایه', exact: true });
+  await layerSides.getByRole('button', { name: 'دو طول', exact: true }).click();
+  for (const label of ['جلو', 'عقب']) await expect(layerSides.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(layerSides.getByRole('button', { name: 'چپ', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await layerSides.getByRole('button', { name: 'محیط کامل', exact: true }).click();
+  for (const label of ['جلو', 'عقب', 'چپ', 'راست']) await expect(layerSides.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(layerSides.getByRole('button', { name: 'دو طول', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await layerSides.getByRole('button', { name: 'محیط کامل', exact: true }).click();
+  await page.getByRole('button', { name: 'جلو', exact: true }).last().click();
   await expect(page.getByRole('button', { name: 'افزودن ابزار', exact: true })).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'افزودن پرداخت', exact: true })).toHaveCount(2);
   await page.getByRole('button', { name: 'افزودن ابزار', exact: true }).last().click();
   await page.getByRole('button', { name: /ابزار آزمایشی/ }).click();
   await page.getByRole('button', { name: 'افزودن پرداخت', exact: true }).last().click();
   await page.getByRole('button', { name: /پرداخت آزمایشی/ }).click();
-  await expect(page.getByText('ابزار آزمایشی', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'جلو', exact: true }).last().click();
+  await expect(page.getByText('ابزار آزمایشی', { exact: true }).last()).toBeVisible();
   await expect(page.getByText('پرداخت آزمایشی', { exact: true })).toBeVisible();
+  // Multiple selected layer sides expose one editor and retain each side's intent.
+  await page.getByRole('group', { name: 'سمت‌های لایه', exact: true }).getByRole('button', { name: 'عقب', exact: true }).click();
+  const sideChooser = page.getByRole('radiogroup', { name: 'اعمال روی', exact: true });
+  await expect(sideChooser).toBeVisible();
+  await sideChooser.getByRole('radio', { name: 'عقب', exact: true }).click();
+  await expect(page.getByText('پرداخت آزمایشی', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'افزودن ابزار', exact: true })).toHaveCount(2);
+  await sideChooser.getByRole('radio', { name: 'جلو', exact: true }).click();
+  await expect(page.getByText('پرداخت آزمایشی', { exact: true })).toBeVisible();
+  await sideChooser.getByRole('radio', { name: 'همه نوارها', exact: true }).click();
+  await expect(page.getByText(/عملیات نوارها یکسان نیست/)).toBeVisible();
+  await page.getByRole('button', { name: 'افزودن پرداخت', exact: true }).last().click();
+  await page.getByRole('button', { name: /پرداخت آزمایشی/ }).click();
+  await sideChooser.getByRole('radio', { name: 'عقب', exact: true }).click();
+  await expect(page.getByText('پرداخت آزمایشی', { exact: true })).toBeVisible();
+  await sideChooser.getByRole('radio', { name: 'جلو', exact: true }).click();
+  await expect(page.getByText('پرداخت آزمایشی', { exact: true })).toBeVisible();
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  const unitSwitch = page.getByRole('radiogroup', { name: 'واحد طول سنگ مادر', exact: true });
+  const selectedUnit = unitSwitch.getByRole('radio', { name: 'cm', exact: true });
+  await expect(selectedUnit).toHaveAttribute('aria-checked', 'true');
+  expect(await selectedUnit.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(48);
+  await expect.poll(() => mother.evaluate(element => getComputedStyle(element).borderTopColor)).toBe('rgba(255, 255, 255, 0.08)');
+  expect(await selectedUnit.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(
+    await unitSwitch.getByRole('radio', { name: 'm', exact: true }).evaluate(element => getComputedStyle(element).backgroundColor));
+  for (const quantity of ['40', '60', '37']) {
+    await stairCount.fill('');
+    await stairCount.pressSequentially(quantity);
+    await expect(page.getByText(/تعداد گروه عملیات از تعداد محصول بیشتر/)).toHaveCount(0);
+    await expect(page.getByText('ابزار آزمایشی', { exact: true }).last()).toBeVisible();
+    await expect(page.getByText('پرداخت آزمایشی', { exact: true })).toBeVisible();
+  }
+  if (!expireLease) await page.getByRole('dialog', { name: 'تنظیمات محصول', exact: true }).screenshot({ path: '/tmp/partner-layer-modal-contrast.png' });
+  if (expireLease) {
+    await page.getByRole('textbox', { name: /قیمت فروش به مشتری/ }).fill('1000000');
+    // Simulate the server's 75-second lease expiring while the user configures
+    // the modal. Committing that product must renew only this editor's lease.
+    leaseExpired = true;
+    await page.getByRole('button', { name: 'افزودن محصول', exact: true }).click();
+    await expect.poll(() => checkpointAttempts, { timeout: 5_000 }).toBeGreaterThan(0);
+    await expect(page.getByText('این پیش‌نویس در محل دیگری در حال ویرایش است', { exact: true }))
+      .toHaveCount(0, { timeout: 2_000 });
+    await expect.poll(() => checkpoints.at(-1)?.leaseToken).toBe('renewed-return-lease');
+    await expect(page.getByRole('region', { name: 'محصولات قرارداد', exact: true })).toContainText('سنگ پله آزمایشی');
+    expect(checkpoints.every(item => item.recoveryId === 'return-draft')).toBe(true);
+    expect(leaseRequests.every(item => item.recoveryId === 'return-draft' && item.takeover === false)).toBe(true);
+  }
+});
 
+test('Partner case list shows current offered prices before acceptance and uses the requested title', async ({ page }) => {
+  await loginAsAdmin(page);
+  const fixture = createPartnerFixtures();
+  const unpriced = { ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY',
+    products: fixture.partner.products.map(({ wholesaleUnitPrice: _price, approvalEvidenceId: _approval, ...product }) => product),
+    wholesaleTotals: undefined, sabalanPaymentPlan: undefined, difference: undefined };
+  await page.route('**/api/partner/cases/query-v2', route => route.fulfill({ json: { success: true, data: { cases: [{
+    view: unpriced, pricingResponseState: 'READY', snapshotId: null,
+    actions: { canContinue: false, canPreview: false, canIssue: false, canFinalize: false,
+      canSendConfirmation: false, canRequestCorrection: false, canCancel: true, canRequestVoid: false },
+  }] } } }));
+  await page.goto('/dashboard/sales/partner-cases');
+  await expect(page.getByRole('heading', { name: 'پیش نویس ها و پرونده ها', exact: true })).toBeVisible();
+  await expect(page.locator('table').getByText('آماده تکمیل', { exact: true })).toBeVisible();
+  await expect(page.locator('table').getByText('در انتظار پاسخ سبلان', { exact: true })).toHaveCount(0);
+});
+
+test('committed Partner output buttons work without a confirmation snapshot', async ({ page }) => {
+  await loginAsAdmin(page);
+  const fixture = createPartnerFixtures();
+  const view = { ...fixture.partner, state: 'COMMITTED' as const };
+  await page.route('**/api/partner/cases/query-v2', route => route.fulfill({ json: { success: true, data: { cases: [{
+    view, snapshotId: null, customerOutput: fixture.customer,
+    actions: { canContinue: false, canPreview: true, canIssue: true, canFinalize: false,
+      canSendConfirmation: true, canRequestCorrection: true, canCancel: false, canRequestVoid: true },
+  }] } } }));
+  await page.route('**/api/partner/corrections/status/*', route => route.fulfill({ json: { success: true, data: null } }));
+  const requests: unknown[] = [];
+  await page.route('**/api/partner/cases/*/output', route => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({ contentType: 'application/pdf', body: '%PDF-1.4\n%%EOF' });
+  });
+  await page.goto(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(view.owner.caseId)}`);
+  const section = page;
+  await expect(section.getByRole('button', { name: 'پیش‌نمایش', exact: true })).toBeEnabled();
+  await section.getByRole('button', { name: 'پیش‌نمایش', exact: true }).click();
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0]).toEqual({ mode: 'PREVIEW', expected: view.owner });
+  await section.getByRole('button', { name: 'صدور PDF نهایی', exact: true }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests[1]).toEqual({ mode: 'FINAL', expected: view.owner });
 });

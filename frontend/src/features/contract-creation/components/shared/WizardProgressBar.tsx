@@ -14,19 +14,21 @@ interface WizardProgressBarProps {
   steps: WizardStep[];
   onStepClick?: (step: number) => void;
   clickable?: boolean;
+  ariaLabel?: string;
 }
 
 export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({
   currentStep,
   steps,
   onStepClick,
-  clickable = false
+  clickable = false,
+  ariaLabel
 }) => {
   return (
     <ErpNeumorphicWorkflowProgress
       currentStep={currentStep}
       steps={steps.map((step) => ({ id: step.id, label: step.title, icon: step.icon }))}
-      ariaLabel={clickable ? 'مراحل ویرایش قرارداد' : 'مراحل ایجاد قرارداد'}
+      ariaLabel={ariaLabel ?? (clickable ? 'مراحل ویرایش قرارداد' : 'مراحل ایجاد قرارداد')}
       clickable={clickable}
       onStepClick={onStepClick}
     />

@@ -1,5 +1,6 @@
 'use client';
-import { ErpBadge, ErpButton, ErpCard, ErpField as CustomerWorkflowField, ErpInput, ErpPressable, ErpSegmentedControl } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpField as CustomerWorkflowField, ErpInput, ErpPressable, ErpSegmentedControl, useErpPresentationScope } from '@/components/erp';
+import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -225,6 +226,7 @@ export default function CreateCustomerPage() {
   }, [partnerContractMode]);
 
   // Step configuration - New structure
+  const presentationScope = useErpPresentationScope();
   const isCollaborativeCustomer = formData.customerType === 'Collaborative';
   const steps = [
     { key: 'customerType', label: 'نوع مشتری', fields: ['customerType'] },
@@ -1019,7 +1021,7 @@ export default function CreateCustomerPage() {
       description="اطلاعات مشتری را مرحله‌به‌مرحله ثبت کنید."
       backHref="/dashboard/crm/customers"
       actions={isReturningToContract ? [{ label: 'لغو و بازگشت به قرارداد', icon: FaTimes, tone: 'danger', variant: 'outline', onClick: returnToContract }] : []}
-      progress={{ current: step + 1, total: steps.length, label: steps[step].label }}
+      progress={{ current: step + 1, total: steps.length, label: steps[step].label, steps: steps.map((item, index) => ({ id: index + 1, title: item.label, titleEn: item.key, description: '', icon: item.key === 'project' ? FaBuilding : FaUser })) }}
       feedback={errors.submit
         ? { kind: 'error', title: errors.submit }
         : transferNotice
@@ -1115,6 +1117,9 @@ export default function CreateCustomerPage() {
         </CustomerWorkflowSection>
       )}
 
+      {presentationScope === 'workspace' ? <WizardNavigation currentStep={step + 1} totalSteps={steps.length}
+        onPrevious={handlePrevious} onNext={handleNext} onSubmit={handleSubmit} loading={loading}
+        labels={{ previous: 'قبلی', next: 'بعدی', submit: 'ثبت مشتری', submitting: 'در حال ثبت...' }} /> : <>
       {/* Navigation */}
       <div className="flex items-center justify-between">
         <ErpPressable type="button"
@@ -1160,6 +1165,7 @@ export default function CreateCustomerPage() {
           )}
         </div>
       </div>
+      </>}
     </CustomerWorkflowPage>
   );
 }

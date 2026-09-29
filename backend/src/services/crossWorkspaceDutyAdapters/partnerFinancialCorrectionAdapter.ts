@@ -423,6 +423,7 @@ async function activateShared(tx: Transaction, input: {
   await synchronizePartnerContractedQuantities(tx, current.id);
   if (accounting.value.replacement && accounting.value.predecessor && accounting.value.approval) {
     const { replacement, predecessor, approval } = accounting.value;
+    const hadPublishedReceivable = await tx.accountingReceivable.count({ where: { invoiceRecordId: predecessor.id } }) > 0;
     await voidAccountingRecordInTransaction(tx, { recordId: predecessor.id, actorId: approval.actorId,
       voidReason: input.command.reason, externalReference: approval.externalReference!,
       downstreamNote: approval.downstreamNote || '', voidedAt: new Date(instant) });
@@ -431,10 +432,11 @@ async function activateShared(tx: Transaction, input: {
     }
     const published = await approvePartnerFinancialSourceWithinTransaction(tx, replacement, { ...approval,
       commandId: `${input.command.commandId}:replacement`, correlationId: input.command.correlationId,
-      approvedAt: new Date(instant), effectiveDate: new Date(`${date}T00:00:00.000Z`) });
+      approvedAt: hadPublishedReceivable ? new Date(instant) : approval.approvedAt,
+      effectiveDate: hadPublishedReceivable ? new Date(`${date}T00:00:00.000Z`) : approval.effectiveDate }, undefined, hadPublishedReceivable);
     const approvalEventId = object(object(published.metadata)?.partnerApproval)?.eventId;
     if (typeof approvalEventId !== 'string') throw new Error('Partner replacement publication evidence missing');
-    eventIds.push(approvalEventId);
+    if (hadPublishedReceivable) eventIds.push(approvalEventId);
   }
   return { ok: true, value: { eventIds } };
 }

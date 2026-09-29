@@ -1112,6 +1112,8 @@ export const accountingAPI = {
     api.get(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/internal-pdf`, { params }),
   getPartnerInternalDocument: (caseId: string) =>
     api.get(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/internal`),
+  createPartnerReceivable: (invoiceRecordId: string, expected: { caseId: string; revision: number; integrityHash: string }) =>
+    api.post('/partner/accounting/receivables', { invoiceRecordId, expected }),
   createPartnerInternalCorrectionRequest: (caseId: string,
     data: { category: string; priority: string; reason: string }, idempotencyKey: string) =>
     api.post(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/correction-requests`, data,

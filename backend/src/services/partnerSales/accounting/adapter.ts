@@ -57,8 +57,8 @@ export function createPartnerAccountingAdapter(repository: PartnerAccountingRepo
       if (source.value.view.state !== 'COMMITTED') return failure('STATE_CONFLICT');
       return prepareCommittedAccountingSource(source.value, expected);
     }),
-    /** Hook after the existing Accounting workflow has approved an invoice. The
-     * repository must join that same transaction, not commit approval separately. */
+    /** Explicit receivable command for an already approved invoice. The legacy
+     * method name is retained for compatibility; invoice approval never calls it. */
     acceptFinancialApproval: (expected: RevisionRef, invoiceRecordId: string) => repository.transaction(async tx => {
       const loaded = await tx.readAuthorizedSource(expected, 'APPROVAL');
       if (!loaded.ok) return loaded;

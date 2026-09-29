@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { FaBoxes, FaChartLine, FaClipboardList, FaCog, FaPlus, FaTools, FaWarehouse } from 'react-icons/fa';
-import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpLoading, ErpPage, ErpSection, type ErpMetric } from '@/components/erp';
+import { FaBoxes, FaClipboardList, FaCog, FaTools, FaWarehouse } from 'react-icons/fa';
+import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { dashboardAPI } from '@/lib/api';
 
 type Availability = Record<string, { visible: boolean; enabled: boolean; reason: string | null }>;
@@ -48,35 +48,18 @@ const InventoryDashboard: React.FC = () => {
 
   const hasAnyMasterDataPermission = masterDataSections.some((section) => section.canView);
 
-  const metrics: ErpMetric[] = [
-    { label: 'بخش‌های داده پایه', value: masterDataSections.length.toLocaleString('fa-IR'), icon: FaCog, tone: 'primary' },
-    { label: 'قابل مشاهده', value: masterDataSections.filter((section) => section.canView).length.toLocaleString('fa-IR'), icon: FaWarehouse, tone: 'success' },
-    { label: 'قابل ایجاد', value: masterDataSections.filter((section) => section.canCreate).length.toLocaleString('fa-IR'), icon: FaPlus, tone: 'info' },
-    { label: 'بدون دسترسی', value: masterDataSections.filter((section) => !section.canView).length.toLocaleString('fa-IR'), icon: FaClipboardList, tone: 'warning' },
-  ];
-
   return (
     <ErpPage
       eyebrow="انبار"
       title="مدیریت انبار"
-      metrics={metrics}
     >
-      <ErpSection title="عملیات اصلی">
+      <ErpSection title="">
         <ErpActionGrid
           columns={3}
           items={[
-            {
-              title: 'داده‌های پایه',
-              href: hasAnyMasterDataPermission ? '/dashboard/inventory/master-data' : undefined,
-              icon: FaCog,
-              tone: 'warning',
-              disabled: !hasAnyMasterDataPermission,
-              meta: hasAnyMasterDataPermission ? 'قابل دسترسی' : 'بدون دسترسی',
-            },
-            { title: 'محصولات', href: '/dashboard/sales/products', icon: FaBoxes, tone: 'primary', meta: 'کاتالوگ فروش' },
-            { title: 'گردش موجودی', icon: FaClipboardList, tone: 'info', disabled: true, meta: 'به‌زودی' },
-            { title: 'خدمات', href: availability.VIEW_SERVICE?.enabled ? '/dashboard/inventory/services' : undefined, icon: FaTools, tone: 'success', disabled: !availability.VIEW_SERVICE?.enabled, meta: availability.VIEW_SERVICE?.reason || undefined },
-            { title: 'گزارش‌ها', icon: FaChartLine, tone: 'purple', disabled: true, meta: 'به‌زودی' },
+            { title: 'محصولات', href: '/dashboard/sales/products', icon: FaBoxes, tone: 'primary', description: 'کاتالوگ مشترک فروش و انبار' },
+            { title: 'خدمات', href: availability.VIEW_SERVICE?.enabled ? '/dashboard/inventory/services' : undefined, icon: FaTools, tone: 'primary', description: 'خدمات، ابزار، لایه و فرآوری', disabled: !availability.VIEW_SERVICE?.enabled, meta: availability.VIEW_SERVICE?.reason || undefined },
+            { title: 'داده‌های پایه', href: hasAnyMasterDataPermission ? '/dashboard/inventory/master-data' : undefined, icon: FaCog, tone: 'primary', description: 'مشخصات پایه سنگ و برش', disabled: !hasAnyMasterDataPermission, meta: hasAnyMasterDataPermission ? undefined : 'بدون دسترسی' },
           ]}
         />
       </ErpSection>
@@ -91,13 +74,11 @@ const InventoryDashboard: React.FC = () => {
             compact
             items={masterDataSections.map((section) => ({
               title: section.title,
-              description: section.description,
-              href: section.canView ? section.href : undefined,
+              href: section.canView ? `/dashboard/inventory/master-data?section=${section.id}` : undefined,
               icon: section.icon,
-              tone: section.canView ? 'success' : 'danger',
+              tone: 'primary',
               disabled: !section.canView,
-              badge: <ErpBadge tone={section.canView ? 'success' : 'danger'}>{section.canView ? 'قابل مشاهده' : 'بدون دسترسی'}</ErpBadge>,
-              meta: section.canCreate ? 'ایجاد مجاز' : undefined,
+              badge: !section.canView ? <ErpBadge tone="neutral">بدون دسترسی</ErpBadge> : undefined,
             }))}
           />
         </ErpSection>
@@ -108,6 +89,11 @@ const InventoryDashboard: React.FC = () => {
           description="برای مشاهده یا مدیریت داده‌های پایه انبار با مدیر سیستم تماس بگیرید."
         />
       )}
+      <ErpSection title="وظایف بین‌واحدی" actions={[{ label: 'مشاهده وظایف', href: '/dashboard/inventory/duties', icon: FaClipboardList, tone: 'neutral', variant: 'outline' }]}>{null}</ErpSection>
+      <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--sds-text-secondary)]">
+        <span>گردش موجودی</span><ErpBadge tone="neutral">به‌زودی</ErpBadge>
+        <span>گزارش‌های انبار</span><ErpBadge tone="neutral">به‌زودی</ErpBadge>
+      </div>
     </ErpPage>
   );
 };

@@ -26,6 +26,7 @@ interface PaymentEntryModalProps {
   onContinueNationalCodeConflict?: () => void;
   disabledAmount?: boolean;
   existingContract?: boolean;
+  allowCustomerBalance?: boolean;
   dateFormat?: 'jalali' | 'gregorian';
 }
 
@@ -45,6 +46,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   onContinueNationalCodeConflict,
   disabledAmount = false,
   existingContract = false,
+  allowCustomerBalance = false,
   dateFormat = 'jalali',
 }) => {
   if (!isOpen) return null;
@@ -69,7 +71,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
         <div className="mx-auto w-full max-w-3xl px-0 py-0">
           <div className="space-y-3">
             <ContractPaymentInstallmentFields dateFormat={dateFormat} method={method} amount={String(form.amount ?? '')}
-              existingContract={existingContract}
+              existingContract={existingContract} allowCustomerBalance={allowCustomerBalance}
               date={form.paymentDate ?? ''}
               amountLabel={isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : isCheck ? 'مبلغ چک (تومان)' : 'مبلغ (تومان)'}
               dateLabel={isCustomerBalance ? 'تاریخ استفاده از مانده' : isCheck ? 'تاریخ سررسید چک' : 'تاریخ پرداخت'}

@@ -3,7 +3,7 @@ import { ErpInput, ErpTextarea } from '@/components/erp';
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FaSave } from 'react-icons/fa';
-import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection, useErpPresentationScope } from '@/components/erp';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { crmAPI } from '@/lib/api';
@@ -21,6 +21,7 @@ const labelClass = 'block text-sm font-semibold text-[var(--sds-text-primary)] d
 export default function CreateFollowUpPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const presentationScope = useErpPresentationScope();
   const [customers, setCustomers] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,11 +110,11 @@ export default function CreateFollowUpPage() {
       eyebrow="CRM"
       description="گزارش اتفاق فعلی و اقدام بعدی لازم برای ادامه پیگیری."
       backHref="/dashboard/crm/follow-ups"
-      actions={[{ label: saving ? 'در حال ذخیره...' : 'ذخیره', icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving, onClick: () => document.getElementById('followup-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }]}
+      actions={presentationScope === 'workspace' ? [] : [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving, onClick: () => document.getElementById('followup-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }]}
     >
 
       {error && <ErpEmptyState title="خطا" description={error} />}
-      <form id="followup-form" onSubmit={submit} className="space-y-5">
+      <form id="followup-form" onSubmit={submit} className={presentationScope === 'workspace' ? "mx-auto max-w-[850px] space-y-5" : "space-y-5"}>
         <ErpSection title="گزارش پیگیری" description="ثبت کنید چه ارتباطی برقرار شد و نتیجه چه بود.">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>مخاطب CRM
@@ -194,7 +195,8 @@ export default function CreateFollowUpPage() {
           </div>
         </ErpSection>
 
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <ErpButton label="انصراف" href="/dashboard/crm/follow-ups" variant="ghost" disabled={saving} />
           <ErpButton label={saving ? 'در حال ذخیره...' : 'ذخیره گزارش'} icon={FaSave} tone="primary" variant="solid" disabled={saving} onClick={() => document.getElementById('followup-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))} />
         </div>
       </form>

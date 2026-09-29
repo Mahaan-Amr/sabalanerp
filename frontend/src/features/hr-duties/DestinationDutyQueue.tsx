@@ -9,6 +9,8 @@ import {
   ErpEmptyState,
   ErpInlineState,
   ErpMetricGrid,
+  ErpNeumorphicMetricGrid,
+  type ErpNeumorphicMetric,
   ErpPage,
   ErpSection,
   ErpSegmentedControl,
@@ -36,7 +38,7 @@ const actionLabel: Record<string, string> = {
 
 type QueueData = { summary: DestinationDutySummary; duties: DestinationDuty[]; view: DestinationDutyView };
 
-export function DestinationDutyQueue({ workspace }: { workspace: string }) {
+export function DestinationDutyQueue({ workspace, metricPresentation = 'default' }: { workspace: string; metricPresentation?: 'default' | 'neumorphic' }) {
   const [view, setView] = useState<DestinationDutyView>('assigned');
   const [state, dispatch] = useReducer(
     reduceDestinationDutyState<QueueData>,
@@ -102,6 +104,13 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
   const { summary, duties } = state.data;
   const displayedView = state.loading || state.stale ? state.data.view : view;
   const options = buildDutyQueueTabs(summary);
+  const metrics: ErpNeumorphicMetric[] = [
+    { id: 'open', label: 'باز', value: summary.open.toLocaleString('fa-IR'), icon: FaInbox, tone: 'info' },
+    { id: 'due-soon', label: 'تا ۲۴ ساعت', value: summary.dueSoon.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
+    { id: 'overdue', label: 'گذشته از موعد', value: summary.overdue.toLocaleString('fa-IR'), icon: FaExclamationTriangle, tone: summary.overdue ? 'danger' : 'neutral' },
+    { id: 'available', label: 'قابل دریافت', value: summary.available.toLocaleString('fa-IR'), icon: FaUserCheck, tone: 'success' },
+    ...(summary.canManageTriage ? [{ id: 'triage', label: 'بدون مسئول', value: summary.triage.toLocaleString('fa-IR'), icon: FaUserShield, tone: 'purple' as const }] : []),
+  ];
   return (
     <ErpPage
       eyebrow="وظایف بین‌واحدی"
@@ -111,13 +120,9 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: load, disabled: state.loading }]}
     >
       {state.stale && <ErpInlineState kind="stale" title={`${state.error} آخرین نمایش موفق حفظ شده است.`} action={{ label: 'تلاش دوباره', onClick: load }} />}
-      <ErpMetricGrid items={[
-        { label: 'باز', value: summary.open.toLocaleString('fa-IR'), icon: FaInbox, tone: 'info' },
-        { label: 'تا ۲۴ ساعت', value: summary.dueSoon.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
-        { label: 'گذشته از موعد', value: summary.overdue.toLocaleString('fa-IR'), icon: FaExclamationTriangle, tone: summary.overdue ? 'danger' : 'neutral' },
-        { label: 'قابل دریافت', value: summary.available.toLocaleString('fa-IR'), icon: FaUserCheck, tone: 'success' },
-        ...(summary.canManageTriage ? [{ label: 'بدون مسئول', value: summary.triage.toLocaleString('fa-IR'), icon: FaUserShield, tone: 'purple' as const }] : []),
-      ]} />
+      {metricPresentation === 'neumorphic'
+        ? <ErpNeumorphicMetricGrid items={metrics} />
+        : <ErpMetricGrid items={metrics} />}
       <ErpSection>
         <ErpSegmentedControl options={options} value={displayedView} onChange={setView} />
       </ErpSection>
@@ -129,9 +134,9 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
           icon={FaInbox}
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className={metricPresentation === "neumorphic" ? "space-y-3" : "grid grid-cols-1 gap-3 lg:grid-cols-2"}>
           {duties.map((duty) => (
-            <ErpCard key={duty.id} className="flex min-h-44 flex-col justify-between gap-4 p-4">
+            <ErpCard key={duty.id} className={metricPresentation === "neumorphic" ? "flex flex-col justify-between gap-4 p-4 sm:flex-row sm:items-center" : "flex min-h-44 flex-col justify-between gap-4 p-4"}>
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="sds-text-primary text-base font-semibold">{duty.fields.title || actionLabel[duty.sourceActionCode] || 'وظیفه سازمانی'}</h2>

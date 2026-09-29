@@ -58,7 +58,7 @@ export function PartnerCaseDetail({ view, actions, customerOutput, history, chil
 }
 
 export function partnerCasePageActions(actions: PartnerCaseActions): ErpAction[] {
-  return [
+  const items: ErpAction[] = [
     ...(actions.decisionActions ?? []),
     ...(actions.canContinue ? [{ label: 'ویرایش', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
     ...(!actions.canContinue && actions.canRequestCorrection ? [{ label: 'ویرایش', icon: FaEdit,
@@ -76,6 +76,7 @@ export function partnerCasePageActions(actions: PartnerCaseActions): ErpAction[]
       tone: 'success' as const, onClick: actions.onFinalize }] : []),
     ...(actions.canIssue ? [{ label: 'صدور نهایی PDF', icon: FaFilePdf, tone: 'success' as const, onClick: actions.onIssue }] : []),
   ];
+  return items.map(item => ({ ...item, disabled: Boolean(actions.pending || item.disabled) }));
 }
 
 export function partnerCaseMetrics(view: PartnerCaseView, status = stateCopy[view.state]): ErpMetric[] {
@@ -94,7 +95,7 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
   const [section, setSection] = React.useState<ContractDetailSection>(initialSection);
   return <>
     <ContractDetailNavigation value={section} onChange={setSection} />
-    {section === 'summary' && <><ErpSection title="اطلاعات قرارداد">
+    {section === 'summary' && <ErpTwoColumn main={<ErpSection title="اطلاعات قرارداد">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <ErpFieldView label="کد پیگیری" value={partnerTrackingCode(view.caseNumber, view.trackingNumber)} />
         <ErpFieldView label="شماره قرارداد مشتری" value={view.customerContractNumber ?? 'در انتظار صدور'} />
@@ -102,16 +103,16 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
         <ErpFieldView label="تأیید مشتری" value={{ NOT_SENT: 'ارسال نشده', SENT: 'در انتظار تأیید',
           APPROVED: 'تأییدشده', REJECTED: 'ردشده', RECONFIRMATION_REQUIRED: 'نیازمند تأیید دوباره' }[view.customerConfirmationState]} />
       </div>
-    </ErpSection>
-    {customerOutput && <ErpSection title="مشتری و پروژه">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    </ErpSection>}
+    aside={customerOutput ? <ErpSection title="مشتری و پروژه">
+      <div className="grid gap-3">
         <ErpFieldView label="مشتری" value={customerOutput.customer.displayName} />
         <ErpFieldView label="فروشنده" value={customerOutput.seller.displayName} />
         <ErpFieldView label="تاریخ قرارداد" value={PersianCalendar.formatForDisplay(customerOutput.contractDate)} />
         <ErpFieldView label="پروژه" value={customerOutput.project?.title ?? 'ثبت نشده'} />
         {customerOutput.project?.address && <ErpFieldView label="نشانی پروژه" value={customerOutput.project.address} />}
       </div>
-    </ErpSection>}</>}
+    </ErpSection> : undefined} />}
     {section === 'items' && <>
       <ErpSection title="اقلام قرارداد" description="مقدار و قیمت‌های ثبت‌شده برای هر ردیف قرارداد.">
         <div className="space-y-3">{view.products.map(product => <ErpCard key={product.productRowId} className="p-4">
@@ -159,14 +160,14 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
     {section === 'summary' && <>
       {(actions.canRequestCorrection || actions.canCancel || actions.canRequestVoid) && <ErpSection title="اقدام‌های پرونده">
         <ErpActionGrid columns={1} items={[
-          ...(actions.canRequestCorrection ? [{ title: 'درخواست اصلاح', description: 'دامنه اصلاح و دلیل ثبت می‌شود.', icon: FaEdit, tone: 'warning' as const, onClick: actions.onRequestCorrection }] : []),
-          ...(actions.canCancel ? [{ title: 'لغو پیش از قطعیت', description: 'هر دو رکورد با هم لغو و سوابق حفظ می‌شوند.', icon: FaBan, tone: 'danger' as const, onClick: actions.onCancel }] : []),
-          ...(actions.canRequestVoid ? [{ title: 'درخواست ابطال', description: 'پس از بررسی وابستگی‌ها و تأییدهای لازم.', icon: FaBan, tone: 'danger' as const, onClick: actions.onRequestVoid }] : []),
+          ...(actions.canRequestCorrection ? [{ title: 'درخواست اصلاح', description: 'دامنه اصلاح و دلیل ثبت می‌شود.', icon: FaEdit, tone: 'warning' as const, onClick: actions.onRequestCorrection, disabled: actions.pending }] : []),
+          ...(actions.canCancel ? [{ title: 'لغو پیش از قطعیت', description: 'هر دو رکورد با هم لغو و سوابق حفظ می‌شوند.', icon: FaBan, tone: 'danger' as const, onClick: actions.onCancel, disabled: actions.pending }] : []),
+          ...(actions.canRequestVoid ? [{ title: 'درخواست ابطال', description: 'پس از بررسی وابستگی‌ها و تأییدهای لازم.', icon: FaBan, tone: 'danger' as const, onClick: actions.onRequestVoid, disabled: actions.pending }] : []),
         ]} />
       </ErpSection>}
       <ErpSection title="خروجی مشتری" description="ارسال برای مشتری و نهایی‌سازی فروشنده دو اقدام مستقل هستند.">
-        <div className="grid gap-2"><ErpButton label="پیش‌نمایش" icon={FaEye} variant="outline" disabled={!actions.canPreview} onClick={actions.onPreview} />
-          <ErpButton label="صدور PDF نهایی" icon={FaPrint} tone="success" disabled={!actions.canIssue} onClick={actions.onIssue} /></div>
+        <div className="grid gap-2"><ErpButton label="پیش‌نمایش" icon={FaEye} variant="outline" disabled={actions.pending || !actions.canPreview} onClick={actions.onPreview} />
+          <ErpButton label="صدور PDF نهایی" icon={FaPrint} tone="success" disabled={actions.pending || !actions.canIssue} onClick={actions.onIssue} /></div>
       </ErpSection>
     </>}
   </>;

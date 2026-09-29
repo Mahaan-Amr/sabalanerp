@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Prisma } from '@prisma/client';
 import { ApprovedInquirySchema, canonicalHash } from '@sabalanerp/partner-sales-contracts';
-import { bindApprovalUsage, resolveApprovalForUse } from '../partnerSales/inquiries/approvalUsage';
+import { bindApprovalUsage, canRetainCasePricingApproval, resolveApprovalForUse } from '../partnerSales/inquiries/approvalUsage';
 
 const approval = ApprovedInquirySchema.parse({
   schemaVersion: 1,
@@ -104,4 +104,11 @@ test('a successor to a rejected row uses its own approval clock and omits absent
     assert.equal(result.value.predecessorApprovalId, undefined);
     assert.equal(result.value.supersessionReason, undefined);
   }
+});
+
+test('editing a rejected row keeps an unchanged valid quote from the same Case before any approval usage exists', () => {
+  assert.equal(canRetainCasePricingApproval(1, 3), true);
+  assert.equal(canRetainCasePricingApproval(3, 3), true);
+  assert.equal(canRetainCasePricingApproval(4, 3), false);
+  assert.equal(canRetainCasePricingApproval(null, 3), false);
 });

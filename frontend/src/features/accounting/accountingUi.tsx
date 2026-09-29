@@ -472,7 +472,7 @@ export function FinancialInvoiceApprovalForm({
         </label>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ سپیدار ({invoice.currency === 'IRT' ? 'تومان' : 'ریال'})</span>
-          {isPartner ? <ErpInput value={partnerAmount} inputMode="decimal" dir="ltr" disabled={busy}
+          {isPartner ? <ErpInput numberFormat="money" value={partnerAmount} inputMode="decimal" dir="ltr" disabled={busy}
             onChange={event => { clearError('sepidarAmount'); setPartnerAmount(event.target.value); }}
             placeholder="مبلغ سپیدار" className={fieldClass('sepidarAmount')} /> : <FormattedNumberInput
             value={sepidarAmount}

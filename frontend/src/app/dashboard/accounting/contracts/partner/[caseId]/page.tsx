@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ErpButton, ErpInlineState, ErpLoading, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpInlineState, ErpLoading, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { defaultCustomPrintSettings, type SalesPdfVariant, type CustomPrintSettings, type CustomPrintPreset } from '@/features/accounting/AccountingCustomPrintSettings';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
-import type { FinancialInvoiceApprovalPayload } from '@/features/accounting/accountingUi';
+import { money, type FinancialInvoiceApprovalPayload } from '@/features/accounting/accountingUi';
 import { PartnerAccountingDetailView, type PartnerInternalDocument as InternalDocument, type PartnerDetailSection } from '@/features/accounting/PartnerAccountingDetailView';
 
 export default function PartnerInternalAccountingContractPage() {
@@ -29,6 +29,19 @@ export default function PartnerInternalAccountingContractPage() {
     } catch (failure) {
       const response = (failure as { response?: { data?: { error?: string; message?: string } } }).response?.data;
       setError(response?.message || response?.error || 'تأیید مالی ثبت نشد؛ وضعیت سند را بررسی و دوباره تلاش کنید.');
+    } finally { setPending(false); }
+  };
+  const [receivableOpen, setReceivableOpen] = useState(false);
+  const createReceivable = async () => {
+    if (!document?.owner || pending || !document.actions.canCreateReceivable) return;
+    setPending(true); setError(undefined);
+    try {
+      const response = await accountingAPI.createPartnerReceivable(document.id, document.owner);
+      if (!response.data?.success) throw new Error('Receivable creation failed');
+      setReceivableOpen(false); setSection('collections'); await load();
+    } catch (failure) {
+      const response = (failure as { response?: { data?: { error?: string; message?: string } } }).response?.data;
+      setError(response?.message || response?.error || 'دریافتنی ثبت نشد؛ وضعیت صورتحساب را تازه‌سازی و دوباره بررسی کنید.');
     } finally { setPending(false); }
   };
   const [printVariant, setPrintVariant] = useState<SalesPdfVariant>('accounting');
@@ -98,11 +111,22 @@ export default function PartnerInternalAccountingContractPage() {
   return <>
     <PartnerAccountingDetailView document={document} section={section} onSection={setSection}
       invoiceOpen={invoiceOpen} onOpenInvoice={openInvoice} onApproveInvoice={approveInvoice}
+      onCreateReceivable={() => { setError(undefined); setReceivableOpen(true); }}
       printVariant={printVariant} onPrintVariant={setPrintVariant} customPrintSettings={customPrintSettings}
       setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset}
       pending={pending} error={action ? undefined : error} onRefresh={() => void load()} onPdf={print => void pdf(print)}
       onFlag={() => openAction('flag')} onCorrection={() => openAction('correction')}
       onResolve={flag => { setFlagTarget(flag); setResolutionReason(''); }} />
+    <ErpSheet open={receivableOpen} onClose={() => { if (!pending) setReceivableOpen(false); }}
+      title="ایجاد دریافتنی" presentation="modal" pending={pending}
+      footer={<ErpButton label="تأیید و ایجاد دریافتنی" disabled={pending} onClick={() => void createReceivable()} />}>
+      <ErpSummaryGrid items={[
+        { label: 'طرف‌حساب سبلان', value: document.partnerContext.debtor.displayName },
+        { label: 'صورتحساب', value: document.systemInvoiceNumber || '—' },
+        { label: 'مبلغ دریافتنی', value: money(document.amount, document.currency) },
+      ]} />
+      {error && <ErpInlineState kind="error" title={error} />}
+    </ErpSheet>
     <AccountingActionModal open={Boolean(action)} title={action === 'flag' ? 'پرچم حسابداری' : 'درخواست اصلاح سند داخلی'}
       fields={[...(action === 'flag' ? [{ id: 'title', label: 'عنوان', type: 'text' as const, required: true }] : []),
         { id: 'reason', label: 'توضیح و دلیل', type: 'textarea', required: true }]}

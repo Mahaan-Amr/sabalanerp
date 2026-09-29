@@ -22,6 +22,8 @@ Register `SABALAN-LAPTOP-BIOMINI` for signed scanner-health diagnostics against 
 
 Registration has not yet been applied. A separate existing release for commit `6a7a79266bcd4e1ccc4a762f85872b42284432b7` owns the host deployment lock. It completed its image builds and entered the coordinated checkpoint stage under maintenance.
 
-A bounded waiting wrapper starts the reviewed configuration runner only after that release succeeds, the lock becomes available, and no active deployment session remains. The runner acquires the canonical lock again and measures the then-running immutable image identity. Failure or unresolved recovery in the existing release prevents configuration execution.
+A bounded waiting wrapper was prepared to start only after that release succeeded, the lock became available, and no active deployment session remained. The concurrent release continued slow remote-archive integrity checks for local-capacity recovery. The biometric wrapper was stopped while its log was still empty and no biometric configuration state existed; the other release was untouched. Its temporary remote provisioning export was removed. No biometric configuration release ran.
+
+To resume, privately transfer the installed workstation's provisioning export again after the concurrent release has completed and its journal/lock are clear. Reverify the immutable runner bundle, acquire the canonical lock through the runner, and measure the then-running image identity. Do not presume that the release is still `196f`.
 
 Final acceptance requires a successful production configuration release and the browser's signed health-command round trip. Remove the temporary remote provisioning export after verification. Retain protected recovery state if any release requires recovery; never delete locks or bypass checkpoint/drill gates.

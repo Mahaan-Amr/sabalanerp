@@ -29,6 +29,11 @@ test('inventory entry points and catalog lists adapt to compact phones and both 
   for (const route of ['/dashboard/inventory', '/dashboard/inventory/master-data?section=thicknesses', '/dashboard/inventory/services', '/dashboard/sales/products', '/dashboard/inventory/duties']) {
     await page.goto(route);
     await expect(page.locator('main h1').first()).toBeVisible();
+    if (route === '/dashboard/inventory') {
+      await expect(page.getByRole('heading', { name: 'وظایف بین‌واحدی' })).toHaveCount(0);
+      await expect(page.getByRole('heading', { name: 'بخش‌های داده‌های پایه' })).toBeVisible();
+      await expect(page.getByRole('link', { name: /عرض برش/ })).toHaveClass(/sds-neumorphic-card/);
+    }
     for (const theme of ['light', 'dark'] as const) {
       await setTheme(page, theme);
       await setViewportAndZoom(page, { width: 320, height: 568 });
@@ -87,6 +92,19 @@ test('master-data navigation selects the requested category and a pending edit c
   expect(submitted).toMatchObject({ code: sample.code, namePersian: 'نمونه thicknesses', isActive: true, value: 40, unit: 'cm' });
   release();
   await expect(dialog).toBeHidden();
+});
+
+test('master-data row operations use the Logistics workspace dropdown presentation', async ({ page }, testInfo) => {
+  await page.goto('/dashboard/inventory/master-data?section=thicknesses');
+  await setViewportAndZoom(page, { width: 914, height: 751 });
+  await page.getByRole('button', { name: 'سایر عملیات' }).click();
+  const menu = page.getByRole('dialog', { name: 'سایر عملیات' });
+  await expect(menu).toHaveClass(/sds-neumorphic-scope/);
+  await expect(menu.getByRole('button', { name: 'غیرفعال کردن' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('master-data-operations-914-dark.png') });
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await assertNoHorizontalOverflow(page);
 });
 
 test('catalog actions use an accessible focused menu and inline layer validation keeps the draft', async ({ page }) => {

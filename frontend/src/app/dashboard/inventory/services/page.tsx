@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaFileExcel } from 'react-icons/fa';
 import { dashboardAPI, servicesAPI } from '@/lib/api';
-import { ErpButton, ErpInlineState, ErpLoading, ErpQuickFilters, ErpListPage, ErpEmptyState, ErpSheet } from '@/components/erp';
+import { ErpButton, ErpInlineState, ErpLoading, ErpQuickFilters, ErpListPage, ErpEmptyState, ErpPresentationProvider, ErpSheet } from '@/components/erp';
 import CatalogExcelSyncModal from '@/components/CatalogExcelSyncModal';
 import { formatPrice } from '@/lib/numberFormat';
 
@@ -488,6 +488,7 @@ const ServicesPage: React.FC = () => {
   };
   return (
     <>
+    <ErpPresentationProvider scope="workspace"><div className="sds-neumorphic-scope sds-neumorphic-workflow-scope">
     <ErpListPage<CatalogRow>
       title="خدمات" eyebrow="انبار" backHref="/dashboard/inventory" rowActionMode="menu"
       actions={[
@@ -515,6 +516,7 @@ const ServicesPage: React.FC = () => {
     >
       {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش مجدد', onClick: loadData }} />}
     </ErpListPage>
+    </div></ErpPresentationProvider>
     <ErpSheet open={showInlineForm && inline} onClose={closeInline} title={`${editingInline ? 'ویرایش' : 'افزودن'} ${tabLabels[activeTab]}`} presentation="modal" size="wide" pending={savingInline}
       footer={<div className="flex flex-wrap justify-end gap-3"><ErpButton label="انصراف" variant="outline" disabled={savingInline} onClick={closeInline} /><ErpButton label={savingInline ? 'در حال ذخیره…' : editingInline ? 'ذخیره تغییرات' : 'ثبت'} disabled={savingInline || !can(editingInline ? 'EDIT' : 'CREATE')} onClick={activeTab === 'stair-lengths' ? handleSaveStairLength : handleSaveLayerType} /></div>}
     >

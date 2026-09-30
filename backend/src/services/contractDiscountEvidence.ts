@@ -12,6 +12,9 @@ export const LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN = {
 export const LEGACY_DISCOUNT_ELIGIBILITY_EVIDENCE_ORIGIN =
   'LEGACY_WIZARD_MISSING_IS_LAYER_AS_FALSE' as const;
 
+export const EXPLICIT_ZERO_DISCOUNT_BASE_RECONCILIATION_ORIGIN =
+  'EXPLICIT_ZERO_DISCOUNT_CANONICAL_BASE_RECONCILIATION_V1' as const;
+
 const isNonZeroOrMalformedDecimal = (value: unknown) => {
   if (value === null || value === undefined || value === '') return false;
   try {

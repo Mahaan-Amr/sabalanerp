@@ -955,6 +955,30 @@ test('accepts explicit no-discount evidence without deriving a default', () => {
   assert.equal(version.netAmount, version.grossAmount);
 });
 
+test('reconciles a stale zero-discount basis from canonical rows without changing payable pricing', () => {
+  const source = approvedPricingSourceFixture();
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '827', percent: '0', amount: '0', currency: 'تومان',
+  };
+  (source.contract.contractData as any).payment.totalContractAmount = '1250';
+  source.leaf.amount = '12500';
+  const version = buildApprovedPricingVersion(source, 1, 'zero-discount-stale-base');
+  assert.equal(version.discountAmount, '0.000000000000');
+  assert.equal(version.netAmount, version.grossAmount);
+  assert.deepEqual((version.sourceEvidence.discount as any).evidenceOrigin,
+    'EXPLICIT_ZERO_DISCOUNT_CANONICAL_BASE_RECONCILIATION_V1');
+  assert.equal((version.sourceEvidence.discount as any).rawBaseSubtotal, '827.000000000000');
+  assert.equal((version.sourceEvidence.discount as any).baseSubtotal, '1000.000000000000');
+
+  (source.contract.contractData as any).payment.totalContractAmount = '1249';
+  assert.throws(() => buildApprovedPricingVersion(source, 1, 'mismatched-payable'),
+    /discount base subtotal conflicts/);
+  (source.contract.contractData as any).payment.totalContractAmount = '1250';
+  (source.contract.contractData as any).serviceRows = [{ amount: '1' }];
+  assert.throws(() => buildApprovedPricingVersion(source, 1, 'hidden-adjustment'),
+    /discount base subtotal conflicts/);
+});
+
 test('accepts graph-v1 money only through its audited historical storage-scale conversion', () => {
   const source = approvedPricingSourceFixture();
   (source.contract.contractData as any).discount = {

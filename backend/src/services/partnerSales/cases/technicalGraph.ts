@@ -26,7 +26,7 @@ export interface PartnerTechnicalGraphContext {
     slabCuttingPricingMethod: 'lineBased' | 'squareMeter'; sawKerfMeters: string; materialRateScale: string; currency: 'IRT';
     calculationPolicy: CalculationPolicySnapshot;
     rates: { longitudinalCutRateToman: string; crossCutRateToman: string; calibrationCutRateToman: string;
-      verticalCutRateToman: string; squareMeterCutRateToman: string };
+      verticalCutRateToman?: string; squareMeterCutRateToman?: string };
   };
   catalog: PartnerTechnicalPreviewCatalog;
   policy: CalculationPolicySnapshot;

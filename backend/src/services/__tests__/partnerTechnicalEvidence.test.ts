@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalHash, PartnerTechnicalDraftSchema, type PartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { Prisma } from '@prisma/client';
+import { compilePartnerTechnicalGraph } from '../partnerSales/cases/technicalGraph';
+import { partnerCustomerGraphTotal } from '../partnerSales/cases/customerGraphTotal';
 import { createPartnerTechnicalEvidenceResolver, readPartnerTechnicalSalesPolicy,
-  technicalConfigurationHash } from '../partnerSales/cases/technicalEvidence';
+  parsePartnerTechnicalSalesPolicySnapshot, technicalConfigurationHash } from '../partnerSales/cases/technicalEvidence';
 
 const terms = {
   schemaVersion: 1 as const,
@@ -15,6 +17,104 @@ const terms = {
   rates: { longitudinalCutRateToman: '1200', crossCutRateToman: '1400', calibrationCutRateToman: '900',
     verticalCutRateToman: '1600', squareMeterCutRateToman: '4500' },
 };
+
+const ordinarySaleTransaction = () => ({
+  $queryRaw: async () => [{ now: new Date('2026-09-30T12:00:00.000Z') }],
+  partnerProfile: { findUnique: async () => ({ commercialAccount: { id: 'account-1' } }) },
+  partnerCommercialTerms: { findMany: async () => [] },
+  partnerTermsPolicy: { findMany: async () => [], count: async () => 0 },
+  cuttingType: { findMany: async () => ['LONG', 'CROSS'].map(code => ({
+    id: `cut-${code}`, code, pricePerMeter: new Prisma.Decimal('20000'), updatedAt: new Date('2026-09-01T00:00:00Z'),
+  })) },
+});
+
+test('an unconfigured Partner inherits ordinary Sale catalog rates without inventing unused slab rates', async () => {
+  const tx = ordinarySaleTransaction();
+  const result = await readPartnerTechnicalSalesPolicy(tx as any, 'partner-1');
+  assert.ok(result.ok);
+  const policy = result.value;
+  assert.equal(policy.mandatoryEnabled, false);
+  assert.equal(policy.mandatoryPercentage, '20');
+  assert.equal(policy.slabCuttingPricingMethod, 'lineBased');
+  assert.equal(policy.sawKerfMeters, '0.003');
+  assert.deepEqual(policy.rates, { longitudinalCutRateToman: '20000', crossCutRateToman: '20000', calibrationCutRateToman: '20000' });
+  // The saved evidence is exact canonical JSON, with no undefined/free rates.
+  await canonicalHash(policy);
+  const { policyId, version, effectiveDate, integrityHash, ...snapshot } = policy;
+  assert.deepEqual(parsePartnerTechnicalSalesPolicySnapshot({ schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_PRICING', ...snapshot },
+    { id: policyId, version, effectiveDate, integrityHash }), policy);
+  const same = await readPartnerTechnicalSalesPolicy(tx as any, 'partner-2');
+  assert.ok(same.ok);
+  assert.equal(same.value.integrityHash, policy.integrityHash);
+  tx.cuttingType.findMany = async () => ['LONG', 'CROSS'].map(code => ({ id: `cut-${code}`, code,
+    pricePerMeter: new Prisma.Decimal('30000'), updatedAt: new Date('2026-09-02T00:00:00Z') }));
+  const changed = await readPartnerTechnicalSalesPolicy(tx as any, 'partner-1');
+  assert.ok(changed.ok);
+  assert.notEqual(changed.value.integrityHash, policy.integrityHash);
+  assert.equal(changed.value.rates.longitudinalCutRateToman, '30000');
+});
+
+test('ordinary Sale fallback cannot bypass a configured policy or fabricate a missing catalog rate', async () => {
+  const tx = ordinarySaleTransaction();
+  tx.partnerTermsPolicy.count = async () => 1;
+  tx.cuttingType.findMany = async () => { throw new Error('A configured policy must not fall back'); };
+  let result = await readPartnerTechnicalSalesPolicy(tx as any, 'partner-1');
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error.code, 'STATE_CONFLICT');
+  tx.partnerTermsPolicy.count = async () => 0;
+  tx.cuttingType.findMany = async () => [];
+  result = await readPartnerTechnicalSalesPolicy(tx as any, 'partner-1');
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error.code, 'STATE_CONFLICT');
+});
+
+test('ordinary Sale rates calculate the Partner payable and remain frozen when a draft resumes', async () => {
+  const updatedAt = new Date('2026-09-01T00:00:00Z');
+  const product = { id: 'ordinary-stone', code: 'S-1', namePersian: 'سنگ تست', updatedAt,
+    widthValue: new Prisma.Decimal('40'), motherLengthValue: new Prisma.Decimal('2'), thicknessValue: new Prisma.Decimal('2'),
+    stoneTypeNamePersian: 'تراورتن', mineNamePersian: 'معدن', finishNamePersian: 'سابیده', colorNamePersian: 'کرم',
+    qualityNamePersian: 'درجه یک', cuttingDimensionNamePersian: 'طولی', isActive: true, deletedAt: null,
+    isAvailable: true, availableInLongitudinalContracts: true, availableInStairContracts: true,
+    availableInSlabContracts: true, availableInVolumetricContracts: true, preparedSalesUnit: 'count', volumetricSalesUnit: 'ton',
+    basePrice: new Prisma.Decimal('1000000'), currency: 'تومان' };
+  const tx = { ...ordinarySaleTransaction(), product: { findMany: async () => [product] },
+    subService: { findMany: async () => [] }, stoneFinishing: { findMany: async () => [] }, layerType: { findMany: async () => [] } };
+  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 1, rows: [{
+    productRowId: 'ordinary-row', catalogItemId: product.id, catalogSnapshotVersion: updatedAt.toISOString(),
+    family: 'longitudinal', retailUnitPrice: { amount: '1000000', currency: 'IRT' }, configuration: {
+      sourceBatchId: 'ordinary-stock', lengthMeters: '2', widthMeters: '0.3', quantity: 1,
+      lastManualField: 'quantity', lastManualDimension: 'width', lengthDisplayUnit: 'm', widthDisplayUnit: 'cm',
+      sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual',
+    } }] });
+  const resolver = createPartnerTechnicalEvidenceResolver();
+  const first = await resolver(tx as any, { actorId: 'partner-1', recoveryId: 'ordinary-draft', draft, previous: null });
+  assert.ok(first.ok);
+  const graph = compilePartnerTechnicalGraph(draft, first.value.context);
+  assert.ok(graph.ok);
+  assert.deepEqual(partnerCustomerGraphTotal(graph.value.graph, draft, { amount: '0', currency: 'IRT' }),
+    { amount: '640000', currency: 'IRT' });
+  const slabDraft = PartnerTechnicalDraftSchema.parse({ ...draft, rows: [{ ...draft.rows[0], family: 'slab',
+    configuration: { sourceBatchId: 'ordinary-slab-stock', lengthMeters: '1', widthMeters: '0.2', quantity: 1,
+      lastManualField: 'width', lastManualDimension: 'width', lengthDisplayUnit: 'm', widthDisplayUnit: 'm',
+      sawKerfEnabled: false, sourceRows: [{ sourceRowId: 'ordinary-mother', lengthMeters: '2', widthMeters: '0.4',
+        quantity: 1, lengthDisplayUnit: 'm', widthDisplayUnit: 'm' }], verticalCutSides: [] } }] });
+  const slab = await resolver(tx as any, { actorId: 'partner-1', recoveryId: 'ordinary-slab-draft', draft: slabDraft, previous: null });
+  assert.ok(slab.ok);
+  assert.ok(compilePartnerTechnicalGraph(slabDraft, slab.value.context).ok);
+  // Selecting a service without a configured rate must never make it free.
+  const vertical = PartnerTechnicalDraftSchema.parse({ ...slabDraft, rows: [{ ...slabDraft.rows[0],
+    configuration: { ...slabDraft.rows[0].configuration, verticalCutSides: ['left'] } }] });
+  assert.equal(compilePartnerTechnicalGraph(vertical, slab.value.context).ok, false);
+  const squareMeter = { ...slab.value.context, products: slab.value.context.products.map(row => ({ ...row,
+    slab: row.slab && { ...row.slab, cuttingPricingMethod: 'squareMeter' as const } })) };
+  assert.equal(compilePartnerTechnicalGraph(slabDraft, squareMeter).ok, false);
+  tx.cuttingType.findMany = async () => { throw new Error('A resumed draft must keep its frozen rates'); };
+  const resumed = await resolver(tx as any, { actorId: 'partner-1', recoveryId: 'ordinary-draft', draft,
+    previous: { context: first.value.context, identities: first.value.identities } as any });
+  assert.ok(resumed.ok);
+  assert.deepEqual(resumed.value.context, first.value.context);
+  assert.deepEqual(resumed.value.identities, first.value.identities);
+});
 
 test('technical sales policy accepts only the latest effective append-only terms with a matching integrity hash', async () => {
   const effectiveDate = new Date('2026-08-29T00:00:00.000Z');

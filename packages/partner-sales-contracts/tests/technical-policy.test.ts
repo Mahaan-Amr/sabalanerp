@@ -12,6 +12,15 @@ const policy = { schemaVersion: 1 as const, purpose: 'PARTNER_TECHNICAL_PRICING'
   rates: { longitudinalCutRateToman: '1200', crossCutRateToman: '1400', calibrationCutRateToman: '900',
     verticalCutRateToman: '1600', squareMeterCutRateToman: '4500' } };
 
+test('line-based Sale policy preserves absent optional slab rates rather than making them free', () => {
+  const { verticalCutRateToman, squareMeterCutRateToman, ...rates } = policy.rates;
+  const parsed = PartnerTechnicalPricingPolicySchema.parse({ ...policy, rates });
+  assert.deepEqual(parsed.rates, rates);
+  assert.equal(Object.hasOwn(parsed.rates, 'verticalCutRateToman'), false);
+  assert.equal(Object.hasOwn(parsed.rates, 'squareMeterCutRateToman'), false);
+  assert.equal(PartnerTechnicalPricingPolicySchema.safeParse({ ...policy, rates: { ...rates, verticalCutRateToman: '-1' } }).success, false);
+});
+
 test('technical pricing policy is purpose-bound, exact-decimal and versioned for Sales management only', () => {
   assert.deepEqual(PartnerTechnicalPricingPolicySchema.parse(policy), policy);
   const command = { schemaVersion: 1 as const, purpose: 'PARTNER_TECHNICAL_POLICY_PUBLISH' as const,

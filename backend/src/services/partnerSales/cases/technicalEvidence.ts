@@ -24,8 +24,8 @@ export interface PartnerTechnicalSalesPolicy {
     longitudinalCutRateToman: string;
     crossCutRateToman: string;
     calibrationCutRateToman: string;
-    verticalCutRateToman: string;
-    squareMeterCutRateToman: string;
+    verticalCutRateToman?: string;
+    squareMeterCutRateToman?: string;
   };
 }
 
@@ -56,7 +56,9 @@ export function parsePartnerTechnicalSalesPolicySnapshot(value: unknown,
   identity: { id: string; version: number; effectiveDate: Date | string; integrityHash: string }): PartnerTechnicalSalesPolicy | undefined {
   const terms = record(value), calculationPolicy = record(terms?.calculationPolicy), rates = record(terms?.rates);
   if (!terms || !calculationPolicy || !rates || !exactKeys(terms, policyKeys) || !exactKeys(calculationPolicy, versionKeys) ||
-      !exactKeys(rates, rateKeys) || terms.schemaVersion !== 1 || terms.purpose !== 'PARTNER_TECHNICAL_PRICING' ||
+      !rateKeys.slice(0, 3).every(key => Object.prototype.hasOwnProperty.call(rates, key)) ||
+      !Object.keys(rates).every(key => (rateKeys as readonly string[]).includes(key)) ||
+      terms.schemaVersion !== 1 || terms.purpose !== 'PARTNER_TECHNICAL_PRICING' ||
       terms.currency !== 'IRT' || typeof terms.mandatoryEnabled !== 'boolean' ||
       !['lineBased', 'squareMeter'].includes(String(terms.slabCuttingPricingMethod)) ||
       !versionKeys.every(key => typeof calculationPolicy[key] === 'string' && /^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(calculationPolicy[key] as string))) {
@@ -66,7 +68,8 @@ export function parsePartnerTechnicalSalesPolicySnapshot(value: unknown,
     materialRateScale = decimal(terms.materialRateScale, true);
   const parsedRates = Object.fromEntries(rateKeys.map(key => [key, decimal(rates[key])])) as Record<typeof rateKeys[number], string | undefined>;
   if (mandatoryPercentage === undefined || new Prisma.Decimal(mandatoryPercentage).gt(100) || sawKerfMeters === undefined ||
-      materialRateScale === undefined || rateKeys.some(key => parsedRates[key] === undefined)) return undefined;
+      materialRateScale === undefined || rateKeys.some((key, index) => parsedRates[key] === undefined &&
+        (index < 3 || Object.prototype.hasOwnProperty.call(rates, key)))) return undefined;
   return {
     policyId: identity.id, version: identity.version,
     effectiveDate: typeof identity.effectiveDate === 'string' ? identity.effectiveDate : identity.effectiveDate.toISOString().slice(0, 10),
@@ -75,7 +78,7 @@ export function parsePartnerTechnicalSalesPolicySnapshot(value: unknown,
     mandatoryPercentage, mandatoryEnabled: terms.mandatoryEnabled,
     slabCuttingPricingMethod: terms.slabCuttingPricingMethod as SlabCuttingPricingMethod,
     sawKerfMeters, materialRateScale, currency: 'IRT',
-    rates: parsedRates as PartnerTechnicalSalesPolicy['rates'],
+    rates: Object.fromEntries(Object.entries(parsedRates).filter(([, value]) => value !== undefined)) as PartnerTechnicalSalesPolicy['rates'],
   };
 }
 
@@ -174,7 +177,34 @@ async function readTechnicalPolicyForAccount(tx: Prisma.TransactionClient, accou
       { id: source.id, version: 1, effectiveDate: source.effectiveDate, integrityHash: source.integrityHash });
     if (policy) return { ok: true, value: { policy, accountVersion } };
   }
-  return { ok: false, error: partnerError('STATE_CONFLICT') };
+  // Only an unconfigured Partner inherits ordinary Sabalan Sale defaults.
+  // Never substitute ordinary prices for a future, expired, revoked or invalid
+  // explicit Partner pricing policy.
+  if (candidates.some(candidate => record(candidate.terms)?.purpose === 'PARTNER_TECHNICAL_PRICING') ||
+      await tx.partnerTermsPolicy.count({ where: { purpose: 'PARTNER_TECHNICAL_PRICING' } })) {
+    return { ok: false, error: partnerError('STATE_CONFLICT') };
+  }
+  const cuts = await tx.cuttingType.findMany({ where: { code: { in: ['LONG', 'CROSS'] }, isActive: true },
+    select: { id: true, code: true, pricePerMeter: true, updatedAt: true } });
+  const longitudinal = cuts.find(cut => cut.code === 'LONG'), cross = cuts.find(cut => cut.code === 'CROSS');
+  if (!longitudinal?.pricePerMeter || !cross?.pricePerMeter ||
+      longitudinal.pricePerMeter.isNegative() || cross.pricePerMeter.isNegative()) {
+    return { ok: false, error: partnerError('STATE_CONFLICT') };
+  }
+  const terms = { schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_PRICING',
+    calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
+    mandatoryEnabled: false, mandatoryPercentage: '20', slabCuttingPricingMethod: 'lineBased',
+    sawKerfMeters: '0.003', materialRateScale: '1', currency: 'IRT',
+    rates: { longitudinalCutRateToman: longitudinal.pricePerMeter.toFixed(),
+      crossCutRateToman: cross.pricePerMeter.toFixed(), calibrationCutRateToman: longitudinal.pricePerMeter.toFixed() } };
+  const integrityHash = await canonicalHash({ source: 'SABALAN_SALE', terms,
+    cuttingTypes: [longitudinal, cross].map(cut => ({ id: cut.id, code: cut.code,
+      updatedAt: cut.updatedAt.toISOString(), rateToman: cut.pricePerMeter!.toFixed() })) });
+  const effectiveDate = new Date(Math.max(longitudinal.updatedAt.getTime(), cross.updatedAt.getTime()));
+  const policy = parsePartnerTechnicalSalesPolicySnapshot(terms, {
+    id: `sabalan-sale-${integrityHash.replace('sha256-v1:', '')}`, version: 1, effectiveDate, integrityHash });
+  return policy ? { ok: true, value: { policy, accountVersion } }
+    : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
 }
 
 /** Approval identity ignores requested quantity and display-only editing
@@ -410,7 +440,8 @@ function createContext(policy: PartnerTechnicalSalesPolicy, publicProducts: Part
           longitudinalCutRateToman: amount(policy.rates.longitudinalCutRateToman), calibrationCutRateToman: amount(policy.rates.calibrationCutRateToman) },
         slab: { baseMaterialRateToman: amount(rate), cuttingPricingMethod: policy.slabCuttingPricingMethod,
           longitudinalCutRateToman: amount(policy.rates.longitudinalCutRateToman), crossCutRateToman: amount(policy.rates.crossCutRateToman),
-          squareMeterCutRateToman: amount(policy.rates.squareMeterCutRateToman), verticalCutRateToman: amount(policy.rates.verticalCutRateToman) },
+          ...(policy.rates.squareMeterCutRateToman === undefined ? {} : { squareMeterCutRateToman: amount(policy.rates.squareMeterCutRateToman) }),
+          ...(policy.rates.verticalCutRateToman === undefined ? {} : { verticalCutRateToman: amount(policy.rates.verticalCutRateToman) }) },
         stair: { baseRateToman: amount(rate), mandatoryEnabled: policy.mandatoryEnabled,
           mandatoryPercentage: amount(rememberedMandatoryPercentage), rememberedMandatoryPercentage: amount(rememberedMandatoryPercentage),
           longitudinalCutRateToman: amount(policy.rates.longitudinalCutRateToman), crossCutRateToman: amount(policy.rates.crossCutRateToman),

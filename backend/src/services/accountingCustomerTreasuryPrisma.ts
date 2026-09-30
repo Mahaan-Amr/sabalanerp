@@ -895,12 +895,17 @@ export const listCustomerAccountsPrisma = async (database: PrismaClient, input: 
   }));
 };
 
-export const listTreasuryOverviewPrisma = async (database: PrismaClient) => {
-  const [transactions, bankLines, bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash] = await Promise.all([
+export const listTreasuryOverviewPrisma = async (database: PrismaClient, input: { bankLinePage?: number } = {}) => {
+  const bankLinePage = input.bankLinePage ?? 1;
+  if (!Number.isSafeInteger(bankLinePage) || bankLinePage < 1 || bankLinePage > 1_000_000) {
+    throw new AccountingCustomerTreasuryError('BANK_PAGE_INVALID', 'شماره صفحه ردیف‌های بانکی معتبر نیست.', 400);
+  }
+  const [transactions, bankLines, bankLineCount, bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash] = await Promise.all([
     database.accountingTreasuryTransaction.findMany({ orderBy: { occurredAt: 'desc' }, take: 100,
       include: { profile: { select: { displayName: true } }, allocations: { include: { lines: true } } } }),
-    database.accountingBankStatementLine.findMany({ orderBy: { bookedAt: 'desc' }, take: 100,
+    database.accountingBankStatementLine.findMany({ orderBy: [{ bookedAt: 'desc' }, { id: 'desc' }], take: 100, skip: (bankLinePage - 1) * 100,
       include: { matches: { orderBy: { createdAt: 'desc' } } } }),
+    database.accountingBankStatementLine.count(),
     database.accountingBankImportMapping.findMany({ orderBy: { createdAt: 'desc' },
       select: { id: true, financialAccountId: true, adapterType: true, version: true, effectiveFrom: true, effectiveTo: true } }),
     database.accountingBankFileImportRun.findMany({ orderBy: { createdAt: 'desc' }, take: 20,
@@ -917,7 +922,8 @@ export const listTreasuryOverviewPrisma = async (database: PrismaClient) => {
     database.accountingCashCount.findMany({ orderBy: { countedAt: 'desc' }, take: 50 }),
     database.accountingPettyCashAdvance.findMany({ orderBy: { settlementDueAt: 'asc' }, take: 100 }),
   ]);
-  return { transactions, bankLines, bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash };
+  return { transactions, bankLines, bankLinePage, bankLineCount, bankLinesHasMore: bankLinePage * 100 < bankLineCount,
+    bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash };
 };
 
 export const listTaxOverviewPrisma = async (database: PrismaClient) => {

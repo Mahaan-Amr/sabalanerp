@@ -288,6 +288,7 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
     ['ایجاد مشتری', '/dashboard/crm/customers/create'],
     ['ایجاد محصول', '/dashboard/sales/products/create'],
     ['گزارش فروش', '/dashboard/sales/reports'],
+    ['پیش‌نویس‌ها و پرونده‌های من', '/dashboard/sales/partner-cases'],
     ['ثبت حسابداری فروشندگان', '/dashboard/sales/reports?view=accounting-registered&period=month'],
   ] as const;
 

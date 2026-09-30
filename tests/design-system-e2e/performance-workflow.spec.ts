@@ -30,7 +30,19 @@ const mockWorkflowApi = async (page: Page, capabilities: Record<string, boolean>
   await page.route('**/api/hr/personnel-performance/**', async (route) => {
     const { pathname } = new URL(route.request().url());
     let body: unknown = { success: true };
-    if (pathname.endsWith('/capabilities')) body = { success: true, capabilities };
+    if (pathname.endsWith('/simple/workspace')) body = {
+      currentUserId: 'reviewer-1', currentPeriodKey: '1405-07', levelLabels: {},
+      evaluablePersonnelIds: [], latestFinalizedAtByPersonnel: {}, currentJobIdByPersonnel: {},
+      personnel: [], historyPersonnel: [], profiles: [], assignments: [], jobs: [], capabilities,
+      evaluations: [{
+        id: 'pending-result-1', personnelId: 'person-1', status: 'PENDING_APPEAL',
+        evaluationDate: '2026-09-01', createdAt: '2026-09-01T08:00:00Z',
+        evaluatorUserId: 'supervisor-1', evaluatorAuthority: 'SUPERVISOR', evaluatorNameFa: 'سرپرست آزمون',
+        profile: { id: 'profile-1', stableKey: 'fixture', nameFa: 'فرم آزمون', version: 1, indicators: [] },
+        values: [], appealText: 'شاهد ثبت‌شده نیازمند بررسی است.', appealedAt: '2026-09-02T08:00:00Z',
+      }],
+    };
+    else if (pathname.endsWith('/capabilities')) body = { success: true, capabilities };
     else if (pathname.endsWith(`/supervisor/sections/${sectionId}`)) body = {
       section: { id: sectionId, evaluationId: 'evaluation-1', status: 'DRAFT', effectiveFrom: '2026-07-01T00:00:00.000Z', effectiveTo: '2026-07-31T23:59:59.000Z', submissionDueAt: '2026-08-05T12:00:00.000Z', reviewDueAt: null, personnel: { displayName: 'کارمند نمونه' } },
       form,
@@ -85,18 +97,46 @@ test('HR decision sheet requires a reason for rejection', async ({ page }) => {
   await expect(dialog.getByRole('button', { name: 'ثبت تصمیم' })).toBeEnabled();
 });
 
-test('workflow hides all surfaces without an independent action permission', async ({ page }) => {
+test('performance workspace hides protected actions without independent permissions', async ({ page }) => {
   await loginAsAdmin(page);
   await mockWorkflowApi(page, {});
   await page.goto('/dashboard/hr/personnel/performance');
-  await expect(page.getByText('هیچ مجوز فعال برای گردش ارزیابی عملکرد ندارید.')).toBeVisible();
+  await expect(page.getByText('اجازه ثبت ارزیابی ندارید.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'شروع بازسازی' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'ثبت ارزیابی', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'انتشار نتیجه رسمی', exact: true })).toHaveCount(0);
+  for (const name of ['فرم‌ها', 'نظرسنجی', 'سابقه']) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeDisabled();
+  }
 });
 
-test('independent suspension permission exposes the audited accepted-result action', async ({ page }) => {
+test('independent finalization permission exposes appeal review with a required human reason', async ({ page }) => {
+  await loginAsAdmin(page);
+  await mockWorkflowApi(page, { FINALIZE_PERFORMANCE_RESULTS: true });
+  await page.goto('/dashboard/hr/personnel/performance');
+  await expect(page.getByText('اجازه ثبت ارزیابی ندارید.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'انتشار نتیجه رسمی', exact: true })).toBeDisabled();
+  const review = page.getByRole('button', { name: 'ثبت رسیدگی', exact: true });
+  await expect(review).toBeDisabled();
+  await page.getByRole('textbox', { name: 'نتیجه رسیدگی', exact: true }).fill('شاهد ثبت‌شده پس از ممیزی معتبر نیست.');
+  await expect(review).toBeEnabled();
+  await review.click();
+  await expect(page.getByRole('dialog', { name: 'ثبت نتیجه رسیدگی به اعتراض؟', exact: true })).toBeVisible();
+});
+
+test('legacy review workflow hides all surfaces without an independent action permission', async ({ page }) => {
+  await loginAsAdmin(page);
+  await mockWorkflowApi(page, {});
+  await page.goto(`/dashboard/hr/personnel/performance/reviews/${submissionId}`);
+  await expect(page.getByText('هیچ مجوز فعال برای گردش ارزیابی عملکرد ندارید.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'شروع بازسازی' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'تعلیق اثر نتیجه', exact: true })).toHaveCount(0);
+});
+
+test('independent suspension permission retains its audited action on legacy review routes', async ({ page }) => {
   await loginAsAdmin(page);
   await mockWorkflowApi(page, { PAUSE_PERFORMANCE_EVALUATION: true });
-  await page.goto('/dashboard/hr/personnel/performance');
+  await page.goto(`/dashboard/hr/personnel/performance/reviews/${submissionId}`);
   await page.getByRole('button', { name: /اقدام‌های منابع انسانی/ }).click();
   await page.getByRole('button', { name: 'تعلیق اثر نتیجه' }).click();
   const dialog = page.getByRole('dialog', { name: 'تعلیق اثر نتیجه' });

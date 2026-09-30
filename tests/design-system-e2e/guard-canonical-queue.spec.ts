@@ -156,7 +156,7 @@ test('view-only Guard sees redacted queue state without mutation controls', asyn
   await page.route('**/api/security/vehicle-pairs**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
   await page.route('**/api/security/vehicle-movements**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
 
-  await login(page);
+  await login(page, '/dashboard/security');
   await page.goto('/dashboard/security/vehicles');
   const workspace = page.locator('main.sds-workspace');
   await expect(workspace.getByText('راننده · ********11', { exact: true })).toBeVisible();

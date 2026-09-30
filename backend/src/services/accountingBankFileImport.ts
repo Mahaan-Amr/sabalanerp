@@ -3,9 +3,23 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { AccountingCustomerTreasuryError } from './accountingCustomerTreasury';
 import { importBankStatementLineWithTx } from './accountingCustomerTreasuryPrisma';
+import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 
 type AdapterType = 'CSV' | 'XLSX';
 type SourceRow = { rowNumber: number; rawRecord: Record<string, string> };
+
+const bankFileTransaction = async <T>(database: PrismaClient, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await database.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 20_000, timeout: 120_000 });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || !['P2034', 'P2002'].includes(error.code)) throw error;
+      if (attempt === 2) throw new AccountingCustomerTreasuryError('BANK_FILE_CONCURRENT_CHANGE', 'داده‌های بانکی هم‌زمان تغییر کردند؛ عملیات را دوباره اجرا کنید.', 409);
+    }
+  }
+  throw new Error('Unreachable bank file transaction state');
+};
 
 export const parseBankStatementFile = (input: { adapterType: AdapterType; fileBase64: string }) => {
   if (input.adapterType !== 'CSV' && input.adapterType !== 'XLSX') {
@@ -40,8 +54,16 @@ export const parseBankStatementFile = (input: { adapterType: AdapterType; fileBa
     throw new AccountingCustomerTreasuryError('BANK_FILE_INVALID', 'فایل بانکی باید دقیقاً یک برگه داشته باشد.', 400);
   }
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+  if (range.e.r > 1000 || range.e.c > 99 || range.s.r !== 0 || range.s.c !== 0) {
+    throw new AccountingCustomerTreasuryError('BANK_FILE_INVALID', 'ستون‌ها یا شمار ردیف‌های فایل بانکی معتبر نیست.', 400);
+  }
   if (Object.values(sheet).some((cell) => cell && typeof cell === 'object' && 'f' in cell)) {
     throw new AccountingCustomerTreasuryError('BANK_FILE_INVALID', 'فرمول در فایل بانکی مجاز نیست.', 400);
+  }
+  if (Object.values(sheet).some((cell) => cell && typeof cell === 'object' && 'v' in cell
+    && typeof cell.v === 'number' && !Number.isSafeInteger(cell.v))) {
+    throw new AccountingCustomerTreasuryError('BANK_FILE_INVALID', 'اعداد فایل بانکی باید صحیح و دقیق باشند؛ اعداد بزرگ را به صورت متن ذخیره کنید.', 400);
   }
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: '', blankrows: true });
   const headers = (matrix[0] || []).map((value) => String(value).trim());
@@ -57,6 +79,7 @@ export const parseBankStatementFile = (input: { adapterType: AdapterType; fileBa
 
 export const importBankStatementFilePrisma = async (database: PrismaClient, input: {
   financialAccountId: string; adapterType: AdapterType; mappingVersion: number; fileBase64: string; actorId: string;
+  actorProfile?: 'ACCOUNTANT' | 'ACCOUNTING_MANAGER' | 'VIEWER';
 }) => {
   if (!input.financialAccountId || !Number.isInteger(input.mappingVersion) || input.mappingVersion < 1) {
     throw new AccountingCustomerTreasuryError('BANK_MAPPING_INVALID', 'حساب مالی و نسخه نگاشت بانکی معتبر نیست.', 400);
@@ -68,7 +91,7 @@ export const importBankStatementFilePrisma = async (database: PrismaClient, inpu
   const { fileHash, rows } = parseBankStatementFile(input);
   const identity = { financialAccountId: input.financialAccountId, adapterType: input.adapterType,
     mappingVersion: input.mappingVersion, fileHash };
-  return database.$transaction(async (tx) => {
+  return bankFileTransaction(database, async (tx) => {
     const prior = await tx.accountingBankFileImportRun.findUnique({ where: {
       financialAccountId_adapterType_mappingVersion_fileHash: identity,
     } });
@@ -102,15 +125,21 @@ export const importBankStatementFilePrisma = async (database: PrismaClient, inpu
       imported: results.filter((item) => item.status === 'IMPORTED').length,
       rejected: results.filter((item) => item.status === 'REJECTED').length,
       sourceFile: Buffer.from(input.fileBase64, 'base64'), sourceRows: rows, results, createdBy: input.actorId } });
+    await createAccountingLedgerPrismaRepository(tx, true).appendAudit({
+      action: 'BANK_FILE_IMPORTED', result: 'SUCCEEDED', actorId: input.actorId,
+      effectiveProfile: input.actorProfile ?? 'ACCOUNTANT', entityType: 'BANK_FILE_IMPORT_RUN', entityId: saved.id,
+      correlationId: saved.id, payloadHash: saved.outputHash,
+      sessionContext: { fileHash, mappingEvidenceHash: mapping.evidenceHash, imported: saved.imported, rejected: saved.rejected },
+    });
     return { id: saved.id, fileHash: saved.fileHash, outputHash: saved.outputHash,
       totalRows: saved.totalRows, imported: saved.imported, rejected: saved.rejected, results: saved.results };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 120_000 });
+  });
 };
 
 export const resolveBankFileExceptionPrisma = async (database: PrismaClient, input: {
   exceptionId: string; correctedRunId: string; correctedRowNumber: number; reason: string; actorId: string;
   actorProfile: 'ACCOUNTANT' | 'ACCOUNTING_MANAGER' | 'VIEWER'; attestUnlinkedCorrection?: boolean;
-}) => database.$transaction(async (tx) => {
+}) => bankFileTransaction(database, async (tx) => {
   const reason = input.reason.trim();
   if (!reason || reason.length < 8 || !Number.isInteger(input.correctedRowNumber) || input.correctedRowNumber < 2) {
     throw new AccountingCustomerTreasuryError('BANK_EXCEPTION_RESOLUTION_INVALID', 'دلیل و ردیف اصلاح‌شده معتبر لازم است.', 400);
@@ -146,7 +175,11 @@ export const resolveBankFileExceptionPrisma = async (database: PrismaClient, inp
   } } });
   const identityField = (mapping?.columnMapping as { sourceIdentityField?: string } | null)?.sourceIdentityField;
   const originalIdentity = identityField ? originalRow?.rawRecord[identityField]?.trim() : '';
-  const correctedIdentity = identityField ? correctedRow?.rawRecord[identityField]?.trim() : '';
+  const line = await tx.accountingBankStatementLine.findUnique({ where: { id: correctedResult.lineId } });
+  if (!line || line.financialAccountId !== original.financialAccountId) {
+    throw new AccountingCustomerTreasuryError('BANK_EXCEPTION_CORRECTION_INVALID', 'ردیف اصلاح‌شده در حساب بانکی یافت نشد.', 409);
+  }
+  const correctedIdentity = line.sourceIdentity;
   const sameIdentity = Boolean(originalIdentity && originalIdentity === correctedIdentity);
   const sameSourceRow = Boolean(originalRow && correctedRow
     && JSON.stringify(originalRow.rawRecord) === JSON.stringify(correctedRow.rawRecord));
@@ -154,11 +187,7 @@ export const resolveBankFileExceptionPrisma = async (database: PrismaClient, inp
     || input.actorProfile !== 'ACCOUNTING_MANAGER' || reason.length < 20)) {
     throw new AccountingCustomerTreasuryError('BANK_EXCEPTION_CORRECTION_INVALID', 'شناسه ردیف اصلاح‌شده باید با ردیف ردشده یکسان باشد.', 409);
   }
-  const line = await tx.accountingBankStatementLine.findUnique({ where: { id: correctedResult.lineId } });
-  if (!line || line.financialAccountId !== original.financialAccountId) {
-    throw new AccountingCustomerTreasuryError('BANK_EXCEPTION_CORRECTION_INVALID', 'ردیف اصلاح‌شده در حساب بانکی یافت نشد.', 409);
-  }
-  return tx.accountingExceptionCase.update({ where: { id: exception.id, status: 'OPEN' }, data: {
+  const resolved = await tx.accountingExceptionCase.update({ where: { id: exception.id, status: 'OPEN' }, data: {
     status: 'RESOLVED', resolvedAt: new Date(), resolutionEvidence: {
       mode: 'CORRECTED_FILE_ROW', originalRunId: original.id, originalRowNumber,
       correctedRunId: corrected.id, correctedRowNumber: input.correctedRowNumber,
@@ -166,4 +195,12 @@ export const resolveBankFileExceptionPrisma = async (database: PrismaClient, inp
       linkBasis: sameIdentity ? 'SOURCE_IDENTITY' : sameSourceRow ? 'UNCHANGED_SOURCE_ROW' : 'MANAGER_ATTESTATION',
     },
   } });
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  await createAccountingLedgerPrismaRepository(tx, true).appendAudit({
+    action: 'BANK_FILE_EXCEPTION_RESOLVED', result: 'SUCCEEDED', actorId: input.actorId,
+    effectiveProfile: input.actorProfile, entityType: 'ACCOUNTING_EXCEPTION', entityId: exception.id,
+    correlationId: corrected.id, reason,
+    payloadHash: createHash('sha256').update(JSON.stringify(resolved.resolutionEvidence)).digest('hex'),
+    sessionContext: { linkBasis: sameIdentity ? 'SOURCE_IDENTITY' : sameSourceRow ? 'UNCHANGED_SOURCE_ROW' : 'MANAGER_ATTESTATION' },
+  });
+  return resolved;
+});

@@ -1,7 +1,33 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { roundContractPayableTotal, sumContractMonetaryAmounts, verifyContractMonetaryRounding, multiplyContractMonetaryAmounts } from '../contractMonetaryRounding';
 import { planLegacyProductGraphMigration } from '../legacyMigration';
+
+test('prepared precision preserves whole-toman recovery and rejects real stone amount drift', () => {
+  const products = JSON.parse(readFileSync(`${__dirname}/fixtures/remaining-child-chain.json`, 'utf8'));
+  products.push({ rowId: 'precise-prepared', productId: 'prepared-catalog', productType: 'prepared',
+    preparedUnit: 'count', preparedQuantity: 1, quantity: 1, unitPrice: 100.4,
+    originalTotalPrice: 100.4, totalPrice: 100.4 });
+  const input = { contractId: 'mixed-recovered-precision', revision: 1, products,
+    recoverRemainingChildrenOnWrite: true,
+    calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1',
+      pricing: 'pricing-precise-prepared-v2', rounding: 'rounding-v2' } };
+  const before = JSON.stringify(products);
+  const plan = planLegacyProductGraphMigration(input);
+  assert.ok(plan.ok, JSON.stringify(plan));
+  if (!plan.ok) return;
+  assert.equal(plan.reconciliation.legacyTotalAmountToman, '23071975.4');
+  assert.equal(plan.reconciliation.canonicalTotalAmountToman, '23071975.4');
+  assert.equal(plan.graph.rows[0].commercial.totalAmountToman, '6545000');
+  assert.equal(plan.graph.rows[5].commercial.totalAmountToman, '100.4');
+  assert.equal(JSON.stringify(products), before);
+  const changed = structuredClone(products);
+  changed[0].totalPrice += 1;
+  const rejected = planLegacyProductGraphMigration({ ...input, products: changed });
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.ok(rejected.conflicts.length > 0, JSON.stringify(rejected));
+});
 
 test('sums exact rows before half-up rounding in the declared currency', () => {
   const source = sumContractMonetaryAmounts(['100.4', '100.4']);

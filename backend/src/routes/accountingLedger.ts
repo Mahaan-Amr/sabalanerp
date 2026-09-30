@@ -224,7 +224,7 @@ router.get('/treasury/overview', ...viewAccess, run(async (req) => {
   const feature = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
     workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_TREASURY_MANAGE,
     requiredPermission: FEATURE_PERMISSIONS.EDIT });
-  return { ...await listTreasuryOverviewPrisma(prisma),
+  return { ...await listTreasuryOverviewPrisma(prisma, { bankLinePage: Number(req.query.bankLinePage ?? 1) }),
     capabilities: { canManage: feature.allowed && ['edit', 'admin'].includes(req.workspacePermission || ''),
       canConfigure: feature.allowed && req.workspacePermission === WORKSPACE_PERMISSIONS.ADMIN } };
 }));
@@ -269,6 +269,7 @@ router.post('/treasury/bank-lines/import-file', ...treasuryCommandAccess, run((r
   mappingVersion: Number(req.body.mappingVersion),
   fileBase64: String(req.body.fileBase64 || ''),
   actorId: req.user!.id,
+  actorProfile: actorOf(req).profile,
 })));
 router.post('/treasury/bank-file-exceptions/:id/resolve', ...treasuryCommandAccess, run((req) => resolveBankFileExceptionPrisma(prisma, {
   exceptionId: req.params.id, correctedRunId: String(req.body.correctedRunId || ''),

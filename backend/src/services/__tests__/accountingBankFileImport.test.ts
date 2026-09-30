@@ -39,3 +39,15 @@ test('bank file refuses excess rows instead of silently truncating a statement',
   const lines = ['reference,amount', ...Array.from({ length: 1001 }, (_, index) => `R-${index},1200`)];
   assert.throws(() => parseBankStatementFile({ adapterType: 'CSV', fileBase64: Buffer.from(lines.join('\n')).toString('base64') }), /شمار ردیف/);
 });
+
+test('bank file rejects inexact spreadsheet numbers and unbounded sparse ranges', () => {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([['reference', 'amount'], ['R-1', 9007199254740992]]);
+  XLSX.utils.book_append_sheet(workbook, sheet, 'بانک');
+  const encoded = () => (XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer).toString('base64');
+  assert.throws(() => parseBankStatementFile({ adapterType: 'XLSX', fileBase64: encoded() }), /صحیح و دقیق/);
+  sheet.B2 = { t: 's', v: '9007199254740992' };
+  assert.equal(parseBankStatementFile({ adapterType: 'XLSX', fileBase64: encoded() }).rows[0].rawRecord.amount, '9007199254740992');
+  sheet['!ref'] = 'A1:B1048576';
+  assert.throws(() => parseBankStatementFile({ adapterType: 'XLSX', fileBase64: encoded() }), /شمار ردیف/);
+});

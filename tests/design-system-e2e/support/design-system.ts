@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 
-export const loginAsAdmin = async (page: Page) => {
+export const loginAsAdmin = async (page: Page, landingPath = '/dashboard') => {
   const username = process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin';
   const password = process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123';
   await page.route('**/api/hr/personnel-performance/badge/me', async (route) => {
@@ -15,7 +15,7 @@ export const loginAsAdmin = async (page: Page) => {
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(username);
   await page.locator('input[type="password"]').fill(password);
   await page.getByRole('button', { name: 'ورود', exact: true }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
+  await expect(page).toHaveURL(new URL(landingPath, page.url()).href, { timeout: 60_000 });
 };
 
 export const isolatedTestNamespace = (testInfo: TestInfo) => [

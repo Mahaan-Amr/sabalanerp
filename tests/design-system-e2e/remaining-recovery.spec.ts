@@ -35,7 +35,9 @@ test('remaining recovery error keeps every row and shows exact chain guidance on
       customerId: 'e2e-customer', customer: { id: 'e2e-customer', firstName: 'مشتری', lastName: 'آزمون', customerType: 'Individual',
         status: 'Active', projectAddresses: [project], phoneNumbers: [], isBlacklisted: false, isLocked: false },
       projectId: project.id, project, selectedProductTypeForAddition: null, products, serviceRows: [], deliveries: [],
-      payment: { payments: [], currency: 'تومان', totalContractAmount: 23071875 }, discount: null, signature: null
+      payment: { payments: [{ id: 'remaining-recovery-payment', method: 'CASH_CARD', amount: 23071875,
+        paymentDate: '1405/06/05', status: 'WILL_BE_PAID' }], currency: 'تومان', totalContractAmount: 23071875 },
+      discount: null, signature: null
     } }));
   }, products);
   await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });

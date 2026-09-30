@@ -85,6 +85,12 @@ export const planLegacyProductGraphMigration = (
   const money = input.calculationPolicy.pricing === PRECISE_PREPARED_GRAPH_PRICING_POLICY
     ? (value: unknown) => new Decimal(String(value ?? '0'))
     : (value: unknown) => new Decimal(String(value ?? '0')).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  // Precision belongs to prepared rows. Existing stone policies still produce
+  // whole-toman amounts, including recovered snapshots with binary residues.
+  const productMoney = (product: Readonly<Record<string, unknown>>) =>
+    input.calculationPolicy.pricing === PRECISE_PREPARED_GRAPH_PRICING_POLICY && product.productType === 'prepared'
+      ? money(product.totalPrice)
+      : new Decimal(String(product.totalPrice ?? '0')).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   const semanticRepair = repairRecoverableLegacyProductSemantics(input);
   const normalizedInput = {
     ...input,
@@ -102,7 +108,7 @@ export const planLegacyProductGraphMigration = (
   }
 
   const productTotal = normalizedInput.products.reduce(
-    (sum, product) => sum.plus(money(product.totalPrice)),
+    (sum, product) => sum.plus(productMoney(product)),
     new Decimal(0)
   );
   const legacyTotal = expectedLegacyTotalAmountToman === undefined
@@ -130,7 +136,7 @@ export const planLegacyProductGraphMigration = (
       const row = rowById.get(productRowId);
       if (!row) return [];
       const difference = money(row.commercial.totalAmountToman)
-        .minus(money(product.totalPrice));
+        .minus(productMoney(product));
       if (difference.isZero()) return [];
       return [{
         code: 'legacy-financial-drift' as const,

@@ -11,6 +11,10 @@ The user approved the static Inventory gallery and its follow-up Sales-style wiz
 - Services are discoverable in workspace navigation. Inventory movements and reports retain their unavailable state. Existing shared duty and Excel interfaces are reused.
 - `ErpListPage` gains optional section navigation and menu-style row actions; existing consumers retain the default icon actions.
 
+The 2026-09-30 visual revision removes the duty block from the Inventory landing page, uses the HR workspace's canonical neumorphic cards for its primary and master-data links, and applies the Logistics workspace presentation scope to Inventory list action menus. The duty route remains available through workspace navigation; the catalog routes and action consequences are unchanged.
+
+Revision verification: the frontend production build, design-system check, 25 foundation tests, 14 adoption tests, and five targeted browser cases passed. The browser cases check the removed dashboard block, HR-style card class, 320px light/dark layout, Logistics-style menu scope at 914px, menu Escape behavior, and unchanged master-data and service actions.
+
 ## Preserved behavior
 
 No backend, database, calculations, permissions, catalog identities, API mutation payloads, units, import/export behavior, duty evidence, product prerequisites, or contract return flow were changed. Service rates retain toman and product base prices retain rial. Permission counts are no longer presented as dashboard metrics. Pending sheets protect dismissal; inline validation retains the entered draft.

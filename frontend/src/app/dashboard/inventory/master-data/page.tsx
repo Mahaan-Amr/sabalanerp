@@ -2,7 +2,7 @@
 import { ErpInput, ErpSelect, ErpTextarea, ErpSheet, ErpField } from '@/components/erp';
 import React, { useEffect, useState } from 'react';
 import { FaBoxes, FaCog, FaEdit, FaPlus, FaToggleOff, FaToggleOn, FaTrash, FaWarehouse } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpEmptyState, ErpListPage, ErpLoading, ErpQuickFilters } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpEmptyState, ErpListPage, ErpLoading, ErpPresentationProvider, ErpQuickFilters } from '@/components/erp';
 import { dashboardAPI, inventoryAPI } from '@/lib/api';
 import SuccessModal from '@/components/SuccessModal';
 import ErrorModal from '@/components/ErrorModal';
@@ -286,6 +286,7 @@ const MasterDataManagement: React.FC = () => {
 
   return (
     <>
+      <ErpPresentationProvider scope="workspace"><div className="sds-neumorphic-scope sds-neumorphic-workflow-scope">
       <ErpListPage
         eyebrow="انبار"
         title="داده‌های پایه"
@@ -353,6 +354,7 @@ const MasterDataManagement: React.FC = () => {
         }
       >
       </ErpListPage>
+      </div></ErpPresentationProvider>
 
       {currentSection && <ErpSheet open={showCreateModal} onClose={() => { setShowCreateModal(false); setFormData({}); setFormErrors({}); setEditingItem(null); }} presentation="modal" size="wide" pending={loading}
         title={`${editingItem ? 'ویرایش' : 'افزودن'} ${currentSection.titlePersian}`}

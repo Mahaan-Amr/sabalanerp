@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { FaBoxes, FaClipboardList, FaCog, FaTools, FaWarehouse } from 'react-icons/fa';
-import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import { FaBoxes, FaCog, FaTools, FaWarehouse } from 'react-icons/fa';
+import { ErpBadge, ErpButton, ErpEmptyState, ErpLoading, ErpNeumorphicActionGrid, ErpPage } from '@/components/erp';
 import { dashboardAPI } from '@/lib/api';
 
 type Availability = Record<string, { visible: boolean; enabled: boolean; reason: string | null }>;
@@ -33,13 +33,13 @@ const InventoryDashboard: React.FC = () => {
   }
 
   const masterDataSections = [
-    { id: 'cut-types', title: 'نوع برش', description: 'مدیریت انواع برش سنگ', icon: FaCog, prefix: 'CUT_TYPES', href: '/dashboard/inventory/master-data/cut-types' },
-    { id: 'stone-materials', title: 'جنس سنگ', description: 'مدیریت جنس‌های سنگ', icon: FaBoxes, prefix: 'STONE_MATERIALS', href: '/dashboard/inventory/master-data/stone-materials' },
-    { id: 'cut-widths', title: 'عرض برش', description: 'مدیریت عرض‌های برش', icon: FaCog, prefix: 'CUT_WIDTHS', href: '/dashboard/inventory/master-data/cut-widths' },
-    { id: 'thicknesses', title: 'ضخامت', description: 'مدیریت ضخامت سنگ', icon: FaCog, prefix: 'THICKNESSES', href: '/dashboard/inventory/master-data/thicknesses' },
-    { id: 'mines', title: 'معدن', description: 'مدیریت معادن سنگ', icon: FaWarehouse, prefix: 'MINES', href: '/dashboard/inventory/master-data/mines' },
-    { id: 'finish-types', title: 'نوع فرآوری', description: 'مدیریت نوع فرآوری سنگ', icon: FaCog, prefix: 'FINISH_TYPES', href: '/dashboard/inventory/master-data/finish-types' },
-    { id: 'colors', title: 'رنگ/تم', description: 'مدیریت رنگ و تم سنگ', icon: FaCog, prefix: 'COLORS', href: '/dashboard/inventory/master-data/colors' },
+    { id: 'cut-types', title: 'نوع برش', icon: FaCog, prefix: 'CUT_TYPES' },
+    { id: 'stone-materials', title: 'جنس سنگ', icon: FaBoxes, prefix: 'STONE_MATERIALS' },
+    { id: 'cut-widths', title: 'عرض برش', icon: FaCog, prefix: 'CUT_WIDTHS' },
+    { id: 'thicknesses', title: 'ضخامت', icon: FaCog, prefix: 'THICKNESSES' },
+    { id: 'mines', title: 'معدن', icon: FaWarehouse, prefix: 'MINES' },
+    { id: 'finish-types', title: 'نوع فرآوری', icon: FaCog, prefix: 'FINISH_TYPES' },
+    { id: 'colors', title: 'رنگ/تم', icon: FaCog, prefix: 'COLORS' },
   ].map((section) => ({
     ...section,
     canView: availability[`VIEW_${section.prefix}`]?.enabled === true,
@@ -53,35 +53,32 @@ const InventoryDashboard: React.FC = () => {
       eyebrow="انبار"
       title="مدیریت انبار"
     >
-      <ErpSection title="">
-        <ErpActionGrid
-          columns={3}
+      <div className="sds-neumorphic-scope space-y-6">
+        <ErpNeumorphicActionGrid
+          title="بخش‌های اصلی انبار"
+          showTitle={false}
+          desktopColumns={3}
           items={[
-            { title: 'محصولات', href: '/dashboard/sales/products', icon: FaBoxes, tone: 'primary', description: 'کاتالوگ مشترک فروش و انبار' },
-            { title: 'خدمات', href: availability.VIEW_SERVICE?.enabled ? '/dashboard/inventory/services' : undefined, icon: FaTools, tone: 'primary', description: 'خدمات، ابزار، لایه و فرآوری', disabled: !availability.VIEW_SERVICE?.enabled, meta: availability.VIEW_SERVICE?.reason || undefined },
-            { title: 'داده‌های پایه', href: hasAnyMasterDataPermission ? '/dashboard/inventory/master-data' : undefined, icon: FaCog, tone: 'primary', description: 'مشخصات پایه سنگ و برش', disabled: !hasAnyMasterDataPermission, meta: hasAnyMasterDataPermission ? undefined : 'بدون دسترسی' },
+            { id: 'products', title: 'محصولات', href: '/dashboard/sales/products', icon: FaBoxes, description: 'کاتالوگ مشترک فروش و انبار' },
+            { id: 'services', title: 'خدمات', href: availability.VIEW_SERVICE?.enabled ? '/dashboard/inventory/services' : undefined, icon: FaTools, description: 'خدمات، ابزار، لایه و فرآوری', disabledReason: availability.VIEW_SERVICE?.enabled ? undefined : availability.VIEW_SERVICE?.reason || 'بدون دسترسی' },
+            { id: 'master-data', title: 'داده‌های پایه', href: hasAnyMasterDataPermission ? '/dashboard/inventory/master-data' : undefined, icon: FaCog, description: 'مشخصات پایه سنگ و برش', disabledReason: hasAnyMasterDataPermission ? undefined : 'بدون دسترسی' },
           ]}
         />
-      </ErpSection>
 
       {hasAnyMasterDataPermission ? (
-        <ErpSection
-          title="بخش‌های داده‌های پایه"
-          actions={[{ label: 'مشاهده همه', href: '/dashboard/inventory/master-data', tone: 'neutral', variant: 'outline' }]}
-        >
-          <ErpActionGrid
-            columns={4}
-            compact
+        <div className="space-y-3">
+          <div className="flex justify-end"><ErpButton label="مشاهده همه" href="/dashboard/inventory/master-data" tone="neutral" variant="outline" /></div>
+          <ErpNeumorphicActionGrid
+            title="بخش‌های داده‌های پایه"
             items={masterDataSections.map((section) => ({
+              id: section.id,
               title: section.title,
               href: section.canView ? `/dashboard/inventory/master-data?section=${section.id}` : undefined,
               icon: section.icon,
-              tone: 'primary',
-              disabled: !section.canView,
-              badge: !section.canView ? <ErpBadge tone="neutral">بدون دسترسی</ErpBadge> : undefined,
+              disabledReason: section.canView ? undefined : 'بدون دسترسی',
             }))}
           />
-        </ErpSection>
+        </div>
       ) : (
         <ErpEmptyState
           icon={FaWarehouse}
@@ -89,7 +86,7 @@ const InventoryDashboard: React.FC = () => {
           description="برای مشاهده یا مدیریت داده‌های پایه انبار با مدیر سیستم تماس بگیرید."
         />
       )}
-      <ErpSection title="وظایف بین‌واحدی" actions={[{ label: 'مشاهده وظایف', href: '/dashboard/inventory/duties', icon: FaClipboardList, tone: 'neutral', variant: 'outline' }]}>{null}</ErpSection>
+      </div>
       <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--sds-text-secondary)]">
         <span>گردش موجودی</span><ErpBadge tone="neutral">به‌زودی</ErpBadge>
         <span>گزارش‌های انبار</span><ErpBadge tone="neutral">به‌زودی</ErpBadge>

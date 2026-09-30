@@ -183,7 +183,7 @@ export const recoverAuditedDiscountEligibility = (input: {
     if (!input.graphAuditCommandId) {
       throw new ApprovedPricingEvidenceError(`Product ${id} discount eligibility recovery has no matching graph audit`);
     }
-    if (!isLayer && (meta.layerInfo != null || meta.layerType != null ||
+    if (!isLayer && (meta.layerInfo != null || meta.layerType != null || meta.layerSourcePlan != null ||
       product.layerTypeId != null || product.layerTypeName != null || product.layerTypePrice != null)) {
       throw new ApprovedPricingEvidenceError(`Product ${id} omitted layer flag conflicts with layer evidence`);
     }

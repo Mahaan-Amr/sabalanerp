@@ -198,6 +198,7 @@ const hasCurrentLayerEvidence = (
   meta: Readonly<Record<string, unknown>>,
 ) => meta.layerInfo != null ||
   meta.layerType != null ||
+  meta.layerSourcePlan != null ||
   product.layerTypeId != null ||
   product.layerTypeName != null ||
   product.layerTypePrice != null;

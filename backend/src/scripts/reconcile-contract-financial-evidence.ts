@@ -71,6 +71,10 @@ const recoveryMethods = (version: Awaited<ReturnType<typeof preflightApprovedPri
     methods.add('AUDITED_FROZEN_STAIR_LAYER_MATERIAL_BASE');
   }
   if (compatibility.recoveredInvoiceAmount) methods.add('ZERO_SENTINEL_FROM_FROZEN_CONTRACT_TOTAL');
+  if (Array.isArray(compatibility.auditedDiscountEligibilityAssignments) &&
+    compatibility.auditedDiscountEligibilityAssignments.length > 0) {
+    methods.add('AUDITED_FROZEN_DISCOUNT_ELIGIBILITY');
+  }
   if (Array.isArray(sourceEvidence.quantityNormalizations) && sourceEvidence.quantityNormalizations.length > 0) {
     methods.add('VERSIONED_COMMERCIAL_PRECISION_RECONCILIATION');
   }

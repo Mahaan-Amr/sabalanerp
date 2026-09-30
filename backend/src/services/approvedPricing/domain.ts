@@ -9,8 +9,9 @@ import {
 import {
   contractDiscountEligibilityEvidence,
   hasConflictingDiscountOrNonProductAdjustmentEvidence,
-  isContractRowDiscountEligible,
   isExplicitZeroDiscountInput,
+  isContractRowDiscountEligible,
+  EXPLICIT_ZERO_DISCOUNT_BASE_RECONCILIATION_ORIGIN,
   LEGACY_DISCOUNT_ELIGIBILITY_EVIDENCE_ORIGIN,
   LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN,
 } from '../contractDiscountEvidence';
@@ -479,6 +480,25 @@ const validateContractDiscountEvidence = (
       throw new ApprovedPricingEvidenceError('Contract discount amount conflicts with base subtotal and percent');
     }
   }
+  if (!contractEligibleBase.eq(discountBase)) {
+    if (!isExplicitZeroDiscountInput(data.discount) ||
+        hasConflictingDiscountOrNonProductAdjustmentEvidence(data) ||
+        money(payment.totalContractAmount, 'Contract payable total') !== money(completeGrossTotal, 'Canonical gross total')) {
+      throw new ApprovedPricingEvidenceError('Contract discount base subtotal conflicts with canonical eligible rows');
+    }
+    return {
+      discount: {
+        ...discount,
+        baseSubtotal: contractEligibleBase.toString(),
+        evidenceOrigin: EXPLICIT_ZERO_DISCOUNT_BASE_RECONCILIATION_ORIGIN,
+        rawBaseSubtotal: discountBase,
+      },
+      discountBase: money(contractEligibleBase.toString(), 'Reconciled contract discount base subtotal'),
+      discountPercent,
+      contractDiscountAmount,
+      discountValue,
+    };
+  }
   return { discount, discountBase, discountPercent, contractDiscountAmount, discountValue };
 };
 
@@ -576,7 +596,6 @@ export const buildApprovedPricingVersion = (
   const { discount, discountBase, discountPercent, contractDiscountAmount, discountValue } =
     validateContractDiscountEvidence(data, payment, currency, contractEligibleBase, graph.totalAmountToman,
       isExplicitZeroNoDiscount && discountEligibility.normalizedNonLayerProductRowIds.length > 0);
-  if (!contractEligibleBase.eq(discountBase)) throw new ApprovedPricingEvidenceError('Contract discount base subtotal conflicts with canonical eligible rows');
   if (discountValue.gt(contractEligibleBase)) throw new ApprovedPricingEvidenceError('Contract discount exceeds eligible pricing');
 
   const canonicalWriterV2MoneyNormalizations = new Map(

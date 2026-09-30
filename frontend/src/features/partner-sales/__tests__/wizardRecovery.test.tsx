@@ -6,7 +6,7 @@ import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures'
 import { PartnerContractWizard, partnerCaseNeedsAutomaticPricingInquiry, partnerWizardStepsForDraft,
   requiredPartnerWizardStep, type PartnerWizardDraft } from '../../contract-creation/partner/PartnerContractWizard';
 import { createPartnerCaseSubmission, saveCompletedPartnerDraft } from '../../contract-creation/partner/partnerCaseSubmission';
-import { alignPartnerCustomerPaymentPlan, defaultPartnerRetailRows, partnerRetailIntentRows,
+import { remainingPartnerAmount, defaultPartnerRetailRows, partnerRetailIntentRows,
   partnerRetailSummary } from '../../contract-creation/partner/partnerRetail';
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
 import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
@@ -212,14 +212,13 @@ test('late-step recovery requires numbering but never waits for Sabalan pricing'
   assert.equal(requiredPartnerWizardStep('confirmation', true, true), 'confirmation');
 });
 
-test('numbering at the pricing boundary keeps the provisional customer plan compatible with retail total', () => {
-  const unaligned = { ...draft.intent.customerPaymentPlan,
-    installments: draft.intent.customerPaymentPlan.installments.map((item, index) => index === 0
-      ? { ...item, amount: { ...item.amount, amount: '0' } } : item) };
-  const aligned = alignPartnerCustomerPaymentPlan(draft.rows, draft.intent.retailDiscount, unaligned);
-  const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
-  assert.equal(summary.valid, true);
-  assert.equal(aligned.installments[0]?.amount.amount, summary.valid ? summary.retail : undefined);
+test('new Partner wizard initialization accepts an empty user payment plan', () => {
+  const { graphHash, rows, belowCostConfirmed, ...base } = draft.intent;
+  const plan = { ...base.customerPaymentPlan, installments: [] };
+  const initialized = enterPartnerWizard({ inquiry: fixture.inquiry, now: Date.parse('2026-08-27T09:00:00Z'),
+    validated: fixture.technicalSaved, base: { ...base, customerPaymentPlan: plan } });
+  assert.ok(initialized);
+  assert.deepEqual(initialized.intent.customerPaymentPlan.installments, []);
 });
 
 test('canonical Partner retail preview uses quoted area and ancillary costs instead of linear display quantity', () => {
@@ -230,11 +229,8 @@ test('canonical Partner retail preview uses quoted area and ancillary costs inst
   const summary = partnerRetailSummary(canonicalRows, { amount: '0', currency: 'IRT' });
   assert.equal(summary.valid, true);
   assert.equal(summary.valid ? summary.retail : undefined, '3105000');
-  const plan = alignPartnerCustomerPaymentPlan(canonicalRows, { amount: '0', currency: 'IRT' },
-    { ...draft.intent.customerPaymentPlan, installments: draft.intent.customerPaymentPlan.installments.map(item => ({
-      ...item, amount: { amount: '7500000', currency: 'IRT' as const },
-    })) });
-  assert.equal(plan.installments[0]?.amount.amount, '3105000');
+  assert.equal(remainingPartnerAmount(summary.valid ? summary.retail : '0', ['7500000']), null);
+
 });
 
 test('the atomic numbered save owns initial Sabalan pricing without a duplicate automatic re-inquiry', () => {
@@ -513,4 +509,12 @@ test('completed draft navigation waits for successful persistence and opens the 
     assert.equal(result, succeeds);
     assert.deepEqual(opened, succeeds ? [fixture.partner.owner.caseId] : []);
   }
+});
+
+
+test('a route bound to a recovery consumes its new-entry intent on refresh', () => {
+  assert.equal(shouldStartFreshPartnerCreation(new URLSearchParams('newInquiry=1')), true);
+  assert.equal(shouldStartFreshPartnerCreation(new URLSearchParams('newInquiry=1&draftId=current-draft')), false);
+  assert.equal(shouldStartFreshPartnerCreation(new URLSearchParams('newInquiry=1&caseId=current-case')), false);
+  assert.equal(shouldStartFreshPartnerCreation(new URLSearchParams('newCustomer=1&draftId=current-draft')), true);
 });

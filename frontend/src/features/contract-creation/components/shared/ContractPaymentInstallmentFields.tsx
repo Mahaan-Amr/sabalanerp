@@ -7,9 +7,9 @@ import type { PaymentEntryMethod } from '../../types/contract.types';
 import { ContractPaymentMethodSelect } from './ContractPaymentMethodSelect';
 
 export function ContractPaymentInstallmentFields({ method, amount, date, amountLabel = 'مبلغ (تومان)',
-  dateLabel = 'تاریخ پرداخت', disabledAmount = false, disabled = false, existingContract = false, allowCustomerBalance = false, amountError, dateError,
+  dateLabel = 'تاریخ پرداخت', disabledAmount = false, disabled = false, existingContract = false, allowCustomerBalance = false, methodError, amountError, dateError,
   dateFormat = 'jalali', onMethodChange, onAmountChange, onDateChange }: {
-  method: PaymentEntryMethod;
+  method: PaymentEntryMethod | undefined;
   amount: string;
   date: string;
   dateFormat?: 'jalali' | 'gregorian';
@@ -19,6 +19,7 @@ export function ContractPaymentInstallmentFields({ method, amount, date, amountL
   disabled?: boolean;
   existingContract?: boolean;
   allowCustomerBalance?: boolean;
+  methodError?: string;
   amountError?: string;
   dateError?: string;
   onMethodChange: (method: PaymentEntryMethod) => void;
@@ -26,7 +27,7 @@ export function ContractPaymentInstallmentFields({ method, amount, date, amountL
   onDateChange: (date: string) => void;
 }) {
   return <div className="grid gap-3 sm:grid-cols-3">
-    <ErpField className="[&>label]:mb-0" label="روش پرداخت"><ContractPaymentMethodSelect value={method} disabled={disabled} existingContract={existingContract} allowCustomerBalance={allowCustomerBalance} className="h-12"
+    <ErpField className="[&>label]:mb-0" label="روش پرداخت" error={methodError}><ContractPaymentMethodSelect value={method} disabled={disabled} existingContract={existingContract} allowCustomerBalance={allowCustomerBalance} className="h-12"
       onChange={onMethodChange} /></ErpField>
     <ErpField className="[&>label]:mb-0" label={amountLabel} error={amountError}><ErpRialInput className="h-12" dir="ltr" value={amount}
       disabled={disabled || disabledAmount} onValueChange={onAmountChange} /></ErpField>

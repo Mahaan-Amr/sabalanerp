@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { ErpInlineState } from '@/components/erp';
-import type { PaymentEntry, PaymentEntryMethod } from '../../types/contract.types';
+import type { PaymentEntry } from '../../types/contract.types';
 import { CentralProductModalShell } from '../product-modal-system';
 import { ContractPaymentInstallmentFields } from '../shared/ContractPaymentInstallmentFields';
 import { ContractPaymentCheckFields } from '../shared/ContractPaymentCheckFields';
@@ -15,7 +15,7 @@ interface PaymentEntryModalProps {
   onSave: () => void;
   currency: string;
   error?: string;
-  fieldErrors?: Partial<Record<'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode', string>>;
+  fieldErrors?: Partial<Record<'method' | 'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode', string>>;
   isEdit?: boolean;
   nationalCodeRequired?: boolean;
   showNationalCode?: boolean;
@@ -28,6 +28,7 @@ interface PaymentEntryModalProps {
   existingContract?: boolean;
   allowCustomerBalance?: boolean;
   dateFormat?: 'jalali' | 'gregorian';
+  requireMethodSelection?: boolean;
 }
 
 export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
@@ -48,10 +49,11 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   existingContract = false,
   allowCustomerBalance = false,
   dateFormat = 'jalali',
+  requireMethodSelection = false,
 }) => {
   if (!isOpen) return null;
 
-  const method = (form.method || 'CASH_CARD') as PaymentEntryMethod;
+  const method = form.method ?? (requireMethodSelection ? undefined : 'CASH_CARD');
   const isCheck = method === 'CHECK';
   const isCustomerBalance = method === 'CUSTOMER_BALANCE';
 
@@ -75,7 +77,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
               date={form.paymentDate ?? ''}
               amountLabel={isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : isCheck ? 'مبلغ چک (تومان)' : 'مبلغ (تومان)'}
               dateLabel={isCustomerBalance ? 'تاریخ استفاده از مانده' : isCheck ? 'تاریخ سررسید چک' : 'تاریخ پرداخت'}
-              amountError={fieldErrors.amount} dateError={fieldErrors.paymentDate}
+              methodError={fieldErrors.method} amountError={fieldErrors.amount} dateError={fieldErrors.paymentDate}
               disabledAmount={disabledAmount}
               onMethodChange={value => onFormChange({ method: value })}
               onAmountChange={value => onFormChange({ amount: Number(value || 0) })}

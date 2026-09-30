@@ -129,6 +129,8 @@ test('Partner creation consumes the shared eight-step date, customer, and projec
 
 test('a resumed Partner inquiry stays inside the shared eight-step contract wizard', async ({ page }) => {
   await loginAsAdmin(page);
+  await page.route('**/api/partner/**', route => route.fulfill({ status: 404,
+    json: { success: false, code: 'NOT_FOUND' } }));
   await page.addInitScript(() => {
     window.localStorage.setItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e', JSON.stringify({
       actorId: 'partner-e2e',
@@ -136,7 +138,10 @@ test('a resumed Partner inquiry stays inside the shared eight-step contract wiza
       access: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e', browserSessionId: 'partner-browser-e2e',
         leaseToken: 'partner-lease-e2e', baseRevision: 1 },
       saved: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e', recoveryRevision: 1, inputRevision: 1,
-        graphHash: 'a'.repeat(64), updatedAt: '2026-09-16T08:00:00.000Z', rows: [], replayed: true },
+        graphHash: `sha256-v1:${'a'.repeat(64)}`, updatedAt: new Date().toISOString(), rows: [{
+          configurationRef: { recoveryId: 'partner-recovery-e2e', recoveryRevision: 1, productRowId: 'resume-product' },
+          quantity: '2', unit: 'meter', configurationChange: 'NEW',
+        }], replayed: true },
       configuredRows: [],
       customerId: 'partner-customer-e2e',
       contractDate: '2026-09-16',
@@ -155,17 +160,37 @@ test('a resumed Partner inquiry stays inside the shared eight-step contract wiza
       writable: true,
       inquiryIds: ['partner-inquiry-e2e'],
       latestInquiryId: 'partner-inquiry-e2e',
-      recoverableDrafts: [],
+      recoverableDrafts: [{ recoveryId: 'partner-recovery-e2e', baseRevision: 1, updatedAt: new Date().toISOString() }],
       customers: [{ id: 'partner-customer-e2e', displayName: 'مشتری همکار آزمایشی', address: 'تهران', phone: '09120000000' }],
       projects: [{ id: 'partner-project-e2e', customerId: 'partner-customer-e2e', title: 'پروژه همکار آزمایشی' }],
     } }),
   }));
+  await page.route('**/api/partner/technical/catalog/query', route => route.fulfill({ json: {
+    success: true, data: { schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG',
+      kind: route.request().postDataJSON().kind, items: [] },
+  } }));
+  await page.route('**/api/partner/technical/recoveries/acquire', route => route.fulfill({ json: {
+    success: true, data: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e',
+      browserSessionId: route.request().postDataJSON().browserSessionId, leaseToken: 'partner-lease-e2e',
+      baseRevision: 1, updatedAt: new Date().toISOString(), takenOver: false },
+  } }));
+  await page.route('**/api/partner/technical/recoveries/read', route => route.fulfill({ json: {
+    success: true, data: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e', recoveryRevision: 1,
+      updatedAt: new Date().toISOString(), draft: null },
+  } }));
+  await page.route('**/api/partner/technical/recoveries/read-saved', route => route.fulfill({ json: {
+    success: true, data: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e', recoveryRevision: 1,
+      inputRevision: 1, graphHash: `sha256-v1:${'a'.repeat(64)}`, updatedAt: new Date().toISOString(),
+      rows: [{ configurationRef: { recoveryId: 'partner-recovery-e2e', recoveryRevision: 1, productRowId: 'resume-product' },
+        quantity: '2', unit: 'meter', configurationChange: 'NEW' }],
+    },
+  } }));
   await page.route('**/api/partner/inquiries/query-v2', route => route.fulfill({
     status: 409,
     contentType: 'application/json',
     body: JSON.stringify({ code: 'STATE_CONFLICT', status: 409, message: 'fixture inquiry remains pending' }),
   }));
-  await page.goto('/dashboard/sales/contracts/create');
+  await page.goto('/dashboard/sales/contracts/create?draftId=partner-recovery-e2e');
   await setTheme(page, 'light');
   const workflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
   await expect(workflow.getByRole('heading', { name: 'ایجاد فروش همکار', exact: true })).toBeVisible();
@@ -183,7 +208,7 @@ test('a resumed Partner inquiry stays inside the shared eight-step contract wiza
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
   await workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ }).click();
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
-  await expect(workflow.getByText('جستجوی محصول', { exact: true })).toBeVisible();
+  await expect(workflow.getByRole('button', { name: 'ویرایش محصولات', exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => JSON.parse(window.localStorage
     .getItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e') || '{}')))
     .toMatchObject({ inquiryId: 'partner-inquiry-e2e', customerId: 'partner-customer-e2e', projectId: 'partner-project-e2e' });

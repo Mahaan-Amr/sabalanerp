@@ -30,7 +30,8 @@ export const shouldPreferLocalPartnerWizard = (localServerRevision: number | und
   localServerRevision === currentServerRevision;
 
 export const shouldStartFreshPartnerCreation = (params: Pick<URLSearchParams, 'get'>) =>
-  params.get('newInquiry') === '1' || params.get('newCustomer') === '1';
+  params.get('newCustomer') === '1' ||
+  (!params.get('draftId') && !params.get('caseId') && params.get('newInquiry') === '1');
 
 export const isExplicitPartnerCreationEntry = (params: Pick<URLSearchParams, 'get'>) =>
   params.get('entry') === 'new-contract';

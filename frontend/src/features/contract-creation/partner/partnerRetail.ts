@@ -194,26 +194,11 @@ export function remainingPartnerAmount(total: string, allocated: readonly string
   } catch { return null; }
 }
 
-/** Keep the first customer installment equal to the unallocated retail total.
- * The numbered Case is created before the payment step, so its provisional
- * plan must already reconcile with the partner-visible retail envelope. */
-export function alignPartnerCustomerPaymentPlan(rows: PartnerRetailRow[], discount: Money,
-  plan: PartnerDraftIntent['customerPaymentPlan'], adjustAmount = true): PartnerDraftIntent['customerPaymentPlan'] {
-  if (!adjustAmount) return plan;
-  const summary = partnerRetailSummary(rows, discount);
-  const [first, ...later] = plan.installments;
-  const firstAmount = summary.valid && first
-    ? remainingPartnerAmount(summary.retail, later.map(item => item.amount.amount)) : null;
-  return first && firstAmount !== null ? { ...plan, installments: [{ ...first,
-    amount: { amount: firstAmount, currency: first.amount.currency } }, ...later] } : plan;
-}
-
-/** Prefill a new installment from the final discounted total without modifying existing payments. */
-export function newPartnerPaymentInstallment(total: Money, plan: PartnerDraftIntent['customerPaymentPlan'],
-  installmentId: string, currentDate: string): PartnerDraftIntent['customerPaymentPlan']['installments'][number] {
+/** Unsaved backing identity; the payment form requires an explicit method and amount. */
+export function newPartnerPaymentInstallment(currency: Money['currency'], installmentId: string, currentDate: string): PartnerDraftIntent['customerPaymentPlan']['installments'][number] {
   return {
     installmentId, dueDate: currentDate,
-    amount: { amount: remainingPartnerAmount(total.amount, plan.installments.map(item => item.amount.amount)) ?? '0', currency: total.currency },
+    amount: { amount: '0', currency },
     method: 'BANK_TRANSFER', subtype: 'SHIBA',
   };
 }

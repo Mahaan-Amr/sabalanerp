@@ -131,33 +131,23 @@ test('four main products keep their remainder child nested and retain all financ
   assert.equal(partnerRetailSummary(rows, { amount: '0', currency: 'IRT' }).retail, '40');
 });
 
-test('editing installment amounts preserves user allocation until retail prices change', async () => {
-  const { alignPartnerCustomerPaymentPlan } = await import('../../contract-creation/partner/partnerRetail');
-  const fixture = createPartnerFixtures();
-  const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm',
-    inquiryRow: fixture.inquiry.rows[0], retailUnitPrice: { amount: '1000', currency: 'IRR' } }]);
-  const plan = { ...fixture.partner.customerPaymentPlan, installments: [
-    { ...fixture.partner.customerPaymentPlan.installments[0], amount: { amount: '500', currency: 'IRR' as const } },
-  ] };
-  const discount = { amount: '0', currency: 'IRR' as const };
-  assert.equal(alignPartnerCustomerPaymentPlan(rows, discount, plan, false).installments[0].amount.amount, '500');
-  assert.equal(alignPartnerCustomerPaymentPlan(rows, discount, plan, true).installments[0].amount.amount, '2000');
+test('remaining balance follows user allocations without rewriting them', async () => {
+  const { remainingPartnerAmount } = await import('../../contract-creation/partner/partnerRetail');
+  const payments = ['500', '200'];
+  assert.equal(remainingPartnerAmount('2000', []), '2000');
+  assert.equal(remainingPartnerAmount('2000', payments), '1300');
+  assert.equal(remainingPartnerAmount('2000', ['700', '200']), '1100');
+  assert.equal(remainingPartnerAmount('2000', ['200']), '1800');
+  assert.equal(remainingPartnerAmount('1900', payments), '1200');
+  assert.deepEqual(payments, ['500', '200']);
+  assert.equal(remainingPartnerAmount('100.75', ['20.25', '30.10']), '50.4');
+  assert.equal(remainingPartnerAmount('100', ['101']), null);
 });
 
-test('new installment prefills the exact unallocated discounted total and today without changing the plan', async () => {
+test('a new payment has no automatic amount allocation', async () => {
   const { newPartnerPaymentInstallment } = await import('../../contract-creation/partner/partnerRetail');
-  for (const [total, payments, expected] of [
-    ['1030650000', ['500000000', '500000000'], '30650000'],
-    ['1030650000', ['5000000', '500000000'], '525650000'],
-    ['100.75', ['20.25', '30.10'], '50.4'],
-    ['100', ['100'], '0'], ['100', ['101'], '0'],
-  ] as const) {
-    const plan = { installments: payments.map((amount, index) => ({ installmentId: String(index),
-      dueDate: '2026-10-28', amount: { amount, currency: 'IRT' as const }, method: 'BANK_TRANSFER' as const })) };
-    const previous = JSON.stringify(plan);
-    const added = newPartnerPaymentInstallment({ amount: total, currency: 'IRT' }, plan, 'new', '2026-09-28');
-    assert.equal(added.amount.amount, expected);
-    assert.equal(added.dueDate, '2026-09-28');
-    assert.equal(JSON.stringify(plan), previous);
-  }
+  const added = newPartnerPaymentInstallment('IRT', 'new', '2026-09-30');
+  assert.equal(added.amount.amount, '0');
+  assert.equal(added.amount.currency, 'IRT');
+  assert.equal(added.dueDate, '2026-09-30');
 });

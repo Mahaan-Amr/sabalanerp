@@ -7,7 +7,7 @@ import type { WizardStep } from '../components/shared/WizardProgressBar';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
 import { WIZARD_STEPS } from '../constants/contract.constants';
 import { PartnerRetailStep } from './PartnerRetailStep';
-import { alignPartnerCustomerPaymentPlan, partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
+import { partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
 import { saveCompletedPartnerDraft, type PartnerDraftIntent, type createPartnerCaseSubmission } from './partnerCaseSubmission';
 import { inquiryRowState, isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import { partnerCaseReviewMessage, reconcilePartnerDeliveriesToProducts } from './partnerWizardEntry';
@@ -213,8 +213,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     return { ...source.intent, pricingRequest: {
       inquiryId: `partner-case-pricing:${source.intent.recoveryId}:1`, rows: pricingRows,
     }, rows: partnerRetailIntentRows(source.rows),
-    customerPaymentPlan: alignPartnerCustomerPaymentPlan(source.rows, source.intent.retailDiscount,
-      source.intent.customerPaymentPlan) };
+    customerPaymentPlan: source.intent.customerPaymentPlan };
   };
   const currentIntent = (preparationCompleted: boolean): PartnerDraftIntent => {
     const rows = draft.rows.map(row => {

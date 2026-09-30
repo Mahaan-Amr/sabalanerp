@@ -51,6 +51,29 @@ const product = (overrides: Partial<ContractProduct> = {}): ContractProduct => (
 } as ContractProduct);
 
 {
+  const rows = ['fraction-a', 'fraction-b'].map(rowId => product({ rowId, totalPrice: 100.4,
+    originalTotalPrice: 100.4, isCut: false, cuttingCost: 0, physicalCuttingCost: 0, cuttingBreakdown: [] }));
+  const payment = { currency: 'تومان', totalContractAmount: 200.8,
+    payments: [{ id: 'whole-payment', method: 'CASH_SHIBA' as const, amount: 201, paymentDate: '1405/07/06' }] };
+  const submission = prepareContractSubmissionFinancials(rows, [], 0, payment, false);
+  assert.equal(submission.totalAmount, 201);
+  assert.equal(submission.payment.totalContractAmount, 201);
+  assert.equal(submission.validation.isValid, true, JSON.stringify(submission.validation));
+  assert.equal(submission.monetaryRounding?.sourceAmount, '200.8');
+  assert.equal(rows[0].totalPrice, 100.4);
+  const tiny = [product({ totalPrice: 0.4, originalTotalPrice: 0.4, isCut: false,
+    cuttingCost: 0, physicalCuttingCost: 0, cuttingBreakdown: [] })];
+  const zero = prepareContractSubmissionFinancials(tiny, [], 0, { ...payment, payments: [] }, false);
+  assert.equal(zero.totalAmount, 0);
+  assert.equal(zero.validation.isValid, true, 'a zero payable obligation needs no artificial payment');
+  assert.equal(getContractPayableTotal(rows, [], 0.3), 201);
+  assert.equal(getContractPayableTotal(rows, [], 0, false), 200.8);
+  assert.equal(prepareContractSubmissionFinancials(rows, [], 0, { ...payment,
+    payments: [{ ...payment.payments[0], amount: 200 }] }, false).validation.isValid, false,
+    'a real shortfall still blocks submission');
+}
+
+{
   const previouslySavedPaymentTotal = 875_000_000;
   const rowsAfterEdit = [
     product({ rowId: 'longitudinal', totalPrice: previouslySavedPaymentTotal, originalTotalPrice: previouslySavedPaymentTotal, cuttingCost: 0, cuttingBreakdown: [] }),

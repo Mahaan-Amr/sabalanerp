@@ -683,8 +683,10 @@ test('Product Selection restores into the shared interface without changing pers
   await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4');
   await expect(page.getByRole('region', { name: 'کاتالوگ محصولات' })).toBeVisible();
   await expect(page.locator('main.sds-workspace')).toHaveCount(1);
-  expect(await page.locator('main.sds-workspace .sds-workspace-surface').count())
-    .toBeGreaterThanOrEqual(3);
+  await expect(page.getByRole('region', { name: 'کاتالوگ محصولات' }).locator('.sds-card')).toBeVisible();
+  for (const name of ['محصولات قرارداد', 'خدمات مستقل']) {
+    await expect(page.getByRole('region', { name, exact: true })).toHaveClass(/sds-workspace-surface/);
+  }
   await expect(page.locator('[data-contract-row-id="source-row"]')).toBeVisible();
   await expect(page.locator('[data-contract-row-id="child-row"]')).toBeVisible();
   await expect(page.getByText('خدمت مستقل', { exact: true })).toBeVisible();
@@ -898,8 +900,15 @@ test('Product Selection restores into the shared interface without changing pers
   await expect(childDialog.getByRole('textbox', { name: 'درصد حکمی' })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(childDialog).toBeVisible();
+  const preservedChildText = await childRow.textContent();
   await childDialog.getByRole('button', { name: 'ذخیره تغییرات', exact: true }).click();
+  await expect(childDialog.getByRole('alert')).toHaveText(
+    'اطلاعات منبع این محصول قابل ویرایش نیست؛ محصول را حذف کنید و دوباره از سنگ باقی‌مانده بسازید.'
+  );
+  await expect(childDialog).toBeVisible();
+  await childDialog.getByRole('button', { name: 'انصراف', exact: true }).click();
   await expect(childDialog).toBeHidden();
+  await expect(childRow).toHaveText(preservedChildText!);
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await childRow.getByRole('button', { name: 'ویرایش', exact: true }).click();
@@ -1211,6 +1220,26 @@ test('Contract payment converts the active percentage range to a toman cap', asy
   await expect(workspace.getByText(/تخفیف اعمال‌شده/)).toContainText(/۳.۹۴۱.۸۶۱ تومان/);
   await workspace.getByRole('button', { name: 'تومان', exact: true }).click();
   await expect(workspace.getByRole('textbox', { name: 'مبلغ تخفیف (تومان)' })).toHaveValue(/3,941,861|۳٬۹۴۱٬۸۶۱/);
+  await workspace.getByRole('button', { name: /^افزودن پرداخت/ }).click();
+  const paymentDialog = page.getByRole('dialog', { name: 'افزودن پرداخت', exact: true });
+  await expect(paymentDialog).toBeVisible();
+  await expect(paymentDialog.getByRole('textbox', { name: 'کد ملی' })).toHaveCount(0);
+  const method = paymentDialog.getByRole('combobox', { name: 'نوع پرداخت' });
+  await expect(method.locator('option[value="CUSTOMER_BALANCE"]')).toHaveCount(0);
+  const paymentAmount = paymentDialog.getByRole('textbox', { name: 'مبلغ (تومان)', exact: true });
+  const dateControl = paymentDialog.locator('button[aria-haspopup="dialog"]');
+  const boxes = await Promise.all([method.boundingBox(), paymentAmount.boundingBox(), dateControl.boundingBox()]);
+  expect(boxes.every(box => box !== null)).toBe(true);
+  expect(Math.max(...boxes.map(box => box!.y)) - Math.min(...boxes.map(box => box!.y))).toBeLessThanOrEqual(2);
+  expect(Math.max(...boxes.map(box => box!.height)) - Math.min(...boxes.map(box => box!.height))).toBeLessThanOrEqual(2);
+  await paymentAmount.fill('1000000');
+  await paymentDialog.getByRole('button', { name: 'ذخیره', exact: true }).click();
+  await expect(paymentDialog).toHaveCount(0);
+  await expect(workspace.getByRole('button', { name: 'ویرایش پرداخت 1' })).toBeVisible();
+  await workspace.getByRole('button', { name: 'ویرایش پرداخت 1' }).click();
+  await expect(page.getByRole('dialog', { name: 'ویرایش پرداخت', exact: true })).toBeVisible();
+  await page.getByRole('dialog', { name: 'ویرایش پرداخت', exact: true }).getByRole('button', { name: 'انصراف', exact: true }).click();
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(workspace.getByRole('button', { name: 'درصد', exact: true })).toBeVisible();
 });
@@ -1583,11 +1612,21 @@ test('Guard attendance and vehicle operations use canonical fields and responsiv
   });
   expect(attendanceFits).toBe(true);
 
+  await page.route('**/api/security/canonical-driver-queue**', route => {
+    if (new URL(route.request().url()).pathname.endsWith('/admission-options')) return route.fallback();
+    return route.fulfill({ json: { success: true, data: [{
+      id: 'surface-fixture-turn', status: 'WAITING_AT_GATE', driverSource: 'INTERNAL',
+      admittedAt: '2026-09-30T08:00:00Z',
+      admissionSnapshot: { driver: { firstName: 'راننده', lastName: 'آزمون' }, vehicle: { vehicleType: 'کامیون' }, plate: { plate: '11ب111ایران11' } },
+    }] } });
+  });
   await page.goto('/dashboard/security/vehicles');
   const vehicles = page.locator('main.sds-workspace');
   await expect(vehicles.getByRole('heading', { name: 'تردد خودروها', exact: true })).toBeVisible();
-  await expect(vehicles.getByRole('heading', { name: 'پذیرش صف جاری', exact: true })).toBeVisible();
-  const vehicleFields = await vehicles.evaluate((element) => {
+  await expect(vehicles.getByRole('heading', { name: 'رانندگان حاضر', exact: true })).toBeVisible();
+  await vehicles.getByRole('button', { name: 'پذیرش راننده', exact: true }).last().click();
+  const admission = page.getByRole('dialog', { name: 'پذیرش راننده و خودرو', exact: true });
+  const vehicleFields = await admission.evaluate((element) => {
     const fields = Array.from(element.querySelectorAll('input:not([type="checkbox"]), select, textarea'));
     return {
       count: fields.length,
@@ -1599,8 +1638,16 @@ test('Guard attendance and vehicle operations use canonical fields and responsiv
   });
   expect(vehicleFields.count).toBeGreaterThan(0);
   expect(vehicleFields.canonical).toBe(true);
-  await expect(vehicles.getByRole('combobox', { name: 'راننده و خودروی داخلی' })).toBeVisible();
-  await expect(vehicles.getByRole('textbox', { name: 'دلیل بازگشت، خروج بدون بارگیری یا ابطال' })).toBeVisible();
+  await expect(admission.getByRole('combobox', { name: 'راننده و خودروی آماده', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(admission).toBeHidden();
+  await vehicles.getByRole('button', { name: 'خروج بدون بارگیری', exact: true }).click();
+  const closeWithoutLoading = page.getByRole('dialog', { name: 'خروج بدون بارگیری', exact: true });
+  const reason = closeWithoutLoading.getByRole('textbox', { name: 'دلیل', exact: true });
+  await expect(reason).toBeVisible();
+  await expect(reason).toHaveClass(/sds-field/);
+  await expect(closeWithoutLoading.getByRole('button', { name: 'تأیید و ثبت', exact: true })).toBeDisabled();
+  await page.keyboard.press('Escape');
 
   const vehiclesFit = await vehicles.evaluate((element) => {
     const rect = element.getBoundingClientRect();

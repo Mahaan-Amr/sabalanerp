@@ -4,6 +4,15 @@ export const partnerPaymentMethodCopy: Record<string, string> = {
   CASH: 'نقدی', BANK_TRANSFER: 'انتقال بانکی', CHECK: 'چک', CREDIT: 'اعتباری',
 };
 
+export const partnerQuantityUnitCopy: Record<string, string> = {
+  meter: 'متر', m: 'متر', squareMeter: 'متر مربع', m2: 'متر مربع',
+  count: 'عدد', piece: 'عدد', physicalPiece: 'عدد', ton: 'تن',
+};
+
+export const partnerProductTypeCopy: Record<string, string> = {
+  prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله',
+};
+
 export function formatPartnerMoney(amount: string | number | null | undefined, currency: 'IRR' | 'IRT' | string) {
   if (!['IRR', 'IRT'].includes(currency) || (typeof amount === 'number' && !Number.isSafeInteger(amount))) return 'داده معتبر در دسترس نیست';
   const value = readPartnerDecimalInput(amount == null ? '' : String(amount));
@@ -47,6 +56,12 @@ export function subtractPartnerDecimal(left: string | null, right: string | null
   const factor = (places: number) => BigInt(`1${'0'.repeat(places)}`);
   return exactText({ scale, digits: first.digits * factor(scale - first.scale)
     - second.digits * factor(scale - second.scale) });
+}
+
+/** Exact display subtotal from the frozen quantity and customer rate. */
+export function multiplyPartnerDecimal(left: string, right: string): string | null {
+  const first = exactDecimal(left); const second = exactDecimal(right);
+  return first && second ? exactText({ digits: first.digits * second.digits, scale: first.scale + second.scale }) : null;
 }
 
 export function partnerChartMagnitude(value: string | null | undefined) {

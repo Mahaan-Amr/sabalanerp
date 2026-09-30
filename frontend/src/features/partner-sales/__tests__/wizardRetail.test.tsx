@@ -4,7 +4,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures';
 import { PartnerRetailStep } from '../../contract-creation/partner/PartnerRetailStep';
-import { defaultPartnerRetailRows, partnerRetailDiscountFromPercent, partnerRetailSummary, refreshPartnerInquiryRow } from '../../contract-creation/partner/partnerRetail';
+import { partnerRetailIntentRows, defaultPartnerRetailRows, partnerRetailDiscountFromPercent, partnerRetailSummary, refreshPartnerInquiryRow } from '../../contract-creation/partner/partnerRetail';
 
 test('periodic price refresh keeps the quoted delivery-unit total for the 100329 rate example', () => {
   const { inquiry, configurationDraft } = createPartnerFixtures();
@@ -54,9 +54,9 @@ test('Sabalan quote is shown as its base unit rate, not multiplied into a mislea
   const html = renderToStaticMarkup(<PartnerRetailStep rows={rows} discount={{ amount: '0', currency: 'IRT' }}
     belowCostConfirmed={false} disabled={false} onRowsChange={() => undefined} onConfirmLoss={() => undefined} />);
   assert.match(html, /نرخ پایه پیشنهادی سبلان/);
-  assert.match(html, /نرخ پایه پیشنهادی سبلان: ۱۵۰۰۰۰۰ تومان/);
+  assert.match(html, /نرخ پایه پیشنهادی سبلان: ۱,۵۰۰,۰۰۰ تومان/);
   assert.match(html, /جمع خرید این ردیف از سبلان/);
-  assert.match(html, /جمع خرید این ردیف از سبلان[\s\S]*۱۵۰۰۰۰۰۰ تومان/);
+  assert.match(html, /جمع خرید این ردیف از سبلان[\s\S]*۱۵,۰۰۰,۰۰۰ تومان/);
 });
 
 test('partner percentage discount changes only the customer retail envelope', () => {
@@ -72,16 +72,17 @@ test('partner percentage discount changes only the customer retail envelope', ()
   assert.equal(rows[0].wholesaleUnitPrice.amount, '800');
 });
 
-test('retail preview keeps sub-unit differences exact above the safe integer range', () => {
+test('retail preview rounds only payable totals above the safe integer range', () => {
   const { inquiry, configurationDraft } = createPartnerFixtures();
   inquiry.rows[0].approvedPrice = { amount: '9007199254740993.01', currency: 'IRR' };
   const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '0.1', unit: 'm', inquiryRow: inquiry.rows[0] }]);
   rows[0].wholesaleUnitPrice = { amount: '9007199254740993.01', currency: 'IRR' };
   rows[0].retailUnitPrice.amount = '9007199254740993.02';
   const summary = partnerRetailSummary(rows, { amount: '0', currency: 'IRR' });
-  assert.equal(summary.wholesale, '900719925474099.301');
-  assert.equal(summary.retail, '900719925474099.302');
-  assert.equal(summary.difference, '0.001');
+  assert.equal(summary.wholesale, '900719925474099');
+  assert.equal(summary.retail, '900719925474099');
+  assert.equal(summary.difference, '0');
+  assert.equal(rows[0].retailUnitPrice.amount, '9007199254740993.02');
   assert.equal(summary.loss, false);
   assert.equal(partnerRetailSummary(rows, { amount: '1', currency: 'IRT' }).valid, false);
 });
@@ -109,4 +110,44 @@ test('invalid retail values are associated with the offending product field', ()
   rows[0].retailUnitPrice.amount = '';
   assert.match(render('0'), /aria-invalid="true"/);
   assert.match(render('0'), /aria-describedby="[^"]+-error"/);
+});
+
+
+test('four main products keep their remainder child nested and retain all financial intent rows', () => {
+  const { inquiry } = createPartnerFixtures();
+  const roots = defaultPartnerRetailRows(Array.from({ length: 4 }, (_, i) => ({ productRowId: `root-${i}`,
+    quantity: '1', unit: 'count', inquiryRow: { ...inquiry.rows[0], description: `سنگ ${i}` },
+    retailUnitPrice: { amount: '10', currency: 'IRT' as const } })));
+  const child = { ...roots[0], productRowId: 'child', parentProductRowId: 'root-0',
+    retailUnitPrice: { amount: '0', currency: 'IRT' as const } };
+  const rows = [...roots, child];
+  const html = renderToStaticMarkup(<PartnerRetailStep rows={rows} discount={{ amount: '0', currency: 'IRT' }}
+    belowCostConfirmed={false} disabled={false} onRowsChange={() => undefined} onConfirmLoss={() => undefined} />);
+  assert.match(html, /۴ محصول/);
+  assert.match(html, /فرزند باقی‌مانده/);
+  assert.equal((html.match(/inputMode="numeric"/g) ?? []).length, 4);
+  assert.ok(html.indexOf('data-retail-row-id="child"') < html.indexOf('data-retail-row-id="root-1"'));
+  assert.equal(partnerRetailIntentRows(rows).length, 5);
+  assert.equal(partnerRetailSummary(rows, { amount: '0', currency: 'IRT' }).retail, '40');
+});
+
+test('remaining balance follows user allocations without rewriting them', async () => {
+  const { remainingPartnerAmount } = await import('../../contract-creation/partner/partnerRetail');
+  const payments = ['500', '200'];
+  assert.equal(remainingPartnerAmount('2000', []), '2000');
+  assert.equal(remainingPartnerAmount('2000', payments), '1300');
+  assert.equal(remainingPartnerAmount('2000', ['700', '200']), '1100');
+  assert.equal(remainingPartnerAmount('2000', ['200']), '1800');
+  assert.equal(remainingPartnerAmount('1900', payments), '1200');
+  assert.deepEqual(payments, ['500', '200']);
+  assert.equal(remainingPartnerAmount('100.75', ['20.25', '30.10']), '50.4');
+  assert.equal(remainingPartnerAmount('100', ['101']), null);
+});
+
+test('a new payment has no automatic amount allocation', async () => {
+  const { newPartnerPaymentInstallment } = await import('../../contract-creation/partner/partnerRetail');
+  const added = newPartnerPaymentInstallment('IRT', 'new', '2026-09-30');
+  assert.equal(added.amount.amount, '0');
+  assert.equal(added.amount.currency, 'IRT');
+  assert.equal(added.dueDate, '2026-09-30');
 });

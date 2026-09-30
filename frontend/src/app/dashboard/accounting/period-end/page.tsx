@@ -1,4 +1,5 @@
 'use client';
+import { ErpPersianDateField } from '@/components/erp';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -13,10 +14,11 @@ import {
   ErpPage,
   ErpSection,
   ErpSegmentedControl,
-  ErpSelect,
+  ErpSearchableSelect,
   ErpSheet,
 } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { downloadBlobResponse } from '@/lib/downloadFile';
 
 type Tab = 'assets' | 'payroll' | 'schedules' | 'reports' | 'tax' | 'close' | 'archive';
 type Notice = { kind: 'success' | 'error'; title: string };
@@ -57,12 +59,13 @@ export default function AccountingPeriodEndPage() {
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<Tab>('assets');
   const [notice, setNotice] = useState<Notice>();
+  const [commandFeedback, setCommandFeedback] = useState<(Notice & { scope: string })>();
   const [closeReason, setCloseReason] = useState('');
   const [pendingClose, setPendingClose] = useState<{ id: string; kind: 'CLOSE' | 'REOPEN' }>();
   const [report, setReport] = useState({ reportKind: 'TRIAL_BALANCE', fiscalYearId: '', mappingVersionId: '', statutoryFormatId: '', from: '', to: '', cutoffAt: '', comparativeFrom: '', comparativeTo: '', cashFlowMethod: 'DIRECT', legalBookKind: 'JOURNAL', columns: 8 as 2 | 4 | 6 | 8, level: 'SUBSIDIARY' });
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
     try {
       const contextResponse = await accountingAPI.getLedgerContext();
       const nextContext = contextResponse.data.data;
@@ -89,11 +92,24 @@ export default function AccountingPeriodEndPage() {
   const overdueTaxes = useMemo(() => (overview?.taxes || []).filter((item: any) => item.status !== 'SETTLED' && new Date(item.dueAt) < new Date()), [overview]);
   const dueSchedules = useMemo(() => (overview?.schedules || []).filter((item: any) => item.status === 'ACTIVE' && item.nextReviewAt && new Date(item.nextReviewAt) <= new Date()), [overview]);
 
-  const act = async (operation: () => Promise<unknown>, message: string) => {
-    setSaving(true); setNotice(undefined);
-    try { await operation(); setNotice({ kind: 'success', title: message }); await load(); }
-    catch (error: any) { setNotice({ kind: 'error', title: error.response?.data?.error || 'انجام عملیات ناموفق بود.' }); }
+  const act = async (operation: () => Promise<unknown>, message: string, scope: string) => {
+    setSaving(true); setCommandFeedback(undefined);
+    try { await operation(); setCommandFeedback({ kind: 'success', title: message, scope }); await load(true); }
+    catch (error: any) { setCommandFeedback({ scope, kind: 'error', title: error.response?.data?.error || 'انجام عملیات ناموفق بود.' }); }
     finally { setSaving(false); }
+  };
+
+  const downloadReport = async (id: string, format: 'pdf' | 'xlsx') => {
+    setSaving(true); setCommandFeedback(undefined);
+    try {
+      const response = await accountingAPI.downloadOfficialReportSnapshot(id, format);
+      downloadBlobResponse(response, `accounting-report-${id}.${format}`);
+      setCommandFeedback({ kind: 'success', title: 'فایل گزارش دریافت شد.', scope: id });
+    } catch (error: any) {
+      let title = 'دریافت فایل گزارش ناموفق بود.';
+      try { if (error.response?.data instanceof Blob) title = JSON.parse(await error.response.data.text()).error || title; } catch {}
+      setCommandFeedback({ kind: 'error', title, scope: id });
+    } finally { setSaving(false); }
   };
 
   if (loading) return <ErpLoading />;
@@ -105,7 +121,7 @@ export default function AccountingPeriodEndPage() {
       title="پایان دوره و گزارش‌های قانونی"
       description="دارایی ثابت، حقوق، برنامه‌های شناسایی، مالیات، گزارش رسمی و بستن دوره از یک زنجیره قابل‌ردیابی"
       backHref="/dashboard/accounting"
-      actions={[{ label: 'به‌روزرسانی', onClick: load, tone: 'neutral', variant: 'outline' }]}
+      actions={[{ label: 'به‌روزرسانی', onClick: () => load(), tone: 'neutral', variant: 'outline' }]}
     >
       {notice && <ErpInlineState kind={notice.kind} title={notice.title} />}
       <ErpMetricGrid items={[
@@ -140,20 +156,21 @@ export default function AccountingPeriodEndPage() {
 
       {tab === 'reports' && <div className="space-y-4"><ErpSection title="ساخت نسخه رسمی گزارش" description="هر دو خروجی از دادهٔ منجمد و یک اثر انگشت ساخته می‌شوند.">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <label><span className="mb-2 block text-sm">نوع گزارش</span><ErpSelect value={report.reportKind} onChange={(event) => setReport({ ...report, reportKind: event.target.value })}><option value="TRIAL_BALANCE">تراز آزمایشی</option><option value="FINANCIAL_STATEMENT">صورت‌های مالی</option><option value="CASH_FLOW">جریان وجوه نقد</option><option value="LEGAL_BOOK">دفاتر قانونی</option></ErpSelect></label>
-          {report.reportKind === 'TRIAL_BALANCE' && <label><span className="mb-2 block text-sm">ستون‌های تراز</span><ErpSelect value={String(report.columns)} onChange={(event) => setReport({ ...report, columns: Number(event.target.value) as 2 | 4 | 6 | 8 })}><option value="2">دو ستونی</option><option value="4">چهار ستونی</option><option value="6">شش ستونی</option><option value="8">هشت ستونی</option></ErpSelect></label>}
-          {report.reportKind === 'TRIAL_BALANCE' && <label><span className="mb-2 block text-sm">سطح حساب</span><ErpSelect value={report.level} onChange={(event) => setReport({ ...report, level: event.target.value })}><option value="GROUP">گروه</option><option value="GENERAL">کل</option><option value="SUBSIDIARY">معین</option><option value="DETAIL">تفصیلی</option></ErpSelect></label>}
-          <label><span className="mb-2 block text-sm">سال مالی</span><ErpSelect value={report.fiscalYearId} onChange={(event) => setReport({ ...report, fiscalYearId: event.target.value })}>{years.map((year: any) => <option key={year.id} value={year.id}>{year.titlePersian}</option>)}</ErpSelect></label>
-          <label><span className="mb-2 block text-sm">نسخه نگاشت</span><ErpSelect value={report.mappingVersionId} onChange={(event) => setReport({ ...report, mappingVersionId: event.target.value })}><option value="">انتخاب نسخه</option>{overview?.mappings?.map((mapping: any) => <option key={mapping.id} value={mapping.id}>{mapping.titlePersian} · نسخه {Number(mapping.version).toLocaleString('fa-IR')}</option>)}</ErpSelect></label>
-          {report.reportKind === 'LEGAL_BOOK' && <label><span className="mb-2 block text-sm">نسخه قالب قانونی</span><ErpSelect value={report.statutoryFormatId} onChange={(event) => setReport({ ...report, statutoryFormatId: event.target.value })}><option value="">انتخاب قالب رسمی</option>{overview?.statutoryFormats?.map((format: any) => <option key={format.id} value={format.id}>{format.titlePersian} · نسخه {Number(format.version).toLocaleString('fa-IR')}</option>)}</ErpSelect></label>}
-          {report.reportKind === 'LEGAL_BOOK' && <label><span className="mb-2 block text-sm">نوع دفتر قانونی</span><ErpSelect value={report.legalBookKind} onChange={(event) => setReport({ ...report, legalBookKind: event.target.value })}><option value="JOURNAL">دفتر روزنامه</option><option value="GENERAL_LEDGER">دفتر کل</option><option value="SUBSIDIARY_LEDGER">دفتر معین</option></ErpSelect></label>}
-          {report.reportKind === 'CASH_FLOW' && <label><span className="mb-2 block text-sm">روش جریان وجوه نقد</span><ErpSelect value={report.cashFlowMethod} onChange={(event) => setReport({ ...report, cashFlowMethod: event.target.value })}><option value="DIRECT">مستقیم</option><option value="INDIRECT">غیرمستقیم</option></ErpSelect></label>}
-          <label><span className="mb-2 block text-sm">از تاریخ</span><ErpInput type="date" value={report.from} onChange={(event) => setReport({ ...report, from: event.target.value })} /></label>
-          <label><span className="mb-2 block text-sm">تا تاریخ</span><ErpInput type="date" value={report.to} onChange={(event) => setReport({ ...report, to: event.target.value })} /></label>
-          {report.reportKind === 'FINANCIAL_STATEMENT' && <><label><span className="mb-2 block text-sm">ابتدای دوره مقایسه‌ای</span><ErpInput type="date" value={report.comparativeFrom} onChange={(event) => setReport({ ...report, comparativeFrom: event.target.value })} /></label><label><span className="mb-2 block text-sm">انتهای دوره مقایسه‌ای</span><ErpInput type="date" value={report.comparativeTo} onChange={(event) => setReport({ ...report, comparativeTo: event.target.value })} /></label></>}
-          <label><span className="mb-2 block text-sm">زمان برش</span><ErpInput type="datetime-local" value={report.cutoffAt} onChange={(event) => setReport({ ...report, cutoffAt: event.target.value })} /></label>
-        </div><div className="mt-4 flex justify-end"><ErpButton label={saving ? 'در حال ساخت…' : 'ساخت نسخه رسمی منجمد'} disabled={saving || !report.fiscalYearId || !report.from || !report.to || !report.cutoffAt || (['FINANCIAL_STATEMENT', 'CASH_FLOW'].includes(report.reportKind) && !report.mappingVersionId) || (report.reportKind === 'LEGAL_BOOK' && !report.statutoryFormatId) || (report.reportKind === 'FINANCIAL_STATEMENT' && Boolean(report.comparativeFrom) !== Boolean(report.comparativeTo))} onClick={() => act(() => accountingAPI.createOfficialReportSnapshot({ request: { ...report, mappingVersionId: report.mappingVersionId || undefined, statutoryFormatId: report.statutoryFormatId || undefined, comparativeFrom: report.comparativeFrom || undefined, comparativeTo: report.comparativeTo || undefined, cashFlowMethod: report.reportKind === 'CASH_FLOW' ? report.cashFlowMethod : undefined, legalBookKind: report.reportKind === 'LEGAL_BOOK' ? report.legalBookKind : undefined, bookId: book.id, columns: report.reportKind === 'TRIAL_BALANCE' ? report.columns : 8, level: report.reportKind === 'TRIAL_BALANCE' ? report.level : report.reportKind === 'LEGAL_BOOK' && report.legalBookKind === 'GENERAL_LEDGER' ? 'GENERAL' : 'SUBSIDIARY' } }), 'نسخه رسمی با مجموعه‌داده و اثر انگشت واحد ساخته شد.')} /></div>
-      </ErpSection><ErpSection title="نسخه‌های رسمی منجمد">{!overview?.snapshots?.length ? <ErpEmptyState title="هنوز نسخه رسمی منجمد ساخته نشده است." /> : <div className="space-y-2">{overview.snapshots.map((snapshot: any) => <ErpCard key={snapshot.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><strong>{snapshot.snapshotIdentity}</strong><ErpBadge tone="success">رسمی و منجمد</ErpBadge></div><div className="mt-2 grid gap-1 text-sm"><span>نوع: {reportTypeFa[snapshot.reportType] || 'گزارش رسمی'}</span><span>برش: {dateFa(snapshot.cutoffAt)}</span><span className="break-all">اثر انگشت مجموعه‌داده: {snapshot.datasetHash}</span></div><div className="mt-3 flex flex-wrap justify-end gap-2"><ErpButton label="دریافت پروندهٔ پی‌دی‌اف" variant="outline" onClick={() => window.open(`/api/accounting/period-end/report-snapshots/${snapshot.id}/export.pdf`, '_blank', 'noopener,noreferrer')} /><ErpButton label="دریافت صفحه‌گسترده" variant="outline" onClick={() => window.open(`/api/accounting/period-end/report-snapshots/${snapshot.id}/export.xlsx`, '_blank', 'noopener,noreferrer')} /></div></ErpCard>)}</div>}</ErpSection></div>}
+          <label><span className="mb-2 block text-sm">نوع گزارش</span><ErpSearchableSelect aria-label="نوع گزارش" value={report.reportKind} onChange={(event) => setReport({ ...report, reportKind: event.target.value })}><option value="TRIAL_BALANCE">تراز آزمایشی</option><option value="FINANCIAL_STATEMENT">صورت‌های مالی</option><option value="CASH_FLOW">جریان وجوه نقد</option><option value="LEGAL_BOOK">دفاتر قانونی</option></ErpSearchableSelect></label>
+          {report.reportKind === 'TRIAL_BALANCE' && <label><span className="mb-2 block text-sm">ستون‌های تراز</span><ErpSearchableSelect aria-label="ستون‌های تراز" value={String(report.columns)} onChange={(event) => setReport({ ...report, columns: Number(event.target.value) as 2 | 4 | 6 | 8 })}><option value="2">دو ستونی</option><option value="4">چهار ستونی</option><option value="6">شش ستونی</option><option value="8">هشت ستونی</option></ErpSearchableSelect></label>}
+          {report.reportKind === 'TRIAL_BALANCE' && <label><span className="mb-2 block text-sm">سطح حساب</span><ErpSearchableSelect aria-label="سطح حساب" value={report.level} onChange={(event) => setReport({ ...report, level: event.target.value })}><option value="GROUP">گروه</option><option value="GENERAL">کل</option><option value="SUBSIDIARY">معین</option><option value="DETAIL">تفصیلی</option></ErpSearchableSelect></label>}
+          <label><span className="mb-2 block text-sm">سال مالی</span><ErpSearchableSelect aria-label="سال مالی" value={report.fiscalYearId} onChange={(event) => setReport({ ...report, fiscalYearId: event.target.value })}>{years.map((year: any) => <option key={year.id} value={year.id}>{year.titlePersian}</option>)}</ErpSearchableSelect></label>
+          <label><span className="mb-2 block text-sm">نسخه نگاشت</span><ErpSearchableSelect aria-label="نسخه نگاشت" value={report.mappingVersionId} onChange={(event) => setReport({ ...report, mappingVersionId: event.target.value })}><option value="">انتخاب نسخه</option>{overview?.mappings?.map((mapping: any) => <option key={mapping.id} value={mapping.id}>{mapping.titlePersian} · نسخه {Number(mapping.version).toLocaleString('fa-IR')}</option>)}</ErpSearchableSelect></label>
+          {report.reportKind === 'LEGAL_BOOK' && <label><span className="mb-2 block text-sm">نسخه قالب قانونی</span><ErpSearchableSelect aria-label="نسخه قالب قانونی" value={report.statutoryFormatId} onChange={(event) => setReport({ ...report, statutoryFormatId: event.target.value })}><option value="">انتخاب قالب رسمی</option>{overview?.statutoryFormats?.map((format: any) => <option key={format.id} value={format.id}>{format.titlePersian} · نسخه {Number(format.version).toLocaleString('fa-IR')}</option>)}</ErpSearchableSelect></label>}
+          {report.reportKind === 'LEGAL_BOOK' && <label><span className="mb-2 block text-sm">نوع دفتر قانونی</span><ErpSearchableSelect aria-label="نوع دفتر قانونی" value={report.legalBookKind} onChange={(event) => setReport({ ...report, legalBookKind: event.target.value })}><option value="JOURNAL">دفتر روزنامه</option><option value="GENERAL_LEDGER">دفتر کل</option><option value="SUBSIDIARY_LEDGER">دفتر معین</option></ErpSearchableSelect></label>}
+          {report.reportKind === 'CASH_FLOW' && <label><span className="mb-2 block text-sm">روش جریان وجوه نقد</span><ErpSearchableSelect aria-label="روش جریان وجوه نقد" value={report.cashFlowMethod} onChange={(event) => setReport({ ...report, cashFlowMethod: event.target.value })}><option value="DIRECT">مستقیم</option><option value="INDIRECT">غیرمستقیم</option></ErpSearchableSelect></label>}
+          <label><span className="mb-2 block text-sm">از تاریخ</span><ErpPersianDateField valueFormat="iso-date" value={report.from} onChange={(value) => setReport({ ...report, from: value })} /></label>
+          <label><span className="mb-2 block text-sm">تا تاریخ</span><ErpPersianDateField valueFormat="iso-date" value={report.to} onChange={(value) => setReport({ ...report, to: value })} /></label>
+          {report.reportKind === 'FINANCIAL_STATEMENT' && <><label><span className="mb-2 block text-sm">ابتدای دوره مقایسه‌ای</span><ErpPersianDateField valueFormat="iso-date" value={report.comparativeFrom} onChange={(value) => setReport({ ...report, comparativeFrom: value })} /></label><label><span className="mb-2 block text-sm">انتهای دوره مقایسه‌ای</span><ErpPersianDateField valueFormat="iso-date" value={report.comparativeTo} onChange={(value) => setReport({ ...report, comparativeTo: value })} /></label></>}
+          <label><span className="mb-2 block text-sm">زمان برش</span><ErpPersianDateField valueFormat="local-datetime" value={report.cutoffAt} onChange={(value) => setReport({ ...report, cutoffAt: value })} /></label>
+        </div><div className="mt-4 flex justify-end"><ErpButton label={saving ? 'در حال ساخت…' : 'ساخت نسخه رسمی منجمد'} disabled={saving || !report.fiscalYearId || !report.from || !report.to || !report.cutoffAt || (['FINANCIAL_STATEMENT', 'CASH_FLOW'].includes(report.reportKind) && !report.mappingVersionId) || (report.reportKind === 'LEGAL_BOOK' && !report.statutoryFormatId) || (report.reportKind === 'FINANCIAL_STATEMENT' && Boolean(report.comparativeFrom) !== Boolean(report.comparativeTo))} onClick={() => act(() => accountingAPI.createOfficialReportSnapshot({ request: { ...report, mappingVersionId: report.mappingVersionId || undefined, statutoryFormatId: report.statutoryFormatId || undefined, comparativeFrom: report.comparativeFrom || undefined, comparativeTo: report.comparativeTo || undefined, cashFlowMethod: report.reportKind === 'CASH_FLOW' ? report.cashFlowMethod : undefined, legalBookKind: report.reportKind === 'LEGAL_BOOK' ? report.legalBookKind : undefined, bookId: book.id, columns: report.reportKind === 'TRIAL_BALANCE' ? report.columns : 8, level: report.reportKind === 'TRIAL_BALANCE' ? report.level : report.reportKind === 'LEGAL_BOOK' && report.legalBookKind === 'GENERAL_LEDGER' ? 'GENERAL' : 'SUBSIDIARY' } }), 'نسخه رسمی با مجموعه‌داده و اثر انگشت واحد ساخته شد.', "period-end-1")} /></div>
+      {commandFeedback?.scope === "period-end-1" && <ErpInlineState kind={commandFeedback.kind} title={commandFeedback.title} />}
+</ErpSection><ErpSection title="نسخه‌های رسمی منجمد">{!overview?.snapshots?.length ? <ErpEmptyState title="هنوز نسخه رسمی منجمد ساخته نشده است." /> : <div className="space-y-2">{overview.snapshots.map((snapshot: any) => <ErpCard key={snapshot.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><strong>{snapshot.snapshotIdentity}</strong><ErpBadge tone="success">رسمی و منجمد</ErpBadge></div><div className="mt-2 grid gap-1 text-sm"><span>نوع: {reportTypeFa[snapshot.reportType] || 'گزارش رسمی'}</span><span>برش: {dateFa(snapshot.cutoffAt)}</span><span className="break-all">اثر انگشت مجموعه‌داده: {snapshot.datasetHash}</span></div><div className="mt-3 flex flex-wrap justify-end gap-2"><ErpButton label="دریافت پروندهٔ پی‌دی‌اف" variant="outline" disabled={saving} onClick={() => downloadReport(snapshot.id, 'pdf')} /><ErpButton label="دریافت صفحه‌گسترده" variant="outline" disabled={saving} onClick={() => downloadReport(snapshot.id, 'xlsx')} /></div>{commandFeedback && commandFeedback.scope === snapshot.id && <ErpInlineState kind={commandFeedback.kind} title={commandFeedback.title} />}</ErpCard>)}</div>}</ErpSection></div>}
 
       {tab === 'tax' && <ErpSection title="تقویم تکالیف مالیاتی" description="مالیات ارزش افزوده، حقوق، تکلیفی و عملکرد با تلاش‌ها و رسیدهای مستقل پیگیری می‌شوند.">{!overview?.taxes?.length ? <ErpEmptyState title="تکلیف مالیاتی بازی وجود ندارد." /> : <div className="grid gap-3 md:grid-cols-2">{overview.taxes.map((item: any) => <ErpCard key={item.id} className="p-4"><div className="flex items-center justify-between gap-3"><strong>{item.obligationIdentity}</strong><ErpBadge tone={toneOf(item.status) as any}>{statusFa[item.status] || item.status}</ErpBadge></div><div className="mt-3 grid gap-1 text-sm"><span>مهلت: {dateFa(item.dueAt)}</span><span>پرداختنی: {digits(item.payableRials)} ریال</span><span>پرداخت‌شده: {digits(item.paidRials)} ریال</span><span>آخرین تلاش: {dateFa(item.attempts?.[0]?.attemptedAt)}</span></div></ErpCard>)}</div>}</ErpSection>}
 
@@ -163,9 +180,10 @@ export default function AccountingPeriodEndPage() {
       </ErpSection>}
 
       {tab === 'archive' && <ErpSection title="بایگانی قانونی و نگهداری" description="مدرک منجمد، اثر انگشت، نتیجه بررسی بدافزار، سیاست نگهداری و توقف قانونی حذف بدون حذف خودکار حفظ می‌شود.">{!overview?.archiveEvidence?.length ? <ErpEmptyState title="مدرک بایگانی‌شده‌ای وجود ندارد." /> : <div className="grid gap-3 md:grid-cols-2">{overview.archiveEvidence.map((item: any) => <ErpCard key={item.id} className="p-4"><div className="flex items-center justify-between gap-3"><strong>{item.evidenceIdentity}</strong><ErpBadge tone={item.legalHold ? 'danger' : 'info'}>{item.legalHold ? 'توقف قانونی حذف' : 'تحت سیاست نگهداری'}</ErpBadge></div><div className="mt-3 grid gap-1 text-sm"><span>نوع: {evidenceTypeFa[item.evidenceType] || 'مدرک قانونی'}</span><span>بررسی بدافزار: {malwareStatusFa[item.malwareScanStatus] || 'نیازمند بررسی'}</span><span>نگهداری تا: {dateFa(item.retainUntil)}</span><span className="break-all">اثر انگشت: {item.contentHash}</span></div></ErpCard>)}</div>}</ErpSection>}
-      <ErpSheet open={Boolean(pendingClose)} onClose={() => setPendingClose(undefined)} presentation="modal" pending={saving} title={pendingClose?.kind === 'REOPEN' ? 'تأیید بازگشایی کنترل‌شده' : 'تأیید بستن قطعی'} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="outline" disabled={saving} onClick={() => setPendingClose(undefined)} /><ErpButton label={pendingClose?.kind === 'REOPEN' ? 'تأیید و بازگشایی' : 'تأیید و بستن قطعی'} tone="danger" disabled={saving} onClick={() => { if (!pendingClose) return; const command = pendingClose; setPendingClose(undefined); void act(() => command.kind === 'REOPEN' ? accountingAPI.reopenCloseRun(command.id, { confirmed: true, reason: closeReason.trim() }) : accountingAPI.finalizeCloseRun(command.id, { confirmed: true, reason: closeReason.trim() }), command.kind === 'REOPEN' ? 'دوره با حفظ کامل شواهد بستن قبلی بازگشایی شد.' : 'دوره با شواهد کامل به‌صورت قطعی بسته شد.'); }} /></div>}>
+      <ErpSheet open={Boolean(pendingClose)} onClose={() => setPendingClose(undefined)} presentation="modal" pending={saving} title={pendingClose?.kind === 'REOPEN' ? 'تأیید بازگشایی کنترل‌شده' : 'تأیید بستن قطعی'} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="outline" disabled={saving} onClick={() => setPendingClose(undefined)} /><ErpButton label={pendingClose?.kind === 'REOPEN' ? 'تأیید و بازگشایی' : 'تأیید و بستن قطعی'} tone="danger" disabled={saving} onClick={() => { if (!pendingClose) return; const command = pendingClose; setPendingClose(undefined); void act(() => command.kind === 'REOPEN' ? accountingAPI.reopenCloseRun(command.id, { confirmed: true, reason: closeReason.trim() }) : accountingAPI.finalizeCloseRun(command.id, { confirmed: true, reason: closeReason.trim() }), command.kind === 'REOPEN' ? 'دوره با حفظ کامل شواهد بستن قبلی بازگشایی شد.' : 'دوره با شواهد کامل به‌صورت قطعی بسته شد.', "period-end-2"); }} /></div>}>
         <p className="text-sm text-[var(--sds-text-secondary)]">این اقدام وضعیت دوره را تغییر می‌دهد، در سابقه حسابرسی ثبت می‌شود و فقط با اجرای جانشین قابل بازگشت است. دلیل ثبت‌شده: {closeReason}</p>
-      </ErpSheet>
+      {commandFeedback?.scope === "period-end-2" && <ErpInlineState kind={commandFeedback.kind} title={commandFeedback.title} />}
+</ErpSheet>
     </ErpPage>
   );
 }

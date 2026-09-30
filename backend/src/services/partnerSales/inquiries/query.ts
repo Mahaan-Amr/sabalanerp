@@ -19,7 +19,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
     return dependencies.transaction(async tx => {
       const inquiry = await tx.partnerInquiry.findUnique({ where: { id: inquiryId }, select: {
         id: true, profileId: true, submittedAt: true, pricingReadyAt: true, pricingExpiresAt: true,
-        profile: { select: { user: { select: { firstName: true, lastName: true } } } },
+        profile: { select: { user: { select: { id: true, firstName: true, lastName: true } } } },
         assignments: { orderBy: { revision: 'desc' }, take: 1, select: { id: true, revision: true, responderId: true } },
         events: { orderBy: { revision: 'asc' }, select: { type: true, reason: true, evidence: true } },
         rows: { orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }], include: {
@@ -71,12 +71,37 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
           ? { action: 'INQUIRY_RESPOND' as const, enabled: true }
           : responseAuthority.error.status === 404 ? null
             : { action: 'INQUIRY_RESPOND' as const, enabled: false, disabledReason: responseAuthority.error };
-        const responseRows = inquiry.rows.map(row => {
+        const responseRows = await Promise.all(inquiry.rows.map(async row => {
           const definition = parseInquiryDefinition(row.definition);
           if (!definition) return null;
+          // Older inquiry definitions predate physical count and layer facts. Rebuild only
+          // those safe display facts from the same frozen technical revision.
+          let configuration = definition.configuration;
+          const technical = await dependencies.resolveConfiguration(tx, {
+            actorId: inquiry.profile.user.id, reference: definition.configurationRef,
+          });
+          // Old journals retain the child inquiry for audit. Its paid material
+          // does not belong in the current material-price response queue.
+          if (technical.ok && technical.value.paidSourceProductRowId && inquiry.rows.some(candidate => {
+            const parent = parseInquiryDefinition(candidate.definition)?.configurationRef;
+            return Boolean(parent && parent.productRowId === technical.value.paidSourceProductRowId &&
+              parent.recoveryId === definition.configurationRef.recoveryId &&
+              parent.recoveryRevision === definition.configurationRef.recoveryRevision);
+          })) return undefined;
+          if (technical.ok) configuration = [...configuration, ...technical.value.configuration.filter(fact =>
+            (fact.label === 'مساحت' || fact.label === 'فرزند از سنگ پرداخت‌شده' || fact.label.startsWith('فرزند ·')) &&
+            !configuration.some(existing => existing.label === fact.label && existing.value === fact.value))];
+          if (!configuration.some(fact => fact.label === 'تعداد')) {
+            const resolved = await dependencies.resolveConfiguration(tx, {
+              actorId: inquiry.profile.user.id, reference: definition.configurationRef,
+            });
+            if (resolved.ok) configuration = [...configuration, ...resolved.value.configuration.filter(fact =>
+              (fact.label === 'تعداد' || fact.label === 'لایه') &&
+              !configuration.some(existing => existing.label === fact.label))];
+          }
           const currentState = state(row.outcome, row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
           return { rowId: row.id, revision: row.revision, identity: definition.identity,
-            description: definition.description, configuration: definition.configuration,
+            description: definition.description, configuration,
             ...(definition.deliveryFacts ? { deliveryFacts: definition.deliveryFacts } : {}),
             ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
             ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
@@ -87,13 +112,13 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
             used: Boolean(row.approval?.usages.length), state: currentState,
             actions: currentState === 'PENDING' && responseAction ? [responseAction] : [],
           };
-        });
+        }));
         if (responseRows.some(row => row === null)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
         const view = ResponderInquiryViewV2Schema.safeParse({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: inquiry.id,
           submittedAt: inquiry.submittedAt?.toISOString(),
           partnerDisplayName: `${inquiry.profile.user.firstName} ${inquiry.profile.user.lastName}`.trim(),
           assignmentId: assignment.id, assignmentRevision: assignment.revision,
-          actions: responseRows.some(row => row?.state === 'PENDING') && responseAction ? [responseAction] : [], rows: responseRows });
+          actions: responseRows.some(row => row?.state === 'PENDING') && responseAction ? [responseAction] : [], rows: responseRows.filter(row => row !== undefined) });
         return view.success ? { ok: true, value: view.data } as never : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
       }
       const rows = inquiry.rows.map(row => {
@@ -109,7 +134,8 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
             expiresAt: row.approval.expiresAt.toISOString(),
             ...(row.approval.note ? { noteOrReason: row.approval.note } : {}),
             approvedRowBinding: { inquiryId: inquiry.id, rowId: row.id, revision: row.revision } } : {}),
-          ...(!row.approval && definition.predecessorReason ? { noteOrReason: definition.predecessorReason } : {}),
+          ...(!row.approval && (reasons.get(row.id) || definition.predecessorReason)
+            ? { noteOrReason: reasons.get(row.id) || definition.predecessorReason } : {}),
           usedCaseNumbers: row.approval?.usages.map(usage => usage.binding.caseRevision.case.caseNumber) ?? [],
           ...(row.predecessor ? { predecessor: { inquiryId: inquiry.id, rowId: row.predecessor.id,
             revision: row.predecessor.revision, ...(definition.predecessorReason ? { reason: definition.predecessorReason } : {}) } } : {}),

@@ -29,6 +29,20 @@ const stairPlan = (quantity: number, kerf = '0') => calculatePackingPlan({
 });
 
 {
+  const started = performance.now();
+  const result = calculatePackingPlan({
+    policyVersion: 'packing-guillotine-v1', kerfMeters: decimal('0'),
+    sources: [{ sourceBatchId, lengthMeters: decimal('3'), widthMeters: decimal('5'), quantity: 1 }],
+    demands: [{ demandId: 'multi-digit-mother-stone', lengthMeters: decimal('1'),
+      widthMeters: decimal('1'), quantity: 13 }],
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('Expected a 13-piece uniform grid to fit.');
+  assert.equal(result.plan.placements.length, 13);
+  assert.ok(performance.now() - started < 500, 'uniform grid must not exhaustively search while typing');
+}
+
+{
   const result = stairPlan(4);
   assert.equal(result.ok, true);
   if (!result.ok) throw new Error('Expected four stair parts to fit.');

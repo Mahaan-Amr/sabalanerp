@@ -3,6 +3,8 @@ import express from 'express';
 import type { AddressInfo } from 'node:net';
 import { prisma } from '../../lib/prisma';
 import accountingRouter from '../../routes/accounting';
+import partnerAccountingRouter from '../../routes/partner-accounting';
+import { readPartnerOutstandingHistory } from '../partnerSales/accounting/history';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
 
 // An actual authenticated HTTP approval against the parent's isolated database.
@@ -17,7 +19,7 @@ async function main() {
     await prisma.featurePermission.create({ data: { userId: actorId, workspace: 'accounting',
       feature: 'accounting_records_approve_void', permissionLevel: 'edit', grantedBy: actorId } });
     const session = await createAuthoritativeSession(prisma, actorId, { ipAddress: '127.0.0.1', userAgent: 'isolated-334-approval' });
-    const app = express(); app.use(express.json()); app.use('/api/accounting', accountingRouter);
+    const app = express(); app.use(express.json()); app.use('/api/accounting', accountingRouter); app.use('/api/partner/accounting', partnerAccountingRouter);
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     try {
@@ -124,12 +126,54 @@ async function main() {
       assert.deepEqual(approved.body.data.affected.financialRecordIds, [invoiceId]);
       assert.equal(await authorizationAuditCount(), auditsBeforeApproval + 1,
         'one approval invocation persists exactly one central authorization decision');
+      assert.equal(await prisma.accountingReceivable.count({ where: { invoiceRecordId: invoiceId } }), 0,
+        'financial approval must not create a receivable');
       const auditsBeforeReplay = await authorizationAuditCount();
       const replay = await approve();
       assert.equal(replay.status, 200, 'an exact successful Partner approval retry returns its existing result');
       assert.deepEqual(replay.body.data.affected, approved.body.data.affected);
       assert.equal(await authorizationAuditCount(), auditsBeforeReplay + 1,
         'an authorized replay rechecks authority once without duplicate effect-level audit');
+      assert.equal(await prisma.accountingReceivable.count({ where: { invoiceRecordId: invoiceId } }), 0);
+      const approvedInvoice = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId } });
+      assert.equal((approvedInvoice.metadata as Record<string, unknown>).partnerReceivablePending, true);
+      const history = await prisma.$transaction(tx => readPartnerOutstandingHistory(tx, {
+        invoiceIds: [invoiceId], cutoff: new Date(), asOf: new Date(),
+      }));
+      assert.equal(history.length, 0, 'approved invoice alone is not an official outstanding debt');
+      const create = async (expected = { caseId, revision: sale.headRevision, integrityHash: sale.integrityHash }) => {
+        const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/partner/accounting/receivables`, {
+          method: 'POST', headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE}=${session.token}` },
+          body: JSON.stringify({ expected, invoiceRecordId: invoiceId }) });
+        return { status: response.status, body: await response.json() as any };
+      };
+      await prisma.featurePermission.create({ data: { userId: actorId, workspace: 'accounting',
+        feature: 'accounting_receivables_manage', permissionLevel: 'view', grantedBy: actorId } });
+      await prisma.workspacePermission.update({ where: { userId_workspace: { userId: actorId, workspace: 'accounting' } },
+        data: { permissionLevel: 'edit' } });
+      assert.equal((await create()).status, 403, 'invoice approval capability alone cannot create receivables');
+      await prisma.featurePermission.update({ where: { userId_workspace_feature: { userId: actorId,
+        workspace: 'accounting', feature: 'accounting_receivables_manage' } }, data: { permissionLevel: 'edit' } });
+      assert.equal((await create({ caseId, revision: sale.headRevision + 1, integrityHash: sale.integrityHash })).status, 409);
+      const metadata = approvedInvoice.metadata as Record<string, any>;
+      await prisma.accountingFinancialRecord.update({ where: { id: invoiceId }, data: { metadata: {
+        ...metadata, partnerApproval: { ...metadata.partnerApproval, financialApprovalEvidenceId: 'tampered-approval' },
+      } } });
+      try { assert.equal((await create()).status, 409, 'explicit creation rejects damaged approval evidence'); }
+      finally { await prisma.accountingFinancialRecord.update({ where: { id: invoiceId }, data: { metadata: approvedInvoice.metadata! } }); }
+      const beforeCreation = new Date(Date.now() - 1);
+      const results = await Promise.all([create(), create(), create()]);
+      for (const result of results) assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.deepEqual(results[0].body.data, results[1].body.data);
+      assert.equal(await prisma.accountingReceivable.count({ where: { invoiceRecordId: invoiceId } }), 1);
+      assert.equal(await prisma.accountingAuditLog.count({ where: { recordId: invoiceId, action: 'CREATE_PARTNER_RECEIVABLE' } }), 1);
+      assert.equal((await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId } })).status, 'ISSUED');
+      const priorHistory = await prisma.$transaction(tx => readPartnerOutstandingHistory(tx, {
+        invoiceIds: [invoiceId], cutoff: new Date(Date.now() + 86400000), asOf: beforeCreation,
+      }));
+      assert.equal(priorHistory.length, 0, 'explicit creation does not invent debt in an earlier knowledge snapshot');
+
+
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

@@ -18,7 +18,7 @@ export type PersianTimeDraftAction =
   | { type: 'CONFIRM' };
 
 export const parseTimeSelection = (value?: string | null): PersianTimeSelection => {
-  const match = String(value || '').match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  const match = String(value || '').match(/^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
   const hour24 = match ? Number(match[1]) : 8;
   return {
     hour: hour24 % 12 || 12,
@@ -51,7 +51,7 @@ export const reduceTimeDraft = (
 export const formatTime12 = (value?: string | null) => {
   if (!value) return '';
   const parsed = parseTimeSelection(value);
-  return `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')} ${parsed.period}`;
+  return `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}${/^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(value) ? `:${value.slice(6, 8)}` : ''} ${parsed.period}`;
 };
 
 export const stepTimeSelection = (

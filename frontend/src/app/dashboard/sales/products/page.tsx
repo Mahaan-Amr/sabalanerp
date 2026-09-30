@@ -8,7 +8,7 @@ import { formatDimensions, formatPrice } from '@/lib/numberFormat';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import ProductImportExportModal from '@/components/ProductImportExportModal';
 import SuccessModal from '@/components/SuccessModal';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpLoading, ErpPagination, ErpToolbar } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpSheet, ErpEmptyState, ErpInlineState, ErpListPage, ErpLoading, ErpPagination, ErpToolbar } from '@/components/erp';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
@@ -241,12 +241,7 @@ export default function ProductsPage() {
             ? [{ label: 'ایجاد محصول جدید', href: '/dashboard/sales/products/create', icon: FaPlus, tone: 'primary' as const, variant: 'solid' as const }]
             : []),
         ]}
-        metrics={[
-          { label: 'کل محصولات', value: totalProducts.toLocaleString('fa-IR'), icon: FaBoxes, tone: 'primary' },
-          { label: 'صفحه جاری', value: products.length.toLocaleString('fa-IR'), icon: FaEye, tone: 'info' },
-          { label: 'فعال', value: products.filter((product) => product.isActive).length.toLocaleString('fa-IR'), icon: FaToggleOn, tone: 'success' },
-          { label: 'غیرفعال', value: products.filter((product) => !product.isActive).length.toLocaleString('fa-IR'), icon: FaToggleOff, tone: 'warning' },
-        ]}
+        rowActionMode="menu"
         rows={products}
         rowKey={(product) => product.id}
         isLoading={loading}
@@ -342,9 +337,7 @@ export default function ProductsPage() {
       </ErpListPage>
 
       {deleteConfirm.show && deleteConfirm.product && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-4">
-          <ErpCard className="w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">تایید حذف محصول</h3>
+        <ErpSheet open onClose={() => setDeleteConfirm({ show: false, product: null })} title="تأیید حذف محصول" presentation="modal" pending={pendingRowActions.has(`${deleteConfirm.product.id}:delete`)}>
             <p className="mt-4 text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
               آیا مطمئن هستید که می‌خواهید محصول <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{deleteConfirm.product.namePersian}</span> را حذف کنید؟
             </p>
@@ -355,8 +348,7 @@ export default function ProductsPage() {
               <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={() => setDeleteConfirm({ show: false, product: null })} disabled={Boolean(deleteConfirm.product && pendingRowActions.has(`${deleteConfirm.product.id}:delete`))} />
               <ErpButton label={deleteConfirm.product && pendingRowActions.has(`${deleteConfirm.product.id}:delete`) ? 'در حال حذف...' : 'حذف محصول'} icon={FaTrash} tone="danger" variant="solid" onClick={handleDeleteConfirm} disabled={Boolean(deleteConfirm.product && pendingRowActions.has(`${deleteConfirm.product.id}:delete`))} />
             </div>
-          </ErpCard>
-        </div>
+        </ErpSheet>
       )}
 
       <SuccessModal isOpen={showSuccessModal} onClose={() => setShowSuccessModal(false)} title="عملیات موفق" message={modalMessage} buttonText="باشه" autoClose autoCloseDelay={2000} />

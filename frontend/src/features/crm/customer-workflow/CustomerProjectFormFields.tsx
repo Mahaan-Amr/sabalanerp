@@ -1,6 +1,6 @@
 'use client';
 
-import { ErpField, ErpInput, ErpSelect } from '@/components/erp';
+import { ErpDisclosure, ErpField, ErpInput, ErpSelect, useErpPresentationScope } from '@/components/erp';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 
 export type CustomerProjectFormValue = {
@@ -26,27 +26,8 @@ export function CustomerProjectFormFields({ value, onChange, errors = {} }: {
   onChange: <K extends keyof CustomerProjectFormValue>(field: K, next: CustomerProjectFormValue[K]) => void;
   errors?: Partial<Record<keyof CustomerProjectFormValue, string>>;
 }) {
-  return <div className="space-y-6">
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-      <ErpField label="نام پروژه" error={errors.projectName} required>
-        <ErpInput value={value.projectName} maxLength={300}
-          onChange={event => onChange('projectName', event.target.value)} placeholder="نام پروژه" />
-      </ErpField>
-      <ErpField label="آدرس پروژه" error={errors.projectAddress} required>
-        <ErpInput value={value.projectAddress} maxLength={1000}
-          onChange={event => onChange('projectAddress', event.target.value)} placeholder="آدرس پروژه" />
-      </ErpField>
-      <ErpField label="شهر پروژه">
-        <ErpInput value={value.projectCity} maxLength={500}
-          onChange={event => onChange('projectCity', event.target.value)} placeholder="شهر پروژه" />
-      </ErpField>
-      <ErpField label="نوع پروژه">
-        <ErpSelect value={value.projectType} onChange={event => onChange('projectType', event.target.value)}>
-          <option value="">نوع پروژه را انتخاب کنید</option>
-          {PROJECT_TYPE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </ErpSelect>
-      </ErpField>
-    </div>
+  const scope = useErpPresentationScope();
+  const supplementary = <>
     <div className="border-t border-[var(--sds-border-subtle)] pt-5">
       <h3 className="mb-4 font-semibold text-[var(--sds-text-primary)]">اطلاعات مدیر پروژه</h3>
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
@@ -77,5 +58,29 @@ export function CustomerProjectFormFields({ value, onChange, errors = {} }: {
         </ErpField>
       </div>
     </div>
+  </>;
+  return <div className="space-y-6">
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+      <ErpField label="نام پروژه" error={errors.projectName} required>
+        <ErpInput value={value.projectName} maxLength={300}
+          onChange={event => onChange('projectName', event.target.value)} placeholder="نام پروژه" />
+      </ErpField>
+      <ErpField label="آدرس پروژه" error={errors.projectAddress} required>
+        <ErpInput value={value.projectAddress} maxLength={1000}
+          onChange={event => onChange('projectAddress', event.target.value)} placeholder="آدرس پروژه" />
+      </ErpField>
+      <ErpField label="شهر پروژه">
+        <ErpInput value={value.projectCity} maxLength={500}
+          onChange={event => onChange('projectCity', event.target.value)} placeholder="شهر پروژه" />
+      </ErpField>
+      <ErpField label="نوع پروژه">
+        <ErpSelect value={value.projectType} onChange={event => onChange('projectType', event.target.value)}>
+          <option value="">نوع پروژه را انتخاب کنید</option>
+          {PROJECT_TYPE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </ErpSelect>
+      </ErpField>
+    </div>
+    {scope === 'workspace' ? <ErpDisclosure title="مدیر پروژه و بازاریاب • اختیاری"
+      expanded={Boolean(errors.projectManagerNumber || errors.marketerPhoneNumber)}>{supplementary}</ErpDisclosure> : supplementary}
   </div>;
 }

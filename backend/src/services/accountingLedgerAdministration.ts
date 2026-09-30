@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { AccountingLedgerError } from './accountingLedgerFoundation';
 
 export const validatePeriodTransition = (
@@ -225,11 +225,18 @@ export const createAccountingLedgerAdministration = (database: PrismaClient) => 
     legalEntityId: string; kind: 'BANK' | 'CASH' | 'OTHER'; titlePersian: string; institutionName?: string;
     branchName?: string; accountNumber?: string; iban?: string; currency?: string; activeFrom: Date; actorId: string;
   }) => database.$transaction(async (tx) => {
+    const optionalText = (value?: string) => value?.trim() || null;
+    if (!input.titlePersian?.trim()) throw new AccountingLedgerError('FINANCIAL_ACCOUNT_TITLE_REQUIRED', 'عنوان حساب مالی الزامی است.', 400);
     const created = await tx.accountingFinancialAccount.create({ data: {
-      legalEntityId: input.legalEntityId, kind: input.kind, titlePersian: input.titlePersian,
-      institutionName: input.institutionName, branchName: input.branchName, accountNumber: input.accountNumber,
-      iban: input.iban, currency: input.currency || 'IRR', activeFrom: input.activeFrom, createdBy: input.actorId,
-    } });
+      legalEntityId: input.legalEntityId, kind: input.kind, titlePersian: input.titlePersian.trim(),
+      institutionName: optionalText(input.institutionName), branchName: optionalText(input.branchName), accountNumber: optionalText(input.accountNumber),
+      iban: optionalText(input.iban), currency: input.currency || 'IRR', activeFrom: input.activeFrom, createdBy: input.actorId,
+    } }).catch((error: unknown) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new AccountingLedgerError('FINANCIAL_ACCOUNT_ALREADY_EXISTS', 'حساب مالی با این شماره شبا قبلاً ثبت شده است.', 409);
+      }
+      throw error;
+    });
     await appendAdministrationAudit(tx, { action: 'FINANCIAL_ACCOUNT_CREATED', actorId: input.actorId, entityType: 'FINANCIAL_ACCOUNT', entityId: created.id, reason: 'تعریف حساب مالی', payload: { kind: created.kind, currency: created.currency, iban: created.iban } });
     return created;
   }),

@@ -3,6 +3,7 @@ import {
   type CanonicalJsonObject
 } from './canonicalJson';
 import Decimal from 'decimal.js';
+import { PRECISE_PREPARED_GRAPH_PRICING_POLICY, PRECISE_PREPARED_MATERIAL_POLICY } from './contractMonetaryRounding';
 import { recoverLegacyRemainingChildren } from './legacyRemainingRecovery';
 import type {
   CalculationPolicySnapshot,
@@ -335,7 +336,8 @@ export const readLegacyProductGraph = ({
           throw new TypeError('Prepared product quantity and unit price are invalid.');
         }
         const pricing = calculatePricing({
-          policyVersion: calculationPolicy.pricing,
+          policyVersion: calculationPolicy.pricing === PRECISE_PREPARED_GRAPH_PRICING_POLICY
+            ? PRECISE_PREPARED_MATERIAL_POLICY : calculationPolicy.pricing,
           roundingPolicyVersion: calculationPolicy.rounding,
           lines: [{
             lineId: 'base-material',

@@ -25,7 +25,10 @@ export const PartnerPricingStateSchema = z.enum(['INCOMPLETE', 'AWAITING_INQUIRY
 export const PartnerCustomerConfirmationStateSchema = z.enum(['NOT_SENT', 'SENT', 'APPROVED', 'REJECTED', 'RECONFIRMATION_REQUIRED']);
 export const RevisionRefSchema = z.object({ caseId: IdSchema, revision: RevisionSchema, integrityHash: HashSchema }).strict();
 export const MoneySchema = z.object({ amount: DecimalSchema, currency: z.enum(['IRR', 'IRT']) }).strict();
-export const TotalsSchema = z.object({ net: DecimalSchema, discount: DecimalSchema, tax: DecimalSchema, charges: DecimalSchema, payable: DecimalSchema, currency: z.enum(['IRR', 'IRT']) }).strict();
+export const TotalsSchema = z.object({ net: DecimalSchema, discount: DecimalSchema, tax: DecimalSchema, charges: DecimalSchema, payable: DecimalSchema, currency: z.enum(['IRR', 'IRT']),
+  monetaryRounding: z.object({ policyVersion: z.literal('contract-payable-whole-unit-v1'), currency: z.string().min(1),
+    sourceAmount: DecimalSchema, roundedAmount: DecimalSchema, difference: SignedDecimalSchema }).strict().optional(),
+}).strict();
 export type RevisionRef = z.infer<typeof RevisionRefSchema>;
 export type Money = z.infer<typeof MoneySchema>;
 export type CaseState = z.infer<typeof CaseStateSchema>;

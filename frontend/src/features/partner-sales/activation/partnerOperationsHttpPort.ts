@@ -1,4 +1,4 @@
-import { PartnerErrorSchema, canonicalHash, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
+import { PartnerErrorSchema, partnerInputHash as canonicalHash, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import api from '@/lib/api';
 
 type Client = { post(path: string, body: unknown): Promise<{ data: unknown }> };

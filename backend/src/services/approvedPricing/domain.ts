@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import { roundContractPayableTotal, verifyContractMonetaryRounding } from '@sabalanerp/contract-product-graph';
 import { isValidFinanciallyApprovedInvoice } from '../accountingStatus';
 import {
   reconcileOptimizerDerivedLongitudinalQuantity,
@@ -8,7 +9,9 @@ import {
 import {
   contractDiscountEligibilityEvidence,
   hasConflictingDiscountOrNonProductAdjustmentEvidence,
+  isExplicitZeroDiscountInput,
   isContractRowDiscountEligible,
+  EXPLICIT_ZERO_DISCOUNT_BASE_RECONCILIATION_ORIGIN,
   LEGACY_DISCOUNT_ELIGIBILITY_EVIDENCE_ORIGIN,
   LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN,
 } from '../contractDiscountEvidence';
@@ -394,21 +397,27 @@ const validateContractDiscountEvidence = (
   currency: string,
   contractEligibleBase: Prisma.Decimal,
   completeGrossTotal: string,
+  reconcileExplicitZeroEligibility = false,
 ) => {
   const hasDiscountField = Object.prototype.hasOwnProperty.call(data, 'discount');
   const isLegacyWizardNull = hasDiscountField && data.discount === null;
   const isLegacyWizardAbsent = !hasDiscountField;
-  const reconciledPayableTotal = isLegacyWizardAbsent
+  const reconciledPayableTotal = isLegacyWizardAbsent || reconcileExplicitZeroEligibility
     ? money(payment.totalContractAmount, 'Legacy contract payable total')
     : null;
-  const reconciledGrossTotal = isLegacyWizardAbsent
+  const reconciledGrossTotal = isLegacyWizardAbsent || reconcileExplicitZeroEligibility
     ? money(completeGrossTotal, 'Legacy contract gross total')
     : null;
   if (reconciledPayableTotal !== null && reconciledPayableTotal !== reconciledGrossTotal) {
     throw new ApprovedPricingEvidenceError('Legacy contract without discount evidence does not reconcile to zero discount');
   }
-  if (isLegacyWizardAbsent && hasConflictingDiscountOrNonProductAdjustmentEvidence(data)) {
+  if ((isLegacyWizardAbsent || reconcileExplicitZeroEligibility) && hasConflictingDiscountOrNonProductAdjustmentEvidence(data)) {
     throw new ApprovedPricingEvidenceError('Legacy contract contains conflicting discount or non-product adjustment evidence');
+  }
+  if (reconcileExplicitZeroEligibility && new Prisma.Decimal(
+    money(record(data.discount, 'Contract discount evidence').baseSubtotal, 'Raw contract discount base subtotal'),
+  ).lt(0)) {
+    throw new ApprovedPricingEvidenceError('Explicit zero-discount raw basis cannot be negative');
   }
   const discount = isLegacyWizardNull
     ? {
@@ -430,7 +439,16 @@ const validateContractDiscountEvidence = (
           reconciledPayableTotal,
           reconciledGrossTotal,
         }
-    : record(data.discount, 'Contract discount evidence');
+    : reconcileExplicitZeroEligibility
+      ? {
+          ...record(data.discount, 'Contract discount evidence'),
+          rawBaseSubtotal: money(record(data.discount, 'Contract discount evidence').baseSubtotal, 'Raw contract discount base subtotal'),
+          baseSubtotal: contractEligibleBase.toString(),
+          evidenceOrigin: LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN.EXPLICIT_ZERO_RECONCILED,
+          reconciledPayableTotal,
+          reconciledGrossTotal,
+        }
+      : record(data.discount, 'Contract discount evidence');
   if (typeof discount.enabled !== 'boolean') throw new ApprovedPricingEvidenceError('Contract discount enabled evidence is missing');
   if (requiredString(discount.currency, 'Contract discount currency') !== currency) throw new ApprovedPricingEvidenceError('Contract discount currency conflicts with contract currency');
   const discountBase = money(discount.baseSubtotal, 'Contract discount base subtotal');
@@ -461,6 +479,25 @@ const validateContractDiscountEvidence = (
     } else if (!percentDerivedAmount.eq(discountValue)) {
       throw new ApprovedPricingEvidenceError('Contract discount amount conflicts with base subtotal and percent');
     }
+  }
+  if (!contractEligibleBase.eq(discountBase)) {
+    if (!isExplicitZeroDiscountInput(data.discount) ||
+        hasConflictingDiscountOrNonProductAdjustmentEvidence(data) ||
+        money(payment.totalContractAmount, 'Contract payable total') !== money(completeGrossTotal, 'Canonical gross total')) {
+      throw new ApprovedPricingEvidenceError('Contract discount base subtotal conflicts with canonical eligible rows');
+    }
+    return {
+      discount: {
+        ...discount,
+        baseSubtotal: contractEligibleBase.toString(),
+        evidenceOrigin: EXPLICIT_ZERO_DISCOUNT_BASE_RECONCILIATION_ORIGIN,
+        rawBaseSubtotal: discountBase,
+      },
+      discountBase: money(contractEligibleBase.toString(), 'Reconciled contract discount base subtotal'),
+      discountPercent,
+      contractDiscountAmount,
+      discountValue,
+    };
   }
   return { discount, discountBase, discountPercent, contractDiscountAmount, discountValue };
 };
@@ -548,15 +585,17 @@ export const buildApprovedPricingVersion = (
   const financialAmountNormalizations: Array<Record<string, string>> = [];
 
   const hasDiscountField = Object.prototype.hasOwnProperty.call(data, 'discount');
-  const isLegacyNoDiscountShape = !hasDiscountField || data.discount === null;
+  const isExplicitZeroNoDiscount = isExplicitZeroDiscountInput(data.discount) &&
+    !hasConflictingDiscountOrNonProductAdjustmentEvidence(data);
+  const isLegacyNoDiscountShape = !hasDiscountField || data.discount === null || isExplicitZeroNoDiscount;
   const discountEligibility = contractDiscountEligibilityEvidence(snapshotByRow, graph.rows.map(row => ({
     productRowId: row.productRowId,
     baseAmountToman: money(row.baseAmountToman, `Product ${row.productRowId} base amount`),
   })), { allowLegacyMissingNonLayer: isLegacyNoDiscountShape });
   const contractEligibleBase = discountEligibility.eligibleBase;
   const { discount, discountBase, discountPercent, contractDiscountAmount, discountValue } =
-    validateContractDiscountEvidence(data, payment, currency, contractEligibleBase, graph.totalAmountToman);
-  if (!contractEligibleBase.eq(discountBase)) throw new ApprovedPricingEvidenceError('Contract discount base subtotal conflicts with canonical eligible rows');
+    validateContractDiscountEvidence(data, payment, currency, contractEligibleBase, graph.totalAmountToman,
+      isExplicitZeroNoDiscount && discountEligibility.normalizedNonLayerProductRowIds.length > 0);
   if (discountValue.gt(contractEligibleBase)) throw new ApprovedPricingEvidenceError('Contract discount exceeds eligible pricing');
 
   const canonicalWriterV2MoneyNormalizations = new Map(
@@ -608,7 +647,28 @@ export const buildApprovedPricingVersion = (
       : selectedEligibleBase.mul(new Prisma.Decimal(discountPercent)).div(100)
     : new Prisma.Decimal(0);
   const discountAmount = money(selectedDiscountValue, 'Approved pricing discount amount');
-  const netAmount = money(gross.minus(selectedDiscountValue), 'Approved pricing net amount');
+  const rawNetAmount = money(gross.minus(selectedDiscountValue), 'Approved pricing net amount');
+  // Replay the Contract's sealed policy, never round historical obligations on read.
+  let netAmount = rawNetAmount;
+  if (data.monetaryRounding !== undefined) {
+    try {
+      const services = Array.isArray(data.serviceRows) ? data.serviceRows : [];
+      const completePayable = completeGraphTotal.plus(services.reduce((sum, row) =>
+        sum.plus(money(record(row, 'Contract service row').totalPrice, 'Contract service amount')), new Prisma.Decimal(0)))
+        .minus(discountValue);
+      const agreed = verifyContractMonetaryRounding(Prisma.Decimal.max(completePayable, 0).toFixed(), currency, data.monetaryRounding);
+      if (!new Prisma.Decimal(agreed).eq(String(payment.totalContractAmount))) throw new Error('Contract payment total conflict');
+      // Partial invoices retain their precise selected-row obligation. The policy
+      // rounds the final Contract total, never individual rows or subsets.
+      if (mode === 'FROM_CONTRACT_TOTAL') {
+        const rounded = roundContractPayableTotal(Prisma.Decimal.max(completePayable, 0).toFixed(), currency);
+        netAmount = money(rounded.roundedAmount, 'Rounded approved pricing net amount');
+        financialAmountNormalizations.push({ scope: 'contract-payable', ...rounded });
+      }
+    } catch {
+      throw new ApprovedPricingEvidenceError('Contract payable rounding evidence conflicts with financial approval');
+    }
+  }
   const rowByItem = new Map(rows.map(row => [row.contractItemId, row]));
   for (const invoiceItem of source.leaf.invoiceItems) {
     const sourceItem = source.contract.items.find(item => item.id === invoiceItem.contractItemId);

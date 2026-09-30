@@ -1,5 +1,5 @@
 type Amounts = Record<string, string | number | null | undefined>;
-type DatasetRow = { key: string; titlePersian: string; amounts: Amounts };
+type DatasetRow = { key: string; titlePersian: string; accountCode?: string; amounts: Amounts };
 type FrozenDataset = {
   parameters?: { from?: string | Date; to?: string | Date };
   columnKeys?: string[];
@@ -13,6 +13,12 @@ const amountColumnFa: Record<string, string> = {
   endingDebit: 'مانده بدهکار پایان دوره', endingCredit: 'مانده بستانکار پایان دوره',
   periodNetDebit: 'خالص بدهکار دوره', periodNetCredit: 'خالص بستانکار دوره',
 };
+
+// Comparative reports can have eighteen columns. Keep every frozen column at
+// readable size instead of cropping the left-hand side of an A4 table.
+export const officialReportPdfPageSize = (columnCount: number) => columnCount > 10
+  ? { widthMm: 420, heightMm: 297, cssSize: 'A3 landscape' }
+  : { widthMm: 297, heightMm: 210, cssSize: 'A4 landscape' };
 
 const persianDate = (value: string | Date | undefined): string => {
   const day = value instanceof Date ? value.toISOString().slice(0, 10) : String(value ?? '').slice(0, 10);
@@ -35,7 +41,7 @@ export const buildOfficialReportExportRows = (dataset: FrozenDataset): Array<Rec
   return keys.map((key) => {
     const current = currentByKey.get(key);
     const comparative = comparativeByKey.get(key);
-    const output: Record<string, string> = { 'عنوان': current?.titlePersian ?? comparative?.titlePersian ?? key };
+    const output: Record<string, string> = { 'کد حساب': current?.accountCode ?? comparative?.accountCode ?? '', 'عنوان': current?.titlePersian ?? comparative?.titlePersian ?? key };
     for (const column of columnKeys) output[amountColumnFa[column] ?? column] = String(current?.amounts?.[column] ?? '');
     if (dataset.comparative) {
       for (const column of columnKeys) output[`${amountColumnFa[column] ?? column} مقایسه‌ای`] = String(comparative?.amounts?.[column] ?? '');

@@ -53,9 +53,6 @@ async function resolveAdditionalMaterialApprovals(tx: Transaction, command: Draf
       approvals.push({ material, binding, approval: frozen.data, frozen: true });
       continue;
     }
-    if (frozen.success && frozen.data.configurationHash === material.configurationHash) {
-      return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
-    }
     const approval = await resolveApprovalForUse(tx, { binding, partnerSellerId: resolved.partnerSellerId,
       caseId: command.type === 'CASE_DRAFT_REVISE' ? command.expected.caseId : command.idempotency.targetId,
       pricingCaseRevision: command.type === 'CASE_DRAFT_REVISE' ? command.expected.revision : 1,
@@ -99,6 +96,7 @@ const receipt = (value: unknown) => {
 async function readPartnerView(tx: Transaction, caseId: string) {
   const row = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
     id: true, profileId: true, customerId: true, headRevision: true, integrityHash: true,
+    trackingCode: { select: { number: true } },
     head: { select: { internalProjection: true, customerContent: true } },
   } });
   const source = row?.head.internalProjection;
@@ -111,7 +109,7 @@ async function readPartnerView(tx: Transaction, caseId: string) {
   const projectId = content && typeof content === 'object' && !Array.isArray(content) &&
     typeof (content as Prisma.JsonObject).projectId === 'string'
     ? (content as Prisma.JsonObject).projectId as string : undefined;
-  return { view: parsed.data, root: row, projectId };
+  return { view: { ...parsed.data, ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}) }, root: row, projectId };
 }
 
 async function readPartnerRevisionView(tx: Transaction, caseId: string, revision: number, integrityHash: string) {
@@ -152,6 +150,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
         approvalSnapshot: true, evidenceHash: true } } } },
     internalRecord: { select: { recordNumber: true } },
     customerContract: { select: { contractNumber: true } },
+    trackingCode: { select: { number: true } },
   } });
   if (!current) return { ok: false, error: partnerError('NOT_FOUND') } as const;
   if (!isPartnerCaseEditableState(current.state) ||
@@ -232,12 +231,6 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       approvedRows.push({ ...saved, retailUnitPrice: { ...row.retailUnitPrice, amount: saved.retailUnitPriceAmount },
         approval: frozen.data, frozen: true });
       continue;
-    }
-    if (previous?.configurationHash === saved.configurationHash && previous.inquiryUsages.length > 0) {
-      await dependencies.recordEvidenceReview(tx, { caseId, profileId: current.profileId,
-        correlationId: command.correlationId, code: 'INTEGRITY_CONFLICT',
-        evidence: { expectedRevision: command.expected.revision, productRowId: row.productRowId } });
-      return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
     }
     const approval = await resolveApprovalForUse(tx, { binding: row.approvedRowBinding,
       partnerSellerId: dependencies.actorId, configurationHash: saved.configurationHash,
@@ -420,7 +413,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   const outcome = { version: 1, commandId: command.commandId, caseId, revision, integrityHash, eventIds: [eventId] };
   await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...key, payloadHash: intentHash, outcome: json(outcome) } });
   return { ok: true, value: { commandId: command.commandId, replayed: false,
-    case: { ...projections.value.partner, state: nextState,
+    case: { ...projections.value.partner, ...(current.trackingCode ? { trackingNumber: current.trackingCode.number } : {}), state: nextState,
       customerConfirmationState: nextConfirmationState }, eventIds: [eventId] } } as const;
 }
 
@@ -550,7 +543,10 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         graphHash: evidence.value.graphHash, graph: evidence.value.graph, partySnapshots: evidence.value.partySnapshots,
         wholesaleEnvelope: evidence.value.wholesaleEnvelope, retailEnvelope: evidence.value.retailEnvelope,
         paymentEvidence: evidence.value.paymentEvidence, customerContent: evidence.value.customerContent });
-      const ids = { eventId: randomUUID(), caseNumber: `PC-${randomUUID()}` };
+      const [tracking] = await tx.$queryRaw<Array<{ number: bigint }>>`
+        SELECT nextval('partner_case_tracking_number_seq') AS number`;
+      const ids = { eventId: randomUUID(), caseNumber: `PC-${randomUUID()}`,
+        trackingNumber: Number(tracking.number) };
       const projections = await buildCaseProjections({ caseId, revision: 1, integrityHash, caseNumber: ids.caseNumber,
         commercialAccountId: resolved.value.commercialAccountId,
         state: 'DRAFT', evidence: evidence.value });
@@ -561,9 +557,11 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         return projections;
       }
       mutated = true;
-      await tx.partnerSaleCase.create({ data: { id: caseId, caseNumber: ids.caseNumber, profileId: resolved.value.profileId,
+      await tx.partnerSaleCase.create({ data: { id: caseId, caseNumber: ids.caseNumber,
+        profileId: resolved.value.profileId,
         customerId: resolved.value.customerId, headRevision: 1, integrityHash,
         pricingState: evidence.value.pricingState } });
+      await tx.partnerCaseTrackingCode.create({ data: { caseId, number: ids.trackingNumber } });
       dependencies.failpoint?.('AFTER_CASE_ROOT');
       await tx.partnerCaseRevision.create({ data: { caseId, revision: 1, integrityHash,
         pricingState: evidence.value.pricingState,
@@ -629,7 +627,7 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
       const outcome = { version: 1, commandId: command.commandId, caseId, revision: 1, integrityHash, eventIds: [ids.eventId] };
       await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...key, payloadHash: intentHash, outcome: json(outcome) } });
       return { ok: true, value: { commandId: command.commandId, replayed: false,
-        case: projections.value.partner, eventIds: [ids.eventId] } };
+        case: { ...projections.value.partner, trackingNumber: ids.trackingNumber }, eventIds: [ids.eventId] } };
       })();
       if (!result.ok && mutated) throw new RollbackCaseResult(result);
       return result;

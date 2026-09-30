@@ -6,7 +6,8 @@ import { disconnectDatabase, prisma } from '../lib/prisma';
 import { readConfiguredFile } from '../services/deploymentCheckpointStorage';
 import { assertIsolatedRecoveryDrill } from '../services/deploymentDrillPolicy';
 import { sha256File } from '../services/recoveryCrypto';
-import { readRestoreJournal, recoveryEngineInternals, stageAndPromoteRecovery, validateRecoveryPackage } from '../services/systemRecoveryEngine';
+import { readRestoreJournal, stageAndPromoteRecovery, validateRecoveryPackage } from '../services/systemRecoveryEngine';
+import { nativePostgresCliConnection } from '../services/nativePostgresCli';
 import { initializeSystemRecovery } from '../services/systemRecoveryLifecycle';
 
 type RemoteMetadata = {
@@ -23,9 +24,11 @@ const execFileAsync = promisify(execFile);
 const main = async () => {
   assertIsolatedRecoveryDrill(process.env);
   const expectedMarker = String(process.env.DEPLOYMENT_DRILL_DATABASE_MARKER);
-  const controlDatabaseUrl = recoveryEngineInternals.databaseUrlWithName(String(process.env.DATABASE_URL), 'postgres');
-  const markerResult = await execFileAsync('psql', [controlDatabaseUrl, '-At', '-v', 'ON_ERROR_STOP=1', '-c',
-    'SELECT marker FROM deployment_drill_environment_marker WHERE singleton = true'], { timeout: 30_000, windowsHide: true });
+  const controlConnection = nativePostgresCliConnection(String(process.env.DATABASE_URL), 'postgres');
+  const markerResult = await execFileAsync('psql', [controlConnection.url, '-At', '-v', 'ON_ERROR_STOP=1', '-c',
+    'SELECT marker FROM deployment_drill_environment_marker WHERE singleton = true'], {
+    env: { ...process.env, ...controlConnection.environment }, timeout: 30_000, windowsHide: true,
+  });
   if (markerResult.stdout.trim() !== expectedMarker) {
     throw Object.assign(new Error('The connected database did not prove its isolated drill identity.'), {
       code: 'DEPLOYMENT_DRILL_DATABASE_IDENTITY_MISMATCH',
@@ -80,7 +83,9 @@ const main = async () => {
 
 main()
   .catch((error: any) => {
-    console.error(JSON.stringify({ ok: false, code: error?.code || 'DEPLOYMENT_DRILL_FAILED', message: error?.message }));
+    // Native command exceptions can include a connection URI or protected payload path.
+    console.error(JSON.stringify({ ok: false, code: error?.code || 'DEPLOYMENT_DRILL_FAILED',
+      message: 'تمرین بازیابی کامل نشد؛ کد خطا و شواهد خصوصی تمرین را بررسی کنید.' }));
     process.exitCode = 1;
   })
   .finally(() => disconnectDatabase());

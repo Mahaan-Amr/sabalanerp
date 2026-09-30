@@ -11,6 +11,7 @@ import type { FinancialTrendPeriod } from '../../accountingFinancialTrend';
 import { PARTNER_REPLACEMENT_MODE, matchesPartnerStagedApproval } from './sharedCorrection';
 import { readPartnerRevisionProjections } from '../cases/lifecycle';
 import { readPartnerInvoiceSource } from './invoiceSource';
+import { validatePendingPartnerApproval } from './financialApproval';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -55,12 +56,22 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
           !await matchesPartnerStagedApproval(invoice, preparation)) throw conflict();
       continue;
     }
+    // Approved invoices awaiting an explicit receivable are not published debt.
+    if (metadata?.partnerReceivablePending === true) {
+      if (typeof caseId !== 'string' || invoice.receivables.length || !invoice.systemInvoiceDate ||
+          !['ISSUED', 'POSTED', 'VOIDED'].includes(invoice.status) || typeof approvalId !== 'string' ||
+          eventsByCase.get(caseId)?.some(event => event.eventId === approvalId)) throw conflict();
+      await readPartnerInvoiceSource(tx, invoice, caseId);
+      await validatePendingPartnerApproval(invoice);
+      continue;
+    }
     const approval = typeof caseId === 'string' ? eventsByCase.get(caseId)?.find(event =>
       event.type === 'SABALAN_FINANCIAL_APPROVED' && event.eventId === approvalId) : undefined;
     if (!approval || approval.type !== 'SABALAN_FINANCIAL_APPROVED' || !invoice.systemInvoiceDate ||
         !['ISSUED', 'POSTED', 'VOIDED'].includes(invoice.status) || (invoice.status === 'VOIDED' && !invoice.voidedAt) ||
         invoice.receivables.length !== 1) throw conflict();
-    if (Date.parse(approval.recordedAt) > input.asOf.getTime()) continue;
+    if (Date.parse(approval.recordedAt) > input.asOf.getTime() ||
+        (metadata?.partnerReceivablePending === false && invoice.receivables[0].createdAt > input.asOf)) continue;
     let effectiveAt = invoice.systemInvoiceDate;
     if (metadata?.mode === PARTNER_REPLACEMENT_MODE) {
       const effect = eventsByCase.get(approval.owner.caseId)?.find(event => event.type === 'CORRECTION_EFFECTIVE' &&
@@ -68,8 +79,10 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
       const predecessor = typeof metadata.replacesRecordId === 'string' ? await tx.accountingFinancialRecord.findUnique({
         where: { id: metadata.replacesRecordId },
       }) : null;
-      if (!effect || effect.type !== 'CORRECTION_EFFECTIVE' || effect.recordedAt !== approval.recordedAt ||
-          effect.effectiveDate !== approval.effectiveDate || !predecessor || predecessor.status !== 'VOIDED' ||
+      const replacesDebt = predecessor && await tx.accountingReceivable.count({ where: { invoiceRecordId: predecessor.id } }) > 0;
+      if (!effect || effect.type !== 'CORRECTION_EFFECTIVE' ||
+          (replacesDebt && (effect.recordedAt !== approval.recordedAt || effect.effectiveDate !== approval.effectiveDate)) ||
+          !predecessor || predecessor.status !== 'VOIDED' ||
           predecessor.sourceKind !== invoice.sourceKind || predecessor.sourceId !== invoice.sourceId ||
           predecessor.voidedAt?.toISOString() !== effect.recordedAt) throw conflict();
       // Retail-only successors advance the Case without replacing its earlier
@@ -80,7 +93,7 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
       const prepared = await preparePartnerFinancialSource({ view: { ...predecessorViews.accounting, state: 'COMMITTED' },
         partnerSellerId: historical.debtor.partnerSellerId }, effect.predecessor);
       if (!prepared.ok || !matchesFinancialPreparation(prepared.value, historical)) throw conflict();
-      effectiveAt = new Date(effect.recordedAt);
+      effectiveAt = replacesDebt ? new Date(effect.recordedAt) : invoice.systemInvoiceDate;
     }
     const canonical = await readPartnerInvoiceSource(tx, invoice, approval.owner.caseId);
     rows.push({ invoice, approval, effectiveAt, preparation: canonical.preparation });

@@ -45,9 +45,11 @@ export function createPrismaPartnerReportingSource(input: {
       const through = effectiveThrough(period);
       const roots = await tx.partnerSaleCase.findMany({ where: { customerContractId: { not: null }, events: { some: {
         effectiveDate: { lte: new Date(`${through}T00:00:00.000Z`) }, recordedAt: { lte: clock.now } } } }, select: { id: true,
-        profile: { select: { userId: true } }, customerContract: { select: { departmentId: true } } }, orderBy: { id: 'asc' } });
+        trackingCode: { select: { number: true } }, profile: { select: { userId: true } },
+        customerContract: { select: { departmentId: true } } }, orderBy: { id: 'asc' } });
       const mapped: Root[] = roots.flatMap(row => row.customerContract ? [{ caseId: row.id,
-        partnerSellerId: row.profile.userId, departmentId: row.customerContract.departmentId }] : []);
+        partnerSellerId: row.profile.userId, departmentId: row.customerContract.departmentId,
+        ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}) }] : []);
       const channel = query.search ? 'SEARCH' as const : 'LIST' as const;
       const baseAuthorization = createAuditedPartnerAuthorization(tx, { actorId: input.actorId,
         purpose: query.purpose, channel }, { correlationId: input.correlationId });
@@ -93,13 +95,14 @@ async function caseEvidence(tx: Prisma.TransactionClient, root: Root, purpose: R
       id: true, type: true, caseRevision: true, integrityHash: true, evidence: true,
       toState: true, effectiveDate: true, recordedAt: true,
     } },
-    customerContract: { select: { departmentId: true } },
+    customerContract: { select: { departmentId: true, contractNumber: true } },
     profile: { select: { userId: true } },
   } });
   if (!row?.internalRecordId || !row.customerContract || row.profile.userId !== root.partnerSellerId ||
       row.customerContract.departmentId !== root.departmentId) {
     throw new Error('Partner report root changed during snapshot');
   }
+  const customerContractNumber = row.customerContract.contractNumber;
   const currentInternal = contracts.SabalanInternalRecordViewSchema.parse(object(row.head.internalProjection)?.accounting);
   const currentFulfillment = contracts.FulfillmentViewSchema.parse(object(row.head.internalProjection)?.fulfillment);
   const head = { caseId: row.id, revision: row.headRevision, integrityHash: row.integrityHash };
@@ -117,14 +120,22 @@ async function caseEvidence(tx: Prisma.TransactionClient, root: Root, purpose: R
   const selected = contracts.SabalanInternalRecordViewSchema.parse(object(revision.internalProjection)?.accounting);
   const fulfillment = contracts.FulfillmentViewSchema.parse(object(revision.internalProjection)?.fulfillment);
   if (!ownsRevision(selected.owner, effective) || !ownsRevision(fulfillment.owner, effective) ||
-      selected.recordId !== row.internalRecordId || fulfillment.recordId !== row.internalRecordId) return integrityConflict();
+      selected.recordId !== row.internalRecordId || fulfillment.recordId !== row.internalRecordId ||
+      selected.customerContractNumber !== customerContractNumber) return integrityConflict();
   const internal = { ...selected, state: history.voided ? 'VOIDED' as const : history.commitment ? 'COMMITTED' as const
     : contracts.CaseStateSchema.parse(stateEvent?.toState) };
   const commercial = ['PARTNER', 'MANAGEMENT'].includes(purpose) ? row.revisions.flatMap(revision => {
     const view = contracts.PartnerCaseViewSchema.parse(object(revision.internalProjection)?.partner);
     if (!ownsRevision(view.owner, { caseId: row.id, revision: revision.revision,
       integrityHash: revision.integrityHash })) integrityConflict();
-    const comparable = comparableCommercialRevision(view, revision);
+    if (!view.sabalanTotals && !view.customerContractNumber) return [];
+    // Early linked-pair allocation stored the pre-numbered Partner projection.
+    // Derive its public number from the verified linked customer Contract for
+    // reporting; the immutable revision and its commercial amounts stay intact.
+    if (view.customerContractNumber && view.customerContractNumber !== customerContractNumber) integrityConflict();
+    const numbered = view.customerContractNumber ? view
+      : contracts.PartnerCaseViewSchema.parse({ ...view, customerContractNumber });
+    const comparable = comparableCommercialRevision(numbered, revision);
     return comparable ? [comparable] : [];
   }) : undefined;
   const progress = await readPartnerShipmentQuantityProjection(tx, row.id,

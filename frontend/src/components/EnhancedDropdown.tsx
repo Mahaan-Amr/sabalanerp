@@ -1,6 +1,6 @@
 'use client';
 
-import { ErpInput, ErpPressable, useErpOverlayPortalContainer } from '@/components/erp';
+import { ErpInput, ErpPressable, useErpOverlayPortalContainer, useErpPresentationScope } from '@/components/erp';
 import React, { useState, useRef, useEffect, useMemo, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { FaChevronDown, FaSearch, FaCheck } from 'react-icons/fa';
@@ -52,6 +52,7 @@ export default function EnhancedDropdown({
   loading = false
 }: EnhancedDropdownProps) {
   const overlayPortalContainer = useErpOverlayPortalContainer();
+  const presentationScope = useErpPresentationScope();
   const [isOpen, setIsOpen] = useState(false);
   const listboxId = useId();
   const [searchTerm, setSearchTerm] = useState('');
@@ -388,10 +389,11 @@ export default function EnhancedDropdown({
           <div
             ref={portalRef}
             data-erp-overlay-root
+            data-erp-presentation={presentationScope}
             onKeyDown={handleKeyDown}
             id={listboxId}
             role="listbox"
-            className="enhanced-dropdown-portal fixed z-[99999] overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-1 shadow-[var(--sds-shadow-raised)]"
+            className={`enhanced-dropdown-portal fixed z-[99999] overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-1 shadow-[var(--sds-shadow-raised)] ${presentationScope === 'workspace' ? 'sds-neumorphic-scope sds-neumorphic-workflow-scope' : ''}`}
             style={{
               top: `${portalPosition.top}px`,
               left: `${portalPosition.left}px`,

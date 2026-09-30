@@ -1,6 +1,7 @@
 'use client';
 import { ErpField, ErpInput, ErpTextarea } from '@/components/erp';
 import React from 'react';
+import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import {
   FaBalanceScale,
   FaBell,
@@ -30,6 +31,9 @@ export type AccountingMetric = {
 
 export type AccountingContractRow = {
   contractId: string;
+  sourceKind?: 'PARTNER_INTERNAL_RECORD';
+  partnerContext?: { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string; internalRecordNumber: string;
+    debtor: { displayName: string }; endCustomer: { displayName: string }; actionUrl: string };
   contractNumber: string;
   titlePersian: string;
   createdAt?: string;
@@ -59,6 +63,7 @@ export type AccountingContractRow = {
     invoicedAmount: string;
     receivedAmount: string;
     remainingAmount: string;
+    currency?: string;
   };
   financialRecords?: Array<{
     id: string;
@@ -191,11 +196,11 @@ export const dateFa = (value?: string | Date | null) => {
 };
 
 export function PartnerAccountingIdentity({ context }: { context?: {
-  caseNumber: string; internalRecordNumber: string; debtor: { displayName: string };
+  caseNumber: string; trackingNumber?: number; internalRecordNumber: string; debtor: { displayName: string };
 } | null }) {
   if (!context) return <span className="sds-text-secondary">شواهد پرونده نیاز به بررسی دارد</span>;
   return <div>
-    <p className="font-semibold">پرونده {context.caseNumber}</p>
+    <p className="font-semibold">کد پیگیری {partnerTrackingCode(context.caseNumber, context.trackingNumber)}</p>
     <p className="mt-1 text-xs sds-text-secondary">طرف حساب همکار: {context.debtor.displayName}</p>
     <p className="mt-1 text-xs sds-text-secondary">سند داخلی: {context.internalRecordNumber}</p>
   </div>;
@@ -467,7 +472,7 @@ export function FinancialInvoiceApprovalForm({
         </label>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ سپیدار ({invoice.currency === 'IRT' ? 'تومان' : 'ریال'})</span>
-          {isPartner ? <ErpInput value={partnerAmount} inputMode="decimal" dir="ltr" disabled={busy}
+          {isPartner ? <ErpInput numberFormat="money" value={partnerAmount} inputMode="decimal" dir="ltr" disabled={busy}
             onChange={event => { clearError('sepidarAmount'); setPartnerAmount(event.target.value); }}
             placeholder="مبلغ سپیدار" className={fieldClass('sepidarAmount')} /> : <FormattedNumberInput
             value={sepidarAmount}

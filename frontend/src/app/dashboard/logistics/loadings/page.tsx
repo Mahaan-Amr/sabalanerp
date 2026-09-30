@@ -7,12 +7,12 @@ import {
   ErpSheet,
   ErpTextarea,
 } from "@/components/erp";
+import { LogisticsPage } from "@/features/logistics/LogisticsWorkspace";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaBan,
   FaCheck,
-  FaEdit,
-  FaEye,
   FaPlus,
   FaPrint,
   FaSearch,
@@ -27,7 +27,6 @@ import {
   ErpEmptyState,
   ErpInlineState,
   ErpLoading,
-  ErpPage,
   ErpPagination,
   ErpQuickFilters,
 } from "@/components/erp";
@@ -45,8 +44,13 @@ const actionLabel = (action: "finalize" | "delete" | "cancel" | "print") =>
   })[action];
 
 export default function LogisticsLoadingsPage() {
+  const searchParams = useSearchParams();
   const [rows, setRows] = useState<any[]>([]);
   const [status, setStatus] = useState("ALL");
+  useEffect(() => {
+    const requested = searchParams.get("status");
+    setStatus(requested && ["DRAFT", "FINALIZED", "CANCELLED"].includes(requested) ? requested : "ALL");
+  }, [searchParams]);
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -266,11 +270,12 @@ export default function LogisticsLoadingsPage() {
   if (isLoading) return <ErpLoading />;
 
   return (
-    <ErpPage
+    <LogisticsPage
       title="بارگیری‌ها"
       actions={[
         {
           label: "بارگیری جدید",
+          variant: "solid",
           href: "/dashboard/logistics/loadings/new",
           icon: FaPlus,
         },
@@ -289,15 +294,17 @@ export default function LogisticsLoadingsPage() {
 
       <ErpCard className="p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative max-w-xl flex-1">
-            <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
+          <ErpField label="جستجوی بارگیری" className="w-full lg:max-w-xl lg:flex-1">
+          <div className="relative">
+            <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-secondary)]" />
             <ErpInput
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="جستجو در شماره، مشتری، پروژه، راننده یا وضعیت"
-              className="w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] py-3 pl-4 pr-10 text-sm outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
+              className="pr-10"
             />
           </div>
+          </ErpField>
           <ErpQuickFilters
             value={status}
             onChange={(value) => setStatus(value)}
@@ -408,117 +415,28 @@ export default function LogisticsLoadingsPage() {
 
       <ErpCard className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-right text-sm dark:divide-slate-800">
-            <thead className="bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)]">
-              <tr>
-                <th className="px-3 py-3">
-                  <ErpCheckboxControl
-                    aria-label="انتخاب همه بارگیری‌های نمایش‌داده‌شده"
-                    checked={allVisibleSelected}
-                    onChange={toggleVisible}
-                  />
-                </th>
-                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">
-                  شماره
-                </th>
-                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">
-                  وضعیت
-                </th>
-                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">
-                  مشتری / پروژه
-                </th>
-                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">
-                  رانندگان
-                </th>
-                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">
-                  تاریخ
-                </th>
-                <th className="px-3 py-3 text-center font-semibold text-[var(--sds-text-secondary)]">
-                  ردیف
-                </th>
-                <th className="px-3 py-3 text-center font-semibold text-[var(--sds-text-secondary)]">
-                  اصلاح
-                </th>
-                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">
-                  عملیات
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 bg-[var(--sds-surface-raised)] dark:divide-slate-800 dark:bg-[var(--sds-surface-raised)]">
-              {filteredRows.map((row) => {
-                const selected = selectedIds.includes(row.id);
-                return (
-                  <tr
-                    key={row.id}
-                    className={
-                      selected
-                        ? "bg-[var(--sds-accent)]/5 dark:bg-[var(--sds-accent-surface)]"
-                        : undefined
-                    }
-                  >
-                    <td className="px-3 py-3 align-top">
-                      <ErpCheckboxControl
-                        aria-label={`انتخاب ${dispatchCaseReference(row.loadingNumber)}`}
-                        checked={selected}
-                        onChange={() => toggleSelected(row.id)}
-                      />
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <a
-                        className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"
-                        href={`/dashboard/logistics/loadings/${row.id}`}
-                      >
-                        {dispatchCaseReference(row.loadingNumber)}
-                      </a>
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <StatusBadge status={row.status} />
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                        {row.customerName || "—"}
-                      </p>
-                      <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
-                        {row.projectName || "—"}
-                      </p>
-                    </td>
-                    <td className="px-3 py-3 align-top text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                      {loadingDriversName(row)}
-                    </td>
-                    <td className="px-3 py-3 align-top text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                      {dateFa(row.loadingDate)}
-                    </td>
-                    <td className="px-3 py-3 text-center align-top">
-                      {(row.lineCount || 0).toLocaleString("fa-IR")}
-                    </td>
-                    <td className="px-3 py-3 text-center align-top">
-                      {row.correctionCount ? (
-                        <ErpBadge tone="warning">
-                          {row.correctionCount.toLocaleString("fa-IR")}
-                        </ErpBadge>
-                      ) : (
-                        <span className="text-[var(--sds-text-muted)]">۰</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <div className="flex flex-wrap gap-1">
-                        <ErpButton
-                          label="مشاهده"
-                          icon={FaEye}
-                          href={`/dashboard/logistics/loadings/${row.id}`}
-                          variant="ghost"
-                          tone="neutral"
-                        />
-                        {canEdit(row) && (
-                          <ErpButton
-                            label="ویرایش"
-                            icon={FaEdit}
-                            href={`/dashboard/logistics/loadings/new?draftId=${row.id}`}
-                            variant="ghost"
-                            tone="primary"
-                          />
-                        )}
+          <table className="block w-full text-right text-sm lg:table">
+            <thead className="hidden bg-[var(--sds-surface-subtle)] text-xs sds-text-secondary lg:table-header-group"><tr>
+              <th className="px-3 py-3"><label className="inline-flex min-h-11 min-w-11 items-center justify-center"><ErpCheckboxControl aria-label="انتخاب همه بارگیری‌های نمایش‌داده‌شده" checked={allVisibleSelected} onChange={toggleVisible} /></label></th>
+              <th className="px-3 py-3">بارگیری / مشتری</th><th className="px-3 py-3">وضعیت</th><th className="px-3 py-3">رانندگان</th><th className="px-3 py-3">تاریخ</th><th className="px-3 py-3">عملیات</th>
+            </tr></thead>
+            <tbody className="block divide-y divide-[var(--sds-border-subtle)] lg:table-row-group">
+              {filteredRows.map(row => <tr key={row.id} className={`grid grid-cols-[44px_minmax(0,1fr)] items-start gap-y-3 p-3 md:grid-cols-[44px_minmax(0,1fr)_auto] lg:table-row lg:p-0 ${selectedIds.includes(row.id) ? 'bg-[var(--sds-accent-soft)]' : ''}`}>
+                <td className="block lg:table-cell lg:px-3 lg:py-3"><label className="inline-flex min-h-11 min-w-11 items-center justify-center"><ErpCheckboxControl aria-label={`انتخاب ${dispatchCaseReference(row.loadingNumber)}`} checked={selectedIds.includes(row.id)} onChange={() => toggleSelected(row.id)} /></label></td>
+                <td className="block min-w-0 lg:table-cell lg:px-3 lg:py-3">
+                  <ErpButton label={dispatchCaseReference(row.loadingNumber)} href={`/dashboard/logistics/loadings/${row.id}`} variant="ghost" className="max-w-full whitespace-normal text-right" />
+                  <p className="mt-1 text-base font-bold sds-text-primary">{row.customerName || 'مشتری ثبت نشده'}</p>
+                  <p className="mt-1 text-sm sds-text-secondary">پروژه: {row.projectName || 'ثبت نشده'}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs sds-text-secondary">{(row.lineCount || 0).toLocaleString('fa-IR')} ردیف {row.correctionCount > 0 && <ErpBadge tone="warning">{row.correctionCount.toLocaleString('fa-IR')} اصلاح</ErpBadge>}</div>
+                </td>
+                <td className="col-span-2 block md:col-span-1 md:self-center lg:table-cell lg:px-3 lg:py-3"><StatusBadge status={row.status} /></td>
+                <td className="col-span-2 block text-sm md:col-span-1 md:col-start-2 lg:table-cell lg:px-3 lg:py-3">{loadingDriversName(row)}</td>
+                <td className="col-span-2 block text-xs sds-text-secondary md:col-span-1 md:text-left lg:table-cell lg:text-right lg:px-3 lg:py-3">{dateFa(row.loadingDate)}</td>
+                <td className="col-span-2 block w-full md:col-span-3 lg:table-cell lg:w-auto lg:min-w-44 lg:px-3 lg:py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <ErpButton label={canEdit(row) ? 'ادامه' : 'مشاهده'} href={canEdit(row) ? `/dashboard/logistics/loadings/new?draftId=${row.id}` : `/dashboard/logistics/loadings/${row.id}`} variant="outline" />
                         <ErpActionMenu
+                          portal
                           label="اقدامات بیشتر"
                           actions={[
                             ...(canFinalize(row)
@@ -570,11 +488,9 @@ export default function LogisticsLoadingsPage() {
                               : []),
                           ]}
                         />
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                  </div>
+                </td>
+              </tr>)}
             </tbody>
           </table>
         </div>
@@ -611,6 +527,7 @@ export default function LogisticsLoadingsPage() {
         }}
         title={`${actionRequest ? actionLabel(actionRequest.action) : ""} ${actionRequest?.targets.length === 1 ? dispatchCaseReference(actionRequest.targets[0].loadingNumber) : `${actionRequest?.targets.length.toLocaleString("fa-IR")} بارگیری`}`}
         presentation="modal"
+        scope="workspace"
         pending={acting}
         footer={
           <div className="flex justify-end gap-2">
@@ -656,6 +573,6 @@ export default function LogisticsLoadingsPage() {
           )}
         </div>
       </ErpSheet>
-    </ErpPage>
+    </LogisticsPage>
   );
 }

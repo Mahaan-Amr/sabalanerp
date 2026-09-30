@@ -40,6 +40,7 @@ import {
   FaTruck,
   FaBell,
   FaFingerprint,
+  FaTools,
 } from "react-icons/fa";
 import {
   useWorkspace,
@@ -48,7 +49,7 @@ import {
   WORKSPACE_PERMISSIONS,
 } from "@/contexts/WorkspaceContext";
 import { dashboardAPI, securityAPI } from "@/lib/api";
-import { ErpPressable } from '@/components/erp';
+import { ErpPressable, useErpPresentationScope } from '@/components/erp';
 import { DutyCountBadge } from '@/features/cross-workspace-duties/DutyCountBadge';
 import { useCrossWorkspaceDutyCount } from '@/features/cross-workspace-duties/useCrossWorkspaceDutyCount';
 import { projectHrNavigation } from '@/features/hr/hrAccessNavigation';
@@ -62,6 +63,7 @@ interface NavigationItem {
   separatorBefore?: boolean;
   children?: NavigationItem[];
   badgeCount?: number;
+  unavailable?: boolean;
 }
 
 interface WorkspaceNavigationProps {
@@ -92,6 +94,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
     useState(false);
   const [partnerRouteAccess, setPartnerRouteAccess] = useState<Record<string, boolean>>({});
   const pathname = usePathname();
+  const crmPresentation = useErpPresentationScope() === 'workspace';
   const dutyCount = useCrossWorkspaceDutyCount(currentWorkspace || null);
 
   const collapsed = !!collapsedProp;
@@ -330,6 +333,9 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         { name: 'Partner Cases', namePersian: 'مشاهده قراردادها',
           href: '/dashboard/sales/contracts', icon: FaFileContract,
           show: partnerRouteAccess['/dashboard/sales/contracts'] === true },
+        { name: 'Partner Drafts', namePersian: 'پیش‌نویس‌ها و پرونده‌های من',
+          href: '/dashboard/sales/partner-cases', icon: FaFileContract,
+          show: partnerRouteAccess['/dashboard/sales/partner-cases'] === true },
         { name: 'Partner Customers', namePersian: 'مشتریان من',
           href: '/dashboard/sales/partner-customers', icon: FaUsers,
           show: partnerRouteAccess['/dashboard/sales/partner-customers'] === true },
@@ -504,6 +510,20 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show: true,
           },
           {
+            name: "Potential Projects",
+            namePersian: "پروژه‌های احتمالی",
+            href: "/dashboard/crm/potential-projects",
+            icon: FaBuilding,
+            show: crmPresentation,
+          },
+          {
+            name: "Follow Ups",
+            namePersian: "پیگیری‌ها",
+            href: "/dashboard/crm/follow-ups",
+            icon: FaHistory,
+            show: crmPresentation,
+          },
+          {
             name: "Customers",
             namePersian: "مشتریان",
             href: "/dashboard/crm/customers",
@@ -602,6 +622,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             namePersian: "پایان دوره و گزارش قانونی",
             href: "/dashboard/accounting/period-end",
             icon: FaClipboardList,
+            show: true,
+          },
+          {
+            name: "جایگزینی حسابداری",
+            namePersian: "مهاجرت، تطبیق و بازیابی",
+            href: "/dashboard/accounting/replacement",
+            icon: FaHistory,
             show: true,
           },
           {
@@ -722,10 +749,12 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             icon: FaWarehouse,
             show: true,
           },
+          { name: 'Services', namePersian: 'خدمات', href: '/dashboard/inventory/services', icon: FaTools, show: true },
           {
             name: "Stock Movements",
             namePersian: "گردش موجودی",
             href: "/dashboard/inventory/movements",
+            unavailable: true,
             icon: FaClipboardList,
             show: true,
           },
@@ -733,6 +762,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             name: "Reports",
             namePersian: "گزارش‌های انبار",
             href: "/dashboard/inventory/reports",
+            unavailable: true,
             icon: FaChartLine,
             show: true,
           },
@@ -928,6 +958,10 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
                 ) : (
                   <FaChevronRight className="h-4 w-4 shrink-0" />
                 ))}
+            </ErpPressable>
+          ) : item.unavailable ? (
+            <ErpPressable disabled aria-label={`${item.namePersian}؛ به‌زودی`} variant="ghost" className="sds-dashboard-nav-control flex min-w-0 flex-1 items-center gap-3">
+              <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span><span className={labelClassName}>{item.namePersian}</span>{!collapsed && <span className="shrink-0 text-xs">به‌زودی</span>}
             </ErpPressable>
           ) : (
             <Link

@@ -10,8 +10,16 @@ import { PartnerAccountPanel } from '../account/PartnerAccountPanel';
 import { PartnerReportContent, partnerReportPrimaryAction, partnerReportReceivable, type PartnerReportPresentation } from '../reports/PartnerReportView';
 import { RetailCollectionsPanel, type RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import { PartnerCorrectionPanel } from '../cases/PartnerCorrectionPanel';
+import { PartnerCaseSupplementary } from '../cases/PartnerCaseWorkspace';
 import ConfirmationContractView from '../../../app/contracts/confirm/ConfirmationContractView';
 import { partnerWizardCompactStatus } from '../../contract-creation/partner/PartnerContractWizard';
+
+test('Case details keep correction labels in Persian and do not contain the global account', () => {
+  const fixture = createPartnerFixtures();
+  const html = renderToStaticMarkup(<PartnerCaseSupplementary view={fixture.partner} correction={null} />);
+  assert.match(html, /اصلاح قیمت فروش و پرداخت مشتری/);
+  assert.doesNotMatch(html, /retail|حساب من با سبلان/);
+});
 
 test('Partner case detail separates retail, wholesale and margin without exposing the internal record', () => {
   const fixture = createPartnerFixtures();
@@ -22,9 +30,11 @@ test('Partner case detail separates retail, wholesale and margin without exposin
   assert.match(html, /خرید از سبلان/);
   assert.match(html, /سود بازفروش/);
   assert.match(html, /پیش‌نمایش/);
-  assert.match(html, /تأیید و نهایی‌سازی قرارداد/);
   assert.match(html, /صدور PDF نهایی/);
-  assert.match(html, /ارسال پیامک تأیید/);
+  const toolbar = partnerCasePageActions({ canPreview: true, canIssue: true, canFinalize: true,
+    canSendConfirmation: true, canRequestCorrection: true, canCancel: true, canRequestVoid: false });
+  assert.ok(toolbar.some(action => action.label === 'پذیرش قیمت‌ها و نهایی‌سازی'));
+  assert.ok(toolbar.some(action => action.label === 'ارسال پیامک تأیید'));
   assert.doesNotMatch(html, /FIXTURE-INTERNAL-313|شماره سند داخلی|approvalEvidenceId|commercialAccountId/);
 });
 
@@ -34,7 +44,7 @@ test('an editable numbered Case exposes one safe continuation action and wire me
     canContinue: true, canPreview: false, canIssue: false, canFinalize: false,
     canSendConfirmation: false, canRequestCorrection: false, canCancel: true, canRequestVoid: false,
   };
-  assert.deepEqual(partnerCasePageActions(actions).map(action => action.label), ['ادامه تکمیل قرارداد']);
+  assert.deepEqual(partnerCasePageActions(actions).map(action => action.label), ['ویرایش', 'لغو پیش‌نویس']);
   const runtime = { cases: [{ view: fixture.partner, snapshotId: null,
     editRecovery: { recoveryId: 'recovery-editable-1', baseRevision: 0 },
     actions: { canContinue: true, canPreview: false, canIssue: false, canFinalize: false,
@@ -73,17 +83,18 @@ test('private retail collection keeps historical plans visible and explains inde
 
 test('account panel is read-only and contains only accounting-backed partner-safe facts', () => {
   const fixture = createPartnerFixtures();
-  const purchase = { owner: fixture.partner.owner, caseNumber: fixture.partner.caseNumber,
+  const purchase = { owner: fixture.partner.owner, caseNumber: fixture.partner.caseNumber, trackingNumber: 313,
     amount: { amount: '1600', currency: 'IRR' as const }, sabalanPaymentPlan: fixture.partner.sabalanPaymentPlan,
     received: { amount: '600', currency: 'IRR' as const }, balance: { amount: '1000', currency: 'IRR' as const },
     status: 'PARTIALLY_PAID' as const };
-  const tomanPurchase = { ...purchase, owner: { ...purchase.owner, revision: 2 }, caseNumber: 'CASE-IRT',
+  const tomanPurchase = { ...purchase, owner: { ...purchase.owner, revision: 2 }, caseNumber: 'CASE-IRT', trackingNumber: 314,
     amount: { amount: '200', currency: 'IRT' as const }, received: { amount: '50', currency: 'IRT' as const }, balance: { amount: '150', currency: 'IRT' as const } };
   const html = renderToStaticMarkup(<PartnerAccountPanel view={{ ...fixture.account, purchases: [purchase, tomanPurchase] }} />);
   assert.match(html, /حساب من با سبلان/);
   assert.match(html, /فقط‌خواندنی/);
-  assert.match(html, /FIXTURE-CASE-313/);
-  assert.match(html, /CASE-IRT/);
+  assert.match(html, /همکار-۰۰۳۱۳/);
+  assert.match(html, /همکار-۰۰۳۱۴/);
+  assert.doesNotMatch(html, /FIXTURE-CASE-313|CASE-IRT/);
   assert.match(html, /تومان/);
   assert.match(html, /برنامه پرداخت به سبلان/);
   assert.match(html, /سررسید 2026-08-28/);

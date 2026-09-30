@@ -1101,7 +1101,7 @@ export default function SecurityVehiclesPage() {
                 </label>
                 <label>
                   <span className={labelClass}>مبلغ تسویه بارنامه</span>
-                  <ErpInput
+                  <ErpInput numberFormat="money"
                     value={inboundForm.settlementSnapshot.amount}
                     onChange={(event) =>
                       setInboundForm((current: any) => ({

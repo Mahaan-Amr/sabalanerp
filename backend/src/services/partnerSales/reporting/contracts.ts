@@ -10,7 +10,7 @@ export type Period = { from: string; to: string; asOf: string };
 export type ReportPurpose = 'PARTNER' | 'MANAGEMENT' | 'ACCOUNTING' | 'FULFILLMENT';
 export type ReportChannel = 'LIST' | 'DETAIL' | 'SEARCH' | 'COUNT' | 'EXPORT';
 export type Currency = Foundation.Money['currency'];
-export type Root = { caseId: string; partnerSellerId: string; departmentId: string | null };
+export type Root = { caseId: string; partnerSellerId: string; departmentId: string | null; trackingNumber?: number };
 export type Purchase = Foundation.PartnerAccountView['purchases'][number];
 
 export class ReportingError extends Error {
@@ -77,12 +77,12 @@ export type Metrics = {
   retailSales?: string; retailCollected?: string; netComparableMargin?: string;
 };
 export type ReportChartTransaction = {
-  caseId: string; caseNumber: string; customerContractNumber: string; effectiveDate: string;
+  caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string; effectiveDate: string;
   kind: 'COMMITMENT' | 'CORRECTION' | 'VOID' | 'SABALAN_RECEIPT' | 'CUSTOMER_RECEIPT' | 'CUSTOMER_RECEIPT_REVERSAL';
   debtDelta: string; receivableDelta: string; receiptDelta: string;
 };
 export type ReportRow = {
-  caseId: string; revision: number; caseNumber: string; customerContractNumber: string;
+  caseId: string; revision: number; caseNumber: string; trackingNumber?: number; customerContractNumber: string;
   internalRecordNumber?: string; state: Foundation.CaseState;
   currency?: Currency; metrics?: Metrics;
   account?: Purchase | null;

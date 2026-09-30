@@ -30,3 +30,16 @@ test('Partner read snapshot does not retry unrelated raw-query failures', async 
   await assert.rejects(() => readPartnerSnapshot(database as never, async () => 'unused'), failure);
   assert.equal(attempts, 1);
 });
+
+test('multi-root workspace authority acquires the exclusive boundary before root reads', async () => {
+  const events: string[] = [];
+  const tx = { ...transactionClient, $queryRaw: async (sql: TemplateStringsArray) => {
+    events.push(sql.join('')); return [{ id: 'partner-operations' }];
+  } };
+  const database = { $transaction: async (work: (client: typeof tx) => Promise<string>) => work(tx) };
+  assert.equal(await readPartnerSnapshot(database as never, async () => {
+    events.push('read roots'); return 'authorized';
+  }, { multiRootAuthority: true }), 'authorized');
+  assert.match(events[0], /FOR UPDATE/);
+  assert.equal(events[1], 'read roots');
+});

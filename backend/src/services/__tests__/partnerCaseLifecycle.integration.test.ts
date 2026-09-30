@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -282,9 +282,12 @@ async function seedCase(tx: Prisma.TransactionClient, ids: Ids, tamperAccounting
     cohortId: ids.cohortId, actorId: ids.partnerId, eligibilityEvidence: { fixture: true } } });
   await tx.crmCustomer.create({ data: { id: ids.customerId, firstName: 'Customer', lastName: 'Lifecycle',
     ownerUserId: ids.partnerId, createdBy: ids.partnerId } });
-  await tx.partnerSaleCase.create({ data: { id: ids.caseId, caseNumber: partner.caseNumber, profileId: ids.profileId,
+  const [tracking] = await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('partner_case_tracking_number_seq') AS number`;
+  await tx.partnerSaleCase.create({ data: { id: ids.caseId, caseNumber: partner.caseNumber,
+    profileId: ids.profileId,
     customerId: ids.customerId, internalRecordId: ids.internalId, customerContractId: ids.contractId,
     headRevision: 1, integrityHash, pricingState: 'READY_TO_FINALIZE' } });
+  await tx.partnerCaseTrackingCode.create({ data: { caseId: ids.caseId, number: Number(tracking.number) } });
   await tx.partnerCaseRevision.create({ data: { caseId: ids.caseId, revision: 1, integrityHash, graphHash,
     graph: storedGraph, partySnapshots, wholesaleEnvelope, retailEnvelope, paymentEvidence, customerContent: revisionCustomerContent,
     pricingState: 'READY_TO_FINALIZE', internalProjection: { partner, accounting: storedAccounting, fulfillment }, customerProjection: customer,
@@ -398,6 +401,9 @@ test('finalization rechecks inquiry package expiry inside the locked transaction
   await tx.partnerInquiry.update({ where: { id: `${ids.caseId}-inquiry` },
     data: { pricingReadyAt: new Date(Date.now() - 48 * 60 * 60 * 1000 - 1_000),
       pricingExpiresAt: new Date(Date.now() - 1_000) } });
+  await tx.partnerInquiryApproval.update({ where: { id: `${ids.caseId}-approval` },
+    data: { approvedAt: new Date(Date.now() - 48 * 60 * 60 * 1000 - 1_000),
+      expiresAt: new Date(Date.now() - 1_000) } });
   await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
   const service = createPartnerCaseLifecycleService(dependencies(tx, ids));
   const blocked = await service.execute(await commitCommand(ids, owner, 'SIGNED', 'expired-inquiry', 'DRAFT'));
@@ -1577,4 +1583,62 @@ test('concurrent SIGNED and PRINTED writers on independent clients create one co
     await Promise.all([setup.$disconnect(), first.$disconnect(), second.$disconnect()]);
     await temporary.cleanup();
   }
+});
+
+test('Partner customer SMS uses the customer recipient, immutable public details, resend cooldown and OTP verification', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
+  const database = temporary.client();
+  const ids = idsFor(`partner-sms-${temporary.runId}`);
+  let providerFails = false;
+  const messages: Array<{ phoneNumber: string; code: string; customerName: string; contractNumber: string }> = [];
+  try {
+    await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+    await database.$transaction(async tx => {
+      const owner = await seedCase(tx, ids);
+      const lifecycle = createPartnerCaseLifecycleService(dependencies(tx, ids));
+      const committed = await lifecycle.execute(await commitCommand(ids, owner, 'SIGNED', 'sms-finalize', 'DRAFT'));
+      assert.equal(committed.ok, true, JSON.stringify(committed));
+    });
+    const hooks = createPrismaPartnerConfirmationHooks({ database, sms: {
+      sendContractConfirmationMessage: async message => { messages.push(message); return providerFails ? { success: false, error: 'test-provider-failure' } : { success: true, messageId: 12345 }; },
+    } });
+    const sent = await hooks.sendForConfirmation({ contractId: ids.contractId, requestedBy: ids.partnerId });
+    assert.equal(sent?.success, true, sent?.error);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].phoneNumber, createPartnerFixtures().customer.customer.phone);
+    assert.equal(messages[0].customerName, createPartnerFixtures().customer.customer.displayName);
+    assert.match(messages[0].code, /^\d{6}$/);
+    assert.ok(sent?.data?.publicLink);
+    const token = new URL(sent.data.publicLink).pathname.split('/').at(-1)!;
+    assert.equal(token.length, 64, 'public confirmation URL retains its complete token');
+    assert.equal((await database.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } })).partnerKind, 'PARTNER_CUSTOMER');
+    assert.deepEqual({ sessions: await database.contractPublicConfirmation.count(), snapshots: await database.partnerCustomerOutputSnapshot.count(), audit: await database.contractConfirmationAuditLog.count() }, { sessions: 1, snapshots: 1, audit: 2 }, 'confirmation evidence persists together');
+    const storedSession = await database.contractPublicConfirmation.findFirstOrThrow({ where: { contractId: ids.contractId } });
+    assert.equal(storedSession.tokenHash, createHash('sha256').update(token).digest('hex'), 'returned link resolves to the persisted session');
+    const view = await hooks.getPublicContractByToken(token);
+    assert.equal(view?.success, true, view?.error);
+    assert.equal(view?.data?.contract.products[0].retailUnitPrice, '1000');
+    assert.ok(!JSON.stringify(view).includes('wholesaleUnitPrice'));
+    const manual = await hooks.getPublicContractByManualLookup({ contractNumber: messages[0].contractNumber, phoneNumber: messages[0].phoneNumber });
+    assert.equal(manual?.data?.contract.outputHash, view?.data?.contract.outputHash);
+    assert.equal((await hooks.verifyPublicOtp({ token, code: '000000' }))?.success, false);
+    assert.equal((await hooks.resendFromPublicToken({ token }))?.success, false);
+    assert.equal(messages.length, 1, 'cooldown must prevent a second provider call');
+    await database.contractPublicConfirmation.updateMany({ where: { contractId: ids.contractId, status: 'PENDING' },
+      data: { lastSentAt: new Date(Date.now() - 120_000) } });
+    providerFails = true;
+    assert.equal((await hooks.resendFromPublicToken({ token }))?.success, false);
+    assert.equal(await database.contractConfirmationAuditLog.count({ where: { eventType: 'PARTNER_SMS_FAILED' } }), 1);
+    providerFails = false;
+    await database.contractPublicConfirmation.updateMany({ where: { contractId: ids.contractId, status: 'PENDING' },
+      data: { lastSentAt: new Date(Date.now() - 120_000) } });
+    assert.equal((await hooks.resendFromPublicToken({ token }))?.success, true);
+    assert.equal(messages.length, 3);
+    const resentView = await hooks.getPublicContractByToken(token);
+    assert.equal(resentView?.data?.contract.outputHash, view?.data?.contract.outputHash);
+    assert.equal(resentView?.data?.linkExpiresAt, view?.data?.linkExpiresAt);
+    const verified = await hooks.verifyPublicOtp({ token, code: messages[2].code });
+    assert.equal(verified?.success, true, verified?.error);
+    assert.equal((await hooks.getPublicContractByToken(token))?.data?.decision, 'APPROVED');
+  } finally { await database.$disconnect(); await temporary.cleanup(); }
 });

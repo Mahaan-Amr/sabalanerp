@@ -33,6 +33,7 @@ export type PartnerReceivable = {
   paymentPlan: PartnerFinancialPreparation['paymentPlan'];
 };
 export type PartnerAccountPurchase = {
+  trackingNumber?: number;
   source: PartnerAccountingSource;
   /** Accounting resolves the effective replacement chain in one read snapshot.
    * Received/balance include official receipt reversals and check movements; no

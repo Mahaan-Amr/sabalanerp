@@ -1,4 +1,4 @@
-import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
+import { partnerInputHash as canonicalHash } from '@sabalanerp/partner-sales-contracts';
 import { normalizeIdentifierDigits } from '@/lib/numberFormat';
 
 export type PartnerCustomerDraft = {

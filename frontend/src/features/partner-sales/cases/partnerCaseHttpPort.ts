@@ -1,4 +1,4 @@
-import { PartnerAccountViewSchema, PartnerCaseRuntimeResultSchema, canonicalHash, partnerError,
+import { PartnerAccountViewSchema, PartnerCaseRuntimeResultSchema, partnerInputHash as canonicalHash, partnerError,
   type PartnerCaseRuntimeRow, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
@@ -154,8 +154,8 @@ export async function finalizePartnerCase(view: PartnerCaseView, lossAccepted: b
   return response.data;
 }
 
-export async function openPartnerPdf(caseId: string, snapshotId: string, mode: 'PREVIEW' | 'FINAL' | 'DOWNLOAD_EXISTING') {
-  const response = await api.post(`/partner/cases/${encodeURIComponent(caseId)}/output`, { snapshotId, mode }, { responseType: 'blob' });
+export async function openPartnerPdf(caseId: string, snapshotId: string | undefined, mode: 'PREVIEW' | 'FINAL' | 'DOWNLOAD_EXISTING', expected?: PartnerCaseView['owner']) {
+  const response = await api.post(`/partner/cases/${encodeURIComponent(caseId)}/output`, { ...(snapshotId ? { snapshotId } : {}), ...(expected ? { expected } : {}), mode }, { responseType: 'blob' });
   await assertSuccessfulSalesDownload(response);
   const url = URL.createObjectURL(response.data as Blob);
   window.open(url, '_blank', 'noopener,noreferrer');

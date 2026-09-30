@@ -1,0 +1,59 @@
+import { writeFileSync } from 'node:fs';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { verifyLedgerAuditChain } from '../services/accountingLedgerPrismaRepository';
+
+const bookId = process.env.SEPIDAR_TARGET_BOOK_ID?.trim() ?? '';
+const snapshotId = process.env.SEPIDAR_SNAPSHOT_ID?.trim() ?? '';
+if (!bookId || !snapshotId) throw new Error('SEPIDAR_TARGET_BOOK_ID and SEPIDAR_SNAPSHOT_ID are required');
+type CountAndSums = { count: bigint; debit: Prisma.Decimal; credit: Prisma.Decimal };
+const main = async () => {
+  const db = new PrismaClient();
+  try {
+    const snapshot = await db.accountingSepidarSourceSnapshot.findUnique({ where: { id: snapshotId }, select: { bookId: true, status: true, expectedRecordCount: true } });
+    if (!snapshot || snapshot.bookId !== bookId || snapshot.status !== 'COMPLETE') throw new Error('Complete snapshot for target book required');
+    const results: Array<{ year: string; vouchers: number; lines: number; debitRials: string; creditRials: string }> = [];
+    for (const [code, sourceRef] of [['1404', 1], ['1405', 10]] as const) {
+      const fiscalYear = await db.accountingFiscalYear.findUniqueOrThrow({ where: { bookId_code: { bookId, code } } });
+      const [source, target, sourceVouchers, targetVouchers, outsidePeriods] = await Promise.all([
+        db.$queryRaw<CountAndSums[]>`
+          SELECT count(*)::bigint AS count, coalesce(sum((l.payload->>'Debit')::numeric),0) AS debit,
+            coalesce(sum((l.payload->>'Credit')::numeric),0) AS credit
+          FROM accounting_sepidar_source_records l
+          JOIN accounting_sepidar_source_records v ON v."snapshotId"=l."snapshotId" AND v."sourceTable"='ACC.Voucher'
+            AND v."sourceKey"=(l.payload->>'VoucherRef')
+          WHERE l."snapshotId"=${snapshotId} AND l."sourceTable"='ACC.VoucherItem' AND v."fiscalYearRef"=${sourceRef}`,
+        db.$queryRaw<CountAndSums[]>`
+          SELECT count(*)::bigint AS count, coalesce(sum(l."debitRials"),0) AS debit,
+            coalesce(sum(l."creditRials"),0) AS credit
+          FROM accounting_ledger_lines l JOIN accounting_ledger_vouchers v ON v.id=l."voucherId"
+          WHERE v."bookId"=${bookId} AND v."fiscalYearId"=${fiscalYear.id} AND v."sourceType"='SEPIDAR_ACC_VOUCHER'`,
+        db.accountingSepidarSourceRecord.count({ where: { snapshotId, sourceTable: 'ACC.Voucher', fiscalYearRef: sourceRef } }),
+        db.accountingLedgerVoucher.count({ where: { bookId, fiscalYearId: fiscalYear.id, sourceType: 'SEPIDAR_ACC_VOUCHER', status: { in: ['DRAFT', 'POSTED'] } } }),
+        db.$queryRaw<Array<{ count: bigint }>>`
+          SELECT count(*)::bigint AS count FROM accounting_ledger_vouchers v
+          JOIN accounting_posting_periods p ON p.id=v."periodId"
+          WHERE v."bookId"=${bookId} AND v."fiscalYearId"=${fiscalYear.id}
+            AND (v."documentDate"<p."startsAt" OR v."documentDate">p."endsAt")`,
+      ]);
+      if (!source[0] || !target[0] || sourceVouchers !== targetVouchers || source[0].count !== target[0].count
+        || !source[0].debit.eq(target[0].debit) || !source[0].credit.eq(target[0].credit)
+        || outsidePeriods[0]?.count !== 0n) throw new Error(`Source and target mismatch in ${code}`);
+      results.push({ year: code, vouchers: sourceVouchers, lines: Number(source[0].count), debitRials: source[0].debit.toString(), creditRials: source[0].credit.toString() });
+    }
+    const [archiveRows, sourceLinks, posted, audit] = await Promise.all([
+      db.accountingSepidarSourceRecord.count({ where: { snapshotId } }),
+      db.accountingSepidarTargetLink.count({ where: { bookId, sourceTable: 'ACC.Voucher', targetKind: 'LEDGER_DRAFT' } }),
+      db.accountingLedgerVoucher.count({ where: { bookId, sourceType: 'SEPIDAR_ACC_VOUCHER', status: 'POSTED' } }),
+      verifyLedgerAuditChain(db),
+    ]);
+    if (archiveRows !== snapshot.expectedRecordCount || sourceLinks !== results.reduce((sum, year) => sum + year.vouchers, 0) || !audit.valid) throw new Error('Archive, lineage, posting status, or audit chain mismatch');
+    const report = { verifiedAt: new Date().toISOString(), snapshotId, bookId, archiveRows, sourceLinks, posted,
+      ledgerAuditEntriesChecked: audit.checkedEntries, years: results,
+      status: posted === sourceLinks ? 'SOURCE_LEDGER_VOUCHERS_POSTED' : posted === 0 ? 'DRAFTS_RECONCILED_TO_SOURCE' : 'PARTIALLY_POSTED',
+      limitations: ['ریزگردش ۱۴۰۴ پیش از ۲۰۲۵-۱۲-۲۲ در پشتیبان موجود نیست.', 'قیمت‌گذاری ۱۱۸۰ حوالهٔ خروج و ۱۱۸ موجودی منفی ۱۴۰۵ حل نشده است.', 'ورود اسناد دفترکل به معنی ورود عملیاتی تمام زیرسیستم‌های سپیدار نیست.'] };
+    const output = process.env.SEPIDAR_VERIFICATION_OUTPUT;
+    if (output) writeFileSync(output, JSON.stringify(report, null, 2) + '\n', { encoding: 'utf8' });
+    console.log(JSON.stringify(report));
+  } finally { await db.$disconnect(); }
+};
+main().catch((error) => { console.error(error); process.exitCode = 1; });

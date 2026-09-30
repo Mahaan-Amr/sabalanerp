@@ -1,6 +1,7 @@
 import {
-  canonicalHash, CaseDraftIntentSchema, PartnerCaseViewSchema, PartnerCommandSchema,
+  partnerInputHash as canonicalHash, CaseDraftIntentSchema, PartnerCaseViewSchema, PartnerCommandSchema,
   PartnerErrorSchema, isPartnerCaseEditableState, type PartnerCaseView, type PartnerCommand, type PartnerCommandPort,
+  type PartnerErrorCode,
 } from '@sabalanerp/partner-sales-contracts';
 
 export type PartnerSubmitCommand = Extract<PartnerCommand, { type: 'CASE_SUBMIT' }>;
@@ -23,13 +24,18 @@ export interface PartnerSubmissionRecovery {
 export interface PartnerSubmissionState {
   phase: 'editing' | 'submitting' | 'uncertain' | 'created';
   message?: string;
+  errorCode?: PartnerErrorCode;
   case?: PartnerCaseView;
   cleanupPending?: boolean;
 }
 
 function revisionIntent(intent: PartnerDraftIntent, savedCase: PartnerCaseView): PartnerDraftIntent {
   const predecessor = savedCase.customerPaymentPlan;
-  return { ...intent, customerPaymentPlan: {
+  // The initial request is already attached to the numbered Case. A pricing
+  // acceptance revises that Case and must not submit the request again.
+  const { pricingRequest: _initialPricingRequest, ...revision } = intent;
+  void _initialPricingRequest;
+  return { ...revision, customerPaymentPlan: {
     ...intent.customerPaymentPlan,
     planId: `partner-customer-plan-${crypto.randomUUID()}`,
     version: predecessor.version + 1,
@@ -45,7 +51,7 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
   recovery: PartnerSubmissionRecovery;
   initialCase?: PartnerCaseView;
 }) {
-  let state: PartnerSubmissionState = recovery.pending() ? { phase: 'uncertain' }
+  let state: PartnerSubmissionState = recovery.pending() ? { phase: 'uncertain', ...(initialCase ? { case: initialCase } : {}) }
     : initialCase ? { phase: 'created', case: initialCase } : { phase: 'editing' };
   let flight: Promise<void> | null = null;
   let cleanupInitialSave = false;
@@ -54,7 +60,8 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
     state = next;
     listeners.forEach(listener => listener());
   };
-  const uncertain = () => publish({ phase: 'uncertain', message: 'نتیجه ثبت هنوز مشخص نیست. برای بررسی همان درخواست، دوباره تلاش کنید؛ اطلاعات شما حفظ شده است.' });
+  const uncertain = () => publish({ phase: 'uncertain', message: 'نتیجه ثبت هنوز مشخص نیست. برای بررسی همان درخواست، دوباره تلاش کنید؛ اطلاعات شما حفظ شده است.',
+    ...(state.case ? { case: state.case } : {}) });
 
   const finalize = async (view: PartnerCaseView, initialSave: boolean) => {
     // Committed truth must survive a failed browser cleanup or detail load.
@@ -71,7 +78,8 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
   };
 
   const execute = async (command: PartnerDraftCommand) => {
-    publish({ phase: 'submitting' });
+    const existingCase = state.case;
+    publish({ phase: 'submitting', ...(existingCase ? { case: existingCase } : {}) });
     try {
       const parsed = PartnerCommandSchema.parse(command);
       if ((parsed.type !== 'CASE_SUBMIT' && parsed.type !== 'CASE_DRAFT_REVISE') || parsed.idempotency.actorId !== actorId) {
@@ -87,7 +95,8 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
       if (!result.ok) {
         const error = PartnerErrorSchema.parse(result.error);
         await recovery.clearPending();
-        publish({ phase: 'editing', message: error.message });
+        publish({ phase: 'editing', message: error.message, errorCode: error.code,
+          ...(existingCase ? { case: existingCase } : {}) });
         return;
       }
       const view = PartnerCaseViewSchema.safeParse(result.value.case);
@@ -114,9 +123,10 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
     submit: (intent: PartnerDraftIntent) => run(async () => {
       if (recovery.pending()) { uncertain(); return; }
       const parsed = CaseDraftIntentSchema.safeParse(intent);
-      if (!parsed.success) { publish({ phase: 'editing', message: 'اطلاعات پرونده کامل نیست؛ محصول، مشتری، پرداخت و تحویل را بررسی کنید.' }); return; }
-      const savedCase = state.phase === 'created' ? state.case : undefined;
-      publish({ phase: 'submitting' });
+      if (!parsed.success) { publish({ phase: 'editing', message: 'اطلاعات پرونده کامل نیست؛ محصول، مشتری، پرداخت و تحویل را بررسی کنید.',
+        ...(state.case ? { case: state.case } : {}) }); return; }
+      const savedCase = state.case;
+      publish({ phase: 'submitting', ...(savedCase ? { case: savedCase } : {}) });
       try {
         const revising = Boolean(savedCase);
         if (savedCase && !isPartnerCaseEditableState(savedCase.state)) {
@@ -139,7 +149,8 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
         await execute(command);
       } catch {
         if (recovery.pending()) uncertain();
-        else publish({ phase: 'editing', message: 'ذخیره امن پیش‌نویس انجام نشد. اطلاعات حفظ شده است؛ اتصال و اختیار ویرایش را بررسی کنید.' });
+        else publish({ phase: 'editing', message: 'ذخیره امن پیش‌نویس انجام نشد. اطلاعات حفظ شده است؛ اتصال و اختیار ویرایش را بررسی کنید.',
+          ...(savedCase ? { case: savedCase } : {}) });
       }
     }),
     retry: () => run(async () => {
@@ -151,4 +162,14 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
       if (command) await execute(command);
     }),
   };
+}
+
+/** Leave the wizard only after the server has acknowledged the completed draft. */
+export async function saveCompletedPartnerDraft(submission: ReturnType<typeof createPartnerCaseSubmission>,
+  intent: PartnerDraftIntent, onSaved: (caseId: string) => Promise<void> | void): Promise<boolean> {
+  await submission.submit(intent);
+  const saved = submission.getSnapshot();
+  if (saved.phase !== 'created' || !saved.case) return false;
+  await onSaved(saved.case.owner.caseId);
+  return true;
 }

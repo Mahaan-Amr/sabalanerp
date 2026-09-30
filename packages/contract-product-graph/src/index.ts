@@ -1,4 +1,5 @@
 export { calculateLongitudinalTechnical } from './longitudinalTechnical';
+export * from './contractMonetaryRounding';
 export type { LongitudinalTechnicalInput, LongitudinalTechnicalResult, LongitudinalTechnicalCalculation } from './longitudinalTechnical';
 export type { TechnicalPackingPlan } from './technicalPacking';
 

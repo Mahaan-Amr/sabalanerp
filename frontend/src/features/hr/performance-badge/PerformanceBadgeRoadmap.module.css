@@ -1,0 +1,11 @@
+@media (max-width: 1023px) {
+  .mobileStage:global(.sds-action) {
+    background: var(--sds-surface-panel);
+    border-color: var(--sds-border-strong);
+  }
+
+  .mobileCurrent:global(.sds-action) {
+    background: var(--sds-surface-raised);
+    border-color: var(--sds-accent);
+  }
+}

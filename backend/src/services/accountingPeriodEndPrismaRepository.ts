@@ -263,6 +263,14 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
   actorId: string;
   policyVersions?: Record<string, string>;
 }) => {
+  const fiscalYear = await database.accountingFiscalYear.findUnique({ where: { id: input.request.fiscalYearId } });
+  if (!fiscalYear || fiscalYear.bookId !== input.request.bookId || input.request.from < fiscalYear.startsAt || input.request.to > fiscalYear.endsAt || input.request.from > input.request.to) throw new Error('سال مالی و بازه گزارش باید متعلق به همان دفتر و یک سال مالی باشند.');
+  if (Boolean(input.request.comparativeFrom) !== Boolean(input.request.comparativeTo) || (input.request.comparativeFrom && input.request.comparativeTo && input.request.comparativeFrom > input.request.comparativeTo)) throw new Error('بازه مقایسه‌ای گزارش معتبر نیست.');
+  const comparativeYears = input.request.comparativeFrom && input.request.comparativeTo ? await database.accountingFiscalYear.findMany({ where: {
+    bookId: input.request.bookId, startsAt: { lte: input.request.comparativeTo }, endsAt: { gte: input.request.comparativeFrom },
+  } }) : [];
+  if (comparativeYears.length > 1 || (comparativeYears[0] && (comparativeYears[0].startsAt > input.request.comparativeFrom! || comparativeYears[0].endsAt < input.request.comparativeTo!))) throw new Error('بازه مقایسه‌ای باید کامل در یک سال مالی همان دفتر باشد.');
+  const comparativeYearId = comparativeYears[0]?.id;
   const mapping = input.request.mappingVersionId ? await database.accountingFinancialStatementMapping.findUnique({
     where: { id: input.request.mappingVersionId },
     include: { rows: true },
@@ -288,14 +296,14 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
     where: {
       voucher: {
         bookId: input.request.bookId,
-        fiscalYearId: input.request.fiscalYearId,
+        fiscalYearId: { in: [...new Set([input.request.fiscalYearId, ...(comparativeYearId ? [comparativeYearId] : [])])] },
         status: { in: ['POSTED', 'REVERSED'] },
         documentDate: { lte: input.request.comparativeTo && input.request.comparativeTo > input.request.to ? input.request.comparativeTo : input.request.to },
         postedAt: { lte: input.request.cutoffAt },
       },
     },
     include: {
-      voucher: { select: { id: true, statutoryNumber: true, status: true, documentDate: true, postedAt: true } },
+      voucher: { select: { id: true, fiscalYearId: true, statutoryNumber: true, status: true, documentDate: true, postedAt: true } },
       account: { include: { parent: { include: { parent: true } } } },
       party: { select: { displayName: true } },
       financialAccount: { select: { titlePersian: true } },
@@ -314,13 +322,14 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
     const detail = [line.party?.displayName, line.financialAccount?.titlePersian, ...details.map((item) => item.title)].filter(Boolean).join(' · ') || 'بدون تفصیل';
     return {
       id: line.id,
+      fiscalYearId: line.voucher.fiscalYearId,
       voucherId: line.voucher.id,
       voucherNumber: line.voucher.statutoryNumber,
       status: line.voucher.status,
       accountId: line.accountId,
       accountCode: line.account.code,
       accountTitlePersian: line.account.titlePersian,
-      accountPath: { group: group.titlePersian, general: general.titlePersian, subsidiary: line.account.titlePersian, detailIdentity, detail },
+      accountPath: { group: group.titlePersian, groupCode: group.code, generalCode: general.code, general: general.titlePersian, subsidiary: line.account.titlePersian, detailIdentity, detail },
       debitRials: BigInt(line.debitRials.toFixed(0)),
       creditRials: BigInt(line.creditRials.toFixed(0)),
       documentDate: line.voucher.documentDate,
@@ -341,7 +350,7 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
         cashFlowClass: row.cashFlowClass as 'OPERATING' | 'INVESTING' | 'FINANCING' | 'INTERNAL_TRANSFER' | undefined,
       })),
     },
-    lines: reportLines,
+    lines: reportLines.filter((line) => line.fiscalYearId === input.request.fiscalYearId),
   });
   if (input.request.reportKind === 'CASH_FLOW' && input.request.cashFlowMethod === 'INDIRECT' && dataset.rows.length === 0) {
     throw new Error('نگاشت مستقل روش غیرمستقیم جریان وجوه نقد ثبت نشده است.');
@@ -356,10 +365,10 @@ export const createOfficialAccountingSnapshot = async (database: Database, input
         sectionCode: row.sectionCode, signMultiplier: row.signMultiplier,
         cashFlowClass: row.cashFlowClass as 'OPERATING' | 'INVESTING' | 'FINANCING' | 'INTERNAL_TRANSFER' | undefined,
       })) },
-      lines: reportLines,
+      lines: reportLines.filter((line) => line.fiscalYearId === comparativeYearId),
     });
-    const comparison = { from: input.request.comparativeFrom, to: input.request.comparativeTo, rows: comparative.rows, integrityHash: comparative.integrityHash };
-    finalDataset = { ...dataset, comparative: comparison, integrityHash: hashAccountingEvidence({ current: dataset.integrityHash, comparative: comparison }) };
+    const comparison = { from: input.request.comparativeFrom, to: input.request.comparativeTo, rows: comparative.rows, sourceLineIds: comparative.sourceLineIds, integrityHash: comparative.integrityHash };
+    finalDataset = { ...dataset, sourceLineIds: [...new Set([...dataset.sourceLineIds, ...comparative.sourceLineIds])], comparative: comparison, integrityHash: hashAccountingEvidence({ current: dataset.integrityHash, comparative: comparison }) };
   }
   let statutoryValidation: Record<string, unknown> | null = null;
   if (statutoryFormat) {

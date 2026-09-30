@@ -135,7 +135,8 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
             quantity: measure.quantity, unit: measure.unit, configurationChange });
         }
         const updatedAt = recovery && technicalDraftContent(recovery.draft) === technicalDraftContent(command.draft) ? recovery.updatedAt : now.getTime();
-        const pricingSubjects = identities.map(identity => ({ configurationRef: { recoveryId: session.draftId,
+        const paidChildren = new Set((command.draft.dependents ?? []).flatMap(row => row.kind === 'remainder' ? [row.productRowId] : []));
+        const pricingSubjects = identities.filter(identity => !paidChildren.has(identity.productRowId)).map(identity => ({ configurationRef: { recoveryId: session.draftId,
           recoveryRevision: savedRevision, productRowId: identity.productRowId },
           role: graph.rows.some(row => row.productRowId === identity.productRowId) ? 'PRIMARY' as const : 'ADDITIONAL_MATERIAL' as const }));
         const view = PartnerTechnicalSavedViewSchema.safeParse({ schemaVersion: 1, recoveryId: session.draftId,

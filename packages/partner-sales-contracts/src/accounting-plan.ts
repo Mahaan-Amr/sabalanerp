@@ -17,6 +17,7 @@ export const SabalanPaymentPlanSetSchema = z.object({
 export const SabalanPaymentPlanCandidateSchema = z.object({
   expected: RevisionRefSchema,
   caseNumber: IdSchema,
+  trackingNumber: z.number().int().positive().safe().optional(),
   internalRecordNumber: IdSchema,
   partnerDisplayName: z.string().trim().min(1).max(4000),
   payable: z.object({ amount: z.string(), currency: z.enum(['IRR', 'IRT']) }).strict(),

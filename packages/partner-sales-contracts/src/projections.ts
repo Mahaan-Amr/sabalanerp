@@ -29,9 +29,14 @@ export const CustomerOutputSnapshotSchema = z.object({
 
 export const PartnerCaseViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('PARTNER_CASE'), owner: RevisionRefSchema,
-  caseNumber: IdSchema, customerContractNumber: IdSchema.optional(), state: CaseStateSchema,
+  caseNumber: IdSchema, trackingNumber: z.number().int().positive().optional(),
+  customerContractNumber: IdSchema.optional(), state: CaseStateSchema,
   pricingState: PartnerPricingStateSchema.default('READY_TO_FINALIZE'),
+  preparationCompleted: z.boolean().optional(),
   customerConfirmationState: PartnerCustomerConfirmationStateSchema.default('NOT_SENT'),
+  catalogLayerRates: z.array(z.object({ parentProductRowId: IdSchema, layerTitle: TextSchema,
+    layerUnit: z.enum(['set', 'physicalPiece', 'meter', 'squareMeter']),
+    rateToman: DecimalSchema }).strict()).optional(),
   products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema.optional(), retailUnitPrice: DecimalSchema }).strict()),
   retailTotals: TotalsSchema, sabalanTotals: TotalsSchema.optional(), resaleDifference: SignedDecimalSchema.optional(),
   customerPaymentPlan: CustomerPaymentPlanSchema, sabalanPaymentPlan: PaymentPlanSchema.optional(), deliveries: z.array(DeliverySchema),
@@ -55,7 +60,8 @@ export const FulfillmentViewSchema = z.object({
 }).strict();
 export const PartnerAccountViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('PARTNER_ACCOUNT'), partnerSellerId: IdSchema,
-  purchases: z.array(z.object({ owner: RevisionRefSchema, caseNumber: IdSchema, amount: MoneySchema,
+  purchases: z.array(z.object({ owner: RevisionRefSchema, caseNumber: IdSchema,
+    trackingNumber: z.number().int().positive().optional(), amount: MoneySchema,
     sabalanPaymentPlan: PaymentPlanSchema, received: MoneySchema, balance: MoneySchema,
     status: z.enum(['AWAITING_REVIEW', 'PAYABLE', 'PARTIALLY_PAID', 'SETTLED', 'VOIDED']),
   }).strict()),

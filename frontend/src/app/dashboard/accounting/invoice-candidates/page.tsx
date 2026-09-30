@@ -1,9 +1,11 @@
 'use client';
+import { ErpPersianDateField } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaCheckCircle, FaExclamationTriangle, FaEye, FaFileInvoice, FaPlus, FaSave, FaSync, FaTrashAlt } from 'react-icons/fa';
-import { ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpListPage, ErpPagination, ErpRialInput, ErpSelect, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
+import { ErpButton, ErpCard, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpListPage, ErpPagination, ErpRialInput, ErpSearchableSelect, ErpSheet, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import PersianCalendar from '@/lib/persian-calendar';
 import { emptyAccountingPagination, FinancialInvoiceApprovalForm, type FinancialInvoiceApprovalPayload,
   readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
@@ -276,7 +278,7 @@ export default function AccountingInvoiceCandidatesPage() {
     >
       {planCandidates.length > 0 && <div className="space-y-3">
         {planCandidates.map(candidate => <ErpCard key={candidate.expected.caseId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="font-semibold">{candidate.caseNumber} · {candidate.partnerDisplayName}</p>
+          <div><p className="font-semibold">{partnerTrackingCode(candidate.caseNumber, candidate.trackingNumber)} · {candidate.partnerDisplayName}</p>
             <p className="sds-text-muted text-sm">{money(candidate.payable.amount, candidate.payable.currency)}</p></div>
           <ErpButton label="ثبت برنامه پرداخت به سبلان" icon={FaPlus} onClick={() => openPlan(candidate)} />
         </ErpCard>)}
@@ -296,17 +298,17 @@ export default function AccountingInvoiceCandidatesPage() {
             (item.method === 'CHECK' && (!item.checkNumber?.trim() || !item.checkBank?.trim())))} onClick={() => void savePlan()} />}>
         <div className="space-y-4">
           {actionError && <ErpInlineState kind="error" title={actionError} />}
-          <ErpField label="تاریخ شروع" required><ErpInput type="date" value={planEffectiveDate} onChange={event => setPlanEffectiveDate(event.target.value)} /></ErpField>
+          <ErpField label="تاریخ شروع" required><ErpPersianDateField valueFormat="iso-date" value={planEffectiveDate} onChange={(value) => setPlanEffectiveDate(value)} /></ErpField>
           {planInstallments.map((item, index) => <ErpCard key={item.id} className="space-y-3 p-3">
             <div className="grid gap-3 sm:grid-cols-3">
-              <ErpField label={`سررسید ${(index + 1).toLocaleString('fa-IR')}`} required><ErpInput type="date" value={item.dueDate}
-                onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, dueDate: event.target.value } : row))} /></ErpField>
+              <ErpField label={`سررسید ${(index + 1).toLocaleString('fa-IR')}`} required><ErpPersianDateField valueFormat="iso-date" value={item.dueDate}
+                onChange={(value) => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, dueDate: value } : row))} /></ErpField>
               <ErpField label="مبلغ" required><ErpRialInput value={item.amount}
                 onValueChange={amount => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, amount } : row))} /></ErpField>
-              <ErpField label="روش"><ErpSelect value={item.method} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id
+              <ErpField label="روش"><ErpSearchableSelect value={item.method} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id
                 ? { ...row, method: event.target.value as typeof item.method } : row))}>
                 <option value="BANK_TRANSFER">واریز بانکی</option><option value="CASH">نقدی</option><option value="CHECK">چک</option>
-              </ErpSelect></ErpField>
+              </ErpSearchableSelect></ErpField>
             </div>
             {item.method === 'CHECK' && <div className="grid gap-3 sm:grid-cols-2">
               <ErpField label="شماره چک" required><ErpInput value={item.checkNumber ?? ''} onChange={event => setPlanInstallments(rows => rows.map(row => row.id === item.id ? { ...row, checkNumber: event.target.value } : row))} /></ErpField>

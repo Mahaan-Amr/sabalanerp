@@ -117,6 +117,9 @@ export const validatePayment = (
   existingContract = false
 ): { isValid: boolean; errors: string[] } => {
   const errors: string[] = [];
+  if (toFiniteNumber(totalContractAmount) === 0 && (!payment.payments || payment.payments.length === 0)) {
+    return { isValid: true, errors };
+  }
   
   if (!payment.payments || payment.payments.length === 0) {
     errors.push('حداقل یک روش پرداخت اضافه کنید.');
@@ -275,7 +278,8 @@ export const validateWizardStep = (
       break;
       
     case 6: // Payment Method
-      const contractTotal = toFiniteNumber(wizardData.payment.totalContractAmount) ||
+      const contractTotal = wizardData.payment.totalContractAmount != null
+        ? toFiniteNumber(wizardData.payment.totalContractAmount) :
         sumNumericValues(wizardData.products, (product) => product.totalPrice) +
         sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
       const paymentValidation = validatePayment(wizardData.payment, contractTotal);

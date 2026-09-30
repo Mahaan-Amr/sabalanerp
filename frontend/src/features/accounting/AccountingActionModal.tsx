@@ -3,6 +3,7 @@ import { ErpField, ErpInlineState, ErpInput, ErpSheet, ErpTextarea } from '@/com
 import { useEffect, useMemo, useState } from 'react';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import PersianCalendarComponent from '@/components/PersianCalendar';
+import PersianTimePicker from '@/components/PersianTimePicker';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendar from '@/lib/persian-calendar';
 import { ErpButton } from '@/components/erp';
@@ -18,7 +19,7 @@ export type AccountingActionField = (
   | {
       id: string;
       label: string;
-      type: 'text' | 'textarea' | 'date' | 'number';
+      type: 'text' | 'textarea' | 'date' | 'time' | 'number';
       required?: boolean;
       placeholder?: string;
       defaultValue?: string | number;
@@ -152,6 +153,16 @@ export default function AccountingActionModal({
                     value={String(value)}
                     onChange={(next) => setValue(field.id, next)}
                     placeholder={field.placeholder || field.label}
+                  />
+                ) : field.type === 'time' ? (
+                  <PersianTimePicker
+                    value={String(value)}
+                    onChange={(next) => setValue(field.id, next)}
+                    ariaLabel={field.label}
+                    placeholder="انتخاب ساعت"
+                    precision="second"
+                    presentation="inline"
+                    disabled={busy}
                   />
                 ) : field.type === 'number' ? (
                   <FormattedNumberInput

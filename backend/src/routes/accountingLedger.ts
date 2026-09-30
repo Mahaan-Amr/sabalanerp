@@ -8,6 +8,7 @@ import { createAccountingLedgerAdministration } from '../services/accountingLedg
 import { AccountingLedgerError, accountingAccessProfileFromPermission, createAccountingLedgerApplication, type AccountingAccessProfile } from '../services/accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository, listLedgerVouchers, listPostedJournal, listPostedTrialBalance, readLedgerVoucherEvidence, verifyLedgerAuditChain } from '../services/accountingLedgerPrismaRepository';
 import { AccountingCustomerTreasuryError } from '../services/accountingCustomerTreasury';
+import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../services/accountingBankFileImport';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import {
   allocateCustomerReceiptPrisma,
@@ -223,7 +224,7 @@ router.get('/treasury/overview', ...viewAccess, run(async (req) => {
   const feature = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
     workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_TREASURY_MANAGE,
     requiredPermission: FEATURE_PERMISSIONS.EDIT });
-  return { ...await listTreasuryOverviewPrisma(prisma),
+  return { ...await listTreasuryOverviewPrisma(prisma, { bankLinePage: Number(req.query.bankLinePage ?? 1) }),
     capabilities: { canManage: feature.allowed && ['edit', 'admin'].includes(req.workspacePermission || ''),
       canConfigure: feature.allowed && req.workspacePermission === WORKSPACE_PERMISSIONS.ADMIN } };
 }));
@@ -261,6 +262,19 @@ router.post('/treasury/bank-lines/import', ...treasuryCommandAccess, run((req) =
   ...req.body, mappingVersion: Number(req.body.mappingVersion),
   bookedAt: req.body.adapterType === 'MANUAL' ? validDate(req.body.bookedAt, 'تاریخ ردیف بانکی') : new Date(0),
   amountRials: req.body.adapterType === 'MANUAL' ? wholeRials(req.body.amountRials) : 0n,
+})));
+router.post('/treasury/bank-lines/import-file', ...treasuryCommandAccess, run((req) => importBankStatementFilePrisma(prisma, {
+  financialAccountId: String(req.body.financialAccountId || ''),
+  adapterType: req.body.adapterType,
+  mappingVersion: Number(req.body.mappingVersion),
+  fileBase64: String(req.body.fileBase64 || ''),
+  actorId: req.user!.id,
+  actorProfile: actorOf(req).profile,
+})));
+router.post('/treasury/bank-file-exceptions/:id/resolve', ...treasuryCommandAccess, run((req) => resolveBankFileExceptionPrisma(prisma, {
+  exceptionId: req.params.id, correctedRunId: String(req.body.correctedRunId || ''),
+  correctedRowNumber: Number(req.body.correctedRowNumber), reason: String(req.body.reason || ''), actorId: req.user!.id,
+  actorProfile: actorOf(req).profile, attestUnlinkedCorrection: req.body.attestUnlinkedCorrection === true,
 })));
 router.post('/treasury/bank-mappings', ...managerAccess, run((req) => createBankImportMappingPrisma(prisma, {
   financialAccountId: String(req.body.financialAccountId || ''), adapterType: req.body.adapterType,

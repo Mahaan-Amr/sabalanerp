@@ -163,6 +163,11 @@
   --sds-neu-shadow-inset: inset 2px 2px 5px rgb(0 0 0 / 30%), inset -2px -2px 5px rgb(255 255 255 / 3%);
 }
 
+/* Scoped workspace presentation keeps small supporting text readable. */
+[data-erp-presentation="workspace"] {
+  --sds-text-muted: var(--sds-text-secondary);
+}
+
 .sds-neumorphic-card,
 .sds-neumorphic-bottom-nav {
   border: 1px solid var(--sds-border-subtle);
@@ -618,4 +623,28 @@
   .sds-neumorphic-interactive:hover {
     transform: none;
   }
+}
+
+/* Dialogs use the existing navy workspace palette, with quiet boundaries. */
+[data-theme="dark"] [role=dialog],
+[data-theme="dark"][role=dialog],
+[data-theme="dark"] [role=dialog] [data-erp-overlay-root] {
+  --sds-surface-canvas: #101923;
+  --sds-surface-panel: #15212c;
+  --sds-surface-subtle: #111d27;
+  --sds-surface-raised: #182631;
+  --sds-border-subtle: rgb(255 255 255 / 5%);
+  --sds-border-default: rgb(255 255 255 / 8%);
+  --sds-border-strong: rgb(255 255 255 / 13%);
+  --sds-accent-soft: #203b47;
+  --sds-accent-on-soft: #b2dedc;
+}
+
+/* Keep unit choices readable without adding frames to every control. */
+[role=dialog] .sds-unit-switch { gap: 0.25rem; }
+[role=dialog] .sds-unit-switch [role=radio] { min-width: 3rem; font-size: 0.875rem; }
+[data-theme="dark"] [role=dialog] [role=radio][aria-checked=true] {
+  border-color: transparent;
+  background: var(--sds-accent-soft);
+  color: var(--sds-accent-on-soft);
 }

@@ -25,7 +25,8 @@ export async function resolveApprovalForUse(tx: Prisma.TransactionClient, input:
     } });
   if (!row?.approval || row.inquiry.profile.userId !== input.partnerSellerId ||
       (input.caseId !== undefined && (row.inquiry.caseId !== input.caseId ||
-        row.inquiry.caseRevision !== input.pricingCaseRevision))) {
+        row.inquiry.caseRevision === null || input.pricingCaseRevision === undefined ||
+        row.inquiry.caseRevision > input.pricingCaseRevision))) {
     return { ok: false, error: partnerError('NOT_FOUND') };
   }
   if (row.revision !== input.binding.revision) return { ok: false, error: partnerError('ROW_STALE') };
@@ -168,4 +169,11 @@ export async function bindFrozenMaterialApprovalUsage(tx: Prisma.TransactionClie
     caseRevision: input.caseRevision, pricingSubjectId: input.pricingSubjectId, approvalId: approval.data.approvalId,
     approvalSnapshot: approval.data as Prisma.InputJsonValue, evidenceHash } });
   return { ok: true, value: { usageId, approval: approval.data } };
+}
+
+/** Candidate selection runs after owner, Case and configuration checks. */
+export function canRetainCasePricingApproval(pricingRevision: number | null, headRevision: number): boolean {
+  // Partial responses have no Case usage until the entire price package is accepted.
+  // An unrelated correction must not discard their still-valid immutable evidence.
+  return pricingRevision !== null && pricingRevision > 0 && pricingRevision <= headRevision;
 }

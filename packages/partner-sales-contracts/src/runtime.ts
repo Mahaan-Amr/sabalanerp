@@ -19,6 +19,9 @@ export const PartnerCaseRuntimeActionsSchema = z.object({
 
 export const PartnerCaseRuntimeRowSchema = z.object({
   view: PartnerCaseViewSchema,
+  pricingResponseState: z.enum(['READY', 'PARTIAL', 'WAITING', 'REJECTED', 'EXPIRED']).optional(),
+  accountingCorrectionRequests: z.array(z.object({ id: IdSchema, reason: z.string().min(1),
+    createdAt: InstantSchema }).strict()).optional(),
   customerOutput: CustomerContractOutputSchema.optional(),
   history: z.array(z.object({ sequence: z.number().int().positive(), type: z.string().min(1),
     recordedAt: InstantSchema }).strict()).optional(),
@@ -33,8 +36,9 @@ export const PartnerCaseRuntimeResultSchema = z.object({
 
 export const PartnerCustomerOutputRequestSchema = z.object({
   mode: z.enum(['PREVIEW', 'FINAL', 'DOWNLOAD_EXISTING']),
-  snapshotId: IdSchema,
-}).strict();
+  snapshotId: IdSchema.optional(),
+  expected: RevisionRefSchema.optional(),
+}).strict().refine(value => Boolean(value.snapshotId || value.expected), { message: 'Snapshot or expected Case revision required' });
 
 export const PartnerCaseFinalizeRequestSchema = z.object({
   operationId: IdSchema,
@@ -57,9 +61,9 @@ export const PartnerCreationContextSchema = z.discriminatedUnion('kind', [
     profileId: IdSchema, writable: z.boolean(), blockedCode: z.string().optional(),
     sabalanTermsVersionId: IdSchema.optional(), latestInquiryId: IdSchema.optional(),
     inquiryIds: z.array(IdSchema).max(100),
-    recoverableDraft: z.object({ recoveryId: IdSchema, caseId: IdSchema.optional(), baseRevision: z.number().int().nonnegative().safe(),
+    recoverableDraft: z.object({ recoveryId: IdSchema, caseId: IdSchema.optional(), trackingNumber: z.number().int().positive().safe().optional(), baseRevision: z.number().int().nonnegative().safe(),
       updatedAt: InstantSchema, title: z.string().trim().min(1).max(200).optional() }).strict().optional(),
-    recoverableDrafts: z.array(z.object({ recoveryId: IdSchema, caseId: IdSchema.optional(), baseRevision: z.number().int().nonnegative().safe(),
+    recoverableDrafts: z.array(z.object({ recoveryId: IdSchema, caseId: IdSchema.optional(), trackingNumber: z.number().int().positive().safe().optional(), baseRevision: z.number().int().nonnegative().safe(),
       updatedAt: InstantSchema, title: z.string().trim().min(1).max(200).optional() }).strict()).max(50).optional(),
     customers: z.array(z.object({ id: IdSchema, displayName: z.string().min(1).max(240),
       address: z.string().min(1).max(2000), phone: z.string().min(1).max(30).optional() }).strict()),

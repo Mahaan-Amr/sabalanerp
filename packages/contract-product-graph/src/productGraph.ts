@@ -15,6 +15,7 @@ import {
   parseProductGraphCommand
 } from './productGraphSerialization';
 import { calculatePricing, type PackingPlan } from './packingPricing';
+import { PRECISE_PREPARED_GRAPH_PRICING_POLICY, PRECISE_PREPARED_MATERIAL_POLICY } from './contractMonetaryRounding';
 import {
   calculateLongitudinalProduct,
   parseLongitudinalProductInput,
@@ -301,7 +302,8 @@ const cloneCommercialFacts = (facts: CanonicalCommercialFacts): CanonicalCommerc
 
 const calculateAuthoritativeCommercialFacts = (
   facts: CanonicalCommercialFacts,
-  policy: CalculationPolicySnapshot
+  policy: CalculationPolicySnapshot,
+  productType: CanonicalProductType
 ): CanonicalCommercialFacts => {
   const {
     baseAmountToman: _clientBaseAmount,
@@ -316,7 +318,8 @@ const calculateAuthoritativeCommercialFacts = (
     return cloneCommercialFacts(sellerFacts);
   }
   const pricing = calculatePricing({
-    policyVersion: policy.pricing,
+    policyVersion: productType === 'prepared' && policy.pricing === PRECISE_PREPARED_GRAPH_PRICING_POLICY
+      ? PRECISE_PREPARED_MATERIAL_POLICY : policy.pricing,
     roundingPolicyVersion: policy.rounding,
     lines: [{
       lineId: 'base-material',
@@ -1495,7 +1498,8 @@ export const executeProductGraphCommand = (
       ...nextRow,
       commercial: calculateAuthoritativeCommercialFacts(
         nextRow.commercial,
-        graph.calculationPolicy
+        graph.calculationPolicy,
+        nextRow.productType
       )
     };
   }

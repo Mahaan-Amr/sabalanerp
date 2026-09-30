@@ -1,4 +1,5 @@
-﻿import axios from 'axios';
+﻿import { normalizePartnerInput } from '@sabalanerp/partner-sales-contracts';
+import axios from 'axios';
 
 import type { InternalAxiosRequestConfig } from 'axios';
 import { createClientRequestId } from './requestIdentity';
@@ -131,6 +132,10 @@ const clearRetryKey = (config?: RetryAwareConfig) => {
 };
 
 api.interceptors.request.use(async (config) => {
+  if (config.url?.startsWith('/partner/') && config.data && typeof config.data === 'object'
+      && !(typeof FormData !== 'undefined' && config.data instanceof FormData)) {
+    config.data = normalizePartnerInput(config.data);
+  }
   const method = String(config.method || 'get').toUpperCase();
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   if (!config.headers.has('x-correlation-id')) {
@@ -976,12 +981,14 @@ export const accountingAPI = {
   getCustomerAccounts: (params?: { search?: string; asOf?: string }) => api.get('/accounting/ledger/customer-profiles', { params }),
   getCustomerAccountProjection: (id: string, params?: { asOf?: string }) => api.get(`/accounting/ledger/customer-profiles/${id}/projection`, { params }),
   exportCustomerStatement: (id: string, format: 'pdf' | 'xlsx', asOf: string) => api.get(`/accounting/ledger/customer-profiles/${id}/export.${format}`, { params: { asOf }, responseType: 'blob' }),
-  getTreasuryOverview: () => api.get('/accounting/ledger/treasury/overview'),
+  getTreasuryOverview: (bankLinePage = 1) => api.get('/accounting/ledger/treasury/overview', { params: { bankLinePage } }),
   getTaxOverview: () => api.get('/accounting/ledger/tax/overview'),
   recordCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/receipts', data),
   allocateCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/allocations', data),
   reverseCustomerAllocation: (id: string, data: any) => api.post(`/accounting/ledger/treasury/allocations/${id}/reverse`, data),
   importBankStatementLine: (data: any) => api.post('/accounting/ledger/treasury/bank-lines/import', data),
+  importBankStatementFile: (data: any) => api.post('/accounting/ledger/treasury/bank-lines/import-file', data),
+  resolveBankFileException: (id: string, data: any) => api.post(`/accounting/ledger/treasury/bank-file-exceptions/${id}/resolve`, data),
   createBankImportMapping: (data: any) => api.post('/accounting/ledger/treasury/bank-mappings', data),
   proposeBankMatches: (id: string) => api.post(`/accounting/ledger/treasury/bank-lines/${id}/propose-matches`),
   confirmBankMatch: (id: string, reason: string) => api.post(`/accounting/ledger/treasury/bank-matches/${id}/confirm`, { reason }),
@@ -1014,6 +1021,24 @@ export const accountingAPI = {
   transitionPayableCheck: (id: string, data: any) => api.post(`/accounting/supply-chain/checks/${id}/transitions`, data),
   previewOpeningInventory: (data: any) => api.post('/accounting/supply-chain/opening-inventory/preview', data),
   commitOpeningInventory: (id: string, data: any, idempotencyKey: string) => api.post(`/accounting/supply-chain/opening-inventory/${id}/commit`, data, { headers: { 'Idempotency-Key': idempotencyKey } }),
+  getReplacementOverview: (bookId: string) => api.get('/accounting/replacement/overview', { params: { bookId } }),
+  getSepidarSourceSnapshots: (bookId: string) => api.get('/accounting/replacement/sepidar-snapshots', { params: { bookId } }),
+  getSepidarSourceRecords: (bookId: string, snapshotId: string, table: string, page: number) => api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/records`, { params: { bookId, table, page } }),
+  getSepidarVouchers: (bookId: string, snapshotId: string, year: string, page: number) => api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/vouchers`, { params: { bookId, year, page } }),
+  getSepidarVoucher: (bookId: string, snapshotId: string, voucherKey: string) => api.get(`/accounting/replacement/sepidar-snapshots/${snapshotId}/vouchers/${voucherKey}`, { params: { bookId } }),
+  searchLegacyAccountingArchive: (bookId: string, query: string) => api.get('/accounting/replacement/legacy-archive', { params: { bookId, query } }),
+  previewAccountingMigration: (data: any) => api.post('/accounting/replacement/migrations/preview', data),
+  commitAccountingMigration: (id: string, data: any) => api.post(`/accounting/replacement/migrations/${id}/commit`, data),
+  recordAccountingParallelRun: (data: any) => api.post('/accounting/replacement/parallel-runs', data),
+  getAccountingParallelContext: (bookId: string, periodId?: string) => api.get('/accounting/replacement/parallel-comparisons/context', { params: { bookId, periodId } }),
+  compareAccountingParallelEvents: (data: { bookId: string; periodId: string; snapshotId: string; pair?: { sourceKey: string; targetId: string; reason: string } }) => api.post('/accounting/replacement/parallel-comparisons', data),
+  manageAccountingParallelDifference: (data: { bookId: string; comparisonId: string; differenceIdentity: string; action: 'OPEN' | 'NOTE' | 'RESOLVE'; cause?: string; resolution?: string }) => api.post('/accounting/replacement/parallel-differences', data),
+  recordAccountingRecoveryProof: (data: any) => api.post('/accounting/replacement/recovery-proofs', data),
+  prepareAccountingCutover: (data: any) => api.post('/accounting/replacement/cutovers', data),
+  transferAccountingAuthority: (id: string, data: any) => api.post(`/accounting/replacement/cutovers/${id}/transfer`, data),
+  acknowledgeAccountingAuthoritativeWrite: (id: string, data: any) => api.post(`/accounting/replacement/cutovers/${id}/authoritative-write`, data),
+  recordAccountingCutoverFailure: (id: string, data: any) => api.post(`/accounting/replacement/cutovers/${id}/failures`, data),
+  resumeAccountingFixForward: (id: string, data: any) => api.post(`/accounting/replacement/cutovers/${id}/resume`, data),
   getLedgerContext: () => api.get('/accounting/ledger/context'),
   setupLedger: (data: any) => api.post('/accounting/ledger/setup', data),
   createLedgerFiscalYear: (data: any) => api.post('/accounting/ledger/fiscal-years', data),
@@ -1042,6 +1067,7 @@ export const accountingAPI = {
   createEstimateCase: (data: any) => api.post('/accounting/period-end/estimate-cases', data),
   createFinancialStatementMapping: (data: any) => api.post('/accounting/period-end/mappings', data),
   createStatutoryFormat: (data: any) => api.post('/accounting/period-end/statutory-formats', data),
+  downloadOfficialReportSnapshot: (id: string, format: 'pdf' | 'xlsx') => api.get(`/accounting/period-end/report-snapshots/${encodeURIComponent(id)}/export.${format}`, { responseType: 'blob' }),
   createOfficialReportSnapshot: (data: any) => api.post('/accounting/period-end/report-snapshots', data),
   createTaxObligation: (data: any) => api.post('/accounting/period-end/tax-obligations', data),
   createTaxPaymentVoucher: (id: string, data: any) => api.post(`/accounting/period-end/tax-obligations/${id}/payment-voucher`, data),
@@ -1056,6 +1082,8 @@ export const accountingAPI = {
     getPartnerSabalanPlanCandidates: () => api.get('/partner-accounting/sabalan-plan-candidates'),
     setPartnerSabalanPaymentPlan: (data: any) => api.post('/partner-accounting/sabalan-payment-plan', data),
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
+  getDashboard: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
+    api.get('/accounting/dashboard', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
   decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
@@ -1079,6 +1107,25 @@ export const accountingAPI = {
     api.get(`/accounting/contracts/${contractId}/pdf`, {
       params: { download: true },
       responseType: 'blob'
+    }),
+  getPartnerInternalPdf: (caseId: string, params?: Record<string, string | boolean>) =>
+    api.get(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/internal-pdf`, { params }),
+  getPartnerInternalDocument: (caseId: string) =>
+    api.get(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/internal`),
+  createPartnerReceivable: (invoiceRecordId: string, expected: { caseId: string; revision: number; integrityHash: string }) =>
+    api.post('/partner/accounting/receivables', { invoiceRecordId, expected }),
+  createPartnerInternalCorrectionRequest: (caseId: string,
+    data: { category: string; priority: string; reason: string }, idempotencyKey: string) =>
+    api.post(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/correction-requests`, data,
+      { headers: { 'X-Idempotency-Key': idempotencyKey } }),
+  flagPartnerInternalRecord: (caseId: string,
+    data: { category: string | number; severity: string | number; title: string; note: string }) =>
+    api.post(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/flags`, data),
+  resolvePartnerInternalFlag: (caseId: string, flagId: string, reason: string) =>
+    api.post(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/flags/${encodeURIComponent(flagId)}/resolve`, { reason }),
+  downloadPartnerInternalPdf: (caseId: string, params?: Record<string, string | boolean>) =>
+    api.get(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/internal-pdf`, {
+      params: { ...params, download: true }, responseType: 'blob'
     }),
   getSalesContractPdf: (contractId: string, params?: any) =>
     api.get(`/accounting/contracts/${contractId}/sales-pdf`, { params }),

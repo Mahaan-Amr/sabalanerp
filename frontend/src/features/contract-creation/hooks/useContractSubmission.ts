@@ -52,6 +52,7 @@ interface UseContractSubmissionOptions {
   userDepartment?: string;
   departments?: Array<{ id: string }>;
   mode?: 'create' | 'edit';
+  applyMonetaryRounding?: boolean;
   contractId?: string;
   editSession?: {
     draftId: string;
@@ -91,6 +92,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     userDepartment,
     departments,
     mode = 'create',
+    applyMonetaryRounding = true,
     contractId,
     editSession,
     onCommitted,
@@ -301,6 +303,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       });
       const {
         totalAmount,
+        monetaryRounding,
         payment: normalizedPayment,
         validation: paymentValidation
       } = prepareContractSubmissionFinancials(
@@ -308,7 +311,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         wizardData.serviceRows || [],
         wizardData.discount?.amount || 0,
         wizardData.payment,
-        isEditMode
+        isEditMode,
+        applyMonetaryRounding
       );
       if (!paymentValidation.isValid) {
         updateWizardData({ payment: normalizedPayment });
@@ -352,6 +356,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         }),
         contractData: {
           ...wizardData,
+          ...(monetaryRounding ? { monetaryRounding } : {}),
           contractNumber: wizardData.contractNumber,
           contractDate: wizardData.contractDate,
           customerId: wizardData.customerId || wizardData.customer?.id || '',
@@ -519,6 +524,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     userDepartment,
     departments,
     mode,
+    applyMonetaryRounding,
     contractId,
     editSession,
     onCommitted,

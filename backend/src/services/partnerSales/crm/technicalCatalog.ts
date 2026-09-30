@@ -48,8 +48,14 @@ export function projectPartnerTechnicalProduct(source: TechnicalProductSource): 
     if (source.isActive !== true || source.deletedAt !== null) {
       return { ok: false, error: partnerError('NOT_FOUND') };
     }
-    const dimension = (value: InventoryDecimal | null) => value === null
-      ? undefined : parseCanonicalDecimal(value.toString());
+    const dimension = (value: InventoryDecimal | null) => {
+      if (value === null) return undefined;
+      const normalized = parseCanonicalDecimal(value.toString());
+      // Inventory uses zero for an unspecified catalog dimension (notably
+      // slab width and prepared-stone thickness). Keep the product selectable;
+      // its configuration must still supply any required physical geometry.
+      return normalized === '0' ? undefined : normalized;
+    };
     const families: PartnerTechnicalFamily[] = [];
     if (source.availableInLongitudinalContracts) families.push('longitudinal');
     if (source.availableInStairContracts) families.push('stair');

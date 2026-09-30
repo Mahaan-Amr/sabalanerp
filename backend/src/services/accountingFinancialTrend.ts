@@ -184,11 +184,16 @@ const invoiceMovements = (invoices: TrendInvoice[], auditEvents: TrendAuditEvent
 const collectionMovements = (payments: TrendPayment[], auditEvents: TrendAuditEvent[]): TrendMovement[] => {
   const paymentAudits = auditEvents.filter((event) => event.entityType === 'AccountingPaymentStatus');
   const receiptAudits = auditTimesByEntity(paymentAudits, (event) => event.action === 'REGISTER_RECEIPT');
-  const transitionAudit = (paymentId: string, status: string) => paymentAudits.find((event) => {
-    if (event.entityId !== paymentId || event.action !== 'UPDATE_CHECK_STATUS') return false;
+  const transitionTimes = new Map<string, Map<string, Date>>();
+  for (const event of paymentAudits) {
+    if (!event.entityId || event.action !== 'UPDATE_CHECK_STATUS') continue;
     const after = event.afterState && typeof event.afterState === 'object' ? event.afterState as Record<string, unknown> : {};
-    return after.checkStatus === status;
-  })?.createdAt;
+    if (typeof after.checkStatus !== 'string') continue;
+    const byStatus = transitionTimes.get(event.entityId) || new Map<string, Date>();
+    if (!byStatus.has(after.checkStatus)) byStatus.set(after.checkStatus, event.createdAt);
+    transitionTimes.set(event.entityId, byStatus);
+  }
+  const transitionAudit = (paymentId: string, status: string) => transitionTimes.get(paymentId)?.get(status);
   return payments.flatMap((payment) => {
     if (!payment.contractId) return [];
     const stored = payment.metadata && typeof payment.metadata === 'object'
@@ -245,11 +250,6 @@ const contractBalancesAt = (invoices: TrendMovement[], collections: TrendMovemen
   return contracts;
 };
 
-const outstandingAt = (invoices: TrendMovement[], collections: TrendMovement[], cutoff: Date) => (
-  [...contractBalancesAt(invoices, collections, cutoff).values()]
-    .reduce((total, contract) => total + Math.max(contract.invoiced - contract.received, 0), 0)
-);
-
 export const buildOutstandingContractSnapshots = ({ invoices, payments, auditEvents, cutoff }: {
   invoices: TrendInvoice[];
   payments: TrendPayment[];
@@ -296,22 +296,58 @@ export const buildAccountingFinancialTrend = ({
   const periods = resolveFinancialTrendPeriods(range, now);
   const invoiceEvents = invoiceMovements(invoices, auditEvents);
   const collectionEvents = collectionMovements(payments, auditEvents);
-  const allEvents = [...invoiceEvents, ...collectionEvents];
-  const points: AccountingFinancialTrendPoint[] = periods.map((period) => ({
-    periodKey: period.key,
-    monthKey: period.monthKey,
-    label: period.label,
-    marker: period.marker,
-    startsAt: period.startsAt.toISOString(),
-    endsAt: period.endsAt.toISOString(),
-    invoicedRial: invoiceEvents.filter((event) => within(event, period)).reduce((sum, event) => sum + event.amount, 0),
-    receivedRial: collectionEvents.filter((event) => within(event, period)).reduce((sum, event) => sum + event.amount, 0),
-    outstandingRial: outstandingAt(invoiceEvents, collectionEvents, period.endsAt),
-    confidence: allEvents.some((event) => event.confidence === 'legacy-fallback' && throughCutoff(event, period.endsAt))
-      ? 'legacy-fallback'
-      : 'authoritative',
-    destinations: destinationsFor(period),
-  }));
+  // The balance needs every earlier movement, including receipts before the
+  // first invoice. Walk each history once across chronological period cutoffs.
+  const byTime = (left: TrendMovement, right: TrendMovement) => left.effectiveAt.getTime() - right.effectiveAt.getTime();
+  const valid = (event: TrendMovement) => Number.isFinite(event.effectiveAt.getTime());
+  const orderedInvoices = invoiceEvents.filter(valid).sort(byTime);
+  const orderedCollections = collectionEvents.filter(valid).sort(byTime);
+  const balances = new Map<string, { invoiced: number; received: number; hasInvoice: boolean }>();
+  let invoiceIndex = 0;
+  let collectionIndex = 0;
+  let outstanding = 0;
+  let hasLegacyFallback = false;
+  const apply = (event: TrendMovement, kind: 'invoice' | 'collection') => {
+    const balance = balances.get(event.contractId) || { invoiced: 0, received: 0, hasInvoice: false };
+    const before = balance.hasInvoice ? Math.max(balance.invoiced - balance.received, 0) : 0;
+    if (kind === 'invoice') {
+      balance.invoiced += event.amount;
+      balance.hasInvoice = true;
+    } else {
+      balance.received += event.amount;
+    }
+    const after = balance.hasInvoice ? Math.max(balance.invoiced - balance.received, 0) : 0;
+    outstanding += after - before;
+    balances.set(event.contractId, balance);
+    if (event.confidence === 'legacy-fallback') hasLegacyFallback = true;
+  };
+  const points: AccountingFinancialTrendPoint[] = periods.map((period) => {
+    let invoicedRial = 0;
+    let receivedRial = 0;
+    while (invoiceIndex < orderedInvoices.length && orderedInvoices[invoiceIndex].effectiveAt < period.endsAt) {
+      const event = orderedInvoices[invoiceIndex++];
+      if (within(event, period)) invoicedRial += event.amount;
+      apply(event, 'invoice');
+    }
+    while (collectionIndex < orderedCollections.length && orderedCollections[collectionIndex].effectiveAt < period.endsAt) {
+      const event = orderedCollections[collectionIndex++];
+      if (within(event, period)) receivedRial += event.amount;
+      apply(event, 'collection');
+    }
+    return {
+      periodKey: period.key,
+      monthKey: period.monthKey,
+      label: period.label,
+      marker: period.marker,
+      startsAt: period.startsAt.toISOString(),
+      endsAt: period.endsAt.toISOString(),
+      invoicedRial,
+      receivedRial,
+      outstandingRial: outstanding,
+      confidence: hasLegacyFallback ? 'legacy-fallback' : 'authoritative',
+      destinations: destinationsFor(period),
+    };
+  });
   return {
     range,
     currency: 'RIAL' as const,

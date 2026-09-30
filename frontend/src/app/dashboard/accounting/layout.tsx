@@ -6,5 +6,9 @@ import { AccountingActorBoundary } from '@/features/accounting/AccountingActorBo
 
 export default function AccountingLayout({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
-  return <AccountingActorBoundary actorId={user?.id ?? null} loading={loading}>{children}</AccountingActorBoundary>;
+  return (
+    <div className="sds-neumorphic-scope sds-neumorphic-workflow-scope min-h-[calc(100vh-8rem)] rounded-[var(--sds-radius-card)] bg-[var(--sds-surface-canvas)] p-3 sm:p-4">
+      <AccountingActorBoundary actorId={user?.id ?? null} loading={loading}>{children}</AccountingActorBoundary>
+    </div>
+  );
 }

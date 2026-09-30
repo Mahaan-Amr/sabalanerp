@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { prisma } from '../../lib/prisma';
 import { getAccountingWorkspaceResponse } from '../../routes/accounting';
 import {
   getAccountantPerformanceReport,
@@ -11,13 +12,15 @@ import {
 } from '../accountingService';
 
 const requestWorkspace = async (query: Record<string, string>) => {
+  const actor = await prisma.user.findFirst({ select: { id: true } });
+  assert.ok(actor);
   let responseBody: any;
   let statusCode = 200;
   const response = {
     status(code: number) { statusCode = code; return this; },
     json(body: unknown) { responseBody = body; return this; },
   };
-  await getAccountingWorkspaceResponse({ query } as never, response as never);
+  await getAccountingWorkspaceResponse({ query, user: { id: actor.id } } as never, response as never);
   assert.equal(statusCode, 200);
   assert.equal(responseBody?.success, true);
   return responseBody.data;

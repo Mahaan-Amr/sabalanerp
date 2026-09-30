@@ -25,6 +25,10 @@ assert.deepEqual(parseTimeSelection('invalid'), { hour: 8, minute: 0, period: 'A
 assert.equal(to24HourTime({ hour: 12, minute: 0, period: 'AM' }), '00:00');
 assert.equal(to24HourTime({ hour: 12, minute: 0, period: 'PM' }), '12:00');
 assert.equal(formatTime12('17:07'), '05:07 PM');
+assert.deepEqual(parseTimeSelection('23:59:42'), { hour: 11, minute: 59, period: 'PM' });
+assert.deepEqual(parseTimeSelection('23:59:60'), { hour: 8, minute: 0, period: 'AM' });
+assert.equal(formatTime12('17:07:42'), '05:07:42 PM');
+assert.equal(formatTime12('00:00:00'), '12:00:00 AM');
 
 assert.deepEqual(
   stepTimeSelection({ hour: 12, minute: 59, period: 'AM' }, 'minute', 1),

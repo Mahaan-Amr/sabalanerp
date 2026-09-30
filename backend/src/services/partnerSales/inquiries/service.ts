@@ -8,6 +8,7 @@ import {
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { parseInquiryDefinition, type ConfigurationRef, type InquiryDefinition } from './definition';
 import { createPartnerInquiryQuery } from './query';
+import { sameCaseInquiryLineage } from './caseInquiryLineage';
 import {
   createPartnerPricingDuty,
   reassignPartnerPricingDuty,
@@ -41,6 +42,7 @@ export interface PartnerInquiryDependencies {
   publishCommittedEvents?(eventIds: readonly string[]): Promise<void>;
   resolveConfiguration(tx: Transaction, input: { actorId: string; reference: ConfigurationRef }): Promise<Result<{
     identity: InquiryIdentity; description: string; configuration: Array<{ label: string; value: string }>;
+    paidSourceProductRowId?: string;
   }>>;
 }
 
@@ -100,7 +102,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
     }
     await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${command.inquiryId} FOR UPDATE`;
     const inquiry = await tx.partnerInquiry.findUnique({ where: { id: command.inquiryId },
-      select: { id: true, profileId: true, revision: true, submittedAt: true } });
+      select: { id: true, profileId: true, revision: true, submittedAt: true, profile: { select: { userId: true } } } });
     if (!inquiry) return { ok: false, error: partnerError('NOT_FOUND') } as const;
     const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId,
       action: 'INQUIRY_RESPOND', purpose: 'RESPONDER', reason: command.decisions.map(decision =>
@@ -118,7 +120,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
     const rows = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id,
       id: { in: command.decisions.map(decision => decision.rowId) } }, select: {
       id: true, revision: true, outcome: true, definition: true, predecessorId: true,
-      predecessor: { select: { outcome: true, approval: { select: { id: true } } } },
+      predecessor: { select: { definition: true, outcome: true, approval: { select: { id: true } } } },
     } });
     const hasActionableDecision = command.decisions.some(decision => {
       const row = rows.find(item => item.id === decision.rowId);
@@ -152,6 +154,12 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
       if (row.outcome !== 'PENDING') { outcomes.push({ ok: false, rowId: row.id, error: partnerError('STATE_CONFLICT') }); continue; }
       const definition = parseInquiryDefinition(row.definition);
       if (!definition) { outcomes.push({ ok: false, rowId: row.id, error: partnerError('INTEGRITY_CONFLICT') }); continue; }
+      const material = await dependencies.resolveConfiguration(tx, {
+        actorId: inquiry.profile.userId, reference: definition.configurationRef,
+      });
+      if (material.ok && material.value.paidSourceProductRowId) {
+        outcomes.push({ ok: false, rowId: row.id, error: partnerError('INVALID_PAYLOAD') }); continue;
+      }
       const outcomeId = randomUUID(), revision = row.revision + 1;
       if (decision.outcome === 'APPROVED') {
         if (decision.wholesaleUnitPrice.currency !== definition.identity.currency) {
@@ -180,11 +188,20 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
       outcomes.push({ ok: true, rowId: row.id, outcomeId, revision, outcome: decision.outcome });
     }
     const currentLeaves = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id, successor: null },
-      select: { outcome: true, approval: { select: { id: true, approvedAt: true, expiresAt: true } } } });
-    const completedPackage = currentLeaves.length > 0 &&
-      currentLeaves.every(row => row.outcome === 'APPROVED' && Boolean(row.approval) &&
+      select: { definition: true, outcome: true, approval: { select: { id: true, approvedAt: true, expiresAt: true } } } });
+    const materialLeaves: typeof currentLeaves = [];
+    for (const leaf of currentLeaves) {
+      const definition = parseInquiryDefinition(leaf.definition);
+      const resolved = definition && await dependencies.resolveConfiguration(tx, {
+        actorId: inquiry.profile.userId, reference: definition.configurationRef,
+      });
+      if (resolved && resolved.ok && resolved.value.paidSourceProductRowId) continue;
+      materialLeaves.push(leaf);
+    }
+    const completedPackage = materialLeaves.length > 0 &&
+      materialLeaves.every(row => row.outcome === 'APPROVED' && Boolean(row.approval) &&
         row.approval!.expiresAt.getTime() > clock.now.getTime());
-    const requiredApprovals = currentLeaves.flatMap(row => row.approval ? [row.approval] : []);
+    const requiredApprovals = materialLeaves.flatMap(row => row.approval ? [row.approval] : []);
     const batch = InquiryBatchResultSchema.parse({ schemaVersion: 1, commandId: command.commandId, outcomes });
     const eventIds: string[] = [];
     if (outcomes.some(outcome => outcome.ok)) {
@@ -334,8 +351,11 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
         }
         const profile = await tx.partnerProfile.findUnique({ where: { userId: dependencies.actorId }, select: { id: true } });
         if (!profile) return { ok: false, error: partnerError('NOT_FOUND') };
+        if (command.type === 'CASE_PRICING_SUBMIT') {
+          await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${command.caseId} FOR UPDATE`;
+        }
         const scopedCase = command.type === 'CASE_PRICING_SUBMIT' ? await tx.partnerSaleCase.findFirst({ where: {
-          id: command.caseId, profileId: profile.id, state: 'DRAFT', pricingState: { in: ['AWAITING_INQUIRY', 'EXPIRED'] },
+          id: command.caseId, profileId: profile.id, state: 'DRAFT', pricingState: { in: ['AWAITING_INQUIRY', 'EXPIRED', 'READY_TO_FINALIZE'] },
           headRevision: command.expected.revision, integrityHash: command.expected.integrityHash,
         }, select: { id: true, headRevision: true } }) : undefined;
         if (command.type === 'CASE_PRICING_SUBMIT' && !scopedCase) {
@@ -365,14 +385,21 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           }
           const resolved = await dependencies.resolveConfiguration(tx, { actorId: dependencies.actorId, reference: row.configuration });
           if (!resolved.ok) return resolved;
+          if (resolved.value.paidSourceProductRowId) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
           if (resolved.value.identity.partnerSellerId !== dependencies.actorId ||
               resolved.value.identity.catalogProductId.length === 0) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           let version = 1, predecessorId: string | undefined;
           if (row.predecessor) {
             const predecessor = await tx.partnerInquiryRow.findUnique({ where: { id: row.predecessor.rowId },
-              select: { id: true, revision: true, version: true, outcome: true,
-                successor: { select: { id: true } }, inquiry: { select: { id: true, profileId: true } } } });
-            if (!predecessor || predecessor.inquiry.id !== scope || predecessor.inquiry.profileId !== profile.id) {
+              select: { id: true, revision: true, version: true, outcome: true, definition: true,
+                successor: { select: { id: true } }, inquiry: { select: { id: true, profileId: true, caseId: true, caseRevision: true } } } });
+            const predecessorDefinition = predecessor && parseInquiryDefinition(predecessor.definition);
+            if (!predecessor || !predecessorDefinition || predecessor.inquiry.profileId !== profile.id ||
+                !sameCaseInquiryLineage({ inquiryId: scope, caseId: command.type === 'CASE_PRICING_SUBMIT' ? command.caseId : '',
+                  caseRevision: command.type === 'CASE_PRICING_SUBMIT' ? command.expected.revision : 0,
+                  productRowId: row.configuration.productRowId, predecessorInquiryId: predecessor.inquiry.id,
+                  predecessorCaseId: predecessor.inquiry.caseId, predecessorCaseRevision: predecessor.inquiry.caseRevision,
+                  predecessorProductRowId: predecessorDefinition.configurationRef.productRowId })) {
               return { ok: false, error: partnerError('NOT_FOUND') };
             }
             if (predecessor.revision !== row.predecessor.revision) return { ok: false, error: partnerError('ROW_STALE') };

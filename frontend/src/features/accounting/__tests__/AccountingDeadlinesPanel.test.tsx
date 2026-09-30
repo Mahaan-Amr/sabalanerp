@@ -78,6 +78,13 @@ test('type-specific deadline panel renders the selected actionable population', 
   assert.match(html, /recordId=check-1/);
 });
 
+test('a shortened dashboard deadline list states the full count and links to both complete registers', () => {
+  const html = renderPanel(deadlines({ total: 42 }));
+  assert.match(html, /۲ مورد اول از ۴۲/);
+  assert.match(html, /\/dashboard\/accounting\/receivables\?view=open&amp;due=next7/);
+  assert.match(html, /\/dashboard\/accounting\/payments\?view=unsettled-checks&amp;due=next7/);
+});
+
 test('empty deadline filter keeps bucket register actions without rendering stale rows', () => {
   const html = renderPanel(deadlines({
     selection: { due: 'days8to30', deadlineType: 'receivable' },

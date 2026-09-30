@@ -334,7 +334,7 @@ test("Logistics Loading create and detail routes retain canonical responsive int
   await expect(
     page.getByRole("heading", { name: "انتخاب پروژه" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "انتخاب", exact: true }).click();
+  await page.getByRole("button", { name: /پروژه نمونه.*انتخاب/ }).click();
   await expect(page.getByText("پیش‌نویس بارگیری ساخته شد.")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "انتخاب ردیف‌های قرارداد" }),

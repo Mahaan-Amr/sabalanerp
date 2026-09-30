@@ -170,6 +170,19 @@ export default function AccountingDeadlinesPanel({
             })}
           </ul>
         )}
+        {deadlines.total > deadlines.items.length && (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="sds-text-muted me-auto text-sm">
+              {deadlines.items.length.toLocaleString('fa-IR')} مورد اول از {deadlines.total.toLocaleString('fa-IR')}
+            </p>
+            {selectedType !== 'check' && (
+              <ErpButton href={deadlineRegisterHref('receivable', selectedDue)} label="همه دریافتنی‌ها" tone="success" />
+            )}
+            {selectedType !== 'receivable' && (
+              <ErpButton href={deadlineRegisterHref('check', selectedDue)} label="همه چک‌ها" tone="warning" />
+            )}
+          </div>
+        )}
       </div>
     </ErpSection>
   );

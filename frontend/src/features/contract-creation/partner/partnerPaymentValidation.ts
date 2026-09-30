@@ -1,7 +1,20 @@
+import moment from 'moment-jalaali';
+import { normalizeDigits } from '@/lib/numberFormat';
 import type { CustomerPaymentPlan } from '@sabalanerp/partner-sales-contracts';
 
 type PartnerInstallment = CustomerPaymentPlan['installments'][number];
 export type PartnerPaymentFieldErrors = Partial<Record<'amount' | 'date' | 'number' | 'bank' | 'ownerName' | 'handoverDate' | 'nationalCode', string>>;
+
+export function partnerPaymentNeedsNationalCode(method: PartnerInstallment['method'], date: string, currentDate: string): boolean {
+  if (method === 'CREDIT' || !date) return false;
+  const day = (value: string) => {
+    const normalized = normalizeDigits(value).trim();
+    const parsed = moment(normalized, normalized.includes('/') ? 'jYYYY/jMM/jDD' : 'YYYY-MM-DD', true);
+    return parsed.isValid() ? parsed.locale('en').format('YYYY-MM-DD') : null;
+  };
+  const paymentDay = day(date);
+  return !paymentDay || paymentDay !== day(currentDate);
+}
 
 export function validatePartnerPaymentInstallment(installment: PartnerInstallment, currentDate: string,
   existingContract = false): PartnerPaymentFieldErrors {
@@ -15,7 +28,7 @@ export function validatePartnerPaymentInstallment(installment: PartnerInstallmen
     if (!installment.check?.ownerName?.trim()) errors.ownerName = 'نام صاحب چک الزامی است.';
     if (!installment.check?.handoverDate?.trim()) errors.handoverDate = 'تاریخ تحویل چک الزامی است.';
   }
-  if (installment.method !== 'CREDIT' && installment.dueDate && installment.dueDate !== currentDate) {
+  if (partnerPaymentNeedsNationalCode(installment.method, installment.dueDate, currentDate)) {
     if (!installment.nationalCode?.trim()) errors.nationalCode = 'کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است.';
     else if (!/^\d{10}$/.test(installment.nationalCode)) errors.nationalCode = 'کد ملی باید ۱۰ رقم باشد.';
   }

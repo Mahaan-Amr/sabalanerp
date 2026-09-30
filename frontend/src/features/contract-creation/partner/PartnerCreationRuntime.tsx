@@ -1,12 +1,14 @@
 'use client';
 
+import { partnerRetailPresentation, presentPartnerRetailRows } from './partnerRetailPresentation';
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  CaseDraftIntentSchema, PartnerCaseRuntimeResultSchema, PartnerCaseViewSchema, PartnerCommandSchema, PartnerCreationContextSchema,
-  PartnerApprovalMatchSetSchema, PartnerWholesaleQuoteSchema, PartnerWizardRecoverySnapshotSchema,
-  PartnerTechnicalCatalogPageSchema, CustomerPaymentPlanSchema, canonicalHash, partnerError, previewPartnerTechnicalDraft,
-  type PartnerCaseView, type PartnerCommand, type PartnerCommandPort, type PartnerApprovalMatchSet,
+  MoneySchema, CaseDraftIntentSchema, PartnerCaseRuntimeResultSchema, PartnerCaseViewSchema, PartnerCommandSchema, PartnerCreationContextSchema,
+  PartnerApprovalMatchSetSchema, PartnerWholesaleQuoteSchema, PartnerWizardRecoverySnapshotSchema, PartnerTechnicalSaveReceiptSchema,
+  PartnerTechnicalCatalogPageSchema, CustomerPaymentPlanSchema, partnerInputHash as canonicalHash, partnerError, partnerTrackingCode, previewPartnerTechnicalDraft,
+  type PartnerCaseView, type PartnerCommand, type PartnerCommandPort, type PartnerApprovalMatchSet, type PartnerWholesaleQuote,
   type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
   type CustomerPaymentPlan,
@@ -18,6 +20,7 @@ import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/par
 import { PartnerInquiryWorkspace } from '../../partner-sales/inquiries/PartnerInquiryWorkspace';
 import type { PartnerConfiguredInquiryRows } from '../../partner-sales/inquiries/partnerInquirySubmission';
 import { isUsableInquiryRow, type PartnerInquiryView, type PartnerInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
+import { partnerQuantityUnitCopy } from '../../partner-sales/presentation';
 import { PartnerContractWizard, partnerWizardPresentationSteps, type PartnerWizardDraft,
   type PartnerWizardStep } from './PartnerContractWizard';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
@@ -25,20 +28,21 @@ import { ContractCreationDraftPrompt } from '../components/shared/ContractCreati
 import { CustomerProjectFormFields, emptyCustomerProjectFormValue } from '../../crm/customer-workflow/CustomerProjectFormFields';
 import { ContractCustomerStepView, ContractDateStepView, ContractDeliveryDetailsFields, ContractProjectStepView,
   type ContractCustomerOption, type ContractProjectOption } from '../components/shared/ContractWizardStepViews';
-import { ContractPaymentInstallmentFields } from '../components/shared/ContractPaymentInstallmentFields';
-import { ContractPaymentCheckFields } from '../components/shared/ContractPaymentCheckFields';
+import { ContractPaymentEntriesList } from '../components/shared/ContractPaymentEntriesList';
 import { ContractDiscountEditor } from '../components/shared/ContractDiscountEditor';
 import { PaymentEntryModal } from '../components/modals/PaymentEntryModal';
 import type { PaymentEntry } from '../types/contract.types';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { createPartnerCaseSubmission, type PartnerDraftCommand } from './partnerCaseSubmission';
 import { selectPartnerReinquiryRows } from './partnerReinquiry';
-import { enterPartnerWizard, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
+import { enterPartnerWizard, partnerDeliveryPlanIssue, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
   partnerCasePendingStorageKey, shouldPreferLocalPartnerWizard,
   isExplicitPartnerCreationEntry, partnerProductEditPath, shouldOfferPartnerDraftChoice,
-  shouldStartFreshPartnerCreation } from './partnerWizardEntry';
-import { alignPartnerCustomerPaymentPlan, partnerMoneyText, partnerRetailIntentRows, refreshPartnerInquiryRow,
-  partnerRetailDiscountFromPercent, partnerRetailSubtotal, partnerRetailSummary, remainingPartnerAmount } from './partnerRetail';
+  shouldStartFreshPartnerCreation, partnerCreationRouteIdentity, partnerCreationRequestedInquiry, partnerSaleReturnStep,
+  partnerCaseResultStep, partnerCaseHasIntegrityError, partnerCaseReviewMessage,
+  latestMatchingPartnerInquiryRow, partnerCasePricingInquiryIds, partnerFinalizedContractPath } from './partnerWizardEntry';
+import { partnerMoneyText, partnerRetailIntentRows, refreshPartnerInquiryRow,
+  partnerRetailDiscountFromPercent, partnerRetailSubtotal, partnerRetailSummary, remainingPartnerAmount, newPartnerPaymentInstallment } from './partnerRetail';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
 import { finalizePartnerCase, sendPartnerConfirmation } from '../../partner-sales/cases/partnerCaseHttpPort';
 import { PartnerQuickInquiryEditor, type PartnerInquiryDimensions } from './PartnerQuickInquiryEditor';
@@ -46,19 +50,21 @@ import { isPartnerContractConfigurationComplete, removePartnerTechnicalProduct }
 import { normalizeNumericText } from '@/lib/numberFormat';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 import { commitPartnerTechnicalDraft } from './partnerTechnicalCommit';
+import { repairPartnerTechnicalOperationIds } from './partnerTechnicalOperationIds';
 import { getPartnerBrowserSessionId } from './partnerBrowserSession';
-import { canSubmitPartnerTechnicalAction, showPartnerContractConfigurationWarning } from './partnerCreationFlow';
+import { canSubmitPartnerTechnicalAction, partnerTechnicalSaveIssue, showPartnerContractConfigurationWarning } from './partnerCreationFlow';
 import { readPartnerCreationContext } from './partnerCreationContext';
-import { partnerPaymentChoice, partnerPaymentMethodUpdate } from './partnerPaymentMethodAdapter';
+import { partnerProductEditEntry, partnerSaleEntryIssue } from './partnerProductEditEntry';
+import { partnerPaymentChoice } from './partnerPaymentMethodAdapter';
 import { paymentEntryFromPartnerInstallment, partnerInstallmentFromPaymentEntry } from './partnerPaymentEntryAdapter';
-import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment } from './partnerPaymentValidation';
+import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment, partnerPaymentNeedsNationalCode } from './partnerPaymentValidation';
 import { buildPartnerInquirySubjectOptions, type PartnerInquirySubjectOption } from './partnerInquirySubjectOptions';
 import { validateOptionalIranianMobile } from '@/lib/phoneFormat';
 
 type PartnerContext = Extract<PartnerCreationContext, { kind: 'PARTNER' }>;
 type PartnerCustomer = PartnerContext['customers'][number];
 type PartnerPaymentInstallment = CustomerPaymentPlan['installments'][number];
-type PartnerPaymentModalErrors = Partial<Record<'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode', string>>;
+type PartnerPaymentModalErrors = Partial<Record<'method' | 'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode', string>>;
 const partnerSaleEntrySteps: PartnerWizardStep[] = ['date', 'customer', 'project', 'products'];
 type Access = { schemaVersion: 1; recoveryId: string; browserSessionId: string;
   leaseToken: string; baseRevision: number };
@@ -67,10 +73,43 @@ type PersistedRuntime = { actorId: string; inquiryId: string; access: Access;
   knownInquiryRows?: PartnerInquiryRow[];
   contractDate?: string; projectId?: string };
 
+async function requestPartnerRetailQuote(draft: PartnerWizardDraft, actorId: string): Promise<PartnerWholesaleQuote> {
+  const intent = { ...draft.intent, rows: partnerRetailIntentRows(draft.rows) };
+  const payloadHash = await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent });
+  const command = PartnerCommandSchema.parse({ schemaVersion: 1, type: 'CASE_SUBMIT', intent,
+    commandId: `partner-quote-${crypto.randomUUID()}`, correlationId: `partner-quote-${crypto.randomUUID()}`,
+    idempotency: { actorId, operation: 'CASE_SUBMIT', targetId: draft.intent.recoveryId,
+      key: `partner-quote-${crypto.randomUUID()}`, payloadHash } });
+  const response = await api.post('/partner/cases/quote', command);
+  const quote = PartnerWholesaleQuoteSchema.parse((response.data as { data?: unknown })?.data);
+  if (quote.recoveryId !== draft.intent.recoveryId || quote.recoveryRevision !== draft.intent.recoveryRevision ||
+      quote.graphHash !== draft.intent.graphHash || quote.rows.length !== draft.rows.length ||
+      draft.rows.some(row => !quote.rows.some(item => item.productRowId === row.productRowId))) {
+    throw new Error('Quote does not match the active technical draft');
+  }
+  return quote;
+}
+
+function applyPartnerRetailQuote(draft: PartnerWizardDraft, quote: PartnerWholesaleQuote): PartnerWizardDraft {
+  const rows = draft.rows.map(row => {
+    const priced = quote.rows.find(item => item.productRowId === row.productRowId)!;
+    return { ...row, retailEffectiveUnitPrice: priced.retailEffectiveUnitPrice,
+      ...(priced.wholesaleUnitPrice ? { wholesaleUnitPrice: priced.wholesaleUnitPrice } : {}) };
+  });
+  const retailDiscount = draft.intent.retailDiscountPercent === undefined ? draft.intent.retailDiscount
+    : partnerRetailDiscountFromPercent(rows, draft.intent.retailDiscountPercent,
+      draft.intent.retailDiscount.currency) ?? draft.intent.retailDiscount;
+  return { ...draft, rows, intent: { ...draft.intent, rows: partnerRetailIntentRows(rows), retailDiscount,
+    customerPaymentPlan: draft.intent.customerPaymentPlan } };
+}
+
 const ports = createPartnerTechnicalHttpPorts();
 const inquiryPorts = createPartnerInquiryHttpPorts();
 const runtimeKey = (actorId: string, inquiryId: string) => `partner-creation-runtime:${actorId}:${inquiryId}`;
 const inquiryPendingKey = (actorId: string) => `partner-inquiry-pending:${actorId}`;
+const entryDraftKey = (actorId: string, recoveryId: string) => `partner-creation-entry:${actorId}:${recoveryId}`;
+type EntrySnapshot = { actorId: string; recoveryId: string; baseRevision: number; recoveryRevision: number;
+  contractDate: string; customerId: string; projectId: string; step: PartnerWizardStep };
 const wizardDraftKey = (actorId: string, recoveryId: string) => `partner-wizard-draft:${actorId}:${recoveryId}`;
 const emptyTechnicalDraft = (inputRevision = 0): PartnerTechnicalDraft => ({
   schemaVersion: 1, inputRevision, rows: [], dependents: [], stairSystems: [], editingValues: [],
@@ -153,13 +192,28 @@ function readStored<T>(key: string): T | null {
   catch { return null; }
 }
 
+function readSessionEntry(actorId: string, recoveryId: string): EntrySnapshot | null {
+  try { const value = window.sessionStorage.getItem(entryDraftKey(actorId, recoveryId));
+    return value ? JSON.parse(value) as EntrySnapshot : null; }
+  catch { return null; }
+}
+
 export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: React.ReactNode; mode?: 'sale' | 'inquiry' }) {
+  const searchParams = useSearchParams();
+  return <PartnerCreationRuntimeSession key={partnerCreationRouteIdentity(searchParams, mode)} ordinary={ordinary} mode={mode} />;
+}
+
+function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.ReactNode; mode: 'sale' | 'inquiry' }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const freshInquiryRef = useRef(shouldStartFreshPartnerCreation(searchParams));
   const [context, setContext] = useState<PartnerCreationContext | null>(null);
+  const [discountEntryMode, setDiscountEntryMode] = useState<'percent' | 'amount'>('amount');
+  const [cartTotalAttempt, setCartTotalAttempt] = useState(0);
+  const [cartTotal, setCartTotal] = useState<{ key: string; total?: ReturnType<typeof MoneySchema.parse>; failed?: boolean } | null>(null);
   const [runtime, setRuntime] = useState<PersistedRuntime | null>(null);
   const runtimeRef = useRef<PersistedRuntime | null>(null);
+  const finalizationFlight = useRef(false);
   runtimeRef.current = runtime;
   const [catalog, setCatalog] = useState<PartnerTechnicalProduct[]>([]);
   const [operations, setOperations] = useState<PartnerTechnicalOperation[]>([]);
@@ -175,6 +229,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const recoveryRevisionRef = useRef(0);
   recoveryRevisionRef.current = recoveryRevision;
   const recoveryStarting = useRef(false);
+  const startNewFlight = useRef(false);
   const checkpointFlight = useRef<Promise<boolean> | null>(null);
   const technicalCommitFlight = useRef(false);
   const checkpointedInputRevision = useRef(0);
@@ -232,8 +287,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     { products: technicalProducts, operations: technicalOperations,
       sawKerfMeters: retainedCatalog?.sawKerfMeters ?? '0.003' }),
   [technicalProducts, technicalOperations, retainedCatalog, technicalDraft]);
-  const technicalReady = technicalPreview.ok && technicalDraft.rows.length > 0 && technicalPreview.value.conflicts.length === 0
-    && technicalPreview.value.rows.every(row => row.calculation.ok);
+  const technicalIssue = partnerTechnicalSaveIssue(technicalPreview);
+  const technicalReady = technicalDraft.rows.length > 0 && technicalIssue === null;
   const contractConfigurationReady = isPartnerContractConfigurationComplete(technicalDraft);
   const normalizedQuickDimensions = (productRowId: string) => Object.fromEntries(Object.entries(quickDimensions[productRowId] ?? {})
     .filter((entry): entry is [keyof PartnerInquiryDimensions, string] => Boolean(entry[1]?.trim()))
@@ -245,18 +300,55 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   const technicalActionReady = retailPricesReady && canSubmitPartnerTechnicalAction({ mode, pending, technicalReady,
     contractConfigurationReady, quickDimensionsValid, hasDraftAccess: Boolean(draftAccess) });
 
-  const reacquireRuntime = useCallback(async (value: PersistedRuntime): Promise<PersistedRuntime | null> => {
-    const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: value.access.recoveryId,
-      browserSessionId: value.access.browserSessionId, baseRevision: value.access.baseRevision, takeover: false });
-    if (!lease.ok) { setError(lease.error.message); return null; }
-    if (lease.value.leaseToken === value.access.leaseToken && lease.value.baseRevision === value.access.baseRevision) return value;
-    const refreshed = { ...value, access: { ...value.access, leaseToken: lease.value.leaseToken,
-      baseRevision: lease.value.baseRevision } };
-    persistRuntime(refreshed);
+  const reacquireDraftAccess = useCallback(async (access: Access): Promise<Access | null> => {
+    const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: access.recoveryId,
+      browserSessionId: access.browserSessionId, baseRevision: access.baseRevision, takeover: false });
+    if (!lease.ok) { setRecoveryBlocked(true); setError(lease.error.message); return null; }
+    const refreshed = { ...access, leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
+    setDraftAccess(current => current?.recoveryId === access.recoveryId &&
+      (current.leaseToken !== refreshed.leaseToken || current.baseRevision !== refreshed.baseRevision) ? refreshed : current);
     return refreshed;
-  }, [persistRuntime]);
+  }, []);
+
+  const reacquireRuntime = useCallback(async (value: PersistedRuntime): Promise<PersistedRuntime | null> => {
+    const access = await reacquireDraftAccess(value.access);
+    if (!access) return null;
+    if (access.leaseToken === value.access.leaseToken && access.baseRevision === value.access.baseRevision) return value;
+    const refreshed = { ...value, access };
+    persistRuntime(refreshed);
+    setDraftAccess(current => current?.recoveryId === refreshed.access.recoveryId ? refreshed.access : current);
+    return refreshed;
+  }, [persistRuntime, reacquireDraftAccess]);
 
   const wizardRecoveryId = wizard?.intent.recoveryId;
+  const cartTotalRecoveryId = draftAccess?.recoveryId ?? runtime?.access.recoveryId;
+  const cartTotalKey = JSON.stringify({ recoveryId: cartTotalRecoveryId, draft: technicalDraft, recoveryRevision, cartTotalAttempt });
+  const cartTotalComplete = technicalDraft.rows.length > 0 && technicalDraft.rows.every(row =>
+    row.retailUnitPrice && MoneySchema.safeParse(row.retailUnitPrice).success) && technicalPreview.ok &&
+    technicalPreview.value.conflicts.length === 0 && technicalPreview.value.rows.every(row => row.calculation.ok && (!row.operations || row.operations.ok)) &&
+    technicalPreview.value.dependents.every(row => row.calculation.ok &&
+      (!('operations' in row) || !row.operations || row.operations.ok));
+  useEffect(() => {
+    if (!cartTotalRecoveryId || !cartTotalComplete || saleStep !== 'products' || wizard) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const draftHash = await canonicalHash(technicalDraft);
+        const response = await api.post('/partner/cases/customer-total-preview', {
+          recoveryId: cartTotalRecoveryId, draft: technicalDraft,
+        });
+        const data = response.data?.data;
+        if (data?.inputRevision !== technicalDraft.inputRevision || data?.draftHash !== draftHash)
+          throw new Error('Customer total belongs to another draft');
+        const total = MoneySchema.parse(data.total);
+        if (!cancelled) setCartTotal({ key: cartTotalKey, total });
+      })().catch(() => { if (!cancelled) setCartTotal({ key: cartTotalKey, failed: true }); });
+    }, 600);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  // Full draft identity includes dimensions, operations and customer rates; stale results are never displayed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartTotalKey, cartTotalComplete, saleStep, Boolean(wizard)]);
+
   useEffect(() => {
     if (!wizardRecoveryId || !runtime) return;
     window.localStorage.setItem(wizardDraftKey(runtime.actorId, wizard.intent.recoveryId), JSON.stringify({
@@ -265,12 +357,14 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   }, [runtime, wizard, wizardRecoveryId]);
 
   const persistWizardServer = useCallback(async (next: PartnerWizardDraft) => {
+    if (finalizationFlight.current) return false;
     if (!runtime || next.intent.recoveryId !== runtime.saved.recoveryId) return false;
     wizardSavePending.current = next;
     if (!wizardSaveFlight.current) {
       wizardSaveFlight.current = (async () => {
         try {
           while (wizardSavePending.current) {
+            if (finalizationFlight.current) { wizardSavePending.current = null; break; }
             const current = wizardSavePending.current;
             wizardSavePending.current = null;
             const active = runtimeRef.current;
@@ -316,26 +410,26 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     const requestedCaseId = searchParams.get('caseId');
     void readPartnerCreationContext(() => api.get(requestedCaseId
       ? `/partner/cases/creation-context?caseId=${encodeURIComponent(requestedCaseId)}`
-      : '/partner/cases/creation-context')).then(response => {
+      : '/partner/cases/creation-context')).then(async response => {
       const parsed = PartnerCreationContextSchema.safeParse((response.data as { data?: unknown })?.data);
       if (!active) return;
       if (!parsed.success) throw new Error('Invalid Partner creation context');
-      setContext(parsed.data);
       setError(null);
       if (parsed.data.kind === 'PARTNER') {
-        const returnedStep = searchParams.get('step');
-        if (returnedStep === '2') setSaleStep('customer');
-        if (returnedStep === '3') setSaleStep('project');
+        const returnedStep = partnerSaleReturnStep(searchParams);
+        if (returnedStep) setSaleStep(returnedStep);
         const startFresh = shouldStartFreshPartnerCreation(searchParams);
         const recoverableDraftCount = parsed.data.recoverableDrafts?.length ?? (parsed.data.recoverableDraft ? 1 : 0);
         const explicitEntry = isExplicitPartnerCreationEntry(searchParams);
-        freshInquiryRef.current = startFresh || (explicitEntry && recoverableDraftCount === 0);
+        // A route asking for a new inquiry is not consent to discard an
+        // unfinished draft. Only the explicit start-new action sets this ref.
+        if (recoverableDraftCount === 0) freshInquiryRef.current = startFresh || explicitEntry;
         if (explicitEntry) {
           setRuntime(null); setWizard(null); setDraftAccess(null); setRecoveryRevision(0); setRecoveryBlocked(false);
           recoveryRevisionRef.current = 0; checkpointedInputRevision.current = 0; inquiryHydrationFlight.current = false;
-          setTechnicalDraft(emptyTechnicalDraft()); setSaleStep('date'); setEditingCase(null);
+          setTechnicalDraft(emptyTechnicalDraft()); setSaleStep('date'); setContractDate(today()); setEditingCase(null);
         }
-        if (shouldOfferPartnerDraftChoice(recoverableDraftCount, searchParams, startFresh)) {
+        if (shouldOfferPartnerDraftChoice(recoverableDraftCount, searchParams, freshInquiryRef.current)) {
           const requestedCustomer = searchParams.get('customerId');
           const nextCustomerId = parsed.data.customers.some(customer => customer.id === requestedCustomer)
             ? requestedCustomer! : parsed.data.customers[0]?.id || '';
@@ -343,21 +437,81 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           setCustomerId(nextCustomerId);
           setProjectId(parsed.data.projects.some(project => project.id === requestedProject && project.customerId === nextCustomerId)
             ? requestedProject! : '');
+          setContext(parsed.data);
           return;
         }
-        const requestedInquiry = searchParams.get('inquiryId') || parsed.data.latestInquiryId || '';
+        const requestedInquiry = partnerCreationRequestedInquiry(searchParams, parsed.data.latestInquiryId);
         const configureForSale = mode === 'sale' && searchParams.get('configure') === '1';
-        if (configureForSale) setSaleStep('products');
-        const saved = startFresh || explicitEntry || configureForSale || !requestedInquiry ? null
-          : readStored<PersistedRuntime>(runtimeKey(parsed.data.actorId, requestedInquiry));
-        if (saved?.actorId === parsed.data.actorId) {
-          setRuntime(saved); setCustomerId(saved.customerId);
-          setDraftAccess(saved.access); setRecoveryRevision(saved.saved.recoveryRevision);
+        if (configureForSale) {
           setSaleStep('products');
-          if (saved.contractDate) setContractDate(saved.contractDate);
-          if (saved.projectId) setProjectId(saved.projectId);
+          const recoveryId = searchParams.get('draftId');
+          if (recoveryId) {
+            let serverSnapshot: unknown;
+            try {
+              const response = await api.get(`/partner/cases/drafts/${encodeURIComponent(recoveryId)}/wizard`);
+              serverSnapshot = (response.data as { data?: unknown })?.data;
+            } catch {
+              // The actor-scoped local wizard is retained before opening edits.
+            }
+            if (!active) return;
+            const stored = readStored<{ draft?: PartnerWizardDraft }>(wizardDraftKey(parsed.data.actorId, recoveryId));
+            const entry = partnerProductEditEntry(recoveryId, serverSnapshot, stored?.draft?.intent);
+            setContractDate(entry.contractDate);
+            setCustomerId(parsed.data.customers.some(customer => customer.id === entry.customerId) ? entry.customerId : '');
+            setProjectId(parsed.data.projects.some(project => project.id === entry.projectId && project.customerId === entry.customerId)
+              ? entry.projectId! : '');
+          }
         }
-        else {
+        const actorId = parsed.data.actorId;
+        const requestedDraft = searchParams.get('draftId');
+        const localInquiries = requestedInquiry ? [requestedInquiry] : requestedDraft ? parsed.data.inquiryIds : [];
+        const saved = startFresh || explicitEntry || configureForSale ? null : localInquiries
+          .map(inquiryId => {
+            const value = readStored<PersistedRuntime>(runtimeKey(actorId, inquiryId));
+            return value?.inquiryId === inquiryId ? value : null;
+          })
+          .find(value => value?.actorId === actorId &&
+            (!requestedDraft || value.access?.recoveryId === requestedDraft));
+        const candidate = saved && (parsed.data.recoverableDrafts ??
+          (parsed.data.recoverableDraft ? [parsed.data.recoverableDraft] : []))
+          .find(item => item.recoveryId === saved.access?.recoveryId);
+        let restored = false;
+        // Browser contents are only a cache of a live, actor-owned recovery.
+        // latestInquiryId alone is not evidence that the previous attempt survives.
+        const receipt = PartnerTechnicalSaveReceiptSchema.safeParse(saved?.saved);
+        if (saved && candidate && receipt.success && receipt.data.recoveryId === candidate.recoveryId) {
+          const browserSessionId = getPartnerBrowserSessionId(window.sessionStorage, parsed.data.actorId);
+          const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: candidate.recoveryId,
+            browserSessionId, baseRevision: candidate.baseRevision, takeover: false });
+          if (!active) return;
+          if (!lease.ok) {
+            setRecoveryBlocked(true); setError(lease.error.message);
+          } else {
+            const access: Access = { schemaVersion: 1, recoveryId: candidate.recoveryId, browserSessionId,
+              leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
+            const recovered = await ports.recovery.read(access);
+            const validated = recovered.ok && recovered.value.recoveryId === candidate.recoveryId &&
+              recovered.value.recoveryRevision === receipt.data.recoveryRevision
+              ? await ports.saved.readSaved({ ...access, recoveryRevision: receipt.data.recoveryRevision }) : null;
+            if (!active) return;
+            if (validated?.ok && validated.value.recoveryId === candidate.recoveryId &&
+                validated.value.graphHash === receipt.data.graphHash &&
+                validated.value.recoveryRevision === receipt.data.recoveryRevision) {
+              setRuntime({ ...saved, access, saved: { ...validated.value, replayed: true } });
+              setCustomerId(saved.customerId); setProjectId(saved.projectId ?? '');
+              setDraftAccess(access); setRecoveryRevision(validated.value.recoveryRevision);
+              if (recovered.ok && recovered.value.draft) {
+                setTechnicalDraft(repairPartnerTechnicalOperationIds(recovered.value.draft));
+                checkpointedInputRevision.current = recovered.value.draft.inputRevision;
+              }
+              if (recovered.ok) setRetainedCatalog(recovered.value.retainedCatalog ?? null);
+              setSaleStep(returnedStep ?? 'products');
+              if (saved.contractDate) setContractDate(saved.contractDate);
+              restored = true;
+            }
+          }
+        }
+        if (!restored && !configureForSale) {
           const requestedCustomer = searchParams.get('customerId');
           const nextCustomerId = parsed.data.customers.some(customer => customer.id === requestedCustomer)
             ? requestedCustomer! : parsed.data.customers[0]?.id || '';
@@ -373,6 +527,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           router.replace(`/dashboard/crm/customers/create?${params.toString()}`);
         }
       }
+      setContext(parsed.data);
     }).catch(() => active && setError('تشخیص مسیر ایجاد قرارداد انجام نشد. دوباره تلاش کنید.'));
     return () => { active = false; };
   }, [mode, router, searchParams]);
@@ -450,12 +605,21 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (recoveryStarting.current || (runtime && !fresh)) return;
     recoveryStarting.current = true; setError(null);
     try {
+      const requestedCaseId = searchParams.get('caseId');
       const requestedDraft = searchParams.get('draftId');
       const requestedBase = Number(searchParams.get('baseRevision'));
       const requestedCandidate = requestedDraft ? partner.recoverableDrafts?.find(item => item.recoveryId === requestedDraft)
         ?? { recoveryId: requestedDraft, baseRevision: Number.isSafeInteger(requestedBase) && requestedBase >= 0 ? requestedBase : 0,
           updatedAt: new Date().toISOString() } : undefined;
-      const candidate = fresh ? undefined : requestedCandidate ?? partner.recoverableDraft;
+      const candidate = fresh ? undefined : draftAccess ? { recoveryId: draftAccess.recoveryId,
+        baseRevision: draftAccess.baseRevision } : requestedCaseId
+        ? partner.recoverableDrafts?.find(item => item.caseId === requestedCaseId)
+          ?? (partner.recoverableDraft?.caseId === requestedCaseId ? partner.recoverableDraft : undefined)
+        : requestedCandidate ?? partner.recoverableDraft;
+      if (requestedCaseId && !candidate) {
+        setError('پیش‌نویس این پرونده پیدا نشد؛ شماره پرونده را به پشتیبانی اعلام کنید.');
+        return;
+      }
       const recoveryId = candidate?.recoveryId ?? `partner-recovery-${crypto.randomUUID()}`;
       const browserSessionId = getPartnerBrowserSessionId(window.sessionStorage, partner.actorId);
       const baseRevision = candidate?.baseRevision ?? 0;
@@ -465,23 +629,57 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
       const recovered = await ports.recovery.read(access);
       if (!recovered.ok) { setError(recovered.error.message); return; }
+      if (recovered.value.recoveryId !== recoveryId) throw new Error('Recovery identity mismatch');
+      if (!fresh && !requestedCaseId) {
+        const entry = readSessionEntry(partner.actorId, recoveryId);
+        if (entry && entry.actorId === partner.actorId && entry.recoveryId === recoveryId &&
+            entry.baseRevision === access.baseRevision && entry.recoveryRevision === recovered.value.recoveryRevision &&
+            partnerSaleEntrySteps.includes(entry.step) && !searchParams.get('configure')) {
+          setContractDate(entry.contractDate);
+          const nextCustomer = searchParams.get('customerId') ?? entry.customerId;
+          setCustomerId(partner.customers.some(customer => customer.id === nextCustomer) ? nextCustomer : '');
+          setProjectId(partner.projects.some(project => project.id === entry.projectId && project.customerId === nextCustomer)
+            ? entry.projectId : '');
+          setSaleStep(partnerSaleReturnStep(searchParams) ?? entry.step);
+        }
+      }
       if (recovered.value.mandatoryDefaults) setMandatoryDefaults(recovered.value.mandatoryDefaults);
       setRetainedCatalog(recovered.value.retainedCatalog ?? null);
       setDraftAccess(access); setRecoveryRevision(recovered.value.recoveryRevision);
       checkpointedInputRevision.current = recovered.value.draft?.inputRevision ?? 0;
       if (fresh) setTechnicalDraft(emptyTechnicalDraft());
-      else if (recovered.value.draft) setTechnicalDraft(recovered.value.draft);
+      else if (recovered.value.draft) setTechnicalDraft(repairPartnerTechnicalOperationIds(recovered.value.draft));
       setRecoveryBlocked(false);
+      if (shouldStartFreshPartnerCreation(searchParams) && !searchParams.get('newCustomer')) {
+        window.sessionStorage.setItem(entryDraftKey(partner.actorId, recoveryId), JSON.stringify({
+          actorId: partner.actorId, recoveryId, baseRevision: access.baseRevision,
+          recoveryRevision: recovered.value.recoveryRevision, contractDate, customerId, projectId, step: saleStep,
+        } satisfies EntrySnapshot));
+        router.replace(`${mode === 'inquiry' ? '/dashboard/sales/partner-inquiries' : '/dashboard/sales/contracts/create'}?draftId=${encodeURIComponent(recoveryId)}`);
+      }
+      return access;
     } catch { setError('بازیابی پیش‌نویس فنی انجام نشد.'); }
     finally { recoveryStarting.current = false; }
-  }, [runtime, searchParams]);
+  }, [contractDate, customerId, draftAccess, mode, projectId, router, runtime, saleStep, searchParams]);
+
+  useEffect(() => {
+    if (context?.kind !== 'PARTNER' || !draftAccess || runtime || recoveryBlocked || startNewFlight.current) return;
+    window.sessionStorage.setItem(entryDraftKey(context.actorId, draftAccess.recoveryId), JSON.stringify({
+      actorId: context.actorId, recoveryId: draftAccess.recoveryId, baseRevision: draftAccess.baseRevision,
+      recoveryRevision, contractDate, customerId, projectId, step: saleStep,
+    } satisfies EntrySnapshot));
+  }, [context, draftAccess, runtime, recoveryBlocked, recoveryRevision, contractDate, customerId, projectId, saleStep]);
 
   const checkpointTechnicalDraft = useCallback((draft: PartnerTechnicalDraft, access: Access): Promise<boolean> => {
     if (checkpointFlight.current) return checkpointFlight.current;
     const expectedRecoveryRevision = recoveryRevisionRef.current;
     checkpointFlight.current = (async () => {
       try {
-        const result = await ports.recovery.checkpoint({ ...access, expectedRecoveryRevision,
+        // Configuring a modal can outlast the short writer lease. Reacquire for
+        // this same browser before saving; never silently take another writer.
+        const refreshed = await reacquireDraftAccess(access);
+        if (!refreshed) return false;
+        const result = await ports.recovery.checkpoint({ ...refreshed, expectedRecoveryRevision,
           idempotencyKey: `partner-checkpoint-${crypto.randomUUID()}`, draft });
         if (!result.ok) { setRecoveryBlocked(true); setError(result.error.message); return false; }
         checkpointedInputRevision.current = result.value.inputRevision;
@@ -494,7 +692,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       } finally { checkpointFlight.current = null; }
     })();
     return checkpointFlight.current;
-  }, []);
+  }, [reacquireDraftAccess]);
 
   const discardDraftRecovery = useCallback(async (partner: PartnerContext) => {
     if (searchParams.get('caseId')) {
@@ -530,7 +728,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
   }, [searchParams]);
 
   useEffect(() => {
-    if (context?.kind !== 'PARTNER' || !context.writable || runtime || draftAccess || recoveryBlocked) return;
+    if (context?.kind !== 'PARTNER' || !context.writable || runtime || draftAccess || recoveryBlocked || startNewFlight.current) return;
     const recoverableDraftCount = context.recoverableDrafts?.length ?? (context.recoverableDraft ? 1 : 0);
     if (shouldOfferPartnerDraftChoice(recoverableDraftCount, searchParams, freshInquiryRef.current)) return;
     void openDraftRecovery(context, false, freshInquiryRef.current);
@@ -546,24 +744,40 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     return () => window.clearTimeout(timer);
   }, [checkpointTechnicalDraft, draftAccess, recoveryBlocked, recoveryRevision, runtime, technicalDraft]);
 
-  const beginNewInquiry = useCallback(async (partner: PartnerContext) => {
-    if (pending || recoveryStarting.current) return;
+  const beginNewInquiry = useCallback(async (partner: PartnerContext, discardRecoveryId?: string) => {
+    if (startNewFlight.current || pending || recoveryStarting.current) return;
+    startNewFlight.current = true;
     setPending(true); setError(null);
-    freshInquiryRef.current = true;
-    setRuntime(null); setWizard(null); setDraftAccess(null); setRecoveryRevision(0); setRecoveryBlocked(false);
-    recoveryRevisionRef.current = 0; checkpointedInputRevision.current = 0; inquiryHydrationFlight.current = false;
-    setTechnicalDraft(emptyTechnicalDraft());
-    router.replace(mode === 'inquiry' ? '/dashboard/sales/partner-inquiries?newInquiry=1'
-      : '/dashboard/sales/contracts/create?newInquiry=1');
-    try { await openDraftRecovery(partner, false, true); }
-    finally { setPending(false); }
+    try {
+      if (discardRecoveryId) {
+        await api.delete(`/partner/cases/drafts/${encodeURIComponent(discardRecoveryId)}`);
+        window.sessionStorage.removeItem(entryDraftKey(partner.actorId, discardRecoveryId));
+        setContext(current => current?.kind === 'PARTNER' && current.actorId === partner.actorId ? {
+          ...current, recoverableDrafts: current.recoverableDrafts?.filter(item => item.recoveryId !== discardRecoveryId),
+          recoverableDraft: current.recoverableDraft?.recoveryId === discardRecoveryId ? undefined : current.recoverableDraft,
+        } : current);
+      }
+      freshInquiryRef.current = true;
+      setRuntime(null); setWizard(null); setDraftAccess(null); setRecoveryRevision(0); setRecoveryBlocked(false);
+      recoveryRevisionRef.current = 0; checkpointedInputRevision.current = 0; inquiryHydrationFlight.current = false;
+      setTechnicalDraft(emptyTechnicalDraft()); setContractDate(today());
+      setCustomerId(partner.customers[0]?.id ?? ''); setProjectId(''); setSaleStep('date');
+      const access = await openDraftRecovery(partner, false, true);
+      if (!access) return;
+      window.sessionStorage.setItem(entryDraftKey(partner.actorId, access.recoveryId), JSON.stringify({
+        actorId: partner.actorId, recoveryId: access.recoveryId, baseRevision: access.baseRevision,
+        recoveryRevision: 0, contractDate: today(), customerId: partner.customers[0]?.id ?? '', projectId: '', step: 'date',
+      } satisfies EntrySnapshot));
+      router.replace(`${mode === 'inquiry' ? '/dashboard/sales/partner-inquiries' : '/dashboard/sales/contracts/create'}?draftId=${encodeURIComponent(access.recoveryId)}`);
+    } catch { setError('کنار گذاشتن پیش‌نویس و شروع قرارداد جدید انجام نشد.'); }
+    finally { startNewFlight.current = false; setPending(false); }
   }, [mode, openDraftRecovery, pending, router]);
 
   useEffect(() => {
     if (context?.kind !== 'PARTNER' || runtime || freshInquiryRef.current || !draftAccess || recoveryRevision < 1 ||
         searchParams.get('caseId') ||
         inquiryHydrationFlight.current || (mode === 'sale' && searchParams.get('configure') === '1')) return;
-    const inquiryId = searchParams.get('inquiryId') || context.latestInquiryId;
+    const inquiryId = partnerCreationRequestedInquiry(searchParams, context.latestInquiryId);
     if (!inquiryId) return;
     inquiryHydrationFlight.current = true;
     void inquiryPorts.queries.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId }).then(async result => {
@@ -590,24 +804,54 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
 
   const readCasePricingRows = useCallback(async (saved: PartnerTechnicalSaveReceipt, caseId: string) => {
     const matches = await readApprovalMatches(saved, caseId);
-    const inquiryId = `partner-case-pricing:${saved.recoveryId}:1`;
-    const inquiry = await inquiryPorts.queries.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId });
-    return inquiry.ok ? inquiry.value.rows : matches.rows;
+    // Case revisions also record payments/deliveries. They are not inquiry IDs.
+    const response = await api.get(`/partner/cases/creation-context?caseId=${encodeURIComponent(caseId)}`);
+    const available = PartnerCreationContextSchema.safeParse((response.data as { data?: unknown })?.data);
+    if (!available.success || available.data.kind !== 'PARTNER') throw partnerError('INTEGRITY_CONFLICT');
+    const inquiryIds = partnerCasePricingInquiryIds(saved.recoveryId, available.data.inquiryIds, matches.rows);
+    const inquiries = await Promise.all(inquiryIds.map(inquiryId => inquiryPorts.queries.query({
+      schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId,
+    })));
+    if (inquiries.some(result => !result.ok && result.error.code !== 'NOT_FOUND')) throw partnerError('INTEGRITY_CONFLICT');
+    const currentRows = inquiries.flatMap(result => result.ok ? result.value.rows : []);
+    const retained = matches.rows.filter(match => !currentRows.some(row =>
+      row.configurationRef.recoveryId === match.configurationRef.recoveryId &&
+      row.configurationRef.recoveryRevision === match.configurationRef.recoveryRevision &&
+      row.configurationRef.productRowId === match.configurationRef.productRowId && !row.successor));
+    return [...currentRows, ...retained];
   }, [readApprovalMatches]);
 
   const startInquiry = async (partner: PartnerContext, selectedProductRowIds?: ReadonlySet<string>, skipInquiry = false) => {
-    if (!technicalActionReady || !draftAccess || (mode === 'sale' && (!contractDate || !customerId || !projectId))) return;
+    if (mode === 'sale') {
+      const issue = partnerSaleEntryIssue({ contractDate, customerId, projectId });
+      if (issue) { setSaleStep(issue.step); setError(issue.message); return; }
+    }
+    if (!technicalActionReady || !draftAccess) {
+      setError(technicalIssue ?? 'اطلاعات محصولات یا دسترسی پیش‌نویس آماده نیست؛ موارد مشخص‌شده را بررسی کنید.');
+      return;
+    }
     setPending(true); setError(null);
     technicalCommitFlight.current = true;
     try {
+      const activeRuntime = runtimeRef.current;
+      const refreshed = activeRuntime?.access.recoveryId === draftAccess.recoveryId
+        ? await reacquireRuntime(activeRuntime) : null;
+      if (activeRuntime && !refreshed) return;
+      const activeAccess = refreshed?.access ?? await reacquireDraftAccess(draftAccess);
+      if (!activeAccess) return;
       const saved = await commitPartnerTechnicalDraft({
         checkpointRequired: technicalDraft.inputRevision > checkpointedInputRevision.current,
-        checkpoint: () => checkpointTechnicalDraft(technicalDraft, draftAccess),
-        save: () => ports.saved.save({ ...draftAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
+        checkpoint: () => checkpointTechnicalDraft(technicalDraft, activeAccess),
+        save: () => ports.saved.save({ ...activeAccess, expectedRecoveryRevision: recoveryRevisionRef.current,
           idempotencyKey: `partner-save-${crypto.randomUUID()}`, draft: technicalDraft }),
       });
       if (!saved) return;
-      if (!saved.ok) { setError(saved.error.message); return; }
+      if (!saved.ok) {
+        setError(saved.error.code === 'INVALID_PAYLOAD' && editingCase
+          ? technicalIssue ?? partnerCaseReviewMessage(editingCase.caseNumber, editingCase.trackingNumber)
+          : saved.error.message);
+        return;
+      }
       setRecoveryRevision(saved.value.recoveryRevision);
       const subjects = saved.value.pricingSubjects ?? saved.value.rows.map(row => ({ configurationRef: row.configurationRef,
         role: 'PRIMARY' as const }));
@@ -624,7 +868,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         .filter(Boolean);
       if (skipInquiry && mode === 'sale') {
         const inquiryId = `${saved.value.recoveryId}-unpriced`;
-        const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
+        const value = { actorId: partner.actorId, inquiryId, access: activeAccess, saved: saved.value,
           configuredRows: allConfiguredRows, knownInquiryRows: [], customerId, contractDate, projectId };
         persistRuntime(value);
         setInitialInquiryOpen(false);
@@ -634,7 +878,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       }
       if (!availableRows.length && matches?.rows.length) {
         const inquiryId = matches.rows[0].approvedRowBinding!.inquiryId;
-        persistRuntime({ actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
+        persistRuntime({ actorId: partner.actorId, inquiryId, access: activeAccess, saved: saved.value,
           configuredRows: allConfiguredRows, knownInquiryRows: matches.rows,
           customerId, contractDate, projectId });
         setInitialInquiryOpen(false);
@@ -655,7 +899,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       window.localStorage.setItem(inquiryPendingKey(partner.actorId), JSON.stringify(command));
       const submitted = await inquiryPorts.commands.execute(command);
       if (!submitted.ok) { window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); setError(submitted.error.message); return; }
-      const value = { actorId: partner.actorId, inquiryId, access: draftAccess, saved: saved.value,
+      const value = { actorId: partner.actorId, inquiryId, access: activeAccess, saved: saved.value,
         configuredRows: allConfiguredRows, knownInquiryRows: matches?.rows,
         customerId, ...(mode === 'sale' ? { contractDate, projectId } : {}) };
       window.localStorage.removeItem(inquiryPendingKey(partner.actorId)); persistRuntime(value);
@@ -707,7 +951,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     } });
   }, [editingCase, reacquireRuntime, submissionActorId, submissionRecoveryId]);
 
-  const enterWizard = async (inquiry: PartnerInquiryView, runtimeOverride?: PersistedRuntime) => {
+  const enterWizard = async (inquiry: PartnerInquiryView, runtimeOverride?: PersistedRuntime,
+    caseIdOverride?: string, caseNumberOverride?: string) => {
     const currentRuntime = runtimeOverride ?? runtime;
     if (!currentRuntime || !context || context.kind !== 'PARTNER') return;
     setError(null);
@@ -716,10 +961,14 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     const validated = await ports.saved.readSaved({ ...refreshed.access, recoveryRevision: refreshed.saved.recoveryRevision });
     if (!validated.ok) { setError(validated.error.message); return; }
     let inquiryRows: readonly PartnerInquiryRow[] = inquiry.rows;
-    try {
-      const caseId = editingCase?.owner.caseId;
-      inquiryRows = caseId ? await readCasePricingRows(refreshed.saved, caseId) : inquiry.rows;
-    } catch { /* The exact inquiry view remains a safe fallback for older records. */ }
+    const caseId = caseIdOverride ?? editingCase?.owner.caseId;
+    try { inquiryRows = caseId ? await readCasePricingRows(refreshed.saved, caseId) : inquiry.rows; }
+    catch (caught) { setError(partnerCaseHasIntegrityError(caught)
+      ? partnerCaseReviewMessage(caseNumberOverride ?? editingCase?.caseNumber ?? caseId ?? '')
+      : 'نتیجه استعلام این پرونده دریافت نشد؛ صفحه را دوباره باز کنید.'); return; }
+    // After saving a correction, return to the numbered Case's pricing step.
+    // Product persistence alone must not submit a new Sabalan duty.
+    const openingNumberedResult = Boolean(caseId);
     const selectedCustomerId = currentRuntime.customerId || customerId || context.customers[0]?.id || '';
     const customer = context.customers.find(item => item.id === selectedCustomerId);
     const selectedProject = context.projects.find(item => item.id === currentRuntime.projectId && item.customerId === selectedCustomerId);
@@ -730,17 +979,14 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (!selectedProject) { setSaleStep('project'); setError('برای ایجاد قرارداد، پروژه را انتخاب کنید.'); return; }
     const selectedContractDate = currentRuntime.contractDate || contractDate || today();
     const draft = enterPartnerWizard({ inquiryRows, now: Date.now(), validated: validated.value,
+      productPresentation: partnerRetailPresentation(technicalDraft, technicalProducts),
       retailUnitPrices: new Map(technicalDraft.rows.flatMap(row => row.retailUnitPrice
         ? [[row.productRowId, row.retailUnitPrice] as const] : [])),
       base: { customerId: customer.id, recoveryId: currentRuntime.saved.recoveryId, recoveryRevision: currentRuntime.saved.recoveryRevision,
         contractDate: selectedContractDate, projectId: selectedProject.id,
         customerPaymentPlan: { planId: `partner-customer-plan-${crypto.randomUUID()}`, version: 1,
-          effectiveDate: selectedContractDate, installments: [{ installmentId: `partner-installment-${crypto.randomUUID()}`,
-            dueDate: addDays(selectedContractDate, 30), amount: { amount: '0', currency }, method: 'BANK_TRANSFER', subtype: 'SHIBA' }] },
-        deliveries: currentRuntime.saved.rows.map((row, index) => ({ deliveryId: `partner-delivery-${crypto.randomUUID()}`,
-          date: addDays(selectedContractDate, 7 + index), destination: customer.address,
-          receiverName: customer.displayName,
-          items: [{ productRowId: row.configurationRef.productRowId, quantity: row.quantity }] })),
+          effectiveDate: selectedContractDate, installments: [] },
+        deliveries: [],
         retailDiscount: { amount: '0', currency }, retailDiscountPercent: '0',
       } });
     if (!draft) { setError('همه ردیف‌های فنی باید پاسخ معتبر و جاری داشته باشند.'); return; }
@@ -752,9 +998,9 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       }
       const rows = draft.rows.map(row => ({ ...row,
         retailUnitPrice: intent.rows.find(item => item.productRowId === row.productRowId)!.retailUnitPrice }));
-      setWizard({ ...draft, step, rows, intent: { ...intent,
+      setWizard({ ...draft, step: partnerCaseResultStep(step, openingNumberedResult), rows, intent: { ...intent,
         rows: partnerRetailIntentRows(rows),
-        customerPaymentPlan: alignPartnerCustomerPaymentPlan(rows, intent.retailDiscount, intent.customerPaymentPlan),
+        customerPaymentPlan: intent.customerPaymentPlan,
         additionalMaterialApprovals: draft.intent.additionalMaterialApprovals } });
       return true;
     };
@@ -768,20 +1014,19 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         return previous?.retailUnitPrice.currency === row.retailUnitPrice.currency
           ? { ...row, retailUnitPrice: previous.retailUnitPrice } : row;
       });
-      const deliveries = preservePartnerDeliveriesAcrossProductEdit(intent.deliveries, draft.intent.deliveries,
+      const deliveries = preservePartnerDeliveriesAcrossProductEdit(intent.deliveries,
         rows.map(row => row.productRowId));
       const paymentPlan = intent.customerPaymentPlan.installments.every(item => item.amount.currency === currency)
         ? intent.customerPaymentPlan : draft.intent.customerPaymentPlan;
       const retailDiscount = intent.retailDiscount.currency === currency ? intent.retailDiscount : draft.intent.retailDiscount;
       const nextIntent = { ...draft.intent, contractDate: intent.contractDate, customerId: nextCustomerId,
         ...(preservedProject ? { projectId: preservedProject.id } : {}), deliveries, customerPaymentPlan: paymentPlan,
-        retailDiscount, belowCostConfirmed: false,
+        retailDiscount, preparationCompleted: intent.preparationCompleted ?? false, belowCostConfirmed: false,
         rows: partnerRetailIntentRows(rows),
         additionalMaterialApprovals: draft.intent.additionalMaterialApprovals };
       setCustomerId(nextCustomerId);
-      setWizard({ ...draft, step: 'products', rows, intent: { ...nextIntent,
-        customerPaymentPlan: alignPartnerCustomerPaymentPlan(rows, nextIntent.retailDiscount,
-          nextIntent.customerPaymentPlan) } });
+      setWizard({ ...draft, step: partnerCaseResultStep('products', openingNumberedResult), rows, intent: { ...nextIntent,
+        customerPaymentPlan: nextIntent.customerPaymentPlan } });
     };
     const stored = readStored<{ savedAt: number; serverRevision?: number; draft: PartnerWizardDraft }>(
       wizardDraftKey(currentRuntime.actorId, draft.intent.recoveryId));
@@ -816,9 +1061,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     }
     if (storedIntent?.success) { restoreAcrossProductEdit(storedIntent.data); return; }
     wizardServerRevision.current = 0;
-    setWizard({ ...draft, intent: { ...draft.intent,
-      customerPaymentPlan: alignPartnerCustomerPaymentPlan(draft.rows, draft.intent.retailDiscount,
-        draft.intent.customerPaymentPlan) } });
+    setWizard({ ...draft, step: partnerCaseResultStep(draft.step, openingNumberedResult), intent: { ...draft.intent,
+      customerPaymentPlan: draft.intent.customerPaymentPlan } });
   };
   const enterWizardRef = useRef(enterWizard);
   enterWizardRef.current = enterWizard;
@@ -828,6 +1072,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (!caseId || context?.kind !== 'PARTNER' || !draftAccess || recoveryRevision < 1 || wizard ||
         editingHydrationFlight.current) return;
     editingHydrationFlight.current = true;
+    let caseReference = caseId;
     void (async () => {
       const [caseResponse, wizardResponse, savedResult] = await Promise.all([
         api.post('/partner/cases/query-v2', { caseId }),
@@ -836,9 +1081,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       ]);
       const cases = PartnerCaseRuntimeResultSchema.safeParse((caseResponse.data as { data?: unknown })?.data);
       const recoveredWizard = PartnerWizardRecoverySnapshotSchema.safeParse((wizardResponse.data as { data?: unknown })?.data);
+      if (cases.success && cases.data.cases.length === 1 && cases.data.cases[0].view.owner.caseId === caseId) {
+        caseReference = cases.data.cases[0].view.caseNumber;
+      }
       if (!cases.success || cases.data.cases.length !== 1 || !savedResult.ok || !recoveredWizard.success ||
           cases.data.cases[0].view.owner.caseId !== caseId ||
-          recoveredWizard.data.intent.recoveryId !== draftAccess.recoveryId) throw new Error('Invalid editable Case recovery');
+          recoveredWizard.data.intent.recoveryId !== draftAccess.recoveryId) throw partnerError('INTEGRITY_CONFLICT');
       const savedReceipt: PartnerTechnicalSaveReceipt = { ...savedResult.value, replayed: true };
       const matches = await readApprovalMatches(savedReceipt, caseId);
       const inquiryId = matches.rows[0]?.approvedRowBinding?.inquiryId ?? `${draftAccess.recoveryId}-edit`;
@@ -858,8 +1106,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       setCustomerId(value.customerId); setContractDate(value.contractDate!); setProjectId(value.projectId ?? '');
       persistRuntime(value);
       if (searchParams.get('configure') === '1') setSaleStep('products');
-      else await enterWizardRef.current({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: matches.rows }, value);
-    })().catch(() => setError('بازیابی پرونده ذخیره‌شده انجام نشد؛ هیچ تغییری ثبت نشده است.'))
+      else await enterWizardRef.current({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: matches.rows },
+        value, caseId, caseReference);
+    })().catch(caught => setError(partnerCaseHasIntegrityError(caught)
+      ? partnerCaseReviewMessage(caseReference)
+      : 'بازیابی پرونده ذخیره‌شده انجام نشد؛ هیچ تغییری ثبت نشده است.'))
       .finally(() => { editingHydrationFlight.current = false; });
   }, [context, draftAccess, persistRuntime, readApprovalMatches, recoveryRevision, searchParams, wizard]);
 
@@ -877,8 +1128,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       : partnerRetailDiscountFromPercent(next.rows, next.intent.retailDiscountPercent,
         next.intent.retailDiscount.currency) ?? next.intent.retailDiscount;
     setWizard({ ...next, intent: { ...next.intent, retailDiscount,
-      customerPaymentPlan: alignPartnerCustomerPaymentPlan(next.rows, retailDiscount,
-        next.intent.customerPaymentPlan) } });
+      customerPaymentPlan: next.intent.customerPaymentPlan } });
     if (context?.kind === 'PARTNER' && next.intent.projectId && next.intent.recoveryId) {
       const customer = context.customers.find(item => item.id === next.intent.customerId)?.displayName;
       const project = context.projects.find(item => item.id === next.intent.projectId)?.title;
@@ -897,9 +1147,9 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     }
   };
 
-  const openPartnerPaymentModal = (installment: PartnerPaymentInstallment, isNew: boolean, isFirst: boolean) => {
+  const openPartnerPaymentModal = (installment: PartnerPaymentInstallment, isNew: boolean, isFirst: boolean, initialAmount?: number) => {
     setPaymentModal({ installment, isNew, isFirst });
-    setPaymentForm(paymentEntryFromPartnerInstallment(installment));
+    setPaymentForm(isNew ? { paymentDate: installment.dueDate, amount: initialAmount } : paymentEntryFromPartnerInstallment(installment));
     setPaymentModalErrors({});
   };
 
@@ -911,13 +1161,17 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
 
   const savePartnerPayment = (draft: PartnerWizardDraft) => {
     if (!paymentModal) return;
-    if (!editingCase && paymentForm.method === 'CUSTOMER_BALANCE') {
+    if (!paymentForm.method) {
+      setPaymentModalErrors({ method: 'روش پرداخت را انتخاب کنید.' });
+      return;
+    }
+    if (paymentForm.method === 'CUSTOMER_BALANCE') {
       setPaymentModalErrors({ amount: 'استفاده از باقی مانده مشتری غیرفعال است.' });
       return;
     }
     const entry: PaymentEntry = {
       id: paymentModal.installment.installmentId,
-      method: paymentForm.method ?? 'CASH_SHIBA',
+      method: paymentForm.method,
       amount: Number(paymentForm.amount ?? 0),
       paymentDate: paymentForm.paymentDate ?? '',
       nationalCode: paymentForm.nationalCode ? normalizeNumericText(paymentForm.nationalCode).replace(/\D/g, '') : undefined,
@@ -947,13 +1201,6 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     closePartnerPaymentModal();
   };
 
-  const deleteDraft = async (recoveryId: string) => {
-    if (context?.kind !== 'PARTNER') return;
-    await api.delete(`/partner/cases/drafts/${encodeURIComponent(recoveryId)}`);
-    setContext({ ...context, recoverableDrafts: context.recoverableDrafts?.filter(item => item.recoveryId !== recoveryId),
-      recoverableDraft: context.recoverableDraft?.recoveryId === recoveryId ? undefined : context.recoverableDraft });
-  };
-
   const quoteReady = Boolean(wizard?.intent.projectId);
   const quoteKey = wizard && quoteReady ? JSON.stringify({ recoveryId: wizard.intent.recoveryId,
     recoveryRevision: wizard.intent.recoveryRevision, graphHash: wizard.intent.graphHash,
@@ -967,31 +1214,15 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     const requestedRetailPrices = new Map(wizard.intent.rows.map(row => [row.productRowId,
       `${row.retailUnitPrice.currency}:${row.retailUnitPrice.amount}`]));
     void (async () => {
-      const payloadHash = await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent: wizard.intent });
-      const command = PartnerCommandSchema.parse({ schemaVersion: 1, type: 'CASE_SUBMIT', intent: wizard.intent,
-        commandId: `partner-quote-${crypto.randomUUID()}`, correlationId: `partner-quote-${crypto.randomUUID()}`,
-        idempotency: { actorId: runtime.actorId, operation: 'CASE_SUBMIT', targetId: wizard.intent.recoveryId,
-          key: `partner-quote-${crypto.randomUUID()}`, payloadHash } });
-      const response = await api.post('/partner/cases/quote', command);
-      const quote = PartnerWholesaleQuoteSchema.safeParse((response.data as { data?: unknown })?.data);
-      if (!quote.success || cancelled || quote.data.recoveryId !== wizard.intent.recoveryId ||
-          quote.data.recoveryRevision !== wizard.intent.recoveryRevision || quote.data.graphHash !== wizard.intent.graphHash) return;
+      const quote = await requestPartnerRetailQuote({ ...wizard,
+        rows: presentPartnerRetailRows(wizard.rows, technicalDraft, technicalProducts) }, runtime.actorId);
+      if (cancelled) return;
       setWizard(current => {
-        if (!current || current.intent.recoveryId !== quote.data.recoveryId ||
-            current.intent.recoveryRevision !== quote.data.recoveryRevision || current.intent.rows.some(row =>
+        if (!current || current.intent.recoveryId !== quote.recoveryId ||
+            current.intent.recoveryRevision !== quote.recoveryRevision || current.intent.rows.some(row =>
               requestedRetailPrices.get(row.productRowId) !==
                 `${row.retailUnitPrice.currency}:${row.retailUnitPrice.amount}`)) return current;
-        const rows = current.rows.map(row => {
-          const quoted = quote.data.rows.find(item => item.productRowId === row.productRowId);
-          return quoted ? { ...row, retailEffectiveUnitPrice: quoted.retailEffectiveUnitPrice,
-            ...(quoted.wholesaleUnitPrice ? { wholesaleUnitPrice: quoted.wholesaleUnitPrice } : {}) } : row;
-        });
-        const retailDiscount = current.intent.retailDiscountPercent === undefined ? current.intent.retailDiscount
-          : partnerRetailDiscountFromPercent(rows, current.intent.retailDiscountPercent,
-            current.intent.retailDiscount.currency) ?? current.intent.retailDiscount;
-        return { ...current, rows, intent: { ...current.intent, rows: partnerRetailIntentRows(rows), retailDiscount,
-          customerPaymentPlan: alignPartnerCustomerPaymentPlan(rows, retailDiscount,
-            current.intent.customerPaymentPlan) } };
+        return applyPartnerRetailQuote({ ...current, rows: presentPartnerRetailRows(current.rows, technicalDraft, technicalProducts) }, quote);
       });
     })().catch(() => !cancelled && setError('محاسبه مبلغ محصولات انجام نشد؛ دوباره تلاش کنید.'));
     return () => { cancelled = true; };
@@ -1007,18 +1238,15 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       const activeCaseId = submission?.getSnapshot().case?.owner.caseId;
       if (!activeCaseId) return;
       const rowsFromCase = await readCasePricingRows(runtime.saved, activeCaseId);
-      if (cancelled) return;
+      if (cancelled || finalizationFlight.current) return;
       setWizard(current => {
         if (!current) return current;
-        const latestFor = (subjectId: string, previous: PartnerInquiryRow) => rowsFromCase
-          .filter(row => row.configurationRef.productRowId === subjectId && row.state !== 'SUPERSEDED')
-          .at(-1) ?? previous;
         const rows = current.rows.map(row => {
-          const inquiryRow = latestFor(row.productRowId, row.inquiryRow);
+          const inquiryRow = latestMatchingPartnerInquiryRow(rowsFromCase, row.inquiryRow);
           return refreshPartnerInquiryRow(row, inquiryRow);
         });
         const materialInquiryRows = (current.materialInquiryRows ?? []).map(row => ({ ...row,
-          inquiryRow: latestFor(row.pricingSubjectId, row.inquiryRow) }));
+          inquiryRow: latestMatchingPartnerInquiryRow(rowsFromCase, row.inquiryRow) }));
         const additionalMaterialApprovals = materialInquiryRows.flatMap(row => row.inquiryRow.approvedRowBinding
           ? [{ pricingSubjectId: row.pricingSubjectId, approvedRowBinding: row.inquiryRow.approvedRowBinding }] : []);
         return { ...current, rows, materialInquiryRows, intent: { ...current.intent,
@@ -1030,7 +1258,8 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [readCasePricingRows, runtime, submission, wizardRecoveryId]);
 
-  const reinquireFromWizard = async (requestedRow?: PartnerInquiryRow) => {
+  const reinquiryCommands = useRef(new Map<string, ReturnType<typeof PartnerCommandSchema.parse>>());
+  const reinquireFromWizard = async (requestedRow?: PartnerInquiryRow, reason?: string) => {
     if (!runtime || !wizard) return;
     setError(null);
     try {
@@ -1039,28 +1268,47 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       const sourceRows = [...wizard.rows.map(item => item.inquiryRow),
         ...(wizard.materialInquiryRows ?? []).map(item => item.inquiryRow)];
       const selectedPackage = selectPartnerReinquiryRows(sourceRows,
-        `partner-case-pricing:${wizard.intent.recoveryId}:1`, requestedRow);
+        `partner-case-pricing:${wizard.intent.recoveryId}:${activeOwner.revision}`, requestedRow);
       const selected = selectedPackage.rows;
+      const historicalRows = selected.some(item => item.submissionState === 'UNSENT')
+        ? await readCasePricingRows(runtime.saved, activeOwner.caseId) : [];
+      const retryKey = JSON.stringify({ owner: activeOwner, rows: selected.map(item => ({
+        rowId: item.rowId, revision: item.revision, configuration: item.configurationRef })), reason });
+      const pendingKey = `partner-case-reinquiry-pending:${runtime.actorId}:${activeOwner.caseId}`;
+      const stored = readStored<{ retryKey: string; command: unknown }>(pendingKey);
+      const storedCommand = stored?.retryKey === retryKey ? PartnerCommandSchema.safeParse(stored.command) : undefined;
+      const retainedCommand = reinquiryCommands.current.get(retryKey) ??
+        (storedCommand?.success && storedCommand.data.type === 'CASE_PRICING_SUBMIT' &&
+          storedCommand.data.idempotency.actorId === runtime.actorId && storedCommand.data.caseId === activeOwner.caseId
+          ? storedCommand.data : undefined);
       const rows = selected.map(item => {
-        const deliveryFacts = wizard.intent.deliveries.flatMap(delivery => delivery.items
-          .filter(deliveryItem => deliveryItem.productRowId === item.configurationRef.productRowId)
-          .map(deliveryItem => ({ date: delivery.date, quantity: deliveryItem.quantity })));
+        const predecessor = item.submissionState === 'UNSENT'
+          ? historicalRows.find(previous => previous.configurationRef.productRowId === item.configurationRef.productRowId &&
+            previous.state === 'REJECTED' && !previous.successor)
+          : item;
+        if (!predecessor) throw new Error('Rejected inquiry row unavailable');
         return { rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: item.configurationRef,
-          ...(deliveryFacts.length ? { deliveryFacts } : {}),
-          predecessor: { rowId: item.rowId, revision: item.revision } };
+          predecessor: { rowId: predecessor.rowId, revision: predecessor.revision,
+            ...(reason ? { reason } : {}) } };
       });
-      const scopedInquiryId = selectedPackage.inquiryId;
+      const scopedInquiryId = `${selectedPackage.inquiryId}:requote-${crypto.randomUUID()}`;
       const intent = { schemaVersion: 1 as const, type: 'CASE_PRICING_SUBMIT' as const,
         caseId: activeOwner.caseId, expected: activeOwner, inquiryId: scopedInquiryId, rows };
       const payloadHash = await canonicalHash(intent);
-      const command = PartnerCommandSchema.parse({ ...intent, commandId: payloadHash, correlationId: payloadHash,
+      const command = retainedCommand ?? PartnerCommandSchema.parse({ ...intent, commandId: payloadHash, correlationId: payloadHash,
         idempotency: { actorId: runtime.actorId, operation: intent.type,
           targetId: activeOwner.caseId,
           key: payloadHash, payloadHash } });
+      reinquiryCommands.current.set(retryKey, command);
+      window.localStorage.setItem(pendingKey, JSON.stringify({ retryKey, command }));
       const result = await inquiryPorts.commands.execute(command);
-      if (!result.ok) { setError(result.error.message); return; }
-      const pendingByProductRowId = new Map(rows.map(item => [item.configuration.productRowId, {
-        inquiryId: scopedInquiryId, rowId: item.rowId, revision: 1, state: 'PENDING' as const,
+      if (!result.ok) { reinquiryCommands.current.delete(retryKey); window.localStorage.removeItem(pendingKey);
+        setError(result.error.message); throw new Error(result.error.message); }
+      reinquiryCommands.current.delete(retryKey);
+      window.localStorage.removeItem(pendingKey);
+      if (command.type !== 'CASE_PRICING_SUBMIT') throw new Error('Invalid retained inquiry');
+      const pendingByProductRowId = new Map(command.rows.map(item => [item.configuration.productRowId, {
+        inquiryId: command.inquiryId, rowId: item.rowId, revision: 1, state: 'PENDING' as const,
       }]));
       setWizard(current => current ? { ...current,
         rows: current.rows.map(item => ({ ...item, inquiryRow: pendingByProductRowId.has(item.productRowId)
@@ -1069,14 +1317,14 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           inquiryRow: pendingByProductRowId.has(item.pricingSubjectId)
             ? { ...item.inquiryRow, successor: pendingByProductRowId.get(item.pricingSubjectId) } : item.inquiryRow })),
       } : current);
-    } catch { setError('ارسال استعلام مجدد انجام نشد؛ اطلاعات Wizard حفظ شده است.'); }
+    } catch (caught) { setError('ارسال استعلام مجدد انجام نشد؛ اطلاعات پیش‌نویس حفظ شده است.'); if (reason) throw caught; }
   };
 
   const renderSection = (step: Exclude<PartnerWizardStep, 'products' | 'pricing'>, draft: PartnerWizardDraft,
     showValidationErrors: boolean) => {
     if (!context || context.kind !== 'PARTNER') return null;
     if (step === 'date') return <ContractDateStepView creatorName={context.actorDisplayName}
-      dateControl={<PersianCalendarComponent value={draft.intent.contractDate} className="w-full"
+      dateControl={<PersianCalendarComponent valueFormat="gregorian" value={draft.intent.contractDate} className="w-full"
         onChange={contractDate => updateWizard({ ...draft, intent: { ...draft.intent, contractDate } })} />}
       numberNotice="شماره پس از ثبت موفق قرارداد تخصیص داده می‌شود." />;
     if (step === 'customer') return <ContractCustomerStepView
@@ -1106,18 +1354,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       </div>;
     }
     if (step === 'delivery') return <div className="mx-auto max-w-4xl space-y-4">
-      <div className="flex items-center justify-between gap-3"><h3 className="text-lg font-medium">لیست تحویل‌ها</h3>
-        <ErpButton label="افزودن تحویل" onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
-          deliveries: [...draft.intent.deliveries, { deliveryId: `partner-delivery-${crypto.randomUUID()}`,
-            date: addDays(draft.intent.contractDate, 7), destination: context.customers.find(item => item.id === draft.intent.customerId)?.address ?? '',
-            receiverName: context.customers.find(item => item.id === draft.intent.customerId)?.displayName,
-            items: [] }] } })} />
-      </div>{draft.intent.deliveries.map((delivery, index) => <ErpNeumorphicCard key={delivery.deliveryId} className="space-y-4 p-6">
+      {draft.intent.deliveries.map((delivery, index) => <ErpNeumorphicCard key={delivery.deliveryId} className="space-y-4 p-6">
       <div className="flex items-center justify-between"><h3 className="font-semibold">تحویل {(index + 1).toLocaleString('fa-IR')}</h3>
-        {draft.intent.deliveries.length > 1 && <ErpButton label="حذف تحویل" tone="danger" variant="outline"
+        <ErpButton label="حذف تحویل" tone="danger" variant="outline"
           onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
-            deliveries: draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId) } })} />}</div>
-      <ContractDeliveryDetailsFields value={{ date: delivery.date, address: delivery.destination,
+            deliveries: draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId) } })} /></div>
+      <ContractDeliveryDetailsFields dateFormat="gregorian" value={{ date: delivery.date, address: delivery.destination,
         projectManagerName: delivery.projectManagerName ?? '', receiverName: delivery.receiverName ?? '',
         notes: delivery.notes ?? '' }} errors={showValidationErrors ? {
           ...(!delivery.date ? { date: 'تاریخ تحویل الزامی است.' } : {}),
@@ -1137,6 +1379,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         } })} />
       <ErpNeumorphicCard className="space-y-3 p-4"><h4 className="text-sm font-semibold">محصولات این تحویل</h4>
         {draft.rows.map(row => {
+          const unitLabel = partnerQuantityUnitCopy[row.unit] ?? row.unit;
           const current = delivery.items.find(item => item.productRowId === row.productRowId)?.quantity ?? '0';
           const others = draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId)
             .flatMap(item => item.items.filter(product => product.productRowId === row.productRowId).map(product => product.quantity));
@@ -1152,11 +1395,11 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           };
           return <ErpCard key={row.productRowId} className="space-y-2 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{row.inquiryRow.description}</strong>
-              <ErpField label={`مقدار (${row.unit})`}><ErpInput inputMode="decimal" value={current}
+              <ErpField label={`مقدار (${unitLabel})`}><ErpInput inputMode="decimal" value={current}
                 onChange={event => updateQuantity(event.target.value)} /></ErpField></div>
-            <div className="sds-text-secondary flex flex-wrap gap-3 text-xs"><span>کل قرارداد: {row.quantity} {row.unit}</span>
-              <span>تحویل‌های دیگر: {maximum === null ? 'نامعتبر' : remainingPartnerAmount(row.quantity, [maximum])} {row.unit}</span>
-              <span>مانده: {unallocated ?? 'نامعتبر'} {row.unit}</span>
+            <div className="sds-text-secondary flex flex-wrap gap-3 text-xs"><span>کل قرارداد: {row.quantity} {unitLabel}</span>
+              <span>تحویل‌های دیگر: {maximum === null ? 'نامعتبر' : remainingPartnerAmount(row.quantity, [maximum])} {unitLabel}</span>
+              <span>مانده: {unallocated ?? 'نامعتبر'} {unitLabel}</span>
               {maximum !== null && current !== maximum && <ErpPressable type="button"
                 onClick={() => updateQuantity(maximum)}>پر کردن ({maximum})</ErpPressable>}</div>
             {showValidationErrors && unallocated !== '0' && <ErpInlineState kind="stale"
@@ -1164,11 +1407,29 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           </ErpCard>;
         })}
       </ErpNeumorphicCard>
-    </ErpNeumorphicCard>)}</div>;
+    </ErpNeumorphicCard>)}
+      <div className="flex items-center justify-center gap-3">
+        <ErpButton label="افزودن تحویل" onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
+          deliveries: [...draft.intent.deliveries, { deliveryId: `partner-delivery-${crypto.randomUUID()}`,
+            date: addDays(draft.intent.contractDate, 7), destination: context.customers.find(item => item.id === draft.intent.customerId)?.address ?? '',
+            receiverName: context.customers.find(item => item.id === draft.intent.customerId)?.displayName,
+            items: [] }] } })} />
+      </div>
+    </div>;
     if (step === 'payment') { const retailSummary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
+      const remaining = retailSummary.valid ? remainingPartnerAmount(retailSummary.retail,
+        draft.intent.customerPaymentPlan.installments.map(item => item.amount.amount)) : null;
+      const remainingText = remaining === null ? 'مجموع اقساط از جمع نهایی بیشتر است.'
+        : partnerMoneyText(remaining, draft.intent.retailDiscount.currency);
       const retailSubtotal = partnerRetailSubtotal(draft.rows, draft.intent.retailDiscount.currency); return <div className="space-y-3">
-      <ContractDiscountEditor mode="percent" value={draft.intent.retailDiscountPercent ?? '0'}
-        label="درصد تخفیف فروش به مشتری" max="100"
+      <ContractDiscountEditor mode={discountEntryMode}
+        value={discountEntryMode === 'amount' ? draft.intent.retailDiscount.amount : draft.intent.retailDiscountPercent ??
+          (retailSubtotal && Number(retailSubtotal) > 0 ? String(Number((Number(draft.intent.retailDiscount.amount) * 100 / Number(retailSubtotal)).toFixed(2))) : '0')}
+        label={discountEntryMode === 'amount' ? 'مبلغ تخفیف (تومان)' : 'درصد تخفیف'} max="100"
+        onModeChange={mode => {
+          setDiscountEntryMode(mode);
+          if (mode === 'amount') updateWizard({ ...draft, intent: { ...draft.intent, retailDiscountPercent: undefined } });
+        }}
         description="این تخفیف فقط از قیمت فروش شما به مشتری کم می‌شود و قیمت توافق‌شده سبلان را تغییر نمی‌دهد."
         summaryItems={retailSummary.valid ? [
           { label: 'جمع قبل از تخفیف', value: retailSubtotal
@@ -1179,6 +1440,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         ] : []}
         error={!retailSummary.valid && retailSummary.field === 'discount' ? retailSummary.message : undefined}
         onValueChange={percent => {
+          if (discountEntryMode === 'amount') {
+            const amount = normalizeNumericText(percent).replace(/,/g, '') || '0';
+            updateWizard({ ...draft, intent: { ...draft.intent, retailDiscount: { ...draft.intent.retailDiscount, amount },
+              retailDiscountPercent: undefined, belowCostConfirmed: false } });
+            return;
+          }
           const normalizedPercent = String(Math.min(Math.max(Number(percent) || 0, 0), 100));
           const retailDiscount = partnerRetailDiscountFromPercent(draft.rows, normalizedPercent,
             draft.intent.retailDiscount.currency);
@@ -1191,52 +1458,21 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       {retailSummary.valid && retailSummary.loss && <ErpCheckbox label="زیان را بررسی کرده‌ام و ادامه می‌دهم"
         checked={draft.intent.belowCostConfirmed}
         onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, belowCostConfirmed: event.target.checked } })} />}
-      {draft.intent.customerPaymentPlan.installments.map((installment, installmentIndex) => { const paymentErrors = showValidationErrors
-        ? validatePartnerPaymentInstallment(installment, today(), Boolean(editingCase)) : {}; const nationalCodeRequired = installment.method !== 'CREDIT'
-          && Boolean(installment.dueDate) && installment.dueDate !== today(); return <ErpCard key={installment.installmentId} className="space-y-3 p-4">
-      <ContractPaymentInstallmentFields method={partnerPaymentChoice(installment)} amount={installment.amount.amount}
-        existingContract={Boolean(editingCase)}
-        amountLabel={`مبلغ قسط ${(installmentIndex + 1).toLocaleString('fa-IR')} (تومان)`} date={installment.dueDate}
-        dateLabel="سررسید" disabledAmount={installmentIndex === 0} amountError={paymentErrors.amount} dateError={paymentErrors.date}
-        onAmountChange={amount => updateWizard({ ...draft, intent: { ...draft.intent,
+      <ContractPaymentEntriesList currency={draft.intent.retailDiscount.currency === 'IRR' ? 'ریال' : 'تومان'}
+        payments={draft.intent.customerPaymentPlan.installments.map(paymentEntryFromPartnerInstallment)}
+        onEdit={(_payment, index) => openPartnerPaymentModal(draft.intent.customerPaymentPlan.installments[index], false, index === 0)}
+        onRemove={index => updateWizard({ ...draft, intent: { ...draft.intent,
           customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
-            installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
-              ? { ...item, amount: { ...item.amount, amount } } : item) } } })}
-        onDateChange={date => updateWizard({ ...draft, intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
-          installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
-            ? { ...item, dueDate: date, ...(item.check ? { check: { ...item.check, dueDate: date } } : {}) } : item) } } })}
-        onMethodChange={value => updateWizard({ ...draft, intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
-          installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId ? (() => {
-            const method = partnerPaymentMethodUpdate(value, item.dueDate);
-            return { ...item, ...method, ...(value === 'CHECK' && item.check ? { check: item.check } : {}) };
-          })() : item) } } })} />
-      {(installment.method === 'CHECK' || nationalCodeRequired) && <ContractPaymentCheckFields
-        showCheckFields={installment.method === 'CHECK'} nationalCodeRequired={nationalCodeRequired}
-        value={{ number: installment.check?.number ?? '', bank: installment.check?.bank ?? '',
-          ownerName: installment.check?.ownerName ?? '', handoverDate: installment.check?.handoverDate ?? '',
-          nationalCode: installment.nationalCode ?? '' }} errors={paymentErrors}
-        onChange={updates => updateWizard({ ...draft, intent: { ...draft.intent,
-          customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
-            installments: draft.intent.customerPaymentPlan.installments.map(item => item.installmentId === installment.installmentId
-              ? { ...item, ...(updates.nationalCode !== undefined ? { nationalCode: updates.nationalCode } : {}),
-                ...(item.method === 'CHECK' ? { check: { number: updates.number ?? item.check?.number ?? '',
-                  bank: updates.bank ?? item.check?.bank ?? '', dueDate: item.dueDate,
-                  ...(updates.ownerName !== undefined || item.check?.ownerName !== undefined
-                    ? { ownerName: updates.ownerName ?? item.check?.ownerName ?? '' } : {}),
-                  ...(updates.handoverDate !== undefined || item.check?.handoverDate !== undefined
-                    ? { handoverDate: updates.handoverDate ?? item.check?.handoverDate ?? '' } : {}) } } : {}) } : item) } } })} />}
-      {installmentIndex > 0 && <ErpButton label="حذف قسط" tone="danger" variant="outline" onClick={() => updateWizard({ ...draft,
-        intent: { ...draft.intent, customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
-          installments: draft.intent.customerPaymentPlan.installments.filter(item => item.installmentId !== installment.installmentId) } } })} />}
-    </ErpCard>; })}<ErpButton label="افزودن پرداخت" variant="outline" onClick={() => openPartnerPaymentModal({
-      installmentId: `partner-installment-${crypto.randomUUID()}`,
-      dueDate: addDays(draft.intent.contractDate, 30),
-      amount: { amount: '0', currency: draft.intent.customerPaymentPlan.installments[0].amount.currency },
-      method: 'BANK_TRANSFER', subtype: 'SHIBA',
-    }, true, false)} />
-      {paymentModal && <PaymentEntryModal
+            installments: draft.intent.customerPaymentPlan.installments.filter((_, itemIndex) => itemIndex !== index) } } })} />
+      {retailSummary.valid && <ErpFieldView label="مانده قابل تخصیص" value={remainingText} />}
+      <ErpButton label="افزودن پرداخت" variant="outline" disabled={!retailSummary.valid}
+        onClick={() => retailSummary.valid && openPartnerPaymentModal(newPartnerPaymentInstallment(
+          draft.intent.retailDiscount.currency,
+          `partner-installment-${crypto.randomUUID()}`, today()), true, false, remaining === null ? undefined : Number(remaining))} />
+      {paymentModal && <PaymentEntryModal dateFormat="gregorian" requireMethodSelection
         isOpen
         existingContract={Boolean(editingCase)}
+        allowCustomerBalance={false}
         onClose={closePartnerPaymentModal}
         form={paymentForm}
         onFormChange={updates => {
@@ -1251,9 +1487,10 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         currency={paymentModal.installment.amount.currency}
         fieldErrors={paymentModalErrors}
         isEdit={!paymentModal.isNew}
-        disabledAmount={paymentModal.isFirst}
-        nationalCodeRequired={paymentForm.method !== 'CUSTOMER_BALANCE'
-          && Boolean(paymentForm.paymentDate) && paymentForm.paymentDate !== today()}
+        showNationalCode={partnerPaymentNeedsNationalCode(paymentForm.method === 'CUSTOMER_BALANCE' ? 'CREDIT' : 'BANK_TRANSFER',
+          paymentForm.paymentDate ?? '', today())}
+        nationalCodeRequired={partnerPaymentNeedsNationalCode(paymentForm.method === 'CUSTOMER_BALANCE' ? 'CREDIT' : 'BANK_TRANSFER',
+          paymentForm.paymentDate ?? '', today())}
       />}
     </div>; }
     const customer = context.customers.find(item => item.id === draft.intent.customerId);
@@ -1264,7 +1501,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
         <h3 className="text-2xl font-bold">خلاصه قرارداد</h3>
         <div className="grid gap-4 md:grid-cols-2">
           <ErpNeumorphicCard className="grid gap-3 p-4 sm:grid-cols-2">
-            <ErpFieldView label="شماره پرونده" value={caseView?.caseNumber ?? 'پس از ثبت'} tone="primary" />
+            <ErpFieldView label="کد پیگیری" value={caseView ? partnerTrackingCode(caseView.caseNumber, caseView.trackingNumber) : 'پس از ثبت'} tone="primary" />
             <ErpFieldView label="تاریخ قرارداد" value={draft.intent.contractDate} />
           </ErpNeumorphicCard>
           <ErpNeumorphicCard className="grid gap-3 p-4 sm:grid-cols-2">
@@ -1277,14 +1514,14 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
             ? partnerMoneyText(retailSummary.retail, draft.intent.retailDiscount.currency) : '—'} tone="primary" />
           <ErpFieldView label="مبلغ توافق‌شده با سبلان" value={retailSummary.valid && retailSummary.wholesale
             ? partnerMoneyText(retailSummary.wholesale, draft.intent.retailDiscount.currency) : '—'} tone="info" />
-          <ErpFieldView label="تخفیف مشتری" value={`${draft.intent.retailDiscountPercent ?? '0'}٪`} tone="success" />
+          <ErpFieldView label="تخفیف مشتری" value={partnerMoneyText(draft.intent.retailDiscount.amount, draft.intent.retailDiscount.currency)} tone="success" />
         </ErpNeumorphicCard>
       </ErpNeumorphicCard>
       <ErpNeumorphicDisclosure open>
         <summary className="cursor-pointer px-4 py-3 font-semibold">محصولات قرارداد ({draft.rows.length.toLocaleString('fa-IR')})</summary>
         <div className="space-y-3 px-4 pb-4">{draft.rows.map(row => <ErpCard key={row.productRowId} className="p-4">
           <p className="font-semibold">{row.inquiryRow.description}</p>
-          <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">مقدار: {row.quantity} {row.unit} · قیمت فروش واحد: {partnerMoneyText(row.retailUnitPrice.amount, row.retailUnitPrice.currency)}</p>
+          <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">مقدار: {row.quantity} {partnerQuantityUnitCopy[row.unit] ?? row.unit} · قیمت فروش واحد: {partnerMoneyText(row.retailUnitPrice.amount, row.retailUnitPrice.currency)}</p>
         </ErpCard>)}</div>
       </ErpNeumorphicDisclosure>
       <ErpNeumorphicDisclosure>
@@ -1320,38 +1557,51 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       <ContractCreationDraftPrompt
         className="mb-4"
         pending={pending}
+        preservePrevious={Boolean(latestDraft.caseId)}
+        draftLabel={latestDraft.trackingNumber ? `همکار-${latestDraft.trackingNumber.toLocaleString('fa-IR',
+          { useGrouping: false, minimumIntegerDigits: 5 })}` : latestDraft.title}
         onResume={() => router.replace(`${mode === 'inquiry'
           ? '/dashboard/sales/partner-inquiries?'
-          : '/dashboard/sales/contracts/create?'}draftId=${encodeURIComponent(latestDraft.recoveryId)}`)}
-        onStartNew={async () => {
-          try {
-            await deleteDraft(latestDraft.recoveryId);
-            await beginNewInquiry(context);
-          } catch {
-            setError('کنار گذاشتن پیش‌نویس و شروع قرارداد جدید انجام نشد.');
-          }
-        }}
+          : '/dashboard/sales/contracts/create?'}${latestDraft.caseId
+            ? `caseId=${encodeURIComponent(latestDraft.caseId)}`
+            : `draftId=${encodeURIComponent(latestDraft.recoveryId)}`}`)}
+        onStartNew={() => beginNewInquiry(context, latestDraft.caseId ? undefined : latestDraft.recoveryId)}
       />
+      {recoverableDrafts.length > 1 && <ErpCard className="mb-4 space-y-3">
+        <p className="font-semibold">سایر پرونده‌های ناتمام</p>
+        <div className="flex flex-wrap gap-2">{recoverableDrafts.slice(1).map(item => <ErpButton
+          key={item.recoveryId} variant="outline"
+          label={item.trackingNumber ? `ادامه همکار-${item.trackingNumber.toLocaleString('fa-IR',
+            { useGrouping: false, minimumIntegerDigits: 5 })}` : item.title || 'ادامه پیش‌نویس'}
+          onClick={() => router.replace(`${mode === 'inquiry'
+            ? '/dashboard/sales/partner-inquiries?'
+            : '/dashboard/sales/contracts/create?'}${item.caseId
+              ? `caseId=${encodeURIComponent(item.caseId)}`
+              : `draftId=${encodeURIComponent(item.recoveryId)}`}`)} />)}</div>
+      </ErpCard>}
       {error && <ErpInlineState kind="error" title={error} />}
     </ErpNeumorphicWorkflowLayout>;
   }
   if (recoveryBlocked && !runtime) return <section dir="rtl" className="mx-auto max-w-3xl space-y-4">
     <ContractCreationDraftPrompt mode="takeover" pending={pending}
-      onResume={() => openDraftRecovery(context, true)}
+      onResume={async () => { await openDraftRecovery(context, true); }}
       onStartNew={() => discardDraftRecovery(context)} />
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
-  if (wizard && submission) return <PartnerContractWizard draft={wizard} onChange={updateWizard} recovery={{ state: 'writable' }}
+  if (wizard && submission) return <PartnerContractWizard draft={{ ...wizard, rows: presentPartnerRetailRows(wizard.rows, technicalDraft, technicalProducts) }} onChange={updateWizard} recovery={{ state: 'writable' }} externalError={error}
     submission={submission} now={Date.now()} renderSection={renderSection}
     canonicalRetailReady={wizard.rows.every(row => Boolean(row.retailEffectiveUnitPrice))}
+    onPreparePricingQuote={async current => {
+      if (!runtime || current.intent.recoveryId !== runtime.saved.recoveryId) throw new Error('Recovery changed');
+      const quote = await requestPartnerRetailQuote(current, runtime.actorId);
+      const prepared = applyPartnerRetailQuote(current, quote);
+      updateWizard(prepared);
+      return prepared;
+    }}
     validateStep={(step, draft) => step === 'date' && !draft.intent.contractDate ? 'تاریخ قرارداد را وارد کنید.'
       : step === 'customer' && !draft.intent.customerId ? 'مشتری را انتخاب کنید.'
       : step === 'project' && !draft.intent.projectId ? 'پروژه را انتخاب کنید.'
-      : step === 'delivery' && draft.intent.deliveries.some(item => item.items.length === 0 || !item.date || !item.destination.trim()
-        || !item.projectManagerName?.trim() || !item.receiverName?.trim()) ? 'برنامه تحویل را کامل کنید.'
-      : step === 'delivery' && draft.rows.some(row => remainingPartnerAmount(row.quantity,
-        draft.intent.deliveries.flatMap(delivery => delivery.items.filter(item => item.productRowId === row.productRowId).map(item => item.quantity))) !== '0')
-        ? 'مقدار تحویل هر محصول باید دقیقاً با مقدار قرارداد برابر باشد.'
+      : step === 'delivery' ? partnerDeliveryPlanIssue(draft.intent.deliveries, draft.rows)
       : step === 'payment' && !CustomerPaymentPlanSchema.safeParse(draft.intent.customerPaymentPlan).success
         ? 'برنامه پرداخت را کامل کنید.'
       : step === 'payment' && firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today(), Boolean(editingCase))
@@ -1362,6 +1612,7 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           draft.intent.customerPaymentPlan.installments.map(item => item.amount.amount)) !== '0';
       })() ? 'جمع اقساط باید با مبلغ فروش برابر باشد.'
         : null}
+    onRejectPrice={(row, reason) => reinquireFromWizard(row, reason)}
     onReinquire={row => void reinquireFromWizard(row)} onEditProduct={row => {
       const current = wizard;
       void persistWizardServer(current).then(saved => {
@@ -1380,13 +1631,22 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       });
     }} onSendConfirmation={caseId => sendPartnerConfirmation(caseId).then(() => undefined)}
     onFinalize={async view => {
-      const response = await finalizePartnerCase(view, Boolean(partnerRetailSummary(wizard.rows,
-        wizard.intent.retailDiscount).loss));
-      if (!(response as { success?: boolean })?.success) throw new Error('finalization-failed');
-      router.replace('/dashboard/sales/contracts');
+      finalizationFlight.current = true;
+      wizardSavePending.current = null;
+      try {
+        // Finish any in-flight draft write before the commit consumes its lease.
+        await wizardSaveFlight.current;
+        const response = await finalizePartnerCase(view, Boolean(partnerRetailSummary(wizard.rows,
+          wizard.intent.retailDiscount).loss));
+        const destination = partnerFinalizedContractPath(response, view.owner.caseId);
+        if (runtime) window.localStorage.removeItem(wizardDraftKey(runtime.actorId, wizard.intent.recoveryId));
+        setWizard(null);
+        persistRuntime(null);
+        router.replace(destination);
+      } catch (error) { finalizationFlight.current = false; throw error; }
     }}
     onCaseNumbered={caseId => router.replace(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(caseId)}`)}
-    onOpenCase={() => router.push('/dashboard/sales/contracts')} />;
+    onOpenCase={caseId => router.push(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(caseId)}`)} />;
   const inquiryWorkspace = runtime && <PartnerInquiryWorkspace actorId={runtime.actorId} inquiryId={runtime.inquiryId}
     queries={inquiryPorts.queries} commands={inquiryPorts.commands} recovery={{
       pending: () => readStored(inquiryPendingKey(runtime.actorId)),
@@ -1419,6 +1679,12 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
     if (saleStepIndex < partnerSaleEntrySteps.length - 1) {
       setSaleStep(partnerSaleEntrySteps[saleStepIndex + 1]); return;
     }
+    // A corrected numbered Case is saved first. The price step then offers
+    // an explicit per-row reinquiry; saving alone must not send a duty.
+    if (editingCase && context?.kind === 'PARTNER') {
+      void startInquiry(context, new Set(), true);
+      return;
+    }
     void openInitialInquiry();
   };
   return <ContractWizardFrame
@@ -1439,12 +1705,13 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
       loading: pending,
       canGoPrevious: !pending && saleStepIndex > 0,
       canGoNext: !pending && (saleStep !== 'products' || technicalActionReady),
-      labels: { next: saleStep === 'products' ? 'ادامه تکمیل قرارداد' : 'بعدی' }
+      labels: { next: saleStep === 'products'
+        ? editingCase ? 'ذخیره تغییرات و مشاهده استعلام' : 'ادامه تکمیل قرارداد' : 'بعدی' }
     }}
   >
     <div className="space-y-4">
       {saleStep === 'date' && <ContractDateStepView creatorName={context.actorDisplayName}
-        dateControl={<PersianCalendarComponent value={contractDate} onChange={value => {
+        dateControl={<PersianCalendarComponent valueFormat="gregorian" value={contractDate} onChange={value => {
           setContractDate(value); if (runtime) persistRuntime({ ...runtime, contractDate: value });
         }} className="w-full" />}
         numberNotice="شماره پس از ثبت موفق قرارداد تخصیص داده می‌شود." />}
@@ -1481,7 +1748,13 @@ export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: 
           operations={technicalOperations}
           sawKerfMeters={retainedCatalog?.sawKerfMeters ?? '0.003'}
           mandatoryDefaults={mandatoryDefaults}
-          preview={technicalPreview} focusProductRowId={searchParams.get('focusProductRowId') ?? undefined} onChange={setTechnicalDraft} />
+          finalTotal={cartTotalComplete && cartTotal?.key === cartTotalKey ? cartTotal.total : undefined}
+          onRetryTotal={cartTotalComplete && cartTotal?.key === cartTotalKey && cartTotal.failed
+            ? () => setCartTotalAttempt(attempt => attempt + 1) : undefined}
+          finalTotalStatus={!cartTotalComplete ? 'در انتظار تکمیل مشخصات و قیمت'
+            : cartTotal?.key === cartTotalKey && cartTotal.failed ? 'محاسبه انجام نشد؛ دوباره تلاش کنید.' : 'در حال محاسبه'}
+          preview={technicalPreview} focusProductRowId={searchParams.get('focusProductRowId') ?? undefined}
+          onChange={next => setTechnicalDraft(repairPartnerTechnicalOperationIds(next))} />
       </>}
       <ErpSheet open={initialInquiryOpen} onClose={() => setInitialInquiryOpen(false)} title="استعلام جدید"
         presentation="modal" pending={pending} footer={<div className="flex flex-wrap gap-2"><ErpButton

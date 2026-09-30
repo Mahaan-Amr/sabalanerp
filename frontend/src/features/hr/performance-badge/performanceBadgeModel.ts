@@ -1,5 +1,4 @@
-export type PerformanceLevelCode = 'COMPANION' | 'DILIGENT' | 'WORTHY' | 'CAPABLE' | 'SUPERIOR' | 'EXCELLENT' | 'ROLE_MODEL'
-  | 'URGENT_IMPROVEMENT' | 'IMPROVEMENT' | 'IMPROVEMENT_NEEDED' | 'NEEDS_IMPROVEMENT' | 'MEETS' | 'MEETS_EXPECTATIONS' | 'EXCEEDS' | 'EXCEEDS_EXPECTATIONS' | 'OUTSTANDING';
+export type PerformanceLevelCode = 'COMPANION' | 'DILIGENT' | 'WORTHY' | 'CAPABLE' | 'SUPERIOR' | 'EXCELLENT' | 'ROLE_MODEL';
 export type PerformanceLevelTone = 'danger' | 'warning' | 'success' | 'primary' | 'purple' | 'neutral';
 
 export type PerformanceBadgeSummary = {
@@ -32,27 +31,23 @@ export type PerformanceBadgeSummary = {
   } | null;
 };
 
-const levelPresentation = {
-  COMPANION: { tone: 'neutral', asset: 'agate' },
-  DILIGENT: { tone: 'warning', asset: 'amber' },
-  WORTHY: { tone: 'success', asset: 'emerald-v2', imageFilter: 'hue-rotate(48deg) saturate(1.2)' },
-  CAPABLE: { tone: 'success', asset: 'emerald-v2' },
-  SUPERIOR: { tone: 'primary', asset: 'ruby', imageFilter: 'hue-rotate(235deg) saturate(1.15)' },
-  EXCELLENT: { tone: 'purple', asset: 'ruby' },
-  ROLE_MODEL: { tone: 'purple', asset: 'diamond' },
-  URGENT_IMPROVEMENT: { tone: 'danger', asset: 'agate' },
-  IMPROVEMENT: { tone: 'warning', asset: 'amber' },
-  IMPROVEMENT_NEEDED: { tone: 'warning', asset: 'amber' },
-  NEEDS_IMPROVEMENT: { tone: 'warning', asset: 'amber' },
-  MEETS: { tone: 'success', asset: 'emerald-v2' },
-  MEETS_EXPECTATIONS: { tone: 'success', asset: 'emerald-v2' },
-  EXCEEDS: { tone: 'primary', asset: 'ruby' },
-  EXCEEDS_EXPECTATIONS: { tone: 'primary', asset: 'ruby' },
-  OUTSTANDING: { tone: 'purple', asset: 'diamond' },
+const levelTones = {
+  COMPANION: 'neutral', DILIGENT: 'warning', WORTHY: 'success', CAPABLE: 'success',
+  SUPERIOR: 'primary', EXCELLENT: 'purple', ROLE_MODEL: 'purple',
 } as const;
 
+export const PERFORMANCE_BADGE_ROADMAP = [
+  { code: 'COMPANION', labelFa: 'همراه', meaningFa: 'با ماست', romanNumeral: 'I', assetNumber: '01' },
+  { code: 'DILIGENT', labelFa: 'هم‌ریشه', meaningFa: 'از ماست', romanNumeral: 'II', assetNumber: '02' },
+  { code: 'WORTHY', labelFa: 'کارساز', meaningFa: 'به کار ما می‌آید', romanNumeral: 'III', assetNumber: '03' },
+  { code: 'CAPABLE', labelFa: 'مانا', meaningFa: 'با ما می‌ماند', romanNumeral: 'I', assetNumber: '04' },
+  { code: 'SUPERIOR', labelFa: 'ستون', meaningFa: 'تکیه‌گاه ماست', romanNumeral: 'II', assetNumber: '05' },
+  { code: 'EXCELLENT', labelFa: 'اثرگذار', meaningFa: 'ما را بهتر می‌کند', romanNumeral: 'I', assetNumber: '06' },
+  { code: 'ROLE_MODEL', labelFa: 'الگو', meaningFa: 'آن‌گونه که باید باشی', romanNumeral: 'II', assetNumber: '07' },
+] as const;
+
 export const performanceLevelTone = (levelCode: string): PerformanceLevelTone =>
-  levelPresentation[levelCode as PerformanceLevelCode]?.tone ?? 'neutral';
+  levelTones[levelCode as PerformanceLevelCode] ?? 'neutral';
 
 export const performanceBadgePresentation = (badge: PerformanceBadgeSummary) => {
   if (badge.presentationVersion === 'roman-v1' && badge.lightAsset && badge.darkAsset) return {
@@ -68,18 +63,16 @@ export const performanceBadgePresentation = (badge: PerformanceBadgeSummary) => 
     presentationVersion: badge.presentationVersion,
     neutral: false,
   };
-  const level = badge.state === 'LEVEL' && badge.levelCode ? levelPresentation[badge.levelCode] : null;
-  const asset = level?.asset ?? 'neutral-frame';
-  const tone: PerformanceLevelTone = level?.tone ?? 'neutral';
-  const imageFilter = level && 'imageFilter' in level ? (level as { imageFilter: string }).imageFilter : undefined;
+  const level = badge.state === 'LEVEL' && badge.levelCode
+    ? PERFORMANCE_BADGE_ROADMAP.find(({ code }) => code === badge.levelCode) : undefined;
   return {
     labelFa: badge.labelFa,
     meaningFa: badge.meaningFa,
-    tone,
-    lightAsset: `/assets/performance-rank-badges-v2/light/${asset}.png`,
-    darkAsset: `/assets/performance-rank-badges-v2/dark/${asset}.png`,
-    imageFilter,
-    romanNumeral: undefined,
+    tone: performanceLevelTone(badge.levelCode ?? ''),
+    lightAsset: level ? `/assets/performance-rank-badges-roman-v1/light/rank-${level.assetNumber}.png` : '/assets/performance-rank-badges-v2/light/neutral-frame.png',
+    darkAsset: level ? `/assets/performance-rank-badges-roman-v1/dark/rank-${level.assetNumber}.png` : '/assets/performance-rank-badges-v2/dark/neutral-frame.png',
+    imageFilter: undefined,
+    romanNumeral: badge.officialResult === false ? undefined : level?.romanNumeral,
     presentationVersion: undefined,
     neutral: !level,
   };

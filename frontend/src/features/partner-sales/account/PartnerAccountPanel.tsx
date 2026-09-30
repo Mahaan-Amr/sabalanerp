@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import type { PartnerAccountView } from '@sabalanerp/partner-sales-contracts';
+import { partnerTrackingCode, type PartnerAccountView } from '@sabalanerp/partner-sales-contracts';
 import { ErpBadge, ErpCard, ErpEmptyState, ErpFieldView, ErpInlineState } from '@/components/erp';
 import { FaMoneyCheckAlt } from 'react-icons/fa';
 import { formatPartnerMoney, partnerPaymentMethodCopy } from '../presentation';
@@ -12,7 +12,7 @@ export function PartnerAccountPanel({ view }: { view: PartnerAccountView }) {
     <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">نمای فقط‌خواندنی از خریدها، پرداخت‌های ثبت‌شده و مانده حسابداری</p></div>
     <ErpInlineState kind="permission" title="این نما فقط‌خواندنی است؛ ثبت و بررسی اسناد مالی در حسابداری انجام می‌شود." />
     {!view.purchases.length ? <ErpEmptyState icon={FaMoneyCheckAlt} title="خریدی در حساب ثبت نشده است" /> : <div className="space-y-3">{view.purchases.map(item => { const status = statusCopy[item.status]; return <ErpCard key={`${item.owner.caseId}:${item.owner.revision}`} className="p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2"><strong>پرونده {item.caseNumber}</strong><ErpBadge tone={status[1]}>{status[0]}</ErpBadge></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><strong>پرونده {partnerTrackingCode(item.caseNumber, item.trackingNumber)}</strong><ErpBadge tone={status[1]}>{status[0]}</ErpBadge></div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3"><ErpFieldView label="خرید" value={formatPartnerMoney(item.amount.amount, item.amount.currency)} />
         <ErpFieldView label="پرداخت ثبت‌شده" value={formatPartnerMoney(item.received.amount, item.received.currency)} tone="success" />
         <ErpFieldView label="مانده" value={formatPartnerMoney(item.balance.amount, item.balance.currency)} tone="warning" /></div>

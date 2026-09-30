@@ -1,5 +1,5 @@
 "use client";
-import { ErpInput, ErpSelect } from "@/components/erp";
+import { ErpInput, ErpSearchableSelect } from "@/components/erp";
 import { useCallback, useEffect, useState, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -31,6 +31,8 @@ import { accountingAPI, dashboardAPI } from "@/lib/api";
 import { downloadBlobResponse } from "@/lib/downloadFile";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
+import AccountingCustomPrintSettings, { defaultCustomPrintSettings, salesPdfVariantLabels, type SalesPdfVariant, type CustomPrintPreset, type CustomProductRowsMode, type CustomPrintSettings } from '@/features/accounting/AccountingCustomPrintSettings';
+import AccountingContractPrintActions, { accountingContractTabs } from "@/features/accounting/AccountingContractPrintActions";
 import AccountingActionModal from "@/features/accounting/AccountingActionModal";
 import AccountingVoidWorkflowPanel, {
   type AccountingVoidWorkflowView,
@@ -58,9 +60,9 @@ import {
 
 const toPdfViewerUrl = (url: string) => `${url}#page=1&zoom=page-fit`;
 
-type SalesPdfVariant = "original" | "accounting" | "workshop" | "custom";
-type CustomPrintPreset = "accounting" | "workshop" | "detailed" | "summarized";
-type CustomProductRowsMode = "detailed" | "summarized";
+
+
+
 
 const financialRecordKindLabels: Record<string, string> = {
   INVOICE_CANDIDATE: "صورتحساب قرارداد",
@@ -73,63 +75,6 @@ const correctionPriorityLabels: Record<string, string> = {
   MEDIUM: "متوسط",
   HIGH: "زیاد",
   CRITICAL: "فوری",
-};
-
-type CustomPrintSettings = {
-  preset: CustomPrintPreset;
-  productRowsMode: CustomProductRowsMode;
-  showCustomerSection: boolean;
-  showProductsSection: boolean;
-  showPrices: boolean;
-  showExplanatoryRows: boolean;
-  showDeliverySection: boolean;
-  showPaymentSection: boolean;
-  showTotals: boolean;
-  showNotes: boolean;
-  columns: {
-    index: boolean;
-    code: boolean;
-    description: boolean;
-    category: boolean;
-    length: boolean;
-    width: boolean;
-    measurement: boolean;
-    count: boolean;
-    rate: boolean;
-    total: boolean;
-  };
-};
-
-const salesPdfVariantLabels: Record<SalesPdfVariant, string> = {
-  original: "چاپ نسخه اصلی",
-  accounting: "چاپ حسابداری",
-  workshop: "چاپ نمره کارگاه",
-  custom: "چاپ سفارشی",
-};
-
-const defaultCustomPrintSettings: CustomPrintSettings = {
-  preset: "accounting",
-  productRowsMode: "detailed",
-  showCustomerSection: true,
-  showProductsSection: true,
-  showPrices: true,
-  showExplanatoryRows: true,
-  showDeliverySection: true,
-  showPaymentSection: true,
-  showTotals: true,
-  showNotes: true,
-  columns: {
-    index: true,
-    code: true,
-    description: true,
-    category: true,
-    length: true,
-    width: true,
-    measurement: true,
-    count: true,
-    rate: true,
-    total: true,
-  },
 };
 
 const formatLifecycleBlockers = (blockers: any[]) =>
@@ -159,7 +104,7 @@ export default function AccountingContractDetailPage(props: {
   const [data, setData] = useState<any>(null);
   const [detailSection, setDetailSection] = useState<
     "summary" | "items" | "financial" | "collections" | "compliance"
-  >("summary");
+  >(searchParams.get("section") === "financial" ? "financial" : "summary");
   const [lifecycle, setLifecycle] = useState<any>(null);
   const [userRole, setUserRole] = useState<string>("USER");
   const [lifecycleTarget, setLifecycleTarget] = useState<{
@@ -760,13 +705,7 @@ export default function AccountingContractDetailPage(props: {
       <ErpSegmentedControl
         value={detailSection}
         onChange={setDetailSection}
-        options={[
-          { value: "summary", label: "خلاصه" },
-          { value: "items", label: "اقلام" },
-          { value: "financial", label: "رکوردهای مالی" },
-          { value: "collections", label: "دریافت‌ها" },
-          { value: "compliance", label: "مالیات و اصلاحات" },
-        ]}
+        options={[...accountingContractTabs]}
       />
       <div hidden={detailSection !== "summary"}>
         <ErpSection title="مدیریت وضعیت قرارداد">
@@ -899,170 +838,12 @@ export default function AccountingContractDetailPage(props: {
           title="خروجی چاپ قرارداد"
           description="نسخه مورد نیاز حسابداری را انتخاب کنید و سپس چاپ یا دانلود بگیرید."
         >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-              نسخه چاپ
-              <ErpSelect
-                value={salesPdfVariant}
-                onChange={(event) =>
-                  setSalesPdfVariant(event.target.value as SalesPdfVariant)
-                }
-                className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
-              >
-                <option value="original">
-                  {salesPdfVariantLabels.original}
-                </option>
-                <option value="accounting">
-                  {salesPdfVariantLabels.accounting}
-                </option>
-                <option value="workshop">
-                  {salesPdfVariantLabels.workshop}
-                </option>
-                <option value="custom">{salesPdfVariantLabels.custom}</option>
-              </ErpSelect>
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <ErpButton
-                label="دانلود PDF"
-                icon={FaDownload}
-                tone="success"
-                disabled={pdfActionLoading === "DOWNLOAD_SALES_PDF"}
-                onClick={() => openSalesContractPdf(false)}
-              />
-              <ErpButton
-                label="چاپ"
-                icon={FaPrint}
-                tone="purple"
-                disabled={pdfActionLoading === "PRINT_SALES_PDF"}
-                onClick={() => openSalesContractPdf(true)}
-              />
-            </div>
-          </div>
-          {salesPdfVariant === "custom" && (
-            <div className="mt-4 space-y-4 rounded-xl border border-dashed border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)]">
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="flex flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                  الگوی چاپ
-                  <ErpSelect
-                    value={customPrintSettings.preset}
-                    onChange={(event) =>
-                      applyCustomPreset(event.target.value as CustomPrintPreset)
-                    }
-                    className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
-                  >
-                    <option value="accounting">حسابداری</option>
-                    <option value="workshop">کارگاه بدون قیمت</option>
-                    <option value="detailed">جزئیات کامل</option>
-                    <option value="summarized">
-                      خلاصه گروه‌بندی‌شده افزونه‌ها
-                    </option>
-                  </ErpSelect>
-                </label>
-                <label className="flex flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                  نمایش محصولات
-                  <ErpSelect
-                    value={customPrintSettings.productRowsMode}
-                    onChange={(event) =>
-                      setCustomPrintSettings((current) => ({
-                        ...current,
-                        productRowsMode: event.target
-                          .value as CustomProductRowsMode,
-                      }))
-                    }
-                    className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
-                  >
-                    <option value="detailed">جزئیات کامل</option>
-                    <option value="summarized">ردیف‌های خلاصه افزونه‌ها</option>
-                  </ErpSelect>
-                </label>
-              </div>
-
-              <div>
-                <p className="mb-2 text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                  بخش‌ها
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                  {[
-                    ["showCustomerSection", "مشخصات مشتری"],
-                    ["showProductsSection", "جدول محصولات"],
-                    ["showPrices", "قیمت‌ها"],
-                    ["showExplanatoryRows", "ردیف‌های توضیحی"],
-                    ["showDeliverySection", "برنامه تحویل"],
-                    ["showPaymentSection", "برنامه پرداخت"],
-                    ["showTotals", "جمع‌ها و تخفیف"],
-                    ["showNotes", "توضیحات"],
-                  ].map(([key, label]) => (
-                    <label
-                      key={key}
-                      className="flex items-center gap-2 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
-                    >
-                      <ErpInput
-                        type="checkbox"
-                        checked={Boolean(
-                          customPrintSettings[key as keyof CustomPrintSettings],
-                        )}
-                        onChange={(event) =>
-                          setCustomPrintSettings((current) => ({
-                            ...current,
-                            [key]: event.target.checked,
-                          }))
-                        }
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                  ستون‌های جدول محصولات
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                  {[
-                    ["index", "ردیف"],
-                    ["code", "کد"],
-                    ["description", "شرح"],
-                    ["category", "دسته"],
-                    ["length", "طول"],
-                    ["width", "عرض"],
-                    ["measurement", "متراژ/مقدار"],
-                    ["count", "تعداد"],
-                    ["rate", "نرخ"],
-                    ["total", "مبلغ کل"],
-                  ].map(([key, label]) => (
-                    <label
-                      key={key}
-                      className="flex items-center gap-2 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
-                    >
-                      <ErpInput
-                        type="checkbox"
-                        checked={
-                          customPrintSettings.columns[
-                            key as keyof CustomPrintSettings["columns"]
-                          ]
-                        }
-                        onChange={(event) =>
-                          setCustomPrintSettings((current) => ({
-                            ...current,
-                            columns: {
-                              ...current.columns,
-                              [key]: event.target.checked,
-                            },
-                          }))
-                        }
-                        disabled={
-                          !customPrintSettings.showPrices &&
-                          (key === "rate" || key === "total")
-                        }
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+          <AccountingContractPrintActions value={salesPdfVariant}
+            options={Object.entries(salesPdfVariantLabels).map(([value, label]) => ({ value, label }))}
+            onChange={value => setSalesPdfVariant(value as SalesPdfVariant)} pending={Boolean(pdfActionLoading)}
+            onDownload={() => void openSalesContractPdf(false)} onPrint={() => void openSalesContractPdf(true)} />
+          {salesPdfVariant === "custom" && <AccountingCustomPrintSettings customPrintSettings={customPrintSettings}
+            setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset} />}
         </ErpSection>
       </div>
 
@@ -1160,7 +941,26 @@ export default function AccountingContractDetailPage(props: {
                       ]}
                     />
 
-                    {!replacementWorkflow.amountChanged ? (
+                    {replacementWorkflow.status?.startsWith("DRAFT_SOURCE") ? (
+                      <div className="space-y-3">
+                        <ErpInlineState
+                          kind="stale"
+                          title={replacementWorkflow.status === "DRAFT_SOURCE_MUST_BE_RECREATED"
+                            ? "پیش‌نویس مالی قبلی را از بخش رکوردهای مالی حذف کنید؛ سپس از مبلغ اصلاح‌شده پیش‌نویس تازه بسازید."
+                            : "پیش‌نویس قبلی حذف شد. از بخش اقدام سریع، پیش‌نویس تازه با مبلغ اصلاح‌شده بسازید."}
+                        />
+                        {replacementWorkflow.replacementRecordId && (
+                          <ErpInlineState kind="success" title="پیش‌نویس تازه با مبلغ اصلاح‌شده ثبت شده است." />
+                        )}
+                        <ErpButton
+                          label="بستن اصلاح پس از بررسی پیش‌نویس تازه"
+                          icon={FaCheckCircle}
+                          tone="success"
+                          disabled={!replacementWorkflow.canResolve || actionLoading}
+                          onClick={() => setResolveTarget({ id: replacementWorkflow.correctionRequestId })}
+                        />
+                      </div>
+                    ) : !replacementWorkflow.amountChanged ? (
                       <div className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
                         مبلغ تایید شده با مبلغ اصلاح‌شده برابر است. پس از بررسی
                         مدیریتی، اصلاح را با یادداشت بستن ثبت کنید.

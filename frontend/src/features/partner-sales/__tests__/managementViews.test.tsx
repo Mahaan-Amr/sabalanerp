@@ -47,7 +47,7 @@ test('response review keeps different prices and mixed rejection visible before 
 test('an unavailable responder row shows evidence but no editable price or decision controls', () => {
   const html = renderToStaticMarkup(<ResponseRow number={1} row={{ rowId: 'fixture-row', revision: 2,
     description: 'گرانیت نهبندان ممتاز',
-    configuration: [{ label: 'عرض قطعه', value: '۶۰ سانتی‌متر' }, { label: 'تعداد قطعه', value: '۱۲ عدد' }],
+    configuration: [{ label: 'عرض قطعه', value: '۶۰ سانتی‌متر' }, { label: 'تعداد قطعه', value: '۱۲ عدد' }, { label: 'مساحت', value: '7.5 متر مربع' }],
     identity: { schemaVersion: 1, partnerSellerId: 'fixture-partner', catalogProductId: 'fixture-stone', family: 'slab',
       unit: 'count', configuration: [{ key: 'private-fingerprint', value: `sha256-v1:${'1'.repeat(64)}` }], materialRateEvidenceId: 'internal-rate',
       materialRateHash: `sha256-v1:${'0'.repeat(64)}`, components: [], currency: 'IRR', calculationPolicyVersion: 'v1', roundingPolicyVersion: 'v1' },
@@ -58,6 +58,8 @@ test('an unavailable responder row shows evidence but no editable price or decis
   assert.match(html, /۶۰ سانتی‌متر/);
   assert.match(html, /گرانیت نهبندان ممتاز/);
   assert.match(html, /تعداد قطعه/);
+  assert.match(html, /مساحت/);
+  assert.match(html, /7.5 متر مربع/);
   assert.match(html, /واحد قیمت: عدد/);
   assert.match(html, /۱۲۰٬۰۰۰/);
   assert.match(html, /واگذار نشده/);

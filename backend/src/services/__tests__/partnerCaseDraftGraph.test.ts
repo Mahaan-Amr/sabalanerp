@@ -5,7 +5,7 @@ import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales
 import { previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { compilePartnerTechnicalGraph } from '../partnerSales/cases/technicalGraph';
 
-test('private graph compilation preserves prepared and legacy volumetric identity and prices the exact selected measure', () => {
+test('private graph compilation preserves prepared quantities and prices the exact selected measure', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
   const product = { ...catalog.products[0], families: ['prepared', 'volumetric'] as const };
   const context = { catalog: { ...catalog, products: [{ ...product, families: [...product.families] }] },
@@ -17,12 +17,12 @@ test('private graph compilation preserves prepared and legacy volumetric identit
     { productRowId: 'prepared-a', catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
       family: 'prepared', configuration: { kind: 'readyPiece', unit: 'count', quantity: '3' } },
     { productRowId: 'legacy-b', catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
-      family: 'volumetric', configuration: { kind: 'cubic', unit: 'ton', quantity: '2.5' } },
+      family: 'prepared', configuration: { kind: 'cubic', unit: 'ton', quantity: '2.5' } },
   ] }, context);
   if (!result.ok) throw new Error(result.error.code);
   assert.deepEqual(result.value.graph.rows.map(row => [row.productRowId, row.productType, row.commercial.requestedQuantity,
     row.commercial.baseRateToman, row.commercial.totalAmountToman]),
-  [['prepared-a', 'prepared', '3', '123.4', '370'], ['legacy-b', 'volumetric', '2.5', '123.4', '309']]);
+  [['prepared-a', 'prepared', '3', '123.4', '370'], ['legacy-b', 'prepared', '2.5', '123.4', '309']]);
   assert.equal(result.value.graph.rows[0].commercial.calculationSnapshot?.unit, 'count');
   assert.equal(result.value.graph.rows[1].commercial.calculationSnapshot?.unit, 'ton');
   assert.equal(result.value.graph.rows[1].commercial.calculationSnapshot?.kind, 'cubic');
@@ -33,6 +33,12 @@ test('private graph compilation preserves prepared and legacy volumetric identit
   assert.deepEqual(result.value.graph.sourceBatches, []);
   assert.deepEqual(result.value.graph.allocations, []);
   assert.equal(JSON.stringify(result.value.preview).includes('123.4'), false);
+  const legacy = compilePartnerTechnicalGraph({ schemaVersion: 1, inputRevision: 4, rows: [{
+    productRowId: 'legacy-volume', catalogItemId: product.catalogItemId,
+    catalogSnapshotVersion: product.catalogSnapshotVersion, family: 'volumetric',
+    configuration: { kind: 'cubic', unit: 'ton', quantity: '2.5' },
+  }] }, context);
+  assert.equal(legacy.ok ? null : legacy.error.code, 'INVALID_PAYLOAD');
 });
 
 test('explicit different layer material binds its own catalog dimensions and never spends the parent remainder', () => {
@@ -51,7 +57,7 @@ test('explicit different layer material binds its own catalog dimensions and nev
       layersPerParentPiece: 2, widthMeters: '0.05', widthDisplayUnit: 'cm', targetSides: ['front'],
       source: { kind: 'new-material', catalogItemId: material.catalogItemId, catalogSnapshotVersion: version,
         sourceRows: [{ sourceRowId: 'new-source', lengthMeters: '1', widthMeters: '0.2', quantity: 1 }] },
-      sawKerfEnabled: false, calibrationEnabled: false,
+      sawKerfEnabled: false, calibrationEnabled: false, description: '',
     }] };
   const context = { catalog, policy: { calculation: 'calc-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
     products: [{ catalogItemId: parent.catalogItemId, catalogSnapshotVersion: version,
@@ -63,6 +69,7 @@ test('explicit different layer material binds its own catalog dimensions and nev
   const result = compilePartnerTechnicalGraph(draft, context);
   if (!result.ok) throw new Error(result.error.code);
   const layer = result.value.graph.layerConfigurations[0];
+  assert.equal(layer.input.description, undefined, 'an empty optional note must not invalidate the canonical layer command');
   assert.equal(layer.result.materialAmountToman, '40000');
   assert.equal(layer.input.source.kind, 'new-material');
   assert.ok(result.value.graph.catalogSnapshots.some(item => item.catalogProductId === material.catalogItemId));

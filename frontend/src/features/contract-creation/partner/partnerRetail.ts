@@ -1,9 +1,12 @@
 import { DecimalSchema, QuantitySchema, type Money } from '@sabalanerp/partner-sales-contracts';
+import { roundContractPayableTotal } from '@sabalanerp/contract-product-graph';
 import type { PartnerInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
 export interface PartnerRetailRow {
   productRowId: string;
+  /** Presentation only; never part of the submitted financial intent. */
+  parentProductRowId?: string;
   quantity: string;
   unit: string;
   inquiryRow: PartnerInquiryRow;
@@ -31,9 +34,19 @@ export function defaultPartnerRetailRows(rows: (Omit<PartnerRetailRow, 'retailUn
 }
 
 export function partnerRetailIntentRows(rows: PartnerRetailRow[]): PartnerDraftIntent['rows'] {
-  return rows.map(row => ({ productRowId: row.productRowId,
-    ...(row.inquiryRow.approvedRowBinding ? { approvedRowBinding: row.inquiryRow.approvedRowBinding } : {}),
-    retailUnitPrice: row.retailUnitPrice }));
+  return rows.map(row => {
+    let source = row;
+    const visited = new Set<string>();
+    while (source.parentProductRowId && !visited.has(source.productRowId)) {
+      visited.add(source.productRowId);
+      const parent = rows.find(item => item.productRowId === source.parentProductRowId);
+      if (!parent) break;
+      source = parent;
+    }
+    return { productRowId: row.productRowId,
+      ...(source.inquiryRow.approvedRowBinding ? { approvedRowBinding: source.inquiryRow.approvedRowBinding } : {}),
+      retailUnitPrice: row.retailUnitPrice };
+  });
 }
 
 // Only a preview of net commercial difference. The Case writer owns final
@@ -59,6 +72,38 @@ function display(value: Decimal): string {
   const digits = (negative ? -value.digits : value.digits).toString().padStart(value.scale + 1, '0');
   const result = value.scale ? `${digits.slice(0, -value.scale)}.${digits.slice(-value.scale)}`.replace(/\.?0+$/, '') : digits;
   return (negative ? '-' : '') + result;
+}
+
+export function partnerPriceLineTotal(lines: readonly { quantity: string; rate: Money }[], currency: Money['currency']): string | null {
+  try {
+    let total = decimal('0');
+    for (const line of lines) {
+      if (line.rate.currency !== currency) return null;
+      total = add(total, product(line.quantity, line.rate.amount));
+    }
+    return display(total);
+  } catch { return null; }
+}
+
+/** Flatten each family under its root without changing financial row identity. */
+export function partnerRetailGroups(rows: PartnerRetailRow[]) {
+  const byId = new Map(rows.map(row => [row.productRowId, row]));
+  const owner = (row: PartnerRetailRow) => {
+    const seen = new Set([row.productRowId]);
+    let current = row;
+    while (current.parentProductRowId && byId.has(current.parentProductRowId)) {
+      if (seen.has(current.parentProductRowId)) return row.productRowId;
+      seen.add(current.parentProductRowId);
+      current = byId.get(current.parentProductRowId)!;
+    }
+    return current.productRowId;
+  };
+  const groups = new Map<string, PartnerRetailRow[]>();
+  for (const row of rows) {
+    const id = owner(row);
+    groups.set(id, [...(groups.get(id) ?? []), row]);
+  }
+  return Array.from(groups.entries()).map(([id, members]) => ({ root: byId.get(id)!, children: members.filter(row => row.productRowId !== id) }));
 }
 
 function retailSubtotal(rows: PartnerRetailRow[], currency: Money['currency']): Decimal | null {
@@ -114,9 +159,11 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) 
   try { retail = add(retail, decimal(discount.amount), true); }
   catch { return { valid: false as const, field: 'discount' as const, message: 'مبلغ تخفیف را کامل وارد کنید.' }; }
   if (retail.digits < BigInt(0)) return { valid: false as const, field: 'discount' as const, message: 'تخفیف نمی‌تواند از جمع فروش بیشتر باشد.' };
-  const difference = add(retail, wholesale, true);
-  return { valid: true as const, pricingReady, wholesale: pricingReady ? display(wholesale) : undefined,
-    retail: display(retail), difference: pricingReady ? display(difference) : undefined,
+  const retailPayable = roundContractPayableTotal(display(retail), discount.currency).roundedAmount;
+  const wholesalePayable = roundContractPayableTotal(display(wholesale), discount.currency).roundedAmount;
+  const difference = add(decimal(retailPayable), decimal(wholesalePayable), true);
+  return { valid: true as const, pricingReady, wholesale: pricingReady ? wholesalePayable : undefined,
+    retail: retailPayable, difference: pricingReady ? display(difference) : undefined,
     loss: pricingReady && difference.digits < BigInt(0) };
 }
 
@@ -131,8 +178,13 @@ export function partnerRetailRowSummary(row: PartnerRetailRow) {
   } catch { return null; }
 }
 
-export const partnerMoneyText = (amount: string, currency: Money['currency']) =>
-  `${amount.replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} ${currency === 'IRR' ? 'ریال' : 'تومان'}`;
+export const partnerMoneyText = (amount: string, currency: Money['currency']) => {
+  const [whole, fraction] = amount.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const formatted = (fraction === undefined ? grouped : `${grouped}.${fraction}`)
+    .replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
+  return `${formatted} ${currency === 'IRR' ? 'ریال' : 'تومان'}`;
+};
 
 export function remainingPartnerAmount(total: string, allocated: readonly string[]): string | null {
   try {
@@ -142,15 +194,11 @@ export function remainingPartnerAmount(total: string, allocated: readonly string
   } catch { return null; }
 }
 
-/** Keep the first customer installment equal to the unallocated retail total.
- * The numbered Case is created before the payment step, so its provisional
- * plan must already reconcile with the partner-visible retail envelope. */
-export function alignPartnerCustomerPaymentPlan(rows: PartnerRetailRow[], discount: Money,
-  plan: PartnerDraftIntent['customerPaymentPlan']): PartnerDraftIntent['customerPaymentPlan'] {
-  const summary = partnerRetailSummary(rows, discount);
-  const [first, ...later] = plan.installments;
-  const firstAmount = summary.valid && first
-    ? remainingPartnerAmount(summary.retail, later.map(item => item.amount.amount)) : null;
-  return first && firstAmount !== null ? { ...plan, installments: [{ ...first,
-    amount: { amount: firstAmount, currency: first.amount.currency } }, ...later] } : plan;
+/** Unsaved backing identity; the payment form requires an explicit method and amount. */
+export function newPartnerPaymentInstallment(currency: Money['currency'], installmentId: string, currentDate: string): PartnerDraftIntent['customerPaymentPlan']['installments'][number] {
+  return {
+    installmentId, dueDate: currentDate,
+    amount: { amount: '0', currency },
+    method: 'BANK_TRANSFER', subtype: 'SHIBA',
+  };
 }

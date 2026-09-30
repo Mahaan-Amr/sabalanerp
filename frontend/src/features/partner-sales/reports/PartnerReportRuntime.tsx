@@ -1,12 +1,15 @@
 'use client';
 
+import PersianCalendarComponent from '@/components/PersianCalendar';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import moment from 'moment-jalaali';
-import { ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpSegmentedControl, ErpSelect, ErpToolbar } from '@/components/erp';
+import { ErpEmptyState, ErpField, ErpInlineState, ErpLoading, ErpSegmentedControl, ErpSelect, ErpToolbar } from '@/components/erp';
 import { FaChartLine } from 'react-icons/fa';
 import api from '@/lib/api';
 import { PartnerReportView, type PartnerReportPresentation } from './PartnerReportView';
+import { PartnerAccountRuntime } from '../account/PartnerAccountRuntime';
 
 const tehranDate = (date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 const jalaliRangeFrom = (months: number) => moment().subtract(months - 1, 'jMonth').startOf('jMonth').format('YYYY-MM-DD');
@@ -38,6 +41,7 @@ function parseReport(value: unknown): PartnerReportPresentation | null {
           receivableBalance: String(point.receivableBalance), receipts: String(point.receipts),
           transactions: Array.isArray(point.transactions) ? (point.transactions as Record<string, unknown>[]).map(transaction => ({
             caseId: String(transaction.caseId), caseNumber: String(transaction.caseNumber),
+            ...(Number.isSafeInteger(transaction.trackingNumber) ? { trackingNumber: Number(transaction.trackingNumber) } : {}),
             customerContractNumber: String(transaction.customerContractNumber), effectiveDate: String(transaction.effectiveDate),
             kind: transaction.kind as never, debtDelta: String(transaction.debtDelta),
             receivableDelta: String(transaction.receivableDelta), receiptDelta: String(transaction.receiptDelta),
@@ -45,7 +49,9 @@ function parseReport(value: unknown): PartnerReportPresentation | null {
         })) : [],
       })) : [],
       rows: (report.rows as Record<string, unknown>[]).map(row => ({ caseId: String(row.caseId), revision: Number(row.revision),
-        caseNumber: String(row.caseNumber), customerContractNumber: String(row.customerContractNumber), state: row.state as never,
+        caseNumber: String(row.caseNumber),
+        ...(Number.isSafeInteger(row.trackingNumber) ? { trackingNumber: Number(row.trackingNumber) } : {}),
+        customerContractNumber: String(row.customerContractNumber), state: row.state as never,
         currency: row.currency as 'IRR' | 'IRT', metrics: metric(row.metrics),
         accountingBalance: row.account && typeof row.account === 'object' && !Array.isArray(row.account)
           && (row.account as Record<string, unknown>).balance && typeof (row.account as Record<string, unknown>).balance === 'object'
@@ -55,6 +61,15 @@ function parseReport(value: unknown): PartnerReportPresentation | null {
 }
 
 export function PartnerReportRuntime() {
+  const [section, setSection] = useState<'reports' | 'account'>('reports');
+  return <div className="space-y-4">
+    <ErpSegmentedControl value={section} onChange={setSection}
+      options={[{ value: 'reports', label: 'گزارش فروش' }, { value: 'account', label: 'حساب من با سبلان' }]} />
+    {section === 'account' ? <PartnerAccountRuntime /> : <PartnerSalesReportRuntime />}
+  </div>;
+}
+
+function PartnerSalesReportRuntime() {
   const router = useRouter();
   const [from, setFrom] = useState(initialFrom);
   const [to, setTo] = useState(tehranDate);
@@ -95,9 +110,7 @@ export function PartnerReportRuntime() {
   };
   const periodControl = <div className="space-y-3"><ErpSegmentedControl value={periodPreset} onChange={choosePeriod}
     options={[{ value: '3', label: '۳ ماه' }, { value: '6', label: '۶ ماه' }, { value: '12', label: '۱۲ ماه' }, { value: 'custom', label: 'بازه دلخواه' }]} />
-    {periodPreset === 'custom' && <div className="grid gap-4 sm:grid-cols-2"><ErpField label="از"><ErpInput type="date" value={from}
-      onChange={event => setFrom(event.target.value)} /></ErpField><ErpField label="تا"><ErpInput type="date" value={to}
-      onChange={event => setTo(event.target.value)} /></ErpField></div>}</div>;
+    {periodPreset === 'custom' && <div className="grid gap-4 sm:grid-cols-2"><ErpField label="از"><PersianCalendarComponent valueFormat="gregorian" value={from} onChange={setFrom} className="w-full" /></ErpField><ErpField label="تا"><PersianCalendarComponent valueFormat="gregorian" value={to} onChange={setTo} className="w-full" /></ErpField></div>}</div>;
   const filters = <ErpToolbar search={{ value: search, placeholder: 'شماره پرونده یا قرارداد مشتری', onChange: setSearch }}
     filters={<ErpSelect aria-label="وضعیت" value={state} onChange={event => setState(event.target.value as StateFilter)}>
       <option value="">همه وضعیت‌ها</option><option value="DRAFT">پیش‌نویس</option><option value="AWAITING_CUSTOMER_CONFIRMATION">در انتظار تأیید مشتری</option>

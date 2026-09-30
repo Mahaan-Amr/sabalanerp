@@ -1,4 +1,5 @@
 'use client';
+import { WizardProgressBar } from '@/features/contract-creation/components/shared/WizardProgressBar';
 import { ErpCard, ErpCheckbox, ErpField as SalesAuthoringField, ErpFieldView, ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -914,7 +915,6 @@ export default function CreateStoneProductWizard() {
       description="مشخصات و ساختار محصول را تکمیل کنید."
       backHref="/dashboard/sales/products"
       actions={isReturningToContract ? [{ label: 'لغو و بازگشت به قرارداد', icon: FaTimes, tone: 'danger', variant: 'outline', onClick: returnToContract }] : []}
-      progress={{ current: currentStep, total: WIZARD_STEPS.length, label: WIZARD_STEPS[currentStep - 1].title }}
       feedback={loadError
         ? { kind: loadErrorKind, title: loadError, action: { label: 'تلاش دوباره', onClick: loadMasterData } }
         : getSalesErrorSummary(errors)
@@ -923,6 +923,7 @@ export default function CreateStoneProductWizard() {
           ? { kind: 'stale', title: 'اطلاعات این محصول تا ثبت نهایی ذخیره نمی‌شوند.' }
           : undefined}
     >
+      <WizardProgressBar currentStep={currentStep} steps={WIZARD_STEPS} ariaLabel="مراحل ایجاد محصول" />
       <SalesAuthoringSection title={WIZARD_STEPS[currentStep - 1].title} description={WIZARD_STEPS[currentStep - 1].description}>
         {renderStepContent()}
       </SalesAuthoringSection>

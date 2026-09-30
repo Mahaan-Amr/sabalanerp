@@ -1,4 +1,6 @@
 import React from 'react';
+import type { CustomerContractOutput } from '@sabalanerp/partner-sales-contracts';
+import { formatPartnerMoney, subtractPartnerDecimal, multiplyPartnerDecimal, partnerPaymentMethodCopy, partnerProductTypeCopy } from '@/features/partner-sales/presentation';
 import { ErpNeumorphicCard, ErpNeumorphicDisclosure } from '@/components/erp';
 import { formatDisplayNumber, formatPriceWithRial, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -61,6 +63,7 @@ export function buildManualContractSummary(data: PublicContract) {
     ].filter(Boolean).join(' | ') || '—',
     quantity: product.quantity,
     area: product.squareMeters,
+    unitPrice: product.pricePerSquareMeter ?? product.pricePerMeter ?? product.unitPrice ?? product.price,
     total: getContractProductNonServiceSubtotal(product)
   }));
   const dependentServices: Array<{ id: string; product: string; category: string; name: string; amount: string; rate: string; cost: number }> = [];
@@ -121,6 +124,36 @@ export function buildManualContractSummary(data: PublicContract) {
     productsTotal, servicesTotal, paymentTotal, grandTotal, remaining: grandTotal - paymentTotal };
 }
 
+export function buildPartnerManualContractSummary(output: CustomerContractOutput) {
+  // Use only the frozen customer projection. Never read wholesale or current catalog rates.
+  const money = (amount: unknown) => typeof amount === 'string' ? formatPartnerMoney(amount, output.totals.currency) : '—';
+  const payments = output.customerPaymentPlan.installments.map(item => ({
+    id: item.installmentId, methodLabel: partnerPaymentMethodCopy[item.method], amount: item.amount.amount,
+    paymentDate: item.dueDate, handoverDate: item.check?.handoverDate, checkNumber: item.check?.number,
+    checkOwnerName: item.check?.ownerName, status: 'WILL_BE_PAID',
+  }));
+  const negativePlanned = payments.reduce<string | null>((sum, item) => subtractPartnerDecimal(sum, item.amount), '0');
+  const paymentTotal = subtractPartnerDecimal('0', negativePlanned);
+  return {
+    contract: { contractNumber: output.contractNumber, createdAt: output.contractDate,
+      customer: { firstName: output.customer.displayName, lastName: '', companyName: '', phoneNumber: output.customer.phone } },
+    snapshot: { contractDate: output.contractDate, discount: { amount: output.totals.discount } }, money,
+    productRows: output.products.map(item => ({ id: item.productRowId, code: item.productCode ?? '—',
+      name: item.description, type: partnerProductTypeCopy[item.productType ?? ''] ?? '—',
+      dimensions: [item.lengthMeters ? `طول: ${item.lengthMeters} متر` : null,
+        item.widthMeters ? `عرض: ${item.widthMeters} متر` : null].filter(Boolean).join(' | ') || '—',
+      quantity: item.count ?? item.quantity, area: item.areaSquareMeters, unitPrice: item.retailUnitPrice, total: item.retailLineTotal ?? multiplyPartnerDecimal(item.quantity, item.retailUnitPrice),
+    })),
+    dependentServices: [], independentServices: [],
+    deliveries: output.deliveries.map(item => ({ id: item.deliveryId, deliveryDate: date(item.date),
+      deliveryAddress: item.destination, projectManagerName: item.projectManagerName ?? output.project?.managerName ?? '—',
+      receiverName: item.receiverName ?? '—', notes: item.notes ?? '—',
+      products: item.items.map(entry => `${output.products.find(product => product.productRowId === entry.productRowId)?.description ?? 'محصول'}: ${entry.quantity}`),
+    })), payments, productsTotal: output.totals.net, servicesTotal: undefined, paymentTotal,
+    grandTotal: output.totals.payable, remaining: subtractPartnerDecimal(output.totals.payable, paymentTotal),
+  };
+}
+
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <div className="flex justify-between gap-4 text-sm"><span className="text-secondary">{label}:</span><span className="font-medium text-primary text-left">{children}</span></div>
 );
@@ -133,8 +166,9 @@ const Table = ({ headings, rows }: { headings: string[]; rows: React.ReactNode[]
   </div>
 );
 
-export default function ManualContractSummary({ data }: { data: PublicContract }) {
-  const summary = buildManualContractSummary(data);
+export default function ManualContractSummary({ data, customerOutput }: { data?: PublicContract; customerOutput?: CustomerContractOutput }) {
+  if (!data && !customerOutput) return null;
+  const summary = customerOutput ? buildPartnerManualContractSummary(customerOutput) : buildManualContractSummary(data!);
   const { contract, snapshot, money } = summary;
   const customerName = [contract.customer.firstName, contract.customer.lastName].filter(Boolean).join(' ') || contract.customer.companyName || 'مشتری';
   return <div className="space-y-3" dir="rtl">
@@ -145,26 +179,37 @@ export default function ManualContractSummary({ data }: { data: PublicContract }
           <ErpNeumorphicCard className="space-y-2 p-4"><h3 className="mb-3 font-semibold text-secondary">اطلاعات قرارداد</h3>
             <Field label="شماره قرارداد">{contract.contractNumber}</Field>
             <Field label="تاریخ قرارداد">{date(snapshot.contractDate || contract.createdAt)}</Field>
-            <Field label="وضعیت">{status(data.contractStatus)}</Field>
+            <Field label="وضعیت">{status(customerOutput?.status ?? data!.contractStatus)}</Field>
           </ErpNeumorphicCard>
           <ErpNeumorphicCard className="space-y-2 p-4"><h3 className="mb-3 font-semibold text-secondary">اطلاعات مشتری</h3>
             <Field label="نام">{customerName}</Field><Field label="شماره موبایل تایید">{value(contract.customer.phoneNumber)}</Field>
           </ErpNeumorphicCard>
         </div>
         <div className="space-y-4"><ErpNeumorphicCard className="space-y-2 p-4"><h3 className="mb-3 font-semibold text-secondary">جمع‌بندی مالی</h3>
-          <Field label="جمع محصولات">{money(summary.productsTotal)}</Field>
-          <Field label="جمع خدمات">{money(summary.servicesTotal)}</Field>
+          <Field label={customerOutput ? 'مبلغ پیش از تعدیل' : 'جمع محصولات'}>{money(summary.productsTotal)}</Field>
+          {!customerOutput && <Field label="جمع خدمات">{money(summary.servicesTotal)}</Field>}
           {toFiniteNumber(snapshot.discount?.amount) > 0 && <Field label="تخفیف">{money(snapshot.discount.amount)}</Field>}
-          <Field label="جمع پرداختی">{money(summary.paymentTotal)}</Field>
+          <Field label={customerOutput ? 'جمع برنامه پرداخت' : 'جمع پرداختی'}>{money(summary.paymentTotal)}</Field>
+          {customerOutput && <><Field label="مالیات">{money(customerOutput.totals.tax)}</Field>
+            <Field label="هزینه‌های جانبی">{money(customerOutput.totals.charges)}</Field></>}
           <div className="border-t border-[var(--sds-border-default)] pt-2"><Field label="مبلغ نهایی قرارداد">{money(summary.grandTotal)}</Field></div>
-          <Field label="مانده پرداخت">{money(summary.remaining)}</Field>
+          <Field label={customerOutput ? 'مبلغ خارج از برنامه پرداخت' : 'مانده پرداخت'}>{money(summary.remaining)}</Field>
         </ErpNeumorphicCard>
-          <ErpNeumorphicCard className="p-4"><Field label="وضعیت تایید مشتری">{status(data.status)}</Field></ErpNeumorphicCard>
+          <ErpNeumorphicCard className="p-4"><Field label="وضعیت تایید مشتری">{status(customerOutput?.confirmation === 'VERIFIED' ? 'VERIFIED' : data?.status ?? 'PENDING')}</Field></ErpNeumorphicCard>
         </div>
       </div>
     </ErpNeumorphicCard>
+    {customerOutput && <ErpNeumorphicCard className="space-y-2 p-4">
+      <h3 className="font-semibold text-secondary">فروشنده و پروژه</h3>
+      <Field label="فروشنده">{customerOutput.seller.displayName}</Field>
+      <Field label="تلفن فروشنده">{customerOutput.seller.phone}</Field>
+      <Field label="نشانی فروشنده">{customerOutput.seller.address}</Field>
+      {customerOutput.project && <><Field label="پروژه">{customerOutput.project.title}</Field>
+        <Field label="نشانی پروژه">{customerOutput.project.address ?? '—'}</Field></>}
+      <p className="text-sm text-secondary">{customerOutput.legalText}</p>
+    </ErpNeumorphicCard>}
     <ErpNeumorphicDisclosure open><summary className="cursor-pointer px-4 py-3 font-semibold text-primary">محصولات قرارداد ({summary.productRows.length})</summary>
-      <Table headings={['کد', 'نام', 'نوع', 'ابعاد', 'تعداد', 'متراژ', 'مبلغ کل']} rows={summary.productRows.map((row: any) => [row.code, row.name, row.type, row.dimensions, formatDisplayNumber(row.quantity), formatDisplayNumber(row.area), money(row.total)])} />
+      <Table headings={['کد', 'نام', 'نوع', 'ابعاد', 'تعداد', 'متراژ', 'نرخ', 'مبلغ کل']} rows={summary.productRows.map((row: any) => [row.code, row.name, row.type, row.dimensions, formatDisplayNumber(row.quantity), row.area === undefined ? '—' : formatDisplayNumber(row.area), money(row.unitPrice), money(row.total)])} />
     </ErpNeumorphicDisclosure>
     <ErpNeumorphicDisclosure><summary className="cursor-pointer px-4 py-3 font-semibold text-primary">خدمات و عملیات وابسته ({summary.dependentServices.length})</summary>
       <Table headings={['محصول', 'دسته', 'شرح', 'مقدار', 'نرخ', 'هزینه']} rows={summary.dependentServices.map(row => [row.product, row.category, row.name, row.amount, row.rate, money(row.cost)])} />

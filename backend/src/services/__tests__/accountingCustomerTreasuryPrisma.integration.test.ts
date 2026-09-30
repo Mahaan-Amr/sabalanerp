@@ -143,7 +143,12 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
       adapterType: 'CSV', mappingVersion: 1, fileBase64, actorId: actor.id });
     assert.equal(importedFile.imported, 1);
     assert.equal(importedFile.rejected, 1);
-    assert.match(String((importedFile.results as any[])[1].reason || ''), /ردیف منبع بانکی/);
+    assert.match(String((importedFile.results as any[])[1].reason || ''), /مبلغ ردیف بانکی نامعتبر/);
+    await assert.rejects(() => importBankStatementLinePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, sourceIdentity: '', bookedAt: new Date(0), amountRials: 0n,
+      direction: 'INBOUND', description: '', evidence: { rawRecord: {
+        reference: 'file-date-bad', date: 'invalid-date', amount: '1200', direction: 'credit', description: 'تاریخ نامعتبر',
+      } } }), /تاریخ ردیف بانکی نامعتبر/);
     const rejectedCase = await database.accountingExceptionCase.findUniqueOrThrow({ where: {
       sourceType_sourceId_sourceVersion_code: { sourceType: 'BANK_STATEMENT_FILE',
         sourceId: `${financial.id}:${importedFile.fileHash}:3`, sourceVersion: 1, code: 'BANK_SOURCE_ROW_INVALID' },

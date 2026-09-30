@@ -1,5 +1,5 @@
 'use client';
-import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSection, ErpSheet, ErpTextarea, useErpPresentationScope } from '@/components/erp';
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -31,6 +31,7 @@ import { getCrmPermissions } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
+import { CustomerRemovalConfirmation } from '@/features/crm/customer-workflow/CustomerRemovalConfirmation';
 import { writeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
 
 interface CrmCustomer {
@@ -143,6 +144,15 @@ export default function CustomerDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'projects' | 'contacts' | 'leads' | 'contracts'>('overview');
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
+  const presentationScope = useErpPresentationScope();
+  const DetailFrame = presentationScope === 'workspace' ? 'div' : ErpCard;
+  const DetailSection = presentationScope === 'workspace' ? ErpSection : 'div';
+  const [removal, setRemoval] = useState<{ kind: 'project' | 'contact'; id: string } | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removalError, setRemovalError] = useState<string | null>(null);
+  const [projectSaving, setProjectSaving] = useState(false);
+  const [contactSaving, setContactSaving] = useState(false);
+  const [contactSubmitError, setContactSubmitError] = useState<string | null>(null);
   const [projectSubmitError, setProjectSubmitError] = useState<string | null>(null);
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [editingProject, setEditingProject] = useState<any>(null);
@@ -274,6 +284,7 @@ export default function CustomerDetailPage() {
 
   // Project Address Handlers
   const handleAddProject = () => {
+    setProjectSubmitError(null);
     setEditingProject(null);
     setProjectFormData({
       address: '',
@@ -318,6 +329,7 @@ export default function CustomerDetailPage() {
   }, [customer?.id]);
 
   const handleEditProject = (project: any) => {
+    setProjectSubmitError(null);
     setEditingProject(project);
     setProjectFormData({
       address: project.address || '',
@@ -334,48 +346,70 @@ export default function CustomerDetailPage() {
     setShowAddProjectModal(true);
   };
 
-  const handleDeleteProject = async (projectId: string) => {
-    if (!confirm('آیا از حذف این آدرس پروژه اطمینان دارید؟')) return;
+  const handleDeleteProject = async (projectId: string, confirmed = false) => {
+    if (!confirmed) {
+      if (presentationScope === 'workspace') {
+        setRemovalError(null);
+        setRemoval({ kind: 'project', id: projectId });
+        return;
+      }
+      if (!confirm('آیا از حذف این آدرس پروژه اطمینان دارید؟')) return;
+    }
 
     try {
       const response = await crmAPI.deleteProjectAddress(customer!.id, projectId);
       if (response.data.success) {
         await fetchCustomer(); // Refresh data
+        return true;
       }
     } catch (error) {
       console.error('Error deleting project address:', error);
     }
+    return false;
   };
 
   // Contact Handlers
   const handleAddContact = () => {
+    setContactSubmitError(null);
     setEditingContact(null);
     setShowAddContactModal(true);
   };
 
   const handleEditContact = (contact: any) => {
+    setContactSubmitError(null);
     setEditingContact(contact);
     setShowAddContactModal(true);
   };
 
-  const handleDeleteContact = async (contactId: string) => {
+  const handleDeleteContact = async (contactId: string, confirmed = false) => {
     if (!customer) return;
-    if (!confirm('آیا از حذف این مخاطب اطمینان دارید؟')) return;
+    if (!confirmed) {
+      if (presentationScope === 'workspace') {
+        setRemovalError(null);
+        setRemoval({ kind: 'contact', id: contactId });
+        return;
+      }
+      if (!confirm('آیا از حذف این مخاطب اطمینان دارید؟')) return;
+    }
 
     try {
       const response = await crmAPI.deleteContact(customer.id, contactId);
       if (response.data.success) {
         await fetchCustomer(); // Refresh data
+        return true;
       }
     } catch (error) {
       console.error('Error deleting contact:', error);
     }
+    return false;
   };
 
   // Form Submission Handlers
   const handleSubmitProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customer) return;
+    if (!customer || projectSaving) return;
+    setProjectSaving(true);
+    setProjectSubmitError(null);
 
     const projectPayload = {
       ...projectFormData,
@@ -424,12 +458,17 @@ export default function CustomerDetailPage() {
       }
     } catch (error) {
       console.error('Error saving project address:', error);
+      setProjectSubmitError('ذخیره آدرس پروژه ناموفق بود؛ دوباره تلاش کنید.');
+    } finally {
+      setProjectSaving(false);
     }
   };
 
   const handleSubmitContact = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customer) return;
+    if (!customer || contactSaving) return;
+    setContactSaving(true);
+    setContactSubmitError(null);
 
     try {
       if (editingContact) {
@@ -449,6 +488,9 @@ export default function CustomerDetailPage() {
       }
     } catch (error) {
       console.error('Error saving contact:', error);
+      setContactSubmitError('ذخیره مخاطب ناموفق بود؛ دوباره تلاش کنید.');
+    } finally {
+      setContactSaving(false);
     }
   };
 
@@ -558,8 +600,8 @@ export default function CustomerDetailPage() {
       </div>
 
       {/* Tabs */}
-      <ErpCard>
-        <ErpSegmentedControl
+      <DetailFrame>
+        {presentationScope !== 'workspace' && <ErpSegmentedControl
           value={activeTab}
           onChange={setActiveTab}
           options={[
@@ -569,11 +611,11 @@ export default function CustomerDetailPage() {
             { value: 'leads', label: 'سرنخ‌ها', icon: FaHistory },
             { value: 'contracts', label: 'قراردادها', icon: FaFileContract },
           ]}
-        />
+        />}
 
-        <div className="p-4 sm:p-6">
-          {activeTab === 'overview' && (
-            <div className="space-y-6">
+        <div className={presentationScope === 'workspace' ? "p-4 sm:p-6 space-y-6" : "p-4 sm:p-6"}>
+          {(presentationScope === 'workspace' || activeTab === 'overview') && (
+            <DetailSection className="space-y-6">
               {/* Basic Information */}
               <div>
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات پایه</h3>
@@ -606,8 +648,8 @@ export default function CustomerDetailPage() {
               </div>
 
               {/* Contact Information */}
-              <div>
-                <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات تماس</h3>
+              <CustomerWorkflowSection title="اطلاعات تماس" collapsible legacyPlain>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   <ErpFieldView label="کد ملی" value={<>{customer.nationalCode || 'تعریف نشده'}</>} />
                   <ErpFieldView label="آدرس منزل" value={<>{customer.homeAddress || 'تعریف نشده'}</>} />
@@ -615,27 +657,27 @@ export default function CustomerDetailPage() {
                   <ErpFieldView label="آدرس محل کار" value={<>{customer.workAddress || 'تعریف نشده'}</>} />
                   <ErpFieldView label="شماره محل کار" value={<>{customer.workNumber || 'تعریف نشده'}</>} />
                 </div>
-              </div>
+              </CustomerWorkflowSection>
 
               {/* Project Management */}
-              <div>
-                <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">مدیریت پروژه</h3>
+              <CustomerWorkflowSection title="مدیریت پروژه" collapsible legacyPlain>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <ErpFieldView label="نام مدیر پروژه" value={<>{customer.projectManagerName || 'تعریف نشده'}</>} />
                   <ErpFieldView label="شماره تماس مدیر پروژه" value={<>{customer.projectManagerNumber || 'تعریف نشده'}</>} />
                 </div>
-              </div>
+              </CustomerWorkflowSection>
 
               {/* Brand Information */}
-              <div>
-                <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات برند</h3>
+              <CustomerWorkflowSection title="اطلاعات برند" collapsible legacyPlain>
+
                 <div className="grid grid-cols-1 gap-6">
                   <ErpFieldView label="نام برند" value={<>{customer.brandName || 'تعریف نشده'}</>} />
                   {customer.brandNameDescription && (
                     <ErpFieldView label="توضیحات برند" value={<>{customer.brandNameDescription}</>} />
                   )}
                 </div>
-              </div>
+              </CustomerWorkflowSection>
 
               {/* Phone Numbers */}
               {customer.phoneNumbers && customer.phoneNumbers.length > 0 && (
@@ -659,18 +701,18 @@ export default function CustomerDetailPage() {
               )}
 
               {/* System Information */}
-              <div>
-                <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات سیستم</h3>
+              <CustomerWorkflowSection title="اطلاعات سیستم" collapsible legacyPlain>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <ErpFieldView label="تاریخ ایجاد" value={<>{formatDate(customer.createdAt)}</>} />
                   <ErpFieldView label="آخرین بروزرسانی" value={<>{formatDate(customer.updatedAt)}</>} />
                 </div>
-              </div>
-            </div>
+              </CustomerWorkflowSection>
+            </DetailSection>
           )}
 
-          {activeTab === 'projects' && (
-            <div className="space-y-6">
+          {(presentationScope === 'workspace' || activeTab === 'projects') && (
+            <DetailSection className="space-y-6">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">آدرس‌های پروژه</h3>
                 {hasPermission('crm' as any, 'edit' as any) && (
@@ -784,11 +826,11 @@ export default function CustomerDetailPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </DetailSection>
           )}
 
-          {activeTab === 'contacts' && (
-            <div className="space-y-6">
+          {(presentationScope === 'workspace' || activeTab === 'contacts') && (
+            <DetailSection className="space-y-6">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">مخاطبین</h3>
                 {hasPermission('crm' as any, 'edit' as any) && (
@@ -870,11 +912,11 @@ export default function CustomerDetailPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </DetailSection>
           )}
 
-          {activeTab === 'leads' && (
-            <div className="space-y-6">
+          {(presentationScope === 'workspace' || activeTab === 'leads') && (
+            <DetailSection className="space-y-6">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">سرنخ‌ها</h3>
 
               {(!customer.leads || customer.leads.length === 0) ? (
@@ -902,11 +944,11 @@ export default function CustomerDetailPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </DetailSection>
           )}
 
-          {activeTab === 'contracts' && (
-            <div className="space-y-6">
+          {(presentationScope === 'workspace' || activeTab === 'contracts') && (
+            <DetailSection className="space-y-6">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">قراردادها</h3>
 
               {(!customer.salesContracts || customer.salesContracts.length === 0) ? (
@@ -935,14 +977,14 @@ export default function CustomerDetailPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </DetailSection>
           )}
         </div>
-      </ErpCard>
+      </DetailFrame>
 
       {/* Admin Actions */}
       {hasPermission('crm' as any, 'admin' as any) && (
-        <CustomerWorkflowSection title="عملیات مدیریتی">
+        <CustomerWorkflowSection title="عملیات مدیریتی" collapsible>
           <div className="flex items-center gap-4">
             <ErpPressable type="button"
               onClick={handleToggleBlacklist}
@@ -968,6 +1010,7 @@ export default function CustomerDetailPage() {
       {/* Add/Edit Project Address Modal */}
       <ErpSheet
         open={showAddProjectModal}
+        pending={projectSaving}
         onClose={() => setShowAddProjectModal(false)}
         title={editingProject ? 'ویرایش آدرس پروژه' : 'افزودن آدرس پروژه'}
         presentation="modal"
@@ -1085,15 +1128,17 @@ export default function CustomerDetailPage() {
               <div className="flex items-center gap-4 pt-4">
                 <ErpPressable
                   type="submit"
+                  disabled={projectSaving}
                   tone="primary"
                   variant="solid"
                   className="inline-flex items-center gap-2 px-6 py-3"
                 >
                   <FaSave className="h-4 w-4" />
-                  {editingProject ? 'بروزرسانی' : 'افزودن'}
+                  {projectSaving ? 'در حال ذخیره…' : editingProject ? 'بروزرسانی' : 'افزودن'}
                 </ErpPressable>
                 <ErpPressable
                   type="button"
+                  disabled={projectSaving}
                   onClick={() => setShowAddProjectModal(false)}
                   variant="ghost"
                   className="px-6 py-3"
@@ -1107,11 +1152,13 @@ export default function CustomerDetailPage() {
       {/* Add/Edit Contact Modal */}
       <ErpSheet
         open={showAddContactModal}
+        pending={contactSaving}
         onClose={() => setShowAddContactModal(false)}
         title={editingContact ? 'ویرایش مخاطب' : 'افزودن مخاطب'}
         presentation="modal"
       >
             <form onSubmit={handleSubmitContact} className="space-y-4">
+              {contactSubmitError && <ErpInlineState kind="error" title={contactSubmitError} />}
               <div className="grid grid-cols-2 gap-4">
                 <CustomerWorkflowField label="نام" required>
                   <ErpInput
@@ -1169,15 +1216,17 @@ export default function CustomerDetailPage() {
               <div className="flex items-center gap-4 pt-4">
                 <ErpPressable
                   type="submit"
+                  disabled={contactSaving}
                   tone="primary"
                   variant="solid"
                   className="inline-flex items-center gap-2 px-6 py-3"
                 >
                   <FaSave className="h-4 w-4" />
-                  {editingContact ? 'بروزرسانی' : 'افزودن'}
+                  {contactSaving ? 'در حال ذخیره…' : editingContact ? 'بروزرسانی' : 'افزودن'}
                 </ErpPressable>
                 <ErpPressable
                   type="button"
+                  disabled={contactSaving}
                   onClick={() => setShowAddContactModal(false)}
                   variant="ghost"
                   className="px-6 py-3"
@@ -1187,6 +1236,21 @@ export default function CustomerDetailPage() {
               </div>
             </form>
       </ErpSheet>
+      <CustomerRemovalConfirmation open={Boolean(removal)} title={removal?.kind === 'project' ? 'حذف آدرس پروژه' : 'حذف مخاطب'}
+        description={removal?.kind === 'project' ? 'آیا از حذف این آدرس پروژه اطمینان دارید؟' : 'آیا از حذف این مخاطب اطمینان دارید؟'}
+        pending={removing} error={removalError} onClose={() => setRemoval(null)}
+        onConfirm={async () => {
+          if (!removal || removing) return;
+          setRemoving(true);
+          setRemovalError(null);
+          try {
+            const removed = removal.kind === 'project'
+              ? await handleDeleteProject(removal.id, true)
+              : await handleDeleteContact(removal.id, true);
+            if (removed) setRemoval(null);
+            else setRemovalError('حذف ناموفق بود؛ دوباره تلاش کنید.');
+          } finally { setRemoving(false); }
+        }} />
     </CustomerWorkflowPage>
   );
 }

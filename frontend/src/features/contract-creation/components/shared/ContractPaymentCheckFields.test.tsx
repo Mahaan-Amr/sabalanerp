@@ -15,3 +15,11 @@ test('shared check editor exposes ordinary and Partner check evidence with field
   assert.match(html, /کد ملی/);
   assert.match(html, /aria-invalid="true"/);
 });
+
+test('today payment can display an optional national ID without the required marker', () => {
+  const html = renderToStaticMarkup(<ContractPaymentCheckFields showCheckFields={false} showNationalCode
+    nationalCodeRequired={false} value={{ number: '', ownerName: '', handoverDate: '', nationalCode: '' }} onChange={() => undefined} />);
+  assert.match(html, /برای پرداخت امروز اختیاری است/);
+  assert.match(html, /کد ملی مشتری/);
+  assert.doesNotMatch(html, /الزامی است/);
+});

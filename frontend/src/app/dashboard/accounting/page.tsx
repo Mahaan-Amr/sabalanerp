@@ -3,34 +3,24 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaBalanceScale,
-  FaClipboardCheck,
-  FaExclamationTriangle,
   FaFileInvoice,
-  FaHistory,
-  FaMoneyCheckAlt,
-  FaReceipt,
   FaSync,
-  FaUserClock,
-  FaUserPlus,
 } from 'react-icons/fa';
 import {
-  ErpActionGrid,
   ErpInlineState,
+  ErpNeumorphicActionGrid,
   ErpPage,
-  ErpSkeleton,
 } from '@/components/erp';
 import { accountingAPI, hrHiringMetricsAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { StatusBadge } from '@/features/accounting/accountingUi';
 import { AccountingFinancialTrend } from '@/features/accounting/AccountingFinancialTrend';
+import { AccountingDashboardSkeleton, AccountingOperationalMetricGrid } from '@/features/accounting/AccountingDashboardPresentation';
 import {
-  failFinancialTrend,
   pendingFinancialTrend,
   resolveFinancialTrend,
   type FinancialTrendRange,
   type FinancialTrendState,
 } from '@/features/accounting/accountingFinancialTrendState';
-import { HR_HIRING_METRIC_VIEWS } from '@/features/hr-hiring/hrHiringMetricViews';
 import {
   clearHrHiringMetrics,
   pendingHrHiringMetrics,
@@ -65,6 +55,8 @@ export default function AccountingDashboardPage() {
   const hrRequestGeneration = useRef(0);
   const workspaceRequestGeneration = useRef(0);
   const trendRequestGeneration = useRef(0);
+  const trendRangeRef = useRef<FinancialTrendRange>('6m');
+  const dashboardOwnerRef = useRef<string | null>(null);
   const rawSearchParams = searchParams.toString();
   const dashboardQuery = useMemo(
     () => canonicalizeAccountingDashboardQuery(new URLSearchParams(rawSearchParams)),
@@ -73,24 +65,35 @@ export default function AccountingDashboardPage() {
   const workspace = workspaceState.data;
   const loading = workspaceState.loading;
 
-  const loadWorkspace = useCallback(async () => {
+  const loadDashboard = useCallback(async () => {
     const requestGeneration = ++workspaceRequestGeneration.current;
+    const trendGeneration = ++trendRequestGeneration.current;
+    const requestedRange = trendRangeRef.current;
     dispatchWorkspace({ type: 'start' });
+    setFinancialTrend((previous) => pendingFinancialTrend(previous, requestedRange));
     try {
-      const response = await accountingAPI.getWorkspace({
+      const response = await accountingAPI.getDashboard({
+        range: requestedRange,
         due: dashboardQuery.state.due || undefined,
         deadlineType: dashboardQuery.state.deadlineType === 'all' ? undefined : dashboardQuery.state.deadlineType,
       });
       if (requestGeneration !== workspaceRequestGeneration.current) return;
       if (!response.data.success) {
         dispatchWorkspace({ type: 'failure', message: 'داده‌های حسابداری دریافت نشد.' });
+        if (trendGeneration === trendRequestGeneration.current) setFinancialTrend({ status: 'error', data: null });
         return;
       }
-      dispatchWorkspace({ type: 'success', data: response.data.data });
+      dispatchWorkspace({ type: 'success', data: response.data.data.workspace });
+      if (trendGeneration === trendRequestGeneration.current) {
+        setFinancialTrend(response.data.data.trendError || !response.data.data.trend
+          ? { status: 'error', data: null }
+          : { status: 'available', data: response.data.data.trend });
+      }
     } catch (error) {
       if (requestGeneration !== workspaceRequestGeneration.current) return;
       console.error('Error loading accounting workspace:', error);
       dispatchWorkspace({ type: 'failure', message: 'ارتباط با حسابداری برقرار نشد.' });
+      if (trendGeneration === trendRequestGeneration.current) setFinancialTrend({ status: 'error', data: null });
     }
   }, [dashboardQuery.state.deadlineType, dashboardQuery.state.due]);
 
@@ -120,29 +123,41 @@ export default function AccountingDashboardPage() {
       const response = await accountingAPI.getFinancialTrend(range);
       if (requestGeneration !== trendRequestGeneration.current) return;
       if (!response.data.success) {
-        setFinancialTrend((previous) => failFinancialTrend(previous));
+        setFinancialTrend({ status: 'error', data: null });
         return;
       }
       setFinancialTrend((previous) => resolveFinancialTrend(previous, response.data.data));
     } catch {
       if (requestGeneration === trendRequestGeneration.current) {
-        setFinancialTrend((previous) => failFinancialTrend(previous));
+        setFinancialTrend({ status: 'error', data: null });
       }
     }
   }, []);
 
   useEffect(() => {
-    void loadFinancialTrend(trendRange);
-  }, [loadFinancialTrend, trendRange]);
-
-  useEffect(() => {
+    if (authLoading) return;
+    if (!currentUserId) {
+      dashboardOwnerRef.current = null;
+      workspaceRequestGeneration.current += 1;
+      trendRequestGeneration.current += 1;
+      dispatchWorkspace({ type: 'reset' });
+      setFinancialTrend(pendingFinancialTrend());
+      return;
+    }
+    if (dashboardOwnerRef.current !== currentUserId) {
+      dashboardOwnerRef.current = currentUserId;
+      workspaceRequestGeneration.current += 1;
+      trendRequestGeneration.current += 1;
+      dispatchWorkspace({ type: 'reset' });
+      setFinancialTrend(pendingFinancialTrend());
+    }
     const canonicalSearch = dashboardQuery.params.toString();
     if (canonicalSearch !== rawSearchParams) {
       router.replace(`/dashboard/accounting${canonicalSearch ? `?${canonicalSearch}` : ''}`, { scroll: false });
       return;
     }
-    void loadWorkspace();
-  }, [dashboardQuery.params, loadWorkspace, rawSearchParams, router]);
+    void loadDashboard();
+  }, [authLoading, currentUserId, dashboardQuery.params, loadDashboard, rawSearchParams, router]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -156,36 +171,53 @@ export default function AccountingDashboardPage() {
   }, [authLoading, currentUserId, loadHrMetrics]);
 
   useEffect(() => {
+    let focusTimer: ReturnType<typeof setTimeout> | null = null;
     const revalidateOnFocus = () => {
       if (document.visibilityState === 'visible' && currentUserId) {
-        void loadHrMetrics(currentUserId);
-        void loadWorkspace();
-        void loadFinancialTrend(trendRange);
+        if (focusTimer) clearTimeout(focusTimer);
+        focusTimer = setTimeout(() => {
+          focusTimer = null;
+          if (document.visibilityState !== 'visible') return;
+          void loadHrMetrics(currentUserId);
+          void loadDashboard();
+        }, 100);
       }
     };
     window.addEventListener('focus', revalidateOnFocus);
     document.addEventListener('visibilitychange', revalidateOnFocus);
     return () => {
+      if (focusTimer) clearTimeout(focusTimer);
       window.removeEventListener('focus', revalidateOnFocus);
       document.removeEventListener('visibilitychange', revalidateOnFocus);
     };
-  }, [currentUserId, loadHrMetrics, loadWorkspace, loadFinancialTrend, trendRange]);
+  }, [currentUserId, loadHrMetrics, loadDashboard]);
 
   const financialTrendPanel = (
     <AccountingFinancialTrend
       range={trendRange}
       state={financialTrend}
-      onRangeChange={setTrendRange}
+      onRangeChange={(range) => {
+        trendRangeRef.current = range;
+        setTrendRange(range);
+        void loadFinancialTrend(range);
+      }}
       onRetry={() => void loadFinancialTrend(trendRange)}
       compact
     />
   );
 
-  if (!workspace && loading) {
+  const hrMetricsPending = Boolean(currentUserId &&
+    (hrMetricsOwnerId !== currentUserId || hrMetrics.status === 'pending'));
+  if (!authLoading && !currentUserId) {
+    return <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری" backHref="/dashboard">
+      <ErpInlineState kind="permission" title="برای مشاهده حسابداری وارد حساب خود شوید." />
+    </ErpPage>;
+  }
+  if (authLoading || dashboardOwnerRef.current !== currentUserId || loading ||
+      (workspace && hrMetricsPending)) {
     return (
       <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری" backHref="/dashboard">
-        {financialTrendPanel}
-        <ErpSkeleton lines={4} label="در حال بارگذاری سررسیدهای حسابداری" />
+        <AccountingDashboardSkeleton />
       </ErpPage>
     );
   }
@@ -197,7 +229,7 @@ export default function AccountingDashboardPage() {
         <ErpInlineState
           kind="error"
           title={workspaceState.error || 'داده‌های حسابداری در دسترس نیست.'}
-          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadWorkspace, tone: 'primary' }}
+          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadDashboard, tone: 'primary' }}
         />
       </ErpPage>
     );
@@ -205,15 +237,11 @@ export default function AccountingDashboardPage() {
 
   const commandCenter = workspace?.commandCenter || {};
   const refreshDashboard = () => {
-    void loadWorkspace();
-    void loadFinancialTrend(trendRange);
+    void loadDashboard();
     if (currentUserId) void loadHrMetrics(currentUserId);
   };
   const hrMetricsBelongToCurrentUser = Boolean(currentUserId && hrMetricsOwnerId === currentUserId);
-  const hrMetricsAvailable = hrMetricsBelongToCurrentUser && hrMetrics.status === 'available';
-  const hrMetricsDescription = !hrMetricsBelongToCurrentUser || hrMetrics.status === 'pending'
-    ? 'در حال بررسی دسترسی'
-    : undefined;
+  const dashboardHrMetrics = hrMetricsBelongToCurrentUser ? hrMetrics : { status: 'unavailable' as const };
   const dashboardHref = (patch: { due?: DeadlineBucket | ''; deadlineType?: 'all' | 'receivable' | 'check' }) => {
     const result = patchAccountingDashboardQuery(new URLSearchParams(rawSearchParams), patch);
     const query = result.params.toString();
@@ -238,12 +266,14 @@ export default function AccountingDashboardPage() {
         <ErpInlineState
           kind="stale"
           title="آخرین نمایش موفق حفظ شده است؛ به‌روزرسانی انجام نشد."
-          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadWorkspace, tone: 'warning' }}
+          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadDashboard, tone: 'warning' }}
         />
       )}
       {loading && workspace && (
         <p role="status" className="sds-text-muted text-sm">در حال به‌روزرسانی داده‌های حسابداری…</p>
       )}
+
+      <AccountingOperationalMetricGrid commandCenter={commandCenter} hrMetrics={dashboardHrMetrics} />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,.9fr)]">
         <div className="min-w-0">{financialTrendPanel}</div>
@@ -256,100 +286,23 @@ export default function AccountingDashboardPage() {
         </div>
       </div>
 
-      <ErpActionGrid
-        columns={5}
-        compact
+      <ErpNeumorphicActionGrid
+        title="دسترسی‌های مالی"
+        desktopColumns={2}
         items={[
           {
+            id: 'ledger',
             title: 'دفترکل و کدینگ',
             description: 'اسناد قطعی، دفتر روزنامه و تراز آزمایشی رسمی',
             href: '/dashboard/accounting/ledger',
             icon: FaBalanceScale,
-            tone: 'primary',
           },
           {
-            title: 'قراردادهای قابل بررسی',
-            href: '/dashboard/accounting/contracts?view=reviewable',
-            icon: FaClipboardCheck,
-            tone: 'primary',
-            badge: <StatusBadge label={(commandCenter.reviewableContracts?.count || 0).toLocaleString('fa-IR')} tone="primary" />,
-          },
-          {
-            title: 'پیش‌نویس صورتحساب‌ها',
-            href: '/dashboard/accounting/invoice-candidates?view=actionable',
-            icon: FaFileInvoice,
-            tone: 'info',
-            badge: <StatusBadge label={(commandCenter.invoiceCandidates?.count || 0).toLocaleString('fa-IR')} tone="info" />,
-          },
-          {
+            id: 'dispatch-documents',
             title: 'اسناد ارسال مشتری',
-            description: 'بررسی و صدور هم‌زمان بارنامه و صورت‌حساب محموله',
+            description: 'بررسی و صدور بارنامه و صورت‌حساب محموله',
             href: '/dashboard/accounting/dispatch-documents',
             icon: FaFileInvoice,
-            tone: 'primary',
-          },
-          {
-            title: 'دریافت‌ها و چک‌ها',
-            href: '/dashboard/accounting/payments?view=due-soon',
-            icon: FaMoneyCheckAlt,
-            tone: 'warning',
-            description: 'چک‌های تسویه‌نشدهٔ سررسیدگذشته یا تا ۷ روز آینده',
-            badge: <StatusBadge label={(commandCenter.checksDue?.count || 0).toLocaleString('fa-IR')} tone="warning" />,
-          },
-          {
-            title: 'دریافتنی‌ها',
-            href: '/dashboard/accounting/receivables?view=open',
-            icon: FaReceipt,
-            tone: 'success',
-            badge: <StatusBadge label={(commandCenter.openReceivables?.count || 0).toLocaleString('fa-IR')} tone="success" />,
-          },
-          {
-            title: 'استخدام: وثیقه و قرارداد',
-            href: `/dashboard/hr/hiring?view=${HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts}`,
-            icon: FaUserPlus,
-            tone: 'info',
-            description: hrMetricsDescription,
-            badge: hrMetricsAvailable
-              ? <StatusBadge label={hrMetrics.actionableCollateralOrContractCases.toLocaleString('fa-IR')} tone="info" />
-              : undefined,
-          },
-          {
-            title: 'قالب وثیقه استخدام',
-            href: `/dashboard/hr/hiring/collateral-templates?view=${HR_HIRING_METRIC_VIEWS.activeCollateralTemplates}`,
-            icon: FaClipboardCheck,
-            tone: 'neutral',
-            description: hrMetricsDescription,
-            badge: hrMetricsAvailable
-              ? <StatusBadge label={hrMetrics.activeCollateralTemplates.toLocaleString('fa-IR')} tone="neutral" />
-              : undefined,
-          },
-          {
-            title: 'مالیات و سامانه مودیان',
-            href: '/dashboard/accounting/tax?view=needs-attention',
-            icon: FaBalanceScale,
-            tone: 'purple',
-            badge: <StatusBadge label={(commandCenter.taxNotReady?.count || 0).toLocaleString('fa-IR')} tone="purple" />,
-          },
-          {
-            title: 'بررسی اصلاحات',
-            href: '/dashboard/accounting/correction-requests?view=active',
-            icon: FaExclamationTriangle,
-            tone: 'warning',
-            badge: <StatusBadge label={(commandCenter.correctionRequests?.count || 0).toLocaleString('fa-IR')} tone="warning" />,
-          },
-          {
-            title: 'سوابق عملیات',
-            href: '/dashboard/accounting/audit',
-            icon: FaHistory,
-            tone: 'neutral',
-            badge: <StatusBadge label={(commandCenter.auditHistory?.count || 0).toLocaleString('fa-IR')} tone="neutral" />,
-          },
-          {
-            title: 'عملکرد حسابداران',
-            href: '/dashboard/accounting/performance?view=last30days',
-            icon: FaUserClock,
-            tone: 'primary',
-            badge: <StatusBadge label={(commandCenter.accountantPerformance?.count || 0).toLocaleString('fa-IR')} tone="primary" />,
           },
         ]}
       />

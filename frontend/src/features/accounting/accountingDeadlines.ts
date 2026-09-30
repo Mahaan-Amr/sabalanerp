@@ -8,12 +8,12 @@ export type DeadlineNavigationRow = {
   contractId?: string | null;
 };
 
-export const deadlineRegisterHref = (type: DeadlineType, bucket: DeadlineBucket) => {
+export const deadlineRegisterHref = (type: DeadlineType, bucket?: DeadlineBucket | '') => {
   const pathname = type === 'receivable'
     ? '/dashboard/accounting/receivables'
     : '/dashboard/accounting/payments';
   const view = type === 'receivable' ? 'open' : 'unsettled-checks';
-  return `${pathname}?view=${view}&due=${bucket}`;
+  return `${pathname}?view=${view}${bucket ? `&due=${bucket}` : ''}`;
 };
 
 export const deadlineRowHref = (row: DeadlineNavigationRow) => {
@@ -31,6 +31,7 @@ export type AccountingWorkspaceLoadState<T = any> = {
 };
 
 export type AccountingWorkspaceLoadEvent<T = any> =
+  | { type: 'reset' }
   | { type: 'start' }
   | { type: 'success'; data: T }
   | { type: 'failure'; message: string };
@@ -47,6 +48,7 @@ export const reduceAccountingWorkspaceLoad = <T = any>(
   event: AccountingWorkspaceLoadEvent<T>,
 ): AccountingWorkspaceLoadState<T> => {
   const state = current || initialAccountingWorkspaceLoadState as AccountingWorkspaceLoadState<T>;
+  if (event.type === 'reset') return { data: null, loading: true, stale: false, error: null };
   const privateData = Boolean(state.data && typeof state.data === 'object' &&
     'partnerAccountingIncluded' in state.data && state.data.partnerAccountingIncluded);
   if (event.type === 'start') return { ...state, data: privateData ? null : state.data, loading: true, stale: false, error: null };

@@ -35,9 +35,9 @@ Result<{ displayName: string; phone: string; address: string }> {
   return { ok: true, value: { displayName, phone: input.phone, address: input.address } };
 }
 
-/** Atomically binds immutable technical evidence to the customer contract on
- * first save, while allowing later Draft revisions to reuse that exact bound
- * evidence. The editable lease remains unavailable through the recovery API. */
+/** Atomically binds immutable technical evidence on first save and records
+ * later corrected recovery revisions without replacing earlier evidence. The
+ * editable lease remains unavailable through the recovery API. */
 export async function consumePrismaPartnerTechnicalRecovery(tx: Transaction, input: {
   actorId: string;
   recoveryId: string;
@@ -61,9 +61,27 @@ export async function consumePrismaPartnerTechnicalRecovery(tx: Transaction, inp
     ...(input.customerContractId ? { customerContractId: input.customerContractId } : {}),
     recoveryRevision: input.recoveryRevision, validatedSnapshots: recovery.validatedSnapshots };
   const payloadHash = await canonicalHash(evidence);
-  const evidenceKey = input.customerContractId ? 'contract-v1' : 'case-v1';
-  const prior = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: {
-    actorId: input.actorId, operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key: evidenceKey } } });
+  const evidencePrefix = input.customerContractId ? 'contract' : 'case';
+  const originalKey = `${evidencePrefix}-v1`;
+  const findEvidence = (key: string) => tx.partnerCommandOutcome.findUnique({
+    where: { actorId_operation_targetScope_key: { actorId: input.actorId,
+      operation: SUBMISSION_EVIDENCE_OPERATION, targetScope: input.recoveryId, key } },
+  });
+  const original = await findEvidence(originalKey);
+  if (original && await canonicalHash(original.outcome) !== original.payloadHash) {
+    return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+  }
+  const originalEvidence = object(original?.outcome);
+  if (original && original.payloadHash !== payloadHash &&
+      (boundCaseId !== input.caseId || originalEvidence?.caseId !== input.caseId ||
+        originalEvidence?.customerContractId !== input.customerContractId ||
+        typeof originalEvidence?.recoveryRevision !== 'number' ||
+        originalEvidence.recoveryRevision >= input.recoveryRevision)) {
+    return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+  }
+  const evidenceKey = original && original.payloadHash !== payloadHash
+    ? `${evidencePrefix}-recovery-${input.recoveryRevision}` : originalKey;
+  const prior = evidenceKey === originalKey ? original : await findEvidence(evidenceKey);
   if (prior && (prior.payloadHash !== payloadHash || await canonicalHash(prior.outcome) !== prior.payloadHash)) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
@@ -194,8 +212,8 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     : { title: legacyProject!.title, address: legacyProject!.address };
 
   const materialBindings = command.intent.additionalMaterialApprovals ?? [];
-  const approvalRowIds = [...command.intent.rows.flatMap(row => row.approvedRowBinding ? [row.approvedRowBinding.rowId] : []),
-    ...materialBindings.map(row => row.approvedRowBinding.rowId)];
+  const approvalRowIds = [...new Set([...command.intent.rows.flatMap(row => row.approvedRowBinding ? [row.approvedRowBinding.rowId] : []),
+    ...materialBindings.map(row => row.approvedRowBinding.rowId)])];
   const approvals = await tx.partnerInquiryApproval.findMany({ where: { rowId: { in: approvalRowIds } },
     select: { rowId: true, wholesaleUnitPrice: true, currency: true,
       row: { select: { configurationHash: true, definition: true } } } });
@@ -235,16 +253,29 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   const materialPricingReady = additionalMaterialApprovals.length === supplemental.length;
   for (const row of saved.graph.rows) {
     const view = saved.view.rows.find(item => item.configurationRef.productRowId === row.productRowId);
-    const identityRow = saved.identities.find(item => item.productRowId === row.productRowId)?.identity;
+    let materialRowId: string = row.productRowId;
+    const visited = new Set<string>();
+    while (!visited.has(materialRowId)) {
+      visited.add(materialRowId);
+      const child = saved.draft.dependents?.find(item => item.kind === 'remainder' && item.productRowId === materialRowId);
+      if (!child || child.kind !== 'remainder') break;
+      materialRowId = child.sourceProductRowId;
+    }
+    const identityRow = saved.identities.find(item => item.productRowId === materialRowId)?.identity;
+    const displayIdentity = saved.identities.find(item => item.productRowId === row.productRowId)?.identity;
     const intentRow = command.intent.rows.find(item => item.productRowId === row.productRowId);
-    const approval = approvals.find(item => item.rowId === intentRow?.approvedRowBinding?.rowId);
+    const paidRemainder = materialRowId !== row.productRowId;
+    // Material was paid by the source row; child services use canonical owner rates.
+    const sourceIntent = command.intent.rows.find(item => item.productRowId === materialRowId);
+    const approval = approvals.find(item => item.rowId === sourceIntent?.approvedRowBinding?.rowId);
     const definition = approval && parseInquiryDefinition(approval.row.definition);
     const currentSubjectHash = identityRow && await inquiryConfigurationHash(identityRow);
     const approvedSubjectHash = definition && await inquiryConfigurationHash(definition.identity);
     const approvedLegacyHash = definition && await canonicalHash(definition.identity);
     const hash = approval?.row.configurationHash;
-    const product = catalogProducts.map(object).find(item => item?.catalogItemId === identityRow?.catalogProductId);
-    if (!view || !identityRow || !intentRow || typeof product?.name !== 'string' || typeof product?.code !== 'string' ||
+    const product = catalogProducts.map(object).find(item => item?.catalogItemId === displayIdentity?.catalogProductId);
+    if (!view || !identityRow || !intentRow || !sourceIntent ||
+        (paidRemainder && JSON.stringify(intentRow.approvedRowBinding) !== JSON.stringify(sourceIntent.approvedRowBinding)) || typeof product?.name !== 'string' || typeof product?.code !== 'string' ||
         (approval && (approval.currency !== 'IRT' || !definition || definition.identity.partnerSellerId !== actorId ||
           approvedSubjectHash !== currentSubjectHash ||
           (hash !== approvedSubjectHash && hash !== approvedLegacyHash)))) {
@@ -252,7 +283,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     }
     let wholesale: ReturnType<typeof calculatePartnerCanonicalWholesale> | undefined;
     if (approval && materialPricingReady) {
-      try { wholesale = calculatePartnerCanonicalWholesale(row, approval.wholesaleUnitPrice.toString(),
+      try { wholesale = calculatePartnerCanonicalWholesale(row, paidRemainder ? '0' : approval.wholesaleUnitPrice.toString(),
         saved.graph.layerConfigurations, additionalRates); }
       catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
     }

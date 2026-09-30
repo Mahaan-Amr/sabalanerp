@@ -55,9 +55,13 @@ class ApplyPreflightFailure extends Error {
 
 const recoveryMethods = (version: Awaited<ReturnType<typeof preflightApprovedPricingAtFinancialApproval>>) => {
   const sourceEvidence = metadata(version.sourceEvidence);
+  const discount = metadata(sourceEvidence.discount);
   const graph = metadata(sourceEvidence.graph);
   const compatibility = metadata(graph.compatibility);
   const methods = new Set<string>();
+  if (discount.evidenceOrigin === 'EXPLICIT_ZERO_DISCOUNT_CANONICAL_BASE_RECONCILIATION_V1') {
+    methods.add('EXPLICIT_ZERO_DISCOUNT_CANONICAL_BASE_RECONCILIATION');
+  }
   const origin = String(compatibility.evidenceOrigin || '');
   if (origin === 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING') {
     methods.add('FROZEN_COMMERCIAL_TUPLE_TO_AUDITED_CANONICAL_GRAPH');
@@ -71,6 +75,10 @@ const recoveryMethods = (version: Awaited<ReturnType<typeof preflightApprovedPri
     methods.add('AUDITED_FROZEN_STAIR_LAYER_MATERIAL_BASE');
   }
   if (compatibility.recoveredInvoiceAmount) methods.add('ZERO_SENTINEL_FROM_FROZEN_CONTRACT_TOTAL');
+  if (Array.isArray(compatibility.auditedDiscountEligibilityAssignments) &&
+    compatibility.auditedDiscountEligibilityAssignments.length > 0) {
+    methods.add('AUDITED_FROZEN_DISCOUNT_ELIGIBILITY');
+  }
   if (Array.isArray(sourceEvidence.quantityNormalizations) && sourceEvidence.quantityNormalizations.length > 0) {
     methods.add('VERSIONED_COMMERCIAL_PRECISION_RECONCILIATION');
   }

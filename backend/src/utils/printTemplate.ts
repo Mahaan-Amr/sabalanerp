@@ -109,6 +109,8 @@ interface NormalizedLayerDetails {
 }
 
 interface NormalizedProduct {
+  billingUnit?: string;
+  billingQuantity?: number;
   id: string;
   rowId: string;
   code: string;
@@ -653,10 +655,18 @@ const getUserName = (user: any): string =>
   [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || EMPTY;
 
 const deliveryUnitLabel = (unit: unknown): string => {
-  if (unit === 'meter') return 'متر طول';
-  if (unit === 'squareMeter') return 'متر مربع';
+  if (unit === 'meter' || unit === 'm') return 'متر طول';
+  if (unit === 'squareMeter' || unit === 'm2') return 'متر مربع';
   if (unit === 'ton') return 'تن';
+  if (unit === 'count' || unit === 'piece' || unit === 'physicalPiece') return 'عدد';
+  if (unit === 'set') return 'دستگاه';
   return 'عدد';
+};
+
+const customerPaymentSubtypeLabel = (subtype: string): string => {
+  const labels: Record<string, string> = { CARD: 'کارت', SHIBA: 'شبا', CASH: 'نقدی',
+    BANK_TRANSFER: 'انتقال بانکی', CHECK: 'چک', CHEQUE: 'چک' };
+  return labels[subtype] ?? (/^[\p{Script=Arabic}\s]+$/u.test(subtype) ? subtype : 'روش ثبت‌شده');
 };
 
 const inferDeliveryUnit = (product: NormalizedProduct | undefined, deliveryProduct: any): string => {
@@ -1318,8 +1328,9 @@ const normalizeProducts = (
     preparedUnit: preparedUnitLabel(item?.preparedUnit),
     preparedQuantity: toNumber(item?.preparedQuantity || item?.quantity),
     stairPart: stairPartLabel(item?.stairPartType),
-    dimensions: EMPTY,
-    quantity: toNumber(item?.quantity),
+    dimensions: item?.dimensions || EMPTY,
+    billingUnit: item?.billingUnit, billingQuantity: toNumber(item?.quantity),
+    quantity: toNumber(item?.pieceCount ?? item?.quantity),
     squareMeters: 0,
     unitPrice: toNumber(item?.unitPrice),
     originalTotalPrice: toNumber(item?.originalTotalPrice),
@@ -1725,6 +1736,12 @@ function measurementCellsFromLabel(value: string): Pick<FlatProductRow, 'linearM
 }
 
 const buildProductQuantityColumns = (product: NormalizedProduct): Pick<FlatProductRow, 'linearMeasurement' | 'squareMeasurement' | 'count'> => {
+  if (product.billingUnit) {
+    const quantity = toFaNumber(product.billingQuantity, 4);
+    return { ...emptyMeasurementCells(), count: product.billingUnit === 'count' ? quantity : toFaNumber(product.quantity, 4),
+      linearMeasurement: product.billingUnit === 'meter' ? quantity : '',
+      squareMeasurement: product.billingUnit === 'squareMeter' ? quantity : '' };
+  }
   if (isPreparedProductType(product.productType)) {
     const quantity = toFaNumber(product.preparedQuantity || product.quantity, product.preparedUnit === 'تعداد' ? 0 : 2);
     if (product.preparedUnit === 'تعداد') {
@@ -2564,7 +2581,7 @@ function renderCustomerProductRows(output: CustomerContractOutput, columns: Arra
     const cells: Partial<Record<ContractPrintColumnKey, string>> = {
       index: escapeHtml(String(index + 1)),
       code: escapeHtml(row.productCode || EMPTY),
-      description: `${escapeHtml(row.description)}<div>مقدار قراردادی: ${escapeHtml(row.quantity)} ${escapeHtml(row.unit)}</div>`,
+      description: `${escapeHtml(row.description)}<div>مقدار قراردادی: ${escapeHtml(row.quantity)} ${escapeHtml(deliveryUnitLabel(row.unit))}</div>`,
       category: escapeHtml(productTypeLabel(row.productType) || row.productType || EMPTY),
       length: escapeHtml(row.lengthMeters || EMPTY),
       width: escapeHtml(row.widthMeters || EMPTY),
@@ -2586,7 +2603,7 @@ function renderCustomerDeliveryRows(output: CustomerContractOutput): string {
   return output.deliveries.flatMap((delivery, index) => delivery.items.map(item => `<tr>
     <td>${escapeHtml(String(index + 1))}</td>
     <td>${escapeHtml(products.get(item.productRowId)?.description || '')}</td>
-    <td>${escapeHtml(item.quantity)} ${escapeHtml(products.get(item.productRowId)?.unit || '')}</td>
+    <td>${escapeHtml(item.quantity)} ${escapeHtml(deliveryUnitLabel(products.get(item.productRowId)?.unit))}</td>
     <td>${escapeHtml(formatDate(delivery.date))}</td><td>${escapeHtml(output.customer.displayName)}</td><td>${escapeHtml(delivery.destination)}</td>
   </tr>`)).join('');
 }
@@ -2594,7 +2611,7 @@ function renderCustomerDeliveryRows(output: CustomerContractOutput): string {
 function renderCustomerPaymentRows(output: CustomerContractOutput): string {
   const methods: Record<string, string> = { CASH: 'نقد', BANK_TRANSFER: 'انتقال بانکی', CHECK: 'چک', CREDIT: 'اعتباری' };
   return output.customerPaymentPlan.installments.map((payment, index) => `<tr>
-    <td>${escapeHtml(String(index + 1))}</td><td>${escapeHtml(methods[payment.method] || payment.method)}${payment.subtype ? ` - ${escapeHtml(payment.subtype)}` : ''}</td>
+    <td>${escapeHtml(String(index + 1))}</td><td>${escapeHtml(methods[payment.method] || 'روش ثبت‌شده')}${payment.subtype ? ` - ${escapeHtml(customerPaymentSubtypeLabel(payment.subtype))}` : ''}</td>
     <td>${customerMoney(payment.amount.amount, output)}</td><td>برنامه پرداخت</td>
     <td>${escapeHtml(formatDate(payment.dueDate))}</td><td>${escapeHtml(payment.check?.number || EMPTY)}</td><td>—</td><td>${payment.check ? escapeHtml(formatDate(payment.check.dueDate)) : EMPTY}</td><td>${escapeHtml([payment.check?.bank, payment.notes].filter(Boolean).join(' - ') || EMPTY)}</td>
   </tr>`).join('');

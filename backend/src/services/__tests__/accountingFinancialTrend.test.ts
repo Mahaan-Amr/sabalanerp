@@ -75,6 +75,20 @@ test('outstanding is floored per contract, includes unallocated receipts, and ex
   assert.equal(result.points.at(-1)?.outstandingRial, 150);
 });
 
+test('an advance receipt before the first invoice reduces outstanding only after that invoice exists', () => {
+  const result = buildAccountingFinancialTrend({
+    range: '1m', now,
+    invoices: [{ id: 'invoice', contractId: 'c1', status: 'ISSUED', amount: 300,
+      financiallyApprovedAt: new Date('2026-08-04T00:00:00Z'), systemInvoiceDate: new Date('2026-08-04T00:00:00Z'),
+      createdAt: new Date('2026-08-04T00:00:00Z') }],
+    payments: [{ id: 'advance', contractId: 'c1', method: 'CASH', status: 'RECEIVED', amount: 100,
+      occurredAt: new Date('2026-08-02T00:00:00Z'), createdAt: new Date('2026-08-02T00:00:00Z') }],
+    auditEvents: [],
+  });
+  assert.equal(result.points.find(point => point.periodKey === '1405-05-12')?.outstandingRial, 0);
+  assert.equal(result.points.find(point => point.periodKey === '1405-05-14')?.outstandingRial, 200);
+});
+
 test('legacy event fallback is exposed and prefers audit time before creation time', () => {
   const result = buildAccountingFinancialTrend({
     range: '1m', now,

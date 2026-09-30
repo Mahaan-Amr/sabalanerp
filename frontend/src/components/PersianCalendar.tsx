@@ -1,6 +1,6 @@
 'use client';
 
-import { ErpButton, ErpPressable, ErpSelect, useErpOverlayPortalContainer } from '@/components/erp';
+import { ErpButton, ErpPressable, ErpSelect, useErpOverlayPortalContainer, useErpPresentationScope } from '@/components/erp';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -10,13 +10,17 @@ import PersianCalendar from '@/lib/persian-calendar';
 import PersianTimePicker from './PersianTimePicker';
 import { isCalendarOwnedInteraction } from './calendarOverlayPolicy';
 import { resolveDateTimeSelection } from './persianCalendarCommitPolicy';
+import { persianCalendarLayout } from './persianCalendarLayout';
 import { normalizeYearOnlyValue, yearOnlyOptions } from './persianCalendarYearPolicy';
+
+import { calendarDisplayDate, calendarStoredDate, type CalendarValueFormat } from './persianCalendarValueFormat';
 
 export interface PersianCalendarProps {
   id?: string;
   'aria-describedby'?: string;
   'aria-invalid'?: boolean | 'true' | 'false';
   value?: string;
+  valueFormat?: CalendarValueFormat;
   onChange: (date: string) => void;
   placeholder?: string;
   className?: string;
@@ -46,6 +50,7 @@ export default function PersianCalendarComponent({
   'aria-invalid': ariaInvalid,
   value,
   onChange,
+  valueFormat = 'jalali',
   placeholder = 'انتخاب تاریخ',
   className = '',
   disabled = false,
@@ -60,9 +65,11 @@ export default function PersianCalendarComponent({
   yearOnly = false,
 }: PersianCalendarProps) {
   const overlayPortalContainer = useErpOverlayPortalContainer();
+  const presentationScope = useErpPresentationScope();
+  const pickerValue = yearOnly ? value : calendarDisplayDate(value || '', valueFormat);
   const initial = yearOnly
     ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
-    : splitDateTime(value);
+    : splitDateTime(pickerValue);
   const [open, setOpen] = useState(false);
   const [draftDate, setDraftDate] = useState(initial.date);
   const [draftTime, setDraftTime] = useState(initial.time);
@@ -93,22 +100,19 @@ export default function PersianCalendarComponent({
     if (open) return;
     const next = yearOnly
       ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
-      : splitDateTime(value);
+      : splitDateTime(pickerValue);
     setDraftDate(next.date);
     setDraftTime(next.time);
     if (next.date) setCurrentMonth(yearOnly ? `${next.date}/01` : next.date.slice(0, 7));
-  }, [maxYear, minYear, open, value, yearOnly]);
+  }, [maxYear, minYear, open, pickerValue, value, yearOnly]);
 
   const updateLayout = useCallback(() => {
     const isMobile = window.matchMedia('(max-width: 639px)').matches;
     setMobile(isMobile);
     if (isMobile || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
-    const width = Math.min(Math.max(rect.width, 344), window.innerWidth - 32);
     const height = yearOnly ? 360 : showTime ? 510 : 440;
-    const top = rect.bottom + height + 12 <= window.innerHeight ? rect.bottom + 8 : Math.max(16, rect.top - height - 8);
-    const left = Math.max(16, Math.min(rect.left, window.innerWidth - width - 16));
-    setPosition({ top, left, width, maxHeight: Math.min(height, window.innerHeight - 32) });
+    setPosition(persianCalendarLayout(rect, { width: window.innerWidth, height: window.innerHeight }, height));
   }, [showTime, yearOnly]);
 
   useEffect(() => {
@@ -144,7 +148,8 @@ export default function PersianCalendarComponent({
   }, [draftDate, draftTime, showTime, yearOnly]);
 
   const commit = (date: string, time = draftTime) => {
-    onChange(showTime && time ? `${date} ${time}` : date);
+    const storedDate = calendarStoredDate(date, valueFormat);
+    onChange(showTime && time ? `${storedDate} ${time}` : storedDate);
     setOpen(false);
   };
 
@@ -152,7 +157,7 @@ export default function PersianCalendarComponent({
     if (isPast(date) || isFuture(date)) return;
     if (showTime && autoCommitDateTime) {
       const selection = resolveDateTimeSelection({
-        initialValue: value || '', draftDate, draftTime,
+        initialValue: pickerValue || '', draftDate, draftTime,
         changedPart: 'date', nextValue: date,
       });
       setDraftDate(selection.date);
@@ -169,7 +174,7 @@ export default function PersianCalendarComponent({
       return;
     }
     const selection = resolveDateTimeSelection({
-      initialValue: value || '', draftDate, draftTime,
+      initialValue: pickerValue || '', draftDate, draftTime,
       changedPart: 'time', nextValue: time,
     });
     setDraftTime(selection.time);
@@ -196,7 +201,7 @@ export default function PersianCalendarComponent({
     if (disabled) return;
     const next = yearOnly
       ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
-      : splitDateTime(value);
+      : splitDateTime(pickerValue);
     setDraftDate(next.date);
     setDraftTime(next.time);
     setCurrentMonth(yearOnly
@@ -216,8 +221,9 @@ export default function PersianCalendarComponent({
   const panel = (
     <motion.div
       data-erp-overlay-root
+      data-erp-presentation={presentationScope}
       ref={panelRef}
-      className="persian-calendar-portal fixed z-[99999] overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] shadow-[var(--sds-shadow-raised)]"
+      className={`persian-calendar-portal fixed z-[99999] overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] shadow-[var(--sds-shadow-raised)] ${presentationScope === 'workspace' ? 'sds-neumorphic-scope sds-neumorphic-workflow-scope' : ''}`}
       style={mobile ? { inset: 'auto 0 0 0', maxHeight: '92dvh' } : { top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight }}
       initial={reduceMotion ? false : mobile ? { opacity: 0, y: 28 } : { opacity: 0, y: -6, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -228,7 +234,7 @@ export default function PersianCalendarComponent({
       aria-label={yearOnly ? "انتخاب سال شمسی" : "انتخاب تاریخ شمسی"}
       dir="rtl"
     >
-      <div className="max-h-[92dvh] overflow-y-auto p-4">
+      <div className="overflow-y-auto overscroll-contain p-4" style={{ maxHeight: mobile ? '92dvh' : position.maxHeight }}>
         {mobile && <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]" />}
         {yearOnly ? (
           <div className="space-y-3">

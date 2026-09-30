@@ -1,4 +1,5 @@
 import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
+import { roundContractPayableTotal, sumContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
 import type { ContractProduct, ContractServiceRow } from '../types/contract.types';
 import { getBillableCuttingCost } from './mandatoryCuttingPricing';
 
@@ -142,3 +143,24 @@ export const getContractGrossPayableTotal = (
   standaloneServiceRows: ContractServiceRow[] = []
 ): number => getContractProductsPayableTotal(products) +
   sumNumericValues(standaloneServiceRows, (row) => row.totalPrice);
+
+export const getContractPayableTotal = (
+  products: ContractProduct[],
+  standaloneServiceRows: ContractServiceRow[] = [],
+  discountAmount = 0,
+  applyMonetaryRounding = true
+): number => {
+  const source = getContractUnroundedPayableTotal(products, standaloneServiceRows, discountAmount);
+  return Number(applyMonetaryRounding ? roundContractPayableTotal(source, 'تومان').roundedAmount : source);
+};
+
+export const getContractUnroundedPayableTotal = (
+  products: ContractProduct[], standaloneServiceRows: ContractServiceRow[] = [], discountAmount = 0
+): string => {
+  const source = sumContractMonetaryAmounts([
+    ...products.map(getContractProductPayableTotal),
+    ...standaloneServiceRows.map(row => toFiniteNumber(row.totalPrice)),
+    -Math.max(toFiniteNumber(discountAmount), 0)
+  ]);
+  return source.startsWith('-') ? '0' : source;
+};

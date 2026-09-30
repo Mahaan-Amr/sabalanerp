@@ -6,6 +6,7 @@ import { createCustomerOutputSnapshots } from '../partnerSales/customerOutput/sn
 import { createCustomerConfirmationAdapter, ConfirmationSession, ConfirmationSource, CustomerConfirmationStore } from '../partnerSales/customerOutput/confirmation';
 import { createCustomerOutputIssuer, CustomerIssuanceStore } from '../partnerSales/customerOutput/issuance';
 import type { ContractRuntime, Notification, Output, Result, Snapshot } from '../partnerSales/customerOutput/contracts';
+import { roundPartnerContractTotals } from '@sabalanerp/partner-sales-contracts';
 import { generateCustomerContractPdf } from '../../utils/pdf';
 
 const packageRequire = createRequire(path.resolve(__dirname, '../../../../packages/partner-sales-contracts/package.json'));
@@ -33,6 +34,18 @@ async function snapshot() {
   const current = source();
   return snapshots.mint({ ...current, snapshotId: 'output-325', createdAt: now, expiresAt: expiry });
 }
+
+test('customer output seals the rounded total and preserves precise retail rows', async () => {
+  const current = source();
+  current.retail.totals = roundPartnerContractTotals({ net: '200.8', discount: '0', tax: '0', charges: '0', currency: 'IRR' });
+  current.retail.products[0].retailUnitPrice = '100.4';
+  current.retail.products[0].quantity = '2';
+  current.retail.customerPaymentPlan.installments[0].amount = { amount: '201', currency: 'IRR' };
+  const sealed = await snapshots.mint({ ...current, snapshotId: 'rounded-output', createdAt: now, expiresAt: expiry });
+  assert.equal(sealed.content.totals.payable, '201');
+  assert.equal(sealed.content.products[0].retailUnitPrice, '100.4');
+  assert.equal((await snapshots.read(sealed)).content.customerPaymentPlan.installments[0].amount.amount, '201');
+});
 
 // Module fixture only. #334/#335 must prove these port contracts against the
 // real Case/session/outbox schema, row locks, constraints and authorization.

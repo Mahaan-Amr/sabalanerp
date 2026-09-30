@@ -22,6 +22,7 @@ const inquiryRows = z.array(z.object({ rowId: IdSchema, configuration: PartnerCo
 }).strict()).min(1);
 export const CaseDraftIntentSchema = PartnerDraftSubmissionRefSchema.extend({
   projectId: IdSchema.optional(), contractDate: DateSchema,
+  preparationCompleted: z.boolean().optional(),
   // The Case writer resolves this immutable private recovery graph; no second graph owner.
   rows: z.array(z.object({ productRowId: IdSchema, approvedRowBinding: ApprovedRowBindingSchema.optional(),
     retailUnitPrice: MoneySchema }).strict()).min(1),

@@ -32,9 +32,12 @@ async function seedCommittedCase(tx: Prisma.TransactionClient, ids: ReturnType<t
   await tx.partnerCommercialAccount.create({ data: { id: ids.accountId, profileId: ids.profileId } });
   await tx.crmCustomer.create({ data: { id: ids.customerId, firstName: 'Customer', lastName: 'Correction',
     ownerUserId: ids.partnerId, createdBy: ids.partnerId } });
-  await tx.partnerSaleCase.create({ data: { id: ids.caseId, caseNumber: `${ids.caseId}-number`, profileId: ids.profileId,
+  const [tracking] = await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('partner_case_tracking_number_seq') AS number`;
+  await tx.partnerSaleCase.create({ data: { id: ids.caseId, caseNumber: `${ids.caseId}-number`,
+    profileId: ids.profileId,
     customerId: ids.customerId, internalRecordId: ids.internalId, customerContractId: ids.contractId,
     headRevision: 1, integrityHash: owner.integrityHash } });
+  await tx.partnerCaseTrackingCode.create({ data: { caseId: ids.caseId, number: Number(tracking.number) } });
   await tx.partnerCaseRevision.create({ data: { caseId: ids.caseId, revision: 1, integrityHash: owner.integrityHash,
     graphHash: hash('b'), graph: {}, partySnapshots: {},
     wholesaleEnvelope: { schemaVersion: 1, totals: { net: '900', discount: '50', tax: '100', charges: '50', payable: '1000', currency: 'IRR' } },

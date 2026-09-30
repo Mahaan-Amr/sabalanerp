@@ -17,8 +17,8 @@ route registration, feature activation, SMS, or production deployment is owned h
   Accounting preparation, including Partner/Commercial Account debtor identity,
   approved wholesale row evidence, internal totals and Partner-to-Sabalan plan.
   It neither approves an invoice nor creates debt records.
-- `acceptFinancialApproval(expected, invoiceRecordId)`: joins the existing
-  financial approval transaction. Reads the approved invoice from Accounting,
+- `acceptFinancialApproval(expected, invoiceRecordId)`: is the explicit receivable command
+  (legacy method name retained). Reads an already approved invoice from Accounting,
   verifies exact revision/content binding, creates one official receivable via
   the persistence port and appends its approval event atomically. A different
   live receivable blocks replacement until the official void workflow resolves it.
@@ -107,3 +107,19 @@ npm run architecture:check
 Run the full foundation suite as well. The fixture tests exercise only the approved Accounting/account
 seams. Their serialized in-memory transaction proves adapter retry and rollback
 behavior; it does not prove database locking or production persistence.
+
+## Separate invoice approval and receivable creation
+
+Financial approval seals `partnerApproval` with `partnerReceivablePending: true`.
+It does not insert a receivable or publish an obligation event. Accounting must
+explicitly confirm `POST /api/partner/accounting/receivables` with the current Case
+owner and invoice ID. The transaction rechecks audited Case authority, the narrow
+receivables capability, canonical source and correction freeze, then inserts one
+deterministic receivable, publishes its original approval evidence and audits the
+creating actor. Concurrent retries converge; existing receivables remain untouched.
+Approved pending invoices are excluded from official outstanding-debt history.
+
+The existing atomic correction effect may replace an already published obligation;
+financial approval of its staged replacement still never creates a receivable.
+When the predecessor has no receivable, the replacement also awaits the explicit
+create action. Ordinary Sales Accounting behavior is unchanged.

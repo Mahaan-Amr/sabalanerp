@@ -76,5 +76,48 @@ test('responder facts include system-owned mandatory policy, tools and finishing
     { label: 'ابزار', value: 'چسب سنگ · 4 متر' },
     { label: 'پرداخت', value: 'ساب صیقلی · 0.8 مترمربع' },
   ]);
+  assert.deepEqual(facts.find(fact => fact.label === 'تعداد'), { label: 'تعداد', value: '1 عدد' });
   assert.equal(JSON.stringify(facts).includes('rate'), false);
+});
+
+test('responder facts describe a stair layer with its count and selected sides', () => {
+  const facts = presentSavedTechnicalConfiguration({
+    productRowId: 'stair-row', family: 'stair', areaSquareMeters: '7.5',
+    product: { code: 'STONE-2', attributes: { stoneType: 'مرمریت' }, dimensions: { thicknessCentimeters: '3' } } as never,
+    draftRow: { family: 'stair', configuration: { quantity: 5, part: 'tread', lengthMeters: '2', crossDimensionMeters: '0.3' } } as never,
+    dependents: [{ kind: 'layer', parentProductRowId: 'stair-row', catalogItemId: 'layer-1', layersPerParentPiece: 2,
+      widthMeters: '0.05', targetSides: ['front', 'back'] }] as never,
+    operations: [{ kind: 'LAYER', catalogItemId: 'layer-1', name: 'لایه مرمریت' }] as never,
+  });
+  assert.deepEqual(facts.find(fact => fact.label === 'مساحت'), { label: 'مساحت', value: '7.5 متر مربع' });
+  assert.deepEqual(facts.filter(fact => fact.label === 'تعداد' || fact.label === 'لایه'), [
+    { label: 'تعداد', value: '5 عدد' },
+    { label: 'لایه', value: 'لایه مرمریت · 2 لایه برای هر پله · عرض 0.05 متر · جلو، عقب' },
+  ]);
+});
+
+test('replacing a pricing duty records waiver in audit without completed-response fields', async () => {
+  const { createPartnerPricingDuty } = await import('../crossWorkspaceDutyAdapters/partnerPricingDutyAdapter');
+  let closed: Record<string, unknown> | undefined;
+  let audit: Record<string, unknown> | undefined;
+  const database = {
+    partnerInquiry: { findUniqueOrThrow: async () => ({ id: 'inquiry-1', caseId: 'case-1', revision: 5,
+      case: { caseNumber: 'PF-1001' }, assignments: [{ responderId: 'seller-1' }] }) },
+    crossWorkspaceDutyEnvelope: { upsert: async () => ({}) },
+    crossWorkspaceDuty: {
+      findMany: async () => [{ id: 'old-duty', sourceVersion: 4, envelopeVersion: 1, createdAt: new Date() }],
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => { closed = data; return { count: 1 }; },
+      upsert: async ({ create }: { create: Record<string, unknown> }) => ({ id: 'new-duty', ...create }),
+    },
+    crossWorkspaceDutyAssignmentHistory: { updateMany: async () => ({}), upsert: async () => ({}) },
+    crossWorkspaceDutyAuditVersion: { aggregate: async () => ({ _max: { version: 1 } }),
+      create: async ({ data }: { data: Record<string, unknown> }) => { audit = data; return {}; }, upsert: async () => ({}) },
+  };
+  const duty = await createPartnerPricingDuty(database, { inquiryId: 'inquiry-1', actorUserId: 'partner-1', inquiryRevision: 5 });
+  assert.equal(closed?.status, 'WAIVED');
+  assert.equal(closed?.respondedAt, null);
+  assert.equal(closed?.respondedByUserId, null);
+  assert.equal(audit?.actorUserId, 'partner-1');
+  assert.equal(audit?.eventCode, 'WAIVED');
+  assert.equal(duty.predecessorDutyId, 'old-duty');
 });

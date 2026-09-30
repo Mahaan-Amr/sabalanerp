@@ -23,7 +23,6 @@ import {
   ErpLoading,
   ErpPage,
   ErpSection,
-  ErpSegmentedControl,
   ErpTwoColumn,
   type ErpAction,
   type ErpMetric,
@@ -75,12 +74,11 @@ import {
 } from "@/features/accounting/accountingUi";
 import { buildContractPaymentPresentation } from "@/features/sales/contractPaymentPresentation";
 import {
-  PartnerAccountViewSchema,
   PartnerCaseViewSchema,
   type PartnerAccountView,
   type PartnerCaseView,
 } from "@sabalanerp/partner-sales-contracts";
-import { PartnerCaseWorkspace } from "@/features/partner-sales/cases/PartnerCaseWorkspace";
+import { PartnerSalesContractWorkspace } from "@/features/partner-sales/cases/PartnerSalesContractWorkspace";
 import { resolvePartnerContractRoute } from "@/features/partner-sales/cases/partnerContractRouting";
 import {
   assertSuccessfulSalesDownload,
@@ -94,6 +92,7 @@ import {
   hasAnyPendingOperation,
 } from "@/features/sales/latestRequestTracker";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
+import { ContractDetailNavigation } from "@/features/sales/ContractDetailNavigation";
 
 interface Contract {
   id: string;
@@ -842,72 +841,6 @@ export default function ContractDetailPage() {
     );
   }
 
-  const partnerRoute = resolvePartnerContractRoute(contract);
-  if (partnerRoute.kind === "blocked") {
-    return (
-      <ErpInlineState
-        kind="error"
-        title="شواهد نسخه پرونده فروش همکار کامل نیست؛ برای جلوگیری از نمایش نادرست، دسترسی متوقف شد. اطلاعات قرارداد را دوباره دریافت کنید."
-        action={{ label: "دریافت دوباره", onClick: () => void loadContract() }}
-      />
-    );
-  }
-  if (partnerRoute.kind === "partner") {
-    const projection = PartnerCaseViewSchema.safeParse(
-      contract.partnerCaseView,
-    );
-    if (
-      !projection.success ||
-      projection.data.owner.caseId !== partnerRoute.caseId ||
-      projection.data.owner.revision !== partnerRoute.expected.revision ||
-      projection.data.owner.integrityHash !==
-        partnerRoute.expected.integrityHash
-    ) {
-      return (
-        <ErpInlineState
-          kind="error"
-          title="نمای مجاز پرونده فروش همکار در دسترس نیست؛ اطلاعات قرارداد عادی جایگزین نمی‌شود."
-          action={{
-            label: "دریافت دوباره",
-            onClick: () => void loadContract(),
-          }}
-        />
-      );
-    }
-    const capabilities = contract.partnerActions || {};
-    const account = PartnerAccountViewSchema.safeParse(
-      contract.partnerAccountView,
-    );
-    return (
-      <PartnerCaseWorkspace
-        view={projection.data}
-        account={account.success ? account.data : undefined}
-        actions={{
-          canPreview: capabilities.canPreview === true,
-          canIssue: capabilities.canIssue === true,
-          canSendConfirmation: capabilities.canSendConfirmation === true,
-          canRequestCorrection: false,
-          // Command transport for these mutations is registered by the integration owner.
-          canCancel: false,
-          canRequestVoid: false,
-          onPreview: () => void handleDownloadPdf(),
-          onIssue: () => void handlePrintContract(),
-          onSendConfirmation: () => void handleResendConfirmation(),
-        }}
-      />
-    );
-  }
-
-  const totalAmount =
-    toFiniteNumber(contract.totalAmount) ||
-    sumNumericValues(products, (item: any) => item.totalPrice) ||
-    toFiniteNumber(contract.contractData?.payment?.totalAmount);
-
-  const canEdit =
-    !contract.isInactive &&
-    (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) &&
-    (contractPermissions.canEdit ||
-      contract.createdByUser.id === currentUser?.id);
   const canApprove =
     !contract.isInactive &&
     (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
@@ -920,28 +853,7 @@ export default function ContractDetailPage() {
     !contract.isInactive &&
     contract.status === "APPROVED" &&
     contractPermissions.canSign;
-  const canDownloadPdf = contractPermissions.canView;
-  const canPrint = contractPermissions.canPrint;
-  const canResendConfirmation =
-    !contract.isInactive &&
-    contract.status !== "CANCELLED" &&
-    !contract.isSigned &&
-    hasFeatureAccess(currentUser, "sales_verification_send", "edit");
-
-  const actions: ErpAction[] = [
-    ...(canEdit
-      ? [
-          {
-            label: contract.canOpenCorrectionEdit ? "اصلاح قرارداد" : "ویرایش",
-            href: `/dashboard/sales/contracts/${contract.id}/edit`,
-            icon: FaEdit,
-            tone: (contract.canOpenCorrectionEdit
-              ? "warning"
-              : "info") as ErpTone,
-            variant: "soft" as const,
-          },
-        ]
-      : []),
+  const decisionActions: ErpAction[] = [
     ...(canApprove
       ? [
           {
@@ -975,6 +887,88 @@ export default function ContractDetailPage() {
           },
         ]
       : []),
+  ];
+
+  const partnerRoute = resolvePartnerContractRoute(contract);
+  if (partnerRoute.kind === "blocked") {
+    return (
+      <ErpInlineState
+        kind="error"
+        title="شواهد نسخه پرونده فروش همکار کامل نیست؛ برای جلوگیری از نمایش نادرست، دسترسی متوقف شد. اطلاعات قرارداد را دوباره دریافت کنید."
+        action={{ label: "دریافت دوباره", onClick: () => void loadContract() }}
+      />
+    );
+  }
+  if (partnerRoute.kind === "partner") {
+    const projection = PartnerCaseViewSchema.safeParse(
+      contract.partnerCaseView,
+    );
+    if (
+      !projection.success ||
+      projection.data.owner.caseId !== partnerRoute.caseId ||
+      projection.data.owner.revision !== partnerRoute.expected.revision ||
+      projection.data.owner.integrityHash !==
+        partnerRoute.expected.integrityHash
+    ) {
+      return (
+        <ErpInlineState
+          kind="error"
+          title="نمای مجاز پرونده فروش همکار در دسترس نیست؛ اطلاعات قرارداد عادی جایگزین نمی‌شود."
+          action={{
+            label: "دریافت دوباره",
+            onClick: () => void loadContract(),
+          }}
+        />
+      );
+    }
+    return (
+      <>
+      {visibleOperationalError && <ErpInlineState kind={visibleOperationalError.kind} title={visibleOperationalError.message} />}
+      <PartnerSalesContractWorkspace
+        view={projection.data}
+        decisionActions={decisionActions}
+        canDownload={contractPermissions.canView}
+        canPrint={contractPermissions.canPrint}
+        onDownload={() => void handleDownloadPdf()}
+        onPrint={() => void handlePrintContract()}
+      />
+      </>
+    );
+  }
+
+  const totalAmount =
+    toFiniteNumber(contract.totalAmount) ||
+    sumNumericValues(products, (item: any) => item.totalPrice) ||
+    toFiniteNumber(contract.contractData?.payment?.totalAmount);
+
+  const canEdit =
+    !contract.isInactive &&
+    (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) &&
+    (contractPermissions.canEdit ||
+      contract.createdByUser.id === currentUser?.id);
+  const canDownloadPdf = contractPermissions.canView;
+  const canPrint = contractPermissions.canPrint;
+  const canResendConfirmation =
+    !contract.isInactive &&
+    contract.status !== "CANCELLED" &&
+    !contract.isSigned &&
+    hasFeatureAccess(currentUser, "sales_verification_send", "edit");
+
+  const actions: ErpAction[] = [
+    ...(canEdit
+      ? [
+          {
+            label: contract.canOpenCorrectionEdit ? "اصلاح قرارداد" : "ویرایش",
+            href: `/dashboard/sales/contracts/${contract.id}/edit`,
+            icon: FaEdit,
+            tone: (contract.canOpenCorrectionEdit
+              ? "warning"
+              : "info") as ErpTone,
+            variant: "soft" as const,
+          },
+        ]
+      : []),
+    ...decisionActions,
     ...(canPrint
       ? [
           {
@@ -1114,15 +1108,9 @@ export default function ContractDetailPage() {
         />
       )}
 
-      <ErpSegmentedControl
+      <ContractDetailNavigation
         value={detailSection}
         onChange={setDetailSection}
-        options={[
-          { value: "summary", label: "خلاصه" },
-          { value: "items", label: "اقلام و تحویل" },
-          { value: "financial", label: "وضعیت مالی" },
-          { value: "history", label: "سوابق" },
-        ]}
       />
 
       {detailSection === "summary" && (

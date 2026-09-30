@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaExclamationTriangle, FaReceipt, FaSync } from 'react-icons/fa';
 import { ErpCard, ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, PartnerAccountingIdentity, accountingFailureMessage, receivableStatusLabels } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -236,7 +237,7 @@ export default function AccountingReceivablesPage() {
       <AccountingActionModal
         open={Boolean(receiptTarget)}
         title="ثبت دریافت"
-        description={receiptTarget ? `${receiptTarget.partnerContext?.caseNumber || receiptTarget.contract?.contractNumber || 'قرارداد'} - مانده ${money(receiptTarget.remainingAmount, receiptTarget.currency)}` : undefined}
+        description={receiptTarget ? `${receiptTarget.partnerContext?.caseNumber ? partnerTrackingCode(receiptTarget.partnerContext.caseNumber, receiptTarget.partnerContext.trackingNumber) : receiptTarget.contract?.contractNumber || 'قرارداد'} - مانده ${money(receiptTarget.remainingAmount, receiptTarget.currency)}` : undefined}
         fields={[
           { id: 'amount', label: 'مبلغ دریافت', type: receiptTarget?.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'text' : 'number', required: true, defaultValue: receiptTarget?.remainingAmount || 0 },
           { id: 'method', label: 'روش دریافت', type: 'select', defaultValue: 'CASH', options: [

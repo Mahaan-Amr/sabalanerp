@@ -18,7 +18,8 @@ import {
 import { getDeliverableProductEntries, reconcileDeliveryProductReferences } from '../utils/deliveryScheduleController';
 import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
-import { getContractGrossPayableTotal, reconcileContractProductPricing } from '../utils/contractProductPricing';
+import { reconcileContractProductPricing } from '../utils/contractProductPricing';
+import { prepareContractSubmissionFinancials } from '../utils/contractSubmissionFinancials';
 import { reconcileContractProductGraph } from '../utils/contractProductGraphReconciliation';
 import {
   hasUnconfirmedProductQuantityOverride,
@@ -51,6 +52,7 @@ interface UseContractSubmissionOptions {
   userDepartment?: string;
   departments?: Array<{ id: string }>;
   mode?: 'create' | 'edit';
+  applyMonetaryRounding?: boolean;
   contractId?: string;
   editSession?: {
     draftId: string;
@@ -90,6 +92,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     userDepartment,
     departments,
     mode = 'create',
+    applyMonetaryRounding = true,
     contractId,
     editSession,
     onCommitted,
@@ -298,8 +301,25 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           finishingCost: product.finishingCost ?? finishing.cost
         });
       });
-      const totalAmount = wizardData.payment.totalContractAmount ||
-        getContractGrossPayableTotal(normalizedProducts, wizardData.serviceRows || []);
+      const {
+        totalAmount,
+        monetaryRounding,
+        payment: normalizedPayment,
+        validation: paymentValidation
+      } = prepareContractSubmissionFinancials(
+        normalizedProducts,
+        wizardData.serviceRows || [],
+        wizardData.discount?.amount || 0,
+        wizardData.payment,
+        isEditMode,
+        applyMonetaryRounding
+      );
+      if (!paymentValidation.isValid) {
+        updateWizardData({ payment: normalizedPayment });
+        setErrors({ paymentMethod: paymentValidation.errors[0] });
+        setCurrentStep(6);
+        return;
+      }
       const normalizedDeliveryReferences = reconcileDeliveryProductReferences(normalizedProducts, currentDeliveryReferences.deliveries);
       const deliverableProductRowIds = new Set(
         getDeliverableProductEntries(normalizedProducts)
@@ -331,11 +351,12 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           products: normalizedProducts,
           serviceRows: wizardData.serviceRows || [],
           deliveries: contractDeliveries,
-          payment: wizardData.payment,
+          payment: normalizedPayment,
           discount: wizardData.discount || null
         }),
         contractData: {
           ...wizardData,
+          ...(monetaryRounding ? { monetaryRounding } : {}),
           contractNumber: wizardData.contractNumber,
           contractDate: wizardData.contractDate,
           customerId: wizardData.customerId || wizardData.customer?.id || '',
@@ -345,7 +366,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           products: normalizedProducts,
           serviceRows: wizardData.serviceRows || [],
           deliveries: contractDeliveries,
-          payment: wizardData.payment,
+          payment: normalizedPayment,
           discount: wizardData.discount || null
         },
         totalAmount,
@@ -503,6 +524,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     userDepartment,
     departments,
     mode,
+    applyMonetaryRounding,
     contractId,
     editSession,
     onCommitted,

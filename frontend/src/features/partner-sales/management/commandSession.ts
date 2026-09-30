@@ -1,4 +1,4 @@
-import { canonicalHash, InquiryBatchResultSchema, PartnerCommandSchema, PartnerErrorSchema, PartnerManagementCommandV2Schema, partnerError } from '@sabalanerp/partner-sales-contracts';
+import { partnerInputHash as canonicalHash, InquiryBatchResultSchema, PartnerCommandSchema, PartnerErrorSchema, PartnerManagementCommandV2Schema, partnerError } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerCommand, PartnerCommandPort, PartnerError, InquiryBatchResult, PartnerManagementCommandV2, PartnerManagementCommandV2Port } from '@sabalanerp/partner-sales-contracts';
 
 type WithoutEnvelope<T> = T extends unknown ? Omit<T, 'schemaVersion' | 'commandId' | 'correlationId' | 'idempotency'> : never;

@@ -1,8 +1,19 @@
-import { CorrectionRequestCategory, CorrectionRequestPriority, Prisma, type PrismaClient } from '@prisma/client';
+import { AccountingRecordStatus, CorrectionRequestCategory, CorrectionRequestPriority, FinancialRecordKind, Prisma, type PrismaClient } from '@prisma/client';
 import { synchronizeCrossWorkspaceDutySource } from './crossWorkspaceDutyModule';
 import { completeSalesCorrectionEditDuty } from './crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter';
 
 type Database = PrismaClient | Prisma.TransactionClient;
+
+const correctionSourceRecordId = async (database: Database, contractId: string) => {
+  const records = await database.accountingFinancialRecord.findMany({
+    where: { contractId, kind: FinancialRecordKind.INVOICE_CANDIDATE },
+    select: { id: true, status: true, financiallyApprovedAt: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  return (records.find(record => record.financiallyApprovedAt && record.status !== AccountingRecordStatus.VOIDED)
+    ?? records.find(record => record.status !== AccountingRecordStatus.VOIDED)
+    ?? records.find(record => record.financiallyApprovedAt))?.id ?? null;
+};
 
 export type RequestSalesContractCorrectionInput = {
   contractId: string;
@@ -130,6 +141,7 @@ export const requestAccountingSalesContractCorrection = (
 
   const correction = await tx.accountingCorrectionRequest.create({ data: {
     contractId: contract.id,
+    recordId: await correctionSourceRecordId(tx, contract.id),
     category: CorrectionRequestCategory[input.category] ?? CorrectionRequestCategory.OTHER,
     priority: CorrectionRequestPriority[input.priority] ?? CorrectionRequestPriority.MEDIUM,
     status: 'ACKNOWLEDGED',
@@ -217,6 +229,7 @@ export const requestSalesContractCorrection = (
 
   const correction = await tx.accountingCorrectionRequest.create({ data: {
     contractId: contract.id,
+    recordId: await correctionSourceRecordId(tx, contract.id),
     category: CorrectionRequestCategory[input.category] ?? CorrectionRequestCategory.OTHER,
     priority: CorrectionRequestPriority[input.priority] ?? CorrectionRequestPriority.MEDIUM,
     assignedToUserId: null,

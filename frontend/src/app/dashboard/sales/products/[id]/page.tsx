@@ -219,11 +219,11 @@ const ProductDetailPage: React.FC = () => {
         />
       )}
       <SalesAuthoringSection title="مشخصات و قیمت‌گذاری محصول">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
           {/* Product Information */}
-          <div className="lg:col-span-2">
-            <div className="space-y-6">
-              <div className="flex items-center justify-between mb-6">
+          <ErpCard className="min-w-0 p-5 lg:col-span-2">
+            <div className="min-w-0 space-y-5">
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   اطلاعات محصول
                 </h2>
@@ -283,10 +283,10 @@ const ProductDetailPage: React.FC = () => {
                 <ErpFieldView label="ابعاد برش" value={<>{product.cuttingDimensionNamePersian}</>} />
               </div>
             </div>
-          </div>
+          </ErpCard>
 
           {/* Pricing and Management */}
-          <div className="space-y-6">
+          <div className="min-w-0 space-y-5">
             {/* Pricing */}
             <ErpCard className="p-5">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
@@ -407,7 +407,7 @@ const ProductDetailPage: React.FC = () => {
 
             {/* Save Button */}
             {editing && (
-              <div className="flex space-x-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 <ErpPressable type="button"
                   onClick={handleSave}
                   disabled={saving}

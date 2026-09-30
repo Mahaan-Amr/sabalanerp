@@ -10,7 +10,7 @@ import type {
   PartnerAccountingRepository, PartnerInvoiceEvidence, PartnerReceivable,
 } from './repository';
 import type { PartnerFinancialPreparation } from './source';
-import { PARTNER_INTERNAL_ACCOUNTING_SOURCE } from './financialApproval';
+import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, validatePendingPartnerApproval } from './financialApproval';
 import { latestPartnerFinancialApproval, readPartnerOfficialPurchase, PartnerOfficialAccountingIntegrityError } from './officialPurchase';
 import { readPersistedPartnerEvents, PartnerEventIntegrityError } from '../events/persisted';
 import { visibleEvents } from '../reporting/revenue';
@@ -20,6 +20,8 @@ import { readCurrentPartnerCaseViews } from '../cases/lifecycle';
 import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from './errors';
 import { PartnerCollectionIntegrityError } from './collections';
 import { withCurrentSabalanPlan } from './sabalanPlan';
+import { readPartnerAccountingCapabilities } from './capabilities';
+import { readPartnerInvoiceSource } from './invoiceSource';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -85,6 +87,12 @@ export function createPrismaPartnerAccountingRepository(input: {
             purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: input.correlationId })
             .authorize(authAction, { kind: 'CASE', id: row.id });
           if (!allowed.ok) return allowed;
+          if (action === 'APPROVAL') {
+            if (!(await readPartnerAccountingCapabilities(tx, input.actorId)).receivables)
+              return { ok: false, error: partnerError('FORBIDDEN') };
+            if (await partnerPredecessorIsFrozen(tx, row.id, row.headRevision))
+              return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
+          }
           if (!await readCurrentPartnerCaseViews(tx, row.id)) {
             return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           }
@@ -132,6 +140,11 @@ export function createPrismaPartnerAccountingRepository(input: {
           },
           readInvoice: async (invoiceRecordId, expected) => {
             const row = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceRecordId } });
+            if (row && object(row.metadata)?.partnerCaseId !== expected.caseId) return null;
+            if (row) {
+              await readPartnerInvoiceSource(tx, row, expected.caseId);
+              await validatePendingPartnerApproval(row);
+            }
             const value = row && invoice(row);
             return value?.preparation.owner.caseId === expected.caseId ? value : null;
           },
@@ -149,16 +162,29 @@ export function createPrismaPartnerAccountingRepository(input: {
               originalAmount: value.originalAmount.amount, remainingAmount: value.originalAmount.amount,
               currency: value.originalAmount.currency, dueDate: new Date(`${value.dueDate}T00:00:00.000Z`),
               metadata: json({ partnerReceivable: value }), createdBy: input.actorId } });
+            await tx.accountingAuditLog.create({ data: { action: 'CREATE_PARTNER_RECEIVABLE', actorId: input.actorId,
+              recordId: value.invoiceRecordId, entityType: 'AccountingReceivable', entityId: value.id,
+              afterState: json(value), note: 'ایجاد دریافتنی با اقدام صریح حسابداری' } });
           },
-          appendEvent: appendPublicEvent,
+          appendEvent: async event => {
+            await appendPublicEvent(event);
+            if (event.type === 'SABALAN_FINANCIAL_APPROVED') {
+              const receivable = await tx.accountingReceivable.findUniqueOrThrow({ where: { id: event.accountingReceivableId } });
+              const record = await tx.accountingFinancialRecord.findUniqueOrThrow({ where: { id: receivable.invoiceRecordId! } });
+              await tx.accountingFinancialRecord.update({ where: { id: record.id },
+                data: { metadata: json({ ...object(record.metadata), partnerReceivablePending: false }) } });
+            }
+          },
           readOwnAccount: async () => {
             const profile = await tx.partnerProfile.findUnique({ where: { userId: input.actorId }, select: { id: true } });
             if (!profile) return { ok: false, error: partnerError('NOT_FOUND') };
             const allowed = await createAuditedPartnerAuthorization(tx, { actorId: input.actorId, purpose: 'PARTNER', channel: 'DETAIL' },
               { correlationId: input.correlationId }).authorize('ACCOUNTING_READ', { kind: 'PROFILE', id: profile.id });
             if (!allowed.ok) return allowed;
+
             const cases = await tx.partnerSaleCase.findMany({ where: { profileId: profile.id, state: { in: ['COMMITTED', 'VOIDED'] } },
               select: { id: true, state: true, headRevision: true, integrityHash: true, internalRecordId: true,
+                trackingCode: { select: { number: true } },
                 profile: { select: { userId: true } }, head: { select: { internalProjection: true } },
                 events: { orderBy: { sequence: 'asc' },
                   select: { id: true, type: true, caseRevision: true, integrityHash: true, evidence: true } } } });
@@ -188,7 +214,7 @@ export function createPrismaPartnerAccountingRepository(input: {
                   from: '0001-01-01', to: '9999-12-31', asOf: clock.now.toISOString() })),
                 cutoff: clock.now, asOf: clock.now, voided: row.state === 'VOIDED' });
               if (!covered) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-              purchases.push({ source, official });
+              purchases.push({ source, official, trackingNumber: row.trackingCode?.number });
             }
             return { ok: true, value: { partnerSellerId: input.actorId, purchases } };
           },

@@ -49,3 +49,10 @@ test('Partner Accounting summaries cannot remain visible while authority is reva
   assert.equal(reduceAccountingWorkspaceLoad(loaded, { type: 'start' }).data, null);
   assert.equal(reduceAccountingWorkspaceLoad(loaded, { type: 'failure', message: 'permission denied' }).data, null);
 });
+
+test('switching the Accounting viewer clears the prior dashboard snapshot', () => {
+  const loaded = reduceAccountingWorkspaceLoad(undefined, { type: 'success', data: { deadlines: { items: [] } } });
+  assert.deepEqual(reduceAccountingWorkspaceLoad(loaded, { type: 'reset' }), {
+    data: null, loading: true, stale: false, error: null,
+  });
+});

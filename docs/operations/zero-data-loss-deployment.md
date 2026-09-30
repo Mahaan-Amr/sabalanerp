@@ -19,6 +19,16 @@ The target normal maintenance duration is under five minutes. The ordinary hard 
 
 ## Deployment lease
 
+### Biometric workstation configuration on existing images
+
+Use `DEPLOYMENT_MODE=configuration DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE=/private/path/erp-provisioning.json sh deploy/scripts/deploy.sh deploy/.env.prod` to register a new workstation without fetching source or rebuilding application images. This mode permits additive workstation registration only; it does not enable physical enrollment or rotate an existing workstation's keys.
+
+All six existing containers must be running and healthy. Their image IDs must be immutable, and the three application IDs must agree with the running backend's complete release identity. The operation retains the running commit and source identity even when the checkout is newer. It uses the same host/database leases, recovery-drill preflight, maintenance boundary, verified local and remote checkpoint, idempotent migrations/reconciliation, fifteen-minute mutation deadline, mandatory gates and rollback as a code release.
+
+Before preparing the session, workstation credentials and the exact previous environment bytes are stored with mode `0600` in the protected recovery-coordination volume. The checkpoint therefore encrypts and remotely verifies the configuration recovery snapshot. Only after the remote checkpoint passes may the environment file be atomically updated. Rollback restores its exact previous bytes and the previous runtime workstation setting before restarting previous images. Concurrent edits or a changed snapshot fail closed. Interrupted configuration state without an active deployment session blocks a new deployment pending inspection; it is never silently discarded.
+
+A reviewed operations bundle can be staged separately from the application checkout. `DEPLOYMENT_REPO_ROOT` selects the existing clean production checkout while the helpers are loaded from the runner's own bundle. This does not change application source identity or omit any release gate. Keep the bundle immutable for the entire operation and recovery; retain its checksum record with operational evidence. Transfer provisioning exports through the approved private channel and remove them after successful registration and confirmation. Never print them in logs or issue bodies.
+
 Before preparing a maintenance session, the built backend runs the same production-environment validator used at application startup. Missing runtime settings, including personnel-performance attestation configuration and release identity, abort while the current release remains online. Provision the approved attestation configuration and bind release identity to the measured candidate before retrying; do not fill these settings with placeholders or weaken startup validation.
 
 Deployment derives performance commit/source identity and immutable image digests from the built candidate. It measures the database ledger and policy hashes before preflight, then measures them again after migrations and reconciliation, immediately before application startup. The resolved Compose infrastructure hash is refreshed with those final values. The previous running backend's nonsecret identity fields are captured in the deployment session and restored alongside its immutable images during rollback. Attestation keys remain separately provisioned; deployment never signs acceptance evidence or activates a performance rollout.
@@ -54,6 +64,8 @@ Before mutation, the deployment locally decrypt-validates and restore-validates 
 ## Storage management
 
 Capacity decisions use measured component sizes and worst-case staging needs rather than a rigid free-space percentage. Preflight estimates checkpoint, restore staging, rollback safety, PostgreSQL working space, Docker working space, and operational headroom.
+
+Immutable application images are built sequentially before maintenance. After each successful image export, unused builder cache is reclaimed and its result retained in a per-service deployment log. This prevents compiler caches from accumulating until the next image export exhausts the disk. Cleanup failure aborts before maintenance; release images, containers, business volumes, and checkpoint archives remain protected. The complete release and all checkpoint gates are still required before promotion.
 
 Before blocking a deployment, cleanup proceeds in this order:
 

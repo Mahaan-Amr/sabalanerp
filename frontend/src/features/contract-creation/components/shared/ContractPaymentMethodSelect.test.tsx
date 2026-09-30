@@ -19,5 +19,5 @@ test('ordinary and Partner payment editors hide customer balance for new payment
 
   const existingHtml = renderToStaticMarkup(<ContractPaymentMethodSelect value="CUSTOMER_BALANCE"
     existingContract onChange={() => undefined} />);
-  assert.match(existingHtml, /<option value="CUSTOMER_BALANCE" selected="">استفاده از باقی مانده مشتری<\/option>/);
+  assert.match(existingHtml, /<option value="CUSTOMER_BALANCE" disabled="" selected="">استفاده از باقی مانده مشتری \(غیرفعال\)/);
 });

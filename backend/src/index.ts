@@ -255,6 +255,7 @@ app.use(
 app.use(
   "/files/accounting-contracts",
   express.static(path.join(process.cwd(), "storage", "accounting-contracts"), {
+    dotfiles: "deny",
     etag: false,
     maxAge: "0",
     setHeaders: (res) => {

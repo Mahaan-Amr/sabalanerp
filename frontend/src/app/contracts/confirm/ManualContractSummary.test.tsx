@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ManualContractSummary, { buildManualContractSummary } from './ManualContractSummary';
+import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
+import ManualContractSummary, { buildManualContractSummary, buildPartnerManualContractSummary } from './ManualContractSummary';
 import ConfirmationContractView from './ConfirmationContractView';
 
 const data = {
+  sessionId: 'ordinary-session', otpExpiresAt: '2026-10-28T00:00:00.000Z', linkExpiresAt: '2026-10-28T00:00:00.000Z',
   status: 'PENDING', contractStatus: 'SIGNED',
   contract: {
-    contractNumber: '100546', createdAt: '2026-09-25T00:00:00.000Z', currency: 'تومان', totalAmount: 130,
+    id: 'ordinary-contract', title: 'Contract', titlePersian: 'قرارداد', contractNumber: '100546', createdAt: '2026-09-25T00:00:00.000Z', currency: 'تومان', totalAmount: 130,
     customer: { firstName: 'آزمایشی', lastName: 'مشتری', phoneNumber: '09120000000' },
     contractData: {
       contractDate: '1405/07/04',
@@ -56,4 +58,23 @@ assert.ok(verifiedHtml.includes('تایید شده در تاریخ'));
 assert.ok(verifiedHtml.includes('خلاصه قرارداد'));
 assert.ok(!verifiedHtml.includes('ثبت کد تایید'));
 const tokenHtml = renderToStaticMarkup(<ConfirmationContractView {...confirmationProps} fullManualSummary={false} data={data} />);
-assert.ok(tokenHtml.includes('اقلام قرارداد'), 'the SMS-link presentation remains available');
+assert.ok(tokenHtml.includes('محصولات قرارداد'), 'the SMS-link presentation remains available');
+
+assert.ok(tokenHtml.includes('ثبت کد تایید'), 'SMS links require VERIFIED session even for SIGNED contracts');
+
+const retail = createPartnerFixtures().customer;
+retail.products[0] = { ...retail.products[0], productCode: 'STONE-PUBLIC', productType: 'slab',
+  lengthMeters: '2.5', widthMeters: '1.2', areaSquareMeters: '3', count: '1', retailLineTotal: '9007199254740993.25' };
+retail.totals = { ...retail.totals, net: '9007199254740993.25', payable: '9007199254740993.25' };
+const partnerSummary = buildPartnerManualContractSummary(retail);
+assert.equal(partnerSummary.grandTotal, '9007199254740993.25');
+const partnerHtml = renderToStaticMarkup(<ConfirmationContractView {...confirmationProps} data={{
+  contract: retail, verifiedAt: null, linkExpiresAt: '2026-10-28T00:00:00.000Z',
+  sellerFinalized: true, decision: 'PENDING', readOnly: false, banner: null,
+}} />);
+for (const label of ['خلاصه قرارداد', 'محصولات قرارداد', 'برنامه پرداخت', 'برنامه تحویل',
+  'STONE-PUBLIC', 'طول: 2.5 متر', 'عرض: 1.2 متر', 'ثبت کد تایید', 'ارسال مجدد کد', '۹٬۰۰۷٬۱۹۹٬۲۵۴٬۷۴۰٬۹۹۳٫۲۵']) {
+  assert.ok(partnerHtml.includes(label), label);
+}
+assert.ok(!partnerHtml.includes('wholesaleUnitPrice'));
+assert.ok(!partnerHtml.includes('sha256-v1:'));

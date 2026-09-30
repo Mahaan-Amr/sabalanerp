@@ -3,9 +3,10 @@ import { ErpInput, ErpTextarea } from '@/components/erp';
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FaSave } from 'react-icons/fa';
-import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection, useErpPresentationScope } from '@/components/erp';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
+import { CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 import { crmAPI } from '@/lib/api';
 import { crmPersonName, CRM_WORK_TYPES, persianDateToApiDate, POTENTIAL_PROJECT_STATUSES } from '@/lib/crmPipeline';
 
@@ -18,6 +19,7 @@ const labelClass = 'block text-sm font-semibold text-[var(--sds-text-primary)] d
 export default function CreatePotentialProjectPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const presentationScope = useErpPresentationScope();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,11 +92,11 @@ export default function CreatePotentialProjectPage() {
       eyebrow="CRM"
       description="پروژه یا فرصتی که هنوز به قرارداد فروش تبدیل نشده است."
       backHref="/dashboard/crm/potential-projects"
-      actions={[{ label: saving ? 'در حال ذخیره...' : 'ذخیره', onClick: () => document.getElementById('potential-project-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })), icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving }]}
+      actions={presentationScope === 'workspace' ? [] : [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', onClick: () => document.getElementById('potential-project-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })), icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving }]}
     >
 
       {error && <ErpEmptyState title="خطا" description={error} />}
-      <form id="potential-project-form" onSubmit={submit} className="space-y-5">
+      <form id="potential-project-form" onSubmit={submit} className={presentationScope === 'workspace' ? "mx-auto max-w-[850px] space-y-5" : "space-y-5"}>
         <ErpSection title="اطلاعات اصلی" description="این فیلدها برای ایجاد پروژه احتمالی الزامی هستند." className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>مخاطب CRM
@@ -133,7 +135,7 @@ export default function CreatePotentialProjectPage() {
           </div>
         </ErpSection>
 
-        <ErpSection title="اطلاعات تکمیلی" className="space-y-4">
+        <CustomerWorkflowSection title="اطلاعات تکمیلی" collapsible className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>آدرس/موقعیت
               <ErpInput className={`${inputClass} mt-2`} value={form.address} onChange={(e) => update('address', e.target.value)} />
@@ -156,9 +158,10 @@ export default function CreatePotentialProjectPage() {
               <ErpTextarea className={`${inputClass} mt-2 min-h-28`} value={form.description} onChange={(e) => update('description', e.target.value)} />
             </label>
           </div>
-        </ErpSection>
+        </CustomerWorkflowSection>
 
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <ErpButton label="انصراف" href="/dashboard/crm/potential-projects" variant="ghost" disabled={saving} />
           <ErpButton
             label={saving ? 'در حال ذخیره...' : 'ذخیره پروژه'}
             icon={FaSave}

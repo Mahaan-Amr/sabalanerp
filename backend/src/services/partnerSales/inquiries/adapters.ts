@@ -84,6 +84,7 @@ type DisplayFact = { label: string; value: string };
  * and canonical graph internals are deliberately impossible to append here. */
 export function presentSavedTechnicalConfiguration(input: {
   productRowId: string;
+  areaSquareMeters?: string;
   family: keyof typeof familyLabels;
   product: PartnerTechnicalProduct;
   draftRow?: PartnerTechnicalDraft['rows'][number];
@@ -100,20 +101,25 @@ export function presentSavedTechnicalConfiguration(input: {
   };
   add('خانواده محصول', familyLabels[input.family] ?? input.family);
   add('کد محصول', product.code);
+  add('مساحت', input.areaSquareMeters, ' متر مربع');
   add('نوع سنگ', product.attributes.stoneType);
   add('ضخامت', product.dimensions.thicknessCentimeters, ' سانتی‌متر');
 
   if (draftRow?.family === 'prepared' || draftRow?.family === 'volumetric') {
+    if (draftRow.configuration.unit === 'count') add('تعداد', draftRow.configuration.quantity, ' عدد');
     add('ابعاد کاتالوگی', product.attributes.cuttingDimension);
     add('طول', product.dimensions.motherLengthMeters, ' متر');
     add('عرض', product.dimensions.motherWidthCentimeters, ' سانتی‌متر');
   } else if (draftRow?.family === 'longitudinal') {
+    add('تعداد', draftRow.configuration.quantity, ' عدد');
     add('طول', draftRow.configuration.lengthMeters, ' متر');
     add('عرض', draftRow.configuration.widthMeters, ' متر');
   } else if (draftRow?.family === 'slab') {
+    add('تعداد', draftRow.configuration.quantity, ' عدد');
     add('طول', draftRow.configuration.lengthMeters, ' متر');
     add('عرض', draftRow.configuration.widthMeters, ' متر');
   } else if (draftRow?.family === 'stair') {
+    if (draftRow.configuration.quantity !== undefined) add('تعداد', draftRow.configuration.quantity, ' عدد');
     add('طول', draftRow.configuration.lengthMeters, ' متر');
     add(draftRow.configuration.part === 'riser' ? 'ارتفاع' : 'عرض',
       draftRow.configuration.crossDimensionMeters, ' متر');
@@ -129,6 +135,19 @@ export function presentSavedTechnicalConfiguration(input: {
     add('طول', remainder.lengthMeters, ' متر');
     add('عرض', remainder.widthMeters, ' متر');
   }
+  const layerSides: Record<'front' | 'back' | 'left' | 'right', string> = {
+    front: 'جلو', back: 'عقب', left: 'چپ', right: 'راست',
+  };
+  input.dependents?.filter(dependent => dependent.kind === 'layer' &&
+    dependent.parentProductRowId === input.productRowId).forEach(layer => {
+    if (layer.kind !== 'layer') return;
+    const catalog = input.operations.find(item => item.kind === 'LAYER' && item.catalogItemId === layer.catalogItemId);
+    const details = [catalog?.name ?? 'لایه', layer.layersPerParentPiece
+      ? `${layer.layersPerParentPiece} لایه برای هر پله` : null,
+    layer.widthMeters ? `عرض ${layer.widthMeters} متر` : null,
+    layer.targetSides.length ? layer.targetSides.map(side => layerSides[side]).join('، ') : null].filter(Boolean);
+    add('لایه', details.join(' · '));
+  });
   const groupIds = new Set(input.graphOperations?.operationGroups
     .filter(group => String(group.productRowId) === input.productRowId)
     .map(group => String(group.operationGroupId)) ?? []);
@@ -182,12 +201,25 @@ export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['res
     if (!saved || !identity || !graphRow || saved.configurationRef.recoveryId !== input.reference.recoveryId ||
         saved.configurationRef.recoveryRevision !== input.reference.recoveryRevision || typeof product?.name !== 'string' ||
         typeof product.code !== 'string') return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    const paidChild = snapshot.draft.dependents?.find(item => item.kind === 'remainder' && item.productRowId === graphRow.productRowId);
+    const childFacts = (snapshot.draft.dependents ?? []).flatMap(child => {
+      if (child.kind !== 'remainder' || child.sourceProductRowId !== graphRow.productRowId) return [];
+      const childProduct = context.catalog?.products?.find(item => item.catalogItemId === child.catalogItemId &&
+        item.catalogSnapshotVersion === child.catalogSnapshotVersion);
+      if (!childProduct) return [];
+      const details = presentSavedTechnicalConfiguration({ productRowId: child.productRowId,
+        family: 'longitudinal', product: childProduct, dependents: snapshot.draft.dependents,
+        operations: context.catalog?.operations ?? [], graphOperations: snapshot.graph });
+      return [{ label: 'فرزند از سنگ پرداخت‌شده', value: childProduct.name },
+        ...details.map(fact => ({ label: `فرزند · ${fact.label}`, value: fact.value }))];
+    });
     return { ok: true, value: { identity, description: product.name,
-      configuration: presentSavedTechnicalConfiguration({ productRowId: input.reference.productRowId,
-        family: identity.family, product, draftRow,
+      ...(paidChild?.kind === 'remainder' ? { paidSourceProductRowId: paidChild.sourceProductRowId } : {}),
+      configuration: [...presentSavedTechnicalConfiguration({ productRowId: input.reference.productRowId,
+        family: identity.family, product, draftRow, areaSquareMeters: graphRow.commercial?.requestedAreaSquareMeters,
         dependents: snapshot.draft.dependents,
         operations: context.catalog?.operations ?? [], graphOperations: snapshot.graph,
-        technicalPolicy: context.technicalPolicy }) } };
+        technicalPolicy: context.technicalPolicy }), ...childFacts] } };
   }
   return { ok: false, error: partnerError('NOT_FOUND') };
 };

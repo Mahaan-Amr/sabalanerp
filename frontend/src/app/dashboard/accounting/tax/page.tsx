@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaBalanceScale, FaCheck, FaSync, FaTimes } from 'react-icons/fa';
 import { ErpEmptyState, ErpInlineState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, taxStatusLabels,
   PartnerAccountingIdentity, accountingFailureMessage } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
@@ -170,7 +171,7 @@ export default function AccountingTaxPage() {
       <AccountingActionModal
         open={Boolean(trackTarget)}
         title="پیگیری وضعیت سامانه مودیان"
-        description={trackTarget ? `${trackTarget.row.partnerContext?.caseNumber || trackTarget.row.contract?.contractNumber || 'قرارداد'} - ${taxStatusLabels[trackTarget.status] || trackTarget.status}` : undefined}
+        description={trackTarget ? `${trackTarget.row.partnerContext?.caseNumber ? partnerTrackingCode(trackTarget.row.partnerContext.caseNumber, trackTarget.row.partnerContext.trackingNumber) : trackTarget.row.contract?.contractNumber || 'قرارداد'} - ${taxStatusLabels[trackTarget.status] || trackTarget.status}` : undefined}
         fields={[
           { id: 'trackingCode', label: 'کد پیگیری یا شماره مرجع', type: 'text', required: ['SUBMITTED_MANUALLY', 'SUBMITTED_EXTERNALLY'].includes(trackTarget?.status || ''), defaultValue: trackTarget?.row?.trackingCode || '' },
           ...(trackTarget?.row.sourceKind === 'PARTNER_INTERNAL_RECORD'

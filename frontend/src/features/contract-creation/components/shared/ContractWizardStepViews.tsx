@@ -50,7 +50,8 @@ export type ContractDeliveryDetails = {
   notes: string;
 };
 
-export function ContractDeliveryDetailsFields({ value, onChange, errors = {} }: {
+export function ContractDeliveryDetailsFields({ value, onChange, errors = {}, dateFormat = 'jalali' }: {
+  dateFormat?: 'jalali' | 'gregorian';
   value: ContractDeliveryDetails;
   onChange: (updates: Partial<ContractDeliveryDetails>) => void;
   errors?: Partial<Record<'date' | 'address' | 'projectManagerName' | 'receiverName', string>>;
@@ -58,7 +59,7 @@ export function ContractDeliveryDetailsFields({ value, onChange, errors = {} }: 
   return <div className="space-y-4">
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       <ErpField label="تاریخ تحویل" error={errors.date} required>
-        <PersianCalendarComponent value={value.date} onChange={date => onChange({ date })}
+        <PersianCalendarComponent valueFormat={dateFormat} value={value.date} onChange={date => onChange({ date })}
           className="w-full" disablePastDates />
       </ErpField>
       <ErpField label="آدرس تحویل" error={errors.address} required>

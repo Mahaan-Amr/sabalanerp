@@ -28,7 +28,7 @@ test('Catalog Excel Sync is responsive, accessible, and cannot dismiss or repeat
   });
 
   await page.goto('/dashboard/inventory/services');
-  await page.getByRole('button', { name: 'وارد/صادر کردن' }).click();
+  await page.getByRole('button', { name: 'اکسل', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: /ورود و خروج اکسل/ });
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveAttribute('aria-modal', 'true');

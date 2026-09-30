@@ -54,4 +54,13 @@ assert.match(html, /انبار مشتری/);
 assert.match(html, /برنامه پرداخت/);
 assert.doesNotMatch(html, /wholesaleUnitPrice|approvalEvidenceId|resaleDifference/);
 
+const localized = renderCustomerContractPrint(CustomerContractOutputSchema.parse({ ...output,
+  products: [{ ...output.products[0], unit: 'meter' }],
+  customerPaymentPlan: { ...output.customerPaymentPlan, installments: [{ ...output.customerPaymentPlan.installments[0],
+    method: 'CASH', subtype: 'CARD' }] },
+})).htmlContent;
+assert.match(localized, /مقدار قراردادی:[^<]*متر/);
+assert.match(localized, /نقد - کارت/);
+assert.doesNotMatch(localized, />meter<|>CARD<| - CARD/);
+
 console.log('printTemplatePartnerCustomerOutput tests passed');

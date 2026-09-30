@@ -46,6 +46,16 @@ that editing input was checkpointed, not that its product graph is valid.
 
 ## Verification boundaries
 
+The browser reacquires its current recovery lease with `takeover: false` before
+an automatic checkpoint or validated Product save. Configuring a Product may
+outlast the 75-second lease; expiry alone must not replace the editor with the
+"editing elsewhere" prompt. The refreshed token is used for the protected write,
+while another active browser still requires explicit takeover. A takeover from
+an open editor targets that editor's recovery ID rather than stale entry context.
+The Product-configuration browser regression expires the lease before adding a
+configured Product and checks successful checkpointing of the same Draft with
+the new token and no automatic takeover.
+
 The dedicated PostgreSQL tests run solely in the existing `sabalanerp-local` and
 roll back each outer transaction, including immutable receipt rows. No append-only
 trigger is disabled and no evidence row is deleted. The tests exercise stored

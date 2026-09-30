@@ -58,3 +58,15 @@ Run `node tests/partner-sales/output/run-local.mjs` only with the existing healt
 The runner copies sources into `/tmp/customer-output-325`, never changes runtime
 services or the database. UI and template tests also run using the existing
 frontend tsx executable. Verification results are recorded in the issue delivery.
+
+## Committed Case PDF without SMS
+
+The authenticated Case output endpoint also accepts an expected revision/hash in
+place of a session snapshot ID. After authorization and a Case lock it rebuilds
+and validates the immutable Case projections, then freezes a purpose-specific
+`PDF_PREVIEW` or `PDF_FINAL` snapshot. Existing confirmation evidence defaults to
+`CUSTOMER_CONFIRMATION` and remains unchanged; PDF creation cannot consume the
+confirmation snapshot's uniqueness slot or send a message. Final publication
+retains the shared PRINTED lifecycle/audit and idempotent private artifact. It
+never records a customer signature or OTP approval. A stale revision, invalid
+projection, noncommitted Case or forbidden caller fails closed.

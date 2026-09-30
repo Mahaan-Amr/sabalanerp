@@ -1,10 +1,6 @@
-import { Prisma } from '@prisma/client';
+import { partnerContractPayableTotal } from '@sabalanerp/partner-sales-contracts';
 import { BusinessIdentity, ContractRuntime, CurrentOutput, CustomerOutputError, Output, Snapshot } from './contracts';
 import { projectCustomerVisibleRevisionContent } from './customerVisible';
-
-// The wire allows 80-character decimals. Validate sums without changing Prisma's
-// shared Decimal configuration or rounding valid large evidence to 20 digits.
-const OutputDecimal = Prisma.Decimal.clone({ precision: 200 });
 
 export function createCustomerOutputSnapshots(contract: ContractRuntime) {
   const conflict = (): never => { throw new CustomerOutputError('INTEGRITY_CONFLICT'); };
@@ -23,7 +19,7 @@ export function createCustomerOutputSnapshots(contract: ContractRuntime) {
       }
     }
     const totals = content.totals;
-    if (!new OutputDecimal(totals.net).minus(totals.discount).plus(totals.tax).plus(totals.charges).equals(totals.payable)) conflict();
+    try { partnerContractPayableTotal(totals); } catch { conflict(); }
     const installments = content.customerPaymentPlan.installments;
     if (new Set(installments.map(row => row.installmentId)).size !== installments.length
       || installments.some(row => row.amount.currency !== totals.currency)) conflict();

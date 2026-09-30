@@ -61,7 +61,7 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
     </ul>
   ` : '';
 
-  const totalAmount = toFiniteNumber(data.payment?.totalContractAmount) || 
+  const totalAmount = data.payment?.totalContractAmount != null ? toFiniteNumber(data.payment.totalContractAmount) :
     getContractGrossPayableTotal(data.products, data.serviceRows || []);
   const discountAmount = toFiniteNumber(data.discount?.amount);
   const discountPercent = data.discount?.inputMode === 'AMOUNT_TOMAN'
@@ -134,5 +134,4 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
     </div>
   `;
 };
-
 

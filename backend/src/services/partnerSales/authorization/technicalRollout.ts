@@ -12,6 +12,14 @@ export async function lockPartnerOperationsControl(tx: Prisma.TransactionClient)
     select: { cohortId: true, operationalPaused: true } });
 }
 
+/** Readers share the rollout boundary with other readers while excluding
+ * writers. A waiting writer that changed the row forces the existing
+ * repeatable-read retry instead of allowing an obsolete authority snapshot. */
+export async function lockPartnerOperationsControlForRead(tx: Prisma.TransactionClient) {
+  await tx.$queryRaw`SELECT id FROM partner_operations_controls
+    WHERE id = ${PARTNER_OPERATIONS_CONTROL_ID} FOR SHARE`;
+}
+
 /** Compatibility rollout boundary shared by mounted Partner technical
  * surfaces. Direct conversion bypasses it completely; older profiles retain
  * their named-cohort eligibility until migrated. */

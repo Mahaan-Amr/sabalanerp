@@ -43,7 +43,7 @@ export function PartnerCorrectionPanel({ view, correction, pending, onRequest, o
   const editable = correction?.scope === 'RETAIL_ONLY' && correction.status === 'APPROVED_TO_EDIT' && !correction.saved;
   const editableInstallments = correction ? view.customerPaymentPlan.installments.filter(item => correction.editableCustomerInstallmentIds.includes(item.installmentId)) : [];
   if (!correction) return <ErpSection title="اصلاح پرونده"><p className="text-sm text-[var(--sds-text-secondary)]">برای تغییر قیمت فروش، برنامه پرداخت مشتری یا اطلاعات مشترک، ابتدا دامنه اصلاح بررسی می‌شود.</p>
-    <div className="mt-4 flex flex-wrap gap-2"><ErpButton label="درخواست اصلاح retail" icon={FaEdit} onClick={() => onRequest('RETAIL_ONLY')} />
+    <div className="mt-4 flex flex-wrap gap-2"><ErpButton label="اصلاح قیمت فروش و پرداخت مشتری" icon={FaEdit} onClick={() => onRequest('RETAIL_ONLY')} />
       <ErpButton label="درخواست اصلاح مشترک" icon={FaEdit} tone="warning" variant="outline" onClick={() => onRequest('SHARED')} /></div></ErpSection>;
   const status = statusCopy[correction.status];
   return <ErpSection title={correction.scope === 'RETAIL_ONLY' ? 'اصلاح قیمت فروش و پرداخت مشتری' : 'وضعیت اصلاح پرونده'}>

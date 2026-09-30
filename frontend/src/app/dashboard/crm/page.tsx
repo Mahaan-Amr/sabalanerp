@@ -5,18 +5,14 @@ import {
   FaBell,
   FaCalendarDay,
   FaChartLine,
-  FaCheckCircle,
-  FaClock,
   FaExclamationTriangle,
-  FaFileContract,
   FaHistory,
-  FaPlus,
   FaProjectDiagram,
   FaTasks,
   FaUserPlus,
   FaUsers,
 } from 'react-icons/fa';
-import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, ErpTwoColumn, type ErpMetric } from '@/components/erp';
+import { ErpNeumorphicActionGrid, ErpCard, ErpMetricGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, type ErpMetric } from '@/components/erp';
 import { crmAPI } from '@/lib/api';
 import { crmPersonName, crmUserName, formatToman, isActionOverdue, potentialProjectStatusTone } from '@/lib/crmPipeline';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -81,7 +77,8 @@ export default function CrmWorkspacePage() {
   ];
 
   const actionRow = (action: any) => (
-    <Link key={action.id} href={action.potentialProject?.id ? `/dashboard/crm/potential-projects/${action.potentialProject.id}` : `/dashboard/crm/customers/${action.customer.id}`} className="block rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 transition hover:border-[var(--sds-accent)]/40 hover:bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
+    <Link key={action.id} href={action.potentialProject?.id ? `/dashboard/crm/potential-projects/${action.potentialProject.id}` : `/dashboard/crm/customers/${action.customer.id}`} className="block rounded-[var(--sds-radius-card)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]">
+      <ErpCard interactive className="p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{action.title}</p>
@@ -92,6 +89,7 @@ export default function CrmWorkspacePage() {
           {action.communicationType}
         </ErpBadge>
       </div>
+      </ErpCard>
     </Link>
   );
 
@@ -99,50 +97,49 @@ export default function CrmWorkspacePage() {
     <ErpPage
       eyebrow="CRM"
       title="مدیریت ارتباط و پیگیری مشتری"
-      metrics={metrics}
       actions={[{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaUserPlus, tone: 'primary', variant: 'solid' }]}
     >
+      <div>
+        <ErpSection title={data.permissions.canManage ? 'صف پیگیری تیم' : 'صف پیگیری من'}>
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div>
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-[var(--sds-danger)] dark:text-[var(--sds-danger)]"><FaExclamationTriangle /> سررسیدشده</h3>
+              <div className="space-y-2">
+                {data.nextActions.overdue.length ? data.nextActions.overdue.slice(0, 6).map(actionRow) : <ErpFieldView label="وضعیت" value="مورد عقب‌افتاده ندارید" tone="success" />}
+              </div>
+            </div>
+            <div>
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"><FaCalendarDay /> امروز</h3>
+              <div className="space-y-2">
+                {data.nextActions.today.length ? data.nextActions.today.slice(0, 6).map(actionRow) : <ErpFieldView label="وضعیت" value="برای امروز اقدامی ثبت نشده" tone="neutral" />}
+              </div>
+            </div>
+          </div>
+        </ErpSection>
+      </div>
+
+      <ErpMetricGrid items={metrics} />
 
 
       <div>
-        <ErpActionGrid
-          columns={4}
+        <ErpNeumorphicActionGrid
+          title="دسترسی سریع"
+          showTitle={false}
           items={[
-            { title: 'ثبت پروژه احتمالی', href: '/dashboard/crm/potential-projects/create', icon: FaProjectDiagram, tone: 'primary' },
-            { title: 'ثبت گزارش پیگیری', href: '/dashboard/crm/follow-ups/create', icon: FaTasks, tone: 'success' },
-            { title: 'فهرست پروژه‌ها', href: '/dashboard/crm/potential-projects', icon: FaChartLine, tone: 'info' },
-            { title: 'مشتریان', href: '/dashboard/crm/customers', icon: FaUsers, tone: 'neutral' },
+            { id: 'new-project', title: 'ثبت پروژه احتمالی', href: '/dashboard/crm/potential-projects/create', icon: FaProjectDiagram },
+            { id: 'new-follow-up', title: 'ثبت گزارش پیگیری', href: '/dashboard/crm/follow-ups/create', icon: FaTasks },
+            { id: 'projects', title: 'فهرست پروژه‌ها', href: '/dashboard/crm/potential-projects', icon: FaChartLine },
+            { id: 'customers', title: 'مشتریان', href: '/dashboard/crm/customers', icon: FaUsers },
           ]}
         />
       </div>
 
-      <ErpTwoColumn
-        main={
-          <>
-            <div>
-              <ErpSection title={data.permissions.canManage ? 'صف پیگیری تیم' : 'صف پیگیری من'} description="اقدام‌های سررسیدشده و امروز باید اولویت کار روزانه باشند.">
-                <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                  <div>
-                    <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-[var(--sds-danger)] dark:text-[var(--sds-danger)]"><FaExclamationTriangle /> سررسیدشده</h3>
-                    <div className="space-y-2">
-                      {data.nextActions.overdue.length ? data.nextActions.overdue.slice(0, 6).map(actionRow) : <ErpFieldView label="وضعیت" value="مورد عقب‌افتاده ندارید" tone="success" />}
-                    </div>
-                  </div>
-                  <div>
-                    <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"><FaCalendarDay /> امروز</h3>
-                    <div className="space-y-2">
-                      {data.nextActions.today.length ? data.nextActions.today.slice(0, 6).map(actionRow) : <ErpFieldView label="وضعیت" value="برای امروز اقدامی ثبت نشده" tone="neutral" />}
-                    </div>
-                  </div>
-                </div>
-              </ErpSection>
-            </div>
-
-            <div>
-              <ErpSection title="پروژه‌های احتمالی اخیر" actions={[{ label: 'مشاهده همه', href: '/dashboard/crm/potential-projects', tone: 'neutral', variant: 'outline' }]}>
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
+<ErpSection title="پروژه‌های احتمالی اخیر" actions={[{ label: 'مشاهده همه', href: '/dashboard/crm/potential-projects', tone: 'neutral', variant: 'outline' }]}>
                 <div className="space-y-3">
                   {data.recentProjects.map((project) => (
-                    <Link key={project.id} href={`/dashboard/crm/potential-projects/${project.id}`} className="block rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 transition hover:border-[var(--sds-accent)]/40 hover:bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
+                    <Link key={project.id} href={`/dashboard/crm/potential-projects/${project.id}`} className="block rounded-[var(--sds-radius-card)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]">
+                      <ErpCard interactive className="p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <p className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{project.title}</p>
@@ -150,46 +147,36 @@ export default function CrmWorkspacePage() {
                         </div>
                         <ErpBadge tone={potentialProjectStatusTone(project.status)}>{project.status}</ErpBadge>
                       </div>
+                      </ErpCard>
                     </Link>
                   ))}
                 </div>
               </ErpSection>
-            </div>
-          </>
-        }
-        aside={
-          <>
-            <ErpSection title="وضعیت پروژه‌ها">
+<ErpSection title="وضعیت پروژه‌ها">
               <div className="space-y-2">
                 {data.projects.byStatus.map((row) => (
                   <ErpFieldView key={row.status} label={row.status} value={row.count.toLocaleString('fa-IR')} tone={potentialProjectStatusTone(row.status)} />
                 ))}
               </div>
             </ErpSection>
-
-            {data.permissions.canManage && (
-              <ErpSection title="نمای فروشنده‌ها">
+{data.permissions.canManage && (<ErpSection title="نمای فروشنده‌ها">
                 <div className="space-y-2">
                   {data.projects.bySeller.slice(0, 8).map((row) => (
                     <ErpFieldView key={row.sellerId} label={row.sellerName} value={`${row.count.toLocaleString('fa-IR')} پروژه فعال`} />
                   ))}
                 </div>
-              </ErpSection>
-            )}
-
-            <ErpSection title="آخرین رخدادها">
+              </ErpSection>)}
+<ErpSection title="آخرین رخدادها">
               <div className="space-y-3">
                 {data.recentTimeline.map((event) => (
-                  <div key={event.id} className="rounded-lg border border-[var(--sds-border-default)] p-3 text-sm dark:border-[var(--sds-border-strong)]">
+                  <ErpCard key={event.id} className="p-3 text-sm">
                     <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"><FaHistory className="ml-2 inline h-3 w-3" />{event.title}</p>
                     <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{event.potentialProject?.title || crmPersonName(event.customer)} · {crmUserName(event.actor)}</p>
-                  </div>
+                  </ErpCard>
                 ))}
               </div>
             </ErpSection>
-          </>
-        }
-      />
+      </div>
     </ErpPage>
   );
 }

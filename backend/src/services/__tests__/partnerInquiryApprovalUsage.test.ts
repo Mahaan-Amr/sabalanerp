@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Prisma } from '@prisma/client';
 import { ApprovedInquirySchema, canonicalHash } from '@sabalanerp/partner-sales-contracts';
-import { bindApprovalUsage, resolveApprovalForUse } from '../partnerSales/inquiries/approvalUsage';
+import { bindApprovalUsage, canRetainCasePricingApproval, resolveApprovalForUse } from '../partnerSales/inquiries/approvalUsage';
 
 const approval = ApprovedInquirySchema.parse({
   schemaVersion: 1,
@@ -43,7 +43,7 @@ test('an exact usage retry returns its immutable snapshot without revalidating a
   assert.equal(currentApprovalReads, 0, 'historical replay must not depend on current approval validity');
 });
 
-test('fresh approval use is bound to the pricing source revision, not the successor revision', async () => {
+test('unchanged pricing survives later draft preparation revisions but cannot come from a future revision', async () => {
   const tx = {
     $queryRaw: async () => [{ now: new Date('2026-08-21T10:00:00.000Z') }],
     partnerInquiryRow: { findFirst: async () => ({ id: approval.rowId, revision: approval.revision,
@@ -63,10 +63,18 @@ test('fresh approval use is bound to the pricing source revision, not the succes
     rowId: approval.rowId, revision: approval.revision }, partnerSellerId: approval.partnerSellerId,
     configurationHash: approval.configurationHash, caseId: 'case-usage-replay', pricingCaseRevision: 2 });
   assert.equal(usable.ok, true);
-  const wrongRevision = await resolveApprovalForUse(tx, { binding: { inquiryId: approval.inquiryId,
+  const laterPreparation = await resolveApprovalForUse(tx, { binding: { inquiryId: approval.inquiryId,
     rowId: approval.rowId, revision: approval.revision }, partnerSellerId: approval.partnerSellerId,
     configurationHash: approval.configurationHash, caseId: 'case-usage-replay', pricingCaseRevision: 3 });
-  assert.equal(wrongRevision.ok ? null : wrongRevision.error.code, 'NOT_FOUND');
+  assert.equal(laterPreparation.ok, true);
+  const futureSource = await resolveApprovalForUse(tx, { binding: { inquiryId: approval.inquiryId,
+    rowId: approval.rowId, revision: approval.revision }, partnerSellerId: approval.partnerSellerId,
+    configurationHash: approval.configurationHash, caseId: 'case-usage-replay', pricingCaseRevision: 1 });
+  assert.equal(futureSource.ok ? null : futureSource.error.code, 'NOT_FOUND');
+  const otherCase = await resolveApprovalForUse(tx, { binding: { inquiryId: approval.inquiryId,
+    rowId: approval.rowId, revision: approval.revision }, partnerSellerId: approval.partnerSellerId,
+    configurationHash: approval.configurationHash, caseId: 'other-case', pricingCaseRevision: 3 });
+  assert.equal(otherCase.ok ? null : otherCase.error.code, 'NOT_FOUND');
 });
 
 test('a successor to a rejected row uses its own approval clock and omits absent supersession evidence', async () => {
@@ -96,4 +104,11 @@ test('a successor to a rejected row uses its own approval clock and omits absent
     assert.equal(result.value.predecessorApprovalId, undefined);
     assert.equal(result.value.supersessionReason, undefined);
   }
+});
+
+test('editing a rejected row keeps an unchanged valid quote from the same Case before any approval usage exists', () => {
+  assert.equal(canRetainCasePricingApproval(1, 3), true);
+  assert.equal(canRetainCasePricingApproval(3, 3), true);
+  assert.equal(canRetainCasePricingApproval(4, 3), false);
+  assert.equal(canRetainCasePricingApproval(null, 3), false);
 });

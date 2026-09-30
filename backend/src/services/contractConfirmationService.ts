@@ -1,3 +1,4 @@
+import { confirmationResendCooldownError } from './contractConfirmationPolicy';
 import { prisma } from '../lib/prisma';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
@@ -12,7 +13,6 @@ import { readContractCancellationEvidence, resolveContractReactivationStatus } f
 const LINK_TTL_DAYS = parseInt(process.env.CONTRACT_CONFIRM_LINK_TTL_DAYS || '60', 10);
 const OTP_TTL_MINUTES = parseInt(process.env.CONTRACT_CONFIRM_OTP_TTL_MINUTES || '10', 10);
 const MAX_ATTEMPTS = parseInt(process.env.CONTRACT_CONFIRM_MAX_ATTEMPTS || '5', 10);
-const RESEND_COOLDOWN_SECONDS = parseInt(process.env.CONTRACT_CONFIRM_RESEND_COOLDOWN_SECONDS || '60', 10);
 
 export interface RequestEvidenceMeta {
   ipAddress?: string;
@@ -304,15 +304,8 @@ export class ContractConfirmationService {
     let session = existingActiveSession;
 
     if (session && params.resend) {
-      if (session.lastSentAt) {
-        const secondsSinceLastSend = Math.floor((Date.now() - session.lastSentAt.getTime()) / 1000);
-        if (secondsSinceLastSend < RESEND_COOLDOWN_SECONDS) {
-          return {
-            success: false,
-            error: `لطفا پس از ${RESEND_COOLDOWN_SECONDS - secondsSinceLastSend} ثانیه دوباره تلاش کنید`
-          };
-        }
-      }
+      const cooldownError = confirmationResendCooldownError(session.lastSentAt, new Date());
+      if (cooldownError) return { success: false, error: cooldownError };
 
       session = await prisma.contractPublicConfirmation.update({
         where: { id: session.id },

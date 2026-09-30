@@ -1,6 +1,6 @@
 import { parseCanonicalProductGraph, projectCanonicalProductGraph, type CanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import {
-  CaseDraftIntentSchema, PaymentPlanSchema, canonicalHash, partnerError,
+  CaseDraftIntentSchema, PaymentPlanSchema, canonicalHash, partnerError, roundPartnerContractTotals,
   type ApprovedInquiry, type PartnerCommand, type PartnerTechnicalSavedView, type Result,
 } from '@sabalanerp/partner-sales-contracts';
 import { technicalGraphMeasures } from './technicalGraphMeasures';
@@ -86,12 +86,16 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
   if (input.command.intent.retailDiscount.currency !== currency || subtract(retailNet, discount).startsWith('-')) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
   }
-  const retailPayable = subtract(retailNet, discount);
+  const retailTotals = roundPartnerContractTotals({ net: retailNet, discount: sum([discount]), tax: '0', charges: '0', currency });
+  const wholesaleTotals = pricingReady
+    ? roundPartnerContractTotals({ net: wholesaleNet!, discount: '0', tax: '0', charges: '0', currency }) : undefined;
+  const retailPayable = retailTotals.payable;
   const planTotal = sum(input.command.intent.customerPaymentPlan.installments.map(item => item.amount.amount));
   const sabalanPlanTotal = sum(input.resolved.sabalanPaymentPlan.installments.map(item => item.amount.amount));
   if (input.command.intent.customerPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
       input.resolved.sabalanPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
-      planTotal !== retailPayable || (pricingReady && input.resolved.sabalanPaymentPlan.installments.length > 0 && sabalanPlanTotal !== wholesaleNet)) {
+      (input.command.intent.preparationCompleted !== false && planTotal !== retailPayable) ||
+      (pricingReady && input.resolved.sabalanPaymentPlan.installments.length > 0 && sabalanPlanTotal !== wholesaleTotals!.payable)) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
   }
   const quantities = new Map(input.rows.map(row => [row.productRowId, row.quantity]));
@@ -103,19 +107,19 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
   if ([...delivered].some(([id, quantity]) => subtract(quantities.get(id)!, quantity).startsWith('-'))) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
   }
-  const totals = (net: string, reduction: string) => ({ net, discount: sum([reduction]),
-    tax: '0', charges: '0', payable: subtract(net, reduction), currency });
   return { ok: true, value: {
     graph: input.graph, graphHash: input.graphHash,
     partySnapshots: { partner: input.resolved.partner, customer: input.resolved.customer },
     pricingState: pricingReady ? 'READY_TO_FINALIZE' as const : 'AWAITING_INQUIRY' as const,
     wholesaleEnvelope: pricingReady ? { schemaVersion: 1, status: 'PRICED' as const,
       products: products.map(({ retailUnitPrice: _retail, ...row }) => row),
-      totals: totals(wholesaleNet!, '0'), termsVersionId: input.resolved.sabalanTermsVersionId }
+      totals: wholesaleTotals!, termsVersionId: input.resolved.sabalanTermsVersionId }
       : { schemaVersion: 1, status: 'UNPRICED' as const, products: [] },
     retailEnvelope: { schemaVersion: 1, products: products.map(({ wholesaleUnitPrice: _wholesale, approvalEvidenceId: _approval,
-      configurationHash: _configuration, ...row }) => row), totals: totals(retailNet, discount),
-      belowCostConfirmed: input.command.intent.belowCostConfirmed },
+      configurationHash: _configuration, ...row }) => row), totals: retailTotals,
+      belowCostConfirmed: input.command.intent.belowCostConfirmed,
+      ...(input.command.intent.preparationCompleted !== undefined
+        ? { preparationCompleted: input.command.intent.preparationCompleted } : {}) },
     paymentEvidence: { customerPaymentPlan: input.command.intent.customerPaymentPlan,
       ...(pricingReady ? { sabalanPaymentPlan: input.resolved.sabalanPaymentPlan } : {}) },
     customerContent: { contractDate: input.command.intent.contractDate, legalText: input.resolved.legalText,
@@ -123,6 +127,6 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
       ...(input.resolved.project ? { project: input.resolved.project } : {}),
       deliveries: input.command.intent.deliveries, confirmation: 'NOT_SENT', signatures: [] },
     products,
-    ...(pricingReady ? { resaleDifference: subtract(retailPayable, wholesaleNet!) } : {}),
+    ...(pricingReady ? { resaleDifference: subtract(retailPayable, wholesaleTotals!.payable) } : {}),
   } } as const;
 }

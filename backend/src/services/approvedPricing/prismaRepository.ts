@@ -14,6 +14,7 @@ import { sanitizeContractDataCustomerSnapshot } from '../contractSnapshotBoundar
 import {
   hasConflictingDiscountOrNonProductAdjustmentEvidence,
   isExplicitZeroDiscountInput,
+  recoverAuditedDiscountEligibility,
 } from '../contractDiscountEvidence';
 import type {
   ApprovalLeaf,
@@ -1080,7 +1081,7 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
         effectiveCurrentItems = binding.currentItems as typeof currentItems;
         compatibility = { ...identityCompatibility, rowIdentityAssignments: binding.assignments };
       }
-      if (canReconstructLegacyV1) {
+      if (canReconstructLegacyV1 && optionalRecord(optionalRecord(effectiveContractData)?.discount)?.enabled !== true) {
         const eligibility = reconstructLegacyV1DiscountEligibility({
           contractData: effectiveContractData,
           graphRows,
@@ -1093,6 +1094,25 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
             snapshotOriginallyMissing: false,
           };
           compatibility = { ...compatibility, discountEligibilityAssignments: eligibility.assignments };
+        }
+      }
+      if (optionalRecord(optionalRecord(effectiveContractData)?.discount)?.enabled === true &&
+        (hasMatchingLegacyMigration || hasMatchingCanonicalWriter)) {
+        const eligibility = recoverAuditedDiscountEligibility({
+          contractData: effectiveContractData,
+          graphRows,
+          layerRowIds: graph.layerConfigurations.map(layer => String(layer.layerConfigurationId)),
+          graphAuditCommandId: migrationAudit!.commandId,
+        });
+        effectiveContractData = eligibility.contractData;
+        if (eligibility.assignments.length > 0) {
+          compatibility = {
+            ...(compatibility ?? {
+              evidenceOrigin: 'AUDITED_GRAPH_DISCOUNT_ELIGIBILITY_RECOVERY' as const,
+              snapshotOriginallyMissing: false,
+            }),
+            auditedDiscountEligibilityAssignments: eligibility.assignments,
+          };
         }
       }
       if (!compatibility && (monetaryNormalizations.length > 0 || legacyQuantityNormalizations.length > 0)) {

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Partially superseded by ADR-0104 for customer-Contract and internal-record numbering before commitment.
 
 ## Context
 

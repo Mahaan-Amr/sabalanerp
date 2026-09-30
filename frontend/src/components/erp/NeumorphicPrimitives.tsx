@@ -246,7 +246,7 @@ export function ErpNeumorphicMetricGrid({
                 {item.value}
               </p>
               {item.hint && (
-                <p className="mt-1 text-xs text-[var(--sds-text-muted)]">{item.hint}</p>
+                <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{item.hint}</p>
               )}
             </div>
             <span
@@ -285,8 +285,9 @@ export interface ErpNeumorphicActionItem {
   id: string;
   title: string;
   description?: string;
-  href: string;
+  href?: string;
   icon: IconType;
+  disabledReason?: string;
 }
 
 export function ErpNeumorphicActionGrid({
@@ -297,7 +298,7 @@ export function ErpNeumorphicActionGrid({
 }: {
   title: string;
   items: ErpNeumorphicActionItem[];
-  desktopColumns?: 4 | 5;
+  desktopColumns?: 2 | 3 | 4 | 5;
   showTitle?: boolean;
 }) {
   const titleId = useId();
@@ -316,17 +317,12 @@ export function ErpNeumorphicActionGrid({
       <div
         className={cx(
           "grid grid-cols-2 gap-3 xl:gap-4",
-          desktopColumns === 5 ? "xl:grid-cols-5" : "xl:grid-cols-4",
+          desktopColumns === 2 ? "xl:grid-cols-2" : desktopColumns === 3 ? "xl:grid-cols-3" : desktopColumns === 5 ? "xl:grid-cols-5" : "xl:grid-cols-4",
         )}
       >
         {items.map((item) => {
           const Icon = item.icon;
-          return (
-            <Link
-              key={item.id}
-              href={item.href}
-              className="sds-neumorphic-card sds-neumorphic-interactive group flex min-h-24 flex-col items-center justify-center gap-2.5 p-4 text-center outline-none"
-            >
+          const content = <>
               <span className="sds-neumorphic-icon inline-flex h-11 w-11 items-center justify-center text-[var(--sds-text-secondary)] transition-colors group-hover:text-[var(--sds-accent)]">
                 <Icon className="h-6 w-6" />
               </span>
@@ -339,9 +335,13 @@ export function ErpNeumorphicActionGrid({
                     {item.description}
                   </span>
                 )}
+                {item.disabledReason && <span className="mt-1 block text-xs text-[var(--sds-text-muted)]">{item.disabledReason}</span>}
               </span>
-            </Link>
-          );
+            </>;
+          const className = "sds-neumorphic-card group flex min-h-24 min-w-0 flex-col items-center justify-center gap-2.5 p-4 text-center outline-none";
+          return item.href
+            ? <Link key={item.id} href={item.href} className={`${className} sds-neumorphic-interactive`}>{content}</Link>
+            : <div key={item.id} className={className}>{content}</div>;
         })}
       </div>
     </section>

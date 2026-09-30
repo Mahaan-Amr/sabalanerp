@@ -7,6 +7,8 @@ import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACE_PERMISSIONS, WORKSP
 import { FeatureRequest, FEATURE_PERMISSIONS, FEATURES, requireAnyNarrowFeatureAccess, requireFeatureAccess, requireNarrowFeatureAccess, type Feature } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
+import { readPartnerInternalDocument, renderPartnerInternalDocumentHtml,
+  withPartnerInternalAccountingTarget, renderPartnerInternalDocumentHeader } from '../services/partnerSales/accounting/internalDocument';
 import {
   buildSalesContractPdfDownloadName,
   buildSalesContractPdfFingerprint,
@@ -24,6 +26,7 @@ import {
   getAccountingSettings,
   getAccountingContractDetail,
   getAccountingFinancialTrend,
+  getAccountingDashboard,
   getAccountingWorkspace,
   listAccountingContracts,
   listAuditLogs,
@@ -83,11 +86,13 @@ import { readPartnerDispatchAccountingViewCapability } from '../services/partner
 import accountingLedgerRouter from './accountingLedger';
 import accountingPeriodEndRouter from './accountingPeriodEnd';
 import accountingSupplyChainRouter from './accountingSupplyChain';
+import accountingReplacementRouter from './accountingReplacement';
 
 const router = express.Router();
 router.use('/ledger', accountingLedgerRouter);
 router.use('/period-end', accountingPeriodEndRouter);
 router.use('/supply-chain', accountingSupplyChainRouter);
+router.use('/replacement', accountingReplacementRouter);
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
 
 const accountingActionFeature: Record<string, string[]> = {
@@ -132,14 +137,14 @@ const getAccountingActionCapabilities = async (userId: string, role: string) => 
   ]) as Record<string, boolean>;
 };
 
-const projectAccountingActions = <T extends { nextBestActions?: Array<Record<string, any>> }>(
+const projectAccountingActions = <T extends { sourceKind?: string; nextBestActions?: Array<Record<string, any>> }>(
   record: T,
   capabilities: Record<string, boolean>,
 ): T => ({
   ...record,
   nextBestActions: [
     ...(record.nextBestActions || []),
-    { kind: 'FLAG_CONTRACT', labelFa: 'ثبت پرچم حسابداری', enabled: true },
+    ...(record.sourceKind === 'PARTNER_INTERNAL_RECORD' ? [] : [{ kind: 'FLAG_CONTRACT', labelFa: 'ثبت پرچم حسابداری', enabled: true }]),
   ].map((action) => {
     const visible = Boolean(capabilities[action.kind]);
     return {
@@ -547,9 +552,25 @@ export const getAccountingWorkspaceResponse = async (req: AuthRequest, res: Resp
 
 router.get('/workspace', accountingView, getAccountingWorkspaceResponse);
 
+export const createAccountingDashboardResponse = (
+  loadDashboard: typeof getAccountingDashboard = getAccountingDashboard,
+) => async (req: AuthRequest, res: Response) => {
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    const dashboard = await loadDashboard(req.query, req.query.range, new Date(), { userId: req.user!.id });
+    res.json({ success: true, data: dashboard });
+  } catch (error) {
+    console.error('Accounting dashboard error:', error);
+    accountingReadFailure(res, error);
+  }
+};
+
+router.get('/dashboard', accountingView, createAccountingDashboardResponse());
+
 export const createAccountingFinancialTrendResponse = (
   loadTrend: typeof getAccountingFinancialTrend = getAccountingFinancialTrend,
 ) => async (req: AuthRequest, res: Response) => {
+  res.set('Cache-Control', 'private, no-store');
   try {
     const trend = await loadTrend(req.query.range, new Date(), { userId: req.user!.id });
     res.json({ success: true, data: trend });
@@ -564,7 +585,7 @@ router.get('/financial-trend', accountingView, createAccountingFinancialTrendRes
 router.get('/contracts', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {
     const [data, capabilities] = await Promise.all([
-      listAccountingContracts(req.query as any),
+      listAccountingContracts(req.query as any, { userId: req.user!.id }),
       getAccountingActionCapabilities(req.user!.id, req.user!.role),
     ]);
     res.json({ success: true, data: {
@@ -698,6 +719,170 @@ router.post(
     }
   },
 );
+
+router.get('/contracts/partner/:caseId/internal', accountingContractsView, async (req: AuthRequest, res: Response) => {
+  try {
+    const document = await readPartnerInternalDocument(req.params.caseId, req.user!.id);
+    if (!document) return res.status(404).json({ success: false, error: 'سند داخلی در دسترس نیست.' });
+    const access = await getEffectiveUserAccess(prisma, { userId: req.user!.id, userRole: req.user!.role });
+    const canResolveFlag = ['edit', 'admin'].includes((req as WorkspaceRequest).workspacePermission || '')
+      && access.features.some(feature => feature.workspace === WORKSPACES.ACCOUNTING
+        && feature.feature === FEATURES.ACCOUNTING_ACTIONS_MANAGE
+        && ['edit', 'admin'].includes(feature.permission));
+    const capabilities = await getAccountingActionCapabilities(req.user!.id, req.user!.role);
+    const writable = document.partnerContext.accountingWritable;
+    return res.json({ success: true, data: { ...document, actions: { canResolveFlag: canResolveFlag && writable,
+      canCreateInvoice: capabilities.CREATE_INVOICE && writable, canFlag: capabilities.FLAG_CONTRACT && writable, canRequestCorrection: capabilities.CREATE_CORRECTION_REQUEST && writable,
+      canReviewInvoice: capabilities.APPROVE_FINANCIAL_INVOICE && writable,
+      canCreateReceivable: capabilities.CREATE_RECEIVABLE && writable } } });
+  } catch (error) {
+    console.error('Partner internal document error:', error);
+    return res.status(500).json({ success: false, error: 'نمایش سند داخلی انجام نشد.' });
+  }
+});
+
+router.get('/contracts/partner/:caseId/internal-pdf', accountingContractsView, async (req: AuthRequest, res: Response) => {
+  try {
+    const document = await readPartnerInternalDocument(req.params.caseId, req.user!.id);
+    if (!document) return res.status(404).json({ success: false, error: 'سند داخلی در دسترس نیست.' });
+    const variant = ['original', 'accounting', 'workshop', 'custom'].includes(String(req.query.variant))
+      ? String(req.query.variant) as 'original' | 'accounting' | 'workshop' | 'custom' : 'accounting';
+    const printOptions = { variant, customPrint: variant === 'custom' ? customPrintOptionsFromQuery(req.query) : undefined };
+    const pdfPath = await generatePdfFromHtml({ htmlContent: renderPartnerInternalDocumentHtml(document, printOptions),
+      outputDir: ACCOUNTING_PDF_DIR, fileName: `partner_internal_${document.id}_${Date.now()}`,
+      landscape: false, scale: 1, widthMm: 210, heightMm: 297, displayHeaderFooter: true,
+      headerTemplate: renderPartnerInternalDocumentHeader(document), footerTemplate: '<span></span>',
+      margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
+    if (String(req.query.download || 'false').toLowerCase() === 'true') {
+      return res.download(pdfPath, `partner_internal_${document.partnerContext.internalRecordNumber}.pdf`);
+    }
+    const url = resolveAccountingPdfUrl(req, pdfPath);
+    if (!url) return res.status(500).json({ success: false, error: 'PDF در دسترس نیست.' });
+    return res.json({ success: true, data: { url, generatedAt: new Date().toISOString(), fromCache: false } });
+  } catch (error) {
+    console.error('Partner internal PDF error:', error);
+    return res.status(500).json({ success: false, error: 'ساخت سند داخلی انجام نشد.' });
+  }
+});
+
+router.post('/contracts/partner/:caseId/correction-requests', protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
+  requireAnyNarrowFeatureAccess([FEATURES.ACCOUNTING_CORRECTIONS_CREATE,
+    FEATURES.ACCOUNTING_CORRECTIONS_MANAGE], FEATURE_PERMISSIONS.EDIT),
+  [body('reason').isString().trim().isLength({ min: 3 }),
+    body('category').optional().isIn(['CUSTOMER_IDENTITY', 'AMOUNT_PRICING', 'PAYMENT_PLAN',
+      'DELIVERY_SCHEDULE', 'TAX_INFO', 'DOCUMENT_SIGNATURE', 'OTHER']),
+    body('priority').optional().isIn(['LOW', 'MEDIUM', 'HIGH', 'URGENT'])],
+  async (req: AuthRequest, res: Response) => {
+    if (!validationResult(req).isEmpty()) return res.status(400).json({ success: false,
+      message: 'دلیل درخواست اصلاح را بررسی کنید.' });
+    const key = String(req.get('X-Idempotency-Key') || '');
+    if (!/^[0-9a-f-]{36}$/i.test(key)) return res.status(400).json({ success: false,
+      message: 'شناسه درخواست معتبر نیست؛ صفحه را تازه‌سازی و دوباره تلاش کنید.' });
+    try {
+      const data = await withPartnerInternalAccountingTarget(req.params.caseId, req.user!.id,
+        async (database, target) => {
+          const trackingCode = `partner-internal-correction:${key}`;
+          const prior = await database.accountingContractFlag.findUnique({ where: { trackingCode } });
+          if (prior) {
+            if (prior.sourceFinancialRecordId !== target.invoiceRecordId || prior.createdBy !== req.user!.id ||
+              prior.note !== String(req.body.reason).trim()) throw new Error('CORRECTION_IDEMPOTENCY_CONFLICT');
+            return { id: prior.id, replayed: true };
+          }
+          const flag = await database.accountingContractFlag.create({ data: {
+            contractId: target.customerContractId, sourceFinancialRecordId: target.invoiceRecordId,
+            trackingCode, category: req.body.category || 'OTHER', severity: 'BLOCKER',
+            title: 'درخواست اصلاح سند داخلی همکار', note: String(req.body.reason).trim(),
+            createdBy: req.user!.id,
+            evidence: { purpose: 'PARTNER_INTERNAL_CORRECTION_REQUEST', priority: req.body.priority || 'MEDIUM' },
+          } });
+          await database.accountingAuditLog.create({ data: {
+            action: 'REQUEST_PARTNER_INTERNAL_CORRECTION', actorId: req.user!.id,
+            recordId: target.invoiceRecordId, entityType: 'AccountingContractFlag', entityId: flag.id,
+            afterState: { id: flag.id, category: flag.category, severity: flag.severity,
+              reason: flag.note, purpose: 'PARTNER_INTERNAL_CORRECTION_REQUEST' }, note: flag.note,
+          } });
+          return { id: flag.id, replayed: false };
+        });
+      if (!data) return res.status(404).json({ success: false, message: 'این سند داخلی در دسترس شما نیست.' });
+      return res.status(data.replayed ? 200 : 201).json({ success: true, data });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'CORRECTION_IDEMPOTENCY_CONFLICT')
+        return res.status(409).json({ success: false, message: 'این شناسه برای درخواست دیگری ثبت شده است.' });
+      console.error('Partner internal correction request failed:', error);
+      return res.status(409).json({ success: false,
+        message: 'درخواست اصلاح ثبت نشد. وضعیت پرونده را تازه‌سازی و دوباره بررسی کنید.' });
+    }
+  });
+
+router.post('/contracts/partner/:caseId/flags', accountingEdit,
+  [body('note').isString().trim().isLength({ min: 3 }),
+    body('category').optional().isIn(['CUSTOMER_IDENTITY', 'AMOUNT_PRICING', 'PAYMENT_PLAN',
+      'DELIVERY_SCHEDULE', 'TAX_INFO', 'DOCUMENT_SIGNATURE', 'OTHER']),
+    body('severity').optional().isIn(['LOW', 'MEDIUM', 'HIGH', 'BLOCKER'])],
+  async (req: AuthRequest, res: Response) => {
+    if (!validationResult(req).isEmpty()) return res.status(400).json({ success: false,
+      message: 'متن پرچم را بررسی کنید.' });
+    try {
+      const data = await withPartnerInternalAccountingTarget(req.params.caseId, req.user!.id,
+        async (database, target) => {
+          const flag = await database.accountingContractFlag.create({ data: {
+            contractId: target.customerContractId,
+            sourceFinancialRecordId: target.invoiceRecordId,
+            category: req.body.category || 'OTHER', severity: req.body.severity || 'MEDIUM',
+            title: String(req.body.title || 'نیازمند بررسی حسابداری'),
+            note: String(req.body.note), createdBy: req.user!.id,
+          } });
+          await database.accountingAuditLog.create({ data: {
+            action: 'FLAG_PARTNER_INTERNAL_RECORD', actorId: req.user!.id,
+            recordId: target.invoiceRecordId, entityType: 'AccountingContractFlag',
+            entityId: flag.id, afterState: { id: flag.id, category: flag.category,
+              severity: flag.severity, note: flag.note }, note: flag.note,
+          } });
+          return { id: flag.id };
+        });
+      if (!data) return res.status(404).json({ success: false, message: 'این سند داخلی در دسترس شما نیست.' });
+      return res.status(201).json({ success: true, data });
+    } catch (error) {
+      console.error('Partner accounting flag failed:', error);
+      return res.status(409).json({ success: false,
+        message: 'پرچم ثبت نشد. وضعیت پرونده را تازه‌سازی و دوباره بررسی کنید.' });
+    }
+  });
+
+router.post('/contracts/partner/:caseId/flags/:flagId/resolve', accountingEdit,
+  [body('reason').isString().trim().isLength({ min: 3 })],
+  async (req: AuthRequest, res: Response) => {
+    if (!validationResult(req).isEmpty()) return res.status(400).json({ success: false,
+      message: 'دلیل رفع پرچم را وارد کنید.' });
+    try {
+      const data = await withPartnerInternalAccountingTarget(req.params.caseId, req.user!.id,
+        async (database, target) => {
+          const flag = await database.accountingContractFlag.findUnique({ where: { id: req.params.flagId } });
+          if (!flag || flag.sourceFinancialRecordId !== target.invoiceRecordId ||
+            flag.contractId !== target.customerContractId || flag.status !== 'OPEN') return null;
+          const changed = await database.accountingContractFlag.updateMany({ where: { id: flag.id,
+            status: 'OPEN', sourceFinancialRecordId: target.invoiceRecordId }, data: {
+            status: 'RESOLVED', resolvedBy: req.user!.id, resolvedAt: new Date(),
+            resolutionNote: String(req.body.reason).trim(),
+          } });
+          if (changed.count !== 1) return null;
+          await database.accountingAuditLog.create({ data: {
+            action: 'RESOLVE_PARTNER_INTERNAL_FLAG', actorId: req.user!.id,
+            recordId: target.invoiceRecordId, entityType: 'AccountingContractFlag', entityId: flag.id,
+            beforeState: { status: flag.status }, afterState: { status: 'RESOLVED',
+              resolutionNote: String(req.body.reason).trim() }, note: String(req.body.reason).trim(),
+          } });
+          return { id: flag.id };
+        });
+      if (!data) return res.status(404).json({ success: false, message: 'این پرچم در دسترس نیست یا قبلاً رفع شده است.' });
+      return res.json({ success: true, data });
+    } catch (error) {
+      console.error('Partner internal flag resolution failed:', error);
+      return res.status(409).json({ success: false,
+        message: 'رفع پرچم ثبت نشد. وضعیت سند را تازه‌سازی و دوباره بررسی کنید.' });
+    }
+  });
 
 router.get('/contracts/:contractId/pdf', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {

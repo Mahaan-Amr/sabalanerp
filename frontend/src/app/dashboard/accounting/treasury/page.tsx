@@ -1,4 +1,5 @@
 "use client";
+import { ErpPersianDateField } from "@/components/erp";
 
 import { useCallback, useEffect, useState } from "react";
 import { FaMoneyCheckAlt, FaSync } from "react-icons/fa";
@@ -12,9 +13,12 @@ import {
   ErpInput,
   ErpPage,
   ErpSection,
-  ErpSelect,
+  ErpSegmentedControl,
+  ErpSearchableSelect,
 } from "@/components/erp";
 import { accountingAPI } from "@/lib/api";
+import { treasuryLedgerAccounts } from '@/features/accounting/treasuryLedgerAccounts';
+import { parseBankApiRecord } from '@/features/accounting/bankStatementInput';
 import {
   accountingFailureMessage,
   dateFa,
@@ -50,10 +54,15 @@ const checkStatusFa: Record<string, string> = {
 };
 
 export default function TreasuryControlPage() {
+  const [workspaceTab, setWorkspaceTab] = useState("bank");
+  const [receiptTab, setReceiptTab] = useState("receipt");
+  const [bankTab, setBankTab] = useState("import");
+  const [cashTab, setCashTab] = useState("checks");
   const [data, setData] = useState<any>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ scope: string; kind: "success" | "error"; title: string }>();
+  const [actionPending, setActionPending] = useState(false);
   const [matchReason, setMatchReason] = useState(
     "تأیید تطبیق بر پایه مبلغ، جهت و تاریخ تراکنش",
   );
@@ -173,21 +182,15 @@ export default function TreasuryControlPage() {
     ledgerVoucherId: "",
     settledAt: "",
   });
-  const run = async (operation: () => Promise<unknown>, success: string) => {
-    setError(null);
-    setNotice(null);
-    try {
-      await operation();
-      setNotice(success);
-      await load();
-    } catch (reason) {
-      setError(
-        accountingFailureMessage(reason, "عملیات خزانه‌داری انجام نشد."),
-      );
-    }
+  const run = async (operation: () => Promise<unknown>, success: string, scope: string) => {
+    if (actionPending) return;
+    setActionPending(true); setActionFeedback(undefined);
+    try { await operation(); setActionFeedback({ scope, kind: "success", title: success }); await load(true); }
+    catch (reason) { const local = reason instanceof Error && /[\u0600-\u06ff]/.test(reason.message) ? reason.message : "عملیات خزانه‌داری انجام نشد."; setActionFeedback({ scope, kind: "error", title: accountingFailureMessage(reason, local) }); }
+    finally { setActionPending(false); }
   };
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
     setError(null);
     try {
       const [overview, context, customers] = await Promise.all([
@@ -213,7 +216,7 @@ export default function TreasuryControlPage() {
       eyebrow="خزانه‌داری"
       title="کنترل خزانه‌داری"
       description="دریافت، ردیف بانکی، تطبیق، چک، شمارش صندوق و تنخواه با هویت و سابقه مستقل نمایش داده می‌شوند."
-      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: load }]}
+      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: () => load() }]}
       metrics={
         data
           ? [
@@ -253,19 +256,19 @@ export default function TreasuryControlPage() {
           action={{ label: "تلاش دوباره", onClick: load }}
         />
       )}
-      {notice && <ErpInlineState kind="success" title={notice} />}
+
       {data && (
         <>
-          <ErpSection
-            title="دریافت‌ها و تخصیص‌ها"
+          <ErpSegmentedControl value={workspaceTab} onChange={setWorkspaceTab} options={[{ value: "bank", label: "صورتحساب و تطبیق بانک" }, { value: "receipts", label: "دریافت و تخصیص" }, { value: "cash", label: "چک، صندوق و تنخواه" }]} />
+          <ErpSection className={workspaceTab === "receipts" ? "" : "hidden"} title="دریافت‌ها و تخصیص‌ها"
             description="وجه تا زمان تخصیص قطعی، بستانکاری تخصیص‌نیافته همان مشتری باقی می‌ماند."
-          >
+          ><ErpSegmentedControl value={receiptTab} onChange={setReceiptTab} options={[{"value":"receipt","label":"ثبت دریافت"},{"value":"allocation","label":"تخصیص دریافت"},{"value":"transfer","label":"انتقال داخلی"}]} />
             {data.capabilities?.canManage && (
-              <ErpCard className="mb-4 p-4">
+              <ErpCard className={receiptTab === "receipt" ? "mb-4 p-4" : "hidden"}>
                 <strong>ثبت دریافت مشتری</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <ErpField label="مشتری" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={receipt.profileId}
                       onChange={async (event) => {
                         const profileId = event.target.value;
@@ -288,7 +291,7 @@ export default function TreasuryControlPage() {
                           {item.displayName}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="شناسه قرارداد">
                     <ErpInput
@@ -302,7 +305,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="حساب مالی" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={receipt.financialAccountId}
                       onChange={(event) =>
                         setReceipt({
@@ -317,15 +320,17 @@ export default function TreasuryControlPage() {
                           {item.titlePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="دفتر" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={receipt.bookId}
                       onChange={(event) =>
                         setReceipt({
                           ...receipt,
                           bookId: event.target.value,
+                          bankAccountLedgerId: "",
+                          customerAdvanceLedgerId: "",
                           fiscalYearId: "",
                           periodId: "",
                         })
@@ -337,10 +342,10 @@ export default function TreasuryControlPage() {
                           {item.namePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="سال مالی" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={receipt.fiscalYearId}
                       onChange={(event) =>
                         setReceipt({
@@ -358,10 +363,10 @@ export default function TreasuryControlPage() {
                             {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="دوره" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={receipt.periodId}
                       onChange={(event) =>
                         setReceipt({ ...receipt, periodId: event.target.value })
@@ -378,10 +383,10 @@ export default function TreasuryControlPage() {
                             {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="حساب بانک در دفترکل" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={receipt.bankAccountLedgerId}
                       onChange={(event) =>
                         setReceipt({
@@ -391,7 +396,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, receipt.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -402,10 +407,10 @@ export default function TreasuryControlPage() {
                             {item.code} · {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="حساب پیش‌دریافت مشتری" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={receipt.customerAdvanceLedgerId}
                       onChange={(event) =>
                         setReceipt({
@@ -415,7 +420,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, receipt.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -426,10 +431,10 @@ export default function TreasuryControlPage() {
                             {item.code} · {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="مبلغ ریال" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={receipt.amountRials}
                       onChange={(event) =>
@@ -441,13 +446,13 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="زمان دریافت" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={receipt.occurredAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setReceipt({
                           ...receipt,
-                          occurredAt: event.target.value,
+                          occurredAt: value,
                         })
                       }
                     />
@@ -461,7 +466,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="نوع شاهد">
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={receipt.sourceType}
                       onChange={(event) =>
                         setReceipt({
@@ -472,13 +477,13 @@ export default function TreasuryControlPage() {
                     >
                       <option value="BANK_RECEIPT">واریز بانکی</option>
                       <option value="CASH_RECEIPT">دریافت نقدی</option>
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                 </div>
                 <div className="mt-3 flex justify-end">
                   <ErpButton
                     label="ثبت دریافت قطعی"
-                    disabled={[
+                    disabled={actionPending || ([
                       "profileId",
                       "bookId",
                       "fiscalYearId",
@@ -489,7 +494,7 @@ export default function TreasuryControlPage() {
                       "bankAccountLedgerId",
                       "customerAdvanceLedgerId",
                       "sourceId",
-                    ].some((key) => !receipt[key as keyof typeof receipt])}
+                    ].some((key) => !receipt[key as keyof typeof receipt]))}
                     onClick={() =>
                       void run(
                         () =>
@@ -511,19 +516,20 @@ export default function TreasuryControlPage() {
                             idempotencyKey: crypto.randomUUID(),
                             correlationId: crypto.randomUUID(),
                           }),
-                        "دریافت مشتری با بستانکاری تخصیص‌نیافته ثبت شد.",
+                        "دریافت مشتری با بستانکاری تخصیص‌نیافته ثبت شد.", "treasury-1"
                       )
                     }
                   />
                 </div>
-              </ErpCard>
+              {actionFeedback?.scope === "treasury-1" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
             )}
             {data.capabilities?.canManage && (
-              <ErpCard className="mb-4 p-4">
+              <ErpCard className={receiptTab === "allocation" ? "mb-4 p-4" : "hidden"}>
                 <strong>تخصیص دریافت به قلم باز</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <ErpField label="دریافت" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={allocation.treasuryTransactionId}
                       onChange={(event) =>
                         setAllocation({
@@ -541,10 +547,10 @@ export default function TreasuryControlPage() {
                             {money(item.amountRials, "IRR")}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="قلم باز" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={allocation.openItemId}
                       onChange={(event) =>
                         setAllocation({
@@ -562,10 +568,10 @@ export default function TreasuryControlPage() {
                             {money(item.remainingRials, "IRR")}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="مبلغ تخصیص" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={allocation.amountRials}
                       onChange={(event) =>
@@ -577,12 +583,14 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="دفتر" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={allocation.bookId}
                       onChange={(event) =>
                         setAllocation({
                           ...allocation,
                           bookId: event.target.value,
+                          customerAdvanceLedgerId: "",
+                          receivableLedgerId: "",
                           fiscalYearId: "",
                           periodId: "",
                         })
@@ -594,10 +602,10 @@ export default function TreasuryControlPage() {
                           {item.namePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="سال مالی" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={allocation.fiscalYearId}
                       onChange={(event) =>
                         setAllocation({
@@ -615,10 +623,10 @@ export default function TreasuryControlPage() {
                             {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="دوره" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={allocation.periodId}
                       onChange={(event) =>
                         setAllocation({
@@ -638,10 +646,10 @@ export default function TreasuryControlPage() {
                             {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="حساب پیش‌دریافت" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={allocation.customerAdvanceLedgerId}
                       onChange={(event) =>
                         setAllocation({
@@ -651,7 +659,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, allocation.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -662,10 +670,10 @@ export default function TreasuryControlPage() {
                             {item.code} · {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="حساب دریافتنی" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={allocation.receivableLedgerId}
                       onChange={(event) =>
                         setAllocation({
@@ -675,7 +683,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, allocation.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -686,16 +694,16 @@ export default function TreasuryControlPage() {
                             {item.code} · {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="تاریخ سند" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={allocation.documentDate}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setAllocation({
                           ...allocation,
-                          documentDate: event.target.value,
+                          documentDate: value,
                         })
                       }
                     />
@@ -718,7 +726,7 @@ export default function TreasuryControlPage() {
                 <div className="mt-3 flex justify-end">
                   <ErpButton
                     label="ثبت تخصیص"
-                    disabled={[
+                    disabled={actionPending || ([
                       "treasuryTransactionId",
                       "openItemId",
                       "amountRials",
@@ -730,7 +738,7 @@ export default function TreasuryControlPage() {
                       "documentDate",
                     ].some(
                       (key) => !allocation[key as keyof typeof allocation],
-                    )}
+                    ))}
                     onClick={() =>
                       void run(
                         () =>
@@ -748,19 +756,20 @@ export default function TreasuryControlPage() {
                             idempotencyKey: crypto.randomUUID(),
                             correlationId: crypto.randomUUID(),
                           }),
-                        "تخصیص دریافت قطعی شد.",
+                        "تخصیص دریافت قطعی شد.", "treasury-2"
                       )
                     }
                   />
                 </div>
-              </ErpCard>
+              {actionFeedback?.scope === "treasury-2" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
             )}
             {data.capabilities?.canManage && (
-              <ErpCard className="mb-4 p-4">
+              <ErpCard className={receiptTab === "transfer" ? "mb-4 p-4" : "hidden"}>
                 <strong>انتقال داخلی میان حساب‌های مالی</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <ErpField label="حساب مالی مبدأ" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={transfer.fromFinancialAccountId}
                       onChange={(event) =>
                         setTransfer({
@@ -775,10 +784,10 @@ export default function TreasuryControlPage() {
                           {item.titlePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="حساب مالی مقصد" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={transfer.toFinancialAccountId}
                       onChange={(event) =>
                         setTransfer({
@@ -793,10 +802,10 @@ export default function TreasuryControlPage() {
                           {item.titlePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="مبلغ ریال" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={transfer.amountRials}
                       onChange={(event) =>
@@ -808,12 +817,14 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="دفتر" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={transfer.bookId}
                       onChange={(event) =>
                         setTransfer({
                           ...transfer,
                           bookId: event.target.value,
+                          fromLedgerAccountId: "",
+                          toLedgerAccountId: "",
                           fiscalYearId: "",
                           periodId: "",
                         })
@@ -825,10 +836,10 @@ export default function TreasuryControlPage() {
                           {item.namePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="سال مالی" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={transfer.fiscalYearId}
                       onChange={(event) =>
                         setTransfer({
@@ -846,10 +857,10 @@ export default function TreasuryControlPage() {
                             {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="دوره" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={transfer.periodId}
                       onChange={(event) =>
                         setTransfer({
@@ -869,10 +880,10 @@ export default function TreasuryControlPage() {
                             {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="حساب دفترکل مبدأ" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={transfer.fromLedgerAccountId}
                       onChange={(event) =>
                         setTransfer({
@@ -882,7 +893,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, transfer.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -893,10 +904,10 @@ export default function TreasuryControlPage() {
                             {item.code} · {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="حساب دفترکل مقصد" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={transfer.toLedgerAccountId}
                       onChange={(event) =>
                         setTransfer({
@@ -906,7 +917,7 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, transfer.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -917,16 +928,16 @@ export default function TreasuryControlPage() {
                             {item.code} · {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="زمان انتقال" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={transfer.occurredAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setTransfer({
                           ...transfer,
-                          occurredAt: event.target.value,
+                          occurredAt: value,
                         })
                       }
                     />
@@ -935,7 +946,7 @@ export default function TreasuryControlPage() {
                 <div className="mt-3 flex justify-end">
                   <ErpButton
                     label="ثبت انتقال داخلی"
-                    disabled={Object.values(transfer).some((value) => !value)}
+                    disabled={actionPending || (Object.values(transfer).some((value) => !value))}
                     onClick={() =>
                       void run(
                         () =>
@@ -947,12 +958,13 @@ export default function TreasuryControlPage() {
                             idempotencyKey: crypto.randomUUID(),
                             correlationId: crypto.randomUUID(),
                           }),
-                        "انتقال داخلی با دو اثر خزانه‌ای ثبت شد.",
+                        "انتقال داخلی با دو اثر خزانه‌ای ثبت شد.", "treasury-3"
                       )
                     }
                   />
                 </div>
-              </ErpCard>
+              {actionFeedback?.scope === "treasury-3" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
             )}
             {data.transactions.length ? (
               <div className="grid gap-3">
@@ -991,13 +1003,13 @@ export default function TreasuryControlPage() {
                             tone="danger"
                             variant="outline"
                             disabled={
-                              !allocation.reason ||
+                              actionPending || (!allocation.reason ||
                               !allocation.documentDate ||
                               !allocation.bookId ||
                               !allocation.fiscalYearId ||
                               !allocation.periodId ||
                               !allocation.customerAdvanceLedgerId ||
-                              !allocation.receivableLedgerId
+                              !allocation.receivableLedgerId)
                             }
                             onClick={() =>
                               void run(
@@ -1020,13 +1032,14 @@ export default function TreasuryControlPage() {
                                       correlationId: crypto.randomUUID(),
                                     },
                                   ),
-                                "تخصیص با سند مستقل برگشت خورد.",
+                                "تخصیص با سند مستقل برگشت خورد.", ("treasury-4" + String(row.id))
                               )
                             }
                           />
                         </div>
                       ))}
-                  </ErpCard>
+                  {actionFeedback?.scope === ("treasury-4" + String(row.id)) && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
                 ))}
               </div>
             ) : (
@@ -1036,16 +1049,15 @@ export default function TreasuryControlPage() {
               />
             )}
           </ErpSection>
-          <ErpSection
-            title="صورتحساب بانکی و تطبیق"
+          <ErpSection className={workspaceTab === "bank" ? "" : "hidden"} title="صورتحساب بانکی و تطبیق"
             description="پیشنهاد خودکار تا تأیید صریح اثر قطعی ندارد و برگشت تطبیق در تاریخچه حفظ می‌شود."
-          >
+          ><ErpSegmentedControl value={bankTab} onChange={setBankTab} options={[{"value":"import","label":"ورود و تطبیق صورتحساب"},{"value":"mapping","label":"نگاشت منبع بانک"}]} />
             {data.capabilities?.canConfigure && (
-              <ErpCard className="mb-4 p-4">
+              <ErpCard className={bankTab === "mapping" ? "mb-4 p-4" : "hidden"}>
                 <strong>نگاشت نسخه‌دار منبع بانکی</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <ErpField label="حساب مالی" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={bankMapping.financialAccountId}
                       onChange={(event) =>
                         setBankMapping({
@@ -1060,10 +1072,10 @@ export default function TreasuryControlPage() {
                           {item.titlePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="مسیر ورود">
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={bankMapping.adapterType}
                       onChange={(event) =>
                         setBankMapping({
@@ -1075,7 +1087,7 @@ export default function TreasuryControlPage() {
                       <option value="API">رابط بانکی</option>
                       <option value="CSV">فایل CSV</option>
                       <option value="XLSX">فایل اکسل</option>
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="نسخه">
                     <ErpInput
@@ -1090,13 +1102,13 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="شروع اثر" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={bankMapping.effectiveFrom}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setBankMapping({
                           ...bankMapping,
-                          effectiveFrom: event.target.value,
+                          effectiveFrom: value,
                         })
                       }
                     />
@@ -1183,8 +1195,8 @@ export default function TreasuryControlPage() {
                   <ErpButton
                     label="ثبت نگاشت"
                     disabled={
-                      !bankMapping.financialAccountId ||
-                      !bankMapping.effectiveFrom
+                      actionPending || (!bankMapping.financialAccountId ||
+                      !bankMapping.effectiveFrom)
                     }
                     onClick={() =>
                       void run(
@@ -1213,17 +1225,18 @@ export default function TreasuryControlPage() {
                                 .filter(Boolean),
                             },
                           }),
-                        "نگاشت بانکی نسخه‌دار ثبت شد.",
+                        "نگاشت بانکی نسخه‌دار ثبت شد.", "treasury-5"
                       )
                     }
                   />
                 </div>
-              </ErpCard>
+              {actionFeedback?.scope === "treasury-5" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
             )}
             {data.capabilities?.canManage && (
-              <div className="mb-4 grid gap-3 md:grid-cols-3">
+              <ErpCard className={bankTab === "import" ? "mb-4 p-4" : "hidden"}><h3 className="mb-3 font-semibold">ورود صورتحساب بانک</h3><div className="grid gap-3 md:grid-cols-3">
                 <ErpField label="حساب مالی" required>
-                  <ErpSelect
+                  <ErpSearchableSelect
                     value={bankLine.financialAccountId}
                     onChange={(event) =>
                       setBankLine({
@@ -1239,10 +1252,10 @@ export default function TreasuryControlPage() {
                         {item.titlePersian}
                       </option>
                     ))}
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </ErpField>
                 <ErpField label="مسیر ورود">
-                  <ErpSelect
+                  <ErpSearchableSelect
                     value={bankLine.adapterType}
                     onChange={(event) =>
                       setBankLine({
@@ -1256,19 +1269,19 @@ export default function TreasuryControlPage() {
                     <option value="CSV">فایل CSV</option>
                     <option value="XLSX">فایل اکسل</option>
                     <option value="MANUAL">ورود کنترل‌شده دستی</option>
-                  </ErpSelect>
+                  </ErpSearchableSelect>
                 </ErpField>
                 <ErpField label="نسخه نگاشت" required>
                   {bankLine.adapterType === "MANUAL" ? (
                     <ErpInput inputMode="numeric" value={bankLine.mappingVersion}
                       onChange={(event) => setBankLine({ ...bankLine, mappingVersion: event.target.value })} />
                   ) : (
-                    <ErpSelect value={bankLine.mappingVersion}
+                    <ErpSearchableSelect value={bankLine.mappingVersion}
                       onChange={(event) => setBankLine({ ...bankLine, mappingVersion: event.target.value })}>
                       <option value="">انتخاب نگاشت</option>
                       {data.bankMappings?.filter((item: any) => item.financialAccountId === bankLine.financialAccountId && item.adapterType === bankLine.adapterType)
                         .map((item: any) => <option key={item.id} value={item.version}>نسخه {Number(item.version).toLocaleString("fa-IR")}</option>)}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   )}
                 </ErpField>
                 {bankLine.adapterType === "MANUAL" ? (
@@ -1285,19 +1298,19 @@ export default function TreasuryControlPage() {
                       />
                     </ErpField>
                     <ErpField label="زمان ثبت بانک" required>
-                      <ErpInput
-                        type="datetime-local"
+                      <ErpPersianDateField
+                        valueFormat="local-datetime"
                         value={bankLine.bookedAt}
-                        onChange={(event) =>
+                        onChange={(value) =>
                           setBankLine({
                             ...bankLine,
-                            bookedAt: event.target.value,
+                            bookedAt: value,
                           })
                         }
                       />
                     </ErpField>
                     <ErpField label="مبلغ ریال" required>
-                      <ErpInput
+                      <ErpInput numberFormat="money"
                         inputMode="numeric"
                         value={bankLine.amountRials}
                         onChange={(event) =>
@@ -1309,7 +1322,7 @@ export default function TreasuryControlPage() {
                       />
                     </ErpField>
                     <ErpField label="جهت">
-                      <ErpSelect
+                      <ErpSearchableSelect
                         value={bankLine.direction}
                         onChange={(event) =>
                           setBankLine({
@@ -1320,7 +1333,7 @@ export default function TreasuryControlPage() {
                       >
                         <option value="INBOUND">ورودی</option>
                         <option value="OUTBOUND">خروجی</option>
-                      </ErpSelect>
+                      </ErpSearchableSelect>
                     </ErpField>
                     <ErpField label="شرح" required>
                       <ErpInput
@@ -1365,14 +1378,14 @@ export default function TreasuryControlPage() {
                   <ErpButton
                     label={bankLine.adapterType === "CSV" || bankLine.adapterType === "XLSX" ? "ورود فایل بانکی" : "ثبت ردیف بانکی"}
                     disabled={
-                      !bankLine.financialAccountId ||
+                      actionPending || (!bankLine.financialAccountId ||
                       !bankLine.mappingVersion ||
                       (bankLine.adapterType === "MANUAL"
                         ? !bankLine.sourceIdentity ||
                           !bankLine.bookedAt ||
                           !bankLine.amountRials ||
                           !bankLine.description
-                        : bankLine.adapterType === "API" ? !bankLine.rawRecord : !bankFile)
+                        : bankLine.adapterType === "API" ? !bankLine.rawRecord : !bankFile))
                     }
                     onClick={() =>
                       void run(
@@ -1418,19 +1431,21 @@ export default function TreasuryControlPage() {
                                     bankLine.mappingVersion,
                                   ),
                                   evidence: {
-                                    rawRecord: JSON.parse(bankLine.rawRecord),
+                                    rawRecord: parseBankApiRecord(bankLine.rawRecord),
                                   },
                                 },
                           );
                         },
                         bankLine.adapterType === "CSV" || bankLine.adapterType === "XLSX"
                           ? "پردازش فایل بانکی پایان یافت؛ نتیجه هر ردیف را بررسی کنید."
-                          : "ردیف بانکی با نگاشت نسخه‌دار ثبت شد.",
+                          : "ردیف بانکی با نگاشت نسخه‌دار ثبت شد.", "treasury-6"
                       )
                     }
                   />
                 </div>
               </div>
+{actionFeedback?.scope === "treasury-6" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
             )}
             {data.bankFileImports?.length > 0 && (
               <div className="mb-4 grid gap-3">
@@ -1457,13 +1472,13 @@ export default function TreasuryControlPage() {
                     {data.capabilities?.canManage && (
                       <div className="grid gap-2 md:grid-cols-4">
                         <ErpField label="فایل اصلاح‌شده">
-                          <ErpSelect value={correction.runId}
+                          <ErpSearchableSelect value={correction.runId}
                             onChange={(event) => updateExceptionCorrection(item.id, { runId: event.target.value })}>
                             <option value="">انتخاب فایل</option>
                             {data.bankFileChoices?.filter((run: any) => run.financialAccountId === item.sourceId.split(":")[0]).map((run: any) => (
                               <option key={run.id} value={run.id}>{run.fileHash.slice(0, 12)} · نسخه {run.mappingVersion} · {dateFa(run.createdAt)}</option>
                             ))}
-                          </ErpSelect>
+                          </ErpSearchableSelect>
                         </ErpField>
                         <ErpField label="شماره ردیف اصلاح‌شده">
                           <ErpInput inputMode="numeric" value={correction.rowNumber}
@@ -1475,27 +1490,28 @@ export default function TreasuryControlPage() {
                         </ErpField>
                         {data.capabilities?.canConfigure && (
                           <ErpField label="روش پیوند ردیف">
-                            <ErpSelect value={correction.attestUnlinkedCorrection ? "ATTESTED" : "SOURCE"}
+                            <ErpSearchableSelect value={correction.attestUnlinkedCorrection ? "ATTESTED" : "SOURCE"}
                               onChange={(event) => updateExceptionCorrection(item.id, { attestUnlinkedCorrection: event.target.value === "ATTESTED" })}>
                               <option value="SOURCE">شناسه یا ردیف منبع یکسان</option>
                               <option value="ATTESTED">تأیید مدیر برای ردیف بدون شناسه</option>
-                            </ErpSelect>
+                            </ErpSearchableSelect>
                           </ErpField>
                         )}
                         <div className="flex items-end">
-                          <ErpButton label="ثبت رفع استثنا" disabled={!correction.runId || !correction.rowNumber || correction.reason.trim().length < (correction.attestUnlinkedCorrection ? 20 : 8)}
+                          <ErpButton label="ثبت رفع استثنا" disabled={actionPending || (!correction.runId || !correction.rowNumber || correction.reason.trim().length < (correction.attestUnlinkedCorrection ? 20 : 8))}
                             onClick={() => void run(() => accountingAPI.resolveBankFileException(item.id, {
                               correctedRunId: correction.runId, correctedRowNumber: Number(correction.rowNumber),
                               reason: correction.reason, attestUnlinkedCorrection: correction.attestUnlinkedCorrection,
-                            }), "رفع استثنا با ردیف فایل اصلاح‌شده ثبت شد.")} />
+                            }), "رفع استثنا با ردیف فایل اصلاح‌شده ثبت شد.", "treasury-7")} />
                         </div>
                       </div>
                     )}
                   </div>
                   );
                 })}
-              </ErpCard>
+</ErpCard>
             )}
+            {actionFeedback?.scope === "treasury-7" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
             {data.bankLines.length ? (
               <div className="grid gap-3">
                 {data.capabilities?.canManage && (
@@ -1522,13 +1538,13 @@ export default function TreasuryControlPage() {
                       </span>
                     </div>
                     {data.capabilities?.canManage && <div className="mt-3 flex flex-wrap gap-2">
-                      <ErpButton
+                      <ErpButton disabled={actionPending}
                         label="یافتن تطبیق"
                         variant="outline"
                         onClick={() =>
                           void run(
                             () => accountingAPI.proposeBankMatches(row.id),
-                            "پیشنهادهای تطبیق بازسازی شدند.",
+                            "پیشنهادهای تطبیق بازسازی شدند.", ("treasury-8" + String(row.id))
                           )
                         }
                       />
@@ -1539,7 +1555,7 @@ export default function TreasuryControlPage() {
                             label="تأیید پیشنهاد"
                             tone="success"
                             variant="outline"
-                            disabled={matchReason.trim().length < 8}
+                            disabled={actionPending || (matchReason.trim().length < 8)}
                             onClick={() =>
                               void run(
                                 () =>
@@ -1547,7 +1563,7 @@ export default function TreasuryControlPage() {
                                     match.id,
                                     matchReason,
                                   ),
-                                "تطبیق بانکی قطعی شد.",
+                                "تطبیق بانکی قطعی شد.", ("treasury-8" + String(row.id))
                               )
                             }
                           />
@@ -1557,7 +1573,7 @@ export default function TreasuryControlPage() {
                             label="برگشت تطبیق"
                             tone="danger"
                             variant="outline"
-                            disabled={matchReason.trim().length < 8}
+                            disabled={actionPending || (matchReason.trim().length < 8)}
                             onClick={() =>
                               void run(
                                 () =>
@@ -1565,30 +1581,31 @@ export default function TreasuryControlPage() {
                                     match.id,
                                     matchReason,
                                   ),
-                                "تطبیق بانکی برگشت خورد.",
+                                "تطبیق بانکی برگشت خورد.", ("treasury-8" + String(row.id))
                               )
                             }
                           />
                         ) : null,
                       )}
                     </div>}
-                  </ErpCard>
+                  {actionFeedback?.scope === ("treasury-8" + String(row.id)) && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
                 ))}
               </div>
             ) : (
               <ErpEmptyState title="ردیف بانکی وارد نشده است" />
             )}
-          </ErpSection>
-          <ErpSection
-            title="چک، صندوق و تنخواه"
+
+</ErpSection>
+          <ErpSection className={workspaceTab === "cash" ? "" : "hidden"} title="چک، صندوق و تنخواه"
             description="هویت چک، تحویل‌دار، کسری یا اضافه صندوق و تسویه تنخواه با شاهد و سند مرتبط نگهداری می‌شود."
-          >
+          ><ErpSegmentedControl value={cashTab} onChange={setCashTab} options={[{"value":"checks","label":"چک‌ها"},{"value":"count","label":"شمارش صندوق"},{"value":"petty","label":"تنخواه"}]} />
             {data.capabilities?.canManage && (
-              <ErpCard className="mb-4 p-4">
+              <ErpCard className={cashTab === "checks" ? "mb-4 p-4" : "hidden"}>
                 <strong>ثبت چک دریافتنی</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <ErpField label="مشتری" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={check.profileId}
                       onChange={(event) =>
                         setCheck({ ...check, profileId: event.target.value })
@@ -1600,7 +1617,7 @@ export default function TreasuryControlPage() {
                           {item.displayName}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="شناسه صیاد">
                     <ErpInput
@@ -1627,7 +1644,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="مبلغ ریال" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={check.amountRials}
                       onChange={(event) =>
@@ -1636,11 +1653,11 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="سررسید" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={check.dueAt}
-                      onChange={(event) =>
-                        setCheck({ ...check, dueAt: event.target.value })
+                      onChange={(value) =>
+                        setCheck({ ...check, dueAt: value })
                       }
                     />
                   </ErpField>
@@ -1657,11 +1674,11 @@ export default function TreasuryControlPage() {
                   <ErpButton
                     label="ثبت چک"
                     disabled={
-                      !check.profileId ||
+                      actionPending || (!check.profileId ||
                       !check.serialNumber ||
                       !check.bankName ||
                       !check.amountRials ||
-                      !check.dueAt
+                      !check.dueAt)
                     }
                     onClick={() =>
                       void run(
@@ -1677,19 +1694,20 @@ export default function TreasuryControlPage() {
                               sayadId: check.sayadId || null,
                             },
                           }),
-                        "چک دریافتنی ثبت شد.",
+                        "چک دریافتنی ثبت شد.", "treasury-9"
                       )
                     }
                   />
                 </div>
-              </ErpCard>
+              {actionFeedback?.scope === "treasury-9" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
             )}
             {data.capabilities?.canManage && (
               <ErpCard className="mb-4 p-4">
                 <strong>رویداد چک</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <ErpField label="وضعیت بعدی">
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={checkEvent.nextStatus}
                       onChange={(event) =>
                         setCheckEvent({
@@ -1706,16 +1724,16 @@ export default function TreasuryControlPage() {
                       <option value="RETURNED">عودت</option>
                       <option value="REPLACED">جایگزینی</option>
                       <option value="CANCELLED">ابطال</option>
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="زمان رویداد" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={checkEvent.occurredAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setCheckEvent({
                           ...checkEvent,
-                          occurredAt: event.target.value,
+                          occurredAt: value,
                         })
                       }
                     />
@@ -1759,7 +1777,7 @@ export default function TreasuryControlPage() {
             )}
             <div className="mb-4 grid gap-3">
               {data.checks.map((row: any) => (
-                <ErpCard key={row.id} className="p-4">
+                <ErpCard key={row.id} className={cashTab === "checks" ? "p-4" : "hidden"}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <strong>
@@ -1777,7 +1795,7 @@ export default function TreasuryControlPage() {
                       <ErpButton
                         label="ثبت رویداد"
                         variant="outline"
-                        disabled={!checkEvent.occurredAt}
+                        disabled={actionPending || (!checkEvent.occurredAt)}
                         onClick={() =>
                           void run(
                             () =>
@@ -1799,21 +1817,22 @@ export default function TreasuryControlPage() {
                                   occurredAt: checkEvent.occurredAt,
                                 },
                               }),
-                            "رویداد چک ثبت شد.",
+                            "رویداد چک ثبت شد.", ("treasury-10" + String(row.id))
                           )
                         }
                       />
                     </div>
                   </div>
-                </ErpCard>
+                {actionFeedback?.scope === ("treasury-10" + String(row.id)) && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
               ))}
             </div>
             {data.capabilities?.canManage && (
-              <ErpCard className="mb-4 p-4">
+              <ErpCard className={cashTab === "count" ? "mb-4 p-4" : "hidden"}>
                 <strong>شمارش صندوق</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <ErpField label="حساب مالی" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={cashCount.financialAccountId}
                       onChange={(event) =>
                         setCashCount({
@@ -1828,7 +1847,7 @@ export default function TreasuryControlPage() {
                           {item.titlePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="شناسه تحویل‌دار" required>
                     <ErpInput
@@ -1842,19 +1861,19 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="زمان شمارش" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={cashCount.countedAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setCashCount({
                           ...cashCount,
-                          countedAt: event.target.value,
+                          countedAt: value,
                         })
                       }
                     />
                   </ErpField>
                   <ErpField label="مانده مورد انتظار" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={cashCount.expectedRials}
                       onChange={(event) =>
@@ -1866,7 +1885,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="مبلغ شمارش‌شده" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={cashCount.countedRials}
                       onChange={(event) =>
@@ -1893,11 +1912,11 @@ export default function TreasuryControlPage() {
                   <ErpButton
                     label="ثبت شمارش"
                     disabled={
-                      !cashCount.financialAccountId ||
+                      actionPending || (!cashCount.financialAccountId ||
                       !cashCount.custodianId ||
                       !cashCount.countedAt ||
                       !cashCount.expectedRials ||
-                      !cashCount.countedRials
+                      !cashCount.countedRials)
                     }
                     onClick={() =>
                       void run(
@@ -1915,19 +1934,20 @@ export default function TreasuryControlPage() {
                               countedRials: cashCount.countedRials,
                             },
                           }),
-                        "شمارش صندوق ثبت شد.",
+                        "شمارش صندوق ثبت شد.", "treasury-11"
                       )
                     }
                   />
                 </div>
-              </ErpCard>
+              {actionFeedback?.scope === "treasury-11" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
             )}
             {data.capabilities?.canManage && (
-              <ErpCard className="mb-4 p-4">
+              <ErpCard className={cashTab === "petty" ? "mb-4 p-4" : "hidden"}>
                 <strong>پرداخت تنخواه</strong>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <ErpField label="حساب مالی" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={petty.financialAccountId}
                       onChange={(event) =>
                         setPetty({
@@ -1942,7 +1962,7 @@ export default function TreasuryControlPage() {
                           {item.titlePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="شناسه امین" required>
                     <ErpInput
@@ -1961,7 +1981,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="مبلغ" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={petty.amountRials}
                       onChange={(event) =>
@@ -1970,7 +1990,7 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="سقف مصوب" required>
-                    <ErpInput
+                    <ErpInput numberFormat="money"
                       inputMode="numeric"
                       value={petty.limitRials}
                       onChange={(event) =>
@@ -1979,33 +1999,35 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                   <ErpField label="تاریخ پرداخت" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={petty.issuedAt}
-                      onChange={(event) =>
-                        setPetty({ ...petty, issuedAt: event.target.value })
+                      onChange={(value) =>
+                        setPetty({ ...petty, issuedAt: value })
                       }
                     />
                   </ErpField>
                   <ErpField label="سررسید تسویه" required>
-                    <ErpInput
-                      type="datetime-local"
+                    <ErpPersianDateField
+                      valueFormat="local-datetime"
                       value={petty.settlementDueAt}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setPetty({
                           ...petty,
-                          settlementDueAt: event.target.value,
+                          settlementDueAt: value,
                         })
                       }
                     />
                   </ErpField>
                   <ErpField label="دفتر" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={petty.bookId}
                       onChange={(event) =>
                         setPetty({
                           ...petty,
                           bookId: event.target.value,
+                          cashLedgerId: "",
+                          pettyCashAdvanceLedgerId: "",
                           fiscalYearId: "",
                           periodId: "",
                         })
@@ -2017,10 +2039,10 @@ export default function TreasuryControlPage() {
                           {item.namePersian}
                         </option>
                       ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="سال مالی" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={petty.fiscalYearId}
                       onChange={(event) =>
                         setPetty({
@@ -2038,10 +2060,10 @@ export default function TreasuryControlPage() {
                             {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="دوره" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={petty.periodId}
                       onChange={(event) =>
                         setPetty({ ...petty, periodId: event.target.value })
@@ -2058,17 +2080,17 @@ export default function TreasuryControlPage() {
                             {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="حساب نقد" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={petty.cashLedgerId}
                       onChange={(event) =>
                         setPetty({ ...petty, cashLedgerId: event.target.value })
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, petty.bookId)
                         ?.filter(
                           (item: any) =>
                             item.level === "MOIN" &&
@@ -2079,10 +2101,10 @@ export default function TreasuryControlPage() {
                             {item.code} · {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                   <ErpField label="حساب تنخواه" required>
-                    <ErpSelect
+                    <ErpSearchableSelect
                       value={petty.pettyCashAdvanceLedgerId}
                       onChange={(event) =>
                         setPetty({
@@ -2092,20 +2114,20 @@ export default function TreasuryControlPage() {
                       }
                     >
                       <option value="">انتخاب حساب</option>
-                      {data.ledger?.accounts
+                      {treasuryLedgerAccounts(data.ledger, petty.bookId)
                         ?.filter((item: any) => item.level === "MOIN")
                         .map((item: any) => (
                           <option key={item.id} value={item.id}>
                             {item.code} · {item.titlePersian}
                           </option>
                         ))}
-                    </ErpSelect>
+                    </ErpSearchableSelect>
                   </ErpField>
                 </div>
                 <div className="mt-3 flex justify-end">
                   <ErpButton
                     label="پرداخت تنخواه"
-                    disabled={Object.values(petty).some((value) => !value)}
+                    disabled={actionPending || (Object.values(petty).some((value) => !value))}
                     onClick={() =>
                       void run(
                         () =>
@@ -2122,12 +2144,13 @@ export default function TreasuryControlPage() {
                             idempotencyKey: crypto.randomUUID(),
                             correlationId: crypto.randomUUID(),
                           }),
-                        "تنخواه پرداخت و ثبت قطعی شد.",
+                        "تنخواه پرداخت و ثبت قطعی شد.", "treasury-12"
                       )
                     }
                   />
                 </div>
-              </ErpCard>
+              {actionFeedback?.scope === "treasury-12" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
             )}
             <div className="grid gap-3 md:grid-cols-3">
               <ErpField label="سند قطعی تسویه تنخواه">
@@ -2142,13 +2165,13 @@ export default function TreasuryControlPage() {
                 />
               </ErpField>
               <ErpField label="زمان تسویه">
-                <ErpInput
-                  type="datetime-local"
+                <ErpPersianDateField
+                  valueFormat="local-datetime"
                   value={pettySettlement.settledAt}
-                  onChange={(event) =>
+                  onChange={(value) =>
                     setPettySettlement({
                       ...pettySettlement,
-                      settledAt: event.target.value,
+                      settledAt: value,
                     })
                   }
                 />
@@ -2156,7 +2179,7 @@ export default function TreasuryControlPage() {
             </div>
             <div className="mt-3 grid gap-3">
               {data.pettyCash.map((row: any) => (
-                <ErpCard key={row.id} className="p-4">
+                <ErpCard key={row.id} className={cashTab === "petty" ? "p-4" : "hidden"}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <strong>تنخواه {money(row.amountRials, "IRR")}</strong>
@@ -2170,8 +2193,8 @@ export default function TreasuryControlPage() {
                         label="ثبت تسویه"
                         variant="outline"
                         disabled={
-                          !pettySettlement.ledgerVoucherId ||
-                          !pettySettlement.settledAt
+                          actionPending || (!pettySettlement.ledgerVoucherId ||
+                          !pettySettlement.settledAt)
                         }
                         onClick={() =>
                           void run(
@@ -2188,7 +2211,7 @@ export default function TreasuryControlPage() {
                                   amountRials: row.amountRials,
                                 },
                               }),
-                            "تنخواه با سند قطعی تسویه شد.",
+                            "تنخواه با سند قطعی تسویه شد.", ("treasury-13" + String(row.id))
                           )
                         }
                       />
@@ -2196,7 +2219,8 @@ export default function TreasuryControlPage() {
                       <ErpBadge tone="success">تسویه‌شده</ErpBadge>
                     )}
                   </div>
-                </ErpCard>
+                {actionFeedback?.scope === ("treasury-13" + String(row.id)) && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+</ErpCard>
               ))}
             </div>
           </ErpSection>

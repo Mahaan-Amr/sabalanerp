@@ -27,6 +27,24 @@ export type PartnerFinancialApprovalAuthorization = {
 
 export { PARTNER_INTERNAL_ACCOUNTING_SOURCE } from './source';
 
+/** Verify a sealed approval that has not yet published a receivable. */
+export async function validatePendingPartnerApproval(record: AccountingFinancialRecord) {
+  const metadata = object(record.metadata);
+  if (metadata?.partnerReceivablePending !== true) return;
+  const approval = object(metadata.partnerApproval);
+  const preparation = object(object(record.sourceSnapshot)?.partnerPreparation);
+  if (!approval || !preparation || !record.financiallyApprovedAt || !record.systemInvoiceDate ||
+      record.financiallyApprovedBy !== approval.actorId ||
+      record.financiallyApprovedAt.toISOString() !== approval.recordedAt ||
+      record.systemInvoiceDate.toISOString().slice(0, 10) !== approval.effectiveDate ||
+      approval.financialApprovalEvidenceId !== `partner-financial-approval:${(await canonicalHash({
+        invoiceRecordId: record.id, evidenceHash: preparation.evidenceHash,
+        actorId: approval.actorId, approvedAt: approval.recordedAt,
+      })).slice(10)}`) {
+    throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'شواهد تأیید صورتحساب همکار معتبر نیست؛ بررسی حسابداری لازم است.');
+  }
+}
+
 /** Call before mutating the invoice, returning a denied decision from the owning
  * transaction so its central audit survives. Case precedes invoice in the lock order. */
 export async function authorizePartnerFinancialApproval(tx: Prisma.TransactionClient, record: AccountingFinancialRecord,
@@ -58,14 +76,15 @@ export async function authorizePartnerFinancialApproval(tx: Prisma.TransactionCl
  * Partner financial approval is deliberately not sealed against the retail
  * SalesContract. Its immutable source is the Sabalan-to-Partner record, whose
  * debtor, amount and terms differ from the end-customer contract. This hook
- * validates that private source and publishes the official receivable/event in
- * the same Accounting approval transaction.
+ * validates that private source and seals invoice approval without creating debt.
+ * Only the atomic correction effect may replace an already published obligation.
  */
 export async function approvePartnerFinancialSourceWithinTransaction(
   tx: Prisma.TransactionClient,
   record: AccountingFinancialRecord,
   input: PartnerReplacementApprovalInput,
   authorization?: PartnerFinancialApprovalAuthorization,
+  replacePublishedObligation = false,
 ): Promise<AccountingFinancialRecord> {
   if (record.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE || !record.sourceId) {
     throw new Error('Partner financial approval source is invalid');
@@ -136,6 +155,11 @@ export async function approvePartnerFinancialSourceWithinTransaction(
   if (await tx.accountingReceivable.count({ where: { status: { not: 'VOIDED' },
     invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: record.sourceId } } })) {
     throw new Error('تعهد فعال قبلی باید در همان گردش اصلاح پرونده همکار تعیین تکلیف شود.');
+  }
+  if (!replacePublishedObligation) {
+    return tx.accountingFinancialRecord.update({ where: { id: record.id }, data: {
+      metadata: json({ ...metadata, partnerApproval: approval, partnerReceivablePending: true }),
+    } });
   }
   const receivable = {
     id: `partner-receivable:${(await canonicalHash(record.id)).slice(10)}`,

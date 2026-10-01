@@ -1,5 +1,6 @@
 import { confirmationResendCooldownError } from './contractConfirmationPolicy';
 import { prisma } from '../lib/prisma';
+import { isOrdinaryCommercialFlow, assertCommercialActionAvailable, markCustomerAcceptance, lockOrdinaryContract } from './ordinaryContractLifecycle';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import smsService from './smsService';
@@ -113,6 +114,7 @@ function serializePublicContract(session: any) {
     sessionId: session.id,
     status: session.status,
     contractStatus: contract.status,
+    commercialFlowVersion: contract.commercialFlowVersion,
     verifiedAt: session.verifiedAt,
     otpExpiresAt: session.otpExpiresAt,
     linkExpiresAt: session.linkExpiresAt,
@@ -281,6 +283,10 @@ export class ContractConfirmationService {
     if (contract.status === 'CANCELLED') {
       return { success: false, error: 'قرارداد لغو شده است' };
     }
+    if (isOrdinaryCommercialFlow(contract)) {
+      try { assertCommercialActionAvailable(contract); } catch { return { success: false, error: 'قرارداد منقضی یا غیرفعال است؛ مدیر فروش باید وضعیت آن را بررسی کند.' }; }
+      if (contract.customerAcceptanceRevision === contract.commercialRevision) return { success: false, error: 'پذیرش این نسخه قرارداد قبلاً ثبت شده است.' };
+    }
 
     const phoneNumber = extractCustomerPhone(contract.customer);
     if (!phoneNumber) {
@@ -290,6 +296,7 @@ export class ContractConfirmationService {
     const existingActiveSession = await prisma.contractPublicConfirmation.findFirst({
       where: {
         contractId: params.contractId,
+        ...(isOrdinaryCommercialFlow(contract) ? { commercialRevision: contract.commercialRevision } : {}),
         status: 'PENDING',
         linkExpiresAt: { gt: new Date() }
       },
@@ -334,6 +341,7 @@ export class ContractConfirmationService {
       session = await prisma.contractPublicConfirmation.create({
         data: {
           contractId: params.contractId,
+          commercialRevision: isOrdinaryCommercialFlow(contract) ? contract.commercialRevision : null,
           tokenHash: hashValue(rawToken),
           phoneNumber,
           otpCodeHash,
@@ -404,29 +412,33 @@ export class ContractConfirmationService {
       };
     }
 
-    if (contract.status === 'DRAFT') {
-      await prisma.salesContract.update({
-        where: { id: contract.id },
-        data: {
-          status: 'PENDING_APPROVAL',
-          signatures: {
-            ...((contract.signatures as Record<string, unknown>) || {}),
-            digitalConfirmation: {
-              status: 'PENDING',
-              sentAt: new Date().toISOString(),
-              phoneNumber,
-              sessionId: session.id
-            }
-          }
-        }
-      });
-    }
+    const sentStatus = await prisma.$transaction(async tx => {
+      const current = await lockOrdinaryContract(tx, contract.id);
+      const active = await tx.contractPublicConfirmation.findUnique({ where: { id: session!.id } });
+      const changed = current.commercialFlowVersion !== contract.commercialFlowVersion
+        || (isOrdinaryCommercialFlow(current) && current.commercialRevision !== session!.commercialRevision);
+      let unavailable = changed || active?.status !== 'PENDING';
+      try { assertCommercialActionAvailable(current); } catch { unavailable = true; }
+      if (unavailable) {
+        await tx.contractPublicConfirmation.updateMany({ where: { id: session!.id, status: 'PENDING' }, data: { status: 'CANCELLED', cancelledAt: new Date() } });
+        return null;
+      }
+      if (current.status === 'DRAFT' && !isOrdinaryCommercialFlow(current)) {
+        await tx.salesContract.update({ where: { id: current.id }, data: { status: 'PENDING_APPROVAL',
+          signatures: { ...((current.signatures as any) || {}), digitalConfirmation: { status: 'PENDING',
+            sentAt: new Date().toISOString(), phoneNumber, sessionId: session!.id } },
+        } });
+        return 'PENDING_APPROVAL';
+      }
+      return current.status;
+    });
+    if (!sentStatus) return { success: false, error: 'نسخه یا وضعیت قرارداد هنگام ارسال تغییر کرد؛ صفحه را تازه کنید و برای نسخه فعلی دوباره پیام تأیید بفرستید.' };
 
     return {
       success: true,
       data: {
         contractId: contract.id,
-        status: 'PENDING_APPROVAL',
+        status: sentStatus,
         phoneNumber,
         publicLink,
         expiresAt: session.linkExpiresAt.toISOString(),
@@ -467,6 +479,7 @@ export class ContractConfirmationService {
       data: {
         contractId,
         contractStatus: contract.status,
+        commercialFlowVersion: contract.commercialFlowVersion,
         sessionStatus: session?.status || null,
         phoneNumber: session?.phoneNumber || null,
         linkExpiresAt: session?.linkExpiresAt || null,
@@ -477,7 +490,7 @@ export class ContractConfirmationService {
         lastSentAt: session?.lastSentAt || null,
         lastOpenedAt: lastOpen?.eventAt || null,
         verifiedAt: session?.verifiedAt || null,
-        isApproved: contract.status === 'APPROVED'
+        isApproved: isOrdinaryCommercialFlow(contract) ? contract.customerAcceptanceRevision === contract.commercialRevision : contract.status === 'APPROVED'
       }
     };
   }
@@ -521,6 +534,9 @@ export class ContractConfirmationService {
     if (session.status === 'CANCELLED') {
       return { success: false, error: 'این لینک دیگر قابل استفاده نیست' };
     }
+    if (isOrdinaryCommercialFlow(session.contract) && session.commercialRevision !== session.contract.commercialRevision) {
+      return { success: false, error: 'این نسخه قرارداد تغییر کرده است؛ لینک نسخه تازه را از فروش دریافت کنید.' };
+    }
 
     if (session.linkExpiresAt < new Date()) {
       await prisma.contractPublicConfirmation.update({
@@ -563,6 +579,10 @@ export class ContractConfirmationService {
     }
 
     const session = lookup.session;
+
+    if (isOrdinaryCommercialFlow(session.contract) && session.commercialRevision !== session.contract.commercialRevision) {
+      return { success: false, error: 'این نسخه قرارداد تغییر کرده است؛ لینک نسخه تازه را از فروش دریافت کنید.' };
+    }
 
     await createAuditLog({
       contractId: session.contractId,
@@ -632,8 +652,8 @@ export class ContractConfirmationService {
     const codeHash = hashValue(params.code.trim());
 
     if (codeHash !== session.otpCodeHash) {
-      await prisma.contractPublicConfirmation.update({
-        where: { id: session.id },
+      await prisma.contractPublicConfirmation.updateMany({
+        where: { id: session.id, status: 'PENDING', attemptsUsed: session.attemptsUsed },
         data: {
           attemptsUsed: nextAttempts,
           status: nextAttempts >= session.maxAttempts ? 'EXPIRED' : 'PENDING'
@@ -656,6 +676,15 @@ export class ContractConfirmationService {
     const verifiedAt = new Date();
 
     await prisma.$transaction(async (tx) => {
+      const currentContract = await lockOrdinaryContract(tx, session.contractId);
+      const currentSession = await tx.contractPublicConfirmation.findUnique({ where: { id: session.id } });
+      if (!currentSession || currentSession.status !== 'PENDING' || currentSession.otpCodeHash !== codeHash
+        || currentSession.linkExpiresAt < verifiedAt || currentSession.otpExpiresAt < verifiedAt
+        || currentSession.attemptsUsed >= currentSession.maxAttempts) throw new Error('این نشست تایید دیگر قابل استفاده نیست');
+      if (isOrdinaryCommercialFlow(currentContract)) {
+        await markCustomerAcceptance(tx, { contractId: session.contractId, revision: currentSession.commercialRevision ?? -1,
+          actorId: session.createdBy || currentContract.createdBy, method: 'DIGITAL', sessionId: session.id });
+      }
       await tx.contractPublicConfirmation.update({
         where: { id: session.id },
         data: {
@@ -665,7 +694,7 @@ export class ContractConfirmationService {
         }
       });
 
-      await tx.salesContract.update({
+      if (!isOrdinaryCommercialFlow(currentContract)) await tx.salesContract.update({
         where: { id: session.contractId },
         data: {
           status: 'APPROVED',
@@ -710,7 +739,7 @@ export class ContractConfirmationService {
       success: true,
       data: {
         contractId: session.contractId,
-        status: 'APPROVED',
+        status: (await prisma.salesContract.findUnique({ where: { id: session.contractId }, select: { status: true } }))!.status,
         verifiedAt: verifiedAt.toISOString()
       }
     };
@@ -786,8 +815,8 @@ export class ContractConfirmationService {
     const codeHash = hashValue(params.code.trim());
 
     if (codeHash !== session.otpCodeHash) {
-      await prisma.contractPublicConfirmation.update({
-        where: { id: session.id },
+      await prisma.contractPublicConfirmation.updateMany({
+        where: { id: session.id, status: 'PENDING', attemptsUsed: session.attemptsUsed },
         data: {
           attemptsUsed: nextAttempts,
           status: nextAttempts >= session.maxAttempts ? 'EXPIRED' : 'PENDING'
@@ -810,6 +839,15 @@ export class ContractConfirmationService {
     const verifiedAt = new Date();
 
     await prisma.$transaction(async (tx) => {
+      const currentContract = await lockOrdinaryContract(tx, session.contractId);
+      const currentSession = await tx.contractPublicConfirmation.findUnique({ where: { id: session.id } });
+      if (!currentSession || currentSession.status !== 'PENDING' || currentSession.otpCodeHash !== codeHash
+        || currentSession.linkExpiresAt < verifiedAt || currentSession.otpExpiresAt < verifiedAt
+        || currentSession.attemptsUsed >= currentSession.maxAttempts) throw new Error('این نشست تایید دیگر قابل استفاده نیست');
+      if (isOrdinaryCommercialFlow(currentContract)) {
+        await markCustomerAcceptance(tx, { contractId: session.contractId, revision: currentSession.commercialRevision ?? -1,
+          actorId: session.createdBy || currentContract.createdBy, method: 'DIGITAL', sessionId: session.id });
+      }
       await tx.contractPublicConfirmation.update({
         where: { id: session.id },
         data: {
@@ -819,7 +857,7 @@ export class ContractConfirmationService {
         }
       });
 
-      await tx.salesContract.update({
+      if (!isOrdinaryCommercialFlow(currentContract)) await tx.salesContract.update({
         where: { id: session.contractId },
         data: {
           status: 'APPROVED',
@@ -864,7 +902,7 @@ export class ContractConfirmationService {
       success: true,
       data: {
         contractId: session.contractId,
-        status: 'APPROVED',
+        status: (await prisma.salesContract.findUnique({ where: { id: session.contractId }, select: { status: true } }))!.status,
         verifiedAt: verifiedAt.toISOString()
       }
     };

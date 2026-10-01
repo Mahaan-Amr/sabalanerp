@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { isOrdinaryCommercialFlow, commercialDeadlinePassed, isCommerciallyFinal, renewOrdinaryContract, readCommercialExpiryDays, lockOrdinaryContract, canManageCommercialSettings } from '../services/ordinaryContractLifecycle';
 import express, { Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import {
@@ -155,6 +156,57 @@ const canManageDiscountRanges = async (user: any) => {
   const effective = await getEffectiveUserAccess(prisma, { userId: user.id, userRole: user.role });
   return effective.workspaces.some(({ workspace, permission }) => workspace === WORKSPACES.SALES && permission === 'admin');
 };
+
+const projectCommercialActions = async (contract: any, user: any) => {
+  if (!isOrdinaryCommercialFlow(contract)) return undefined;
+  const access = await getEffectiveUserAccess(prisma, { userId: user.id, userRole: user.role });
+  const permitted = (feature: string) => user.role === 'ADMIN' || access.features.some(item => item.feature === feature && ['edit', 'admin'].includes(item.permission));
+  const accessible = validateContractAccess(contract, user);
+  const available = accessible && !contract.isInactive && !['CANCELLED', 'EXPIRED'].includes(contract.status) && !commercialDeadlinePassed(contract);
+  const financial = await prisma.accountingFinancialRecord.findFirst({ where: { contractId: contract.id }, select: { id: true } });
+  const opportunity = await prisma.crossWorkspaceDuty.findFirst({ where: {
+    sourceType: 'SALES_CONTRACT_CORRECTION', sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN', dueAt: { gte: new Date() },
+    sourceId: { in: (await prisma.accountingCorrectionRequest.findMany({ where: { contractId: contract.id, status: 'APPROVED_FOR_SALES_EDIT' }, select: { id: true } })).map(item => item.id) },
+    ...(user.role === 'ADMIN' ? {} : { currentAssigneeUserId: user.id }),
+  }, select: { id: true } });
+  return { canApproveSales: available && permitted(FEATURES.SALES_CONTRACTS_APPROVE) && contract.salesApprovalRevision !== contract.commercialRevision,
+    canSendConfirmation: available && permitted(FEATURES.SALES_CONTRACTS_SIGN) && !isCommerciallyFinal(contract),
+    canEdit: available && permitted(FEATURES.SALES_CONTRACTS_EDIT) && (!(financial || contract.firstFinancialRecordAt) || !!opportunity),
+    canRenew: accessible && !contract.isInactive && !contract.firstFinancialRecordAt && (contract.status === 'EXPIRED' || commercialDeadlinePassed(contract)) && await canManageCommercialSettings(prisma, user),
+  };
+};
+
+const commercialSettingsHandler = (work: (req: any, res: Response) => Promise<unknown>) => async (req: any, res: Response) => {
+  try { await work(req, res); }
+  catch (error) { sendUnexpectedSalesFailure(res, error, 'تنظیمات مهلت قرارداد', 'SALES_COMMERCIAL_SETTINGS_UNEXPECTED'); }
+};
+router.get('/commercial-settings', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), commercialSettingsHandler(async (req: any, res: Response) => {
+  res.json({ success: true, data: { expiryDays: await readCommercialExpiryDays(prisma), canManage: await canManageCommercialSettings(prisma, req.user) } });
+}));
+router.put('/commercial-settings', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN), commercialSettingsHandler(async (req: any, res: Response) => {
+  if (!await canManageCommercialSettings(prisma, req.user)) return res.status(403).json({ success: false, error: 'تنظیم مهلت فقط در اختیار مدیر فروش است.' });
+  const expiryDays = Number(req.body.expiryDays);
+  if (!Number.isInteger(expiryDays) || expiryDays < 1 || expiryDays > 365) return res.status(400).json({ success: false, error: 'مهلت باید بین ۱ تا ۳۶۵ روز باشد.' });
+  const data = await prisma.$transaction(async tx => {
+    const before = await tx.salesCommercialSetting.findUnique({ where: { id: 'ordinary-contracts' } });
+    const updated = await tx.salesCommercialSetting.upsert({ where: { id: 'ordinary-contracts' }, create: { expiryDays, updatedBy: req.user.id }, update: { expiryDays, updatedBy: req.user.id } });
+    await tx.accountingAuditLog.create({ data: { actorId: req.user.id, action: 'COMMERCIAL_EXPIRY_SETTING_CHANGED', entityType: 'SalesCommercialSetting', entityId: 'ordinary-contracts',
+      beforeState: before ? JSON.parse(JSON.stringify(before)) : { expiryDays: 10 }, afterState: { expiryDays } } });
+    return updated;
+  });
+  res.json({ success: true, data: { expiryDays: data.expiryDays, canManage: true } });
+}));
+router.post('/contracts/:id/renew', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response) => {
+  try {
+    if (!await canManageCommercialSettings(prisma, req.user)) return res.status(403).json({ success: false, error: 'تمدید فقط در اختیار مدیر فروش است.' });
+    const data = await prisma.$transaction(async tx => {
+      const contract = await tx.salesContract.findUnique({ where: { id: req.params.id } });
+      if (!contract || !validateContractAccess(contract, req.user)) throw new Error('Access denied');
+      return renewOrdinaryContract(tx, req.params.id, req.user.id, String(req.body.reason || ''));
+    });
+    res.json({ success: true, data });
+  } catch (error: any) { res.status(409).json({ success: false, error: error.message }); }
+});
 
 const toDiscountRangeDto = (range: any) => ({
   id: range.id,
@@ -716,7 +768,6 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
         prisma.accountingFinancialRecord.findMany({
           where: {
             contractId: { in: contractIds },
-            financiallyApprovedAt: { not: null }
           },
           select: {
             contractId: true,
@@ -744,14 +795,15 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     const approvedCorrectionByContractId = new Map(
       approvedCorrectionRequests.map((request) => [request.contractId, request] as const)
     );
-    const contractsWithAccountingLock = contracts.map((contract) => ({
+    const contractsWithAccountingLock = await Promise.all(contracts.map(async (contract) => ({
       ...contract,
-      accountingEditLocked: financiallyApprovedByContractId.has(contract.id),
+      commercialActions: await projectCommercialActions(contract, req.user),
+      accountingEditLocked: financiallyApprovedByContractId.has(contract.id) || !!contract.firstFinancialRecordAt,
       canOpenCorrectionEdit: approvedCorrectionByContractId.has(contract.id),
       activeCorrectionRequest: approvedCorrectionByContractId.get(contract.id) || null,
       accountingFinanciallyApprovedAt: financiallyApprovedByContractId.get(contract.id) || null,
       accounting: accountingSummaries.get(contract.id) || null
-    }));
+    })));
 
     const total = await prisma.salesContract.count({ where: whereClause });
 
@@ -851,7 +903,7 @@ router.get('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
     res.setHeader('Cache-Control', contract.partnerKind === 'PARTNER_CUSTOMER' ? 'private, no-store' : 'private');
     res.json({
       success: true,
-      data: responseContract
+      data: { ...responseContract, commercialActions: await projectCommercialActions(contract, req.user) }
     });
     return;
   } catch (error: any) {
@@ -1015,14 +1067,12 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
         fingerprint: pdfFingerprint
       };
 
-      await prisma.salesContract.update({
-        where: { id: contract.id },
-        data: {
-          signatures: {
-            ...currentSignatures,
-            print: updatedPrintSignature
-          }
-        }
+      await prisma.$transaction(async tx => {
+        const current = await lockOrdinaryContract(tx, contract.id);
+        if (current.updatedAt.getTime() !== contract.updatedAt.getTime()) return;
+        await tx.salesContract.update({ where: { id: contract.id }, data: {
+          signatures: { ...((current.signatures as any) || {}), print: updatedPrintSignature },
+        } });
       });
     }
 
@@ -1414,7 +1464,7 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
 router.put('/contracts/:id/approve', protect, requireFeatureAccess(FEATURES.SALES_CONTRACTS_APPROVE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const note: string | undefined = req.body?.note;
-    const updatedContract = await approveContract(req.params.id, req.user.id, note);
+    const updatedContract = await approveContract(req.params.id, req.user.id, note, req.body?.commercialRevision);
 
     res.json({
       success: true,
@@ -1435,6 +1485,10 @@ router.put('/contracts/:id/approve', protect, requireFeatureAccess(FEATURES.SALE
         error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.')
       });
     }
+    if (['Contract changed concurrently; reload before saving', 'Contract cannot be modified in current status', 'DUTY_SALES_EDIT_EXPIRED'].includes(error.message)) {
+      return res.status(409).json({ success: false, error: 'نسخه یا مهلت قرارداد تغییر کرده است؛ صفحه را تازه کنید و وضعیت قرارداد را بررسی کنید.' });
+    }
+    if (error.message === 'Access denied') return res.status(403).json({ success: false, error: 'اجازه تأیید این قرارداد را ندارید.' });
     return sendUnexpectedSalesFailure(res, error, 'تأیید قرارداد', 'SALES_CONTRACT_APPROVE_UNEXPECTED');
   }
 });
@@ -1484,13 +1538,19 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
     const note: string | undefined = req.body?.note;
 
     await prisma.$transaction(async (tx) => {
+      const currentContract = await lockOrdinaryContract(tx, req.params.id);
+      if (currentContract.commercialFlowVersion !== contract.commercialFlowVersion
+        || (isOrdinaryCommercialFlow(currentContract) ? currentContract.commercialRevision !== contract.commercialRevision
+          : currentContract.updatedAt.getTime() !== contract.updatedAt.getTime())) {
+        throw new Error('Contract changed concurrently; reload before saving');
+      }
       await tx.salesContract.update({
         where: { id: req.params.id },
         data: {
-          status: contract.status === 'SIGNED' ? 'PRINTED' : contract.status,
+          status: !isOrdinaryCommercialFlow(currentContract) && currentContract.status === 'SIGNED' ? 'PRINTED' : currentContract.status,
           printedAt: new Date(),
           signatures: {
-            ...(contract.signatures as any || {}),
+            ...(currentContract.signatures as any || {}),
             print: {
               by: req.user.id,
               at: new Date().toISOString(),
@@ -1500,7 +1560,7 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
           }
         }
       });
-      if (contract.status === 'SIGNED' || contract.status === 'PRINTED') {
+      if (!isOrdinaryCommercialFlow(contract) && (contract.status === 'SIGNED' || contract.status === 'PRINTED')) {
         await snapshotRealizedSale(tx, contract.id, req.user.id, contract.signedAt || new Date());
       }
     });
@@ -1547,8 +1607,9 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
       data: updatedContract
     });
     return;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Print sales contract error:', error);
+    if (error.message === 'Contract changed concurrently; reload before saving') return res.status(409).json({ success: false, error: 'نسخه قرارداد تغییر کرده است؛ صفحه را تازه کنید و دوباره چاپ بگیرید.' });
     res.status(500).json({
       success: false,
       error: 'این عملیات فروش انجام نشد؛ دوباره تلاش کنید.'
@@ -1603,6 +1664,9 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
         error: 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.'
       });
     }
+    if (isOrdinaryCommercialFlow(contract)) {
+      return res.status(409).json({ success: false, error: 'امضا با پذیرش مشتری ثبت می‌شود؛ تأیید فروش را با علامت تأیید انجام دهید.' });
+    }
 
     if (contract.isInactive) {
       return res.status(409).json({ success: false, error: 'قرارداد غیرفعال و فقط‌خواندنی است؛ قرارداد فعال را انتخاب کنید.' });
@@ -1631,6 +1695,9 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
         SELECT "id" FROM "sales_contracts" WHERE "id" = ${req.params.id} FOR UPDATE
       `);
       const lockedContract = await tx.salesContract.findUnique({ where: { id: req.params.id } });
+      if (lockedContract && isOrdinaryCommercialFlow(lockedContract)) {
+        throw new ApprovedPricingEvidenceError('Contract changed before finalization');
+      }
       if (!lockedContract || lockedContract.isInactive || lockedContract.status !== 'APPROVED') {
         throw new ApprovedPricingEvidenceError('Contract changed before finalization');
       }
@@ -2024,6 +2091,7 @@ router.post('/contracts/:contractId/deliveries', protect, requireWorkspaceAccess
     return;
   } catch (error: any) {
     console.error('Create delivery error:', error);
+    if (error.message === 'تغییر اقلام، پرداخت یا تحویل این قرارداد باید از ویرایش کامل قرارداد انجام شود.') return res.status(409).json({ success: false, code: 'CONTRACT_GRAPH_REQUIRES_ATOMIC_EDIT', error: error.message });
     if (error.message === 'Contract not found' || error.message === 'User not found') {
       return res.status(404).json({
         success: false,
@@ -2130,6 +2198,7 @@ router.post('/contracts/:contractId/payments', protect, requireWorkspaceAccess(W
     return;
   } catch (error: any) {
     console.error('Create payment error:', error);
+    if (error.message === 'تغییر اقلام، پرداخت یا تحویل این قرارداد باید از ویرایش کامل قرارداد انجام شود.') return res.status(409).json({ success: false, code: 'CONTRACT_GRAPH_REQUIRES_ATOMIC_EDIT', error: error.message });
     if (error.message === 'Contract not found' || error.message === 'User not found') {
       return res.status(404).json({
         success: false,
@@ -2490,6 +2559,7 @@ router.post('/contracts/:contractId/items', protect, requireWorkspaceAccess(WORK
     return;
   } catch (error: any) {
     console.error('Create contract item error:', error);
+    if (error.message === 'تغییر اقلام، پرداخت یا تحویل این قرارداد باید از ویرایش کامل قرارداد انجام شود.') return res.status(409).json({ success: false, code: 'CONTRACT_GRAPH_REQUIRES_ATOMIC_EDIT', error: error.message });
     if (error.message === 'Contract not found' || error.message === 'User not found') {
       return res.status(404).json({
         success: false,

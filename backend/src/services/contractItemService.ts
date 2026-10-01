@@ -1,3 +1,4 @@
+import { mutateLegacyCommercialContract } from './ordinaryContractLifecycle';
 import { prisma } from '../lib/prisma';
 // Contract item service
 // Handles contract item business logic
@@ -69,7 +70,7 @@ export async function createContractItem(
   }
 
   // Create contract item
-  const contractItem = await prisma.contractItem.create({
+  const contractItem = await mutateLegacyCommercialContract(prisma, contractId, async tx => tx.contractItem.create({
     data: {
       contractId,
       productId: data.productId,
@@ -87,7 +88,7 @@ export async function createContractItem(
     include: {
       product: true
     }
-  });
+  }));
 
   return contractItem;
 }

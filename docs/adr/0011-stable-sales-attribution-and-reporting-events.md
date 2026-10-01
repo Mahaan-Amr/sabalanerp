@@ -4,6 +4,8 @@
 
 Accepted
 
+ADR-0110 replaces the realization trigger for new-flow ordinary Contracts with the first successfully persisted Accounting financial record. Historical realization and seller evidence remain intact; untouched legacy and Partner workflows retain their existing trigger.
+
 ## Context
 
 Sales Contracts currently identify only their technical creator, while CRM potential projects identify a responsible seller. Reporting from the creator or the contract's mutable current amount would conflate data entry with commercial ownership, rewrite seller history after reassignment, and rewrite closed reporting periods after later corrections.

@@ -13,6 +13,7 @@ import { allocateLoadingNumber } from '../services/logisticsLoadingNumber';
 import { createPartnerCaseLoading, readPartnerCaseLoading, withLogisticsLoadingReadScope } from '../services/dispatchAllocation';
 import { randomUUID } from 'node:crypto';
 import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
+import { ordinaryContractDispatchEligible, assertOrdinaryContractsDispatchEligible } from '../services/ordinaryContractDispatchEligibility';
 import { PartnerLoadingCommandError } from '../services/partnerSales/fulfillment/loadingAuthority';
 
 const router = express.Router();
@@ -268,7 +269,9 @@ const getProjectContracts = async (projectId: string, customerId: string) => {
   });
   const financiallyApprovedContractIds = new Set(approvedRecords.map((record) => record.contractId).filter(Boolean));
 
-  return contracts.filter((contract) => financiallyApprovedContractIds.has(contract.id));
+  const eligible = await Promise.all(contracts.map(async contract => financiallyApprovedContractIds.has(contract.id)
+    && await ordinaryContractDispatchEligible(prisma, contract)));
+  return contracts.filter((_contract, index) => eligible[index]);
 };
 
 const getConsumptionByItemIds = async (itemIds: string[]) => {
@@ -570,6 +573,9 @@ const linePayloadToCreate = async (line: any) => {
 
   if (!financiallyApprovedRecord) {
     throw new Error('Contract is not financially approved for logistics loading');
+  }
+  if (!await ordinaryContractDispatchEligible(prisma, sourceItem.contract)) {
+    throw new DispatchAllocationConflictError('قرارداد برای بارگیری باید قطعی و کاملاً تسویه شده باشد.');
   }
 
   const unit = String(line.unit || inferUnit(sourceItem, null));
@@ -1050,6 +1056,7 @@ router.post('/loadings', canEdit, canCreateLoadings, [
 
     const loading = await prisma.$transaction(async (tx) => {
       const loadingNumber = await allocateLoadingNumber(tx);
+      await assertOrdinaryContractsDispatchEligible(tx, lineCreates.map(line => line.sourceContractId), DispatchAllocationConflictError);
       const created = await tx.logisticsLoading.create({
         data: { loadingNumber, customerId: project.customerId, projectId: project.id, loadingDate: req.body.loadingDate ? new Date(req.body.loadingDate) : new Date(), notes: req.body.notes || null, createdBy: req.user.id, lines: { create: lineCreates } }
       });
@@ -1091,6 +1098,7 @@ router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Resp
 
     await prisma.$transaction(async (tx) => {
       await reconcileDriverAssignments(tx, existing.id, req.body.driverTurnIds || [], req.user.id);
+      await assertOrdinaryContractsDispatchEligible(tx, lineCreates.map(line => line.sourceContractId), DispatchAllocationConflictError);
       await tx.logisticsLoadingLine.deleteMany({ where: { loadingId: existing.id } });
       await tx.logisticsLoading.update({
         where: { id: existing.id },
@@ -1159,6 +1167,7 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
 
     const updated = await prisma.$transaction(async (tx) => {
       const saved = await tx.logisticsLoading.update({ where: { id: loading.id }, data: { status: FINALIZED_STATUS as any, finalizedAt: new Date(), finalizedBy: req.user.id } });
+      await assertOrdinaryContractsDispatchEligible(tx, loading.lines.map((line: any) => line.sourceContractId), DispatchAllocationConflictError);
       await tx.securityDriverQueueTurn.updateMany({ where: { loadingId: loading.id, status: SecurityDriverQueueTurnStatus.RESERVED }, data: { status: SecurityDriverQueueTurnStatus.DISPATCHED, dispatchedAt: new Date(), dispatchedBy: req.user.id } });
       return saved;
     });

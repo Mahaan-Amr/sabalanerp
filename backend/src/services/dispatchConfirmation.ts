@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
+import { assertOrdinaryContractsDispatchEligible } from './ordinaryContractDispatchEligibility';
 import { GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
 import { BiometricConnector, SimulatorScenario } from './biometricProtocol';
 import { ProtectedTemplateEnvelope, ProtectedTemplateVault } from './biometricTemplateVault';
@@ -226,6 +227,10 @@ export class DispatchConfirmationService {
     const session = await tx.dispatchConfirmationSession.findUnique({ where: { id: sessionId }, include: { waybill: true, otpChallenges: true, guardApprovals: true, attempts: true, exitAuthorization: true } });
     if (!session || session.status !== 'ACTIVE' || session.expiresAt <= at) throw new DispatchConfirmationConflictError('The confirmation session is no longer active.');
     if (session.exitAuthorization) return session.exitAuthorization;
+    const sourceLines = await tx.logisticsAllocationRevisionLine.findMany({
+      where: { revision: { candidate: { waybills: { some: { id: session.waybillId } } } } }, select: { sourceContractId: true },
+    });
+    await assertOrdinaryContractsDispatchEligible(tx, sourceLines.map(line => line.sourceContractId), DispatchConfirmationConflictError);
     if (session.waybill.status !== 'ISSUED' || session.waybill.integrityHash !== session.waybillIntegrityHash) throw new DispatchConfirmationConflictError('The bound waybill snapshot is no longer valid.');
     if (session.driverSource === GuardDriverSource.INTERNAL) {
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DRIVER_BIOMETRIC:${session.driverId}`);

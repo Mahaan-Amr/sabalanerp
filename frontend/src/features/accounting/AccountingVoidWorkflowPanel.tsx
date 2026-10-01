@@ -51,9 +51,10 @@ const eventLabel = (action: string) => ({
   CANCEL_ACCOUNTING_VOID_CASE: 'لغو پرونده ابطال',
 }[action] || action);
 
-export default function AccountingVoidWorkflowPanel({ workflows, busy, onResolveTax, onVoidReceivable, onVoidRecord, onCancel }: {
+export default function AccountingVoidWorkflowPanel({ workflows, busy, canAct = true, onResolveTax, onVoidReceivable, onVoidRecord, onCancel }: {
   workflows: AccountingVoidWorkflowView[];
   busy?: boolean;
+  canAct?: boolean;
   onResolveTax: (workflow: AccountingVoidWorkflowView, taxRecordId: string) => void;
   onVoidReceivable: (workflow: AccountingVoidWorkflowView, receivableId: string) => void;
   onVoidRecord: (workflow: AccountingVoidWorkflowView, recordId: string) => void;
@@ -122,7 +123,7 @@ export default function AccountingVoidWorkflowPanel({ workflows, busy, onResolve
                         <p className="mt-1 text-xs text-[var(--sds-text-muted)]">{stateLabel(step.state)}</p>
                       </div>
                     </div>
-                    {actionable && (step.action!.kind === 'RESOLVE_TAX' ? (
+                    {canAct && actionable && (step.action!.kind === 'RESOLVE_TAX' ? (
                       <ErpButton label={step.action!.labelFa} tone="warning" variant="solid" disabled={busy}
                         onClick={() => onResolveTax(workflow, step.action!.targetId)} />
                     ) : step.action!.kind === 'VOID_RECEIVABLE' ? (
@@ -150,7 +151,7 @@ export default function AccountingVoidWorkflowPanel({ workflows, busy, onResolve
               </ul>
             </div>
           )}
-          {workflow.status === 'OPEN' && workflow.canCancel && (
+          {canAct && workflow.status === 'OPEN' && workflow.canCancel && (
             <div className="mt-4 flex justify-end">
               <ErpButton label="لغو پرونده ابطال" icon={FaBan} tone="neutral" variant="outline" disabled={busy}
                 onClick={() => onCancel(workflow)} />

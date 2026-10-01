@@ -8,10 +8,12 @@ type OrdinaryConfirmationData = {
   sessionId: string;
   status: string;
   contractStatus: string;
+  commercialFlowVersion?: number;
   verifiedAt?: string | null;
   otpExpiresAt: string;
   linkExpiresAt: string;
   contract: {
+    commercialFlowVersion?: number;
     id: string;
     contractNumber: string;
     title: string;

@@ -1,3 +1,4 @@
+import { mutateLegacyCommercialContract } from './ordinaryContractLifecycle';
 import { prisma } from '../lib/prisma';
 // Delivery service
 // Handles delivery business logic
@@ -69,7 +70,7 @@ export async function createDelivery(
   }
 
   // Create delivery
-  const delivery = await prisma.delivery.create({
+  const delivery = await mutateLegacyCommercialContract(prisma, contractId, async tx => tx.delivery.create({
     data: {
       contractId,
       deliveryDate: new Date(data.deliveryDate),
@@ -92,7 +93,7 @@ export async function createDelivery(
         }
       }
     }
-  });
+  }));
 
   return delivery;
 }

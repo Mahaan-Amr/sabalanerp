@@ -1,4 +1,6 @@
 "use client";
+import { ContractRenewal } from '@/features/sales/ContractRenewal';
+import { contractLifecycleLabel, contractLifecycleFilterOptions, isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
 import { ErpPressable, ErpSelect, ErpTextarea } from "@/components/erp";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
@@ -94,7 +96,7 @@ import {
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { ContractDetailNavigation } from "@/features/sales/ContractDetailNavigation";
 
-interface Contract {
+interface Contract extends ContractLifecyclePresentation {
   id: string;
   contractNumber: string;
   title: string;
@@ -208,16 +210,6 @@ const salesContractPrintVariantLabels: Record<
   summary: "خلاصه قرارداد",
 };
 
-const statusLabels: Record<string, string> = {
-  DRAFT: "پیش‌نویس",
-  PENDING_APPROVAL: "در انتظار تایید",
-  APPROVED: "تایید شده",
-  SIGNED: "امضا شده",
-  PRINTED: "چاپ شده",
-  CANCELLED: "لغو شده",
-  EXPIRED: "منقضی شده",
-};
-
 const statusTones: Record<string, ErpTone> = {
   DRAFT: "neutral",
   PENDING_APPROVAL: "warning",
@@ -253,6 +245,7 @@ export default function ContractDetailPage() {
     "",
   );
 
+  const [renewalOpen, setRenewalOpen] = useState(false);
   const [contract, setContract] = useState<Contract | null>(null);
   const [detailSection, setDetailSection] = useState<
     "summary" | "items" | "financial" | "history"
@@ -422,7 +415,7 @@ export default function ContractDetailPage() {
       let response;
       switch (action) {
         case "approve":
-          response = await salesAPI.approveContract(contract.id, note);
+          response = await salesAPI.approveContract(contract.id, note, isCurrentContractFlow(contract) ? contract.commercialRevision : undefined);
           break;
         case "reject":
           response = await salesAPI.rejectContract(contract.id, note);
@@ -841,15 +834,17 @@ export default function ContractDetailPage() {
     );
   }
 
-  const canApprove =
-    !contract.isInactive &&
-    (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
-    contractPermissions.canApprove;
+  const canApprove = isCurrentContractFlow(contract)
+    ? contract.commercialActions?.canApproveSales === true
+    : !contract.isInactive &&
+      (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
+      contractPermissions.canApprove;
   const canReject =
     !contract.isInactive &&
     (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
     contractPermissions.canReject;
   const canSign =
+    !isCurrentContractFlow(contract) &&
     !contract.isInactive &&
     contract.status === "APPROVED" &&
     contractPermissions.canSign;
@@ -941,20 +936,22 @@ export default function ContractDetailPage() {
     sumNumericValues(products, (item: any) => item.totalPrice) ||
     toFiniteNumber(contract.contractData?.payment?.totalAmount);
 
-  const canEdit =
-    !contract.isInactive &&
-    (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) &&
-    (contractPermissions.canEdit ||
-      contract.createdByUser.id === currentUser?.id);
+  const canEdit = isCurrentContractFlow(contract)
+    ? contract.commercialActions?.canEdit === true
+    : !contract.isInactive &&
+      (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) &&
+      (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
   const canDownloadPdf = contractPermissions.canView;
   const canPrint = contractPermissions.canPrint;
-  const canResendConfirmation =
-    !contract.isInactive &&
+  const canResendConfirmation = isCurrentContractFlow(contract)
+    ? contract.commercialActions?.canSendConfirmation === true
+    : !contract.isInactive &&
     contract.status !== "CANCELLED" &&
     !contract.isSigned &&
     hasFeatureAccess(currentUser, "sales_verification_send", "edit");
 
   const actions: ErpAction[] = [
+    ...(contract.commercialActions?.canRenew ? [{ label: "تمدید مهلت", icon: FaRedo, tone: "warning" as ErpTone, onClick: () => setRenewalOpen(true) }] : []),
     ...(canEdit
       ? [
           {
@@ -1022,8 +1019,7 @@ export default function ContractDetailPage() {
     {
       label: "وضعیت",
       value:
-        statusLabels[contract.status] ||
-        operationalStatusLabel(contract.status),
+        contractLifecycleLabel(contract),
       icon: FaFileContract,
       tone: statusTones[contract.status] || "neutral",
     },
@@ -1060,7 +1056,9 @@ export default function ContractDetailPage() {
   ];
 
   return (
-    <ErpPage
+    <>
+      <ContractRenewal contractId={renewalOpen ? contract.id : null} onClose={() => setRenewalOpen(false)} onRenewed={loadContract} />
+      <ErpPage
       eyebrow="قرارداد فروش"
       title={sanitizeUiTextWithCandidates(
         [contract.titlePersian, contract.title, contract.contractNumber],
@@ -1071,6 +1069,7 @@ export default function ContractDetailPage() {
       actions={actions}
       metrics={metrics}
     >
+      {isCurrentContractFlow(contract) && !contract.firstFinancialRecordAt && contract.commercialExpiresAt && <ErpInlineState kind={contract.status === "EXPIRED" ? "stale" : "empty"} title={`مهلت ثبت اولین رکورد مالی: ${PersianCalendar.formatForDisplay(contract.commercialExpiresAt)}`} />}
       {contract.isInactive && (
         <ErpInlineState
           kind="stale"
@@ -1158,8 +1157,7 @@ export default function ContractDetailPage() {
                       <ErpBadge
                         tone={statusTones[contract.status] || "neutral"}
                       >
-                        {statusLabels[contract.status] ||
-                          operationalStatusLabel(contract.status)}
+                        {contractLifecycleLabel(contract)}
                       </ErpBadge>
                     }
                   />
@@ -1724,14 +1722,14 @@ export default function ContractDetailPage() {
                     tone="primary"
                   />
                   <ErpFieldView
-                    label="اعتبار فروش قطعی"
+                    label={isCurrentContractFlow(contract) ? "اعتبار فروش ثبت‌شده حسابداری" : "اعتبار فروش قطعی"}
                     value={
                       contract.realizedSeller
                         ? `${contract.realizedSeller.firstName} ${contract.realizedSeller.lastName}`.trim() ||
                           contract.realizedSeller.username
                         : contract.realizedAt
                           ? "فروش قطعی تخصیص‌نیافته قدیمی"
-                          : "هنوز فروش قطعی نشده"
+                          : isCurrentContractFlow(contract) ? "هنوز رکورد مالی ثبت نشده" : "هنوز فروش قطعی نشده"
                     }
                     hint={
                       contract.realizedAt
@@ -1747,7 +1745,7 @@ export default function ContractDetailPage() {
                   )}
                   {contract.signedByUser && (
                     <ErpFieldView
-                      label="امضا کننده"
+                      label={isCurrentContractFlow(contract) ? "ثبت‌کننده قطعیت" : "امضا کننده"}
                       value={`${contract.signedByUser.firstName} ${contract.signedByUser.lastName}`}
                     />
                   )}
@@ -1826,7 +1824,7 @@ export default function ContractDetailPage() {
                   {contract.signedAt && (
                     <TimelineItem
                       icon={FaSignature}
-                      label="امضا شده"
+                      label={isCurrentContractFlow(contract) ? "قطعی شده" : "امضا شده"}
                       value={PersianCalendar.formatForDisplay(
                         contract.signedAt,
                       )}
@@ -1850,6 +1848,7 @@ export default function ContractDetailPage() {
         }
       />
     </ErpPage>
+    </>
   );
 }
 

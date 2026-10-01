@@ -1,4 +1,7 @@
 import { prisma } from '../lib/prisma';
+import { isNewOrdinaryCommercialFlow, ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError,
+  assertOrdinaryAccountingCommercialGate } from './ordinaryAccountingCommercialGate';
+import { reconcileOrdinaryFinancialRealization } from './salesAttributionService';
 import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates,
   accountingFinancialRegisterSelect, accountingAuditRegisterSelect, attachPartnerRegisterSnapshots } from './accountingListProjection';
 import { attachAccountingTrendAuditState } from './accountingReadProjection';
@@ -706,6 +709,23 @@ const audit = async (tx: Prisma.TransactionClient | PrismaClient, data: {
   afterState?: Prisma.InputJsonValue;
   note?: string | null;
 }) => {
+  if (data.contractId) {
+    await assertOrdinaryAccountingCommercialGate(tx, data.contractId, data.action);
+    const financialCreation = ['CREATE_INVOICE', 'CREATE_REPLACEMENT_INVOICE', 'CREATE_RECEIVABLE'].includes(data.action);
+    if (financialCreation) {
+      await tx.salesContract.updateMany({ where: { id: data.contractId, commercialFlowVersion: 1,
+        partnerCaseId: null, partnerKind: null, firstFinancialRecordAt: null },
+      data: { firstFinancialRecordAt: new Date() } });
+    }
+    if (financialCreation || ['VOID_ACCOUNTING_RECORD', 'VOID_ACCOUNTING_RECEIVABLE', 'DELETE_DRAFT_ACCOUNTING_RECORD'].includes(data.action)) {
+      await reconcileOrdinaryFinancialRealization(tx as Prisma.TransactionClient, {
+        contractId: data.contractId, actorId: data.actorId,
+        sourceKey: `${data.action}:${data.action === 'VOID_ACCOUNTING_RECEIVABLE' ? data.entityId : data.recordId || data.entityId}`,
+        ...(['VOID_ACCOUNTING_RECORD', 'VOID_ACCOUNTING_RECEIVABLE'].includes(data.action)
+          ? { effectiveAt: new Date((data.afterState as any).metadata.voidedAt) } : {}),
+      });
+    }
+  }
   await tx.accountingAuditLog.create({
     data: {
       ...data,
@@ -815,7 +835,8 @@ const buildContractRow = async (contract: any, settings: any) => {
     .reduce((sum: Prisma.Decimal, payment: any) => sum.plus(payment.amount), new Prisma.Decimal(0));
   const remainingAmount = Prisma.Decimal.max(contractAmount.minus(receivedAmount), new Prisma.Decimal(0));
   const missingFields = getTaxMissingFields(contract, settings);
-  const eligible = ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) && !contract.isInactive;
+  const eligible = ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) && !contract.isInactive
+    && ordinaryFinancialActionsAllowed(contract);
   const openCorrections = corrections.filter((item: any) => activeCorrectionStatuses().includes(item.status));
   const openFlags = flags.filter((item: any) => item.status === 'OPEN');
   const issuedInvoices = records.filter(isValidFinanciallyApprovedInvoice);
@@ -852,7 +873,9 @@ const buildContractRow = async (contract: any, settings: any) => {
     ? undefined
     : contract.isInactive
       ? 'قرارداد غیرفعال است و رکورد مالی جدید نمی‌پذیرد'
-      : 'فقط قراردادهای تایید شده، امضا شده یا چاپ شده قابل ثبت مالی هستند';
+      : isNewOrdinaryCommercialFlow(contract)
+        ? 'ثبت مالی پس از قطعی شدن نسخه جاری قرارداد مجاز است'
+        : 'فقط قراردادهای تایید شده، امضا شده یا چاپ شده قابل ثبت مالی هستند';
   const nextBestActions = [
     {
       kind: 'CREATE_INVOICE',
@@ -881,7 +904,7 @@ const buildContractRow = async (contract: any, settings: any) => {
     {
       kind: 'CREATE_CORRECTION_REQUEST',
       labelFa: 'درخواست اصلاح',
-      enabled: !contract.isInactive,
+      enabled: !contract.isInactive && ordinaryFinancialActionsAllowed(contract),
       disabledReason: contract.isInactive ? 'قرارداد غیرفعال و فقط‌خواندنی است' : undefined
     }
   ];
@@ -900,6 +923,13 @@ const buildContractRow = async (contract: any, settings: any) => {
       economicCode: contract.customer?.customFields?.economicCode
     },
     status: contract.status,
+    commercialFlowVersion: contract.commercialFlowVersion,
+    commercialRevision: contract.commercialRevision,
+    salesApprovalRevision: contract.salesApprovalRevision,
+    customerAcceptanceRevision: contract.customerAcceptanceRevision,
+    customerAcceptanceMethod: contract.customerAcceptanceMethod,
+    commercialExpiresAt: contract.commercialExpiresAt,
+    firstFinancialRecordAt: contract.firstFinancialRecordAt,
     isInactive: contract.isInactive,
     inactiveAt: contract.inactiveAt,
     inactiveReason: contract.inactiveReason,
@@ -1605,8 +1635,9 @@ const ensureEligibleContract = async (contractId: string) => {
 
   if (!contract) throw new Error('Contract not found');
   if (contract.partnerKind === 'PARTNER_CUSTOMER') throw new Error('حسابداری فروش همکار فقط از رکورد داخلی پرونده همکار انجام می‌شود.');
+  if (!ordinaryFinancialActionsAllowed(contract)) throw new OrdinaryAccountingCommercialError();
   if (contract.isInactive) throw new Error('Inactive contracts cannot create new accounting records');
-  if (!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status)) {
+  if (!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) || !ordinaryFinancialActionsAllowed(contract)) {
     throw new Error('Only approved, signed, or printed contracts can create accounting records');
   }
   return contract;
@@ -1620,7 +1651,7 @@ const ensureContractForReceipt = async (contractId: string, receivableId?: strin
   if (!contract) throw new Error('Contract not found');
   if (contract.partnerKind === 'PARTNER_CUSTOMER') throw new Error('دریافت فروش همکار فقط از دریافتنی داخلی پرونده همکار ثبت می‌شود.');
   if (!contract.isInactive) {
-    if (!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status)) {
+    if (!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) || !ordinaryFinancialActionsAllowed(contract)) {
       throw new Error('Only approved, signed, or printed contracts can create accounting records');
     }
     return contract;
@@ -1657,6 +1688,7 @@ const lockAccountingContract = async (tx: Prisma.TransactionClient, contractId?:
   if (!contractId) return;
   await tx.$queryRaw`SELECT 1::int AS "locked"
     FROM (SELECT pg_advisory_xact_lock(hashtextextended(${`accounting-void:${contractId}`}, 0))) AS acquired`;
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM sales_contracts WHERE id = ${contractId} FOR UPDATE`);
 };
 
 const blockNewActivityForOpenVoidCase = async (tx: Prisma.TransactionClient, invoiceRecordId: string) => {
@@ -1868,6 +1900,7 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
   const vatAmount = amount.mul(vatRate).div(100);
 
   const record = await prisma.$transaction(async (tx) => {
+    await assertOrdinaryAccountingCommercialGate(tx, contract.id, 'CREATE_INVOICE', contract.commercialRevision);
     const invoice = await tx.accountingFinancialRecord.create({
       data: {
         kind: FinancialRecordKind.INVOICE_CANDIDATE,
@@ -1982,6 +2015,7 @@ const createReplacementInvoiceCandidate = async (command: AccountingActionReques
   const vatAmount = amount.mul(vatRate).div(100);
 
   const record = await prisma.$transaction(async (tx) => {
+    await assertOrdinaryAccountingCommercialGate(tx, contract.id, 'CREATE_REPLACEMENT_INVOICE', contract.commercialRevision);
     const invoice = await tx.accountingFinancialRecord.create({
       data: {
         kind: FinancialRecordKind.INVOICE_CANDIDATE,
@@ -2406,6 +2440,7 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
 
   const result = await prisma.$transaction(async (tx) => {
     await lockAccountingContract(tx, contract.id);
+    await assertOrdinaryAccountingCommercialGate(tx, contract.id, 'CREATE_RECEIVABLE', contract.commercialRevision);
     const currentSourceInvoice = await tx.accountingFinancialRecord.findFirst({ where: {
       id: sourceInvoice.id,
       contractId: contract.id,
@@ -2445,6 +2480,10 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
         createdBy: actor.userId
       }
     });
+
+    await tx.accountingFinancialRecord.update({ where: { id: record.id }, data: {
+      metadata: { ...metadataObject(record.metadata), receivableId: receivable.id },
+    } });
 
     await audit(tx, {
       action: 'CREATE_RECEIVABLE',

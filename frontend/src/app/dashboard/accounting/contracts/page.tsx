@@ -1,4 +1,5 @@
 'use client';
+import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpButton, ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -52,16 +53,7 @@ import {
   taxStatusLabels,
 } from '@/features/accounting/accountingUi';
 
-const statusOptions = [
-  { label: 'همه وضعیت‌ها', value: 'ALL' },
-  { label: 'پیش‌نویس', value: 'DRAFT' },
-  { label: 'در انتظار تایید', value: 'PENDING_APPROVAL' },
-  { label: 'تایید شده', value: 'APPROVED' },
-  { label: 'امضا شده', value: 'SIGNED' },
-  { label: 'چاپ شده', value: 'PRINTED' },
-  { label: 'لغو شده', value: 'CANCELLED' },
-  { label: 'منقضی شده', value: 'EXPIRED' },
-];
+const statusOptions = contractLifecycleFilterOptions;
 
 const sourceStatusOptions = [
   { label: 'همه حالت‌ها', value: 'ALL' },
@@ -388,7 +380,7 @@ export default function AccountingContractsPage() {
       cell: (contract) => (
         <div className="flex flex-wrap gap-1">
           <ErpBadge tone={contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'success' : contractStatusTones[contract.status] || 'neutral'}>
-            {contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'فروش داخلی ثبت‌شده' : contractStatusLabels[contract.status] || operationalStatusLabel(contract.status)}
+            {contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'فروش داخلی ثبت‌شده' : contractLifecycleLabel(contract)}
           </ErpBadge>
           {contract.isInactive && <ErpBadge tone="warning">غیرفعال</ErpBadge>}
         </div>

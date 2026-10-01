@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { assertOrdinaryContractsDispatchEligible } from '../ordinaryContractDispatchEligibility';
 import {
   AccountingDispatchCandidateStatus,
   AccountingDispatchWaybillStatus,
@@ -197,6 +198,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       const pricingContracts = await tx.logisticsAllocationRevisionPricing.findMany({
         where: { allocationRevisionId: input.allocationRevisionId }, select: { contractId: true }, orderBy: { contractId: 'asc' },
       });
+      await assertOrdinaryContractsDispatchEligible(tx, pricingContracts.map(item => item.contractId), DispatchDocumentConflictError);
       await createPrismaAllocationPricingBindingPort(tx).lockPricingScope(
         pricingContracts.map(reference => `APPROVED_PRICING_HEAD:${reference.contractId}`),
       );

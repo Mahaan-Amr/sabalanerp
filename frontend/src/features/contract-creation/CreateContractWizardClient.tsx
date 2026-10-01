@@ -4514,6 +4514,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           }),
           phoneNumber: statusData.phoneNumber || existingSignature?.phoneNumber || null,
           contractStatus: statusData.contractStatus || existingSignature?.contractStatus || null,
+          commercialFlowVersion: statusData.commercialFlowVersion ?? existingSignature?.commercialFlowVersion,
           confirmationSent: !!statusData.sessionStatus,
           confirmationStatus: statusData.sessionStatus,
           linkExpiresAt: statusData.linkExpiresAt || null,
@@ -4679,6 +4680,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           }),
           phoneNumber: response.data.data?.phoneNumber || existingSignature?.phoneNumber || null,
           contractStatus: response.data.data?.status || existingSignature?.contractStatus || null,
+          commercialFlowVersion: response.data.data?.commercialFlowVersion ?? existingSignature?.commercialFlowVersion,
           confirmationSent: true,
           confirmationStatus: 'PENDING',
           linkExpiresAt: response.data.data?.expiresAt || null,
@@ -6195,7 +6197,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
         const canDownloadPdfAction = !!wizardData.signature?.contractId;
         const canPrintPdfAction = !!wizardData.signature?.contractId &&
-          ['SIGNED', 'PRINTED'].includes(wizardData.signature?.contractStatus || '');
+          (wizardData.signature?.commercialFlowVersion === 1 || ['SIGNED', 'PRINTED'].includes(wizardData.signature?.contractStatus || ''));
         return (
           <Step8DigitalSignature
             wizardData={wizardData}

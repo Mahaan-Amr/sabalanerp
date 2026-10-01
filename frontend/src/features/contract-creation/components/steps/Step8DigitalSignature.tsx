@@ -1,4 +1,5 @@
-﻿import React from 'react';
+﻿import { contractLifecycleLabel } from '@/features/sales/contractLifecyclePresentation';
+import React from 'react';
 import { ErpButton, ErpInlineState, ErpNeumorphicCard, ErpNeumorphicDisclosure, ErpPressable } from '@/components/erp';
 import {
   FaFileContract,
@@ -198,7 +199,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                   <div className="flex justify-between">
                     <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">وضعیت:</span>
                     <span className="font-medium text-[var(--sds-text-primary)]">
-                      {signature?.contractStatus || '—'}
+                      {signature?.contractStatus ? contractLifecycleLabel({ status: signature.contractStatus, commercialFlowVersion: signature.commercialFlowVersion }) : '—'}
                     </span>
                   </div>
                 </div>

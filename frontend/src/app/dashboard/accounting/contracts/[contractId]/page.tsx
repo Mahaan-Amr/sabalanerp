@@ -1,4 +1,5 @@
 "use client";
+import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpInput, ErpSearchableSelect } from "@/components/erp";
 import { useCallback, useEffect, useState, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -147,6 +148,17 @@ export default function AccountingContractDetailPage(props: {
   const [highlightedCollectionId, setHighlightedCollectionId] = useState<
     string | null
   >(null);
+
+  const recordPaperSignature = async () => {
+    if (actionLoading || !data?.contract?.capabilities?.canRecordPaperSignature) return;
+    setActionLoading(true); setActionError(null);
+    try {
+      const response = await accountingAPI.recordCustomerPaperSignature(params.contractId, data.contract.commercialRevision);
+      if (!response.data.success) throw new Error(response.data.error || 'ثبت امضای کاغذی انجام نشد');
+      await loadDetail();
+    } catch (error) { setActionError(userFacingError(error, 'ثبت امضای کاغذی مشتری انجام نشد؛ اطلاعات قرارداد را تازه‌سازی کنید.')); }
+    finally { setActionLoading(false); }
+  };
 
   const loadDetail = useCallback(async () => {
     try {
@@ -620,6 +632,7 @@ export default function AccountingContractDetailPage(props: {
     accountingActionAvailability(contract, kind)?.enabled === true;
   const accountingActionReason = (kind: string) =>
     accountingActionAvailability(contract, kind)?.reason || undefined;
+  const canActFinancially = contract.commercialFlowVersion === 1 ? contract.capabilities?.canActFinancially === true : contract.capabilities?.canActFinancially !== false;
   const source = data.sourceSnapshot;
   const canCreateRecords = contract.accounting.eligibleForFinancialRecords;
   const replacementWorkflow = data.replacementWorkflow;
@@ -708,6 +721,10 @@ export default function AccountingContractDetailPage(props: {
         options={[...accountingContractTabs]}
       />
       <div hidden={detailSection !== "summary"}>
+        {contract.capabilities?.canRecordPaperSignature && <ErpSection title="امضای مشتری">
+          <p className="mb-3 text-sm text-[var(--sds-text-secondary)]">با ثبت این اقدام، امضای مشتری روی نسخه کاغذی همین قرارداد را تأیید می‌کنید.</p>
+          <ErpButton label="ثبت امضای کاغذی مشتری" icon={FaCheckCircle} tone="success" disabled={actionLoading} onClick={() => void recordPaperSignature()} />
+        </ErpSection>}
         <ErpSection title="مدیریت وضعیت قرارداد">
           {contract.isInactive && (
             <ErpInlineState
@@ -863,8 +880,7 @@ export default function AccountingContractDetailPage(props: {
                           <StatusBadge
                             status={contract.status}
                             label={
-                              contractStatusLabels[contract.status] ||
-                              operationalStatusLabel(contract.status)
+                              contractLifecycleLabel(contract)
                             }
                           />
                         ),
@@ -1047,7 +1063,7 @@ export default function AccountingContractDetailPage(props: {
                         )}
 
                         <div className="flex flex-wrap gap-2">
-                          <ErpButton
+                          {canActFinancially && <ErpButton
                             label="ابطال رکورد قبلی"
                             icon={FaExclamationTriangle}
                             tone="danger"
@@ -1066,19 +1082,19 @@ export default function AccountingContractDetailPage(props: {
                               if (sourceRecord)
                                 setStartVoidTarget(sourceRecord);
                             }}
-                          />
-                          <ErpButton
+                          />}
+                          {canActFinancially && <ErpButton
                             label="ایجاد پیش‌نویس جایگزین"
                             icon={FaFileInvoice}
                             tone="info"
                             disabled={
-                              !replacementWorkflow.canCreateReplacement ||
+                              !canActFinancially || !replacementWorkflow.canCreateReplacement ||
                               actionLoading
                             }
                             onClick={() =>
                               setReplacementTarget(replacementWorkflow)
                             }
-                          />
+                          />}
                           <ErpButton
                             label="بستن اصلاح"
                             icon={FaCheckCircle}
@@ -1094,7 +1110,7 @@ export default function AccountingContractDetailPage(props: {
                           />
                         </div>
 
-                        {replacementWorkflow.canApproveReplacement &&
+                        {canActFinancially && replacementWorkflow.canApproveReplacement &&
                           replacementRecord && (
                             <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
                               {actionError && (
@@ -1172,7 +1188,7 @@ export default function AccountingContractDetailPage(props: {
                           amount={money(record.amount, record.currency)}
                           status={<StatusBadge status={record.status} />}
                           footer={
-                            record.kind === "INVOICE_CANDIDATE" ? (
+                            canActFinancially && record.kind === "INVOICE_CANDIDATE" ? (
                               <div className="space-y-3">
                                 {(contract.accounting.openCorrections > 0 ||
                                   contract.accounting.openBlockerFlags > 0) &&
@@ -1247,6 +1263,7 @@ export default function AccountingContractDetailPage(props: {
                     >
                       <AccountingVoidWorkflowPanel
                         workflows={data.voidWorkflows}
+                        canAct={canActFinancially}
                         busy={actionLoading}
                         onResolveTax={(workflow, taxRecordId) =>
                           setResolveTaxTarget({ workflow, taxRecordId })
@@ -1336,7 +1353,7 @@ export default function AccountingContractDetailPage(props: {
           }
           aside={
             <>
-              {detailSection === "financial" && (
+              {detailSection === "financial" && ["CREATE_INVOICE", "CREATE_RECEIVABLE", "FLAG_CONTRACT", "CREATE_CORRECTION_REQUEST"].some(canUseAccountingAction) && (
                 <ErpSection title="اقدام سریع">
                   <div className="space-y-2">
                     {canUseAccountingAction("CREATE_INVOICE") && (

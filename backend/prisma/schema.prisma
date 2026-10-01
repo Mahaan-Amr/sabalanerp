@@ -1833,6 +1833,15 @@ model RoleFeaturePermission {
 }
 
 model SalesContract {
+  commercialFlowVersion             Int                                @default(0)
+  commercialRevision                Int                                @default(0)
+  salesApprovalRevision             Int?
+  customerAcceptanceRevision        Int?
+  customerAcceptanceMethod          String?
+  commercialStartedAt               DateTime?
+  commercialExpiresAt               DateTime?
+  commercialExpiryDays              Int?
+  firstFinancialRecordAt            DateTime?
   // NULL preserves existing Standard/Collaboration meaning without classification/backfill.
   partnerKind                       String?
   partnerCaseId                     String?                            @unique
@@ -4319,6 +4328,14 @@ model PaymentInstallment {
 }
 
 // ==================== ACCOUNTING WORKSPACE ====================
+
+model SalesCommercialSetting {
+  id String @id @default("ordinary-contracts")
+  expiryDays Int @default(10)
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+  @@map("sales_commercial_settings")
+}
 
 model AccountingSetting {
   id                    String   @id @default(cuid())
@@ -7710,6 +7727,7 @@ model ContractVerificationCode {
 }
 
 model ContractPublicConfirmation {
+  commercialRevision Int?
   id            String        @id @default(cuid())
   contractId    String
   tokenHash     String        @unique

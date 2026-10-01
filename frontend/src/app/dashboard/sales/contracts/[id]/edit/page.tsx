@@ -1,5 +1,6 @@
 'use client';
 
+import { isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
@@ -22,7 +23,7 @@ const CreateContractWizardClient = dynamic(
   }
 );
 
-interface ContractForEdit {
+interface ContractForEdit extends ContractLifecyclePresentation {
   id: string;
   status: string;
   isInactive?: boolean;
@@ -101,6 +102,11 @@ export default function SalesContractEditPage() {
           return;
         }
 
+        if (isCurrentContractFlow(nextContract) && nextContract.commercialActions?.canEdit !== true) {
+          setError(nextContract.status === 'EXPIRED' ? 'مهلت قرارداد منقضی شده است؛ تمدید آن به مدیر یا ادمین فروش نیاز دارد.' : 'ویرایش قرارداد مجاز نیست؛ مسیر اصلاح را در پرونده حسابداری بررسی کنید.');
+          setErrorKind('stale');
+          return;
+        }
         if (nextContract.accountingEditLocked && !nextContract.canOpenCorrectionEdit) {
           setError('این قرارداد پس از تأیید مالی قابل‌ویرایش نیست. از صفحه قرارداد، مسیر درخواست اصلاح را بررسی کنید.');
           setErrorKind('stale');

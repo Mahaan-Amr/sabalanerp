@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { commercialStartFields, isOrdinaryCommercialFlow, assertCommercialActionAvailable, invalidateCommercialApprovals, approveOrdinarySales, lockOrdinaryContract } from './ordinaryContractLifecycle';
 import { randomUUID } from 'node:crypto';
 // Contract service
 // Handles contract business logic
@@ -807,6 +808,7 @@ export async function createContract(
 
         const contract = await tx.salesContract.create({
           data: {
+            ...(await commercialStartFields(tx)),
             contractNumber,
             creatorSequenceNumber,
             title: data.title,
@@ -1000,14 +1002,14 @@ export async function updateContract(
   });
   const approvedSalesCorrection = await getApprovedSalesCorrection(contractId, client);
 
-  if ((contract.status === 'SIGNED' || contract.status === 'PRINTED') && !approvedSalesCorrection) {
+  if (!isOrdinaryCommercialFlow(contract) && (contract.status === 'SIGNED' || contract.status === 'PRINTED') && !approvedSalesCorrection) {
     throw new Error('Signed contract commercial evidence can only change through an approved formal correction');
   }
 
   if (financiallyApprovedRecord && !approvedSalesCorrection) {
     throw new Error('Contract cannot be modified after accounting financial approval');
   }
-  if (existingFinancialRecord && !approvedSalesCorrection) {
+  if ((existingFinancialRecord || (isOrdinaryCommercialFlow(contract) && contract.firstFinancialRecordAt)) && !approvedSalesCorrection) {
     throw new Error('Existing accounting financial record requires an approved formal correction');
   }
 
@@ -1037,16 +1039,29 @@ export async function updateContract(
       select: { id: true },
     });
     const transactionFinancialRecord = await tx.accountingFinancialRecord.findFirst({
-      where: { contractId }, select: { id: true },
+      where: { contractId }, select: { id: true, createdAt: true },
     });
-    if ((transactionContract.status === 'SIGNED' || transactionContract.status === 'PRINTED') && !transactionCorrection) {
+    const historicalFinancialAction = !isOrdinaryCommercialFlow(transactionContract) ? await tx.accountingAuditLog.findFirst({
+      where: { contractId, action: { in: ['CREATE_INVOICE', 'CREATE_RECEIVABLE', 'APPROVE_FINANCIAL_INVOICE', 'DELETE_DRAFT_ACCOUNTING_RECORD'] } },
+      orderBy: { createdAt: 'asc' }, select: { createdAt: true },
+    }) : null;
+    if (!isOrdinaryCommercialFlow(transactionContract) && (transactionContract.status === 'SIGNED' || transactionContract.status === 'PRINTED') && !transactionCorrection) {
       throw new Error('Signed contract commercial evidence can only change through an approved formal correction');
     }
     if (transactionFinancialApproval && !transactionCorrection) {
       throw new Error('Contract cannot be modified after accounting financial approval');
     }
-    if (transactionFinancialRecord && !transactionCorrection) {
+    if ((transactionFinancialRecord || (isOrdinaryCommercialFlow(transactionContract) && transactionContract.firstFinancialRecordAt)) && !transactionCorrection) {
       throw new Error('Existing accounting financial record requires an approved formal correction');
+    }
+    assertCommercialActionAvailable(transactionContract);
+    if (transactionCorrection) {
+      const correctionDuty = await tx.crossWorkspaceDuty.findFirst({ where: {
+        sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: transactionCorrection.id,
+        sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN',
+      } });
+      if (!correctionDuty || correctionDuty.dueAt < new Date()) throw new Error('DUTY_SALES_EDIT_EXPIRED');
+      if (user.role !== 'ADMIN' && correctionDuty.currentAssigneeUserId !== userId) throw new Error('Access denied');
     }
 
     const nextCustomerId = data.customerId || transactionContract.customerId;
@@ -1174,7 +1189,7 @@ export async function updateContract(
       }
     }
 
-    if (transactionCorrection) {
+    if (transactionCorrection && transactionContract.partnerKind) {
       await completeSalesContractCorrectionEdit(tx, {
         contractId,
         actorUserId: userId,
@@ -1189,7 +1204,9 @@ export async function updateContract(
         previousAmount: transactionContract.totalAmount,
         nextAmount: data.totalAmount,
         sourceKey: transactionCorrection
-          ? `accounting-correction:${transactionCorrection.id}`
+          ? isOrdinaryCommercialFlow(transactionContract)
+            ? `accounting-correction:${transactionCorrection.id}:commercial-revision:${transactionContract.commercialRevision + 1}`
+            : `accounting-correction:${transactionCorrection.id}`
           : `contract-adjustment:${contractId}:${Date.now()}`,
         actorId: userId,
         reason: transactionCorrection?.accountantNote || data.notes || 'Sales contract amount corrected'
@@ -1226,6 +1243,16 @@ export async function updateContract(
     const persistedContract = await tx.salesContract.update({
       where: { id: contractId },
       data: {
+        ...(!transactionContract.partnerKind ? {
+          ...(isOrdinaryCommercialFlow(transactionContract) ? {} : await commercialStartFields(tx)),
+          commercialRevision: isOrdinaryCommercialFlow(transactionContract) ? transactionContract.commercialRevision + 1 : 1,
+          ...(transactionContract.firstFinancialRecordAt || !(transactionFinancialRecord || historicalFinancialAction) ? {} : { firstFinancialRecordAt: historicalFinancialAction?.createdAt || transactionFinancialRecord!.createdAt }),
+          status: 'DRAFT' as const, salesApprovalRevision: null, customerAcceptanceRevision: null,
+          customerAcceptanceMethod: null, approvedBy: null, signedBy: null, signedAt: null,
+          isSigned: false, signedByPhoneNumber: null, verificationCodeId: null,
+          signatures: { ...((transactionContract.signatures as any) || {}), approve: null, sign: null,
+            customerAcceptance: null, digitalConfirmation: null },
+        } : {}),
         title: data.title,
         titlePersian: data.titlePersian,
         content: data.content,
@@ -1270,6 +1297,14 @@ export async function updateContract(
         payments: true
       }
     });
+    if (!transactionContract.partnerKind) {
+      await invalidateCommercialApprovals(tx, contractId);
+      await tx.accountingAuditLog.create({ data: { contractId, actorId: userId,
+        action: 'COMMERCIAL_EDIT_RESET', entityType: 'SalesContract', entityId: contractId,
+        beforeState: toJsonValue(transactionContract), afterState: toJsonValue(persistedContract),
+        note: transactionCorrection ? `اصلاح مجاز: ${transactionCorrection.id}` : null,
+      } });
+    }
     await assertContractQuantityEvidenceReadyForFinalization(tx, contractId);
     return persistedContract;
   });
@@ -1347,6 +1382,7 @@ export async function getContract(contractId: string) {
     select: { id: true, financiallyApprovedAt: true }
   });
   const approvedSalesCorrection = await getApprovedSalesCorrection(contractId);
+  const existingFinancialRecord = await prisma.accountingFinancialRecord.findFirst({ where: { contractId }, select: { id: true } });
   const accountingSummaries = await buildAccountingSummaryForContracts([contract]);
 
   return {
@@ -1358,7 +1394,7 @@ export async function getContract(contractId: string) {
           'step5'
         )
       : null,
-    accountingEditLocked: Boolean(financiallyApprovedRecord),
+    accountingEditLocked: Boolean(existingFinancialRecord || contract.firstFinancialRecordAt) || (!isOrdinaryCommercialFlow(contract) && ['SIGNED', 'PRINTED'].includes(contract.status)),
     canOpenCorrectionEdit: Boolean(approvedSalesCorrection),
     activeCorrectionRequest: approvedSalesCorrection ? {
       id: approvedSalesCorrection.id,
@@ -1404,7 +1440,8 @@ export function validateContractAccess(
 export async function approveContract(
   contractId: string,
   userId: string,
-  note?: string
+  note?: string,
+  expectedRevision?: number
 ) {
   const contract = await prisma.salesContract.findUnique({
     where: { id: contractId }
@@ -1418,19 +1455,32 @@ export async function approveContract(
     throw new Error('Contract cannot be approved in current status');
   }
 
+  if (isOrdinaryCommercialFlow(contract)) {
+    const actor = await prisma.user.findUnique({ where: { id: userId }, select: { role: true, departmentId: true } });
+    if (!actor || !validateContractAccess(contract, actor)) throw new Error('Access denied');
+    return prisma.$transaction(async tx => {
+      const updated = await approveOrdinarySales(tx, contractId, userId, note, expectedRevision);
+      await provisionApprovedSalesContractCustomer(tx, { contractId, approvedAt: new Date(), actorId: userId });
+      return updated;
+    });
+  }
+
   if (contract.status !== 'DRAFT' && contract.status !== 'PENDING_APPROVAL') {
     throw new Error('Contract cannot be approved in current status');
   }
 
   const approvedAt = new Date();
   const updatedContract = await prisma.$transaction(async (tx) => {
+    const currentContract = await lockOrdinaryContract(tx, contractId);
+    if (isOrdinaryCommercialFlow(currentContract)) throw new Error('Contract changed concurrently; reload before saving');
+    if (currentContract.isInactive || !['DRAFT', 'PENDING_APPROVAL'].includes(currentContract.status)) throw new Error('Contract cannot be approved in current status');
     const updated = await tx.salesContract.update({
       where: { id: contractId },
       data: {
         status: 'APPROVED',
         approvedBy: userId,
         signatures: {
-          ...(contract.signatures as any || {}),
+          ...(currentContract.signatures as any || {}),
           approve: {
             by: userId,
             at: approvedAt.toISOString(),

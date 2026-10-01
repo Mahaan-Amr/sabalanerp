@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { assertOrdinaryContractsDispatchEligible } from './ordinaryContractDispatchEligibility';
+import { isOrdinaryCommercialFlow } from './ordinaryContractLifecycle';
 import {
   AccountingDispatchCandidateStatus,
   AccountingDispatchWaybillStatus,
@@ -471,20 +473,44 @@ const normalizeConfirmationPhone = (phoneNumber: string) => {
   return digits;
 };
 
-const resolveRevisionConfirmationPhone = async (tx: Tx, contractIds: string[]) => {
+export const resolveRevisionConfirmationPhone = async (tx: Tx, contractIds: string[]) => {
   const uniqueContractIds = [...new Set(contractIds)];
+  const contracts = await tx.salesContract.findMany({ where: { id: { in: uniqueContractIds } },
+    include: { customer: { include: { phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] }, primaryContact: true } } } });
+  const byId = new Map(contracts.map(contract => [contract.id, contract]));
   const confirmations = await tx.contractPublicConfirmation.findMany({
     where: { contractId: { in: uniqueContractIds }, status: 'CONFIRMED', verifiedAt: { not: null } },
-    select: { contractId: true, phoneNumber: true, verifiedAt: true, createdAt: true },
+    select: { contractId: true, commercialRevision: true, phoneNumber: true, verifiedAt: true, createdAt: true },
     orderBy: [{ verifiedAt: 'desc' }, { createdAt: 'desc' }],
   });
   const latestByContract = new Map<string, string>();
+  const evidence: Array<{ contractId: string; commercialRevision: number | null; source: string; phoneVerified: boolean }> = [];
   for (const confirmation of confirmations) {
-    if (!latestByContract.has(confirmation.contractId)) latestByContract.set(confirmation.contractId, normalizeConfirmationPhone(confirmation.phoneNumber));
+    const contract = byId.get(confirmation.contractId);
+    if (contract && isOrdinaryCommercialFlow(contract) && confirmation.commercialRevision !== contract.commercialRevision) continue;
+    if (!latestByContract.has(confirmation.contractId)) {
+      latestByContract.set(confirmation.contractId, normalizeConfirmationPhone(confirmation.phoneNumber));
+      evidence.push({ contractId: confirmation.contractId, commercialRevision: confirmation.commercialRevision,
+        source: 'CONTRACT_PUBLIC_CONFIRMATION', phoneVerified: true });
+    }
+  }
+  for (const contract of contracts) {
+    if (!isOrdinaryCommercialFlow(contract) || contract.customerAcceptanceMethod !== 'PAPER'
+      || contract.customerAcceptanceRevision !== contract.commercialRevision || latestByContract.has(contract.id)) continue;
+    // A paper signature does not verify a phone. Notification uses the current Customer contact separately.
+    const candidates = [...contract.customer.phoneNumbers.map(phone => phone.number), contract.customer.primaryContact?.mobile];
+    const phone = candidates.filter((value): value is string => Boolean(value)).map(normalizeConfirmationPhone)
+      .find(value => /^09\d{9}$/.test(value));
+    if (phone) {
+      latestByContract.set(contract.id, phone);
+      evidence.push({ contractId: contract.id, commercialRevision: contract.commercialRevision,
+        source: 'CURRENT_CUSTOMER_CONTACT', phoneVerified: false });
+    }
   }
   const phones = [...new Set(latestByContract.values())].filter(Boolean);
   if (phones.length > 1) throw new DispatchAllocationConflictError('Allocation rows have conflicting confirmed buyer notification phones. Split the allocation or reconcile confirmations.');
-  return phones[0] || null;
+  return { confirmationPhone: phones[0] || null,
+    source: evidence.some(item => !item.phoneVerified) ? 'CURRENT_CUSTOMER_CONTACT' : 'CONTRACT_PUBLIC_CONFIRMATION', evidence };
 };
 
 export type CanonicalAllocationLineInput = {
@@ -527,6 +553,7 @@ export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
   const ordinaryLines = input.lines as CanonicalAllocationLineInput[];
   const ids = ordinaryLines.map((line) => required(line.sourceContractItemId, 'sourceContractItemId'));
   const items = await tx.contractItem.findMany({ where: { id: { in: ids } }, include: { contract: true, product: true } });
+  await assertOrdinaryContractsDispatchEligible(tx, items.map(item => item.contractId), DispatchAllocationConflictError);
   const byId = new Map(items.map((item) => [item.id, item]));
   rows = ordinaryLines.map((line) => {
     const item = byId.get(line.sourceContractItemId);
@@ -767,6 +794,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     .map(draft => ({ ...draft, lines: draft.lines.map(ordinaryDraftLine) }));
   if (refreshedDrafts.length !== draftIds.length) throw new DispatchAllocationConflictError('An allocation draft changed during finalization.');
   const lockedItems = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, include: { contract: true } });
+  await assertOrdinaryContractsDispatchEligible(tx, lockedItems.map(item => item.contractId), DispatchAllocationConflictError);
   const lockedItemsById = new Map(lockedItems.map((item) => [item.id, item]));
   for (const line of refreshedDrafts.flatMap((draft) => draft.lines)) {
     const item = lockedItemsById.get(line.sourceContractItemId);
@@ -822,7 +850,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
       queueTurn: { id: draft.queueTurn.id, driverSource: draft.queueTurn.driverSource,
         admissionSnapshot: draft.queueTurn.admissionSnapshot, admissionIntegrityHash: draft.queueTurn.integrityHash },
       revisionNumber, finalizedAt: now,
-      notification: { confirmationPhone, source: 'CONTRACT_PUBLIC_CONFIRMATION', capturedAt: now },
+      notification: { ...confirmationPhone, capturedAt: now },
       lines: draft.lines.map((line) => ({ contractId: line.sourceContractId,
         contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
         quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
@@ -891,6 +919,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     ...transferItemIds.map((id) => `SHIPMENT_PROJECTION:${id}`),
     ...pricingContractIds.map((id) => `APPROVED_PRICING_CONTRACT:${id}`)]);
   await lockPricingContracts(tx, pricingContractIds);
+  await assertOrdinaryContractsDispatchEligible(tx, pricingContractIds, DispatchAllocationConflictError);
   await lockShipmentTruth(tx, transferItemIds);
   await lockQueueTurns(tx, [initialPredecessor.queueTurnId]);
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "accounting_dispatch_candidates"
@@ -976,7 +1005,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     queueTurn: { id: refreshedQueueTurn.id, driverSource: refreshedQueueTurn.driverSource,
       admissionSnapshot: refreshedQueueTurn.admissionSnapshot, admissionIntegrityHash: refreshedQueueTurn.integrityHash },
     revisionNumber, finalizedAt: now,
-    notification: { confirmationPhone, source: 'CONTRACT_PUBLIC_CONFIRMATION', capturedAt: now },
+    notification: { ...confirmationPhone, capturedAt: now },
     lines: rows.map((line) => ({ contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
       quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
@@ -1068,6 +1097,8 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
   });
   if (!candidate) throw new DispatchAllocationValidationError('Accounting dispatch candidate was not found.');
   if (candidate.status !== AccountingDispatchCandidateStatus.PENDING) throw new DispatchAllocationConflictError('Only a pending candidate can be decided.');
+  if (input.action === 'ACCEPT') await assertOrdinaryContractsDispatchEligible(tx,
+    candidate.allocationRevision.lines.map(line => line.sourceContractId), DispatchAllocationConflictError);
   const reason = input.action === 'ACCEPT' ? null : required(input.reason, 'reason');
   const status = input.action === 'ACCEPT' ? AccountingDispatchCandidateStatus.ACCEPTED
     : input.action === 'REJECT' ? AccountingDispatchCandidateStatus.REJECTED : AccountingDispatchCandidateStatus.RETURNED;

@@ -162,6 +162,7 @@ export const buildSalesContractPdfFingerprint = (
     title: contract?.title,
     titlePersian: contract?.titlePersian,
     status: contract?.status,
+    commercialFlowVersion: contract?.commercialFlowVersion,
     type: contract?.type,
     totalAmount: contract?.totalAmount,
     currency: contract?.currency,

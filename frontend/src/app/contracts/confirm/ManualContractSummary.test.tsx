@@ -46,6 +46,11 @@ for (const heading of ['خلاصه قرارداد', 'محصولات قراردا
 }
 assert.ok(!html.includes('تعداد تلاش'));
 assert.ok(!html.includes('نشانی قدیمی'));
+assert.ok(html.includes('امضا شده'), 'untouched legacy contract keeps its historical status label');
+const currentFinalHtml = renderToStaticMarkup(<ManualContractSummary data={{ ...data, commercialFlowVersion: 1 }} />);
+assert.ok(currentFinalHtml.includes('قطعی'), 'current signed status represents both approvals');
+const customerOnlyHtml = renderToStaticMarkup(<ManualContractSummary data={{ ...data, commercialFlowVersion: 1, contractStatus: 'APPROVED' }} />);
+assert.ok(customerOnlyHtml.includes('امضا شده'), 'customer acceptance alone must not display finality');
 
 const confirmationProps = {
   fullManualSummary: true, code: '', error: '', success: '', submitting: false,

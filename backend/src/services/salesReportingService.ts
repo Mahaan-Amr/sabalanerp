@@ -4,11 +4,22 @@ import { rankBiSellers } from './biRecommendationService';
 import * as partnerContracts from '@sabalanerp/partner-sales-contracts';
 import { projectSabalanRevenue } from './partnerSales/reporting/revenue';
 import { readPersistedPartnerEvents } from './partnerSales/events/persisted';
+import { isOrdinaryCommercialFlow } from './ordinaryContractLifecycle';
 
 const DAY = 86_400_000;
 const REALIZED = new Set(['SIGNED', 'PRINTED']);
 const PIPELINE = new Set(['PENDING_APPROVAL', 'APPROVED']);
 const LOST = new Set(['CANCELLED', 'EXPIRED']);
+export const isSalesPipelineContract = (contract: { status: string; commercialFlowVersion?: number; partnerKind?: string | null;
+  partnerCaseId?: string | null; realizedAt?: Date | string | null }) => isOrdinaryCommercialFlow(contract as any)
+  ? !contract.realizedAt && ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED'].includes(contract.status)
+  : PIPELINE.has(contract.status);
+const commercialStatusInfo: Record<string, { label: string; description: string }> = {
+  DRAFT: { label: 'یادداشت', description: 'نسخه فعلی منتظر تأیید فروش و پذیرش مشتری است.' },
+  PENDING_APPROVAL: { label: 'پیش نویس', description: 'فروش تأیید کرده و پذیرش مشتری باقی مانده است.' },
+  APPROVED: { label: 'امضا شده', description: 'مشتری پذیرفته و تأیید فروش باقی مانده است.' },
+  SIGNED: { label: 'قطعی', description: 'هر دو تأیید برای نسخه فعلی موجود است؛ تحقق فروش با اولین رکورد مالی ثبت می‌شود.' },
+};
 
 export type SalesReportAccess = {
   userId: string;
@@ -339,6 +350,10 @@ type SalesPipelineContract = {
   totalAmount: unknown;
   createdAt: Date | string;
   responsibleSellerId: string;
+  commercialFlowVersion?: number;
+  realizedAt?: Date | string | null;
+  partnerKind?: string | null;
+  partnerCaseId?: string | null;
 };
 
 export const buildSalesPipelineHeadline = ({
@@ -353,7 +368,7 @@ export const buildSalesPipelineHeadline = ({
   to: Date;
 }) => {
   const activeContracts = contracts.filter((contract) =>
-    PIPELINE.has(contract.status)
+    isSalesPipelineContract(contract)
     && (!sellerId || contract.responsibleSellerId === sellerId));
   const createdInPeriod = activeContracts.filter((contract) =>
     inRange(contract.createdAt, from, to));
@@ -478,7 +493,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const { originalRealized, adjustments, grossRealized, adjustmentAmount, netRealized, realizedContractIds } = headline;
   const previousNet = previousEvents.reduce((sum, event) => sum + n(event.amount), 0);
 
-  const pipelineContracts = metricContracts.filter((contract) => PIPELINE.has(contract.status) && inRange(contract.createdAt, period.from, period.to) && (!scope.sellerId || contract.responsibleSellerId === scope.sellerId));
+  const pipelineContracts = metricContracts.filter((contract) => isSalesPipelineContract(contract) && inRange(contract.createdAt, period.from, period.to) && (!scope.sellerId || contract.responsibleSellerId === scope.sellerId));
   const lostContracts = metricContracts.filter((contract) => LOST.has(contract.status) && inRange(contract.lostAt || contract.updatedAt, period.from, period.to) && (!scope.sellerId || contract.responsibleSellerId === scope.sellerId));
   const createdContracts = metricContracts.filter((contract) => inRange(contract.createdAt, period.from, period.to) && (!scope.sellerId || contract.createdBy === scope.sellerId));
   const successRate = headline.successRate;
@@ -503,13 +518,19 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   });
   const trend = Array.from(trendMap.values()).reverse(); // oldest on the right in RTL charts
 
-  const statusDistribution = Object.entries(statusInfo).map(([status, info]) => {
-    const rows = metricContracts.filter((contract) => contract.status === status && (
-      REALIZED.has(status) ? inRange(contract.realizedAt || contract.signedAt || contract.createdAt, period.from, period.to)
-        : LOST.has(status) ? inRange(contract.lostAt || contract.updatedAt, period.from, period.to)
-          : inRange(contract.createdAt, period.from, period.to)
-    ));
-    return { status, ...info, count: rows.length, value: rows.reduce((sum, row) => sum + n(row.totalAmount), 0) };
+  const statusDistribution = Object.entries(statusInfo).flatMap(([status, info]) => {
+    const groups = [false, true].map(ordinary => {
+      const rows = metricContracts.filter(contract => isOrdinaryCommercialFlow(contract) === ordinary
+        && contract.status === status && (
+          !ordinary && REALIZED.has(status) ? inRange(contract.realizedAt || contract.signedAt || contract.createdAt, period.from, period.to)
+            : LOST.has(status) ? inRange(contract.lostAt || contract.updatedAt, period.from, period.to)
+              : inRange(contract.createdAt, period.from, period.to)
+        ));
+      const presentation = ordinary ? commercialStatusInfo[status] || info : info;
+      return { status, ...info, ...presentation, commercialFlowVersion: ordinary ? 1 : 0,
+        count: rows.length, value: rows.reduce((sum, row) => sum + n(row.totalAmount), 0) };
+    });
+    return groups.filter(group => group.count > 0);
   });
 
   const receivedStatuses = new Set(['RECEIVED', 'RECONCILED']);
@@ -600,7 +621,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const exitedLoadings = loadings.filter((loading) => loading.securityVehicleMovements.some((movement: any) => movement.direction === 'EXIT' && !movement.voidedAt));
   const now = new Date();
   const stalledBefore = new Date(now.getTime() - 30 * DAY);
-  const activePipelineContracts = metricContracts.filter((contract) => PIPELINE.has(contract.status));
+  const activePipelineContracts = metricContracts.filter((contract) => isSalesPipelineContract(contract));
   const stalledPipelineContracts = activePipelineContracts.filter((contract) => contract.createdAt < stalledBefore);
   const overdueReceivableRows = receivables.filter((row) =>
     n(row.remainingAmount) > 0
@@ -648,7 +669,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       if (!sellerMap.has(id)) sellerMap.set(id, { id, name: userName(contract.responsibleSeller), createdCount: 0, createdValue: 0, pipelineCount: 0, pipelineValue: 0, stalledPipelineCount: 0, overdueFollowUpCount: 0, realizedCount: 0, realizedValue: 0, adjustments: 0, previousNetRealized: 0, lostCount: 0, lostValue: 0, discountAmount: 0 });
       const row = sellerMap.get(id);
       if (inRange(contract.createdAt, period.from, period.to) && contract.createdBy === id) { row.createdCount += 1; row.createdValue += n(contract.totalAmount); }
-      if (PIPELINE.has(contract.status)) {
+      if (isSalesPipelineContract(contract)) {
         row.pipelineCount += 1;
         row.pipelineValue += n(contract.totalAmount);
         if (contract.createdAt < stalledBefore) row.stalledPipelineCount += 1;
@@ -673,7 +694,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
 
   const details = metricContracts.filter((contract) => {
     const relevantEvent = contract.reportingEvents.some((event) => inRange(event.effectiveAt, period.from, period.to) && (!scope.sellerId || event.sellerId === scope.sellerId));
-    return PIPELINE.has(contract.status) || relevantEvent || inRange(contract.createdAt, period.from, period.to) || inRange(contract.lostAt, period.from, period.to);
+    return isSalesPipelineContract(contract) || relevantEvent || inRange(contract.createdAt, period.from, period.to) || inRange(contract.lostAt, period.from, period.to);
   }).map((contract) => ({
     id: contract.id,
     customerId: contract.customerId,
@@ -684,8 +705,9 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     customer: customerName(contract.customer),
     project: contract.wonCrmPotentialProject?.title || (contract.contractData as any)?.project?.address || 'ثبت نشده',
     status: contract.status,
-    statusLabel: statusInfo[contract.status]?.label || contract.status,
-    statusDescription: statusInfo[contract.status]?.description || '',
+    commercialFlowVersion: contract.commercialFlowVersion,
+    statusLabel: (isOrdinaryCommercialFlow(contract) ? commercialStatusInfo[contract.status]?.label : undefined) || statusInfo[contract.status]?.label || contract.status,
+    statusDescription: (isOrdinaryCommercialFlow(contract) ? commercialStatusInfo[contract.status]?.description : undefined) || statusInfo[contract.status]?.description || '',
     amount: n(contract.totalAmount),
     responsibleSeller: userName(contract.responsibleSeller),
     realizedSeller: contract.realizedSeller ? userName(contract.realizedSeller) : contract.realizedAt ? 'تخصیص‌نیافته قدیمی' : '—',

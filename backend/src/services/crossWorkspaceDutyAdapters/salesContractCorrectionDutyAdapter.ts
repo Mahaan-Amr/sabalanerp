@@ -832,7 +832,7 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
 
 export const completeSalesCorrectionEditDuty = async (
   database: Parameters<CrossWorkspaceDutySourceAdapter['respond']>[0],
-  input: { contractId: string; actorUserId: string; note: string | null; policyVersion: number; now: Date },
+  input: { contractId: string; actorUserId: string; note: string | null; policyVersion: number; now: Date; commercialFinality?: boolean; periodExpired?: boolean },
 ) => {
   const correction = await database.accountingCorrectionRequest.findFirst({
     where: { contractId: input.contractId, status: 'APPROVED_FOR_SALES_EDIT' },
@@ -856,9 +856,17 @@ export const completeSalesCorrectionEditDuty = async (
   salesDuty = await database.crossWorkspaceDuty.findUnique({ where: { id: salesDuty.id } });
   if (!salesDuty || salesDuty.status !== 'OPEN') throw new Error('DUTY_SALES_EDIT_ALREADY_CONSUMED');
   const actorIsAdmin = await isSystemAdmin(database, input.actorUserId);
-  if (salesDuty.currentAssigneeUserId !== input.actorUserId && !actorIsAdmin) throw new Error('ASSIGNEE_CHANGED');
-  const expiredAdminOverride = salesDuty.dueAt < input.now && actorIsAdmin;
-  if (salesDuty.dueAt < input.now && !actorIsAdmin) throw new Error('DUTY_SALES_EDIT_EXPIRED');
+  const commercialClosing = input.commercialFinality || input.periodExpired;
+  if (commercialClosing) {
+    const contract = await database.salesContract.findUnique({ where: { id: input.contractId } });
+    if (!contract || contract.commercialFlowVersion !== 1 || contract.partnerKind || contract.partnerCaseId) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
+    if (input.commercialFinality && (contract.status !== 'SIGNED' || contract.salesApprovalRevision !== contract.commercialRevision
+      || contract.customerAcceptanceRevision !== contract.commercialRevision)) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
+    if (input.periodExpired && salesDuty.dueAt >= input.now) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
+  }
+  if (!commercialClosing && salesDuty.currentAssigneeUserId !== input.actorUserId && !actorIsAdmin) throw new Error('ASSIGNEE_CHANGED');
+  const expiredAdminOverride = !commercialClosing && salesDuty.dueAt < input.now && actorIsAdmin;
+  if (!commercialClosing && salesDuty.dueAt < input.now && !actorIsAdmin) throw new Error('DUTY_SALES_EDIT_EXPIRED');
   if (expiredAdminOverride) await database.crossWorkspaceDutyAuditVersion.create({ data: {
     dutyId: salesDuty.id, version: await nextAuditVersion(database, salesDuty.id), eventCode: 'ADMIN_OVERRIDE_EXPIRED_DUTY',
     actorUserId: input.actorUserId, sourceVersion: salesDuty.sourceVersion, envelopeVersion: salesDuty.envelopeVersion,
@@ -876,7 +884,7 @@ export const completeSalesCorrectionEditDuty = async (
   const claimed = await database.crossWorkspaceDuty.updateMany({
     where: { id: salesDuty.id, status: 'OPEN' },
     data: {
-      status: 'COMPLETED', structuredResultJson: asJson({ actionCode: 'SALES_EDIT_SAVED', reason: input.note }),
+      status: 'COMPLETED', structuredResultJson: asJson({ actionCode: input.periodExpired ? 'EDIT_PERIOD_EXPIRED' : input.commercialFinality ? 'COMMERCIAL_FINALITY' : 'SALES_EDIT_SAVED', reason: input.note }),
       respondedAt: input.now, respondedByUserId: input.actorUserId,
     },
   });
@@ -886,10 +894,10 @@ export const completeSalesCorrectionEditDuty = async (
     data: { endedAt: input.now, endReason: 'COMPLETED', changedByUserId: input.actorUserId },
   });
   await database.crossWorkspaceDutyAuditVersion.create({ data: {
-    dutyId: salesDuty.id, version: await nextAuditVersion(database, salesDuty.id), eventCode: 'COMPLETED', actorUserId: input.actorUserId,
+    dutyId: salesDuty.id, version: await nextAuditVersion(database, salesDuty.id), eventCode: input.periodExpired ? 'EDIT_PERIOD_EXPIRED' : 'COMPLETED', actorUserId: input.periodExpired ? null : input.actorUserId,
     sourceVersion: salesDuty.sourceVersion, envelopeVersion: salesDuty.envelopeVersion,
     policyVersion: input.policyVersion, reason: input.note,
-    afterJson: asJson({ status: 'COMPLETED', actionCode: 'SALES_EDIT_SAVED' }),
+    afterJson: asJson({ status: 'COMPLETED', actionCode: input.periodExpired ? 'EDIT_PERIOD_EXPIRED' : input.commercialFinality ? 'COMMERCIAL_FINALITY' : 'SALES_EDIT_SAVED' }),
   } });
   const financialCandidates = correction.recordId ? [] : await database.accountingFinancialRecord.findMany({
     where: { contractId: input.contractId, kind: FinancialRecordKind.INVOICE_CANDIDATE },
@@ -909,7 +917,7 @@ export const completeSalesCorrectionEditDuty = async (
     },
   });
   await database.accountingAuditLog.create({ data: {
-    action: 'SALES_CORRECTION_SAVED', actorId: input.actorUserId, contractId: input.contractId,
+    action: input.periodExpired ? 'SALES_CORRECTION_PERIOD_EXPIRED' : 'SALES_CORRECTION_SAVED', actorId: input.actorUserId, contractId: input.contractId,
     entityType: 'AccountingCorrectionRequest', entityId: correction.id,
     beforeState: asJson(correction), afterState: asJson(updatedCorrection), note: input.note,
     createdAt: input.now,
@@ -931,7 +939,7 @@ export const completeSalesCorrectionEditDuty = async (
       deduplicationKey: `sales-contract-correction-edited:${correction.id}:${updatedCorrection.dutySourceVersion}:${feature}`,
       recipientIds,
       recipientGroups: { DIRECT_USER: recipientIds },
-      actorId: input.actorUserId,
+      actorId: input.periodExpired ? null : input.actorUserId,
       workspace: 'accounting',
       feature,
       resourceType: 'sales-contract',

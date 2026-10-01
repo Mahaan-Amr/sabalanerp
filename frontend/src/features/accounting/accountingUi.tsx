@@ -46,6 +46,9 @@ export type AccountingContractRow = {
     economicCode?: string;
   };
   status: string;
+  commercialFlowVersion?: number;
+  commercialRevision?: number;
+  capabilities?: { canRecordPaperSignature?: boolean; canActFinancially?: boolean };
   isInactive?: boolean;
   inactiveAt?: string | null;
   inactiveReason?: string | null;

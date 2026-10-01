@@ -1,3 +1,5 @@
+import { contractStatusLabel } from './contractStatusLabel';
+
 type AccountingContractPrintData = {
   contract: any;
   sourceSnapshot?: any;
@@ -272,7 +274,7 @@ export function renderAccountingContractHtml(data: AccountingContractPrintData):
       </header>
 
       <section class="summary">
-        ${summaryItem('وضعیت قرارداد', label(contract.status))}
+        ${summaryItem('وضعیت قرارداد', contractStatusLabel(contract))}
         ${summaryItem('وضعیت حسابداری', label(accounting.sourceStatus))}
         ${summaryItem('صورتحساب', label(accounting.invoiceStatus))}
         ${summaryItem('دریافتی', label(accounting.receivableStatus))}

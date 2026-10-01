@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { assertOrdinaryContractsDispatchEligible, ordinaryDispatchSourcesEligible } from './ordinaryContractDispatchEligibility';
 import { AccountingDispatchWaybillStatus, DispatchBuyerSmsStatus, GuardDriverQueueTurnStatus, Prisma, PrismaClient } from '@prisma/client';
 import { refreshProjectionContracts } from './dispatchAllocation';
 import { appendQueueEvent } from './guardDriverQueue';
@@ -69,8 +70,10 @@ export class PhysicalGateExitService {
     const authorizations = await this.prisma.dispatchExitAuthorization.findMany({ where: {
       status: 'ACTIVE', validUntil: { gt: at }, waybill: { status: AccountingDispatchWaybillStatus.ISSUED,
         candidate: { allocationRevision: { sealedAt: { not: null }, queueTurn: { status: GuardDriverQueueTurnStatus.LOADING_FINALIZED } } } },
-    }, include: { waybill: { include: { candidate: { include: { allocationRevision: { include: { queueTurn: true } } } } } } }, orderBy: [{ issuedAt: 'asc' }, { id: 'asc' }] });
-    return authorizations.map((authorization) => ({ id: authorization.id, waybillId: authorization.waybillId,
+    }, include: { waybill: { include: { candidate: { include: { allocationRevision: { include: { queueTurn: true, lines: true } } } } } } }, orderBy: [{ issuedAt: 'asc' }, { id: 'asc' }] });
+    const eligible = await Promise.all(authorizations.map(authorization => ordinaryDispatchSourcesEligible(this.prisma,
+      authorization.waybill.candidate.allocationRevision.lines.map(line => line.sourceContractId))));
+    return authorizations.filter((_authorization, index) => eligible[index]).map((authorization) => ({ id: authorization.id, waybillId: authorization.waybillId,
       dispatchNumber: authorization.waybill.number.toString(), validUntil: authorization.validUntil,
       method: authorization.method, queueTurnId: authorization.waybill.candidate.allocationRevision.queueTurnId,
       admissionSnapshot: authorization.waybill.candidate.allocationRevision.queueTurn.admissionSnapshot }));
@@ -110,6 +113,7 @@ export class PhysicalGateExitService {
       }
       const waybill = authorization.waybill;
       const revision = waybill.candidate.allocationRevision;
+      await assertOrdinaryContractsDispatchEligible(tx, revision.lines.map(line => line.sourceContractId), PhysicalGateExitConflictError);
       const turn = revision.queueTurn;
       if (waybill.status !== AccountingDispatchWaybillStatus.ISSUED || waybill.integrityHash !== authorization.waybillIntegrityHash) {
         throw new PhysicalGateExitConflictError('The authorized waybill snapshot is no longer valid.');

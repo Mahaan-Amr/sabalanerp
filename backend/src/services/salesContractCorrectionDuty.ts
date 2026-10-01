@@ -1,6 +1,7 @@
 import { AccountingRecordStatus, CorrectionRequestCategory, CorrectionRequestPriority, FinancialRecordKind, Prisma, type PrismaClient } from '@prisma/client';
 import { synchronizeCrossWorkspaceDutySource } from './crossWorkspaceDutyModule';
 import { completeSalesCorrectionEditDuty } from './crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter';
+import { isOrdinaryCommercialFlow, isCommerciallyFinal, lockOrdinaryContract } from './ordinaryContractLifecycle';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 
@@ -70,12 +71,10 @@ export const requestAccountingSalesContractCorrection = (
   const reason = input.reason.trim();
   if (reason.length < 3) throw new Error('DUTY_REASON_REQUIRED');
   if (!input.idempotencyKey.trim()) throw new Error('DUTY_IDEMPOTENCY_KEY_REQUIRED');
-  const contract = await tx.salesContract.findUnique({
-    where: { id: input.contractId },
-    select: { id: true, isInactive: true, responsibleSellerId: true },
-  });
+  const contract = await lockOrdinaryContract(tx, input.contractId);
   if (!contract) throw new Error('CONTRACT_NOT_FOUND');
   if (contract.isInactive) throw new Error('CONTRACT_INACTIVE');
+  if (isOrdinaryCommercialFlow(contract) && !isCommerciallyFinal(contract)) throw new Error('قرارداد هنوز قطعی نشده است.');
   if (!contract.responsibleSellerId) throw new Error('RESPONSIBLE_SELLER_REQUIRED');
 
   const replaySource = await tx.accountingCorrectionRequest.findUnique({
@@ -279,13 +278,15 @@ export const requestSalesContractCorrection = (
 
 export const completeSalesContractCorrectionEdit = (
   database: Database,
-  input: { contractId: string; actorUserId: string; note?: string | null; policyVersion: number; now?: Date },
+  input: { contractId: string; actorUserId: string; note?: string | null; policyVersion: number; now?: Date; commercialFinality?: boolean; periodExpired?: boolean },
 ) => inTransaction(database, (tx) => completeSalesCorrectionEditDuty(tx, {
   contractId: input.contractId,
   actorUserId: input.actorUserId,
   note: input.note?.trim() || null,
   policyVersion: input.policyVersion,
   now: input.now ?? new Date(),
+  commercialFinality: input.commercialFinality,
+  periodExpired: input.periodExpired,
 }));
 
 const correctionStage = (status: string) => ({

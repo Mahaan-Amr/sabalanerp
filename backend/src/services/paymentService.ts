@@ -1,3 +1,4 @@
+import { mutateLegacyCommercialContract } from './ordinaryContractLifecycle';
 import { prisma } from '../lib/prisma';
 // Payment service
 // Handles payment business logic
@@ -109,7 +110,7 @@ export async function createPayment(
   }
 
   // Create payment
-  const payment = await prisma.payment.create({
+  const payment = await mutateLegacyCommercialContract(prisma, contractId, async tx => tx.payment.create({
     data: {
       contractId,
       paymentMethod: data.paymentMethod,
@@ -137,7 +138,7 @@ export async function createPayment(
         orderBy: { installmentNumber: 'asc' }
       }
     }
-  });
+  }));
 
   return payment;
 }

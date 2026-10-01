@@ -20,6 +20,7 @@ const tx: any = {
     update: async ({ data }: any) => { Object.assign(contract, data); updates.push(data); return { ...contract }; }
   },
   salesReportingEvent: {
+    findUnique: async ({ where }: any) => events.find(event => event.sourceKey === where.sourceKey) || null,
     upsert: async ({ where, create }: any) => {
       const existing = events.find((event) => event.sourceKey === where.sourceKey);
       if (existing) return existing;

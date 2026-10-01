@@ -12,6 +12,11 @@ import {
 
 process.env.DATABASE_URL ??= 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public';
 
+// Shift the fixed scenario by whole weeks so real database timestamps precede its simulated clock.
+const scenarioEpoch = Date.UTC(2026, 7, 16, 8);
+const scenarioShift = (Math.ceil((Date.now() - scenarioEpoch) / (7 * 86400000)) + 1) * 7 * 86400000;
+const fixtureTime = (iso: string) => new Date(Date.parse(iso) + scenarioShift);
+
 const rollback = new Error('ROLLBACK_SALES_CONTRACT_CORRECTION_DUTY_TEST');
 
 test('Accounting creates a manager-approved correction for the Responsible Seller and verifies the result', async () => {
@@ -104,7 +109,7 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         priority: 'HIGH',
         reason: 'مبلغ قرارداد باید اصلاح شود.',
         idempotencyKey: `${suffix}:request`,
-        now: new Date('2026-08-16T08:00:00.000Z'),
+        now: fixtureTime('2026-08-16T08:00:00.000Z'),
       });
       assert.deepEqual({
         status: created.correction.status,
@@ -118,7 +123,7 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
       const joined = await requestAccountingSalesContractCorrection(tx, {
         contractId: contract.id, actorUserId: initiator.id, category: 'TAX_INFO', priority: 'MEDIUM',
         reason: 'یافته تکمیلی پیش از تصمیم مدیر.', idempotencyKey: `${suffix}:joined`,
-        now: new Date('2026-08-16T08:01:00.000Z'),
+        now: fixtureTime('2026-08-16T08:01:00.000Z'),
       });
       assert.equal(joined.joined, true);
 
@@ -130,6 +135,7 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         expectedEnvelopeVersion: 1,
         reason: null,
         policyVersion: 2,
+        now: fixtureTime('2026-08-22T08:02:00.000Z'),
       });
       assert.equal(approved.successor.currentAssigneeUserId, seller.id);
       assert.equal(approved.successor.sourceActionCode, 'SALES_EDIT_CONTRACT_CORRECTION');
@@ -137,7 +143,7 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         dutyId: approved.successor.id,
         actorUserId: seller.id,
         workspaceCode: 'SALES',
-        now: new Date('2026-08-20T08:00:00.000Z'),
+        now: fixtureTime('2026-08-23T08:00:00.000Z'),
       });
       assert.equal(sellerEditDuty.destinationHref, `/dashboard/sales/contracts/${contract.id}/edit`);
       assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
@@ -147,7 +153,7 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         dutyId: created.duty.id,
         actorUserId: initiator.id,
         workspaceCode: 'ACCOUNTING',
-        now: new Date('2026-08-20T08:00:00.000Z'),
+        now: fixtureTime('2026-08-23T08:00:00.000Z'),
       });
       assert.equal(completedManagerDecision.status, 'COMPLETED');
       assert.deepEqual(completedManagerDecision.allowedActionCodes, []);
@@ -155,14 +161,14 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
       const queued = await requestAccountingSalesContractCorrection(tx, {
         contractId: contract.id, actorUserId: initiator.id, category: 'DELIVERY_SCHEDULE', priority: 'HIGH',
         reason: 'یافته جدید پس از شروع ویرایش باید در زنجیره بعدی باز شود.',
-        idempotencyKey: `${suffix}:queued`, now: new Date('2026-08-24T07:30:00.000Z'),
+        idempotencyKey: `${suffix}:queued`, now: fixtureTime('2026-08-24T07:30:00.000Z'),
       });
       assert.equal(queued.queuedSuccessor, true);
 
       await reassignCrossWorkspaceDuty(tx, {
         dutyId: approved.successor.id, actorUserId: salesManager.id, targetUserId: delegateSeller.id,
         expectedAssigneeUserId: seller.id, reason: 'بازتخصیص ممیزی‌شده توسط مدیر فروش.', policyVersion: 2,
-        now: new Date('2026-08-24T07:45:00.000Z'),
+        now: fixtureTime('2026-08-24T07:45:00.000Z'),
       });
 
       const edited = await completeSalesContractCorrectionEdit(tx, {
@@ -170,7 +176,7 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         actorUserId: delegateSeller.id,
         note: 'اصلاح فروش ثبت شد.',
         policyVersion: 2,
-        now: new Date('2026-08-24T08:00:00.000Z'),
+        now: fixtureTime('2026-08-24T08:00:00.000Z'),
       });
       assert.equal(edited.successor.currentAssigneeUserId, null);
       assert.equal(edited.successor.sourceActionCode, 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION');
@@ -200,7 +206,7 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         expectedEnvelopeVersion: 1,
         reason: 'تغییرات با درخواست حسابداری منطبق است.',
         policyVersion: 2,
-        now: new Date('2026-08-24T09:00:00.000Z'),
+        now: fixtureTime('2026-08-24T09:00:00.000Z'),
       });
       assert.equal(verified.correction.status, 'RESOLVED');
       assert.equal(verified.successor?.sourceActionCode, 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION');
@@ -236,7 +242,7 @@ test('ADMIN may execute every correction stage through the audited workflow with
         content: 'Contract content', customerId: customer.id, departmentId: department.id,
         createdBy: seller.id, responsibleSellerId: seller.id,
       } });
-      const createdAt = new Date('2026-08-22T10:00:00.000Z');
+      const createdAt = fixtureTime('2026-08-22T10:00:00.000Z');
       const created = await requestAccountingSalesContractCorrection(tx, {
         contractId: contract.id, actorUserId: admin.id, category: 'OTHER', priority: 'URGENT',
         reason: 'مدیر سیستم زنجیره رسمی اصلاح را آغاز می‌کند.', idempotencyKey: `${suffix}:request`, now: createdAt,
@@ -252,7 +258,7 @@ test('ADMIN may execute every correction stage through the audited workflow with
       } });
       const assignedDetail = await getCrossWorkspaceDutyDetail(tx, {
         dutyId: created.duty.id, actorUserId: admin.id, workspaceCode: 'ACCOUNTING',
-        now: new Date('2026-08-22T10:01:30.000Z'),
+        now: fixtureTime('2026-08-22T10:01:30.000Z'),
       });
       assert.equal(assignedDetail.access, 'SHARED');
       assert.equal(assignedDetail.responseRequiresReason, false);
@@ -260,7 +266,7 @@ test('ADMIN may execute every correction stage through the audited workflow with
         dutyId: created.duty.id, actorUserId: admin.id, actionCode: 'APPROVE',
         expectedSourceVersion: 1, expectedEnvelopeVersion: 1,
         reason: null, policyVersion: 2,
-        now: new Date('2026-08-22T10:02:00.000Z'),
+        now: fixtureTime('2026-08-22T10:02:00.000Z'),
       });
       assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
         dutyId: created.duty.id, eventCode: 'SYSTEM_ADMIN_SELF_DECISION', actorUserId: admin.id,
@@ -268,14 +274,14 @@ test('ADMIN may execute every correction stage through the audited workflow with
       assert.equal(approved.successor.currentAssigneeUserId, seller.id);
       const edited = await completeSalesContractCorrectionEdit(tx, {
         contractId: contract.id, actorUserId: admin.id, note: 'ویرایش با Admin Override ثبت شد.', policyVersion: 2,
-        now: new Date('2026-09-01T10:03:00.000Z'),
+        now: fixtureTime('2026-09-01T10:03:00.000Z'),
       });
       assert.equal(edited.successor.currentAssigneeUserId, null);
       const verified = await respondToCrossWorkspaceDuty(tx, {
         dutyId: edited.successor.id, actorUserId: admin.id, actionCode: 'VERIFY',
         expectedSourceVersion: 3, expectedEnvelopeVersion: 1,
         reason: 'تغییرات توسط مدیر سیستم بازبینی شد.', policyVersion: 2,
-        now: new Date('2026-09-01T10:04:00.000Z'),
+        now: fixtureTime('2026-09-01T10:04:00.000Z'),
       });
       assert.equal(verified.correction.status, 'RESOLVED');
       const actors = await tx.accountingAuditLog.findMany({
@@ -349,7 +355,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
       const summaryBefore = await getCrossWorkspaceDutySummary(tx, {
         actorUserId: processor.id,
         workspaceCode: 'ACCOUNTING',
-        now: new Date('2026-08-16T07:59:00.000Z'),
+        now: fixtureTime('2026-08-16T07:59:00.000Z'),
       });
 
       const created = await requestSalesContractCorrection(tx, {
@@ -359,7 +365,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         priority: 'HIGH',
         reason: 'مبلغ قرارداد نیازمند اصلاح است.',
         idempotencyKey: `${suffix}:request`,
-        now: new Date('2026-08-16T08:00:00.000Z'),
+        now: fixtureTime('2026-08-16T08:00:00.000Z'),
       });
 
       assert.deepEqual({
@@ -378,7 +384,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         actorUserId: processor.id,
         workspaceCode: 'ACCOUNTING',
         view: 'available',
-        now: new Date('2026-08-16T08:02:00.000Z'),
+        now: fixtureTime('2026-08-16T08:02:00.000Z'),
       });
       assert.deepEqual(
         available.filter(({ id }) => id === created.duty.id).map(({ id, access }) => ({ id, access })),
@@ -387,7 +393,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
       const summaryAfter = await getCrossWorkspaceDutySummary(tx, {
         actorUserId: processor.id,
         workspaceCode: 'ACCOUNTING',
-        now: new Date('2026-08-16T08:02:00.000Z'),
+        now: fixtureTime('2026-08-16T08:02:00.000Z'),
       });
       assert.equal(summaryAfter.open, summaryBefore.open);
       assert.equal(summaryAfter.available, summaryBefore.available + 1);
@@ -398,20 +404,20 @@ test('Responsible Seller creates one correction request assigned to an eligible 
       await markCrossWorkspaceDutyAvailableSeen(tx, {
         actorUserId: processor.id,
         workspaceCode: 'ACCOUNTING',
-        seenThrough: new Date('2026-08-24T08:02:00.000Z'),
-        now: new Date('2026-08-24T08:02:00.000Z'),
+        seenThrough: fixtureTime('2026-08-24T08:02:00.000Z'),
+        now: fixtureTime('2026-08-24T08:02:00.000Z'),
       });
       assert.equal((await getCrossWorkspaceDutySummary(tx, {
         actorUserId: processor.id,
         workspaceCode: 'ACCOUNTING',
-        now: new Date('2026-08-24T08:02:30.000Z'),
+        now: fixtureTime('2026-08-24T08:02:30.000Z'),
       })).availableUnseen, 0);
 
       const claimed = await claimCrossWorkspaceDuty(tx, {
         dutyId: created.duty.id,
         actorUserId: processor.id,
         policyVersion: 1,
-        now: new Date('2026-08-16T08:03:00.000Z'),
+        now: fixtureTime('2026-08-16T08:03:00.000Z'),
       });
       assert.equal(claimed.currentAssigneeUserId, processor.id);
 
@@ -419,12 +425,12 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         dutyId: created.duty.id,
         actorUserId: processor.id,
         workspaceCode: 'ACCOUNTING',
-        now: new Date('2026-08-16T08:05:00.000Z'),
+        now: fixtureTime('2026-08-16T08:05:00.000Z'),
       });
       assert.deepEqual(detail.fields, {
         title: `اصلاح قرارداد ${contract.contractNumber}`,
         description: 'مبلغ قرارداد نیازمند اصلاح است.',
-        dueAt: '2026-08-17T08:00:00.000Z',
+        dueAt: fixtureTime('2026-08-17T08:00:00.000Z').toISOString(),
       });
       const reconciliation = await reconcileSalesContractCorrectionDuties(tx, { sourceIds: [created.correction.id] });
       assert.deepEqual(reconciliation, {
@@ -440,7 +446,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         priority: 'HIGH',
         reason: 'مبلغ قرارداد نیازمند اصلاح است.',
         idempotencyKey: `${suffix}:request`,
-        now: new Date('2026-08-16T08:01:00.000Z'),
+        now: fixtureTime('2026-08-16T08:01:00.000Z'),
       });
       assert.deepEqual({ correctionId: replay.correction.id, dutyId: replay.duty.id, replayed: replay.replayed }, {
         correctionId: created.correction.id,
@@ -455,7 +461,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         priority: 'HIGH',
         reason: 'درخواست فعال تکراری',
         idempotencyKey: `${suffix}:duplicate`,
-        now: new Date('2026-08-16T08:10:00.000Z'),
+        now: fixtureTime('2026-08-16T08:10:00.000Z'),
       }), /DUTY_ACTIVE_CHAIN_CONFLICT/);
 
       const forwarded = await respondToCrossWorkspaceDuty(tx, {
@@ -466,7 +472,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         expectedEnvelopeVersion: 1,
         reason: 'نیازمند تصمیم مدیر حسابداری است.',
         policyVersion: 1,
-        now: new Date('2026-08-16T09:00:00.000Z'),
+        now: fixtureTime('2026-08-16T09:00:00.000Z'),
       });
       assert.deepEqual({
         sourceStatus: forwarded.correction.status,
@@ -490,7 +496,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         expectedEnvelopeVersion: 1,
         reason: null,
         policyVersion: 1,
-        now: new Date('2026-08-16T10:00:00.000Z'),
+        now: fixtureTime('2026-08-16T10:00:00.000Z'),
       });
       assert.deepEqual({
         sourceStatus: approved.correction.status,
@@ -503,7 +509,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         predecessorStatus: 'COMPLETED',
         dutyAction: 'SALES_EDIT_CONTRACT_CORRECTION',
         assignee: seller.id,
-        dueAt: '2026-08-19T10:00:00.000Z',
+        dueAt: fixtureTime('2026-08-19T10:00:00.000Z').toISOString(),
       });
 
       const edited = await completeSalesContractCorrectionEdit(tx, {
@@ -511,7 +517,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         actorUserId: seller.id,
         note: 'مبلغ قرارداد اصلاح شد.',
         policyVersion: 1,
-        now: new Date('2026-08-17T08:00:00.000Z'),
+        now: fixtureTime('2026-08-17T08:00:00.000Z'),
       });
       assert.deepEqual({
         sourceStatus: edited.correction.status,
@@ -530,7 +536,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         actorUserId: seller.id,
         note: 'ذخیره دوم نباید مجاز باشد.',
         policyVersion: 1,
-        now: new Date('2026-08-17T08:05:00.000Z'),
+        now: fixtureTime('2026-08-17T08:05:00.000Z'),
       }), /DUTY_SALES_EDIT_ALREADY_CONSUMED/);
 
       await assert.rejects(respondToCrossWorkspaceDuty(tx, {
@@ -541,7 +547,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         expectedEnvelopeVersion: 1,
         reason: null,
         policyVersion: 1,
-        now: new Date('2026-08-17T09:00:00.000Z'),
+        now: fixtureTime('2026-08-17T09:00:00.000Z'),
       }), /DUTY_ASSIGNEE_INELIGIBLE|SEPARATION_OF_DUTIES_CONFLICT/);
 
       const returned = await respondToCrossWorkspaceDuty(tx, {
@@ -552,7 +558,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         expectedEnvelopeVersion: 1,
         reason: 'اصلاح تکمیلی به تصمیم مدیر نیاز دارد.',
         policyVersion: 1,
-        now: new Date('2026-08-17T09:05:00.000Z'),
+        now: fixtureTime('2026-08-17T09:05:00.000Z'),
       });
       assert.deepEqual({
         sourceStatus: returned.correction.status,
@@ -572,7 +578,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         expectedEnvelopeVersion: 1,
         reason: null,
         policyVersion: 1,
-        now: new Date('2026-08-17T09:10:00.000Z'),
+        now: fixtureTime('2026-08-17T09:10:00.000Z'),
       });
       assert.equal(reapproved.successor.sourceVersion, 6);
       const reedited = await completeSalesContractCorrectionEdit(tx, {
@@ -580,7 +586,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         actorUserId: seller.id,
         note: 'اصلاح تکمیلی ذخیره شد.',
         policyVersion: 1,
-        now: new Date('2026-08-17T09:20:00.000Z'),
+        now: fixtureTime('2026-08-17T09:20:00.000Z'),
       });
       assert.equal(reedited.successor.sourceVersion, 7);
       const verified = await respondToCrossWorkspaceDuty(tx, {
@@ -591,7 +597,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         expectedEnvelopeVersion: 1,
         reason: 'اصلاح قرارداد بررسی و تأیید شد.',
         policyVersion: 1,
-        now: new Date('2026-08-17T09:25:00.000Z'),
+        now: fixtureTime('2026-08-17T09:25:00.000Z'),
       });
       assert.deepEqual({
         sourceStatus: verified.correction.status,
@@ -654,7 +660,7 @@ test('competing Seller requests create exactly one active correction chain', asy
       priority: 'MEDIUM',
       reason: 'تنها یک زنجیره فعال باید ایجاد شود.',
       idempotencyKey,
-      now: new Date('2026-08-16T08:00:00.000Z'),
+      now: fixtureTime('2026-08-16T08:00:00.000Z'),
     });
     const outcomes = await Promise.allSettled([
       request(first, `${suffix}:first`),

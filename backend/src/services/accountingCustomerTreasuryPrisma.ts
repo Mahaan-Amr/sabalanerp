@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
+
+const lockSettlementContracts = async (tx: Prisma.TransactionClient, openItemIds: string[]) => {
+  const items = await tx.accountingCustomerOpenItem.findMany({ where: { id: { in: openItemIds } }, select: { contractId: true } });
+  const ids = [...new Set(items.map(item => item.contractId))].sort();
+  if (ids.length) await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
+};
 import * as XLSX from 'xlsx';
 import {
   AccountingCustomerTreasuryError,
@@ -766,6 +772,7 @@ export const allocateCustomerReceiptPrisma = async (database: PrismaClient, inpu
     allocations: { where: { reversesId: null, reversedById: null }, include: { lines: true } }, profile: true,
   } });
   if (!receipt || receipt.kind !== 'CUSTOMER_RECEIPT' || !receipt.profile) throw new AccountingCustomerTreasuryError('RECEIPT_NOT_FOUND', 'دریافت مشتری پیدا نشد.', 404);
+  await lockSettlementContracts(tx, input.allocations.map(item => item.openItemId));
   const payload = { treasuryTransactionId: receipt.id,
     allocations: [...input.allocations].map((item) => ({ openItemId: item.openItemId, amountRials: item.amountRials }))
       .sort((left, right) => left.openItemId.localeCompare(right.openItemId)),
@@ -823,6 +830,7 @@ export const reverseCustomerAllocationPrisma = async (database: PrismaClient, in
   } });
   if (!original || original.reversesId || !original.transaction.profile) throw new AccountingCustomerTreasuryError('ALLOCATION_NOT_FOUND', 'تخصیص پیدا نشد.', 404);
   if (original.reversedBy) return original.reversedBy;
+  await lockSettlementContracts(tx, original.lines.map(line => line.openItemId));
   const total = original.lines.reduce((sum, line) => sum + toBigInt(line.amountRials), 0n);
   const payload = { reversesAllocationId: original.id, reason: input.reason.trim(), originalLines: original.lines.map((line) => ({ openItemId: line.openItemId, amountRials: line.amountRials.toString() })) };
   const evidence = lineEvidence('SETTLEMENT_ALLOCATION_REVERSAL', original.id, 1, payload);
@@ -1135,6 +1143,10 @@ export const transitionReceivableCheckPrisma = async (database: PrismaClient, in
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.checkId}))`;
   const instrument = await tx.accountingCheckInstrument.findUnique({ where: { id: input.checkId }, include: { events: true } });
   if (!instrument) throw new AccountingCustomerTreasuryError('CHECK_NOT_FOUND', 'چک دریافتنی پیدا نشد.', 404);
+  const appliedCheck = await tx.accountingSettlementAllocationLine.findMany({ where: { allocation: {
+    reversesId: null, reversedById: null, transaction: { sourceType: 'CHECK_INSTRUMENT', sourceId: instrument.id },
+  } }, select: { openItemId: true } });
+  await lockSettlementContracts(tx, appliedCheck.map(line => line.openItemId));
   if (!checkTransitions[instrument.status]?.has(input.nextStatus)) throw new AccountingCustomerTreasuryError('INVALID_CHECK_TRANSITION', 'تغییر وضعیت چک با سابقه فعلی آن سازگار نیست.', 409);
   const nextSequence = instrument.events.length + 1;
   if (['ASSIGNED', 'DEPOSITED', 'CLEARED', 'BOUNCED', 'REPLACED'].includes(input.nextStatus)) {

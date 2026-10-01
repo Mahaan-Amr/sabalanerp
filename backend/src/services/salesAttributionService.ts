@@ -1,17 +1,40 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { isOrdinaryCommercialFlow } from './ordinaryContractLifecycle';
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
 const decimal = (value: unknown) => new Prisma.Decimal(String(value ?? 0));
 
+export const countValidOrdinaryFinancialRecords = async (tx: DbClient, contractId: string) => {
+  const direct = await tx.accountingFinancialRecord.count({ where: { contractId,
+    status: { not: 'VOIDED' }, kind: { not: 'RECEIVABLE' } } });
+  const companions = await tx.accountingFinancialRecord.findMany({ where: { contractId,
+    status: { not: 'VOIDED' }, kind: 'RECEIVABLE' }, select: { id: true, metadata: true } });
+  if (!companions.length) return direct;
+  // Existing companion records have an exact CREATE_RECEIVABLE audit link;
+  // newer records also retain that obligation identity in metadata.
+  const links = await tx.accountingAuditLog.findMany({ where: { contractId, action: 'CREATE_RECEIVABLE',
+    recordId: { in: companions.map(record => record.id) }, entityType: 'AccountingReceivable' },
+  select: { recordId: true, entityId: true } });
+  const byRecord = new Map(links.map(link => [link.recordId, link.entityId]));
+  const obligationByRecord = new Map(companions.map(record => [record.id,
+    String((record.metadata as any)?.receivableId || byRecord.get(record.id) || '')]));
+  const active = await tx.accountingReceivable.findMany({ where: { contractId, status: { not: 'VOIDED' },
+    id: { in: [...obligationByRecord.values()].filter(Boolean) } }, select: { id: true } });
+  const activeIds = new Set(active.map(item => item.id));
+  return direct + companions.filter(record => activeIds.has(obligationByRecord.get(record.id)!)).length;
+};
+
 export const snapshotRealizedSale = async (
   tx: DbClient,
   contractId: string,
   actorId: string,
-  effectiveAt = new Date()
+  effectiveAt = new Date(),
+  trigger: 'COMMERCIAL' | 'FINANCIAL_RECORD' = 'COMMERCIAL'
 ) => {
   const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
   if (!contract) throw new Error('Contract not found');
+  if (isOrdinaryCommercialFlow(contract) && trigger !== 'FINANCIAL_RECORD') return contract;
   if (contract.realizedAt) return contract;
 
   const amount = decimal(contract.totalAmount);
@@ -37,10 +60,40 @@ export const snapshotRealizedSale = async (
       sourceKey: `realized:${contract.id}`,
       reason: 'First transition to realized sales',
       createdBy: actorId,
-      metadata: { statusAtRealization: contract.status }
+      metadata: { statusAtRealization: contract.status, trigger }
     }
   });
   return updated;
+};
+
+/** Reconcile after the financial writer persists its mutation, inside its transaction. */
+export const reconcileOrdinaryFinancialRealization = async (
+  tx: DbClient,
+  input: { contractId: string; actorId: string; sourceKey: string; effectiveAt?: Date }
+) => {
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${input.contractId} FOR UPDATE`);
+  const contract = await tx.salesContract.findUnique({ where: { id: input.contractId }, include: { reportingEvents: true } });
+  if (!contract || !isOrdinaryCommercialFlow(contract)) return;
+  const original = contract.reportingEvents.find(event => event.eventType === 'REALIZED');
+  // Adoption never rewrites a realization earned under the historical commercial trigger.
+  if (original && (original.metadata as any)?.trigger !== 'FINANCIAL_RECORD') return;
+  if (contract.realizedAt && !original) return;
+  const valid = await countValidOrdinaryFinancialRecords(tx, input.contractId);
+  const effectiveAt = input.effectiveAt || new Date();
+  if (!contract.realizedAt) {
+    if (valid > 0) await snapshotRealizedSale(tx, contract.id, input.actorId, effectiveAt, 'FINANCIAL_RECORD');
+    return;
+  }
+  const net = contract.reportingEvents.reduce((sum, event) => sum.plus(event.amount), new Prisma.Decimal(0));
+  const target = valid > 0 && contract.status !== 'CANCELLED' ? decimal(contract.totalAmount) : new Prisma.Decimal(0);
+  const delta = target.minus(net);
+  if (delta.isZero()) return;
+  await tx.salesReportingEvent.upsert({ where: { sourceKey: input.sourceKey }, update: {}, create: {
+    contractId: contract.id, eventType: 'ADJUSTMENT', amount: delta, effectiveAt,
+    sellerId: contract.realizedSellerId, sourceKey: input.sourceKey, createdBy: input.actorId,
+    reason: valid > 0 ? 'Accounting financial record restored realized sales value' : 'Last valid accounting financial record removed',
+    metadata: { trigger: 'FINANCIAL_RECORD', validRecordCount: valid, previousNet: net.toString(), nextNet: target.toString() }
+  } });
 };
 
 export const recordRealizedAdjustment = async (
@@ -55,8 +108,11 @@ export const recordRealizedAdjustment = async (
     effectiveAt?: Date;
   }
 ) => {
-  const contract = await tx.salesContract.findUnique({ where: { id: params.contractId } });
+  const contract = await tx.salesContract.findUnique({ where: { id: params.contractId }, include: { reportingEvents: true } });
   if (!contract?.realizedAt) return null;
+  if (isOrdinaryCommercialFlow(contract)
+    && contract.reportingEvents.some(event => event.eventType === 'REALIZED' && (event.metadata as any)?.trigger === 'FINANCIAL_RECORD')
+    && await countValidOrdinaryFinancialRecords(tx, contract.id) === 0) return null;
   const delta = decimal(params.nextAmount).minus(decimal(params.previousAmount));
   if (delta.isZero()) return null;
 

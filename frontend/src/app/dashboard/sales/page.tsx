@@ -5,12 +5,13 @@ import {
   FaChartLine,
   FaFileContract,
   FaPlus,
+  FaCog,
   FaUsers,
 } from 'react-icons/fa';
 import { ErpNeumorphicActionGrid, ErpWorkspacePage } from '@/components/erp';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace, WORKSPACE_PERMISSIONS, WORKSPACES } from '@/contexts/WorkspaceContext';
-import { dashboardAPI } from '@/lib/api';
+import { dashboardAPI, salesAPI } from '@/lib/api';
 
 const baseSalesActions: Array<{
   title: string;
@@ -47,6 +48,12 @@ const baseSalesActions: Array<{
 export default function SalesWorkspacePage() {
   const { user } = useAuth();
   const { hasPermission } = useWorkspace();
+  const [canManageSettings, setCanManageSettings] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void salesAPI.getCommercialSettings().then(response => { if (active) setCanManageSettings(response.data.data.canManage === true); }).catch(() => { if (active) setCanManageSettings(false); });
+    return () => { active = false; };
+  }, [user?.id]);
   const [canViewPartnerCases, setCanViewPartnerCases] = useState(false);
   useEffect(() => {
     let active = true;
@@ -59,6 +66,7 @@ export default function SalesWorkspacePage() {
   const canViewSellerComparisons = user?.role === 'ADMIN' || hasPermission(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN);
   const salesActions = [
     ...baseSalesActions,
+    ...(canManageSettings ? [{ title: 'تنظیمات فروش', href: '/dashboard/sales/settings', icon: FaCog }] : []),
     ...(canViewPartnerCases ? [{
       title: 'پیش‌نویس‌ها و پرونده‌های من',
       href: '/dashboard/sales/partner-cases',

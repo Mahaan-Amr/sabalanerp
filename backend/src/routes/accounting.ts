@@ -1,4 +1,6 @@
 import { prisma } from '../lib/prisma';
+import { markCustomerAcceptance, isOrdinaryCommercialFlow, commercialDeadlinePassed, lockOrdinaryContract } from '../services/ordinaryContractLifecycle';
+import { ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError } from '../services/ordinaryAccountingCommercialGate';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { body, validationResult } from 'express-validator';
@@ -133,20 +135,30 @@ const getAccountingActionCapabilities = async (userId: string, role: string) => 
     .map(async ([kind, features]) => [kind, await resolveFeatures(features)] as const));
   return Object.fromEntries([
     ...entries,
+    ['RECORD_CUSTOMER_PAPER_SIGNATURE', await resolveFeatures([FEATURES.ACCOUNTING_ACTIONS_MANAGE])],
     ['CREATE_CORRECTION_REQUEST', await resolveFeatures([FEATURES.ACCOUNTING_CORRECTIONS_CREATE, FEATURES.ACCOUNTING_CORRECTIONS_MANAGE])],
   ]) as Record<string, boolean>;
 };
 
-const projectAccountingActions = <T extends { sourceKind?: string; nextBestActions?: Array<Record<string, any>> }>(
+const projectAccountingActions = <T extends { sourceKind?: string; nextBestActions?: Array<Record<string, any>>;
+  commercialFlowVersion?: number; status?: string; isInactive?: boolean }>(
   record: T,
   capabilities: Record<string, boolean>,
 ): T => ({
   ...record,
+  capabilities: {
+    canActFinancially: ordinaryFinancialActionsAllowed(record as any),
+    canRecordPaperSignature: Boolean(capabilities.RECORD_CUSTOMER_PAPER_SIGNATURE)
+      && isOrdinaryCommercialFlow(record as any) && !record.isInactive
+      && (record as any).customerAcceptanceRevision !== (record as any).commercialRevision
+      && !['CANCELLED', 'EXPIRED'].includes(record.status || '')
+      && !commercialDeadlinePassed(record as any),
+  },
   nextBestActions: [
     ...(record.nextBestActions || []),
     ...(record.sourceKind === 'PARTNER_INTERNAL_RECORD' ? [] : [{ kind: 'FLAG_CONTRACT', labelFa: 'ثبت پرچم حسابداری', enabled: true }]),
   ].map((action) => {
-    const visible = Boolean(capabilities[action.kind]);
+    const visible = Boolean(capabilities[action.kind]) && ordinaryFinancialActionsAllowed(record as any);
     return {
       ...action,
       visible,
@@ -500,33 +512,30 @@ const customPrintOptionsFromQuery = (query: any): ContractCustomPrintOptions => 
   };
 };
 
-const markOriginalSalesContractPrinted = async (
+export const markOriginalSalesContractPrinted = async (
   req: AuthRequest,
   contract: any,
   currentSignatures: any,
   pdfPath: string,
   fingerprint: string,
-  generatedAt: string | null
+  generatedAt: string | null,
+  database: typeof prisma = prisma
 ) => {
   const printedAt = new Date();
   const timestamp = generatedAt || printedAt.toISOString();
-  await prisma.salesContract.update({
-    where: { id: contract.id },
-    data: {
-      status: contract.status === 'SIGNED' ? 'PRINTED' : contract.status,
-      printedAt,
-      signatures: {
-        ...currentSignatures,
-        print: {
-          by: req.user!.id,
-          at: timestamp,
-          generatedAt: timestamp,
-          pdfPath,
-          fingerprint,
-          variant: 'original'
-        }
-      }
-    }
+  await database.$transaction(async tx => {
+    const current = await lockOrdinaryContract(tx, contract.id);
+    if (current.commercialFlowVersion !== contract.commercialFlowVersion
+      || current.commercialRevision !== contract.commercialRevision
+      || (!isOrdinaryCommercialFlow(current)
+        && current.updatedAt.getTime() !== new Date(contract.updatedAt).getTime())) return;
+    await tx.salesContract.update({ where: { id: current.id }, data: {
+      ...(!isOrdinaryCommercialFlow(current) && current.status === 'SIGNED' ? { status: 'PRINTED' as const } : {}),
+      printedAt, signatures: { ...((current.signatures as any) || {}), print: {
+        by: req.user!.id, at: timestamp, generatedAt: timestamp, pdfPath, fingerprint, variant: 'original',
+        ...(isOrdinaryCommercialFlow(current) ? { revision: current.commercialRevision } : {}),
+      } },
+    } });
   });
 };
 
@@ -618,6 +627,25 @@ router.get('/contracts/:contractId', accountingContractsView, async (req: AuthRe
     });
   }
 });
+
+router.post('/contracts/:contractId/customer-paper-signature',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.ACCOUNTING_CONTRACTS_VIEW, FEATURE_PERMISSIONS.VIEW),
+  requireNarrowFeatureAccess(FEATURES.ACCOUNTING_ACTIONS_MANAGE, FEATURE_PERMISSIONS.EDIT),
+  body('revision').isInt({ min: 1 }),
+  async (req: AuthRequest, res: Response) => {
+    if (!validationResult(req).isEmpty()) return res.status(400).json({ success: false, message: 'نسخه قرارداد معتبر نیست؛ صفحه را تازه‌سازی کنید.' });
+    try {
+      const contract = await prisma.$transaction(tx => markCustomerAcceptance(tx, {
+        contractId: req.params.contractId, revision: Number(req.body.revision), actorId: req.user!.id, method: 'PAPER',
+        note: 'حسابدار امضای مشتری روی نسخه کاغذی قرارداد را ثبت کرد.',
+      }));
+      return res.json({ success: true, data: contract, message: 'امضای کاغذی مشتری ثبت شد.' });
+    } catch (error) {
+      return res.status(409).json({ success: false, message: 'ثبت امضا انجام نشد؛ وضعیت و نسخه قرارداد را تازه‌سازی کنید.' });
+    }
+  });
 
 router.get('/contracts/:contractId/lifecycle', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {
@@ -948,7 +976,7 @@ router.get('/contracts/:contractId/sales-pdf', accountingContractsView, async (r
     const fresh = variant !== 'original' || String(req.query.fresh || 'false').toLowerCase() === 'true';
     const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
-    const printableContract = variant === 'original' && contract.status === 'SIGNED'
+    const printableContract = variant === 'original' && contract.status === 'SIGNED' && !isOrdinaryCommercialFlow(contract)
       ? { ...contract, status: 'PRINTED' }
       : contract;
     const pdfFingerprint = buildSalesContractPdfFingerprint(printableContract, variant, customPrintOptions);
@@ -1338,6 +1366,9 @@ export const createAccountingActionHandler = (
         workflow: error.workflow,
         actionUrl: error.actionUrl,
       });
+      if (error instanceof OrdinaryAccountingCommercialError) {
+        return res.status(error.status).json({ success: false, message: error.message });
+      }
       if (error instanceof FinancialEvidenceConflictError && (req.body.invoiceId || req.body.recordId)) {
         const reviewCase = await recordFinancialEvidenceReviewCase({
           invoiceId: req.body.invoiceId || req.body.recordId,

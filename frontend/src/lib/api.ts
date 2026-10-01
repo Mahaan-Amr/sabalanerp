@@ -531,6 +531,9 @@ export const departmentsAPI = {
 
 // Sales Workspace API
 export const salesAPI = {
+  getCommercialSettings: () => api.get('/sales/commercial-settings'),
+  updateCommercialSettings: (expiryDays: number) => api.put('/sales/commercial-settings', { expiryDays }),
+  renewContract: (id: string, reason: string) => api.post(`/sales/contracts/${id}/renew`, { reason }),
   // Contracts
   getContracts: (params?: { page?: number; limit?: number; status?: string; departmentId?: string; search?: string; lifecycleView?: 'active' | 'inactive' }) =>
     api.get('/sales/contracts', { params }),
@@ -632,7 +635,7 @@ export const salesAPI = {
     }
   } : undefined),
   
-  approveContract: (id: string, note?: string) => api.put(`/sales/contracts/${id}/approve`, { note }),
+  approveContract: (id: string, note?: string, commercialRevision?: number) => api.put(`/sales/contracts/${id}/approve`, { note, ...(commercialRevision === undefined ? {} : { commercialRevision }) }),
   
   rejectContract: (id: string, note?: string) => api.put(`/sales/contracts/${id}/reject`, { note }),
   
@@ -978,6 +981,7 @@ export const inventoryAPI = {
 
 // Accounting Workspace API
 export const accountingAPI = {
+  recordCustomerPaperSignature: (contractId: string, revision: number) => api.post(`/accounting/contracts/${contractId}/customer-paper-signature`, { revision }),
   getCustomerAccounts: (params?: { search?: string; asOf?: string }) => api.get('/accounting/ledger/customer-profiles', { params }),
   getCustomerAccountProjection: (id: string, params?: { asOf?: string }) => api.get(`/accounting/ledger/customer-profiles/${id}/projection`, { params }),
   exportCustomerStatement: (id: string, format: 'pdf' | 'xlsx', asOf: string) => api.get(`/accounting/ledger/customer-profiles/${id}/export.${format}`, { params: { asOf }, responseType: 'blob' }),

@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { contractStatusLabel } from './contractStatusLabel';
 import path from 'path';
 import type { CustomerContractOutput } from '../../../packages/partner-sales-contracts';
 import { parseCanonicalProductGraph, projectCanonicalRemainderConsumption,
@@ -10,6 +11,9 @@ interface RenderableContract {
   title?: string;
   titlePersian?: string;
   status?: string;
+  commercialFlowVersion?: number;
+  partnerKind?: string | null;
+  partnerCaseId?: string | null;
   totalAmount?: number | null;
   currency?: string | null;
   notes?: string | null;
@@ -557,16 +561,6 @@ const formatDateTime = (value: unknown, timeZone?: string): string => {
   const date = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(date.getTime())) return escapeHtml(value);
   return date.toLocaleString('fa-IR', timeZone ? { timeZone } : undefined);
-};
-
-const statusLabelMap: Record<string, string> = {
-  DRAFT: 'پیش‌نویس',
-  PENDING_APPROVAL: 'در انتظار تایید',
-  APPROVED: 'تایید شده',
-  SIGNED: 'امضا شده',
-  PRINTED: 'چاپ شده',
-  CANCELLED: 'لغو شده',
-  EXPIRED: 'منقضی شده'
 };
 
 const productTypeLabel = (value: unknown): string => {
@@ -2473,7 +2467,7 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
   return {
     contractNumber: contract.contractNumber || contractData.contractNumber || EMPTY,
     contractDate: contractData.contractDate || formatDate(contract.createdAt),
-    statusLabel: statusLabelMap[String(contract.status || '')] || String(contract.status || 'DRAFT')
+    statusLabel: contractStatusLabel(contract)
   };
 };
 

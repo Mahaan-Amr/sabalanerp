@@ -18,6 +18,16 @@ let memoryState: RecoveryRuntimeState = { mode: 'NORMAL', updatedAt: new Date().
 let operationLocked = false;
 let activeWrites = 0;
 
+/** Background mutations share the same maintenance admission and drain as HTTP writes.
+ * Check and register synchronously, before awaiting work; recovery cannot see a
+ * drained system while an admitted background write is still running. */
+export const withRecoveryBackgroundWrite = async <T>(work: () => Promise<T>): Promise<T | undefined> => {
+  if (getRecoveryRuntimeState().mode !== 'NORMAL' || deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR)) return undefined;
+  activeWrites += 1;
+  try { return await work(); }
+  finally { activeWrites = Math.max(0, activeWrites - 1); }
+};
+
 export const initializeRecoveryRuntime = () => {
   fs.mkdirSync(RECOVERY_COORDINATION_DIR, { recursive: true });
   try {

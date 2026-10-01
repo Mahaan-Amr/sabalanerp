@@ -1,4 +1,6 @@
 'use client';
+import { ContractRenewal } from '@/features/sales/ContractRenewal';
+import { contractLifecycleLabel, contractLifecycleFilterOptions, isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
 import { ErpInlineState, ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -38,7 +40,7 @@ import { assertSuccessfulSalesDownload, getSalesOperationalErrorKind, getSalesOp
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 
-interface Contract {
+interface Contract extends ContractLifecyclePresentation {
   id: string;
   contractNumber: string;
   creatorSequenceNumber?: number | null;
@@ -91,16 +93,6 @@ interface ContractPagination {
 
 const CONTRACTS_PAGE_SIZE = 10;
 
-const statusLabels: Record<string, string> = {
-  DRAFT: 'پیش‌نویس',
-  PENDING_APPROVAL: 'در انتظار تایید',
-  APPROVED: 'تایید شده',
-  SIGNED: 'امضا شده',
-  PRINTED: 'چاپ شده',
-  CANCELLED: 'لغو شده',
-  EXPIRED: 'منقضی شده',
-};
-
 const statusTones: Record<string, ErpTone> = {
   DRAFT: 'neutral',
   PENDING_APPROVAL: 'warning',
@@ -111,17 +103,7 @@ const statusTones: Record<string, ErpTone> = {
   EXPIRED: 'neutral',
 };
 
-const statusOptions = [
-  { label: 'همه وضعیت‌ها', value: 'ALL' },
-  { label: 'پیش‌نویس', value: 'DRAFT' },
-  { label: 'در انتظار تایید', value: 'PENDING_APPROVAL' },
-  { label: 'تایید شده', value: 'APPROVED' },
-  { label: 'امضا شده', value: 'SIGNED' },
-  { label: 'چاپ شده', value: 'PRINTED' },
-  { label: 'لغو شده', value: 'CANCELLED' },
-  { label: 'منقضی شده', value: 'EXPIRED' },
-  { label: 'لغو یا منقضی', value: 'CANCELLED,EXPIRED' },
-];
+const statusOptions = [...contractLifecycleFilterOptions, { label: 'لغو یا منقضی', value: 'CANCELLED,EXPIRED' }];
 
 const getStatusIcon = (status: string) => {
   switch (status) {
@@ -183,6 +165,7 @@ export default function ContractsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [renewalContractId, setRenewalContractId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState(requestedStatusFilter);
   const [pagination, setPagination] = useState<ContractPagination>({
     page: 1,
@@ -369,8 +352,8 @@ export default function ContractsPage() {
     const totalAmount = sumNumericValues(filteredContracts, (contract) => contract.totalAmount);
     return [
       { label: 'کل قراردادها', value: pagination.total.toLocaleString('fa-IR'), icon: FaFileContract, tone: 'primary' },
-      { label: 'نتایج فعلی', value: filteredContracts.length.toLocaleString('fa-IR'), hint: statusFilter === 'ALL' ? 'همه وضعیت‌ها' : statusLabels[statusFilter], icon: FaEye, tone: 'info' },
-      { label: 'در انتظار تایید', value: contracts.filter((contract) => contract.status === 'PENDING_APPROVAL').length.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
+      { label: 'نتایج فعلی', value: filteredContracts.length.toLocaleString('fa-IR'), hint: statusOptions.find(option => option.value === statusFilter)?.label, icon: FaEye, tone: 'info' },
+      { label: 'پیش‌نویس و منتظر تأیید قدیمی', value: contracts.filter((contract) => contract.status === 'PENDING_APPROVAL').length.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
       { label: 'مبلغ نتایج', value: formatCurrency(totalAmount, 'تومان'), icon: FaFileContract, tone: 'success' },
     ];
   }, [contracts, filteredContracts, pagination.total, statusFilter]);
@@ -419,6 +402,7 @@ export default function ContractsPage() {
   };
 
   const handleStatusAction = async (contractId: string, action: string) => {
+    const actionContract = contracts.find(item => item.id === contractId);
     const actionKey = `${contractId}:${action}`;
     const errorKey = `action:${actionKey}`;
     const requestSequence = beginAction(errorKey);
@@ -427,7 +411,7 @@ export default function ContractsPage() {
       let response;
       switch (action) {
         case 'approve':
-          response = await salesAPI.approveContract(contractId);
+          response = await salesAPI.approveContract(contractId, undefined, actionContract && isCurrentContractFlow(actionContract) ? actionContract.commercialRevision : undefined);
           break;
         case 'reject':
           response = await salesAPI.rejectContract(contractId);
@@ -561,7 +545,7 @@ export default function ContractsPage() {
       priority: 'meta',
       cell: (contract) => (
         <ErpBadge tone={statusTones[contract.status] || 'neutral'}>
-          {statusLabels[contract.status] || operationalStatusLabel(contract.status)}
+          {contractLifecycleLabel(contract)}
         </ErpBadge>
       ),
     },
@@ -616,7 +600,7 @@ export default function ContractsPage() {
         disabled: pendingActions.has(`action:${contract.id}:print`),
       });
     }
-    if (contractPermissions.canEdit && (!contract.accountingEditLocked || contract.canOpenCorrectionEdit)) {
+    if (isCurrentContractFlow(contract) ? contract.commercialActions?.canEdit === true : contractPermissions.canEdit && (!contract.accountingEditLocked || contract.canOpenCorrectionEdit)) {
       actions.push({
         label: contract.canOpenCorrectionEdit ? 'اصلاح قرارداد' : 'ویرایش قرارداد',
         href: `/dashboard/sales/contracts/${contract.id}/edit`,
@@ -625,7 +609,7 @@ export default function ContractsPage() {
       });
     }
 
-    if ((contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove) {
+    if (isCurrentContractFlow(contract) ? contract.commercialActions?.canApproveSales === true : (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove) {
       actions.push({
         label: 'تایید قرارداد',
         onClick: () => handleStatusAction(contract.id, 'approve'),
@@ -645,7 +629,7 @@ export default function ContractsPage() {
       });
     }
 
-    if (contract.status === 'APPROVED' && contractPermissions.canSign) {
+    if (!isCurrentContractFlow(contract) && contract.status === 'APPROVED' && contractPermissions.canSign) {
       actions.push({
         label: 'امضای قرارداد',
         onClick: () => handleStatusAction(contract.id, 'sign'),
@@ -655,6 +639,7 @@ export default function ContractsPage() {
       });
     }
 
+    if (contract.commercialActions?.canRenew) actions.push({ label: "تمدید مهلت", tone: "warning", onClick: () => setRenewalContractId(contract.id) });
     return actions;
   };
 
@@ -750,6 +735,7 @@ export default function ContractsPage() {
         />
       )}
     </ErpListPage>
+    <ContractRenewal contractId={renewalContractId} onClose={() => setRenewalContractId(null)} onRenewed={() => loadContracts(1, { append: false })} />
     </>
   );
 }

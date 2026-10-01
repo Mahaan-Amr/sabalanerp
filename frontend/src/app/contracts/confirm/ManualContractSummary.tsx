@@ -1,3 +1,4 @@
+import { contractLifecycleLabel } from '@/features/sales/contractLifecyclePresentation';
 import React from 'react';
 import type { CustomerContractOutput } from '@sabalanerp/partner-sales-contracts';
 import { formatPartnerMoney, subtractPartnerDecimal, multiplyPartnerDecimal, partnerPaymentMethodCopy, partnerProductTypeCopy } from '@/features/partner-sales/presentation';
@@ -12,8 +13,10 @@ import { buildContractPaymentPresentation } from '@/features/sales/contractPayme
 
 type PublicContract = {
   contractStatus: string;
+  commercialFlowVersion?: number;
   status: string;
   contract: {
+    commercialFlowVersion?: number;
     contractNumber: string;
     createdAt?: string;
     contractData: any;
@@ -179,7 +182,7 @@ export default function ManualContractSummary({ data, customerOutput }: { data?:
           <ErpNeumorphicCard className="space-y-2 p-4"><h3 className="mb-3 font-semibold text-secondary">اطلاعات قرارداد</h3>
             <Field label="شماره قرارداد">{contract.contractNumber}</Field>
             <Field label="تاریخ قرارداد">{date(snapshot.contractDate || contract.createdAt)}</Field>
-            <Field label="وضعیت">{status(customerOutput?.status ?? data!.contractStatus)}</Field>
+            <Field label="وضعیت">{customerOutput ? status(customerOutput.status) : contractLifecycleLabel({ status: data!.contractStatus, commercialFlowVersion: data!.commercialFlowVersion ?? data!.contract.commercialFlowVersion })}</Field>
           </ErpNeumorphicCard>
           <ErpNeumorphicCard className="space-y-2 p-4"><h3 className="mb-3 font-semibold text-secondary">اطلاعات مشتری</h3>
             <Field label="نام">{customerName}</Field><Field label="شماره موبایل تایید">{value(contract.customer.phoneNumber)}</Field>

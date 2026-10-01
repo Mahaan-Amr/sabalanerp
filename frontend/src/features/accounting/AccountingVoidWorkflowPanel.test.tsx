@@ -45,3 +45,15 @@ test('shows a simple resolution step, responsible role, and direct action for a 
   assert.match(html, /فاکتور ۱۴۰۶/);
   assert.doesNotMatch(html, /invoice-1406/);
 });
+
+test('retains financial void evidence while commercial finality blocks all actions', () => {
+  const html = renderToStaticMarkup(
+    <AccountingVoidWorkflowPanel workflows={[workflow]} canAct={false} onResolveTax={() => undefined}
+      onVoidReceivable={() => undefined} onVoidRecord={() => undefined} onCancel={() => undefined} />,
+  );
+  assert.match(html, /تاریخچه اقدامات/);
+  assert.match(html, /فاکتور ۱۴۰۶/);
+  assert.doesNotMatch(html, /href="\/dashboard\/accounting\/payments/);
+  assert.doesNotMatch(html, /لغو پرونده ابطال/);
+  assert.doesNotMatch(html, /<button/);
+});

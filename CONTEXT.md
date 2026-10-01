@@ -2,6 +2,38 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**یادداشت قرارداد فروش عادی**:
+قرارداد فروش عادی ثبت‌شده‌ای که نسخه جاری آن هنوز تأیید فروش ندارد؛ این اصطلاح با پیش‌نویس بازیابیِ ایجاد قرارداد تفاوت دارد.
+_Avoid_: پیش‌نویس ایجاد قرارداد، قرارداد تأییدشده، یا تعمیم این مرحله به پرونده فروش همکار
+
+**پیش‌نویس قرارداد فروش عادی**:
+قرارداد فروش عادی که نسخه جاری آن با تیک فروش تأیید شده، ولی پذیرش مشتری برای همان نسخه هنوز ثبت نشده است.
+_Avoid_: یادداشت، پیش‌نویس صورتحساب، یا نیاز به تأیید نهایی دوم فروش
+
+**امضای مشتری قرارداد فروش عادی**:
+پذیرش یک نسخه مشخص قرارداد توسط مشتری، از طریق تأیید دیجیتال یا ثبت امضای کاغذی مشتری توسط حسابدار با حفظ هویت ثبت‌کننده و سابقه پذیرش.
+_Avoid_: امضای فروشنده، تأیید مستقل حسابدار بدون پذیرش مشتری، یا معادل دانستن امضای کاغذی با احراز تلفن مشتری
+
+**قرارداد امضا شده فروش عادی**:
+قرارداد فروش عادی که پذیرش مشتری برای نسخه جاری آن ثبت شده، ولی تأیید فروش برای همان نسخه هنوز ثبت نشده است.
+_Avoid_: قرارداد قطعی، امضای فروشنده، یا امضای معتبر برای نسخه قبلی قرارداد
+
+**قرارداد قطعی فروش عادی**:
+قرارداد فروش عادی که نسخه جاری آن هم تأیید فروش و هم پذیرش مشتری دارد؛ قطعی شدن به‌خودی‌خود به معنای تسویه مالی نیست.
+_Avoid_: تأیید نهایی دوم فروش، قرارداد تسویه‌شده، یا تأیید معتبر برای نسخه قبلی قرارداد
+
+**دوره اصلاح قرارداد در گردش جدید فروش عادی**:
+مجوز حسابداری برای ویرایش چندباره قرارداد دارای رکورد مالی در گردش جدید، که هر ذخیره آن تأییدهای تجاری را از نو لازم می‌کند و قطعی شدن مجدد، دوره را می‌بندد و اصلاح را برای بررسی حسابداری برمی‌گرداند.
+_Avoid_: فرصت یک‌بار ذخیره گردش قدیمی، ویرایش آزاد بدون تأیید اصلاح، یا تغییر رکوردهای مالی قبلی
+
+**تحقق فروش در گردش جدید قرارداد عادی**:
+رویداد تحقق فروش وابسته به اولین ثبت موفق رکورد مالی حسابداری برای قرارداد در گردش جدید؛ قطعی شدن، چاپ یا ثبت امضای کاغذی به‌تنهایی تحقق فروش محسوب نمی‌شوند.
+_Avoid_: انتظار برای تأیید مالی یا تسویه، ثبت فرم ذخیره‌نشده، یا شمارش دوباره فروش با ایجاد رکورد مالی بعدی
+
+**مهلت انقضای قرارداد بدون رکورد مالی**:
+مهلت تقویمی مختص هر قرارداد در گردش جدید فروش عادی، از ایجاد سیستمی یا نخستین ورود قرارداد قدیمی به گردش جدید، برای ثبت رکورد مالی؛ تغییر تنظیم مدیر و ویرایش عادی، مهلت اختصاص‌یافته را از نو شروع نمی‌کنند.
+_Avoid_: تاریخ تجاری قرارداد، مهلت اصلاح قرارداد دارای رکورد مالی، یا تغییر خودکار مهلت قراردادهای جاری با تغییر تنظیم عمومی
+
 **Contract Hard Deletion**:
 The irreversible removal of a Draft or Voided sales Contract after Admin approval, permitted only when the Contract has no financial document and no conclusive physical operation. An Accountant or Manager may request deletion, while an Admin may either decide that request or initiate and approve deletion directly; the reason, actors, dependency check, and outcome remain in the audit history after the Contract is removed. Any blocking dependency prevents deletion and is identified explicitly to the Admin.
 _Avoid_: deleting an active Contract, treating disappearance from ordinary lists as deletion, cascading through financial or conclusive physical evidence, requiring a second actor for an Admin-initiated deletion, allowing Manager approval alone, losing the deletion audit record, or reporting an unexplained deletion failure

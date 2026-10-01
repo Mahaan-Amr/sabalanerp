@@ -106,6 +106,7 @@ import { inquiryNotificationAccess, startPartnerInquiryNotificationDelivery } fr
 import { verifyHrRedesignCutover } from "./services/hrRedesignCutover";
 import { resolveHrRedesignCutoverStartup } from "./services/hrRedesignCutoverStartup";
 import { startPersonnelPerformanceMaintenance } from "./services/personnelPerformanceMaintenance";
+import { startOrdinaryContractExpiry } from './services/ordinaryContractLifecycle';
 
 initializeRecoveryRuntime();
 registerPartnerNotificationAccess(inquiryNotificationAccess);
@@ -375,6 +376,7 @@ initializeSystemRecovery(prisma).then(async () => {
     startAccountingTaxpayerOutboxDelivery(prisma);
     startCrossWorkspaceDutyDeadlineMaintenance(prisma);
     startPersonnelPerformanceMaintenance(prisma);
+    startOrdinaryContractExpiry(prisma);
     startPartnerInquiryNotificationDelivery(prisma);
   }
   server.listen(PORT, () => {

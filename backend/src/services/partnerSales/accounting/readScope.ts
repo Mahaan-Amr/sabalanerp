@@ -16,6 +16,7 @@ import { PARTNER_ACCOUNTING_MARKER_JSON_PATH } from './provenance';
 import { assertPartnerAccountingWitnesses as assertWitnesses, readPartnerReceivableEvidence } from './receivableEvidence';
 import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvidence';
 import { withCurrentSabalanPlan } from './sabalanPlan';
+import { readAuthorizedPartnerAuditWitnesses } from '../../accountingReadProjection';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -259,18 +260,11 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   // Select Partner-bearing JSON in the database, not after user pagination. An
   // unknown or ordinary reference cannot authorize a private snapshot.
   const markedAuditIds = markedIds('AUDIT');
-  const markedAudits = markedAuditIds.length ? await database.accountingAuditLog.findMany({
-    where: { id: { in: markedAuditIds } },
-  }) : [];
-  const rejectedAuditIds: string[] = [];
-  for (const audit of markedAudits) {
-    const references = [audit.recordId, audit.entityId].filter((id): id is string => Boolean(id));
-    const owners = references.map(id => invoiceByEntity.get(id));
-    const invoiceId = owners[0];
-    if (!invoiceId || owners.some(owner => owner !== invoiceId) || audit.contractId) {
-      rejectedAuditIds.push(audit.id); continue;
-    }
-    const preparation = preparationByInvoice.get(invoiceId)!;
+  const { rejectedIds: rejectedAuditIds, witnesses } = await readAuthorizedPartnerAuditWitnesses(
+    database, markedAuditIds, invoiceByEntity,
+  );
+  for (const audit of witnesses) {
+    const preparation = preparationByInvoice.get(audit.invoiceId)!;
     assertWitnesses(audit.beforeState, preparation);
     assertWitnesses(audit.afterState, preparation);
   }

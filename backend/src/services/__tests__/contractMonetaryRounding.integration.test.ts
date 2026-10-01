@@ -17,6 +17,7 @@ async function run() {
       { unit: 'count', quantity: 1, rate: 100.4, rowTotal: 100.4, sourceTotal: '200.8', payable: 201 },
       { unit: 'count', quantity: 1, rate: 0.2, rowTotal: 0.2, sourceTotal: '0.4', payable: 0 },
       { unit: 'ton', quantity: 1.333, rate: 100.45, rowTotal: 133.89985, sourceTotal: '267.7997', payable: 268 },
+      { unit: 'squareMeter', quantity: 12345.678, rate: 1234567.8912, rowTotal: '15241577653.8942336', sourceTotal: '30483155307.7884672', payable: 30483155308 },
     ]) {
     const sourceData = JSON.parse(JSON.stringify(source.contractData));
     const products = ['round-row-a', 'round-row-b'].map(rowId => ({ rowId,

@@ -539,12 +539,12 @@ export interface UpdateContractData {
       productRowId?: string | null;
       productType?: string | null;
       quantity: number;
-      unitPrice: number;
-      totalPrice: number;
+      unitPrice: number | string;
+      totalPrice: number | string;
       description?: string | null;
       isMandatory?: boolean;
       mandatoryPercentage?: number | null;
-      originalTotalPrice?: number | null;
+      originalTotalPrice?: number | string | null;
       stairSystemId?: string | null;
       stairPartType?: string | null;
     }>;
@@ -602,6 +602,17 @@ const toDecimalNumber = (value: unknown, fallback = 0): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+export const persistContractMonetaryAmount = (value: string | number): Prisma.Decimal => {
+  const amount = new Prisma.Decimal(String(value));
+  if (!amount.isFinite() || amount.isNegative()) {
+    throw new Error('مبلغ واردشده معتبر نیست؛ مقدار را بررسی کنید و دوباره قرارداد را ذخیره کنید.');
+  }
+  return amount;
+};
+
+const persistNullableContractMonetaryAmount = (value: string | number | null | undefined) =>
+  value === null || value === undefined || value === '' ? null : persistContractMonetaryAmount(value);
+
 export const persistContractQuantityAtPolicyScale = (
   value: unknown,
   calculationPolicy: typeof CURRENT_CONTRACT_PRODUCT_POLICY,
@@ -634,12 +645,12 @@ const contractItemWriteData = (
   productRowId: item.productRowId,
   productType: item.productType || null,
   quantity: persistContractQuantityAtPolicyScale(item.quantity, calculationPolicy),
-  unitPrice: toDecimalNumber(item.unitPrice),
-  totalPrice: toDecimalNumber(item.totalPrice),
+  unitPrice: persistContractMonetaryAmount(item.unitPrice),
+  totalPrice: persistContractMonetaryAmount(item.totalPrice),
   description: item.description || null,
   isMandatory: item.isMandatory || false,
   mandatoryPercentage: toNullableDecimalNumber(item.mandatoryPercentage),
-  originalTotalPrice: toNullableDecimalNumber(item.originalTotalPrice),
+  originalTotalPrice: persistNullableContractMonetaryAmount(item.originalTotalPrice),
   stairSystemId: item.stairSystemId || null,
   stairPartType: item.stairPartType || null,
 });
@@ -842,12 +853,12 @@ export async function createContract(
               productRowId: item.productRowId || null,
               productType: item.productType || null,
               quantity: persistContractQuantityAtPolicyScale(item.quantity, CURRENT_CONTRACT_PRODUCT_POLICY_V3),
-              unitPrice: toDecimalNumber(item.unitPrice),
-              totalPrice: toDecimalNumber(item.totalPrice),
+              unitPrice: persistContractMonetaryAmount(item.unitPrice),
+              totalPrice: persistContractMonetaryAmount(item.totalPrice),
               description: item.description || null,
               isMandatory: item.isMandatory || false,
               mandatoryPercentage: toNullableDecimalNumber(item.mandatoryPercentage),
-              originalTotalPrice: toNullableDecimalNumber(item.originalTotalPrice),
+              originalTotalPrice: persistNullableContractMonetaryAmount(item.originalTotalPrice),
               stairSystemId: item.stairSystemId || null,
               stairPartType: item.stairPartType || null
             }))

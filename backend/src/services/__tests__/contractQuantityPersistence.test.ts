@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { persistContractQuantityAtPolicyScale } from '../contractService';
+import { persistContractQuantityAtPolicyScale, persistContractMonetaryAmount } from '../contractService';
 import {
   CURRENT_CONTRACT_PRODUCT_POLICY,
   CURRENT_CONTRACT_PRODUCT_POLICY_V2,
@@ -24,4 +24,9 @@ test('contract writer rejects malformed quantities instead of creating a zero se
       /کمیت واردشده معتبر نیست/,
     );
   }
+});
+
+test('contract item money preserves prepared precision without a Number round trip', () => {
+  assert.equal(persistContractMonetaryAmount('15241577653.8942336').toString(), '15241577653.8942336');
+  for (const value of ['not-a-number', 'Infinity', '-1']) assert.throws(() => persistContractMonetaryAmount(value));
 });

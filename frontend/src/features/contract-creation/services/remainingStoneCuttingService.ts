@@ -7,8 +7,6 @@ import {
   parseStableIdentity
 } from '@sabalanerp/contract-product-graph';
 
-const normalizeCalculatedNumber = (value: number): number => Number(value.toFixed(6));
-
 export const calculateRemainingChildCuttingBreakdown = ({
   row,
   stock,
@@ -23,8 +21,8 @@ export const calculateRemainingChildCuttingBreakdown = ({
   stock: RemainingStone;
   rate: number;
   sourcePieceQuantities?: number[];
-  longitudinalCutMeters?: number;
-  crossCutMeters?: number;
+  longitudinalCutMeters?: number | string;
+  crossCutMeters?: number | string;
   physicalPieces?: StonePartition[];
   sawKerfCm?: number;
 }): CuttingBreakdownEntry[] | undefined => {
@@ -61,15 +59,16 @@ export const calculateRemainingChildCuttingBreakdown = ({
     ['longitudinal', longitudinalCutMeters ?? (packed?.ok ? packed.plan.longitudinalCutMeters : 0)],
     ['cross', crossCutMeters ?? (packed?.ok ? packed.plan.crossCutMeters : 0)]
   ] as const).flatMap(([type, canonicalMeters]) => {
-    const meters = normalizeCalculatedNumber(Number(canonicalMeters));
-    return meters > 0 ? [{ type, meters }] : [];
+    const quantity = parseCanonicalDecimal(String(canonicalMeters));
+    const meters = Number(quantity);
+    return meters > 0 ? [{ type, meters, quantity }] : [];
   });
   const pricing = calculatePricing({
     policyVersion: 'pricing-v1',
     roundingPolicyVersion: 'rounding-v2',
-    lines: cuttingQuantities.map(({ type, meters }) => ({
+    lines: cuttingQuantities.map(({ type, quantity }) => ({
       lineId: `${row.id}:${type}-cut`,
-      quantity: parseCanonicalDecimal(String(meters)),
+      quantity,
       rateToman: parseCanonicalDecimal(String(safeRate))
     }))
   });

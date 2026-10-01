@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates } from './accountingListProjection';
+import { attachAccountingTrendAuditState } from './accountingReadProjection';
 import { normalizePersianSearchTokens } from './crmCustomerSearch';
 import { randomUUID } from 'node:crypto';
 import { canonicalHash, InstantSchema, partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
@@ -1420,11 +1421,12 @@ const getAccountingFinancialTrendInScope = async (scope: AccountingReadScope, re
         ] } },
         { entityType: 'AccountingPaymentStatus', action: { in: ['REGISTER_RECEIPT', 'UPDATE_CHECK_STATUS'] } },
       ] }),
-      select: { entityId: true, entityType: true, action: true, afterState: true, createdAt: true },
+      select: { id: true, entityId: true, entityType: true, action: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     }),
   ]);
-  const ordinary = buildAccountingFinancialTrend({ range, now, invoices, payments, auditEvents });
+  const ordinary = buildAccountingFinancialTrend({ range, now, invoices, payments,
+    auditEvents: await attachAccountingTrendAuditState(prisma, auditEvents) });
   const partnerSeries = await readPartnerAccountingTrend(prisma, { invoiceIds: invoices.map(row => row.id),
     periods: resolveFinancialTrendPeriods(range, now), asOf: now });
   return { ...ordinary, partnerSeries };

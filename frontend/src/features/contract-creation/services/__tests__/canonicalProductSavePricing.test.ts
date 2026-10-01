@@ -6,7 +6,8 @@ import {
   type StairLayerConfigurationInput, type ProductOperationsInput
 } from '@sabalanerp/contract-product-graph';
 import { canonicalProductSavePricing } from '../../utils/canonicalProductSavePricing';
-import { getContractPayableTotal, getContractProductPriceComponents, reconcileContractProductPricing } from '../../utils/contractProductPricing';
+import { getContractPayableTotal, getContractUnroundedPayableTotal, getContractProductPriceComponents, reconcileContractProductPricing, serializeContractProductMonetaryAmounts } from '../../utils/contractProductPricing';
+import { createContractServiceRow, getContractServiceRowExactAmount, recalculateContractServiceRow, serializeContractServiceRow } from '../../utils/contractServiceRows';
 import { recalculateRemainingChildAddOns } from '../remainingStoneChildAddOnService';
 import type { ContractProduct } from '../../types/contract.types';
 
@@ -106,3 +107,32 @@ const child = recalculateRemainingChildAddOns({ productType: 'longitudinal', ope
 assert.ok(child.ok);
 assert.equal(child.product.totalSubServiceCost, 30, 'remaining-child replay must retain the canonical rounded charge instead of 30.12');
 console.log('canonicalProductSavePricing all-family tests passed');
+
+const exactPreparedAmount = multiplyContractMonetaryAmounts('12345.678', '1234567.8912');
+assert.equal(exactPreparedAmount, '15241577653.8942336');
+const exactPreparedPricing = canonicalProductSavePricing({ materialBase: exactPreparedAmount, cuttingCost: 0, totalAmount: exactPreparedAmount });
+const exactPrepared = { rowId: 'precise-prepared', productId: 'stone', productType: 'prepared', preparedKind: 'cubic',
+  preparedUnit: 'squareMeter', preparedQuantity: 12345.678, quantity: 12345.678, squareMeters: 12345.678,
+  unitPrice: 1234567.8912, pricePerSquareMeter: 1234567.8912, originalTotalPrice: exactPreparedPricing.materialBase,
+  totalPrice: exactPreparedPricing.totalPrice, meta: { pricing: exactPreparedPricing } } as ContractProduct;
+const exactPreparedSubmission = serializeContractProductMonetaryAmounts(exactPrepared);
+assert.equal(exactPreparedSubmission.totalPrice, exactPreparedAmount);
+assert.equal(getContractUnroundedPayableTotal([exactPrepared]), exactPreparedAmount);
+assert.equal(getContractPayableTotal([exactPrepared]), 15_241_577_654);
+assert.ok(planLegacyProductGraphMigration({ contractId: 'precise-prepared', revision: 1, calculationPolicy: graphPolicy,
+  products: [exactPreparedSubmission] }).ok, 'submission preserves independently replayable prepared money');
+assert.equal(serializeContractProductMonetaryAmounts({ ...exactPrepared, totalPrice: exactPrepared.totalPrice + 1 }).totalPrice,
+  exactPrepared.totalPrice + 1, 'changed witnesses are not replaced by stale precise metadata');
+for (const kind of ['tool', 'cutting', 'finishing'] as const) {
+  const service = createContractServiceRow(kind, { id: 'service', name: 'service', pricePerMeter: 50,
+    unitPrice: 50, calculationBase: 'length' } as any, 0.29);
+  assert.equal(service.totalPrice, 14.5);
+  assert.equal(recalculateContractServiceRow({ ...service, quantity: 1 }, { quantity: 0.29 }).totalPrice, 14.5);
+  assert.equal(serializeContractServiceRow(service).totalPrice, '14.5');
+  assert.equal(getContractPayableTotal([], [service]), 15, 'round services only after exact decimal multiplication');
+  const historical = { ...service, exactPricing: undefined, totalPrice: 12 };
+  assert.equal(getContractServiceRowExactAmount(historical), '12');
+  assert.equal(serializeContractServiceRow(historical).totalPrice, '12');
+  assert.equal(recalculateContractServiceRow(historical, { description: 'edited description' }).totalPrice, 12);
+  assert.equal(recalculateContractServiceRow(historical, { quantity: 0.29 }).totalPrice, 14.5);
+}

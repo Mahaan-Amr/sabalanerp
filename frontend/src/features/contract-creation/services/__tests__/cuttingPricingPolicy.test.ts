@@ -73,3 +73,19 @@ for (const scenario of [
   assert.ok(breakdown);
   assert.equal(breakdown.reduce((sum, line) => sum + line.cost, 0), scenario.expected);
 }
+
+// Repeating physical meterage must reach pricing before any display rounding.
+for (const [meters, rate, expected] of [
+  ['6.6666749966666667', 20_000, 133_333],
+  ['6.6666666666666666667', 2_000_000, 13_333_333]
+] as const) {
+  const stock = { id: 'precise-stock', width: 2, length: Number(meters),
+    quantity: 1, isAvailable: true } as RemainingStone;
+  const row = { id: 'precise-child', width: 1, length: Number(meters), quantity: 1 } as StonePartition;
+  const breakdown = calculateRemainingChildCuttingBreakdown({
+    row, stock, rate, longitudinalCutMeters: meters, crossCutMeters: '0'
+  });
+  assert.ok(breakdown);
+  assert.equal(breakdown[0].cost, expected, 'price full meterage instead of a six-decimal display value');
+  assert.equal(breakdown[0].meters, Number(meters));
+}

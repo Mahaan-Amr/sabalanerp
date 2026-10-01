@@ -5606,7 +5606,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         cuttingCost: finalProduct.cuttingCost,
         toolsCost: existingSubServiceCost,
         finishingCost: resolvedFinishingCost,
-        totalPrice: finalProduct.totalPrice
+        totalPrice: finalProduct.totalPrice,
+        ...(canonicalPricing?.ok ? { exactAmounts: canonicalPricing.exactAmounts } : {})
       }
     } as any;
 

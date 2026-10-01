@@ -1,5 +1,6 @@
 import type { AppliedSubService, ContractProduct } from '../types/contract.types';
 import { getContractProductOperationGeometry } from '../utils/longitudinalOptimizerGeometry';
+import { calculateProductOperations, sumContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
 
 export interface RemainingChildAddOnResult {
   ok: boolean;
@@ -126,6 +127,27 @@ export const recalculateRemainingChildAddOns = (product: ContractProduct): Remai
       reason: 'افزونه‌های قدیمی این محصول باقی‌مانده هنوز تعیین تکلیف نشده‌اند؛ ابتدا حذف یا پذیرش و محاسبه مجدد را انتخاب کنید.'
     };
   }
+  if (product.operationPolicyInput) {
+    const calculation = calculateProductOperations(product.operationPolicyInput);
+    if (!calculation.ok) return { ok: false, product, reason: calculation.conflicts.map(conflict => conflict.message).join(' | ') };
+    const { tools, finishings } = calculation.result;
+    return {
+      ok: true,
+      product: {
+        ...product,
+        appliedSubServices: (product.appliedSubServices || []).map(tool => {
+          const fact = tools.find(item => item.toolSelectionId === tool.id);
+          return fact ? { ...tool, meter: Number(fact.finalQuantity), cost: Number(fact.amountToman) } : tool;
+        }),
+        finishings: (product.finishings || []).map(finishing => {
+          const fact = finishings.find(item => item.finishingSelectionId === finishing.selectionId);
+          return fact ? { ...finishing, quantity: Number(fact.finalQuantity), cost: Number(fact.amountToman) } : finishing;
+        }),
+        totalSubServiceCost: Number(sumContractMonetaryAmounts(tools.map(tool => tool.amountToman))),
+        finishingCost: Number(sumContractMonetaryAmounts(finishings.map(finishing => finishing.amountToman)))
+      }
+    };
+  }
   const geometry = getContractProductOperationGeometry(product);
   const lengthCapacity = geometry.totalLengthMeters;
   const areaCapacity = geometry.squareMeters;
@@ -155,7 +177,7 @@ export const recalculateRemainingChildAddOns = (product: ContractProduct): Remai
     };
   }
 
-  const totalSubServiceCost = recalculatedTools.reduce((sum, tool) => sum + Number(tool.cost || 0), 0);
+  const totalSubServiceCost = Number(sumContractMonetaryAmounts(recalculatedTools.map(tool => tool.cost || 0)));
   const usedLengthForSubServices = recalculatedTools
     .filter((tool) => tool.calculationBase === 'length')
     .reduce((sum, tool) => sum + Number(tool.meter || 0), 0);

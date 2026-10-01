@@ -14,6 +14,7 @@ import {
   getPricingLengthMeters
 } from '../utils/stairCalculations';
 import { toFiniteNumber } from '@/lib/numberFormat';
+import { sumContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
 
 interface UseStairLayerManagementProps {
   getDraftByPart: (part: StairStepperPart) => StairPartDraftV2 | null;
@@ -445,7 +446,7 @@ export const useStairLayerManagement = ({
       quantity: totalLayers,
       squareMeters: totalLayerSqm,
       pricePerSquareMeter: layerPricePerSquareMeter,
-      totalPrice: typeof layerTotalPrice === 'number' ? Number(layerTotalPrice.toFixed(2)) : Number(parseFloat(String(layerTotalPrice || 0)).toFixed(2)),
+      totalPrice: Number(layerTotalPrice || 0),
       description: `لایه برای ${getPartDisplayLabel(parentPartType)} - ${draft.numberOfLayersPerStair} لایه برای هر پله${layersFromRemainingStones > 0 ? ` (${layersFromRemainingStones} از باقی‌مانده، ${layersFromNewStones} از سنگ جدید)` : ''}${draft.layerTypeName ? ` | نوع لایه: ${draft.layerTypeName}` : ''}`,
       currency: 'تومان',
       isMandatory: false,
@@ -657,8 +658,8 @@ export const useStairLayerManagement = ({
     const mergedCutDetails = [...existingCutDetails, ...layerCutDetails];
 
     const existingLayerMaterialPrice = existing.originalTotalPrice || 0;
-    const updatedLayerMaterialPrice = layerMaterialPrice + existingLayerMaterialPrice;
-    const updatedLayerTotalPrice = Number((updatedLayerMaterialPrice + (existing.cuttingCost || 0) + totalLayerCuttingCost).toFixed(2));
+    const updatedLayerMaterialPrice = Number(sumContractMonetaryAmounts([layerMaterialPrice, existingLayerMaterialPrice]));
+    const updatedLayerTotalPrice = Number(sumContractMonetaryAmounts([updatedLayerMaterialPrice, existing.cuttingCost || 0, totalLayerCuttingCost]));
 
     const existingLayerTypeMeta = (existing.meta as any)?.layerType || {};
     return {

@@ -671,8 +671,12 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           recoveryId: command.intent.recoveryId, recoveryRevision: command.intent.recoveryRevision,
           graphHash: command.intent.graphHash, rows: resolved.value.rows.map(row => ({ productRowId: row.productRowId,
             retailEffectiveUnitPrice: { amount: row.retailUnitPriceAmount, currency: 'IRT' as const },
+            ...(row.retailLineTotalAmount !== undefined ? { retailLineTotal: {
+              amount: row.retailLineTotalAmount, currency: 'IRT' as const } } : {}),
             ...(row.wholesaleUnitPriceAmount !== undefined ? { wholesaleUnitPrice: {
-              amount: row.wholesaleUnitPriceAmount, currency: 'IRT' as const } } : {}) })) }) };
+              amount: row.wholesaleUnitPriceAmount, currency: 'IRT' as const } } : {}),
+            ...(row.wholesaleLineTotalAmount !== undefined ? { wholesaleLineTotal: {
+              amount: row.wholesaleLineTotalAmount, currency: 'IRT' as const } } : {}) })) }) };
       });
       respond(response, result);
     } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }

@@ -4,6 +4,7 @@
 import { useState, useCallback } from 'react';
 import {
   calculateProductOperations,
+  sumContractMonetaryAmounts,
   parseCanonicalDecimal,
   parseStableIdentity,
   type ProductOperationsInput
@@ -395,7 +396,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         squareMeters: row.squareMeters,
         pricePerSquareMeter: 0,
         unitPrice: 0,
-        totalPrice: cuttingCost + operationsAmount,
+        totalPrice: Number(sumContractMonetaryAmounts([cuttingCost, operationsAmount])),
         description:
           remainingStoneConfig.description ||
           `ایجاد شده از سنگ باقی‌مانده • پارتیشن ${index + 1}${wasSplit ? ` • تقسیم فیزیکی: ${splitCount} قطعه` : ''}`,
@@ -492,7 +493,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
             materialCost: 0,
             cuttingCost,
             operationsCost: operationsAmount,
-            totalPrice: cuttingCost + operationsAmount,
+            totalPrice: Number(sumContractMonetaryAmounts([cuttingCost, operationsAmount])),
             materialPricingReason: 'calculated-in-source-product'
           },
           sawKerf: remainingStoneSawKerfEnabled

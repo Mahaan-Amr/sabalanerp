@@ -42,6 +42,7 @@ export async function buildCaseProjections(input: { caseId: string; revision: nu
       customerContractNumber: input.customerContractNumber!, commercialAccountId: input.commercialAccountId,
       debtor: input.evidence.partySnapshots.partner, state: input.state,
       products: input.evidence.products.map(row => ({ ...product(row), wholesaleUnitPrice: row.wholesaleUnitPrice!,
+        ...(row.wholesaleLineTotal !== undefined ? { wholesaleLineTotal: row.wholesaleLineTotal } : {}),
         approvalEvidenceId: row.approvalEvidenceId! })), totals: input.evidence.wholesaleEnvelope.totals,
       sabalanPaymentPlan: input.evidence.paymentEvidence.sabalanPaymentPlan! }) : undefined;
     const fulfillment = priced && linked ? FulfillmentViewSchema.parse({ schemaVersion: 1, purpose: 'FULFILLMENT',

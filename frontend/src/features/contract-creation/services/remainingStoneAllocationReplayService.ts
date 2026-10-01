@@ -13,6 +13,7 @@ import { calculateSlabRemainingStones, calculateSmartLongitudinalCutPlan } from 
 import { calculateRemainingChildCuttingBreakdown } from './remainingStoneCuttingService';
 import {
   parseCanonicalDecimal,
+  sumContractMonetaryAmounts,
   parseStableIdentity,
   type RemainderChildPolicyInput
 } from '@sabalanerp/contract-product-graph';
@@ -217,7 +218,7 @@ const replaceAllocatedStockGroup = (
 };
 
 const getChildOperationTotal = (child: ContractProduct, cuttingCost: number): number =>
-  cuttingCost + Number(child.totalSubServiceCost || 0) + Number(child.finishingCost || 0);
+  Number(sumContractMonetaryAmounts([cuttingCost, child.totalSubServiceCost || 0, child.finishingCost || 0]));
 
 const createRemainderChildPolicyInput = ({
   child,

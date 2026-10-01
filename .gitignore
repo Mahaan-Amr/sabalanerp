@@ -49,6 +49,7 @@ test-results/
 playwright-report/
 
 # Runtime data
+/storage/dispatch-documents/
 pids
 *.pid
 *.seed

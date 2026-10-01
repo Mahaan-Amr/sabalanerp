@@ -233,6 +233,7 @@ import {
   reconcileContractProductPricing
 } from '@/features/contract-creation/utils/contractProductPricing';
 import { getBillableCuttingBreakdown, getBillableCuttingCost } from '@/features/contract-creation/utils/mandatoryCuttingPricing';
+import { calculateCanonicalLongitudinalSavePricing } from '@/features/contract-creation/utils/canonicalLongitudinalSavePricing';
 import {
   getDeliverableProductEntries,
   getDeliveryTargetAmount as getContractDeliveryTargetAmount,
@@ -5573,20 +5574,34 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     const existingSubServiceCost = Number(finalProduct.totalSubServiceCost || 0);
     const resolvedFinishingCost =
       operationSnapshots.finishingsCost + Number(finalProduct.finishingCost || 0);
-    finalProduct.totalPrice =
+    const canonicalPricing = finalProduct.longitudinalPolicyInput
+      ? calculateCanonicalLongitudinalSavePricing(
+          finalProduct.longitudinalPolicyInput,
+          existingSubServiceCost,
+          resolvedFinishingCost
+        )
+      : null;
+    if (canonicalPricing && !canonicalPricing.ok) {
+      setErrors({ products: 'محاسبه معتبر مبلغ محصول ممکن نیست؛ تنظیمات محصول را بررسی کنید.' });
+      return;
+    }
+    // Save the same monetary facts the server replays, without multiplying float geometry.
+    finalProduct.originalTotalPrice = canonicalPricing?.materialBase ?? finalProduct.originalTotalPrice;
+    finalProduct.cuttingCost = canonicalPricing?.cuttingCost ?? billableCuttingCost;
+    finalProduct.totalPrice = canonicalPricing?.totalPrice ?? (
       (editingRemainingStoneChild ? 0 : longitudinalMaterialPricing.totalPrice) +
       billableCuttingCost +
       existingSubServiceCost +
-      resolvedFinishingCost;
+      resolvedFinishingCost);
     finalProduct.meta = {
       ...(finalProduct.meta || {}),
       pricing: {
         ...((finalProduct.meta as any)?.pricing || {}),
         authority: 'canonical-current-save',
-        materialBase: longitudinalMaterialPricing.originalTotalPrice,
-        mandatoryAmount:
+        materialBase: canonicalPricing?.materialBase ?? longitudinalMaterialPricing.originalTotalPrice,
+        mandatoryAmount: canonicalPricing?.mandatoryAmount ??
           longitudinalMaterialPricing.totalPrice - longitudinalMaterialPricing.originalTotalPrice,
-        cuttingCost: billableCuttingCost,
+        cuttingCost: finalProduct.cuttingCost,
         toolsCost: existingSubServiceCost,
         finishingCost: resolvedFinishingCost,
         totalPrice: finalProduct.totalPrice

@@ -24,8 +24,8 @@ export const PartnerTechnicalPricingPolicySchema = z.object({
     longitudinalCutRateToman: decimal,
     crossCutRateToman: decimal,
     calibrationCutRateToman: decimal,
-    verticalCutRateToman: decimal,
-    squareMeterCutRateToman: decimal,
+    verticalCutRateToman: decimal.optional(),
+    squareMeterCutRateToman: decimal.optional(),
   }).strict(),
 }).strict();
 

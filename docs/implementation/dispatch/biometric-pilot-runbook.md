@@ -9,7 +9,7 @@ Do not set `BIOMETRIC_CONNECTOR_MODE=physical` until all of these records exist:
 - supplier invoice and unit serial;
 - Xperix production SDK licence plus explicit development, production, redistribution, offline operation and 1:1 matching rights;
 - warranty, replacement turnaround and spare-device terms;
-- Sabalan-owned code-signing certificate and a production package whose pinned signer and manifest pass `install-connector.ps1`;
+- a production package received through the approved internal transfer channel whose SHA-256 manifest and file checks pass `install-connector.ps1` (no code-signing certificate required);
 - approved workstation hardening record: supported Windows release, patches, restricted local administration, USB power policy, endpoint protection and time synchronization; and
 - named primary/backup HR, Accounting, Guard and IT operators who passed the competency checks below.
 
@@ -17,8 +17,8 @@ No manager can waive one of these gates. A missing gate keeps enrollment disable
 
 ## Installation and secret reconciliation
 
-1. On a controlled build machine, run `package-production.ps1` with the approved SDK, portable Node runtime, empty output directory and Sabalan code-signing certificate thumbprint.
-2. Verify the package on the pilot PC and run `install-connector.ps1` elevated, using the exact ERP HTTPS origin, approved device serial, assigned workstation ID and Sabalan signer thumbprint.
+1. On a controlled build machine, run `package-production.ps1` with the approved SDK, portable Node runtime and empty output directory.
+2. Verify the package on the pilot PC with `install-connector.ps1 -ValidateOnly`, using the exact ERP HTTPS origin, approved device serial and assigned workstation ID. Then run the same command elevated without `-ValidateOnly` to install. Neither command requires a signer thumbprint.
 3. Move `erp-provisioning.json` through the approved secret-transfer channel. Merge it into `BIOMETRIC_WORKSTATIONS_JSON`; never paste it into an issue, chat, log or source file.
 4. Securely remove the provisioning export after two authorized people compare workstation ID and key ID. Keep no second plaintext copy.
 5. Confirm the scheduled task runs as SYSTEM, the port listens only on `127.0.0.1:47631`, the journal/config ACL contains only SYSTEM and Administrators, and an unapproved browser Origin receives HTTP 403.

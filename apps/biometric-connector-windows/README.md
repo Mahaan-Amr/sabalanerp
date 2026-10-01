@@ -54,7 +54,9 @@ npm --prefix .\host test
 npm --prefix .\host run build
 ```
 
-`package-production.ps1` assembles an external distribution from an approved SDK directory and a portable Node executable. Proprietary Xperix files stay outside Git. A Sabalan code-signing certificate is mandatory. `install-connector.ps1` pins the trusted signer thumbprint, rejects unsigned, modified, missing, duplicate, escaping, or unmanifested package files, installs into a manifest-addressed release directory, restricts configuration/journal ACLs to SYSTEM and Administrators, generates per-workstation credentials, and registers a SYSTEM startup task. HTTPS and signature verification cannot be disabled.
+`package-production.ps1` assembles an external distribution from an approved SDK directory and a portable Node executable. Proprietary Xperix files stay outside Git. Code-signing certificates and Authenticode signatures are not required. Obtain the package through the approved internal transfer channel: its SHA-256 manifest detects file differences but does not authenticate the publisher. `install-connector.ps1` rejects modified, missing, duplicate, escaping, or unmanifested package files, installs into a manifest-addressed release directory, restricts configuration/journal ACLs to SYSTEM and Administrators, generates per-workstation credentials, and registers a SYSTEM startup task. HTTPS, command/result authentication and transport encryption remain mandatory.
+
+Use `install-connector.ps1 -ValidateOnly` with the normal workstation, HTTPS origin and device serial arguments to check a package without installing files, generating credentials or registering a task. This validation does not require elevation. Run `test-package-validation.ps1` to verify unsigned-package acceptance and package integrity rejection cases without installing a connector.
 
 The production packager uses `build-production.ps1` and emits `adapter\Sabalan.BioMini.Adapter.exe` with production version metadata. The evaluation executable remains limited to the local hardware-evaluation commands and is excluded from production packages.
 

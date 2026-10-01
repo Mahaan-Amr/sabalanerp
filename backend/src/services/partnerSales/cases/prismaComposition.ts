@@ -296,7 +296,9 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     rows.push({ productRowId: row.productRowId, configurationHash: hash ?? currentSubjectHash!, quantity: view.quantity,
       unit: view.unit, precisionPolicyVersion: identityRow.roundingPolicyVersion, description: product.name, productCode: product.code,
       retailUnitPriceAmount: new Prisma.Decimal(retail.totalAmount).div(commercialQuantity).toString(),
-      ...(wholesale ? { wholesaleUnitPriceAmount: new Prisma.Decimal(wholesale.totalAmount).div(commercialQuantity).toString() } : {}) });
+      retailLineTotalAmount: retail.totalAmount,
+      ...(wholesale ? { wholesaleUnitPriceAmount: new Prisma.Decimal(wholesale.totalAmount).div(commercialQuantity).toString(),
+        wholesaleLineTotalAmount: wholesale.totalAmount } : {}) });
   }
   const planVersion = command.type === 'CASE_DRAFT_REVISE' ? command.expected.revision + 1 : 1;
   const caseId = command.idempotency.targetId;

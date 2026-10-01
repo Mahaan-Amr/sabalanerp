@@ -11,7 +11,8 @@ export const PartnerWholesaleQuoteSchema = z.object({
   recoveryRevision: RevisionSchema,
   graphHash: HashSchema,
   rows: z.array(z.object({ productRowId: IdSchema, retailEffectiveUnitPrice: MoneySchema,
-    wholesaleUnitPrice: MoneySchema.optional() }).strict()).min(1),
+    wholesaleUnitPrice: MoneySchema.optional(),
+    retailLineTotal: MoneySchema.optional(), wholesaleLineTotal: MoneySchema.optional() }).strict()).min(1),
 }).strict();
 
 export type PartnerWholesaleQuote = z.infer<typeof PartnerWholesaleQuoteSchema>;

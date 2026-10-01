@@ -94,7 +94,8 @@ function applyPartnerRetailQuote(draft: PartnerWizardDraft, quote: PartnerWholes
   const rows = draft.rows.map(row => {
     const priced = quote.rows.find(item => item.productRowId === row.productRowId)!;
     return { ...row, retailEffectiveUnitPrice: priced.retailEffectiveUnitPrice,
-      ...(priced.wholesaleUnitPrice ? { wholesaleUnitPrice: priced.wholesaleUnitPrice } : {}) };
+      retailLineTotal: priced.retailLineTotal, wholesaleLineTotal: priced.wholesaleLineTotal,
+      wholesaleUnitPrice: priced.wholesaleUnitPrice };
   });
   const retailDiscount = draft.intent.retailDiscountPercent === undefined ? draft.intent.retailDiscount
     : partnerRetailDiscountFromPercent(rows, draft.intent.retailDiscountPercent,

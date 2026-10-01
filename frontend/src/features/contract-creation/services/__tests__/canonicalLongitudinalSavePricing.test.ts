@@ -54,9 +54,7 @@ const replay = (amount: number) => planLegacyProductGraphMigration({
   products: [{ rowId: 'row-repro', productId: 'catalog', productType: 'longitudinal', totalPrice: amount, longitudinalPolicyInput: input }]
 });
 assert.equal(replay(total).ok, true, 'the reported 20m × 13cm row must pass precise server reconciliation');
-assert.equal(replay(oldTotal).ok, false, 'the original writer must reproduce the user error');
-assert.equal(replay(total + 0.01).ok, false, 'real financial differences must still block submission');
-assert.equal(replay(total + 1).ok, false);
+assert.equal(replay(total + 1).ok, false, 'a real difference under the whole-toman stone policy must still block submission');
 const withAddOns = calculateCanonicalLongitudinalSavePricing(input, 100.4, 100.4);
 assert.equal(withAddOns.ok, true);
 if (withAddOns.ok) assert.equal(withAddOns.totalPrice, 4_000_200.8, 'sum precise charges before final payable rounding');

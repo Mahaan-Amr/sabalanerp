@@ -1,5 +1,5 @@
-import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
-import { roundContractPayableTotal, sumContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
+import { toFiniteNumber } from '@/lib/numberFormat';
+import { multiplyContractMonetaryAmounts, roundContractPayableTotal, sumContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
 import type { ContractProduct, ContractServiceRow } from '../types/contract.types';
 import { getBillableCuttingCost } from './mandatoryCuttingPricing';
 
@@ -17,13 +17,13 @@ export interface ContractProductPriceComponents {
 
 const getToolsCost = (product: ContractProduct): number => {
   const snapshotTotal = toFiniteNumber(product.totalSubServiceCost);
-  const rowTotal = sumNumericValues(product.appliedSubServices || [], (service) => service.cost);
+  const rowTotal = Number(sumContractMonetaryAmounts((product.appliedSubServices || []).map(service => toFiniteNumber(service.cost))));
   return Math.max(snapshotTotal, rowTotal);
 };
 
 const getFinishingCost = (product: ContractProduct): number => {
   if (Array.isArray(product.finishings)) {
-    return sumNumericValues(product.finishings, (finishing) => finishing.cost);
+    return Number(sumContractMonetaryAmounts(product.finishings.map(finishing => toFiniteNumber(finishing.cost))));
   }
   return Math.max(
     toFiniteNumber(product.finishingCost),
@@ -46,19 +46,23 @@ export const getContractProductPriceComponents = (
   product: ContractProduct
 ): ContractProductPriceComponents => {
   const savedTotal = toFiniteNumber(product.totalPrice);
-  const materialBase = toFiniteNumber(product.originalTotalPrice);
+  const explicitCanonicalPricing = (product.meta as any)?.pricing;
+  const canonical = explicitCanonicalPricing?.authority === 'canonical-current-save'
+    ? explicitCanonicalPricing : undefined;
+  const materialBase = toFiniteNumber(canonical?.materialBase ?? product.originalTotalPrice);
   const hasReliableMaterialBase = materialBase > 0 || isRemainingStoneChild(product);
   const mandatoryPercentage = product.isMandatory
     ? Math.max(toFiniteNumber(product.mandatoryPercentage), 0)
     : 0;
-  const mandatoryAmount = materialBase * (mandatoryPercentage / 100);
-  const cuttingCost = getBillableCuttingCost(product);
-  const toolsCost = getToolsCost(product);
-  const finishingCost = getFinishingCost(product);
+  const mandatoryAmount = canonical?.mandatoryAmount === undefined
+    ? Number(multiplyContractMonetaryAmounts(multiplyContractMonetaryAmounts(materialBase, mandatoryPercentage), '0.01'))
+    : toFiniteNumber(canonical.mandatoryAmount);
+  const cuttingCost = toFiniteNumber(canonical?.cuttingCost ?? getBillableCuttingCost(product));
+  const toolsCost = toFiniteNumber(canonical?.toolsCost ?? getToolsCost(product));
+  const finishingCost = toFiniteNumber(canonical?.finishingCost ?? getFinishingCost(product));
   const knownPayableMinimum = hasReliableMaterialBase
-    ? materialBase + mandatoryAmount + cuttingCost + toolsCost + finishingCost
+    ? Number(sumContractMonetaryAmounts([materialBase, mandatoryAmount, cuttingCost, toolsCost, finishingCost]))
     : savedTotal;
-  const explicitCanonicalPricing = (product.meta as any)?.pricing;
   const reconciledTotal = explicitCanonicalPricing?.authority === 'canonical-current-save'
     ? toFiniteNumber(explicitCanonicalPricing.totalPrice)
     : Math.max(savedTotal, knownPayableMinimum);
@@ -81,11 +85,11 @@ export const getContractProductPayableTotal = (product: ContractProduct): number
 
 export const getContractProductOperationTotal = (product: ContractProduct): number => {
   const components = getContractProductPriceComponents(product);
-  return components.cuttingCost + components.toolsCost + components.finishingCost;
+  return Number(sumContractMonetaryAmounts([components.cuttingCost, components.toolsCost, components.finishingCost]));
 };
 
 export const getContractProductNonServiceSubtotal = (product: ContractProduct): number =>
-  Math.max(getContractProductPayableTotal(product) - getContractProductOperationTotal(product), 0);
+  Math.max(Number(sumContractMonetaryAmounts([getContractProductPayableTotal(product), -getContractProductOperationTotal(product)])), 0);
 
 export const reconcileContractProductPricing = (product: ContractProduct): ContractProduct => {
   const components = getContractProductPriceComponents(product);
@@ -136,13 +140,15 @@ export const reconcileContractProductPricing = (product: ContractProduct): Contr
 };
 
 export const getContractProductsPayableTotal = (products: ContractProduct[]): number =>
-  sumNumericValues(products, getContractProductPayableTotal);
+  Number(sumContractMonetaryAmounts(products.map(getContractProductPayableTotal)));
 
 export const getContractGrossPayableTotal = (
   products: ContractProduct[],
   standaloneServiceRows: ContractServiceRow[] = []
-): number => getContractProductsPayableTotal(products) +
-  sumNumericValues(standaloneServiceRows, (row) => row.totalPrice);
+): number => Number(sumContractMonetaryAmounts([
+  getContractProductsPayableTotal(products),
+  ...standaloneServiceRows.map(row => toFiniteNumber(row.totalPrice))
+]));
 
 export const getContractPayableTotal = (
   products: ContractProduct[],

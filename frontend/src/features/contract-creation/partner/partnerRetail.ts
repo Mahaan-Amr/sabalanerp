@@ -14,6 +14,9 @@ export interface PartnerRetailRow {
   /** Canonical blended rate: Partner material rate plus system-owned components. */
   retailEffectiveUnitPrice?: Money;
   wholesaleUnitPrice?: Money;
+  /** Exact server quote totals; effective rates may contain repeating decimals. */
+  retailLineTotal?: Money;
+  wholesaleLineTotal?: Money;
 }
 
 export function refreshPartnerInquiryRow(row: PartnerRetailRow, inquiryRow: PartnerInquiryRow): PartnerRetailRow {
@@ -23,8 +26,9 @@ export function refreshPartnerInquiryRow(row: PartnerRetailRow, inquiryRow: Part
     && row.inquiryRow.approvedPrice?.amount === inquiryRow.approvedPrice?.amount
     && row.inquiryRow.approvedPrice?.currency === inquiryRow.approvedPrice?.currency;
   if (sameApproval && inquiryRow.approvedPrice) return { ...row, inquiryRow };
-  const { wholesaleUnitPrice: _staleQuote, ...withoutStaleQuote } = row;
+  const { wholesaleUnitPrice: _staleQuote, wholesaleLineTotal: _staleTotal, ...withoutStaleQuote } = row;
   void _staleQuote;
+  void _staleTotal;
   return { ...withoutStaleQuote, inquiryRow };
 }
 
@@ -66,6 +70,11 @@ function add(left: Decimal, right: Decimal, subtract = false): Decimal {
 function product(left: string, right: string): Decimal {
   const a = decimal(left); const b = decimal(right);
   return { digits: a.digits * b.digits, scale: a.scale + b.scale };
+}
+function quotedLineTotal(quantity: string, rate: Money, total?: Money): Decimal {
+  if (!total) return product(quantity, rate.amount);
+  if (total.currency !== rate.currency) throw new Error('currency mismatch');
+  return decimal(total.amount);
 }
 function display(value: Decimal): string {
   const negative = value.digits < BigInt(0);
@@ -113,7 +122,7 @@ function retailSubtotal(rows: PartnerRetailRow[], currency: Money['currency']): 
       const effectiveRetail = row.retailEffectiveUnitPrice ?? row.retailUnitPrice;
       if (effectiveRetail.currency !== currency) return null;
       QuantitySchema.parse(row.quantity);
-      subtotal = add(subtotal, product(row.quantity, effectiveRetail.amount));
+      subtotal = add(subtotal, quotedLineTotal(row.quantity, effectiveRetail, row.retailLineTotal));
     }
     return subtotal;
   } catch { return null; }
@@ -147,11 +156,11 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) 
     };
     try {
       QuantitySchema.parse(row.quantity);
-      if (approved) wholesale = add(wholesale, product(row.quantity, approved.amount));
+      if (approved) wholesale = add(wholesale, quotedLineTotal(row.quantity, approved, row.wholesaleLineTotal));
       else pricingReady = false;
       const effectiveRetail = row.retailEffectiveUnitPrice ?? row.retailUnitPrice;
       if (effectiveRetail.currency !== discount.currency) throw new Error('currency mismatch');
-      retail = add(retail, product(row.quantity, effectiveRetail.amount));
+      retail = add(retail, quotedLineTotal(row.quantity, effectiveRetail, row.retailLineTotal));
     } catch {
       return { valid: false as const, field: 'quantity' as const, productRowId: row.productRowId, message: 'مقدار و قیمت تأییدشده را بررسی کنید.' };
     }
@@ -170,8 +179,8 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) 
 export function partnerRetailRowSummary(row: PartnerRetailRow) {
   if (!row.wholesaleUnitPrice || row.wholesaleUnitPrice.currency !== row.retailUnitPrice.currency) return null;
   try {
-    const wholesale = product(row.quantity, row.wholesaleUnitPrice.amount);
-    const retail = product(row.quantity, (row.retailEffectiveUnitPrice ?? row.retailUnitPrice).amount);
+    const wholesale = quotedLineTotal(row.quantity, row.wholesaleUnitPrice, row.wholesaleLineTotal);
+    const retail = quotedLineTotal(row.quantity, row.retailEffectiveUnitPrice ?? row.retailUnitPrice, row.retailLineTotal);
     const difference = add(retail, wholesale, true);
     return { wholesale: display(wholesale), retail: display(retail), difference: display(difference),
       loss: difference.digits < BigInt(0) };

@@ -13,6 +13,7 @@ import { createOrdinaryCrmProject, findOrdinaryCrmNextAction, ordinaryProjectSea
   reassignOrdinaryCrmProject } from '../../routes/crm';
 import { FEATURES } from '../../middleware/feature';
 import { WORKSPACES } from '../../middleware/workspace';
+import { ordinaryCustomerCreationGuard } from '../../middleware/ordinaryCustomerCreation';
 
 const databaseUrl = (connectionLimit = 2) => {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -58,6 +59,46 @@ function signal() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
+
+test('a legacy Customer owned by the Partner remains discoverable as a masked transfer match', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback legacy Partner Customer fixture');
+  try {
+    await assert.rejects(database.$transaction(async tx => {
+      const id = `legacy-partner-customer-${randomUUID()}`;
+      const phone = `09${Date.now().toString().slice(-9)}`;
+      await tx.user.create({ data: { id, username: id, email: `${id}@example.invalid`,
+        password: 'not-a-login', firstName: 'Fixture', lastName: 'Legacy', role: 'USER' } });
+      const runGuard = async () => {
+        let status: number | undefined, code: string | undefined, continued = false;
+        const response = { status(value: number) { status = value; return this; },
+          json(body: { code: string }) { code = body.code; return this; } };
+        await ordinaryCustomerCreationGuard(tx)({ user: { id } }, response as any, error => {
+          if (error) throw error;
+          continued = true;
+        });
+        return { status, code, continued };
+      };
+      assert.equal((await runGuard()).continued, true, 'ordinary account may use the ordinary route');
+      await tx.partnerProfile.create({ data: { id, userId: id, state: 'ACTIVE' } });
+      assert.deepEqual(await runGuard(), { status: 409, code: 'PARTNER_CUSTOMER_ROUTE_REQUIRED', continued: false },
+        'same account after Partner activation must be blocked even if its browser still uses the ordinary route');
+      await tx.crmCustomer.create({ data: { id, ownerUserId: id, firstName: 'مشتری', lastName: 'قدیمی',
+        phoneNumbers: { create: { number: phone, type: 'mobile', isPrimary: true } } } });
+      const service = createPartnerCrmService({ database: transactionDatabase(tx), actorId: id,
+        authorize: authorize(id, id, 'PARTNER'), notifyTransfer: async () => undefined });
+      const result = await service.findDuplicate({ schemaVersion: 1, correlationId: id, phone });
+      assert.equal(result.ok, true, 'same-owner ordinary Customer must not disappear through nullable ownership filtering');
+      if (!result.ok) throw new Error('masked duplicate expected');
+      assert.equal(result.value.maskedWitness, `********${phone.slice(-4)}`);
+      assert.equal('customerId' in result.value, false);
+      assert.equal((await service.listCustomers({ correlationId: id })).ok, true);
+      assert.equal((await tx.crmCustomer.findUniqueOrThrow({ where: { id } })).partnerOwnerProfileId, null,
+        'duplicate lookup must not silently convert historical ownership');
+      throw rollback;
+    }, { timeout: 20_000 }), error => error === rollback);
+  } finally { await database.$disconnect(); }
+});
 
 test('masked duplicate and approved transfer expose no prior CRM history and preserve Project responsibility', async () => {
   const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
@@ -922,6 +963,17 @@ test('Partner contract Customer creation atomically creates one canonical Custom
       assert.equal(await tx.projectAddress.count({ where: { customer: { partnerOwnerProfileId: partnerId } } }), 1);
       assert.equal(await tx.crmPotentialProject.count({ where: { customer: { partnerOwnerProfileId: partnerId } } }), 0);
       const customerId = (created.value.customer as PartnerCustomerSummary).customerId;
+      const listed = await service.listCustomers({ correlationId: `list-created-${suffix}` });
+      assert.equal(listed.ok, true);
+      if (!listed.ok) throw new Error('list expected immediately after creation');
+      assert.ok(listed.value.items.some(customer => customer.customerId === customerId),
+        'successful creation must be immediately visible without logging out');
+      const secondTry = await service.createContractCustomer({ ...command,
+        commandId: `second-try-${suffix}`, idempotencyKey: `second-try-key-${suffix}` });
+      assert.equal(secondTry.ok, true);
+      if (!secondTry.ok) throw new Error('owned duplicate selection expected');
+      assert.equal('duplicate' in secondTry.value ? secondTry.value.duplicate : undefined, 'OWNED');
+      assert.equal((secondTry.value.customer as PartnerCustomerSummary).customerId, customerId);
       const projectBase = { schemaVersion: 1 as const,
         commandId: `contract-project-command-${suffix}`,
         correlationId: `contract-project-correlation-${suffix}`,

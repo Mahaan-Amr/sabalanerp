@@ -815,6 +815,14 @@ _Avoid_: adding a normal-vs-collaboration choice as a required step in every con
 A CRM customer whose relationship to a sales contract is collaborative rather than a normal project customer. A مشتری همکاری can be selected for فروش همکاری without requiring project-address selection.
 _Avoid_: creating a separate non-CRM buyer record for collaborators
 
+**دید مدیریتی مشتریان CRM**:
+نمای مشترک مشتریان داخلی و مشتریان همهٔ فروشندگان همکار برای Admin و مدیر دارای مجوز مشخص «مشاهده همه مشتریان»، با نمایش مالک و امکان تفکیک داخلی، همکار یا همه. این دید شامل مشخصات، تماس‌ها و پروژه‌هاست؛ مالکیت و اختیار ویرایش را تغییر نمی‌دهد و مجوز مشاهدهٔ سود، قیمت‌های خصوصی و دریافتی‌های فروشنده را اعطا نمی‌کند.
+_Avoid_: حذف مشتریان همکار از مشاهده همه مشتریان، انتقال مالکیت با مشاهده، یکی‌دانستن رکوردهای هم‌نام
+
+**حذف دائمی مشتری CRM**:
+حذف غیرقابل‌بازگشت و تکی مشتری داخلی یا همکار برای Admin و مدیر دارای مجوز مشخص حذف دائمی مشتری، با پیش‌نمایش اثر حذف، دلیل اجباری، تأیید نهایی ساده و رسید حسابرسی عامل، زمان و دلیل. برای مشتری دارای سابقه، کارت عملیاتی حذف می‌شود و هویت و مشخصات تاریخی او همراه قراردادها، پرونده‌ها و دیگر سوابق محفوظ و غیرقابل‌ویرایش می‌ماند؛ برای مشتری بدون سابقه، اطلاعات متعلق به کارت مانند شماره‌ها، تماس‌ها و آدرس‌های بدون استفاده نیز حذف می‌شوند و ورود مجدد رمز یا تایپ نام لازم نیست.
+_Avoid_: اختیار حذف صرفاً بر اساس عنوان مدیر، حذف زنجیره‌ای سابقهٔ تجاری یا مالی، یکسان‌دانستن حذف دائمی با قفل یا بلک‌لیست
+
 **فروشنده همکار**:
 An external independent sales collaborator with an ERP account and a Partner sales profile. The Partner Seller creates Sales Contracts for their own CRM Customers, remains both the Contract Creator and Responsible Seller, and receives the resulting sales-performance credit; the internal seller who quotes the required Sabalan price does not receive ownership or sales credit. A Partner Seller may create a numbered Case for internal pricing before every row is approved, but cannot expose a customer Contract until every required row is approved and the Partner deliberately finalizes the Case and accepts the debt to Sabalan.
 _Avoid_: treating the Partner Seller as an internal Sabalan seller, confusing the Partner Seller with فروش همکاری or مشتری همکاری, attributing the sale to the internal price responder, exposing a Customer Contract or allowing finalization before all required prices are approved, treating a numbered unfinalized Case as Sabalan debt, or relying on a broad system Role alone to express the Partner boundary
@@ -4987,3 +4995,10 @@ _Avoid_: deleting the visit, confusing it with a mistaken entry, leaving a reser
 **Voided Queue Turn**:
 A queue turn retained as accountable evidence because the admission record itself was entered by mistake or duplicated, with actor, time, reason, and an optional replacement-turn link.
 _Avoid_: hard deletion, using voiding for a real visit that ended without loading, or voiding after finalized downstream evidence exists
+
+**Admin Partner Customer Card Management**:
+The Admin authority to edit a Partner-owned Customer’s identity, phones, contacts and addresses and toggle blacklist or lock status without transferring its ownership. Updates are atomic, reject stale card versions and retain an immutable audit decision. Company Manager view-all permission alone does not grant this authority; private Partner financial and commercial evidence remains outside the editable card.
+
+**هویت تاریخی مشتری**:
+مشخصات ثابت مشتری که پس از حذف دائمی کارت عملیاتی، فقط برای نگهداری و نمایش سوابق قبلی او باقی می‌ماند و برای ایجاد مشتری یا قرارداد مستقل جدید قابل انتخاب نیست.
+_Avoid_: مشتری فعال CRM، امکان بازگردانی کارت حذف‌شده، پاک‌کردن مشخصات از قراردادهای سابق

@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { FaBan, FaBuilding, FaCheckCircle, FaEdit, FaEnvelope, FaExclamationTriangle, FaEye, FaLock, FaMapMarkerAlt, FaPhone, FaPlus, FaUser, FaUsers } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpEmptyState, ErpFieldView, ErpListPage, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
+import { FaBan, FaBuilding, FaCheckCircle, FaEdit, FaEnvelope, FaExclamationTriangle, FaEye, FaLock, FaMapMarkerAlt, FaPhone, FaPlus, FaTrash, FaUser, FaUsers } from 'react-icons/fa';
+import { ErpBadge, ErpButton, ErpEmptyState, ErpFieldView, ErpListPage, ErpInlineState, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
 import { crmAPI, dashboardAPI } from '@/lib/api';
+import { CustomerPermanentDeletion } from '@/features/crm/customer-workflow/CustomerPermanentDeletion';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
 
@@ -41,6 +42,9 @@ interface CrmCustomer {
     isPrimary: boolean;
     isActive: boolean;
   }>;
+  partnerOwnerProfileId?: string | null;
+  managementReadOnly?: boolean;
+  canManageCustomerCard?: boolean;
   ownerUserId?: string | null;
   ownerUser?: {
     id: string;
@@ -53,6 +57,7 @@ interface CrmCustomer {
 }
 
 interface CustomerFilters {
+  ownership: string;
   search: string;
   status: string;
   customerType: string;
@@ -70,6 +75,9 @@ const statusTone: Record<string, ErpTone> = {
 };
 
 export default function CustomersPage() {
+  const [deletionId, setDeletionId] = useState<string | null>(null);
+  const [receiptId, setReceiptId] = useState<string | null>(null);
+  const [management, setManagement] = useState({ canViewAllCustomers: false, canDeleteCustomers: false });
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [crmPermissions, setCrmPermissions] = useState({
     canViewCustomers: false,
@@ -80,6 +88,7 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<CustomerFilters>({
+    ownership: '',
     search: '',
     status: '',
     customerType: '',
@@ -122,11 +131,15 @@ export default function CustomersPage() {
         search: filters.search || undefined,
         status: filters.status || undefined,
         customerType: filters.customerType || undefined,
+        ownership: filters.ownership || undefined,
+        isBlacklisted: filters.isBlacklisted ?? undefined,
+        isLocked: filters.isLocked ?? undefined,
       };
 
       const response = await crmAPI.getCustomers(params);
 
       if (response.data.success) {
+        setManagement(response.data.permissions || { canViewAllCustomers: false, canDeleteCustomers: false });
         let filteredCustomers = response.data.data;
 
         if (filters.isBlacklisted !== null) {
@@ -213,7 +226,8 @@ export default function CustomersPage() {
 
   const clearFilters = () => {
     setFilters({
-      search: '',
+      ownership: '',
+    search: '',
       status: '',
       customerType: '',
       isBlacklisted: null,
@@ -238,6 +252,7 @@ export default function CustomersPage() {
         <div>
           <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{customer.firstName} {customer.lastName}</p>
           {customer.companyName && <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{customer.companyName}</p>}
+          <ErpBadge tone="neutral">{customer.partnerOwnerProfileId ? 'همکار فروش' : 'داخلی'}</ErpBadge>
           <p className="mt-1 text-xs text-[var(--sds-info)] dark:text-[var(--sds-info)]">مسئول فروش: {getOwnerLabel(customer)}</p>
           {customer.nationalCode && <p className="mt-1 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-secondary)]">کد ملی: {customer.nationalCode}</p>}
         </div>
@@ -314,12 +329,18 @@ export default function CustomersPage() {
   }
 
   return (
+    <>
+    {receiptId && <ErpInlineState kind="success" title={`مشتری حذف شد. رسید حذف: ${receiptId}`} />}
     <ErpListPage
       eyebrow="CRM"
       title="مدیریت مشتریان"
       metrics={metrics}
       actions={crmPermissions.canCreateCustomers ? [{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaPlus, tone: 'primary', variant: 'solid' }] : []}
       filters={[
+        ...(management.canViewAllCustomers ? [{ id: 'ownership', label: 'مالکیت', type: 'select' as const, value: filters.ownership,
+          onChange: (value: string) => handleFilterChange('ownership', value), options: [
+            { label: 'همه مشتریان', value: '' }, { label: 'داخلی', value: 'internal' }, { label: 'همکار فروش', value: 'partner' },
+          ] }] : []),
         {
           id: 'search',
           label: 'جستجو',
@@ -374,9 +395,10 @@ export default function CustomersPage() {
       rowKey={(customer) => customer.id}
       columns={columns}
       rowActions={(customer) => [
+        ...(management.canDeleteCustomers ? [{ label: 'حذف دائمی', onClick: () => { setReceiptId(null); setDeletionId(customer.id); }, icon: FaTrash, tone: 'danger' as ErpTone, title: 'حذف دائمی' }] : []),
         { label: 'مشاهده مشتری', href: `/dashboard/crm/customers/${customer.id}`, icon: FaEye, title: 'مشاهده مشتری' },
-        ...(hasPermission('crm' as any, 'edit' as any) ? [{ label: 'ویرایش', href: `/dashboard/crm/customers/${customer.id}/edit`, icon: FaEdit, title: 'ویرایش' }] : []),
-        ...(hasPermission('crm' as any, 'admin' as any)
+        ...((!customer.managementReadOnly || customer.canManageCustomerCard) && hasPermission('crm' as any, 'edit' as any) ? [{ label: 'ویرایش', href: `/dashboard/crm/customers/${customer.id}/edit`, icon: FaEdit, title: 'ویرایش' }] : []),
+        ...((!customer.managementReadOnly || customer.canManageCustomerCard) && hasPermission('crm' as any, 'admin' as any)
           ? [
               {
                 label: customer.isBlacklisted ? 'حذف از بلک‌لیست' : 'افزودن به بلک‌لیست',
@@ -429,5 +451,7 @@ export default function CustomersPage() {
         </div>
       }
     />
+    <CustomerPermanentDeletion customerId={deletionId} onClose={() => setDeletionId(null)} onDeleted={receipt => { setDeletionId(null); setReceiptId(receipt); fetchCustomers(); }} />
+    </>
   );
 }

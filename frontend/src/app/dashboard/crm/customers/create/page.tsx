@@ -1,8 +1,8 @@
 'use client';
-import { ErpBadge, ErpButton, ErpCard, ErpField as CustomerWorkflowField, ErpInput, ErpPressable, ErpSegmentedControl, useErpPresentationScope } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpField as CustomerWorkflowField, ErpInput, ErpPressable, ErpSegmentedControl, ErpLoading, ErpInlineState, useErpPresentationScope } from '@/components/erp';
 import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
 import { useState, useEffect, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   FaArrowRight,
@@ -17,7 +17,7 @@ import {
   FaCheckCircle,
   FaTimes
 } from 'react-icons/fa';
-import { crmAPI, dashboardAPI } from '@/lib/api';
+import api, { crmAPI, dashboardAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -32,7 +32,8 @@ import {
 import { CustomerWorkflowPage, CustomerWorkflowSection, hasCustomerDraftChanges } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 import { CustomerProjectFormFields } from '@/features/crm/customer-workflow/CustomerProjectFormFields';
 import { writeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
-import { partnerInputHash as canonicalHash } from '@sabalanerp/partner-sales-contracts';
+import { partnerInputHash as canonicalHash, PartnerCreationContextSchema } from '@sabalanerp/partner-sales-contracts';
+import { readPartnerCreationContext } from '@/features/contract-creation/partner/partnerCreationContext';
 
 interface ProjectAddress {
   id?: string;
@@ -126,8 +127,22 @@ interface User extends PermissionUser {}
 
 export default function CreateCustomerPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const partnerContractMode = searchParams.get('partnerContract') === '1';
+  // Ownership comes from the authenticated server context, never a URL flag
+  // or a cached role from before conversion to Partner Seller.
+  const [creationMode, setCreationMode] = useState<'ordinary' | 'partner' | 'blocked' | null>(null);
+  const [creationModeError, setCreationModeError] = useState(false);
+  const [creationModeRetry, setCreationModeRetry] = useState(0);
+  const partnerContractMode = creationMode === 'partner';
+  useEffect(() => {
+    let active = true;
+    setCreationMode(null); setCreationModeError(false);
+    void readPartnerCreationContext(() => api.get('/partner/cases/creation-context')).then(response => {
+      const context = PartnerCreationContextSchema.parse(response.data?.data);
+      if (active) setCreationMode(context.kind === 'ORDINARY_SALES' ? 'ordinary'
+        : context.writable ? 'partner' : 'blocked');
+    }).catch(() => { if (active) setCreationModeError(true); });
+    return () => { active = false; };
+  }, [creationModeRetry]);
   const { hasPermission } = useWorkspace();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [crmPermissions, setCrmPermissions] = useState({
@@ -306,7 +321,7 @@ export default function CreateCustomerPage() {
   };
 
   useEffect(() => {
-    if (partnerContractMode) {
+    if (creationMode !== 'ordinary') {
       setDuplicateCustomers([]);
       return;
     }
@@ -351,7 +366,7 @@ export default function CreateCustomerPage() {
     }, 450);
 
     return () => window.clearTimeout(timeoutId);
-  }, [formData.phoneNumber1, formData.phoneNumber2, partnerContractMode]);
+  }, [formData.phoneNumber1, formData.phoneNumber2, creationMode]);
 
   const handleNext = () => {
     if (validateStep(step) && step < steps.length - 1) {
@@ -581,6 +596,10 @@ export default function CreateCustomerPage() {
           setErrors({ submit: 'این مشتری قبلاً در فهرست شما ثبت شده است. برای استفاده در قرارداد، او را انتخاب کنید.' });
           return;
         }
+        if (new URLSearchParams(window.location.search).get('returnTo') !== 'contract') {
+          router.push('/dashboard/sales/partner-customers');
+          return;
+        }
         router.push(getContractReturnUrl(result?.project?.id ? '3' : '2', {
           customerId: createdCustomerId, projectId: result?.project?.id,
         }));
@@ -670,6 +689,11 @@ export default function CreateCustomerPage() {
       }
     } catch (error: any) {
       console.error('Error creating customer:', error);
+      if (error.response?.data?.code === 'PARTNER_CUSTOMER_ROUTE_REQUIRED') {
+        setCreationModeRetry(value => value + 1);
+        setErrors({ submit: 'حساب شما فروشنده همکار است. اطلاعات حفظ شد؛ دوباره ذخیره کنید.' });
+        return;
+      }
       if (partnerContractMode && error.response?.status === 409 && error.response?.data?.code === 'STATE_CONFLICT') {
         try {
           const correlationId = `partner-duplicate-correlation-${crypto.randomUUID()}`;
@@ -679,7 +703,7 @@ export default function CreateCustomerPage() {
           const match = duplicate.data?.data;
           if (match?.matchReference) {
             setPartnerDuplicateMatch(match);
-            setErrors({ submit: 'این مشتری در اختیار فروشنده دیگری است. در صورت نیاز درخواست انتقال ثبت کنید.' });
+            setErrors({ submit: 'این مشتری قبلاً ثبت شده، اما در فهرست مشتریان همکار شما نیست. در صورت نیاز درخواست انتقال ثبت کنید.' });
             return;
           }
         } catch { /* Preserve the non-disclosing duplicate response below. */ }
@@ -989,6 +1013,11 @@ export default function CreateCustomerPage() {
     }
   };
 
+  if (creationModeError) return <ErpInlineState kind="error" title="تشخیص مسیر ثبت مشتری ناموفق بود."
+    action={{ label: 'تلاش دوباره', onClick: () => setCreationModeRetry(value => value + 1) }} />;
+  if (!creationMode) return <ErpLoading />;
+  if (creationMode === 'blocked') return <ErpInlineState kind="permission" title="ثبت مشتری برای این حساب همکار در حال حاضر مجاز نیست." />;
+
   if (!crmPermissions.canCreateCustomers && !partnerContractMode) {
     return (
       <CustomerWorkflowPage title="ایجاد مشتری جدید" backHref="/dashboard/crm/customers" feedback={{ kind: 'permission', title: 'شما دسترسی لازم برای ایجاد مشتری را ندارید.' }} />
@@ -1019,7 +1048,7 @@ export default function CreateCustomerPage() {
     <CustomerWorkflowPage
       title="ایجاد مشتری جدید"
       description="اطلاعات مشتری را مرحله‌به‌مرحله ثبت کنید."
-      backHref="/dashboard/crm/customers"
+      backHref={partnerContractMode ? '/dashboard/sales/partner-customers' : '/dashboard/crm/customers'}
       actions={isReturningToContract ? [{ label: 'لغو و بازگشت به قرارداد', icon: FaTimes, tone: 'danger', variant: 'outline', onClick: returnToContract }] : []}
       progress={{ current: step + 1, total: steps.length, label: steps[step].label, steps: steps.map((item, index) => ({ id: index + 1, title: item.label, titleEn: item.key, description: '', icon: item.key === 'project' ? FaBuilding : FaUser })) }}
       feedback={errors.submit
@@ -1076,9 +1105,10 @@ export default function CreateCustomerPage() {
                 {partnerOwnedDuplicate.phone}
               </p>}
             </div>
-            <ErpButton label="انتخاب این مشتری و بازگشت به قرارداد" onClick={() => router.push(getContractReturnUrl('3', {
+            <ErpButton label={isReturningToContract ? 'انتخاب این مشتری و بازگشت به قرارداد' : 'مشاهده فهرست مشتریان من'}
+              onClick={() => router.push(isReturningToContract ? getContractReturnUrl('3', {
               customerId: partnerOwnedDuplicate.customerId,
-            }))} />
+            }) : '/dashboard/sales/partner-customers')} />
           </ErpCard>
         </CustomerWorkflowSection>
       )}

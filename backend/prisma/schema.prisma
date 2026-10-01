@@ -16,6 +16,7 @@ model EffectiveAuthorizationState {
 }
 
 model EffectiveAuthorizationAudit {
+  retainedCustomerHistory CrmCustomerRetainedHistory?
   id                    String   @id
   domain                String
   actorId               String
@@ -2040,6 +2041,9 @@ model SalesReportPreset {
 }
 
 model CrmCustomer {
+  activeCard               CrmCustomerCard?
+  retainedHistory          CrmCustomerRetainedHistory?
+  cardDeletedAt            DateTime?                       @db.Timestamptz(3)
   partnerSaleCases         PartnerSaleCase[]
   partnerOwnerProfileId    String?
   partnerOwnerProfile      PartnerProfile?                 @relation(fields: [partnerOwnerProfileId], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -12428,4 +12432,23 @@ model PartnerOperationsIncident {
 
   @@index([lastSeenAt])
   @@map("partner_operations_incidents")
+}
+
+
+// Operational membership is physically removed; historical identity is retained.
+model CrmCustomerCard {
+  customerId String @id
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  customer CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  @@map("crm_customer_cards")
+}
+
+model CrmCustomerRetainedHistory {
+  customerId String @id
+  receiptId String @unique
+  receipt EffectiveAuthorizationAudit @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  retainedAt DateTime @default(now()) @db.Timestamptz(3)
+  snapshot Json
+  customer CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  @@map("crm_customer_retained_history")
 }

@@ -3,12 +3,12 @@ import type { Prisma } from '@prisma/client';
 
 /** Relational authorization fixture only. The pair passes the real deferred
  * schema constraints; it is never committed, issued, priced or used by runtime. */
-export async function seedAuthorizationCase(tx: Prisma.TransactionClient, partner: string, customerOwner = partner) {
+export async function seedAuthorizationCase(tx: Prisma.TransactionClient, partner: string, customerOwner = partner, partnerOwned = false) {
   const id = `authorization-case-${randomUUID()}`;
   const hash = `sha256-v1:${'a'.repeat(64)}`;
   const internalId = `${id}-internal`; const contractId = `${id}-customer`;
   await tx.partnerCommercialAccount.create({ data: { id, profileId: partner } });
-  await tx.crmCustomer.create({ data: { id, firstName: 'Fixture', lastName: 'Case', ownerUserId: customerOwner } });
+  await tx.crmCustomer.create({ data: { id, firstName: 'Fixture', lastName: 'Case', ownerUserId: customerOwner, ...(partnerOwned ? { partnerOwnerProfileId: partner, partnerRevision: 1 } : {}) } });
   await tx.department.create({ data: { id, name: id, namePersian: `دپارتمان آزمون ${id}` } });
   await tx.$executeRaw`INSERT INTO partner_sale_cases
     (id,"caseNumber","profileId","customerId","internalRecordId","customerContractId","headRevision","integrityHash")

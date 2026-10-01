@@ -176,6 +176,7 @@ const getFeatureWorkspace = (feature: string): string => {
     'sales_customers_delete': 'sales',
     'sales_customers_assign_owner': 'sales',
     'crm_customers_view': 'crm',
+    'crm_customers_view_all': 'crm',
     'crm_customers_edit': 'crm',
     'crm_customers_create': 'crm',
     'crm_customers_delete': 'crm',
@@ -260,7 +261,7 @@ export const getContractPermissions = (user: User | null) => {
  */
 export const getCrmPermissions = (user: User | null) => {
   return {
-    canViewCustomers: hasFeatureAccess(user, 'crm_customers_view', 'view'),
+    canViewCustomers: hasFeatureAccess(user, 'crm_customers_view', 'view') || hasFeatureAccess(user, 'crm_customers_view_all', 'view'),
     canCreateCustomers:
       hasFeatureAccess(user, 'crm_customers_create', 'edit') ||
       hasFeatureAccess(user, 'sales_customers_create', 'edit'),

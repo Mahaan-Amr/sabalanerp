@@ -56,7 +56,7 @@ const rules: Rule[] = [
   { pattern: /^\/dashboard\/sales\/reports/, workspace: 'sales', features: ['sales_dashboard_view'] },
   { pattern: /^\/dashboard\/crm\/customers\/create/, workspace: 'crm', features: ['crm_customers_create', 'sales_customers_create'], level: 'edit' },
   { pattern: /^\/dashboard\/crm\/customers\/[^/]+\/edit/, workspace: 'crm', features: ['crm_customers_edit', 'sales_customers_edit'], level: 'edit' },
-  { pattern: /^\/dashboard\/crm\/customers/, workspace: 'crm', features: ['crm_customers_view', 'sales_customers_view'] },
+  { pattern: /^\/dashboard\/crm\/customers/, workspace: 'crm', features: ['crm_customers_view', 'crm_customers_view_all', 'sales_customers_view'] },
   { pattern: /^\/dashboard\/crm\/potential-projects\/create/, workspace: 'crm', features: ['crm_potential_projects_create'], level: 'edit' },
   { pattern: /^\/dashboard\/crm\/potential-projects/, workspace: 'crm', features: ['crm_potential_projects_view'] },
   { pattern: /^\/dashboard\/crm\/follow-ups\/create/, workspace: 'crm', features: ['crm_follow_ups_create'], level: 'edit' },

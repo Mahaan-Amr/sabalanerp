@@ -163,7 +163,7 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
       return database.$transaction(async tx => {
         const access = await authorizeCustomer(tx, 'CUSTOMER_READ', input.customerId, input.correlationId);
         if (!access.ok) return access;
-        const row = await tx.crmCustomer.findUnique({ where: { id: input.customerId }, select: { ...customerSelect,
+        const row = await tx.crmCustomer.findUnique({ where: { id: input.customerId, activeCard: { isNot: null } }, select: { ...customerSelect,
           potentialProjects: { where: { isActive: true, responsibleSellerId: access.value.partnerSellerId },
             orderBy: { createdAt: 'desc' }, select: { id: true,
             partnerRevision: true, title: true, status: true, workType: true, address: true, probability: true,
@@ -570,7 +570,12 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
         }
         const customer = await tx.crmCustomer.findFirst({ where: { isActive: true,
-          NOT: { AND: { partnerOwnerProfileId: profile.id, ownerUserId: profile.userId } },
+          // SQL NOT(profile = id AND owner = user) excludes NULL-profile
+          // legacy Customers as well. Include those explicitly for a masked
+          // transfer match; never silently convert their historical ownership.
+          AND: [{ OR: [{ partnerOwnerProfileId: null },
+            { partnerOwnerProfileId: { not: profile.id } },
+            { ownerUserId: null }, { ownerUserId: { not: profile.userId } }] }],
           OR: [...(phone ? [{ phoneNumbers: { some: { number: phone, isActive: true } } }] : []),
             ...(nationalCode ? [{ nationalCode }] : [])] }, orderBy: { id: 'asc' }, select: customerSelect });
         if (!customer) return { ok: false as const, error: partnerError('NOT_FOUND') };

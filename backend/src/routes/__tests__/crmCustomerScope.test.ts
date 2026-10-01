@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { customerScopeForActor, ordinaryCrmRelatedVisibility, ordinaryCrmResponse, ordinaryProjectSearch } from '../crm';
 
-assert.deepEqual(customerScopeForActor({ userId: 'admin', role: 'ADMIN', canAssignOwner: false }), { partnerOwnerProfileId: null });
+assert.deepEqual(customerScopeForActor({ userId: 'admin', role: 'ADMIN', canAssignOwner: false }), {});
+assert.deepEqual(customerScopeForActor({ userId: 'manager', role: 'MANAGER', canAssignOwner: false, canViewAll: true }), {});
 assert.deepEqual(customerScopeForActor({ userId: 'manager', role: 'MANAGER', canAssignOwner: true }), { partnerOwnerProfileId: null });
 assert.deepEqual(customerScopeForActor({ userId: 'seller', role: 'USER', canAssignOwner: false }), {
   partnerOwnerProfileId: null,

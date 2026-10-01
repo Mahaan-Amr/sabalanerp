@@ -47,6 +47,7 @@ export const FEATURES = {
 
   // CRM Features
   CRM_CUSTOMERS_VIEW: 'crm_customers_view',
+  CRM_CUSTOMERS_VIEW_ALL: 'crm_customers_view_all',
   CRM_CUSTOMERS_CREATE: 'crm_customers_create',
   CRM_CUSTOMERS_EDIT: 'crm_customers_edit',
   CRM_CUSTOMERS_DELETE: 'crm_customers_delete',
@@ -338,6 +339,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
 
   // CRM Features
   [FEATURES.CRM_CUSTOMERS_VIEW]: 'crm',
+  [FEATURES.CRM_CUSTOMERS_VIEW_ALL]: 'crm',
   [FEATURES.CRM_CUSTOMERS_CREATE]: 'crm',
   [FEATURES.CRM_CUSTOMERS_EDIT]: 'crm',
   [FEATURES.CRM_CUSTOMERS_DELETE]: 'crm',
@@ -737,6 +739,8 @@ const FEATURE_ACTION_LABELS_FA: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const featureLabelFa = (feature: Feature): string => {
+  if (feature === FEATURES.CRM_CUSTOMERS_VIEW_ALL) return 'مشاهده همه مشتریان داخلی و همکار';
+  if (feature === FEATURES.CRM_CUSTOMERS_DELETE) return 'حذف دائمی مشتری بدون سابقه';
   const action = FEATURE_ACTION_LABELS_FA.find(([suffix]) => feature.endsWith(`_${suffix}`));
   if (!action) throw new Error(`Missing Persian action label for feature: ${feature}`);
   const [suffix, actionLabel] = action;

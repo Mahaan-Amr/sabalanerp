@@ -17,7 +17,7 @@ import {
   FaTrash,
   FaUser
 } from 'react-icons/fa';
-import { crmAPI, dashboardAPI } from '@/lib/api';
+import api, { crmAPI, dashboardAPI } from '@/lib/api';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
@@ -163,6 +163,7 @@ export default function EditCustomerPage() {
   const [phones, setPhones] = useState<EditablePhone[]>([]);
   const [contacts, setContacts] = useState<EditableContact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [partnerCard, setPartnerCard] = useState<{ revision: number; version: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -199,6 +200,10 @@ export default function EditCustomerPage() {
         }
 
         const customer = customerResponse.data.data;
+        if (customer.partnerOwnerProfileId) {
+          if (!customer.canManageCustomerCard) { setError('مجوز ویرایش مشتری همکار ندارید'); return; }
+          setPartnerCard({ revision: customer.partnerRevision, version: customer.cardVersion });
+        }
         setFormData({
           firstName: customer.firstName || '',
           lastName: customer.lastName || '',
@@ -345,8 +350,8 @@ export default function EditCustomerPage() {
     const nextErrors: Record<string, string> = {};
     if (!formData.firstName.trim()) nextErrors.firstName = 'نام الزامی است';
     if (!formData.lastName.trim()) nextErrors.lastName = 'نام خانوادگی الزامی است';
-    if (formData.nationalCode && formData.nationalCode.length !== 10) {
-      nextErrors.nationalCode = 'کد ملی باید ۱۰ رقم باشد';
+    if (formData.nationalCode && formData.nationalCode.length !== (partnerCard && formData.customerType !== 'Individual' ? 11 : 10)) {
+      nextErrors.nationalCode = partnerCard && formData.customerType !== 'Individual' ? 'شناسه حقوقی باید ۱۱ رقم باشد' : 'کد ملی باید ۱۰ رقم باشد';
     }
 
     const activePhones = phones.filter((phone) => phone.isActive);
@@ -392,7 +397,7 @@ export default function EditCustomerPage() {
     try {
       setSaving(true);
       setError(null);
-      await crmAPI.updateCustomer(customerId, {
+      const customerPayload = {
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim(),
         customerType: formData.customerType,
@@ -413,7 +418,17 @@ export default function EditCustomerPage() {
         referrerPhoneNumber: normalizeIranianMobile(formData.referrerPhoneNumber) || null,
         isBlacklisted: formData.isBlacklisted,
         isLocked: formData.isLocked
-      });
+      };
+      if (partnerCard) {
+        const clean = <T extends { id?: string; isActive: boolean }>(rows: T[]) => rows.map(({ id, ...row }) => ({ ...(id ? { id } : {}), ...row }));
+        await api.put(`/crm/customers/${customerId}/admin-card`, { ...customerPayload,
+          expectedRevision: partnerCard.revision, expectedCardVersion: partnerCard.version,
+          projects: clean(projects),
+          phones: clean(phones),
+          contacts: clean(contacts) });
+        router.push(returnPath); return;
+      }
+      await crmAPI.updateCustomer(customerId, customerPayload);
 
       await Promise.all([
         ...projects.map((project) => {
@@ -523,7 +538,7 @@ export default function EditCustomerPage() {
                 { value: 'Individual', label: 'حقیقی' },
                 { value: 'Company', label: 'حقوقی' },
                 { value: 'Government', label: 'دولتی' },
-                { value: 'Collaborative', label: 'همکاری' },
+                ...(!partnerCard ? [{ value: 'Collaborative', label: 'همکاری' }] : []),
               ]}
               searchable
             />
@@ -542,7 +557,7 @@ export default function EditCustomerPage() {
               searchable
             />
           </div>
-          <CustomerWorkflowField label="کد ملی" error={errors.nationalCode}><ErpInput value={formData.nationalCode} maxLength={10} onChange={(e) => updateField('nationalCode', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="کد ملی" error={errors.nationalCode}><ErpInput value={formData.nationalCode} maxLength={partnerCard && formData.customerType !== 'Individual' ? 11 : 10} onChange={(e) => updateField('nationalCode', e.target.value)} /></CustomerWorkflowField>
           <CustomerWorkflowField label="صنعت"><ErpInput value={formData.industry} onChange={(e) => updateField('industry', e.target.value)} /></CustomerWorkflowField>
         </div>
       </CustomerWorkflowSection>

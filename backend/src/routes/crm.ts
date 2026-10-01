@@ -1,8 +1,11 @@
+import { customerCardVersion, updateAdminPartnerCustomerCard } from '../services/adminPartnerCustomerCard';
+import { customerManagementCapabilities, CustomerManagementError, previewCustomerDeletion, deleteCustomerInTransaction } from '../services/crmCustomerManagement';
 import { prisma } from '../lib/prisma';
 import express, { Response, type NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
+import { ordinaryCustomerCreationGuard } from '../middleware/ordinaryCustomerCreation';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES, FEATURE_WORKSPACE_MAP,
   type Feature } from '../middleware/feature';
@@ -58,11 +61,25 @@ const partnerCrmEndpoint = (handler: (req: any, res: Response) => Promise<void>)
 
 const isOwnerScopedUser = (req: any) => req?.user?.role && req.user.role !== 'ADMIN';
 
-export const customerScopeForActor = (input: { userId: string; role: string; canAssignOwner: boolean }) => {
-  if (input.role === 'ADMIN' || input.canAssignOwner) return { partnerOwnerProfileId: null };
+export const customerScopeForActor = (input: { userId: string; role: string; canAssignOwner: boolean; canViewAll?: boolean }) => {
+  if (input.role === 'ADMIN' || input.canViewAll) return {};
+  if (input.canAssignOwner) return { partnerOwnerProfileId: null };
   return { partnerOwnerProfileId: null,
     OR: [{ ownerUserId: input.userId }, { ownerUserId: null, createdBy: input.userId }] };
 };
+
+export function managedCustomerResponse<T extends Record<string, any>>(customer: T, canManageCustomerCard = false) {
+  const keys = ['id', 'firstName', 'lastName', 'companyName', 'customerType', 'status', 'nationalCode',
+    'homeAddress', 'homeNumber', 'workAddress', 'workNumber', 'brandName', 'brandNameDescription', 'industry', 'address', 'city', 'country',
+    'projectManagerName', 'projectManagerNumber', 'referrerFirstName', 'referrerLastName', 'referrerPhoneNumber',
+    'isBlacklisted', 'isLocked', 'isActive', 'createdAt', 'updatedAt', 'ownerUserId', 'ownerUser',
+    'partnerOwnerProfileId', 'primaryContact', 'contacts', 'phoneNumbers', 'projectAddresses'];
+  const safeContact = (contact: Record<string, unknown>) => Object.fromEntries(['id', 'firstName', 'lastName', 'position', 'email', 'phone', 'mobile', 'isPrimary', 'isActive'].filter(key => key in contact).map(key => [key, contact[key]]));
+  return { ...Object.fromEntries(keys.filter(key => key in customer).map(key => [key, customer[key]])),
+    contacts: customer.contacts?.map(safeContact) ?? [],
+    ...(customer.primaryContact ? { primaryContact: safeContact(customer.primaryContact) } : {}), managementReadOnly: true, canManageCustomerCard,
+    ...(canManageCustomerCard ? { partnerRevision: customer.partnerRevision, cardVersion: customerCardVersion(customer as any) } : {}) };
+}
 
 export const ordinaryCrmRelatedVisibility = { OR: [{ customer: { partnerOwnerProfileId: null } },
   { potentialProject: { partnerRevision: null } }] };
@@ -81,10 +98,13 @@ export const ordinaryProjectSearch = (search: string) => ({ OR: [
   { customerTransferSnapshot: { path: ['companyName'], string_contains: search } },
 ] });
 
-const buildCustomerScope = async (req: any) => {
-  return customerScopeForActor({
-    userId: req.user.id, role: req.user.role, canAssignOwner: await canAssignCustomerOwner(req),
+const buildCustomerScope = async (req: any, managementDirectory = false) => {
+  const canViewAll = managementDirectory && (await customerManagementCapabilities(prisma, req.user.id)).canViewAllCustomers;
+  const scope = customerScopeForActor({
+    userId: req.user.id, role: managementDirectory && !canViewAll && req.user.role === 'ADMIN' ? 'USER' : req.user.role, canAssignOwner: await canAssignCustomerOwner(req),
+    canViewAll,
   });
+  return managementDirectory ? { ...scope, activeCard: { isNot: null } } : { ...scope, partnerOwnerProfileId: null, activeCard: { isNot: null } };
 };
 
 const normalizeDigits = (value: unknown): string => {
@@ -767,7 +787,7 @@ router.post('/partner/customer-transfers/:id/decision', protect, partnerCrmEndpo
     transferId: req.params.id, correlationId }));
 }));
 
-router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -777,7 +797,16 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
     const customerType = req.query.customerType as string;
 
     // Build where clause
-    let whereClause: any = await buildCustomerScope(req);
+    let whereClause: any = await buildCustomerScope(req, true);
+    const capabilities = await customerManagementCapabilities(prisma, req.user.id);
+    const canAssign = await canAssignCustomerOwner(req);
+    if (req.query.ownership === 'internal') whereClause.partnerOwnerProfileId = null;
+    if (req.query.ownership === 'partner') {
+      if (!capabilities.canViewAllCustomers) { res.status(403).json({ success: false, error: 'مجوز مشاهده همه مشتریان لازم است.' }); return; }
+      whereClause.partnerOwnerProfileId = { not: null };
+    }
+    if (['true', 'false'].includes(req.query.isBlacklisted)) whereClause.isBlacklisted = req.query.isBlacklisted === 'true';
+    if (['true', 'false'].includes(req.query.isLocked)) whereClause.isLocked = req.query.isLocked === 'true';
     
     if (search) {
       whereClause.AND = normalizePersianSearchTokens(search).map(token => ({
@@ -878,7 +907,8 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
 
     res.json({
       success: true,
-      data: customers,
+      data: customers.map(customer => customer.partnerOwnerProfileId || (req.user.role !== 'ADMIN' && customer.ownerUserId !== req.user.id && !canAssign) ? managedCustomerResponse(customer, Boolean(customer.partnerOwnerProfileId) && req.user.role === 'ADMIN') : customer),
+      permissions: { canViewAllCustomers: capabilities.canViewAllCustomers, canDeleteCustomers: capabilities.canDeleteCustomers },
       pagination: {
         page,
         limit,
@@ -895,11 +925,39 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
   }
 });
 
+const customerManagementEndpoint = (handler: (req: any) => Promise<unknown>) => async (req: any, res: Response) => {
+  try { res.json({ success: true, data: await handler(req) }); }
+  catch (error) {
+    if (error instanceof CustomerManagementError) res.status(error.status).json({ success: false, code: error.code, error: error.message });
+    else if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2034', 'P2003'].includes(error.code)) {
+      res.status(409).json({ success: false, code: 'CUSTOMER_DELETE_PREVIEW_STALE', error: 'اطلاعات یا سوابق مشتری همزمان تغییر کرد؛ پیش‌نمایش را دوباره بررسی کنید.' });
+    }
+    else { console.error('Customer management command failed', error); res.status(500).json({ success: false, error: 'خطا در پردازش درخواست؛ دوباره تلاش کنید.' }); }
+  }
+};
+router.put('/customers/:id/admin-card', protect, customerManagementEndpoint(async req =>
+  managedCustomerResponse(await updateAdminPartnerCustomerCard(prisma, req.user.id, req.params.id, 'EDIT', req.body), true)));
+router.get('/customers/:id/deletion-preview', protect, customerManagementEndpoint(req =>
+  previewCustomerDeletion(prisma, req.user.id, req.params.id)));
+router.delete('/customers/:id', protect, customerManagementEndpoint(req => prisma.$transaction(tx =>
+  deleteCustomerInTransaction(tx, { actorId: req.user.id, customerId: req.params.id,
+    reason: req.body?.reason, confirmed: req.body?.confirmed, previewToken: req.body?.previewToken }),
+  { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })));
+
 // @desc    Get CRM customer by ID
 // @route   GET /api/crm/customers/:id
 // @access  Private/CRM or Sales Customer View Access
-router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
+router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
   try {
+    const scope = await buildCustomerScope(req, true);
+    const managed = await prisma.crmCustomer.findFirst({ where: { AND: [scope, { id: req.params.id }] },
+      include: { contacts: true, phoneNumbers: true, projectAddresses: true,
+        ownerUser: { select: { id: true, firstName: true, lastName: true, username: true } } } });
+    if (!managed) { res.status(404).json({ success: false, error: 'Customer not found' }); return; }
+    if (managed.partnerOwnerProfileId || (req.user.role !== 'ADMIN' && managed.ownerUserId !== req.user.id && !(await canAssignCustomerOwner(req)))) {
+      res.json({ success: true, data: managedCustomerResponse(managed, Boolean(managed.partnerOwnerProfileId) && req.user.role === 'ADMIN') }); return;
+    }
+
     const customer = await prisma.crmCustomer.findFirst({
       where: { id: req.params.id, partnerOwnerProfileId: null },
       include: {
@@ -984,7 +1042,7 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
 // @desc    Create new CRM customer
 // @route   POST /api/crm/customers
 // @access  Private/CRM Workspace
-router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_CREATE, FEATURES.SALES_CUSTOMERS_CREATE], FEATURE_PERMISSIONS.EDIT), [
+router.post('/customers', protect, ordinaryCustomerCreationGuard(prisma), requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_CREATE, FEATURES.SALES_CUSTOMERS_CREATE], FEATURE_PERMISSIONS.EDIT), [
   body('firstName').notEmpty().withMessage('First name is required'),
   body('lastName').notEmpty().withMessage('Last name is required'),
   body('customerType').notEmpty().withMessage('Customer type is required'),
@@ -1125,109 +1183,123 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
     
     let customer;
     try {
-      customer = await prisma.crmCustomer.create({
-        data: {
-        // Basic Information
-        firstName,
-        lastName,
-        companyName,
-        customerType,
-        industry,
-        status: status || 'Active',
-        
-        // Contact Information
-        nationalCode: normalizedNationalCode,
-        homeAddress,
-        homeNumber: normalizeDigits(homeNumber) || null,
-        workAddress,
-        workNumber: normalizeDigits(workNumber) || null,
-        
-        // Project Management
-        projectManagerName,
-        projectManagerNumber: normalizeOptionalIranianMobileNumber(projectManagerNumber),
-
-        // Referrer Information
-        referrerFirstName,
-        referrerLastName,
-        referrerPhoneNumber: normalizeOptionalIranianMobileNumber(referrerPhoneNumber),
-        
-        // Brand Information
-        brandName,
-        brandNameDescription,
-        
-        // Security & Access Control
-        isBlacklisted: isBlacklisted || false,
-        isLocked: isLocked || false,
-        ownerUserId: req.user.id,
-        createdBy: req.user.id,
-        updatedBy: req.user.id,
-        
-        // Legacy Fields (for backward compatibility)
-        address: address || null,
-        city: city || null,
-        country: country || 'ایران',
-        communicationPreferences: communicationPreferences || null,
-        customFields: customFields || null,
-        
-        // Related Data
-        projectAddresses: projectAddresses && projectAddresses.length > 0 ? {
-          create: projectAddresses.map((addr: any) => ({
-            address: addr.address,
-            city: normalizeNullableText(addr.city),
-            postalCode: addr.postalCode || null,
-            projectName: addr.projectName || null,
-            projectType: addr.projectType || null,
-            projectManagerName: addr.projectManagerName || null,
-            projectManagerNumber: normalizeOptionalIranianMobileNumber(addr.projectManagerNumber),
-            marketerFirstName: addr.marketerFirstName || null,
-            marketerLastName: addr.marketerLastName || null,
-            marketerPhoneNumber: normalizeOptionalIranianMobileNumber(addr.marketerPhoneNumber),
-            isActive: true
-          }))
-        } : undefined,
-        
-        phoneNumbers: phoneNumbers && phoneNumbers.length > 0 ? {
-          create: phoneNumbers.map((phone: any) => ({
-            number: normalizePhoneNumber(phone.number),
-            type: String(phone.type || 'mobile').toLowerCase(),
-            isPrimary: phone.isPrimary || false,
-            isActive: true
-          }))
-        } : undefined,
-        
-        contacts: primaryContact ? {
-          create: {
-            ...primaryContact,
-            isPrimary: true
-          }
-        } : undefined
-      },
-      include: {
-        primaryContact: true,
-        contacts: true,
-        projectAddresses: true,
-        phoneNumbers: true,
-        ownerUser: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true
-          }
+      customer = await prisma.$transaction(async tx => {
+        // Partner activation locks this same User. Recheck after taking the
+        // lock so an already-open ordinary form cannot race conversion.
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${req.user.id} FOR UPDATE`;
+        if (await tx.partnerProfile.findUnique({ where: { userId: req.user.id }, select: { id: true } })) {
+          throw Object.assign(new Error('این حساب فروشنده همکار است؛ مشتری را از مسیر مشتریان همکار ثبت کنید.'),
+            { code: 'PARTNER_CUSTOMER_ROUTE_REQUIRED' });
         }
-      }
-    });
+        const created = await tx.crmCustomer.create({
+            data: {
+            // Basic Information
+            firstName,
+            lastName,
+            companyName,
+            customerType,
+            industry,
+            status: status || 'Active',
+        
+            // Contact Information
+            nationalCode: normalizedNationalCode,
+            homeAddress,
+            homeNumber: normalizeDigits(homeNumber) || null,
+            workAddress,
+            workNumber: normalizeDigits(workNumber) || null,
+        
+            // Project Management
+            projectManagerName,
+            projectManagerNumber: normalizeOptionalIranianMobileNumber(projectManagerNumber),
 
-    // Update primary contact reference if provided
-    if (primaryContact && customer.contacts.length > 0) {
-      await prisma.crmCustomer.update({
-        where: { id: customer.id },
-        data: {
-          primaryContactId: customer.contacts[0].id
+            // Referrer Information
+            referrerFirstName,
+            referrerLastName,
+            referrerPhoneNumber: normalizeOptionalIranianMobileNumber(referrerPhoneNumber),
+        
+            // Brand Information
+            brandName,
+            brandNameDescription,
+        
+            // Security & Access Control
+            isBlacklisted: isBlacklisted || false,
+            isLocked: isLocked || false,
+            ownerUserId: req.user.id,
+            createdBy: req.user.id,
+            updatedBy: req.user.id,
+        
+            // Legacy Fields (for backward compatibility)
+            address: address || null,
+            city: city || null,
+            country: country || 'ایران',
+            communicationPreferences: communicationPreferences || null,
+            customFields: customFields || null,
+        
+            // Related Data
+            projectAddresses: projectAddresses && projectAddresses.length > 0 ? {
+              create: projectAddresses.map((addr: any) => ({
+                address: addr.address,
+                city: normalizeNullableText(addr.city),
+                postalCode: addr.postalCode || null,
+                projectName: addr.projectName || null,
+                projectType: addr.projectType || null,
+                projectManagerName: addr.projectManagerName || null,
+                projectManagerNumber: normalizeOptionalIranianMobileNumber(addr.projectManagerNumber),
+                marketerFirstName: addr.marketerFirstName || null,
+                marketerLastName: addr.marketerLastName || null,
+                marketerPhoneNumber: normalizeOptionalIranianMobileNumber(addr.marketerPhoneNumber),
+                isActive: true
+              }))
+            } : undefined,
+        
+            phoneNumbers: phoneNumbers && phoneNumbers.length > 0 ? {
+              create: phoneNumbers.map((phone: any) => ({
+                number: normalizePhoneNumber(phone.number),
+                type: String(phone.type || 'mobile').toLowerCase(),
+                isPrimary: phone.isPrimary || false,
+                isActive: true
+              }))
+            } : undefined,
+        
+            contacts: primaryContact ? {
+              create: {
+                ...primaryContact,
+                isPrimary: true
+              }
+            } : undefined
+          },
+          include: {
+            primaryContact: true,
+            contacts: true,
+            projectAddresses: true,
+            phoneNumbers: true,
+            ownerUser: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                username: true
+              }
+            }
+          }
+        });
+
+        // Update primary contact reference if provided
+        if (primaryContact && created.contacts.length > 0) {
+          await tx.crmCustomer.update({
+            where: { id: created.id },
+            data: {
+              primaryContactId: created.contacts[0].id
+            }
+          });
         }
+        return created;
       });
-    }
     } catch (prismaError: any) {
+      if (prismaError.code === 'PARTNER_CUSTOMER_ROUTE_REQUIRED') {
+        res.status(409).json({ success: false, code: prismaError.code, error: prismaError.message });
+        return;
+      }
       console.error('Prisma error creating customer:', prismaError);
       res.status(400).json({
         success: false,
@@ -1899,8 +1971,11 @@ router.put('/customers/:id/blacklist', protect, requireWorkspaceAccess(WORKSPACE
   try {
     const customer = await prisma.crmCustomer.findUnique({
       where: { id: req.params.id },
-      select: { id: true, ownerUserId: true, isBlacklisted: true }
+      select: { id: true, ownerUserId: true, partnerOwnerProfileId: true, isBlacklisted: true }
     });
+    if (customer?.partnerOwnerProfileId) {
+      res.json({ success: true, data: managedCustomerResponse(await updateAdminPartnerCustomerCard(prisma, req.user.id, req.params.id, 'BLACKLIST'), true) }); return;
+    }
     if (!(await ensureOwnershipOrDeny(req, res, customer, 'toggle_blacklist'))) return;
 
     const updatedCustomer = await prisma.crmCustomer.update({
@@ -1922,6 +1997,7 @@ router.put('/customers/:id/blacklist', protect, requireWorkspaceAccess(WORKSPACE
       message: `Customer ${updatedCustomer.isBlacklisted ? 'blacklisted' : 'removed from blacklist'} successfully`
     });
   } catch (error) {
+    if (error instanceof CustomerManagementError) { res.status(error.status).json({ success: false, code: error.code, error: error.message }); return; }
     console.error('Toggle blacklist error:', error);
     res.status(500).json({
       success: false,
@@ -1937,8 +2013,11 @@ router.put('/customers/:id/lock', protect, requireWorkspaceAccess(WORKSPACES.CRM
   try {
     const customer = await prisma.crmCustomer.findUnique({
       where: { id: req.params.id },
-      select: { id: true, ownerUserId: true, isLocked: true }
+      select: { id: true, ownerUserId: true, partnerOwnerProfileId: true, isLocked: true }
     });
+    if (customer?.partnerOwnerProfileId) {
+      res.json({ success: true, data: managedCustomerResponse(await updateAdminPartnerCustomerCard(prisma, req.user.id, req.params.id, 'LOCK'), true) }); return;
+    }
     if (!(await ensureOwnershipOrDeny(req, res, customer, 'toggle_lock'))) return;
 
     const updatedCustomer = await prisma.crmCustomer.update({
@@ -1960,6 +2039,7 @@ router.put('/customers/:id/lock', protect, requireWorkspaceAccess(WORKSPACES.CRM
       message: `Customer ${updatedCustomer.isLocked ? 'locked' : 'unlocked'} successfully`
     });
   } catch (error) {
+    if (error instanceof CustomerManagementError) { res.status(error.status).json({ success: false, code: error.code, error: error.message }); return; }
     console.error('Toggle lock error:', error);
     res.status(500).json({
       success: false,

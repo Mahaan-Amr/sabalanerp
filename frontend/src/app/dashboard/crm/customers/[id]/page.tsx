@@ -35,6 +35,8 @@ import { CustomerRemovalConfirmation } from '@/features/crm/customer-workflow/Cu
 import { writeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
 
 interface CrmCustomer {
+  managementReadOnly?: boolean;
+  canManageCustomerCard?: boolean;
   id: string;
   firstName: string;
   lastName: string;
@@ -141,6 +143,7 @@ export default function CustomerDetailPage() {
     canAssignCustomerOwner: false,
   });
   const [loading, setLoading] = useState(true);
+  const [cardActionPending, setCardActionPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'projects' | 'contacts' | 'leads' | 'contracts'>('overview');
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
@@ -257,29 +260,33 @@ export default function CustomerDetailPage() {
   };
 
   const handleToggleBlacklist = async () => {
-    if (!customer) return;
+    if (!customer || cardActionPending) return;
 
+    setCardActionPending(true); setError(null);
     try {
       const response = await crmAPI.toggleBlacklist(customer.id);
       if (response.data.success) {
-        setCustomer(prev => prev ? { ...prev, isBlacklisted: !prev.isBlacklisted } : null);
+        setCustomer(prev => prev ? { ...prev, isBlacklisted: response.data.data.isBlacklisted } : null);
       }
-    } catch (error) {
+    } catch (error: any) {
+      setError(error.response?.data?.error || 'خطا در تغییر وضعیت مشتری');
       console.error('Error toggling blacklist:', error);
-    }
+    } finally { setCardActionPending(false); }
   };
 
   const handleToggleLock = async () => {
-    if (!customer) return;
+    if (!customer || cardActionPending) return;
 
+    setCardActionPending(true); setError(null);
     try {
       const response = await crmAPI.toggleLock(customer.id);
       if (response.data.success) {
-        setCustomer(prev => prev ? { ...prev, isLocked: !prev.isLocked } : null);
+        setCustomer(prev => prev ? { ...prev, isLocked: response.data.data.isLocked } : null);
       }
-    } catch (error) {
+    } catch (error: any) {
+      setError(error.response?.data?.error || 'خطا در تغییر وضعیت مشتری');
       console.error('Error toggling lock:', error);
-    }
+    } finally { setCardActionPending(false); }
   };
 
   // Project Address Handlers
@@ -535,6 +542,28 @@ export default function CustomerDetailPage() {
       </CustomerWorkflowPage>
     );
   }
+
+  if (customer.managementReadOnly) return <CustomerWorkflowPage title={`${customer.firstName} ${customer.lastName}`} backHref="/dashboard/crm/customers"
+    feedback={error ? { kind: 'error', title: error } : undefined}
+    actions={customer.canManageCustomerCard ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []}>
+    {customer.canManageCustomerCard && <CustomerWorkflowSection title="مدیریت مشتری"><ErpPressable disabled={cardActionPending} onClick={handleToggleBlacklist}>{customer.isBlacklisted ? 'حذف از بلک‌لیست' : 'افزودن به بلک‌لیست'}</ErpPressable><ErpPressable disabled={cardActionPending} onClick={handleToggleLock}>{customer.isLocked ? 'باز کردن قفل' : 'قفل کردن'}</ErpPressable></CustomerWorkflowSection>}
+    <CustomerWorkflowSection title="اطلاعات مشتری">
+      <ErpInlineState kind="permission" title={customer.canManageCustomerCard ? "مدیریت کارت مشتری همکار" : "نمایش مدیریتی مشتری — دسترسی مشاهده اطلاعات"} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <ErpFieldView label="مسئول فروش" value={getOwnerLabel(customer.ownerUser)} />
+        <ErpFieldView label="شرکت" value={customer.companyName || '—'} />
+        <ErpFieldView label="کد ملی" value={customer.nationalCode || '—'} />
+        <ErpFieldView label="نشانی منزل" value={customer.homeAddress || '—'} />
+        <ErpFieldView label="نشانی کار" value={customer.workAddress || '—'} />
+        {customer.phoneNumbers.map(phone => <ErpFieldView key={phone.id} label="تلفن" value={phone.number} />)}
+        {customer.contacts?.map(contact => <ErpFieldView key={contact.id} label={`${contact.firstName} ${contact.lastName}`} value={[contact.phone, contact.email].filter(Boolean).join(' • ') || '—'} />)}
+      </div>
+    </CustomerWorkflowSection>
+    <CustomerWorkflowSection title="پروژه‌های مشتری">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{customer.projectAddresses.map(project =>
+        <ErpFieldView key={project.id} label={project.projectName || 'نشانی پروژه'} value={[project.address, project.city].filter(Boolean).join(' • ')} />)}</div>
+    </CustomerWorkflowSection>
+  </CustomerWorkflowPage>;
 
   return (
     <CustomerWorkflowPage

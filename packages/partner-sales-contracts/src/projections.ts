@@ -50,7 +50,7 @@ export const SabalanInternalRecordViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('ACCOUNTING'), sourceKind: z.literal('SABALAN_TO_PARTNER'),
   owner: RevisionRefSchema, recordId: IdSchema, recordNumber: IdSchema, caseNumber: IdSchema, customerContractNumber: IdSchema,
   commercialAccountId: IdSchema, debtor: DisplayPartySchema, state: CaseStateSchema,
-  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema, approvalEvidenceId: IdSchema }).strict()),
+  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema, wholesaleLineTotal: DecimalSchema.optional(), approvalEvidenceId: IdSchema }).strict()),
   totals: TotalsSchema, sabalanPaymentPlan: PaymentPlanSchema,
 }).strict();
 export const FulfillmentViewSchema = z.object({

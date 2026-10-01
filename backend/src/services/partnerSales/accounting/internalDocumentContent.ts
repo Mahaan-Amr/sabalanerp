@@ -16,7 +16,9 @@ export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: u
   const preparation = object(object(sourceSnapshot).partnerPreparation);
   const parsed = SabalanInternalRecordViewSchema.pick({ products: true, totals: true, sabalanPaymentPlan: true }).safeParse({
     products: array(preparation.products).map(row => ({ productRowId: row.productRowId, description: row.description,
-      quantity: row.quantity, unit: row.unit, wholesaleUnitPrice: row.wholesaleUnitPrice, approvalEvidenceId: row.approvalEvidenceId })),
+      quantity: row.quantity, unit: row.unit, wholesaleUnitPrice: row.wholesaleUnitPrice,
+      ...(row.wholesaleLineTotal !== undefined ? { wholesaleLineTotal: row.wholesaleLineTotal } : {}),
+      approvalEvidenceId: row.approvalEvidenceId })),
     totals: preparation.totals, sabalanPaymentPlan: preparation.paymentPlan,
   });
   const owner = RevisionRefSchema.safeParse(preparation.owner);
@@ -47,7 +49,8 @@ export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: u
     return { productRowId: product.productRowId, description: product.description, productType: typeof row?.productType === 'string' ? row.productType : undefined,
       lengthMeters: decimal(facts.requestedLengthMeters), widthMeters: decimal(facts.requestedWidthMeters),
       pieceCount: decimal(facts.requestedQuantity), areaSquareMeters: decimal(facts.requestedAreaSquareMeters), quantity: product.quantity, unit: product.unit,
-      unitPrice: product.wholesaleUnitPrice, totalPrice: new ExactDecimal(product.quantity).mul(product.wholesaleUnitPrice).toFixed(), details };
+      unitPrice: product.wholesaleUnitPrice,
+      totalPrice: product.wholesaleLineTotal ?? new ExactDecimal(product.quantity).mul(product.wholesaleUnitPrice).toFixed(), details };
   });
   return { items, totals: parsed.data.totals, paymentPlan: parsed.data.sabalanPaymentPlan };
 }

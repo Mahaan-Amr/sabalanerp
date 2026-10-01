@@ -14,7 +14,7 @@ export type ResolvedCaseDraft = {
   technicalSnapshot: PartnerTechnicalSavedView;
   rows: Array<{ productRowId: string; configurationHash: string; quantity: string; unit: string;
     precisionPolicyVersion: string; description: string; productCode?: string; retailUnitPriceAmount: string;
-    wholesaleUnitPriceAmount?: string }>;
+    wholesaleUnitPriceAmount?: string; retailLineTotalAmount?: string; wholesaleLineTotalAmount?: string }>;
   partner: DisplayParty; customer: DisplayParty; project?: { title: string; address?: string }; legalText: string;
   sabalanPaymentPlan: ReturnType<typeof PaymentPlanSchema.parse>;
   additionalMaterialApprovals?: Array<{ pricingSubjectId: string; configurationHash: string;
@@ -72,16 +72,18 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
   const products = input.rows.map(row => { const graph = graphProducts.get(row.productRowId); return ({ productRowId: row.productRowId, description: row.description,
     quantity: row.quantity, unit: row.unit, ...(row.wholesaleUnitPriceAmount !== undefined
       ? { wholesaleUnitPrice: row.wholesaleUnitPriceAmount } : {}),
+    ...(row.wholesaleLineTotalAmount !== undefined ? { wholesaleLineTotal: row.wholesaleLineTotalAmount } : {}),
     retailUnitPrice: row.retailUnitPrice.amount, ...(row.approval ? { approvalEvidenceId: row.approval.approvalId } : {}),
     configurationHash: row.configurationHash, ...(row.productCode ? { productCode: row.productCode } : {}),
     ...(graph ? { productType: graph.productType, ...(graph.lengthMeters ? { lengthMeters: graph.lengthMeters } : {}),
       ...(graph.widthMeters ? { widthMeters: graph.widthMeters } : {}),
       ...(graph.areaSquareMeters ? { areaSquareMeters: graph.areaSquareMeters } : {}),
       ...(graph.quantity ? { count: graph.quantity } : {}) } : {}),
-    retailLineTotal: multiply(row.quantity, row.retailUnitPrice.amount) }); });
-  const retailNet = sum(input.rows.map(row => multiply(row.quantity, row.retailUnitPrice.amount)));
+    retailLineTotal: row.retailLineTotalAmount ?? multiply(row.quantity, row.retailUnitPrice.amount) }); });
+  // Effective unit rates can repeat; source totals are the server's exact row evidence.
+  const retailNet = sum(input.rows.map(row => row.retailLineTotalAmount ?? multiply(row.quantity, row.retailUnitPrice.amount)));
   const wholesaleNet = pricingReady
-    ? sum(input.rows.map(row => multiply(row.quantity, row.wholesaleUnitPriceAmount!))) : undefined;
+    ? sum(input.rows.map(row => row.wholesaleLineTotalAmount ?? multiply(row.quantity, row.wholesaleUnitPriceAmount!))) : undefined;
   const discount = input.command.intent.retailDiscount.amount;
   if (input.command.intent.retailDiscount.currency !== currency || subtract(retailNet, discount).startsWith('-')) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
@@ -115,7 +117,7 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
       products: products.map(({ retailUnitPrice: _retail, ...row }) => row),
       totals: wholesaleTotals!, termsVersionId: input.resolved.sabalanTermsVersionId }
       : { schemaVersion: 1, status: 'UNPRICED' as const, products: [] },
-    retailEnvelope: { schemaVersion: 1, products: products.map(({ wholesaleUnitPrice: _wholesale, approvalEvidenceId: _approval,
+    retailEnvelope: { schemaVersion: 1, products: products.map(({ wholesaleUnitPrice: _wholesale, wholesaleLineTotal: _wholesaleTotal, approvalEvidenceId: _approval,
       configurationHash: _configuration, ...row }) => row), totals: retailTotals,
       belowCostConfirmed: input.command.intent.belowCostConfirmed,
       ...(input.command.intent.preparationCompleted !== undefined

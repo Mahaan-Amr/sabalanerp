@@ -3,6 +3,7 @@ import {
   sumContractMonetaryAmounts,
   type LongitudinalProductInput
 } from '@sabalanerp/contract-product-graph';
+import { canonicalProductSavePricing } from './canonicalProductSavePricing';
 
 /** Use the same versioned monetary facts as the modal and server replay. */
 export const calculateCanonicalLongitudinalSavePricing = (
@@ -15,16 +16,14 @@ export const calculateCanonicalLongitudinalSavePricing = (
   const result = calculation.result;
   return {
     ok: true as const,
-    materialBase: Number(result.baseAmountToman),
-    mandatoryAmount: Number(result.mandatoryAmountToman),
-    cuttingCost: Number(sumContractMonetaryAmounts([
-      result.longitudinalCutAmountToman,
-      result.calibrationCutAmountToman
-    ])),
-    totalPrice: Number(sumContractMonetaryAmounts([
-      result.totalAmountToman,
-      toolsCost,
-      finishingCost
-    ]))
+    ...canonicalProductSavePricing({
+      materialBase: result.baseAmountToman,
+      mandatoryAmount: result.mandatoryAmountToman,
+      cuttingCost: sumContractMonetaryAmounts([
+        result.longitudinalCutAmountToman,
+        result.calibrationCutAmountToman
+      ]),
+      totalAmount: result.totalAmountToman
+    }, toolsCost, finishingCost)
   };
 };

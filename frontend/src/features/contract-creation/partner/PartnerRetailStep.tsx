@@ -27,7 +27,8 @@ export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled
         <ErpRialInput dir="ltr" disabled={disabled} value={row.retailUnitPrice.amount} onValueChange={amount => {
           onConfirmLoss(false);
           onRowsChange(rows.map(item => item.productRowId === row.productRowId ? { ...item,
-            retailUnitPrice: { ...item.retailUnitPrice, amount }, retailEffectiveUnitPrice: undefined } : item));
+            retailUnitPrice: { ...item.retailUnitPrice, amount }, retailEffectiveUnitPrice: undefined,
+            retailLineTotal: undefined } : item));
         }} />
       </ErpField>}
       {rowSummary && <dl className="grid gap-2 text-sm sm:grid-cols-2">

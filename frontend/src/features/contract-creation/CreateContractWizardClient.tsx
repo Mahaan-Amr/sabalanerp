@@ -234,6 +234,7 @@ import {
 } from '@/features/contract-creation/utils/contractProductPricing';
 import { getBillableCuttingBreakdown, getBillableCuttingCost } from '@/features/contract-creation/utils/mandatoryCuttingPricing';
 import { calculateCanonicalLongitudinalSavePricing } from '@/features/contract-creation/utils/canonicalLongitudinalSavePricing';
+import { canonicalProductSavePricing } from '@/features/contract-creation/utils/canonicalProductSavePricing';
 import {
   getDeliverableProductEntries,
   getDeliveryTargetAmount as getContractDeliveryTargetAmount,
@@ -297,6 +298,7 @@ import {
   resolveStaircaseQuantity,
   type ProductOperationsInput,
   multiplyContractMonetaryAmounts,
+  sumContractMonetaryAmounts,
 } from '@sabalanerp/contract-product-graph';
 
 const refreshOperationGeometry = (
@@ -373,14 +375,8 @@ const materializeOperationSnapshots = (
       overrideStatus: 'current' as const,
       cost: Number(finishing.amountToman)
     })),
-    toolsCost: calculation.result.tools.reduce(
-      (sum, tool) => sum + Number(tool.amountToman),
-      0
-    ),
-    finishingsCost: calculation.result.finishings.reduce(
-      (sum, finishing) => sum + Number(finishing.amountToman),
-      0
-    )
+    toolsCost: Number(sumContractMonetaryAmounts(calculation.result.tools.map(tool => tool.amountToman))),
+    finishingsCost: Number(sumContractMonetaryAmounts(calculation.result.finishings.map(finishing => finishing.amountToman)))
   };
 };
 
@@ -4845,7 +4841,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       }
 
       const squareMeters = preparedUnit === 'squareMeter' ? preparedQuantity : 0;
-      const totalPrice = Number(multiplyContractMonetaryAmounts(preparedQuantity, unitPrice));
+      const preparedAmount = multiplyContractMonetaryAmounts(preparedQuantity, unitPrice);
+      const pricing = canonicalProductSavePricing({ materialBase: preparedAmount, cuttingCost: 0, totalAmount: preparedAmount });
+      const totalPrice = pricing.totalPrice;
       const finalProduct: ContractProduct = {
         rowId: previousPreparedProduct?.rowId || createContractProductRowId(),
         productId: selectedProduct.id,
@@ -4864,6 +4862,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         pricePerSquareMeter: unitPrice,
         unitPrice,
         totalPrice,
+        meta: { pricing },
         description: productConfig.description || '',
         images: Array.isArray(productConfig.images) ? [...productConfig.images] : [...(selectedProduct.images || [])],
         currency: 'تومان',
@@ -5035,6 +5034,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         return;
       }
 
+      const pricing = canonicalProductSavePricing({
+        materialBase: slab.materialAmountToman,
+        cuttingCost: sumContractMonetaryAmounts([slab.cuttingAmountToman, slab.verticalCutAmountToman]),
+        totalAmount: slab.totalAmountToman
+      }, operations.toolsCost, operations.finishingsCost);
       const finalProduct: ContractProduct = reconcileContractProductPricing({
         rowId: previousSlabProduct?.rowId || createContractProductRowId(),
         productId: selectedProduct.id,
@@ -5052,10 +5056,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         pricePerSquareMeter: Number(
           productConfig.slabPolicyInput.baseMaterialRateToman
         ),
-        totalPrice:
-          Number(slab.totalAmountToman) +
-          operations.toolsCost +
-          operations.finishingsCost,
+        totalPrice: pricing.totalPrice,
         description: productConfig.description || '',
         images: Array.isArray(productConfig.images)
           ? [...productConfig.images]
@@ -5122,6 +5123,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         slabLineCuttingLongitudinalMeters: longitudinalMeters,
         slabLineCuttingCrossMeters: crossMeters,
         meta: {
+          pricing,
           calculation: {
             policyVersion: slab.calculationPolicyVersion,
             inputHash: slab.inputHash,
@@ -9422,7 +9424,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                          draft.stoneProduct?.id || draft.stoneId || 'unselected'
                        )
                      : undefined;
-                   let stairOperationsAmount = 0;
+                   let stairToolsAmount = '0';
+                   let stairFinishingsAmount = '0';
                    if (stairOperationPolicyInput) {
                      const operationCalculation = calculateProductOperations(
                        stairOperationPolicyInput
@@ -9452,9 +9455,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                        });
                        return;
                      }
-                     stairOperationsAmount = Number(
-                       operationCalculation.result.totalAmountToman
-                     );
+                     stairToolsAmount = sumContractMonetaryAmounts(operationCalculation.result.tools.map(tool => tool.amountToman));
+                     stairFinishingsAmount = sumContractMonetaryAmounts(operationCalculation.result.finishings.map(finishing => finishing.amountToman));
                    }
                    const canonicalStairResult = totals.canonicalCalculation.result;
                    const chargeableCuttingCost = totals.billableCuttingCost;
@@ -9536,16 +9538,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   const defaultMandatoryForPart = stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
                   const isDraftMandatory = draft.useMandatory ?? defaultMandatoryForPart;
                   const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
-                  const mandatoryAmount = isDraftMandatory && mandatoryPercentageValue > 0
-                    ? totals.baseMaterialPrice * (mandatoryPercentageValue / 100)
-                    : 0;
-                  const basePrice = totals.baseMaterialPrice + mandatoryAmount;
-                   const totalPrice =
-                     basePrice +
-                     toolsTotal +
-                     finishingCost +
-                     stairOperationsAmount +
-                     chargeableCuttingCost;
+                   const pricing = canonicalProductSavePricing({
+                     materialBase: canonicalStairResult.baseAmountToman,
+                     mandatoryAmount: canonicalStairResult.mandatoryAmountToman,
+                     cuttingCost: sumContractMonetaryAmounts([
+                       canonicalStairResult.longitudinalCutAmountToman,
+                       canonicalStairResult.crossCutAmountToman,
+                       canonicalStairResult.calibrationCutAmountToman
+                     ]),
+                     totalAmount: canonicalStairResult.totalAmountToman
+                   }, sumContractMonetaryAmounts([toolsTotal, stairToolsAmount]),
+                     sumContractMonetaryAmounts([finishingCost, stairFinishingsAmount]));
+                   const totalPrice = pricing.totalPrice;
 
                   const hasWidthCut = totals.cuttingMetersLongitudinal > 0;
                   const hasLengthCut = totals.cuttingMetersCross > 0;
@@ -9745,12 +9749,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     currency: 'تومان',
                     isMandatory: isDraftMandatory && mandatoryPercentageValue > 0,
                     mandatoryPercentage: isDraftMandatory && mandatoryPercentageValue > 0 ? mandatoryPercentageValue : 0,
-                    originalTotalPrice: totals.baseMaterialPrice,
+                    originalTotalPrice: pricing.materialBase,
                     isCut: isCut,
                     cutType: cutType,
                     originalWidth: originalWidthCm,
                     originalLength: actualLengthM, // Store original length in meters for canvas visualization
-                    cuttingCost: cuttingCost,
+                    cuttingCost: pricing.cuttingCost,
                     physicalCuttingCost: totals.cuttingCost,
                     cuttingCostPerMeter: cuttingCostPerMeter,
                     calibrationCutEnabled: canonicalStairResultForRow.calibrationEnabled,
@@ -9796,6 +9800,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     finishingCost: draft.finishingEnabled ? finishingCost : null,
                     finishingSquareMeters: draft.finishingEnabled && finishingCost > 0 && finishingCalculationBase === 'squareMeters' ? finishingQuantity : null,
                     meta: {
+                      pricing,
                       stairStepperV2: true,
                       isLayer: false,
                       meters: { lengthM: actualLengthM, widthM, toolsMeters },
@@ -10559,6 +10564,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           createContractProductRowId();
                         updatedItems.push({
                           ...newLayerProduct,
+                          totalPrice: layerTotalPrice,
                           description:
                             draft.layerDescription || newLayerProduct.description,
                           appliedSubServices: layerAppliedSubServices,

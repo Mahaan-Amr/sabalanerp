@@ -18,7 +18,8 @@ import {
 import { getDeliverableProductEntries, reconcileDeliveryProductReferences } from '../utils/deliveryScheduleController';
 import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
-import { reconcileContractProductPricing } from '../utils/contractProductPricing';
+import { reconcileContractProductPricing, serializeContractProductMonetaryAmounts } from '../utils/contractProductPricing';
+import { serializeContractServiceRow } from '../utils/contractServiceRows';
 import { prepareContractSubmissionFinancials } from '../utils/contractSubmissionFinancials';
 import { reconcileContractProductGraph } from '../utils/contractProductGraphReconciliation';
 import {
@@ -301,6 +302,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           finishingCost: product.finishingCost ?? finishing.cost
         });
       });
+      const monetaryProducts = normalizedProducts.map(serializeContractProductMonetaryAmounts);
       const {
         totalAmount,
         monetaryRounding,
@@ -363,8 +365,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           projectId: wizardData.projectId || wizardData.project?.id || '',
           customer: wizardData.customer,
           project: wizardData.project,
-          products: normalizedProducts,
-          serviceRows: wizardData.serviceRows || [],
+          products: monetaryProducts,
+          serviceRows: (wizardData.serviceRows || []).map(serializeContractServiceRow),
           deliveries: contractDeliveries,
           payment: normalizedPayment,
           discount: wizardData.discount || null
@@ -378,7 +380,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           ? new URLSearchParams(window.location.search).get('potentialProjectId') || undefined
           : undefined,
         _relations: {
-          items: normalizedProducts.map((product) => ({
+          items: monetaryProducts.map((product) => ({
             productId: product.productId,
             productRowId: product.rowId,
             productType: product.productType,

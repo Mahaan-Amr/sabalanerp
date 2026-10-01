@@ -30,6 +30,8 @@ export interface RemainingPartitionAllocation {
   sourcePieceQuantitiesByRow: Map<string, number[]>;
   longitudinalCutMeters: number;
   crossCutMeters: number;
+  canonicalLongitudinalCutMeters?: string;
+  canonicalCrossCutMeters?: string;
 }
 
 interface RemainingPartitionAllocationOptions {
@@ -342,6 +344,8 @@ export const allocateRemainingStonePartitions = (
     physicalPiecesByRow,
     sourcePieceQuantitiesByRow,
     longitudinalCutMeters: normalizeGeometryNumber(Number(plan.longitudinalCutMeters)),
-    crossCutMeters: normalizeGeometryNumber(Number(plan.crossCutMeters))
+    crossCutMeters: normalizeGeometryNumber(Number(plan.crossCutMeters)),
+    canonicalLongitudinalCutMeters: plan.longitudinalCutMeters,
+    canonicalCrossCutMeters: plan.crossCutMeters
   };
 };

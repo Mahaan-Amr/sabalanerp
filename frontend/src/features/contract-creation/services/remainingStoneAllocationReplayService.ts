@@ -412,8 +412,8 @@ export const replayRemainingStoneAllocations = ({
       rate: Number(recalculatedChild.cuttingCostPerMeter || 0),
       sourcePieceQuantities: successfulAllocation.sourcePieceQuantitiesByRow.get(row.id),
       physicalPieces,
-      longitudinalCutMeters: successfulAllocation.longitudinalCutMeters,
-      crossCutMeters: successfulAllocation.crossCutMeters,
+      longitudinalCutMeters: successfulAllocation.canonicalLongitudinalCutMeters ?? successfulAllocation.longitudinalCutMeters,
+      crossCutMeters: successfulAllocation.canonicalCrossCutMeters ?? successfulAllocation.crossCutMeters,
       sawKerfCm: recalculatedChild.sawKerfEnabled
         ? Number(recalculatedChild.sawKerfCm || 0)
         : 0

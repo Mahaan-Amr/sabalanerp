@@ -6,6 +6,7 @@ import type {
   StoneFinishing,
   SubService
 } from '../types/contract.types';
+import { multiplyContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
 
 type ServiceCatalogItem = SubService | CuttingType | StoneFinishing;
 
@@ -52,6 +53,7 @@ export const createContractServiceRow = (
 ): ContractServiceRow => {
   const normalizedQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
   const normalizedUnitPrice = unitPrice ?? getServiceRowUnitPriceFromCatalog(sourceType, item);
+  const exactTotal = multiplyContractMonetaryAmounts(normalizedQuantity, normalizedUnitPrice);
 
   return {
     id: makeServiceRowId(sourceType, item.id),
@@ -63,7 +65,8 @@ export const createContractServiceRow = (
     unit: getServiceRowUnitFromCatalog(sourceType, item),
     quantity: normalizedQuantity,
     unitPrice: normalizedUnitPrice,
-    totalPrice: normalizedQuantity * normalizedUnitPrice,
+    totalPrice: Number(exactTotal),
+    exactPricing: { policyVersion: 'service-decimal-v1', quantity: normalizedQuantity, unitPrice: normalizedUnitPrice, totalPrice: exactTotal },
     currency: 'تومان',
     images: Array.isArray((item as any).images) ? [...(item as any).images] : []
   };
@@ -75,11 +78,29 @@ export const recalculateContractServiceRow = (
 ): ContractServiceRow => {
   const quantity = updates.quantity ?? row.quantity;
   const unitPrice = updates.unitPrice ?? row.unitPrice;
+  if (updates.quantity === undefined && updates.unitPrice === undefined) return { ...row, ...updates };
+  const exactTotal = multiplyContractMonetaryAmounts(Math.max(quantity, 0), Math.max(unitPrice, 0));
   return {
     ...row,
     ...updates,
     quantity,
     unitPrice,
-    totalPrice: Math.max(quantity, 0) * Math.max(unitPrice, 0)
+    totalPrice: Number(exactTotal),
+    exactPricing: { policyVersion: 'service-decimal-v1', quantity, unitPrice, totalPrice: exactTotal }
   };
 };
+
+export const getContractServiceRowExactAmount = (row: ContractServiceRow): string => {
+  const exact = row.exactPricing;
+  if (exact?.policyVersion === 'service-decimal-v1' && exact.quantity === row.quantity &&
+    exact.unitPrice === row.unitPrice && Number(exact.totalPrice) === Number(row.totalPrice)) {
+    const amount = multiplyContractMonetaryAmounts(Math.max(row.quantity, 0), Math.max(row.unitPrice, 0));
+    if (amount === exact.totalPrice) return amount;
+  }
+  return String(row.totalPrice);
+};
+
+export const serializeContractServiceRow = (row: ContractServiceRow) => ({
+  ...row,
+  totalPrice: getContractServiceRowExactAmount(row)
+});

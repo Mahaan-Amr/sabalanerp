@@ -312,6 +312,7 @@ export interface ContractServiceRow {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  exactPricing?: { policyVersion: 'service-decimal-v1'; quantity: number; unitPrice: number; totalPrice: string };
   currency: string;
   images?: string[];
 }

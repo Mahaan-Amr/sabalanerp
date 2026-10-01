@@ -97,6 +97,16 @@ test('generic destination Inbox returns the minimum HR Work Item projection to i
       });
       assert.equal(managerAvailable.some(({ id }) => id === unclaimable.id), false,
         'manager triage access must not advertise an unclaimable duty as Available');
+      const now = new Date('2026-08-16T08:00:00.000Z');
+      for (const user of [actor, manager]) {
+        const summary = await getCrossWorkspaceDutySummary(tx, { actorUserId: user.id, workspaceCode: 'ACCOUNTING', now });
+        for (const view of ['assigned', 'available', ...(summary.canManageTriage ? ['triage'] : [])] as const) {
+          const full = await listCrossWorkspaceDuties(tx, { actorUserId: user.id, workspaceCode: 'ACCOUNTING',
+            view: view as 'assigned' | 'available' | 'triage', now });
+          const metric = view === 'assigned' ? summary.open : view === 'available' ? summary.available : summary.triage;
+          assert.equal(metric, full.length, `summary changed ${view} visibility`);
+        }
+      }
       throw rollback;
     }, { timeout: 30_000 }), rollback);
   } finally {

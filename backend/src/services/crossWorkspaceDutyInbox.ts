@@ -218,6 +218,7 @@ const authorizeLoadedDuty = async (
   requestedWorkspaceCode: string,
   now: Date,
   knownManager?: boolean,
+  summaryOnly = false,
 ) => {
   const source = await loadCrossWorkspaceDutySourceProjection(database, {
     sourceType: duty.sourceType,
@@ -225,7 +226,7 @@ const authorizeLoadedDuty = async (
     sourceActionCode: duty.sourceActionCode,
     sourceVersion: duty.sourceVersion,
   });
-  const resultActorUser = duty.respondedByUserId ? await database.user.findUnique({
+  const resultActorUser = !summaryOnly && duty.respondedByUserId ? await database.user.findUnique({
     where: { id: duty.respondedByUserId },
     select: { id: true, firstName: true, lastName: true, username: true },
   }) : null;
@@ -234,7 +235,7 @@ const authorizeLoadedDuty = async (
     displayName: `${resultActorUser.firstName} ${resultActorUser.lastName}`.trim() || resultActorUser.username,
     username: resultActorUser.username,
   } : null;
-  const assigneeUser = duty.currentAssigneeUserId ? await database.user.findUnique({
+  const assigneeUser = !summaryOnly && duty.currentAssigneeUserId ? await database.user.findUnique({
     where: { id: duty.currentAssigneeUserId },
     select: { id: true, firstName: true, lastName: true, username: true },
   }) : null;
@@ -255,7 +256,7 @@ const authorizeLoadedDuty = async (
     includeCompleted: duty.status !== 'OPEN',
     now,
   }));
-  const accessProvenance = isSharedEligible ? await sharedCrossWorkspaceDutyAccessProvenance(database, {
+  const accessProvenance = !summaryOnly && isSharedEligible ? await sharedCrossWorkspaceDutyAccessProvenance(database, {
     dutyId: duty.id, actorUserId, now,
   }) : [];
   if (!isSharedDecision && duty.currentAssigneeUserId === null && await canClaimCrossWorkspaceDuty(database, {
@@ -264,7 +265,7 @@ const authorizeLoadedDuty = async (
     duty,
     source,
     access: 'AVAILABLE' as const,
-    claimRequiresReason: await crossWorkspaceDutyClaimRequiresReason(database, {
+    claimRequiresReason: !summaryOnly && await crossWorkspaceDutyClaimRequiresReason(database, {
       dutyId: duty.id, actorUserId, policyVersion: 1, now,
     }),
   };
@@ -290,7 +291,7 @@ const authorizeLoadedDuty = async (
     resultActor,
     currentAssignee,
     accessProvenance,
-    responseRequiresReason: decision.access === 'ASSIGNEE' || decision.access === 'SHARED'
+    responseRequiresReason: !summaryOnly && (decision.access === 'ASSIGNEE' || decision.access === 'SHARED')
       ? await crossWorkspaceDutyResponseRequiresReason(database, { dutyId: duty.id, actorUserId })
       : false,
   };
@@ -327,7 +328,7 @@ export const getCrossWorkspaceDutyDetail = async (
 
 export const listCrossWorkspaceDuties = async (
   database: Database,
-  input: { actorUserId: string; workspaceCode: string; view: 'assigned' | 'available' | 'triage' | 'history'; now?: Date },
+  input: { actorUserId: string; workspaceCode: string; view: 'assigned' | 'available' | 'triage' | 'history'; now?: Date; summaryOnly?: boolean },
 ) => {
   const now = input.now ?? new Date();
   const workspaceCode = crossWorkspaceDutyDestinationCode(input.workspaceCode);
@@ -344,30 +345,30 @@ export const listCrossWorkspaceDuties = async (
           ? { status: { in: ['COMPLETED', 'WAIVED', 'CANCELLED'] } }
           : { status: 'OPEN' }),
     },
-    include,
+    include: { ...include, auditVersions: input.summaryOnly ? false : include.auditVersions },
     orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
   });
   const visible: Array<ReturnType<typeof projectCrossWorkspaceDuty>> = [];
-  for (const duty of duties) {
+  const project = async (duty: typeof duties[number]) => {
     try {
-      const authorized = await authorizeLoadedDuty(database, duty, input.actorUserId, workspaceCode, now, manager);
-      if (input.view === 'available' && authorized.access !== 'AVAILABLE') continue;
-      if (input.view === 'assigned' && !['ASSIGNEE', 'SHARED'].includes(authorized.access)) continue;
-      if (input.view === 'triage' && authorized.access === 'SHARED') continue;
-      visible.push(projectCrossWorkspaceDuty({
+      const authorized = await authorizeLoadedDuty(database, duty, input.actorUserId, workspaceCode, now, manager, input.summaryOnly);
+      if (input.view === 'available' && authorized.access !== 'AVAILABLE') return null;
+      if (input.view === 'assigned' && !['ASSIGNEE', 'SHARED'].includes(authorized.access)) return null;
+      if (input.view === 'triage' && authorized.access === 'SHARED') return null;
+      return projectCrossWorkspaceDuty({
         duty, source: authorized.source, resultActor: authorized.resultActor, currentAssignee: authorized.currentAssignee,
         accessProvenance: authorized.accessProvenance, envelope: duty.envelope, access: authorized.access,
         claimRequiresReason: authorized.claimRequiresReason,
         responseRequiresReason: authorized.responseRequiresReason,
-        includeHistory: input.view === 'history', audit: duty.auditVersions, now,
-      }));
+        includeHistory: !input.summaryOnly && input.view === 'history', audit: duty.auditVersions, now,
+      });
     } catch {
-      if (input.view !== 'history') continue;
-      if (definitionFor(duty.sourceActionCode)?.accountabilityModel === 'SHARED_DECISION') continue;
+      if (input.view !== 'history') return null;
+      if (definitionFor(duty.sourceActionCode)?.accountabilityModel === 'SHARED_DECISION') return null;
       const wasAssigned = duty.assignmentHistory.some((assignment: { assignedUserId: string | null }) => (
         assignment.assignedUserId === input.actorUserId
       ));
-      if (!manager && !wasAssigned) continue;
+      if (!manager && !wasAssigned) return null;
       const historical = projectCrossWorkspaceDuty({
         duty: { ...duty, structuredResultJson: null },
         source: { title: '', description: null },
@@ -378,8 +379,8 @@ export const listCrossWorkspaceDuties = async (
           allowedActionCodesJson: [],
         },
         access: manager ? 'MANAGER_TRIAGE' : 'ASSIGNEE',
-        includeHistory: true,
-        audit: duty.auditVersions.map((event: { version: number; eventCode: string; createdAt: Date }) => ({
+        includeHistory: !input.summaryOnly,
+        audit: (duty.auditVersions ?? []).map((event: { version: number; eventCode: string; createdAt: Date }) => ({
           ...event,
           reason: null,
         })),
@@ -387,8 +388,14 @@ export const listCrossWorkspaceDuties = async (
       });
       historical.allowedActionCodes = [];
       historical.detailAvailable = false;
-      visible.push(historical);
+      return historical;
     }
+  };
+  // Bound concurrent source/authority reads; retain database ordering and run
+  // every existing visibility check. No authority decision is cached.
+  for (let offset = 0; offset < duties.length; offset += 4) {
+    const rows = await Promise.all(duties.slice(offset, offset + 4).map(project));
+    for (const row of rows) if (row) visible.push(row);
   }
   return visible;
 };
@@ -398,11 +405,11 @@ export const getCrossWorkspaceDutySummary = async (
   input: { actorUserId: string; workspaceCode: string; now?: Date },
 ) => {
   const now = input.now ?? new Date();
-  const assigned = await listCrossWorkspaceDuties(database, { ...input, view: 'assigned', now });
-  const available = await listCrossWorkspaceDuties(database, { ...input, view: 'available', now });
+  const assigned = await listCrossWorkspaceDuties(database, { ...input, view: 'assigned', now, summaryOnly: true });
+  const available = await listCrossWorkspaceDuties(database, { ...input, view: 'available', now, summaryOnly: true });
   const manager = await isManager(database, input.actorUserId, crossWorkspaceDutyDestinationCode(input.workspaceCode), now);
   const triage = manager
-    ? await listCrossWorkspaceDuties(database, { ...input, view: 'triage', now })
+    ? await listCrossWorkspaceDuties(database, { ...input, view: 'triage', now, summaryOnly: true })
     : [];
   const destinationWorkspaceCode = crossWorkspaceDutyDestinationCode(input.workspaceCode);
   const historyReceipt = await database.crossWorkspaceDutyHistoryReceipt.findUnique({
@@ -419,7 +426,7 @@ export const getCrossWorkspaceDutySummary = async (
     } },
     select: { lastSeenAt: true },
   });
-  const history = await listCrossWorkspaceDuties(database, { ...input, view: 'history', now });
+  const history = await listCrossWorkspaceDuties(database, { ...input, view: 'history', now, summaryOnly: true });
   const historyUnseen = history.filter((duty) => (
     !historyReceipt || new Date(duty.updatedAt) > historyReceipt.lastSeenAt
   )).length;

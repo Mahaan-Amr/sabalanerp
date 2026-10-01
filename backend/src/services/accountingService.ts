@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
-import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates } from './accountingListProjection';
+import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates,
+  accountingFinancialRegisterSelect, accountingAuditRegisterSelect, attachPartnerRegisterSnapshots } from './accountingListProjection';
 import { attachAccountingTrendAuditState } from './accountingReadProjection';
 import { normalizePersianSearchTokens } from './crmCustomerSearch';
 import { randomUUID } from 'node:crypto';
@@ -3664,7 +3665,9 @@ const getContractContextMap = async (contractIds: string[]) => {
   if (!uniqueIds.length) return new Map<string, any>();
   const contracts = await prisma.salesContract.findMany({
     where: { id: { in: uniqueIds } },
-    include: { customer: true }
+    select: { id: true, contractNumber: true, titlePersian: true, title: true,
+      status: true, createdAt: true, customer: { select: { id: true, firstName: true,
+        lastName: true, companyName: true, nationalCode: true } } }
   });
   return new Map(contracts.map((contract) => [
     contract.id,
@@ -3761,7 +3764,8 @@ export const listFinancialRecords = async (query: any = {}, actor?: AccountingRe
   const [rows, total] = await Promise.all([
     prisma.accountingFinancialRecord.findMany({
       where: scope.financial(where),
-      include: { invoiceItems: true, taxRecords: { where: scope.tax() }, receivables: { where: scope.receivable() } },
+      select: { ...accountingFinancialRegisterSelect, invoiceItems: true,
+        taxRecords: { where: scope.tax() }, receivables: { where: scope.receivable() } },
       orderBy: { createdAt: 'desc' },
       skip,
       take: pageSize
@@ -3769,7 +3773,7 @@ export const listFinancialRecords = async (query: any = {}, actor?: AccountingRe
     prisma.accountingFinancialRecord.count({ where: scope.financial(where) })
   ]);
   return {
-    items: await attachListContext(await scope.contextualize('FINANCIAL', rows)),
+    items: await attachListContext(await scope.contextualize('FINANCIAL', await attachPartnerRegisterSnapshots(prisma, rows))),
     page,
     pageSize,
     total
@@ -4064,6 +4068,7 @@ export const listAuditLogs = async (query: any = {}, actor?: AccountingReadActor
   const [rows, total] = await Promise.all([
     prisma.accountingAuditLog.findMany({
       where,
+      select: accountingAuditRegisterSelect,
       orderBy: authorizedAuditPopulationOrderBy(),
       skip,
       take: pageSize
@@ -4082,18 +4087,23 @@ export const getAccountantPerformanceReport = async (query: any = {}, actor?: Ac
   const [records, payments, corrections, auditRows] = await Promise.all([
     prisma.accountingFinancialRecord.findMany({
       where: scope.financial({ createdAt: range }),
+      select: { contractId: true, createdBy: true, financiallyApprovedBy: true,
+        financiallyApprovedAt: true, createdAt: true },
       orderBy: { createdAt: 'asc' }
     }),
     prisma.accountingPaymentStatus.findMany({
       where: scope.payment({ createdAt: range }),
+      select: { contractId: true, createdBy: true, createdAt: true },
       orderBy: { createdAt: 'asc' }
     }),
     prisma.accountingCorrectionRequest.findMany({
       where: scope.correction({ createdAt: range }),
+      select: { contractId: true, createdBy: true, createdAt: true, resolvedBy: true, resolvedAt: true },
       orderBy: { createdAt: 'asc' }
     }),
     prisma.accountingAuditLog.findMany({
       where: scope.audit({ createdAt: range }),
+      select: { contractId: true, actorId: true },
       orderBy: { createdAt: 'desc' }
     })
   ]);

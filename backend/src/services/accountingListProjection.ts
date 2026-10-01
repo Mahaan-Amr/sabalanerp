@@ -15,6 +15,33 @@ export const accountingFinancialSummarySelect = {
   sepidarAmount: true, financiallyApprovedAt: true, createdAt: true, metadata: true,
 } satisfies Prisma.AccountingFinancialRecordSelect;
 
+/** Registers retain action/form fields, but ordinary source evidence belongs to
+ * the detail reader. Partner validation still reads its complete source. */
+export const accountingFinancialRegisterSelect = {
+  id: true, kind: true, status: true, sourceKind: true, sourceId: true,
+  contractId: true, customerId: true, periodId: true, amount: true, currency: true,
+  metadata: true, idempotencyKey: true, systemInvoiceNumber: true, systemInvoiceDate: true,
+  sepidarAmount: true, financiallyApprovedAt: true, financiallyApprovedBy: true,
+  createdBy: true, postedAt: true, voidedAt: true, createdAt: true, updatedAt: true,
+} satisfies Prisma.AccountingFinancialRecordSelect;
+
+export const accountingAuditRegisterSelect = {
+  id: true, action: true, actorId: true, contractId: true, recordId: true,
+  entityType: true, entityId: true, note: true, createdAt: true,
+} satisfies Prisma.AccountingAuditLogSelect;
+
+export async function attachPartnerRegisterSnapshots<T extends { id: string; sourceKind: string }>(
+  database: Pick<Prisma.TransactionClient, 'accountingFinancialRecord'>, rows: T[],
+) {
+  const ids = rows.filter(row => row.sourceKind === 'PARTNER_INTERNAL_RECORD').map(row => row.id);
+  const snapshots = ids.length ? await database.accountingFinancialRecord.findMany({
+    where: { id: { in: ids }, sourceKind: 'PARTNER_INTERNAL_RECORD' },
+    select: { id: true, sourceSnapshot: true },
+  }) : [];
+  const byId = new Map(snapshots.map(row => [row.id, row.sourceSnapshot]));
+  return rows.map(row => ({ ...row, sourceSnapshot: byId.get(row.id) ?? null }));
+}
+
 /** Preserve every existing date fallback while projecting JSON in PostgreSQL,
  * rather than decoding whole historical snapshots in the API process. */
 export async function attachAccountingListDates<T extends { id: string }>(

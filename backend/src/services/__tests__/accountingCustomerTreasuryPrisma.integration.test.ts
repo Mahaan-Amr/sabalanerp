@@ -4,7 +4,7 @@ import test from 'node:test';
 import { createAccountingLedgerAdministration } from '../accountingLedgerAdministration';
 import { hashCustomerTreasuryEvidence } from '../accountingCustomerTreasury';
 import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../accountingBankFileImport';
-import { listPostedJournal, listPostedTrialBalance } from '../accountingLedgerPrismaRepository';
+import { listPostedJournal, listPostedTrialBalance, verifyLedgerAuditChain } from '../accountingLedgerPrismaRepository';
 import {
   allocateCustomerReceiptPrisma,
   bindTaxOutboxChannelPrisma,
@@ -217,6 +217,21 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
     assert.equal((attested.resolutionEvidence as any).linkBasis, 'MANAGER_ATTESTATION');
     assert.equal((await listTreasuryOverviewPrisma(database)).bankExceptions.length, 0);
     const savedRun = await database.accountingBankFileImportRun.findUniqueOrThrow({ where: { id: importedFile.id } });
+    const mismatchedOriginal = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 1, actorId: actor.id,
+      fileBase64: Buffer.from('reference,actualReference,date,amount,direction,description\noriginal-identity,other-identity,2026-09-25T08:00:00Z,invalid,credit,اصلاح نگاشت\n').toString('base64') });
+    const mismatchedCorrection = await importBankStatementFilePrisma(database, { financialAccountId: financial.id,
+      adapterType: 'CSV', mappingVersion: 2, actorId: actor.id,
+      fileBase64: Buffer.from('reference,actualReference,date,amount,direction,description\noriginal-identity,other-identity,2026-09-25T08:00:00Z,1200,credit,اصلاح نگاشت\n').toString('base64') });
+    await assert.rejects(() => resolveBankFileExceptionPrisma(database, {
+      exceptionId: (mismatchedOriginal.results as any[])[0].exceptionId,
+      correctedRunId: mismatchedCorrection.id, correctedRowNumber: 2, reason: 'شناسه قدیمی در ستون دیگری باقی مانده',
+      actorId: actor.id, actorProfile: 'ACCOUNTANT' }), /شناسه ردیف اصلاح‌شده/);
+    assert.equal(await database.accountingLedgerAuditEntry.count({ where: { action: 'BANK_FILE_IMPORTED', entityId: importedFile.id } }), 1);
+    const overrideAudit = await database.accountingLedgerAuditEntry.findFirstOrThrow({ where: {
+      action: 'BANK_FILE_EXCEPTION_RESOLVED', entityId: missingCaseId } });
+    assert.equal(overrideAudit.effectiveProfile, 'ACCOUNTING_MANAGER');
+    assert.equal((overrideAudit.sessionContext as any).linkBasis, 'MANAGER_ATTESTATION');
     assert.equal((savedRun.sourceRows as any[])[1].rawRecord.reference, 'file-line-bad');
     assert.deepEqual(Buffer.from(savedRun.sourceFile), Buffer.from(fileBase64, 'base64'));
     await database.$executeRawUnsafe(`CREATE FUNCTION reject_bank_file_run_test() RETURNS trigger AS $$
@@ -234,6 +249,26 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
     assert.equal(await database.accountingLedgerVoucher.count({ where: { sourceType: 'BANK_STATEMENT_FILE' } }), 0);
     const officialAfterImport = await listPostedTrialBalance(database, { bookId: book.id, fiscalYearId: year.id });
     assert.deepEqual(officialAfterImport, officialBeforeImport);
+    const pageFile = Buffer.from(['reference,date,amount,direction,description', ...Array.from({ length: 101 }, (_, i) =>
+      `page-${i},2026-09-25T08:00:00Z,1200,credit,ردیف صفحه‌بندی ${i}`)].join('\n')).toString('base64');
+    await importBankStatementFilePrisma(database, { financialAccountId: financial.id, adapterType: 'CSV',
+      mappingVersion: 1, actorId: actor.id, fileBase64: pageFile });
+    const firstPage = await listTreasuryOverviewPrisma(database);
+    const secondPage = await listTreasuryOverviewPrisma(database, { bankLinePage: 2 });
+    assert.equal(firstPage.bankLines.length, 100);
+    assert.equal(firstPage.bankLinesHasMore, true);
+    assert.equal(secondPage.bankLinesHasMore, false);
+    assert.equal(new Set([...firstPage.bankLines, ...secondPage.bankLines].map((line) => line.id)).size,
+      await database.accountingBankStatementLine.count());
+    await assert.rejects(() => listTreasuryOverviewPrisma(database, { bankLinePage: 0 }), /شماره صفحه/);
+    const concurrentInput = { financialAccountId: financial.id, adapterType: 'CSV' as const,
+      mappingVersion: 1, actorId: actor.id,
+      fileBase64: Buffer.from('reference,date,amount,direction,description\nconcurrent-file,2026-09-25T08:00:00Z,1200,credit,ورود هم‌زمان\n').toString('base64') };
+    const concurrentRuns = await Promise.all([importBankStatementFilePrisma(database, concurrentInput),
+      importBankStatementFilePrisma(database, concurrentInput)]);
+    assert.equal(concurrentRuns[0].id, concurrentRuns[1].id);
+    assert.equal(await database.accountingLedgerAuditEntry.count({ where: { action: 'BANK_FILE_IMPORTED', entityId: concurrentRuns[0].id } }), 1);
+    assert.equal((await verifyLedgerAuditChain(database)).valid, true);
     const allocation = await allocateCustomerReceiptPrisma(database, { treasuryTransactionId: receipt.id, allocations: [{ openItemId: sale.openItem.id, amountRials: 1_100n }],
       bookId: book.id, fiscalYearId: year.id, periodId: year.periods[0].id, customerAdvanceLedgerId: advance.id,
       receivableLedgerId: receivable.id, documentDate: new Date('2026-09-25T08:01:00Z'), idempotencyKey: `allocation-${temporary.runId}`,

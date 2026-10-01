@@ -24,7 +24,7 @@ test('role-aware dispatch timeline preserves authorized LSV and clears it on den
     } } : { success: true, access: { workspace: 'security', permission: 'edit' }, data: [{ id: 'turn-1', driverName: 'راننده آزمون', loadingNumber: 'L-100', status: 'WAITING_AT_GATE' }] }) });
   });
 
-  await login(page);
+  await login(page, '/dashboard/security');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/dashboard/security/vehicles');
   await page.getByRole('button', { name: 'پرونده‌های ارسال', exact: true }).click();

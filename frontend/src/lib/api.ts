@@ -981,7 +981,7 @@ export const accountingAPI = {
   getCustomerAccounts: (params?: { search?: string; asOf?: string }) => api.get('/accounting/ledger/customer-profiles', { params }),
   getCustomerAccountProjection: (id: string, params?: { asOf?: string }) => api.get(`/accounting/ledger/customer-profiles/${id}/projection`, { params }),
   exportCustomerStatement: (id: string, format: 'pdf' | 'xlsx', asOf: string) => api.get(`/accounting/ledger/customer-profiles/${id}/export.${format}`, { params: { asOf }, responseType: 'blob' }),
-  getTreasuryOverview: () => api.get('/accounting/ledger/treasury/overview'),
+  getTreasuryOverview: (bankLinePage = 1) => api.get('/accounting/ledger/treasury/overview', { params: { bankLinePage } }),
   getTaxOverview: () => api.get('/accounting/ledger/tax/overview'),
   recordCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/receipts', data),
   allocateCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/allocations', data),

@@ -29,6 +29,12 @@ test('Department Creation is a stable RTL, responsive, themed, and accessible pi
 
     await setViewportAndZoom(page, { width: 390, height: 844 });
     await assertNoHorizontalOverflow(page);
+    // Main's platform alignment (128bb009) moved the compact mobile title
+    // below the controls and hid the welcome subtitle; verify that contract.
+    const topbar = page.locator('[data-dashboard-topbar]');
+    await expect(topbar.getByRole('heading', { name: 'داشبورد اصلی', exact: true })).toBeVisible();
+    await expect(topbar.getByText(/^خوش آمدید/)).toBeHidden();
+    await expect(topbar.getByRole('button', { name: 'بازکردن منوی اصلی' })).toBeVisible();
     await expect(page).toHaveScreenshot(`department-create-mobile-${theme}.png`, {
       animations: 'disabled', caret: 'hide', mask: deterministicScreenshotMasks(page), fullPage: true, maxDiffPixelRatio: 0.002
     });

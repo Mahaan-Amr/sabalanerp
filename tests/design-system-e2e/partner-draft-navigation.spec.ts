@@ -26,7 +26,7 @@ for (const allowed of [true, false]) {
     }));
     await drafts.click();
     await expect(page).toHaveURL(/\/dashboard\/sales\/partner-cases$/);
-    await expect(page.getByRole('heading', { name: 'قراردادهای فروش همکار', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'پیش نویس ها و پرونده ها', exact: true })).toBeVisible();
   });
 }
 

@@ -1,7 +1,7 @@
 "use client";
 import { ErpPersianDateField } from "@/components/erp";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FaMoneyCheckAlt, FaSync } from "react-icons/fa";
 import {
   ErpBadge,
@@ -12,6 +12,7 @@ import {
   ErpInlineState,
   ErpInput,
   ErpPage,
+  ErpPagination,
   ErpSection,
   ErpSegmentedControl,
   ErpSearchableSelect,
@@ -57,9 +58,11 @@ export default function TreasuryControlPage() {
   const [workspaceTab, setWorkspaceTab] = useState("bank");
   const [receiptTab, setReceiptTab] = useState("receipt");
   const [bankTab, setBankTab] = useState("import");
+  const [bankLinePage, setBankLinePage] = useState(1);
   const [cashTab, setCashTab] = useState("checks");
   const [data, setData] = useState<any>();
   const [loading, setLoading] = useState(true);
+  const loadSequence = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ scope: string; kind: "success" | "error"; title: string }>();
   const [actionPending, setActionPending] = useState(false);
@@ -78,6 +81,7 @@ export default function TreasuryControlPage() {
     rawRecord: "",
   });
   const [bankFile, setBankFile] = useState<File | null>(null);
+  const bankFileInput = useRef<HTMLInputElement>(null);
   const [exceptionCorrections, setExceptionCorrections] = useState<Record<string, {
     runId: string; rowNumber: string; reason: string; attestUnlinkedCorrection: boolean;
   }>>({});
@@ -190,24 +194,27 @@ export default function TreasuryControlPage() {
     finally { setActionPending(false); }
   };
   const load = useCallback(async (background = false) => {
+    const sequence = ++loadSequence.current;
     if (!background) setLoading(true);
     setError(null);
     try {
       const [overview, context, customers] = await Promise.all([
-        accountingAPI.getTreasuryOverview(),
+        accountingAPI.getTreasuryOverview(bankLinePage),
         accountingAPI.getLedgerContext(),
         accountingAPI.getCustomerAccounts(),
       ]);
+      if (sequence !== loadSequence.current) return;
       setData({ ...overview.data.data, ledger: context.data.data });
       setCustomerAccounts(customers.data.data);
     } catch (reason) {
+      if (sequence !== loadSequence.current) return;
       setError(
         accountingFailureMessage(reason, "نمای کنترل خزانه‌داری بارگیری نشد."),
       );
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
-  }, []);
+  }, [bankLinePage]);
   useEffect(() => {
     load();
   }, [load]);
@@ -1234,7 +1241,7 @@ export default function TreasuryControlPage() {
 </ErpCard>
             )}
             {data.capabilities?.canManage && (
-              <ErpCard className={bankTab === "import" ? "mb-4 p-4" : "hidden"}><h3 className="mb-3 font-semibold">ورود صورتحساب بانک</h3><div className="grid gap-3 md:grid-cols-3">
+              <ErpCard className={bankTab === "import" ? "mb-4 min-w-0 p-4" : "hidden"}><h3 className="mb-3 font-semibold">ورود صورتحساب بانک</h3><div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-3">
                 <ErpField label="حساب مالی" required>
                   <ErpSearchableSelect
                     value={bankLine.financialAccountId}
@@ -1364,15 +1371,22 @@ export default function TreasuryControlPage() {
                     />
                   </ErpField>
                 ) : (
-                  <ErpField label="فایل صورت‌حساب بانک" hint="حداکثر ۲ مگابایت و ۱۰۰۰ ردیف؛ تاریخ باید به شکل 2026-09-25T08:00:00Z و مبلغ به ریالِ بدون جداکننده باشد." required>
+                  <div className="min-w-0">
                     <ErpInput
+                      ref={bankFileInput}
+                      className="hidden"
                       type="file"
                       accept={bankLine.adapterType === "CSV" ? ".csv,text/csv" : ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
                       onChange={(event) => {
                         setBankFile(event.target.files?.[0] || null);
                       }}
                     />
-                  </ErpField>
+                    <ErpField label="فایل صورت‌حساب بانک" hint="حداکثر ۲ مگابایت و ۱۰۰۰ ردیف؛ تاریخ باید به شکل 2026-09-25T08:00:00Z و مبلغ به ریالِ بدون جداکننده باشد." required>
+                      <ErpButton label={bankFile ? "تغییر فایل بانکی" : "انتخاب فایل بانکی"} variant="outline"
+                        disabled={actionPending} onClick={() => bankFileInput.current?.click()} />
+                    </ErpField>
+                    {bankFile && <span className="block break-all text-sm">{bankFile.name}</span>}
+                  </div>
                 )}
                 <div className="md:col-span-3 flex justify-end">
                   <ErpButton
@@ -1512,6 +1526,9 @@ export default function TreasuryControlPage() {
 </ErpCard>
             )}
             {actionFeedback?.scope === "treasury-7" && <ErpInlineState kind={actionFeedback.kind} title={actionFeedback.title} />}
+            <ErpPagination currentPage={bankLinePage} totalPages={Math.max(1, Math.ceil(data.bankLineCount / 100))}
+              totalItems={data.bankLineCount} itemsPerPage={100} itemLabel="ردیف بانکی"
+              onPageChange={(page) => { if (!actionPending && !loading) setBankLinePage(page); }} />
             {data.bankLines.length ? (
               <div className="grid gap-3">
                 {data.capabilities?.canManage && (

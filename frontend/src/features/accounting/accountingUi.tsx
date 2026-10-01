@@ -421,7 +421,7 @@ export function FinancialInvoiceApprovalForm({
     onApprove({
       invoiceId: invoice.id,
       systemInvoiceNumber: systemInvoiceNumber.trim(),
-      systemInvoiceDate: PersianCalendar.toGregorian(systemInvoiceDate).toISOString(),
+      systemInvoiceDate: PersianCalendar.toGregorianDateOnly(systemInvoiceDate),
       sepidarAmount: isPartner ? exactAmount! : sepidarAmount,
       ...(partnerReplacement ? { externalReference: externalReference.trim(), downstreamNote: downstreamNote.trim() } : {}),
     });

@@ -552,11 +552,11 @@ const formatPersianDate = (value: unknown): string => {
   return year && month && day ? `${year}/${month}/${day}` : EMPTY;
 };
 
-const formatDateTime = (value: unknown): string => {
+const formatDateTime = (value: unknown, timeZone?: string): string => {
   if (!value) return EMPTY;
   const date = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(date.getTime())) return escapeHtml(value);
-  return date.toLocaleString('fa-IR');
+  return date.toLocaleString('fa-IR', timeZone ? { timeZone } : undefined);
 };
 
 const statusLabelMap: Record<string, string> = {
@@ -2515,7 +2515,7 @@ const renderCompactMetadataSection = (
         <div><strong>شماره قرارداد:</strong> ${escapeHtml(contractNumber)}</div>
         <div><strong>تاریخ قرارداد:</strong> ${escapeHtml(contractDate)}</div>
         <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(statusLabel)}</div>
-        <div><strong>زمان چاپ:</strong> ${escapeHtml(formatDateTime(new Date()))}</div>
+        <div><strong>زمان چاپ:</strong> ${escapeHtml(formatDateTime(new Date(), 'Asia/Tehran'))}</div>
         ${accountingFields}
         ${workshopFields}
       </div>
@@ -2870,7 +2870,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
     <footer class="footer">
       <span>${output ? 'تأمین و تحویل توسط سبلان' : 'نسخه چاپی قرارداد - سامانه سبلان'}</span>
-      <span>تاریخ چاپ: ${escapeHtml(formatDateTime(new Date()))}</span>
+      <span>تاریخ چاپ: ${escapeHtml(formatDateTime(new Date(), 'Asia/Tehran'))}</span>
       <span>شماره قرارداد: ${escapeHtml(contractNumber)}</span>
     </footer>
   </div>

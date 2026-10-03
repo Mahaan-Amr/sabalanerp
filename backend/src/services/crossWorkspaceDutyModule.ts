@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { CONTRACT_DISPATCH_DUTY_DEFINITIONS, contractDispatchDutyAdapter } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { hrWorkItemDutyAdapter } from './crossWorkspaceDutyAdapters/hrWorkItemDutyAdapter';
 import {
   SALES_CONTRACT_CORRECTION_DUTY_DEFINITIONS,
@@ -37,6 +38,7 @@ import {
 } from './crossWorkspaceDutyAdapters/hrWorkItemDutyLifecycle';
 
 const sourceAdapters = new Map<string, CrossWorkspaceDutySourceAdapter>([
+  [contractDispatchDutyAdapter.sourceType, contractDispatchDutyAdapter],
   [hrWorkItemDutyAdapter.sourceType, hrWorkItemDutyAdapter],
   [salesContractCorrectionDutyAdapter.sourceType, salesContractCorrectionDutyAdapter],
   [hrHiringFinanceDutyAdapter.sourceType, hrHiringFinanceDutyAdapter],
@@ -56,6 +58,7 @@ const adapterForDuty = async (database: CrossWorkspaceDutyDatabase, dutyId: stri
 };
 
 export const CROSS_WORKSPACE_DUTY_DEFINITIONS = Object.freeze({
+  ...CONTRACT_DISPATCH_DUTY_DEFINITIONS,
   ...HR_DUTY_DEFINITIONS,
   ...SALES_CONTRACT_CORRECTION_DUTY_DEFINITIONS,
   ...HR_HIRING_FINANCE_DUTY_DEFINITIONS,

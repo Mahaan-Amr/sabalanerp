@@ -3,6 +3,7 @@
 import { isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
+import PersianCalendar from '@/lib/persian-calendar';
 import { useParams } from 'next/navigation';
 import { ErpCard, ErpInlineState, ErpLoading } from '@/components/erp';
 import { dashboardAPI, salesAPI } from '@/lib/api';
@@ -37,6 +38,7 @@ interface ContractForEdit extends ContractLifecyclePresentation {
     resolutionNote?: string | null;
   } | null;
   contractData?: ContractWizardData | null;
+  payments?: Array<{ paymentMethod: string; paymentDate?: string | null }>;
   productGraphProjection?: { revision: number } | null;
   customerId?: string;
   contractNumber: string;
@@ -200,6 +202,10 @@ export default function SalesContractEditPage() {
         initialContractStatus={contract.status}
         initialWizardData={{
           ...contract.contractData,
+          payment: { ...contract.contractData.payment, payments: contract.contractData.payment.payments.map(payment => {
+            const liveDate = payment.method === 'SELLER_CREDIT' ? contract.payments?.find(row => row.paymentMethod === 'SELLER_CREDIT')?.paymentDate : null;
+            return liveDate ? { ...payment, paymentDate: PersianCalendar.toPersian(liveDate, 'jYYYY/jMM/jDD') } : payment;
+          }) },
           productGraphRevision: contract.productGraphProjection?.revision ?? 0
         }}
       />

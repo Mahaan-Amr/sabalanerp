@@ -55,7 +55,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   }, [getCurrentPersianDate]);
 
   const paymentEntryNationalCodeRequired =
-    paymentEntryForm.method !== 'CUSTOMER_BALANCE' &&
+    paymentEntryForm.method !== 'CUSTOMER_BALANCE' && paymentEntryForm.method !== 'SELLER_CREDIT' &&
     isPaymentNationalCodeRequired(paymentEntryForm.paymentDate);
 
   const normalizePaymentEntryForm = useCallback((
@@ -64,7 +64,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   ): Partial<PaymentEntry> => {
     const nextForm = { ...form, ...updates };
     const nationalCodeRequired =
-      nextForm.method !== 'CUSTOMER_BALANCE' &&
+      nextForm.method !== 'CUSTOMER_BALANCE' && nextForm.method !== 'SELLER_CREDIT' &&
       isPaymentNationalCodeRequired(nextForm.paymentDate);
 
     if (!nationalCodeRequired) {
@@ -154,7 +154,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     const method = paymentEntryForm.method as PaymentEntryMethod | undefined;
     const nextErrors: PaymentEntryFieldErrors = {};
     const isCustomerBalance = method === 'CUSTOMER_BALANCE';
-    const nationalCodeRequired = !isCustomerBalance && isPaymentNationalCodeRequired(paymentEntryForm.paymentDate);
+    const nationalCodeRequired = !isCustomerBalance && method !== 'SELLER_CREDIT' && isPaymentNationalCodeRequired(paymentEntryForm.paymentDate);
     const normalizedNationalCode = normalizeNationalCodeDigits(paymentEntryForm.nationalCode);
     const customerNationalCode = getCustomerNationalCode();
 
@@ -181,7 +181,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       nextErrors.amount = 'جمع پرداخت‌ها نباید از مبلغ قرارداد بیشتر شود.';
     }
 
-    if (method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE') {
+    if (method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE' || method === 'SELLER_CREDIT') {
       if (!paymentEntryForm.paymentDate || !paymentEntryForm.paymentDate.trim()) {
         nextErrors.paymentDate = isCustomerBalance ? 'تاریخ استفاده از مانده الزامی است' : 'تاریخ پرداخت الزامی است';
       }

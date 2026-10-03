@@ -74,6 +74,9 @@ model EffectiveActionGrant {
 }
 
 model User {
+  sellerCreditAccount                        SellerCreditAccount?
+  creditGuarantees                           ContractDispatchAuthority[] @relation("DispatchCreditSeller")
+  requestedCreditTransfers                   ContractDispatchAuthority[] @relation("DispatchCreditTargetSeller")
   scopedActionGrants                         EffectiveActionGrant[]               @relation("ScopedGrantSubject")
   issuedScopedActionGrants                   EffectiveActionGrant[]               @relation("ScopedGrantIssuer")
   revokedScopedActionGrants                  EffectiveActionGrant[]               @relation("ScopedGrantRevoker")
@@ -1833,6 +1836,8 @@ model RoleFeaturePermission {
 }
 
 model SalesContract {
+  dispatchExpiryExempt              Boolean                            @default(false)
+  dispatchAuthorities               ContractDispatchAuthority[]
   commercialFlowVersion             Int                                @default(0)
   commercialRevision                Int                                @default(0)
   salesApprovalRevision             Int?
@@ -7284,6 +7289,46 @@ enum PaymentMethod {
   CASH
   RECEIPT
   CHECK
+  SELLER_CREDIT
+}
+
+model SellerCreditAccount {
+  sellerId   String   @id
+  seller     User     @relation(fields: [sellerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  limitRials Decimal  @default(0) @db.Decimal(18, 0)
+  updatedAt  DateTime @updatedAt
+  updatedBy  String
+
+  @@map("seller_credit_accounts")
+}
+
+model ContractDispatchAuthority {
+  id                 String        @id @default(cuid())
+  contractId         String
+  contract           SalesContract @relation(fields: [contractId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  kind               String
+  status             String        @default("PENDING")
+  revision           Int
+  sellerId           String?
+  targetSellerId     String?
+  targetAuthorityId  String?
+  seller             User? @relation("DispatchCreditSeller", fields: [sellerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  targetSeller       User? @relation("DispatchCreditTargetSeller", fields: [targetSellerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  targetAuthority    ContractDispatchAuthority? @relation("DispatchCreditProposal", fields: [targetAuthorityId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  proposals          ContractDispatchAuthority[] @relation("DispatchCreditProposal")
+  amountRials        Decimal       @default(0) @db.Decimal(18, 0)
+  promisedDate       DateTime      @db.Date
+  notifiedFor        String?
+  requestedBy        String
+  decidedBy          String?
+  reason             String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([contractId, kind, status])
+  @@index([sellerId, status])
+  @@index([promisedDate, status])
+  @@map("contract_dispatch_authorities")
 }
 
 enum PaymentStatus {

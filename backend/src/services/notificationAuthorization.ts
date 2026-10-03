@@ -5,6 +5,7 @@ import { canAccessTicket } from './supportTicketPolicy';
 import { canReadPartnerNotification, PARTNER_NOTIFICATION_RESOURCE } from './partnerSales/notifications/access';
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
 import { canAccessPerformanceOperationalAlert } from './performanceOperationalNotificationAccess';
+import { dispatchCreditAccess } from './contractDispatchCredit';
 
 export type NotificationAuthorizationUser = {
   id: string;
@@ -221,6 +222,11 @@ export const filterCurrentlyAuthorizedNotifications = async <
         : null)
     : Promise.resolve(null);
   const performanceAccess = new Map<string, boolean>();
+  const dispatchAccess = new Map<string, boolean>();
+  await Promise.all(rows.filter(row => row.event?.resourceType === 'CONTRACT_DISPATCH').map(async row => {
+    const contract = await database.salesContract.findUnique({ where: { id: row.event!.resourceId ?? '' } });
+    dispatchAccess.set(row.id, !!contract && (await dispatchCreditAccess(database, contract, user.id)).read);
+  }));
   await Promise.all(rows.map(async (row) => {
     const allowed = await canAccessPerformanceNotification(database, user.id, row, performanceContext);
     if (allowed !== null) performanceAccess.set(row.id, allowed);
@@ -277,6 +283,7 @@ export const filterCurrentlyAuthorizedNotifications = async <
       .filter((assignedUserId): assignedUserId is string => Boolean(assignedUserId)),
   }] as const));
   return rows.filter((row) => {
+    if (row.event?.resourceType === 'CONTRACT_DISPATCH') return dispatchAccess.get(row.id) === true;
     const event = row.event;
     if (event?.resourceType === PARTNER_NOTIFICATION_RESOURCE) return partnerAllowed.has(row.id);
     if (performanceAccess.has(row.id)) return performanceAccess.get(row.id) === true;

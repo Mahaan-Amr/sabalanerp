@@ -1,4 +1,5 @@
 "use client";
+import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpInput, ErpSearchableSelect } from "@/components/erp";
 import { useCallback, useEffect, useState, use } from "react";
@@ -721,9 +722,10 @@ export default function AccountingContractDetailPage(props: {
         options={[...accountingContractTabs]}
       />
       <div hidden={detailSection !== "summary"}>
-        {contract.capabilities?.canRecordPaperSignature && <ErpSection title="امضای مشتری">
-          <p className="mb-3 text-sm text-[var(--sds-text-secondary)]">با ثبت این اقدام، امضای مشتری روی نسخه کاغذی همین قرارداد را تأیید می‌کنید.</p>
-          <ErpButton label="ثبت امضای کاغذی مشتری" icon={FaCheckCircle} tone="success" disabled={actionLoading} onClick={() => void recordPaperSignature()} />
+        {!contract.partnerKind && !contract.partnerCaseId && <ErpSection title="امضای مشتری و مجوز ارسال">
+          <ContractDispatchCreditPanel contractId={params.contractId} refreshKey={contract.updatedAt} onChanged={() => void loadDetail()}>
+            {contract.capabilities?.canRecordPaperSignature && <ErpButton label="ثبت امضای کاغذی مشتری" icon={FaCheckCircle} tone="success" disabled={actionLoading} onClick={() => void recordPaperSignature()} />}
+          </ContractDispatchCreditPanel>
         </ErpSection>}
         <ErpSection title="مدیریت وضعیت قرارداد">
           {contract.isInactive && (

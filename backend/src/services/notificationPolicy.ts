@@ -33,6 +33,12 @@ export interface NotificationPolicyDraft {
 }
 
 const REGISTERED_NOTIFICATION_EVENTS = {
+  CONTRACT_PAYMENT_PROMISE_DUE: {
+    type: 'CONTRACT_PAYMENT_PROMISE_DUE', mandatory: true, titleTemplate: 'یادآوری وعده پرداخت مشتری',
+    messageTemplate: 'موعد پرداخت قرارداد {{contractNumber}} در تاریخ {{promisedDate}} رسیده است؛ پرداخت مشتری را پیگیری کنید.',
+    priority: 'HIGH', allowedVariables: ['contractNumber','promisedDate'],
+    allowedChannels: ['IN_APP','REALTIME'], allowedRecipientResolvers: ['DIRECT_USER'],
+  },
   PERFORMANCE_OPERATIONAL_ALERT: {
     type: 'PERFORMANCE_OPERATIONAL_ALERT', mandatory: true,
     titleTemplate: 'هشدار عملیاتی ارزیابی عملکرد',

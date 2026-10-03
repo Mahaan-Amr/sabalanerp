@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import SellerCreditSettings from '@/features/sales/SellerCreditSettings';
 import { ErpButton, ErpField, ErpInlineState, ErpInput, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { salesAPI } from '@/lib/api';
 import { assertSuccessfulSalesResponse, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
@@ -43,6 +44,7 @@ export default function SalesSettingsPage() {
           <ErpButton label="ذخیره مهلت" tone="primary" disabled={!valid || pending} onClick={() => void save()} />
           {saved && <ErpInlineState kind="success" title="مهلت انقضای قراردادهای جدید ذخیره شد." />}
         </ErpSection>}
+      {canManage && <SellerCreditSettings />}
     </>}
   </ErpPage>;
 }

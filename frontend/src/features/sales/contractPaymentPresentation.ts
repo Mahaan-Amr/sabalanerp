@@ -47,6 +47,7 @@ export const getContractPaymentMethodLabel = (
   if (method === 'CASH_CARD' || (method === 'CASH' && (cash === 'CARD' || cash === 'POS'))) return 'نقدی (کارتخوان)';
   if (method === 'CASH') return 'نقدی';
   if (method === 'CHECK') return 'چک';
+  if (method === 'SELLER_CREDIT') return 'استفاده از اعتبار فروشنده';
   if (method === 'CUSTOMER_BALANCE' || method === 'RECEIPT') return 'استفاده از مانده مشتری';
   return 'روش پرداخت نامشخص';
 };

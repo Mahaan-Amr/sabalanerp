@@ -1,6 +1,7 @@
 ﻿// Payment Entry Modal — minimal, compact overlay for adding/editing a payment
 
 import React from 'react';
+import { dispatchCreditApi, type SellerCreditBalance } from '@/features/sales/dispatchCreditApi';
 import { ErpInlineState } from '@/components/erp';
 import type { PaymentEntry } from '../../types/contract.types';
 import { CentralProductModalShell } from '../product-modal-system';
@@ -29,6 +30,8 @@ interface PaymentEntryModalProps {
   allowCustomerBalance?: boolean;
   dateFormat?: 'jalali' | 'gregorian';
   requireMethodSelection?: boolean;
+  allowSellerCredit?: boolean;
+  contractId?: string;
 }
 
 export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
@@ -50,7 +53,20 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   allowCustomerBalance = false,
   dateFormat = 'jalali',
   requireMethodSelection = false,
+  allowSellerCredit = false,
+  contractId,
 }) => {
+  const [balance, setBalance] = React.useState<SellerCreditBalance | null>(null);
+  const [creditError, setCreditError] = React.useState(false);
+  React.useEffect(() => {
+    if (!isOpen || !allowSellerCredit) return;
+    let active = true;
+    setBalance(null); setCreditError(false);
+    const projectId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('potentialProjectId') ?? undefined : undefined;
+    dispatchCreditApi.balance(contractId, projectId).then(value => { if (active) setBalance(value); })
+      .catch(() => { if (active) setCreditError(true); });
+    return () => { active = false; };
+  }, [isOpen, allowSellerCredit, contractId]);
   if (!isOpen) return null;
 
   const method = form.method ?? (requireMethodSelection ? undefined : 'CASH_CARD');
@@ -73,10 +89,11 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
         <div className="mx-auto w-full max-w-3xl px-0 py-0">
           <div className="space-y-3">
             <ContractPaymentInstallmentFields dateFormat={dateFormat} method={method} amount={String(form.amount ?? '')}
+              allowSellerCredit={allowSellerCredit && !!balance} sellerCreditLabel={balance ? `مانده: ${Number(balance.availableRials).toLocaleString('fa-IR')} ریال` : 'در حال دریافت مانده'}
               existingContract={existingContract} allowCustomerBalance={allowCustomerBalance}
               date={form.paymentDate ?? ''}
               amountLabel={isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : isCheck ? 'مبلغ چک (تومان)' : 'مبلغ (تومان)'}
-              dateLabel={isCustomerBalance ? 'تاریخ استفاده از مانده' : isCheck ? 'تاریخ سررسید چک' : 'تاریخ پرداخت'}
+              dateLabel={method === 'SELLER_CREDIT' ? 'تاریخ وعده پرداخت مشتری' : isCustomerBalance ? 'تاریخ استفاده از مانده' : isCheck ? 'تاریخ سررسید چک' : 'تاریخ پرداخت'}
               methodError={fieldErrors.method} amountError={fieldErrors.amount} dateError={fieldErrors.paymentDate}
               disabledAmount={disabledAmount}
               onMethodChange={value => onFormChange({ method: value })}
@@ -97,6 +114,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
               })} />}
 
             {error && <ErpInlineState kind="error" title={error} />}
+            {creditError && <ErpInlineState kind="error" title="مانده اعتبار دریافت نشد؛ فرم پرداخت را دوباره باز کنید." />}
 
             {nationalCodeConflict && (
               <ErpInlineState kind="stale" title={

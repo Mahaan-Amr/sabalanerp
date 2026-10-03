@@ -5820,7 +5820,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               newErrors.paymentMethod = `مبلغ پرداخت ${index + 1} باید بیشتر از صفر باشد`;
               return;
             }
-            if ((method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE') && !String(payment.paymentDate || '').trim()) {
+            if ((method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE' || method === 'SELLER_CREDIT') && !String(payment.paymentDate || '').trim()) {
               newErrors.paymentMethod = method === 'CUSTOMER_BALANCE'
                 ? `تاریخ استفاده از مانده مشتری برای پرداخت ${index + 1} الزامی است`
                 : `تاریخ پرداخت برای پرداخت ${index + 1} الزامی است`;
@@ -5840,7 +5840,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 return;
               }
             }
-            if (!isContractEditMode && method !== 'CUSTOMER_BALANCE' && payment.paymentDate && String(payment.paymentDate).trim() !== getCurrentPersianDate()) {
+            if (!isContractEditMode && method !== 'CUSTOMER_BALANCE' && method !== 'SELLER_CREDIT' && payment.paymentDate && String(payment.paymentDate).trim() !== getCurrentPersianDate()) {
               const paymentNationalCode = String(payment.nationalCode || '').trim();
               if (!paymentNationalCode) {
                 newErrors.paymentMethod = `کد ملی برای پرداخت ${index + 1} با تاریخ غیر از امروز الزامی است`;
@@ -6036,6 +6036,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           if (method === 'CASH_SHIBA') return 'نقدی (شبا)';
           if (method === 'CHECK') return 'چک';
           if (method === 'CUSTOMER_BALANCE') return 'استفاده از باقی مانده مشتری';
+          if (method === 'SELLER_CREDIT') return 'استفاده از اعتبار فروشنده';
           return '—';
         };
         const mapPaymentStatusLabel = (status?: string) => {
@@ -11074,6 +11075,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
         {paymentHandlers.showPaymentEntryModal && (
           <PaymentEntryModal
+            allowSellerCredit
+            contractId={contractId}
             existingContract={isContractEditMode}
             isOpen={paymentHandlers.showPaymentEntryModal}
             onClose={paymentHandlers.handleClosePaymentEntryModal}

@@ -1,4 +1,5 @@
 "use client";
+import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
 import { ContractRenewal } from '@/features/sales/ContractRenewal';
 import { contractLifecycleLabel, contractLifecycleFilterOptions, isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
 import { ErpPressable, ErpSelect, ErpTextarea } from "@/components/erp";
@@ -1140,6 +1141,9 @@ export default function ContractDetailPage() {
       <ErpTwoColumn
         main={
           <>
+            {detailSection === 'summary' && !contract.partnerKind && !contract.partnerCaseId && <ErpSection title="مجوز ارسال و ضمانت فروشنده">
+              <ContractDispatchCreditPanel contractId={contractId} refreshKey={contract.updatedAt} onChanged={() => void loadContract()} />
+            </ErpSection>}
             {detailSection === "summary" && (
               <ErpSection
                 title="اطلاعات قرارداد"

@@ -8,7 +8,7 @@ export const accountingContractListSelect = {
   status: true, isInactive: true, inactiveAt: true, inactiveReason: true,
   commercialFlowVersion: true, commercialRevision: true, salesApprovalRevision: true,
   customerAcceptanceRevision: true, customerAcceptanceMethod: true,
-  commercialExpiresAt: true, firstFinancialRecordAt: true,
+  commercialExpiresAt: true, firstFinancialRecordAt: true, dispatchExpiryExempt: true,
   partnerCaseId: true, partnerKind: true,
   customer: true, items: { select: { totalPrice: true } },
 } satisfies Prisma.SalesContractSelect;

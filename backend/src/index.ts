@@ -35,6 +35,7 @@ import sabalanCalendarRoutes from "./routes/sabalan-calendar";
 
 // Import workspace routes
 import salesRoutes from "./routes/sales";
+import dispatchCreditRoutes from "./routes/dispatchCredit";
 import crmRoutes from "./routes/crm";
 import inventoryRoutes from "./routes/inventory";
 import accountingRoutes from "./routes/accounting";
@@ -201,6 +202,7 @@ app.use("/api/security", securityRoutes);
 // Workspace-specific routes
 if (!isProduction) console.log("? Registering workspace routes...");
 app.use("/api/sales", salesRoutes);
+app.use("/api/dispatch-credit", dispatchCreditRoutes);
 app.use("/api/crm", crmRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/accounting", accountingRoutes);

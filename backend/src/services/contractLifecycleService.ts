@@ -10,6 +10,8 @@ import {
   ShipmentQuantityEvidenceKind,
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { auditDispatchCredit } from './contractDispatchCredit';
+import { closeContractDispatchDuty } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import {
   PARTNER_CASE_RETENTION_BLOCKER,
   PARTNER_CASE_LIFECYCLE_BLOCKER,
@@ -382,6 +384,14 @@ export const executeContractLifecycleAction = async ({
     await tx.salesContractEditSession.deleteMany({ where: { contractId } });
     await tx.shipmentQuantityProjection.deleteMany({ where: { contractId } });
     await tx.shipmentQuantityEvidence.deleteMany({ where: { contractId } });
+    const dispatchAuthorities = await tx.contractDispatchAuthority.findMany({ where: { contractId } });
+    for (const authority of dispatchAuthorities) {
+      await closeContractDispatchDuty(tx, authority.id, actorId, 'HARD_DELETE', normalizedReason);
+      await auditDispatchCredit(tx, null, actorId, 'DISPATCH_AUTHORITY_ARCHIVED_BY_HARD_DELETE', authority.id,
+        { ...authority, contractNumber: contract.contractNumber }, { archived: true }, normalizedReason);
+    }
+    await tx.contractDispatchAuthority.deleteMany({ where: { contractId, kind: { in: ['DATE','TRANSFER'] } } });
+    await tx.contractDispatchAuthority.deleteMany({ where: { contractId } });
     await tx.salesContract.delete({ where: { id: contractId } });
     return { id: contractId, contractNumber: contract.contractNumber, deleted: true };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });

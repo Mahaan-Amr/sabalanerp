@@ -3,6 +3,8 @@ import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDu
 import { withRecoveryBackgroundWrite } from './recoveryRuntime';
 import { assertContractQuantityEvidenceReadyForFinalization } from './contractQuantityEvidenceGuard';
 import { getEffectiveUserAccess } from './effectiveAccessService';
+import { ordinaryContractDispatchEligible } from './ordinaryContractDispatchEligibility';
+import { processContractCreditReminders } from './contractCreditReminders';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 export type CommercialContract = {
@@ -11,6 +13,7 @@ export type CommercialContract = {
   salesApprovalRevision?: number | null; customerAcceptanceRevision?: number | null;
   status: string; isInactive?: boolean; firstFinancialRecordAt?: Date | null;
   commercialExpiresAt?: Date | null;
+  dispatchExpiryExempt?: boolean;
 };
 export const isOrdinaryCommercialFlow = (contract: CommercialContract) =>
   contract.commercialFlowVersion === 1 && !contract.partnerKind && !contract.partnerCaseId;
@@ -23,17 +26,22 @@ export const isCommerciallyFinal = (contract: CommercialContract) => isOrdinaryC
     && contract.customerAcceptanceRevision === contract.commercialRevision
   : !contract.isInactive && ['APPROVED', 'SIGNED', 'PRINTED'].includes(contract.status);
 export const commercialDeadlinePassed = (contract: CommercialContract, now = new Date()) =>
-  isOrdinaryCommercialFlow(contract) && !contract.firstFinancialRecordAt && !!contract.commercialExpiresAt
+  isOrdinaryCommercialFlow(contract) && !contract.firstFinancialRecordAt && !contract.dispatchExpiryExempt && !!contract.commercialExpiresAt
   && contract.commercialExpiresAt <= now;
 export const assertCommercialActionAvailable = (contract: CommercialContract, now = new Date()) => {
   if (contract.isInactive || ['CANCELLED', 'EXPIRED'].includes(contract.status) || commercialDeadlinePassed(contract, now)) {
     throw new Error('Contract cannot be modified in current status');
   }
 };
+export const refreshDispatchExpiryExemption = async (db: Database, contract: CommercialContract) => {
+  if (isOrdinaryCommercialFlow(contract) && !contract.firstFinancialRecordAt && contract.commercialExpiresAt
+    && contract.commercialExpiresAt <= new Date()) contract.dispatchExpiryExempt = await ordinaryContractDispatchEligible(db, contract);
+};
 export const lockOrdinaryContract = async (tx: Database, contractId: string) => {
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${contractId} FOR UPDATE`);
   const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
   if (!contract) throw new Error('Contract not found');
+  await refreshDispatchExpiryExemption(tx, contract);
   return contract;
 };
 /** Compatibility endpoints cannot mutate the coupled commercial snapshot of a
@@ -86,7 +94,11 @@ export const approveOrdinarySales = async (tx: Database, contractId: string, act
     signatures: { ...((contract.signatures as any) || {}), approve: { by: actorId, at: new Date().toISOString(), revision, note: note || null } },
   } });
   await audit(tx, contractId, actorId, 'COMMERCIAL_SALES_APPROVED', contract, updated, note);
-  if (status === 'SIGNED') await finishCommercialCorrection(tx, contractId, actorId);
+  if (status === 'SIGNED') {
+    await finishCommercialCorrection(tx, contractId, actorId);
+    updated.dispatchExpiryExempt = await ordinaryContractDispatchEligible(tx, updated);
+    await tx.salesContract.update({ where: { id: contractId }, data: { dispatchExpiryExempt: updated.dispatchExpiryExempt } });
+  }
   return updated;
 };
 export const markCustomerAcceptance = async (tx: Database, input: {
@@ -109,7 +121,11 @@ export const markCustomerAcceptance = async (tx: Database, input: {
   } });
   await audit(tx, contract.id, input.actorId, `COMMERCIAL_CUSTOMER_${input.method}_ACCEPTED`, contract, updated, input.note);
   if (input.method === 'PAPER') await invalidateCommercialApprovals(tx, contract.id);
-  if (status === 'SIGNED') await finishCommercialCorrection(tx, contract.id, input.actorId);
+  if (status === 'SIGNED') {
+    await finishCommercialCorrection(tx, contract.id, input.actorId);
+    updated.dispatchExpiryExempt = await ordinaryContractDispatchEligible(tx, updated);
+    await tx.salesContract.update({ where: { id: contract.id }, data: { dispatchExpiryExempt: updated.dispatchExpiryExempt } });
+  }
   return updated;
 };
 export const renewOrdinaryContract = async (tx: Database, contractId: string, actorId: string, reason: string) => {
@@ -134,6 +150,9 @@ export const expireOrdinaryContracts = async (database: PrismaClient, now = new 
     firstFinancialRecordAt: null, commercialExpiresAt: { lte: now }, status: { notIn: ['CANCELLED', 'EXPIRED'] }, isInactive: false }, select: { id: true } });
   for (const row of due) await database.$transaction(async tx => {
     const contract = await lockOrdinaryContract(tx, row.id);
+    const exempt = await ordinaryContractDispatchEligible(tx, contract);
+    if (contract.dispatchExpiryExempt !== exempt) await tx.salesContract.update({ where: { id: row.id }, data: { dispatchExpiryExempt: exempt } });
+    contract.dispatchExpiryExempt = exempt;
     if (!commercialDeadlinePassed(contract, now) || contract.isInactive || ['CANCELLED', 'EXPIRED'].includes(contract.status)) return;
     const updated = await tx.salesContract.update({ where: { id: row.id }, data: { status: 'EXPIRED' } });
     await invalidateCommercialApprovals(tx, row.id);
@@ -144,7 +163,7 @@ export const expireOrdinaryContracts = async (database: PrismaClient, now = new 
 export const startOrdinaryContractExpiry = (database: PrismaClient) => {
   let running = false;
   const run = async () => { if (running) return; running = true;
-    try { await withRecoveryBackgroundWrite(async () => { await expireOrdinaryContracts(database); await expireCommercialCorrectionPeriods(database); }); } catch (error) { console.error('Contract expiry failed:', error); }
+    try { await withRecoveryBackgroundWrite(async () => { await expireOrdinaryContracts(database); await expireCommercialCorrectionPeriods(database); await processContractCreditReminders(database); }); } catch (error) { console.error('Contract expiry failed:', error); }
     finally { running = false; } };
   void run(); const timer = setInterval(() => void run(), 60_000); timer.unref?.();
   return () => clearInterval(timer);

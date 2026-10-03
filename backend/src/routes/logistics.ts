@@ -269,7 +269,7 @@ const getProjectContracts = async (projectId: string, customerId: string) => {
   });
   const financiallyApprovedContractIds = new Set(approvedRecords.map((record) => record.contractId).filter(Boolean));
 
-  const eligible = await Promise.all(contracts.map(async contract => financiallyApprovedContractIds.has(contract.id)
+  const eligible = await Promise.all(contracts.map(async contract => ((!contract.partnerKind && !contract.partnerCaseId) || financiallyApprovedContractIds.has(contract.id))
     && await ordinaryContractDispatchEligible(prisma, contract)));
   return contracts.filter((_contract, index) => eligible[index]);
 };
@@ -571,11 +571,11 @@ const linePayloadToCreate = async (line: any) => {
     select: { id: true }
   });
 
-  if (!financiallyApprovedRecord) {
+  if (!financiallyApprovedRecord && (sourceItem.contract.partnerKind || sourceItem.contract.partnerCaseId)) {
     throw new Error('Contract is not financially approved for logistics loading');
   }
   if (!await ordinaryContractDispatchEligible(prisma, sourceItem.contract)) {
-    throw new DispatchAllocationConflictError('قرارداد برای بارگیری باید قطعی و کاملاً تسویه شده باشد.');
+    throw new DispatchAllocationConflictError('قرارداد برای بارگیری باید قطعی و دارای تأیید مالی، مجوز مدیر یا پوشش کامل دریافت و اعتبار باشد.');
   }
 
   const unit = String(line.unit || inferUnit(sourceItem, null));

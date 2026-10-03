@@ -6,13 +6,17 @@ import { ContractPaymentMethodSelect, contractPaymentMethodOptions } from './Con
 
 test('ordinary and Partner payment editors hide customer balance for new payments', () => {
   assert.deepEqual(contractPaymentMethodOptions.map(option => option.value),
-    ['CASH_CARD', 'CASH_SHIBA', 'CHECK']);
+    ['CASH_CARD', 'CASH_SHIBA', 'CHECK', 'SELLER_CREDIT']);
 
   const html = renderToStaticMarkup(<ContractPaymentMethodSelect value="CASH_CARD" onChange={() => undefined} />);
   assert.match(html, /نقدی \(کارت‌خوان\)/);
   assert.match(html, /نقدی \(شبا\)/);
   assert.match(html, /چک/);
   assert.doesNotMatch(html, /استفاده از باقی مانده مشتری/);
+  assert.doesNotMatch(html, /SELLER_CREDIT/);
+  const creditHtml = renderToStaticMarkup(<ContractPaymentMethodSelect value="SELLER_CREDIT" allowSellerCredit sellerCreditLabel="مانده: ۵۰۰ ریال" onChange={() => undefined} />);
+  assert.match(creditHtml, /استفاده از اعتبار فروشنده/);
+  assert.match(creditHtml, /مانده: ۵۰۰ ریال/);
 
   const legacyHtml = renderToStaticMarkup(<ContractPaymentMethodSelect value="CUSTOMER_BALANCE" onChange={() => undefined} />);
   assert.match(legacyHtml, /استفاده از باقی مانده مشتری \(غیرفعال\)/);

@@ -7,7 +7,7 @@ import type { PaymentEntryMethod } from '../../types/contract.types';
 import { ContractPaymentMethodSelect } from './ContractPaymentMethodSelect';
 
 export function ContractPaymentInstallmentFields({ method, amount, date, amountLabel = 'مبلغ (تومان)',
-  dateLabel = 'تاریخ پرداخت', disabledAmount = false, disabled = false, existingContract = false, allowCustomerBalance = false, methodError, amountError, dateError,
+  dateLabel = 'تاریخ پرداخت', disabledAmount = false, disabled = false, existingContract = false, allowCustomerBalance = false, allowSellerCredit = false, sellerCreditLabel, methodError, amountError, dateError,
   dateFormat = 'jalali', onMethodChange, onAmountChange, onDateChange }: {
   method: PaymentEntryMethod | undefined;
   amount: string;
@@ -19,6 +19,8 @@ export function ContractPaymentInstallmentFields({ method, amount, date, amountL
   disabled?: boolean;
   existingContract?: boolean;
   allowCustomerBalance?: boolean;
+  allowSellerCredit?: boolean;
+  sellerCreditLabel?: string;
   methodError?: string;
   amountError?: string;
   dateError?: string;
@@ -28,7 +30,7 @@ export function ContractPaymentInstallmentFields({ method, amount, date, amountL
 }) {
   return <div className="grid gap-3 sm:grid-cols-3">
     <ErpField className="[&>label]:mb-0" label="روش پرداخت" error={methodError}><ContractPaymentMethodSelect value={method} disabled={disabled} existingContract={existingContract} allowCustomerBalance={allowCustomerBalance} className="h-12"
-      onChange={onMethodChange} /></ErpField>
+      allowSellerCredit={allowSellerCredit} sellerCreditLabel={sellerCreditLabel} onChange={onMethodChange} /></ErpField>
     <ErpField className="[&>label]:mb-0" label={amountLabel} error={amountError}><ErpRialInput className="h-12" dir="ltr" value={amount}
       disabled={disabled || disabledAmount} onValueChange={onAmountChange} /></ErpField>
     <ErpField className="[&>label]:mb-0" label={dateLabel} error={dateError}><PersianCalendarComponent valueFormat={dateFormat} value={date}

@@ -1,6 +1,7 @@
 import { assertPartnerFinancialFinality } from './partnerSales/cases/commercialLifecycle';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { isOrdinaryCommercialFlow, isCommerciallyFinal, commercialDeadlinePassed } from './ordinaryContractLifecycle';
+import { refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
 
 export type OrdinaryCommercialContract = {
   commercialFlowVersion?: number;
@@ -9,6 +10,7 @@ export type OrdinaryCommercialContract = {
   customerAcceptanceRevision?: number | null;
   commercialExpiresAt?: Date | null;
   firstFinancialRecordAt?: Date | null;
+  dispatchExpiryExempt?: boolean;
   status: string;
   isInactive?: boolean;
   partnerCaseId?: string | null;
@@ -51,6 +53,7 @@ export const assertOrdinaryAccountingCommercialGate = async (
   const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
   if (!contract) throw new OrdinaryAccountingCommercialError('قرارداد پیدا نشد.');
   if (contract.commercialFlowVersion === 2 && contract.partnerCaseId && !correctionContinuation.has(action)) await assertPartnerFinancialFinality(tx as Prisma.TransactionClient, contract.partnerCaseId);
+  await refreshDispatchExpiryExemption(tx, contract);
   if (isNewOrdinaryCommercialFlow(contract)) {
     if (expectedRevision !== undefined && contract.commercialRevision !== expectedRevision) {
       throw new OrdinaryAccountingCommercialError('قرارداد تغییر کرده است؛ صفحه را تازه‌سازی کنید.');

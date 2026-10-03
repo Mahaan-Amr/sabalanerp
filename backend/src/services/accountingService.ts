@@ -2,6 +2,7 @@ import { reconcilePartnerFinancialRealization } from './partnerSales/accounting/
 import { assertPartnerFinancialFinality } from './partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
 import { listPartnerPreparationDocuments } from './partnerSales/accounting/preFinancialDocument';
+import { recordFinancialCreditTransition } from './contractDispatchCredit';
 import { isNewOrdinaryCommercialFlow, ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError,
   assertOrdinaryAccountingCommercialGate } from './ordinaryAccountingCommercialGate';
 import { reconcileOrdinaryFinancialRealization } from './salesAttributionService';
@@ -946,6 +947,7 @@ const buildContractRow = async (contract: any, settings: any) => {
     customerAcceptanceRevision: contract.customerAcceptanceRevision,
     customerAcceptanceMethod: contract.customerAcceptanceMethod,
     commercialExpiresAt: contract.commercialExpiresAt,
+    dispatchExpiryExempt: contract.dispatchExpiryExempt,
     firstFinancialRecordAt: contract.firstFinancialRecordAt,
     isInactive: contract.isInactive,
     inactiveAt: contract.inactiveAt,
@@ -2422,6 +2424,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       note: command.note || null
     });
 
+    await recordFinancialCreditTransition(tx, updated.contractId, actor.userId, 'SELLER_CREDIT_RELEASED_BY_FINANCIAL_APPROVAL');
     if (updated.contractId) {
       const contract = await tx.salesContract.findUnique({ where: { id: updated.contractId } });
       if (contract) await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, updated.id);
@@ -3501,6 +3504,7 @@ export async function voidAccountingRecordInTransaction(tx: Prisma.TransactionCl
         }
       }
     });
+    await recordFinancialCreditTransition(tx, record.contractId, actorId, 'SELLER_CREDIT_RECOMPUTED_AFTER_VOID');
     await audit(tx, {
       action: 'VOID_ACCOUNTING_RECORD',
       actorId,

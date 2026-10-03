@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { isCommerciallyFinal, isOrdinaryCommercialFlow } from './ordinaryContractLifecycle';
+import { activeCreditForContract, activeManagerApproval, hasFinancialDispatchApproval, ordinaryContract, rials } from './contractDispatchCredit';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type Obligation = { original: Prisma.Decimal.Value; applied: Prisma.Decimal.Value };
@@ -12,11 +13,7 @@ export const obligationsFullySettled = (required: Prisma.Decimal.Value, obligati
     && new Prisma.Decimal(item.applied).gte(item.original));
 };
 
-export const ordinaryContractDispatchEligible = async (db: Db, contract: any): Promise<boolean> => {
-  if (!isOrdinaryCommercialFlow(contract)) return true; // Existing caller retains the legacy gates.
-  if (contract.isInactive || !isCommerciallyFinal(contract)) return false;
-  const amount = new Prisma.Decimal(contract.totalAmount).mul(
-    ['IRT', 'تومان'].includes(contract.currency) ? 10 : 1);
+export const actualContractReceiptsRials = async (db: Db, contract: any): Promise<Prisma.Decimal> => {
   const authoritative = await db.accountingReplacementCutoverRun.findMany({ where: {
     authorityTransferredAt: { not: null }, sabalanAuthoritative: true,
   }, select: { bookId: true } });
@@ -36,20 +33,31 @@ export const ordinaryContractDispatchEligible = async (db: Db, contract: any): P
       line.allocation.transaction.sourceType === 'CHECK_INSTRUMENT').map(line => line.allocation.transaction.sourceId);
     const cleared = new Set((await db.accountingCheckInstrument.findMany({ where: { id: { in: checks }, status: 'CLEARED' },
       select: { id: true } })).map(check => check.id));
-    return obligationsFullySettled(amount, items.filter(item => posted.has(item.invoice.ledgerVoucherId)).map(item => ({
+    const obligations = items.filter(item => posted.has(item.invoice.ledgerVoucherId)).map(item => ({
       original: item.originalRials, applied: item.allocationLines.filter(line => {
         const allocation = line.allocation; const receipt = allocation.transaction;
         return posted.has(allocation.ledgerVoucherId!) && posted.has(receipt.postedVoucherId!)
           && (receipt.sourceType !== 'CHECK_INSTRUMENT' || cleared.has(receipt.sourceId));
       }).reduce((sum, line) => sum.plus(line.amountRials), new Prisma.Decimal(0))
-    })));
+    }));
+    return obligations.reduce((sum, item) => sum.plus(Prisma.Decimal.min(item.original, item.applied)), new Prisma.Decimal(0));
   }
   const receivables = await db.accountingReceivable.findMany({ where: { contractId: contract.id, status: { not: 'VOIDED' } },
     include: { paymentStatuses: true } });
-  return obligationsFullySettled(amount, receivables.map(item => ({ original: item.originalAmount,
+  const obligations = receivables.map(item => ({ original: item.originalAmount,
     applied: item.paymentStatuses.filter(payment => ['RECEIVED', 'RECONCILED'].includes(payment.status)
       && (payment.method !== 'CHECK' || payment.checkStatus === 'CLEARED'))
-      .reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0)) })));
+      .reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0)) }));
+  return obligations.reduce((sum, item) => sum.plus(Prisma.Decimal.min(item.original, item.applied)), new Prisma.Decimal(0));
+};
+
+export const ordinaryContractDispatchEligible = async (db: Db, contract: any): Promise<boolean> => {
+  if (!ordinaryContract(contract)) return true;
+  if (contract.isInactive || !isCommerciallyFinal(contract)) return false;
+  if (await hasFinancialDispatchApproval(db, contract.id) || await activeManagerApproval(db, contract)) return true;
+  const amount = rials(contract.totalAmount ?? 0, contract.currency);
+  if (amount.lte(0)) return false;
+  return (await actualContractReceiptsRials(db, contract)).plus(await activeCreditForContract(db, contract)).gte(amount);
 };
 
 /** Lock the same contract rows as receipt writers before the final dispatch decision. */
@@ -61,7 +69,7 @@ export const assertOrdinaryContractsDispatchEligible = async (db: Db, contractId
   const contracts = await db.salesContract.findMany({ where: { id: { in: ids } } });
   for (const contract of contracts) {
     if (!await ordinaryContractDispatchEligible(db, contract)) {
-      throw new Conflict('قرارداد باید برای نسخه فعلی قطعی و با دریافت‌های وصول‌شده و تخصیص‌یافته کاملاً تسویه شده باشد.');
+      throw new Conflict('ارسال به قرارداد قطعی و تأیید مالی، مجوز مدیر یا پوشش کامل دریافت و اعتبار فروشنده نیاز دارد.');
     }
   }
   if (contracts.length !== ids.length) throw new Conflict('Contract not found');

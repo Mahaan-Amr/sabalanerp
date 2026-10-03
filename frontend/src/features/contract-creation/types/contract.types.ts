@@ -586,7 +586,7 @@ export interface DeliverySchedule {
 }
 
 // ?? (??) | ?? (??) | ? | ??????? ?? ????? ??????
-export type PaymentEntryMethod = 'CASH_CARD' | 'CASH_SHIBA' | 'CHECK' | 'CUSTOMER_BALANCE';
+export type PaymentEntryMethod = 'CASH_CARD' | 'CASH_SHIBA' | 'CHECK' | 'CUSTOMER_BALANCE' | 'SELLER_CREDIT';
 export type ExtraPaymentReason = 'PREVIOUS_DEBT';
 
 export interface PaymentEntry {

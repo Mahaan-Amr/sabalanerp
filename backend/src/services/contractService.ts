@@ -1,4 +1,7 @@
 import { prisma } from '../lib/prisma';
+import { synchronizeSellerCredit } from './contractDispatchCredit';
+import { refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
+import { closeContractDispatchDuty } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { commercialStartFields, isOrdinaryCommercialFlow, assertCommercialActionAvailable, invalidateCommercialApprovals, approveOrdinarySales, lockOrdinaryContract } from './ordinaryContractLifecycle';
 import { randomUUID } from 'node:crypto';
 // Contract service
@@ -563,7 +566,7 @@ export interface UpdateContractData {
       }>;
     }>;
     payments?: Array<{
-      paymentMethod: 'CASH' | 'RECEIPT' | 'CHECK';
+      paymentMethod: 'CASH' | 'RECEIPT' | 'CHECK' | 'SELLER_CREDIT';
       totalAmount: number;
       currency?: string;
       status?: 'PENDING' | 'PARTIAL' | 'COMPLETED' | 'CANCELLED';
@@ -937,6 +940,7 @@ export async function createContract(
             data: { wonSalesContractId: contract.id }
           });
         }
+        await synchronizeSellerCredit(tx, contract, userId);
         await onCreated?.(tx, contract);
         return contract;
       }, CONTRACT_CREATE_TRANSACTION_OPTIONS);
@@ -1054,6 +1058,7 @@ export async function updateContract(
     if ((transactionFinancialRecord || (isOrdinaryCommercialFlow(transactionContract) && transactionContract.firstFinancialRecordAt)) && !transactionCorrection) {
       throw new Error('Existing accounting financial record requires an approved formal correction');
     }
+    await refreshDispatchExpiryExemption(tx, transactionContract);
     assertCommercialActionAvailable(transactionContract);
     if (transactionCorrection) {
       const correctionDuty = await tx.crossWorkspaceDuty.findFirst({ where: {
@@ -1247,7 +1252,7 @@ export async function updateContract(
           ...(isOrdinaryCommercialFlow(transactionContract) ? {} : await commercialStartFields(tx)),
           commercialRevision: isOrdinaryCommercialFlow(transactionContract) ? transactionContract.commercialRevision + 1 : 1,
           ...(transactionContract.firstFinancialRecordAt || !(transactionFinancialRecord || historicalFinancialAction) ? {} : { firstFinancialRecordAt: historicalFinancialAction?.createdAt || transactionFinancialRecord!.createdAt }),
-          status: 'DRAFT' as const, salesApprovalRevision: null, customerAcceptanceRevision: null,
+          status: 'DRAFT' as const, salesApprovalRevision: null, customerAcceptanceRevision: null, dispatchExpiryExempt: false,
           customerAcceptanceMethod: null, approvedBy: null, signedBy: null, signedAt: null,
           isSigned: false, signedByPhoneNumber: null, verificationCodeId: null,
           signatures: { ...((transactionContract.signatures as any) || {}), approve: null, sign: null,
@@ -1306,6 +1311,15 @@ export async function updateContract(
       } });
     }
     await assertContractQuantityEvidenceReadyForFinalization(tx, contractId);
+    const staleAuthorities = await tx.contractDispatchAuthority.findMany({ where: { contractId, revision: { not: persistedContract.commercialRevision },
+      OR: [{ kind: 'MANAGER', status: { in: ['PENDING','APPROVED'] } }, { kind: { in: ['DATE','TRANSFER'] }, status: 'PENDING' }] } });
+    for (const authority of staleAuthorities) {
+      await tx.contractDispatchAuthority.update({ where: { id: authority.id }, data: { status: 'SUPERSEDED' } });
+      await closeContractDispatchDuty(tx, authority.id, userId, 'SUPERSEDED', 'نسخه قرارداد تغییر کرد.');
+      await tx.accountingAuditLog.create({ data: { contractId, actorId: userId, action: 'DISPATCH_AUTHORITY_SUPERSEDED',
+        entityType: 'ContractDispatchAuthority', entityId: authority.id, beforeState: toJsonValue(authority), afterState: { status: 'SUPERSEDED' } } });
+    }
+    await synchronizeSellerCredit(tx, persistedContract, userId);
     return persistedContract;
   });
 

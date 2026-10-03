@@ -109,7 +109,7 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
             <h4>روش‌های پرداخت:</h4>
             <ul>
               ${data.payment.payments.map((payment: any) => {
-                const methodLabel = payment.method === 'CASH_CARD' ? 'نقدی (کارت)' : payment.method === 'CASH_SHIBA' ? 'نقدی (شبا)' : payment.method === 'CHECK' ? 'چک' : payment.method === 'CUSTOMER_BALANCE' ? 'استفاده از باقی مانده مشتری' : payment.method === 'CASH' ? 'نقدی' : payment.method || 'نامشخص';
+                const methodLabel = payment.method === 'SELLER_CREDIT' ? 'استفاده از اعتبار فروشنده' : payment.method === 'CASH_CARD' ? 'نقدی (کارت)' : payment.method === 'CASH_SHIBA' ? 'نقدی (شبا)' : payment.method === 'CHECK' ? 'چک' : payment.method === 'CUSTOMER_BALANCE' ? 'استفاده از باقی مانده مشتری' : payment.method === 'CASH' ? 'نقدی' : payment.method || 'نامشخص';
                 return `
                 <li>
                   ${methodLabel} - 

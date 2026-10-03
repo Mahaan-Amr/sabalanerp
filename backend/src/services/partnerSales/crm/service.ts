@@ -3,13 +3,13 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { DuplicateCustomerMatchSchema, PartnerCommandSchema, canonicalHash, partnerError,
   type DuplicateCustomerMatch, type PartnerActionV2, type PermissionContext, type Result } from '@sabalanerp/partner-sales-contracts';
 import { PartnerContractCustomerCreateSchema, PartnerContractProjectCreateSchema, PartnerCustomerCreateSchema, PartnerCustomerUpdateSchema, PartnerDuplicateSearchSchema,
-  PartnerFollowUpCreateSchema, PartnerNextActionCompleteSchema, PartnerProjectCreateSchema,
+  PartnerDirectTransferSchema, PartnerFollowUpCreateSchema, PartnerNextActionCompleteSchema, PartnerProjectCreateSchema,
   PartnerProjectUpdateSchema, PartnerTransferCancelSchema, PartnerTransferRequestSchema, type PartnerCustomerDetail, type PartnerCustomerSummary,
   type PartnerFollowUpView, type PartnerNextActionView, type PartnerProjectView } from './contracts';
 
 type Root = PermissionContext['root'];
 type Authorization = (tx: Prisma.TransactionClient, input: { action: PartnerActionV2; root: Root;
-  correlationId: string; reason?: string; target?: { customerTransferId: string } }) => Promise<Result<PermissionContext>>;
+  correlationId: string; reason?: string; target?: { customerTransferId: string } | { directTransferProfileId: string } }) => Promise<Result<PermissionContext>>;
 type TransferNotice = (tx: Prisma.TransactionClient, input: { kind: 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   transferId: string; recipientIds: string[]; actorId: string; correlationId: string }) => Promise<void>;
 
@@ -94,7 +94,7 @@ function nextActionView(row: { id: string; potentialProjectId: string | null; pa
     status: row.status, ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}) };
 }
 
-const customerSelect = { id: true, partnerRevision: true, firstName: true, lastName: true, companyName: true,
+const customerSelect = { id: true, isActive: true, partnerRevision: true, firstName: true, lastName: true, companyName: true,
   customerType: true, status: true, isBlacklisted: true, isLocked: true, nationalCode: true,
   city: true, address: true, ownerUserId: true, partnerOwnerProfileId: true,
   _count: { select: { potentialProjects: { where: { isActive: true } } } },
@@ -128,8 +128,80 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
     profileId: string, correlationId: string, reason?: string) => dependencies.authorize(tx,
     { action, root: { kind: 'PROFILE', id: profileId }, correlationId, reason });
   const authorizeCustomer = async (tx: Prisma.TransactionClient, action: PartnerActionV2,
-    customerId: string, correlationId: string, reason?: string, target?: { customerTransferId: string }) => dependencies.authorize(tx,
+    customerId: string, correlationId: string, reason?: string, target?: { customerTransferId: string } | { directTransferProfileId: string }) => dependencies.authorize(tx,
     { action, root: { kind: 'CUSTOMER', id: customerId }, correlationId, reason, target });
+  async function decideInTransaction(tx: Prisma.TransactionClient, command: Extract<ReturnType<typeof PartnerCommandSchema.parse>, { type: 'CUSTOMER_TRANSFER_DECIDE' }>, payloadHash: string) {
+        const replay = await priorOutcome(tx, dependencies.actorId, command.type, command.transferId,
+          command.idempotency.key, payloadHash); if (replay) return replay;
+        const target = await tx.partnerCustomerTransfer.findUnique({ where: { id: command.transferId }, select: { customerId: true } });
+        if (!target) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        const access = await authorizeCustomer(tx, 'CUSTOMER_TRANSFER_DECIDE', target.customerId,
+          command.correlationId, command.reason, { customerTransferId: command.transferId }); if (!access.ok) return access;
+        const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: command.transferId }, include: {
+          fromOwner: { select: { id: true } }, fromProfile: { select: { userId: true } },
+          toProfile: { select: { userId: true, state: true, user: { select: { isActive: true } } } },
+          match: { select: { requesterProfileId: true, customerId: true, witnessHash: true } } } });
+        if (!transfer) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        if (transfer.revision !== command.expectedRevision) return { ok: false as const, error: partnerError('ROW_STALE') };
+        if (transfer.status !== 'PENDING') return { ok: false as const, error: partnerError('STATE_CONFLICT') };
+        const customer = await tx.crmCustomer.findUnique({ where: { id: transfer.customerId }, select: {
+          partnerOwnerProfileId: true, ownerUserId: true, partnerRevision: true, firstName: true, lastName: true,
+          companyName: true, phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { id: 'asc' }],
+            take: 2, select: { number: true, isPrimary: true } } } });
+        if (customer?.partnerOwnerProfileId !== transfer.fromProfileId ||
+            customer?.ownerUserId !== transfer.fromOwnerUserId ||
+            (transfer.fromProfile && transfer.fromProfile.userId !== transfer.fromOwnerUserId) ||
+            transfer.match.customerId !== transfer.customerId ||
+            transfer.match.requesterProfileId !== transfer.toProfileId) {
+          return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+        }
+        if (command.outcome === 'APPROVE') {
+          if (transfer.toProfile.state !== 'ACTIVE' || !transfer.toProfile.user.isActive) {
+            return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
+          }
+          const unresolvedCase = await tx.partnerSaleCase.findFirst({ where: { customerId: transfer.customerId,
+            state: { in: ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'] } }, select: { id: true } });
+          // Ownership never rewrites a Case. A previous in-flight Case must use
+          // its existing cancellation/remediation command before Customer
+          // transfer can commit, so neither owner can continue a stale draft.
+          if (unresolvedCase) return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
+          const [transferClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+          const customerSnapshot = { schemaVersion: 1, capturedAt: transferClock.now.toISOString(),
+            firstName: customer.firstName, lastName: customer.lastName, companyName: customer.companyName,
+            phoneNumbers: customer.phoneNumbers };
+          await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_transfer', ${transfer.id}, true)`;
+          await tx.$executeRaw`UPDATE crm_potential_projects
+            SET "customerTransferSnapshot" = ${JSON.stringify(customerSnapshot)}::jsonb
+            WHERE "customerId" = ${transfer.customerId} AND "partnerRevision" IS NULL
+              AND "customerTransferSnapshot" IS NULL`;
+          const changed = await tx.crmCustomer.updateMany({ where: { id: transfer.customerId,
+            partnerOwnerProfileId: transfer.fromProfileId, ownerUserId: transfer.fromOwnerUserId,
+            partnerRevision: customer.partnerRevision }, data: { partnerOwnerProfileId: transfer.toProfileId,
+            ownerUserId: transfer.toProfile.userId,
+            partnerRevision: customer.partnerRevision === null ? 1 : { increment: 1 }, updatedBy: dependencies.actorId } });
+          if (changed.count !== 1) return { ok: false as const, error: partnerError('ROW_STALE') };
+        }
+        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        await tx.partnerCustomerTransfer.update({ where: { id: transfer.id }, data: { revision: 2,
+          status: command.outcome === 'APPROVE' ? 'APPROVED' : 'REJECTED', decidedBy: dependencies.actorId,
+          decisionReason: command.reason, decidedAt: clock.now, decisionCommandId: command.commandId } });
+        const eventId = randomUUID();
+        await tx.partnerCustomerTransferEvent.create({ data: { id: eventId, transferId: transfer.id, revision: 2,
+          type: command.outcome === 'APPROVE' ? 'APPROVED' : 'REJECTED', actorId: dependencies.actorId,
+          reason: command.reason, commandId: command.commandId, correlationId: command.correlationId,
+          evidence: json({ witnessHash: transfer.match.witnessHash,
+            ownershipChanged: command.outcome === 'APPROVE', projectResponsibilityChanged: false,
+            historicalCaseOwnershipChanged: false, salesCreditChanged: false }) } });
+        const outcome = { commandId: command.commandId, transferId: transfer.id, revision: 2,
+          status: command.outcome === 'APPROVE' ? 'APPROVED' as const : 'REJECTED' as const, eventIds: [eventId] };
+        await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId,
+          operation: command.type, targetScope: transfer.id, key: command.idempotency.key, payloadHash, outcome: json(outcome) } });
+        await dependencies.notifyTransfer(tx, { kind: outcome.status, transferId: transfer.id,
+          recipientIds: [...new Set([transfer.fromOwnerUserId, transfer.toProfile.userId])],
+          actorId: dependencies.actorId, correlationId: command.correlationId });
+        return { ok: true as const, value: outcome };
+  }
+
   return {
     async listCustomers(input: { correlationId: string; cursor?: string; limit?: number; query?: string }) {
       if (!input.correlationId || (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 50))) {
@@ -708,6 +780,71 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
       });
     },
 
+    async directTransfer(raw: unknown) {
+      const parsed = PartnerDirectTransferSchema.safeParse(raw);
+      if (!parsed.success || !await validatePayloadHash(parsed.data)) return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+      const command = parsed.data;
+      return database.$transaction(async tx => {
+        const replay = await priorOutcome(tx, dependencies.actorId, 'CUSTOMER_TRANSFER_DIRECT', command.customerId, command.idempotencyKey, command.payloadHash);
+        if (replay) return replay;
+        const access = await authorizeCustomer(tx, 'CUSTOMER_TRANSFER_DECIDE', command.customerId, command.correlationId,
+          command.reason, { directTransferProfileId: command.toProfileId });
+        if (!access.ok) return access;
+        if (access.value.persona !== 'INTERNAL') return { ok: false as const, error: partnerError('FORBIDDEN') };
+        const customer = await tx.crmCustomer.findUnique({ where: { id: command.customerId }, select: customerSelect });
+        const target = await tx.partnerProfile.findUnique({ where: { id: command.toProfileId }, select: { userId: true, state: true, user: { select: { isActive: true } } } });
+        if (!customer?.isActive || !customer.ownerUserId || !target) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        if (customer.ownerUserId !== command.expectedOwnerUserId) return { ok: false as const, error: partnerError('ROW_STALE') };
+        if (target.state !== 'ACTIVE' || !target.user.isActive || customer.partnerOwnerProfileId === command.toProfileId) return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
+        const unresolved = await tx.partnerSaleCase.findFirst({ where: { customerId: customer.id, state: { in: ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'] } }, select: { id: true } });
+        if (unresolved) return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
+        const pendingTransfer = await tx.partnerCustomerTransfer.findFirst({ where: { customerId: customer.id, status: 'PENDING' } });
+        if (pendingTransfer) {
+          if (pendingTransfer.toProfileId !== command.toProfileId) return { ok: false as const, error: partnerError('STATE_CONFLICT') };
+          const intent = { schemaVersion: 1 as const, type: 'CUSTOMER_TRANSFER_DECIDE' as const, transferId: pendingTransfer.id,
+            expectedRevision: pendingTransfer.revision, outcome: 'APPROVE' as const, reason: command.reason };
+          const hash = await canonicalHash(intent);
+          const decision = PartnerCommandSchema.parse({ ...intent, commandId: command.commandId, correlationId: command.correlationId,
+            idempotency: { actorId: dependencies.actorId, operation: 'CUSTOMER_TRANSFER_DECIDE', targetId: pendingTransfer.id, key: command.idempotencyKey, payloadHash: hash } });
+          if (decision.type !== 'CUSTOMER_TRANSFER_DECIDE') return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+          const result = await decideInTransaction(tx, decision, hash);
+          if (result.ok) await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId, operation: 'CUSTOMER_TRANSFER_DIRECT',
+            targetScope: command.customerId, key: command.idempotencyKey, payloadHash: command.payloadHash, outcome: json(result.value) } });
+          return result;
+        }
+        const matchId = randomUUID(), transferId = randomUUID();
+        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        const phone = customer.phoneNumbers[0]?.number;
+        const snapshot = DuplicateCustomerMatchSchema.parse({ schemaVersion: 1, purpose: 'DUPLICATE_MATCH', matchReference: matchId,
+          displayName: displayName(customer), personType: personType(customer.customerType), city: customer.city?.trim() || 'ثبت‌نشده', maskedWitness: phone && digits(phone).length >= 4 ? `********${digits(phone).slice(-4)}` : 'ثبت‌نشده' });
+        await tx.$executeRawUnsafe('SAVEPOINT partner_direct_transfer');
+        await tx.partnerDuplicateCustomerMatch.create({ data: { id: matchId, requesterProfileId: command.toProfileId, customerId: customer.id,
+          snapshot: json(snapshot), witnessHash: await canonicalHash(snapshot), issuedAt: clock.now, expiresAt: new Date(clock.now.getTime() + 900000) } });
+        await tx.partnerCustomerTransfer.create({ data: { id: transferId, customerId: customer.id, matchId,
+          fromOwnerUserId: customer.ownerUserId, fromProfileId: customer.partnerOwnerProfileId, toProfileId: command.toProfileId,
+          requestedBy: dependencies.actorId, requestReason: command.reason, correlationId: command.correlationId,
+          events: { create: { id: randomUUID(), revision: 1, type: 'REQUESTED', actorId: dependencies.actorId,
+            reason: command.reason, commandId: `direct-request:${transferId}`, correlationId: command.correlationId, evidence: json({ directAdministrativeTransfer: true, sourceCommandId: command.commandId }) } } } });
+        const decisionIntent = { schemaVersion: 1 as const, type: 'CUSTOMER_TRANSFER_DECIDE' as const, transferId,
+          expectedRevision: 1, outcome: 'APPROVE' as const, reason: command.reason };
+        const decisionHash = await canonicalHash(decisionIntent);
+        const decision = PartnerCommandSchema.parse({ ...decisionIntent, commandId: command.commandId, correlationId: command.correlationId,
+          idempotency: { actorId: dependencies.actorId, operation: 'CUSTOMER_TRANSFER_DECIDE', targetId: transferId, key: command.idempotencyKey, payloadHash: decisionHash } });
+        if (decision.type !== 'CUSTOMER_TRANSFER_DECIDE') return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+        const result = await decideInTransaction(tx, decision, decisionHash);
+        if (!result.ok) {
+          // Roll back only this uncommitted request; preserve the initial authorization audit.
+          await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT partner_direct_transfer');
+          await tx.$executeRawUnsafe('RELEASE SAVEPOINT partner_direct_transfer');
+          return result;
+        }
+        await tx.$executeRawUnsafe('RELEASE SAVEPOINT partner_direct_transfer');
+        await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId, operation: 'CUSTOMER_TRANSFER_DIRECT',
+          targetScope: command.customerId, key: command.idempotencyKey, payloadHash: command.payloadHash, outcome: json(result.value) } });
+        return result;
+      });
+    },
+
     async decideTransfer(raw: unknown) {
       const parsed = PartnerCommandSchema.safeParse(raw);
       if (!parsed.success || parsed.data.type !== 'CUSTOMER_TRANSFER_DECIDE') {
@@ -718,77 +855,7 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           command.idempotency.targetId !== command.transferId || command.idempotency.payloadHash !== payloadHash) {
         return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
       }
-      return database.$transaction(async tx => {
-        const replay = await priorOutcome(tx, dependencies.actorId, command.type, command.transferId,
-          command.idempotency.key, payloadHash); if (replay) return replay;
-        const target = await tx.partnerCustomerTransfer.findUnique({ where: { id: command.transferId }, select: { customerId: true } });
-        if (!target) return { ok: false as const, error: partnerError('NOT_FOUND') };
-        const access = await authorizeCustomer(tx, 'CUSTOMER_TRANSFER_DECIDE', target.customerId,
-          command.correlationId, command.reason, { customerTransferId: command.transferId }); if (!access.ok) return access;
-        const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: command.transferId }, include: {
-          fromOwner: { select: { id: true } }, fromProfile: { select: { userId: true } },
-          toProfile: { select: { userId: true, state: true, user: { select: { isActive: true } } } },
-          match: { select: { requesterProfileId: true, customerId: true, witnessHash: true } } } });
-        if (!transfer) return { ok: false as const, error: partnerError('NOT_FOUND') };
-        if (transfer.revision !== command.expectedRevision) return { ok: false as const, error: partnerError('ROW_STALE') };
-        if (transfer.status !== 'PENDING') return { ok: false as const, error: partnerError('STATE_CONFLICT') };
-        const customer = await tx.crmCustomer.findUnique({ where: { id: transfer.customerId }, select: {
-          partnerOwnerProfileId: true, ownerUserId: true, partnerRevision: true, firstName: true, lastName: true,
-          companyName: true, phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { id: 'asc' }],
-            take: 2, select: { number: true, isPrimary: true } } } });
-        if (customer?.partnerOwnerProfileId !== transfer.fromProfileId ||
-            customer?.ownerUserId !== transfer.fromOwnerUserId ||
-            (transfer.fromProfile && transfer.fromProfile.userId !== transfer.fromOwnerUserId) ||
-            transfer.match.customerId !== transfer.customerId ||
-            transfer.match.requesterProfileId !== transfer.toProfileId) {
-          return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
-        }
-        if (command.outcome === 'APPROVE') {
-          if (transfer.toProfile.state !== 'ACTIVE' || !transfer.toProfile.user.isActive) {
-            return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
-          }
-          const unresolvedCase = await tx.partnerSaleCase.findFirst({ where: { customerId: transfer.customerId,
-            state: { in: ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'] } }, select: { id: true } });
-          // Ownership never rewrites a Case. A previous in-flight Case must use
-          // its existing cancellation/remediation command before Customer
-          // transfer can commit, so neither owner can continue a stale draft.
-          if (unresolvedCase) return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
-          const [transferClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-          const customerSnapshot = { schemaVersion: 1, capturedAt: transferClock.now.toISOString(),
-            firstName: customer.firstName, lastName: customer.lastName, companyName: customer.companyName,
-            phoneNumbers: customer.phoneNumbers };
-          await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_transfer', ${transfer.id}, true)`;
-          await tx.$executeRaw`UPDATE crm_potential_projects
-            SET "customerTransferSnapshot" = ${JSON.stringify(customerSnapshot)}::jsonb
-            WHERE "customerId" = ${transfer.customerId} AND "partnerRevision" IS NULL
-              AND "customerTransferSnapshot" IS NULL`;
-          const changed = await tx.crmCustomer.updateMany({ where: { id: transfer.customerId,
-            partnerOwnerProfileId: transfer.fromProfileId, ownerUserId: transfer.fromOwnerUserId,
-            partnerRevision: customer.partnerRevision }, data: { partnerOwnerProfileId: transfer.toProfileId,
-            ownerUserId: transfer.toProfile.userId,
-            partnerRevision: customer.partnerRevision === null ? 1 : { increment: 1 }, updatedBy: dependencies.actorId } });
-          if (changed.count !== 1) return { ok: false as const, error: partnerError('ROW_STALE') };
-        }
-        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-        await tx.partnerCustomerTransfer.update({ where: { id: transfer.id }, data: { revision: 2,
-          status: command.outcome === 'APPROVE' ? 'APPROVED' : 'REJECTED', decidedBy: dependencies.actorId,
-          decisionReason: command.reason, decidedAt: clock.now, decisionCommandId: command.commandId } });
-        const eventId = randomUUID();
-        await tx.partnerCustomerTransferEvent.create({ data: { id: eventId, transferId: transfer.id, revision: 2,
-          type: command.outcome === 'APPROVE' ? 'APPROVED' : 'REJECTED', actorId: dependencies.actorId,
-          reason: command.reason, commandId: command.commandId, correlationId: command.correlationId,
-          evidence: json({ witnessHash: transfer.match.witnessHash,
-            ownershipChanged: command.outcome === 'APPROVE', projectResponsibilityChanged: false,
-            historicalCaseOwnershipChanged: false, salesCreditChanged: false }) } });
-        const outcome = { commandId: command.commandId, transferId: transfer.id, revision: 2,
-          status: command.outcome === 'APPROVE' ? 'APPROVED' as const : 'REJECTED' as const, eventIds: [eventId] };
-        await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId,
-          operation: command.type, targetScope: transfer.id, key: command.idempotency.key, payloadHash, outcome: json(outcome) } });
-        await dependencies.notifyTransfer(tx, { kind: outcome.status, transferId: transfer.id,
-          recipientIds: [...new Set([transfer.fromOwnerUserId, transfer.toProfile.userId])],
-          actorId: dependencies.actorId, correlationId: command.correlationId });
-        return { ok: true as const, value: outcome };
-      });
+      return database.$transaction(tx => decideInTransaction(tx, command, payloadHash));
     },
   };
 }

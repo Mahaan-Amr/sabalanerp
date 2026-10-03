@@ -1,4 +1,7 @@
+import { reconcilePartnerFinancialRealization } from './partnerSales/accounting/commercialRealization';
+import { assertPartnerFinancialFinality } from './partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
+import { listPartnerPreparationDocuments } from './partnerSales/accounting/preFinancialDocument';
 import { isNewOrdinaryCommercialFlow, ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError,
   assertOrdinaryAccountingCommercialGate } from './ordinaryAccountingCommercialGate';
 import { reconcileOrdinaryFinancialRealization } from './salesAttributionService';
@@ -726,6 +729,20 @@ const audit = async (tx: Prisma.TransactionClient | PrismaClient, data: {
       });
     }
   }
+  if (data.recordId && ['CREATE_INVOICE', 'CREATE_REPLACEMENT_INVOICE', 'CREATE_RECEIVABLE', 'VOID_ACCOUNTING_RECORD', 'VOID_ACCOUNTING_RECEIVABLE', 'DELETE_DRAFT_ACCOUNTING_RECORD'].includes(data.action)) {
+    // A deleted draft is identified through its retained audit before-state.
+    const stored = await tx.accountingFinancialRecord.findUnique({ where: { id: data.recordId }, select: { sourceKind: true, sourceId: true } });
+    const before = data.beforeState as Record<string, unknown> | undefined;
+    const sourceKind = stored?.sourceKind ?? before?.sourceKind;
+    const sourceId = stored?.sourceId ?? before?.sourceId;
+    if (sourceKind === 'PARTNER_INTERNAL_RECORD' && typeof sourceId === 'string') {
+      const root = await tx.partnerSaleCase.findFirst({ where: { internalRecordId: sourceId }, select: { id: true } });
+      if (root) await reconcilePartnerFinancialRealization(tx as Prisma.TransactionClient, root.id, data.actorId,
+        `partner-financial:${data.action}:${data.recordId}:${randomUUID()}`,
+        ['VOID_ACCOUNTING_RECORD', 'VOID_ACCOUNTING_RECEIVABLE'].includes(data.action)
+          ? new Date((data.afterState as any).metadata.voidedAt) : new Date());
+    }
+  }
   await tx.accountingAuditLog.create({
     data: {
       ...data,
@@ -1139,6 +1156,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     where.status = query.status as ContractStatus;
   }
 
+  if (query.status === 'QUOTED') where.id = { in: [] };
   const reviewableView = !where.status && query.view === 'reviewable';
   const orderBy: Prisma.SalesContractOrderByWithRelationInput =
     reviewableView ? { createdAt: 'desc' } :
@@ -1147,7 +1165,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     query.sort === 'oldest' ? { createdAt: 'asc' } :
     { createdAt: 'desc' };
 
-  const [rawContracts, settings, partnerRecords] = await Promise.all([
+  const [rawContracts, settings, partnerRecords, preparations] = await Promise.all([
     prisma.salesContract.findMany({
       where,
       select: accountingContractListSelect,
@@ -1172,12 +1190,31 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
         flag.sourceFinancialRecordId === record.id), partnerOpenCorrections: corrections.filter(item =>
           item.recordId === record.id).length }));
     }) : Promise.resolve([]),
+    actor ? listPartnerPreparationDocuments(actor.userId, lifecycleView) : Promise.resolve([]),
   ]);
 
   const contracts = await attachAccountingCollections(await attachAccountingListDates(prisma, rawContracts));
   let items: any[] = await Promise.all(contracts.map((contract) => buildContractRow(contract, settings)));
-  if (lifecycleView === 'active' && (!query.status || query.status === 'ALL')) {
-    items.push(...partnerRecords.map(record => partnerAccountingContractRow(record)).filter((row): row is NonNullable<typeof row> => row !== null));
+  {
+    const projected = (lifecycleView === 'active' ? partnerRecords : []).map(record => partnerAccountingContractRow(record)).filter((row): row is NonNullable<typeof row> => row !== null);
+    for (const document of preparations) {
+      const existing = projected.find(row => row.partnerContext === undefined ? false : (row.partnerContext as any).caseId === document.owner.caseId);
+      const row: any = existing ?? partnerAccountingContractRow({ ...document, amount: new Prisma.Decimal(document.amount) });
+      if (!row) continue;
+      row.partnerCommercialStatus = document.commercial.status;
+      row.amountKnown = document.amountKnown; row.isInactive = document.isInactive;
+      row.status = ({ NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', QUOTED: 'QUOTED', FINAL: 'SIGNED', EXPIRED: 'EXPIRED', CANCELLED: 'CANCELLED' } as Record<string, string>)[document.commercial.status];
+      if (!existing) {
+        row.preparationOnly = true; row.owner = document.owner;
+        row.financialRecords = [];
+        row.accounting.invoiceStatus = 'NONE';
+        row.accounting.sourceStatus = document.commercial.status === 'FINAL' ? 'ELIGIBLE' : 'VISIBLE_ONLY';
+        row.accounting.eligibleForFinancialRecords = document.canRegister;
+        row.nextBestActions = [{ kind: 'CREATE_INVOICE', labelFa: 'ایجاد پیش‌نویس صورتحساب', enabled: document.canRegister }];
+        projected.push(row);
+      }
+    }
+    items.push(...projected.filter(row => !query.status || query.status === 'ALL' || row.status === query.status));
   }
 
   if (search) {
@@ -2224,6 +2261,8 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       const caseRow = await tx.partnerSaleCase.findFirst({ where: { internalRecordId: before.sourceId },
         select: { customerContractId: true } });
       if (caseRow?.customerContractId) {
+        const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { customerContractId: caseRow.customerContractId }, select: { id: true } });
+        await assertPartnerFinancialFinality(tx as Prisma.TransactionClient, root.id);
         const openCorrection = await tx.accountingCorrectionRequest.findFirst({ where: {
           contractId: caseRow.customerContractId, status: { in: activeCorrectionStatuses() } } });
         if (openCorrection) throw new Error('Open correction requests must be completed before financial approval');

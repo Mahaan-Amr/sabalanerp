@@ -64,3 +64,11 @@ assert.match(localized, /نقد - کارت/);
 assert.doesNotMatch(localized, />meter<|>CARD<| - CARD/);
 
 console.log('printTemplatePartnerCustomerOutput tests passed');
+
+const execution = renderCustomerContractPrint(CustomerContractOutputSchema.parse({ ...output,
+  products: [{...output.products[0],productRowId:'independent-service',productType:'service',description:'ابزار مستقل قرارداد',quantity:'2.5',unit:'meter'}],
+  deliveries:[{deliveryId:'execution',date:'2026-09-28',destination:'محل اجرای ابزار',items:[],serviceItems:[{serviceRowId:'independent-service',quantity:'2.5'}]}],
+})).htmlContent;
+assert.match(execution,/اجرای خدمت: ابزار مستقل قرارداد/);
+assert.match(execution,/محل اجرای ابزار/);
+assert.match(execution,/۲\.۵/);

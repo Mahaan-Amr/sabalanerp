@@ -16,10 +16,14 @@ import { inspectTechnicalIdentities, collectGeneratedTechnicalIdentities, type T
 import type { TechnicalLayerParent } from './technical-layers';
 import { PartnerTechnicalStairSystemSchema, previewTechnicalStairSystems, type TechnicalStairSystemConflict } from './technical-stair-systems';
 
+import { PartnerTechnicalServiceRowSchema } from './technical-services';
+
 const rowIdentity = { productRowId: IdSchema, catalogItemId: IdSchema, catalogSnapshotVersion: InstantSchema,
   // Customer-facing commercial intent belongs to Partner recovery, but is
   // deliberately excluded from technical previews and inquiry identity.
-  retailUnitPrice: MoneySchema.optional() };
+  retailUnitPrice: MoneySchema.optional(),
+  contractualTitle: z.string().max(300).optional(),
+  description: z.string().max(2000).optional() };
 const preparedConfiguration = z.object({
   kind: z.enum(['cubic', 'readyPiece']), unit: z.enum(['squareMeter', 'ton', 'count']), quantity: decimal.optional(),
 }).strict();
@@ -64,6 +68,7 @@ export const PartnerTechnicalDraftSchema = z.object({
     .refine(ids => new Set(ids).size === ids.length).optional(),
   contractConfiguredProductRowIds: z.array(IdSchema)
     .refine(ids => new Set(ids).size === ids.length).optional(),
+  serviceRows: z.array(PartnerTechnicalServiceRowSchema).optional(),
   dependents: z.array(PartnerTechnicalDependentSchema).optional(),
   stairSystems: z.array(PartnerTechnicalStairSystemSchema).optional(),
   // A control retains text until its normal unit-aware parsing commits a new

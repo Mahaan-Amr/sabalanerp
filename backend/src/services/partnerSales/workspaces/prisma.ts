@@ -15,7 +15,7 @@ export function createPrismaPartnerWorkspaceQuery(input: {
   actorId: string;
   correlationId: string;
   authorize: PartnerInquiryDependencies['authorize'];
-  readManagementWorkspace?(transaction: Transaction, page: { cursor?: string; limit: number }):
+  readManagementWorkspace?(transaction: Transaction, page: { cursor?: string; limit: number; section?: 'PROFILES' | 'TRANSFERS'; history?: boolean; transferStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'; search?: string; transferId?: string }):
     Promise<Result<PartnerManagementWorkspaceViewV2>>;
 }) {
   const readManagementWorkspace = input.readManagementWorkspace ?? createPrismaManagementWorkspaceReader(input);

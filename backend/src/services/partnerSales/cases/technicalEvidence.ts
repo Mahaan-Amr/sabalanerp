@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { parseCanonicalDecimal, type CalculationPolicySnapshot } from '@sabalanerp/contract-product-graph';
 import { canonicalHash, InquiryIdentitySchema, partnerError, type InquiryIdentity,
   type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct, type Result } from '@sabalanerp/partner-sales-contracts';
-import { projectPartnerTechnicalOperation, projectPartnerTechnicalProduct } from '../crm/technicalCatalog';
+import { catalogMaterialRateToman, projectPartnerTechnicalOperation, projectPartnerTechnicalProduct } from '../crm/technicalCatalog';
 import type { PartnerTechnicalSaveDependencies } from './technicalSave';
 import type { PartnerTechnicalGraphContext } from './technicalGraph';
 
@@ -211,7 +211,7 @@ async function readTechnicalPolicyForAccount(tx: Prisma.TransactionClient, accou
  * preferences. Geometry, sources, technical operations and pricing-affecting
  * overrides remain part of the identity. */
 export async function technicalConfigurationHash(row: PartnerTechnicalDraft['rows'][number]): Promise<string> {
-  return canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE',
+  return canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE', pricingBasis: 'ordinary-sale-v1',
     catalogItemId: row.catalogItemId, family: row.family, unit: identityUnit(row) });
 }
 
@@ -222,8 +222,15 @@ async function technicalDraftRowConfigurationHash(row: PartnerTechnicalDraft['ro
 
 export type PartnerTechnicalDatabase = Pick<PrismaClient, '$transaction'>;
 
-const scaled = (value: Prisma.Decimal.Value, scale: string): string =>
-  parseCanonicalDecimal(new Prisma.Decimal(value).mul(scale).toFixed());
+function enteredMaterialPrice(draft: PartnerTechnicalDraft, catalogItemId: string) {
+  const root = draft.rows.find(row => row.catalogItemId === catalogItemId && row.retailUnitPrice)?.retailUnitPrice;
+  if (root) return root;
+  for (const dependent of draft.dependents ?? []) {
+    if (dependent.kind === 'layer' && dependent.source?.kind === 'new-material' &&
+        dependent.source.catalogItemId === catalogItemId && dependent.source.retailUnitPrice) return dependent.source.retailUnitPrice;
+  }
+  return undefined;
+}
 
 function operationsFromDraft(draft: PartnerTechnicalDraft) {
   const intents = [
@@ -258,7 +265,7 @@ function identityUnit(row: PartnerTechnicalDraft['rows'][number] | Extract<NonNu
 }
 
 async function dependentConfigurationHash(row: Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'remainder' }>) {
-  return canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE',
+  return canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE', pricingBasis: 'ordinary-sale-v1',
     catalogItemId: row.catalogItemId, family: 'longitudinal', unit: identityUnit(row) });
 }
 
@@ -288,7 +295,7 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
         return Boolean(parent && parent.catalogItemId !== item.source.catalogItemId);
       }).map(row => ({ productRowId: `layer-material:${row.layerConfigurationId}`,
         catalogItemId: row.source?.kind === 'new-material' ? row.source.catalogItemId : '', family: 'stair' as const,
-        unit: 'squareMeter' as const, hash: canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE',
+        unit: 'squareMeter' as const, hash: canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE', pricingBasis: 'ordinary-sale-v1',
           catalogItemId: row.source?.kind === 'new-material' ? row.source.catalogItemId : '', family: 'stair', unit: 'squareMeter' }) })),
     ];
     if (parsedPriorPolicy && previousContext && input.previous?.identities.length === identityRows.length) {
@@ -322,8 +329,17 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
     const publicProducts: PartnerTechnicalProduct[] = [];
     for (const source of products) {
       const reference = references.find(item => item.catalogItemId === source.id);
-      if (!reference || source.updatedAt.toISOString() !== reference.catalogSnapshotVersion || source.basePrice === null) {
+      if (!reference || source.updatedAt.toISOString() !== reference.catalogSnapshotVersion) {
         return { ok: false, error: partnerError('ROW_STALE') };
+      }
+      // Ordinary Sale accepts the seller's row price even when the imported
+      // catalog has no commercial price. It is not a stale catalog version.
+      // Keep the technical context calculable using genuine commercial intent;
+      // the compiler applies each row's current price independently below.
+      if (source.basePrice === null) {
+        const entered = enteredMaterialPrice(input.draft, source.id);
+        if (!entered || new Prisma.Decimal(entered.amount).lte(0))
+          return { ok: false, error: partnerError('INVALID_PAYLOAD') };
       }
       const projected = projectPartnerTechnicalProduct(source);
       if (!projected.ok) return projected;
@@ -415,7 +431,7 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
 }
 
 function createContext(policy: PartnerTechnicalSalesPolicy, publicProducts: PartnerTechnicalProduct[],
-  publicOperations: PartnerTechnicalOperation[], products: Array<{ id: string; updatedAt: Date; basePrice: Prisma.Decimal | null }>,
+  publicOperations: PartnerTechnicalOperation[], products: Array<{ id: string; updatedAt: Date; basePrice: Prisma.Decimal | null; currency: string }>,
   operations: Array<{ kind: 'TOOL' | 'FINISHING'; catalogItemId: string; catalogSnapshotVersion: string; rateToman: string }>,
   layers: Array<{ catalogItemId: string; catalogSnapshotVersion: string; layerRateToman: string;
     longitudinalCutRateToman: string; crossCutRateToman: string; calibrationCutRateToman: string }>, draft: PartnerTechnicalDraft): PartnerTechnicalGraphContext {
@@ -430,9 +446,12 @@ function createContext(policy: PartnerTechnicalSalesPolicy, publicProducts: Part
     catalog: { products: publicProducts, operations: publicOperations, sawKerfMeters: policy.sawKerfMeters },
     policy: policy.calculationPolicy,
     products: products.map(product => {
-      const rate = scaled(product.basePrice!, policy.materialRateScale);
-      const preparedRates = draft.rows.flatMap(row => (row.family === 'prepared' || row.family === 'volumetric') && row.catalogItemId === product.id
-        ? [{ kind: row.configuration.kind, unit: row.configuration.unit, rateToman: rate }] : []);
+      const entered = enteredMaterialPrice(draft, product.id);
+      const rate = product.basePrice === null
+        ? parseCanonicalDecimal(new Prisma.Decimal(entered!.amount).div(entered!.currency === 'IRR' ? 10 : 1).toFixed())
+        : catalogMaterialRateToman(product.basePrice, product.currency);
+      const preparedRates = [...new Map(draft.rows.flatMap(row => (row.family === 'prepared' || row.family === 'volumetric') && row.catalogItemId === product.id
+        ? [[`${row.configuration.kind}:${row.configuration.unit}`, { kind: row.configuration.kind, unit: row.configuration.unit, rateToman: rate }] as const] : [])).values()];
       return { catalogItemId: product.id, catalogSnapshotVersion: product.updatedAt.toISOString(), layerMaterialRateToman: rate,
         preparedRates: preparedRates.map(item => ({ ...item, rateToman: amount(item.rateToman) })),
         longitudinal: { baseRateToman: amount(rate), mandatoryEnabled: policy.mandatoryEnabled,

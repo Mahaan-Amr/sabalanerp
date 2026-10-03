@@ -47,9 +47,10 @@ export const syncPartnerPricingDutyDefinitions = (database: any, actorUserId = '
 
 const closeOpenDuties = async (database: any, input: { inquiryId: string; actorUserId: string;
   status: 'COMPLETED' | 'CANCELLED' | 'WAIVED'; eventCode: 'COMPLETED' | 'CANCELLED' | 'WAIVED'; reason: string; now: Date;
-  sourceActionCode?: string }) => {
+  sourceActionCode?: string; exceptSourceVersion?: number }) => {
   const duties = await database.crossWorkspaceDuty.findMany({ where: {
     sourceType: 'PARTNER_PRICING', sourceId: input.inquiryId, status: 'OPEN',
+    ...(input.exceptSourceVersion !== undefined ? { sourceVersion: { not: input.exceptSourceVersion } } : {}),
     ...(input.sourceActionCode ? { sourceActionCode: input.sourceActionCode } : {}),
   } });
   for (const duty of duties) {
@@ -73,6 +74,19 @@ const closeOpenDuties = async (database: any, input: { inquiryId: string; actorU
   return duties;
 };
 
+/** Supersede inbox work, not immutable prices: unchanged rows can retain their valid offers. */
+export const supersedePartnerPricingResultDuties = async (database: any, input: {
+  caseId: string; actorUserId: string; currentInquiryId: string; currentInquiryRevision?: number; now: Date;
+}) => {
+  const inquiries = await database.partnerInquiry.findMany({ where: { caseId: input.caseId }, select: { id: true } });
+  for (const inquiry of inquiries) await closeOpenDuties(database, { inquiryId: inquiry.id,
+    actorUserId: input.actorUserId, status: 'WAIVED', eventCode: 'WAIVED',
+    reason: 'پاسخ استعلام جدید جایگزین وظیفه پاسخ قبلی این پرونده شد', now: input.now,
+    sourceActionCode: resultDefinition.sourceActionCode,
+    ...(inquiry.id === input.currentInquiryId && input.currentInquiryRevision !== undefined
+      ? { exceptSourceVersion: input.currentInquiryRevision } : {}) });
+};
+
 export const createPartnerPricingDuty = async (database: any, input: {
   inquiryId: string; actorUserId: string; inquiryRevision: number; now?: Date;
 }) => {
@@ -84,6 +98,8 @@ export const createPartnerPricingDuty = async (database: any, input: {
   if (!inquiry.caseId || !inquiry.case || inquiry.revision !== input.inquiryRevision || !inquiry.assignments[0]) {
     throw new Error('DUTY_SOURCE_NOT_ACTIONABLE');
   }
+  await supersedePartnerPricingResultDuties(database, { caseId: inquiry.caseId, actorUserId: input.actorUserId,
+    currentInquiryId: inquiry.id, now });
   await upsertEnvelope(database, input.actorUserId, reviewDefinition);
   const predecessors = await closeOpenDuties(database, { inquiryId: inquiry.id, actorUserId: input.actorUserId,
     status: 'WAIVED', eventCode: 'WAIVED', reason: 'بسته قیمت جدید جایگزین بسته قبلی شد', now,
@@ -134,6 +150,11 @@ export const createPartnerPricingResultDuty = async (database: any, input: {
   if (!inquiry.caseId || !inquiry.case || !inquiry.rows.length || inquiry.rows.some((row: any) => row.outcome === 'PENDING')) {
     return null;
   }
+  const current = await database.partnerInquiry.findFirst({ where: { caseId: inquiry.caseId },
+    orderBy: [{ caseRevision: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }, { id: 'desc' }], select: { id: true } });
+  if (current?.id !== inquiry.id) return null;
+  await supersedePartnerPricingResultDuties(database, { caseId: inquiry.caseId, actorUserId: input.actorUserId,
+    currentInquiryId: inquiry.id, currentInquiryRevision: inquiry.revision, now });
   await upsertEnvelope(database, input.actorUserId, resultDefinition);
   const stableKey = `PARTNER_PRICING_RESULT:${inquiry.id}:${inquiry.revision}`;
   const duty = await database.crossWorkspaceDuty.upsert({ where: { stableKey }, update: {}, create: {
@@ -220,14 +241,16 @@ const loadInboxProjection: CrossWorkspaceDutySourceAdapter['loadInboxProjection'
   if (!inquiry?.caseId || !inquiry.case) throw new Error('DUTY_SOURCE_CHANGED');
   inquiry.rows = await materialPriceRows(database, inquiry);
   if (input.sourceActionCode === resultDefinition.sourceActionCode) {
+    const current = await database.partnerInquiry.findFirst({ where: { caseId: inquiry.caseId },
+      orderBy: [{ caseRevision: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }, { id: 'desc' }], select: { id: true } });
     const approved = inquiry.rows.filter((row: any) => row.outcome === 'APPROVED').length;
     const rejected = inquiry.rows.filter((row: any) => row.outcome === 'REJECTED').length;
     return { title: `نتیجه استعلام قیمت پرونده همکار-${inquiry.case.trackingCode?.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 }) ?? '—'}`,
       description: rejected > 0
         ? `${rejected.toLocaleString('fa-IR')} ردیف نیازمند اصلاح و ${approved.toLocaleString('fa-IR')} ردیف قیمت‌گذاری‌شده`
         : `قیمت ${approved.toLocaleString('fa-IR')} ردیف از فروشنده سبلان دریافت شد`,
-      destinationHref: `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(inquiry.caseId)}`,
-      sourceIsCurrent: inquiry.revision === input.sourceVersion && inquiry.rows.every((row: any) => row.outcome !== 'PENDING') };
+      destinationHref: `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(inquiry.caseId)}&returnTo=contract&step=5`,
+      sourceIsCurrent: current?.id === inquiry.id && inquiry.revision === input.sourceVersion && inquiry.rows.every((row: any) => row.outcome !== 'PENDING') };
   }
   const pending = inquiry.rows.filter((row: any) => row.outcome === 'PENDING');
   return { title: `بررسی قیمت پرونده همکار-${inquiry.case.trackingCode?.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 }) ?? '—'}`,

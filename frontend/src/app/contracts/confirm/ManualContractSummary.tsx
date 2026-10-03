@@ -39,7 +39,7 @@ const date = (input: unknown) => {
 };
 const productType = (type?: string) => ({ longitudinal: 'طولی', stair: 'پله', slab: 'اسلب' })[type as 'longitudinal' | 'stair' | 'slab'] || '—';
 const stairPart = (part?: string) => ({ tread: 'کف پله', riser: 'خیز پله', landing: 'پاگرد' })[part as 'tread' | 'riser' | 'landing'] || '—';
-const status = (input: string) => ({ APPROVED: 'تایید شده', VERIFIED: 'تایید شده', PENDING: 'در انتظار تایید', PENDING_APPROVAL: 'در انتظار تایید', SIGNED: 'امضا شده', PRINTED: 'چاپ شده', CANCELLED: 'لغو شده', EXPIRED: 'منقضی شده' })[input as 'APPROVED'] || value(input);
+const status = (input: string) => ({ NOTE: 'یادداشت', DRAFT: 'پیش‌نویس', CUSTOMER_SIGNED: 'امضا شده', FINAL: 'قطعی', APPROVED: 'تایید شده', VERIFIED: 'تایید شده', PENDING: 'در انتظار تایید', PENDING_APPROVAL: 'در انتظار تایید', SIGNED: 'امضا شده', PRINTED: 'چاپ شده', CANCELLED: 'لغو شده', EXPIRED: 'منقضی شده' })[input as 'APPROVED'] || value(input);
 const paymentStatus = (input: string | null) => input === 'WILL_BE_PAID' ? 'پرداخت خواهد شد' : value(input);
 const unit = (input: string) => ({ meter: 'متر', squareMeter: 'متر مربع', ton: 'تن' })[input as 'meter'] || 'عدد';
 
@@ -161,7 +161,8 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
   <div className="flex justify-between gap-4 text-sm"><span className="text-secondary">{label}:</span><span className="font-medium text-primary text-left">{children}</span></div>
 );
 const Table = ({ headings, rows }: { headings: string[]; rows: React.ReactNode[][] }) => (
-  <div className="overflow-x-auto px-4 pb-4">
+  <div role="region" aria-label={headings.join('، ')} tabIndex={rows.length ? 0 : undefined}
+    className="overflow-x-auto px-4 pb-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--sds-focus-ring)]">
     {rows.length === 0 ? <p className="text-sm text-muted">—</p> : <table className="w-full min-w-[680px] text-sm">
       <thead><tr className="border-b border-[var(--sds-border-default)] text-secondary">{headings.map(heading => <th key={heading} className="py-2 text-right">{heading}</th>)}</tr></thead>
       <tbody>{rows.map((cells, index) => <tr key={index} className="border-b border-[var(--sds-border-subtle)]">{cells.map((cell, cellIndex) => <td key={cellIndex} className="py-2 pl-3 text-secondary">{cell}</td>)}</tr>)}</tbody>

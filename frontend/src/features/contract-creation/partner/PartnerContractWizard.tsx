@@ -7,10 +7,10 @@ import type { WizardStep } from '../components/shared/WizardProgressBar';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
 import { WIZARD_STEPS } from '../constants/contract.constants';
 import { PartnerRetailStep } from './PartnerRetailStep';
-import { partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
+import { partnerRetailSummary, partnerRetailIntentRows, partnerMoneyText, type PartnerRetailRow, type PartnerRetailServiceRow } from './partnerRetail';
 import { saveCompletedPartnerDraft, type PartnerDraftIntent, type createPartnerCaseSubmission } from './partnerCaseSubmission';
 import { inquiryRowState, isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
-import { partnerCaseReviewMessage, reconcilePartnerDeliveriesToProducts } from './partnerWizardEntry';
+import { partnerCaseReviewMessage, partnerDeliveryPlanIssue } from './partnerWizardEntry';
 import { partnerSalesActionFeedback } from '../../partner-sales/partnerSalesErrorMessage';
 import { formatPartnerMoney } from '../../partner-sales/presentation';
 import { partnerTrackingCode, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
@@ -19,6 +19,7 @@ export type PartnerWizardStep = 'date' | 'customer' | 'project' | 'products' | '
 export interface PartnerWizardDraft {
   intent: PartnerDraftIntent;
   rows: PartnerRetailRow[];
+  serviceRows?: PartnerRetailServiceRow[];
   materialInquiryRows?: Array<{ pricingSubjectId: string; inquiryRow: PartnerRetailRow['inquiryRow'] }>;
   step: PartnerWizardStep;
 }
@@ -49,7 +50,8 @@ const presentPartnerWizardSteps = (steps: typeof partnerWizardSteps): WizardStep
 }));
 export const partnerWizardPresentationSteps = presentPartnerWizardSteps(partnerWizardSteps);
 
-export const partnerWizardStepsForDraft = (_draft: PartnerWizardDraft) => partnerWizardSteps;
+export const partnerWizardStepsForDraft = (draft: PartnerWizardDraft) =>
+  !draft.rows.length && draft.serviceRows?.length ? partnerWizardSteps.filter(step => step.id !== 'pricing') : partnerWizardSteps;
 
 export function requiredPartnerWizardStep(step: PartnerWizardStep, hasNumberedCase: boolean,
   _pricingReady: boolean): PartnerWizardStep {
@@ -117,6 +119,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const [actionPending, setActionPending] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<PartnerRetailRow['inquiryRow']>();
   const [rejectReason, setRejectReason] = useState('');
+  const [pricingDecision, setPricingDecision] = useState<'accepted' | 'rejected'>();
   const recoveryFlight = useRef(false);
   const confirmationFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -124,7 +127,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const requestedStepIndex = visibleSteps.findIndex(step => step.id === draft.step);
   const stepIndex = requestedStepIndex >= 0 ? requestedStepIndex : visibleSteps.findIndex(step => step.id === 'payment');
   const visiblePresentationSteps = presentPartnerWizardSteps(visibleSteps);
-  const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount);
+  const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount, draft.serviceRows);
+  const validateWizardStep = (step: PartnerWizardStep, current: PartnerWizardDraft) =>
+    validateStep(step, current) ?? (step === 'delivery'
+      ? partnerDeliveryPlanIssue(current.intent.deliveries, current.rows, current.serviceRows) : null);
   const pricingEntries = [...draft.rows.filter(row => !row.parentProductRowId).map(row => ({ id: row.productRowId, inquiryRow: row.inquiryRow })),
     ...(draft.materialInquiryRows ?? []).map(row => ({ id: row.pricingSubjectId, inquiryRow: row.inquiryRow }))]
   const unusable = pricingEntries.filter(row => !isUsableInquiryRow(row.inquiryRow, now)
@@ -148,7 +154,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const compactStatus = result.case ? partnerWizardCompactStatus(result.case) : null;
   const customerNotSent = result.case && ['NOT_SENT', 'RECONFIRMATION_REQUIRED']
     .includes(result.case.customerConfirmationState) && !confirmationSent;
-  const pricingReady = Boolean(result.case && pricingEntries.length > 0 && unusable.length === 0 &&
+  const pricingReady = Boolean(result.case && (pricingEntries.length > 0 || Boolean(draft.serviceRows?.length)) && unusable.length === 0 &&
     pricingEntries.every(({ inquiryRow }) => inquiryRow.state === 'APPROVED' && inquiryRow.approvedPrice && inquiryRow.approvedRowBinding));
   const pricingStatus = result.case?.state === 'DRAFT'
     ? pricingReady ? 'آماده پذیرش'
@@ -210,9 +216,9 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       ...(source.materialInquiryRows ?? []).map(row => ({ rowId: `pricing:${row.pricingSubjectId}`,
         configuration: row.inquiryRow.configurationRef })),
     ];
-    return { ...source.intent, pricingRequest: {
+    return { ...source.intent, ...(pricingRows.length ? { pricingRequest: {
       inquiryId: `partner-case-pricing:${source.intent.recoveryId}:1`, rows: pricingRows,
-    }, rows: partnerRetailIntentRows(source.rows),
+    } } : { pricingRequest: undefined }), rows: partnerRetailIntentRows(source.rows),
     customerPaymentPlan: source.intent.customerPaymentPlan };
   };
   const currentIntent = (preparationCompleted: boolean): PartnerDraftIntent => {
@@ -227,20 +233,21 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     return { ...draft.intent, preparationCompleted, rows: partnerRetailIntentRows(rows),
       additionalMaterialApprovals: draft.intent.additionalMaterialApprovals?.filter(binding =>
         usableMaterials.has(binding.pricingSubjectId)),
-      deliveries: reconcilePartnerDeliveriesToProducts(draft.intent.deliveries, rows) };
+      deliveries: draft.intent.deliveries };
   };
   const submit = async () => {
     if (disabled || stepIndex < 0) return;
-    const invalid = visibleSteps.map(step => ({ step, failure: validateStep(step.id, draft) })).find(item => item.failure);
+    const invalid = visibleSteps.map(step => ({ step, failure: validateWizardStep(step.id, draft) })).find(item => item.failure);
     if (invalid) { onChange({ ...draft, step: invalid.step.id }); setError(invalid.failure); return; }
     if (!summary.valid) { onChange({ ...draft, step: 'products' }); setError(summary.message); return; }
     if (summary.loss && !draft.intent.belowCostConfirmed) {
       onChange({ ...draft, step: 'products' }); setError('زیان فروش را بررسی و تأیید کنید.'); return;
     }
-    if (!draft.rows.length || new Set(draft.rows.map(row => row.productRowId)).size !== draft.rows.length) {
+    const ids = [...draft.rows.map(row => row.productRowId), ...(draft.serviceRows ?? []).map(row => row.serviceRowId)];
+    if (!ids.length || new Set(ids).size !== ids.length) {
       setError('حداقل یک محصول کامل و بدون ردیف تکراری لازم است.'); return;
     }
-    if (pricingReady) { setCommitOpen(true); return; }
+
     const intent = currentIntent(true);
     try {
       await saveCompletedPartnerDraft(submission, intent, caseId => {
@@ -252,7 +259,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   };
   const commit = async () => {
     if (disabled || !pricingReady || !summary.valid || summary.wholesale === undefined) return;
-    const invalid = visibleSteps.map(step => ({ step, failure: validateStep(step.id, draft) })).find(item => item.failure);
+    const invalid = visibleSteps.map(step => ({ step, failure: validateWizardStep(step.id, draft) })).find(item => item.failure);
     if (invalid) { setCommitOpen(false); onChange({ ...draft, step: invalid.step.id }); setError(invalid.failure); return; }
     if (summary.loss && !draft.intent.belowCostConfirmed) {
       setCommitOpen(false); onChange({ ...draft, step: 'products' });
@@ -270,13 +277,33 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   };
   const acceptPrices = async () => {
     if (disabled || !pricingReady) return;
-    if (draft.intent.preparationCompleted) { setCommitOpen(true); return; }
-    await submission.submit(currentIntent(false));
+    // A completed preparation must still agree with the edited graph before accepting prices.
+    const invalid = (draft.intent.preparationCompleted || draft.intent.deliveries.length || draft.intent.customerPaymentPlan.installments.length)
+      ? ['delivery', 'payment'].map(id => ({ step: id as PartnerWizardDraft['step'], failure: validateWizardStep(id as PartnerWizardDraft['step'], draft) })).find(item => item.failure)
+      : undefined;
+    if (invalid) {
+      onChange({ ...draft, step: invalid.step, intent: { ...draft.intent, preparationCompleted: false } });
+      setError(invalid.failure); return;
+    }
+    setActionPending(true); setError(null);
+    try {
+      await submission.submit(currentIntent(Boolean(draft.intent.preparationCompleted)));
+      const saved = submission.getSnapshot();
+      if (saved.phase === 'created' && saved.case?.pricingState === 'READY_TO_FINALIZE') setPricingDecision('accepted');
+    } finally { setActionPending(false); }
+  };
+  const openDecisionContract = async () => {
+    const caseId = submission.getSnapshot().case?.owner.caseId;
+    if (!caseId || actionPending) return;
+    setActionPending(true);
+    try { await onOpenCase(caseId); }
+    catch { setError('تصمیم قیمت ثبت شده است؛ باز کردن قرارداد انجام نشد. دوباره تلاش کنید.'); }
+    finally { setActionPending(false); }
   };
 
   const next = async () => {
     if (disabled || requiresReview || stepIndex < 0) return;
-    const failure = validateStep(draft.step, draft);
+    const failure = validateWizardStep(draft.step, draft);
     if (failure) { setError(failure); return; }
     if (draft.step === 'confirmation' && !summary.valid) {
       setError(summary.message); return;
@@ -289,7 +316,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       try {
         const prepared = onPreparePricingQuote ? await onPreparePricingQuote(draft) : draft;
         if (!canonicalRetailReady && !onPreparePricingQuote) throw new Error('Quote unavailable');
-        const pricedSummary = partnerRetailSummary(prepared.rows, prepared.intent.retailDiscount);
+        const pricedSummary = partnerRetailSummary(prepared.rows, prepared.intent.retailDiscount, prepared.serviceRows);
         if (!pricedSummary.valid) { setError(pricedSummary.message); return; }
         if (pricedSummary.loss && !prepared.intent.belowCostConfirmed) {
           setError('زیان فروش را بررسی و تأیید کنید.'); return;
@@ -302,7 +329,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       const created = submission.getSnapshot();
       if (created.phase === 'created' && created.case) {
         onCaseNumbered?.(created.case.owner.caseId);
-        move(visibleSteps.findIndex(step => step.id === 'pricing'));
+        move(visibleSteps.findIndex(step => step.id === (pricingEntries.length ? 'pricing' : 'delivery')));
       }
       return;
     }
@@ -334,7 +361,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
           : !confirmationSent && result.case.customerConfirmationState === 'REJECTED' ? 'danger' : 'info'}>
           مشتری: {confirmationSent ? 'ارسال‌شده، بدون پاسخ' : compactStatus.customer}
         </ErpBadge>
-        {onSendConfirmation && result.case.state === 'COMMITTED' && result.case.customerConfirmationState !== 'REJECTED' &&
+        {onSendConfirmation && draft.intent.preparationCompleted && result.case.customerConfirmationState !== 'APPROVED' &&
           <ErpButton variant={customerNotSent ? 'solid' : 'outline'} label="ارسال پیامک تأیید"
             disabled={disabled} onClick={() => void sendConfirmation()} />}
         <ErpButton variant={customerNotSent ? 'outline' : 'solid'} label="باز کردن پرونده" disabled={disabled} onClick={() => {
@@ -352,7 +379,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         title="محصول اصلاح‌شده ذخیره شده است. برای دریافت قیمت تازه، استعلام همان محصول را ارسال کنید." />}
       {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
       {submissionError && <ErpInlineState kind="error" title={submissionError} />}
-      {externalError && <ErpInlineState kind="error" title={externalError} />}
+      {externalError && !error && <ErpInlineState kind="error" title={externalError} />}
       {error && <ErpInlineState kind="error" title={error} />}
     </div>}
     navigation={{
@@ -366,7 +393,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
       labels: {
         next: draft.step === 'products' ? (result.case ? 'مشاهده نتیجه استعلام' : 'ارسال برای استعلام قیمت')
           : draft.step === 'pricing' ? 'مرحله بعدی' : 'بعدی',
-        submit: draft.step === 'confirmation' ? (pricingReady ? 'تأیید و نهایی‌سازی قرارداد' : 'ثبت پیش‌نویس') : 'ثبت پرونده',
+        submit: draft.step === 'confirmation' ? 'ثبت یادداشت قرارداد' : 'ثبت پرونده',
       }
     }}
   >
@@ -385,13 +412,22 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         title="رد قیمت پیشنهادی" footer={<ErpButton label="ارسال درخواست قیمت مجدد" disabled={disabled || !rejectReason.trim()} onClick={() => {
           if (!rejectTarget || !onRejectPrice) return;
           setActionPending(true);
-          void onRejectPrice(rejectTarget, rejectReason.trim()).then(() => setRejectTarget(undefined))
+          void onRejectPrice(rejectTarget, rejectReason.trim()).then(() => { setRejectTarget(undefined); setPricingDecision('rejected'); })
             .catch(() => setError('درخواست قیمت مجدد ثبت نشد؛ دوباره تلاش کنید.')).finally(() => setActionPending(false));
         }} />}>
         <ErpTextarea aria-label="دلیل رد قیمت" value={rejectReason} onChange={event => setRejectReason(event.target.value)} />
       </ErpSheet>
+      <ErpSheet open={Boolean(pricingDecision)} presentation="modal" pending={actionPending}
+        onClose={() => void openDecisionContract()}
+        title={pricingDecision === 'accepted' ? 'پذیرش قیمت‌های سبلان ثبت شد' : 'رد پیشنهاد قیمت ثبت شد'}
+        footer={<ErpButton label="مشاهده قرارداد" disabled={actionPending} onClick={() => void openDecisionContract()} />}>
+        <ErpInlineState kind="success" title={pricingDecision === 'accepted'
+          ? 'قیمت‌های پیشنهادی سبلان با موفقیت پذیرفته شدند.'
+          : 'پیشنهاد قیمت رد شد و درخواست پیشنهاد مجدد برای سبلان ارسال شد.'} />
+        {error && <ErpInlineState kind="error" title={error} />}
+      </ErpSheet>
       <fieldset disabled={disabled} className="min-w-0 space-y-4">
-        {draft.step === 'products' ? <div className="space-y-4"><PartnerRetailStep rows={draft.rows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
+        {draft.step === 'products' ? <div className="space-y-4"><PartnerRetailStep rows={draft.rows} serviceRows={draft.serviceRows} discount={draft.intent.retailDiscount} belowCostConfirmed={draft.intent.belowCostConfirmed} disabled={disabled}
           onRowsChange={updateRetail} onConfirmLoss={belowCostConfirmed => onChange({ ...draft, intent: { ...draft.intent, belowCostConfirmed } })} />
           {onEditProducts && <ErpButton label="ویرایش محصولات" variant="outline" disabled={disabled}
             onClick={onEditProducts} />}
@@ -417,7 +453,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
                 </ErpBadge>
               </div>
               <p className="text-sm sds-text-secondary">قیمت پیشنهادی سبلان: <strong className="sds-text-primary">
-                {price ? `${price.amount} ${price.currency === 'IRR' ? 'ریال' : 'تومان'}` : '—'}
+                {price ? partnerMoneyText(price.amount, price.currency) : '—'}
               </strong></p>
               {rowState === 'EXPIRED' && expiresAt && <p className="text-sm sds-text-secondary">اعتبار تا {expiresAt}</p>}
               {usable && onRejectPrice && <ErpButton label="رد قیمت و درخواست پیشنهاد مجدد" tone="danger" variant="outline" disabled={disabled}
@@ -432,7 +468,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
                 disabled={disabled || inquiryRow.successor?.state === 'PENDING'} onClick={() => onReinquire(inquiryRow)} />}
             </ErpCard>;
           })}
-          {pricingReady && <ErpButton label={draft.intent.preparationCompleted ? 'پذیرش قیمت‌ها و نهایی‌سازی' : 'پذیرش قیمت‌ها'} disabled={disabled} onClick={() => void acceptPrices()} />}
+          {pricingReady && <ErpButton label={'پذیرش قیمت‌ها'} disabled={disabled} onClick={() => void acceptPrices()} />}
           {pricingReady
             ? <ErpInlineState kind="success" title="قیمت همه محصولات دریافت شده است؛ می‌توانید قیمت‌ها را بپذیرید یا مراحل پیش‌نویس را ادامه دهید." />
             : <ErpInlineState kind="empty" title={rejectedRows.length ? 'دلیل رد را بررسی و همان محصول را ویرایش کنید؛ قیمت ردیف‌های دیگر حفظ می‌شود.'

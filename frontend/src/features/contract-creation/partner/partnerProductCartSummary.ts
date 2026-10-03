@@ -16,10 +16,11 @@ export function partnerProductCartSummary(draft: PartnerTechnicalDraft, preview:
     let area: string;
     if ('finishedAreaSquareMeters' in facts) {
       area = facts.finishedAreaSquareMeters;
-      quantity = String(facts.packingPlan.consumedSources.length);
+      quantity = facts.materialAreaSquareMeters;
     } else if ('requestedAreaSquareMeters' in facts) {
       area = facts.requestedAreaSquareMeters;
-      quantity = calculated.family === 'stair' ? String(facts.quantity) : area;
+      quantity = 'consumedMotherAreaSquareMeters' in facts
+        ? facts.consumedMotherAreaSquareMeters : facts.consumedMaterialAreaSquareMeters;
     } else if ('squareMeters' in facts) {
       area = facts.squareMeters; quantity = String(facts.quantity);
     } else return null;

@@ -11,8 +11,8 @@ export type PartnerWorkspaceAuthority = {
   canManageInquiries: boolean;
   grants: Array<{
     action: string;
-    rootKind: 'PROFILE' | 'INQUIRY' | 'CASE';
-    purpose: 'ONBOARDING' | 'MANAGEMENT' | 'ACCOUNTING' | 'RESPONDER';
+    rootKind: 'PROFILE' | 'INQUIRY' | 'CASE' | 'CUSTOMER';
+    purpose: 'ONBOARDING' | 'MANAGEMENT' | 'ACCOUNTING' | 'RESPONDER' | 'CRM';
     scope: 'ASSIGNED' | 'COMPANY';
   }>;
 };
@@ -46,6 +46,11 @@ export async function resolvePartnerWorkspaceAuthority(
     if (!grants.some(item => item.action === grant.action && item.rootKind === grant.rootKind &&
         item.purpose === grant.purpose && item.scope === grant.scope)) grants.push(grant);
   };
+
+  if (isSystemAdmin || atLeast(FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE, 'edit')) {
+    add({ action: 'CUSTOMER_READ', rootKind: 'CUSTOMER', purpose: 'CRM', scope: 'COMPANY' });
+    add({ action: 'CUSTOMER_TRANSFER_DECIDE', rootKind: 'CUSTOMER', purpose: 'CRM', scope: 'COMPANY' });
+  }
 
   if (canViewAssigned) {
     add({ action: 'INQUIRY_READ', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' });

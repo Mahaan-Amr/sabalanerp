@@ -758,9 +758,9 @@ router.get('/contracts/partner/:caseId/internal', accountingContractsView, async
         && feature.feature === FEATURES.ACCOUNTING_ACTIONS_MANAGE
         && ['edit', 'admin'].includes(feature.permission));
     const capabilities = await getAccountingActionCapabilities(req.user!.id, req.user!.role);
-    const writable = document.partnerContext.accountingWritable;
+    const writable = document.partnerContext.accountingWritable && (!document.commercial || document.commercial.status === 'FINAL');
     return res.json({ success: true, data: { ...document, actions: { canResolveFlag: canResolveFlag && writable,
-      canCreateInvoice: capabilities.CREATE_INVOICE && writable, canFlag: capabilities.FLAG_CONTRACT && writable, canRequestCorrection: capabilities.CREATE_CORRECTION_REQUEST && writable,
+      canCreateInvoice: capabilities.CREATE_INVOICE && (writable || 'canRegister' in document && document.canRegister), canFlag: capabilities.FLAG_CONTRACT && writable, canRequestCorrection: capabilities.CREATE_CORRECTION_REQUEST && writable,
       canReviewInvoice: capabilities.APPROVE_FINANCIAL_INVOICE && writable,
       canCreateReceivable: capabilities.CREATE_RECEIVABLE && writable } } });
   } catch (error) {

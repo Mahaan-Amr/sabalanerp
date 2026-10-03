@@ -1,3 +1,4 @@
+import { canReadTransferNotice } from './partnerSales/crm/transferAccess';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { FEATURES, getUserFeatures } from '../middleware/feature';
 import { getUserWorkspaces } from '../middleware/workspace';
@@ -186,6 +187,9 @@ export const filterCurrentlyAuthorizedNotifications = async <
   if (user.isActive === false) return [];
   // Partner restrictions precede the general ADMIN override. Unwired central
   // authorization, revoked grants and old assignments all deny access.
+  const transferRows = rows.filter(row => row.event?.resourceType === 'PARTNER_CUSTOMER_TRANSFER');
+  const transferAllowed = new Set((await Promise.all(transferRows.map(async row =>
+    row.event?.resourceId && await canReadTransferNotice(database, user.id, row.event.resourceId) ? row.id : null))).filter((id): id is string => id !== null));
   const partnerRows = rows.filter(row => row.event?.resourceType === PARTNER_NOTIFICATION_RESOURCE);
   const partnerAllowed = new Set((await Promise.all(partnerRows.map(async row =>
     await canReadPartnerNotification(database, user.id, row.id) ? row.id : null,
@@ -278,6 +282,7 @@ export const filterCurrentlyAuthorizedNotifications = async <
   }] as const));
   return rows.filter((row) => {
     const event = row.event;
+    if (event?.resourceType === 'PARTNER_CUSTOMER_TRANSFER') return transferAllowed.has(row.id);
     if (event?.resourceType === PARTNER_NOTIFICATION_RESOURCE) return partnerAllowed.has(row.id);
     if (performanceAccess.has(row.id)) return performanceAccess.get(row.id) === true;
     // Performance notifications are protected by their resource-specific checks above.

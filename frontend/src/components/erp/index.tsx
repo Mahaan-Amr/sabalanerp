@@ -1143,7 +1143,7 @@ export function ErpWorkspacePage({
           {backHref && <ErpWorkspaceBackButton backHref={backHref} />}
           <div className="min-w-0 py-0.5">
             <h1 className="sds-text-primary truncate text-2xl font-black tracking-tight">{title}</h1>
-            {context && <div className="sds-text-muted mt-1 text-xs font-medium">{context}</div>}
+            {context && <div className="sds-text-secondary mt-1 text-xs font-medium">{context}</div>}
           </div>
         </div>
         {(primaryAction || secondaryActions.length > 0) && (

@@ -181,6 +181,7 @@ const getFeatureWorkspace = (feature: string): string => {
     'crm_customers_create': 'crm',
     'crm_customers_delete': 'crm',
     'crm_customers_assign_owner': 'crm',
+    'crm_partner_customer_transfers_manage': 'crm',
     'crm_potential_projects_view': 'crm',
     'crm_potential_projects_create': 'crm',
     'crm_potential_projects_edit': 'crm',

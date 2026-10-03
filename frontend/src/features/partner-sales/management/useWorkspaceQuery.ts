@@ -5,13 +5,15 @@ import type { Result } from '@sabalanerp/partner-sales-contracts';
 import { getPartnerSalesErrorMessage } from '../partnerSalesErrorMessage';
 
 /** Shared read lifecycle for the two purpose-specific workspaces. No authorization fallback. */
-export function useWorkspaceQuery<T>(load: (cursor?: string) => Promise<Result<T>>) {
+export function useWorkspaceQuery<T>(load: (cursor?: string) => Promise<Result<T>>, queryKey = 'default') {
   const [view, setView] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const sequence = useRef(0);
-  const cursor = cursors[cursors.length - 1];
+  const previousKey = useRef(queryKey);
+  const cursor = previousKey.current === queryKey ? cursors[cursors.length - 1] : undefined;
+  useEffect(() => { if (previousKey.current !== queryKey) { previousKey.current = queryKey; setCursors([undefined]); } }, [queryKey]);
   const refresh = useCallback(async () => {
     const request = ++sequence.current;
     setLoading(true);

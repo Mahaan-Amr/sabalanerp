@@ -15,6 +15,10 @@ export function partnerCustomerGraphTotal(graph: Pick<CanonicalProductGraph, 'ro
     const rate = price ? new Prisma.Decimal(price.amount).div(price.currency === 'IRR' ? 10 : 1).toFixed() : '0';
     subtotal = subtotal.plus(calculatePartnerCanonicalRetail(row, rate, graph.layerConfigurations).totalAmount);
   }
+  for (const service of draft.serviceRows ?? []) {
+    if (!service.quantity || !service.retailUnitPrice || new Prisma.Decimal(service.quantity).lte(0) || new Prisma.Decimal(service.retailUnitPrice.amount).lte(0)) throw new Error('Service price and quantity required');
+    subtotal = subtotal.plus(new Prisma.Decimal(service.quantity).mul(service.retailUnitPrice.amount).div(service.retailUnitPrice.currency === 'IRR' ? 10 : 1));
+  }
   const reduction = discountPercent === undefined
     ? new Prisma.Decimal(discount.amount).div(discount.currency === 'IRR' ? 10 : 1)
     : subtotal.mul(discountPercent).div(100);

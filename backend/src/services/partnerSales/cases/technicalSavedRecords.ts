@@ -3,9 +3,12 @@ import { canonicalHash, InquiryIdentitySchema, PartnerTechnicalDraftSchema, Part
   type InquiryIdentity, type PartnerTechnicalDraft, type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
 import { technicalRecoveryJson } from './technicalRecovery';
 
+import type { ResolvedTechnicalService } from './technicalServices';
+
 export interface TechnicalSavedSnapshot {
   version: 1; sessionId: string; view: PartnerTechnicalSavedView; draft: PartnerTechnicalDraft;
   graph: CanonicalProductGraph; context: unknown;
+  serviceRows?: ResolvedTechnicalService[];
   identities: { productRowId: string; identity: InquiryIdentity }[];
 }
 
@@ -48,6 +51,7 @@ export async function decodeTechnicalSavedSnapshot(value: unknown): Promise<Tech
         graph.rows.some(row => !view.rows.some(item => item.configurationRef.productRowId === row.productRowId) ||
           !identities.some(item => item.productRowId === row.productRowId)) ||
         (view.pricingSubjects ?? []).some(subject => !identities.some(item => item.productRowId === subject.configurationRef.productRowId))) return undefined;
-    return { version: 1, sessionId: payload.sessionId, view, draft, graph, context: payload.context, identities };
+    if (JSON.stringify((payload.serviceRows ?? []).map(({serviceRowId, quantity, unit}) => ({serviceRowId, quantity, unit}))) !== JSON.stringify(view.serviceRows ?? [])) return undefined;
+    return { version: 1, sessionId: payload.sessionId, view, draft, graph, context: payload.context, identities, ...(payload.serviceRows ? { serviceRows: payload.serviceRows } : {}) };
   } catch { return undefined; }
 }

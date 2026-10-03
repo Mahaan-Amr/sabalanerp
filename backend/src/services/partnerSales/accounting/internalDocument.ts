@@ -8,6 +8,8 @@ import { PARTNER_INTERNAL_ACCOUNTING_SOURCE } from './source';
 import { projectPartnerInternalContent } from './internalDocumentContent';
 import { RevisionRefSchema, FulfillmentViewSchema } from '@sabalanerp/partner-sales-contracts';
 import { readPartnerRevisionProjections } from '../cases/lifecycle';
+import { readPartnerCommercialState } from '../cases/commercialLifecycle';
+import { readPartnerPreparationDocument } from './preFinancialDocument';
 
 /** Only the Sabalan-to-Partner financial source enters this document. */
 export async function readPartnerInternalDocument(caseId: string, actorUserId: string) {
@@ -21,7 +23,7 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
     });
     const contextualized = await scope.contextualize('FINANCIAL', records);
     const record = contextualized.find(item => item.partnerContext?.caseId === caseId);
-    if (!record?.partnerContext) return null;
+    if (!record?.partnerContext) return readPartnerPreparationDocument(scope.database, actorUserId, caseId);
     const snapshot = record.sourceSnapshot as { partnerPreparation?: { owner?: unknown } } | null;
     const owner = RevisionRefSchema.safeParse(snapshot?.partnerPreparation?.owner);
     const revision = owner.success ? await scope.database.partnerCaseRevision.findUnique({ where: {
@@ -39,7 +41,7 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
     const flags = await scope.database.accountingContractFlag.findMany({
       where: { sourceFinancialRecordId: record.id }, orderBy: { createdAt: 'desc' } });
     return {
-      caseState: sale?.state, receivedAmount: received.toFixed(), remainingAmount: remaining.toFixed(),
+      commercial: await readPartnerCommercialState(scope.database, caseId), caseState: sale?.state, receivedAmount: received.toFixed(), remainingAmount: remaining.toFixed(),
       id: record.id, owner: sale ? { caseId, revision: sale.headRevision, integrityHash: sale.integrityHash } : undefined, status: record.status, amount: record.amount.toString(),
       currency: record.currency, createdAt: record.createdAt,
       systemInvoiceNumber: record.systemInvoiceNumber,
@@ -101,13 +103,16 @@ export function partnerInternalPrintInput(document: NonNullable<Awaited<ReturnTy
   const totals = document.totals;
   return {
     contractNumber: document.partnerContext.customerContractNumber,
-    titlePersian: 'سند داخلی فروش سبلان به همکار', status: document.caseState === 'COMMITTED' ? 'SIGNED' : 'DRAFT',
+    titlePersian: 'سند داخلی فروش سبلان به همکار', partnerCommercialStatus: document.commercial?.status, status: document.caseState === 'COMMITTED' ? 'SIGNED' : 'DRAFT',
     createdAt: document.contractDate || document.createdAt, currency: document.currency == 'IRT' ? 'تومان' : document.currency == 'IRR' ? 'ریال' : document.currency,
     totalAmount: Number(document.amount), customer: { companyName: document.partnerContext.debtor.displayName },
     items: document.items.map(item => ({ productRowId: item.productRowId,
-      product: { namePersian: item.description }, description: (item.details || []).join('، '),
+      product: { namePersian: item.description, code: item.productCode }, description: (item.details || []).join('، '),
       quantity: Number(item.quantity), pieceCount: Number('pieceCount' in item ? item.pieceCount ?? item.quantity : item.quantity),
       billingUnit: item.unit, productType: 'productType' in item ? item.productType : undefined,
+      length: 'lengthMeters' in item ? Number(item.lengthMeters) : undefined, lengthUnit: 'm',
+      width: 'widthMeters' in item ? Number(item.widthMeters) : undefined, widthUnit: 'm',
+      squareMeters: 'areaSquareMeters' in item ? Number(item.areaSquareMeters) : undefined,
       dimensions: (item.details || []).filter(detail => /^(طول|عرض|مساحت):/.test(detail)).join('، '),
       unitPrice: Number(item.unitPrice), totalPrice: Number(item.totalPrice) })),
     contractData: {
@@ -128,8 +133,10 @@ export function renderPartnerInternalDocumentHtml(document: NonNullable<Awaited<
   options: { variant?: ContractPrintVariant; customPrint?: ContractCustomPrintOptions } = {}) {
   const input = partnerInternalPrintInput(document);
   const variant = options.variant || 'accounting';
-  const showMoney = variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false;
-  const html = renderContractHtml(input, { ...options, variant });
+  const showMoney = !('amountKnown' in document && document.amountKnown === false) && variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false;
+  const unpriced = 'amountKnown' in document && document.amountKnown === false;
+  const html = renderContractHtml(input, { ...options, variant, reservePdfHeaderSpace: true,
+    ...(unpriced ? { unavailableMoneyLabel: 'در انتظار استعلام' } : {}) });
   const escape = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
   const amount = (value: string) => new Prisma.Decimal(value).mul(variant === 'accounting' && document.currency === 'IRT' ? 10 : 1).toFixed();
   const currencyLabel = variant === 'accounting' || document.currency === 'IRR' ? 'ریال' : 'تومان';
@@ -139,7 +146,7 @@ export function renderPartnerInternalDocumentHtml(document: NonNullable<Awaited<
     <div>مشتری نهایی مرتبط: ${escape(document.partnerContext.endCustomer.displayName)}</div>` : ''}
     <div>سند داخلی: ${escape(document.partnerContext.internalRecordNumber)}</div>
     ${totals && showMoney ? `<div>جمع اقلام: ${amount(totals.net)} ${currencyLabel} · تخفیف: ${amount(totals.discount)} ${currencyLabel} · مالیات: ${amount(totals.tax)} ${currencyLabel} · هزینه‌های جانبی: ${amount(totals.charges)} ${currencyLabel}</div>` : ''}
-    ${showMoney ? `<strong>جمع خرید از سبلان: ${amount(document.amount)} ${currencyLabel}</strong>` : ''}
+    ${showMoney ? `<strong>جمع خرید از سبلان: ${amount(document.amount)} ${currencyLabel}</strong>` : unpriced && variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false ? '<strong>جمع خرید از سبلان: در انتظار استعلام</strong>' : ''}
     ${variant !== 'workshop' && options.customPrint?.showPaymentSection !== false && !document.paymentPlan?.installments.length ? '<div>برنامه پرداخت به سبلان هنوز ثبت نشده است.</div>' : ''}
     ${document.technicalEvidenceAvailable === false ? '<div>جزئیات فنی نسخه قطعی در دسترس نیست.</div>' : ''}
   </section>`;

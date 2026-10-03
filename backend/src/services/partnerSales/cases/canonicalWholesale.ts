@@ -17,6 +17,27 @@ const isObjectRecord = (value: unknown): value is Readonly<Record<string, unknow
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
 function partnerQuotedQuantity(row: CanonicalProductRow) {
+  const snapshot = row.commercial.calculationSnapshot;
+  if (snapshot?.partnerPricingBasis === 'ordinary-sale-v1') {
+    if (row.productType !== 'prepared') {
+      const lines = Array.isArray(snapshot.pricingLines) ? snapshot.pricingLines.filter(line =>
+        isObjectRecord(line) && line.lineId === 'base-material') : [];
+      const material = row.productType === 'slab' && isObjectRecord(snapshot.materialPricingLine)
+        ? snapshot.materialPricingLine : lines.length === 1 ? lines[0] : undefined;
+      if (isObjectRecord(material) && typeof material.quantity === 'string') return new Prisma.Decimal(material.quantity);
+      if (snapshot.pricingLines !== undefined || snapshot.materialPricingLine !== undefined || row.productType === 'longitudinal') {
+        throw new Error('Canonical material pricing quantity is missing');
+      }
+    }
+    if (row.productType === 'stair') {
+      if (typeof snapshot.consumedMotherAreaSquareMeters !== 'string') throw new Error('Canonical stair material area is missing');
+      return new Prisma.Decimal(snapshot.consumedMotherAreaSquareMeters);
+    }
+    if (row.productType === 'slab') {
+      if (typeof snapshot.materialAreaSquareMeters !== 'string') throw new Error('Canonical slab material area is missing');
+      return new Prisma.Decimal(snapshot.materialAreaSquareMeters);
+    }
+  }
   if (row.productType === 'longitudinal') {
     return new Prisma.Decimal(row.commercial.requestedAreaSquareMeters ?? '0');
   }
@@ -35,16 +56,17 @@ function partnerQuotedQuantity(row: CanonicalProductRow) {
   throw new Error('Partner pricing is not supported for this product family');
 }
 
-/** Reuses the ordinary Contract engine's canonical material and component evidence.
- * The inquiry replaces only the catalog material rate; it never reprices cuts,
- * tools, finishing, mandatory charges, or paid-remainder material. */
+/** Reuses canonical family quantities and fixed component evidence. Material
+ * and its percentage charge use this agreement's rate; paid material stays paid. */
 export function calculatePartnerCanonicalWholesale(row: CanonicalProductRow,
   approvedMaterialRateToman: string, layers: readonly CanonicalLayerConfiguration[] = [],
   additionalMaterialRates: ReadonlyMap<string, string> = new Map()): PartnerCanonicalWholesale {
   const base = new Prisma.Decimal(row.commercial.baseAmountToman ?? '0');
   const total = new Prisma.Decimal(row.commercial.totalAmountToman ?? '0');
-  const materialQuantity = base.isZero() ? new Prisma.Decimal(0) : partnerQuotedQuantity(row);
-  if (!base.isZero() && materialQuantity.lte(0)) throw new Error('Canonical Partner pricing quantity is missing');
+  const snapshot = row.commercial.calculationSnapshot;
+  const chargeMaterial = !base.isZero();
+  const materialQuantity = chargeMaterial ? partnerQuotedQuantity(row) : new Prisma.Decimal(0);
+  if (chargeMaterial && materialQuantity.lte(0)) throw new Error('Canonical Partner pricing quantity is missing');
   const rowLayers = layers.filter(layer => layer.parentProductRowId === row.productRowId && layer.input.source.kind === 'new-material');
   const originalLayerMaterial = rowLayers.reduce((sum, layer) => sum.plus(layer.result.materialSourceSplit.newMaterialAmountToman), new Prisma.Decimal(0));
   const repricedLayerMaterial = rowLayers.reduce((sum, layer) => {
@@ -54,9 +76,22 @@ export function calculatePartnerCanonicalWholesale(row: CanonicalProductRow,
     if (!rate) throw new Error('Approved additional material rate is missing');
     return sum.plus(new Prisma.Decimal(layer.result.materialSourceSplit.newMaterialSquareMeters).mul(rate));
   }, new Prisma.Decimal(0));
-  const componentAmount = total.minus(base).minus(originalLayerMaterial);
-  if (componentAmount.isNegative()) throw new Error('Canonical component amount is invalid');
   const materialAmount = materialQuantity.mul(approvedMaterialRateToman);
+  let componentAmount = total.minus(base).minus(originalLayerMaterial);
+  if (chargeMaterial && snapshot?.partnerPricingBasis === 'ordinary-sale-v1' && snapshot.mandatoryEnabled === true) {
+    if (typeof snapshot.mandatoryPercentage !== 'string' || typeof snapshot.mandatoryAmountToman !== 'string') {
+      throw new Error('Canonical mandatory pricing evidence is missing');
+    }
+    const percentage = new Prisma.Decimal(snapshot.mandatoryPercentage);
+    const originalMandatory = new Prisma.Decimal(snapshot.mandatoryAmountToman);
+    if (percentage.isNegative() || percentage.gt(100) || originalMandatory.isNegative()) {
+      throw new Error('Canonical mandatory pricing evidence is invalid');
+    }
+    componentAmount = componentAmount.minus(originalMandatory);
+    if (componentAmount.isNegative()) throw new Error('Canonical component amount is invalid');
+    componentAmount = componentAmount.plus(materialAmount.mul(percentage).div(100));
+  }
+  if (componentAmount.isNegative()) throw new Error('Canonical component amount is invalid');
   return { materialQuantity: canonical(materialQuantity), materialAmount: canonical(materialAmount.plus(repricedLayerMaterial)),
     componentAmount: canonical(componentAmount), totalAmount: canonical(materialAmount.plus(repricedLayerMaterial).plus(componentAmount)) };
 }

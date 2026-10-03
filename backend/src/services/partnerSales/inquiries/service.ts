@@ -22,6 +22,8 @@ type AuthorizationRequest = { actorId: string; action: 'INQUIRY_READ' | 'INQUIRY
 
 export interface PartnerInquiryDependencies {
   actorId: string;
+  /** Enabled only by the atomic product revision route. Ordinary row re-inquiries keep independent pending work. */
+  replacePendingCaseInquiries?: boolean;
   transaction<T>(run: (tx: Transaction) => Promise<T>): Promise<T>;
   authorize(tx: Transaction, request: AuthorizationRequest): Promise<Result<{
     evidenceId: string;
@@ -463,6 +465,39 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
         await tx.partnerInquiryRow.createMany({ data: definitions.map(row => ({ id: row.rowId, inquiryId: inquiry!.id,
           version: row.version, revision: 1, ...(row.predecessorId ? { predecessorId: row.predecessorId } : {}),
           configurationHash: row.configurationHash, definition: row.definition as Prisma.InputJsonValue })) });
+        const replacementEventIds: string[] = [];
+        if (command.type === 'CASE_PRICING_SUBMIT' && dependencies.replacePendingCaseInquiries) {
+          // The Case lock serializes replacement with responder decisions.
+          // Retain immutable decisions; replace unanswered work from older revisions.
+          const previousInquiries = await tx.partnerInquiry.findMany({ where: {
+            caseId: command.caseId, caseRevision: { lt: command.expected.revision },
+            rows: { some: { outcome: 'PENDING' } },
+          }, orderBy: { id: 'asc' }, select: { id: true } });
+          for (const previous of previousInquiries) {
+            await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${previous.id} FOR UPDATE`;
+            const pendingRows = await tx.partnerInquiryRow.findMany({ where: {
+              inquiryId: previous.id, outcome: 'PENDING',
+            }, select: { id: true, revision: true } });
+            if (!pendingRows.length) continue;
+            for (const row of pendingRows) await tx.partnerInquiryRow.update({ where: { id: row.id },
+              data: { outcome: 'CANCELLED', revision: row.revision + 1 } });
+            const cancelled = await tx.partnerInquiry.update({ where: { id: previous.id },
+              data: { revision: { increment: 1 } }, select: { revision: true } });
+            const previousAssignment = await tx.partnerInquiryAssignment.findFirstOrThrow({ where: { inquiryId: previous.id }, orderBy: { revision: 'desc' } });
+            const cancelledEventId = randomUUID();
+            await tx.partnerInquiryEvent.create({ data: { id: cancelledEventId, inquiryId: previous.id,
+              revision: cancelled.revision, actorId: dependencies.actorId, commandId: command.commandId,
+              correlationId: command.correlationId, type: 'INQUIRY_CANCELLED',
+              reason: 'جایگزینی استعلام پس از ویرایش محصولات', evidence: { version: 1,
+                rowIds: pendingRows.map(row => row.id), replacementInquiryId: inquiry.id,
+                assignmentId: previousAssignment.id, assignmentRevision: previousAssignment.revision,
+                responderId: previousAssignment.responderId,
+                caseId: command.caseId, caseRevision: command.expected.revision } } });
+            replacementEventIds.push(cancelledEventId);
+            await reconcilePartnerPricingDuty(tx, { inquiryId: previous.id,
+              actorUserId: dependencies.actorId, cancelled: true, now: clock.now });
+          }
+        }
         const eventId = randomUUID();
         await tx.partnerInquiryEvent.create({ data: { id: eventId, inquiryId: inquiry.id, revision: inquiry.revision,
           actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,
@@ -474,11 +509,11 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           await createPartnerPricingDuty(tx, { inquiryId: inquiry.id, actorUserId: dependencies.actorId,
             inquiryRevision: inquiry.revision, now: clock.now });
         }
-        const receipt = { version: 1, commandId: command.commandId, eventIds: [eventId] };
+        const receipt = { version: 1, commandId: command.commandId, eventIds: [...replacementEventIds, eventId] };
         await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId,
           operation: command.type, targetScope: scope, key: command.idempotency.key, payloadHash: expectedHash,
           outcome: receipt } });
-        return { ok: true, value: { commandId: command.commandId, replayed: false, eventIds: [eventId] } };
+        return { ok: true, value: { commandId: command.commandId, replayed: false, eventIds: [...replacementEventIds, eventId] } };
       }));
     },
     query: createPartnerInquiryQuery(dependencies),

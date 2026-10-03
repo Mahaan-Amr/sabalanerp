@@ -5,7 +5,7 @@ export function partnerRetailPresentation(draft: PartnerTechnicalDraft, catalog:
   const title = (row: { catalogItemId: string; catalogSnapshotVersion: string }) => catalog.find(product =>
     product.catalogItemId === row.catalogItemId && product.catalogSnapshotVersion === row.catalogSnapshotVersion)?.name ?? row.catalogItemId;
   return new Map<string, { title: string; parentProductRowId?: string }>([
-    ...draft.rows.map(row => [row.productRowId, { title: title(row) }] as const),
+    ...draft.rows.map(row => [row.productRowId, { title: row.contractualTitle ?? title(row) }] as const),
     ...(draft.dependents ?? []).flatMap(row => row.kind === 'remainder' ? [[row.productRowId,
       { title: title(row), parentProductRowId: row.sourceProductRowId }] as const] : []),
   ]);

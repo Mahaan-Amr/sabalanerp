@@ -9,6 +9,7 @@ import { ErpInlineState } from '@/components/erp';
 
 export type PartnerCaseWorkspaceProps = {
   view: PartnerCaseView;
+  commercial?: PartnerCaseRuntimeRow['commercial'];
   customerOutput?: CustomerContractOutput;
   history?: PartnerCaseRuntimeRow['history'];
   accountingCorrectionRequests?: PartnerCaseRuntimeRow['accountingCorrectionRequests'];
@@ -23,14 +24,14 @@ export type PartnerCaseWorkspaceProps = {
   onSaveCorrection?: Parameters<typeof PartnerCorrectionPanel>[0]['onSave'];
 };
 
-export function PartnerCaseWorkspace({ view, actions, customerOutput, history, accountingCorrectionRequests, collections, correction, correctionPending = false,
+export function PartnerCaseWorkspace({ view, actions, customerOutput, history, commercial, accountingCorrectionRequests, collections, correction, correctionPending = false,
   canRecordCollection = false, onRecordCollection, onReverseCollection, onRequestCorrection = () => undefined, onSaveCorrection = () => undefined }: PartnerCaseWorkspaceProps) {
-  return <PartnerCaseDetail view={view} actions={actions} customerOutput={customerOutput} history={history}>
+  return <PartnerCaseDetail view={view} actions={actions} customerOutput={customerOutput} history={history} commercial={commercial}>
     {accountingCorrectionRequests?.map(request => <ErpInlineState key={request.id} kind="stale"
       title={<span>درخواست اصلاح سند داخلی سبلان: {request.reason}</span>}
       action={actions.canRequestCorrection ? { label: 'درخواست اصلاح پرونده',
         onClick: () => onRequestCorrection('SHARED') } : undefined} />)}
-    <PartnerCaseSupplementary view={view} collections={collections} correction={correction}
+    <PartnerCaseSupplementary view={view} collections={collections} correction={actions.canRequestCorrection || correction ? correction : undefined}
       correctionPending={correctionPending} canRecordCollection={canRecordCollection} onRecordCollection={onRecordCollection} onReverseCollection={onReverseCollection}
       onRequestCorrection={onRequestCorrection} onSaveCorrection={onSaveCorrection} />
   </PartnerCaseDetail>;

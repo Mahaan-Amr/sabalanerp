@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import { ErpButton, ErpCard, ErpInlineState, ErpInput, ErpSheet } from '@/components/erp';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import ManualContractSummary from './ManualContractSummary';
 import type { CustomerContractOutput } from '../../../../../packages/partner-sales-contracts';
 
@@ -92,9 +93,12 @@ export default function ConfirmationContractView({
     <main className="sds-workspace min-h-screen px-4 py-10 text-primary">
       <div className="mx-auto max-w-5xl space-y-6">
         <ErpCard className="p-6">
-          <h1 className="mb-2 text-2xl font-bold">تایید دیجیتال قرارداد</h1>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h1 className="mb-2 text-2xl font-bold">تایید دیجیتال قرارداد</h1>
+            <ThemeToggle />
+          </div>
           <p className="text-secondary">
-            لطفا اطلاعات قرارداد را بررسی کنید. ثبت کد پیامک شده به منزله تایید نهایی قرارداد و شرایط درج شده در آن است.
+            لطفا اطلاعات قرارداد را بررسی کنید. ثبت کد پیامک‌شده، پذیرش همین نسخه و شرایط آن توسط شما را ثبت می‌کند.
           </p>
         </ErpCard>
 

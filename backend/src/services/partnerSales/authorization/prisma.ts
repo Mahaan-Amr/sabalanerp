@@ -11,7 +11,7 @@ export type ResolvePartnerAuthority<Action extends PartnerActionV2 = PartnerActi
   actorId: string; root: AuthorizationRoot;
 }) => Promise<Pick<AuthorizationEvidence<Action>, 'grants' | 'authorizationRevision'>>;
 export type PartnerAuthorizationTarget = { correctionOpportunityId: string } | { prospectiveProfileOwnerId: string }
-  | { customerTransferId: string };
+  | { customerTransferId: string } | { directTransferProfileId: string };
 export type PartnerInquiryRecordTarget = {
   kind: 'ASSIGNMENT' | 'ROW' | 'APPROVAL' | 'EVENT' | 'NOTIFICATION_DELIVERY'; id: string;
 };
@@ -64,8 +64,7 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
           customerId: true, fromOwnerUserId: true, fromProfileId: true, toProfileId: true, revision: true, status: true,
           fromProfile: { select: { state: true, revision: true } }, toProfile: { select: { userId: true } },
         } });
-        if (transfer?.customerId === root.id && transfer.fromOwnerUserId === customer.ownerUserId &&
-            transfer.status === 'PENDING') {
+        if (transfer?.customerId === root.id) {
           for (const id of [...new Set([transfer.fromProfileId, transfer.toProfileId]
             .filter((item): item is string => Boolean(item)))].sort()) {
             await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${id} FOR UPDATE`;
@@ -81,6 +80,10 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
             ...(owner.departmentId ? { departmentId: owner.departmentId } : {}) };
         }
         profileId = null;
+      } else if (customer?.isActive && customer.ownerUserId && target && 'directTransferProfileId' in target) {
+        const owner = await tx.user.findUnique({ where: { id: customer.ownerUserId }, select: { departmentId: true } });
+        if (owner) resource = { root, partnerSellerId: customer.ownerUserId, partnerStatus: 'ACTIVE',
+          lifecycleRevision: customer.partnerRevision ?? 1, ...(owner.departmentId ? { departmentId: owner.departmentId } : {}) };
       } else if (customer?.isActive && customer.ownerUserId) {
         profileId = (await tx.partnerProfile.findUnique({ where: { userId: customer.ownerUserId }, select: { id: true } }))?.id ?? null;
       }

@@ -29,13 +29,13 @@ export interface PartnerSubmissionState {
   cleanupPending?: boolean;
 }
 
-function revisionIntent(intent: PartnerDraftIntent, savedCase: PartnerCaseView): PartnerDraftIntent {
+function revisionIntent(intent: PartnerDraftIntent, savedCase: PartnerCaseView, requestPricing = false): PartnerDraftIntent {
   const predecessor = savedCase.customerPaymentPlan;
   // The initial request is already attached to the numbered Case. A pricing
   // acceptance revises that Case and must not submit the request again.
   const { pricingRequest: _initialPricingRequest, ...revision } = intent;
   void _initialPricingRequest;
-  return { ...revision, customerPaymentPlan: {
+  return { ...revision, ...(requestPricing && intent.pricingRequest ? { pricingRequest: intent.pricingRequest } : {}), customerPaymentPlan: {
     ...intent.customerPaymentPlan,
     planId: `partner-customer-plan-${crypto.randomUUID()}`,
     version: predecessor.version + 1,
@@ -120,7 +120,7 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
   return {
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    submit: (intent: PartnerDraftIntent) => run(async () => {
+    submit: (intent: PartnerDraftIntent, options?: { requestPricing?: boolean }) => run(async () => {
       if (recovery.pending()) { uncertain(); return; }
       const parsed = CaseDraftIntentSchema.safeParse(intent);
       if (!parsed.success) { publish({ phase: 'editing', message: 'اطلاعات پرونده کامل نیست؛ محصول، مشتری، پرداخت و تحویل را بررسی کنید.',
@@ -129,11 +129,11 @@ export function createPartnerCaseSubmission({ actorId, commands, recovery, initi
       publish({ phase: 'submitting', ...(savedCase ? { case: savedCase } : {}) });
       try {
         const revising = Boolean(savedCase);
-        if (savedCase && !isPartnerCaseEditableState(savedCase.state)) {
+        if (savedCase && !(isPartnerCaseEditableState(savedCase.state) || savedCase.commercialFlowVersion === 1 && savedCase.state === 'COMMITTED')) {
           publish({ phase: 'created', case: savedCase, message: 'این پرونده دیگر در وضعیت پیش‌نویس قابل ویرایش نیست.' }); return;
         }
         const type = revising ? 'CASE_DRAFT_REVISE' as const : 'CASE_SUBMIT' as const;
-        const commandIntent = savedCase ? revisionIntent(parsed.data, savedCase) : parsed.data;
+        const commandIntent = savedCase ? revisionIntent(parsed.data, savedCase, options?.requestPricing) : parsed.data;
         const editLease = savedCase ? await recovery.prepareEditLease() : undefined;
         const payloadHash = await canonicalHash({ schemaVersion: 1, type, intent: commandIntent });
         const identity = crypto.randomUUID();

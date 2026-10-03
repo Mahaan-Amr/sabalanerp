@@ -16,11 +16,13 @@ const saved = z.object({
     unit: z.enum(['meter', 'squareMeter', 'count', 'ton']),
     // Comparison with the preceding validated save, not an approval decision.
     configurationChange: z.enum(['NEW', 'UNCHANGED', 'CHANGED']),
-  }).strict().refine(row => row.unit !== 'count' || /^[0-9]+(?:\.0+)?$/.test(row.quantity), 'Piece count must be integral')).min(1),
+  }).strict().refine(row => row.unit !== 'count' || /^[0-9]+(?:\.0+)?$/.test(row.quantity), 'Piece count must be integral')),
+  serviceRows: z.array(z.object({ serviceRowId: PartnerConfigurationRefSchema.shape.productRowId, quantity: QuantitySchema, unit: z.enum(['meter', 'squareMeter', 'count']) }).strict()).optional(),
   pricingSubjects: z.array(z.object({ configurationRef: PartnerConfigurationRefSchema,
     role: z.enum(['PRIMARY', 'ADDITIONAL_MATERIAL']) }).strict()).optional(),
 }).strict();
 const coherent = (value: z.infer<typeof saved>, context: z.RefinementCtx) => {
+  if (!value.rows.length && !value.serviceRows?.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Products or services required' });
   const ids = new Set<string>();
   for (const { configurationRef: ref } of value.rows) {
     if (ref.recoveryId !== value.recoveryId || ref.recoveryRevision !== value.recoveryRevision || ids.has(ref.productRowId)) {

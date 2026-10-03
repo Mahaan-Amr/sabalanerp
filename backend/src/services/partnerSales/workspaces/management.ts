@@ -10,13 +10,15 @@ import {
   type PartnerManagementWorkspaceViewV2,
   type Result,
 } from '@sabalanerp/partner-sales-contracts';
+import type { PartnerAuthorizationTarget } from '../authorization/prisma';
+import { resolvePartnerScopedAuthority } from '../authorization/centralAuthority';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { projectActionAvailabilityV2 } from '../authorization/availability';
 import { createPrismaPartnerProfileManagementStore } from '../profiles/managementPrismaStore';
 import { createPrismaPartnerProfileStore } from '../profiles/prismaStore';
 
 type Transaction = Prisma.TransactionClient;
-type Page = { cursor?: string; limit: number };
+type Page = { cursor?: string; limit: number; section?: 'PROFILES' | 'TRANSFERS'; history?: boolean; transferStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'; search?: string; transferId?: string };
 type Purpose = 'ONBOARDING' | 'MANAGEMENT' | 'ACCOUNTING' | 'CRM';
 
 const actionGroups: ReadonlyArray<{ purpose: Purpose; actions: readonly PartnerActionV2[] }> = [
@@ -53,9 +55,9 @@ export function createPrismaManagementWorkspaceReader(input: {
   const managementStore = createPrismaPartnerProfileManagementStore(input.database);
   const profileStore = createPrismaPartnerProfileStore(input.database);
 
-  function authorization(transaction: Transaction, purpose: Purpose, reason?: string) {
+  function authorization(transaction: Transaction, purpose: Purpose, reason?: string, target?: PartnerAuthorizationTarget) {
     return createAuditedPartnerAuthorization(transaction, { actorId: input.actorId, purpose, channel: 'API' },
-      { correlationId: input.correlationId, ...(reason ? { reason } : {}) });
+      { correlationId: input.correlationId, ...(reason ? { reason } : {}) }, target);
   }
 
   async function profileActions(transaction: Transaction, profileId: string,
@@ -108,12 +110,17 @@ export function createPrismaManagementWorkspaceReader(input: {
   return async function readManagementWorkspace(transaction: Transaction, page: Page):
   Promise<Result<PartnerManagementWorkspaceViewV2>> {
     const take = Math.min(page.limit * 4 + 1, 401);
-    const profiles = await transaction.partnerProfile.findMany({
-      where: page.cursor ? { id: { gt: page.cursor } } : undefined,
+    const profiles = page.section === 'TRANSFERS' ? [] : await transaction.partnerProfile.findMany({
+      where: { ...(page.cursor ? { id: { gt: page.cursor } } : {}),
+        ...(page.section === 'PROFILES' ? page.history
+          ? { OR: [{ state: 'TERMINATED' }, { user: { isActive: false } }] }
+          : { state: { in: ['ACTIVE', 'SUSPENDED', 'PENDING'] }, user: { isActive: true } } : {}),
+        ...(page.search ? { user: { AND: [ ...(page.section === 'PROFILES' && !page.history ? [{ isActive: true }] : []),
+          { OR: [{ firstName: { contains: page.search, mode: 'insensitive' } }, { lastName: { contains: page.search, mode: 'insensitive' } }] }] } } : {}) },
       orderBy: { id: 'asc' }, take,
       select: {
         id: true, userId: true, state: true, revision: true, firstActivatedAt: true, irreversibleAt: true,
-        user: { select: { firstName: true, lastName: true, username: true } },
+        user: { select: { firstName: true, lastName: true, username: true, isActive: true } },
         commercialAccount: { select: {
           identities: { orderBy: { version: 'desc' }, take: 1, select: {
             legalName: true, phone: true, address: true, identifiers: true, integrityHash: true,
@@ -228,7 +235,7 @@ export function createPrismaManagementWorkspaceReader(input: {
         ? { action: item.action, enabled: false, disabledReason: partnerError('DEPENDENCY_BLOCKED') } : item);
       projected.push({
         profile: profileView.data,
-        displayName: label(profile.user),
+        displayName: label(profile.user), accountActive: profile.user.isActive,
         actions: visibleActions,
         lifecycleBlockers,
         ...(gates.identityVerified && identity && typeof identitySource?.evidenceId === 'string' &&
@@ -269,29 +276,56 @@ export function createPrismaManagementWorkspaceReader(input: {
     }
 
     const transfers: PartnerManagementWorkspaceViewV2['transfers'] = [];
-    const pendingTransfers = await transaction.partnerCustomerTransfer.findMany({ where: { status: 'PENDING' },
-      orderBy: { id: 'asc' }, take: 100, select: { id: true, revision: true, customerId: true, match: {
-        select: { snapshot: true },
-      } } });
-    for (const transfer of pendingTransfers) {
-      const port = authorization(transaction, 'CRM');
-      const transferVisibility = await visibility(transaction, 'CRM',
-        { kind: 'CUSTOMER', id: transfer.customerId }, 'CUSTOMER_READ');
-      if (!transferVisibility.visible) {
-        if (transferVisibility.error) return { ok: false, error: transferVisibility.error };
-        continue;
+    const transferTake = Math.min(page.limit * 4 + 1, 401);
+    const pendingTransfers = page.section === 'PROFILES' ? [] : await transaction.partnerCustomerTransfer.findMany({
+      where: { ...(page.transferId ? {} : { status: page.transferStatus ?? 'PENDING' }), ...(page.transferId ? { id: page.transferId } : page.section === 'TRANSFERS' && page.cursor ? { id: { gt: page.cursor } } : {}),
+        ...(page.search ? { OR: [{ requestReason: { contains: page.search, mode: 'insensitive' } },
+          { customer: { OR: [{ firstName: { contains: page.search, mode: 'insensitive' } }, { lastName: { contains: page.search, mode: 'insensitive' } }, { companyName: { contains: page.search, mode: 'insensitive' } }] } }] } : {}) },
+      orderBy: { id: 'asc' }, take: transferTake,
+      include: { match: { select: { snapshot: true } }, fromOwner: { select: { firstName: true, lastName: true, username: true } },
+        toProfile: { select: { state: true, user: { select: { firstName: true, lastName: true, username: true, isActive: true } } } } },
+    });
+    for (const [index, transfer] of pendingTransfers.entries()) {
+      if (page.section === 'TRANSFERS') scannedCursor = transfer.id;
+      const port = authorization(transaction, 'CRM',
+        'Transfer availability projection; execution requires the actor decision reason.', { customerTransferId: transfer.id });
+      const visible = await port.authorize('CUSTOMER_READ', { kind: 'CUSTOMER', id: transfer.customerId });
+      if (!visible.ok) {
+        if ([403, 404].includes(visible.error.status)) continue;
+        return visible;
       }
-      const actions = await projectActionAvailabilityV2(port, { kind: 'CUSTOMER', id: transfer.customerId },
-        ['CUSTOMER_TRANSFER_DECIDE']);
+      const actions = transfer.status === 'PENDING' ? await projectActionAvailabilityV2(port,
+        { kind: 'CUSTOMER', id: transfer.customerId }, ['CUSTOMER_TRANSFER_DECIDE']) : [];
       const match = DuplicateCustomerMatchSchema.safeParse(transfer.match.snapshot);
       if (!match.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-      transfers.push({ transferId: transfer.id, revision: transfer.revision, match: match.data, actions });
+      const approvalBlockers: NonNullable<PartnerManagementWorkspaceViewV2['transfers'][number]['approvalBlockers']> = [];
+      if (transfer.status === 'PENDING' && actions.some(action => action.enabled)) {
+        if (transfer.toProfile.state !== 'ACTIVE' || !transfer.toProfile.user.isActive) approvalBlockers.push({ label: 'فروشنده مقصد فعال نیست.', owner: 'مدیریت همکاران' });
+        const cases = await transaction.partnerSaleCase.findMany({ where: { customerId: transfer.customerId,
+          state: { in: ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'] } },
+          select: { id: true, profile: { select: { user: { select: { firstName: true, lastName: true, username: true } } } } } });
+        for (const item of cases) approvalBlockers.push({ label: 'پرونده فروش ناتمام باید تعیین تکلیف شود.',
+          owner: label(item.profile.user), href: `/dashboard/sales/partner-cases?caseId=${item.id}` });
+      }
+      transfers.push({ transferId: transfer.id, revision: transfer.revision, match: match.data, actions,
+        status: transfer.status, customerId: transfer.customerId, currentOwner: label(transfer.fromOwner), requester: label(transfer.toProfile.user),
+        requestReason: transfer.requestReason, requestedAt: transfer.requestedAt.toISOString(),
+        ...(transfer.decisionReason ? { decisionReason: transfer.decisionReason } : {}), approvalBlockers });
+      if (page.section === 'TRANSFERS' && transfers.length === page.limit) {
+        hasUnscanned = index < pendingTransfers.length - 1; break;
+      }
     }
 
+    const actor = await transaction.user.findUnique({ where: { id: input.actorId }, select: { role: true, partnerProfile: { select: { id: true } } } });
+    const authority = await resolvePartnerScopedAuthority(transaction, { actorId: input.actorId, root: { kind: 'PROFILE', id: 'management-sections' } });
+    const isAdmin = actor?.role === 'ADMIN' && !actor.partnerProfile;
+    const availableSections: Array<'PROFILES' | 'TRANSFERS'> = [];
+    if (isAdmin || authority.grants.some(grant => grant.action === 'PROFILE_READ' && grant.purpose === 'ONBOARDING')) availableSections.push('PROFILES');
+    if (isAdmin || authority.grants.some(grant => grant.action === 'CUSTOMER_TRANSFER_DECIDE' && grant.purpose === 'CRM')) availableSections.push('TRANSFERS');
     const view = PartnerManagementWorkspaceViewV2Schema.safeParse({
       schemaVersion: 2, purpose: 'PARTNER_MANAGEMENT', actorId: input.actorId,
-      personaLabel: 'مدیریت فروش همکار', actions: [], profiles: projected, transfers,
-      ...((hasUnscanned || profiles.length === take) && scannedCursor ? { nextCursor: scannedCursor } : {}),
+      personaLabel: 'مدیریت فروش همکار', actions: [], profiles: projected, transfers, availableSections,
+      ...((hasUnscanned || (page.section === 'TRANSFERS' ? pendingTransfers.length === transferTake : profiles.length === take)) && scannedCursor ? { nextCursor: scannedCursor } : {}),
     });
     return view.success ? { ok: true, value: view.data }
       : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };

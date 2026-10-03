@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CaseStateSchema, CustomerPaymentPlanSchema, DateSchema, DecimalSchema, DeliverySchema, DisplayPartySchema, HashSchema, IdSchema, InstantSchema, MoneySchema, PartnerCustomerConfirmationStateSchema, PartnerPricingStateSchema, PaymentPlanSchema, ProductDisplaySchema, RevisionRefSchema, RevisionSchema, SignedDecimalSchema, TextSchema, TotalsSchema } from './primitives';
+import { CaseStateSchema, CustomerPaymentPlanSchema, DateSchema, DecimalSchema, DeliverySchema, DisplayPartySchema, CustomerDisplayPartySchema, HashSchema, IdSchema, InstantSchema, MoneySchema, PartnerCustomerConfirmationStateSchema, PartnerPricingStateSchema, PaymentPlanSchema, ProductDisplaySchema, RevisionRefSchema, RevisionSchema, SignedDecimalSchema, TextSchema, TotalsSchema } from './primitives';
 
 // Positive, recursively strict DTOs. Never spread a Prisma entity into these views.
 // The internal Case hash is intentionally absent from the public output.
@@ -7,7 +7,7 @@ export const CustomerContractOutputSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('CUSTOMER_OUTPUT'),
   contractNumber: IdSchema, revision: RevisionSchema, outputHash: HashSchema,
   status: z.enum(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED', 'PRINTED', 'CANCELLED']),
-  contractDate: DateSchema, seller: DisplayPartySchema, customer: DisplayPartySchema,
+  contractDate: DateSchema, seller: DisplayPartySchema, customer: CustomerDisplayPartySchema,
   products: z.array(ProductDisplaySchema.extend({ retailUnitPrice: DecimalSchema,
     productCode: TextSchema.optional(), productType: TextSchema.optional(),
     lengthMeters: DecimalSchema.optional(), widthMeters: DecimalSchema.optional(),
@@ -33,6 +33,7 @@ export const PartnerCaseViewSchema = z.object({
   customerContractNumber: IdSchema.optional(), state: CaseStateSchema,
   pricingState: PartnerPricingStateSchema.default('READY_TO_FINALIZE'),
   preparationCompleted: z.boolean().optional(),
+  commercialFlowVersion: z.literal(1).optional(),
   customerConfirmationState: PartnerCustomerConfirmationStateSchema.default('NOT_SENT'),
   catalogLayerRates: z.array(z.object({ parentProductRowId: IdSchema, layerTitle: TextSchema,
     layerUnit: z.enum(['set', 'physicalPiece', 'meter', 'squareMeter']),
@@ -50,7 +51,9 @@ export const SabalanInternalRecordViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('ACCOUNTING'), sourceKind: z.literal('SABALAN_TO_PARTNER'),
   owner: RevisionRefSchema, recordId: IdSchema, recordNumber: IdSchema, caseNumber: IdSchema, customerContractNumber: IdSchema,
   commercialAccountId: IdSchema, debtor: DisplayPartySchema, state: CaseStateSchema,
-  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema, wholesaleLineTotal: DecimalSchema.optional(), approvalEvidenceId: IdSchema }).strict()),
+  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema, wholesaleLineTotal: DecimalSchema.optional(), approvalEvidenceId: IdSchema.optional(), serviceRateEvidenceId: HashSchema.optional(), productType: TextSchema.optional() }).strict().refine(row => row.productType === 'service'
+    ? Boolean(row.serviceRateEvidenceId) && !row.approvalEvidenceId
+    : Boolean(row.approvalEvidenceId) && !row.serviceRateEvidenceId, 'Stone rows require approval; independent services require catalog rate evidence')),
   totals: TotalsSchema, sabalanPaymentPlan: PaymentPlanSchema,
 }).strict();
 export const FulfillmentViewSchema = z.object({
@@ -69,7 +72,8 @@ export const PartnerAccountViewSchema = z.object({
 export const DuplicateCustomerMatchSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('DUPLICATE_MATCH'), matchReference: IdSchema,
   displayName: TextSchema, personType: z.enum(['NATURAL', 'LEGAL']), city: TextSchema,
-  maskedWitness: z.string().regex(/^\*{4,}\d{4}$/),
+  // Administrative transfers may originate from a customer with no phone witness.
+  maskedWitness: z.union([z.string().regex(/^\*{4,}\d{4}$/), z.literal('ثبت‌نشده')]),
 }).strict();
 export type DuplicateCustomerMatch = z.infer<typeof DuplicateCustomerMatchSchema>;
 export const PartnerProfileViewSchema = z.object({

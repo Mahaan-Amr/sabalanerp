@@ -1,5 +1,6 @@
 'use client';
 
+import { ErpPresentationProvider } from '@/components/erp';
 import { ManagementWorkspace } from '../management/ManagementWorkspace';
 import { createPartnerManagementHttpPort } from '../management/partnerManagementHttpPort';
 import { createPartnerWorkspaceHttpPort } from './partnerWorkspaceHttpPort';
@@ -10,5 +11,5 @@ const commands = createPartnerRuntimeCommandPort();
 const management = createPartnerManagementHttpPort();
 
 export function PartnerManagementRuntime() {
-  return <ManagementWorkspace queryPort={queries} commandPort={commands} managementPort={management} />;
+  return <ErpPresentationProvider scope="workspace"><ManagementWorkspace queryPort={queries} commandPort={commands} managementPort={management} /></ErpPresentationProvider>;
 }

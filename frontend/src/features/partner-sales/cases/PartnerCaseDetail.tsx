@@ -1,5 +1,6 @@
 'use client';
 
+import { partnerCommercialLabels, partnerInquiryLabels, type PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 import React from 'react';
 import { partnerCustomerContractLabel, partnerTrackingCode, type CustomerContractOutput, type PartnerCaseRuntimeRow, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import { ErpActionGrid, ErpBadge, ErpButton, ErpCard, ErpFieldView, ErpPage, ErpSection, ErpTwoColumn, type ErpAction, type ErpMetric, type ErpTone } from '@/components/erp';
@@ -11,6 +12,8 @@ import PersianCalendar from '@/lib/persian-calendar';
 export type PartnerCaseActions = {
   canPreview: boolean;
   canContinue?: boolean;
+  canReviewPricing?: boolean;
+  canEditDraft?: boolean;
   canIssue: boolean;
   canFinalize?: boolean;
   canSendConfirmation?: boolean;
@@ -19,6 +22,7 @@ export type PartnerCaseActions = {
   canRequestVoid: boolean;
   onPreview?: () => void;
   onContinue?: () => void;
+  onEditDraft?: () => void;
   onIssue?: () => void;
   onFinalize?: () => void;
   onSendConfirmation?: () => void;
@@ -42,26 +46,29 @@ const stateCopy: Record<PartnerCaseView['state'], { label: string; tone: ErpTone
   VOIDED: { label: 'باطل‌شده', tone: 'danger' },
 };
 const historyCopy: Record<string, string> = {
+  PARTNER_SELLER_SIGNED: 'ثبت امضای فروشنده',
   CASE_CREATED: 'ایجاد پرونده', CASE_COMMITTED: 'تأیید و ثبت نهایی', CASE_CANCELLED: 'لغو پرونده',
   CUSTOMER_CONFIRMED: 'تأیید مشتری', CUSTOMER_REJECTED: 'رد مشتری',
   CORRECTION_REQUESTED: 'درخواست اصلاح', VOID_REQUESTED: 'درخواست ابطال',
 };
 
-export function PartnerCaseDetail({ view, actions, customerOutput, history, children }: { view: PartnerCaseView; actions: PartnerCaseActions;
-  customerOutput?: CustomerContractOutput; history?: PartnerCaseRuntimeRow['history']; children?: React.ReactNode }) {
-  const status = stateCopy[view.state];
+export function PartnerCaseDetail({ view, actions, customerOutput, history, commercial, children }: { view: PartnerCaseView; actions: PartnerCaseActions;
+  customerOutput?: CustomerContractOutput; history?: PartnerCaseRuntimeRow['history']; commercial?: PartnerCommercialState; children?: React.ReactNode }) {
+  const status = commercial ? { label: partnerCommercialLabels[commercial.status], tone: (commercial.status === 'FINAL' ? 'success' : 'neutral') as ErpTone } : stateCopy[view.state];
   const pageActions = partnerCasePageActions(actions);
   return <ErpPage eyebrow="پرونده فروش همکار" title={`پرونده ${partnerCustomerContractLabel(view.caseNumber, view.customerContractNumber, view.trackingNumber)}`} description={`کد پیگیری: ${partnerTrackingCode(view.caseNumber, view.trackingNumber)}`}
     backHref="/dashboard/sales/partner-cases" actions={pageActions} metrics={partnerCaseMetrics(view, status)}><PartnerCaseDetailContent
-      view={view} actions={actions} customerOutput={customerOutput} history={history} />{children}
+      view={view} actions={actions} customerOutput={customerOutput} history={history} commercial={commercial} />{children}
   </ErpPage>;
 }
 
 export function partnerCasePageActions(actions: PartnerCaseActions): ErpAction[] {
   const items: ErpAction[] = [
     ...(actions.decisionActions ?? []),
-    ...(actions.canContinue ? [{ label: 'ویرایش', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
-    ...(!actions.canContinue && actions.canRequestCorrection ? [{ label: 'ویرایش', icon: FaEdit,
+    ...(actions.canEditDraft ? [{ label: 'ویرایش', icon: FaEdit, tone: 'info' as const, onClick: actions.onEditDraft }] : []),
+    ...(!actions.canEditDraft && actions.canContinue ? [{ label: 'ویرایش', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
+    ...(actions.canContinue && actions.canReviewPricing ? [{ label: 'ادامه تکمیل قرارداد', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
+    ...(!actions.canEditDraft && !actions.canContinue && actions.canRequestCorrection ? [{ label: 'درخواست اصلاح', icon: FaEdit,
       tone: 'info' as const, onClick: actions.onRequestCorrection, disabled: actions.pending }] : []),
     ...(!actions.decisionActions && actions.canCancel ? [{ label: 'لغو پیش‌نویس', icon: FaBan, tone: 'danger' as const,
       onClick: actions.onCancel, disabled: actions.pending }] : []),
@@ -89,8 +96,8 @@ export function partnerCaseMetrics(view: PartnerCaseView, status = stateCopy[vie
     ];
 }
 
-export function PartnerCaseDetailContent({ view, actions, customerOutput, history, initialSection = 'summary' }: { view: PartnerCaseView;
-  actions: PartnerCaseActions; customerOutput?: CustomerContractOutput; history?: PartnerCaseRuntimeRow['history'];
+export function PartnerCaseDetailContent({ view, actions, customerOutput, history, commercial, initialSection = 'summary' }: { view: PartnerCaseView;
+  actions: PartnerCaseActions; customerOutput?: CustomerContractOutput; history?: PartnerCaseRuntimeRow['history']; commercial?: PartnerCommercialState;
   initialSection?: ContractDetailSection }) {
   const [section, setSection] = React.useState<ContractDetailSection>(initialSection);
   return <>
@@ -99,7 +106,8 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <ErpFieldView label="کد پیگیری" value={partnerTrackingCode(view.caseNumber, view.trackingNumber)} />
         <ErpFieldView label="شماره قرارداد مشتری" value={view.customerContractNumber ?? 'در انتظار صدور'} />
-        <ErpFieldView label="وضعیت قرارداد" value={stateCopy[view.state].label} />
+        <ErpFieldView label="وضعیت قرارداد" value={commercial ? partnerCommercialLabels[commercial.status] : stateCopy[view.state].label} />
+        {commercial && <ErpFieldView label="وضعیت استعلام" value={partnerInquiryLabels[commercial.inquiry]} />}
         <ErpFieldView label="تأیید مشتری" value={{ NOT_SENT: 'ارسال نشده', SENT: 'در انتظار تأیید',
           APPROVED: 'تأییدشده', REJECTED: 'ردشده', RECONFIRMATION_REQUIRED: 'نیازمند تأیید دوباره' }[view.customerConfirmationState]} />
       </div>

@@ -1,3 +1,4 @@
+import { readPartnerCommercialState } from '../services/partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
 import { isOrdinaryCommercialFlow, commercialDeadlinePassed, isCommerciallyFinal, renewOrdinaryContract, readCommercialExpiryDays, lockOrdinaryContract, canManageCommercialSettings } from '../services/ordinaryContractLifecycle';
 import express, { Response } from 'express';
@@ -675,7 +676,7 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     // Sales workspace/department grants. Those grants must never disclose
     // Sabalan's ordinary contracts.
     let whereClause: any = { isInactive: lifecycleView === 'inactive' };
-    if (statuses.length) whereClause.status = { in: statuses };
+    const quotedFilter = String(req.query.status || '').split(',').includes('QUOTED');
     const partnerProfileId = await readPartnerProfileId(prisma, req.user.id, req.user.role);
 
     if (req.user.role === 'ADMIN') {
@@ -693,6 +694,29 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
           { OR: buildContractSearchConditions(search) }
         ]
       };
+    }
+
+    const partnerStates = new Map<string, string>();
+    const partnerSalesApprovals = new Map<string, boolean>();
+    const projectPartnerStatus = async (contract: { id: string; partnerKind: string | null; commercialFlowVersion: number; partnerCaseId: string | null }) => {
+      if (contract.partnerKind !== 'PARTNER_CUSTOMER' || contract.commercialFlowVersion !== 2 || !contract.partnerCaseId) return;
+      const state = await readPartnerCommercialState(prisma, contract.partnerCaseId);
+      if (state) {
+        partnerStates.set(contract.id, state.status);
+        partnerSalesApprovals.set(contract.id, state.salesApproved);
+      }
+    };
+    if (statuses.length || quotedFilter) {
+      const candidates = await prisma.salesContract.findMany({ where: { AND: [whereClause, { partnerKind: 'PARTNER_CUSTOMER', commercialFlowVersion: 2 }] },
+        select: { id: true, partnerKind: true, commercialFlowVersion: true, partnerCaseId: true } });
+      for (const candidate of candidates) await projectPartnerStatus(candidate);
+      const selected = new Set<string>([...statuses, ...(quotedFilter ? ['QUOTED'] : [])]);
+      const statusKeys: Record<string, string> = { NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', FINAL: 'SIGNED', QUOTED: 'QUOTED', CANCELLED: 'CANCELLED', EXPIRED: 'EXPIRED' };
+      const matchingIds = [...partnerStates].filter(([, state]) => selected.has(statusKeys[state])).map(([id]) => id);
+      whereClause = { AND: [whereClause, { OR: [
+        { AND: [{ OR: [{ partnerKind: null }, { partnerKind: { not: 'PARTNER_CUSTOMER' } }, { commercialFlowVersion: { not: 2 } }] }, { status: { in: statuses } }] },
+        { id: { in: matchingIds } },
+      ] }] };
     }
 
     const contracts = await prisma.salesContract.findMany({
@@ -762,6 +786,7 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
       }
     });
 
+    for (const contract of contracts) if (!partnerStates.has(contract.id)) await projectPartnerStatus(contract);
     const contractIds = contracts.map((contract) => contract.id);
     const [financiallyApprovedRecords, approvedCorrectionRequests, accountingSummaries] = contractIds.length
       ? await Promise.all([
@@ -797,6 +822,8 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     );
     const contractsWithAccountingLock = await Promise.all(contracts.map(async (contract) => ({
       ...contract,
+      partnerCommercialStatus: partnerStates.get(contract.id),
+      partnerSalesApproved: partnerSalesApprovals.get(contract.id),
       commercialActions: await projectCommercialActions(contract, req.user),
       accountingEditLocked: financiallyApprovedByContractId.has(contract.id) || !!contract.firstFinancialRecordAt,
       canOpenCorrectionEdit: approvedCorrectionByContractId.has(contract.id),

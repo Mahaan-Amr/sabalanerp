@@ -1,7 +1,7 @@
 import type { PartnerEvent } from '../../../../../packages/partner-sales-contracts';
 import { CaseEvidence, CommercialRevision, ContractRuntime, Metrics, Period, ReportChartTransaction, ReportPurpose, ReportRow, ReportingError } from './contracts';
 import { negate, subtract, sum } from './money';
-import { projectSabalanRevenue, visibleEvents } from './revenue';
+import { effectiveThrough, projectSabalanRevenue, visibleEvents } from './revenue';
 import { caseHistory, collectionHistory } from './history';
 
 const conflict = (): never => { throw new ReportingError('INTEGRITY_CONFLICT'); };
@@ -146,7 +146,9 @@ export function projectReportRow(runtime: ContractRuntime, data: CaseEvidence, p
   row.currency = internal.totals.currency;
   if (purpose !== 'PARTNER') row.internalRecordNumber = internal.recordNumber;
   const revenue = projectSabalanRevenue(runtime, events, period);
-  row.metrics = { wholesalePurchases: sum(revenue.map(event => event.amount)) };
+  row.metrics = { wholesalePurchases: sum(data.financialRevenue !== undefined
+    ? data.financialRevenue.filter(event => event.effectiveDate >= period.from && event.effectiveDate <= effectiveThrough(period) && event.recordedAt <= period.asOf).map(event => event.amount)
+    : revenue.map(event => event.amount)) };
   if (data.account === null) row.account = null;
   else {
     const account = runtime.PartnerAccountViewSchema.parse({ schemaVersion: 1, purpose: 'PARTNER_ACCOUNT',

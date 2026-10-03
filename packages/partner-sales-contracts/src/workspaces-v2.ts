@@ -30,7 +30,7 @@ const options = z.array(option).refine(values => new Set(values.map(value => val
 const terms = z.object({ currentVersionId: IdSchema.optional(), summary: TextSchema, options }).strict();
 
 export const PartnerManagementProfileViewV2Schema = z.object({
-  profile: PartnerProfileViewSchema, displayName: TextSchema, actions,
+  profile: PartnerProfileViewSchema, displayName: TextSchema, actions, accountActive: z.boolean().optional(),
   lifecycleBlockers: z.array(PartnerDirectActivationBlockerV4Schema).default([]),
   identity: z.object({ evidenceId: IdSchema, legalName: TextSchema, phone: TextSchema,
     address: TextSchema, personType: z.enum(['NATURAL', 'LEGAL']) }).strict().optional(),
@@ -49,10 +49,16 @@ export type PartnerManagementProfileViewV2 = z.infer<typeof PartnerManagementPro
 export const PartnerManagementWorkspaceViewV2Schema = z.object({
   schemaVersion: z.literal(2), purpose: z.literal('PARTNER_MANAGEMENT'),
   actorId: IdSchema, personaLabel: TextSchema, actions,
+  availableSections: z.array(z.enum(['PROFILES', 'TRANSFERS'])).optional(),
   identityCandidates: z.array(z.object({ identityEvidenceId: IdSchema, displayName: TextSchema }).strict()).optional(),
   profiles: z.array(PartnerManagementProfileViewV2Schema),
   transfers: z.array(z.object({ transferId: IdSchema, revision: RevisionSchema,
-    match: DuplicateCustomerMatchSchema, actions }).strict()),
+    match: DuplicateCustomerMatchSchema, actions,
+    status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(),
+    customerId: IdSchema.optional(), currentOwner: TextSchema.optional(), requester: TextSchema.optional(),
+    requestReason: TextSchema.optional(), requestedAt: InstantSchema.optional(), decisionReason: TextSchema.optional(),
+    approvalBlockers: z.array(z.object({ label: TextSchema, owner: TextSchema, href: TextSchema.optional() }).strict()).optional(),
+  }).strict()),
   nextCursor: IdSchema.optional(),
 }).strict().superRefine((view, context) => {
   if (view.identityCandidates && !view.actions.some(action => action.action === 'PROFILE_CREATE' && action.enabled)) {

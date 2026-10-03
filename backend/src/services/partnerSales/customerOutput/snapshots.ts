@@ -8,14 +8,20 @@ export function createCustomerOutputSnapshots(contract: ContractRuntime) {
   function checkCommercialContent(content: Output): void {
     const ids = new Set(content.products.map(row => row.productRowId));
     if (ids.size !== content.products.length) conflict();
+    const serviceIds = new Set(content.products.filter(row => row.productType === 'service').map(row => row.productRowId));
     const deliveryIds = new Set<string>();
     for (const delivery of content.deliveries) {
       if (deliveryIds.has(delivery.deliveryId)) conflict();
       deliveryIds.add(delivery.deliveryId);
       const rows = new Set<string>();
       for (const row of delivery.items) {
-        if (!ids.has(row.productRowId) || rows.has(row.productRowId)) conflict();
+        if (!ids.has(row.productRowId) || serviceIds.has(row.productRowId) || rows.has(row.productRowId)) conflict();
         rows.add(row.productRowId);
+      }
+      const serviceRows = new Set<string>();
+      for (const row of delivery.serviceItems ?? []) {
+        if (!serviceIds.has(row.serviceRowId) || serviceRows.has(row.serviceRowId)) conflict();
+        serviceRows.add(row.serviceRowId);
       }
     }
     const totals = content.totals;

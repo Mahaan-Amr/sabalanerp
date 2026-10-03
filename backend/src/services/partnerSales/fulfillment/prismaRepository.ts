@@ -1,3 +1,4 @@
+import { partnerCommercialDispatchEligible } from './commercialSettlement';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { parseCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import {
@@ -59,6 +60,7 @@ export function createPrismaPartnerFulfillmentRepository(input: {
             purpose: 'FULFILLMENT', channel: 'API' }, { correlationId: input.correlationId, reason: input.reason })
             .authorize(authAction, { kind: 'CASE', id: row.id });
           if (!authorization.ok) return authorization;
+          if (['MATERIALIZE', 'SELECT_DELIVERY'].includes(action) && !await partnerCommercialDispatchEligible(tx, row.id)) return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
           if (!await readCurrentPartnerCaseViews(tx, row.id)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           const historical = action === 'INSPECT_LOADING';
           const history = historical ? await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: {

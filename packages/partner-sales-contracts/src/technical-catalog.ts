@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { IdSchema, InstantSchema, TextSchema } from './primitives';
+import { IdSchema, InstantSchema, MoneySchema, TextSchema } from './primitives';
 import type { Result } from './errors';
+import { PartnerTechnicalServiceCatalogItemSchema } from './technical-services';
 
 export const PartnerTechnicalFamilySchema = z.enum(['longitudinal', 'stair', 'slab', 'prepared', 'volumetric']);
 // Inventory width/thickness are centimetres; mother length is already metres.
@@ -14,6 +15,7 @@ export const PartnerTechnicalProductSchema = z.object({
   catalogSnapshotVersion: InstantSchema,
   code: TextSchema,
   name: TextSchema,
+  suggestedRetailUnitPrice: MoneySchema.optional(),
   families: z.array(PartnerTechnicalFamilySchema).min(1)
     .refine(values => new Set(values).size === values.length),
   salesUnits: z.object({
@@ -54,6 +56,7 @@ const catalogEnvelope = { schemaVersion: z.literal(1), purpose: z.literal('PARTN
 const catalogPagination = { search: z.string().trim().max(200).optional(), cursor: IdSchema.optional(), limit: z.number().int().min(1).max(100).optional() };
 export const PartnerTechnicalCatalogQuerySchema = z.discriminatedUnion('kind', [
   z.object({ ...catalogEnvelope, ...catalogPagination, kind: z.literal('PRODUCT'), family: PartnerTechnicalFamilySchema.optional() }).strict(),
+  z.object({ ...catalogEnvelope, ...catalogPagination, kind: z.literal('SERVICE'), sourceType: z.enum(['tool', 'cutting', 'finishing']) }).strict(),
   z.object({ ...catalogEnvelope, ...catalogPagination, kind: z.literal('TOOL') }).strict(),
   z.object({ ...catalogEnvelope, ...catalogPagination, kind: z.literal('FINISHING') }).strict(),
   z.object({ ...catalogEnvelope, ...catalogPagination, kind: z.literal('LAYER') }).strict(),
@@ -61,6 +64,7 @@ export const PartnerTechnicalCatalogQuerySchema = z.discriminatedUnion('kind', [
 const catalogPage = { ...catalogEnvelope, nextCursor: IdSchema.optional() };
 export const PartnerTechnicalCatalogPageSchema = z.discriminatedUnion('kind', [
   z.object({ ...catalogPage, kind: z.literal('PRODUCT'), items: z.array(PartnerTechnicalProductSchema).max(100) }).strict(),
+  z.object({ ...catalogPage, kind: z.literal('SERVICE'), items: z.array(PartnerTechnicalServiceCatalogItemSchema).max(100) }).strict(),
   z.object({ ...catalogPage, kind: z.literal('TOOL'), items: z.array(PartnerTechnicalOperationSchema.options[0]).max(100) }).strict(),
   z.object({ ...catalogPage, kind: z.literal('FINISHING'), items: z.array(PartnerTechnicalOperationSchema.options[1]).max(100) }).strict(),
   z.object({ ...catalogPage, kind: z.literal('LAYER'), items: z.array(PartnerTechnicalOperationSchema.options[2]).max(100) }).strict(),

@@ -62,8 +62,12 @@ export const CustomerPaymentPlanSchema = paymentPlanSchema(CustomerCheckEvidence
 export type PaymentPlan = z.infer<typeof PaymentPlanSchema>;
 export type CustomerPaymentPlan = z.infer<typeof CustomerPaymentPlanSchema>;
 export const DisplayPartySchema = z.object({ displayName: TextSchema, phone: TextSchema, address: TextSchema }).strict();
+// CRM customer addresses are optional; seller commercial identity remains complete.
+export const CustomerDisplayPartySchema = DisplayPartySchema.extend({ address: TextSchema.optional() }).strict();
 export const ProductDisplaySchema = z.object({ productRowId: IdSchema, description: TextSchema, quantity: QuantitySchema, unit: TextSchema }).strict();
-export const DeliverySchema = z.object({ deliveryId: IdSchema, date: DateSchema, destination: TextSchema,
+export const DeliveryFieldsSchema = z.object({ deliveryId: IdSchema, date: DateSchema, destination: TextSchema,
   projectManagerName: TextSchema.optional(), receiverName: TextSchema.optional(), notes: TextSchema.optional(),
-  items: z.array(z.object({ productRowId: IdSchema, quantity: QuantitySchema }).strict()).min(1),
+  items: z.array(z.object({ productRowId: IdSchema, quantity: QuantitySchema }).strict()),
+  serviceItems: z.array(z.object({ serviceRowId: IdSchema, quantity: QuantitySchema }).strict()).optional(),
 }).strict();
+export const DeliverySchema = DeliveryFieldsSchema.refine(delivery => delivery.items.length > 0 || (delivery.serviceItems?.length ?? 0) > 0, 'Delivery requires stone items or service execution items');

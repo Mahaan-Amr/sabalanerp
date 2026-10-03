@@ -1,8 +1,14 @@
 import type { PartnerCaseView, PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
-import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
+import { partnerCommercialLabels, partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import type { ErpTone } from '@/components/erp';
 
 export const partnerCaseListTags = {
+  NOTE: { label: partnerCommercialLabels.NOTE, tone: 'neutral' },
+  DRAFT: { label: partnerCommercialLabels.DRAFT, tone: 'info' },
+  CUSTOMER_SIGNED: { label: partnerCommercialLabels.CUSTOMER_SIGNED, tone: 'success' },
+  QUOTED: { label: partnerCommercialLabels.QUOTED, tone: 'info' },
+  FINAL: { label: partnerCommercialLabels.FINAL, tone: 'success' },
+  COMMERCIAL_EXPIRED: { label: partnerCommercialLabels.EXPIRED, tone: 'warning' },
   READY: { label: 'آماده تکمیل', tone: 'success' },
   PARTIAL: { label: 'بخشی از قیمت‌ها دریافت شد', tone: 'warning' },
   WAITING: { label: 'در انتظار پاسخ سبلان', tone: 'info' },
@@ -16,7 +22,8 @@ export const partnerCaseListTags = {
 } satisfies Record<string, { label: string; tone: ErpTone }>;
 export type PartnerCaseListTag = keyof typeof partnerCaseListTags;
 
-export function partnerCaseListTag(view: Pick<PartnerCaseView, 'state' | 'pricingState'>, responseState?: PartnerCaseRuntimeRow['pricingResponseState']): PartnerCaseListTag {
+export function partnerCaseListTag(view: Pick<PartnerCaseView, 'state' | 'pricingState'>, responseState?: PartnerCaseRuntimeRow['pricingResponseState'], commercial?: PartnerCaseRuntimeRow['commercial']): PartnerCaseListTag {
+  if (commercial) return commercial.status === 'EXPIRED' ? 'COMMERCIAL_EXPIRED' : commercial.status;
   if (view.state !== 'DRAFT') return view.state === 'AWAITING_CUSTOMER_CONFIRMATION' ? 'CUSTOMER_PENDING'
     : view.state === 'CUSTOMER_APPROVED' ? 'CUSTOMER_APPROVED' : view.state;
   if (responseState) return responseState === 'REJECTED' ? 'INCOMPLETE' : responseState;
@@ -28,7 +35,7 @@ export function partnerCaseListTag(view: Pick<PartnerCaseView, 'state' | 'pricin
 export function partnerCaseListPage(rows: readonly PartnerCaseRuntimeRow[], search: string,
   tag: string, requestedPage: number) {
   const needle = search.trim().toLocaleLowerCase('fa-IR');
-  const filtered = rows.filter(row => (tag === 'ALL' || partnerCaseListTag(row.view, row.pricingResponseState) === tag) &&
+  const filtered = rows.filter(row => (tag === 'ALL' || partnerCaseListTag(row.view, row.pricingResponseState, row.commercial) === tag) &&
     (!needle || [row.view.caseNumber, partnerTrackingCode(row.view.caseNumber, row.view.trackingNumber),
       row.view.customerContractNumber ?? '', ...row.view.products.map(product => product.description)]
       .some(value => value.toLocaleLowerCase('fa-IR').includes(needle))));

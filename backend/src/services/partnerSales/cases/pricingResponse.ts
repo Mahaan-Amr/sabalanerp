@@ -39,6 +39,7 @@ export async function readCasePricingResponse(tx: Prisma.TransactionClient, inpu
   const subjects = saved.identities.filter(item => (!subjectIds || subjectIds.includes(item.productRowId)) && !saved!.draft.dependents?.some(dependent =>
     dependent.kind === 'remainder' && dependent.productRowId === item.productRowId));
   const required = await Promise.all(subjects.map(item => inquiryConfigurationHash(item.identity)));
+  if (!required.length && saved.serviceRows?.length) return 'READY';
   const rows = await tx.partnerInquiryRow.findMany({ where: { inquiry: { caseId: input.caseId, profileId: input.profileId } },
     orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }], select: { outcome: true, definition: true,
       inquiry: { select: { caseRevision: true } }, successor: { select: { outcome: true } },

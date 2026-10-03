@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PartnerManagementWorkspaceViewV2Schema, partnerError } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerCommandPort, PartnerManagementCommandV2Port, PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpField, ErpInlineState, ErpLoading, ErpSelect, ErpWorkspacePage } from '@/components/erp';
+import { ErpButton, ErpField, ErpInlineState, ErpLoading, ErpSelect, ErpWorkspacePage, ErpSegmentedControl, ErpInput } from '@/components/erp';
 import { actionPresentation } from './availability';
 import { PartnerCommandSession, type CommandFeedback } from './commandSession';
 import { CommandFeedbackView } from './CommandFeedbackView';
@@ -14,11 +14,19 @@ import { useWorkspaceQuery } from './useWorkspaceQuery';
 export function ManagementWorkspace({ queryPort, commandPort, managementPort }: {
   queryPort: PartnerQueryV2Port; commandPort: PartnerCommandPort; managementPort: PartnerManagementCommandV2Port;
 }) {
+  const [section, setSection] = useState<'PROFILES' | 'TRANSFERS'>(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('transferId') ? 'TRANSFERS' : 'PROFILES');
+  const [history, setHistory] = useState(false);
+  const [transferStatus, setTransferStatus] = useState<'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('PENDING');
+  const [search, setSearch] = useState('');
+  const [querySearch, setQuerySearch] = useState('');
+  const [transferId, setTransferId] = useState<string | undefined>(() => typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('transferId') || undefined : undefined);
+  useEffect(() => { const timer = setTimeout(() => setQuerySearch(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
   const load = useCallback(async (cursor?: string) => {
-    const response = await queryPort.query({ schemaVersion: 2, purpose: 'PARTNER_MANAGEMENT', limit: 20, ...(cursor ? { cursor } : {}) });
+    const response = await queryPort.query({ schemaVersion: 2, purpose: 'PARTNER_MANAGEMENT', limit: 20, section, history, transferStatus, search: querySearch, ...(transferId ? { transferId } : {}), ...(cursor ? { cursor } : {}) });
     return response.ok ? { ok: true as const, value: PartnerManagementWorkspaceViewV2Schema.parse(response.value) } : response;
-  }, [queryPort]);
-  const resource = useWorkspaceQuery(load);
+  }, [queryPort, section, history, transferStatus, querySearch, transferId]);
+  const resource = useWorkspaceQuery(load, JSON.stringify([section, history, transferStatus, querySearch, transferId]));
+  useEffect(() => { const sections = resource.view?.availableSections; if (sections?.length && !sections.includes(section)) setSection(sections[0]); }, [resource.view?.availableSections, section]);
   const session = useMemo(() => new PartnerCommandSession(commandPort, resource.view?.actorId || 'unloaded', managementPort), [commandPort, managementPort, resource.view?.actorId]);
   const [choice, setChoice] = useState<ManagementChoice | null>(null);
   const [option, setOption] = useState('');
@@ -97,7 +105,17 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
       : choice?.action === 'CUSTOMER_TRANSFER_DECIDE' ? 'فقط مالکیت جاری مشتری تعیین می‌شود؛ تاریخچه، مسئولیت پروژه و اعتبار فروش تغییر نمی‌کند.'
         : choice?.action === 'RESPONDER_REASSIGN' ? 'فقط ردیف‌های منتظر پاسخ واگذار می‌شوند؛ سابقه تصمیم‌های قبلی تغییر نمی‌کند.'
           : 'این تصمیم با هویت شما و دلیل ثبت می‌شود. سامانه پیش از ثبت، مجوز و شرایط جاری را دوباره بررسی می‌کند.';
-  return <ErpWorkspacePage title="مدیریت فروشندگان همکار">
+  return <ErpWorkspacePage title="مدیریت همکاران">
+    <ErpSegmentedControl value={section} onChange={value => { setSection(value); setChoice(null); setSearch(''); setTransferId(undefined); }}
+      options={([{ value: 'PROFILES' as const, label: 'فروشندگان همکار', disabled: locked }, { value: 'TRANSFERS' as const, label: 'درخواست‌های انتقال مشتری', disabled: locked }]).filter(option => !resource.view?.availableSections || resource.view.availableSections.includes(option.value))} />
+    <div className="flex flex-wrap gap-3">
+      <ErpField label="جست‌وجو"><ErpInput value={search} onChange={event => { setSearch(event.target.value); setTransferId(undefined); }} /></ErpField>
+      {section === 'PROFILES' ? <ErpSegmentedControl value={history ? 'HISTORY' : 'CURRENT'} onChange={value => setHistory(value === 'HISTORY')}
+        options={[{ value: 'CURRENT', label: 'همکاری‌های جاری' }, { value: 'HISTORY', label: 'سوابق' }]} />
+        : <ErpField label="وضعیت درخواست"><ErpSelect value={transferStatus} onChange={event => { setTransferStatus(event.target.value as typeof transferStatus); setTransferId(undefined); }}>
+          <option value="PENDING">در انتظار بررسی</option><option value="APPROVED">تأییدشده</option><option value="REJECTED">ردشده</option><option value="CANCELLED">لغوشده</option>
+        </ErpSelect></ErpField>}
+    </div>
     {resource.loading && !resource.view && <ErpLoading />}
     {resource.error && <ErpInlineState kind="error" className="flex-col items-start" title={resource.error}
       action={{ label: 'دریافت وضعیت تازه', disabled: locked || resource.loading, onClick: () => void refreshDecision() }} />}

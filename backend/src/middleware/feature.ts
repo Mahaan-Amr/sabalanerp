@@ -54,6 +54,7 @@ export const FEATURES = {
   CRM_CUSTOMERS_BLACKLIST: 'crm_customers_blacklist',
   CRM_CUSTOMERS_LOCK: 'crm_customers_lock',
   CRM_CUSTOMERS_ASSIGN_OWNER: 'crm_customers_assign_owner',
+  CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE: 'crm_partner_customer_transfers_manage',
   CRM_PROJECT_ADDRESSES_CREATE: 'crm_project_addresses_create',
   CRM_PROJECT_ADDRESSES_EDIT: 'crm_project_addresses_edit',
   CRM_PROJECT_ADDRESSES_DELETE: 'crm_project_addresses_delete',
@@ -346,6 +347,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.CRM_CUSTOMERS_BLACKLIST]: 'crm',
   [FEATURES.CRM_CUSTOMERS_LOCK]: 'crm',
   [FEATURES.CRM_CUSTOMERS_ASSIGN_OWNER]: 'crm',
+  [FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE]: 'crm',
   [FEATURES.CRM_PROJECT_ADDRESSES_CREATE]: 'crm',
   [FEATURES.CRM_PROJECT_ADDRESSES_EDIT]: 'crm',
   [FEATURES.CRM_PROJECT_ADDRESSES_DELETE]: 'crm',
@@ -751,7 +753,7 @@ const featureLabelFa = (feature: Feature): string => {
 };
 
 export const FEATURE_LABELS = Object.fromEntries(
-  Object.values(FEATURES).map((feature) => [feature, featureLabelFa(feature)]),
+  Object.values(FEATURES).map((feature) => [feature, feature === FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE ? 'بررسی و تصمیم انتقال مشتری به همکار' : featureLabelFa(feature)]),
 ) as Record<Feature, string>;
 
 
@@ -821,7 +823,10 @@ export const requireFeatureAccess = (feature: Feature, requiredPermission: Featu
       let effectivePermission: FeaturePermission | null = null;
 
       // Priority: user-specific overrides > role defaults.
-      if (isPermissionActiveAndNotExpired(userFeaturePermission)) {
+      if (feature === FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE) {
+          effectivePermission = isPermissionActiveAndNotExpired(userFeaturePermission) ? userFeaturePermission!.permissionLevel as FeaturePermission
+            : isPermissionActiveAndNotExpired(roleFeaturePermission) ? roleFeaturePermission!.permissionLevel as FeaturePermission : null;
+        } else if (isPermissionActiveAndNotExpired(userFeaturePermission)) {
         effectivePermission = userFeaturePermission!.permissionLevel as FeaturePermission;
       } else if (isPermissionActiveAndNotExpired(userWorkspacePermission)) {
         effectivePermission = userWorkspacePermission!.permissionLevel as FeaturePermission;
@@ -985,7 +990,10 @@ export const requireAnyFeatureAccessWithClient = (
 
         let effectivePermission: FeaturePermission | null = null;
 
-        if (isPermissionActiveAndNotExpired(userFeaturePermission)) {
+        if (feature === FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE) {
+          effectivePermission = isPermissionActiveAndNotExpired(userFeaturePermission) ? userFeaturePermission!.permissionLevel as FeaturePermission
+            : isPermissionActiveAndNotExpired(roleFeaturePermission) ? roleFeaturePermission!.permissionLevel as FeaturePermission : null;
+        } else if (isPermissionActiveAndNotExpired(userFeaturePermission)) {
           effectivePermission = userFeaturePermission!.permissionLevel as FeaturePermission;
         } else if (isPermissionActiveAndNotExpired(userWorkspacePermission)) {
           effectivePermission = userWorkspacePermission!.permissionLevel as FeaturePermission;
@@ -1089,6 +1097,11 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
         (p) => p.workspace === workspace && isPermissionActiveAndNotExpired(p)
       );
 
+      if (feature === FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE) {
+        const explicit = userFeaturePermission ?? roleFeaturePermission;
+        if (explicit) features.push({ feature: feature as Feature, permission: explicit.permissionLevel as FeaturePermission, workspace });
+        continue;
+      }
       let permission: FeaturePermission;
       if (userFeaturePermission) {
         permission = userFeaturePermission.permissionLevel as FeaturePermission;

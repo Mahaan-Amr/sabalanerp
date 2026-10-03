@@ -8,9 +8,9 @@ import { CustomerOutputError } from './contracts';
 const snapshots = createCustomerOutputSnapshots(contracts);
 
 /** PDF availability depends on authorized frozen Case content, not an SMS session. */
-export function casePdfAvailability(input: { authorized: boolean; state: string; hasContent: boolean; hasSnapshot: boolean }) {
-  return { canPreview: input.authorized && (input.hasSnapshot || (input.state === 'COMMITTED' && input.hasContent)),
-    canIssue: input.authorized && input.state === 'COMMITTED' && input.hasContent };
+export function casePdfAvailability(input: { authorized: boolean; state: string; hasContent: boolean; hasSnapshot: boolean; commercialFlow?: boolean }) {
+  return { canPreview: input.authorized && (input.hasSnapshot || ((input.state === 'COMMITTED' || input.commercialFlow) && input.hasContent)),
+    canIssue: input.authorized && (input.state === 'COMMITTED' || input.commercialFlow) && input.hasContent };
 }
 
 /** Caller owns the Case lock and has authorized CUSTOMER_OUTPUT. Never changes
@@ -19,7 +19,7 @@ export async function resolveCasePdfSnapshot(tx: Prisma.TransactionClient, caseI
   const current = await readCurrentPartnerCaseViews(tx, caseId);
   if (!current) throw new CustomerOutputError('INTEGRITY_CONFLICT');
   if (contracts.checkExpectedRevision(expected, current.partner.owner)) throw new CustomerOutputError('ROW_STALE');
-  if (current.row.state !== 'COMMITTED') throw new CustomerOutputError('STATE_CONFLICT');
+  if (current.row.state !== 'COMMITTED' && current.row.commercialFlowVersion !== 1) throw new CustomerOutputError('STATE_CONFLICT');
   const content = contracts.CustomerContractOutputSchema.parse(current.row.head.customerProjection);
   const digits = content.customer.phone.replace(/\D/g, '');
   const recipient = digits.startsWith('0098') ? `+${digits.slice(2)}` : digits.startsWith('98') ? `+${digits}`

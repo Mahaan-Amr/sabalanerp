@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ErpButton, ErpInlineState, ErpLoading, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
-import { accountingAPI } from '@/lib/api';
+import api, { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { defaultCustomPrintSettings, type SalesPdfVariant, type CustomPrintSettings, type CustomPrintPreset } from '@/features/accounting/AccountingCustomPrintSettings';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
@@ -19,7 +19,17 @@ export default function PartnerInternalAccountingContractPage() {
   const [resolutionReason, setResolutionReason] = useState('');
   const [section, setSection] = useState<PartnerDetailSection>('summary');
   const [invoiceOpen, setInvoiceOpen] = useState(false);
-  const openInvoice = () => { setSection('financial'); setInvoiceOpen(true); setError(undefined); };
+  const openInvoice = async () => {
+    if (!document?.actions.canCreateInvoice || pending) return;
+    setError(undefined);
+    if (document.preparationOnly) {
+      if (!document.owner) return;
+      setPending(true);
+      try { await api.post('/partner/accounting/enqueue', document.owner); await load(); setSection('financial'); setInvoiceOpen(true); }
+      catch { setError('ایجاد پیش‌نویس مالی انجام نشد؛ وضعیت قرارداد را تازه‌سازی کنید.'); }
+      finally { setPending(false); }
+    } else { setSection('financial'); setInvoiceOpen(true); }
+  };
   const approveInvoice = async (payload: FinancialInvoiceApprovalPayload) => {
     if (!document || pending || !document.actions.canReviewInvoice || payload.invoiceId !== document.id) return;
     setPending(true); setError(undefined);

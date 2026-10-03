@@ -152,3 +152,7 @@ export type PartnerNextActionView = { actionId: string; projectId?: string; revi
   communicationType: string; workType?: string; dueAt: string; instructions: string; status: string; completedAt?: string };
 export type PartnerCustomerDetail = PartnerCustomerSummary & { address?: string; projects: PartnerProjectView[];
   followUps: PartnerFollowUpView[]; nextActions: PartnerNextActionView[] };
+
+export const PartnerDirectTransferSchema = z.object({ schemaVersion: z.literal(1), customerId: IdSchema,
+  toProfileId: IdSchema, expectedOwnerUserId: IdSchema, reason: PersianReasonSchema,
+  commandId: IdSchema, correlationId: IdSchema, idempotencyKey: IdSchema, payloadHash: IdSchema }).strict();

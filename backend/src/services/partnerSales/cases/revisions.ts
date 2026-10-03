@@ -6,16 +6,19 @@ import {
 import { technicalGraphMeasures } from './technicalGraphMeasures';
 import { multiply, subtract, sum } from '../reporting/money';
 
+import type { ResolvedTechnicalService } from './technicalServices';
+
 export type DisplayParty = { displayName: string; phone: string; address: string };
 export type ResolvedCaseDraft = {
   profileId: string; partnerSellerId: string; customerId: string; projectId?: string;
   commercialAccountId: string; departmentId: string; sabalanTermsVersionId: string;
   graph: CanonicalProductGraph;
+  serviceRows?: ResolvedTechnicalService[];
   technicalSnapshot: PartnerTechnicalSavedView;
   rows: Array<{ productRowId: string; configurationHash: string; quantity: string; unit: string;
     precisionPolicyVersion: string; description: string; productCode?: string; retailUnitPriceAmount: string;
     wholesaleUnitPriceAmount?: string; retailLineTotalAmount?: string; wholesaleLineTotalAmount?: string }>;
-  partner: DisplayParty; customer: DisplayParty; project?: { title: string; address?: string }; legalText: string;
+  partner: DisplayParty; customer: Omit<DisplayParty, 'address'> & { address?: string }; project?: { title: string; address?: string }; legalText: string;
   sabalanPaymentPlan: ReturnType<typeof PaymentPlanSchema.parse>;
   additionalMaterialApprovals?: Array<{ pricingSubjectId: string; configurationHash: string;
     catalogProductId: string; wholesaleUnitPriceAmount: string }>;
@@ -44,6 +47,10 @@ export async function validateResolvedDraft(command: Extract<PartnerCommand, { t
   const exact = (left: string[], right: string[]) => left.length === right.length &&
     new Set(left).size === left.length && left.every(id => right.includes(id));
   const snapshot = resolved.technicalSnapshot;
+  const services = resolved.serviceRows ?? [];
+  if (!exact(services.map(row => row.serviceRowId), command.intent.serviceRows?.map(row => row.serviceRowId) ?? []) ||
+      !exact(services.map(row => row.serviceRowId), snapshot.serviceRows?.map(row => row.serviceRowId) ?? []) ||
+      services.some(row => !snapshot.serviceRows?.some(saved => saved.serviceRowId === row.serviceRowId && saved.quantity === row.quantity && saved.unit === row.unit))) return { ok: false, error: partnerError('CONFIG_MISMATCH') };
   if (graphHash !== command.intent.graphHash || snapshot.graphHash !== graphHash ||
       snapshot.recoveryId !== command.intent.recoveryId || snapshot.recoveryRevision !== command.intent.recoveryRevision ||
       !exact(graphIds, savedIds) || !exact(graphIds, intentIds) || !exact(graphIds,
@@ -62,8 +69,9 @@ export async function validateResolvedDraft(command: Extract<PartnerCommand, { t
 
 export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, { type: 'CASE_SUBMIT' | 'CASE_DRAFT_REVISE' }>;
   resolved: ResolvedCaseDraft; graph: CanonicalProductGraph; graphHash: string; rows: ApprovedCaseRow[] }) {
-  const currency = input.rows[0]?.retailUnitPrice.currency;
-  const pricingReady = input.rows.length > 0 && input.rows.every(row => row.approval && row.wholesaleUnitPriceAmount !== undefined);
+  const services = input.resolved.serviceRows ?? [];
+  const currency = input.rows[0]?.retailUnitPrice.currency ?? services[0]?.retailUnitPrice.currency;
+  const pricingReady = (input.rows.length + services.length) > 0 && input.rows.every(row => row.approval && row.wholesaleUnitPriceAmount !== undefined);
   if (!currency || input.rows.some(row => row.retailUnitPrice.currency !== currency ||
       (row.approval && row.approval.wholesaleUnitPrice.currency !== currency))) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
@@ -80,10 +88,14 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
       ...(graph.areaSquareMeters ? { areaSquareMeters: graph.areaSquareMeters } : {}),
       ...(graph.quantity ? { count: graph.quantity } : {}) } : {}),
     retailLineTotal: row.retailLineTotalAmount ?? multiply(row.quantity, row.retailUnitPrice.amount) }); });
+  for (const service of services) products.push({ productRowId: service.serviceRowId, description: service.title,
+    quantity: service.quantity, unit: service.unit, productType: 'service', retailUnitPrice: service.retailUnitPrice.amount,
+    wholesaleUnitPrice: service.wholesaleUnitPriceAmount, retailLineTotal: multiply(service.quantity, service.retailUnitPrice.amount),
+    wholesaleLineTotal: multiply(service.quantity, service.wholesaleUnitPriceAmount), configurationHash: service.rateEvidenceId });
   // Effective unit rates can repeat; source totals are the server's exact row evidence.
-  const retailNet = sum(input.rows.map(row => row.retailLineTotalAmount ?? multiply(row.quantity, row.retailUnitPrice.amount)));
+  const retailNet = sum(products.map(row => row.retailLineTotal));
   const wholesaleNet = pricingReady
-    ? sum(input.rows.map(row => row.wholesaleLineTotalAmount ?? multiply(row.quantity, row.wholesaleUnitPriceAmount!))) : undefined;
+    ? sum(products.map(row => row.wholesaleLineTotal ?? multiply(row.quantity, row.wholesaleUnitPrice!))) : undefined;
   const discount = input.command.intent.retailDiscount.amount;
   if (input.command.intent.retailDiscount.currency !== currency || subtract(retailNet, discount).startsWith('-')) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
@@ -95,19 +107,39 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
   const planTotal = sum(input.command.intent.customerPaymentPlan.installments.map(item => item.amount.amount));
   const sabalanPlanTotal = sum(input.resolved.sabalanPaymentPlan.installments.map(item => item.amount.amount));
   if (input.command.intent.customerPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
-      input.resolved.sabalanPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
-      (input.command.intent.preparationCompleted !== false && planTotal !== retailPayable) ||
+      (input.command.intent.preparationCompleted !== false && planTotal !== retailPayable)) {
+    return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
+  }
+  if (input.resolved.sabalanPaymentPlan.installments.some(item => item.amount.currency !== currency) ||
       (pricingReady && input.resolved.sabalanPaymentPlan.installments.length > 0 && sabalanPlanTotal !== wholesaleTotals!.payable)) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
   }
-  const quantities = new Map(input.rows.map(row => [row.productRowId, row.quantity]));
-  const delivered = new Map<string, string>();
-  for (const delivery of input.command.intent.deliveries) for (const item of delivery.items) {
-    if (!quantities.has(item.productRowId)) return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
-    delivered.set(item.productRowId, sum([delivered.get(item.productRowId) ?? '0', item.quantity]));
-  }
-  if ([...delivered].some(([id, quantity]) => subtract(quantities.get(id)!, quantity).startsWith('-'))) {
-    return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
+  // Product revisions may retain obsolete allocations for the seller to repair.
+  // Inquiry submission does not assert that preparation is complete; completed
+  // drafts still require exact row identities and quantities before confirmation.
+  if (input.command.intent.preparationCompleted !== false) {
+    const quantities = new Map(input.rows.map(row => [row.productRowId, row.quantity]));
+    const delivered = new Map<string, string>();
+    for (const delivery of input.command.intent.deliveries) for (const item of delivery.items) {
+      if (!quantities.has(item.productRowId)) return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
+      delivered.set(item.productRowId, sum([delivered.get(item.productRowId) ?? '0', item.quantity]));
+    }
+    const serviceQuantities = new Map(services.map(row => [row.serviceRowId, row.quantity]));
+    const scheduledServices = new Map<string, string>();
+    for (const delivery of input.command.intent.deliveries) {
+      const entries = delivery.serviceItems ?? [];
+      if (new Set(entries.map(item => item.serviceRowId)).size !== entries.length) return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
+      for (const item of entries) {
+        if (!serviceQuantities.has(item.serviceRowId) || !/[1-9]/.test(item.quantity)) return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
+        scheduledServices.set(item.serviceRowId, sum([scheduledServices.get(item.serviceRowId) ?? '0', item.quantity]));
+      }
+    }
+    if ([...scheduledServices].some(([id, quantity]) => subtract(serviceQuantities.get(id)!, quantity).startsWith('-')) ||
+        services.some(row => subtract(row.quantity, scheduledServices.get(row.serviceRowId) ?? '0') !== '0')) return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
+    if ([...delivered].some(([id, quantity]) => subtract(quantities.get(id)!, quantity).startsWith('-')) ||
+        input.rows.some(row => subtract(row.quantity, delivered.get(row.productRowId) ?? '0') !== '0')) {
+      return { ok: false, error: partnerError('INVALID_PAYLOAD') } as const;
+    }
   }
   return { ok: true, value: {
     graph: input.graph, graphHash: input.graphHash,

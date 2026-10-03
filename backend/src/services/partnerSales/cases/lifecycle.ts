@@ -108,7 +108,7 @@ async function readCase(tx: Transaction, caseId: string) {
   return tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
     id: true, caseNumber: true, trackingCode: { select: { number: true } },
     profileId: true, headRevision: true, integrityHash: true, state: true,
-    pricingState: true, customerConfirmationState: true,
+    pricingState: true, commercialFlowVersion: true, customerConfirmationState: true,
     stateRevision: true, internalRecordId: true, customerContractId: true, commitmentEventId: true,
     profile: { select: { userId: true } },
     internalRecord: { select: { recordNumber: true, commercialAccountId: true, pricingState: true,
@@ -276,7 +276,7 @@ async function nextSequence(tx: Transaction, caseId: string) {
   return (maximum._max.sequence ?? 0) + 1;
 }
 
-async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef) {
+export async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef) {
   await tx.$queryRaw`SELECT a.id
     FROM partner_inquiry_usages u
     JOIN partner_inquiry_approvals a ON a.id = u."approvalId"
@@ -292,21 +292,26 @@ async function currentPricingEvidenceIsValid(tx: Transaction, owner: RevisionRef
   const [bindings, usages, materialUsages, now] = await Promise.all([
     tx.partnerCaseRowBinding.count({ where: { caseId: owner.caseId, revision: owner.revision } }),
     tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
-      select: { approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } },
+      select: { approvalId: true, approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } },
         inquiry: { select: { caseId: true, caseRevision: true } } } } } } } }),
     tx.partnerMaterialInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
-      select: { approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } },
+      select: { approvalId: true, approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } },
         inquiry: { select: { caseId: true, caseRevision: true } } } } } } } }),
     tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`,
   ]);
+  const root = await tx.partnerSaleCase.findUnique({ where: { id: owner.caseId }, select: { commercialFlowVersion: true, committedRevision: true } });
+  const committedRevision = root?.commercialFlowVersion === 1 ? root.committedRevision : null;
+  const frozen = committedRevision ? await tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: committedRevision }, select: { approvalId: true } }) : [];
+  const frozenMaterials = committedRevision ? await tx.partnerMaterialInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: committedRevision }, select: { approvalId: true } }) : [];
+  const frozenIds = new Set([...frozen, ...frozenMaterials].map(row => row.approvalId));
   const instant = now[0]?.now;
   const valid = (usage: (typeof usages)[number]) => {
     const inquiry = usage.approval.row.inquiry;
     return Boolean(instant) &&
       inquiry.caseId === owner.caseId && inquiry.caseRevision !== null &&
       inquiry.caseRevision > 0 && inquiry.caseRevision <= owner.revision &&
-      usage.approval.row.outcome === 'APPROVED' && !usage.approval.row.successor &&
-      usage.approval.expiresAt.getTime() > instant!.getTime();
+      usage.approval.row.outcome === 'APPROVED' && (frozenIds.has(usage.approvalId) || !usage.approval.row.successor &&
+      usage.approval.expiresAt.getTime() > instant!.getTime());
   };
   return usages.length === bindings && usages.every(valid) && materialUsages.every(valid);
 }
@@ -401,6 +406,7 @@ Promise<ExecutionResult> {
   if (row.pricingState !== 'READY_TO_FINALIZE' || views.partner.preparationCompleted === false || !views.accounting) {
     return { ok: false, error: partnerError('STATE_CONFLICT') };
   }
+  if (row.commercialFlowVersion === 1 && row.state !== 'COMMITTED') return { ok: false, error: partnerError('STATE_CONFLICT') };
   const firstCommitment = row.state !== 'COMMITTED';
   if (firstCommitment && command.expectedState !== row.state) {
     return { ok: false, error: partnerError('STATE_CONFLICT') };

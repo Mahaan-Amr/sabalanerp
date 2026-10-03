@@ -25,7 +25,8 @@ export const CaseDraftIntentSchema = PartnerDraftSubmissionRefSchema.extend({
   preparationCompleted: z.boolean().optional(),
   // The Case writer resolves this immutable private recovery graph; no second graph owner.
   rows: z.array(z.object({ productRowId: IdSchema, approvedRowBinding: ApprovedRowBindingSchema.optional(),
-    retailUnitPrice: MoneySchema }).strict()).min(1),
+    retailUnitPrice: MoneySchema }).strict()),
+  serviceRows: z.array(z.object({ serviceRowId: IdSchema }).strict()).optional(),
   additionalMaterialApprovals: z.array(z.object({ pricingSubjectId: IdSchema,
     approvedRowBinding: ApprovedRowBindingSchema }).strict()).optional(),
   customerPaymentPlan: CustomerPaymentPlanSchema,
@@ -94,6 +95,8 @@ export const PartnerCommandSchema = z.discriminatedUnion('type', [
   if (command.type === 'CASE_DRAFT_REVISE' && command.editLease.recoveryId !== command.intent.recoveryId) {
     invalid('Edit lease must match recovery');
   }
+  if ((command.type === 'CASE_SUBMIT' || command.type === 'CASE_DRAFT_REVISE') && (!command.intent.rows.length && !command.intent.serviceRows?.length)) invalid('Products or services required');
+  if ((command.type === 'CASE_SUBMIT' || command.type === 'CASE_DRAFT_REVISE') && new Set(command.intent.serviceRows?.map(row => row.serviceRowId) ?? []).size !== (command.intent.serviceRows?.length ?? 0)) invalid('Duplicate service row');
   if (command.type === 'INQUIRY_DECIDE' && new Set(command.decisions.map(row => row.rowId)).size !== command.decisions.length) invalid('Duplicate decision row');
   if (command.type === 'INQUIRY_DECIDE' && command.decisions.some(row =>
     row.outcome === 'APPROVED' && !/[1-9]/.test(row.wholesaleUnitPrice.amount))) invalid('Approved price must be positive');

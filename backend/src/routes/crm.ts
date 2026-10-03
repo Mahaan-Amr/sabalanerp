@@ -12,6 +12,7 @@ import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEA
 import { expandPersianSearchTokenVariants, normalizePersianSearchTokens } from '../services/crmCustomerSearch';
 import { resolveEffectiveNarrowAuthority, resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { randomUUID } from 'node:crypto';
+import { transferDecisionRecipients, canReadTransferNotice } from '../services/partnerSales/crm/transferAccess';
 import { createPartnerCrmService } from '../services/partnerSales/crm/service';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { publishNotificationEvent } from '../services/notificationService';
@@ -35,14 +36,14 @@ const partnerCrmForRequest = (req: any, correlationId: string) => createPartnerC
     await publishNotificationEvent(tx, {
       type: notice.kind === 'REQUESTED' ? 'PARTNER_CUSTOMER_TRANSFER_REQUESTED' : 'PARTNER_CUSTOMER_TRANSFER_DECIDED',
       deduplicationKey: `partner-customer-transfer:${notice.transferId}:${notice.kind}`,
-      recipientIds: notice.recipientIds,
+      recipientIds: [...new Set([...notice.recipientIds, ...(notice.kind === 'REQUESTED' ? await transferDecisionRecipients(tx, notice.transferId, notice.correlationId) : [])])],
       actorId: notice.actorId,
       workspace: 'crm',
       feature: 'partner-customer-transfer',
       resourceType: 'PARTNER_CUSTOMER_TRANSFER',
       resourceId: notice.transferId,
       referenceId: null,
-      actionUrl: '/dashboard/personal/notifications',
+      actionUrl: `/dashboard/crm/customer-transfers/${encodeURIComponent(notice.transferId)}`,
       payload: { correlationId },
     });
   },
@@ -773,6 +774,42 @@ router.post('/partner/customer-duplicates/search', protect, partnerCrmEndpoint(a
 router.post('/partner/customer-transfers', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
   const correlationId = partnerCorrelationId(req);
   sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).requestTransfer({ ...req.body, correlationId }));
+}));
+
+router.get('/partner/customer-transfers/mine', protect, partnerCrmEndpoint(async (req: any, res: Response) => {
+  const actor = await prisma.user.findUnique({ where: { id: req.user.id }, select: { isActive: true, partnerProfile: { select: { id: true } } } });
+  if (!actor?.isActive || !actor.partnerProfile) { res.status(403).json({ success: false }); return; }
+  const items = await prisma.partnerCustomerTransfer.findMany({ where: { toProfileId: actor.partnerProfile.id, ...(typeof req.query.cursor === 'string' ? { id: { lt: req.query.cursor } } : {}) }, orderBy: { id: 'desc' },
+    take: 51, select: { id: true, status: true, requestReason: true, requestedAt: true, decisionReason: true, match: { select: { snapshot: true } } } });
+  res.json({ success: true, data: { items: items.slice(0, 50).map(({ match, ...item }) => ({ ...item, match: match.snapshot })), ...(items.length > 50 ? { nextCursor: items[49].id } : {}) } });
+}));
+
+router.get('/partner/customer-transfers/:id/status', protect, partnerCrmEndpoint(async (req: any, res: Response) => {
+  if (!await canReadTransferNotice(prisma, req.user.id, req.params.id)) { res.status(404).json({ success: false }); return; }
+  const transfer = await prisma.partnerCustomerTransfer.findUnique({ where: { id: req.params.id }, select: { status: true, requestReason: true, decisionReason: true, requestedAt: true, match: { select: { snapshot: true } } } });
+  res.json({ success: true, data: transfer });
+}));
+
+router.get('/partner/customer-transfers/direct/options/:customerId', protect, partnerCrmEndpoint(async (req: any, res: Response) => {
+  const correlationId = partnerCorrelationId(req);
+  const result = await prisma.$transaction(async tx => {
+    const access = await createAuditedPartnerAuthorization(tx, { actorId: req.user.id, purpose: 'CRM', channel: 'API' },
+      { correlationId, reason: 'Direct transfer availability; execution requires an explicit actor reason.' }, { directTransferProfileId: 'availability' })
+      .authorize('CUSTOMER_TRANSFER_DECIDE', { kind: 'CUSTOMER', id: req.params.customerId });
+    if (!access.ok || access.value.persona !== 'INTERNAL') return { ok: false as const, error: access.ok ? { code: 'FORBIDDEN', status: 403, message: 'Forbidden' } : access.error };
+    const customer = await tx.crmCustomer.findUnique({ where: { id: req.params.customerId }, select: { ownerUserId: true, partnerOwnerProfileId: true } });
+    const profiles = await tx.partnerProfile.findMany({ where: { state: 'ACTIVE', user: { isActive: true }, ...(customer?.partnerOwnerProfileId ? { id: { not: customer.partnerOwnerProfileId } } : {}) },
+      select: { id: true, user: { select: { firstName: true, lastName: true } } }, orderBy: { id: 'asc' } });
+    const unfinished = await tx.partnerSaleCase.findMany({ where: { customerId: req.params.customerId, state: { in: ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'] } }, select: { id: true } });
+    const pendingTransfer = await tx.partnerCustomerTransfer.findFirst({ where: { customerId: req.params.customerId, status: 'PENDING' }, select: { toProfileId: true } });
+    return { ok: true as const, value: { blockers: unfinished.map(item => ({ label: 'پرونده ناتمام باید تعیین تکلیف شود.', href: `/dashboard/sales/partner-cases?caseId=${item.id}` })), pendingProfileId: pendingTransfer?.toProfileId, expectedOwnerUserId: customer?.ownerUserId, profiles: profiles.map(profile => ({ id: profile.id, label: `${profile.user.firstName} ${profile.user.lastName}`.trim() })) } };
+  });
+  sendPartnerResult(res, result as Result<unknown>);
+}));
+
+router.post('/partner/customer-transfers/direct', protect, partnerCrmEndpoint(async (req: any, res: Response) => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).directTransfer({ ...req.body, correlationId }));
 }));
 
 router.post('/partner/customer-transfers/:id/cancel', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {

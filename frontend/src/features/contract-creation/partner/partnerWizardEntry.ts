@@ -1,14 +1,14 @@
-import { IdSchema, PartnerCaseViewSchema, PartnerErrorSchema, PartnerTechnicalSavedViewSchema, partnerTrackingCode,
+import { IdSchema, QuantitySchema, PartnerCaseViewSchema, PartnerErrorSchema, PartnerTechnicalSavedViewSchema, partnerTrackingCode,
   type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryRow, PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
 import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
-import { defaultPartnerRetailRows, partnerRetailIntentRows, remainingPartnerAmount } from './partnerRetail';
+import { defaultPartnerRetailRows, partnerRetailIntentRows, remainingPartnerAmount, type PartnerRetailServiceRow } from './partnerRetail';
 import type { PartnerWizardDraft } from './PartnerContractWizard';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
 export function partnerCasePricingInquiryIds(recoveryId: string, publishedIds: readonly string[],
-  rows: readonly PartnerInquiryRow[]): string[] {
-  const ids = new Set(publishedIds.filter(id => id.startsWith(`partner-case-pricing:${recoveryId}:`)));
+  rows: readonly PartnerInquiryRow[], caseScoped = false): string[] {
+  const ids = new Set(publishedIds.filter(id => caseScoped || id.startsWith(`partner-case-pricing:${recoveryId}:`)));
   for (const row of rows) for (const binding of [row.approvedRowBinding, row.predecessor, row.successor]) {
     if (binding) ids.add(binding.inquiryId);
   }
@@ -101,58 +101,64 @@ export function rebasePartnerWizardSnapshot<T extends { serverRevision?: number 
 export function preservePartnerDeliveriesAcrossProductEdit(
   previous: PartnerDraftIntent['deliveries'],
   currentProductRowIds: readonly string[],
+  currentServiceRowIds: readonly string[] = [],
 ): PartnerDraftIntent['deliveries'] {
-  const currentIds = new Set(currentProductRowIds);
-  const preserved = previous.flatMap(delivery => {
-    const items = delivery.items.filter(item => currentIds.has(item.productRowId));
-    return items.length > 0 ? [{ ...delivery, items }] : [];
-  });
-  return preserved;
+  // The editor retains the user's quantities and dates; validation catches removed identities.
+  // These arguments describe the new graph but must never silently rewrite allocations.
+  void currentProductRowIds;
+  void currentServiceRowIds;
+  return previous;
+
 }
 
 export function partnerDeliveryPlanIssue(
   deliveries: PartnerDraftIntent['deliveries'],
   rows: readonly { productRowId: string; quantity: string }[],
+  services: readonly { serviceRowId: string; quantity: string }[] = [],
 ): string | null {
-  if (!deliveries.length) return null;
-  if (deliveries.some(item => !item.items.length || !item.date || !item.destination.trim() ||
+  if (!deliveries.length) return rows.length || services.length ? 'حداقل یک برنامه تحویل یا اجرا اضافه کنید.' : null;
+  const deliverableIds = new Set(rows.map(row => row.productRowId));
+  if (deliveries.some(delivery => delivery.items.some(item => !deliverableIds.has(item.productRowId)))) {
+    return 'تحویل فقط برای محصولات قرارداد قابل ثبت است.';
+  }
+  const serviceIds = new Set(services.map(row => row.serviceRowId));
+  if (deliveries.some(delivery => {
+    const serviceItems = delivery.serviceItems ?? [];
+    return new Set(serviceItems.map(item => item.serviceRowId)).size !== serviceItems.length ||
+      serviceItems.some(item => !QuantitySchema.safeParse(item.quantity).success);
+  })) return 'مقدار اجرای خدمت باید مثبت و هر خدمت در هر برنامه یکتا باشد.';
+  if (deliveries.some(delivery => (delivery.serviceItems ?? []).some(item => !serviceIds.has(item.serviceRowId)))) {
+    return 'خدمت برنامه اجرا در قرارداد موجود نیست.';
+  }
+  if (deliveries.some(item => (!item.items.length && !item.serviceItems?.length) || !item.date || !item.destination.trim() ||
       !item.projectManagerName?.trim() || !item.receiverName?.trim())) return 'برنامه تحویل را کامل کنید.';
   if (rows.some(row => remainingPartnerAmount(row.quantity, deliveries.flatMap(delivery => delivery.items
     .filter(item => item.productRowId === row.productRowId).map(item => item.quantity))) !== '0')) {
     return 'مقدار تحویل هر محصول باید دقیقاً با مقدار قرارداد برابر باشد.';
   }
+  if (services.some(row => remainingPartnerAmount(row.quantity, deliveries.flatMap(delivery => (delivery.serviceItems ?? [])
+    .filter(item => item.serviceRowId === row.serviceRowId).map(item => item.quantity))) !== '0')) {
+    return 'مقدار اجرای هر خدمت باید دقیقاً با مقدار قرارداد برابر باشد.';
+  }
   return null;
 }
 
-/** A technical correction can reduce a row after the delivery plan was saved.
- * Keep the existing schedule and trim only quantities beyond the new total;
- * the delivery step remains responsible for any unallocated remainder. */
+/** Preserve explicit allocations. Call partnerDeliveryPlanIssue before completion;
+ * reducing a product must never silently reduce an agreed delivery quantity. */
 export function reconcilePartnerDeliveriesToProducts(
   deliveries: PartnerDraftIntent['deliveries'],
   rows: readonly { productRowId: string; quantity: string }[],
+  services: readonly { serviceRowId: string; quantity: string }[] = [],
 ): PartnerDraftIntent['deliveries'] {
-  const limits = new Map(rows.map(row => [row.productRowId, row.quantity]));
-  const allocated = new Map<string, string[]>();
-  return deliveries.flatMap(delivery => {
-    const items = delivery.items.flatMap(item => {
-      const limit = limits.get(item.productRowId);
-      if (!limit) return [];
-      const prior = allocated.get(item.productRowId) ?? [];
-      const remaining = remainingPartnerAmount(limit, prior);
-      if (!remaining || remaining === '0') return [];
-      const quantity = remainingPartnerAmount(remaining, [item.quantity]) === null
-        ? remaining : item.quantity;
-      allocated.set(item.productRowId, [...prior, quantity]);
-      return [{ ...item, quantity }];
-    });
-    return items.length ? [{ ...delivery, items }] : [];
-  });
+  return preservePartnerDeliveriesAcrossProductEdit(deliveries,
+    rows.map(row => row.productRowId), services.map(row => row.serviceRowId));
 }
 
 /** Quantity is supplied by the canonical graph's display projection; it is not
  * an inquiry fingerprint. No catalog-ID or array-position matching is allowed.
  */
-export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated, mismatchedRowIds = [], retailUnitPrices, productPresentation }: {
+export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated, mismatchedRowIds = [], retailUnitPrices, productPresentation, serviceRows = [] }: {
+  serviceRows?: PartnerRetailServiceRow[];
   inquiry?: PartnerInquiryView;
   inquiryRows?: readonly PartnerInquiryRow[];
   now: number;
@@ -165,6 +171,12 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
   const saved = PartnerTechnicalSavedViewSchema.safeParse(validated);
   if (!saved.success || saved.data.recoveryId !== base.recoveryId ||
       saved.data.recoveryRevision !== base.recoveryRevision) return null;
+  const savedServices = saved.data.serviceRows ?? [];
+  const savedIds = [...saved.data.rows.map(row => row.configurationRef.productRowId), ...savedServices.map(row => row.serviceRowId)];
+  if (new Set(savedIds).size !== savedIds.length) return null;
+  if (savedServices.length !== serviceRows.length || new Set(serviceRows.map(row => row.serviceRowId)).size !== serviceRows.length ||
+      savedServices.some(row => !serviceRows.some(service => service.serviceRowId === row.serviceRowId &&
+        service.quantity === row.quantity && service.unit === row.unit))) return null;
   const availableRows = inquiryRows ?? inquiry?.rows ?? [];
   const approved = availableRows.filter(row => isUsableInquiryRow(row, now))
     .filter(row => !mismatchedRowIds.includes(row.rowId));
@@ -221,14 +233,16 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
     ? [{ pricingSubjectId: row.configurationRef.productRowId, approvedRowBinding: row.approvedRowBinding }] : []);
   const intent = { ...base, preparationCompleted: base.preparationCompleted ?? false, graphHash: saved.data.graphHash, belowCostConfirmed: false, additionalMaterialApprovals,
     rows: partnerRetailIntentRows(rows),
+    ...(serviceRows.length ? { serviceRows: serviceRows.map(row => ({ serviceRowId: row.serviceRowId })) } : {}),
   };
   const materialInquiryRows = subjectRows.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&
     subject.configurationRef.productRowId === row.configurationRef.productRowId)
     ? [{ pricingSubjectId: row.configurationRef.productRowId, inquiryRow: row }] : []);
-  return { intent, rows, materialInquiryRows, step: 'date' };
+  return { intent, rows, serviceRows, materialInquiryRows, step: 'date' };
 }
 
-export function partnerSaleReturnStep(params: Pick<URLSearchParams, 'get'>): 'customer' | 'project' | null {
+export function partnerSaleReturnStep(params: Pick<URLSearchParams, 'get'>): 'customer' | 'project' | 'pricing' | null {
   if (params.get('returnTo') !== 'contract') return null;
+  if (params.get('step') === '5') return 'pricing';
   return params.get('step') === '3' ? 'project' : params.get('step') === '2' ? 'customer' : null;
 }

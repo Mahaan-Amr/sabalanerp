@@ -1,6 +1,6 @@
 'use client';
 import { ContractRenewal } from '@/features/sales/ContractRenewal';
-import { contractLifecycleLabel, contractLifecycleFilterOptions, isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
+import { contractLifecycleFilterStatus, contractLifecycleLabel, contractLifecycleFilterOptions, isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
 import { ErpInlineState, ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -28,6 +28,7 @@ import {
   type ErpTone,
 } from '@/components/erp';
 import { salesAPI, dashboardAPI } from '@/lib/api';
+import { decidePartnerCommercial, readPartnerCases } from '@/features/partner-sales/cases/partnerCaseHttpPort';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, User } from '@/lib/permissions';
@@ -319,7 +320,7 @@ export default function ContractsPage() {
         accountingStatus.toLowerCase().includes(normalizedSearch) ||
         (sourceStatusLabels[accountingStatus] || '').toLowerCase().includes(normalizedSearch);
 
-      const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(contract.status);
+      const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(contractLifecycleFilterStatus(contract));
       return matchesSearch && matchesStatus;
     });
   }, [contracts, debouncedSearchTerm, statusFilter]);
@@ -353,7 +354,7 @@ export default function ContractsPage() {
     return [
       { label: 'کل قراردادها', value: pagination.total.toLocaleString('fa-IR'), icon: FaFileContract, tone: 'primary' },
       { label: 'نتایج فعلی', value: filteredContracts.length.toLocaleString('fa-IR'), hint: statusOptions.find(option => option.value === statusFilter)?.label, icon: FaEye, tone: 'info' },
-      { label: 'پیش‌نویس و منتظر تأیید قدیمی', value: contracts.filter((contract) => contract.status === 'PENDING_APPROVAL').length.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
+      { label: 'پیش‌نویس', value: contracts.filter((contract) => contractLifecycleFilterStatus(contract) === 'PENDING_APPROVAL').length.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
       { label: 'مبلغ نتایج', value: formatCurrency(totalAmount, 'تومان'), icon: FaFileContract, tone: 'success' },
     ];
   }, [contracts, filteredContracts, pagination.total, statusFilter]);
@@ -411,9 +412,18 @@ export default function ContractsPage() {
       let response;
       switch (action) {
         case 'approve':
-          response = await salesAPI.approveContract(contractId, undefined, actionContract && isCurrentContractFlow(actionContract) ? actionContract.commercialRevision : undefined);
+          if (actionContract?.partnerKind === 'PARTNER_CUSTOMER' && actionContract.commercialFlowVersion === 2) {
+            if (!actionContract.partnerCaseId) throw new Error('شواهد پرونده قرارداد کامل نیست.');
+            const row = (await readPartnerCases(actionContract.partnerCaseId))[0];
+            if (!row?.commercial) throw new Error('نسخه تجاری قرارداد پیدا نشد.');
+            response = { data: await decidePartnerCommercial(actionContract.partnerCaseId, row.commercial.revision, 'APPROVE_SALES') };
+          } else response = await salesAPI.approveContract(contractId, undefined, actionContract && isCurrentContractFlow(actionContract) ? actionContract.commercialRevision : undefined);
           break;
         case 'reject':
+          if (actionContract?.partnerKind === 'PARTNER_CUSTOMER' && actionContract.commercialFlowVersion === 2) {
+            router.push(`/dashboard/sales/contracts/${encodeURIComponent(contractId)}`);
+            return;
+          }
           response = await salesAPI.rejectContract(contractId);
           break;
         case 'sign':
@@ -600,7 +610,8 @@ export default function ContractsPage() {
         disabled: pendingActions.has(`action:${contract.id}:print`),
       });
     }
-    if (isCurrentContractFlow(contract) ? contract.commercialActions?.canEdit === true : contractPermissions.canEdit && (!contract.accountingEditLocked || contract.canOpenCorrectionEdit)) {
+    const partnerFinal = contract.partnerKind === 'PARTNER_CUSTOMER' && contract.partnerCommercialStatus === 'FINAL';
+    if ((!partnerFinal || contract.canOpenCorrectionEdit) && (isCurrentContractFlow(contract) ? contract.commercialActions?.canEdit === true : contractPermissions.canEdit && (!contract.accountingEditLocked || contract.canOpenCorrectionEdit))) {
       actions.push({
         label: contract.canOpenCorrectionEdit ? 'اصلاح قرارداد' : 'ویرایش قرارداد',
         href: `/dashboard/sales/contracts/${contract.id}/edit`,
@@ -609,7 +620,8 @@ export default function ContractsPage() {
       });
     }
 
-    if (isCurrentContractFlow(contract) ? contract.commercialActions?.canApproveSales === true : (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove) {
+    const partnerCanApprove = contract.partnerKind !== 'PARTNER_CUSTOMER' || contract.commercialFlowVersion !== 2 || contract.partnerSalesApproved === false;
+    if (partnerCanApprove && (isCurrentContractFlow(contract) ? contract.commercialActions?.canApproveSales === true : (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove)) {
       actions.push({
         label: 'تایید قرارداد',
         onClick: () => handleStatusAction(contract.id, 'approve'),
@@ -629,7 +641,7 @@ export default function ContractsPage() {
       });
     }
 
-    if (!isCurrentContractFlow(contract) && contract.status === 'APPROVED' && contractPermissions.canSign) {
+    if (contract.partnerKind !== 'PARTNER_CUSTOMER' && contract.commercialFlowVersion !== 2 && !isCurrentContractFlow(contract) && contract.status === 'APPROVED' && contractPermissions.canSign) {
       actions.push({
         label: 'امضای قرارداد',
         onClick: () => handleStatusAction(contract.id, 'sign'),

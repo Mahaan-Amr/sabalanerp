@@ -18,3 +18,7 @@ assert.equal(isCurrentContractFlow({ commercialFlowVersion: 1 }), true);
 assert.equal(isCurrentContractFlow({ commercialFlowVersion: 0 }), false);
 assert.equal(isCurrentContractFlow({}), false);
 console.log('ordinary contract lifecycle presentation tests passed');
+
+for (const [partnerCommercialStatus, expected] of [['NOTE','یادداشت'],['DRAFT','پیش‌نویس'],['CUSTOMER_SIGNED','امضا شده'],['QUOTED','استعلام شده'],['FINAL','قطعی']]) {
+  assert.equal(contractLifecycleLabel({ status: 'DRAFT', commercialFlowVersion: 2, partnerCommercialStatus }), expected);
+}

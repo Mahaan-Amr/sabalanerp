@@ -14,5 +14,9 @@ test('customer output accepts retail evidence but rejects nested wholesale evide
     deliveries: [], legalText: 'متن قرارداد', signatures: [], confirmation: 'NOT_SENT',
   };
   assert.equal(CustomerContractOutputSchema.parse(output).contractNumber, 'PC-313-1');
+  const { address: _address, ...customerWithoutAddress } = output.customer;
+  assert.equal(CustomerContractOutputSchema.parse({...output, customer: customerWithoutAddress}).customer.address, undefined);
+  const { address: _sellerAddress, ...sellerWithoutAddress } = output.seller;
+  assert.equal(CustomerContractOutputSchema.safeParse({...output, seller: sellerWithoutAddress}).success, false);
   assert.equal(CustomerContractOutputSchema.safeParse({ ...output, products: [{ ...output.products[0], wholesaleUnitPrice: '800' }] }).success, false);
 });

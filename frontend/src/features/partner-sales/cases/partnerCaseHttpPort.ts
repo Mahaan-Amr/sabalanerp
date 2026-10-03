@@ -161,3 +161,8 @@ export async function openPartnerPdf(caseId: string, snapshotId: string | undefi
   window.open(url, '_blank', 'noopener,noreferrer');
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
+
+export async function decidePartnerCommercial(caseId: string, revision: number, action: 'APPROVE_SALES' | 'REJECT_DRAFT' | 'REJECT_PRICE' | 'RENEW', reason?: string) {
+  const response = await api.post(`/partner/cases/${encodeURIComponent(caseId)}/commercial`, { action, revision, ...(reason ? { reason } : {}) });
+  return response.data;
+}

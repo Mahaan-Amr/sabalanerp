@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { DecimalSchema, DeliverySchema, IdSchema, InstantSchema, RevisionRefSchema } from './primitives';
+import { PartnerCommercialStateSchema } from './commercial-lifecycle';
+import { DecimalSchema, DeliveryFieldsSchema, IdSchema, InstantSchema, RevisionRefSchema } from './primitives';
 import { CustomerContractOutputSchema, PartnerCaseViewSchema } from './projections';
 import { CaseDraftIntentSchema, PartnerDraftEditLeaseSchema } from './commands';
 import { PartnerInquiryRowV2Schema } from './inquiry-v2';
@@ -8,6 +9,9 @@ export const PartnerCaseRuntimeQuerySchema = z.object({ caseId: IdSchema.optiona
 
 export const PartnerCaseRuntimeActionsSchema = z.object({
   canContinue: z.boolean(),
+  canApproveSales: z.boolean().optional(),
+  canRejectDraft: z.boolean().optional(),
+  canRenew: z.boolean().optional(),
   canPreview: z.boolean(),
   canIssue: z.boolean(),
   canFinalize: z.boolean(),
@@ -19,6 +23,8 @@ export const PartnerCaseRuntimeActionsSchema = z.object({
 
 export const PartnerCaseRuntimeRowSchema = z.object({
   view: PartnerCaseViewSchema,
+  customerContractId: IdSchema.optional(),
+  commercial: PartnerCommercialStateSchema.optional(),
   pricingResponseState: z.enum(['READY', 'PARTIAL', 'WAITING', 'REJECTED', 'EXPIRED']).optional(),
   accountingCorrectionRequests: z.array(z.object({ id: IdSchema, reason: z.string().min(1),
     createdAt: InstantSchema }).strict()).optional(),
@@ -84,8 +90,9 @@ export const PartnerWizardStepSchema = z.enum([
 // A delivery may be added before its product amounts are assigned. The
 // submission command continues to require positive, nonempty delivery items.
 const PartnerWizardRecoveryIntentSchema = CaseDraftIntentSchema.omit({ deliveries: true }).extend({
-  deliveries: z.array(DeliverySchema.omit({ items: true }).extend({
+  deliveries: z.array(DeliveryFieldsSchema.omit({ items: true, serviceItems: true }).extend({
     items: z.array(z.object({ productRowId: IdSchema, quantity: DecimalSchema }).strict()),
+    serviceItems: z.array(z.object({ serviceRowId: IdSchema, quantity: DecimalSchema }).strict()).optional(),
   }).strict()),
 }).strict();
 export const PartnerWizardRecoverySaveSchema = z.object({

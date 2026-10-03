@@ -16,6 +16,8 @@ export async function enqueueCommittedPartnerCase(
   tx: Prisma.TransactionClient,
   input: { caseId: string; actorId: string },
 ): Promise<Result<{ queueEvidenceId: string }>> {
+  const flow = await tx.partnerSaleCase.findUnique({ where: { id: input.caseId }, select: { commercialFlowVersion: true } });
+  if (flow?.commercialFlowVersion === 1) return { ok: true, value: { queueEvidenceId: `awaiting-accounting:${input.caseId}` } };
   const current = await readCurrentPartnerCaseViews(tx, input.caseId);
   if (!current?.accounting || current.row.state !== 'COMMITTED' || !current.row.internalRecordId) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };

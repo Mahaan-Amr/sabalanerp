@@ -4,6 +4,14 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { PartnerCaseDetailContent, partnerCasePageActions } from '../cases/PartnerCaseDetail';
+import { partnerSaleReturnStep } from '../../contract-creation/partner/partnerWizardEntry';
+
+test('price response continuation is explicit and returns to pricing', () => {
+  assert.equal(partnerSaleReturnStep(new URLSearchParams('returnTo=contract&step=5')), 'pricing');
+  const labels = partnerCasePageActions({ canContinue: true, canReviewPricing: true, canEditDraft: true }).map(action => action.label);
+  assert.ok(labels.includes('ادامه تکمیل قرارداد'));
+  assert.ok(labels.includes('ویرایش'));
+});
 
 test('Partner contract detail exposes applicable contract actions and delivery allocations', () => {
   const actions = { canPreview: true, canContinue: true, canIssue: true,
@@ -51,4 +59,20 @@ test('customer contract decisions replace Case commit and cancellation actions i
   const decisionActions = [{ label: 'امضا', onClick: () => undefined }];
   assert.deepEqual(partnerCasePageActions({ ...actions, decisionActions }).map(action => action.label), ['امضا']);
   assert.deepEqual(partnerCasePageActions({ ...actions, decisionActions: [] }), []);
+});
+
+test('draft editing resets approvals before exposing recovery or finalized correction editing', () => {
+  const called: string[] = [];
+  const capabilities = { canPreview: false, canIssue: false, canCancel: false, canRequestVoid: false,
+    canContinue: true, canRequestCorrection: true, canEditDraft: true,
+    onEditDraft: () => { called.push('reset-approvals'); },
+    onContinue: () => { called.push('resume'); },
+    onRequestCorrection: () => { called.push('correction'); } };
+  const edits = partnerCasePageActions(capabilities).filter(action => action.label === 'ویرایش');
+  assert.equal(edits.length, 1);
+  edits[0].onClick?.();
+  assert.deepEqual(called, ['reset-approvals']);
+  assert.ok(partnerCasePageActions({ ...capabilities, pending: true }).every(action => action.disabled));
+  partnerCasePageActions({ ...capabilities, canEditDraft: false })[0].onClick?.();
+  assert.deepEqual(called, ['reset-approvals', 'resume']);
 });

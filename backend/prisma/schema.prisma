@@ -11903,6 +11903,7 @@ enum PartnerCustomerConfirmationState {
 }
 
 model PartnerSaleCase {
+  commercialFlowVersion Int                           @default(0)
   id                  String                          @id
   caseNumber          String                          @unique
   trackingCode        PartnerCaseTrackingCode?

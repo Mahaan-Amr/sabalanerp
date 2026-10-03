@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { createManagementFixture, type ManagementPersona } from '../management/fixturePorts';
 import { createResponderFixture } from '../responder/fixturePorts';
 import { PartnerCommandSession } from '../management/commandSession';
-import { ManagementView } from '../management/ManagementView';
+import { ManagementView, actionLabels } from '../management/ManagementView';
 
 test('purpose-projected fixtures keep HR, Sales, Accounting, CRM and ordinary Manager separate', async () => {
   const expected: Record<ManagementPersona, string[]> = {
@@ -20,7 +20,10 @@ test('purpose-projected fixtures keep HR, Sales, Accounting, CRM and ordinary Ma
     const html = renderToStaticMarkup(<ManagementView view={response.value} now={Date.now()} disabled={false} onChoose={() => undefined} />);
     const buttons = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) || [];
     for (const label of ['تأیید هویت', 'تغییر شرایط تجاری', 'تغییر شرایط اعتبار', 'تغییر پاسخ‌دهنده', 'تأیید انتقال']) {
-      assert.equal(buttons.some(button => button.includes(`>${label}</span>`)), expected[persona].includes(label), `${persona}: ${label}`);
+      const available = [...response.value.profiles.flatMap(profile => profile.actions), ...response.value.profiles.flatMap(profile => profile.responder?.pendingInquiries.flatMap(inquiry => inquiry.actions) || []), ...response.value.transfers.flatMap(transfer => transfer.actions)]
+        .filter(action => action.enabled).map(action => action.action === 'CUSTOMER_TRANSFER_DECIDE' ? 'تأیید انتقال' : actionLabels[action.action]);
+      assert.equal(available.includes(label), expected[persona].includes(label), `${persona}: ${label}`);
+      assert.equal(buttons.some(button => button.includes(`>${label}</span>`)), label === 'تأیید انتقال' && expected[persona].includes(label), `${persona}: directory defers settings to detail`);
     }
     assert.doesNotMatch(html, /قیمت مشتری|حاشیه سود|retail/);
   }

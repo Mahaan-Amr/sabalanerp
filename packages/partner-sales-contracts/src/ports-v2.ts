@@ -8,7 +8,9 @@ const page = { cursor: IdSchema.optional(), limit: z.number().int().min(1).max(1
 export const PartnerQueryV2Schema = z.discriminatedUnion('purpose', [
   z.object({ schemaVersion: z.literal(2), purpose: z.literal('PARTNER_INQUIRY'), inquiryId: IdSchema }).strict(),
   z.object({ schemaVersion: z.literal(2), purpose: z.literal('RESPONDER_INQUIRY'), inquiryId: IdSchema }).strict(),
-  z.object({ schemaVersion: z.literal(2), purpose: z.literal('PARTNER_MANAGEMENT'), ...page }).strict(),
+  z.object({ schemaVersion: z.literal(2), purpose: z.literal('PARTNER_MANAGEMENT'), ...page,
+    section: z.enum(['PROFILES', 'TRANSFERS']).optional(), history: z.boolean().optional(),
+    transferStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(), search: z.string().trim().max(200).optional(), transferId: IdSchema.optional() }).strict(),
   z.object({ schemaVersion: z.literal(2), purpose: z.literal('RESPONDER_WORKSPACE'), ...page }).strict(),
 ]);
 export type PartnerQueryV2 = z.infer<typeof PartnerQueryV2Schema>;

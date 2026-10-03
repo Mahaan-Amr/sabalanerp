@@ -3,7 +3,7 @@ import { CaseStateSchema, HashSchema, IdSchema, InstantSchema, PartnerCustomerCo
 
 export const CaseGraphRefSchema = z.object({
   owner: RevisionRefSchema, schemaVersion: z.literal(1), graphHash: HashSchema,
-  productRowIds: z.array(IdSchema).min(1).refine(ids => new Set(ids).size === ids.length),
+  productRowIds: z.array(IdSchema).refine(ids => new Set(ids).size === ids.length),
 }).strict();
 export const PartnerSaleCaseSchema = z.object({
   schemaVersion: z.literal(1), caseId: IdSchema, caseNumber: IdSchema,

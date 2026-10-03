@@ -1,5 +1,7 @@
 'use client';
 
+import { partnerInquiryLabels } from '@sabalanerp/partner-sales-contracts';
+import { decidePartnerCommercial } from './partnerCaseHttpPort';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -39,6 +41,10 @@ export function PartnerCaseRuntime() {
   const [loadError, setLoadError] = useState<{ message: string; kind: 'error' | 'permission' | 'stale' }>();
   const [caseErrors, setCaseErrors] = useState<CaseError[]>([]);
   const [cancelTarget, setCancelTarget] = useState<PartnerCaseRuntimeRow>();
+  const [rejectDraftTarget, setRejectDraftTarget] = useState<PartnerCaseRuntimeRow>();
+  const [rejectDraftReason, setRejectDraftReason] = useState('');
+  const [rejectPricing, setRejectPricing] = useState(false);
+  const [renewTarget, setRenewTarget] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [finalizeTarget, setFinalizeTarget] = useState<PartnerCaseRuntimeRow>();
   const [lossAccepted, setLossAccepted] = useState(false);
@@ -176,7 +182,7 @@ export function PartnerCaseRuntime() {
         <p className="sds-text-secondary mt-1 text-xs">کد پیگیری {partnerTrackingCode(row.view.caseNumber, row.view.trackingNumber)}</p>
       </div> },
       { id: 'status', header: 'وضعیت', priority: 'secondary', cell: row => {
-        const status = partnerCaseListTags[partnerCaseListTag(row.view, row.pricingResponseState)];
+        const status = partnerCaseListTags[partnerCaseListTag(row.view, row.pricingResponseState, row.commercial)];
         return <ErpBadge tone={status.tone}>{status.label}</ErpBadge>;
       } },
       { id: 'products', header: 'اقلام', priority: 'meta', cell: row => row.view.products.length.toLocaleString('fa-IR') },
@@ -186,7 +192,7 @@ export function PartnerCaseRuntime() {
     const rowActions = (row: PartnerCaseRuntimeRow): ErpAction[] => [
       { label: 'بررسی قرارداد', icon: FaEye,
         href: `/dashboard/sales/partner-cases?caseId=${encodeURIComponent(row.view.owner.caseId)}` },
-      ...(row.actions.canContinue && row.editRecovery ? [{ label: 'ادامه تکمیل',
+      ...(row.actions.canContinue && row.commercial?.inquiry !== 'ACCEPTED' && row.editRecovery ? [{ label: 'ادامه تکمیل',
         href: `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(row.view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery.recoveryId)}&baseRevision=${row.editRecovery.baseRevision}` }] : []),
     ];
     return <ErpListPage eyebrow="فروش همکار" title="پیش نویس ها و پرونده ها"
@@ -214,24 +220,46 @@ export function PartnerCaseRuntime() {
       return <div key={caseId} className="space-y-2">
         {error && <ErpInlineState kind={error.kind} title={error.message} />}
         <PartnerCaseWorkspace view={row.view} customerOutput={row.customerOutput} history={row.history}
-          accountingCorrectionRequests={row.accountingCorrectionRequests}
+          commercial={row.commercial} accountingCorrectionRequests={row.accountingCorrectionRequests}
           collections={collections[caseId]} correction={corrections[caseId]}
           canRecordCollection={row.view.state === 'COMMITTED'} onRecordCollection={() => { setCollectionTarget(row); setCollectionAmount(''); setCollectionMethod('BANK_TRANSFER'); setCollectionReference(''); setCollectionNote(''); }}
           onReverseCollection={receiptId => { setReversalTarget({ row, receiptId }); setReversalReason(''); }}
           onRequestCorrection={scope => void runAction(caseId, `request-correction:${scope}`, 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, scope))}
           onSaveCorrection={input => void runAction(caseId, 'save-correction', 'ذخیره اصلاح فروش همکار', () => savePartnerRetailCorrection(row.view, input))}
           actions={{ ...row.actions,
+            canReviewPricing: row.commercial?.inquiry !== 'ACCEPTED' && ['READY', 'PARTIAL', 'REJECTED'].includes(row.pricingResponseState || ''),
+            decisionActions: row.commercial ? [
+              ...(row.actions.canCancel ? [{ label: 'رد', tone: 'danger' as const, onClick: () => { setCancelTarget(row); setCancelReason(''); } }] : []),
+              ...(row.actions.canRenew ? [{ label: 'تمدید مهلت', tone: 'warning' as const, onClick: () => { setRenewTarget(true); setRejectPricing(false); setRejectDraftTarget(row); setRejectDraftReason(''); } }] : []),
+              ...(row.commercial && !row.commercial.firstFinancialRecordAt && row.commercial.inquiry !== 'ACCEPTED' && ['READY', 'PARTIAL'].includes(row.pricingResponseState || '') ? [{ label: 'رد استعلام', tone: 'danger' as const, onClick: () => { setRenewTarget(false); setRejectPricing(true); setRejectDraftTarget(row); setRejectDraftReason(''); } }] : []),
+              ...(row.actions.canApproveSales && row.commercial ? [{ label: 'تایید', tone: 'success' as const,
+                onClick: () => void runAction(caseId, 'approve-sales', 'تأیید فروش', () => decidePartnerCommercial(caseId, row.commercial!.revision, 'APPROVE_SALES')) }] : []),
+            ] : undefined,
+            canEditDraft: Boolean(row.commercial && row.actions.canRejectDraft),
+            onEditDraft: () => { setRenewTarget(false); setRejectPricing(false); setRejectDraftTarget(row); setRejectDraftReason(''); },
             onContinue: row.editRecovery ? () => router.push(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}`) : undefined,
             onPreview: () => void previewPdf(caseId, row.view.state === 'COMMITTED' ? undefined : row.snapshotId ?? undefined, 'PREVIEW', row.view.owner),
             onIssue: () => void previewPdf(caseId, undefined, 'FINAL', row.view.owner),
             onFinalize: () => { setFinalizeTarget(row); setLossAccepted(false); },
-            onSendConfirmation: () => void runAction(caseId, 'send-confirmation', 'ارسال تأییدیه فروش همکار', () => sendPartnerConfirmation(caseId)),
+            onSendConfirmation: () => void runAction(caseId, 'send-confirmation', 'ارسال تأییدیه فروش همکار', async () => {
+              const result = await sendPartnerConfirmation(caseId);
+              return result;
+            }),
             onRequestCorrection: () => void runAction(caseId, 'request-correction:retail', 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, 'RETAIL_ONLY')),
             onCancel: () => { setCancelTarget(row); setCancelReason(''); },
             onRequestVoid: () => void runAction(caseId, 'request-void', 'ثبت درخواست ابطال فروش همکار', () => requestPartnerCorrection(row.view, 'VOID')),
           }} />
       </div>;
     })}</div>
+    <ErpSheet open={Boolean(rejectDraftTarget)} onClose={() => { if (!actionPending) setRejectDraftTarget(undefined); }}
+      title={renewTarget ? "تمدید مهلت" : rejectPricing ? "رد استعلام" : "بازگشت به یادداشت"} presentation="modal" pending={actionPending}
+      footer={<ErpButton label={renewTarget ? "تمدید مهلت" : rejectPricing ? "رد استعلام" : "بازگشت برای اصلاح"} tone="warning" disabled={actionPending || !rejectDraftReason.trim()}
+        onClick={() => { if (!rejectDraftTarget?.commercial) return;
+          void runAction(rejectDraftTarget.view.owner.caseId, 'reject-draft', 'بازگشت به یادداشت', () => decidePartnerCommercial(
+            rejectDraftTarget.view.owner.caseId, rejectDraftTarget.commercial!.revision, renewTarget ? 'RENEW' : rejectPricing ? 'REJECT_PRICE' : 'REJECT_DRAFT', rejectDraftReason))
+            .then(saved => { if (saved) setRejectDraftTarget(undefined); }); }} />}>
+      <ErpField label="دلیل"><ErpTextarea value={rejectDraftReason} disabled={actionPending} onChange={event => setRejectDraftReason(event.target.value)} /></ErpField>
+    </ErpSheet>
     <ErpSheet open={Boolean(finalizeTarget)} onClose={() => { if (!actionPending) setFinalizeTarget(undefined); }}
       title="تأیید و نهایی‌سازی قرارداد" presentation="modal" pending={actionPending}
       footer={<ErpButton label="تأیید و نهایی‌سازی قرارداد" tone="success"

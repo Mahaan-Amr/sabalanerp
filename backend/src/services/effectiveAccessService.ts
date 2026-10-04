@@ -49,6 +49,13 @@ type EffectiveAccessClient = Pick<
   | 'hrFeatureAccessGrant'
 >;
 
+// These resource-sensitive features require an explicit direct or role grant.
+const EXPLICIT_FEATURES = new Set<string>([
+  FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE,
+  FEATURES.SALES_PARTNER_INQUIRIES_VIEW,
+  FEATURES.SALES_PARTNER_INQUIRIES_RESPOND,
+]);
+
 const ADMIN_WORKSPACES = ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics'];
 const HR_FEATURE_CODES = HR_REDESIGN_CATALOG.workspaceFeatures.map(({ code }) => code);
 const HR_ACTION_CODES = new Set(AUTHORIZABLE_HR_ACTION_PERMISSIONS.map(({ code }) => code));
@@ -156,7 +163,7 @@ export const getEffectiveUserAccess = async (
     const directWorkspace = activeDirect.find((grant) => grant.workspace === workspace);
     const roleFeature = activeRoleFeatures.find((grant) => grant.feature === feature);
     const roleWorkspace = roleWorkspaces.find((grant) => grant.workspace === workspace && activeLegacyGrant(grant, at));
-    if (feature === FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE) {
+    if (EXPLICIT_FEATURES.has(feature)) {
       const explicit = directFeature ?? roleFeature;
       return explicit ? [{ feature, permission: permission(explicit.permissionLevel), workspace }] : [];
     }
@@ -230,7 +237,7 @@ export const getEffectiveUserAccess = async (
     const directWorkspace = activeDirect.find((candidate) => candidate.workspace === grant.workspace);
     const roleFeature = activeRoleFeatures.find((candidate) => candidate.feature === grant.feature);
     const roleWorkspace = roleWorkspaces.find((candidate) => candidate.workspace === grant.workspace && activeLegacyGrant(candidate, at));
-    if (grant.feature === FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE) {
+    if (EXPLICIT_FEATURES.has(grant.feature)) {
       return { ...grant, source: directFeature ? 'DIRECT_FEATURE' as const : 'ROLE_FEATURE' as const, grantId: directFeature?.id ?? roleFeature?.id ?? null };
     }
     if (directWorkspace?.permissionLevel.toLowerCase() === 'admin') {

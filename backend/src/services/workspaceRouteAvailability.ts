@@ -2,7 +2,7 @@ import { canReadTransferNotice } from './partnerSales/crm/transferAccess';
 import type { PrismaClient } from '@prisma/client';
 import { resolveNarrowFeatureAccess } from './narrowFeatureAccess';
 import { getEffectiveUserAccess } from './effectiveAccessService';
-import { readScopedActions } from './effectiveAccessService';
+import { readPartnerRouteAuthority } from './partnerSales/authorization/centralAuthority';
 import { PERFORMANCE_ACTION_PERMISSION_CODES } from './hrActionPermissionCatalog';
 
 type Rule = { pattern: RegExp; workspace: string; features: string[]; level?: 'view' | 'edit' | 'admin'; narrow?: boolean;
@@ -79,7 +79,7 @@ const rules: Rule[] = [
 export const resolveWorkspaceRouteAvailability = async (
   prisma: PrismaClient,
   input: { userId: string; role: string; path: string },
-  scopedResolver = readScopedActions,
+  scopedResolver = readPartnerRouteAuthority,
 ) => {
   const transferStatusId = input.path.match(/^\/dashboard\/crm\/customer-transfers\/([A-Za-z0-9:_-]+)$/)?.[1];
   if (transferStatusId) { const allowed = await canReadTransferNotice(prisma, input.userId, transferStatusId);

@@ -1,5 +1,6 @@
+import type { Prisma } from '@prisma/client';
 import { PartnerActionV2Schema, PermissionContextSchema, type PartnerActionV2 } from '@sabalanerp/partner-sales-contracts';
-import { resolveScopedActions } from '../../effectiveAccessService';
+import { readScopedActions, resolveScopedActions } from '../../effectiveAccessService';
 import type { ResolvePartnerAuthority } from './prisma';
 import type { AuthorizationEvidence } from './contracts';
 import { resolvePartnerWorkspaceAuthority } from './workspaceAuthority';
@@ -27,3 +28,12 @@ export const resolvePartnerScopedAuthority: ResolvePartnerAuthority<PartnerActio
   }
   return { authorizationRevision: current.authorizationRevision, grants };
 };
+
+/** Route admission uses the existing responder feature bridge. Other Partner
+ * entry points keep their scoped grants; resource assignment checks stay in policy. */
+export async function readPartnerRouteAuthority(tx: Prisma.TransactionClient, actorId: string, _domain: string) {
+  const current = await readScopedActions(tx, actorId, 'PARTNER');
+  const workspace = await resolvePartnerWorkspaceAuthority(tx, actorId);
+  return { ...current, grants: [...current.grants,
+    ...workspace.grants.filter(grant => grant.purpose === 'RESPONDER' && grant.scope === 'ASSIGNED')] };
+}

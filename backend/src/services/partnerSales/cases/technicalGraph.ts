@@ -70,7 +70,7 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
   }
   const preview = previewPartnerTechnicalDraft(draft, context.catalog);
   if (!preview.ok) return preview;
-  if (draft.rows.length === 0 || preview.value.conflicts.length ||
+  if ((draft.rows.length === 0 && !draft.serviceRows?.length) || preview.value.conflicts.length ||
       preview.value.rows.some(row => !row.calculation.ok || (row.operations && !row.operations.ok)) ||
       preview.value.dependents.some(item => !item.calculation.ok || ('operations' in item && item.operations && !item.operations.ok))) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') };
@@ -88,16 +88,20 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
       const evidence = context.products.filter(item => item.catalogItemId === row.catalogItemId && item.catalogSnapshotVersion === row.catalogSnapshotVersion);
       if (products.length !== 1 || evidence.length !== 1) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
       const snapshot = technicalProductSnapshot(products[0]);
+      const enteredRate = row.retailUnitPrice ? parseCanonicalDecimal(new Prisma.Decimal(row.retailUnitPrice.amount)
+        .div(row.retailUnitPrice.currency === 'IRR' ? 10 : 1).toFixed()) : undefined;
+      if (enteredRate !== undefined && new Prisma.Decimal(enteredRate).lte(0))
+        return { ok: false, error: partnerError('INVALID_PAYLOAD') };
       let intent: AddRowSellerIntent = { row: {
         productRowId: parseStableIdentity('product-row', row.productRowId), catalogProductId: row.catalogItemId,
-        catalogSnapshotVersion: row.catalogSnapshotVersion, productType: row.family, contractualTitle: products[0].name,
-        commercial: {},
+        catalogSnapshotVersion: row.catalogSnapshotVersion, productType: row.family, contractualTitle: row.contractualTitle?.trim() || products[0].name,
+        ...(row.description ? { description: row.description } : {}), commercial: {},
       } };
       if (row.family === 'prepared' || row.family === 'volumetric') {
         const rates = evidence[0].preparedRates?.filter(rate => rate.kind === row.configuration.kind && rate.unit === row.configuration.unit) ?? [];
         if (rates.length !== 1) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         const quantity = parseCanonicalDecimal(row.configuration.quantity!);
-        const rateToman = parseCanonicalDecimal(rates[0].rateToman);
+        const rateToman = enteredRate ?? parseCanonicalDecimal(rates[0].rateToman);
         const pricing = calculatePricing({ policyVersion: context.policy.pricing, roundingPolicyVersion: context.policy.rounding,
           lines: [{ lineId: row.productRowId, quantity, rateToman }] });
         intent = { row: { ...intent.row, commercial: { requestedQuantity: quantity, baseRateToman: rateToman,
@@ -111,6 +115,7 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
         const pricing = evidence[0].longitudinal;
         if (!pricing || !snapshot.facts.motherWidthMeters) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         intent = { ...intent, productPolicyInput: { ...pricing, ...row.configuration,
+          ...(enteredRate === undefined ? {} : { baseRateToman: enteredRate }),
           ...versions,
           mandatoryPercentage: decimal(row.configuration.mandatoryPercentage) ?? pricing.mandatoryPercentage,
           rememberedMandatoryPercentage: decimal(row.configuration.mandatoryPercentage) ?? pricing.rememberedMandatoryPercentage,
@@ -124,6 +129,7 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
         if (!pricing) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         const { sawKerfEnabled, ...configuration } = row.configuration;
         intent = { ...intent, slabPolicyInput: { ...pricing, ...configuration, ...versions,
+          ...(enteredRate === undefined ? {} : { baseMaterialRateToman: enteredRate }),
           sourceBatchId: parseStableIdentity('source-batch', configuration.sourceBatchId),
           lengthMeters: decimal(configuration.lengthMeters), widthMeters: decimal(configuration.widthMeters),
           areaSquareMeters: decimal(configuration.areaSquareMeters),
@@ -141,6 +147,7 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
         if (!system) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
         const { quantityMode, ...configuration } = row.configuration;
         intent = { ...intent, stairPartPolicyInput: { ...pricing, ...configuration, ...versions,
+          ...(enteredRate === undefined ? {} : { baseRateToman: enteredRate }),
           mandatoryPercentage: decimal(configuration.mandatoryPercentage) ?? pricing.mandatoryPercentage,
           rememberedMandatoryPercentage: decimal(configuration.mandatoryPercentage) ?? pricing.rememberedMandatoryPercentage,
           stairSystemId: parseStableIdentity('stair-system', configuration.stairSystemId),
@@ -176,7 +183,7 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
       graph = applied.graph;
       rowIntents.set(row.productRowId, { intent, snapshot });
     }
-    if ((draft.stairSystems?.length ?? 0) !== graph.stairSystems.length) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
+    if (new Set(draft.rows.flatMap(row => row.family === 'stair' ? [row.configuration.stairSystemId] : [])).size !== graph.stairSystems.length) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
     const dependents = (draft.dependents ?? []).map(intent => ({ intent, kind: intent.kind, order: intent.creationOrder,
       identity: intent.kind === 'layer' ? intent.layerConfigurationId : intent.allocationId })).sort(compareProductDependentOrder);
     for (const { intent } of dependents) {
@@ -215,6 +222,10 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
       graph = applied.graph;
     }
   } catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
+  // A new technical revision uses exactly the ordinary Sale family basis.
+  // Historical saved graphs keep their previous negotiated-unit semantics.
+  graph = { ...graph, rows: graph.rows.map(row => ({ ...row, commercial: { ...row.commercial,
+    calculationSnapshot: { ...row.commercial.calculationSnapshot, partnerPricingBasis: 'ordinary-sale-v1' } } })) };
   try { return { ok: true, value: { graph, preview: preview.value, measures: technicalGraphMeasures(graph) } }; }
   catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
 }

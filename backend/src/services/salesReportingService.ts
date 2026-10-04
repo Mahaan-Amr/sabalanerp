@@ -419,6 +419,10 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const capturedAt = new Date().toISOString();
   const contracts: typeof ordinaryContracts = [...ordinaryContracts, ...partnerRows.flatMap(row => {
     if (!row.partnerCase?.internalRecordId) throw new Error('Partner sales reporting root integrity conflict');
+    if (row.commercialFlowVersion === 2) {
+      if (!row.realizedAt) return [];
+      return [{ ...row, totalAmount: row.realizedAmount ?? new Prisma.Decimal(0) }];
+    }
     const publicEvents = readPersistedPartnerEvents({ ...row.partnerCase,
       internalRecordId: row.partnerCase.internalRecordId }, row.partnerCase.events);
     const projected = projectPartnerRevenueForSales(publicEvents, capturedAt);

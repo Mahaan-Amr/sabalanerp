@@ -94,7 +94,7 @@ test('accepting prices on a numbered Case does not resend its initial pricing re
     commands: { execute: async command => {
       assert.equal(command.type, 'CASE_DRAFT_REVISE');
       if (command.type !== 'CASE_DRAFT_REVISE') throw new Error('revision expected');
-      // The /partner/cases/commands route rejects pricingRequest on revisions.
+      // An ordinary approval save must not resend an earlier request.
       if (command.intent.pricingRequest) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
       return { ok: true, value: { commandId: command.commandId, replayed: false,
         case: fixture.partner, eventIds: [] } };
@@ -282,4 +282,20 @@ test('final submission hashes optional blank payment and discount fields as thei
     customerPaymentPlan: { ...intent().customerPaymentPlan,
       installments: intent().customerPaymentPlan.installments.map(item => ({ ...item, nationalCode: undefined })) } });
   assert.equal(executed, true, submission.getSnapshot().message);
+});
+
+
+test('explicit product edit keeps its new inquiry request on the numbered revision', async () => {
+  const pricingRequest = { inquiryId: 'replacement-inquiry', rows: [{ rowId: 'replacement-row', configuration: fixture.configurationDraft }] };
+  const submission = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId, initialCase: fixture.partner,
+    commands: { execute: async command => {
+      assert.equal(command.type, 'CASE_DRAFT_REVISE');
+      if (command.type !== 'CASE_DRAFT_REVISE') throw new Error('revision expected');
+      assert.deepEqual(command.intent.pricingRequest, pricingRequest);
+      return { ok: true, value: { commandId: command.commandId, replayed: false, case: fixture.partner, eventIds: [] } };
+    } }, recovery: { pending: () => null, savePending: async () => undefined,
+      clearPending: async () => undefined, finalizeCommitted: async () => undefined, prepareEditLease },
+  });
+  await submission.submit({ ...intent(), pricingRequest }, { requestPricing: true });
+  assert.equal(submission.getSnapshot().phase, 'created');
 });

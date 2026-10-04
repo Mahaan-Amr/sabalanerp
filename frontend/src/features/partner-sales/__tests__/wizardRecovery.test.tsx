@@ -518,3 +518,10 @@ test('a route bound to a recovery consumes its new-entry intent on refresh', () 
   assert.equal(shouldStartFreshPartnerCreation(new URLSearchParams('newInquiry=1&caseId=current-case')), false);
   assert.equal(shouldStartFreshPartnerCreation(new URLSearchParams('newCustomer=1&draftId=current-draft')), true);
 });
+
+
+test('Case-scoped published inquiries restore replacement requests regardless of their ID format', () => {
+  assert.deepEqual(partnerCasePricingInquiryIds('recovery', ['replacement-uuid', 'legacy-case-inquiry'], [], true),
+    ['replacement-uuid', 'legacy-case-inquiry']);
+  assert.deepEqual(partnerCasePricingInquiryIds('recovery', ['replacement-uuid'], []), []);
+});

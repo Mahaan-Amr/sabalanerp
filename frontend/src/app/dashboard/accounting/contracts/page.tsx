@@ -26,7 +26,7 @@ import {
 } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
-import { accountingAPI } from '@/lib/api';
+import api, { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
@@ -379,8 +379,8 @@ export default function AccountingContractsPage() {
       priority: 'secondary',
       cell: (contract) => (
         <div className="flex flex-wrap gap-1">
-          <ErpBadge tone={contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'success' : contractStatusTones[contract.status] || 'neutral'}>
-            {contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? 'فروش داخلی ثبت‌شده' : contractLifecycleLabel(contract)}
+          <ErpBadge tone={contractStatusTones[contract.status] || 'neutral'}>
+            {contractLifecycleLabel(contract)}
           </ErpBadge>
           {contract.isInactive && <ErpBadge tone="warning">غیرفعال</ErpBadge>}
         </div>
@@ -419,12 +419,22 @@ export default function AccountingContractsPage() {
       align: 'end',
       priority: 'secondary',
       cell: (contract) => (
-        <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{money(contract.accounting.remainingAmount, contract.accounting.currency)}</span>
+        <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{contract.amountKnown === false ? 'پس از پذیرش قیمت‌ها' : money(contract.accounting.remainingAmount, contract.accounting.currency)}</span>
       ),
     },
   ];
 
-  const rowActions = (contract: AccountingContractRow): ErpAction[] => contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? [
+  const rowActions = (contract: AccountingContractRow): ErpAction[] => contract.preparationOnly ? [
+    { label: 'مشاهده', icon: FaEye, href: `/dashboard/accounting/contracts/partner/${encodeURIComponent(contract.partnerContext!.caseId)}` },
+    { label: 'پرینت', icon: FaPrint, onClick: () => void openPartnerInternalPdf(contract, true) },
+    ...(contract.partnerCommercialStatus === 'FINAL' && accountingActionAvailability(contract, 'CREATE_INVOICE')?.enabled ? [{
+      label: 'ثبت رکورد مالی', icon: FaFileInvoice, disabled: Boolean(actionLoading),
+      onClick: () => { if (!contract.owner || actionLoading) return; setActionLoading(`${contract.contractId}:CREATE_INVOICE`);
+        void api.post('/partner/accounting/enqueue', contract.owner).then(() => loadContracts())
+          .catch(() => setActionError('ثبت پیش‌نویس مالی انجام نشد؛ وضعیت قرارداد را تازه‌سازی کنید.'))
+          .finally(() => setActionLoading(null)); },
+    } as ErpAction] : []),
+  ] : contract.sourceKind === 'PARTNER_INTERNAL_RECORD' ? [
     { label: 'مشاهده', href: contract.partnerContext?.caseId
       ? `/dashboard/accounting/contracts/partner/${encodeURIComponent(contract.partnerContext.caseId)}` : undefined,
       icon: FaEye, tone: 'primary' },
@@ -441,10 +451,11 @@ export default function AccountingContractsPage() {
       onClick: () => openApprovalModal(contract),
     } as ErpAction] : []),
     { label: 'دریافتنی', icon: FaReceipt, tone: 'success',
-      disabled: !['ISSUED', 'POSTED'].includes(contract.accounting.invoiceStatus),
+      disabled: (Boolean(contract.partnerCommercialStatus) && contract.partnerCommercialStatus !== 'FINAL') || !['ISSUED', 'POSTED'].includes(contract.accounting.invoiceStatus),
       title: !['ISSUED', 'POSTED'].includes(contract.accounting.invoiceStatus) ? 'ابتدا سند را تأیید مالی کنید.' : undefined,
       href: `/dashboard/accounting/receivables?search=${encodeURIComponent(contract.partnerContext?.caseNumber ?? '')}` },
     { label: 'پیش‌نویس صورتحساب', icon: FaFileInvoice, tone: 'info',
+      disabled: Boolean(contract.partnerCommercialStatus) && contract.partnerCommercialStatus !== 'FINAL',
       href: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(contract.partnerContext?.caseNumber ?? '')}` },
     ...(accountingActionAvailability(contract, 'FLAG_CONTRACT')?.visible ? [
       { label: 'پرچم', icon: FaFlag, tone: 'warning',
@@ -512,7 +523,7 @@ export default function AccountingContractsPage() {
     <ErpListPage
       eyebrow="حسابداری"
       title="قراردادهای قابل بررسی"
-      description="همه قراردادها در هر وضعیت دیده می‌شوند؛ اقدام مالی فقط برای قراردادهای تایید شده، امضا شده یا چاپ شده فعال است."
+      description="قراردادهای همکار از یادداشت نمایش داده می‌شوند؛ اقدامات مالی آن‌ها پس از قطعی‌شدن فعال است."
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadContracts, tone: 'neutral' }]}
       filters={[
         {

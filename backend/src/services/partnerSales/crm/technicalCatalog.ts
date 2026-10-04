@@ -1,4 +1,5 @@
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
+import { Prisma } from '@prisma/client';
 import {
   PartnerTechnicalProductSchema, PartnerTechnicalOperationSchema, partnerError,
   type PartnerTechnicalFamily, type PartnerTechnicalProduct, type PartnerTechnicalOperation, type Result,
@@ -15,6 +16,12 @@ export interface TechnicalProductSource {
   availableInLongitudinalContracts: boolean; availableInStairContracts: boolean;
   availableInSlabContracts: boolean; availableInVolumetricContracts: boolean;
   preparedSalesUnit: string; volumetricSalesUnit: string;
+  basePrice?: InventoryDecimal | null; currency?: string;
+}
+
+export function catalogMaterialRateToman(value: InventoryDecimal, currency: string): string {
+  if (!['ریال', 'IRR', 'تومان', 'IRT'].includes(currency)) throw new Error('Unknown catalog currency');
+  return parseCanonicalDecimal(new Prisma.Decimal(value.toString()).div(currency === 'ریال' || currency === 'IRR' ? 10 : 1).toFixed());
 }
 
 type TechnicalOperationSource = { id: string; updatedAt: Date; isActive: boolean } & (
@@ -41,7 +48,8 @@ export function projectPartnerTechnicalOperation(source: TechnicalOperationSourc
 
 /** Projection only. The authenticated catalog producer must authorize before
  * reading candidates/counts; passing an inventory row here grants no access.
- * Never spread the source: Prisma rows may contain prices or future private data.
+ * Never spread the source: only the normalized ordinary catalog suggestion is
+ * public; responder quotes and other private evidence do not enter this DTO.
  */
 export function projectPartnerTechnicalProduct(source: TechnicalProductSource): Result<PartnerTechnicalProduct> {
   try {
@@ -66,6 +74,8 @@ export function projectPartnerTechnicalProduct(source: TechnicalProductSource): 
     return { ok: true, value: PartnerTechnicalProductSchema.parse({
       catalogItemId: source.id, catalogSnapshotVersion: source.updatedAt.toISOString(),
       code: source.code, name: source.namePersian, families,
+      ...(source.basePrice != null && new Prisma.Decimal(source.basePrice.toString()).gt(0)
+        ? { suggestedRetailUnitPrice: { amount: catalogMaterialRateToman(source.basePrice, source.currency ?? ''), currency: 'IRT' } } : {}),
       salesUnits: { prepared: source.preparedSalesUnit, volumetric: source.volumetricSalesUnit },
       dimensions: {
         motherWidthCentimeters: dimension(source.widthValue),

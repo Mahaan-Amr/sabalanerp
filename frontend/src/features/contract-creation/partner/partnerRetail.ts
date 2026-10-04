@@ -19,6 +19,23 @@ export interface PartnerRetailRow {
   wholesaleLineTotal?: Money;
 }
 
+/** Independent services have catalog pricing and never carry inquiry authority. */
+export interface PartnerRetailServiceRow {
+  serviceRowId: string;
+  title: string;
+  quantity: string;
+  unit: string;
+  retailUnitPrice: Money;
+  wholesaleUnitPrice?: Money;
+  retailLineTotal?: Money;
+  wholesaleLineTotal?: Money;
+}
+type FinancialRow = Pick<PartnerRetailRow, 'productRowId' | 'quantity' | 'retailUnitPrice' |
+  'retailEffectiveUnitPrice' | 'wholesaleUnitPrice' | 'retailLineTotal' | 'wholesaleLineTotal'>;
+const financialRows = (rows: PartnerRetailRow[], services: readonly PartnerRetailServiceRow[]): FinancialRow[] => [
+  ...rows, ...services.map(service => ({ ...service, productRowId: service.serviceRowId })),
+];
+
 export function refreshPartnerInquiryRow(row: PartnerRetailRow, inquiryRow: PartnerInquiryRow): PartnerRetailRow {
   const sameApproval = row.inquiryRow.rowId === inquiryRow.rowId
     && row.inquiryRow.revision === inquiryRow.revision
@@ -34,7 +51,7 @@ export function refreshPartnerInquiryRow(row: PartnerRetailRow, inquiryRow: Part
 
 export function defaultPartnerRetailRows(rows: (Omit<PartnerRetailRow, 'retailUnitPrice'> & { retailUnitPrice?: Money })[]): PartnerRetailRow[] {
   return rows.map(row => ({ ...row, retailUnitPrice: row.retailUnitPrice ??
-    (row.inquiryRow.approvedPrice ? { ...row.inquiryRow.approvedPrice } : { amount: '', currency: 'IRT' }) }));
+    { amount: '', currency: 'IRT' } }));
 }
 
 export function partnerRetailIntentRows(rows: PartnerRetailRow[]): PartnerDraftIntent['rows'] {
@@ -115,7 +132,7 @@ export function partnerRetailGroups(rows: PartnerRetailRow[]) {
   return Array.from(groups.entries()).map(([id, members]) => ({ root: byId.get(id)!, children: members.filter(row => row.productRowId !== id) }));
 }
 
-function retailSubtotal(rows: PartnerRetailRow[], currency: Money['currency']): Decimal | null {
+function retailSubtotal(rows: FinancialRow[], currency: Money['currency']): Decimal | null {
   let subtotal = decimal('0');
   try {
     for (const row of rows) {
@@ -130,23 +147,24 @@ function retailSubtotal(rows: PartnerRetailRow[], currency: Money['currency']): 
 
 /** Derive the frozen customer discount without touching any Sabalan price. */
 export function partnerRetailDiscountFromPercent(rows: PartnerRetailRow[], percent: string,
-  currency: Money['currency']): Money | null {
+  currency: Money['currency'], services: readonly PartnerRetailServiceRow[] = []): Money | null {
   if (!DecimalSchema.safeParse(percent).success || Number(percent) > 100) return null;
-  const subtotal = retailSubtotal(rows, currency);
+  const subtotal = retailSubtotal(financialRows(rows, services), currency);
   if (!subtotal) return null;
   const rate = decimal(percent);
   return { amount: display({ digits: subtotal.digits * rate.digits,
     scale: subtotal.scale + rate.scale + 2 }), currency };
 }
 
-export function partnerRetailSubtotal(rows: PartnerRetailRow[], currency: Money['currency']): string | null {
-  const subtotal = retailSubtotal(rows, currency);
+export function partnerRetailSubtotal(rows: PartnerRetailRow[], currency: Money['currency'],
+  services: readonly PartnerRetailServiceRow[] = []): string | null {
+  const subtotal = retailSubtotal(financialRows(rows, services), currency);
   return subtotal ? display(subtotal) : null;
 }
 
-export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) {
+export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money, services: readonly PartnerRetailServiceRow[] = []) {
   let wholesale = decimal('0'); let retail = decimal('0'); let pricingReady = true;
-  for (const row of rows) {
+  for (const row of financialRows(rows, services)) {
     const approved = row.wholesaleUnitPrice;
     if (row.retailUnitPrice.currency !== discount.currency || (approved && approved.currency !== discount.currency)) {
       return { valid: false as const, field: 'price' as const, productRowId: row.productRowId, message: 'واحد پول ردیف‌ها یکسان نیست؛ قیمت تأییدشده را بررسی کنید.' };

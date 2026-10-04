@@ -5,7 +5,7 @@ import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales
 import { previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { compilePartnerTechnicalGraph } from '../partnerSales/cases/technicalGraph';
 
-test('private graph compilation preserves prepared quantities and prices the exact selected measure', () => {
+test('private graph compilation ignores an unused stair group after product deletion and preserves actual quantities', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
   const product = { ...catalog.products[0], families: ['prepared', 'volumetric'] as const };
   const context = { catalog: { ...catalog, products: [{ ...product, families: [...product.families] }] },
@@ -18,7 +18,7 @@ test('private graph compilation preserves prepared quantities and prices the exa
       family: 'prepared', configuration: { kind: 'readyPiece', unit: 'count', quantity: '3' } },
     { productRowId: 'legacy-b', catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
       family: 'prepared', configuration: { kind: 'cubic', unit: 'ton', quantity: '2.5' } },
-  ] }, context);
+  ], stairSystems: [{stairSystemId:'stair-system:removed',quantity:{mode:'steps',totalSteps:10}}] }, context);
   if (!result.ok) throw new Error(result.error.code);
   assert.deepEqual(result.value.graph.rows.map(row => [row.productRowId, row.productType, row.commercial.requestedQuantity,
     row.commercial.baseRateToman, row.commercial.totalAmountToman]),

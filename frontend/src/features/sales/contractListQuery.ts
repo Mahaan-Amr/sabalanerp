@@ -1,4 +1,5 @@
 export const CONTRACT_STATUSES = [
+  'QUOTED',
   'DRAFT',
   'PENDING_APPROVAL',
   'APPROVED',

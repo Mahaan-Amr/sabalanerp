@@ -7,7 +7,8 @@ import { ErpButton, ErpCheckbox, ErpFieldView, ErpInlineState, ErpSheet, ErpText
 import { partnerSalesActionFeedback } from '../partnerSalesErrorMessage';
 import { formatPartnerMoney } from '../presentation';
 import { PartnerCaseWorkspace } from './PartnerCaseWorkspace';
-import { cancelPartnerCase, finalizePartnerCase, openPartnerPdf, readPartnerCases, requestPartnerCorrection, sendPartnerConfirmation } from './partnerCaseHttpPort';
+import { assertSuccessfulSalesResult } from '@/features/sales/salesOperationalError';
+import { cancelPartnerCase, decidePartnerCommercial, finalizePartnerCase, openPartnerPdf, readPartnerCases, requestPartnerCorrection, sendPartnerConfirmation } from './partnerCaseHttpPort';
 
 /** Uses the same Case permissions and commands as the Partner workspace. */
 export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onDownload, onPrint, decisionActions }: {
@@ -52,21 +53,32 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
   return <>
     {error && <ErpInlineState kind={error.kind} title={error.message} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
     <PartnerCaseWorkspace view={currentView}
+      commercial={row?.commercial}
       customerOutput={row?.customerOutput} history={row?.history}
       accountingCorrectionRequests={row?.accountingCorrectionRequests}
       onRequestCorrection={scope => { if (!pending) void run(() => requestPartnerCorrection(currentView, scope)); }}
       actions={{
-        canDownload, canPrint, onDownload, onPrint, pending, decisionActions,
+        canDownload, canPrint, onDownload, onPrint, pending,
+        decisionActions: row?.commercial ? [
+          ...(actions?.canApproveSales ? [{ label: 'تایید', tone: 'success' as const,
+            onClick: () => void run(() => decidePartnerCommercial(currentView.owner.caseId, row.commercial!.revision, 'APPROVE_SALES')) }] : []),
+          ...(actions?.canCancel ? [{ label: 'رد', tone: 'danger' as const, onClick: () => setCancelOpen(true) }] : []),
+        ] : row ? decisionActions : [],
         canPreview: Boolean(actions?.canPreview), canIssue: Boolean(actions?.canIssue),
         canContinue: Boolean(actions?.canContinue), canFinalize: Boolean(actions?.canFinalize),
+        canReviewPricing: row?.commercial?.inquiry !== 'ACCEPTED' && ['READY', 'PARTIAL', 'REJECTED'].includes(row?.pricingResponseState || ''),
         canSendConfirmation: Boolean(actions?.canSendConfirmation),
         canRequestCorrection: Boolean(actions?.canRequestCorrection),
         canCancel: Boolean(actions?.canCancel), canRequestVoid: Boolean(actions?.canRequestVoid),
         onPreview: () => void run(() => openPartnerPdf(currentView.owner.caseId, currentView.state === 'COMMITTED' ? undefined : row?.snapshotId ?? undefined, 'PREVIEW', currentView.owner)),
         onIssue: () => void run(() => openPartnerPdf(currentView.owner.caseId, undefined, 'FINAL', currentView.owner)),
-        onSendConfirmation: () => { if (!pending) void run(() => sendPartnerConfirmation(currentView.owner.caseId)); },
+        onSendConfirmation: () => { if (!pending) void run(async () => {
+          const result = await sendPartnerConfirmation(currentView.owner.caseId);
+          assertSuccessfulSalesResult(result);
+          return result;
+        }); },
         onContinue: row?.editRecovery ? () => router.push(
-          `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}`) : undefined,
+          `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}${['READY', 'PARTIAL', 'REJECTED'].includes(row.pricingResponseState || '') ? '&returnTo=contract&step=5' : ''}`) : undefined,
         onRequestCorrection: () => { if (!pending) void run(() => requestPartnerCorrection(currentView, 'RETAIL_ONLY')); },
         onCancel: () => { if (!pending) setCancelOpen(true); },
         onRequestVoid: () => { if (!pending) void run(() => requestPartnerCorrection(currentView, 'VOID')); },

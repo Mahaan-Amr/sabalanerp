@@ -10,7 +10,7 @@ import {
   type Result,
 } from '@sabalanerp/partner-sales-contracts';
 
-type Page = { cursor?: string; limit: number };
+type Page = { cursor?: string; limit: number; section?: 'PROFILES' | 'TRANSFERS'; history?: boolean; transferStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'; search?: string; transferId?: string };
 
 export interface PartnerWorkspaceQueryDependencies<Transaction> {
   actorId: string;
@@ -37,6 +37,7 @@ export function createPartnerWorkspaceQuery<Transaction>(
     const page = {
       ...(parsed.data.cursor ? { cursor: parsed.data.cursor } : {}),
       limit: parsed.data.limit ?? 20,
+      ...(parsed.data.purpose === 'PARTNER_MANAGEMENT' ? { section: parsed.data.section, history: parsed.data.history, transferStatus: parsed.data.transferStatus, search: parsed.data.search, transferId: parsed.data.transferId } : {}),
     };
     return dependencies.transaction(async transaction => {
       if (parsed.data.purpose === 'PARTNER_MANAGEMENT') {

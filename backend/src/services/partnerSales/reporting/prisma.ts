@@ -44,7 +44,7 @@ export function createPrismaPartnerReportingSource(input: {
       const period = { from: query.from, to: query.to, asOf: clock.now.toISOString() };
       const through = effectiveThrough(period);
       const roots = await tx.partnerSaleCase.findMany({ where: { customerContractId: { not: null }, events: { some: {
-        effectiveDate: { lte: new Date(`${through}T00:00:00.000Z`) }, recordedAt: { lte: clock.now } } } }, select: { id: true,
+        type: 'CASE_COMMITTED', effectiveDate: { lte: new Date(`${through}T00:00:00.000Z`) }, recordedAt: { lte: clock.now } } } }, select: { id: true,
         trackingCode: { select: { number: true } }, profile: { select: { userId: true } },
         customerContract: { select: { departmentId: true } } }, orderBy: { id: 'asc' } });
       const mapped: Root[] = roots.flatMap(row => row.customerContract ? [{ caseId: row.id,
@@ -95,7 +95,7 @@ async function caseEvidence(tx: Prisma.TransactionClient, root: Root, purpose: R
       id: true, type: true, caseRevision: true, integrityHash: true, evidence: true,
       toState: true, effectiveDate: true, recordedAt: true,
     } },
-    customerContract: { select: { departmentId: true, contractNumber: true } },
+    customerContract: { select: { departmentId: true, contractNumber: true, commercialFlowVersion: true, reportingEvents: true } },
     profile: { select: { userId: true } },
   } });
   if (!row?.internalRecordId || !row.customerContract || row.profile.userId !== root.partnerSellerId ||
@@ -150,7 +150,9 @@ async function caseEvidence(tx: Prisma.TransactionClient, root: Root, purpose: R
     if (!accountView.ok) throw new Error(`Partner accounting projection failed: ${accountView.error.code}`);
     account = accountView.value.purchases[0] ?? null;
   }
-  return { root, events, internal, fulfillment, ...(commercial ? { commercial } : {}), account,
+  const financialRevenue = row.customerContract.commercialFlowVersion === 2
+    ? row.customerContract.reportingEvents.filter(item => item.effectiveAt <= cutoff && item.createdAt <= new Date(period.asOf)).map(item => ({ amount: item.amount.toString(), effectiveDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(item.effectiveAt), recordedAt: item.createdAt.toISOString() })) : undefined;
+  return { root, events, internal, fulfillment, ...(financialRevenue ? { financialRevenue } : {}), ...(commercial ? { commercial } : {}), account,
     deliveryProgress: progress.rows.length && progress.rows.every(item => item.health === 'CURRENT' && item.quantities)
       ? progress.rows.map(item => ({ productRowId: item.productRowId, unit: item.unit,
         contracted: item.quantities!.contracted, reserved: item.quantities!.finalizedReserved,

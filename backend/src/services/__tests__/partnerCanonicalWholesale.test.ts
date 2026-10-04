@@ -64,3 +64,54 @@ test('stair and slab quotes use the negotiated family unit instead of square-met
     materialQuantity: '1', materialAmount: '700', componentAmount: '200', totalAmount: '900',
   });
 });
+
+test('new ordinary pricing uses material areas across all families and reprices mandatory per agreement', () => {
+  const cases = [
+    { family: 'longitudinal', quantity: '6', commercial: { requestedAreaSquareMeters: decimal('4') }, snapshot: { pricingLines: [{ lineId: 'base-material', quantity: '6' }] } },
+    { family: 'stair', quantity: '8', commercial: { requestedQuantity: decimal('3') }, snapshot: { consumedMotherAreaSquareMeters: '99', pricingLines: [{ lineId: 'base-material', quantity: '8' }] } },
+    { family: 'slab', quantity: '12', commercial: { requestedQuantity: decimal('8') }, snapshot: { materialAreaSquareMeters: '99', materialPricingLine: { quantity: '12' }, packingPlan: { consumedSources: [{}] } } },
+    { family: 'prepared', quantity: '7', commercial: { requestedQuantity: decimal('7') }, snapshot: {} },
+  ] as const;
+  for (const item of cases) {
+    const base = Number(item.quantity) * 100;
+    const mandatory = item.family === 'longitudinal' || item.family === 'stair';
+    const product = { ...row({ ...item.commercial, baseAmountToman: decimal(String(base)),
+      totalAmountToman: decimal(String(base + (mandatory ? base * 0.2 : 0) + 50)), calculationSnapshot: {
+        ...item.snapshot, partnerPricingBasis: 'ordinary-sale-v1', mandatoryEnabled: mandatory,
+        mandatoryPercentage: '20', mandatoryAmountToman: String(mandatory ? base * 0.2 : 0),
+      } }), productType: item.family } as CanonicalProductRow;
+    const wholesale = calculatePartnerCanonicalWholesale(product, '150');
+    const retail = calculatePartnerCanonicalRetail(product, '200');
+    assert.equal(wholesale.materialQuantity, item.quantity, item.family);
+    assert.equal(wholesale.materialAmount, String(Number(item.quantity) * 150), item.family);
+    assert.equal(retail.materialAmount, String(Number(item.quantity) * 200), item.family);
+    assert.equal(wholesale.componentAmount, String(50 + (mandatory ? Number(item.quantity) * 30 : 0)), item.family);
+    assert.equal(retail.componentAmount, String(50 + (mandatory ? Number(item.quantity) * 40 : 0)), item.family);
+  }
+});
+
+test('ordinary pricing never recharges material or mandatory charges on paid remainders', () => {
+  const product = { ...row({ requestedAreaSquareMeters: decimal('4'), baseAmountToman: decimal('0'),
+    totalAmountToman: decimal('50'), calculationSnapshot: { partnerPricingBasis: 'ordinary-sale-v1',
+      materialPricing: { amountToman: '0', reason: 'paid-in-source-product' }, mandatoryEnabled: false } }),
+    sourceProductRowId: 'source-row' as CanonicalProductRow['productRowId'] };
+  assert.deepEqual(calculatePartnerCanonicalWholesale(product, '100'), {
+    materialQuantity: '0', materialAmount: '0', componentAmount: '50', totalAmount: '50',
+  });
+});
+
+test('new ordinary repricing fails closed without material area or mandatory evidence', () => {
+  const product = row({ requestedAreaSquareMeters: decimal('4'), baseAmountToman: decimal('400'),
+    totalAmountToman: decimal('450'), calculationSnapshot: { partnerPricingBasis: 'ordinary-sale-v1', pricingLines: [{ lineId: 'base-material', quantity: '4' }], mandatoryEnabled: true } });
+  assert.throws(() => calculatePartnerCanonicalWholesale(product, '100'), /mandatory pricing evidence/);
+  for (const productType of ['stair', 'slab'] as const) {
+    assert.throws(() => calculatePartnerCanonicalWholesale({ ...product, productType, commercial: { ...product.commercial, calculationSnapshot: { partnerPricingBasis: 'ordinary-sale-v1' } } } as CanonicalProductRow, '100'), /material area/);
+  }
+});
+
+test('legacy mandatory amounts remain frozen without the new pricing basis marker', () => {
+  const product = row({ requestedAreaSquareMeters: decimal('4'), baseAmountToman: decimal('400'),
+    totalAmountToman: decimal('530'), calculationSnapshot: { mandatoryEnabled: true,
+      mandatoryPercentage: '20', mandatoryAmountToman: '80' } });
+  assert.equal(calculatePartnerCanonicalWholesale(product, '200').componentAmount, '130');
+});

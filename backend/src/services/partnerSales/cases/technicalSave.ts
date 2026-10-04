@@ -10,6 +10,8 @@ import { technicalRecoveryLease, technicalRecoveryJson as json, technicalDraftCo
   type PartnerTechnicalRecoveryDependencies } from './technicalRecovery';
 import { encodeTechnicalSavedSnapshot, decodeTechnicalSavedSnapshot, decodeTechnicalSaveOutcome, type TechnicalSavedSnapshot } from './technicalSavedRecords';
 
+import { resolvePartnerTechnicalServices } from './technicalServices';
+
 const SAVE_OPERATION = 'PARTNER_TECHNICAL_SAVE_V1';
 
 export interface PartnerTechnicalSaveDependencies extends PartnerTechnicalRecoveryDependencies {
@@ -95,9 +97,12 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         const evidence = await dependencies.resolveEvidence(tx, { actorId: dependencies.actorId, recoveryId: session.draftId,
           draft: command.draft, previous });
         if (!evidence.ok) return { ok: false, error: partnerError(evidence.error.code) };
+        const services = await resolvePartnerTechnicalServices(tx, command.draft);
+        if (!services.ok) return services;
         const compiled = compilePartnerTechnicalGraph(command.draft, evidence.value.context);
         if (!compiled.ok) return compiled;
         const graph = compiled.value.graph;
+        if (services.value.some(service => graph.rows.some(row => row.productRowId === service.serviceRowId))) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
         const graphHash = await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph });
         const identities = evidence.value.identities;
         if (identities.length < graph.rows.length || new Set(identities.map(item => item.productRowId)).size !== identities.length ||
@@ -141,10 +146,11 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
           role: graph.rows.some(row => row.productRowId === identity.productRowId) ? 'PRIMARY' as const : 'ADDITIONAL_MATERIAL' as const }));
         const view = PartnerTechnicalSavedViewSchema.safeParse({ schemaVersion: 1, recoveryId: session.draftId,
           recoveryRevision: savedRevision, inputRevision: command.draft.inputRevision, graphHash,
-          updatedAt: new Date(updatedAt).toISOString(), rows, pricingSubjects });
+          updatedAt: new Date(updatedAt).toISOString(), rows, pricingSubjects,
+          ...(services.value.length ? { serviceRows: services.value.map(({serviceRowId, quantity, unit}) => ({serviceRowId, quantity, unit})) } : {}) });
         if (!view.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         const snapshot = await encodeTechnicalSavedSnapshot({ version: 1, sessionId: session.id, view: view.data, draft: command.draft,
-          graph, context: evidence.value.context, identities });
+          graph, context: evidence.value.context, identities, ...(services.value.length ? { serviceRows: services.value } : {}) });
         const stillAuthorized = await dependencies.authorize(tx, { actorId: dependencies.actorId, recoveryId: session.draftId, operation: 'SAVE' });
         if (!stillAuthorized.ok) return { ok: false, error: partnerError(stillAuthorized.error.code) };
         const current = await tx.salesContractEditSession.findUnique({ where: { draftId: session.draftId } });

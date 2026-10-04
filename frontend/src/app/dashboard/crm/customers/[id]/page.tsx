@@ -1,4 +1,5 @@
 'use client';
+import { DirectCustomerTransfer } from '@/features/partner-sales/customers/DirectCustomerTransfer';
 import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSection, ErpSheet, ErpTextarea, useErpPresentationScope } from '@/components/erp';
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -548,6 +549,7 @@ export default function CustomerDetailPage() {
   if (customer.managementReadOnly) return <CustomerWorkflowPage title={`${customer.firstName} ${customer.lastName}`} backHref="/dashboard/crm/customers"
     feedback={error ? { kind: 'error', title: error } : undefined}
     actions={customer.canManageCustomerCard ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []}>
+    <DirectCustomerTransfer customerId={customer.id} onTransferred={() => void fetchCustomer()} />
     {customer.canManageCustomerCard && <CustomerWorkflowSection title="مدیریت مشتری"><ErpPressable disabled={cardActionPending} onClick={handleToggleBlacklist}>{customer.isBlacklisted ? 'حذف از بلک‌لیست' : 'افزودن به بلک‌لیست'}</ErpPressable><ErpPressable disabled={cardActionPending} onClick={handleToggleLock}>{customer.isLocked ? 'باز کردن قفل' : 'قفل کردن'}</ErpPressable></CustomerWorkflowSection>}
     {!customer.partnerOwnerProfileId && <CustomerCreditPanel customerId={customer.id} onChanged={() => void fetchCustomer()} />}
     <CustomerWorkflowSection title="اطلاعات مشتری">
@@ -575,6 +577,7 @@ export default function CustomerDetailPage() {
       backHref="/dashboard/crm/customers"
       actions={hasPermission('crm' as any, 'edit' as any) ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []}
     >
+      <DirectCustomerTransfer customerId={customer.id} onTransferred={() => void fetchCustomer()} />
       <div className="flex flex-wrap items-center gap-3">
           {/* Cancel button - return to contract wizard */}
           {(() => {

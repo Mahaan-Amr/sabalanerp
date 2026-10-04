@@ -43,11 +43,12 @@ export async function buildCaseProjections(input: { caseId: string; revision: nu
       debtor: input.evidence.partySnapshots.partner, state: input.state,
       products: input.evidence.products.map(row => ({ ...product(row), wholesaleUnitPrice: row.wholesaleUnitPrice!,
         ...(row.wholesaleLineTotal !== undefined ? { wholesaleLineTotal: row.wholesaleLineTotal } : {}),
-        approvalEvidenceId: row.approvalEvidenceId! })), totals: input.evidence.wholesaleEnvelope.totals,
+        ...(row.approvalEvidenceId ? { approvalEvidenceId: row.approvalEvidenceId } : { productType: 'service', serviceRateEvidenceId: row.configurationHash }) })), totals: input.evidence.wholesaleEnvelope.totals,
       sabalanPaymentPlan: input.evidence.paymentEvidence.sabalanPaymentPlan! }) : undefined;
     const fulfillment = priced && linked ? FulfillmentViewSchema.parse({ schemaVersion: 1, purpose: 'FULFILLMENT',
       sourceKind: 'SABALAN_TO_PARTNER', owner, recordId: input.internalRecordId!, mode: 'DIRECT_TO_CUSTOMER',
-      products: input.evidence.products.map(product), deliveries }) : undefined;
+      products: input.evidence.products.filter(row => row.productType !== 'service').map(product),
+      deliveries: deliveries.filter(delivery => delivery.items.length > 0).map(({serviceItems: _services, ...delivery}) => delivery) }) : undefined;
     const partner = PartnerCaseViewSchema.parse({ schemaVersion: 1, purpose: 'PARTNER_CASE', owner,
       caseNumber: input.caseNumber, ...(input.customerContractNumber
         ? { customerContractNumber: input.customerContractNumber } : {}), state: input.state,

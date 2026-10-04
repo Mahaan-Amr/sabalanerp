@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { calculateStairLayerTechnical, calculateLayerSideOperations, parseStableIdentity, parseCanonicalDecimal,
   type PaidRemainderStock, type StairLayerParentGeometry, type StairLayerTechnicalCalculation,
   type StairLayerTechnicalSource, type StairLayerConflict } from '@sabalanerp/contract-product-graph';
-import { IdSchema, InstantSchema } from './primitives';
+import { IdSchema, InstantSchema, MoneySchema } from './primitives';
 import { technicalDecimal as decimal } from './technical-values';
 import type { PartnerTechnicalPreviewCatalog } from './technical-draft';
 import { PartnerTechnicalOperationsIntentSchema, previewTechnicalOperations } from './technical-operations';
@@ -22,7 +22,8 @@ export const PartnerTechnicalLayerSchema = z.object({
   source: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('paid-remainder'), selectedRemainingStoneIds: z.array(IdSchema) }).strict(),
     z.object({ kind: z.literal('parent-material'), selectedRemainingStoneIds: z.array(IdSchema), ...newMaterial }).strict(),
-    z.object({ kind: z.literal('new-material'), ...newMaterial }).strict(),
+    z.object({ kind: z.literal('new-material'), ...newMaterial,
+      retailUnitPrice: MoneySchema.refine(price => /[1-9]/.test(price.amount)).optional() }).strict(),
   ]).optional(),
   sawKerfEnabled: z.boolean(), calibrationEnabled: z.boolean(), description: z.string().max(4000).optional(),
   sideOperations: z.array(z.object({ side: z.enum(['front', 'back', 'left', 'right']),

@@ -860,7 +860,7 @@ export const completeSalesCorrectionEditDuty = async (
   const commercialClosing = input.commercialFinality || input.periodExpired;
   if (commercialClosing) {
     const contract = await database.salesContract.findUnique({ where: { id: input.contractId } });
-    if (!contract || contract.commercialFlowVersion !== 1 || contract.partnerKind || contract.partnerCaseId) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
+    if (!contract || !((contract.commercialFlowVersion === 1 && !contract.partnerKind && !contract.partnerCaseId) || (contract.commercialFlowVersion === 2 && contract.partnerKind === 'PARTNER_CUSTOMER' && contract.partnerCaseId))) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
     if (input.commercialFinality && !hasSpecialCustomerCreditAuthorization(contract) && (contract.status !== 'SIGNED' || contract.salesApprovalRevision !== contract.commercialRevision
       || contract.customerAcceptanceRevision !== contract.commercialRevision)) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
     if (input.periodExpired && salesDuty.dueAt >= input.now) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');

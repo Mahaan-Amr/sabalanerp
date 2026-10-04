@@ -168,7 +168,9 @@ test('real database policy and private catalog evidence produce a validated safe
     const returned = await createPartnerTechnicalRecoveryService(dependencies).read(access);
     if (!returned.ok) throw new Error(returned.error.code);
     assert.equal(returned.value.retainedCatalog?.products[0]?.catalogItemId, product.id);
-    assert.equal(JSON.stringify(returned.value.retainedCatalog).includes('1200000'), false);
+    assert.deepEqual(returned.value.retainedCatalog?.products[0]?.suggestedRetailUnitPrice,
+      { amount: '1200000', currency: 'IRT' });
+    assert.equal(JSON.stringify(returned.value.retainedCatalog).includes('mandatoryPercentage'), false);
     const inquiryConfiguration = await resolveSavedTechnicalConfiguration(tx, { actorId,
       reference: result.value.rows[0].configurationRef });
     assert.equal(inquiryConfiguration.ok, true);
@@ -182,14 +184,15 @@ test('real database policy and private catalog evidence produce a validated safe
         { label: 'طول', value: '2 متر' },
         { label: 'عرض', value: '40 سانتی‌متر' },
       ]);
-      assert.equal(inquiryConfiguration.value.configuration.some(item => item.label.includes('تعداد') || item.label.includes('مقدار')), false);
+      assert.deepEqual(inquiryConfiguration.value.configuration.find(item => item.label === 'تعداد'),
+        { label: 'تعداد', value: '2 عدد' });
       assert.equal(JSON.stringify(inquiryConfiguration.value).includes('12000000'), false);
       assert.equal(JSON.stringify(inquiryConfiguration.value).includes('mandatoryPercentage'), false);
     }
   });
 });
 
-test('a checkpointed longitudinal Partner row validates against the real local policy on next step', async () => {
+test('a checkpointed longitudinal Partner row with no catalog price saves its entered price on next step', async () => {
   await fixture(async (tx, actorId, access) => {
     await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`,
       password: 'not-a-login', firstName: 'Fixture', lastName: 'Longitudinal evidence' } });
@@ -212,7 +215,7 @@ test('a checkpointed longitudinal Partner row validates against the real local p
       thicknessCode: '3', thicknessValue: '3', thicknessName: '3', mineCode: 'technical', mineName: 'technical',
       mineNamePersian: 'معدن تست', finishCode: 'technical', finishName: 'technical', finishNamePersian: 'صیقلی',
       colorCode: 'technical', colorName: 'technical', colorNamePersian: 'سفید', qualityCode: 'technical',
-      qualityName: 'technical', qualityNamePersian: 'درجه یک', basePrice: '10000000', images: [],
+      qualityName: 'technical', qualityNamePersian: 'درجه یک', basePrice: null, images: [],
       availableInLongitudinalContracts: true } });
     const draft = { schemaVersion: 1 as const, inputRevision: 2, rows: [{
       productRowId: 'product-row:longitudinal-regression', catalogItemId: product.id,
@@ -695,5 +698,38 @@ test('discard and recreation of the same recovery ID cannot reissue an old confi
     const oldRetry = await service.save(command);
     if (oldRetry.ok) throw new Error('Old receipt crossed recovery incarnation');
     assert.equal(oldRetry.error.code, 'INTEGRITY_CONFLICT');
+  });
+});
+
+test('independent service-only recovery validates real catalog, freezes rates and never creates inquiry subjects', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const catalogService = await tx.subService.create({ data: { code: actorId, namePersian: 'ابزار تست', pricePerMeter: '100', calculationBase: 'length' } });
+    const dependencies = { actorId, transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: async () => ({ ok: true as const, value: undefined }),
+      resolveEvidence: async () => ({ ok: true as const, value: { context: {
+        catalog: { products: [], operations: [], sawKerfMeters: '0' }, products: [],
+        policy: { calculation: 'c', packing: 'p', pricing: 'p', rounding: 'r' },
+      }, identities: [] } }) };
+    const command = { ...access, expectedRecoveryRevision: 0, idempotencyKey: 'independent-service', draft: { schemaVersion: 1 as const,
+      inputRevision: 1, rows: [], serviceRows: [{serviceRowId:'service-row',sourceType:'tool' as const,catalogItemId:catalogService.id,
+        catalogSnapshotVersion:catalogService.updatedAt.toISOString(),title:'ابزار مشتری',unit:'meter' as const,quantity:'2.5',
+        retailUnitPrice:{amount:'2000',currency:'IRR' as const}}] } };
+    const saved = await createPartnerTechnicalSaveService(dependencies).save(command);
+    assert.equal(saved.ok,true,JSON.stringify(saved)); if(!saved.ok)return;
+    assert.deepEqual(saved.value.rows,[]);
+    assert.deepEqual(saved.value.pricingSubjects,[]);
+    assert.deepEqual(saved.value.serviceRows,[{serviceRowId:'service-row',quantity:'2.5',unit:'meter'}]);
+    const loaded = await createPartnerTechnicalSaveService(dependencies).readSaved({...access,recoveryRevision:saved.value.recoveryRevision});
+    assert.equal(loaded.ok,true);
+    const replay = await createPartnerTechnicalSaveService(dependencies).save(command); assert.equal(replay.ok,true);
+    const current = await tx.salesContractEditSession.findUniqueOrThrow({where:{draftId:access.recoveryId}});
+    const recovery = current.recovery as unknown as {validatedSnapshots: Array<{payload:{serviceRows:Array<{wholesaleUnitPriceAmount:string;retailUnitPrice:{amount:string}}>;graph:{rows:unknown[]};identities:unknown[]}}>};
+    const snapshot=recovery.validatedSnapshots[0].payload;
+    assert.equal(snapshot.serviceRows[0].wholesaleUnitPriceAmount,'100');
+    assert.equal(snapshot.serviceRows[0].retailUnitPrice.amount,'200');
+    assert.deepEqual(snapshot.identities,[]);assert.deepEqual(snapshot.graph.rows,[]);
+    const stale = await createPartnerTechnicalSaveService(dependencies).save({...command,idempotencyKey:'stale-service',expectedRecoveryRevision:saved.value.recoveryRevision,
+      draft:{...command.draft,inputRevision:2,serviceRows:[{...command.draft.serviceRows[0],catalogSnapshotVersion:'2020-01-01T00:00:00.000Z'}]}});
+    assert.equal(stale.ok,false);if(!stale.ok)assert.equal(stale.error.code,'ROW_STALE');
   });
 });

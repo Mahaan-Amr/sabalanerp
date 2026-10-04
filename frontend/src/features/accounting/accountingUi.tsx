@@ -31,6 +31,10 @@ export type AccountingMetric = {
 
 export type AccountingContractRow = {
   contractId: string;
+  preparationOnly?: boolean;
+  amountKnown?: boolean;
+  partnerCommercialStatus?: string;
+  owner?: { caseId: string; revision: number; integrityHash: string };
   sourceKind?: 'PARTNER_INTERNAL_RECORD';
   partnerContext?: { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string; internalRecordNumber: string;
     debtor: { displayName: string }; endCustomer: { displayName: string }; actionUrl: string };

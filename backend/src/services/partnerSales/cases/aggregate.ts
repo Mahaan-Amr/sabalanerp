@@ -1,3 +1,5 @@
+import { allocatePartnerLinkedPair } from './linkedPair';
+import { assertPartnerCommercialAvailable, resetPartnerCommercialApprovals, reconcilePartnerCommercialFinality } from './commercialLifecycle';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
@@ -96,7 +98,7 @@ const receipt = (value: unknown) => {
 async function readPartnerView(tx: Transaction, caseId: string) {
   const row = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
     id: true, profileId: true, customerId: true, headRevision: true, integrityHash: true,
-    trackingCode: { select: { number: true } },
+    trackingCode: { select: { number: true } }, state: true, commercialFlowVersion: true,
     head: { select: { internalProjection: true, customerContent: true } },
   } });
   const source = row?.head.internalProjection;
@@ -109,7 +111,7 @@ async function readPartnerView(tx: Transaction, caseId: string) {
   const projectId = content && typeof content === 'object' && !Array.isArray(content) &&
     typeof (content as Prisma.JsonObject).projectId === 'string'
     ? (content as Prisma.JsonObject).projectId as string : undefined;
-  return { view: { ...parsed.data, ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}) }, root: row, projectId };
+  return { view: { ...parsed.data, state: row.state, ...(row.commercialFlowVersion === 1 ? { commercialFlowVersion: 1 as const } : {}), ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}) }, root: row, projectId };
 }
 
 async function readPartnerRevisionView(tx: Transaction, caseId: string, revision: number, integrityHash: string) {
@@ -143,19 +145,32 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   const current = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
     id: true, caseNumber: true, profileId: true, customerId: true, internalRecordId: true,
     customerContractId: true, headRevision: true, integrityHash: true, state: true,
-    customerConfirmationState: true, stateRevision: true,
+    customerConfirmationState: true, commercialFlowVersion: true, stateRevision: true,
     head: { select: { customerContent: true, customerProjection: true, rowBindings: { select: { productRowId: true,
       configurationHash: true, inquiryUsages: { select: { approvalSnapshot: true } } } },
       materialInquiryUsages: { select: { pricingSubjectId: true, approvalId: true,
         approvalSnapshot: true, evidenceHash: true } } } },
     internalRecord: { select: { recordNumber: true } },
-    customerContract: { select: { contractNumber: true } },
+    customerContract: true,
     trackingCode: { select: { number: true } },
   } });
   if (!current) return { ok: false, error: partnerError('NOT_FOUND') } as const;
-  if (!isPartnerCaseEditableState(current.state) ||
+  if ((!isPartnerCaseEditableState(current.state) && !(current.commercialFlowVersion === 1 && current.state === 'COMMITTED')) ||
       command.expectedState !== current.state) {
     return { ok: false, error: partnerError('STATE_CONFLICT') } as const;
+  }
+  if (current.customerContract && current.commercialFlowVersion === 1) {
+    assertPartnerCommercialAvailable(current.customerContract);
+    const financial = current.customerContract.firstFinancialRecordAt || await tx.accountingFinancialRecord.findFirst({
+      where: { sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: current.internalRecordId ?? '' }, select: { id: true },
+    });
+    if (financial || current.state === 'COMMITTED' || current.customerContract.status === 'SIGNED') {
+      const authorizedCorrection = await tx.accountingCorrectionRequest.findFirst({ where: {
+        contractId: current.customerContract.id, status: 'APPROVED_FOR_SALES_EDIT',
+      } });
+      const duty = authorizedCorrection ? await tx.crossWorkspaceDuty.findFirst({ where: { sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: authorizedCorrection.id, sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN', dueAt: { gt: new Date() }, currentAssigneeUserId: dependencies.actorId } }) : null;
+      if (!duty) return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') } as const;
+    }
   }
   if (command.expected.revision !== current.headRevision) return { ok: false, error: partnerError('ROW_STALE') } as const;
   if (command.expected.integrityHash !== current.integrityHash) {
@@ -188,12 +203,24 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       projectId: previousProjectId, customerId: current.customerId }) : undefined;
   if (previousProjectAccess && !previousProjectAccess.ok) return previousProjectAccess;
   if (previousProjectId && previousProjectId === resolved.value.projectId && current.customerContractId) {
-    const locked = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM crm_potential_projects
+    // Use the same project identities as authorizeProject and linked-pair
+    // allocation: customer projects are canonical; retained CRM opportunities
+    // are the legacy fallback. A customer project has no won-contract claim.
+    const customerProject = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM project_addresses
       WHERE id = ${previousProjectId} AND "customerId" = ${current.customerId}
-        AND "wonSalesContractId" = ${current.customerContractId}
+        AND "isActive" = true
       FOR UPDATE`;
-    if (locked.length !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
+    if (customerProject.length !== 1) {
+      // A numbered contract may retain an unclaimed CRM opportunity. Never
+      // permit an opportunity already claimed by a different contract.
+      const legacyProject = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM crm_potential_projects
+        WHERE id = ${previousProjectId} AND "customerId" = ${current.customerId}
+          AND ("wonSalesContractId" IS NULL OR "wonSalesContractId" = ${current.customerContractId})
+        FOR UPDATE`;
+      if (legacyProject.length !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
+    }
   }
   const rollout = await authorizePartnerTechnicalRollout(tx, current.profileId, 'MUTATE');
   if (!rollout.ok) return rollout;
@@ -288,8 +315,10 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     ? projectCustomerVisibleRevisionContent(nextCustomerOutput.data) : undefined;
   const customerVisibleChanged = !previousCustomer || !nextCustomer ||
     await canonicalHash(previousCustomer) !== await canonicalHash(nextCustomer);
-  const nextState = customerVisibleChanged ? 'DRAFT' as const : current.state;
-  const nextConfirmationState = customerVisibleChanged && current.customerConfirmationState !== 'NOT_SENT'
+  const commercialChanged = customerVisibleChanged || current.customerConfirmationState === 'REJECTED';
+  const nextState = current.commercialFlowVersion === 1 ? current.state
+    : customerVisibleChanged ? 'DRAFT' as const : current.state;
+  const nextConfirmationState = commercialChanged && current.customerConfirmationState !== 'NOT_SENT'
     ? 'RECONFIRMATION_REQUIRED' as const : current.customerConfirmationState;
   const eventId = randomUUID();
   const maximum = await tx.partnerCaseEvent.aggregate({ where: { caseId }, _max: { sequence: true } });
@@ -306,7 +335,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     actorId: dependencies.actorId, commandId: command.commandId } });
   const updated = await tx.partnerSaleCase.updateMany({ where: { id: caseId, headRevision: current.headRevision,
     integrityHash: current.integrityHash, state: current.state, stateRevision: current.stateRevision },
-    data: { headRevision: revision, integrityHash, customerId: resolved.value.customerId,
+    data: { commercialFlowVersion: 1, headRevision: revision, integrityHash, customerId: resolved.value.customerId,
       pricingState: evidence.value.pricingState, state: nextState, customerConfirmationState: nextConfirmationState,
       stateRevision: { increment: 1 } } });
   if (updated.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
@@ -316,9 +345,9 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     partnerRevision: revision, partnerIntegrityHash: integrityHash, customerId: resolved.value.customerId,
     totalAmount: evidence.value.retailEnvelope.totals.payable, content: resolved.value.legalText,
     contractData: json(projections.value.customer),
-    ...(customerVisibleChanged ? { status: 'DRAFT' } : {}),
+    ...(commercialChanged ? { status: 'DRAFT' } : {}),
   } });
-  if (customerVisibleChanged && current.customerContractId) {
+  if (commercialChanged && current.customerContractId) {
     await tx.contractPublicConfirmation.updateMany({ where: { contractId: current.customerContractId, status: 'PENDING' },
       data: { status: 'CANCELLED', cancelledAt: new Date() } });
   }
@@ -385,8 +414,11 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       projectId: previousProjectId, customerId: current.customerId });
     if (!stillPreviousProject.ok) return stillPreviousProject;
     const legacyPreviousProject = await tx.crmPotentialProject.findUnique({ where: { id: previousProjectId },
-      select: { id: true } });
-    if (legacyPreviousProject) {
+      select: { id: true, wonSalesContractId: true } });
+    if (legacyPreviousProject?.wonSalesContractId && legacyPreviousProject.wonSalesContractId !== current.customerContractId) {
+      return { ok: false, error: partnerError('ROW_STALE') } as const;
+    }
+    if (legacyPreviousProject?.wonSalesContractId === current.customerContractId) {
       const unlinked = await tx.crmPotentialProject.updateMany({ where: { id: previousProjectId,
         customerId: current.customerId,
         wonSalesContractId: current.customerContractId, partnerRevision: { not: null } },
@@ -410,10 +442,19 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     recoveryId: command.intent.recoveryId, recoveryRevision: command.intent.recoveryRevision,
     caseId, ...(current.customerContractId ? { customerContractId: current.customerContractId } : {}) });
   if (!consumed.ok) return consumed;
+  if (current.customerContractId && commercialChanged) {
+    await resetPartnerCommercialApprovals(tx, caseId, dependencies.actorId);
+  }
+  if (command.intent.preparationCompleted !== false && !current.customerContractId) {
+    const allocated = await allocatePartnerLinkedPair(tx, { caseId, actorId: dependencies.actorId, consumeRecovery: dependencies.consumeRecovery,
+      expected: { caseId, revision, integrityHash } });
+    if (!allocated.ok) return allocated;
+  }
+  if (command.intent.preparationCompleted !== false) await reconcilePartnerCommercialFinality(tx, caseId, dependencies.actorId);
   const outcome = { version: 1, commandId: command.commandId, caseId, revision, integrityHash, eventIds: [eventId] };
   await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...key, payloadHash: intentHash, outcome: json(outcome) } });
   return { ok: true, value: { commandId: command.commandId, replayed: false,
-    case: { ...projections.value.partner, ...(current.trackingCode ? { trackingNumber: current.trackingCode.number } : {}), state: nextState,
+    case: { ...(await readPartnerView(tx, caseId))!.view, commercialFlowVersion: 1 as const, ...(current.trackingCode ? { trackingNumber: current.trackingCode.number } : {}),
       customerConfirmationState: nextConfirmationState }, eventIds: [eventId] } } as const;
 }
 
@@ -557,7 +598,7 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         return projections;
       }
       mutated = true;
-      await tx.partnerSaleCase.create({ data: { id: caseId, caseNumber: ids.caseNumber,
+      await tx.partnerSaleCase.create({ data: { id: caseId, commercialFlowVersion: 1, caseNumber: ids.caseNumber,
         profileId: resolved.value.profileId,
         customerId: resolved.value.customerId, headRevision: 1, integrityHash,
         pricingState: evidence.value.pricingState } });
@@ -624,10 +665,16 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         recoveryId: command.intent.recoveryId, recoveryRevision: command.intent.recoveryRevision,
         caseId });
       if (!consumed.ok) return consumed;
+      if (command.intent.preparationCompleted !== false) {
+        const allocated = await allocatePartnerLinkedPair(tx, { caseId, actorId: dependencies.actorId, consumeRecovery: dependencies.consumeRecovery,
+          expected: { caseId, revision: 1, integrityHash } });
+        if (!allocated.ok) return allocated;
+        await reconcilePartnerCommercialFinality(tx, caseId, dependencies.actorId);
+      }
       const outcome = { version: 1, commandId: command.commandId, caseId, revision: 1, integrityHash, eventIds: [ids.eventId] };
       await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...key, payloadHash: intentHash, outcome: json(outcome) } });
       return { ok: true, value: { commandId: command.commandId, replayed: false,
-        case: { ...projections.value.partner, trackingNumber: ids.trackingNumber }, eventIds: [ids.eventId] } };
+        case: { ...(await readPartnerView(tx, caseId))!.view, commercialFlowVersion: 1 as const, trackingNumber: ids.trackingNumber }, eventIds: [ids.eventId] } };
       })();
       if (!result.ok && mutated) throw new RollbackCaseResult(result);
       return result;

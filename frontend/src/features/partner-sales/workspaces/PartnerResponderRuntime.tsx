@@ -5,8 +5,8 @@ import { ResponderWorkspace } from '../responder/ResponderWorkspace';
 import { createPartnerWorkspaceHttpPort } from './partnerWorkspaceHttpPort';
 
 const queries = createPartnerWorkspaceHttpPort();
-const { commands } = createPartnerInquiryHttpPorts();
+const { commands, queries: inquiryQueries } = createPartnerInquiryHttpPorts();
 
 export function PartnerResponderRuntime() {
-  return <ResponderWorkspace queryPort={queries} commandPort={commands} />;
+  return <ResponderWorkspace queryPort={queries} inquiryQueryPort={inquiryQueries} commandPort={commands} />;
 }

@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { FEATURE_WORKSPACE_MAP, type Feature } from '../middleware/feature';
+import { FEATURES, FEATURE_WORKSPACE_MAP, type Feature } from '../middleware/feature';
 import { HR_REDESIGN_CATALOG } from './hrRedesignDataContracts';
 import { AUTHORIZABLE_HR_ACTION_PERMISSIONS } from './hrActionPermissionCatalog';
 // Explicit resource-scoped actions use the same central access entry point.
@@ -156,6 +156,10 @@ export const getEffectiveUserAccess = async (
     const directWorkspace = activeDirect.find((grant) => grant.workspace === workspace);
     const roleFeature = activeRoleFeatures.find((grant) => grant.feature === feature);
     const roleWorkspace = roleWorkspaces.find((grant) => grant.workspace === workspace && activeLegacyGrant(grant, at));
+    if (feature === FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE) {
+      const explicit = directFeature ?? roleFeature;
+      return explicit ? [{ feature, permission: permission(explicit.permissionLevel), workspace }] : [];
+    }
     const effective = directWorkspace?.permissionLevel.toLowerCase() === 'admin'
       ? directWorkspace
       : directFeature ?? directWorkspace ?? roleFeature ?? roleWorkspace;
@@ -226,6 +230,9 @@ export const getEffectiveUserAccess = async (
     const directWorkspace = activeDirect.find((candidate) => candidate.workspace === grant.workspace);
     const roleFeature = activeRoleFeatures.find((candidate) => candidate.feature === grant.feature);
     const roleWorkspace = roleWorkspaces.find((candidate) => candidate.workspace === grant.workspace && activeLegacyGrant(candidate, at));
+    if (grant.feature === FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE) {
+      return { ...grant, source: directFeature ? 'DIRECT_FEATURE' as const : 'ROLE_FEATURE' as const, grantId: directFeature?.id ?? roleFeature?.id ?? null };
+    }
     if (directWorkspace?.permissionLevel.toLowerCase() === 'admin') {
       return { ...grant, source: 'DIRECT_WORKSPACE' as const, grantId: directWorkspace.id };
     }

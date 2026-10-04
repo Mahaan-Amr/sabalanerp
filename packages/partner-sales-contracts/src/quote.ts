@@ -12,7 +12,9 @@ export const PartnerWholesaleQuoteSchema = z.object({
   graphHash: HashSchema,
   rows: z.array(z.object({ productRowId: IdSchema, retailEffectiveUnitPrice: MoneySchema,
     wholesaleUnitPrice: MoneySchema.optional(),
-    retailLineTotal: MoneySchema.optional(), wholesaleLineTotal: MoneySchema.optional() }).strict()).min(1),
-}).strict();
+    retailLineTotal: MoneySchema.optional(), wholesaleLineTotal: MoneySchema.optional() }).strict()),
+  serviceRows: z.array(z.object({ serviceRowId: IdSchema, retailUnitPrice: MoneySchema, wholesaleUnitPrice: MoneySchema,
+    retailLineTotal: MoneySchema, wholesaleLineTotal: MoneySchema }).strict()).optional(),
+}).strict().refine(value => value.rows.length > 0 || Boolean(value.serviceRows?.length), 'A quote requires products or services');
 
 export type PartnerWholesaleQuote = z.infer<typeof PartnerWholesaleQuoteSchema>;

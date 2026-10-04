@@ -6,14 +6,14 @@ import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
 import { projectPartnerTechnicalProduct, projectPartnerTechnicalOperation } from './technicalCatalog';
 
-// Query only the public technical projection's source fields. Prices, notes,
+// Query the public technical projection and its optional ordinary catalog suggestion. Notes,
 // customer relationships and future inventory fields cannot be spread outward.
 const productSelect = { id: true, code: true, namePersian: true, updatedAt: true,
   widthValue: true, motherLengthValue: true, thicknessValue: true, stoneTypeNamePersian: true,
   mineNamePersian: true, finishNamePersian: true, colorNamePersian: true, qualityNamePersian: true, cuttingDimensionNamePersian: true,
   isActive: true, deletedAt: true, isAvailable: true, availableInLongitudinalContracts: true,
   availableInStairContracts: true, availableInSlabContracts: true, availableInVolumetricContracts: true,
-  preparedSalesUnit: true, volumetricSalesUnit: true } satisfies Prisma.ProductSelect;
+  preparedSalesUnit: true, volumetricSalesUnit: true, basePrice: true, currency: true } satisfies Prisma.ProductSelect;
 const familyFilter: Record<PartnerTechnicalFamily, Prisma.ProductWhereInput> = {
   longitudinal: { availableInLongitudinalContracts: true }, stair: { availableInStairContracts: true },
   slab: { availableInSlabContracts: true }, prepared: { availableInVolumetricContracts: true }, volumetric: { availableInVolumetricContracts: true },
@@ -35,6 +35,32 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
     if (!rollout.ok) return rollout;
     const query = parsed.data;
     const limit = query.limit ?? 50;
+    if (query.kind === 'SERVICE') {
+      const where = { isActive: true, ...(query.cursor ? { id: { gt: query.cursor } } : {}),
+        ...(query.search ? { OR: [{ code: { contains: query.search, mode: 'insensitive' as const } },
+          { namePersian: { contains: query.search, mode: 'insensitive' as const } }] } : {}) };
+      const paging = { where, take: limit + 1, orderBy: { id: 'asc' as const } };
+      const identity = { id: true, updatedAt: true, namePersian: true } as const;
+      const rows = query.sourceType === 'tool'
+        ? (await tx.subService.findMany({ ...paging, select: { ...identity, calculationBase: true, pricePerMeter: true } }))
+          .map(row => ({ ...row, rate: row.pricePerMeter, unit: row.calculationBase === 'squareMeters' ? 'squareMeter' : 'meter' }))
+        : query.sourceType === 'cutting'
+          ? (await tx.cuttingType.findMany({ ...paging, select: { ...identity, pricePerMeter: true } }))
+            .map(row => ({ ...row, rate: row.pricePerMeter, unit: 'meter' }))
+          : (await tx.stoneFinishing.findMany({ ...paging, select: { ...identity, calculationBase: true, unitPrice: true, pricePerSquareMeter: true } }))
+            .map(row => ({ ...row, rate: row.unitPrice,
+              unit: row.calculationBase === 'squareMeters' ? 'squareMeter' : 'meter' }));
+      const refreshed = await authority.authorize('CASE_READ', root);
+      if (!refreshed.ok) return refreshed;
+      const refreshedRollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'READ');
+      if (!refreshedRollout.ok) return refreshedRollout;
+      const page = PartnerTechnicalCatalogPageSchema.safeParse({ schemaVersion: 1, purpose: query.purpose, kind: query.kind,
+        items: rows.slice(0, limit).map(row => ({ catalogItemId: row.id, catalogSnapshotVersion: row.updatedAt.toISOString(),
+          sourceType: query.sourceType, name: row.namePersian, unit: row.unit,
+          ...(row.rate && row.rate.gt(0) ? { suggestedRetailUnitPrice: { amount: row.rate.toFixed(), currency: 'IRT' } } : {}) })),
+        ...(rows.length > limit ? { nextCursor: rows[limit - 1].id } : {}) });
+      return page.success ? { ok: true, value: page.data } : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    }
     let projectedRows: Array<{ id: string; result: Result<PartnerTechnicalProduct | PartnerTechnicalOperation> }>;
     if (query.kind !== 'PRODUCT') {
       const where = { isActive: true, ...(query.cursor ? { id: { gt: query.cursor } } : {}),

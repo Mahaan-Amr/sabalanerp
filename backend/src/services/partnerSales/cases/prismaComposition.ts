@@ -27,12 +27,12 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
 export function requireCompleteCustomerParty(input: { displayName: string; phone?: string; address?: string }):
-Result<{ displayName: string; phone: string; address: string }> {
+Result<{ displayName: string; phone: string; address?: string }> {
   const displayName = input.displayName.trim();
-  if (!displayName || !input.phone || !input.address) {
+  if (!displayName || !input.phone) {
     return { ok: false, error: partnerError('INVALID_PAYLOAD') };
   }
-  return { ok: true, value: { displayName, phone: input.phone, address: input.address } };
+  return { ok: true, value: { displayName, phone: input.phone, ...(input.address?.trim() ? { address: input.address.trim() } : {}) } };
 }
 
 /** Atomically binds immutable technical evidence on first save and records
@@ -123,6 +123,7 @@ function phone(values: unknown[]): string | undefined {
 export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   actorId: string;
   command: DraftCommand;
+  purpose?: 'QUOTE';
   expectedCustomerContractId?: string;
   revisionAuthority?: 'CASE_EDIT_LEASE' | 'CORRECTION_WORKFLOW';
 }): Promise<Result<ResolvedCaseDraft>> {
@@ -138,7 +139,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     (!input.expectedCustomerContractId && session?.contractId === null && boundCaseId === command.expected.caseId)
   ));
   if (!session || session.ownerUserId !== actorId || session.purpose !== 'PARTNER_TECHNICAL' ||
-      (command.type === 'CASE_SUBMIT' && session.contractId) ||
+      (command.type === 'CASE_SUBMIT' && session.contractId && input.purpose !== 'QUOTE') ||
       !revisionBound) {
     return { ok: false, error: partnerError('NOT_FOUND') };
   }
@@ -169,6 +170,9 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
 
+  const serviceIds = command.intent.serviceRows?.map(row => row.serviceRowId) ?? [];
+  const savedServiceIds = saved.serviceRows?.map(row => row.serviceRowId) ?? [];
+  if (serviceIds.length !== savedServiceIds.length || new Set(serviceIds).size !== serviceIds.length || serviceIds.some(id => !savedServiceIds.includes(id))) return { ok: false, error: partnerError('CONFIG_MISMATCH') };
   const profile = await tx.partnerProfile.findUnique({ where: { userId: actorId }, select: {
     id: true, state: true,
     user: { select: { departmentId: true } },
@@ -294,7 +298,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
       saved.graph.layerConfigurations); }
     catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
     rows.push({ productRowId: row.productRowId, configurationHash: hash ?? currentSubjectHash!, quantity: view.quantity,
-      unit: view.unit, precisionPolicyVersion: identityRow.roundingPolicyVersion, description: product.name, productCode: product.code,
+      unit: view.unit, precisionPolicyVersion: identityRow.roundingPolicyVersion, description: row.contractualTitle, productCode: product.code,
       retailUnitPriceAmount: new Prisma.Decimal(retail.totalAmount).div(commercialQuantity).toString(),
       retailLineTotalAmount: retail.totalAmount,
       ...(wholesale ? { wholesaleUnitPriceAmount: new Prisma.Decimal(wholesale.totalAmount).div(commercialQuantity).toString(),
@@ -318,7 +322,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     ...(command.intent.projectId ? { projectId: command.intent.projectId } : {}),
     project: { title: project.title, ...(project.address ? { address: project.address } : {}) },
     commercialAccountId: account.id, departmentId: profile.user.departmentId,
-    sabalanTermsVersionId: 'ACCOUNTING_PENDING_V1', graph: saved.graph, technicalSnapshot: saved.view, rows,
+    sabalanTermsVersionId: 'ACCOUNTING_PENDING_V1', graph: saved.graph, technicalSnapshot: saved.view, rows, ...(saved.serviceRows ? { serviceRows: saved.serviceRows } : {}),
     partner: { displayName: identity.tradeName || identity.legalName, phone: identity.phone, address: identity.address },
     customer: customerParty.value,
     legalText: 'قرارداد فروش کالا و خدمات مطابق مشخصات، برنامه پرداخت و برنامه تحویل ثبت‌شده است.', sabalanPaymentPlan,

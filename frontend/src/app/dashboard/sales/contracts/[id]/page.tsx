@@ -845,6 +845,7 @@ export default function ContractDetailPage() {
     (contract.status === "DRAFT" || contract.status === "PENDING_APPROVAL") &&
     contractPermissions.canReject;
   const canSign =
+    contract.partnerKind !== "PARTNER_CUSTOMER" &&
     !isCurrentContractFlow(contract) &&
     !contract.isInactive &&
     contract.status === "APPROVED" &&

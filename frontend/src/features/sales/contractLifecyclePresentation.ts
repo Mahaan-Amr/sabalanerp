@@ -1,6 +1,11 @@
+import { partnerCommercialLabels, type PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 export type ContractLifecyclePresentation = {
   status: string;
   commercialFlowVersion?: number;
+  partnerCommercialStatus?: string;
+  partnerSalesApproved?: boolean;
+  partnerKind?: string | null;
+  partnerCaseId?: string | null;
   commercialRevision?: number;
   commercialExpiresAt?: string | null;
   commercialExpiryDays?: number;
@@ -24,17 +29,22 @@ const currentLabels: Record<string, string> = {
 export const isCurrentContractFlow = (contract: Pick<ContractLifecyclePresentation, 'commercialFlowVersion'>) =>
   contract.commercialFlowVersion === 1;
 
-export const contractLifecycleLabel = (contract: Pick<ContractLifecyclePresentation, 'status' | 'commercialFlowVersion'>) =>
+export const contractLifecycleLabel = (contract: Pick<ContractLifecyclePresentation, 'status' | 'commercialFlowVersion' | 'partnerCommercialStatus'>) =>
+  (contract.partnerCommercialStatus ? partnerCommercialLabels[contract.partnerCommercialStatus as PartnerCommercialState['status']] : undefined) ||
   (isCurrentContractFlow(contract) ? currentLabels : legacyLabels)[contract.status] || contract.status;
 
-// Stored status meanings differ for untouched historical contracts. Keep both meanings explicit in mixed lists.
+// Preserve historical stored evidence while using canonical filter labels.
 export const contractLifecycleFilterOptions = [
   { label: 'همه وضعیت‌ها', value: 'ALL' },
-  { label: 'یادداشت / پیش‌نویس قدیمی', value: 'DRAFT' },
-  { label: 'پیش‌نویس / در انتظار تایید قدیمی', value: 'PENDING_APPROVAL' },
-  { label: 'امضا شده / تایید شده قدیمی', value: 'APPROVED' },
-  { label: 'قطعی / امضا شده قدیمی', value: 'SIGNED' },
-  { label: 'چاپ شده قدیمی', value: 'PRINTED' },
+  { label: 'یادداشت', value: 'DRAFT' },
+  { label: 'پیش‌نویس', value: 'PENDING_APPROVAL' },
+  { label: 'امضا شده', value: 'APPROVED' },
+  { label: 'استعلام شده', value: 'QUOTED' },
+  { label: 'قطعی', value: 'SIGNED' },
+  { label: 'چاپ شده', value: 'PRINTED' },
   { label: 'لغو شده', value: 'CANCELLED' },
   { label: 'منقضی شده', value: 'EXPIRED' },
 ];
+
+export const contractLifecycleFilterStatus = (contract: ContractLifecyclePresentation) =>
+  ({ NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', FINAL: 'SIGNED', QUOTED: 'QUOTED', CANCELLED: 'CANCELLED', EXPIRED: 'EXPIRED' } as Record<string, string>)[contract.partnerCommercialStatus || ''] || contract.status;

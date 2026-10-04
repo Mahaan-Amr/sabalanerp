@@ -2,6 +2,7 @@ import { parseCanonicalDecimal as decimal, parseStableIdentity, type StairLayerC
 import type { PartnerTechnicalDependent, PartnerTechnicalDependentPreview } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerTechnicalGraphContext } from './technicalGraph';
 import { technicalGraphOperations } from './technicalGraphOperations';
+import { Prisma } from '@prisma/client';
 
 export function technicalGraphLayer(intent: Extract<PartnerTechnicalDependent, { kind: 'layer' }>,
   preview: PartnerTechnicalDependentPreview, context: PartnerTechnicalGraphContext): StairLayerConfigurationInput {
@@ -19,7 +20,9 @@ export function technicalGraphLayer(intent: Extract<PartnerTechnicalDependent, {
     const materials = context.products.filter(item => item.catalogItemId === selection.catalogItemId && item.catalogSnapshotVersion === selection.catalogSnapshotVersion);
     if (materials.length !== 1 || materials[0].layerMaterialRateToman === undefined) throw new Error('Missing layer material evidence');
     const common = { catalogProductId: selection.catalogItemId, catalogSnapshotVersion: selection.catalogSnapshotVersion,
-      materialRateToman: decimal(materials[0].layerMaterialRateToman),
+      materialRateToman: selection.kind === 'new-material' && selection.retailUnitPrice
+        ? decimal(new Prisma.Decimal(selection.retailUnitPrice.amount).div(selection.retailUnitPrice.currency === 'IRR' ? 10 : 1).toFixed())
+        : decimal(materials[0].layerMaterialRateToman),
       sourceRows: selection.sourceRows.map(row => ({ sourceRowId: parseStableIdentity('layer-source-row', row.sourceRowId),
         lengthMeters: decimal(row.lengthMeters!), widthMeters: decimal(row.widthMeters!), quantity: row.quantity! })) };
     source = selection.kind === 'new-material' ? { kind: 'new-material', ...common }

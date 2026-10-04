@@ -1,3 +1,5 @@
+import { appendPartnerCommercialEvent } from '../cases/commercialEvents';
+import { isPartnerCommercialFlow, partnerDeadlinePassed, assertPartnerCommercialAvailable, acceptPartnerCustomer, rejectPartnerCustomer } from '../cases/commercialLifecycle';
 import { confirmationResendCooldownError } from '../../contractConfirmationPolicy';
 import crypto, { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
@@ -14,9 +16,10 @@ import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '
 import { createPrismaPartnerRetailCorrectionService } from '../corrections/prismaRetailCorrection';
 
 export function createPrismaPartnerConfirmationHooks(input: { database?: PrismaClient;
-  sms?: Pick<typeof smsService, 'sendContractConfirmationMessage'> } = {}): PartnerConfirmationHooks {
+  sms?: Pick<typeof smsService, 'sendContractConfirmationMessage'>; onTechnicalError?: (error: unknown) => void } = {}): PartnerConfirmationHooks {
 const prisma = input.database ?? applicationPrisma;
 const sms = input.sms ?? smsService;
+const onTechnicalError = input.onTechnicalError;
 
 const snapshots = createCustomerOutputSnapshots(contracts);
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -80,9 +83,12 @@ function lifecycle(tx: Prisma.TransactionClient, actorId: string, correlationId:
 }
 
 async function caseOutput(tx: Prisma.TransactionClient, contractId: string) {
+  const identity = await tx.salesContract.findUnique({ where: { id: contractId }, select: { partnerCaseId: true } });
+  if (identity?.partnerCaseId) await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${identity.partnerCaseId} FOR UPDATE`;
   await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${contractId} FOR UPDATE`;
   const row = await tx.salesContract.findUnique({ where: { id: contractId }, select: {
-    id: true, partnerKind: true, partnerCaseId: true, contractNumber: true, customerId: true,
+    id: true, partnerKind: true, commercialFlowVersion: true, commercialRevision: true, salesApprovalRevision: true,
+    customerAcceptanceRevision: true, firstFinancialRecordAt: true, commercialExpiresAt: true, status: true, isInactive: true, partnerCaseId: true, contractNumber: true, customerId: true,
     partnerCase: { select: { id: true, state: true, customerConfirmationState: true,
       headRevision: true, integrityHash: true,
       committedRevision: true,
@@ -126,7 +132,7 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
       const source = await caseOutput(tx, input.contractId);
       if (source === 'ORDINARY') return undefined as unknown as SendConfirmationResult;
       if (!source) throw new Rollback({ success: false, error: safeError('NOT_FOUND') });
-      if (source.case.customerConfirmationState === 'REJECTED') {
+      if (!isPartnerCommercialFlow(source.contract) && source.case.customerConfirmationState === 'REJECTED') {
         throw new Rollback({ success: false, error: safeError('STATE_CONFLICT') });
       }
       const correlationId = randomUUID();
@@ -134,8 +140,13 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
       if (!allowed.ok) throw new Rollback({ success: false, error: allowed.error.message });
       const rollout = await authorizePartnerTechnicalRollout(tx, source.case.profile.id, 'MUTATE');
       if (!rollout.ok) throw new Rollback({ success: false, error: rollout.error.message });
-      if (source.case.state !== 'COMMITTED' && !source.pendingRetailCorrection) {
+      if (!isPartnerCommercialFlow(source.contract) && source.case.state !== 'COMMITTED' && !source.pendingRetailCorrection) {
         throw new Rollback({ success: false, error: safeError('STATE_CONFLICT') });
+      }
+      if (isPartnerCommercialFlow(source.contract)) {
+        const full = await tx.salesContract.findUniqueOrThrow({ where: { id: source.contract.id } });
+        assertPartnerCommercialAvailable(full);
+        if (full.customerAcceptanceRevision === full.commercialRevision) throw new Rollback({ success: false, error: safeError('STATE_CONFLICT') });
       }
       const recipient = normalize(source.content.customer.phone);
       if (!/^\+98\d{10}$/.test(recipient)) throw new Rollback({ success: false, error: safeError('INVALID_PAYLOAD') });
@@ -170,17 +181,22 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
       const active = previous && snapshotId(previous.createdBy) === snapshot.snapshotId && previous.status === 'PENDING';
       const session = active ? await tx.contractPublicConfirmation.update({ where: { id: previous.id }, data: {
         tokenHash: hash(rawToken), otpCodeHash: hash(otp), otpExpiresAt, attemptsUsed: 0,
+        commercialRevision: source.contract.commercialRevision,
         resendCount: { increment: 1 }, lastSentAt: now,
       } }) : await tx.contractPublicConfirmation.create({ data: { contractId: input.contractId, tokenHash: hash(rawToken),
-        phoneNumber: localPhone(recipient), otpCodeHash: hash(otp), otpExpiresAt, linkExpiresAt: snapshot.expiresAt,
+        commercialRevision: source.contract.commercialRevision, phoneNumber: localPhone(recipient), otpCodeHash: hash(otp), otpExpiresAt, linkExpiresAt: snapshot.expiresAt,
         maxAttempts: maxAttempts(), lastSentAt: now, resendCount: input.resend ? 1 : 0,
         createdBy: `partner-output:${snapshot.snapshotId}` } });
-      if (source.case.state === 'COMMITTED' && !source.pendingRetailCorrection &&
+      if (!isPartnerCommercialFlow(source.contract) && source.case.state === 'COMMITTED' && !source.pendingRetailCorrection &&
           source.case.customerConfirmationState !== 'SENT') {
         const transitioned = await lifecycle(tx, input.requestedBy, correlationId).markAwaitingCustomerConfirmation({
           expected: snapshot.owner, commandId: randomUUID(), correlationId, snapshotId: snapshot.snapshotId,
         });
         if (!transitioned.ok) throw new Rollback({ success: false, error: transitioned.error.message });
+      }
+      if (isPartnerCommercialFlow(source.contract)) {
+        await tx.partnerSaleCase.update({ where: { id: source.case.id }, data: { customerConfirmationState: 'SENT', stateRevision: { increment: 1 } } });
+        await appendPartnerCommercialEvent(tx, source.case.id, input.requestedBy, 'PARTNER_CONFIRMATION_SENT', { sessionId: session.id, commercialRevision: source.contract.commercialRevision });
       }
       await tx.contractConfirmationAuditLog.create({ data: { contractId: input.contractId, sessionId: session.id,
         eventType: 'PARTNER_CONFIRMATION_QUEUED', eventPayloadJson: json({ snapshotId: snapshot.snapshotId,
@@ -192,11 +208,11 @@ async function send(input: { contractId: string; requestedBy: string; resend?: b
         customerName: source.content.customer.displayName, contractId: source.contract.id, sessionId: session.id };
       return { success: true, data: { contractId: input.contractId, status: 'PENDING_APPROVAL', phoneNumber: localPhone(recipient),
         publicLink: `${frontendUrl()}/contracts/confirm/${rawToken}`, expiresAt: snapshot.expiresAt,
-        otpExpiresAt: otpExpiresAt.toISOString(),
-        ...(process.env.SMS_IR_ENVIRONMENT === 'sandbox' && process.env.NODE_ENV !== 'production' ? { debugOtp: otp } : {}) } };
+        otpExpiresAt: otpExpiresAt.toISOString() } };
     });
   } catch (error) {
     if (error instanceof Rollback) return error.result;
+    onTechnicalError?.(error);
     return { success: false, error: safeError('INTEGRITY_CONFLICT') };
   }
   if (!delivery) return response;
@@ -239,9 +255,9 @@ async function getPublic(session: Awaited<ReturnType<typeof publicSession>>, met
       eventType: 'PARTNER_LINK_OPENED', eventPayloadJson: json({ snapshotId: snapshot.snapshotId }),
       ipAddress: meta?.ipAddress, userAgent: meta?.userAgent } });
     return { success: true, data: { contract: snapshot.content, verifiedAt: locked.verifiedAt?.toISOString() || null,
-      linkExpiresAt: snapshot.expiresAt, sellerFinalized: source.case.state === 'COMMITTED',
+      linkExpiresAt: snapshot.expiresAt, sellerFinalized: isPartnerCommercialFlow(source.contract) ? source.contract.status === 'SIGNED' : source.case.state === 'COMMITTED',
       decision: locked.status === 'REJECTED' ? 'REJECTED' : locked.verifiedAt ? 'APPROVED' : 'PENDING',
-      ...disposition, readOnly: disposition.readOnly || locked.status === 'REJECTED' } satisfies PublicCustomerConfirmation };
+      ...disposition, readOnly: disposition.readOnly || locked.status === 'REJECTED' || isPartnerCommercialFlow(source.contract) && (source.contract.isInactive || source.contract.status === 'EXPIRED' || partnerDeadlinePassed(source.contract)) } satisfies PublicCustomerConfirmation };
   });
 }
 
@@ -250,6 +266,7 @@ async function verify(session: Awaited<ReturnType<typeof publicSession>>, code: 
   try {
     return await prisma.$transaction(async tx => {
       await lockPartnerOperationsControl(tx);
+      await caseOutput(tx, session.contractId);
       await tx.$queryRaw`SELECT id FROM contract_public_confirmations WHERE id = ${session.id} FOR UPDATE`;
       const current = await tx.contractPublicConfirmation.findUnique({ where: { id: session.id } });
       const snapshot = current && await readSnapshot(tx, current);
@@ -268,7 +285,10 @@ async function verify(session: Awaited<ReturnType<typeof publicSession>>, code: 
       snapshots.disposition(snapshot, { owner: source.owner, contractNumber: source.contract.contractNumber,
         normalizedRecipient: normalize(source.content.customer.phone), state: source.case.state,
         customerContent: source.content }, null, verifiedAt.toISOString());
-      if (!source.pendingRetailCorrection) {
+      if (isPartnerCommercialFlow(source.contract)) {
+        await acceptPartnerCustomer(tx, { caseId: source.case.id, revision: current.commercialRevision ?? -1,
+          actorId: source.case.profile.userId, method: 'DIGITAL', sessionId: current.id });
+      } else if (!source.pendingRetailCorrection) {
         const approved = await lifecycle(tx, source.case.profile.userId, correlationId).markCustomerApproved({
           expected: source.owner, commandId: randomUUID(), correlationId,
             snapshotId: snapshot.snapshotId, verifiedAt: verifiedAt.toISOString() });
@@ -294,6 +314,7 @@ async function verify(session: Awaited<ReturnType<typeof publicSession>>, code: 
       return { success: true, data: { status: 'APPROVED', verifiedAt: verifiedAt.toISOString() } };
     });
   } catch (error) {
+    if (!(error instanceof Rollback) && !(error instanceof RejectionRollback)) onTechnicalError?.(error);
     return error instanceof Rollback ? error.result : { success: false, error: safeError('INTEGRITY_CONFLICT') };
   }
 }
@@ -303,6 +324,7 @@ async function reject(session: Awaited<ReturnType<typeof publicSession>>, meta?:
   try {
     return await prisma.$transaction(async tx => {
       await lockPartnerOperationsControl(tx);
+      await caseOutput(tx, session.contractId);
       await tx.$queryRaw`SELECT id FROM contract_public_confirmations WHERE id = ${session.id} FOR UPDATE`;
       const current = await tx.contractPublicConfirmation.findUnique({ where: { id: session.id } });
       const snapshot = current && await readSnapshot(tx, current);
@@ -316,10 +338,15 @@ async function reject(session: Awaited<ReturnType<typeof publicSession>>, meta?:
         normalizedRecipient: normalize(source.content.customer.phone), state: source.case.state,
         customerContent: source.content }, null, rejectedAt.toISOString());
       const correlationId = randomUUID();
+      if (isPartnerCommercialFlow(source.contract)) {
+        if (current.commercialRevision !== source.contract.commercialRevision) throw new RejectionRollback({ success: false, error: safeError('ROW_STALE') });
+        await rejectPartnerCustomer(tx, source.case.id, source.case.profile.userId);
+      } else {
       const rejected = await lifecycle(tx, source.case.profile.userId, correlationId).markCustomerRejected({
         expected: source.owner, commandId: `customer-reject:${current.id}`, correlationId,
         snapshotId: snapshot.snapshotId, rejectedAt: rejectedAt.toISOString() });
       if (!rejected.ok) throw new RejectionRollback({ success: false, error: rejected.error.message });
+      }
       await tx.contractPublicConfirmation.update({ where: { id: current.id }, data: {
         status: 'REJECTED', cancelledAt: rejectedAt } });
       await tx.contractConfirmationAuditLog.create({ data: { contractId: current.contractId, sessionId: current.id,
@@ -329,6 +356,7 @@ async function reject(session: Awaited<ReturnType<typeof publicSession>>, meta?:
       return { success: true, data: { status: 'REJECTED' as const, rejectedAt: rejectedAt.toISOString() } };
     });
   } catch (error) {
+    if (!(error instanceof Rollback) && !(error instanceof RejectionRollback)) onTechnicalError?.(error);
     return error instanceof RejectionRollback ? error.result
       : { success: false, error: safeError('INTEGRITY_CONFLICT') };
   }

@@ -19,6 +19,7 @@ export function projectCustomerVisibleRevisionContent(content: CustomerContractO
     },
     deliveries: visible.deliveries.map(({ deliveryId: _deliveryId, ...delivery }) => ({
       ...delivery,
+      ...(delivery.serviceItems ? { serviceItems: delivery.serviceItems.map(({serviceRowId, ...item}) => ({...item, productAlias: productAliases.get(serviceRowId) ?? `unmatched:${serviceRowId}`})) } : {}),
       items: delivery.items.map(({ productRowId, ...item }) => ({
         ...item,
         // Valid output always references a product row. Retaining an unknown

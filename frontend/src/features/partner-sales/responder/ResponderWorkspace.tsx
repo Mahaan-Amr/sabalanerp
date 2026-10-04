@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ResponderWorkspaceViewV2Schema } from '@sabalanerp/partner-sales-contracts';
+import { ResponderWorkspaceViewV2Schema, ResponderInquiryViewV2Schema, partnerError } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerCommandPort, PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
 import { ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpSegmentedControl, ErpWorkspacePage } from '@/components/erp';
 import { actionPresentation } from '../management/availability';
@@ -18,30 +18,53 @@ const tehranTime = (instant: string) => new Date(instant).toLocaleString('fa-IR'
 const inquiryLabel = (inquiry: { partnerDisplayName: string; submittedAt: string; rows: readonly unknown[] }) =>
   `${inquiry.partnerDisplayName} · ${tehranTime(inquiry.submittedAt)} · ${inquiry.rows.length.toLocaleString('fa-IR')} ردیف`;
 
-export function ResponderWorkspace({ queryPort, commandPort }: { queryPort: PartnerQueryV2Port; commandPort: PartnerCommandPort }) {
+export function ResponderWorkspace({ queryPort, inquiryQueryPort = queryPort, commandPort }: { queryPort: PartnerQueryV2Port; inquiryQueryPort?: PartnerQueryV2Port; commandPort: PartnerCommandPort }) {
   const searchParams = useSearchParams();
   const requestedInquiryId = searchParams.get('inquiryId');
   const load = useCallback(async (cursor?: string) => {
     const response = await queryPort.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', limit: 20, ...(cursor ? { cursor } : {}) });
-    return response.ok ? { ok: true as const, value: ResponderWorkspaceViewV2Schema.parse(response.value) } : response;
-  }, [queryPort]);
-  const resource = useWorkspaceQuery(load);
-  const [selected, setSelected] = useState<string | null>(requestedInquiryId);
+    if (!response.ok) return response;
+    const view = ResponderWorkspaceViewV2Schema.parse(response.value);
+    // A duty's target can be outside this queue page. Resolve its exact identity,
+    // never substitute the first inquiry from the paginated workspace.
+    if (requestedInquiryId && !view.inquiries.some(item => item.inquiryId === requestedInquiryId)) {
+      const target = await inquiryQueryPort.query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: requestedInquiryId });
+      if (!target.ok) return target;
+      const parsed = ResponderInquiryViewV2Schema.safeParse(target.value);
+      if (!parsed.success || parsed.data.inquiryId !== requestedInquiryId) return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
+      return { ok: true as const, value: { ...view, inquiries: [parsed.data, ...view.inquiries] } };
+    }
+    return { ok: true as const, value: view };
+  }, [queryPort, inquiryQueryPort, requestedInquiryId]);
+  const resource = useWorkspaceQuery(load, requestedInquiryId ?? 'queue');
+  const [selection, setSelection] = useState({ routeId: requestedInquiryId, inquiryId: requestedInquiryId });
+  const selected = selection.routeId === requestedInquiryId ? selection.inquiryId : requestedInquiryId;
+  const setSelected = (inquiryId: string | null) => setSelection({ routeId: requestedInquiryId, inquiryId });
   const [queueView, setQueueView] = useState<ResponderQueueView>('pending');
+  const focusedRoute = useRef<string | null>(null);
   const [locked, setLocked] = useState(false);
   const [draftsByInquiry, setDraftsByInquiry] = useState<Record<string, ResponseDrafts>>({});
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const visibleInquiries = responderInquiriesForView(resource.view?.inquiries ?? [], queueView, now);
   const historyInquiries = responderInquiriesForView(resource.view?.inquiries ?? [], 'history', now);
-  const inquiry = visibleInquiries.find(item => item.inquiryId === selected) || visibleInquiries[0];
+  const inquiry = selected
+    ? visibleInquiries.find(item => item.inquiryId === selected) || resource.view?.inquiries.find(item => item.inquiryId === selected)
+    : visibleInquiries[0];
   const activeInquiryId = inquiry?.inquiryId;
+  useEffect(() => {
+    if (!requestedInquiryId) { focusedRoute.current = null; return; }
+    const target = resource.view?.inquiries.find(item => item.inquiryId === requestedInquiryId);
+    if (!target || focusedRoute.current === requestedInquiryId) return;
+    focusedRoute.current = requestedInquiryId;
+    setQueueView(target.rows.some(row => row.state === 'PENDING') ? 'pending' : 'answered');
+  }, [requestedInquiryId, resource.view]);
   const setDrafts = useCallback<React.Dispatch<React.SetStateAction<ResponseDrafts>>>((update) => {
     if (!activeInquiryId) return;
     setDraftsByInquiry(previous => ({ ...previous, [activeInquiryId]: typeof update === 'function' ? update(previous[activeInquiryId] || {}) : update }));
   }, [activeInquiryId]);
   useEffect(() => setDraftsByInquiry({}), [resource.view?.actorId]);
-  useEffect(() => { if (requestedInquiryId) setSelected(requestedInquiryId); }, [requestedInquiryId]);
+
   const session = useMemo(() => new PartnerCommandSession(commandPort, resource.view?.actorId || 'unloaded'), [commandPort, resource.view?.actorId]);
   const inquiryAvailability = inquiry && actionPresentation(inquiry.actions, 'INQUIRY_RESPOND', now);
   const editableRowIds = inquiry?.rows.filter(row => row.state === 'PENDING' && inquiryAvailability?.enabled && actionPresentation(row.actions, 'INQUIRY_RESPOND', now)?.enabled).map(row => row.rowId) || [];

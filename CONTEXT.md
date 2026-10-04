@@ -2,6 +2,26 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**پذیرش مشتری در گردش جدید فروش همکار**:
+پذیرش نسخه مشخص قرارداد فروش همکار به مشتری، مستقل از پاسخ و پذیرش استعلام قیمت خرید همکار از سبلان. مشتری فقط اطلاعات و قیمت فروش خودش را می‌بیند و می‌تواند همان نسخه را بپذیرد یا رد کند.
+_Avoid_: پذیرش قیمت خرید از سبلان، افشای قیمت عمده یا سود همکار، یا وابسته‌کردن مشاهده و پذیرش مشتری به تکمیل استعلام
+
+**رد پیش‌نویس توسط فروشنده همکار در گردش جدید**:
+بازگشت قرارداد به یادداشت برای اصلاح با ثبت دلیل، پس‌گرفتن تأیید فروش و بی‌اعتبارشدن پذیرش مشتری و لینک‌های تأیید نسخه جاری، با حفظ سابقه. قرارداد دارای ثبت مالی فقط از مسیر اصلاح مجاز حسابداری می‌تواند این بازگشت را داشته باشد.
+_Avoid_: لغو کامل پرونده، رد استعلام قیمت، رد قرارداد توسط مشتری، یا حذف سابقه پذیرش قبلی
+
+**قرارداد قطعی در گردش جدید فروش همکار**:
+قراردادی که نسخه جاری آن تأیید فروشنده همکار و پذیرش مشتری دارد و همه قیمت‌های لازم خرید از سبلان معتبر و پذیرفته‌شده‌اند. قطعی‌شدن، تعهد خرید همکار از سبلان را برقرار می‌کند و با ثبت مالی یا تسویه کامل تفاوت دارد.
+_Avoid_: قطعی‌شدن صرفاً با پذیرش مشتری، الزام تکمیل استعلام برای ارسال کد مشتری، یا یکی‌دانستن مبلغ خرید از سبلان و مبلغ فروش به مشتری
+
+**پیش‌نویس در گردش جدید فروش همکار**:
+قرارداد دارای تأیید فروشنده همکار که هنوز همه شروط قطعی‌شدن را ندارد؛ پذیرش مشتری و وضعیت استعلام خرید از سبلان جداگانه مشخص‌اند. وضعیت استعلام یکی از تأیید استعلام، رد استعلام، در حال انتظار یا نیازمند اصلاح است.
+_Avoid_: پیش‌نویس بازیابی ایجاد قرارداد، پیش‌نویس صورتحساب حسابداری، یا قطعی دانستن قرارداد دارای پذیرش مشتری و استعلام ناتمام
+
+**اصلاح قرارداد ردشده توسط مشتری همکار در گردش جدید**:
+ویرایش قرارداد پس از رد مشتری که با ذخیره نسخه تازه، قرارداد را به یادداشت برمی‌گرداند و تأیید همکار و پذیرش مشتری را از ابتدا لازم می‌کند، با حفظ سابقه رد و تأییدهای قبلی. وجود رکورد مالی، این ویرایش را به اصلاح مجاز حسابداری وابسته می‌کند.
+_Avoid_: معتبرماندن تأیید نسخه قبلی برای نسخه اصلاح‌شده، حذف سابقه رد، یا الزام استعلام مجدد ردیف‌های معتبر و بدون تغییر
+
 **یادداشت قرارداد فروش عادی**:
 قرارداد فروش عادی ثبت‌شده‌ای که نسخه جاری آن هنوز تأیید فروش ندارد؛ این اصطلاح با پیش‌نویس بازیابیِ ایجاد قرارداد تفاوت دارد.
 _Avoid_: پیش‌نویس ایجاد قرارداد، قرارداد تأییدشده، یا تعمیم این مرحله به پرونده فروش همکار
@@ -900,8 +920,8 @@ The platform-wide boundary for every structured numeric or digit-shaped field in
 _Avoid_: deleting Persian digits with a Latin-only filter, delaying normalization until submission, limiting normalization to one page or workspace, converting identifiers to numbers, removing leading zeroes, persisting mixed digit scripts, retaining grouping in canonical values, or relying only on frontend validation
 
 **واحد نرخ استعلام فروشنده همکار**:
-The fixed Product-family pricing basis used separately for the hidden Partner retail rate and Sabalan responder rate. Longitudinal Product rate is toman per square meter; Stair rates are toman per finished component, independently `فی کف پله`, `فی خیز`, and `فی پاگرد`; Slab rate is toman per canonical consumed mother-stone unit; and Prepared Product rate is its catalog `قیمت واحد`. Cubic Product is outside the active Partner Sale scope and is not offered in this workflow. The system, not either seller, owns the unit and all ancillary rates; independent Services require no inquiry and retain their canonical system unit and rate.
-_Avoid_: using linear meters for Longitudinal Product rate, collapsing Stair sections into square-meter pricing, pricing Slab by finished-piece area instead of consumed mother-stone units, allowing either seller to choose the rate unit or ancillary rates, forcing independent Services through inquiry, or exposing Cubic Product in the Partner workflow
+The ordinary Sale Product-family pricing basis used separately for the hidden Partner customer price and the Sabalan responder price. Longitudinal, Stair and Slab stone rates are toman per square meter of material consumption determined by the shared calculation rules; each Stair part retains its own independently entered price. Prepared Product uses its selected ordinary sales unit and ready-piece or cubic kind. A missing catalog price does not prevent a Contract row with a valid positive seller-entered price. The mandatory percentage charge uses the material price of its own agreement, while fixed cutting, tool, finishing and adhesive rates remain system-owned. Previously paid remaining material is not charged again. Finalized historical agreements retain their recorded unit and amount. Independent Services require no stone inquiry: their purchase rate and unit come from the shared catalog, their customer rate is editable, and their execution quantities are scheduled separately from physical stone delivery.
+_Avoid_: replacing missing catalog prices with sample prices, interpreting a missing price as stale technical data, charging finished-piece counts or mother-stone counts for new square-meter prices, repricing finalized historical agreements, forcing sibling Stair prices to match, letting either seller set system ancillary rates, charging paid remainder material twice
 
 **شواهد تصمیم استعلام قیمت فروشنده همکار**:
 The immutable, integrity-verifiable record binding one Partner Sale Case revision and stable `productRowId` to its submitted technical definition, assigned responder, authorized decision and quoted Sabalan rate. It preserves actor and effective authority, database time, revisions, command identity and configuration hashes, with independent outcomes for every row. Choosing Reject reveals a mandatory explanation field and records its reason; choosing Accept shows no explanation field and records only the quoted rate plus decision evidence.
@@ -1103,6 +1123,10 @@ _Avoid_: sending inquiry SMS, contacting the Customer before Sabalan pricing com
 The reasoned, audited transfer of a CRM Customer to a Partner Seller after a duplicate match or explicit request, decided within scope by an actor with the explicit CRM transfer-decision authority or by an Admin. The request is an independent CRM workflow: discarding the Contract Draft that prompted it neither cancels nor approves it, the requester may cancel it explicitly, and later approval only notifies and offers the Customer for explicit selection without creating or changing a Contract. The current owner is notified and may comment but has no mandatory veto; only the current Customer identity and profile become available to the Partner Seller, while historical Contracts, follow-ups, Projects, authorship, responsibility, and sales credit remain attributed and undisclosed, and existing Potential Projects retain their Responsible Sellers.
 _Avoid_: coupling transfer disposition to Draft deletion, creating or changing a Contract on transfer approval, allowing a Partner Seller to approve their own request, requiring current-owner consent as an operational veto, transferring historical sales credit or project responsibility, exposing another seller's detailed history, rewriting authorship, approving without a reason and audit record, or creating an unrestricted duplicate instead of resolving the existing identity
 
+**انتقال مستقیم مشتری به فروشنده همکار**:
+انتقال مالکیت جاری مشتری که مدیر سیستم یا کاربر داخلی دارای مجوز صریح تصمیم انتقال، با انتخاب فروشنده همکار مقصد، ثبت دلیل و تأیید نهایی آغاز و تصویب می‌کند؛ درخواست قبلی فروشنده یا تأیید نفر دوم لازم نیست. این انتقال همان مرزهای حفظ سوابق و مسئولیت‌ها را دارد و تا تعیین تکلیف پرونده فروش همکار ناتمام مشتری قابل تأیید نیست.
+_Avoid_: حذف و ساخت دوباره مشتری، انتقال خودکار پرونده قبلی، لغو خودکار پرونده ناتمام، انتقال بدون مجوز یا دلیل
+
 **گزارش فروشنده همکار**:
 The owner-scoped reporting surface for a Partner Seller's retail sales, Sabalan purchases, resale profit or loss, Customers, Products, private customer-collection status, debt and payments to Sabalan, and delivery status. Its financial overview shows three current cards—Sabalan debt balance, Customer receivable balance, and actual Customer receipts in the selected period—plus a `مانده‌ها` line chart for Sabalan debt and Customer receivables and a separate `دریافتی‌ها` column chart for actual Customer receipts. It defaults to the last six Jalali months, supports three-month, six-month, one-year and custom ranges, displays toman, and drills every point or column into its contributing Contracts and transactions. System Administrators and company-management users with the explicit Partner-economics reporting permission may view both prices and the complete Partner report; Sabalan Accounting sees only Sabalan debt and payments, while ordinary Company Managers without that permission, Price Responders and unrelated sellers receive none of the private retail comparison or collection data through ordinary access.
 _Avoid_: exposing another Partner Seller's data, mixing balance and receipt flow without separate labels and views, counting planned installments as receipts, mixing retail value into Sabalan revenue, hiding the Partner Seller's own purchase economics, granting private Customer collection or margin access to a Price Responder or ordinary Accounting user, or weakening management-report permission boundaries
@@ -1169,7 +1193,7 @@ _Avoid_: combining Partner ownership with general internal authority, using prio
 
 **مرز محصول بدون سنگ فروشنده همکار**:
 A Prepared Product without a separate Stone selector uses its exact catalog Product as the Case-row pricing identity and its immutable catalog selling unit as the retail and Sabalan rate basis. An independent Service uses the canonical system rate without Partner inquiry and remains separately identified from stone material, while Product-catalog creation and rate administration remain unavailable to the Partner Seller. Cubic Product is excluded from the active Partner Sale catalog and workflow.
-_Avoid_: treating Prepared Product dimensions as pricing identity, changing its catalog unit inside a Case, requiring a Stone inquiry for an independent Service, allowing the Partner Seller to create catalog Products or rates, merging Service revenue into stone material, or exposing Cubic Product in the Partner workflow
+_Avoid_: treating Prepared Product dimensions as pricing identity, changing its catalog unit inside a Case, requiring a Stone inquiry for an independent Service, allowing the Partner Seller to create catalog Products or rates, merging Service revenue into stone material
 
 **تعیین تکلیف سابقه فروشنده تبدیل‌شده**:
 The frozen inventory of internal responsibilities owned immediately before Partner conversion and retained through record-specific read access. The converted User may inspect each listed responsibility, propose an eligible internal destination, and request transfer, but cannot edit, approve, complete, cancel, or transfer it directly; an authorized manager decides the request without changing creator or realized-sales credit, and open responsibilities do not block Partner activation.
@@ -5078,3 +5102,9 @@ _Avoid_: دریافت پول، مجموع کل قراردادهای نقدی و 
 **وعده پرداخت اعتباری مشتری خاص**:
 تاریخ الزامی وعده مشتری برای پرداخت بخش اعتباری قرارداد که در صورت باقی‌ماندن مبلغ پرداخت‌نشده، مبنای یادآوری داخلی سررسید است.
 _Avoid_: دریافت واقعی، تسویه خودکار در سررسید، یا تاریخ انقضای خودکار مجوز ارسال
+
+### Partner pricing result and preparation after product edits
+
+A **Current Partner Pricing Result Duty** is the sole actionable result duty for the newest Case pricing package and its current inquiry revision. Earlier results are **Superseded Result Duties**: `WAIVED`, displayed as `جایگزین‌شده` in history, with audit and assignment history retained. Superseding inbox work never deletes valid unchanged wholesale pricing evidence.
+
+A **Compatible Partner Preparation Plan** refers to delivery/service allocations with current row identities and exact quantities, and customer installments with current currency, valid payment terms and a sum equal to the current retail payable. Product edits preserve explicit plan values, invalidate completion when incompatible, and require owner correction rather than automatic installment adjustment or allocation trimming. Accounting Partner print variants retain the chosen layout and actual commercial status; unknown wholesale monetary values display `در انتظار استعلام`, without exposing customer retail prices.

@@ -1,5 +1,6 @@
 import {
-  PartnerTechnicalDraftSchema,
+  PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft,
+  type PartnerTechnicalPreviewCatalog,
   type PartnerTechnicalDraft,
   type PartnerTechnicalFamily,
   type PartnerTechnicalOperation,
@@ -7,6 +8,7 @@ import {
 } from '@sabalanerp/partner-sales-contracts';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 import { normalizeNumericText } from '@/lib/numberFormat';
+import { inferPreparedKindFromProduct } from '../utils/preparedProductUtils';
 
 type Row = PartnerTechnicalDraft['rows'][number];
 type EditingValue = NonNullable<PartnerTechnicalDraft['editingValues']>[number];
@@ -35,6 +37,14 @@ export function setPartnerTechnicalRetailUnitPrice(draft: PartnerTechnicalDraft,
     ? { ...row, retailUnitPrice: { amount, currency: 'IRT' as const } }
     : Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'retailUnitPrice')) as typeof row);
   return revise(draft, { rows });
+}
+
+/** Customer presentation remains separate from catalog identity and rate. */
+export function updatePartnerTechnicalPresentation(draft: PartnerTechnicalDraft, productRowId: string,
+  changes: { contractualTitle?: string; description?: string }): PartnerTechnicalDraft {
+  if (!draft.rows.some(row => row.productRowId === productRowId)) throw new Error('Product row is unavailable');
+  return revise(draft, { rows: draft.rows.map(row => row.productRowId === productRowId
+    ? { ...row, ...changes } : row) });
 }
 
 /** A catalog refresh keeps the contractual row identity and requires an
@@ -80,7 +90,9 @@ export function addPartnerTechnicalProduct(
     catalogSnapshotVersion: product.catalogSnapshotVersion };
   let row: Row;
   if (input.family === 'prepared' || input.family === 'volumetric') {
-    row = { ...identity, family: input.family, configuration: { kind: input.family === 'volumetric' ? 'cubic' : 'readyPiece', unit: 'squareMeter' } };
+    row = { ...identity, family: input.family, configuration: { kind: input.family === 'volumetric' ? 'cubic' : inferPreparedKindFromProduct({
+      namePersian: product.name, cuttingDimensionNamePersian: product.attributes.cuttingDimension,
+    } as Parameters<typeof inferPreparedKindFromProduct>[0]), unit: 'count', quantity: '1' } };
   } else if (input.family === 'longitudinal') {
     row = { ...identity, family: 'longitudinal', configuration: { sourceBatchId: input.sourceBatchId,
       lastManualField: 'length', lastManualDimension: 'length', lengthDisplayUnit: 'm', widthDisplayUnit: 'cm',
@@ -215,6 +227,8 @@ export function removePartnerTechnicalProduct(draft: PartnerTechnicalDraft, prod
   });
   const editingValues = (draft.editingValues ?? []).filter(value => !removedEntityIds.has(value.entityId));
   return revise(draft, { rows, dependents, editingValues,
+    stairSystems: draft.stairSystems?.filter(system => rows.some(row => row.family === 'stair'
+      && row.configuration.stairSystemId === system.stairSystemId)),
     contractConfigurationRequiredProductRowIds: (draft.contractConfigurationRequiredProductRowIds ?? [])
       .filter(id => !removedProductRowIds.has(id)),
     contractConfiguredProductRowIds: (draft.contractConfiguredProductRowIds ?? [])
@@ -348,4 +362,72 @@ export function commitPartnerTechnicalField(
   if (!committed) throw new Error('Technical field is unavailable for this entity');
   const editingValues = (draft.editingValues ?? []).filter(item => item.entityId !== entityId || item.field !== field);
   return revise(draft, { rows, dependents, stairSystems, editingValues });
+}
+
+/** Duplicate an independently purchased parent and its stair layers. Existing
+ * paid-remainder allocations stay with their original source, as in Sales. */
+export function duplicatePartnerTechnicalProduct(draft: PartnerTechnicalDraft, productRowId: string,
+  catalog: PartnerTechnicalPreviewCatalog, issueId: (kind: string) => string = kind => `${kind}:${crypto.randomUUID()}`): PartnerTechnicalDraft {
+  const source = draft.rows.find(row => row.productRowId === productRowId);
+  if (!source) throw new Error('محصول در دسترس نیست.');
+  const before = previewPartnerTechnicalDraft(draft, catalog);
+  if (!before.ok || before.value.conflicts.length || before.value.rows.some(row => !row.calculation.ok || row.operations && !row.operations.ok)
+    || before.value.dependents.some(row => !row.calculation.ok || row.kind === 'remainder' && row.operations && !row.operations.ok)) {
+    throw new Error('پیش از تکثیر، مشخصات و عملیات محصول‌ها را کامل کنید.');
+  }
+  const layers = (draft.dependents ?? []).filter(item => item.kind === 'layer' && item.parentProductRowId === productRowId)
+    .sort((a, b) => a.creationOrder - b.creationOrder);
+  const identities = new Map<string, string>();
+  const identityKinds: Record<string, string> = { productRowId: 'product-row', sourceBatchId: 'source-batch',
+    stairSystemId: 'stair-system', sourceRowId: 'source-row', layerConfigurationId: 'layer-configuration',
+    operationGroupId: 'operation-group', toolSelectionId: 'tool-selection', finishingSelectionId: 'finishing-selection',
+    operationCollectionId: 'layer-operation-collection' };
+  const collect = (value: unknown): void => {
+    if (Array.isArray(value)) { value.forEach(collect); return; }
+    if (!value || typeof value !== 'object') return;
+    for (const [key, item] of Object.entries(value)) {
+      if (identityKinds[key] && typeof item === 'string' && !identities.has(item)) identities.set(item, issueId(identityKinds[key]));
+      else collect(item);
+    }
+  };
+  collect(source); layers.forEach(collect);
+  const remapRemaining = (id: string) => {
+    // Generated stock identities contain parent/layer identity followed by a
+    // canonical suffix. Replace only the prefix that issued that stock.
+    for (const [oldId, newId] of Array.from(identities).sort((a, b) => b[0].length - a[0].length)) {
+      if (id.startsWith(`${oldId}:`)) return `${newId}${id.slice(oldId.length)}`;
+    }
+    return id;
+  };
+  const clone = (value: unknown, field?: string): unknown => {
+    if (Array.isArray(value)) return value.map(item => clone(item, field));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item, key)]));
+    if (typeof value !== 'string') return value;
+    if (identityKinds[field ?? ''] || field === 'parentProductRowId') return identities.get(value) ?? value;
+    if (field === 'selectedRemainingStoneIds') {
+      let remapped = remapRemaining(value);
+      // A derived layer remainder can include more than one cloned identity.
+      for (const [oldId, newId] of Array.from(identities)) remapped = remapped.replace(`:layer-remainder:${oldId}:`, `:layer-remainder:${newId}:`);
+      return remapped;
+    }
+    return value;
+  };
+  const duplicate = clone(source) as Row;
+  let order = Math.max(-1, ...(draft.dependents ?? []).map(item => item.creationOrder));
+  const clonedLayers = layers.map(layer => ({ ...(clone(layer) as typeof layer), creationOrder: ++order }));
+  const stairSystem = source.family === 'stair' ? draft.stairSystems?.find(system => system.stairSystemId === source.configuration.stairSystemId) : undefined;
+  const next = revise(draft, { rows: [...draft.rows, duplicate],
+    ...(clonedLayers.length ? { dependents: [...(draft.dependents ?? []), ...clonedLayers] } : {}),
+    ...(stairSystem ? { stairSystems: [...(draft.stairSystems ?? []), clone(stairSystem) as typeof stairSystem] } : {}),
+    ...(draft.contractConfigurationRequiredProductRowIds?.includes(productRowId)
+      ? { contractConfigurationRequiredProductRowIds: [...draft.contractConfigurationRequiredProductRowIds, duplicate.productRowId] } : {}),
+    ...(draft.contractConfiguredProductRowIds?.includes(productRowId)
+      ? { contractConfiguredProductRowIds: [...draft.contractConfiguredProductRowIds, duplicate.productRowId] } : {}),
+  });
+  const after = previewPartnerTechnicalDraft(next, catalog);
+  if (!after.ok || after.value.conflicts.length || after.value.rows.some(row => !row.calculation.ok || row.operations && !row.operations.ok)
+    || after.value.dependents.some(row => !row.calculation.ok || row.kind === 'remainder' && row.operations && !row.operations.ok)) {
+    throw new Error('تکثیر مستقل این تنظیمات انجام نشد؛ اطلاعات قبلی حفظ شده است.');
+  }
+  return next;
 }

@@ -1,3 +1,4 @@
+import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
 import { createHash, randomUUID } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible, ordinaryDispatchSourcesEligible } from './ordinaryContractDispatchEligibility';
 import { AccountingDispatchWaybillStatus, DispatchBuyerSmsStatus, GuardDriverQueueTurnStatus, Prisma, PrismaClient } from '@prisma/client';
@@ -114,6 +115,7 @@ export class PhysicalGateExitService {
       const waybill = authorization.waybill;
       const revision = waybill.candidate.allocationRevision;
       await assertOrdinaryContractsDispatchEligible(tx, revision.lines.map(line => line.sourceContractId), PhysicalGateExitConflictError);
+      await assertPartnerCommercialDispatchEligible(tx, [revision.partnerCaseId, ...revision.lines.map(line => line.partnerCaseId)], PhysicalGateExitConflictError);
       const turn = revision.queueTurn;
       if (waybill.status !== AccountingDispatchWaybillStatus.ISSUED || waybill.integrityHash !== authorization.waybillIntegrityHash) {
         throw new PhysicalGateExitConflictError('The authorized waybill snapshot is no longer valid.');

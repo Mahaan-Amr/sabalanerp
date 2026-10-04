@@ -1,3 +1,4 @@
+import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
 import { createHash } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible } from './ordinaryContractDispatchEligibility';
 import { isOrdinaryCommercialFlow } from './ordinaryContractLifecycle';
@@ -620,6 +621,7 @@ const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
     include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } },
   });
   if (previous) return previous;
+  await assertPartnerCommercialDispatchEligible(tx, [source.owner.caseId], DispatchAllocationConflictError);
   const loading = await tx.logisticsLoading.findUnique({ where: { id: input.loadingId }, include: {
     customer: true, canonicalAllocationDrafts: { include: { lines: true, queueTurn: true },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } } });
@@ -762,6 +764,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } },
   });
   if (previous) return previous;
+
   const loading = await tx.logisticsLoading.findUnique({
     where: { id: input.loadingId },
     include: { customer: true, project: true, lines: true,

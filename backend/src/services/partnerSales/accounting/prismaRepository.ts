@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { assertPartnerFinancialFinality } from '../cases/commercialLifecycle';
+import { reconcilePartnerFinancialRealization } from './commercialRealization';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   PartnerEventSchema, SabalanInternalRecordViewSchema, canonicalHash, partnerError,
@@ -84,9 +87,14 @@ export function createPrismaPartnerAccountingRepository(input: {
           }
           const authAction = action === 'PREPARE' ? 'ACCOUNTING_READ' : 'ACCOUNTING_WRITE';
           const allowed = await createAuditedPartnerAuthorization(tx, { actorId: input.actorId,
-            purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: input.correlationId })
+            purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: input.correlationId,
+              reason: `اقدام حسابداری پرونده همکار: ${action}` })
             .authorize(authAction, { kind: 'CASE', id: row.id });
           if (!allowed.ok) return allowed;
+          if (action !== 'PUBLISH_FACT') {
+            try { await assertPartnerFinancialFinality(tx, row.id); }
+            catch { return { ok: false, error: partnerError('STATE_CONFLICT') }; }
+          }
           if (action === 'APPROVAL') {
             if (!(await readPartnerAccountingCapabilities(tx, input.actorId)).receivables)
               return { ok: false, error: partnerError('FORBIDDEN') };
@@ -137,6 +145,7 @@ export function createPrismaPartnerAccountingRepository(input: {
               currency: entry.preparation.amount.currency, sourceSnapshot: json({ partnerPreparation: entry.preparation }),
               metadata: json({ partnerCaseId: entry.preparation.owner.caseId, commitmentEventId: entry.commitmentEventId }),
               idempotencyKey: entry.queueEvidenceId, createdBy: input.actorId } });
+            await reconcilePartnerFinancialRealization(tx, entry.preparation.owner.caseId, input.actorId, `financial-create:${entry.queueEvidenceId}:${randomUUID()}`);
           },
           readInvoice: async (invoiceRecordId, expected) => {
             const row = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceRecordId } });

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { loginAsAdmin } from './support/design-system';
+import { partnerInputHash, type PartnerTechnicalDraft } from '../../packages/partner-sales-contracts/dist';
 
 const actorId = 'partner-entry-regression';
 const oldRecoveryId = 'partner-old-entry';
@@ -26,12 +27,13 @@ const previous = (page: Page) => workflow(page).getByRole('button', { name: 'ق�
 
 async function mockPartner(page: Page, recoverable = false) {
   const state = { recoverable, actorId, deletes: [] as string[], acquisitions: [] as string[],
+    services: false, checkpoint: undefined as PartnerTechnicalDraft | undefined,
     delayDelete: undefined as Promise<void> | undefined };
   // Never send a Partner request to a real account, including unexpected mutations.
   await page.route('**/api/partner/**', async route => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    const input = route.request().method() === 'POST' ? route.request().postDataJSON() : undefined;
+    const input = route.request().postData() ? route.request().postDataJSON() : undefined;
     let data: unknown;
     if (path.endsWith('/creation-context')) data = {
       schemaVersion: 1, kind: 'PARTNER', actorId: state.actorId, actorDisplayName: 'همکار آزمون',
@@ -43,7 +45,11 @@ async function mockPartner(page: Page, recoverable = false) {
         updatedAt: new Date().toISOString() } } : {}),
     };
     else if (path.endsWith('/catalog/query')) data = {
-      schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG', kind: input.kind, items: [],
+      schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG', kind: input.kind, items: state.services && input.kind === 'SERVICE' ? [{
+        catalogItemId: `service-${input.sourceType}`, catalogSnapshotVersion: '2026-10-03T00:00:00.000Z',
+        sourceType: input.sourceType, name: `خدمت ${input.sourceType}`, unit: input.sourceType === 'finishing' ? 'squareMeter' : 'meter',
+        suggestedRetailUnitPrice: { amount: '100', currency: 'IRT' },
+      }] : [],
     };
     else if (path.endsWith('/recoveries/acquire')) {
       state.acquisitions.push(input.recoveryId);
@@ -57,6 +63,12 @@ async function mockPartner(page: Page, recoverable = false) {
       const { replayed, ...view } = saved;
       data = view;
     }
+    else if (path.endsWith('/recoveries/checkpoint')) {
+      state.checkpoint = input.draft;
+      data = { schemaVersion: 1, recoveryId: input.recoveryId, recoveryRevision: input.expectedRecoveryRevision + 1,
+        inputRevision: input.draft.inputRevision, updatedAt: new Date().toISOString(), replayed: false };
+    } else if (path.endsWith('/customer-total-preview')) data = { inputRevision: input.draft.inputRevision,
+      draftHash: await partnerInputHash(input.draft), total: { amount: '29', currency: 'IRT' } };
     else if (route.request().method() === 'DELETE') {
       state.deletes.push(path.split('/').at(-1)!);
       await state.delayDelete;
@@ -79,6 +91,33 @@ async function confirmStartNew(page: Page) {
   await dialog.getByRole('button', { name: 'شروع قرارداد جدید', exact: true }).click();
   await expect(workflow(page).getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last()).toBeVisible();
 }
+
+test('Partner independent services use catalog defaults, editable rates and distinct duplicate recovery identities', async ({ page }) => {
+  await loginAsAdmin(page);
+  const state = await mockPartner(page);
+  state.services = true;
+  await page.goto('/dashboard/sales/contracts/create?entry=new-contract');
+  await next(page).click();
+  await workflow(page).getByRole('button', { name: /مشتری جدید/ }).click();
+  await next(page).click();
+  await workflow(page).getByRole('button', { name: /پروژه جدید/ }).click();
+  await next(page).click();
+  const services = workflow(page).getByRole('region', { name: 'خدمات مستقل' });
+  await services.getByRole('button', { name: 'افزودن خدمت', exact: true }).click();
+  await services.getByRole('button', { name: /خدمت tool/ }).click();
+  await services.getByRole('textbox', { name: 'مقدار', exact: true }).fill('0.29');
+  await services.getByRole('textbox', { name: 'نرخ (تومان)', exact: true }).fill('200');
+  await expect.poll(() => state.checkpoint?.serviceRows?.[0]?.quantity).toBe('0.29');
+  await expect.poll(() => state.checkpoint?.serviceRows?.[0]?.retailUnitPrice?.amount).toBe('200');
+  await services.getByRole('button', { name: 'تکثیر', exact: true }).click();
+  await expect.poll(() => state.checkpoint?.serviceRows?.length).toBe(2);
+  expect(new Set(state.checkpoint!.serviceRows!.map(row => row.serviceRowId)).size).toBe(2);
+  expect(state.checkpoint!.rows).toEqual([]);
+  await services.getByRole('button', { name: 'حذف', exact: true }).last().click();
+  await services.getByRole('button', { name: 'تأیید حذف', exact: true }).click();
+  await expect.poll(() => state.checkpoint?.serviceRows?.length).toBe(1);
+  await expect(workflow(page).getByRole('button', { name: 'ادامه تکمیل قرارداد', exact: true })).toBeEnabled();
+});
 
 for (const returnMode of ['logout/login', 'browser reopen'] as const) {
   test(`stale runtime is ignored after ${returnMode} and a different customer starts clean`, async ({ page, context, browser }) => {
@@ -218,9 +257,20 @@ test('Partner payments require user entry and preserve remaining balance through
     projectId: 'old-project', contractDate: '2026-09-30', preparationCompleted: false,
     rows: [{ productRowId: 'old-product', retailUnitPrice: { amount: '1000', currency: 'IRT' } }],
     customerPaymentPlan: { planId: 'manual-payments-plan', version: 1, effectiveDate: '2026-09-30', installments: [] },
-    deliveries: [], retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false };
+    deliveries: [{ deliveryId: 'payment-test-delivery', date: '2026-10-03', destination: 'تهران',
+      projectManagerName: 'مدیر آزمون', receiverName: 'تحویل‌گیرنده آزمون',
+      items: [{ productRowId: 'old-product', quantity: '2' }] }],
+    retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false };
   await loginAsAdmin(page);
   await mockPartner(page, true);
+  await page.route('**/api/partner/cases/quote', route => {
+    const { intent: quotedIntent } = route.request().postDataJSON();
+    return route.fulfill({ json: { success: true, data: { schemaVersion: 1,
+      recoveryId: quotedIntent.recoveryId, recoveryRevision: quotedIntent.recoveryRevision,
+      graphHash: quotedIntent.graphHash, rows: [{ productRowId: 'old-product',
+        retailEffectiveUnitPrice: { amount: '1000', currency: 'IRT' },
+        retailLineTotal: { amount: '2000', currency: 'IRT' } }] } } });
+  });
   await page.route('**/api/partner/cases/creation-context*', route => route.fulfill({ json: { success: true, data: {
     schemaVersion: 1, kind: 'PARTNER', actorId, actorDisplayName: 'همکار آزمون', profileId: 'partner-entry-profile',
     writable: true, inquiryIds: [], customers: [oldCustomer, newCustomer], projects,

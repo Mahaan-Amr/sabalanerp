@@ -12,6 +12,7 @@ interface RenderableContract {
   titlePersian?: string;
   status?: string;
   commercialFlowVersion?: number;
+  partnerCommercialStatus?: string;
   partnerKind?: string | null;
   partnerCaseId?: string | null;
   totalAmount?: number | null;
@@ -402,6 +403,7 @@ const shouldShowRialEquivalent = (currency = 'تومان'): boolean =>
   String(currency || '').trim() === 'تومان';
 
 type PrintMoneyOptions = {
+  unavailableMoneyLabel?: string;
   includeRialEquivalent?: boolean;
   displayInRials?: boolean;
 };
@@ -423,6 +425,7 @@ const formatPrintAmount = (
   currency = 'تومان',
   options: PrintMoneyOptions = {}
 ): string => {
+  if (options.unavailableMoneyLabel) return escapeHtml(options.unavailableMoneyLabel);
   if (options.displayInRials) return formatRialAmount(value, currency);
   return options.includeRialEquivalent
     ? formatAccountingAmount(value, currency)
@@ -434,6 +437,7 @@ const formatPrintMoneyCell = (
   currency = 'تومان',
   options: PrintMoneyOptions = {}
 ): string => {
+  if (options.unavailableMoneyLabel) return escapeHtml(options.unavailableMoneyLabel);
   if (options.displayInRials) return formatRialAmount(value, currency);
   return options.includeRialEquivalent
     ? formatAccountingAmount(value, currency)
@@ -1327,7 +1331,7 @@ const normalizeProducts = (
     dimensions: item?.dimensions || EMPTY,
     billingUnit: item?.billingUnit, billingQuantity: toNumber(item?.quantity),
     quantity: toNumber(item?.pieceCount ?? item?.quantity),
-    squareMeters: 0,
+    squareMeters: toNumber(item?.squareMeters),
     unitPrice: toNumber(item?.unitPrice),
     originalTotalPrice: toNumber(item?.originalTotalPrice),
     isMandatory: Boolean(item?.isMandatory),
@@ -1785,6 +1789,7 @@ const buildFlatProductRows = (
   grandTotal: number,
   financials?: NormalizedFinancials,
   options: {
+    unavailableMoneyLabel?: string;
     includeRialEquivalent?: boolean;
     displayInRials?: boolean;
     accountingDetail?: boolean;
@@ -2256,6 +2261,7 @@ const renderProductMainRows = (
   financials?: NormalizedFinancials,
   options: {
     hidePrices?: boolean;
+    unavailableMoneyLabel?: string;
     includeRialEquivalent?: boolean;
     displayInRials?: boolean;
     accountingDetail?: boolean;
@@ -2596,12 +2602,16 @@ function renderCustomerProductRows(output: CustomerContractOutput, columns: Arra
 
 function renderCustomerDeliveryRows(output: CustomerContractOutput): string {
   const products = new Map(output.products.map(row => [row.productRowId, row]));
-  return output.deliveries.flatMap((delivery, index) => delivery.items.map(item => `<tr>
-    <td>${escapeHtml(String(index + 1))}</td>
-    <td>${escapeHtml(products.get(item.productRowId)?.description || '')}</td>
-    <td>${escapeHtml(item.quantity)} ${escapeHtml(deliveryUnitLabel(products.get(item.productRowId)?.unit))}</td>
-    <td>${escapeHtml(formatDate(delivery.date))}</td><td>${escapeHtml(output.customer.displayName)}</td><td>${escapeHtml(delivery.destination)}</td>
-  </tr>`)).join('');
+  return output.deliveries.flatMap((delivery, index) => {
+    const physical = delivery.items.map(item => ({ rowId: item.productRowId, quantity: item.quantity, execution: false }));
+    const services = (delivery.serviceItems ?? []).map(item => ({ rowId: item.serviceRowId, quantity: item.quantity, execution: true }));
+    return [...physical, ...services].map(item => `<tr>
+      <td>${escapeHtml(String(index + 1))}</td>
+      <td>${item.execution ? 'اجرای خدمت: ' : ''}${escapeHtml(products.get(item.rowId)?.description || '')}</td>
+      <td>${escapeHtml(item.quantity)} ${escapeHtml(deliveryUnitLabel(products.get(item.rowId)?.unit))}</td>
+      <td>${escapeHtml(formatDate(delivery.date))}</td><td>${escapeHtml(output.customer.displayName)}</td><td>${escapeHtml(delivery.destination)}</td>
+    </tr>`);
+  }).join('');
 }
 
 function renderCustomerPaymentRows(output: CustomerContractOutput): string {
@@ -2626,6 +2636,7 @@ export function renderCustomerContractPrint(output: CustomerContractOutput) {
 }
 
 type RenderContractHtmlOptions = {
+  unavailableMoneyLabel?: string;
   /** Internal typed adapter only; validate/hash-check at the output boundary. */
   customerOutput?: CustomerContractOutput;
   reservePdfHeaderSpace?: boolean;
@@ -2654,9 +2665,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     : isSummaryVariant
       ? { productRowsMode: 'summarized' as const }
       : {};
-  const priceFormatOptions: PrintMoneyOptions = isAccountingVariant
-    ? { displayInRials: true }
-    : {};
+  const priceFormatOptions: PrintMoneyOptions = {
+    ...(isAccountingVariant ? { displayInRials: true } : {}),
+    ...(options.unavailableMoneyLabel ? { unavailableMoneyLabel: options.unavailableMoneyLabel } : {}),
+  };
   const showFormalSection = variant === 'original' || isSummaryVariant;
   const showCustomerSection = !isWorkshopVariant && customPrint.showCustomerSection !== false;
   const showProductsSection = customPrint.showProductsSection !== false;

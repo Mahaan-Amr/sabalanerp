@@ -45,6 +45,7 @@ export type DeliveryProgress = {
 export type CaseEvidence = {
   root: Root;
   events: Foundation.PartnerEvent[];
+  financialRevenue?: Array<{ amount: string; effectiveDate: string; recordedAt: string }>;
   internal: Foundation.SabalanInternalRecordView;
   // Not requested from an Accounting/Logistics source; no broad entity is serialized.
   commercial?: CommercialRevision[];

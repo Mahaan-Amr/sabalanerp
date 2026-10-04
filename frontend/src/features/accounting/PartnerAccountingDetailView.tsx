@@ -1,7 +1,7 @@
 'use client';
 import React from 'react';
 import { FaBalanceScale, FaFileInvoice, FaFlag, FaMoneyCheckAlt, FaReceipt, FaSync, FaTrashAlt, FaExclamationTriangle } from 'react-icons/fa';
-import { partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
+import { partnerTrackingCode, partnerCommercialLabels } from '@sabalanerp/partner-sales-contracts';
 import { ErpButton, ErpCard, ErpInlineState, ErpPage, ErpSection, ErpSegmentedControl, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
 import { CompactQueueItem, FinancialInvoiceApprovalForm, type FinancialInvoiceApprovalPayload, StatusBadge, dateFa, invoiceStatusLabels, money, receivableStatusLabels, taxStatusLabels } from './accountingUi';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
@@ -10,6 +10,7 @@ import AccountingContractPrintActions, { accountingContractTabs } from './Accoun
 
 export type PartnerInternalDocument = {
   owner?: { caseId: string; revision: number; integrityHash: string };
+  preparationOnly?: boolean; amountKnown?: boolean; commercial?: { status: keyof typeof partnerCommercialLabels } | null;
   id: string; caseState?: string; status: string; amount: string; receivedAmount: string; remainingAmount: string;
   currency: string; systemInvoiceNumber: string | null; contractDate?: string; technicalEvidenceAvailable?: boolean;
   systemInvoiceDate?: string | null; sepidarAmount?: string | null; metadata?: { mode?: string };
@@ -41,22 +42,22 @@ export function PartnerAccountingDetailView({ document: doc, section, onSection,
   const context = doc.partnerContext;
   const issued = ['ISSUED', 'POSTED'].includes(doc.status);
   const receivableHref = `/dashboard/accounting/receivables?search=${encodeURIComponent(context.caseNumber)}`;
-  const lifecycleReason = 'پرونده همکار قطعی است؛ تغییر آن از مسیر اصلاح یا ابطال بررسی‌شده انجام می‌شود.';
+  const lifecycleReason = 'پرونده شماره‌دار همکار حذف دائمی نمی‌شود؛ تغییر یا ابطال آن از مسیر بررسی‌شدهٔ پرونده انجام می‌شود.';
   const quickActions = <ErpSection title="اقدام سریع"><div className="space-y-2">
-    <ErpButton label="ایجاد پیش‌نویس صورتحساب" icon={FaFileInvoice} tone="info" onClick={onOpenInvoice}
+    <ErpButton label={doc.preparationOnly ? "ثبت رکورد مالی" : "ایجاد پیش‌نویس صورتحساب"} icon={FaFileInvoice} tone="info" onClick={onOpenInvoice}
       disabled={pending || !doc.actions.canCreateInvoice || issued || doc.status === 'VOIDED'}
       title={issued ? 'صورتحساب صادر شده است.' : 'پیش‌نویس سند داخلی برای ثبت رکورد مالی باز می‌شود.'} />
     <ErpButton label="ایجاد دریافتنی" icon={FaReceipt} tone="success" onClick={onCreateReceivable}
       disabled={pending || !doc.actions.canCreateReceivable || !doc.owner || doc.receivables.length > 0 || !issued}
       title={doc.receivables.length ? 'دریافتنی موجود است؛ سند تکراری ایجاد نمی‌شود.' : !issued ? 'ابتدا صورتحساب را تأیید مالی کنید.' : 'دریافتنی با تأیید جداگانه برای این صورتحساب ایجاد می‌شود.'} />
     {doc.receivables.length > 0 && <ErpButton label="مشاهده دریافتنی" icon={FaReceipt} tone="success" variant="outline" href={receivableHref} />}
-    <ErpButton label="پرچم حسابداری" icon={FaFlag} tone="warning" onClick={onFlag} disabled={pending || !doc.actions.canFlag} />
-    <ErpButton label="درخواست اصلاح" icon={FaExclamationTriangle} tone="danger" onClick={onCorrection} disabled={pending || !doc.actions.canRequestCorrection} />
-  </div></ErpSection>;
+    <ErpButton title={doc.preparationOnly ? "ابتدا رکورد مالی را ثبت کنید." : undefined} label="پرچم حسابداری" icon={FaFlag} tone="warning" onClick={onFlag} disabled={pending || !doc.actions.canFlag} />
+    <ErpButton title={doc.preparationOnly ? "ابتدا رکورد مالی را ثبت کنید." : undefined} label="درخواست اصلاح" icon={FaExclamationTriangle} tone="danger" onClick={onCorrection} disabled={pending || !doc.actions.canRequestCorrection} />
+  </div>{doc.preparationOnly && doc.commercial?.status === 'FINAL' && <ErpInlineState kind="permission" title="ابتدا رکورد مالی را ثبت کنید؛ سپس صورتحساب را تأیید مالی کنید تا دریافتنی ایجاد شود. پرچم و اصلاح پس از ثبت رکورد مالی فعال‌اند." className="mt-3" />}</ErpSection>;
   const summary = <ErpSection title="خلاصه قرارداد"><ErpSummaryGrid columns={3} items={[
     { label: 'طرف‌حساب سبلان', value: context.debtor.displayName },
-    { label: 'وضعیت قرارداد', value: <StatusBadge status={doc.caseState} label={doc.caseState === 'COMMITTED' ? 'قطعی' : operationalStatusLabel(doc.caseState || '')} /> },
-    { label: 'وضعیت حسابداری', value: <StatusBadge status={doc.status} label={invoiceStatusLabels[doc.status] || operationalStatusLabel(doc.status)} /> },
+    { label: 'وضعیت قرارداد', value: <StatusBadge status={doc.caseState} label={doc.commercial ? partnerCommercialLabels[doc.commercial.status] : doc.caseState === 'COMMITTED' ? 'قطعی' : operationalStatusLabel(doc.caseState || '')} /> },
+    { label: 'وضعیت حسابداری', value: <StatusBadge status={doc.status} label={doc.preparationOnly ? 'ثبت مالی نشده' : invoiceStatusLabels[doc.status] || operationalStatusLabel(doc.status)} /> },
     { label: 'صورتحساب', value: doc.systemInvoiceNumber || 'بدون صورتحساب رسمی' },
     { label: 'دریافتنی', value: doc.receivables.length ? 'دریافتنی ثبت شده' : 'بدون دریافتنی' },
     { label: 'مالیات', value: doc.taxRecords.length ? 'پرونده ثبت شده' : 'آماده نیست' },
@@ -68,10 +69,10 @@ export function PartnerAccountingDetailView({ document: doc, section, onSection,
     description={`کد پیگیری ${partnerTrackingCode(context.caseNumber, context.trackingNumber)} · سند داخلی فروش سبلان به همکار`}
     backHref="/dashboard/accounting/contracts" actions={[{ label: 'به‌روزرسانی', icon: FaSync, variant: 'outline', disabled: pending, onClick: onRefresh }]}
     metrics={[
-      { label: 'مبلغ قرارداد', value: money(doc.amount, doc.currency), icon: FaBalanceScale, tone: 'primary' },
+      { label: 'مبلغ قرارداد', value: doc.amountKnown === false ? 'پس از پذیرش قیمت‌ها' : money(doc.amount, doc.currency), icon: FaBalanceScale, tone: 'primary' },
       { label: 'صورتحساب شده', value: money(issued ? doc.amount : '0', doc.currency), icon: FaFileInvoice, tone: 'info' },
       { label: 'دریافت شده', value: money(doc.receivedAmount || '0', doc.currency), icon: FaReceipt, tone: 'success' },
-      { label: 'مانده', value: money(doc.remainingAmount || doc.amount, doc.currency), icon: FaMoneyCheckAlt, tone: 'warning' },
+      { label: 'مانده', value: doc.amountKnown === false ? 'پس از پذیرش قیمت‌ها' : money(doc.remainingAmount || doc.amount, doc.currency), icon: FaMoneyCheckAlt, tone: 'warning' },
     ]}>
     {error && <ErpInlineState kind="error" title={error} />}
     <ErpSegmentedControl value={section} onChange={onSection} options={[...accountingContractTabs]} />
@@ -94,12 +95,13 @@ export function PartnerAccountingDetailView({ document: doc, section, onSection,
       {!doc.items.length && <ErpInlineState kind="empty" title="ریز اقلام معتبر موجود نیست." />}
       <div className="space-y-3">{doc.items.map((item, index) => <div key={item.productRowId || index}>
         <CompactQueueItem icon={FaFileInvoice} title={item.description}
-          meta={`مقدار: ${item.quantity} ${partnerQuantityLabel(item.unit)} · قیمت واحد: ${money(item.unitPrice, doc.currency)}`}
-          amount={money(item.totalPrice, doc.currency)} />
+          meta={`مقدار: ${item.quantity} ${partnerQuantityLabel(item.unit)}${doc.amountKnown === false ? '' : ` · قیمت واحد: ${money(item.unitPrice, doc.currency)}`}`}
+          amount={doc.amountKnown === false ? 'قیمت تعیین نشده' : money(item.totalPrice, doc.currency)} />
         {item.details?.length ? <p className="mt-2 text-sm sds-text-secondary">{item.details.join(' · ')}</p> : null}
       </div>)}</div>
     </ErpSection>} aside={summary} />}
-    {section === 'financial' && <ErpTwoColumn main={<ErpSection title="رکوردهای مالی">
+    {section === 'financial' && doc.preparationOnly && <ErpInlineState kind="empty" title="رکورد مالی برای این قرارداد ثبت نشده است." />}
+    {section === 'financial' && !doc.preparationOnly && <ErpTwoColumn main={<ErpSection title="رکوردهای مالی">
       <CompactQueueItem icon={FaFileInvoice} title="صورتحساب قرارداد" meta={`شماره صورتحساب: ${doc.systemInvoiceNumber || 'ثبت نشده'}`}
         amount={money(doc.amount, doc.currency)} status={<StatusBadge status={doc.status} />}
         footer={invoiceOpen && onApproveInvoice ? <ErpCard className="p-3">

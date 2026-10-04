@@ -47,17 +47,19 @@ Promise<LockedPartnerApprovedPricingVersion & { preparationEvidenceHash: string 
   }
   const rows = await Promise.all(preparation.products.map(async (row, ordinal) => {
     const total = fixedMoney(multiply(row.quantity, row.wholesaleUnitPrice));
-    const priceRowId = preparation.products.slice(0, ordinal).some(previous => previous.approvalEvidenceId === row.approvalEvidenceId)
+    const serviceEvidenceId = row.serviceRateEvidenceId;
+    const priceRowId = serviceEvidenceId ? `partner-service-price:${await canonicalHash({owner: preparation.owner, productRowId: row.productRowId, serviceEvidenceId})}` : preparation.products.slice(0, ordinal).some(previous => previous.approvalEvidenceId === row.approvalEvidenceId)
       ? `partner-price:${await canonicalHash({ owner: preparation.owner, productRowId: row.productRowId, approvalEvidenceId: row.approvalEvidenceId })}`
       : row.approvalEvidenceId;
-    return { id: priceRowId, productRowId: row.productRowId, ordinal,
+    requirePricing(priceRowId, 'شاهد نرخ خدمت یا تایید استعلام لازم است.');
+    return { id: priceRowId!, productRowId: row.productRowId, ordinal,
       contractedQuantity: new Prisma.Decimal(row.quantity).toFixed(3), unit: row.unit,
       canonicalAllInTotal: total, discountEligible: false, componentEvidence: {
-        wholesaleUnitPrice: row.wholesaleUnitPrice, approvalEvidenceId: row.approvalEvidenceId,
+        wholesaleUnitPrice: row.wholesaleUnitPrice, ...(row.approvalEvidenceId ? { approvalEvidenceId: row.approvalEvidenceId } : { serviceRateEvidenceId: row.serviceRateEvidenceId! }),
         financialApprovalEvidenceId: approved.financialApprovalEvidenceId }, integrityHash: await canonicalHash({
           schemaVersion: 1, sourceKind: 'PARTNER_CASE', owner: preparation.owner,
           productRowId: row.productRowId, quantity: row.quantity, unit: row.unit,
-          wholesaleUnitPrice: row.wholesaleUnitPrice, approvalEvidenceId: row.approvalEvidenceId,
+          wholesaleUnitPrice: row.wholesaleUnitPrice, ...(row.approvalEvidenceId ? { approvalEvidenceId: row.approvalEvidenceId } : { serviceRateEvidenceId: row.serviceRateEvidenceId! }),
           financialApprovalEvidenceId: approved.financialApprovalEvidenceId }) };
   }));
   const gross = fixedMoney(sum(rows.map(row => row.canonicalAllInTotal)));

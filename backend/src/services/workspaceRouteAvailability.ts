@@ -1,3 +1,4 @@
+import { canReadTransferNotice } from './partnerSales/crm/transferAccess';
 import type { PrismaClient } from '@prisma/client';
 import { resolveNarrowFeatureAccess } from './narrowFeatureAccess';
 import { getEffectiveUserAccess } from './effectiveAccessService';
@@ -80,6 +81,9 @@ export const resolveWorkspaceRouteAvailability = async (
   input: { userId: string; role: string; path: string },
   scopedResolver = readScopedActions,
 ) => {
+  const transferStatusId = input.path.match(/^\/dashboard\/crm\/customer-transfers\/([A-Za-z0-9:_-]+)$/)?.[1];
+  if (transferStatusId) { const allowed = await canReadTransferNotice(prisma, input.userId, transferStatusId);
+    return { allowed, reason: allowed ? null : 'این درخواست در محدوده مجاز شما نیست.' }; }
   if (input.role === 'ADMIN' || /\/duties(?:\/|$)/.test(input.path)) return { allowed: true, reason: null };
   const rule = rules.find((candidate) => candidate.pattern.test(input.path));
   if (!rule) {
@@ -99,6 +103,10 @@ export const resolveWorkspaceRouteAvailability = async (
       : 'این مسیر بخشی از فضای کاری شخصی فروشنده همکار نیست یا وضعیت حساب اجازه ورود نمی‌دهد.' };
   }
   const effective = await getEffectiveUserAccess(prisma, { userId: input.userId, userRole: input.role });
+  if (input.path.match(/^\/dashboard\/sales\/partners(?:\/|$)/) && effective.features.some(grant =>
+      grant.feature === 'crm_partner_customer_transfers_manage' && ['edit', 'admin'].includes(grant.permission))) {
+    return { allowed: true, reason: null };
+  }
   const workspaceAllowed = effective.workspaces.some((grant) => grant.workspace === rule.workspace);
   const partnerAllowed = rule.partnerPurposes
     ? (await prisma.$transaction(tx => scopedResolver(tx, input.userId, 'PARTNER'))).grants

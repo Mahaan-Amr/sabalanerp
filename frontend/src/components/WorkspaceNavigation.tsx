@@ -62,6 +62,7 @@ interface NavigationItem {
   show: boolean;
   separatorBefore?: boolean;
   children?: NavigationItem[];
+  exact?: boolean;
   badgeCount?: number;
   unavailable?: boolean;
 }
@@ -108,7 +109,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
     let active = true;
     const paths = ['/dashboard/sales/partners', '/dashboard/sales/contracts', '/dashboard/sales/contracts/create',
       '/dashboard/sales/partner-inquiries', '/dashboard/sales/partner-cases',
-      '/dashboard/sales/partner-customers', '/dashboard/sales/partner-reports'];
+      '/dashboard/sales/partner-customers', '/dashboard/sales/partner-customers/transfers', '/dashboard/sales/partner-reports'];
     Promise.all(paths.map(async path => {
       try {
         const response = await dashboardAPI.getRouteAvailability(path);
@@ -191,7 +192,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
           icon: workspaceIcons[workspace.icon] || FaChartLine,
           show: true,
         }));
-        const firstPartnerPath = ['/dashboard/sales/contracts/create', '/dashboard/sales/partner-inquiries',
+        const firstPartnerPath = ['/dashboard/sales/partners', '/dashboard/sales/contracts/create', '/dashboard/sales/partner-inquiries',
           '/dashboard/sales/partner-cases', '/dashboard/sales/partner-customers',
           '/dashboard/sales/partner-reports'].find(path => partnerRouteAccess[path] === true);
         return firstPartnerPath ? [...workspaceItems, { name: 'PartnerSales', namePersian: 'فروش همکار',
@@ -324,6 +325,8 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
     if (currentWorkspace === WORKSPACES.SALES && currentUser?.role !== 'ADMIN' &&
         Object.values(partnerRouteAccess).some(Boolean)) {
       return [
+        { name: 'Partner Management', namePersian: 'مدیریت همکاران', href: '/dashboard/sales/partners',
+          icon: FaHandshake, show: partnerRouteAccess['/dashboard/sales/partners'] === true },
         { name: 'Create Partner Sale', namePersian: 'ایجاد قرارداد جدید',
           href: '/dashboard/sales/contracts/create?entry=new-contract', icon: FaPlus,
           show: partnerRouteAccess['/dashboard/sales/contracts/create'] === true },
@@ -336,9 +339,15 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         { name: 'Partner Drafts', namePersian: 'پیش‌نویس‌ها و پرونده‌های من',
           href: '/dashboard/sales/partner-cases', icon: FaFileContract,
           show: partnerRouteAccess['/dashboard/sales/partner-cases'] === true },
-        { name: 'Partner Customers', namePersian: 'مشتریان من',
+        { name: 'Partner Customers', namePersian: 'مشتریان',
           href: '/dashboard/sales/partner-customers', icon: FaUsers,
-          show: partnerRouteAccess['/dashboard/sales/partner-customers'] === true },
+          show: partnerRouteAccess['/dashboard/sales/partner-customers'] === true || partnerRouteAccess['/dashboard/sales/partner-customers/transfers'] === true,
+          children: [
+            { name: 'My Customers', namePersian: 'مشتریان من', href: '/dashboard/sales/partner-customers', icon: FaUsers, exact: true,
+              show: partnerRouteAccess['/dashboard/sales/partner-customers'] === true },
+            { name: 'My Customer Transfers', namePersian: 'درخواست‌های انتقال مشتری من', href: '/dashboard/sales/partner-customers/transfers', icon: FaClipboardList,
+              show: partnerRouteAccess['/dashboard/sales/partner-customers/transfers'] === true },
+          ] },
         { name: 'Partner Reports', namePersian: 'گزارش و حساب من',
           href: '/dashboard/sales/partner-reports', icon: FaChartLine,
           show: partnerRouteAccess['/dashboard/sales/partner-reports'] === true },
@@ -438,6 +447,9 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               },
             ],
           },
+          { name: "Partner Management", namePersian: "مدیریت همکاران",
+            href: "/dashboard/sales/partners", icon: FaHandshake,
+            show: partnerRouteAccess['/dashboard/sales/partners'] === true },
           {
             name: "Partner Inquiries",
             namePersian: "پاسخ‌گویی استعلام همکاران",
@@ -912,7 +924,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
 
   const renderNavigationItem = (item: NavigationItem, level = 0) => {
     const Icon = item.icon;
-    const isActive = isActivePath(item.href);
+    const isActive = (item.exact ? pathname === item.href : isActivePath(item.href)) || Boolean(item.children?.some(child => child.show && isActivePath(child.href)));
     const hasChildren = item.children && item.children.length > 0;
     const itemKey = item.href;
     const isExpanded = expandedItems.includes(itemKey);

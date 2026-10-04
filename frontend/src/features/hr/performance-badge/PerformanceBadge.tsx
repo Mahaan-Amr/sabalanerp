@@ -1,15 +1,16 @@
 "use client";
 
-import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { FaInfoCircle } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpField, ErpInlineState, ErpPressable, ErpSheet, ErpTextarea } from '@/components/erp';
 import { personnelPerformanceAPI } from '@/lib/api';
 import { dateFa } from '@/features/hr/hrUi';
-import { performanceBadgePresentation, type PerformanceBadgeSummary } from './performanceBadgeModel';
+import { PERFORMANCE_BADGE_ROADMAP, performanceBadgePresentation, type PerformanceBadgeSummary } from './performanceBadgeModel';
+import { FloatingPerformanceStone, performanceStoneIndex } from './FloatingPerformanceStone';
+import styles from './FloatingPerformanceStone.module.css';
 import { PerformanceBadgeRoadmap } from './PerformanceBadgeRoadmap';
 
-export function PerformanceBadge({ badge, onAppeal }: { badge: PerformanceBadgeSummary; compact?: boolean; onAppeal?: (text: string) => Promise<void> }) {
+export function PerformanceBadge({ badge, onAppeal, compact = true }: { badge: PerformanceBadgeSummary; compact?: boolean; onAppeal?: (text: string) => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [appealText, setAppealText] = useState('');
   const [appealPending, setAppealPending] = useState(false);
@@ -21,19 +22,10 @@ export function PerformanceBadge({ badge, onAppeal }: { badge: PerformanceBadgeS
       onClick={(event) => { event.stopPropagation(); setOpen(true); }}
       aria-label={`سطح عملکرد: ${presentation.labelFa}${badge.officialResult === false ? '، بدون نتیجه رسمی' : ''}`}
       title={presentation.labelFa}
-      className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 py-1 text-right dark:border-[var(--sds-border-strong)]"
+      className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 px-2 py-1 text-right"
     >
-      <span className="flex w-9 shrink-0 flex-col items-center gap-0.5" aria-hidden="true">
-        <span className="relative block h-9 w-9">
-          <Image src={presentation.lightAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="object-contain dark:hidden" unoptimized />
-          <Image src={presentation.darkAsset} alt="" fill sizes="36px" style={{ filter: presentation.imageFilter }} className="hidden object-contain dark:block" unoptimized />
-        </span>
-        {presentation.romanNumeral && <bdi
-          dir="ltr"
-          className="block bg-clip-text text-center text-[11px] font-bold leading-none text-transparent"
-          style={{ fontFamily: 'Georgia, "Times New Roman", serif', backgroundImage: 'linear-gradient(180deg, var(--sds-artwork-metal-gold-highlight) 0%, var(--sds-artwork-metal-gold-mid) 45%, var(--sds-artwork-metal-gold-shadow) 100%)' }}
-        >{presentation.romanNumeral}</bdi>}
-      </span>
+      <FloatingPerformanceStone index={performanceStoneIndex(badge)} current size={compact ? 'header' : 'list'} />
+      {!compact && <span className="text-sm font-bold">{presentation.labelFa} <bdi dir="ltr" className={`${styles.roman} font-serif text-xs`}>{performanceStoneIndex(badge) >= 0 ? PERFORMANCE_BADGE_ROADMAP[performanceStoneIndex(badge)].romanNumeral : undefined}</bdi></span>}
       <span className="sr-only">{presentation.meaningFa}</span>
     </ErpPressable>
     <ErpSheet open={open} onClose={() => !appealPending && setOpen(false)} title="خلاصه سطح عملکرد" presentation="modal" size="wide" scope="workspace" pending={appealPending}>

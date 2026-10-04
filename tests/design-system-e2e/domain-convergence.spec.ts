@@ -103,10 +103,9 @@ test("HR work schedule and Persian time selection are RTL, keyboard, mobile, and
   const personnel = page.locator("[data-personnel-id]").first();
   await expect(personnel).toBeVisible();
   await personnel.getByRole("button").first().click();
-  await personnel.getByRole("button", { name: "مشاهده برنامه کاری" }).click();
-  await expect(
-    page.getByRole("dialog", { name: /^برنامه کاری / }),
-  ).toBeVisible();
+  const profile = page.getByRole("dialog", { name: "پروندهٔ پرسنل" });
+  await profile.getByRole("button", { name: "برنامهٔ کاری", exact: true }).click();
+  await expect(profile).toBeVisible();
 
   await setViewportAndZoom(page, { width: 390, height: 844 });
   const saturday = page.getByRole("button", { name: "شنبه", exact: true });

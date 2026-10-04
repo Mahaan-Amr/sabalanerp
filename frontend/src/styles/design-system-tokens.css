@@ -48,6 +48,13 @@
   --sds-artwork-metal-gold-highlight: #fff1bd;
   --sds-artwork-metal-gold-mid: #d6a34f;
   --sds-artwork-metal-gold-shadow: #8b551d;
+  --sds-artwork-gem-turquoise: #37d0d7;
+  --sds-artwork-gem-teal: #04a4ba;
+  --sds-artwork-gem-cyan: #36ceee;
+  --sds-artwork-gem-crimson: #bc153c;
+  --sds-artwork-gem-scarlet: #ff263c;
+  --sds-artwork-gem-champagne: #d1b494;
+  --sds-artwork-gem-diamond: #d8e0ec;
   --sds-space-1: 0.25rem;
   --sds-space-2: 0.5rem;
   --sds-space-3: 0.75rem;
@@ -113,6 +120,13 @@
   --sds-artwork-metal-gold-highlight: #fff1bd;
   --sds-artwork-metal-gold-mid: #d6a34f;
   --sds-artwork-metal-gold-shadow: #8b551d;
+  --sds-artwork-gem-turquoise: #37d0d7;
+  --sds-artwork-gem-teal: #04a4ba;
+  --sds-artwork-gem-cyan: #36ceee;
+  --sds-artwork-gem-crimson: #bc153c;
+  --sds-artwork-gem-scarlet: #ff263c;
+  --sds-artwork-gem-champagne: #d1b494;
+  --sds-artwork-gem-diamond: #d8e0ec;
   --sds-shadow-card: 0 1px 2px rgb(0 0 0 / 24%);
   --sds-shadow-raised: 0 18px 44px rgb(0 0 0 / 42%);
   --sds-shadow-focus: 0 0 0 3px rgb(116 212 206 / 30%);

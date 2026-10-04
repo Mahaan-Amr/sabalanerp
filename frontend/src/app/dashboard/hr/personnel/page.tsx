@@ -8,6 +8,8 @@ import {
   ErpSelect,
   ErpSheet,
   ErpTextarea,
+  ErpNeumorphicInteractiveCard,
+  ErpSegmentedControl,
 } from "@/components/erp";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import moment from "moment-jalaali";
@@ -18,8 +20,6 @@ import {
   FaArchive,
   FaArrowRight,
   FaBriefcase,
-  FaChevronDown,
-  FaChevronUp,
   FaPause,
   FaPlay,
   FaPlus,
@@ -47,6 +47,11 @@ import {
   ErpSection,
 } from "@/components/erp";
 import { hrAPI, hrAuthorizationAPI, personnelPerformanceAPI, usersAPI } from "@/lib/api";
+import { FloatingPerformanceStone, PerformanceBadgeBanner, performanceStoneIndex } from '@/features/hr/performance-badge/FloatingPerformanceStone';
+import { PERFORMANCE_BADGE_ROADMAP } from '@/features/hr/performance-badge/performanceBadgeModel';
+import { PerformanceBadgeRoadmap } from '@/features/hr/performance-badge/PerformanceBadgeRoadmap';
+import { PersonnelPerformanceHistory } from '@/features/hr/performance-badge/PersonnelPerformanceHistory';
+import profileStyles from '@/features/hr/performance-badge/FloatingPerformanceStone.module.css';
 import { PerformanceBadge } from '@/features/hr/performance-badge/PerformanceBadge';
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
@@ -164,6 +169,7 @@ export default function HrPersonnelPage() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleDirty, setScheduleDirty] = useState(false);
   const [confirmDiscardSchedule, setConfirmDiscardSchedule] = useState(false);
+  const [closeProfileAfterSchedule, setCloseProfileAfterSchedule] = useState(false);
   const [exceptionalOpenedHere, setExceptionalOpenedHere] = useState(false);
   const [confirmDiscardExceptional, setConfirmDiscardExceptional] = useState(false);
   const [originHref, setOriginHref] = useState("/dashboard/hr");
@@ -532,21 +538,22 @@ export default function HrPersonnelPage() {
     setScheduleDirty(false);
     replaceListState({ focus: person.id, panel: "schedule" });
   };
-  const closeSchedule = () => {
+  const closeSchedule = (closeProfile = false) => {
     if (saving) return;
+    setCloseProfileAfterSchedule(closeProfile);
     if (scheduleDirty) {
       setConfirmDiscardSchedule(true);
       return;
     }
     setScheduleData(null);
-    replaceListState({ panel: "" });
+    replaceListState({ panel: "", ...(closeProfile ? { focus: "" } : {}) });
   };
   const discardSchedule = () => {
     if (currentUserId && expanded) window.sessionStorage.removeItem(personnelScheduleDraftKey(currentUserId, expanded));
     setScheduleDirty(false);
     setConfirmDiscardSchedule(false);
     setScheduleData(null);
-    replaceListState({ panel: "" });
+    replaceListState({ panel: "", ...(closeProfileAfterSchedule ? { focus: "" } : {}) });
   };
 
   const confirmPermanentDeletion = async (payload: any) => {
@@ -875,6 +882,7 @@ export default function HrPersonnelPage() {
             {resultsLoading ? "در حال به‌روزرسانی نتایج…" : null}
           </div>
         </div>
+        {actionPermissions.includes('VIEW_PERFORMANCE_BADGE_LIST') && <ErpCard className="mb-4 p-4"><PerformanceBadgeBanner /></ErpCard>}
         <div className="space-y-3">
           {rows.map((person) => (
             <PersonnelCard
@@ -886,6 +894,22 @@ export default function HrPersonnelPage() {
                 panel: "",
               })}
               onOpenSchedule={() => openSchedule(person)}
+              scheduleActive={expanded === person.id && listState.panel === "schedule"}
+              scheduleDirty={scheduleDirty}
+              onCloseSchedule={closeSchedule}
+              canViewPerformance={actionPermissions.includes('VIEW_PERFORMANCE_EVALUATIONS')}
+              scheduleContent={expanded === person.id ? <>        {scheduleLoading && !scheduleData ? <ErpLoading /> : null}
+        {scheduleData && scheduleTarget ? (
+          <PersonnelScheduleEditor
+            key={`${scheduleData.workSchedules?.[0]?.id || "new-schedule"}-${scheduleData.workSchedules?.[0]?.updatedAt || "unsaved"}`}
+            person={{ ...scheduleTarget, ...scheduleData }}
+            saving={saving}
+            run={run}
+            onDirtyChange={setScheduleDirty}
+            userId={currentUserId}
+          />
+        ) : null}
+</> : null}
               saving={saving}
               foundation={foundation}
               assignment={assignment}
@@ -935,26 +959,6 @@ export default function HrPersonnelPage() {
           </div>
         </div>
       </ErpSection>
-      <ErpSheet
-        open={listState.panel === "schedule" && Boolean(expanded)}
-        onClose={closeSchedule}
-        dismissible={!saving}
-        title={scheduleTarget ? `برنامه کاری ${scheduleTarget.firstName} ${scheduleTarget.lastName}` : "برنامه کاری"}
-        presentation="modal"
-        size="wide"
-      >
-        {scheduleLoading && !scheduleData ? <ErpLoading /> : null}
-        {scheduleData && scheduleTarget ? (
-          <PersonnelScheduleEditor
-            key={`${scheduleData.workSchedules?.[0]?.id || "new-schedule"}-${scheduleData.workSchedules?.[0]?.updatedAt || "unsaved"}`}
-            person={{ ...scheduleTarget, ...scheduleData }}
-            saving={saving}
-            run={run}
-            onDirtyChange={setScheduleDirty}
-            userId={currentUserId}
-          />
-        ) : null}
-      </ErpSheet>
       <ErpSheet
         open={confirmDiscardExceptional}
         onClose={() => setConfirmDiscardExceptional(false)}
@@ -1038,106 +1042,44 @@ function PersonnelCard(props: any) {
   const primary = relationship?.assignments?.find(
     (item: any) => item.type === "PRIMARY" && !item.effectiveTo,
   );
-  return (
-    <div data-personnel-id={person.id}>
-    <ErpCard className="p-4">
-      <ErpPressable
-        type="button"
-        className="flex w-full items-start justify-between gap-3 text-right"
-        onClick={onToggle}
-      >
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-bold">
-              {person.firstName} {person.lastName}
-            </p>
-            <ErpBadge
-              tone={
-                relationship?.status === "ACTIVE"
-                  ? "success"
-                  : relationship?.status === "PLANNED"
-                    ? "info"
-                    : relationship?.status === "SUSPENDED"
-                      ? "warning"
-                      : "neutral"
-              }
-            >
-              {relationship
-                ? employmentStatusLabel[relationship.status]
-                : "فاقد رابطه استخدامی"}
-            </ErpBadge>
-            {person.user && (
-              <ErpBadge tone={person.user.isActive ? "primary" : "neutral"}>
-                ERP: {person.user.username}
-              </ErpBadge>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
-            {person.employeeNumber || "بدون شماره پرسنلی"} ·{" "}
-            {primary
-              ? `${primary.position.title} / ${primary.position.organizationalUnit.name}`
-              : "فاقد تخصیص اصلی جاری"}
-          </p>
-        </div>
-        {open ? <FaChevronUp /> : <FaChevronDown />}
-      </ErpPressable>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        {person.performanceBadge && <PerformanceBadge badge={person.performanceBadge} />}
-        {person.performanceBadge?.newestMeasurementTo && <span className="text-xs text-[var(--sds-text-secondary)]">آخرین ارزیابی: {dateFa(person.performanceBadge.newestMeasurementTo)}</span>}
-        {canEvaluatePerformance && relationship?.status === "ACTIVE" && <ErpButton label="ثبت ارزیابی" variant="soft" href={`/dashboard/hr/personnel/performance?personnelId=${encodeURIComponent(person.id)}`} />}
-      </div>
-      {canCreatePerformanceConsequence && relationship && ['ACTIVE', 'SUSPENDED'].includes(relationship.status) && <div className="mt-2"><ErpButton label="ارجاع پیامد عملکرد" variant="soft" href={`/dashboard/hr/personnel/performance/consequence/new?personnelId=${encodeURIComponent(person.id)}&relationshipId=${encodeURIComponent(relationship.id)}`} /></div>}
-      {relationship?.hiringApplication && (
-        <Link
-          className="mt-2 inline-block text-xs font-bold text-[var(--sds-success)] hover:underline"
-          href={`/dashboard/hr/hiring/${relationship.hiringApplication.id}`}
-        >
-          ایجادشده از پرونده جذب · مشاهده پرونده
-        </Link>
-      )}
-      {(person.retentionCapabilities?.canArchive ||
-        person.retentionCapabilities?.canRestore) && (
-        <div className="mt-3">
-          <ErpButton
-            label={person.archivedAt ? "بازیابی از بایگانی" : "بایگانی"}
-            icon={person.archivedAt ? FaUndo : FaArchive}
-            tone="warning"
-            variant="soft"
-            disabled={saving}
-            onClick={() => changeArchiveState(person)}
-          />
-        </div>
-      )}
-      {canAccessVehicleOperations && <div className="mt-2">
-        <ErpButton label="صلاحیت رانندگی" icon={FaUserPlus} variant="soft" href={`/dashboard/hr/personnel/${person.id}/driver-eligibility`} />
-      </div>}
-      {person.retentionCapabilities?.canPermanentlyDelete && (
-        <div className="mt-2">
-          <ErpButton
-            label="حذف دائمی"
-            icon={FaTrash}
-            tone="danger"
-            variant="soft"
-            disabled={saving}
-            onClick={() => permanentlyDelete(person)}
-          />
-        </div>
-      )}
-      {person.archivedAt && (
-        <p className="mt-2 text-xs text-[var(--sds-text-secondary)]">
-          بایگانی‌شده در {dateTimeFa(person.archivedAt)} توسط{" "}
-          {person.archivedByDisplayName || "کاربر نامشخص"} · دلیل:{" "}
-          {person.archiveReason || "ثبت نشده"}
-        </p>
-      )}
-      {!relationship?.hiringApplication &&
-        person.hrPersonnelAudits?.[0]?.eventType ===
-          "EXCEPTIONAL_PERSONNEL_REGISTERED" && (
-          <p className="mt-2 text-xs font-bold text-[var(--sds-warning)]">
-            ثبت استثنایی · {person.hrPersonnelAudits[0].reason}
-          </p>
-        )}
-      {open && !person.archivedAt && (
+  const [tab, setTab] = useState('overview');
+  const [requestedTab, setRequestedTab] = useState('overview');
+  useEffect(() => { if (!open) { setTab('overview'); setRequestedTab('overview'); } }, [open]);
+  useEffect(() => { if (props.scheduleActive) setTab('schedule'); else if (tab === 'schedule') setTab(requestedTab); }, [props.scheduleActive, requestedTab, tab]);
+  const selectTab = (next: string) => {
+    if (saving) return;
+    if (next === 'schedule') { if (!props.scheduleActive) onOpenSchedule(); return; }
+    setRequestedTab(next);
+    if (props.scheduleActive) { props.onCloseSchedule(); if (props.scheduleDirty) return; }
+    setTab(next);
+  };
+  const name = `${person.firstName} ${person.lastName}`;
+  const index = person.performanceBadge ? performanceStoneIndex(person.performanceBadge) : -1;
+  return <div data-personnel-id={person.id}>
+    <div className={profileStyles.personRow}>
+      <ErpNeumorphicInteractiveCard className={profileStyles.cardHit} onClick={onToggle} aria-label={`مشاهده پروندهٔ ${name}`} />
+      <div className={profileStyles.personName}><span className={`${profileStyles.avatar} rounded-full`}>{person.firstName?.[0]}</span><div><p className="font-bold">{name}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{primary ? `${primary.position.title} · ${primary.position.organizationalUnit.name}` : 'فاقد تخصیص اصلی جاری'}</p><p className="mt-1 text-xs text-[var(--sds-text-muted)]">{person.employeeNumber || 'بدون شماره پرسنلی'}</p></div></div>
+      <span className={profileStyles.personStatus}><ErpBadge tone={relationship?.status === 'ACTIVE' ? 'success' : relationship?.status === 'SUSPENDED' ? 'warning' : 'neutral'}>{person.archivedAt ? 'بایگانی‌شده' : relationship ? employmentStatusLabel[relationship.status] : 'فاقد رابطه استخدامی'}</ErpBadge></span>
+      {person.performanceBadge && <span className={profileStyles.rowBadge}><PerformanceBadge badge={person.performanceBadge} compact={false} /></span>}
+    </div>
+    <ErpSheet open={open} onClose={() => props.scheduleActive ? props.onCloseSchedule(true) : onToggle()} title="پروندهٔ پرسنل" presentation="modal" size="wide" scope="workspace" pending={saving}>
+      <div className={`${profileStyles.modal} ${profileStyles.profile}`} dir="rtl">
+        <div className={profileStyles.identity}><span className={`${profileStyles.avatar} rounded-full`}>{person.firstName?.[0]}</span><div><h2 className="text-xl font-black">{name}</h2><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{primary ? `${primary.position.title} · ${primary.position.organizationalUnit.name}` : 'فاقد تخصیص اصلی جاری'}</p><div className="mt-2 flex flex-wrap gap-2"><ErpBadge>{relationship ? employmentStatusLabel[relationship.status] : 'فاقد رابطه استخدامی'}</ErpBadge><ErpBadge>{person.employeeNumber || 'بدون شماره پرسنلی'}</ErpBadge>{person.user && <ErpBadge tone={person.user.isActive ? 'primary' : 'neutral'}>ERP: {person.user.username}</ErpBadge>}</div></div></div>
+        <div className={profileStyles.heroBadge}>{person.performanceBadge && <ErpCard className={`${profileStyles.currentBadge} p-4`}><FloatingPerformanceStone index={index} current /><div><p className="text-xs text-[var(--sds-text-secondary)]">{index >= 0 ? 'نشان فعلی' : 'وضعیت عملکرد'}</p><p className="mt-1 text-xl font-black">{person.performanceBadge.labelFa} <bdi dir="ltr" className={`${profileStyles.roman} font-serif text-base`}>{index >= 0 ? PERFORMANCE_BADGE_ROADMAP[index].romanNumeral : ''}</bdi></p><p className="mt-1 text-xs">{person.performanceBadge.meaningFa}</p>{person.performanceBadge.officialResult === false && <ErpBadge>بدون نتیجه رسمی</ErpBadge>}</div></ErpCard>}</div>
+        <div className={profileStyles.modalContent}>
+          <ErpSegmentedControl value={tab} onChange={selectTab} options={[{value:'overview',label:'نمای کلی'},{value:'employment',label:'روابط و مسئولیت‌ها'},{value:'performance',label:'عملکرد و سوابق'},...(!person.archivedAt ? [{value:'schedule',label:'برنامهٔ کاری'}] : [])]} />
+          <div className="mt-5 space-y-5">
+            {tab === 'overview' && <><div className="grid grid-cols-2 gap-4 lg:grid-cols-4"><Info label="کد ملی" value={person.nationalCode || 'ثبت نشده'} /><Info label="شروع رابطه استخدامی" value={dateFa(relationship?.effectiveFrom)} /><Info label="شماره پرسنلی" value={person.employeeNumber || 'ثبت نشده'} /><Info label="حساب سامانه" value={person.user ? person.user.isActive ? 'فعال' : 'غیرفعال' : 'فاقد حساب'} /></div><PersonnelPerformanceHistory personnelId={person.id} allowed={props.canViewPerformance} summary />{person.performanceBadge && <PerformanceBadgeRoadmap badge={person.performanceBadge} />}
+            <div className="flex flex-wrap gap-2">
+              {canEvaluatePerformance && relationship?.status === 'ACTIVE' && <ErpButton label="ثبت ارزیابی" variant="soft" href={`/dashboard/hr/personnel/performance?personnelId=${encodeURIComponent(person.id)}`} />}
+              {canCreatePerformanceConsequence && relationship && ['ACTIVE', 'SUSPENDED'].includes(relationship.status) && <ErpButton label="ارجاع پیامد عملکرد" variant="outline" href={`/dashboard/hr/personnel/performance/consequence/new?personnelId=${encodeURIComponent(person.id)}&relationshipId=${encodeURIComponent(relationship.id)}`} />}
+              {relationship?.hiringApplication && <ErpButton label="مشاهده پروندهٔ جذب" variant="outline" href={`/dashboard/hr/hiring/${relationship.hiringApplication.id}`} />}
+              {canAccessVehicleOperations && <ErpButton label="صلاحیت رانندگی" icon={FaUserPlus} variant="outline" href={`/dashboard/hr/personnel/${person.id}/driver-eligibility`} />}
+            </div>
+            {person.archivedAt && <p className="text-xs text-[var(--sds-text-secondary)]">بایگانی‌شده در {dateTimeFa(person.archivedAt)} توسط {person.archivedByDisplayName || 'کاربر نامشخص'} · دلیل: {person.archiveReason || 'ثبت نشده'}</p>}
+            {!relationship?.hiringApplication && person.hrPersonnelAudits?.[0]?.eventType === 'EXCEPTIONAL_PERSONNEL_REGISTERED' && <p className="text-xs font-bold text-[var(--sds-warning)]">ثبت استثنایی · {person.hrPersonnelAudits[0].reason}</p>}
+            </>}
+            {tab === 'employment' && <>
         <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4 dark:border-[var(--sds-border-strong)]">
           <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
             <Info label="کد ملی" value={person.nationalCode || "ثبت نشده"} />
@@ -1167,7 +1109,7 @@ function PersonnelCard(props: any) {
               onClick={onOpenSchedule}
             />
           </div>
-          {relationship && canEditPersonnel && (
+          {relationship && canEditPersonnel && !person.archivedAt && (
             <>
               <div className="mt-4 flex flex-wrap gap-2">
                 {relationship.status === "PLANNED" &&
@@ -1281,10 +1223,21 @@ function PersonnelCard(props: any) {
             </>
           )}
         </div>
-      )}
-    </ErpCard>
-    </div>
-  );
+
+            </>}
+            {tab === 'employment' && (!canEditPersonnel || person.archivedAt) && relationship?.assignments?.map((item: any) => <ErpCard key={item.id} className="space-y-2 p-3"><p className="font-bold">{item.position?.title || 'مسئولیت'}</p><p className="text-sm text-[var(--sds-text-secondary)]">{assignmentTypeLabel[item.type]} · {dateFa(item.effectiveFrom)} تا {item.effectiveTo ? dateFa(item.effectiveTo) : 'اکنون'}</p></ErpCard>)}
+            {tab === 'employment' && (person.hrEmploymentRelationships || []).slice(1).map((item: any) => <ErpCard key={item.id} className="space-y-2 p-3"><p className="font-bold">رابطهٔ استخدامی پیشین · {employmentStatusLabel[item.status]}</p><p className="text-sm">{dateFa(item.effectiveFrom)} تا {item.effectiveTo ? dateFa(item.effectiveTo) : '—'}</p>{(item.assignments || []).map((allocation: any) => <p key={allocation.id} className="text-sm text-[var(--sds-text-secondary)]">{allocation.position?.title || 'مسئولیت'} · {dateFa(allocation.effectiveFrom)} تا {allocation.effectiveTo ? dateFa(allocation.effectiveTo) : '—'}</p>)}</ErpCard>)}
+            {tab === 'performance' && <>{person.performanceBadge && <PerformanceBadgeRoadmap badge={person.performanceBadge} />}<PersonnelPerformanceHistory personnelId={person.id} allowed={props.canViewPerformance} /></>}
+            {tab === 'schedule' && props.scheduleContent}
+          </div>
+          {(person.retentionCapabilities?.canArchive || person.retentionCapabilities?.canRestore || person.retentionCapabilities?.canPermanentlyDelete) && <div className="mt-6 flex flex-wrap gap-2 border-t border-[var(--sds-border-default)] pt-4">
+            {(person.retentionCapabilities?.canArchive || person.retentionCapabilities?.canRestore) && <ErpButton label={person.archivedAt ? 'بازیابی از بایگانی' : 'بایگانی'} icon={person.archivedAt ? FaUndo : FaArchive} tone="warning" variant="soft" disabled={saving} onClick={() => changeArchiveState(person)} />}
+            {person.retentionCapabilities?.canPermanentlyDelete && <ErpButton label="حذف دائمی" icon={FaTrash} tone="danger" variant="ghost" disabled={saving} onClick={() => permanentlyDelete(person)} />}
+          </div>}
+        </div>
+      </div>
+    </ErpSheet>
+  </div>;
 }
 
 function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }: any) {

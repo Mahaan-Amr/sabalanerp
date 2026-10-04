@@ -1,4 +1,5 @@
 import { customerCardVersion, updateAdminPartnerCustomerCard } from '../services/adminPartnerCustomerCard';
+import { canManageCustomerCredit, customerCreditBalance, updateCustomerCreditPolicy, CustomerCreditError } from '../services/specialCustomerCredit';
 import { customerManagementCapabilities, CustomerManagementError, previewCustomerDeletion, deleteCustomerInTransaction } from '../services/crmCustomerManagement';
 import { prisma } from '../lib/prisma';
 import express, { Response, type NextFunction } from 'express';
@@ -69,7 +70,7 @@ export const customerScopeForActor = (input: { userId: string; role: string; can
 };
 
 export function managedCustomerResponse<T extends Record<string, any>>(customer: T, canManageCustomerCard = false) {
-  const keys = ['id', 'firstName', 'lastName', 'companyName', 'customerType', 'status', 'nationalCode',
+  const keys = ['id', 'firstName', 'lastName', 'companyName', 'customerType', 'trustCategory', 'status', 'nationalCode',
     'homeAddress', 'homeNumber', 'workAddress', 'workNumber', 'brandName', 'brandNameDescription', 'industry', 'address', 'city', 'country',
     'projectManagerName', 'projectManagerNumber', 'referrerFirstName', 'referrerLastName', 'referrerPhoneNumber',
     'isBlacklisted', 'isLocked', 'isActive', 'createdAt', 'updatedAt', 'ownerUserId', 'ownerUser',
@@ -828,6 +829,11 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
     
     if (status) whereClause.status = status;
     if (customerType) whereClause.customerType = customerType;
+    if (req.query.trustCategory) {
+      if (!['NORMAL', 'SPECIAL'].includes(String(req.query.trustCategory))) { res.status(400).json({ success: false, error: 'دسته مشتری معتبر نیست.' }); return; }
+      whereClause.trustCategory = String(req.query.trustCategory);
+      whereClause.partnerOwnerProfileId = null;
+    }
 
     const customers = await prisma.crmCustomer.findMany({
       where: whereClause,
@@ -947,6 +953,22 @@ router.delete('/customers/:id', protect, customerManagementEndpoint(req => prism
 // @desc    Get CRM customer by ID
 // @route   GET /api/crm/customers/:id
 // @access  Private/CRM or Sales Customer View Access
+const customerCreditEndpoint = (write: boolean) => async (req: any, res: Response) => {
+  try {
+    const scope = await buildCustomerScope(req, true);
+    const customer = await prisma.crmCustomer.findFirst({ where: { AND: [scope, { id: req.params.id, partnerOwnerProfileId: null }] }, select: { id: true } });
+    if (!customer) { res.status(404).json({ success: false, error: 'مشتری مستقیم سبلان یافت نشد.' }); return; }
+    const data = write ? await prisma.$transaction(tx => updateCustomerCreditPolicy(tx, req.user.id, customer.id, req.body))
+      : await customerCreditBalance(prisma, customer.id);
+    res.json({ success: true, data: { ...data, canManage: await canManageCustomerCredit(prisma, req.user.id) } });
+  } catch (error) {
+    res.status(error instanceof CustomerCreditError ? error.status : 500).json({ success: false,
+      error: error instanceof CustomerCreditError ? error.message : 'اطلاعات اعتبار مشتری دریافت یا ثبت نشد.' });
+  }
+};
+router.get('/customers/:id/credit', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), customerCreditEndpoint(false));
+router.put('/customers/:id/credit', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL], FEATURE_PERMISSIONS.VIEW), customerCreditEndpoint(true));
+
 router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.CRM_CUSTOMERS_VIEW_ALL, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
   try {
     const scope = await buildCustomerScope(req, true);

@@ -23,6 +23,7 @@ import {
   FaSave,
   FaEye
 } from 'react-icons/fa';
+import CustomerCreditPanel from '@/features/crm/CustomerCreditPanel';
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -35,6 +36,7 @@ import { CustomerRemovalConfirmation } from '@/features/crm/customer-workflow/Cu
 import { writeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
 
 interface CrmCustomer {
+  partnerOwnerProfileId?: string | null;
   managementReadOnly?: boolean;
   canManageCustomerCard?: boolean;
   id: string;
@@ -547,6 +549,7 @@ export default function CustomerDetailPage() {
     feedback={error ? { kind: 'error', title: error } : undefined}
     actions={customer.canManageCustomerCard ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []}>
     {customer.canManageCustomerCard && <CustomerWorkflowSection title="مدیریت مشتری"><ErpPressable disabled={cardActionPending} onClick={handleToggleBlacklist}>{customer.isBlacklisted ? 'حذف از بلک‌لیست' : 'افزودن به بلک‌لیست'}</ErpPressable><ErpPressable disabled={cardActionPending} onClick={handleToggleLock}>{customer.isLocked ? 'باز کردن قفل' : 'قفل کردن'}</ErpPressable></CustomerWorkflowSection>}
+    {!customer.partnerOwnerProfileId && <CustomerCreditPanel customerId={customer.id} onChanged={() => void fetchCustomer()} />}
     <CustomerWorkflowSection title="اطلاعات مشتری">
       <ErpInlineState kind="permission" title={customer.canManageCustomerCard ? "مدیریت کارت مشتری همکار" : "نمایش مدیریتی مشتری — دسترسی مشاهده اطلاعات"} />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -645,6 +648,7 @@ export default function CustomerDetailPage() {
         <div className={presentationScope === 'workspace' ? "p-4 sm:p-6 space-y-6" : "p-4 sm:p-6"}>
           {(presentationScope === 'workspace' || activeTab === 'overview') && (
             <DetailSection className="space-y-6">
+              <CustomerCreditPanel customerId={customer.id} onChanged={() => void fetchCustomer()} />
               {/* Basic Information */}
               <div>
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات پایه</h3>

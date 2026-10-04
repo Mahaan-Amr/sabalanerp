@@ -836,7 +836,7 @@ const buildContractRow = async (contract: any, settings: any) => {
     .reduce((sum: Prisma.Decimal, payment: any) => sum.plus(payment.amount), new Prisma.Decimal(0));
   const remainingAmount = Prisma.Decimal.max(contractAmount.minus(receivedAmount), new Prisma.Decimal(0));
   const missingFields = getTaxMissingFields(contract, settings);
-  const eligible = ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) && !contract.isInactive
+  const eligible = (ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) || isNewOrdinaryCommercialFlow(contract)) && !contract.isInactive
     && ordinaryFinancialActionsAllowed(contract);
   const openCorrections = corrections.filter((item: any) => activeCorrectionStatuses().includes(item.status));
   const openFlags = flags.filter((item: any) => item.status === 'OPEN');
@@ -924,6 +924,10 @@ const buildContractRow = async (contract: any, settings: any) => {
       economicCode: contract.customer?.customFields?.economicCode
     },
     status: contract.status,
+    customerId: contract.customerId,
+    customerCreditCustomerId: contract.customerCreditCustomerId,
+    customerCreditAmountRials: contract.customerCreditAmountRials,
+    customerCreditRevision: contract.customerCreditRevision,
     commercialFlowVersion: contract.commercialFlowVersion,
     commercialRevision: contract.commercialRevision,
     salesApprovalRevision: contract.salesApprovalRevision,
@@ -1639,7 +1643,7 @@ const ensureEligibleContract = async (contractId: string) => {
   if (contract.partnerKind === 'PARTNER_CUSTOMER') throw new Error('حسابداری فروش همکار فقط از رکورد داخلی پرونده همکار انجام می‌شود.');
   if (!ordinaryFinancialActionsAllowed(contract)) throw new OrdinaryAccountingCommercialError();
   if (contract.isInactive) throw new Error('Inactive contracts cannot create new accounting records');
-  if (!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) || !ordinaryFinancialActionsAllowed(contract)) {
+  if ((!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) && !isNewOrdinaryCommercialFlow(contract)) || !ordinaryFinancialActionsAllowed(contract)) {
     throw new Error('Only approved, signed, or printed contracts can create accounting records');
   }
   return contract;
@@ -1653,7 +1657,7 @@ const ensureContractForReceipt = async (contractId: string, receivableId?: strin
   if (!contract) throw new Error('Contract not found');
   if (contract.partnerKind === 'PARTNER_CUSTOMER') throw new Error('دریافت فروش همکار فقط از دریافتنی داخلی پرونده همکار ثبت می‌شود.');
   if (!contract.isInactive) {
-    if (!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) || !ordinaryFinancialActionsAllowed(contract)) {
+    if ((!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) && !isNewOrdinaryCommercialFlow(contract)) || !ordinaryFinancialActionsAllowed(contract)) {
       throw new Error('Only approved, signed, or printed contracts can create accounting records');
     }
     return contract;

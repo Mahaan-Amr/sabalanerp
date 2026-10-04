@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { synchronizeSellerCredit } from './contractDispatchCredit';
+import { validateSpecialCustomerCreditPlan } from './specialCustomerCredit';
 import { refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
 import { closeContractDispatchDuty } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { commercialStartFields, isOrdinaryCommercialFlow, assertCommercialActionAvailable, invalidateCommercialApprovals, approveOrdinarySales, lockOrdinaryContract } from './ordinaryContractLifecycle';
@@ -566,7 +567,7 @@ export interface UpdateContractData {
       }>;
     }>;
     payments?: Array<{
-      paymentMethod: 'CASH' | 'RECEIPT' | 'CHECK' | 'SELLER_CREDIT';
+      paymentMethod: 'CASH' | 'RECEIPT' | 'CHECK' | 'SELLER_CREDIT' | 'SPECIAL_CUSTOMER_CREDIT';
       totalAmount: number;
       currency?: string;
       status?: 'PENDING' | 'PARTIAL' | 'COMPLETED' | 'CANCELLED';
@@ -941,6 +942,7 @@ export async function createContract(
           });
         }
         await synchronizeSellerCredit(tx, contract, userId);
+        await validateSpecialCustomerCreditPlan(tx, contract);
         await onCreated?.(tx, contract);
         return contract;
       }, CONTRACT_CREATE_TRANSACTION_OPTIONS);
@@ -1312,7 +1314,7 @@ export async function updateContract(
     }
     await assertContractQuantityEvidenceReadyForFinalization(tx, contractId);
     const staleAuthorities = await tx.contractDispatchAuthority.findMany({ where: { contractId, revision: { not: persistedContract.commercialRevision },
-      OR: [{ kind: 'MANAGER', status: { in: ['PENDING','APPROVED'] } }, { kind: { in: ['DATE','TRANSFER'] }, status: 'PENDING' }] } });
+      OR: [{ kind: 'MANAGER', status: { in: ['PENDING','APPROVED'] } }, { kind: { in: ['DATE','TRANSFER','CUSTOMER_DATE'] }, status: 'PENDING' }] } });
     for (const authority of staleAuthorities) {
       await tx.contractDispatchAuthority.update({ where: { id: authority.id }, data: { status: 'SUPERSEDED' } });
       await closeContractDispatchDuty(tx, authority.id, userId, 'SUPERSEDED', 'نسخه قرارداد تغییر کرد.');
@@ -1320,6 +1322,7 @@ export async function updateContract(
         entityType: 'ContractDispatchAuthority', entityId: authority.id, beforeState: toJsonValue(authority), afterState: { status: 'SUPERSEDED' } } });
     }
     await synchronizeSellerCredit(tx, persistedContract, userId);
+    await validateSpecialCustomerCreditPlan(tx, persistedContract);
     return persistedContract;
   });
 

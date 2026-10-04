@@ -2,6 +2,7 @@ import { AccountingRecordStatus, CorrectionRequestCategory, CorrectionRequestPri
 import { synchronizeCrossWorkspaceDutySource } from './crossWorkspaceDutyModule';
 import { completeSalesCorrectionEditDuty } from './crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter';
 import { isOrdinaryCommercialFlow, isCommerciallyFinal, lockOrdinaryContract } from './ordinaryContractLifecycle';
+import { hasSpecialCustomerCreditAuthorization } from './specialCustomerCreditPolicy';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 
@@ -74,7 +75,7 @@ export const requestAccountingSalesContractCorrection = (
   const contract = await lockOrdinaryContract(tx, input.contractId);
   if (!contract) throw new Error('CONTRACT_NOT_FOUND');
   if (contract.isInactive) throw new Error('CONTRACT_INACTIVE');
-  if (isOrdinaryCommercialFlow(contract) && !isCommerciallyFinal(contract)) throw new Error('قرارداد هنوز قطعی نشده است.');
+  if (isOrdinaryCommercialFlow(contract) && !isCommerciallyFinal(contract) && !hasSpecialCustomerCreditAuthorization(contract)) throw new Error('قرارداد باید قطعی باشد یا مجوز اعتباری مشتری خاص برای نسخه جاری داشته باشد.');
   if (!contract.responsibleSellerId) throw new Error('RESPONSIBLE_SELLER_REQUIRED');
 
   const replaySource = await tx.accountingCorrectionRequest.findUnique({

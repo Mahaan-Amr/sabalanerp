@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, knownProductCatalogApplyError, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../../utils/salesOperationalError';
+import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, knownCustomerCreditFailure, knownProductCatalogApplyError, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../../utils/salesOperationalError';
+import { CustomerCreditError } from '../../services/specialCustomerCreditPolicy';
+
+test('customer credit validation preserves its actionable cause and status on Sales writes', () => {
+  assert.deepEqual(knownCustomerCreditFailure(new CustomerCreditError(400, 'تاریخ وعده پرداخت باید امروز یا آینده باشد.')), {
+    status: 400, body: { success: false, code: 'CUSTOMER_CREDIT_VALIDATION', error: 'تاریخ وعده پرداخت باید امروز یا آینده باشد.' },
+  });
+  assert.equal(knownCustomerCreditFailure(new CustomerCreditError(409, 'اعتبار آزاد کافی نیست.'))?.status, 409);
+  assert.equal(knownCustomerCreditFailure(new Error('database unavailable')), undefined);
+});
 
 test('unexpected sales response keeps the technical reference without sending the user to support', () => {
   const response = unexpectedSalesErrorResponse({

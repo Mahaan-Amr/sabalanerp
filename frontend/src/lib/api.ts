@@ -749,7 +749,7 @@ export const salesAPI = {
 // CRM Workspace API
 export const crmAPI = {
   // Customers
-  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string }) =>
+  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string }) =>
     api.get('/crm/customers', { params }),
 
   getCustomerOwners: () => api.get('/crm/customer-owners'),
@@ -785,6 +785,9 @@ export const crmAPI = {
     }),
   
   updateCustomer: (id: string, customerData: any) => api.put(`/crm/customers/${id}`, customerData),
+  getCustomerCredit: (id: string) => api.get(`/crm/customers/${id}/credit`),
+  updateCustomerCredit: (id: string, input: { trustCategory: 'NORMAL' | 'SPECIAL'; limitRials: string | null; policyVersion: number; reason: string }) =>
+    api.put(`/crm/customers/${id}/credit`, input),
 
   assignCustomerOwner: (id: string, ownerUserId: string | null) =>
     api.put(`/crm/customers/${id}/owner`, { ownerUserId }),

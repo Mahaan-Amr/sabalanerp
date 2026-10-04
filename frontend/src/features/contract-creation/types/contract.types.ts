@@ -8,6 +8,7 @@ export interface CrmCustomer {
   firstName: string;
   lastName: string;
   companyName?: string;
+  trustCategory?: "NORMAL" | "SPECIAL";
   customerType: string;
   status: string;
   projectAddresses: ProjectAddress[];
@@ -586,7 +587,7 @@ export interface DeliverySchedule {
 }
 
 // ?? (??) | ?? (??) | ? | ??????? ?? ????? ??????
-export type PaymentEntryMethod = 'CASH_CARD' | 'CASH_SHIBA' | 'CHECK' | 'CUSTOMER_BALANCE' | 'SELLER_CREDIT';
+export type PaymentEntryMethod = 'CASH_CARD' | 'CASH_SHIBA' | 'CHECK' | 'CUSTOMER_BALANCE' | 'SELLER_CREDIT' | 'SPECIAL_CUSTOMER_CREDIT';
 export type ExtraPaymentReason = 'PREVIOUS_DEBT';
 
 export interface PaymentEntry {

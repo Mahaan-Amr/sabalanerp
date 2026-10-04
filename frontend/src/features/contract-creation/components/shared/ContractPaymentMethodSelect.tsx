@@ -7,11 +7,12 @@ export const contractPaymentMethodOptions: ReadonlyArray<{ value: PaymentEntryMe
   { value: 'CASH_SHIBA', label: 'نقدی (شبا)' },
   { value: 'CHECK', label: 'چک' },
   { value: 'SELLER_CREDIT', label: 'استفاده از اعتبار فروشنده' },
+  { value: 'SPECIAL_CUSTOMER_CREDIT', label: 'اعتباری مشتری خاص' },
 ];
 
 const legacyCustomerBalanceOption = { value: 'CUSTOMER_BALANCE' as const, label: 'استفاده از باقی مانده مشتری' };
 
-export function ContractPaymentMethodSelect({ value, onChange, className, disabled, existingContract = false, allowCustomerBalance = false, allowSellerCredit = false, sellerCreditLabel }: {
+export function ContractPaymentMethodSelect({ value, onChange, className, disabled, existingContract = false, allowCustomerBalance = false, allowSellerCredit = false, sellerCreditLabel, allowSpecialCustomerCredit = false }: {
   value: PaymentEntryMethod | undefined;
   onChange: (value: PaymentEntryMethod) => void;
   className?: string;
@@ -20,6 +21,7 @@ export function ContractPaymentMethodSelect({ value, onChange, className, disabl
   allowCustomerBalance?: boolean;
   allowSellerCredit?: boolean;
   sellerCreditLabel?: string;
+  allowSpecialCustomerCredit?: boolean;
 }) {
   const isLegacyCustomerBalance = !allowCustomerBalance && value === 'CUSTOMER_BALANCE';
   return <ErpSelect aria-label="نوع پرداخت" value={value ?? ''} disabled={disabled}
@@ -28,8 +30,9 @@ export function ContractPaymentMethodSelect({ value, onChange, className, disabl
     }} className={className}>
     {value === undefined && <option value="" disabled>انتخاب روش پرداخت</option>}
     {isLegacyCustomerBalance && <option value="CUSTOMER_BALANCE" disabled>استفاده از باقی مانده مشتری (غیرفعال)</option>}
-    {contractPaymentMethodOptions.filter(option => option.value !== 'SELLER_CREDIT' || allowSellerCredit || value === 'SELLER_CREDIT')
-      .map(option => <option key={option.value} value={option.value} disabled={option.value === 'SELLER_CREDIT' && !allowSellerCredit}>
+    {contractPaymentMethodOptions.filter(option => (option.value !== 'SELLER_CREDIT' || allowSellerCredit || value === 'SELLER_CREDIT')
+      && (option.value !== 'SPECIAL_CUSTOMER_CREDIT' || allowSpecialCustomerCredit || value === 'SPECIAL_CUSTOMER_CREDIT'))
+      .map(option => <option key={option.value} value={option.value} disabled={(option.value === 'SELLER_CREDIT' && !allowSellerCredit) || (option.value === 'SPECIAL_CUSTOMER_CREDIT' && !allowSpecialCustomerCredit)}>
         {option.value === 'SELLER_CREDIT' && sellerCreditLabel ? `${option.label} — ${sellerCreditLabel}` : option.label}</option>)}
     {allowCustomerBalance && <option value={legacyCustomerBalanceOption.value}>{legacyCustomerBalanceOption.label}</option>}
   </ErpSelect>;

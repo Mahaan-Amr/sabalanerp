@@ -4,10 +4,11 @@ import { ErpButton, ErpCard, ErpDisclosure, ErpField, ErpInlineState, ErpSheet, 
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { dispatchCreditApi, type DispatchAuthority, type DispatchCreditView } from './dispatchCreditApi';
 import { userFacingError } from '@/features/dispatch/userFacingError';
+import { formatCustomerCreditRials } from '@/features/crm/customerCreditPresentation';
 
-const labels: Record<string, string> = { MANAGER: 'مجوز مدیریتی', CREDIT: 'ضمانت فروشنده', DATE: 'تغییر وعده پرداخت', TRANSFER: 'انتقال ضمانت',
+const labels: Record<string, string> = { MANAGER: 'مجوز مدیریتی', CREDIT: 'ضمانت فروشنده', DATE: 'تغییر وعده پرداخت', CUSTOMER_DATE: 'تغییر وعده پرداخت اعتباری مشتری خاص', TRANSFER: 'انتقال ضمانت',
   PENDING: 'در انتظار تصمیم', APPROVED: 'تأییدشده', REJECTED: 'ردشده', REVOKED: 'لغوشده', WITHDRAWN: 'پس‌گرفته‌شده', SUPERSEDED: 'جایگزین‌شده' };
-type Operation = { kind: 'MANAGER' | 'DATE' | 'TRANSFER' | 'ACTION'; authority?: DispatchAuthority; action?: string };
+type Operation = { kind: 'MANAGER' | 'DATE' | 'TRANSFER' | 'CUSTOMER_DATE' | 'ACTION'; authority?: DispatchAuthority; action?: string };
 const formatDate = (value: string) => new Date(value).toLocaleDateString('fa-IR', { timeZone: 'UTC' });
 export default function ContractDispatchCreditPanel({ contractId, refreshKey, children, onChanged }: {
   contractId: string; refreshKey?: string; children?: ReactNode; onChanged?: () => void;
@@ -23,7 +24,7 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
     catch (failure) { setError(userFacingError(failure, 'وضعیت مجوز ارسال دریافت نشد.')); }
   }, [contractId]);
   useEffect(() => { void load(); }, [load, refreshKey]);
-  const open = (next: Operation) => { setReason(''); setDate(next.authority?.promisedDate.slice(0, 10) ?? ''); setError(null); setOperation(next); };
+  const open = (next: Operation) => { setReason(''); setDate(next.kind === 'CUSTOMER_DATE' ? view?.customerCredit?.promisedDate.slice(0, 10) ?? '' : next.authority?.promisedDate.slice(0, 10) ?? ''); setError(null); setOperation(next); };
   const save = async () => {
     if (!operation || pending) return;
     setPending(true); setError(null);
@@ -36,7 +37,7 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
     finally { setPending(false); }
   };
   const actions = (row: DispatchAuthority) => <div className="flex flex-wrap gap-2">
-    {row.status === 'PENDING' && ((view?.access.manage && row.kind !== 'TRANSFER') || row.targetSellerId === view?.actorId) && <>
+    {row.status === 'PENDING' && ((row.kind === 'CUSTOMER_DATE' ? view?.canManageCustomerDate : view?.access.manage && row.kind !== 'TRANSFER') || row.targetSellerId === view?.actorId) && <>
       <ErpButton label="تأیید" tone="success" onClick={() => open({ kind: 'ACTION', authority: row, action: 'APPROVE' })} />
       <ErpButton label="رد درخواست" tone="danger" variant="outline" onClick={() => open({ kind: 'ACTION', authority: row, action: 'DECLINE' })} />
     </>}
@@ -55,7 +56,7 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
       {row.sellerName ? ` — ضامن: ${row.sellerName}` : ''}</p>
     {row.reason && <p className="text-sm sds-text-muted">{row.reason}</p>}{actions(row)}
   </ErpCard>;
-  const needsReason = operation && (operation.kind === 'DATE' || operation.kind === 'TRANSFER' || ['DECLINE','REVOKE'].includes(operation.action ?? ''));
+  const needsReason = operation && (['DATE','CUSTOMER_DATE','TRANSFER'].includes(operation.kind) || ['DECLINE','REVOKE'].includes(operation.action ?? ''));
   return <div className="space-y-3">
     <div className="flex flex-wrap gap-2">{children}
       {(view?.access.request || view?.access.manage) && <ErpButton label="درخواست تأیید مدیریتی" variant="outline" tone="primary"
@@ -64,8 +65,12 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
     </div>
     {error && !operation && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
     {view && <>
+      {view.customerCredit && <ErpCard className="space-y-2 p-3"><p>اعتباری مشتری خاص — {view.customerCredit.active ? 'مجوز نسخه جاری' : 'در انتظار تأیید مجدد فروش'}</p>
+        <p className="text-sm sds-text-secondary">اعتبار مصرف‌شده: {formatCustomerCreditRials(view.customerCredit.consumedRials)} — وعده پرداخت: {formatDate(view.customerCredit.promisedDate)}</p>
+        {view.customerCredit.active && (view.access.request || view.access.seller || view.canManageCustomerDate) && <ErpButton label="درخواست تغییر وعده پرداخت" variant="outline"
+          disabled={pending || view.authorities.some(row => row.kind === 'CUSTOMER_DATE' && row.status === 'PENDING')} onClick={() => open({ kind: 'CUSTOMER_DATE' })} />}</ErpCard>}
       <p className="text-sm sds-text-secondary">{view.eligible ? 'شرط مالی ارسال برقرار است.' : 'شرط ارسال با تأیید مالی، مجوز مدیر یا پوشش دریافت و اعتبار هنوز برقرار نیست.'}</p>
-      {view.authorities.filter(row => ['PENDING','APPROVED'].includes(row.status) && ['MANAGER','CREDIT','TRANSFER','DATE'].includes(row.kind)).map(renderRow)}
+      {view.authorities.filter(row => ['PENDING','APPROVED'].includes(row.status) && ['MANAGER','CREDIT','TRANSFER','DATE','CUSTOMER_DATE'].includes(row.kind)).map(renderRow)}
       {view.authorities.some(row => !['PENDING','APPROVED'].includes(row.status)) && <ErpDisclosure title="سوابق مجوز و ضمانت">
         <div className="space-y-2">{view.authorities.filter(row => !['PENDING','APPROVED'].includes(row.status)).map(renderRow)}</div>
       </ErpDisclosure>}

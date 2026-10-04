@@ -7,6 +7,7 @@ import { lockCrossWorkspaceDuty } from '../crossWorkspaceDutyLock';
 import { resolveWorkspaceDutyAuthority } from '../crossWorkspaceDutyAuthority';
 import { publishNotificationEvent } from '../notificationService';
 import { assertCorrectionFinancialWorkflowReady } from '../accountingService';
+import { hasSpecialCustomerCreditAuthorization } from '../specialCustomerCreditPolicy';
 
 const ACCOUNTING_CORRECTION_FEATURES = Object.freeze({
   PROCESS: ['accounting_corrections_manage'],
@@ -860,7 +861,7 @@ export const completeSalesCorrectionEditDuty = async (
   if (commercialClosing) {
     const contract = await database.salesContract.findUnique({ where: { id: input.contractId } });
     if (!contract || contract.commercialFlowVersion !== 1 || contract.partnerKind || contract.partnerCaseId) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
-    if (input.commercialFinality && (contract.status !== 'SIGNED' || contract.salesApprovalRevision !== contract.commercialRevision
+    if (input.commercialFinality && !hasSpecialCustomerCreditAuthorization(contract) && (contract.status !== 'SIGNED' || contract.salesApprovalRevision !== contract.commercialRevision
       || contract.customerAcceptanceRevision !== contract.commercialRevision)) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
     if (input.periodExpired && salesDuty.dueAt >= input.now) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
   }

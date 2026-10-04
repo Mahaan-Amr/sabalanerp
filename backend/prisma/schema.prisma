@@ -1836,6 +1836,13 @@ model RoleFeaturePermission {
 }
 
 model SalesContract {
+  customerCreditCustomerId           String?
+  customerCreditCustomer             CrmCustomer? @relation("CustomerCreditContracts", fields: [customerCreditCustomerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customerCreditAmountRials          Decimal @default(0) @db.Decimal(18, 0)
+  customerCreditTotalRials           Decimal @default(0) @db.Decimal(18, 0)
+  customerCreditRevision             Int?
+  customerCreditPromisedDate         DateTime? @db.Date
+  customerCreditNotifiedFor          String?
   dispatchExpiryExempt              Boolean                            @default(false)
   dispatchAuthorities               ContractDispatchAuthority[]
   commercialFlowVersion             Int                                @default(0)
@@ -1921,6 +1928,7 @@ model SalesContract {
 
   @@index([createdBy, creatorSequenceNumber])
   @@index([responsibleSellerId])
+  @@index([customerCreditCustomerId])
   @@index([realizedSellerId])
   @@index([realizedAt])
   @@index([lostAt])
@@ -2055,6 +2063,10 @@ model SalesReportPreset {
 }
 
 model CrmCustomer {
+  trustCategory                    String @default("NORMAL")
+  creditLimitRials                  Decimal? @db.Decimal(18, 0)
+  creditPolicyVersion               Int @default(0)
+  creditContracts                   SalesContract[] @relation("CustomerCreditContracts")
   activeCard               CrmCustomerCard?
   retainedHistory          CrmCustomerRetainedHistory?
   cardDeletedAt            DateTime?                       @db.Timestamptz(3)
@@ -7290,6 +7302,7 @@ enum PaymentMethod {
   RECEIPT
   CHECK
   SELLER_CREDIT
+  SPECIAL_CUSTOMER_CREDIT
 }
 
 model SellerCreditAccount {

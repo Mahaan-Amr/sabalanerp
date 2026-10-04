@@ -203,7 +203,7 @@ export default function SalesContractEditPage() {
         initialWizardData={{
           ...contract.contractData,
           payment: { ...contract.contractData.payment, payments: contract.contractData.payment.payments.map(payment => {
-            const liveDate = payment.method === 'SELLER_CREDIT' ? contract.payments?.find(row => row.paymentMethod === 'SELLER_CREDIT')?.paymentDate : null;
+            const liveDate = ['SELLER_CREDIT', 'SPECIAL_CUSTOMER_CREDIT'].includes(payment.method) ? contract.payments?.find(row => row.paymentMethod === payment.method)?.paymentDate : null;
             return liveDate ? { ...payment, paymentDate: PersianCalendar.toPersian(liveDate, 'jYYYY/jMM/jDD') } : payment;
           }) },
           productGraphRevision: contract.productGraphProjection?.revision ?? 0

@@ -601,6 +601,7 @@ const stairPartLabel = (value: unknown): string => {
 
 const paymentMethodLabel = (value: unknown, cashType: unknown): string => {
   if (value === 'SELLER_CREDIT') return 'استفاده از اعتبار فروشنده';
+  if (value === 'SPECIAL_CUSTOMER_CREDIT') return 'اعتباری مشتری خاص';
   if (value === 'CASH_CARD') return 'نقدی (کارت)';
   if (value === 'CASH_SHIBA') return 'نقدی (شبا)';
   if (value === 'CHECK') return 'چک';

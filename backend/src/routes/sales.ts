@@ -71,7 +71,7 @@ import { createAuditedPartnerAuthorization } from '../services/partnerSales/auth
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
 import { applyPartnerContractListScope, canPartnerReadSalesContract,
   readPartnerProfileId } from '../services/partnerSales/contractVisibility';
-import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
+import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, knownCustomerCreditFailure, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
 
 const sendUnexpectedSalesFailure = (
   res: Response,
@@ -80,6 +80,8 @@ const sendUnexpectedSalesFailure = (
   code: string,
   preserveInput = false,
 ) => {
+  const creditFailure = knownCustomerCreditFailure(error);
+  if (creditFailure) return res.status(creditFailure.status).json(creditFailure.body);
   const trackingId = randomUUID();
   console.error('Unexpected sales route failure:', { code, trackingId, error });
   return res.status(500).json(unexpectedSalesErrorResponse({ code, failedAction, trackingId, preserveInput }));
@@ -1201,6 +1203,8 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     if (error instanceof ContractPartyIdentityValidationError) {
       return res.status(422).json({ success: false, code: error.code, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
     }
+    const creditFailure = knownCustomerCreditFailure(error);
+    if (creditFailure) return res.status(creditFailure.status).json(creditFailure.body);
     console.error('Create sales contract error:', error);
     if (error instanceof ContractPayableTotalError) {
       return res.status(422).json({ success: false, code: error.code, error: error.message,
@@ -1397,6 +1401,8 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
     });
     return;
   } catch (error: any) {
+    const creditFailure = knownCustomerCreditFailure(error);
+    if (creditFailure) return res.status(creditFailure.status).json(creditFailure.body);
     console.error('Update sales contract error:', error);
     if (error instanceof ContractPayableTotalError) {
       return res.status(422).json({ success: false, code: error.code, error: error.message,

@@ -9,6 +9,7 @@ const hydrateCustomer = (customer: CrmCustomer): CrmCustomer => Object.fromEntri
     lastName: customer.lastName,
     companyName: customer.companyName,
     customerType: customer.customerType,
+    trustCategory: customer.trustCategory,
     status: customer.status,
     projectAddresses: customer.projectAddresses || [],
     phoneNumbers: customer.phoneNumbers || [],

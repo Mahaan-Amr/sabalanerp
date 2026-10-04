@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import type { CrossWorkspaceDutySourceAdapter, CrossWorkspaceDutyDatabase } from './types';
 import { canManageDispatch, decideDispatchRequest } from '../contractDispatchCredit';
 import { ordinaryContractDispatchEligible } from '../ordinaryContractDispatchEligibility';
+import { canManageCustomerCredit } from '../specialCustomerCredit';
 
 const definition = (code: string, workspace: string, shared: boolean) => ({
   sourceActionCode: code, envelopeCode: code, envelopeVersion: 1, destinationWorkspaceCode: workspace,
@@ -71,7 +72,8 @@ export const contractDispatchDutyAdapter: CrossWorkspaceDutySourceAdapter = {
     const duty = await db.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
     if (!duty || duty.sourceType !== 'CONTRACT_DISPATCH' || duty.sourceActionCode !== 'CONTRACT_DISPATCH_DECISION'
       || (!input.includeCompleted && duty.status !== 'OPEN')) return false;
-    return canManageDispatch(db, input.actorUserId);
+    const request = await db.contractDispatchAuthority.findUnique({ where: { id: duty.sourceId }, select: { kind: true } });
+    return request?.kind === 'CUSTOMER_DATE' ? canManageCustomerCredit(db, input.actorUserId) : canManageDispatch(db, input.actorUserId);
   },
   canReassign: async () => false, reassign: async () => { throw new Error('DUTY_REASSIGNMENT_NOT_ALLOWED'); },
   listEligibleAssignees: async () => [], reconcileAssignment: async () => null,
@@ -82,7 +84,7 @@ export const contractDispatchDutyAdapter: CrossWorkspaceDutySourceAdapter = {
       const before = archived?.beforeState as { contractNumber?: string } | null;
       return { title: `سابقه مجوز یا ضمانت — ${before?.contractNumber ?? ''}`, description: 'قرارداد از مسیر مجاز حذف شده و سابقه تصمیم در ممیزی حفظ شده است.', sourceIsCurrent: false };
     }
-    return { title: `${request?.kind === 'TRANSFER' ? 'پذیرش انتقال ضمانت' : request?.kind === 'DATE' ? 'تغییر وعده پرداخت' : 'درخواست تأیید مدیریتی'} — ${request?.contract.contractNumber ?? ''}`,
+    return { title: `${request?.kind === 'TRANSFER' ? 'پذیرش انتقال ضمانت' : ['DATE','CUSTOMER_DATE'].includes(request.kind) ? 'تغییر وعده پرداخت' : 'درخواست تأیید مدیریتی'} — ${request?.contract.contractNumber ?? ''}`,
       description: request ? `وعده پرداخت: ${request.promisedDate.toLocaleDateString('fa-IR', { timeZone: 'UTC' })}${request.reason ? ` — ${request.reason}` : ''}` : null,
       sourceIsCurrent: !!request && request.status === 'PENDING' && request.revision === request.contract.commercialRevision
         && !request.contract.isInactive && !['CANCELLED','EXPIRED'].includes(request.contract.status),

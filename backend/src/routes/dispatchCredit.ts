@@ -8,6 +8,8 @@ import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { createContractDispatchDuty, closeContractDispatchDuty } from '../services/crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { ordinaryContractDispatchEligible } from '../services/ordinaryContractDispatchEligibility';
 import { isCommerciallyFinal } from '../services/ordinaryContractLifecycle';
+import { hasSpecialCustomerCreditAuthorization } from '../services/specialCustomerCreditPolicy';
+import { consumedCustomerCredit, canManageCustomerCredit } from '../services/specialCustomerCredit';
 
 const router = express.Router();
 router.use(protect);
@@ -67,6 +69,10 @@ router.get('/contracts/:id', handle(async req => {
     select: { id: true, firstName: true, lastName: true, username: true } });
   const names = new Map(sellers.map(user => [user.id, `${user.firstName} ${user.lastName}`.trim() || user.username]));
   return { authorities: authorities.map(row => ({ ...row, sellerName: row.sellerId ? names.get(row.sellerId) : undefined })),
+    customerCredit: contract.customerCreditCustomerId ? { amountRials: contract.customerCreditAmountRials.toString(),
+      consumedRials: (await consumedCustomerCredit(prisma, contract)).toString(), promisedDate: contract.customerCreditPromisedDate,
+      active: hasSpecialCustomerCreditAuthorization(contract) } : null,
+    canManageCustomerDate: await canManageCustomerCredit(prisma, req.user.id),
     actorId: req.user.id, canRequestManager: isCommerciallyFinal(contract) && !['CANCELLED','EXPIRED'].includes(contract.status) && !contract.isInactive,
     responsibleSeller: { id: contract.responsibleSellerId, displayName: names.get(contract.responsibleSellerId) ?? 'فروشنده مسئول' },
     access, eligible: await ordinaryContractDispatchEligible(prisma, contract), balance: await creditBalance(prisma, contract.responsibleSellerId),
@@ -76,10 +82,10 @@ router.post('/contracts/:id/requests', handle(req => prisma.$transaction(async t
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id"=${req.params.id} FOR UPDATE`);
   const { contract, access } = await accessibleContract(tx, req.params.id, req.user.id);
   const kind = req.body.kind;
-  if (!['MANAGER','DATE','TRANSFER'].includes(kind) || !(access.manage || (kind === 'MANAGER' ? access.request : kind === 'DATE' && (access.request || access.seller)))) throw new Error('مجوز ثبت این درخواست ندارید.');
+  if (!['MANAGER','DATE','TRANSFER','CUSTOMER_DATE'].includes(kind) || !(access.manage || (kind === 'CUSTOMER_DATE' && await canManageCustomerCredit(tx, req.user.id)) || (kind === 'MANAGER' ? access.request : ['DATE','CUSTOMER_DATE'].includes(kind) && (access.request || access.seller)))) throw new Error('مجوز ثبت این درخواست ندارید.');
   const request = await createDispatchRequest(tx, contract, req.user.id, req.body);
   await createContractDispatchDuty(tx, request.id);
-  if (kind !== 'TRANSFER' && await canManageDispatch(tx, req.user.id)) {
+  if (kind !== 'TRANSFER' && (kind === 'CUSTOMER_DATE' ? await canManageCustomerCredit(tx, req.user.id) : await canManageDispatch(tx, req.user.id))) {
     await decideDispatchRequest(tx, request.id, req.user.id, 'APPROVE', req.body.reason);
     await closeContractDispatchDuty(tx, request.id, req.user.id, 'APPROVE', req.body.reason);
   }

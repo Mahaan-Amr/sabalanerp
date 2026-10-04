@@ -7,6 +7,9 @@ import type { PaymentEntry } from '../../types/contract.types';
 import { CentralProductModalShell } from '../product-modal-system';
 import { ContractPaymentInstallmentFields } from '../shared/ContractPaymentInstallmentFields';
 import { ContractPaymentCheckFields } from '../shared/ContractPaymentCheckFields';
+import { crmAPI } from '@/lib/api';
+import { formatCustomerCreditRials } from '@/features/crm/customerCreditPresentation';
+import type { CustomerCreditView } from '@/features/crm/CustomerCreditPanel';
 
 interface PaymentEntryModalProps {
   isOpen: boolean;
@@ -32,6 +35,8 @@ interface PaymentEntryModalProps {
   requireMethodSelection?: boolean;
   allowSellerCredit?: boolean;
   contractId?: string;
+  allowSpecialCustomerCredit?: boolean;
+  customerId?: string;
 }
 
 export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
@@ -55,9 +60,22 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   requireMethodSelection = false,
   allowSellerCredit = false,
   contractId,
+  allowSpecialCustomerCredit = false,
+  customerId,
 }) => {
   const [balance, setBalance] = React.useState<SellerCreditBalance | null>(null);
   const [creditError, setCreditError] = React.useState(false);
+  const [customerCredit, setCustomerCredit] = React.useState<CustomerCreditView | null>(null);
+  const [customerCreditError, setCustomerCreditError] = React.useState(false);
+  React.useEffect(() => {
+    setCustomerCredit(null);
+    setCustomerCreditError(false);
+    if (!isOpen || !customerId) return;
+    let active = true;
+    crmAPI.getCustomerCredit(customerId).then(response => { if (active) setCustomerCredit(response.data.data); })
+      .catch(() => { if (active) setCustomerCreditError(true); });
+    return () => { active = false; };
+  }, [isOpen, customerId]);
   React.useEffect(() => {
     if (!isOpen || !allowSellerCredit) return;
     let active = true;
@@ -89,11 +107,12 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
         <div className="mx-auto w-full max-w-3xl px-0 py-0">
           <div className="space-y-3">
             <ContractPaymentInstallmentFields dateFormat={dateFormat} method={method} amount={String(form.amount ?? '')}
+              allowSpecialCustomerCredit={customerCredit?.trustCategory === 'SPECIAL' || (existingContract && allowSpecialCustomerCredit && form.method === 'SPECIAL_CUSTOMER_CREDIT')}
               allowSellerCredit={allowSellerCredit && !!balance} sellerCreditLabel={balance ? `مانده: ${Number(balance.availableRials).toLocaleString('fa-IR')} ریال` : 'در حال دریافت مانده'}
               existingContract={existingContract} allowCustomerBalance={allowCustomerBalance}
               date={form.paymentDate ?? ''}
               amountLabel={isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : isCheck ? 'مبلغ چک (تومان)' : 'مبلغ (تومان)'}
-              dateLabel={method === 'SELLER_CREDIT' ? 'تاریخ وعده پرداخت مشتری' : isCustomerBalance ? 'تاریخ استفاده از مانده' : isCheck ? 'تاریخ سررسید چک' : 'تاریخ پرداخت'}
+              dateLabel={method === 'SELLER_CREDIT' || method === 'SPECIAL_CUSTOMER_CREDIT' ? 'تاریخ وعده پرداخت مشتری' : isCustomerBalance ? 'تاریخ استفاده از مانده' : isCheck ? 'تاریخ سررسید چک' : 'تاریخ پرداخت'}
               methodError={fieldErrors.method} amountError={fieldErrors.amount} dateError={fieldErrors.paymentDate}
               disabledAmount={disabledAmount}
               onMethodChange={value => onFormChange({ method: value })}
@@ -114,6 +133,8 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
               })} />}
 
             {error && <ErpInlineState kind="error" title={error} />}
+            {method === 'SPECIAL_CUSTOMER_CREDIT' && customerCredit && <ErpInlineState kind="empty" title={`اعتبار آزاد مشتری: ${formatCustomerCreditRials(customerCredit.availableRials)}`} />}
+            {customerCreditError && <ErpInlineState kind="error" title="وضعیت اعتبار مشتری دریافت نشد؛ فرم پرداخت را دوباره باز کنید." />}
             {creditError && <ErpInlineState kind="error" title="مانده اعتبار دریافت نشد؛ فرم پرداخت را دوباره باز کنید." />}
 
             {nationalCodeConflict && (

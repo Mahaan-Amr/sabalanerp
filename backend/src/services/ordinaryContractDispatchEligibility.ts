@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { isCommerciallyFinal, isOrdinaryCommercialFlow } from './ordinaryContractLifecycle';
 import { activeCreditForContract, activeManagerApproval, hasFinancialDispatchApproval, ordinaryContract, rials } from './contractDispatchCredit';
+import { hasSpecialCustomerCreditAuthorization } from './specialCustomerCreditPolicy';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type Obligation = { original: Prisma.Decimal.Value; applied: Prisma.Decimal.Value };
@@ -53,8 +54,10 @@ export const actualContractReceiptsRials = async (db: Db, contract: any): Promis
 
 export const ordinaryContractDispatchEligible = async (db: Db, contract: any): Promise<boolean> => {
   if (!ordinaryContract(contract)) return true;
-  if (contract.isInactive || !isCommerciallyFinal(contract)) return false;
-  if (await hasFinancialDispatchApproval(db, contract.id) || await activeManagerApproval(db, contract)) return true;
+  if (contract.isInactive || ['CANCELLED', 'EXPIRED'].includes(contract.status)) return false;
+  const special = hasSpecialCustomerCreditAuthorization(contract);
+  if (!isCommerciallyFinal(contract)) return special && await hasFinancialDispatchApproval(db, contract.id, contract.commercialRevision);
+  if (await hasFinancialDispatchApproval(db, contract.id, special ? contract.commercialRevision : undefined) || await activeManagerApproval(db, contract)) return true;
   const amount = rials(contract.totalAmount ?? 0, contract.currency);
   if (amount.lte(0)) return false;
   return (await actualContractReceiptsRials(db, contract)).plus(await activeCreditForContract(db, contract)).gte(amount);

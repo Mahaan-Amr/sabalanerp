@@ -29,6 +29,7 @@ const nextCustomer = customer('customer-next', [
 
 const customerWithLiveCrmNavigation = {
   ...nextCustomer,
+  trustCategory: 'SPECIAL',
   salesContracts: [{ id: 'contract-old', contractData: { customer: nextCustomer } }],
   leads: [{ id: 'lead-1' }],
   communications: [{ id: 'communication-1' }],
@@ -84,6 +85,7 @@ assert.equal('potentialProjects' in (boundedCustomerSelection?.customer || {}), 
 assert.equal('contacts' in (boundedCustomerSelection?.customer || {}), false);
 assert.equal('_count' in (boundedCustomerSelection?.customer || {}), false);
 assert.deepEqual(boundedCustomerSelection?.customer?.projectAddresses, nextCustomer.projectAddresses);
+assert.equal(boundedCustomerSelection?.customer?.trustCategory, 'SPECIAL');
 
 assert.equal(validateContractPartyIdentity({
   customerId: 'customer-next', customer: nextCustomer,

@@ -1,3 +1,9 @@
+import { CustomerCreditError } from '../services/specialCustomerCreditPolicy';
+
+export const knownCustomerCreditFailure = (error: unknown) => error instanceof CustomerCreditError
+  ? { status: error.status, body: { success: false as const, code: 'CUSTOMER_CREDIT_VALIDATION', error: error.message } }
+  : undefined;
+
 type UnexpectedSalesErrorOptions = {
   code: string;
   failedAction: string;

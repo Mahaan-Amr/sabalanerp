@@ -5,6 +5,8 @@ import { assertContractQuantityEvidenceReadyForFinalization } from './contractQu
 import { getEffectiveUserAccess } from './effectiveAccessService';
 import { ordinaryContractDispatchEligible } from './ordinaryContractDispatchEligibility';
 import { processContractCreditReminders } from './contractCreditReminders';
+import { authorizeSpecialCustomerCredit } from './specialCustomerCredit';
+import { hasSpecialCustomerCreditAuthorization } from './specialCustomerCreditPolicy';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 export type CommercialContract = {
@@ -74,11 +76,11 @@ const audit = (tx: Database, contractId: string, actorId: string, action: string
   tx.accountingAuditLog.create({ data: { contractId, actorId, action, entityType: 'SalesContract', entityId: contractId,
     beforeState: JSON.parse(JSON.stringify(before)), afterState: JSON.parse(JSON.stringify(after)), note: note || null } });
 
-export const finishCommercialCorrection = async (tx: Database, contractId: string, actorId: string) => {
+export const finishCommercialCorrection = async (tx: Database, contractId: string, actorId: string, specialCredit = false) => {
   const correction = await tx.accountingCorrectionRequest.findFirst({ where: { contractId, status: 'APPROVED_FOR_SALES_EDIT' } });
   if (!correction) return;
   await completeSalesContractCorrectionEdit(tx, { contractId, actorUserId: actorId,
-    note: 'قرارداد اصلاح‌شده مجدداً قطعی شد.', policyVersion: 2, commercialFinality: true });
+    note: specialCredit ? 'قرارداد اعتباری اصلاح‌شده مجدداً تأیید فروش شد.' : 'قرارداد اصلاح‌شده مجدداً قطعی شد.', policyVersion: 2, commercialFinality: true });
 };
 export const approveOrdinarySales = async (tx: Database, contractId: string, actorId: string, note?: string, expectedRevision?: number) => {
   const contract = await lockOrdinaryContract(tx, contractId);
@@ -89,13 +91,14 @@ export const approveOrdinarySales = async (tx: Database, contractId: string, act
   if (contract.salesApprovalRevision === revision) return contract;
   const status = commercialApprovalStatus(revision, revision, contract.customerAcceptanceRevision);
   if (status === 'SIGNED') await assertContractQuantityEvidenceReadyForFinalization(tx as Prisma.TransactionClient, contractId);
-  const updated = await tx.salesContract.update({ where: { id: contractId }, data: {
+  let updated = await tx.salesContract.update({ where: { id: contractId }, data: {
     salesApprovalRevision: revision, approvedBy: actorId, status,
     signatures: { ...((contract.signatures as any) || {}), approve: { by: actorId, at: new Date().toISOString(), revision, note: note || null } },
   } });
+  updated = await authorizeSpecialCustomerCredit(tx, updated, actorId);
   await audit(tx, contractId, actorId, 'COMMERCIAL_SALES_APPROVED', contract, updated, note);
-  if (status === 'SIGNED') {
-    await finishCommercialCorrection(tx, contractId, actorId);
+  if (status === 'SIGNED' || hasSpecialCustomerCreditAuthorization(updated)) {
+    await finishCommercialCorrection(tx, contractId, actorId, status !== 'SIGNED');
     updated.dispatchExpiryExempt = await ordinaryContractDispatchEligible(tx, updated);
     await tx.salesContract.update({ where: { id: contractId }, data: { dispatchExpiryExempt: updated.dispatchExpiryExempt } });
   }

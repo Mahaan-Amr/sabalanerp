@@ -149,7 +149,7 @@ export const validatePayment = (
       if (toFiniteNumber(paymentEntry.amount) <= 0) {
         errors.push('مبلغ پرداخت را بیشتر از صفر وارد کنید.');
       }
-      if (method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE' || method === 'SELLER_CREDIT') {
+      if (method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE' || (method === 'SELLER_CREDIT' || method === 'SPECIAL_CUSTOMER_CREDIT')) {
         if (!paymentEntry.paymentDate || !String(paymentEntry.paymentDate).trim()) {
           errors.push(method === 'CUSTOMER_BALANCE' ? 'تاریخ استفاده از مانده مشتری را انتخاب کنید.' : 'تاریخ پرداخت نقدی را انتخاب کنید.');
         }

@@ -42,6 +42,7 @@ interface CrmCustomer {
     isPrimary: boolean;
     isActive: boolean;
   }>;
+  trustCategory?: string;
   partnerOwnerProfileId?: string | null;
   managementReadOnly?: boolean;
   canManageCustomerCard?: boolean;
@@ -57,6 +58,7 @@ interface CrmCustomer {
 }
 
 interface CustomerFilters {
+  trustCategory: string;
   ownership: string;
   search: string;
   status: string;
@@ -92,6 +94,7 @@ export default function CustomersPage() {
     search: '',
     status: '',
     customerType: '',
+      trustCategory: '',
     isBlacklisted: null,
     isLocked: null,
   });
@@ -131,6 +134,7 @@ export default function CustomersPage() {
         search: filters.search || undefined,
         status: filters.status || undefined,
         customerType: filters.customerType || undefined,
+        trustCategory: filters.trustCategory || undefined,
         ownership: filters.ownership || undefined,
         isBlacklisted: filters.isBlacklisted ?? undefined,
         isLocked: filters.isLocked ?? undefined,
@@ -230,6 +234,7 @@ export default function CustomersPage() {
     search: '',
       status: '',
       customerType: '',
+      trustCategory: '',
       isBlacklisted: null,
       isLocked: null,
     });
@@ -253,6 +258,7 @@ export default function CustomersPage() {
           <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{customer.firstName} {customer.lastName}</p>
           {customer.companyName && <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{customer.companyName}</p>}
           <ErpBadge tone="neutral">{customer.partnerOwnerProfileId ? 'همکار فروش' : 'داخلی'}</ErpBadge>
+          {!customer.partnerOwnerProfileId && <ErpBadge tone={customer.trustCategory === 'SPECIAL' ? 'purple' : 'neutral'}>{customer.trustCategory === 'SPECIAL' ? 'مشتری خاص' : 'مشتری عادی'}</ErpBadge>}
           <p className="mt-1 text-xs text-[var(--sds-info)] dark:text-[var(--sds-info)]">مسئول فروش: {getOwnerLabel(customer)}</p>
           {customer.nationalCode && <p className="mt-1 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-secondary)]">کد ملی: {customer.nationalCode}</p>}
         </div>
@@ -362,6 +368,11 @@ export default function CustomersPage() {
             { label: 'بالقوه', value: 'Prospect' },
             { label: 'سرنخ', value: 'Lead' },
           ],
+        },
+        {
+          id: 'trustCategory', label: 'دسته مشتری', type: 'select', value: filters.trustCategory,
+          onChange: (value) => handleFilterChange('trustCategory', value),
+          options: [{ label: 'همه دسته‌ها', value: '' }, { label: 'مشتریان عادی', value: 'NORMAL' }, { label: 'مشتریان خاص', value: 'SPECIAL' }],
         },
         {
           id: 'customerType',

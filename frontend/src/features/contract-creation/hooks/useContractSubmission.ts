@@ -415,7 +415,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           })),
           payments: wizardData.payment.payments.map((paymentEntry) => {
             const method = paymentEntry.method as string;
-            const paymentMethod = method === 'SELLER_CREDIT' ? 'SELLER_CREDIT' : method === 'CHECK' ? 'CHECK' : method === 'CUSTOMER_BALANCE' ? 'RECEIPT' : 'CASH';
+            const paymentMethod = method === 'SPECIAL_CUSTOMER_CREDIT' ? 'SPECIAL_CUSTOMER_CREDIT' : method === 'SELLER_CREDIT' ? 'SELLER_CREDIT' : method === 'CHECK' ? 'CHECK' : method === 'CUSTOMER_BALANCE' ? 'RECEIPT' : 'CASH';
             const cashType = method === 'CASH_SHIBA' ? 'SHIBA' : method === 'CASH_CARD' ? 'CARD' : undefined;
             const notes = [
               method === 'CUSTOMER_BALANCE' ? 'استفاده از باقی مانده مشتری' : null,
@@ -426,7 +426,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
               totalAmount: paymentEntry.amount,
               currency: wizardData.payment.currency,
               status: paymentEntry.status === 'PAID' ? 'COMPLETED' : 'PENDING',
-              paymentDate: method === 'SELLER_CREDIT' ? creditPromiseDate(paymentEntry.paymentDate) : toIsoDate(paymentEntry.paymentDate),
+              paymentDate: (method === 'SELLER_CREDIT' || method === 'SPECIAL_CUSTOMER_CREDIT') ? creditPromiseDate(paymentEntry.paymentDate) : toIsoDate(paymentEntry.paymentDate),
               checkNumber: paymentEntry.checkNumber || null,
               checkOwnerName: paymentEntry.checkOwnerName || null,
               handoverDate: toIsoDate(paymentEntry.handoverDate),

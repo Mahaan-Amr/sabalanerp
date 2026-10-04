@@ -3,7 +3,9 @@ import { Prisma } from '@prisma/client';
 /** List/search rows do not render the printable contract, product graph, graph
  * audit history or delivery/payment snapshots. Detail readers retain all of it. */
 export const accountingContractListSelect = {
-  id: true, contractNumber: true, title: true, titlePersian: true,
+  customerCreditCustomerId: true, customerCreditAmountRials: true, customerCreditRevision: true,
+  customerCreditPromisedDate: true, customerCreditTotalRials: true,
+  id: true, customerId: true, contractNumber: true, title: true, titlePersian: true,
   createdAt: true, signedAt: true, totalAmount: true, currency: true,
   status: true, isInactive: true, inactiveAt: true, inactiveReason: true,
   commercialFlowVersion: true, commercialRevision: true, salesApprovalRevision: true,

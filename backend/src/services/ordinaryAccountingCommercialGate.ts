@@ -1,8 +1,10 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { isOrdinaryCommercialFlow, isCommerciallyFinal, commercialDeadlinePassed } from './ordinaryContractLifecycle';
 import { refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
+import { hasSpecialCustomerCreditAuthorization, type CustomerCreditContract } from './specialCustomerCreditPolicy';
+import { lockCustomerCredit } from './specialCustomerCredit';
 
-export type OrdinaryCommercialContract = {
+export type OrdinaryCommercialContract = CustomerCreditContract & {
   commercialFlowVersion?: number;
   commercialRevision?: number;
   salesApprovalRevision?: number | null;
@@ -21,12 +23,12 @@ export const isNewOrdinaryCommercialFlow = (contract: OrdinaryCommercialContract
 
 export const ordinaryFinancialActionsAllowed = (contract: OrdinaryCommercialContract, now = new Date()) => {
   if (!isNewOrdinaryCommercialFlow(contract)) return true;
-  return isCommerciallyFinal(contract) && !commercialDeadlinePassed(contract, now);
+  return (isCommerciallyFinal(contract) || hasSpecialCustomerCreditAuthorization(contract)) && !commercialDeadlinePassed(contract, now);
 };
 
 export class OrdinaryAccountingCommercialError extends Error {
   readonly status = 409;
-  constructor(message = 'ابتدا قرارداد باید برای نسخه جاری تأیید فروش و تأیید مشتری داشته باشد و قطعی شود.') {
+  constructor(message = 'قرارداد باید قطعی باشد یا برای نسخه جاری، مجوز اعتباری مشتری خاص و تأیید فروش داشته باشد.') {
     super(message);
   }
 }
@@ -47,6 +49,7 @@ export const assertOrdinaryAccountingCommercialGate = async (
   await tx.$queryRaw(Prisma.sql`SELECT id FROM sales_contracts WHERE id = ${contractId} FOR UPDATE`);
   const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
   if (!contract) throw new OrdinaryAccountingCommercialError('قرارداد پیدا نشد.');
+  if (contract.customerCreditCustomerId) await lockCustomerCredit(tx, contract.customerCreditCustomerId);
   await refreshDispatchExpiryExemption(tx, contract);
   if (isNewOrdinaryCommercialFlow(contract)) {
     if (expectedRevision !== undefined && contract.commercialRevision !== expectedRevision) {

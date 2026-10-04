@@ -105,7 +105,10 @@ export const provisionApprovedSalesContractCustomer = async (tx: Database, input
 };
 
 export const backfillApprovedSalesContractCustomers = async (database: PrismaClient, input: { actorId: string }) => database.$transaction(async (tx) => {
-  const contracts = await tx.salesContract.findMany({ where: { status: { in: ['APPROVED', 'SIGNED', 'PRINTED'] } },
+  const contracts = await tx.salesContract.findMany({ where: { OR: [{ status: { in: ['APPROVED', 'SIGNED', 'PRINTED'] } },
+    { status: 'PENDING_APPROVAL', commercialFlowVersion: 1, partnerKind: null, partnerCaseId: null,
+      customerCreditAmountRials: { gt: 0 }, customerCreditRevision: { equals: tx.salesContract.fields.commercialRevision },
+      salesApprovalRevision: { equals: tx.salesContract.fields.commercialRevision } }] },
     select: { id: true, updatedAt: true }, orderBy: { createdAt: 'asc' } });
   const profiles: Array<unknown> = [];
   for (const contract of contracts) profiles.push(await provisionApprovedSalesContractCustomer(tx, {

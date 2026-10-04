@@ -62,7 +62,8 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
         decisionActions: row?.commercial ? [
           ...(actions?.canApproveSales ? [{ label: 'تایید', tone: 'success' as const,
             onClick: () => void run(() => decidePartnerCommercial(currentView.owner.caseId, row.commercial!.revision, 'APPROVE_SALES')) }] : []),
-
+          ...(actions?.canCancel && row.commercial.status !== 'FINAL' ? [{ label: 'رد', tone: 'danger' as const,
+            onClick: () => { if (!pending) { setCancelReason(''); setCancelOpen(true); } } }] : []),
         ] : row ? decisionActions : [],
         canPreview: Boolean(actions?.canPreview), canIssue: Boolean(actions?.canIssue),
         canContinue: Boolean(actions?.canContinue), canFinalize: Boolean(actions?.canFinalize),

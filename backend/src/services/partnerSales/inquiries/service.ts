@@ -435,7 +435,21 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
         let assignment: { id: string; revision: number } | null = null;
         const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
         if (!inquiry) {
-          const responder = await dependencies.resolveInitialResponder(tx, { profileId: profile.id });
+          // A technical revision may negotiate repeatedly, but its initial package
+          // is unique. The Case lock above serializes this check and creation.
+          if (command.type === 'CASE_PRICING_SUBMIT' && definitions.every(row => !row.predecessorId) &&
+              await tx.partnerInquiry.count({ where: { caseId: command.caseId, caseRevision: command.expected.revision } })) {
+            return { ok: false, error: partnerError('STATE_CONFLICT') };
+          }
+          const previousAssignments = definitions.some(row => row.predecessorId) ? await tx.partnerInquiryAssignment.findMany({ where: {
+            inquiry: { rows: { some: { id: { in: definitions.flatMap(row => row.predecessorId ? [row.predecessorId] : []) } } } },
+          }, orderBy: { revision: 'desc' }, select: { inquiryId: true, responderId: true } }) : [];
+          const latestAssignments = [...new Map(previousAssignments.map(row => row.inquiryId).map(id =>
+            [id, previousAssignments.find(row => row.inquiryId === id)!])).values()];
+          const previousResponderIds = [...new Set(latestAssignments.map(row => row.responderId))];
+          const retainedResponder = previousResponderIds.length === 1 && dependencies.resolveResponder
+            ? await dependencies.resolveResponder(tx, { responderId: previousResponderIds[0] }) : null;
+          const responder: Awaited<ReturnType<PartnerInquiryDependencies['resolveInitialResponder']>> = retainedResponder?.ok ? retainedResponder : await dependencies.resolveInitialResponder(tx, { profileId: profile.id });
           if (!responder.ok) {
             if (responder.error.code !== 'NOT_ASSIGNED' || !dependencies.ensureMissingResponderSupport) return responder;
             const support = await dependencies.ensureMissingResponderSupport(tx, { profileId: profile.id, reporterId: dependencies.actorId });

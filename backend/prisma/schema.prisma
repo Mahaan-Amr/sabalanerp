@@ -11837,7 +11837,6 @@ model PartnerInquiry {
   rows        PartnerInquiryRow[]
   events      PartnerInquiryEvent[]
 
-  @@unique([caseId, caseRevision], map: "partner_inquiries_case_revision_key")
 
   @@index([profileId, createdAt])
   @@index([caseId, createdAt])

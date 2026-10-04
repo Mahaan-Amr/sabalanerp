@@ -6,6 +6,7 @@ import { ErpButton, ErpInlineState, ErpLoading, ErpSheet, ErpSummaryGrid, ErpTex
 import api, { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { defaultCustomPrintSettings, type SalesPdfVariant, type CustomPrintSettings, type CustomPrintPreset } from '@/features/accounting/AccountingCustomPrintSettings';
+import PartnerFinancialVoidPanel from '@/features/accounting/PartnerFinancialVoidPanel';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import { money, type FinancialInvoiceApprovalPayload } from '@/features/accounting/accountingUi';
 import { PartnerAccountingDetailView, type PartnerInternalDocument as InternalDocument, type PartnerDetailSection } from '@/features/accounting/PartnerAccountingDetailView';
@@ -60,14 +61,15 @@ export default function PartnerInternalAccountingContractPage() {
     productRowsMode: preset === 'summarized' ? 'summarized' : 'detailed', showPrices: preset !== 'workshop',
     showPaymentSection: preset !== 'workshop', showTotals: preset !== 'workshop',
     columns: { ...current.columns, rate: preset !== 'workshop', total: preset !== 'workshop' } }));
-  const [action, setAction] = useState<'flag' | 'correction'>();
+  const [action, setAction] = useState<'flag' | 'correction' | 'edit'>();
   const [requestKey, setRequestKey] = useState('');
-  const openAction = (kind: 'flag' | 'correction') => { setAction(kind); setRequestKey(crypto.randomUUID()); setError(undefined); };
+  const openAction = (kind: 'flag' | 'correction' | 'edit') => { setAction(kind); setRequestKey(crypto.randomUUID()); setError(undefined); };
   const submitAction = async (values: Record<string, string | number>) => {
     if (!action || pending) return;
     setPending(true); setError(undefined);
     try {
-      if (action === 'correction') await accountingAPI.createPartnerInternalCorrectionRequest(caseId,
+      if (action === 'edit') await api.post(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/edit-permission`, { reason: String(values.reason).trim() }, { headers: { 'X-Idempotency-Key': requestKey } });
+      else if (action === 'correction') await accountingAPI.createPartnerInternalCorrectionRequest(caseId,
         { category: 'OTHER', priority: 'MEDIUM', reason: String(values.reason).trim() }, requestKey);
       else await accountingAPI.flagPartnerInternalRecord(caseId,
         { category: 'OTHER', severity: 'MEDIUM', title: String(values.title), note: String(values.reason).trim() });
@@ -119,13 +121,13 @@ export default function PartnerInternalAccountingContractPage() {
   if (!document) return <ErpInlineState kind="error" title={error!}
     action={{ label: 'تلاش دوباره', onClick: () => void load() }} />;
   return <>
-    <PartnerAccountingDetailView document={document} section={section} onSection={setSection}
+    <PartnerAccountingDetailView financialVoidPanel={<PartnerFinancialVoidPanel document={document} pending={pending} refresh={load} />} document={document} section={section} onSection={setSection}
       invoiceOpen={invoiceOpen} onOpenInvoice={openInvoice} onApproveInvoice={approveInvoice}
       onCreateReceivable={() => { setError(undefined); setReceivableOpen(true); }}
       printVariant={printVariant} onPrintVariant={setPrintVariant} customPrintSettings={customPrintSettings}
       setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset}
       pending={pending} error={action ? undefined : error} onRefresh={() => void load()} onPdf={print => void pdf(print)}
-      onFlag={() => openAction('flag')} onCorrection={() => openAction('correction')}
+      onOpenEdit={() => openAction('edit')} onFlag={() => openAction('flag')} onCorrection={() => openAction('correction')}
       onResolve={flag => { setFlagTarget(flag); setResolutionReason(''); }} />
     <ErpSheet open={receivableOpen} onClose={() => { if (!pending) setReceivableOpen(false); }}
       title="ایجاد دریافتنی" presentation="modal" pending={pending}
@@ -137,7 +139,7 @@ export default function PartnerInternalAccountingContractPage() {
       ]} />
       {error && <ErpInlineState kind="error" title={error} />}
     </ErpSheet>
-    <AccountingActionModal open={Boolean(action)} title={action === 'flag' ? 'پرچم حسابداری' : 'درخواست اصلاح سند داخلی'}
+    <AccountingActionModal open={Boolean(action)} title={action === 'flag' ? 'پرچم حسابداری' : action === 'edit' ? 'بازکردن مجوز ویرایش و لغو قرارداد' : 'درخواست اصلاح سند داخلی'}
       fields={[...(action === 'flag' ? [{ id: 'title', label: 'عنوان', type: 'text' as const, required: true }] : []),
         { id: 'reason', label: 'توضیح و دلیل', type: 'textarea', required: true }]}
       busy={pending} error={error} onClose={() => { if (!pending) setAction(undefined); }} onSubmit={submitAction} />

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   CaseStateSchema,
+  PartnerEventSchema,
   CustomerContractOutputSchema,
   FulfillmentViewSchema,
   PartnerCaseViewSchema,
@@ -20,6 +21,9 @@ import { buildCaseCancellationEvent, buildCaseCommitmentEvent, projectCustomerCo
 import { caseComparableAmount } from '../reporting/comparable';
 import { buildCaseProjections, type CaseRevisionProjectionEvidence } from './projections';
 import { subtract } from '../reporting/money';
+import { sum } from '../reporting/money';
+import { readPartnerCommercialEditPermission } from './commercialEditPermission';
+import { readPersistedPartnerEvents } from '../events/persisted';
 
 type Transaction = Prisma.TransactionClient;
 type Commit = Extract<ReturnType<typeof PartnerCommandSchema.parse>, { type: 'CASE_COMMIT' }>;
@@ -117,7 +121,7 @@ async function readCase(tx: Transaction, caseId: string) {
       partySnapshots: true, wholesaleEnvelope: true, retailEnvelope: true, paymentEvidence: true,
       customerContent: true, internalProjection: true, customerProjection: true } },
     customerContract: { select: { contractNumber: true, partnerRevision: true, partnerIntegrityHash: true,
-      status: true, signedAt: true, printedAt: true } },
+      status: true, signedAt: true, printedAt: true, firstFinancialRecordAt: true } },
   } });
 }
 
@@ -358,12 +362,26 @@ Promise<ExecutionResult> {
   if (expectedError) return { ok: false, error: expectedError };
 
   if (command.type === 'CASE_CANCEL') {
-    if (!['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(row.state) || command.expectedState !== row.state) {
+    if (!['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED', 'COMMITTED'].includes(row.state) || command.expectedState !== row.state) {
       return { ok: false, error: partnerError('STATE_CONFLICT') };
     }
     const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CASE_CANCEL',
       purpose: dependencies.cancellationPurpose, root: { kind: 'CASE', id: caseId } });
     if (!authorization.ok) return authorization;
+    const committed = row.state === 'COMMITTED';
+    if ((committed || row.customerContract?.firstFinancialRecordAt || row.customerContract?.status === 'SIGNED') &&
+        (!row.customerContractId || !await readPartnerCommercialEditPermission(tx, row.customerContractId, dependencies.actorId))) {
+      return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
+    }
+    if (await tx.logisticsLoading.findFirst({ where: { partnerCaseId: caseId, status: { not: 'CANCELLED' } }, select: { id: true } }) ||
+        await tx.shipmentQuantityEvidence.findFirst({ where: { partnerCaseId: caseId,
+          kind: { in: ['PHYSICAL_EXIT', 'MANUAL_OUTAGE_EXIT', 'LEGACY_DISPATCHED'] } }, select: { id: true } })) {
+      return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
+    }
+    if (await tx.accountingFinancialVoidCase.findFirst({ where: { status: 'OPEN',
+      metadata: { path: ['partnerCaseId'], equals: caseId } }, select: { id: true } })) {
+      return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
+    }
     const retained = await dependencies.cancelConfirmationSessions(tx, { caseId, reason: command.reason });
     if (!retained.ok) throw new RollbackLifecycleResult(retained);
     const at = await clock(tx), eventId = randomUUID(), sequence = await nextSequence(tx, caseId);
@@ -371,6 +389,61 @@ Promise<ExecutionResult> {
     const partner = await historicalPartner(tx, { version: 1, commandId: command.commandId,
       caseId, revision: owner.revision, integrityHash: owner.integrityHash, state: row.state, eventIds: [] });
     if (!partner) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    if (committed) {
+      if (!row.internalRecordId || !row.commitmentEventId || !row.customerContractId) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+      // Existing receipts and fiscal effects must be resolved through their
+      // explicit Accounting workflow; cancellation never manufactures refunds.
+      const invoices = await tx.accountingFinancialRecord.findMany({ where: { sourceKind: 'PARTNER_INTERNAL_RECORD',
+        sourceId: row.internalRecordId, status: { not: 'VOIDED' } }, include: { receivables: { include: { paymentStatuses: true } }, taxRecords: true } });
+      if (invoices.some(invoice => invoice.status === 'DRAFT' || invoice.receivables.some(item => !item.paidAmount.isZero() ||
+        item.paymentStatuses.some(payment => payment.method === 'CHECK' ? !['RETURNED', 'BOUNCED', 'REPLACED'].includes(payment.checkStatus || '') && payment.status !== 'REVERSED'
+          : ['RECEIVED', 'RECONCILED'].includes(payment.status))) || invoice.taxRecords.some(tax => !['NOT_READY', 'READY'].includes(tax.submissionStatus)))) {
+        throw new RollbackLifecycleResult({ ok: false, error: partnerError('DEPENDENCY_BLOCKED') });
+      }
+      const { readPartnerInvoiceSource } = await import('../accounting/invoiceSource');
+      for (const invoice of invoices) await readPartnerInvoiceSource(tx, invoice, caseId);
+      const persisted = await tx.partnerCaseEvent.findMany({ where: { caseId }, orderBy: { sequence: 'asc' } });
+      const events = readPersistedPartnerEvents({ id: caseId, internalRecordId: row.internalRecordId }, persisted);
+      const amount = sum(events.flatMap(event => event.type === 'CASE_COMMITTED' ? [event.sabalanNetAmount.amount]
+        : event.type === 'SABALAN_ADJUSTMENT' ? [event.delta] : []));
+      const commitment = events.find(event => event.type === 'CASE_COMMITTED');
+      if (!commitment || commitment.type !== 'CASE_COMMITTED') throw new RollbackLifecycleResult({ ok: false, error: partnerError('INTEGRITY_CONFLICT') });
+      const permission = await readPartnerCommercialEditPermission(tx, row.customerContractId, dependencies.actorId, new Date(at.instant));
+      if (!permission) throw new RollbackLifecycleResult({ ok: false, error: partnerError('DEPENDENCY_BLOCKED') });
+      const correctionId = `commercial-cancel:${command.commandId}`, adjustmentId = randomUUID();
+      await tx.partnerCorrectionOpportunity.create({ data: { id: correctionId, caseId, predecessorRevision: row.headRevision,
+        scope: 'VOID', scopeHash: await canonicalHash({ permissionId: permission.id, reason: command.reason }), requesterId: dependencies.actorId,
+        approvedBy: permission.createdByUserId, approvedAt: permission.createdAt, expiresAt: permission.dueAt!, calendarVersion: 'COMMON_COMMERCIAL_PERMISSION_V1',
+        evidence: json({ permissionId: permission.id, reason: command.reason }) } });
+      const adjustment = PartnerEventSchema.parse({ schemaVersion: 1, type: 'SABALAN_ADJUSTMENT', eventId: adjustmentId,
+        commandId: `${command.commandId}:adjustment`, correlationId: command.correlationId, actorId: dependencies.actorId,
+        recordedAt: at.instant, effectiveDate: at.date, owner, internalRecordId: row.internalRecordId,
+        originalRealizationEventId: row.commitmentEventId, correctionId, delta: subtract('0', amount), currency: commitment.sabalanNetAmount.currency, reason: command.reason });
+      await tx.partnerFinancialAdjustment.create({ data: { id: randomUUID(), caseId, caseRevision: owner.revision, correctionId,
+        originalRealizationEventId: row.commitmentEventId, effectiveDate: new Date(`${at.date}T00:00:00.000Z`), delta: subtract('0', amount),
+        currency: commitment.sabalanNetAmount.currency, commandId: adjustment.commandId, evidence: json(adjustment) } });
+      await tx.partnerCaseEvent.create({ data: { id: adjustmentId, caseId, caseRevision: owner.revision, integrityHash: owner.integrityHash,
+        sequence, type: adjustment.type, actorId: dependencies.actorId, commandId: adjustment.commandId, correlationId: command.correlationId,
+        effectiveDate: new Date(`${at.date}T00:00:00.000Z`), reason: command.reason, evidence: json({ publicEvent: adjustment }) } });
+      const voided = PartnerEventSchema.parse({ schemaVersion: 1, type: 'CASE_VOIDED', eventId, commandId: command.commandId,
+        correlationId: command.correlationId, actorId: dependencies.actorId, recordedAt: at.instant, effectiveDate: at.date,
+        owner, correctionId, commitmentEventId: row.commitmentEventId, adjustmentEventIds: [adjustmentId], dependencyEvidenceIds: [permission.id], reason: command.reason });
+      await tx.partnerSaleCase.update({ where: { id: caseId }, data: { state: 'VOIDED', stateRevision: { increment: 1 } } });
+      await tx.salesContract.update({ where: { id: row.customerContractId }, data: { status: 'CANCELLED', lostAt: new Date(at.instant),
+        isInactive: true, inactiveAt: new Date(at.instant), inactiveBy: dependencies.actorId, inactiveReason: command.reason } });
+      await tx.partnerCaseEvent.create({ data: { id: eventId, caseId, caseRevision: owner.revision, integrityHash: owner.integrityHash,
+        sequence: sequence + 1, stateRevision: row.stateRevision + 1, type: voided.type, fromState: row.state, toState: 'VOIDED',
+        actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,
+        effectiveDate: new Date(`${at.date}T00:00:00.000Z`), reason: command.reason, evidence: json({ publicEvent: voided }) } });
+      const { voidAccountingRecordInTransaction } = await import('../../accountingService');
+      for (const invoice of invoices) await voidAccountingRecordInTransaction(tx, { recordId: invoice.id, actorId: dependencies.actorId,
+        voidReason: command.reason, externalReference: correctionId, downstreamNote: 'Explicit cancellation preflight verified no active receipt or tax effect', voidedAt: new Date(at.instant) });
+      const { closePartnerCommercialEditPermission } = await import('../../crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter');
+      await closePartnerCommercialEditPermission(tx, { dutyId: permission.id, actorUserId: dependencies.actorId,
+        reason: command.reason, now: new Date(at.instant) });
+      await saveOutcome(tx, { ...key, caseId, payloadHash, commandId: command.commandId, owner, state: 'VOIDED', eventIds: [adjustmentId, eventId] });
+      return { ok: true, value: { commandId: command.commandId, replayed: false, case: { ...partner, state: 'VOIDED' }, eventIds: [adjustmentId, eventId] } };
+    }
     const event = buildCaseCancellationEvent({ eventId, commandId: command.commandId,
       correlationId: command.correlationId, actorId: dependencies.actorId, recordedAt: at.instant,
       effectiveDate: at.date, owner, reason: command.reason });

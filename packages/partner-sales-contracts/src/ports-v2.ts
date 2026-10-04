@@ -11,7 +11,8 @@ export const PartnerQueryV2Schema = z.discriminatedUnion('purpose', [
   z.object({ schemaVersion: z.literal(2), purpose: z.literal('PARTNER_MANAGEMENT'), ...page,
     section: z.enum(['PROFILES', 'TRANSFERS']).optional(), history: z.boolean().optional(),
     transferStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(), search: z.string().trim().max(200).optional(), transferId: IdSchema.optional() }).strict(),
-  z.object({ schemaVersion: z.literal(2), purpose: z.literal('RESPONDER_WORKSPACE'), ...page }).strict(),
+  z.object({ schemaVersion: z.literal(2), purpose: z.literal('RESPONDER_WORKSPACE'), ...page,
+    view: z.enum(['pending', 'answered', 'history']).optional(), search: z.string().trim().max(200).optional() }).strict(),
 ]);
 export type PartnerQueryV2 = z.infer<typeof PartnerQueryV2Schema>;
 export interface PartnerQueryV2Results {

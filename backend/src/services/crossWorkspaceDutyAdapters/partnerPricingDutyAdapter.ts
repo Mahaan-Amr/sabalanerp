@@ -253,8 +253,12 @@ const loadInboxProjection: CrossWorkspaceDutySourceAdapter['loadInboxProjection'
       sourceIsCurrent: current?.id === inquiry.id && inquiry.revision === input.sourceVersion && inquiry.rows.every((row: any) => row.outcome !== 'PENDING') };
   }
   const pending = inquiry.rows.filter((row: any) => row.outcome === 'PENDING');
+  const rejectionReasons = pending.flatMap(row => {
+    const definition = parseInquiryDefinition(row.definition);
+    return definition?.predecessorReason ? [`${definition.description}: ${definition.predecessorReason}`] : [];
+  });
   return { title: `بررسی قیمت پرونده همکار-${inquiry.case.trackingCode?.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 }) ?? '—'}`,
-    description: `${pending.length.toLocaleString('fa-IR')} ردیف فنی در انتظار قیمت سبلان`,
+    description: [`${pending.length.toLocaleString('fa-IR')} ردیف فنی در انتظار قیمت سبلان`, ...rejectionReasons].join(' · '),
     destinationHref: `/dashboard/sales/partner-inquiries?inquiryId=${encodeURIComponent(inquiry.id)}`,
     sourceIsCurrent: pending.length > 0 };
 };

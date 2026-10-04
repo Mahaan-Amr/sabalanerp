@@ -25,7 +25,8 @@ export function createPartnerAccountingAdapter(repository: PartnerAccountingRepo
         if (existing.commitmentEventId !== source.commitment.eventId || existing.preparation.evidenceHash !== prepared.value.evidenceHash) return failure('IDEMPOTENCY_CONFLICT');
         return { ok: true, value: { queueEvidenceId: existing.queueEvidenceId } };
       }
-      const queueEvidenceId = `partner-accounting:${(await contracts.canonicalHash(source.commitment.eventId)).slice(10)}`;
+      const initialId = `partner-accounting:${(await contracts.canonicalHash(source.commitment.eventId)).slice(10)}`;
+      const queueEvidenceId = tx.nextQueueEvidenceId ? await tx.nextQueueEvidenceId(source.view.owner.caseId, initialId) : initialId;
       await tx.insertQueue({ queueEvidenceId, commitmentEventId: source.commitment.eventId, preparation: prepared.value });
       return { ok: true, value: { queueEvidenceId } };
     });

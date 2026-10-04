@@ -10,7 +10,7 @@ import {
   type Result,
 } from '@sabalanerp/partner-sales-contracts';
 
-type Page = { cursor?: string; limit: number; section?: 'PROFILES' | 'TRANSFERS'; history?: boolean; transferStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'; search?: string; transferId?: string };
+type Page = { cursor?: string; limit: number; view?: 'pending' | 'answered' | 'history'; section?: 'PROFILES' | 'TRANSFERS'; history?: boolean; transferStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'; search?: string; transferId?: string };
 
 export interface PartnerWorkspaceQueryDependencies<Transaction> {
   actorId: string;
@@ -20,6 +20,9 @@ export interface PartnerWorkspaceQueryDependencies<Transaction> {
   listResponderInquiryIds(transaction: Transaction, page: Page): Promise<{
     inquiryIds: string[];
     hasMore?: boolean;
+    grouped?: boolean;
+    nextCursor?: string;
+    contractCounts?: { pending: number; answered: number; history: number };
   }>;
   readResponderInquiry(transaction: Transaction, inquiryId: string): Promise<Result<ResponderInquiryViewV2>>;
   readManagementWorkspace(transaction: Transaction, page: Page): Promise<Result<PartnerManagementWorkspaceViewV2>>;
@@ -36,7 +39,8 @@ export function createPartnerWorkspaceQuery<Transaction>(
     }
     const page = {
       ...(parsed.data.cursor ? { cursor: parsed.data.cursor } : {}),
-      limit: parsed.data.limit ?? 20,
+      limit: parsed.data.purpose === 'RESPONDER_WORKSPACE' ? 5 : parsed.data.limit ?? 20,
+      ...(parsed.data.purpose === 'RESPONDER_WORKSPACE' ? { view: parsed.data.view ?? 'pending', search: parsed.data.search } : {}),
       ...(parsed.data.purpose === 'PARTNER_MANAGEMENT' ? { section: parsed.data.section, history: parsed.data.history, transferStatus: parsed.data.transferStatus, search: parsed.data.search, transferId: parsed.data.transferId } : {}),
     };
     return dependencies.transaction(async transaction => {
@@ -62,7 +66,7 @@ export function createPartnerWorkspaceQuery<Transaction>(
         const inquiry = ResponderInquiryViewV2Schema.safeParse(result.value);
         if (!inquiry.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
         inquiries.push(inquiry.data);
-        if (inquiries.length === page.limit) {
+        if (!candidates.grouped && inquiries.length === page.limit) {
           hasUnscannedCandidates = index < candidates.inquiryIds.length - 1;
           break;
         }
@@ -72,7 +76,9 @@ export function createPartnerWorkspaceQuery<Transaction>(
         purpose: 'RESPONDER_WORKSPACE',
         actorId: dependencies.actorId,
         inquiries,
-        ...((hasUnscannedCandidates || candidates.hasMore) && scannedCursor ? { nextCursor: scannedCursor } : {}),
+        ...(candidates.contractCounts ? { contractCounts: candidates.contractCounts } : {}),
+        ...(candidates.grouped && candidates.nextCursor ? { nextCursor: candidates.nextCursor } : {}),
+        ...(!candidates.grouped && (hasUnscannedCandidates || candidates.hasMore) && scannedCursor ? { nextCursor: scannedCursor } : {}),
       });
       return projected.success ? { ok: true, value: projected.data } as never
         : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;

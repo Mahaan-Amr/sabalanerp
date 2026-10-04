@@ -228,6 +228,12 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     const successor = await submit(ids.actorId, ids.inquiryId, 'row-3',
       { rowId: 'row-1', revision: 2, reason: 'اصلاح فنی پس از قیمت قبلی' }, 'row-1');
     assert.equal((await partner.execute(successor)).ok, true);
+    const requoteView = await responder.query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: ids.inquiryId });
+    assert.equal(requoteView.ok, true);
+    if (requoteView.ok && requoteView.value.purpose === 'RESPONDER_INQUIRY') {
+      assert.equal(requoteView.value.rows.find(row => row.rowId === 'row-3')?.partnerRejectionReason,
+        'اصلاح فنی پس از قیمت قبلی', 'the assigned pricing duty must expose the Partner reoffer reason');
+    }
     const successorDecisions = [{ rowId: 'row-3', expectedRevision: 1, outcome: 'APPROVED' as const,
       wholesaleUnitPrice: { amount: '1300000', currency: 'IRT' as const } }];
     const successorIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
@@ -566,9 +572,9 @@ test('a repeated pricing submission replaces its duty without violating response
     let revision = 1;
     // Source facts are isolated fixtures; duty writes and database constraints are real.
     const database = new Proxy(tx, { get(target, property, receiver) {
-      if (property === 'partnerInquiry') return { findUniqueOrThrow: async () => ({
+      if (property === 'partnerInquiry') return { findMany: async () => [], findUniqueOrThrow: async () => ({
         id: ids.inquiryId, caseId: 'case-fixture', revision, case: { caseNumber: 'fixture' },
-        assignments: [{ responderId: ids.responderId }],
+        assignments: [{ responderId: ids.responderId }], rows: [],
       }) };
       return Reflect.get(target, property, receiver);
     } });

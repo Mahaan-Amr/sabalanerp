@@ -19,12 +19,13 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
     return dependencies.transaction(async tx => {
       const inquiry = await tx.partnerInquiry.findUnique({ where: { id: inquiryId }, select: {
         id: true, profileId: true, submittedAt: true, pricingReadyAt: true, pricingExpiresAt: true,
+        case: { select: { id: true, caseNumber: true, customerContract: { select: { contractNumber: true } } } },
         profile: { select: { user: { select: { id: true, firstName: true, lastName: true } } } },
         assignments: { orderBy: { revision: 'desc' }, take: 1, select: { id: true, revision: true, responderId: true } },
         events: { orderBy: { revision: 'asc' }, select: { type: true, reason: true, evidence: true } },
         rows: { orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }], include: {
-          predecessor: { select: { id: true, revision: true } },
-          successor: { select: { id: true, revision: true, outcome: true, approval: { select: { expiresAt: true } } } },
+          predecessor: { select: { id: true, revision: true, inquiryId: true } },
+          successor: { select: { id: true, revision: true, inquiryId: true, outcome: true, approval: { select: { expiresAt: true } } } },
           approval: { include: { usages: { include: { binding: { include: {
             caseRevision: { include: { case: { select: { caseNumber: true } } },
             } } } } } } },
@@ -99,9 +100,31 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
               (fact.label === 'تعداد' || fact.label === 'لایه') &&
               !configuration.some(existing => existing.label === fact.label))];
           }
-          const currentState = state(row.outcome, row.approval?.expiresAt, row.successor?.outcome === 'APPROVED');
+          const currentState = state(row.outcome, row.approval?.expiresAt, Boolean(row.successor));
+          const negotiationHistory: Array<{ rowId: string; offeredAt?: string; price?: { amount: string; currency: string }; rejectionReason?: string }> = [];
+          let previousId = row.predecessor?.id;
+          let rejectionReason = definition.predecessorReason;
+          const visited = new Set([row.id]);
+          while (previousId) {
+            if (visited.has(previousId)) return null;
+            visited.add(previousId);
+            const previous = await tx.partnerInquiryRow.findUnique({ where: { id: previousId },
+              include: { approval: true, inquiry: { select: { profileId: true, caseId: true } } } });
+            if (!previous || previous.inquiry.profileId !== inquiry.profileId || previous.inquiry.caseId !== (inquiry.case?.id ?? null)) return null;
+            const previousDefinition = parseInquiryDefinition(previous.definition);
+            if (!previousDefinition) return null;
+            negotiationHistory.unshift({ rowId: previous.id,
+              ...(previous.approval ? { offeredAt: previous.approval.approvedAt.toISOString(),
+                price: { amount: previous.approval.wholesaleUnitPrice.toString(), currency: previous.approval.currency } } : {}),
+              ...(rejectionReason ? { rejectionReason } : {}) });
+            rejectionReason = previousDefinition.predecessorReason;
+            previousId = previous.predecessorId ?? undefined;
+          }
           return { rowId: row.id, revision: row.revision, identity: definition.identity,
             description: definition.description, configuration,
+            ...(definition.predecessorReason ? { partnerRejectionReason: definition.predecessorReason } : {}),
+            negotiationHistory,
+            superseded: Boolean(row.successor),
             ...(definition.deliveryFacts ? { deliveryFacts: definition.deliveryFacts } : {}),
             ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
             ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
@@ -115,6 +138,8 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         }));
         if (responseRows.some(row => row === null)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
         const view = ResponderInquiryViewV2Schema.safeParse({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: inquiry.id,
+          ...(inquiry.case ? { caseId: inquiry.case.id, caseNumber: inquiry.case.caseNumber,
+            ...(inquiry.case.customerContract ? { customerContractNumber: inquiry.case.customerContract.contractNumber } : {}) } : {}),
           submittedAt: inquiry.submittedAt?.toISOString(),
           partnerDisplayName: `${inquiry.profile.user.firstName} ${inquiry.profile.user.lastName}`.trim(),
           assignmentId: assignment.id, assignmentRevision: assignment.revision,
@@ -137,9 +162,9 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
           ...(!row.approval && (reasons.get(row.id) || definition.predecessorReason)
             ? { noteOrReason: reasons.get(row.id) || definition.predecessorReason } : {}),
           usedCaseNumbers: row.approval?.usages.map(usage => usage.binding.caseRevision.case.caseNumber) ?? [],
-          ...(row.predecessor ? { predecessor: { inquiryId: inquiry.id, rowId: row.predecessor.id,
+          ...(row.predecessor ? { predecessor: { inquiryId: row.predecessor.inquiryId, rowId: row.predecessor.id,
             revision: row.predecessor.revision, ...(definition.predecessorReason ? { reason: definition.predecessorReason } : {}) } } : {}),
-          ...(successor ? { successor: { inquiryId: inquiry.id, rowId: successor.id, revision: successor.revision,
+          ...(successor ? { successor: { inquiryId: successor.inquiryId, rowId: successor.id, revision: successor.revision,
             state: state(successor.outcome, successor.approval?.expiresAt) } } : {}),
         };
       });

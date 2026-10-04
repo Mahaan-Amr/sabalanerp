@@ -1,3 +1,4 @@
+import { partnerFinancialChainIsVoiding } from './financialVoidSource';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   PartnerEventSchema, PaymentPlanSchema, SabalanInternalRecordViewSchema, canonicalHash, partnerError,
@@ -119,7 +120,7 @@ export async function setSabalanPaymentPlan(database: PrismaClient, actorId: str
         source.value.rawView.owner.integrityHash !== input.expected.integrityHash) {
       return { ok: false, error: partnerError('ROW_STALE') };
     }
-    if (await partnerPredecessorIsFrozen(tx, source.value.row.id, source.value.row.headRevision)) {
+    if ((await partnerPredecessorIsFrozen(tx, source.value.row.id, source.value.row.headRevision) || await partnerFinancialChainIsVoiding(tx, source.value.row.id))) {
       return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
     }
     const identity = { actorId, operation: 'SABALAN_PAYMENT_PLAN_SET', targetScope: input.expected.caseId,

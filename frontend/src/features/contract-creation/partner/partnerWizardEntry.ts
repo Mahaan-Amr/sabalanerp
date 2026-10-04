@@ -6,6 +6,10 @@ import { defaultPartnerRetailRows, partnerRetailIntentRows, remainingPartnerAmou
 import type { PartnerWizardDraft } from './PartnerContractWizard';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
+export function partnerRequoteInquiryId(nonce: string): string {
+  return IdSchema.parse(`partner-requote:${nonce}`);
+}
+
 export function partnerCasePricingInquiryIds(recoveryId: string, publishedIds: readonly string[],
   rows: readonly PartnerInquiryRow[], caseScoped = false): string[] {
   const ids = new Set(publishedIds.filter(id => caseScoped || id.startsWith(`partner-case-pricing:${recoveryId}:`)));
@@ -61,7 +65,7 @@ export function latestMatchingPartnerInquiryRow(
   return rows.filter(row => row.configurationRef.productRowId === previous.configurationRef.productRowId &&
     row.configurationRef.recoveryId === previous.configurationRef.recoveryId &&
     row.configurationRef.recoveryRevision === previous.configurationRef.recoveryRevision &&
-    row.state !== 'SUPERSEDED').at(-1) ?? previous;
+    row.state !== 'SUPERSEDED' && !row.successor).at(0) ?? previous;
 }
 
 export function partnerCaseHasIntegrityError(error: unknown): boolean {

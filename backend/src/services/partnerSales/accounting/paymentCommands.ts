@@ -14,6 +14,8 @@ import { hasConflictingPartnerAccountingEvidence, hasPartnerAccountingEvidence }
 import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { readPartnerInvoiceSource } from './invoiceSource';
 import { withCurrentSabalanPlan } from './sabalanPlan';
+import { readPartnerReceivableEvidence } from './receivableEvidence';
+import { readPartnerCollections } from './collections';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -73,7 +75,8 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
     // Return denial before any business mutation so its central decision audit survives.
     if (!allowed.ok || !(await readPartnerAccountingCapabilities(tx, actor.userId)).payments) return { denied: true as const };
     const currentInvoice = await tx.accountingFinancialRecord.findUniqueOrThrow({ where: { id: target.invoiceRecord.id } });
-    await readPartnerInvoiceSource(tx, currentInvoice, caseId);
+    const invoiceSource = await readPartnerInvoiceSource(tx, currentInvoice, caseId);
+    const voidCase = await tx.accountingFinancialVoidCase.findFirst({ where: { sourceRecordId: currentInvoice.id, status: 'OPEN' } });
     const identity = { actorId: actor.userId, operation: `ACCOUNTING_${command.kind}`, targetScope: caseId, key: command.idempotencyKey };
     const { correlationId: _correlationId, ...payload } = command;
     const payloadHash = await canonicalHash(payload);
@@ -84,6 +87,7 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
       if (typeof paymentEventId !== 'string') throw conflict();
       return { paymentEventId, replay: true };
     }
+    if (voidCase && command.kind === 'REGISTER_RECEIPT') throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'زنجیره مالی در حال ابطال است و دریافت جدید نمی‌پذیرد.');
     const row = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: caseId }, include: {
       head: true, profile: { select: { userId: true } }, events: { orderBy: { sequence: 'asc' } } } });
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
@@ -96,10 +100,25 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
     const official = purchase.official;
     const view = SabalanInternalRecordViewSchema.safeParse(object(row.head.internalProjection)?.accounting);
     const commitment = events.find(event => event.type === 'CASE_COMMITTED');
+    const voiding = Boolean(voidCase);
+    if (voiding) {
+      readPartnerReceivableEvidence(receivable, invoiceSource.preparation);
+      const collected = await readPartnerCollections(tx, { receivableId: receivable.id, currency: receivable.currency,
+        cutoff: clock.now, asOf: clock.now, preparation: invoiceSource.preparation });
+      if (collected === null || subtract(receivable.paidAmount.toString(), collected) !== '0') throw conflict();
+    }
+    const receivableSource = object(object(receivable.metadata)?.partnerReceivable);
+    if (command.contractId || receivable.invoiceRecordId !== currentInvoice.id || receivable.status === 'VOIDED' ||
+        !['ISSUED', 'POSTED'].includes(currentInvoice.status) || receivableSource?.partnerSellerId !== row.profile.userId ||
+        receivableSource?.commercialAccountId !== invoiceSource.preparation.debtor.commercialAccountId ||
+        await canonicalHash(receivableSource?.owner) !== await canonicalHash(invoiceSource.preparation.owner) ||
+        subtract(receivable.originalAmount.toString(), invoiceSource.preparation.amount.amount) !== '0' ||
+        subtract(receivable.remainingAmount.toString(), subtract(receivable.originalAmount.toString(), receivable.paidAmount.toString())) !== '0') throw conflict();
+    if (!voiding) {
     if (!view.success || !commitment || commitment.type !== 'CASE_COMMITTED' || row.state !== 'COMMITTED' ||
         !purchase.covered || !official || official.receivable.id !== receivable.id || command.contractId ||
         view.data.owner.revision !== row.headRevision || view.data.owner.integrityHash !== row.integrityHash ||
-        receivable.status === 'VOIDED' || !['ISSUED', 'POSTED'].includes(receivable.invoiceRecord!.status)) throw conflict();
+        !['ISSUED', 'POSTED'].includes(receivable.invoiceRecord!.status)) throw conflict();
     const currentView = await withCurrentSabalanPlan(tx, view.data);
     const prepared = await prepareCommittedAccountingSource({ view: { ...currentView, state: row.state },
       partnerSellerId: row.profile.userId, commitment }, { caseId, revision: row.headRevision, integrityHash: row.integrityHash });
@@ -108,6 +127,8 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
         official.receivable.commercialAccountId !== prepared.value.debtor.commercialAccountId ||
         subtract(receivable.paidAmount.toString(), official.received.amount) !== '0' ||
         subtract(receivable.remainingAmount.toString(), official.balance.amount) !== '0') throw conflict();
+    }
+    const financialOwner = voiding ? invoiceSource.preparation.owner : official!.receivable.owner;
     const occurredAt = effectiveInstant(command.receivedAt || command.occurredAt, clock.now);
     const movement = (kind: string, amount: string) => ({ kind, amount, effectiveAt: occurredAt.toISOString(),
       recordedAt: clock.now.toISOString(), confidence: 'authoritative' });
@@ -136,7 +157,7 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
         checkDueDate: checkDueInstant ? new Date(checkDueInstant) : null,
         handoverDate: command.check?.handoverDate ? effectiveInstant(command.check.handoverDate, clock.now) : null,
         occurredAt, notes: command.note, createdBy: actor.userId,
-        metadata: json({ partnerCaseId: caseId, owner: official.receivable.owner,
+        metadata: json({ partnerCaseId: caseId, owner: financialOwner,
           nationalCode: command.check?.nationalCode, collectionMovements: delta === '0' ? [] : [movement('RECEIVED', delta)] }) } });
     } else {
       before = command.paymentEventId ? await tx.accountingPaymentStatus.findUnique({ where: { id: command.paymentEventId } }) : null;
@@ -149,6 +170,7 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
       let status = before.status, checkStatus = before.checkStatus;
       if (command.kind === 'UPDATE_CHECK_STATUS') {
         const next = command.status as CheckAccountingStatus;
+        if (voidCase && !['RETURNED', 'BOUNCED'].includes(next)) throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'در پرونده ابطال فقط عودت یا برگشت چک مجاز است.');
         if (before.method !== 'CHECK' || !checkStatus || !partnerCheckTransitions[checkStatus]?.includes(next)) throw invalid();
         checkStatus = next;
         if (next === 'CLEARED') delta = subtract(before.amount.toString(), realized);
@@ -164,7 +186,7 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
       }
       payment = await tx.accountingPaymentStatus.update({ where: { id: before.id }, data: {
         status, checkStatus, occurredAt, notes: command.note || command.reason || before.notes,
-        metadata: json({ ...metadata, collectionMovements: movements }) } });
+        metadata: json({ ...metadata, collectionMovements: movements, ...(voidCase ? { voidCaseId: voidCase.id } : {}) }) } });
     }
     const paidAmount = sum([receivable.paidAmount.toString(), delta]);
     const remainingAmount = subtract(receivable.originalAmount.toString(), paidAmount);
@@ -175,7 +197,7 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
       const event = PartnerEventSchema.parse({ schemaVersion: 1, type: 'SABALAN_RECEIPT', eventId: randomUUID(),
         commandId: command.idempotencyKey, correlationId: command.correlationId, actorId: actor.userId,
         recordedAt: clock.now.toISOString(), effectiveDate: occurredAt.toISOString().slice(0, 10),
-        owner: official.receivable.owner, internalRecordId: row.internalRecordId,
+        owner: financialOwner, internalRecordId: row.internalRecordId,
         accountingReceiptId: payment.id, amount: { amount: delta, currency: receivable.currency } });
       const maximum = await tx.partnerCaseEvent.aggregate({ where: { caseId }, _max: { sequence: true } });
       await tx.partnerCaseEvent.create({ data: { id: event.eventId, caseId, caseRevision: event.owner.revision,

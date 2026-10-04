@@ -165,10 +165,8 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       where: { sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: current.internalRecordId ?? '' }, select: { id: true },
     });
     if (financial || current.state === 'COMMITTED' || current.customerContract.status === 'SIGNED') {
-      const authorizedCorrection = await tx.accountingCorrectionRequest.findFirst({ where: {
-        contractId: current.customerContract.id, status: 'APPROVED_FOR_SALES_EDIT',
-      } });
-      const duty = authorizedCorrection ? await tx.crossWorkspaceDuty.findFirst({ where: { sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: authorizedCorrection.id, sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN', dueAt: { gt: new Date() }, currentAssigneeUserId: dependencies.actorId } }) : null;
+      const { readPartnerCommercialEditPermission } = await import('./commercialEditPermission');
+      const duty = await readPartnerCommercialEditPermission(tx, current.customerContract.id, dependencies.actorId);
       if (!duty) return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') } as const;
     }
   }

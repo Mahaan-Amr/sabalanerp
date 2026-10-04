@@ -1,3 +1,4 @@
+import { partnerFinancialChainIsVoiding } from './financialVoidSource';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type AccountingFinancialRecord } from '@prisma/client';
 import {
@@ -114,7 +115,7 @@ export async function approvePartnerFinancialSourceWithinTransaction(
   if (metadata?.mode === PARTNER_REPLACEMENT_MODE && row && historical.owner.revision > row.headRevision) {
     return approveStagedPartnerReplacement(tx, record, input);
   }
-  if (row && await partnerPredecessorIsFrozen(tx, row.id, row.headRevision)) {
+  if (row && (await partnerPredecessorIsFrozen(tx, row.id, row.headRevision) || await partnerFinancialChainIsVoiding(tx, row.id))) {
     throw new Error('تأیید صورتحساب قبلی تا تعیین تکلیف گردش اصلاح پرونده همکار متوقف است.');
   }
   if (metadata?.mode === PARTNER_REPLACEMENT_MODE) {

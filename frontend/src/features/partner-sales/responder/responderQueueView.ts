@@ -2,9 +2,10 @@ import type { ResponderWorkspaceViewV2 } from '@sabalanerp/partner-sales-contrac
 
 type Inquiry = ResponderWorkspaceViewV2['inquiries'][number];
 type Row = Inquiry['rows'][number];
-export type ResponderQueueView = 'pending' | 'answered';
+export type ResponderQueueView = 'pending' | 'answered' | 'history';
 
 export function responderRowView(row: Row, now: number): ResponderQueueView | 'history' {
+  if (row.superseded) return 'history';
   if (row.state === 'PENDING') return 'pending';
   if (row.state === 'REJECTED') return 'answered';
   if (row.state === 'APPROVED' && (!row.expiresAt || Date.parse(row.expiresAt) > now)) return 'answered';

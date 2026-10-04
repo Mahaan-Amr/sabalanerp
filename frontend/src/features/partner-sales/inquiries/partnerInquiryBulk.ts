@@ -59,7 +59,7 @@ export function buildPartnerInquiryBulkRows({ configuredRows, inquiry, now, mism
 export async function resolveLatestPartnerInquiryRow(queries: PartnerQueryV2Port, row: PartnerInquiryRow): Promise<PartnerInquiryRow> {
   let current = row;
   const visited = new Set<string>();
-  for (let depth = 0; current.successor && depth < 20; depth += 1) {
+  while (current.successor) {
     const link = current.successor;
     const key = `${link.inquiryId}:${link.rowId}:${link.revision}`;
     if (visited.has(key)) throw new Error('Cyclic inquiry lineage');
@@ -73,6 +73,5 @@ export async function resolveLatestPartnerInquiryRow(queries: PartnerQueryV2Port
     if (!next) throw new Error('Inquiry successor mismatch');
     current = next;
   }
-  if (current.successor) throw new Error('Inquiry lineage limit exceeded');
   return current;
 }

@@ -755,7 +755,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           const cancel = await authorized('CASE_CANCEL', casePurpose, 'API');
           const voidRequest = await authorized('VOID_REQUEST', casePurpose, 'API');
           const commercial = row.commercialFlowVersion === 1 ? await readPartnerCommercialState(tx, row.id) : undefined;
-          const correctionRequired = commercial?.status === 'FINAL' || !!commercial?.firstFinancialRecordAt;
+          const correctionRequired = row.state === 'COMMITTED' || commercial?.status === 'FINAL' || !!commercial?.firstFinancialRecordAt;
           const correctionDuty = correctionRequired && row.customerContractId ? await tx.crossWorkspaceDuty.findFirst({ where: { sourceType: 'SALES_CONTRACT_CORRECTION', sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN', dueAt: { gt: new Date() }, currentAssigneeUserId: request.user!.id, sourceId: { in: (await tx.accountingCorrectionRequest.findMany({ where: { contractId: row.customerContractId, status: 'APPROVED_FOR_SALES_EDIT' }, select: { id: true } })).map(item => item.id) } } }) : null;
           const commercialWritable = !!commercial && commercial.status !== 'EXPIRED' && commercial.status !== 'CANCELLED' && (!correctionRequired || !!correctionDuty);
           const editSession = edit && (partnerContracts.isPartnerCaseEditableState(row.state) || commercialWritable)
@@ -789,7 +789,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             ...(row.customerContractId ? { customerContractId: row.customerContractId } : {}),
             ...(editableRecovery ? { editRecovery: { recoveryId: editableRecovery.draftId,
               baseRevision: editableRecovery.baseRevision } } : {}),
-            actions: { canContinue: Boolean(editableRecovery) && (!commercial || commercialWritable && commercial.status !== 'FINAL'),
+            actions: { canContinue: Boolean(editableRecovery) && (!commercial || commercialWritable),
               canRenew: !!commercial && commercial.status === 'EXPIRED' && !commercial.firstFinancialRecordAt && await canManageCommercialSettings(tx, request.user!),
               canApproveSales: commit && commercialWritable && view.data.preparationCompleted !== false && !commercial?.salesApproved,
               canRejectDraft: edit && commercialWritable && commercial?.status !== 'FINAL' && !commercial?.firstFinancialRecordAt && !!commercial?.salesApproved,
@@ -799,9 +799,9 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
                 partnerContracts.isPartnerCaseEditableState(row.state),
               canSendConfirmation: output && view.data.preparationCompleted !== false && (commercial ? !!row.customerContractId && commercial.status !== 'CANCELLED' && commercial.status !== 'EXPIRED' && !commercial.customerAccepted
                 : row.state === 'COMMITTED' && row.customerConfirmationState !== 'REJECTED'),
-              canRequestCorrection: correction && row.state === 'COMMITTED' && (!commercial || commercial.status === 'FINAL'),
-              canCancel: cancel && partnerContracts.isPartnerCaseEditableState(row.state),
-              canRequestVoid: voidRequest && row.state === 'COMMITTED' } });
+              canRequestCorrection: false,
+              canCancel: cancel && (commercial ? commercialWritable : partnerContracts.isPartnerCaseEditableState(row.state)),
+              canRequestVoid: false } });
         }
         const output = partnerContracts.PartnerCaseRuntimeResultSchema.safeParse({ cases });
         return output.success ? { ok: true as const, value: output.data }

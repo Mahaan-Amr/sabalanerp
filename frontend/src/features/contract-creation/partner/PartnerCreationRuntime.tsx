@@ -1,4 +1,5 @@
 'use client';
+import { PartnerContractCancellation } from '@/features/partner-sales/cases/PartnerContractCancellation';
 
 import { partnerRetailPresentation, presentPartnerRetailRows } from './partnerRetailPresentation';
 
@@ -35,12 +36,13 @@ import type { PaymentEntry } from '../types/contract.types';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { createPartnerCaseSubmission, type PartnerDraftCommand } from './partnerCaseSubmission';
 import { selectPartnerReinquiryRows } from './partnerReinquiry';
+import { resolveLatestPartnerInquiryRow } from '../../partner-sales/inquiries/partnerInquiryBulk';
 import { enterPartnerWizard, partnerDeliveryPlanIssue, preservePartnerDeliveriesAcrossProductEdit, rebasePartnerWizardSnapshot,
   partnerCasePendingStorageKey, shouldPreferLocalPartnerWizard,
   isExplicitPartnerCreationEntry, partnerProductEditPath, shouldOfferPartnerDraftChoice,
   shouldStartFreshPartnerCreation, partnerCreationRouteIdentity, partnerCreationRequestedInquiry, partnerSaleReturnStep,
   partnerCaseResultStep, partnerCaseHasIntegrityError, partnerCaseReviewMessage,
-  latestMatchingPartnerInquiryRow, partnerCasePricingInquiryIds, partnerFinalizedContractPath } from './partnerWizardEntry';
+  latestMatchingPartnerInquiryRow, partnerCasePricingInquiryIds, partnerFinalizedContractPath, partnerRequoteInquiryId } from './partnerWizardEntry';
 import { partnerMoneyText, partnerRetailIntentRows, refreshPartnerInquiryRow,
   partnerRetailDiscountFromPercent, partnerRetailSubtotal, partnerRetailSummary, remainingPartnerAmount, newPartnerPaymentInstallment } from './partnerRetail';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
@@ -1335,8 +1337,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const selectedPackage = selectPartnerReinquiryRows(sourceRows,
         `partner-case-pricing:${wizard.intent.recoveryId}:${activeOwner.revision}`, requestedRow);
       const selected = selectedPackage.rows;
-      const historicalRows = selected.some(item => item.submissionState === 'UNSENT')
-        ? await readCasePricingRows(runtime.saved, activeOwner.caseId) : [];
+      const historicalRows = await readCasePricingRows(runtime.saved, activeOwner.caseId);
       const retryKey = JSON.stringify({ owner: activeOwner, rows: selected.map(item => ({
         rowId: item.rowId, revision: item.revision, configuration: item.configurationRef })), reason });
       const pendingKey = `partner-case-reinquiry-pending:${runtime.actorId}:${activeOwner.caseId}`;
@@ -1346,17 +1347,19 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         (storedCommand?.success && storedCommand.data.type === 'CASE_PRICING_SUBMIT' &&
           storedCommand.data.idempotency.actorId === runtime.actorId && storedCommand.data.caseId === activeOwner.caseId
           ? storedCommand.data : undefined);
-      const rows = selected.map(item => {
-        const predecessor = item.submissionState === 'UNSENT'
+      const rows = await Promise.all(selected.map(async item => {
+        const candidate = item.submissionState === 'UNSENT'
           ? historicalRows.find(previous => previous.configurationRef.productRowId === item.configurationRef.productRowId &&
             previous.state === 'REJECTED' && !previous.successor)
-          : item;
-        if (!predecessor) throw new Error('Rejected inquiry row unavailable');
+          : latestMatchingPartnerInquiryRow(historicalRows, item);
+        if (!candidate) throw new Error('Rejected inquiry row unavailable');
+        const predecessor = await resolveLatestPartnerInquiryRow(inquiryPorts.queries, candidate);
+        if (predecessor.state === 'PENDING') throw new Error('درخواست قیمت این ردیف در انتظار پاسخ است.');
         return { rowId: `partner-inquiry-row-${crypto.randomUUID()}`, configuration: item.configurationRef,
           predecessor: { rowId: predecessor.rowId, revision: predecessor.revision,
             ...(reason ? { reason } : {}) } };
-      });
-      const scopedInquiryId = `${selectedPackage.inquiryId}:requote-${crypto.randomUUID()}`;
+      }));
+      const scopedInquiryId = partnerRequoteInquiryId(crypto.randomUUID());
       const intent = { schemaVersion: 1 as const, type: 'CASE_PRICING_SUBMIT' as const,
         caseId: activeOwner.caseId, expected: activeOwner, inquiryId: scopedInquiryId, rows };
       const payloadHash = await canonicalHash(intent);
@@ -1596,6 +1599,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     const caseView = submission?.getSnapshot().case ?? editingCase;
     const retailSummary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount, draft.serviceRows);
     return <div className="mx-auto max-w-6xl space-y-6">
+      {caseView && <PartnerContractCancellation caseId={caseView.owner.caseId} />}
       <ErpNeumorphicCard className="space-y-5 p-6">
         <h3 className="text-2xl font-bold">خلاصه قرارداد</h3>
         <div className="grid gap-4 md:grid-cols-2">

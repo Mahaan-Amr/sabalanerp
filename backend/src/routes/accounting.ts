@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { lockPartnerOperationsControl } from '../services/partnerSales/authorization/technicalRollout';
 import { markCustomerAcceptance, isOrdinaryCommercialFlow, commercialDeadlinePassed, lockOrdinaryContract } from '../services/ordinaryContractLifecycle';
 import { ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError } from '../services/ordinaryAccountingCommercialGate';
 import express, { Request, Response } from 'express';
@@ -760,6 +761,9 @@ router.get('/contracts/partner/:caseId/internal', accountingContractsView, async
     const capabilities = await getAccountingActionCapabilities(req.user!.id, req.user!.role);
     const writable = document.partnerContext.accountingWritable && (!document.commercial || document.commercial.status === 'FINAL');
     return res.json({ success: true, data: { ...document, actions: { canResolveFlag: canResolveFlag && writable,
+      canVoidRecord: capabilities.START_ACCOUNTING_VOID_CASE,
+      canOpenEdit: !['CANCELLED', 'VOIDED'].includes(document.caseState || '') && access.features.some(feature => feature.workspace === WORKSPACES.ACCOUNTING &&
+        [FEATURES.ACCOUNTING_CORRECTIONS_MANAGE, FEATURES.ACCOUNTING_CORRECTIONS_APPROVE].includes(feature.feature as any) && ['edit', 'admin'].includes(feature.permission)),
       canCreateInvoice: capabilities.CREATE_INVOICE && (writable || 'canRegister' in document && document.canRegister), canFlag: capabilities.FLAG_CONTRACT && writable, canRequestCorrection: capabilities.CREATE_CORRECTION_REQUEST && writable,
       canReviewInvoice: capabilities.APPROVE_FINANCIAL_INVOICE && writable,
       canCreateReceivable: capabilities.CREATE_RECEIVABLE && writable } } });
@@ -792,6 +796,30 @@ router.get('/contracts/partner/:caseId/internal-pdf', accountingContractsView, a
     return res.status(500).json({ success: false, error: 'ساخت سند داخلی انجام نشد.' });
   }
 });
+
+router.post('/contracts/partner/:caseId/edit-permission', protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
+  requireAnyNarrowFeatureAccess([FEATURES.ACCOUNTING_CORRECTIONS_MANAGE, FEATURES.ACCOUNTING_CORRECTIONS_APPROVE], FEATURE_PERMISSIONS.EDIT),
+  [body('reason').isString().trim().isLength({ min: 3 })], async (req: AuthRequest, res: Response) => {
+    if (!validationResult(req).isEmpty()) return res.status(400).json({ success: false, message: 'دلیل بازکردن ویرایش را وارد کنید.' });
+    const requestKey = String(req.get('X-Idempotency-Key') || '');
+    if (!/^[0-9a-f-]{36}$/i.test(requestKey)) return res.status(400).json({ success: false, message: 'شناسه درخواست معتبر نیست.' });
+    try {
+      const permission = await prisma.$transaction(async tx => {
+        await lockPartnerOperationsControl(tx);
+        await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${req.params.caseId} FOR UPDATE`;
+        const allowed = await createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'API' },
+          { correlationId: randomUUID(), reason: req.body.reason }).authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: req.params.caseId });
+        if (!allowed.ok) throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
+        const root = await tx.partnerSaleCase.findUnique({ where: { id: req.params.caseId } });
+        if (!root?.customerContractId || ['VOIDED', 'CANCELLED'].includes(root.state)) throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
+        const { openPartnerCommercialEditPermission } = await import('../services/crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter');
+        return openPartnerCommercialEditPermission(tx, { contractId: root.customerContractId, actorUserId: req.user!.id,
+          reason: String(req.body.reason).trim(), requestKey, now: new Date() });
+      });
+      return res.json({ success: true, data: permission });
+    } catch { return res.status(409).json({ success: false, message: 'مجوز ویرایش باز نشد؛ دسترسی و وضعیت قرارداد را بررسی کنید.' }); }
+  });
 
 router.post('/contracts/partner/:caseId/correction-requests', protect,
   requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),

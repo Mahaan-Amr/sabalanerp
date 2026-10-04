@@ -1,4 +1,6 @@
 import { reconcilePartnerFinancialRealization } from './partnerSales/accounting/commercialRealization';
+import { readPartnerInvoiceSource } from './partnerSales/accounting/invoiceSource';
+import { lockPartnerFinancialVoidSource } from './partnerSales/accounting/financialVoidSource';
 import { assertPartnerFinancialFinality } from './partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
 import { listPartnerPreparationDocuments } from './partnerSales/accounting/preFinancialDocument';
@@ -714,7 +716,8 @@ const audit = async (tx: Prisma.TransactionClient | PrismaClient, data: {
   note?: string | null;
 }) => {
   if (data.contractId) {
-    await assertOrdinaryAccountingCommercialGate(tx, data.contractId, data.action);
+    const source = data.recordId ? await tx.accountingFinancialRecord.findUnique({ where: { id: data.recordId }, select: { sourceKind: true } }) : null;
+    if (source?.sourceKind !== 'PARTNER_INTERNAL_RECORD') await assertOrdinaryAccountingCommercialGate(tx, data.contractId, data.action);
     const financialCreation = ['CREATE_INVOICE', 'CREATE_REPLACEMENT_INVOICE', 'CREATE_RECEIVABLE'].includes(data.action);
     if (financialCreation) {
       await tx.salesContract.updateMany({ where: { id: data.contractId, commercialFlowVersion: 1,
@@ -1782,17 +1785,21 @@ const startAccountingVoidCase = async (command: AccountingActionRequest, actor: 
   const result = await prisma.$transaction(async tx => {
     let sourceRecord = await tx.accountingFinancialRecord.findUnique({ where: { id: sourceRecordId } });
     if (!sourceRecord) throw accountingVoidInputError('رکورد مالی پیدا نشد. فهرست رکوردهای مالی را تازه‌سازی و دوباره انتخاب کنید.', '/dashboard/accounting/invoice-candidates');
-    await lockAccountingContract(tx, sourceRecord.contractId);
+    const partner = await lockPartnerFinancialVoidSource(tx, sourceRecordId, actor.userId, command.correlationId || randomUUID());
+    await lockAccountingContract(tx, partner?.contractId ?? sourceRecord.contractId);
     sourceRecord = await tx.accountingFinancialRecord.findUnique({ where: { id: sourceRecordId } });
     if (!sourceRecord) throw accountingVoidInputError('رکورد مالی پیدا نشد. فهرست رکوردهای مالی را تازه‌سازی و دوباره انتخاب کنید.', '/dashboard/accounting/invoice-candidates');
-    if (sourceRecord.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
-      throw accountingVoidInputError('این رکورد از مسیر فروش همکار ساخته شده است. مدیر حسابداری باید آن را در همان پرونده فروش تعیین‌تکلیف کند.');
-    }
     const retainedRecord = command.retainedRecordId ? await tx.accountingFinancialRecord.findUnique({
       where: { id: command.retainedRecordId },
     }) : null;
     try {
-      validateAccountingVoidCaseStart({ sourceRecord, retainedRecord, reasonKind, reason, effectiveAt, now: new Date() });
+      if (partner && retainedRecord && (retainedRecord.sourceKind !== sourceRecord.sourceKind || retainedRecord.sourceId !== sourceRecord.sourceId)) {
+        throw new Error('فاکتور باقی‌مانده باید از همان سند داخلی همکار باشد.');
+      }
+      if (partner && retainedRecord) await readPartnerInvoiceSource(tx, retainedRecord, partner.caseId);
+      validateAccountingVoidCaseStart({ sourceRecord: partner ? { ...sourceRecord, contractId: partner.contractId } : sourceRecord,
+        retainedRecord: partner && retainedRecord ? { ...retainedRecord, contractId: partner.contractId } : retainedRecord,
+        reasonKind, reason, effectiveAt, now: new Date() });
     } catch (error) {
       throw accountingVoidInputError(
         error instanceof Error ? error.message : 'اطلاعات شروع ابطال کامل نیست. موارد فرم را بررسی کنید.',
@@ -1811,9 +1818,9 @@ const startAccountingVoidCase = async (command: AccountingActionRequest, actor: 
     });
     if (existing) return existing;
     const created = await tx.accountingFinancialVoidCase.create({ data: {
-      contractId: sourceRecord.contractId!, sourceRecordId, retainedRecordId: retainedRecord?.id,
+      contractId: partner?.contractId ?? sourceRecord.contractId!, sourceRecordId, retainedRecordId: retainedRecord?.id,
       reasonKind, reason, effectiveAt, startedBy: actor.userId,
-      metadata: { idempotencyKey: command.idempotencyKey || null },
+      metadata: { idempotencyKey: command.idempotencyKey || null, ...(partner ? { partnerCaseId: partner.caseId } : {}) },
     } });
     await audit(tx, { action: 'START_ACCOUNTING_VOID_CASE', actorId: actor.userId,
       contractId: created.contractId, recordId: sourceRecordId, entityType: 'AccountingFinancialVoidCase',
@@ -1833,7 +1840,8 @@ const cancelAccountingVoidCase = async (command: AccountingActionRequest, actor:
   const result = await prisma.$transaction(async tx => {
     let before = await tx.accountingFinancialVoidCase.findUnique({ where: { id: command.voidCaseId } });
     if (!before) throw accountingVoidInputError('پرونده ابطال پیدا نشد. صفحه قرارداد را تازه‌سازی کنید.');
-    await lockAccountingContract(tx, before.contractId);
+    const partner = before.sourceRecordId ? await lockPartnerFinancialVoidSource(tx, before.sourceRecordId, actor.userId, command.correlationId || randomUUID()) : null;
+    await lockAccountingContract(tx, partner?.contractId ?? before.contractId);
     before = await tx.accountingFinancialVoidCase.findUnique({ where: { id: command.voidCaseId } });
     if (!before) throw accountingVoidInputError('پرونده ابطال پیدا نشد. صفحه قرارداد را تازه‌سازی کنید.');
     if (before.status === AccountingVoidCaseStatus.CANCELLED) return before;
@@ -2834,7 +2842,8 @@ const resolveTaxForVoid = async (command: AccountingActionRequest, actor: Actor)
     if (!before || !before.invoiceRecordId) {
       throw accountingVoidInputError('سابقه مالیاتی مرتبط پیدا نشد. صفحه قرارداد را تازه‌سازی کنید.');
     }
-    await lockAccountingContract(tx, before.contractId);
+    const partner = before.invoiceRecordId ? await lockPartnerFinancialVoidSource(tx, before.invoiceRecordId, actor.userId, command.correlationId || randomUUID()) : null;
+    await lockAccountingContract(tx, partner?.contractId ?? before.contractId);
     before = await tx.accountingTaxRecord.findUnique({ where: { id: command.taxRecordId } });
     if (!before || !before.invoiceRecordId) {
       throw accountingVoidInputError('سابقه مالیاتی مرتبط پیدا نشد. صفحه قرارداد را تازه‌سازی کنید.');
@@ -3350,7 +3359,8 @@ const voidAccountingReceivable = async (command: AccountingActionRequest, actor:
     let before = await tx.accountingReceivable.findUnique({ where: { id: command.receivableId },
       include: { paymentStatuses: true } });
     if (!before) throw accountingVoidInputError('دریافتنی پیدا نشد. فهرست دریافتنی‌ها را تازه‌سازی کنید.', '/dashboard/accounting/receivables');
-    await lockAccountingContract(tx, before.contractId);
+    const partner = before.invoiceRecordId ? await lockPartnerFinancialVoidSource(tx, before.invoiceRecordId, actor.userId, command.correlationId || randomUUID()) : null;
+    await lockAccountingContract(tx, partner?.contractId ?? before.contractId);
     before = await tx.accountingReceivable.findUnique({ where: { id: command.receivableId },
       include: { paymentStatuses: true } });
     if (!before) throw accountingVoidInputError('دریافتنی پیدا نشد. فهرست دریافتنی‌ها را تازه‌سازی کنید.', '/dashboard/accounting/receivables');
@@ -3436,7 +3446,9 @@ export async function voidAccountingRecordInTransaction(tx: Prisma.TransactionCl
     const payments = receivableIds.length
       ? await tx.accountingPaymentStatus.findMany({ where: { receivableId: { in: receivableIds } } })
       : [];
-    const hasReceivedPayments = payments.some((item) => isReceivedPaymentStatus(item.status));
+    const hasReceivedPayments = payments.some((item) => isReceivedPaymentStatus(item.status) &&
+      !(before.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE && requireStepwiseDependencies && item.method === 'CHECK' &&
+        ['BOUNCED', 'RETURNED', 'REPLACED'].includes(item.checkStatus || '')));
     const hasSubmittedTax = before.taxRecords.some((item) => isSubmittedTaxStatus(item.submissionStatus));
     if ((hasReceivedPayments || hasSubmittedTax) && !downstreamNote) {
       throw new Error('Downstream payment or tax correction evidence is required before voiding this record');
@@ -3547,13 +3559,11 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
   const result = await prisma.$transaction(async tx => {
     let source = await tx.accountingFinancialRecord.findUnique({ where: { id: recordId },
       select: { sourceKind: true, metadata: true, sourceSnapshot: true, contractId: true } });
-    await lockAccountingContract(tx, source?.contractId);
+    const partner = await lockPartnerFinancialVoidSource(tx, recordId, actor.userId, command.correlationId || randomUUID());
+    await lockAccountingContract(tx, partner?.contractId ?? source?.contractId);
     source = await tx.accountingFinancialRecord.findUnique({ where: { id: recordId },
       select: { sourceKind: true, metadata: true, sourceSnapshot: true, contractId: true } });
-    if (source?.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
-      throw new Error('ابطال این صورتحساب فقط از گردش اصلاح پرونده همکار امکان‌پذیر است.');
-    }
-    if (hasConflictingPartnerAccountingEvidence(source)) {
+    if (!partner && hasConflictingPartnerAccountingEvidence(source)) {
       throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'شواهد منبع پرونده همکار قابل ابطال از مسیر عمومی نیست.');
     }
     const voidCase = await tx.accountingFinancialVoidCase.findFirst({ where: {
@@ -3570,13 +3580,19 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
       sourceRecordId: retainedRecord.id,
       status: AccountingVoidCaseStatus.OPEN,
     } })) : false;
+    if (partner && retainedRecord) {
+      if (retainedRecord.sourceKind !== partner.invoice.sourceKind || retainedRecord.sourceId !== partner.sourceId) {
+        throw new Error('فاکتور باقی‌مانده از همین سند داخلی همکار نیست.');
+      }
+      await readPartnerInvoiceSource(tx, retainedRecord, partner.caseId);
+    }
     try {
       validateRetainedRecordForCompletion({
         sourceRecordId: recordId,
         contractId: voidCase.contractId,
         reasonKind: voidCase.reasonKind,
         retainedRecordId: voidCase.retainedRecordId,
-        retainedRecord,
+        retainedRecord: partner && retainedRecord ? { ...retainedRecord, contractId: partner.contractId } : retainedRecord,
         retainedRecordHasOpenVoidCase,
       });
     } catch (error) {

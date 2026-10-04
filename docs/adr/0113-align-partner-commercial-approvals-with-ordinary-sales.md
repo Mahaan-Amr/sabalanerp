@@ -59,3 +59,53 @@ Confirmed by the owner: Accounting keeps the selected original/accounting/worksh
 Each Case has one current actionable pricing-result duty. A new pricing package supersedes prior result duties, including a fully answered mixed approval/rejection package. Superseded duties move to `WAIVED` (`جایگزین‌شده`) history with assignment and audit evidence; valid unchanged price evidence is not deleted. A forward migration repairs existing obsolete open duties across all Cases.
 
 Product edits retain the user's delivery allocations and payment installments without silently trimming quantities or changing amounts. Completion and price acceptance of prepared plans validate current row identities, exact delivery/service quantities, payment currency, terms and the current retail payable. Invalid plans route the Partner to delivery/payment for explicit correction; they are ordinary input errors, not integrity/support incidents. Compatible plans remain intact. The public Customer confirmation view uses the shared light/dark theme control.
+
+
+## Partner edit and cancellation interview — 2026-10-04
+
+The owner confirmed these boundaries during the ongoing interview:
+
+- Remove Partner-facing درخواست اصلاح and درخواست ابطال actions from the Contract page. The Partner contacts Accounting outside the application to obtain authorization for a قطعی Contract.
+- An authorized Accounting Manager or Accounting Processor with access to the Contract can directly open one common permission for commercial editing and cancellation; cancellation must not require a separate permission. Direct Processor authorization deliberately extends the current ordinary-flow role split.
+- Retain the three-Tehran-working-day authorization period beginning at Accounting approval. Multiple successful saves are permitted; each returns the current commercial Contract to یادداشت and invalidates current commercial approvals and confirmation links while retaining history. Re-finalization closes the period; expiry preserves saved changes and requires renewed authorization for further editing.
+- Match the ordinary Seller editing and cancellation experience. Cancellation belongs in تأیید دیجیتال → عملیات تأیید قرارداد and uses the common permission once Accounting has opened editing.
+- Initially non-final Contracts can be edited or cancelled by their Partner Seller without an Accounting request. A previously finalized Contract inside an authorized correction period does not acquire unlimited authority merely because editing returns its visible status to یادداشت.
+
+- Cancelling a committed Case neutralizes the related Sabalan purchase obligation through a dated financial adjustment, preserving prior financial records, payments and commercial history. Any resulting refund or credit is handled through Accounting; cancellation never automatically refunds money.
+- In-progress loading must be resolved before cancellation. A recorded physical exit blocks full cancellation; delivered goods require the return-of-goods and financial-correction process, and existing exit evidence remains intact.
+- The common authorization replaces separate Partner correction/void request approval gates for this Seller workflow. Financial and physical dependency checks remain mandatory execution conditions rather than an additional cancellation permission.
+
+All interview decisions above have been agreed individually. The owner confirmed the complete shared-understanding summary and authorized scoped implementation on 2026-10-04; this amendment does not establish runtime completion. These boundaries supersede the earlier Partner-facing correction/void request path for this workflow without rewriting historical evidence.
+
+## Independent Partner financial-record voiding interview — 2026-10-04
+
+The owner requested the existing ordinary Accounting financial-record void workflow and logic for Partner Contracts and agreed to the following recommendations:
+
+- Expose شروع ابطال for every eligible issued or posted internal Sabalan-to-Partner financial record, including existing and historical records, under the same financial-void feature permissions as ordinary Accounting. Draft records retain their existing draft-deletion path.
+- Preserve the Customer Contract, its commercial approvals, the Case's purchase commitment and historical pricing evidence. Voiding an individual financial record must not invoke whole-Case cancellation or transition the Case to VOIDED.
+- Apply the ordinary audited financial-chain workflow: source-record selection, reason and effective date, a lock against new financial operations on that chain, explicit receipt reversal or check return, submitted-tax resolution, receivable voiding and final financial-record voiding. No receipt is automatically reversed or refunded. The financial record remains valid in calculations until finalization. Cancellation of the void workflow retains the ordinary restriction after downstream changes.
+- Duplicate-issue voiding retains a separately selected valid record from the same financial source and revalidates it at completion; it never transfers receipts, checks or tax evidence automatically. Retain the ordinary audit, date-validation and invoice-number release rules.
+- Remove the voided record's financial effect. If no valid financial record remains, record a dated sales-reporting reversal; subsequent valid registration restores the current effect without double-counting or rewriting prior events. Preserve firstFinancialRecordAt and the previously assigned commercial deadline rules.
+- Permit fresh internal financial registration after voiding, with preserved Partner source identity and the ordinary issuance, approval and receivable controls. Customer resale amounts and private Customer collections remain outside Sabalan Accounting.
+- Recompute dispatch eligibility from remaining valid financial obligations and actual cleared Partner-to-Sabalan receipts. If required eligibility is lost, block subsequent loading and physical exit while preserving plans, history and already recorded exits. This financial-record workflow does not itself cancel the commercial Contract or undo delivered goods.
+
+These financial-record decisions extend the edit/cancellation interview above. The owner confirmed the recommendations and authorized implementation limited to the discussed sections on 2026-10-04. Local source and runtime validation are recorded separately from production release.
+
+## Repeated price rejection and responder visibility — 2026-10-04
+
+The owner reported a second price rejection failing after Sabalan had supplied a new offer and requested that the rejection reason appear in the exact Sabalan pricing duty. The owner agreed that the new request should return to the previous responder, with authorized reassignment when that responder is no longer eligible. Show the latest Partner rejection reason beside its pricing row under دلیل رد قیمت توسط همکار; prior prices and rejection reasons remain inspectable in negotiation history.
+
+Each rejection must target the latest actionable offer and create one successor request for the same Case and pricing subject. Repeated negotiation is supported; retries or simultaneous requests must not create duplicate successor work. Preserve valid unaffected pricing and all previous decisions. Investigation identified incorrect cross-package predecessor/successor inquiry identities and missing responder projection of the saved rejection reason. The screenshot's exact conflict cause remains unverified until its response and current source identity are examined.
+
+The owner selected صندوق کار and authorized the redesign. It is a focused view of the same inter-workspace duties, with the exact inquiry identity retained in task links; it does not create a second task system.
+
+- Tabs are نیازمند پاسخ, پاسخ داده‌شده and سوابق, each with at most **5 contracts per page**, grouping their inquiry packages.
+- Search covers contract number, tracking code and Partner name across the authorized queue, with independent tab counts and cursor pagination. Counts and cursors must apply central root authorization before exposing aggregate information.
+- Desktop shows the contract inbox beside its selected detail; mobile uses one column with details and response first, then a compact contract list and pagination. The owner reduced the earlier ten-contract size to five on 2026-10-04. Response drafts survive contract selection and page/tab changes within the active actor session.
+- Show the latest rejection reason beside the requested pricing row and retain prior offers/reasons in a collapsed disclosure. History is confined to its tab, rather than appended to every working page.
+
+## Scoped implementation and local verification — 2026-10-04
+
+The implementation is limited to the shared Partner commercial permission and cancellation flow, independent internal financial-record voiding, repeated pricing negotiation/reason visibility, and the selected responder inbox. Shared ordinary Accounting void steps and permissions remain the authority; internal Partner financial sources retain null Customer/Contract foreign keys.
+
+Local checks cover repeated pricing rounds, the shared edit window and renewal, dated cancellation adjustments, five-contract SQL pagination/search/authorized counts, independent financial void with explicit cash reversal and preserved commercial commitment, financial re-registration/reporting restoration, and desktop/mobile light/dark inbox behavior with saved drafts and 200% zoom. Broader legacy lifecycle tests retain failures from older expected commercial behavior; focused results are not represented as a fully green legacy suite. No production deployment is included.

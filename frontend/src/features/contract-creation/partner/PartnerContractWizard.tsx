@@ -456,7 +456,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
                 {price ? partnerMoneyText(price.amount, price.currency) : '—'}
               </strong></p>
               {rowState === 'EXPIRED' && expiresAt && <p className="text-sm sds-text-secondary">اعتبار تا {expiresAt}</p>}
-              {usable && onRejectPrice && <ErpButton label="رد قیمت و درخواست پیشنهاد مجدد" tone="danger" variant="outline" disabled={disabled}
+              {usable && onRejectPrice && <ErpButton label="رد قیمت و درخواست پیشنهاد مجدد" tone="danger" variant="outline" disabled={disabled || inquiryRow.successor?.state === 'PENDING'}
                 onClick={() => { setRejectReason(''); setRejectTarget(inquiryRow); }} />}
               {inquiryRow.noteOrReason && <ErpInlineState kind="stale" title={inquiryRow.noteOrReason} />}
               {(inquiryRow.state === 'REJECTED' || unsentRows.some(item => item.id === id)) &&

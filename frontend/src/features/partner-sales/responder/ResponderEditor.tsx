@@ -31,15 +31,16 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
     return () => onLockChange(false);
   }, [locked, onLockChange]);
   const editableRowsKey = editableRowIds.join('\u0000');
+  const pendingRowsKey = inquiry.rows.filter(row => row.state === 'PENDING').map(row => row.rowId).join('\u0000');
   const signature = JSON.stringify([inquiry.assignmentRevision, inquiry.rows.map(row => [row.rowId, row.revision]), editableRowsKey]);
   useEffect(() => {
     // Drop drafts for rows that are no longer actionable after a refresh, while
     // preserving unsent input for the remaining pending rows.
-    const editable = new Set(editableRowsKey ? editableRowsKey.split('\u0000') : []);
+    const editable = new Set(pendingRowsKey.split('\u0000'));
     setDrafts(previous => Object.fromEntries(Object.entries(previous)
       .filter(([id]) => editable.has(id))));
     if (!running.current) setReview(null);
-  }, [editableRowsKey, signature, setDrafts]);
+  }, [pendingRowsKey, editableRowsKey, signature, setDrafts]);
 
   async function reload() {
     if (running.current) return;
@@ -75,7 +76,7 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
     {needsRefresh && <ErpInlineState kind="stale" className="flex-col items-start" title="وضعیت تازه دریافت نشد؛ پیش از اقدام بعدی دوباره دریافت کنید."
       action={{ label: 'دریافت وضعیت تازه', onClick: () => void reload(), disabled: pending }} />}
     {errors.selection && <ErpInlineState kind="error" title={errors.selection} />}
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4">
       {inquiry.rows.map((row, index) => <ResponseRow key={row.rowId} row={row} number={index + 1}
         canRespond={editableRowIds.includes(row.rowId)} status={rowStatus[row.rowId]} error={errors[row.rowId]}
         draft={drafts[row.rowId] || { outcome: 'APPROVED', amount: '', note: '' }} pending={locked || needsRefresh}

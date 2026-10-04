@@ -1,3 +1,4 @@
+import { partnerFinancialChainIsVoiding } from './financialVoidSource';
 import { randomUUID } from 'node:crypto';
 import { assertPartnerFinancialFinality } from '../cases/commercialLifecycle';
 import { reconcilePartnerFinancialRealization } from './commercialRealization';
@@ -98,13 +99,13 @@ export function createPrismaPartnerAccountingRepository(input: {
           if (action === 'APPROVAL') {
             if (!(await readPartnerAccountingCapabilities(tx, input.actorId)).receivables)
               return { ok: false, error: partnerError('FORBIDDEN') };
-            if (await partnerPredecessorIsFrozen(tx, row.id, row.headRevision))
+            if ((await partnerPredecessorIsFrozen(tx, row.id, row.headRevision) || await partnerFinancialChainIsVoiding(tx, row.id)))
               return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
           }
           if (!await readCurrentPartnerCaseViews(tx, row.id)) {
             return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           }
-          if (action === 'QUEUE' && await partnerPredecessorIsFrozen(tx, row.id, row.headRevision)) {
+          if (action === 'QUEUE' && (await partnerPredecessorIsFrozen(tx, row.id, row.headRevision) || await partnerFinancialChainIsVoiding(tx, row.id))) {
             return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
           }
           const currentView = await withCurrentSabalanPlan(tx, view.data);
@@ -132,11 +133,17 @@ export function createPrismaPartnerAccountingRepository(input: {
           readAuthorizedSource: readSource,
           findQueue: async caseId => {
             const row = await tx.accountingFinancialRecord.findFirst({ where: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+              kind: 'INVOICE_CANDIDATE', status: { not: 'VOIDED' },
               metadata: { path: ['partnerCaseId'], equals: caseId } }, orderBy: { createdAt: 'asc' } });
             const prepared = row && preparation(row.sourceSnapshot);
             const commitmentEventId = row && object(row.metadata)?.commitmentEventId;
             return row && prepared && typeof commitmentEventId === 'string' ? { queueEvidenceId: row.id,
               commitmentEventId, preparation: prepared } : null;
+          },
+          nextQueueEvidenceId: async (caseId, initialId) => {
+            const count = await tx.accountingFinancialRecord.count({ where: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+              kind: 'INVOICE_CANDIDATE', status: 'VOIDED', metadata: { path: ['partnerCaseId'], equals: caseId } } });
+            return count ? `${initialId}:replacement:${count}` : initialId;
           },
           insertQueue: async entry => {
             await tx.accountingFinancialRecord.create({ data: { id: entry.queueEvidenceId, kind: 'INVOICE_CANDIDATE',

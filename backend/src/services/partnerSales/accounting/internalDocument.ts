@@ -10,6 +10,7 @@ import { RevisionRefSchema, FulfillmentViewSchema } from '@sabalanerp/partner-sa
 import { readPartnerRevisionProjections } from '../cases/lifecycle';
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { readPartnerPreparationDocument } from './preFinancialDocument';
+import { buildAccountingVoidWorkflow } from '../../accountingVoidWorkflow';
 
 /** Only the Sabalan-to-Partner financial source enters this document. */
 export async function readPartnerInternalDocument(caseId: string, actorUserId: string) {
@@ -22,7 +23,9 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
         taxRecords: { where: scope.tax() } },
     });
     const contextualized = await scope.contextualize('FINANCIAL', records);
-    const record = contextualized.find(item => item.partnerContext?.caseId === caseId);
+    const caseRecords = contextualized.filter(item => item.partnerContext?.caseId === caseId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const record = caseRecords.find(item => item.status !== 'VOIDED') ?? caseRecords[0];
     if (!record?.partnerContext) return readPartnerPreparationDocument(scope.database, actorUserId, caseId);
     const snapshot = record.sourceSnapshot as { partnerPreparation?: { owner?: unknown } } | null;
     const owner = RevisionRefSchema.safeParse(snapshot?.partnerPreparation?.owner);
@@ -40,7 +43,21 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
     const remaining = record.receivables.length ? record.receivables.reduce((sum, row) => sum.add(row.remainingAmount), new Prisma.Decimal(0)) : record.amount;
     const flags = await scope.database.accountingContractFlag.findMany({
       where: { sourceFinancialRecordId: record.id }, orderBy: { createdAt: 'desc' } });
+    const voidCases = await scope.database.accountingFinancialVoidCase.findMany({
+      where: { sourceRecordId: { in: caseRecords.map(item => item.id) } }, orderBy: { startedAt: 'desc' } });
+    const voidWorkflows = voidCases.map(voidCase => {
+      const sourceRecord = caseRecords.find(item => item.id === voidCase.sourceRecordId)!;
+      return buildAccountingVoidWorkflow({ voidCase, sourceRecord, receivables: sourceRecord.receivables,
+        payments: sourceRecord.receivables.flatMap(item => item.paymentStatuses), taxRecords: sourceRecord.taxRecords });
+    });
+    if (record.status === 'VOIDED') {
+      const preparation = await readPartnerPreparationDocument(scope.database, actorUserId, caseId);
+      if (preparation) return { ...preparation, financialRecords: caseRecords.map(item => ({ id: item.id,
+        status: item.status, amount: item.amount.toString(), currency: item.currency, systemInvoiceNumber: item.systemInvoiceNumber })), voidWorkflows };
+    }
     return {
+      financialRecords: caseRecords.map(item => ({ id: item.id, status: item.status, amount: item.amount.toString(),
+        currency: item.currency, systemInvoiceNumber: item.systemInvoiceNumber })), voidWorkflows,
       commercial: await readPartnerCommercialState(scope.database, caseId), caseState: sale?.state, receivedAmount: received.toFixed(), remainingAmount: remaining.toFixed(),
       id: record.id, owner: sale ? { caseId, revision: sale.headRevision, integrityHash: sale.integrityHash } : undefined, status: record.status, amount: record.amount.toString(),
       currency: record.currency, createdAt: record.createdAt,

@@ -4,7 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { PrismaClient, type Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { parseCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { PartnerEventSchema, canonicalHash, partnerError, type PartnerCommand, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
@@ -1640,5 +1640,77 @@ test('Partner customer SMS uses the customer recipient, immutable public details
     const verified = await hooks.verifyPublicOtp({ token, code: messages[2].code });
     assert.equal(verified?.success, true, verified?.error);
     assert.equal((await hooks.getPublicContractByToken(token))?.data?.decision, 'APPROVED');
+  } finally { await database.$disconnect(); await temporary.cleanup(); }
+});
+
+test('Partner independent financial void keeps the commercial contract and commitment intact', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
+  const database = temporary.client();
+  const ids = idsFor(`partner-independent-void-${temporary.runId}`);
+  const accountantId = `${ids.caseId}-accountant`;
+  try {
+    await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+    await database.$transaction(async tx => {
+      const seeded = await seedCase(tx, ids);
+      const lifecycle = createPartnerCaseLifecycleService(dependencies(tx, ids));
+      await lifecycle.markAwaitingCustomerConfirmation({ expected: seeded, commandId: `${ids.caseId}-send`,
+        correlationId: `${ids.caseId}-send`, snapshotId: `${ids.caseId}-snapshot` });
+      await lifecycle.markCustomerApproved({ expected: seeded, commandId: `${ids.caseId}-approve`,
+        correlationId: `${ids.caseId}-approve`, snapshotId: `${ids.caseId}-snapshot`,
+        verifiedAt: '2026-08-30T08:00:00.000Z' });
+      const committed = await lifecycle.execute(await commitCommand(ids, seeded, 'SIGNED'));
+      assert.equal(committed.ok, true);
+      await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: { commercialFlowVersion: 1, stateRevision: { increment: 1 } } });
+      await tx.salesContract.update({ where: { id: ids.contractId }, data: { commercialFlowVersion: 2,
+        commercialRevision: 1, salesApprovalRevision: 1, customerAcceptanceRevision: 1, status: 'SIGNED',
+        realizedAt: null, realizedAmount: null, realizedSellerId: null, realizedSellerSource: null } });
+      await tx.salesReportingEvent.deleteMany({ where: { contractId: ids.contractId } });
+      const { appendPartnerCommercialEvent } = await import('../partnerSales/cases/commercialEvents');
+      await appendPartnerCommercialEvent(tx, ids.caseId, ids.partnerId, 'PARTNER_FLOW_MIGRATED', { commercialFlowVersion: 2 });
+      assert.equal(await tx.partnerCaseRevision.count({ where: { caseId: ids.caseId } }), 1, 'retained revision before fixture commit');
+      await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+      return seeded;
+    });
+    const revision = await database.partnerCaseRevision.findUniqueOrThrow({ where: {
+      caseId_revision: { caseId: ids.caseId, revision: 1 },
+    }, select: { internalProjection: true } });
+    const accounting = (revision.internalProjection as Prisma.JsonObject).accounting as Prisma.JsonObject;
+    const committedEvent = await database.partnerCaseEvent.findFirstOrThrow({ where: {
+      caseId: ids.caseId, type: 'CASE_COMMITTED',
+    }, select: { evidence: true } });
+    const commitment = PartnerEventSchema.parse((committedEvent.evidence as Prisma.JsonObject).publicEvent);
+    if (commitment.type !== 'CASE_COMMITTED') throw new Error('Invalid Accounting replay fixture');
+    await database.$transaction(async tx => {
+      await tx.user.create({ data: { id: accountantId, username: accountantId,
+        email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Accounting', lastName: 'Replay' } });
+      await tx.effectiveActionGrant.create({ data: { id: `${ids.caseId}-accounting-grant`, principalKind: 'USER',
+        principalId: accountantId, subjectUserId: accountantId, domain: 'PARTNER', action: 'ACCOUNTING_WRITE',
+        rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: accountantId,
+        reason: 'isolated financial void fixture', correlationId: `${ids.caseId}-grant` } });
+    });
+    const adapter = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database,
+      actorId: accountantId, correlationId: `${ids.caseId}-accounting` }));
+    const view = { ...accounting, state: 'COMMITTED' } as Parameters<typeof adapter.enqueueCommitted>[0];
+
+    const queued = await adapter.enqueueCommitted(view, commitment);
+    assert.equal(queued.ok, true, JSON.stringify(queued));
+    const invoice = await database.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: ids.internalId } });
+    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs', 'backend/src/services/__tests__/partnerFinancialApprovalProbe.ts'],
+      { timeout: 120_000, env: { ...process.env, DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
+    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs', 'backend/src/services/__tests__/partnerFinancialVoidProbe.ts'],
+      { timeout: 120_000, env: { ...process.env, DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_INVOICE_ID: invoice.id, PARTNER_TEST_ACTOR_ID: accountantId } });
+    const contract = await database.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } });
+    assert.ok(contract.firstFinancialRecordAt);
+    const net = async () => (await database.salesReportingEvent.findMany({ where: { contractId: ids.contractId } }))
+      .reduce((sum, event) => sum.plus(event.amount), new Prisma.Decimal(0)).toString();
+    assert.equal(await net(), '0', 'last valid financial source removes wholesale reporting credit');
+    const restored = await adapter.enqueueCommitted(view, commitment);
+    assert.ok(restored.ok, JSON.stringify(restored));
+    if (!restored.ok) return;
+    assert.notEqual(restored.value.queueEvidenceId, invoice.id);
+    assert.equal(await net(), '1600', 'new persisted source restores credit once');
+    assert.equal((await adapter.enqueueCommitted(view, commitment)).ok, true);
+    assert.equal(await net(), '1600');
+    assert.equal((await database.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } })).firstFinancialRecordAt?.toISOString(), contract.firstFinancialRecordAt?.toISOString());
   } finally { await database.$disconnect(); await temporary.cleanup(); }
 });

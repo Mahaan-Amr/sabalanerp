@@ -63,7 +63,8 @@ export async function reconcilePartnerCommercialFinality(tx: Tx, caseId: string,
       commercialStartedAt: now, commercialExpiryDays: days, commercialExpiresAt: new Date(now.getTime() + days * 86_400_000),
     } });
   }
-  const state = partnerCommercialStatus({ salesApproved: current.salesApprovalRevision === current.commercialRevision,
+  const state = !partnerDeadlinePassed(current, now) && current.commercialRevision > 1 && current.salesApprovalRevision === null && current.customerAcceptanceRevision === null
+    ? 'NOTE' : partnerCommercialStatus({ salesApproved: current.salesApprovalRevision === current.commercialRevision,
     customerAccepted: current.customerAcceptanceRevision === current.commercialRevision,
     pricingAccepted,
     expired: partnerDeadlinePassed(current, now) });
@@ -175,7 +176,8 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
   const inquiry = validPricing ? 'ACCEPTED' : response === 'EXPIRED' || response === 'REJECTED'
     || root.pricingState === 'INCOMPLETE' || root.pricingState === 'EXPIRED' ? 'CORRECTION_REQUIRED' : priceRejection ? 'REJECTED' : 'WAITING';
   return { version: 1, revision: contract.commercialRevision,
-    status: partnerCommercialStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing, pricingReceived: response === 'READY',
+    status: contract.commercialRevision > 1 && !salesApproved && !customerAccepted ? (expired ? 'EXPIRED' : ['CANCELLED', 'VOIDED'].includes(root.state) ? 'CANCELLED' : 'NOTE')
+      : partnerCommercialStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing, pricingReceived: response === 'READY',
       expired,
       cancelled: ['CANCELLED', 'VOIDED'].includes(root.state) }), salesApproved, customerAccepted, inquiry,
     expiresAt: contract.commercialExpiresAt?.toISOString() ?? null,

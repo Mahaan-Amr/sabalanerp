@@ -79,6 +79,11 @@ const responderRow = ResponderInquiryViewSchema.shape.rows.element.extend({
   configuration: z.array(z.object({ label: TextSchema, value: TextSchema }).strict()).min(1),
   state: InquiryRowStateV2Schema, approvedAt: InstantSchema.optional(), expiresAt: InstantSchema.optional(),
   noteOrReason: TextSchema.optional(), actions,
+  partnerRejectionReason: PersianReasonSchema.optional(),
+  superseded: z.boolean().optional(),
+  negotiationHistory: z.array(z.object({ rowId: IdSchema, offeredAt: InstantSchema.optional(),
+    price: z.object({ amount: z.string(), currency: z.enum(['IRR', 'IRT']) }).strict().optional(),
+    rejectionReason: PersianReasonSchema.optional() }).strict()).optional(),
 }).strict().superRefine((row, context) => {
   const approved = ['APPROVED', 'EXPIRED', 'SUPERSEDED'].includes(row.state);
   if (approved) {
@@ -95,6 +100,7 @@ const responderRow = ResponderInquiryViewSchema.shape.rows.element.extend({
 });
 export const ResponderInquiryViewV2Schema = ResponderInquiryViewSchema.extend({
   schemaVersion: z.literal(2), submittedAt: InstantSchema, actions,
+  caseId: IdSchema.optional(), caseNumber: TextSchema.optional(), customerContractNumber: TextSchema.optional(),
   rows: z.array(responderRow).refine(rows => new Set(rows.map(row => row.rowId)).size === rows.length, 'Duplicate inquiry row'),
 }).strict();
 export type ResponderInquiryViewV2 = z.infer<typeof ResponderInquiryViewV2Schema>;
@@ -102,6 +108,7 @@ export const ResponderWorkspaceViewV2Schema = z.object({
   schemaVersion: z.literal(2), purpose: z.literal('RESPONDER_WORKSPACE'), actorId: IdSchema,
   inquiries: z.array(ResponderInquiryViewV2Schema)
     .refine(values => new Set(values.map(value => value.inquiryId)).size === values.length, 'Duplicate inquiry'),
+  contractCounts: z.object({ pending: z.number().int().nonnegative(), answered: z.number().int().nonnegative(), history: z.number().int().nonnegative() }).strict().optional(),
   nextCursor: IdSchema.optional(),
 }).strict();
 export type ResponderWorkspaceViewV2 = z.infer<typeof ResponderWorkspaceViewV2Schema>;

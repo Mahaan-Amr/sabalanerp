@@ -15,7 +15,9 @@ export type PartnerInternalDocument = {
   currency: string; systemInvoiceNumber: string | null; contractDate?: string; technicalEvidenceAvailable?: boolean;
   systemInvoiceDate?: string | null; sepidarAmount?: string | null; metadata?: { mode?: string };
   project?: { title?: string; address?: string };
-  actions: { canCreateInvoice?: boolean; canResolveFlag: boolean; canFlag: boolean; canRequestCorrection: boolean; canReviewInvoice: boolean; canCreateReceivable: boolean };
+  actions: { canOpenEdit?: boolean; canVoidRecord?: boolean; canCreateInvoice?: boolean; canResolveFlag: boolean; canFlag: boolean; canRequestCorrection: boolean; canReviewInvoice: boolean; canCreateReceivable: boolean };
+  financialRecords?: Array<{ id: string; status: string; amount: string; currency: string; systemInvoiceNumber: string | null }>;
+  voidWorkflows?: import('./AccountingVoidWorkflowPanel').AccountingVoidWorkflowView[];
   partnerContext: { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string;
     internalRecordNumber: string; debtor: { displayName: string }; endCustomer: { displayName: string } };
   items: Array<{ productRowId?: string; description: string; quantity: string; unit: string; unitPrice: string; totalPrice: string; details?: string[] }>;
@@ -30,7 +32,9 @@ export type PartnerInternalDocument = {
 export type PartnerDetailSection = typeof accountingContractTabs[number]['value'];
 export const partnerQuantityLabel = (unit: string) => ({ meter: 'متر طول', count: 'عدد', squareMeter: 'متر مربع', ton: 'تن' } as Record<string, string>)[unit] || unit;
 
-export function PartnerAccountingDetailView({ document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+export function PartnerAccountingDetailView({ onOpenEdit, financialVoidPanel, document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+  onOpenEdit?: () => void;
+  financialVoidPanel?: React.ReactNode;
   onCreateReceivable?: () => void;
   invoiceOpen?: boolean; onOpenInvoice?: () => void; onApproveInvoice?: (payload: FinancialInvoiceApprovalPayload) => void | Promise<void>;
   printVariant?: SalesPdfVariant; onPrintVariant?: (value: SalesPdfVariant) => void; customPrintSettings?: CustomPrintSettings;
@@ -78,6 +82,7 @@ export function PartnerAccountingDetailView({ document: doc, section, onSection,
     <ErpSegmentedControl value={section} onChange={onSection} options={[...accountingContractTabs]} />
     {section === 'summary' && <>
       <ErpSection title="مدیریت وضعیت قرارداد"><div className="flex flex-wrap gap-2">
+        {doc.actions.canOpenEdit && <ErpButton label="بازکردن ویرایش و لغو" onClick={onOpenEdit} disabled={pending} />}
         <ErpButton label="غیرفعال‌سازی" tone="warning" variant="outline" disabled title={lifecycleReason} />
         <ErpButton label="حذف دائمی" icon={FaTrashAlt} tone="danger" variant="outline" disabled title={lifecycleReason} />
       </div><ErpInlineState kind="permission" title={lifecycleReason} className="mt-3" />
@@ -101,6 +106,7 @@ export function PartnerAccountingDetailView({ document: doc, section, onSection,
       </div>)}</div>
     </ErpSection>} aside={summary} />}
     {section === 'financial' && doc.preparationOnly && <ErpInlineState kind="empty" title="رکورد مالی برای این قرارداد ثبت نشده است." />}
+    {section === 'financial' && financialVoidPanel}
     {section === 'financial' && !doc.preparationOnly && <ErpTwoColumn main={<ErpSection title="رکوردهای مالی">
       <CompactQueueItem icon={FaFileInvoice} title="صورتحساب قرارداد" meta={`شماره صورتحساب: ${doc.systemInvoiceNumber || 'ثبت نشده'}`}
         amount={money(doc.amount, doc.currency)} status={<StatusBadge status={doc.status} />}

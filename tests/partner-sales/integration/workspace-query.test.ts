@@ -10,7 +10,7 @@ test('responder workspace is assembled from currently authorized inquiry project
     transaction: async work => work({ snapshot: 'one' }),
     listResponderInquiryIds: async (tx, page) => {
       assert.deepEqual(tx, { snapshot: 'one' });
-      assert.deepEqual(page, { limit: 2 });
+      assert.deepEqual(page, { limit: 5, view: 'pending', search: undefined });
       return { inquiryIds: ['inquiry-visible', 'inquiry-hidden', 'inquiry-visible-2'] };
     },
     readResponderInquiry: async (_tx, inquiryId) => {

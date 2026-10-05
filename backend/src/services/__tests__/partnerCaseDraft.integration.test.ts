@@ -1679,6 +1679,10 @@ test('approved committed Partner correction acquires reads and checkpoints its r
     assert.equal((await ports.lease.acquire(input)).ok, false, 'finality alone never authorizes technical editing');
     const request = await approvePartnerEdit(tx, { contractId: final.root.customerContractId!, actorUserId: ids.responderId,
       reason: 'مجوز اصلاح پیش‌نویس فنی قرارداد قطعی', requestKey: randomUUID(), now: new Date() });
+    const { readPartnerCommercialEditPermission } = await import('../partnerSales/cases/commercialEditPermission');
+    const reviewedPermission = await readPartnerCommercialEditPermission(tx, final.root.customerContractId!, ids.partnerId);
+    assert.equal(reviewedPermission?.sourceId, request.id);
+    assert.equal(reviewedPermission?.accountantNote, 'مجوز اصلاح پیش‌نویس فنی قرارداد قطعی');
     const lease = await ports.lease.acquire(input);
     assert.ok(lease.ok, JSON.stringify(lease));
     if (!lease.ok) return;

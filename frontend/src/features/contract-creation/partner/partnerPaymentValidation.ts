@@ -1,5 +1,6 @@
 import moment from 'moment-jalaali';
 import { normalizeDigits } from '@/lib/numberFormat';
+import { partnerPaymentChoice } from './partnerPaymentMethodAdapter';
 import type { CustomerPaymentPlan } from '@sabalanerp/partner-sales-contracts';
 
 type PartnerInstallment = CustomerPaymentPlan['installments'][number];
@@ -16,8 +17,20 @@ export function partnerPaymentNeedsNationalCode(method: PartnerInstallment['meth
   return !paymentDay || paymentDay !== day(currentDate);
 }
 
+/** Only the exact retained installment is grandfathered. Opening an editor
+ * must not turn a formerly same-day payment into a new dated payment. */
+export function isRetainedPartnerPayment(installment: PartnerInstallment, saved?: PartnerInstallment): boolean {
+  const identity = (item: PartnerInstallment) => JSON.stringify([
+    item.installmentId, item.method, partnerPaymentChoice(item), item.dueDate,
+    item.amount.currency, item.amount.amount, item.nationalCode?.trim() || null,
+    item.check?.number?.trim() || null, item.check?.bank?.trim() || null, item.check?.dueDate?.trim() || null,
+    item.check?.ownerName?.trim() || null, item.check?.handoverDate?.trim() || null,
+  ]);
+  return Boolean(saved && identity(installment) === identity(saved));
+}
+
 export function validatePartnerPaymentInstallment(installment: PartnerInstallment, currentDate: string,
-  existingContract = false): PartnerPaymentFieldErrors {
+  existingContract = false, savedInstallment?: PartnerInstallment): PartnerPaymentFieldErrors {
   const errors: PartnerPaymentFieldErrors = {};
   if (!installment.amount.amount || installment.amount.amount === '0') errors.amount = 'مبلغ پرداخت باید بیشتر از صفر باشد.';
   if (!existingContract && installment.method === 'CREDIT' && installment.subtype === 'CUSTOMER_BALANCE') {
@@ -28,7 +41,7 @@ export function validatePartnerPaymentInstallment(installment: PartnerInstallmen
     if (!installment.check?.ownerName?.trim()) errors.ownerName = 'نام صاحب چک الزامی است.';
     if (!installment.check?.handoverDate?.trim()) errors.handoverDate = 'تاریخ تحویل چک الزامی است.';
   }
-  if (partnerPaymentNeedsNationalCode(installment.method, installment.dueDate, currentDate)) {
+  if (!isRetainedPartnerPayment(installment, savedInstallment) && partnerPaymentNeedsNationalCode(installment.method, installment.dueDate, currentDate)) {
     if (!installment.nationalCode?.trim()) errors.nationalCode = 'کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است.';
     else if (!/^\d{10}$/.test(installment.nationalCode)) errors.nationalCode = 'کد ملی باید ۱۰ رقم باشد.';
   }
@@ -40,9 +53,10 @@ export function firstPartnerPaymentError(errors: PartnerPaymentFieldErrors): str
 }
 
 export function firstPartnerPaymentPlanError(plan: CustomerPaymentPlan, currentDate: string,
-  existingContract = false): string | null {
+  existingContract = false, savedPlan?: CustomerPaymentPlan): string | null {
   for (const installment of plan.installments) {
-    const error = firstPartnerPaymentError(validatePartnerPaymentInstallment(installment, currentDate, existingContract));
+    const error = firstPartnerPaymentError(validatePartnerPaymentInstallment(installment, currentDate, existingContract,
+      savedPlan?.installments.find(item => item.installmentId === installment.installmentId)));
     if (error) return error;
   }
   return null;

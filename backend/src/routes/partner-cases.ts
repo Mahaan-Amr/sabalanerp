@@ -785,6 +785,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
               profileId: actorProfile.id, actorId: request.user!.id, recovery: editableRecovery.recovery }) : undefined;
           cases.push({ ...(commercial ? { commercial: await readPartnerCommercialState(tx, row.id, pricingResponseState) } : {}), ...(pricingResponseState ? { pricingResponseState } : {}), view: { ...view.data, ...(row.commercialFlowVersion === 1 ? { commercialFlowVersion: 1 as const } : {}), ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
             pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
+            ...(edit && correctionDuty ? { reviewedCorrection: { requestId: correctionDuty.sourceId,
+              reason: correctionDuty.accountantNote } } : {}),
             accountingCorrectionRequests: accountingCorrectionRequests.map(item => ({ id: item.id,
               reason: item.note || 'سند داخلی این پرونده نیازمند اصلاح است.',
               createdAt: item.createdAt.toISOString() })),

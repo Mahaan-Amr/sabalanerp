@@ -1,7 +1,7 @@
 import { isPartnerCaseEditableState } from '@sabalanerp/partner-sales-contracts';
 import type { Prisma } from '@prisma/client';
 export async function readPartnerCommercialEditPermission(tx: Prisma.TransactionClient, contractId: string, actorId: string, now = new Date()) {
-  const requests = await tx.accountingCorrectionRequest.findMany({ where: { contractId, status: 'APPROVED_FOR_SALES_EDIT' }, select: { id: true } });
+  const requests = await tx.accountingCorrectionRequest.findMany({ where: { contractId, status: 'APPROVED_FOR_SALES_EDIT' }, select: { id: true, accountantNote: true } });
   const duty = await tx.crossWorkspaceDuty.findFirst({ where: { sourceType: 'SALES_CONTRACT_CORRECTION',
     sourceId: { in: requests.map(item => item.id) }, sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION',
     status: 'OPEN', dueAt: { gt: now }, currentAssigneeUserId: actorId } });
@@ -10,7 +10,7 @@ export async function readPartnerCommercialEditPermission(tx: Prisma.Transaction
     sourceType: 'SALES_CONTRACT_CORRECTION', sourceActionCode: 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION', status: 'COMPLETED' },
     orderBy: { respondedAt: 'desc' } });
   if (!decision?.respondedByUserId || !decision.respondedAt || (decision.structuredResultJson as { actionCode?: string } | null)?.actionCode !== 'APPROVE') return null;
-  return { ...duty, managerApprovedBy: decision.respondedByUserId, managerApprovedAt: decision.respondedAt };
+  return { ...duty, accountantNote: requests.find(item => item.id === duty.sourceId)!.accountantNote, managerApprovedBy: decision.respondedByUserId, managerApprovedAt: decision.respondedAt };
 }
 
 

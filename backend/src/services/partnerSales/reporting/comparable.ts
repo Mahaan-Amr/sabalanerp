@@ -29,13 +29,14 @@ export function comparableRevision(view: PartnerCaseView, envelopes: { wholesale
     evidenceId: `partner-revision:${view.owner.caseId}:${view.owner.revision}:${view.owner.integrityHash}` };
 }
 
-/** Number allocation is the boundary at which a revision becomes commercial
- * reporting evidence. Earlier draft revisions intentionally have no Sabalan
- * totals and must not make an otherwise finalized Case unreadable. */
+/** Only pricing-ready revisions supply comparable wholesale evidence. Numbered
+ * drafts and reviewed edits can await pricing too. Projections still require
+ * every revision referenced by commitment/correction evidence and fail closed
+ * if one of those required bases is absent. */
 export function comparableCommercialRevision(
   view: PartnerCaseView,
   envelopes: { wholesaleEnvelope: unknown; retailEnvelope: unknown },
 ) {
-  if (!view.sabalanTotals && !view.customerContractNumber) return null;
+  if (!view.sabalanTotals) return null;
   return { view, comparable: comparableRevision(view, envelopes) };
 }

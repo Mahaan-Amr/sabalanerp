@@ -525,3 +525,10 @@ test('Case-scoped published inquiries restore replacement requests regardless of
     ['replacement-uuid', 'legacy-case-inquiry']);
   assert.deepEqual(partnerCasePricingInquiryIds('recovery', ['replacement-uuid'], []), []);
 });
+
+
+test('initial reviewed correction opens at date, while pricing results and subsequent product edits retain their flow', () => {
+  assert.equal(partnerCaseResultStep('payment', true, true), 'date');
+  assert.equal(partnerCaseResultStep('confirmation', true, true), 'date');
+  assert.equal(partnerCaseResultStep('products', true), 'pricing');
+});

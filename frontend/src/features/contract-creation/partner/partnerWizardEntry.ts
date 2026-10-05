@@ -52,8 +52,8 @@ export function partnerCreationRequestedInquiry(params: Pick<URLSearchParams, 'g
   return params.get('inquiryId') || (params.get('draftId') ? null : latestInquiryId) || null;
 }
 
-export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], openingNumberedResult: boolean): PartnerWizardDraft['step'] {
-  return openingNumberedResult ? 'pricing' : savedStep;
+export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], openingNumberedResult: boolean, reviewedCorrection = false): PartnerWizardDraft['step'] {
+  return reviewedCorrection ? 'date' : openingNumberedResult ? 'pricing' : savedStep;
 }
 
 export const partnerCaseReviewMessage = (caseReference: string, trackingNumber?: number) =>

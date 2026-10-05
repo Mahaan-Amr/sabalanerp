@@ -940,6 +940,8 @@ const buildContractRow = async (contract: any, settings: any) => {
     customer: {
       id: contract.customer?.id,
       displayName: getCustomerName(contract.customer || {}),
+      trustCategory: contract.customer?.trustCategory ?? null,
+      partnerOwnerProfileId: contract.customer?.partnerOwnerProfileId ?? null,
       nationalCode: contract.customer?.nationalCode,
       economicCode: contract.customer?.customFields?.economicCode
     },

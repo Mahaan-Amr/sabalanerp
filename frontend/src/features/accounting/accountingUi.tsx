@@ -46,6 +46,8 @@ export type AccountingContractRow = {
   customer: {
     id?: string;
     displayName: string;
+    trustCategory?: string | null;
+    partnerOwnerProfileId?: string | null;
     nationalCode?: string;
     economicCode?: string;
   };

@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 
 const lockSettlementContracts = async (tx: Prisma.TransactionClient, openItemIds: string[]) => {
   const items = await tx.accountingCustomerOpenItem.findMany({ where: { id: { in: openItemIds } }, select: { contractId: true } });
-  const ids = [...new Set(items.map(item => item.contractId))].sort();
+  const ids = [...new Set(items.map(item => item.contractId).filter((id): id is string => Boolean(id)))].sort();
   if (ids.length) await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
 };
 import * as XLSX from 'xlsx';
@@ -21,6 +21,8 @@ import { shipmentQuantityEvidenceIntegrityHash } from './shipmentQuantityProject
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 
 type Database = PrismaClient | Prisma.TransactionClient;
+const customerTransaction = <T>(database: Database, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> =>
+  '$transaction' in database ? database.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 }) : operation(database);
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item));
 const toBigInt = (value: Prisma.Decimal | bigint | number | string) => BigInt(value.toString());
 const sanitizeProviderResponse = (value: unknown): Prisma.InputJsonValue => {
@@ -671,12 +673,12 @@ export const recognizeCustomerReturnPrisma = async (database: PrismaClient, inpu
   return credit;
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
 
-export const recordCustomerReceiptPrisma = async (database: PrismaClient, input: {
+export const recordCustomerReceiptPrisma = async (database: Database, input: {
   profileId: string; contractId?: string; bookId: string; fiscalYearId: string; periodId: string; amountRials: bigint;
   occurredAt: Date; financialAccountId: string; bankAccountLedgerId: string; customerAdvanceLedgerId: string;
   source: { type: string; id: string; version: number; payload: unknown }; idempotencyKey: string; correlationId: string;
   actor: CustomerTreasuryActor;
-}) => database.$transaction(async (tx) => {
+}) => customerTransaction(database, async (tx) => {
   if (input.amountRials <= 0n) throw new AccountingCustomerTreasuryError('INVALID_RECEIPT_AMOUNT', 'مبلغ دریافت باید بیشتر از صفر باشد.', 400);
   const prior = await tx.accountingTreasuryTransaction.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
   const sourceHash = hashCustomerTreasuryEvidence(input.source.payload);
@@ -710,7 +712,7 @@ export const recordCustomerReceiptPrisma = async (database: PrismaClient, input:
     financialAccountId: input.financialAccountId, kind: 'CUSTOMER_RECEIPT', direction: 'INBOUND', amountRials: input.amountRials.toString(),
     idempotencyKey: input.idempotencyKey, sourceType: input.source.type, sourceId: input.source.id, sourceVersion: input.source.version,
     sourceHash, occurredAt: input.occurredAt, postedVoucherId: voucher.id, createdBy: input.actor.id } });
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
+});
 
 export const recordInternalTreasuryTransferPrisma = async (database: PrismaClient, input: {
   fromFinancialAccountId: string; toFinancialAccountId: string; fromLedgerAccountId: string; toLedgerAccountId: string;
@@ -765,11 +767,11 @@ export const recordInternalTreasuryTransferPrisma = async (database: PrismaClien
   return tx.accountingTreasuryTransaction.findMany({ where: { sourceType: 'INTERNAL_TRANSFER', sourceId: input.idempotencyKey }, orderBy: { direction: 'asc' } });
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
 
-export const allocateCustomerReceiptPrisma = async (database: PrismaClient, input: {
+export const allocateCustomerReceiptPrisma = async (database: Database, input: {
   treasuryTransactionId: string; allocations: Array<{ openItemId: string; amountRials: bigint }>;
   bookId: string; fiscalYearId: string; periodId: string; customerAdvanceLedgerId: string; receivableLedgerId: string;
-  documentDate: Date; idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
-}) => database.$transaction(async (tx) => {
+  documentDate: Date; reason?: string; reference?: string; idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
+}) => customerTransaction(database, async (tx) => {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.treasuryTransactionId}))`;
   const receipt = await tx.accountingTreasuryTransaction.findUnique({ where: { id: input.treasuryTransactionId }, include: {
     allocations: { where: { reversesId: null, reversedById: null }, include: { lines: true } }, profile: true,
@@ -781,7 +783,7 @@ export const allocateCustomerReceiptPrisma = async (database: PrismaClient, inpu
       .sort((left, right) => left.openItemId.localeCompare(right.openItemId)),
     bookId: input.bookId, fiscalYearId: input.fiscalYearId, periodId: input.periodId,
     customerAdvanceLedgerId: input.customerAdvanceLedgerId, receivableLedgerId: input.receivableLedgerId,
-    documentDate: input.documentDate };
+    documentDate: input.documentDate, ...(input.reason ? { reason: input.reason.trim(), reference: input.reference?.trim() } : {}) };
   const prior = await tx.accountingSettlementAllocation.findUnique({ where: { idempotencyKey: input.idempotencyKey },
     include: { lines: true } });
   if (prior) {
@@ -794,8 +796,12 @@ export const allocateCustomerReceiptPrisma = async (database: PrismaClient, inpu
     return prior;
   }
   const requestedTotal = input.allocations.reduce((total, item) => total + item.amountRials, 0n);
+  if (new Set(input.allocations.map(item => item.openItemId)).size !== input.allocations.length) {
+    throw new AccountingCustomerTreasuryError('DUPLICATE_ALLOCATION_ITEM', 'هر بدهی فقط یک بار در تخصیص انتخاب شود.', 400);
+  }
+  const refunded = await tx.accountingTreasuryTransaction.aggregate({ where: { refundOfId: receipt.id, kind: 'CUSTOMER_REFUND' }, _sum: { amountRials: true } });
   const used = receipt.allocations.flatMap((item) => item.lines).reduce((total, item) => total + toBigInt(item.amountRials), 0n);
-  if (requestedTotal <= 0n || used + requestedTotal > toBigInt(receipt.amountRials)) throw new AccountingCustomerTreasuryError('RECEIPT_OVER_ALLOCATED', 'جمع تخصیص‌ها از مانده دریافت بیشتر است.', 409);
+  if (requestedTotal <= 0n || used + requestedTotal + toBigInt(refunded._sum.amountRials ?? 0) > toBigInt(receipt.amountRials)) throw new AccountingCustomerTreasuryError('RECEIPT_OVER_ALLOCATED', 'جمع تخصیص‌ها از مانده دریافت بیشتر است.', 409);
   const items = await tx.accountingCustomerOpenItem.findMany({ where: { id: { in: input.allocations.map((item) => item.openItemId) } }, include: {
     allocationLines: { where: { allocation: { reversesId: null, reversedById: null } } },
   } });
@@ -816,26 +822,27 @@ export const allocateCustomerReceiptPrisma = async (database: PrismaClient, inpu
       ledgerLine({ accountId: input.customerAdvanceLedgerId, debitRials: requestedTotal, partyId: receipt.profile.accountingPartyId, evidence, description: 'کاهش بستانکاری تخصیص‌نیافته' }),
       ledgerLine({ accountId: input.receivableLedgerId, creditRials: requestedTotal, partyId: receipt.profile.accountingPartyId, evidence, description: 'تسویه مطالبات مشتری' }),
     ] });
-  const voucher = await app.postVoucher({ voucherId: draft.id, actor: input.actor, reason: 'ثبت قطعی تخصیص دریافت به مطالبات' });
+  const voucher = await app.postVoucher({ voucherId: draft.id, actor: input.actor, reason: input.reason?.trim() || 'ثبت قطعی تخصیص دریافت به مطالبات' });
   return tx.accountingSettlementAllocation.create({ data: { treasuryTransactionId: receipt.id, idempotencyKey: input.idempotencyKey, ledgerVoucherId: voucher.id,
-    createdBy: input.actor.id, lines: { create: input.allocations.map((item) => ({ openItemId: item.openItemId, amountRials: item.amountRials.toString() })) } }, include: { lines: true } });
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
+    reason: input.reason?.trim(), createdBy: input.actor.id, lines: { create: input.allocations.map((item) => ({ openItemId: item.openItemId, amountRials: item.amountRials.toString() })) } }, include: { lines: true } });
+});
 
-export const reverseCustomerAllocationPrisma = async (database: PrismaClient, input: {
-  allocationId: string; reason: string; bookId: string; fiscalYearId: string; periodId: string;
+export const reverseCustomerAllocationPrisma = async (database: Database, input: {
+  allocationId: string; reason: string; reference?: string; bookId: string; fiscalYearId: string; periodId: string;
   customerAdvanceLedgerId: string; receivableLedgerId: string; documentDate: Date;
   idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
-}) => database.$transaction(async (tx) => {
+}) => customerTransaction(database, async (tx) => {
   if (input.reason.trim().length < 8) throw new AccountingCustomerTreasuryError('REVERSAL_REASON_REQUIRED', 'دلیل برگشت تخصیص الزامی است.', 400);
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.allocationId}))`;
   const original = await tx.accountingSettlementAllocation.findUnique({ where: { id: input.allocationId }, include: {
     lines: true, transaction: { include: { profile: true } }, reversedBy: true,
   } });
   if (!original || original.reversesId || !original.transaction.profile) throw new AccountingCustomerTreasuryError('ALLOCATION_NOT_FOUND', 'تخصیص پیدا نشد.', 404);
+  if (original.transaction.kind !== 'CUSTOMER_RECEIPT') throw new AccountingCustomerTreasuryError('REFUND_REVERSAL_REQUIRES_CORRECTION', 'اصلاح استرداد باید همراه با برگشت سند پرداخت انجام شود.', 409);
   if (original.reversedBy) return original.reversedBy;
   await lockSettlementContracts(tx, original.lines.map(line => line.openItemId));
   const total = original.lines.reduce((sum, line) => sum + toBigInt(line.amountRials), 0n);
-  const payload = { reversesAllocationId: original.id, reason: input.reason.trim(), originalLines: original.lines.map((line) => ({ openItemId: line.openItemId, amountRials: line.amountRials.toString() })) };
+  const payload = { reversesAllocationId: original.id, reason: input.reason.trim(), ...(input.reference ? { reference: input.reference.trim() } : {}), originalLines: original.lines.map((line) => ({ openItemId: line.openItemId, amountRials: line.amountRials.toString() })) };
   const evidence = lineEvidence('SETTLEMENT_ALLOCATION_REVERSAL', original.id, 1, payload);
   const app = ledgerApp(tx, new Date());
   const draft = await app.createManualDraft({ bookId: input.bookId, fiscalYearId: input.fiscalYearId, periodId: input.periodId,
@@ -851,45 +858,87 @@ export const reverseCustomerAllocationPrisma = async (database: PrismaClient, in
     createdBy: input.actor.id, lines: { create: original.lines.map((line) => ({ openItemId: line.openItemId, amountRials: line.amountRials })) } } });
   await tx.accountingSettlementAllocation.update({ where: { id: original.id }, data: { reversedById: reversal.id } });
   return reversal;
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
+});
 
-export const projectCustomerAccountPrisma = async (database: Database, input: { profileId: string; asOf: Date }) => {
-  const [profile, items, receipts] = await Promise.all([
-    database.accountingCustomerProfile.findUnique({ where: { id: input.profileId } }),
-    database.accountingCustomerOpenItem.findMany({ where: { profileId: input.profileId, postedAt: { lte: input.asOf } }, include: {
+export const projectCustomerAccountsPrisma = async (database: Database, input: { profileIds: string[]; asOf: Date }) => {
+  const [profiles, allItems, allReceipts, allRefunds] = await Promise.all([
+    database.accountingCustomerProfile.findMany({ where: { id: { in: input.profileIds } } }),
+    database.accountingCustomerOpenItem.findMany({ where: { profileId: { in: input.profileIds }, postedAt: { lte: input.asOf } }, include: {
       invoice: true, allocationLines: { where: { createdAt: { lte: input.asOf }, allocation: { reversesId: null } },
         include: { allocation: { include: { reversedBy: true } } } },
     }, orderBy: { dueAt: 'asc' } }),
-    database.accountingTreasuryTransaction.findMany({ where: { profileId: input.profileId, kind: 'CUSTOMER_RECEIPT', occurredAt: { lte: input.asOf } }, include: {
+    database.accountingTreasuryTransaction.findMany({ where: { profileId: { in: input.profileIds }, kind: 'CUSTOMER_RECEIPT', occurredAt: { lte: input.asOf }, createdAt: { lte: input.asOf } }, include: {
       allocations: { where: { reversesId: null, createdAt: { lte: input.asOf } }, include: { lines: true, reversedBy: true } },
     } }),
+    database.accountingTreasuryTransaction.findMany({ where: { profileId: { in: input.profileIds }, kind: 'CUSTOMER_REFUND', occurredAt: { lte: input.asOf }, createdAt: { lte: input.asOf } } }),
   ]);
-  if (!profile) throw new AccountingCustomerTreasuryError('CUSTOMER_PROFILE_NOT_FOUND', 'حساب مالی مشتری پیدا نشد.', 404);
+  const voucherIds = [...new Set([
+    ...allItems.map(row => row.invoice?.ledgerVoucherId ?? row.ledgerVoucherId),
+    ...allReceipts.map(row => row.postedVoucherId), ...allRefunds.map(row => row.postedVoucherId),
+    ...allReceipts.flatMap(row => row.allocations.flatMap(a => [a.ledgerVoucherId, a.reversedBy?.ledgerVoucherId])),
+  ].filter((id): id is string => Boolean(id)))];
+  const vouchers = await database.accountingLedgerVoucher.findMany({ where: { id: { in: voucherIds } }, select: { id: true, documentDate: true, postedAt: true } });
+  const accountingDate = (id: string | null | undefined, fallback: Date) => vouchers.find(v => v.id === id)?.documentDate ?? fallback;
+  return profiles.map(profile => {
+  const items = allItems.filter(row => row.profileId === profile.id);
+  const receipts = allReceipts.filter(row => row.profileId === profile.id);
+  const refunds = allRefunds.filter(row => row.profileId === profile.id);
   const activeAt = <T extends { reversedBy: { createdAt: Date } | null }>(item: T) => !item.reversedBy || item.reversedBy.createdAt > input.asOf;
   const activityItems = items.map((item) => { const allocated = item.allocationLines.filter((line) => activeAt(line.allocation))
     .reduce((total, line) => total + toBigInt(line.amountRials), 0n);
-    return { id: item.id, kind: item.kind, invoiceId: item.invoiceId, invoiceNumber: item.invoice.number, contractId: item.contractId, dueAt: item.dueAt,
+    return { id: item.id, kind: item.kind, sourceKind: item.sourceKind, description: item.description, postedAt: item.postedAt, occurredAt: accountingDate(item.invoice?.ledgerVoucherId ?? item.ledgerVoucherId, item.postedAt), invoiceId: item.invoiceId, invoiceNumber: item.invoice?.number ?? item.description ?? 'ثبت مستقل', contractId: item.contractId, dueAt: item.dueAt,
       originalRials: toBigInt(item.originalRials), remainingRials: toBigInt(item.originalRials) - allocated,
-      ledgerVoucherId: item.invoice.ledgerVoucherId, taxInvoiceId: item.invoice.taxInvoiceId,
-      controlEvidence: { type: item.invoice.controlEvidenceType, id: item.invoice.controlEvidenceId,
-        version: item.invoice.controlEvidenceVersion, hash: item.invoice.controlEvidenceHash },
+      ledgerVoucherId: item.invoice?.ledgerVoucherId ?? item.ledgerVoucherId, taxInvoiceId: item.invoice?.taxInvoiceId ?? null,
+      controlEvidence: { type: item.invoice?.controlEvidenceType ?? item.sourceKind, id: item.invoice?.controlEvidenceId ?? item.id,
+        version: item.invoice?.controlEvidenceVersion ?? 1, hash: item.invoice?.controlEvidenceHash ?? '' },
       agingDays: Math.max(0, Math.floor((input.asOf.getTime() - item.dueAt.getTime()) / 86_400_000)) }; });
   const openItems = activityItems.filter((item) => item.remainingRials > 0n);
-  const unallocatedCreditRials = receipts.reduce((total, receipt) => total + toBigInt(receipt.amountRials)
+  const refundedReceipt = (id: string) => refunds.filter(row => row.refundOfId === id).reduce((sum, row) => sum + toBigInt(row.amountRials), 0n);
+  const unallocatedCreditRials = receipts.reduce((total, receipt) => total + toBigInt(receipt.amountRials) - refundedReceipt(receipt.id)
     - receipt.allocations.filter(activeAt).flatMap((allocation) => allocation.lines)
       .reduce((allocated, line) => allocated + toBigInt(line.amountRials), 0n), 0n);
   return { profile: { ...profile, openingBalanceRials: toBigInt(profile.openingBalanceRials) },
+    refunds: refunds.map(row => ({ ...row, occurredAt: accountingDate(row.postedVoucherId, row.occurredAt), amountRials: toBigInt(row.amountRials) })),
     receivableRials: openItems.reduce((total, item) => total + (item.kind === 'CREDIT' ? -item.remainingRials : item.remainingRials), 0n),
     unallocatedCreditRials, openItems, activityItems,
     receipts: receipts.map((receipt) => ({ id: receipt.id, contractId: receipt.contractId, financialAccountId: receipt.financialAccountId,
-      amountRials: toBigInt(receipt.amountRials), occurredAt: receipt.occurredAt, postedVoucherId: receipt.postedVoucherId,
+      amountRials: toBigInt(receipt.amountRials), occurredAt: accountingDate(receipt.postedVoucherId, receipt.occurredAt), postedVoucherId: receipt.postedVoucherId,
+      refundedRials: refundedReceipt(receipt.id),
       source: { type: receipt.sourceType, id: receipt.sourceId, version: receipt.sourceVersion, hash: receipt.sourceHash },
       allocatedRials: receipt.allocations.filter(activeAt).flatMap((allocation) => allocation.lines)
         .reduce((total, line) => total + toBigInt(line.amountRials), 0n),
-      allocations: receipt.allocations.map((allocation) => ({ id: allocation.id, createdAt: allocation.createdAt,
-        reversedAt: allocation.reversedBy?.createdAt ?? null, ledgerVoucherId: allocation.ledgerVoucherId,
+      allocations: receipt.allocations.map((allocation) => ({ id: allocation.id, createdAt: allocation.createdAt, occurredAt: accountingDate(allocation.ledgerVoucherId, allocation.createdAt),
+        reversedAt: allocation.reversedBy && allocation.reversedBy.createdAt <= input.asOf ? accountingDate(allocation.reversedBy.ledgerVoucherId, allocation.reversedBy.createdAt) : null, reversalVoucherId: allocation.reversedBy?.ledgerVoucherId ?? null, ledgerVoucherId: allocation.ledgerVoucherId,
         lines: allocation.lines.map((line) => ({ openItemId: line.openItemId, amountRials: toBigInt(line.amountRials) })) })) })),
   };
+  });
+};
+
+export const projectCustomerAccountPrisma = async (database: Database, input: { profileId: string; asOf: Date }) => {
+  const [projection] = await projectCustomerAccountsPrisma(database, { profileIds: [input.profileId], asOf: input.asOf });
+  if (!projection) throw new AccountingCustomerTreasuryError('CUSTOMER_PROFILE_NOT_FOUND', 'حساب مالی مشتری پیدا نشد.', 404);
+  return projection;
+};
+
+/** One chronological projection owns the on-screen and exported customer balance. */
+export const customerStatementMovements = (account: Awaited<ReturnType<typeof projectCustomerAccountPrisma>>) => {
+  const labels: Record<string, string> = { OPENING: 'مانده افتتاحیه', DEBIT: 'ثبت بدهکاری', CREDIT: 'ثبت بستانکاری', SET_BALANCE: 'تنظیم مانده' };
+  const rows = [
+    ...account.activityItems.map(item => ({ id: item.id, label: item.sourceKind === 'SALE' ? item.invoiceNumber : `${labels[item.sourceKind] ?? 'ثبت مستقل'} · ${item.description ?? ''}`,
+      at: item.occurredAt.toISOString(), debit: item.kind === 'CREDIT' ? 0n : item.originalRials, credit: item.kind === 'CREDIT' ? item.originalRials : 0n, voucherId: item.ledgerVoucherId, contractId: item.contractId })),
+    ...account.receipts.map(row => ({ id: row.id, label: 'دریافت وجه', at: row.occurredAt.toISOString(), debit: 0n, credit: row.amountRials, voucherId: row.postedVoucherId, contractId: row.contractId })),
+    ...account.refunds.map(row => ({ id: row.id, label: 'استرداد وجه', at: row.occurredAt.toISOString(), debit: row.amountRials, credit: 0n, voucherId: row.postedVoucherId, contractId: row.contractId })),
+    ...account.receipts.flatMap(row => row.allocations.flatMap(a => {
+      const total = a.lines.reduce((sum, line) => sum + line.amountRials, 0n);
+      return [{ id: a.id, label: 'تخصیص دریافت', at: a.occurredAt.toISOString(), debit: total, credit: total, voucherId: a.ledgerVoucherId, contractId: row.contractId },
+        ...(a.reversedAt ? [{ id: `${a.id}:reverse`, label: 'برگشت تخصیص', at: a.reversedAt.toISOString(), debit: total, credit: total, voucherId: a.reversalVoucherId, contractId: row.contractId }] : [])];
+    })),
+  ];
+  let balance = 0n;
+  return rows.sort((a,b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)).map(row => {
+    balance += row.debit - row.credit;
+    return { ...row, debit: row.debit.toString(), credit: row.credit.toString(), balance: balance.toString() };
+  });
 };
 
 export const listCustomerAccountsPrisma = async (database: PrismaClient, input: { asOf: Date; search?: string }) => {
@@ -906,7 +955,7 @@ export const listCustomerAccountsPrisma = async (database: PrismaClient, input: 
   }));
 };
 
-export const listTreasuryOverviewPrisma = async (database: PrismaClient, input: { bankLinePage?: number } = {}) => {
+export const listTreasuryOverviewPrisma = async (database: PrismaClient, input: { bankLinePage?: number; checkId?: string } = {}) => {
   const bankLinePage = input.bankLinePage ?? 1;
   if (!Number.isSafeInteger(bankLinePage) || bankLinePage < 1 || bankLinePage > 1_000_000) {
     throw new AccountingCustomerTreasuryError('BANK_PAGE_INVALID', 'شماره صفحه ردیف‌های بانکی معتبر نیست.', 400);
@@ -928,7 +977,7 @@ export const listTreasuryOverviewPrisma = async (database: PrismaClient, input: 
       orderBy: { createdAt: 'desc' },
       select: { id: true, code: true, messagePersian: true, sourceId: true, sourceVersion: true,
         assignedProfile: true, assignedUserId: true, createdAt: true } }),
-    database.accountingCheckInstrument.findMany({ orderBy: { dueAt: 'asc' }, take: 100,
+    database.accountingCheckInstrument.findMany({ where: input.checkId ? { id: input.checkId } : undefined, orderBy: { dueAt: 'asc' }, take: 100,
       include: { events: { orderBy: { sequence: 'asc' } } } }),
     database.accountingCashCount.findMany({ orderBy: { countedAt: 'desc' }, take: 50 }),
     database.accountingPettyCashAdvance.findMany({ orderBy: { settlementDueAt: 'asc' }, take: 100 }),
@@ -962,23 +1011,15 @@ export const exportCustomerStatementPrisma = async (database: PrismaClient, inpu
   profileId: string; asOf: Date; format: 'xlsx' | 'pdf'; actorId: string;
 }) => {
   const projection = await projectCustomerAccountPrisma(database, { profileId: input.profileId, asOf: input.asOf });
-  const rows = [
-    ...projection.activityItems.map((item) => ({ نوع: item.kind === 'CREDIT' ? 'اصلاح فروش' : 'صورتحساب فروش', تاریخ: item.dueAt.toISOString(), قرارداد: item.contractId,
-      مرجع: item.invoiceNumber, بدهکار: item.kind === 'CREDIT' ? '0' : item.originalRials.toString(),
-      بستانکار: item.kind === 'CREDIT' ? item.originalRials.toString() : '0', مانده: item.remainingRials.toString(),
-      سند: item.ledgerVoucherId, شاهد: `${item.controlEvidence.type}:${item.controlEvidence.id}:${item.controlEvidence.version}` })),
-    ...projection.receipts.map((receipt) => ({ نوع: 'دریافت', تاریخ: receipt.occurredAt.toISOString(), قرارداد: receipt.contractId ?? '',
-      مرجع: `${receipt.source.type}:${receipt.source.id}:${receipt.source.version}`, بدهکار: '0', بستانکار: receipt.amountRials.toString(),
-      مانده: (receipt.amountRials - receipt.allocatedRials).toString(), سند: receipt.postedVoucherId ?? '', شاهد: receipt.source.hash })),
-    ...projection.receipts.flatMap((receipt) => receipt.allocations.flatMap((allocation) => [
-      ...allocation.lines.map((line) => ({ نوع: 'تخصیص دریافت', تاریخ: allocation.createdAt.toISOString(), قرارداد: receipt.contractId ?? '',
-        مرجع: line.openItemId, بدهکار: line.amountRials.toString(), بستانکار: line.amountRials.toString(), مانده: '0',
-        سند: allocation.ledgerVoucherId ?? '', شاهد: allocation.id })),
-      ...(allocation.reversedAt ? allocation.lines.map((line) => ({ نوع: 'برگشت تخصیص', تاریخ: allocation.reversedAt!.toISOString(), قرارداد: receipt.contractId ?? '',
-        مرجع: line.openItemId, بدهکار: line.amountRials.toString(), بستانکار: line.amountRials.toString(), مانده: '0',
-        سند: allocation.ledgerVoucherId ?? '', شاهد: allocation.id })) : []),
-    ])),
-  ].map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, exportCell(value)])));
+  const movements = customerStatementMovements(projection);
+  const [contracts, vouchers] = await Promise.all([
+    database.salesContract.findMany({ where: { id: { in: movements.flatMap(row => row.contractId ? [row.contractId] : []) } }, select: { id: true, contractNumber: true } }),
+    database.accountingLedgerVoucher.findMany({ where: { id: { in: movements.flatMap(row => row.voucherId ? [row.voucherId] : []) } }, select: { id: true, referenceNumber: true } }),
+  ]);
+  const rows = movements.map(row => Object.fromEntries(Object.entries({
+    شرح: row.label, تاریخ: row.at.slice(0, 10), قرارداد: contracts.find(contract => contract.id === row.contractId)?.contractNumber ?? '',
+    بدهکار: row.debit, بستانکار: row.credit, مانده: row.balance, سند: vouchers.find(voucher => voucher.id === row.voucherId)?.referenceNumber ?? '',
+  }).map(([key, value]) => [key, exportCell(value)])));
   const sourceHash = hashCustomerTreasuryEvidence({ profileId: input.profileId, asOf: input.asOf, rows });
   const requestIdentity = hashCustomerTreasuryEvidence({ profileId: input.profileId, asOf: input.asOf, format: input.format, sourceHash });
   const prior = await database.accountingCustomerStatementExport.findUnique({ where: { requestIdentity } });
@@ -990,8 +1031,15 @@ export const exportCustomerStatementPrisma = async (database: PrismaClient, inpu
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), 'صورتحساب مشتری');
     bytes = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   } else {
-    const headers = rows.length ? Object.keys(rows[0]) : ['نوع', 'تاریخ', 'مرجع', 'مانده'];
-    const html = `<!doctype html><html dir="rtl" lang="fa"><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;padding:24px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:6px;text-align:right;font-size:11px}h1{font-size:18px}</style><h1>صورتحساب مشتری — ${exportHtml(projection.profile.displayName)}</h1><p>تا تاریخ ${exportHtml(input.asOf.toISOString())}</p><table><thead><tr>${headers.map((header) => `<th>${exportHtml(header)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${headers.map((header) => `<td>${exportHtml(row[header])}</td>`).join('')}</tr>`).join('')}</tbody></table></html>`;
+    const headers = ['شرح', 'تاریخ', 'قرارداد', 'بدهکار', 'بستانکار', 'مانده', 'سند'];
+    const date = (value: string) => new Intl.DateTimeFormat('fa-IR', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+    const display = (key: string, value: unknown) => {
+      const text = String(value ?? '').replace(/^'/, '');
+      if (['بدهکار', 'بستانکار', 'مانده'].includes(key)) return BigInt(text || '0').toLocaleString('fa-IR');
+      return key === 'تاریخ' ? date(text) : text;
+    };
+    const net = projection.receivableRials - projection.unallocatedCreditRials;
+    const html = `<!doctype html><html dir="rtl" lang="fa"><meta charset="utf-8"><style>body{font-family:Tahoma,Arial,sans-serif;color:#172b3a;padding:18px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border-bottom:1px solid #d4dce2;padding:9px 5px;text-align:right;font-size:10px;overflow-wrap:anywhere}th{background:#edf2f5}th:first-child{width:25%}tbody tr:nth-child(even){background:#f7f9fb}h1{font-size:20px;margin-bottom:8px}.summary{padding:12px;background:#edf2f5;border-radius:8px;margin:18px 0;font-size:13px}.meta{font-size:11px;color:#506575}</style><h1>صورتحساب مشتری</h1><strong>${exportHtml(projection.profile.displayName)}</strong><p class="meta">تا تاریخ ${exportHtml(date(input.asOf.toISOString()))} · همه مبالغ به ریال</p><div class="summary">مانده خالص: ${exportHtml(net.toLocaleString('fa-IR'))} ریال · ${net > 0n ? 'بدهکار' : net < 0n ? 'بستانکار' : 'تراز'}</div><table><thead><tr>${headers.map(header => `<th>${exportHtml(header)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${headers.map(header => `<td>${exportHtml(display(header, row[header]))}</td>`).join('')}</tr>`).join('')}</tbody></table><p class="meta">تخصیص دریافت و برگشت تخصیص، خالص مانده مشتری را تغییر نمی‌دهند.</p></html>`;
     bytes = await generatePdfBufferFromHtml({ htmlContent: html });
   }
   await database.accountingCustomerStatementExport.create({ data: { requestIdentity, profileId: input.profileId,

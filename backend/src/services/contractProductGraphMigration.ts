@@ -6,6 +6,7 @@ import {
 } from '@sabalanerp/contract-product-graph';
 import { PRECISE_PREPARED_GRAPH_PRICING_POLICY } from '@sabalanerp/contract-product-graph';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { auditPartnerContractProductGraph } from './partnerSales/cases/productGraphReleaseAudit';
 
 export const CURRENT_CONTRACT_PRODUCT_POLICY: CalculationPolicySnapshot = {
   calculation: 'calculation-v1',
@@ -156,13 +157,14 @@ export const migrateLegacyContractProductGraph = async (
 
 export const dryRunLegacyContractProductGraphMigration = async (prisma: PrismaClient) => {
   const contracts = await prisma.salesContract.findMany({
-    where: { productGraphState: null },
-    select: { id: true, contractNumber: true, totalAmount: true, contractData: true },
+    where: { OR: [{ productGraphState: null }, { partnerKind: { not: null } }] },
+    select: { id: true, contractNumber: true, totalAmount: true, contractData: true, partnerKind: true },
     orderBy: { createdAt: 'asc' }
   });
   const report = {
     scanned: contracts.length,
     migratable: 0,
+    partnerCanonical: 0,
     ambiguous: 0,
     financialDifferences: 0,
     brokenRelationships: 0,
@@ -170,6 +172,25 @@ export const dryRunLegacyContractProductGraphMigration = async (prisma: PrismaCl
     contracts: [] as Array<Record<string, unknown>>
   };
   for (const contract of contracts) {
+    if (contract.partnerKind !== null) {
+      const audit = await prisma.$transaction(tx => auditPartnerContractProductGraph(tx, contract.id), {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        timeout: 30_000,
+      });
+      if (audit.ok) {
+        report.partnerCanonical += 1;
+        report.contracts.push({ contractId: contract.id, contractNumber: contract.contractNumber,
+          status: 'partner-canonical', owner: audit.owner, graphHash: audit.graphHash });
+      } else {
+        report.ambiguous += 1;
+        if (audit.conflicts.some(conflict => conflict.code === 'partner-customer-financial-drift')) {
+          report.financialDifferences += 1;
+        }
+        report.contracts.push({ contractId: contract.id, contractNumber: contract.contractNumber,
+          status: 'blocked', conflicts: audit.conflicts });
+      }
+      continue;
+    }
     const plan = buildLegacyContractMigrationPlan(contract);
     if (plan.ok) {
       report.migratable += 1;

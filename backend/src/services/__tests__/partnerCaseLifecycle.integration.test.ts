@@ -38,6 +38,7 @@ import type { PartnerCorrectionDependencyInput } from '../partnerSales/correctio
 import { prepareRetailSuccessor } from '../partnerSales/corrections/retailSuccessor';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend } from '../partnerSales/accounting/history';
 import { createPartnerCaseLoading, readPartnerCaseLoading } from '../dispatchAllocation';
+import { dryRunLegacyContractProductGraphMigration } from '../contractProductGraphMigration';
 
 function databaseUrl() {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -430,6 +431,65 @@ async function fixture(run: (tx: Prisma.TransactionClient, ids: Ids, owner: Revi
     await run(tx, ids, owner); throw rollback; }, { timeout: 30_000 }); }
   catch (error) { if (error !== rollback) throw error; } finally { await database.$disconnect(); }
 }
+
+const migrationAuditInFixture = (tx: Prisma.TransactionClient) =>
+  dryRunLegacyContractProductGraphMigration({ salesContract: tx.salesContract,
+    $transaction: (read: (snapshot: Prisma.TransactionClient) => Promise<unknown>) => read(tx),
+  } as unknown as PrismaClient);
+
+test('release product graph audit verifies Partner ownership instead of migrating its customer projection', () =>
+  fixture(async (tx, ids) => {
+    const before = await tx.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } });
+    const report = await migrationAuditInFixture(tx);
+    const entry = report.contracts.find(contract => contract.contractId === ids.contractId);
+    assert.equal(entry?.status, 'partner-canonical');
+    assert.deepEqual(await tx.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } }), before);
+    assert.equal(await tx.salesContractProductGraphState.count({ where: { contractId: ids.contractId } }), 0);
+  }));
+
+test('release product graph audit blocks altered Partner customer projection', () => fixture(async (tx, ids) => {
+  // Inject damaged historical evidence only inside this automatically rolled-back local fixture.
+  await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+  const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } });
+  const data = contract.contractData as Prisma.JsonObject;
+  await tx.salesContract.update({ where: { id: ids.contractId }, data: { contractData: {
+    ...data, legalText: 'Altered projection without canonical evidence',
+  } } });
+  const report = await migrationAuditInFixture(tx);
+  const entry = report.contracts.find(contract => contract.contractId === ids.contractId);
+  assert.equal(entry?.status, 'blocked');
+  assert.ok(JSON.stringify(entry?.conflicts).includes('partner-customer-projection-mismatch'));
+}));
+
+test('release product graph audit blocks Partner financial drift and missing owner', () => fixture(async (tx, ids) => {
+  await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+  await tx.salesContract.update({ where: { id: ids.contractId }, data: { totalAmount: { increment: 1 } } });
+  const financial = await migrationAuditInFixture(tx);
+  const entry = financial.contracts.find(contract => contract.contractId === ids.contractId);
+  assert.equal(entry?.status, 'blocked');
+  assert.ok(JSON.stringify(entry?.conflicts).includes('partner-customer-financial-drift'));
+  assert.ok(financial.financialDifferences > 0);
+  await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: {
+    customerContractId: `${ids.contractId}-missing-owner`,
+  } });
+  const missing = await migrationAuditInFixture(tx);
+  assert.equal(missing.contracts.find(contract => contract.contractId === ids.contractId)?.status, 'blocked');
+}));
+
+test('release product graph audit retains legacy ambiguity and rejects corrupt Partner revision evidence', () =>
+  fixture(async (tx, ids) => {
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+    await tx.partnerCaseRevision.update({ where: { caseId_revision: { caseId: ids.caseId, revision: 1 } },
+      data: { graphHash: `sha256-v1:${'0'.repeat(64)}` } });
+    const corrupt = await migrationAuditInFixture(tx);
+    assert.equal(corrupt.contracts.find(contract => contract.contractId === ids.contractId)?.status, 'blocked');
+    await tx.salesContract.update({ where: { id: ids.contractId }, data: { partnerKind: null,
+      partnerCaseId: null, partnerRevision: null, partnerIntegrityHash: null } });
+    const ordinary = await migrationAuditInFixture(tx);
+    const entry = ordinary.contracts.find(contract => contract.contractId === ids.contractId);
+    assert.equal(entry?.status, 'blocked');
+    assert.ok(JSON.stringify(entry?.conflicts).includes('legacy-catalog-product-id-missing'));
+  }));
 
 test('a loss requires explicit acceptance at finalization time', () => fixture(async (tx, ids, owner) => {
   const service = createPartnerCaseLifecycleService(dependencies(tx, ids));

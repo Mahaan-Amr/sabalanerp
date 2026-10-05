@@ -40,6 +40,7 @@ const main = async () => {
     mode: apply ? 'APPLY' : 'READ_ONLY',
     scanned: dryRun.scanned,
     migratable: dryRun.migratable,
+    partnerCanonical: dryRun.partnerCanonical,
     ambiguous: dryRun.ambiguous,
     financialDifferences: dryRun.financialDifferences,
     brokenRelationships: dryRun.brokenRelationships,

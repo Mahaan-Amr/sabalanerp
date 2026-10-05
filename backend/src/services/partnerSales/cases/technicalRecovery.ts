@@ -65,7 +65,7 @@ export function technicalRecoveryLease(dependencies: PartnerTechnicalRecoveryDep
       if (session.baseRevision !== access.baseRevision) return { ok: false, error: partnerError('ROW_STALE') };
       const recovery = session.recovery === null ? null : decodeTechnicalRecovery(session.recovery);
       if (recovery === undefined) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-      if (recovery && (recovery.updatedAt > now.getTime() || now.getTime() - recovery.updatedAt > CONTRACT_CREATION_DRAFT_TTL_MS)) {
+      if (recovery && (recovery.updatedAt > now.getTime() || (!session.contractId && now.getTime() - recovery.updatedAt > CONTRACT_CREATION_DRAFT_TTL_MS))) {
         return { ok: false, error: partnerError('STATE_CONFLICT') };
       }
       return work(tx, session, recovery, now);

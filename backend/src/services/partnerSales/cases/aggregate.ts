@@ -1,3 +1,5 @@
+import { finishCommercialCorrection } from '../../ordinaryContractLifecycle';
+import { inquiryBelongsToCurrentActivation } from './reactivationPricing';
 import { allocatePartnerLinkedPair } from './linkedPair';
 import { assertPartnerCommercialAvailable, resetPartnerCommercialApprovals, reconcilePartnerCommercialFinality } from './commercialLifecycle';
 import { randomUUID } from 'node:crypto';
@@ -46,7 +48,7 @@ async function resolveAdditionalMaterialApprovals(tx: Transaction, command: Draf
       caseId: command.type === 'CASE_DRAFT_REVISE' ? command.expected.caseId : command.idempotency.targetId,
       caseRevision: previousRevision,
       pricingSubjectId: material.pricingSubjectId, approval: frozen.data }) : undefined;
-    if (frozen.success && priorUsage?.approvalId === frozen.data.approvalId && priorUsage.evidenceHash === frozenEvidenceHash &&
+    if (frozen.success && await inquiryBelongsToCurrentActivation(tx, command.type === 'CASE_DRAFT_REVISE' ? command.expected.caseId : command.idempotency.targetId, frozen.data.inquiryId) && priorUsage?.approvalId === frozen.data.approvalId && priorUsage.evidenceHash === frozenEvidenceHash &&
         frozen.data.configurationHash === material.configurationHash &&
         frozen.data.inquiryId === binding.inquiryId && frozen.data.rowId === binding.rowId &&
         frozen.data.revision === binding.revision && frozen.data.partnerSellerId === resolved.partnerSellerId &&
@@ -146,7 +148,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     id: true, caseNumber: true, profileId: true, customerId: true, internalRecordId: true,
     customerContractId: true, headRevision: true, integrityHash: true, state: true,
     customerConfirmationState: true, commercialFlowVersion: true, stateRevision: true,
-    head: { select: { customerContent: true, customerProjection: true, rowBindings: { select: { productRowId: true,
+    head: { select: { customerContent: true, customerProjection: true, wholesaleEnvelope: true, retailEnvelope: true, paymentEvidence: true, graph: true, rowBindings: { select: { productRowId: true,
       configurationHash: true, inquiryUsages: { select: { approvalSnapshot: true } } } },
       materialInquiryUsages: { select: { pricingSubjectId: true, approvalId: true,
         approvalSnapshot: true, evidenceHash: true } } } },
@@ -155,11 +157,11 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     trackingCode: { select: { number: true } },
   } });
   if (!current) return { ok: false, error: partnerError('NOT_FOUND') } as const;
-  if ((!isPartnerCaseEditableState(current.state) && !(current.commercialFlowVersion === 1 && current.state === 'COMMITTED')) ||
+  if ((!isPartnerCaseEditableState(current.state) && !(current.state === 'COMMITTED')) ||
       command.expectedState !== current.state) {
     return { ok: false, error: partnerError('STATE_CONFLICT') } as const;
   }
-  if (current.customerContract && current.commercialFlowVersion === 1) {
+  if (current.customerContract) {
     assertPartnerCommercialAvailable(current.customerContract);
     const financial = current.customerContract.firstFinancialRecordAt || await tx.accountingFinancialRecord.findFirst({
       where: { sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: current.internalRecordId ?? '' }, select: { id: true },
@@ -251,7 +253,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     }
     const frozen = previous?.configurationHash === saved.configurationHash
       ? ApprovedInquirySchema.safeParse(previous.inquiryUsages[0]?.approvalSnapshot) : undefined;
-    if (frozen?.success && frozen.data.inquiryId === row.approvedRowBinding.inquiryId &&
+    if (frozen?.success && await inquiryBelongsToCurrentActivation(tx, caseId, frozen.data.inquiryId) && frozen.data.inquiryId === row.approvedRowBinding.inquiryId &&
         frozen.data.rowId === row.approvedRowBinding.rowId && frozen.data.revision === row.approvedRowBinding.revision) {
       approvedRows.push({ ...saved, retailUnitPrice: { ...row.retailUnitPrice, amount: saved.retailUnitPriceAmount },
         approval: frozen.data, frozen: true });
@@ -313,8 +315,34 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     ? projectCustomerVisibleRevisionContent(nextCustomerOutput.data) : undefined;
   const customerVisibleChanged = !previousCustomer || !nextCustomer ||
     await canonicalHash(previousCustomer) !== await canonicalHash(nextCustomer);
-  const commercialChanged = customerVisibleChanged || current.customerConfirmationState === 'REJECTED';
-  const nextState = current.commercialFlowVersion === 1 ? current.state
+  // Workflow/recovery identifiers are not commercial changes. Wholesale terms,
+  // technical configuration and payment instructions are still material.
+  const basis = (wholesale: unknown, payment: unknown, graph: unknown, retail: unknown) => {
+    const envelope = wholesale as Record<string, unknown>;
+    const plan = (payment as { sabalanPaymentPlan?: { effectiveDate: string; installments: Array<Record<string, unknown>> } }).sabalanPaymentPlan;
+    const { revision: _revision, ...technical } = graph as Record<string, unknown>;
+    return { ...envelope, products: Array.isArray(envelope.products) ? envelope.products.map(raw => {
+      const { approvalEvidenceId: _approval, ...product } = raw as Record<string, unknown>; return product;
+    }) : [], technical, preparationCompleted: (retail as { preparationCompleted?: boolean }).preparationCompleted !== false,
+    sabalanPlan: plan ? { effectiveDate: plan.effectiveDate, installments: plan.installments.map(({ installmentId: _id, ...item }) => item) } : null };
+  };
+  const commercialChanged = customerVisibleChanged || current.customerConfirmationState === 'REJECTED' ||
+    current.state === 'COMMITTED' && (await canonicalHash(basis(current.head.wholesaleEnvelope, current.head.paymentEvidence, current.head.graph, current.head.retailEnvelope)) !==
+    await canonicalHash(basis(evidence.value.wholesaleEnvelope, evidence.value.paymentEvidence, evidence.value.graph, evidence.value.retailEnvelope)));
+  if (!commercialChanged && current.customerContract?.status === 'SIGNED') {
+    markMutated();
+    const consumed = await dependencies.consumeRecovery(tx, { actorId: dependencies.actorId,
+      recoveryId: command.intent.recoveryId, recoveryRevision: command.intent.recoveryRevision, caseId,
+      customerContractId: current.customerContract.id });
+    if (!consumed.ok) return consumed;
+    await finishCommercialCorrection(tx, current.customerContract.id, dependencies.actorId);
+    const outcome = { version: 1, commandId: command.commandId, caseId,
+      revision: current.headRevision, integrityHash: current.integrityHash, eventIds: [] };
+    await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...key, payloadHash: intentHash, outcome: json(outcome) } });
+    return { ok: true, value: { commandId: command.commandId, replayed: false,
+      case: (await readPartnerView(tx, caseId))?.view, eventIds: [] as string[] } } as const;
+  }
+  const nextState = current.commercialFlowVersion === 1 || current.state === 'COMMITTED' ? current.state
     : customerVisibleChanged ? 'DRAFT' as const : current.state;
   const nextConfirmationState = commercialChanged && current.customerConfirmationState !== 'NOT_SENT'
     ? 'RECONFIRMATION_REQUIRED' as const : current.customerConfirmationState;

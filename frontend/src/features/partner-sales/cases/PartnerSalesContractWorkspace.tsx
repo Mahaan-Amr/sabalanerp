@@ -1,4 +1,5 @@
 'use client';
+import { PartnerContractCancellation } from './PartnerContractCancellation';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -51,6 +52,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
   const actions = row?.actions;
   const currentView = row?.view ?? view;
   return <>
+    {['CANCELLED', 'VOIDED'].includes(currentView.state) && <PartnerContractCancellation caseId={currentView.owner.caseId} />}
     {error && <ErpInlineState kind={error.kind} title={error.message} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
     <PartnerCaseWorkspace view={currentView}
       commercial={row?.commercial}

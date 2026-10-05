@@ -1,3 +1,4 @@
+import { partnerReactivationAt } from './reactivationPricing';
 import type { Prisma } from '@prisma/client';
 import { inquiryConfigurationHash } from '@sabalanerp/partner-sales-contracts';
 import { decodeTechnicalRecovery } from './technicalRecoveryRecords';
@@ -40,7 +41,8 @@ export async function readCasePricingResponse(tx: Prisma.TransactionClient, inpu
     dependent.kind === 'remainder' && dependent.productRowId === item.productRowId));
   const required = await Promise.all(subjects.map(item => inquiryConfigurationHash(item.identity)));
   if (!required.length && saved.serviceRows?.length) return 'READY';
-  const rows = await tx.partnerInquiryRow.findMany({ where: { inquiry: { caseId: input.caseId, profileId: input.profileId } },
+  const reactivatedAt = await partnerReactivationAt(tx, input.caseId);
+  const rows = await tx.partnerInquiryRow.findMany({ where: { inquiry: { caseId: input.caseId, profileId: input.profileId, ...(reactivatedAt ? { submittedAt: { gt: reactivatedAt } } : {}) } },
     orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }], select: { outcome: true, definition: true,
       inquiry: { select: { caseRevision: true } }, successor: { select: { outcome: true } },
       approval: { select: { expiresAt: true } } } });

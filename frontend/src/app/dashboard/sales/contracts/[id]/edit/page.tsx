@@ -4,7 +4,7 @@ import { isCurrentContractFlow, type ContractLifecyclePresentation } from '@/fea
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import PersianCalendar from '@/lib/persian-calendar';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { ErpCard, ErpInlineState, ErpLoading } from '@/components/erp';
 import { dashboardAPI, salesAPI } from '@/lib/api';
 import { getContractPermissions, type User } from '@/lib/permissions';
@@ -13,6 +13,7 @@ import {
   contractCorrectionBannerTitle,
   contractCorrectionCategoryLabel,
 } from '@/features/contract-creation/services/contractCorrectionPresentation';
+import { readPartnerCases } from '@/features/partner-sales/cases/partnerCaseHttpPort';
 import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
 import { assertSuccessfulSalesResponse, getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
@@ -53,6 +54,7 @@ interface ContractForEdit extends ContractLifecyclePresentation {
 
 export default function SalesContractEditPage() {
   const params = useParams();
+  const router = useRouter();
   const contractId = params.id as string;
   const [contract, setContract] = useState<ContractForEdit | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,7 +88,14 @@ export default function SalesContractEditPage() {
         const user = profileResponse.data?.data as User | undefined;
         const permissions = user ? getContractPermissions(user) : null;
 
-        if (resolvePartnerContractRoute(nextContract).kind !== 'ordinary') {
+        const partner = resolvePartnerContractRoute(nextContract);
+        if (partner.kind !== 'ordinary') {
+          if (partner.kind === 'partner') {
+            const row = (await readPartnerCases(partner.caseId))[0];
+            if (row?.actions.canContinue && row.editRecovery) {
+              router.replace(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(partner.caseId)}&draftId=${encodeURIComponent(row.editRecovery.recoveryId)}&baseRevision=${row.editRecovery.baseRevision}`);
+            } else router.replace(`/dashboard/sales/contracts/${contractId}`);
+          }
           setContract(nextContract);
           setError(null);
           return;
@@ -172,7 +181,7 @@ export default function SalesContractEditPage() {
   if (partnerRoute.kind !== 'ordinary') {
     return <ErpCard className="py-8"><ErpInlineState
       kind={partnerRoute.kind === 'blocked' ? 'error' : 'permission'}
-      title={partnerRoute.kind === 'blocked' ? 'شواهد نسخه پرونده فروش همکار کامل نیست؛ ویرایش متوقف شد.' : 'اصلاح پرونده فروش همکار از جریان نسخه‌دار و یک‌بار ذخیره انجام می‌شود، نه ویرایش قرارداد عادی.'}
+      title={partnerRoute.kind === 'blocked' ? 'شواهد نسخه پرونده فروش همکار کامل نیست؛ ویرایش متوقف شد.' : 'ویرایش قرارداد فروش همکار از صفحه پرونده ادامه می‌یابد.'}
       action={{ label: 'مشاهده پرونده', href: `/dashboard/sales/contracts/${contractId}` }} /></ErpCard>;
   }
 

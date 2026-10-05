@@ -18,6 +18,7 @@ export const PartnerCaseRuntimeActionsSchema = z.object({
   canSendConfirmation: z.boolean(),
   canRequestCorrection: z.boolean(),
   canCancel: z.boolean(),
+  canReactivate: z.boolean().optional(),
   canRequestVoid: z.boolean(),
 }).strict();
 

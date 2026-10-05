@@ -1,3 +1,4 @@
+import { assertPartnerFinancialFinality } from '../cases/commercialLifecycle';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type CheckAccountingStatus } from '@prisma/client';
 import { InstantSchema, MoneySchema, PartnerEventSchema, SabalanInternalRecordViewSchema, canonicalHash } from '@sabalanerp/partner-sales-contracts';
@@ -119,6 +120,7 @@ export async function executePartnerCollectionAction(database: PrismaClient, com
         !purchase.covered || !official || official.receivable.id !== receivable.id || command.contractId ||
         view.data.owner.revision !== row.headRevision || view.data.owner.integrityHash !== row.integrityHash ||
         !['ISSUED', 'POSTED'].includes(receivable.invoiceRecord!.status)) throw conflict();
+    if (command.kind === 'REGISTER_RECEIPT' || command.kind === 'UPDATE_CHECK_STATUS' && !['RETURNED', 'BOUNCED'].includes(command.status || '')) await assertPartnerFinancialFinality(tx, caseId);
     const currentView = await withCurrentSabalanPlan(tx, view.data);
     const prepared = await prepareCommittedAccountingSource({ view: { ...currentView, state: row.state },
       partnerSellerId: row.profile.userId, commitment }, { caseId, revision: row.headRevision, integrityHash: row.integrityHash });

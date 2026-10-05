@@ -666,9 +666,34 @@ export const assertCorrectionFinancialWorkflowReady = async (
     throw new Error('CORRECTION_NOT_READY_FOR_VERIFICATION');
   }
   const contract = await database.salesContract.findUnique({
-    where: { id: correction.contractId }, select: { totalAmount: true, currency: true },
+    where: { id: correction.contractId }, select: { totalAmount: true, currency: true, partnerCaseId: true },
   });
   if (!contract) throw new Error('Contract not found');
+  if (contract.partnerCaseId) {
+    const { readCurrentPartnerCaseViews } = await import('./partnerSales/cases/lifecycle');
+    const { assertPartnerFinancialFinality } = await import('./partnerSales/cases/commercialLifecycle');
+    await assertPartnerFinancialFinality(database, contract.partnerCaseId);
+    const views = await readCurrentPartnerCaseViews(database, contract.partnerCaseId);
+    if (!views?.accounting) throw new Error('PARTNER_CORRECTION_EVIDENCE_REQUIRED');
+    const records = await database.accountingFinancialRecord.findMany({ where: {
+      sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: views.accounting.recordId }, orderBy: { createdAt: 'desc' } });
+    const current = records.find(record => record.status !== 'VOIDED' &&
+      (record.sourceSnapshot as { partnerPreparation?: { owner?: { revision?: number } } } | null)?.partnerPreparation?.owner?.revision === views.accounting!.owner.revision);
+    const source = records.find(record => record.id === correction.recordId);
+    if (source?.status === 'VOIDED' && !current) throw new Error('رکورد مالی قبلی باطل شده است؛ ثبت مالی تازه لازم است.');
+    const recordIds = records.map(record => record.id);
+    const receivables = await database.accountingReceivable.findMany({ where: { invoiceRecordId: { in: recordIds } } });
+    const [payments, tax] = await Promise.all([
+      database.accountingPaymentStatus.findMany({ where: { receivableId: { in: receivables.map(row => row.id) } } }),
+      database.accountingTaxRecord.findMany({ where: { invoiceRecordId: { in: recordIds } } }),
+    ]);
+    const workflowRecords = records.map(record => current?.id === record.id && source && source.id !== current.id
+      ? { ...record, metadata: { ...metadataObject(record.metadata), correctionRequestId: correction.id, replacesRecordId: source.id } } : record);
+    const workflow = buildCorrectionReplacementWorkflow(toRialDecimal(new Prisma.Decimal(views.accounting.totals.payable), views.accounting.totals.currency),
+      workflowRecords, receivables, payments, tax, [correction]);
+    if (!workflow?.canResolve) throw new Error('CORRECTION_FINANCIAL_WORKFLOW_INCOMPLETE');
+    return workflow;
+  }
   const [financialRecords, receivables, paymentEvents, taxRecords] = await Promise.all([
     database.accountingFinancialRecord.findMany({ where: { contractId: correction.contractId }, orderBy: { createdAt: 'desc' } }),
     database.accountingReceivable.findMany({ where: { contractId: correction.contractId } }),
@@ -1219,7 +1244,8 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
         row.accounting.invoiceStatus = 'NONE';
         row.accounting.sourceStatus = document.commercial.status === 'FINAL' ? 'ELIGIBLE' : 'VISIBLE_ONLY';
         row.accounting.eligibleForFinancialRecords = document.canRegister;
-        row.nextBestActions = [{ kind: 'CREATE_INVOICE', labelFa: 'ایجاد پیش‌نویس صورتحساب', enabled: document.canRegister }];
+        row.nextBestActions = [{ kind: 'CREATE_INVOICE', labelFa: 'ایجاد پیش‌نویس صورتحساب', enabled: document.canRegister },
+          { kind: 'CREATE_CORRECTION_REQUEST', labelFa: 'درخواست اصلاح', enabled: ['COMMITTED', 'VOIDED'].includes(document.caseState || '') }];
         projected.push(row);
       }
     }

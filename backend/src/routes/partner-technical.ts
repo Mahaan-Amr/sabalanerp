@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
-import { PartnerTechnicalLeaseRequestSchema, PartnerTechnicalLeaseReceiptSchema, isPartnerCaseEditableState, partnerError,
+import { PartnerTechnicalLeaseRequestSchema, PartnerTechnicalLeaseReceiptSchema, partnerError,
   type PartnerTechnicalCatalogPort, type PartnerTechnicalLeasePort, type PartnerTechnicalRecoveryPort,
   type PartnerTechnicalSavePort, type Result } from '@sabalanerp/partner-sales-contracts';
 import type { PrismaClient } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { partnerTechnicalCaseIsEditable } from '../services/partnerSales/cases/commercialEditPermission';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { createPartnerTechnicalCatalogReader } from '../services/partnerSales/crm/technicalCatalogReader';
 import { createPrismaPartnerTechnicalRecoveryService } from '../services/partnerSales/cases/technicalRecovery';
@@ -69,7 +70,8 @@ export function createPartnerTechnicalRequestServices(input: {
             profile: { select: { userId: true } } } } } }) : null;
         if (existing?.contractId && (contract?.partnerKind !== 'PARTNER_CUSTOMER' ||
             contract.partnerCase?.profile.userId !== input.actorId ||
-            !isPartnerCaseEditableState(contract.partnerCase?.state ?? ''))) {
+            !await partnerTechnicalCaseIsEditable(tx, { contractId: existing.contractId,
+              caseState: contract.partnerCase?.state ?? '', actorId: input.actorId }))) {
           return { ok: false, error: partnerError('STATE_CONFLICT') };
         }
         const sessionInput = {
@@ -82,7 +84,7 @@ export function createPartnerTechnicalRequestServices(input: {
             ...sessionInput, contractId: existing.contractId })
           : await acquirePartnerTechnicalContractEditSession(new PrismaContractEditSessionStore(tx), sessionInput);
         if (!acquired.ok) return { ok: false, error: partnerError(acquired.code === 'revision-conflict'
-          ? 'ROW_STALE' : acquired.code === 'draft-owner-mismatch' ? 'NOT_FOUND' : 'FORBIDDEN') };
+          ? 'ROW_STALE' : acquired.code === 'draft-owner-mismatch' ? 'NOT_FOUND' : 'EDIT_SESSION_OWNED_ELSEWHERE') };
         return { ok: true, value: PartnerTechnicalLeaseReceiptSchema.parse({ schemaVersion: 1,
           recoveryId: acquired.session.draftId, browserSessionId: acquired.session.browserSessionId,
           leaseToken: acquired.session.leaseToken, baseRevision: acquired.session.baseRevision,

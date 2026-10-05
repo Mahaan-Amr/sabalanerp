@@ -54,8 +54,19 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
     }
     if (inPeriod(event, period)) { sales.push(retailDelta); margins.push(subtract(retailDelta, wholesaleDelta)); }
   }
-  if (history.voided && inPeriod(history.voided, period)) {
-    const voided = revision(history.voided.owner);
+  for (const event of history.recommitments) {
+    const renewed = revision(event.owner);
+    if (inPeriod(event, period)) {
+      sales.push(renewed.comparable.retail.amount);
+      margins.push(subtract(renewed.comparable.retail.amount, renewed.comparable.sabalan.amount));
+    }
+  }
+  for (const event of history.voids.filter(item => inPeriod(item, period))) {
+    const voided = revision(event.owner);
+    // Cancelling an activation before renewed finality has no new retail sale
+    // to reverse. Its audited wholesale adjustment is zero.
+    const neutralization = events.filter(item => item.type === 'SABALAN_ADJUSTMENT' && event.adjustmentEventIds.includes(item.eventId));
+    if (neutralization.length && sum(neutralization.map(item => item.type === 'SABALAN_ADJUSTMENT' ? item.delta : '0')) === '0') continue;
     sales.push(negate(voided.comparable.retail.amount));
     margins.push(negate(subtract(voided.comparable.retail.amount, voided.comparable.sabalan.amount)));
   }
@@ -75,6 +86,9 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
     if (event.type === 'CASE_COMMITTED') {
       const committed = revision(event.owner);
       chartTransactions.push(transaction(event, 'COMMITMENT', event.sabalanNetAmount.amount, committed.comparable.retail.amount));
+    } else if (event.type === 'CASE_RECOMMITTED') {
+      const renewed = revision(event.owner);
+      chartTransactions.push(transaction(event, 'COMMITMENT', '0', renewed.comparable.retail.amount));
     } else if (event.type === 'CORRECTION_EFFECTIVE') {
       const previous = revision(event.predecessor); const next = revision(event.owner);
       chartTransactions.push(transaction(event, 'CORRECTION', '0', subtract(next.comparable.retail.amount, previous.comparable.retail.amount)));
@@ -88,7 +102,9 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
       chartTransactions.push(transaction(event, 'CUSTOMER_RECEIPT_REVERSAL', '0', event.amount.amount, negate(event.amount.amount)));
     } else if (event.type === 'CASE_VOIDED') {
       const voided = revision(event.owner);
-      chartTransactions.push(transaction(event, 'VOID', '0', negate(voided.comparable.retail.amount)));
+      const neutralization = events.filter(item => item.type === 'SABALAN_ADJUSTMENT' && event.adjustmentEventIds.includes(item.eventId));
+      const emptyCycle = neutralization.length && sum(neutralization.map(item => item.type === 'SABALAN_ADJUSTMENT' ? item.delta : '0')) === '0';
+      chartTransactions.push(transaction(event, 'VOID', '0', emptyCycle ? '0' : negate(voided.comparable.retail.amount)));
     }
   }
   return { current: current!, retailSales: sum(sales), retailCollected: periodCollected,
@@ -107,7 +123,7 @@ export function projectReportRow(runtime: ContractRuntime, data: CaseEvidence, p
   const history = caseHistory(runtime, events);
   if (history.effective && runtime.checkExpectedRevision(history.effective, internal.owner)) conflict();
   if (['COMMITTED', 'VOIDED'].includes(internal.state) && !history.effective) conflict();
-  if (events.some(event => event.type === 'CASE_VOIDED')) {
+  if (history.voided) {
     if (internal.state !== 'VOIDED') conflict();
     for (const event of events) {
       if (event.type !== 'CASE_VOIDED') continue;

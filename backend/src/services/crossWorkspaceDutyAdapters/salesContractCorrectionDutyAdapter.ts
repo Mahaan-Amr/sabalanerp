@@ -7,6 +7,8 @@ import { lockCrossWorkspaceDuty } from '../crossWorkspaceDutyLock';
 import { resolveWorkspaceDutyAuthority } from '../crossWorkspaceDutyAuthority';
 import { publishNotificationEvent } from '../notificationService';
 import { assertCorrectionFinancialWorkflowReady } from '../accountingService';
+import { partnerInactiveIsCancellation } from '../partnerSales/cases/commercialEditPermission';
+import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
 import { hasSpecialCustomerCreditAuthorization } from '../specialCustomerCreditPolicy';
 
 const ACCOUNTING_CORRECTION_FEATURES = Object.freeze({
@@ -692,9 +694,15 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
     if (input.actionCode === 'APPROVE') {
       const contract = correction.contractId ? await database.salesContract.findUnique({
         where: { id: correction.contractId },
-        select: { responsibleSellerId: true, isInactive: true },
+        select: { responsibleSellerId: true, isInactive: true, inactiveReason: true, inactiveAt: true, partnerKind: true, partnerCaseId: true, status: true },
       }) : null;
-      if (!contract || contract.isInactive) throw new Error('CONTRACT_INACTIVE');
+      if (!contract || contract.isInactive && !(contract.partnerKind === 'PARTNER_CUSTOMER' && contract.status === 'CANCELLED')) throw new Error('CONTRACT_INACTIVE');
+      if (contract.partnerCaseId) {
+        if (!await partnerInactiveIsCancellation(database, contract)) throw new Error('CONTRACT_INACTIVE');
+        const authority = await createAuditedPartnerAuthorization(database, { actorId: input.actorUserId, purpose: 'ACCOUNTING', channel: 'API' },
+          { correlationId: duty.id, reason: correction.accountantNote }).authorize('ACCOUNTING_READ', { kind: 'CASE', id: contract.partnerCaseId });
+        if (!authority.ok) throw new Error('PARTNER_CORRECTION_FORBIDDEN');
+      }
       if (!contract.responsibleSellerId) throw new Error('RESPONSIBLE_SELLER_REQUIRED');
       nextStatus = 'APPROVED_FOR_SALES_EDIT';
       nextAction = 'SALES_EDIT_CONTRACT_CORRECTION';
@@ -831,8 +839,7 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   return { correction: updatedCorrection, predecessor, successor, replayed: false };
 };
 
-/** Partner-only direct Accounting authorization. Ordinary correction stages keep
- * their existing processor/manager separation. */
+/** Shared permission completion retains the independent manager decision. */
 export const closePartnerCommercialEditPermission = async (database: Prisma.TransactionClient, input: {
   dutyId: string; actorUserId: string; reason: string; now: Date; expired?: boolean;
 }) => {
@@ -859,36 +866,21 @@ export const openPartnerCommercialEditPermission = async (database: Prisma.Trans
   await assertAccountingActor(database, input.actorUserId,
     [...ACCOUNTING_CORRECTION_FEATURES.PROCESS, ...ACCOUNTING_CORRECTION_FEATURES.DECIDE], input.now);
   const contract = await database.salesContract.findUnique({ where: { id: input.contractId } });
-  if (!contract?.partnerCaseId || contract.partnerKind !== 'PARTNER_CUSTOMER' || contract.isInactive || !contract.responsibleSellerId) {
+  if (!contract?.partnerCaseId || contract.partnerKind !== 'PARTNER_CUSTOMER' || (contract.isInactive && contract.status !== 'CANCELLED') || !contract.responsibleSellerId) {
     throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
   }
-  const prior = await database.accountingCorrectionRequest.findUnique({ where: { requestIdempotencyKey: input.requestKey } });
-  if (prior) {
-    if (prior.contractId !== contract.id || prior.createdBy !== input.actorUserId || prior.accountantNote !== input.reason) throw new Error('CORRECTION_IDEMPOTENCY_CONFLICT');
-    return prior;
-  }
-  const active = await database.accountingCorrectionRequest.findMany({ where: { contractId: contract.id, status: 'APPROVED_FOR_SALES_EDIT' } });
-  for (const correction of active) {
-    const duty = await database.crossWorkspaceDuty.findFirst({ where: { sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: correction.id,
-      sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN', dueAt: { gt: input.now } } });
-    if (duty) return correction;
-    const expiredDuties = await database.crossWorkspaceDuty.findMany({ where: { sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: correction.id, status: 'OPEN' } });
-    for (const expiredDuty of expiredDuties) await closePartnerCommercialEditPermission(database, {
-      dutyId: expiredDuty.id, actorUserId: input.actorUserId, reason: 'مهلت مجوز مشترک پایان یافته است.', now: input.now, expired: true });
-    if (!expiredDuties.length) await database.accountingCorrectionRequest.update({ where: { id: correction.id }, data: {
-      status: 'CANCELLED', resolvedBy: input.actorUserId, resolvedAt: input.now, resolutionNote: 'مهلت مجوز مشترک پایان یافته است.' } });
-  }
-  const created = await database.accountingCorrectionRequest.create({ data: { contractId: contract.id,
-    category: 'OTHER', priority: 'MEDIUM', status: 'APPROVED_FOR_SALES_EDIT', accountantNote: input.reason,
-    createdBy: input.actorUserId, requestIdempotencyKey: input.requestKey } });
-  await createStageDuty(database, { correctionId: created.id, sourceActorUserId: input.actorUserId,
-    actionCode: 'SALES_EDIT_CONTRACT_CORRECTION', sourceVersion: created.dutySourceVersion,
-    assigneeUserId: contract.responsibleSellerId, actorUserId: input.actorUserId,
-    dueAt: addTehranWorkingDays(input.now, 3), policyVersion: 1, now: input.now });
-  await database.accountingAuditLog.create({ data: { action: 'OPEN_PARTNER_COMMERCIAL_EDIT_PERMISSION', actorId: input.actorUserId,
-    contractId: contract.id, entityType: 'AccountingCorrectionRequest', entityId: created.id,
-    afterState: { permission: 'EDIT_AND_CANCEL', reason: input.reason, correctionId: created.id }, note: input.reason } });
-  return created;
+  const expired = await database.crossWorkspaceDuty.findMany({ where: { sourceType: 'SALES_CONTRACT_CORRECTION',
+    sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN', dueAt: { lte: input.now },
+    sourceId: { in: (await database.accountingCorrectionRequest.findMany({ where: { contractId: contract.id,
+      status: 'APPROVED_FOR_SALES_EDIT' }, select: { id: true } })).map(item => item.id) } } });
+  for (const duty of expired) await closePartnerCommercialEditPermission(database, { dutyId: duty.id,
+    actorUserId: input.actorUserId, reason: 'مهلت مجوز مشترک پایان یافته است.', now: input.now, expired: true });
+  const { requestAccountingSalesContractCorrection } = await import('../salesContractCorrectionDuty');
+  const result = await requestAccountingSalesContractCorrection(database, {
+    contractId: contract.id, actorUserId: input.actorUserId, reason: input.reason,
+    idempotencyKey: input.requestKey, category: 'OTHER', priority: 'MEDIUM', now: input.now,
+  });
+  return result.correction;
 };
 
 export const completeSalesCorrectionEditDuty = async (
@@ -920,9 +912,9 @@ export const completeSalesCorrectionEditDuty = async (
   const commercialClosing = input.commercialFinality || input.periodExpired;
   if (commercialClosing) {
     const contract = await database.salesContract.findUnique({ where: { id: input.contractId } });
-    if (!contract || !((contract.commercialFlowVersion === 1 && !contract.partnerKind && !contract.partnerCaseId) || (contract.commercialFlowVersion === 2 && contract.partnerKind === 'PARTNER_CUSTOMER' && contract.partnerCaseId))) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
-    if (input.commercialFinality && !hasSpecialCustomerCreditAuthorization(contract) && (contract.status !== 'SIGNED' || contract.salesApprovalRevision !== contract.commercialRevision
-      || contract.customerAcceptanceRevision !== contract.commercialRevision)) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
+    if (!contract || !((contract.commercialFlowVersion === 1 && !contract.partnerKind && !contract.partnerCaseId) || (contract.partnerKind === 'PARTNER_CUSTOMER' && contract.partnerCaseId))) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
+    if (input.commercialFinality && !hasSpecialCustomerCreditAuthorization(contract) && (contract.status !== 'SIGNED' || (contract.commercialFlowVersion === 2 || !contract.partnerKind) && (contract.salesApprovalRevision !== contract.commercialRevision
+      || contract.customerAcceptanceRevision !== contract.commercialRevision))) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
     if (input.periodExpired && salesDuty.dueAt >= input.now) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
   }
   if (!commercialClosing && salesDuty.currentAssigneeUserId !== input.actorUserId && !actorIsAdmin) throw new Error('ASSIGNEE_CHANGED');
@@ -1055,7 +1047,7 @@ export const salesContractCorrectionDutyAdapter = {
     if (!correction?.contractId) throw new Error('DUTY_SOURCE_CHANGED');
     const contract = await database.salesContract.findUnique({
       where: { id: correction.contractId },
-      select: { contractNumber: true },
+      select: { contractNumber: true, partnerCaseId: true },
     });
     if (!contract) throw new Error('DUTY_SOURCE_CHANGED');
     return {
@@ -1066,7 +1058,7 @@ export const salesContractCorrectionDutyAdapter = {
       ...(input.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION'
         ? { destinationHref: `/dashboard/sales/contracts/${correction.contractId}/edit` }
         : input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
-          ? { destinationHref: `/dashboard/accounting/contracts/${correction.contractId}?section=financial` }
+          ? { destinationHref: contract.partnerCaseId ? `/dashboard/accounting/contracts/partner/${contract.partnerCaseId}?section=financial` : `/dashboard/accounting/contracts/${correction.contractId}?section=financial` }
         : {}),
       sourceIsCurrent: input.sourceVersion === correction.dutySourceVersion,
     };

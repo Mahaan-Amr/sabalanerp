@@ -1,4 +1,5 @@
 'use client';
+import { accountingCorrectionFields } from '@/features/accounting/accountingCorrectionFields';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpButton, ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -677,24 +678,7 @@ export default function AccountingContractsPage() {
         open={Boolean(correctionTarget)}
         title="درخواست اصلاح"
         description={correctionTarget ? `${correctionTarget.contractNumber} - ${correctionTarget.customer.displayName}` : undefined}
-        fields={[
-          { id: 'category', label: 'دسته اصلاح', type: 'select', defaultValue: 'OTHER', options: [
-            { label: 'هویت مشتری', value: 'CUSTOMER_IDENTITY' },
-            { label: 'مبلغ و قیمت', value: 'AMOUNT_PRICING' },
-            { label: 'برنامه پرداخت', value: 'PAYMENT_PLAN' },
-            { label: 'برنامه تحویل', value: 'DELIVERY_SCHEDULE' },
-            { label: 'مالیات', value: 'TAX_INFO' },
-            { label: 'اسناد و امضا', value: 'DOCUMENT_SIGNATURE' },
-            { label: 'سایر', value: 'OTHER' },
-          ] },
-          { id: 'priority', label: 'اولویت', type: 'select', defaultValue: 'MEDIUM', options: [
-            { label: 'کم', value: 'LOW' },
-            { label: 'متوسط', value: 'MEDIUM' },
-            { label: 'زیاد', value: 'HIGH' },
-            { label: 'فوری', value: 'URGENT' },
-          ] },
-          { id: 'reason', label: 'متن درخواست اصلاح', type: 'textarea', required: true },
-        ]}
+        fields={accountingCorrectionFields}
         submitLabel="ثبت درخواست"
         busy={Boolean(actionLoading)}
         error={actionError}

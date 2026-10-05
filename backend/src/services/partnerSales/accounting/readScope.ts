@@ -1,3 +1,4 @@
+import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { RevisionRefSchema } from '@sabalanerp/partner-sales-contracts';
@@ -25,7 +26,7 @@ type ListRow = { id: string; invoiceRecordId?: string | null; receivableId?: str
 type ListKind = 'FINANCIAL' | 'RECEIVABLE' | 'PAYMENT' | 'TAX' | 'AUDIT';
 type PartnerAccountingContext = { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string; internalRecordNumber: string;
   partnerSellerId: string; commercialAccountId: string; debtor: { displayName: string };
-  endCustomer: { displayName: string }; revision: number; actionUrl: string; accountingWritable: boolean };
+  endCustomer: { displayName: string }; revision: number; actionUrl: string; accountingWritable: boolean; caseState?: string; commercialStatus?: string };
 type AccountingRowContext = { sourceKind?: string; partnerContext?: PartnerAccountingContext;
   partnerFinancialSource?: PartnerFinancialPreparation['totals']; partnerActions?: {
     registerReceipt?: boolean; reverseReceipt?: boolean; checkStatuses?: string[]; taxStatuses?: string[];
@@ -48,7 +49,7 @@ export function withAccountingReadScope<T>(database: PrismaClient, actor: Accoun
 async function createScope(database: Prisma.TransactionClient, actor: AccountingReadActor | undefined) {
   const caseRows = await database.partnerSaleCase.findMany({ where: { internalRecordId: { not: null },
     customerContractId: { not: null } }, orderBy: { id: 'asc' }, select: {
-    id: true, caseNumber: true, trackingCode: { select: { number: true } }, internalRecordId: true, internalRecord: { select: { recordNumber: true } },
+    id: true, state: true, caseNumber: true, trackingCode: { select: { number: true } }, internalRecordId: true, internalRecord: { select: { recordNumber: true } },
     customerContractId: true, customerContract: { select: { contractNumber: true } },
     customer: { select: { companyName: true, firstName: true, lastName: true } },
     profile: { select: { userId: true } } } });
@@ -134,6 +135,8 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   const contextByInvoice = new Map<string, PartnerAccountingContext>();
   const healthyCases = new Set<string>();
   const committedCases = new Set<string>();
+  const finalCases = new Set<string>();
+  const commercialByCase = new Map<string, string>();
   const frozenCases = new Set<string>();
   const preparationByInvoice = new Map<string, PartnerFinancialPreparation>();
   const conflict = () => new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'شواهد صورتحساب همکار نیاز به بررسی دارد؛ پرونده را در حسابداری بررسی کنید.');
@@ -163,6 +166,9 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         const current = await readCurrentPartnerCaseViews(database, row.id);
         if (!current) throw conflict();
         if (current.row.state === 'COMMITTED') committedCases.add(row.id);
+        const commercial = await readPartnerCommercialState(database, row.id);
+        if (commercial) commercialByCase.set(row.id, commercial.status);
+        if (current.row.state === 'COMMITTED' && (!commercial || commercial.status === 'FINAL')) finalCases.add(row.id);
         if (await partnerPredecessorIsFrozen(database, row.id, current.row.headRevision)) frozenCases.add(row.id);
         healthyCases.add(row.id);
       }
@@ -180,7 +186,8 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         commercialAccountId: views.accounting.commercialAccountId, debtor: views.accounting.debtor,
         endCustomer: { displayName: row.customer.companyName ||
           `${row.customer.firstName} ${row.customer.lastName}`.trim() },
-        revision: owner.data.revision, accountingWritable: writableCases.has(row.id) && committedCases.has(row.id),
+        revision: owner.data.revision, caseState: row.state, commercialStatus: commercialByCase.get(row.id),
+        accountingWritable: writableCases.has(row.id) && finalCases.has(row.id),
         actionUrl: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(views.accounting.caseNumber)}` });
       preparationByInvoice.set(invoice.id, preparation);
     }
@@ -196,15 +203,15 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         Boolean(invoice && ['ISSUED', 'POSTED'].includes(invoice.status) && object(invoice.metadata)?.partnerApproval);
       return { ...row, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, partnerContext: context,
         ...(['PAYMENT', 'RECEIVABLE'].includes(kind) ? { partnerActions: {
-          registerReceipt: kind === 'RECEIVABLE' && writable && !frozenCases.has(context.caseId) && !['VOIDED', 'SETTLED'].includes(payment.status || ''),
+          registerReceipt: kind === 'RECEIVABLE' && writable && finalCases.has(context.caseId) && !frozenCases.has(context.caseId) && !['VOIDED', 'SETTLED'].includes(payment.status || ''),
           reverseReceipt: kind === 'PAYMENT' && writable && ['CASH', 'BANK_TRANSFER'].includes(payment.method || '') &&
             ['RECEIVED', 'RECONCILED'].includes(payment.status || ''),
           checkStatuses: kind === 'PAYMENT' && writable && payment.method === 'CHECK' && payment.checkStatus
-            ? partnerCheckTransitions[payment.checkStatus] || [] : [],
+            ? (partnerCheckTransitions[payment.checkStatus] || []).filter(status => finalCases.has(context.caseId) || ['RETURNED', 'BOUNCED'].includes(status)) : [],
         } } : {}),
         ...(kind === 'TAX' ? { partnerFinancialSource: preparationByInvoice.get(invoice!.id)!.totals,
           partnerActions: { taxStatuses: taxWritable && taxStatus ? partnerTaxTransitions[taxStatus].filter(status =>
-            !frozenCases.has(context.caseId) || !['SUBMITTED_MANUALLY', 'SUBMITTED_EXTERNALLY'].includes(status)) : [] } } : {}),
+            finalCases.has(context.caseId) && !frozenCases.has(context.caseId) || !['SUBMITTED_MANUALLY', 'SUBMITTED_EXTERNALLY'].includes(status)) : [] } } : {}),
       };
     });
   };

@@ -7,6 +7,7 @@ import api, { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { defaultCustomPrintSettings, type SalesPdfVariant, type CustomPrintSettings, type CustomPrintPreset } from '@/features/accounting/AccountingCustomPrintSettings';
 import PartnerFinancialVoidPanel from '@/features/accounting/PartnerFinancialVoidPanel';
+import { accountingCorrectionFields } from '@/features/accounting/accountingCorrectionFields';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import { money, type FinancialInvoiceApprovalPayload } from '@/features/accounting/accountingUi';
 import { PartnerAccountingDetailView, type PartnerInternalDocument as InternalDocument, type PartnerDetailSection } from '@/features/accounting/PartnerAccountingDetailView';
@@ -61,20 +62,22 @@ export default function PartnerInternalAccountingContractPage() {
     productRowsMode: preset === 'summarized' ? 'summarized' : 'detailed', showPrices: preset !== 'workshop',
     showPaymentSection: preset !== 'workshop', showTotals: preset !== 'workshop',
     columns: { ...current.columns, rate: preset !== 'workshop', total: preset !== 'workshop' } }));
-  const [action, setAction] = useState<'flag' | 'correction' | 'edit'>();
+  const [action, setAction] = useState<'flag' | 'correction'>();
   const [requestKey, setRequestKey] = useState('');
-  const openAction = (kind: 'flag' | 'correction' | 'edit') => { setAction(kind); setRequestKey(crypto.randomUUID()); setError(undefined); };
+  const openAction = (kind: 'flag' | 'correction') => { setAction(kind); setRequestKey(crypto.randomUUID()); setError(undefined); };
   const submitAction = async (values: Record<string, string | number>) => {
     if (!action || pending) return;
     setPending(true); setError(undefined);
     try {
-      if (action === 'edit') await api.post(`/accounting/contracts/partner/${encodeURIComponent(caseId)}/edit-permission`, { reason: String(values.reason).trim() }, { headers: { 'X-Idempotency-Key': requestKey } });
-      else if (action === 'correction') await accountingAPI.createPartnerInternalCorrectionRequest(caseId,
-        { category: 'OTHER', priority: 'MEDIUM', reason: String(values.reason).trim() }, requestKey);
+      if (action === 'correction') await accountingAPI.createPartnerInternalCorrectionRequest(caseId,
+        { category: String(values.category || 'OTHER'), priority: String(values.priority || 'MEDIUM'), reason: String(values.reason).trim() }, requestKey);
       else await accountingAPI.flagPartnerInternalRecord(caseId,
         { category: 'OTHER', severity: 'MEDIUM', title: String(values.title), note: String(values.reason).trim() });
       setAction(undefined); await load();
-    } catch { setError('اقدام ثبت نشد؛ وضعیت پرونده را تازه‌سازی و دوباره بررسی کنید.'); }
+    } catch (failure) {
+      const response = (failure as { response?: { data?: { message?: string } } }).response?.data;
+      setError(response?.message || 'اقدام ثبت نشد؛ وضعیت پرونده را تازه‌سازی و دوباره بررسی کنید.');
+    }
     finally { setPending(false); }
   };
   const load = useCallback(async () => {
@@ -127,7 +130,7 @@ export default function PartnerInternalAccountingContractPage() {
       printVariant={printVariant} onPrintVariant={setPrintVariant} customPrintSettings={customPrintSettings}
       setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset}
       pending={pending} error={action ? undefined : error} onRefresh={() => void load()} onPdf={print => void pdf(print)}
-      onOpenEdit={() => openAction('edit')} onFlag={() => openAction('flag')} onCorrection={() => openAction('correction')}
+      onFlag={() => openAction('flag')} onCorrection={() => openAction('correction')}
       onResolve={flag => { setFlagTarget(flag); setResolutionReason(''); }} />
     <ErpSheet open={receivableOpen} onClose={() => { if (!pending) setReceivableOpen(false); }}
       title="ایجاد دریافتنی" presentation="modal" pending={pending}
@@ -139,8 +142,11 @@ export default function PartnerInternalAccountingContractPage() {
       ]} />
       {error && <ErpInlineState kind="error" title={error} />}
     </ErpSheet>
-    <AccountingActionModal open={Boolean(action)} title={action === 'flag' ? 'پرچم حسابداری' : action === 'edit' ? 'بازکردن مجوز ویرایش و لغو قرارداد' : 'درخواست اصلاح سند داخلی'}
-      fields={[...(action === 'flag' ? [{ id: 'title', label: 'عنوان', type: 'text' as const, required: true }] : []),
+    <AccountingActionModal open={Boolean(action)} title={action === 'flag' ? 'پرچم حسابداری' : 'درخواست اصلاح'}
+      description={action === 'correction' ? `${document.partnerContext.customerContractNumber} - ${document.partnerContext.endCustomer.displayName}` : undefined}
+      submitLabel={action === 'correction' ? 'ثبت درخواست' : 'ثبت'}
+      fields={action === 'correction' ? accountingCorrectionFields : [
+        { id: 'title', label: 'عنوان', type: 'text', required: true },
         { id: 'reason', label: 'توضیح و دلیل', type: 'textarea', required: true }]}
       busy={pending} error={error} onClose={() => { if (!pending) setAction(undefined); }} onSubmit={submitAction} />
     <ErpSheet open={Boolean(flagTarget)} onClose={() => { if (!pending) setFlagTarget(undefined); }}

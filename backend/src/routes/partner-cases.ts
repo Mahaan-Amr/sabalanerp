@@ -40,6 +40,7 @@ import { ensureMissingResponderSupport, resolveEligibleResponder, resolveProfile
   resolveSavedTechnicalConfiguration } from '../services/partnerSales/inquiries/adapters';
 import { dispatchPartnerInquiryEvents, inquiryNotificationAccess } from '../services/partnerSales/notifications/inquiryDelivery';
 import { completePartnerPricingResultDutiesForCase } from '../services/crossWorkspaceDutyAdapters/partnerPricingDutyAdapter';
+import { partnerTechnicalCaseIsEditable } from '../services/partnerSales/cases/commercialEditPermission';
 import { shouldExposePartnerRecovery } from '../services/partnerSales/cases/recoveryVisibility';
 import { generateContractNumberAssignment } from '../services/contractNumberService';
 import { enqueueCommittedPartnerCase } from '../services/partnerSales/accounting/commitQueue';
@@ -83,7 +84,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const requestedCaseId = typeof request.query.caseId === 'string' ? request.query.caseId : undefined;
         const requestedCase = requestedCaseId ? await tx.partnerSaleCase.findFirst({ where: {
           id: requestedCaseId, profile: { userId: request.user!.id },
-          OR: [{ state: { in: [...partnerContracts.PARTNER_EDITABLE_CASE_STATES] } }, { state: 'COMMITTED', commercialFlowVersion: 1 }],
+          OR: [{ state: { in: [...partnerContracts.PARTNER_EDITABLE_CASE_STATES] } }, { state: 'COMMITTED' }],
         }, select: { customerContractId: true } }) : null;
         if (requestedCaseId && !requestedCase) return { ok: false as const, error: partnerError('NOT_FOUND') };
         const profile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: {
@@ -162,7 +163,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         }))];
         const editableOwnedCases = boundCaseIds.length ? await tx.partnerSaleCase.findMany({ where: {
           id: { in: boundCaseIds }, profileId: profile.id,
-          state: { in: [...partnerContracts.PARTNER_EDITABLE_CASE_STATES] },
+          OR: [{ state: { in: [...partnerContracts.PARTNER_EDITABLE_CASE_STATES] } }, { state: 'COMMITTED' }],
         }, select: { id: true, trackingCode: { select: { number: true } } } }) : [];
         const editableOwnedCaseIds = new Set(editableOwnedCases.map(row => row.id));
         const trackingByCaseId = new Map(editableOwnedCases.map(row => [row.id, row.trackingCode?.number]));
@@ -322,16 +323,21 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           ? 'ROW_STALE' : ownership.code === 'edit-session-missing' ? 'NOT_FOUND' : 'FORBIDDEN') };
         const recoveryCaseId = typeof recovery.partnerCaseId === 'string' ? recovery.partnerCaseId : undefined;
         const boundContract = session.contractId ? await tx.salesContract.findUnique({ where: { id: session.contractId },
-          select: { partnerKind: true, partnerCase: { select: { id: true, state: true, commercialFlowVersion: true,
+          select: { partnerKind: true, partnerCase: { select: { id: true, customerContractId: true, state: true, commercialFlowVersion: true,
             profile: { select: { userId: true } } } } } }) : null;
         const recoveryCase = !session.contractId && recoveryCaseId ? await tx.partnerSaleCase.findUnique({
-          where: { id: recoveryCaseId }, select: { id: true, state: true, commercialFlowVersion: true, profile: { select: { userId: true } } },
+          where: { id: recoveryCaseId }, select: { id: true, customerContractId: true, state: true, commercialFlowVersion: true, profile: { select: { userId: true } } },
         }) : null;
         const boundCase = boundContract?.partnerCase ?? recoveryCase;
         const invalidContractBinding = Boolean(session.contractId && boundContract?.partnerKind !== 'PARTNER_CUSTOMER');
         const invalidCaseBinding = Boolean((session.contractId || recoveryCaseId) && (!boundCase ||
-          boundCase.profile.userId !== request.user!.id || !(partnerContracts.isPartnerCaseEditableState(boundCase.state) || boundCase.commercialFlowVersion === 1 && boundCase.state === 'COMMITTED')));
+          boundCase.profile.userId !== request.user!.id || !(partnerContracts.isPartnerCaseEditableState(boundCase.state) || boundCase.state === 'COMMITTED')));
         if (invalidContractBinding || invalidCaseBinding) {
+          return { ok: false as const, error: partnerError('STATE_CONFLICT') };
+        }
+        if (boundCase?.state === 'COMMITTED' && (!boundCase.customerContractId ||
+            !await partnerTechnicalCaseIsEditable(tx, { contractId: boundCase.customerContractId,
+              caseState: boundCase.state, actorId: request.user!.id }))) {
           return { ok: false as const, error: partnerError('STATE_CONFLICT') };
         }
         const profile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: { id: true, state: true } });
@@ -706,7 +712,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       const result = await prisma.$transaction(async tx => {
         const actorProfile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: { id: true } });
         const rows = await tx.partnerSaleCase.findMany({ where: body.caseId ? { id: body.caseId } : undefined,
-          orderBy: { createdAt: 'desc' }, select: { id: true, state: true, commercialFlowVersion: true, pricingState: true,
+          orderBy: { createdAt: 'desc' }, select: { id: true, state: true, committedAt: true, commercialFlowVersion: true, pricingState: true,
             customerConfirmationState: true, headRevision: true, integrityHash: true,
             customerContractId: true, trackingCode: { select: { number: true } },
             head: { select: { internalProjection: true, customerProjection: true } },
@@ -755,9 +761,9 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           const cancel = await authorized('CASE_CANCEL', casePurpose, 'API');
           const voidRequest = await authorized('VOID_REQUEST', casePurpose, 'API');
           const commercial = row.commercialFlowVersion === 1 ? await readPartnerCommercialState(tx, row.id) : undefined;
-          const correctionRequired = row.state === 'COMMITTED' || commercial?.status === 'FINAL' || !!commercial?.firstFinancialRecordAt;
-          const correctionDuty = correctionRequired && row.customerContractId ? await tx.crossWorkspaceDuty.findFirst({ where: { sourceType: 'SALES_CONTRACT_CORRECTION', sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN', dueAt: { gt: new Date() }, currentAssigneeUserId: request.user!.id, sourceId: { in: (await tx.accountingCorrectionRequest.findMany({ where: { contractId: row.customerContractId, status: 'APPROVED_FOR_SALES_EDIT' }, select: { id: true } })).map(item => item.id) } } }) : null;
-          const commercialWritable = !!commercial && commercial.status !== 'EXPIRED' && commercial.status !== 'CANCELLED' && (!correctionRequired || !!correctionDuty);
+          const correctionRequired = !!row.committedAt || row.state === 'COMMITTED' || commercial?.status === 'FINAL' || !!commercial?.firstFinancialRecordAt;
+          const correctionDuty = correctionRequired && row.customerContractId ? await (await import('../services/partnerSales/cases/commercialEditPermission')).readPartnerCommercialEditPermission(tx, row.customerContractId, request.user!.id) : null;
+          const commercialWritable = commercial ? commercial.status !== 'EXPIRED' && commercial.status !== 'CANCELLED' && (!correctionRequired || !!correctionDuty) : row.state === 'COMMITTED' && !!correctionDuty;
           const editSession = edit && (partnerContracts.isPartnerCaseEditableState(row.state) || commercialWritable)
             ? await tx.salesContractEditSession.findFirst({ where: {
               ownerUserId: request.user!.id, purpose: 'PARTNER_TECHNICAL',
@@ -789,8 +795,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             ...(row.customerContractId ? { customerContractId: row.customerContractId } : {}),
             ...(editableRecovery ? { editRecovery: { recoveryId: editableRecovery.draftId,
               baseRevision: editableRecovery.baseRevision } } : {}),
-            actions: { canContinue: Boolean(editableRecovery) && (!commercial || commercialWritable),
-              canRenew: !!commercial && commercial.status === 'EXPIRED' && !commercial.firstFinancialRecordAt && await canManageCommercialSettings(tx, request.user!),
+            actions: { canContinue: Boolean(editableRecovery) && (!correctionRequired || commercialWritable),
+              canRenew: !!commercial && (commercial.status === 'EXPIRED' || !!commercial.expiresAt && new Date(commercial.expiresAt) <= new Date()) && !commercial.firstFinancialRecordAt && await canManageCommercialSettings(tx, request.user!),
               canApproveSales: commit && commercialWritable && view.data.preparationCompleted !== false && !commercial?.salesApproved,
               canRejectDraft: edit && commercialWritable && commercial?.status !== 'FINAL' && !commercial?.firstFinancialRecordAt && !!commercial?.salesApproved,
               ...casePdfAvailability({ authorized: output, state: row.state, commercialFlow: !!commercial && commercial.status !== 'EXPIRED' && commercial.status !== 'CANCELLED', hasContent: Boolean(customerOutput?.success), hasSnapshot: Boolean(row.outputs[0]) }),
@@ -800,7 +806,9 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
               canSendConfirmation: output && view.data.preparationCompleted !== false && (commercial ? !!row.customerContractId && commercial.status !== 'CANCELLED' && commercial.status !== 'EXPIRED' && !commercial.customerAccepted
                 : row.state === 'COMMITTED' && row.customerConfirmationState !== 'REJECTED'),
               canRequestCorrection: false,
-              canCancel: cancel && (commercial ? commercialWritable : partnerContracts.isPartnerCaseEditableState(row.state)),
+              canReactivate: cancel && ['CANCELLED', 'VOIDED'].includes(row.state) &&
+                (!row.committedAt || !!correctionDuty) && (!commercial?.expiresAt || !!commercial.firstFinancialRecordAt || new Date(commercial.expiresAt) > new Date()),
+              canCancel: cancel && (commercial ? commercialWritable : partnerContracts.isPartnerCaseEditableState(row.state) || row.state === 'COMMITTED' && !!correctionDuty),
               canRequestVoid: false } });
         }
         const output = partnerContracts.PartnerCaseRuntimeResultSchema.safeParse({ cases });
@@ -809,6 +817,24 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       });
       respond(response, result);
     } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+  });
+  router.post('/:caseId/reactivate', async (request: AuthRequest, response) => {
+    if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+    const parsed = z.object({ expected: partnerContracts.RevisionRefSchema,
+      expectedState: z.enum(['CANCELLED', 'VOIDED']), commercialRevision: z.number().int().positive(),
+      commandId: z.string().uuid(), reason: z.string().trim().min(3).max(2000) }).strict().safeParse(request.body);
+    if (!parsed.success || parsed.data.expected.caseId !== request.params.caseId) {
+      respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return;
+    }
+    try {
+      const { reactivatePartnerCase } = await import('../services/partnerSales/cases/reactivation');
+      const value = await prisma.$transaction(tx => reactivatePartnerCase(tx, { ...parsed.data,
+        caseId: request.params.caseId, actorId: request.user!.id }), { timeout: 30_000 });
+      respond(response, { ok: true, value });
+    } catch (error) {
+      response.status(409).json({ success: false, error: error instanceof Error && !('code' in error)
+        ? error.message : 'فعال‌سازی انجام نشد؛ وضعیت و مجوز پرونده را بررسی کنید.' });
+    }
   });
   router.post('/:caseId/commercial', async (request: AuthRequest, response) => {
     if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
@@ -828,7 +854,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         if (contract.commercialRevision !== parsed.data.revision) throw new Error('قرارداد تغییر کرده است؛ صفحه را تازه‌سازی کنید.');
         if (parsed.data.action === 'RENEW') {
           if (contract.isInactive || contract.firstFinancialRecordAt || !(contract.status === 'EXPIRED' || contract.commercialExpiresAt && contract.commercialExpiresAt <= new Date()) || !await canManageCommercialSettings(tx, request.user!)) throw new Error('تمدید در این وضعیت مجاز نیست.');
-          await resetPartnerCommercialApprovals(tx, root.id, request.user!.id, parsed.data.reason);
+          // Renewal must retain the terminal state until an authorized reactivation.
+          if (!['CANCELLED', 'VOIDED'].includes(root.state)) await resetPartnerCommercialApprovals(tx, root.id, request.user!.id, parsed.data.reason);
           await tx.salesContract.update({ where: { id: contract.id }, data: { commercialExpiresAt: new Date(Date.now() + (contract.commercialExpiryDays || 10) * 86400000) } });
           return;
         }

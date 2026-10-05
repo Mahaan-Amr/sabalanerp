@@ -1,3 +1,4 @@
+import { assertPartnerFinancialFinality } from '../cases/commercialLifecycle';
 import { partnerFinancialChainIsVoiding } from './financialVoidSource';
 import { Prisma, type PrismaClient, type AccountingTaxRecord } from '@prisma/client';
 import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
@@ -66,6 +67,7 @@ export async function runPartnerAwareTaxMutation(database: PrismaClient, command
     }
     if (current.row.state !== 'COMMITTED' || !['ISSUED', 'POSTED'].includes(invoice.status) ||
         !object(invoice.metadata)?.partnerApproval) throw conflict();
+    if (command.kind === 'MARK_TAX_READY' || ['SUBMITTED', 'SUBMITTED_MANUALLY', 'SUBMITTED_EXTERNALLY'].includes(command.status || 'SUBMITTED')) await assertPartnerFinancialFinality(tx, caseId);
     const frozen = await partnerPredecessorIsFrozen(tx, caseId, current.row.headRevision) || await partnerFinancialChainIsVoiding(tx, caseId);
     if (frozen && (command.kind === 'MARK_TAX_READY' || ['SUBMITTED', 'SUBMITTED_MANUALLY', 'SUBMITTED_EXTERNALLY'].includes(command.status || 'SUBMITTED'))) {
       throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'ارسال مالیاتی جدید تا تعیین تکلیف اصلاح پرونده همکار متوقف است.');

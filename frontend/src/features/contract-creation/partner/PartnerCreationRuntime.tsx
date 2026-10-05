@@ -242,6 +242,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const [draftAccess, setDraftAccess] = useState<Access | null>(null);
   const [recoveryRevision, setRecoveryRevision] = useState(0);
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
+  const [recoveryTakeoverAllowed, setRecoveryTakeoverAllowed] = useState(false);
   const recoveryRevisionRef = useRef(0);
   recoveryRevisionRef.current = recoveryRevision;
   const recoveryStarting = useRef(false);
@@ -321,7 +322,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const reacquireDraftAccess = useCallback(async (access: Access): Promise<Access | null> => {
     const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: access.recoveryId,
       browserSessionId: access.browserSessionId, baseRevision: access.baseRevision, takeover: false });
-    if (!lease.ok) { setRecoveryBlocked(true); setError(lease.error.message); return null; }
+    if (!lease.ok) { setRecoveryBlocked(true); setRecoveryTakeoverAllowed(lease.error.code === 'EDIT_SESSION_OWNED_ELSEWHERE'); setError(lease.error.message); return null; }
     const refreshed = { ...access, leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
     setDraftAccess(current => current?.recoveryId === access.recoveryId &&
       (current.leaseToken !== refreshed.leaseToken || current.baseRevision !== refreshed.baseRevision) ? refreshed : current);
@@ -503,7 +504,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             browserSessionId, baseRevision: candidate.baseRevision, takeover: false });
           if (!active) return;
           if (!lease.ok) {
-            setRecoveryBlocked(true); setError(lease.error.message);
+            setRecoveryBlocked(true); setRecoveryTakeoverAllowed(lease.error.code === 'EDIT_SESSION_OWNED_ELSEWHERE'); setError(lease.error.message);
           } else {
             const access: Access = { schemaVersion: 1, recoveryId: candidate.recoveryId, browserSessionId,
               leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
@@ -654,11 +655,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const browserSessionId = getPartnerBrowserSessionId(window.sessionStorage, partner.actorId);
       const baseRevision = candidate?.baseRevision ?? 0;
       const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId, browserSessionId, baseRevision, takeover });
-      if (!lease.ok) { setRecoveryBlocked(Boolean(candidate)); setError(lease.error.message); return; }
+      if (!lease.ok) { setRecoveryBlocked(Boolean(candidate)); setRecoveryTakeoverAllowed(lease.error.code === 'EDIT_SESSION_OWNED_ELSEWHERE'); setError(lease.error.message); return; }
+      setRecoveryTakeoverAllowed(false);
       const access: Access = { schemaVersion: 1, recoveryId, browserSessionId,
         leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
       const recovered = await ports.recovery.read(access);
-      if (!recovered.ok) { setError(recovered.error.message); return; }
+      if (!recovered.ok) { setRecoveryBlocked(true); setError(recovered.error.message); return; }
       if (recovered.value.recoveryId !== recoveryId) throw new Error('Recovery identity mismatch');
       if (!fresh && !requestedCaseId) {
         const entry = readSessionEntry(partner.actorId, recoveryId);
@@ -711,7 +713,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         if (!refreshed) return false;
         const result = await ports.recovery.checkpoint({ ...refreshed, expectedRecoveryRevision,
           idempotencyKey: `partner-checkpoint-${crypto.randomUUID()}`, draft });
-        if (!result.ok) { setRecoveryBlocked(true); setError(result.error.message); return false; }
+        if (!result.ok) { setRecoveryBlocked(true); setRecoveryTakeoverAllowed(false); setError(result.error.message); return false; }
         checkpointedInputRevision.current = result.value.inputRevision;
         recoveryRevisionRef.current = result.value.recoveryRevision;
         setRecoveryRevision(result.value.recoveryRevision);
@@ -1695,9 +1697,10 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     </ErpNeumorphicWorkflowLayout>;
   }
   if (recoveryBlocked && !runtime) return <section dir="rtl" className="mx-auto max-w-3xl space-y-4">
-    <ContractCreationDraftPrompt mode="takeover" pending={pending}
+    {recoveryTakeoverAllowed ? <ContractCreationDraftPrompt mode="takeover" pending={pending}
       onResume={async () => { await openDraftRecovery(context, true); }}
-      onStartNew={() => discardDraftRecovery(context)} />
+      onStartNew={() => discardDraftRecovery(context)} /> : <ErpButton label="به‌روزرسانی" disabled={pending}
+        onClick={() => window.location.reload()} />}
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
   if (wizard && submission) return <PartnerContractWizard draft={{ ...wizard, rows: presentPartnerRetailRows(wizard.rows, technicalDraft, technicalProducts) }} onChange={updateWizard} recovery={{ state: 'writable' }} externalError={error}

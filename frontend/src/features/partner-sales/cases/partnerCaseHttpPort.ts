@@ -166,3 +166,11 @@ export async function decidePartnerCommercial(caseId: string, revision: number, 
   const response = await api.post(`/partner/cases/${encodeURIComponent(caseId)}/commercial`, { action, revision, ...(reason ? { reason } : {}) });
   return response.data;
 }
+
+export async function reactivatePartnerCase(row: PartnerCaseRuntimeRow, reason: string, commandId: string) {
+  const response = await api.post(`/partner/cases/${encodeURIComponent(row.view.owner.caseId)}/reactivate`, {
+    expected: row.view.owner, expectedState: row.view.state, commercialRevision: row.commercial?.revision ?? 1,
+    commandId, reason,
+  });
+  return response.data;
+}

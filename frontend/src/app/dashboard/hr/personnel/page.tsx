@@ -843,17 +843,41 @@ export default function HrPersonnelPage() {
         </ErpSection>
       )}
 
+      {actionPermissions.includes('VIEW_PERFORMANCE_BADGE_LIST') && <ErpCard className="p-4"><PerformanceBadgeBanner /></ErpCard>}
+      <div className="min-w-0" data-testid="personnel-list-toolbar">
+        <div className="grid min-w-0 grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)]">
+          <ErpField label="جست‌وجوی پرسنل" className="min-w-0">
+            <ErpInput
+              aria-label="جستجوی پرسنل"
+              placeholder="نام پرسنل…"
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") submitSearch(); }}
+            />
+          </ErpField>
+        <div className="min-w-0 max-w-full overflow-x-auto" aria-label="فیلتر واحدهای پرسنل" data-testid="personnel-unit-tabs">
+          <div className="w-max min-w-full">
+            <ErpSegmentedControl
+              value={organizationalUnitId}
+              options={[
+                { value: "", label: "همهٔ واحدها" },
+                ...unitTabs.map((unit) => ({ value: unit.id, label: unit.name })),
+                ...(organizationalUnitId && !unitTabs.some((unit) => unit.id === organizationalUnitId)
+                  ? [{ value: organizationalUnitId, label: "واحد انتخاب‌شده (بدون پرسنل)" }] : []),
+              ]}
+              onChange={(unitId) => replaceListState({ organizationalUnitId: unitId, page: 1, focus: "", panel: "" })}
+            />
+          </div>
+        </div>
+        </div>
+        <div className="mt-2 min-h-5 text-xs text-[var(--sds-text-muted)]" role="status" aria-live="polite">
+          {resultsLoading ? "در حال به‌روزرسانی نتایج…" : null}
+        </div>
+      </div>
+
       <ErpSection
         title={archiveView ? "بایگانی پرسنل" : "فهرست پرسنل"}
         description={`${meta.total.toLocaleString("fa-IR")} پرونده`}
-        actions={[
-          {
-            label: "جستجو",
-            icon: FaSearch,
-            onClick: submitSearch,
-            tone: "neutral",
-          },
-        ]}
       >
         {(relationshipStatus || attention) && (
           <ErpCard className="mb-4 flex flex-wrap items-center justify-between gap-3 p-3">
@@ -868,38 +892,6 @@ export default function HrPersonnelPage() {
             <ErpButton label="حذف فیلتر" href="/dashboard/hr/personnel" tone="neutral" variant="ghost" />
           </ErpCard>
         )}
-        <div className="mb-4">
-          <ErpInput
-            aria-label="جستجوی پرسنل"
-
-            value={searchDraft}
-            onChange={(e) => {
-              setSearchDraft(e.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter") return;
-              submitSearch();
-            }}
-          />
-          <div className="mt-2 min-h-5 text-xs text-[var(--sds-text-muted)]" role="status" aria-live="polite">
-            {resultsLoading ? "در حال به‌روزرسانی نتایج…" : null}
-          </div>
-        </div>
-        {actionPermissions.includes('VIEW_PERFORMANCE_BADGE_LIST') && <ErpCard className="mb-4 p-4"><PerformanceBadgeBanner /></ErpCard>}
-        <div className="mb-4 min-w-0 max-w-full overflow-x-auto" aria-label="فیلتر واحدهای پرسنل" data-testid="personnel-unit-tabs">
-          <div className="w-max min-w-full">
-            <ErpSegmentedControl
-              value={organizationalUnitId}
-              options={[
-                { value: "", label: "همهٔ واحدها" },
-                ...unitTabs.map((unit) => ({ value: unit.id, label: unit.name })),
-                ...(organizationalUnitId && !unitTabs.some((unit) => unit.id === organizationalUnitId)
-                  ? [{ value: organizationalUnitId, label: "واحد انتخاب‌شده (بدون پرسنل)" }] : []),
-              ]}
-              onChange={(unitId) => replaceListState({ organizationalUnitId: unitId, page: 1, focus: "", panel: "" })}
-            />
-          </div>
-        </div>
         <div className="space-y-3">
           {rows.map((person) => (
             <PersonnelCard

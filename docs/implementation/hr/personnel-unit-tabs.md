@@ -1,6 +1,6 @@
 # Personnel organizational-unit tabs — 2026-10-05
 
-Approved placement: beneath the seven-badge banner and above personnel cards. The canonical segmented control scrolls horizontally at every viewport width.
+Approved placement: the seven-badge banner sits above the list section. Beneath it, desktop shows the labeled search field on the right and unit tabs on the left with aligned control bottoms; mobile stacks search above tabs. The canonical segmented control scrolls horizontally at every viewport width. The layout follows the user reference while preserving the previously approved left-to-right badge order and Roman numerals.
 
 Units come from actual current employment assignments, not legacy account departments or a fixed list. A person with simultaneous assignments appears in each matching unit; the all-units collection contains each person once, including unassigned people. Only units with matching personnel in the authorized active/archive population appear. Search does not hide the other unit choices.
 

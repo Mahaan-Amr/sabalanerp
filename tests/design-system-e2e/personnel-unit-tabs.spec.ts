@@ -18,6 +18,14 @@ test('Personnel unit tabs scroll, preserve URL filtering and reset pagination', 
     await expect(tabs).toBeVisible();
     expect(await tabs.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
     await assertNoHorizontalOverflow(page);
+    const search = await page.getByRole('textbox', { name: 'جستجوی پرسنل' }).boundingBox();
+    const unitBox = await tabs.boundingBox();
+    if (width >= 1024) {
+      expect(search!.x).toBeGreaterThan(unitBox!.x);
+      expect(Math.abs(search!.y + search!.height - unitBox!.y - unitBox!.height)).toBeLessThan(2);
+    } else {
+      expect(unitBox!.y).toBeGreaterThanOrEqual(search!.y + search!.height);
+    }
   }
   await tabs.getByRole('button', { name: 'واحد سازمانی 24', exact: true }).click();
   await expect(page).toHaveURL(/organizationalUnitId=unit-23/);

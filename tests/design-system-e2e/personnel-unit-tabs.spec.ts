@@ -28,3 +28,32 @@ test('Personnel unit tabs scroll, preserve URL filtering and reset pagination', 
   await tabs.getByRole('button', { name: 'همهٔ واحدها', exact: true }).click();
   await expect(page).not.toHaveURL(/organizationalUnitId/);
 });
+
+test('Personnel unit tabs use current assignments from the existing local database', async ({ page }) => {
+  await loginAsAdmin(page);
+  const listing = page.waitForResponse(response => /\/api\/hr\/personnel\?/.test(response.url()) && response.ok());
+  await page.goto('/dashboard/hr/personnel');
+  const data = await (await listing).json();
+  const units = data.meta.organizationalUnits;
+  expect(Array.isArray(units)).toBe(true);
+  const tabs = page.getByTestId('personnel-unit-tabs');
+  await expect(tabs.getByRole('button')).toHaveCount(units.length + 1);
+  if (units.length) {
+    const selected = units[0];
+    const filtered = page.waitForResponse(response => /\/api\/hr\/personnel\?/.test(response.url()) && response.url().includes(`organizationalUnitId=${selected.id}`) && response.ok());
+    await tabs.getByRole('button', { name: selected.name, exact: true }).click();
+    const result = await (await filtered).json();
+    expect(result.meta.total).toBeGreaterThan(0);
+    expect(new Set(result.data.map((person: any) => person.id)).size).toBe(result.data.length);
+    for (const person of result.data) {
+      const at = Date.now();
+      expect(person.hrEmploymentRelationships.some((relationship: any) =>
+        ['ACTIVE', 'SUSPENDED'].includes(relationship.status)
+        && Date.parse(relationship.effectiveFrom) <= at
+        && (!relationship.effectiveTo || Date.parse(relationship.effectiveTo) >= at)
+        && relationship.assignments.some((assignment: any) => assignment.organizationalUnitId === selected.id
+          && Date.parse(assignment.effectiveFrom) <= at
+          && (!assignment.effectiveTo || Date.parse(assignment.effectiveTo) >= at)))).toBe(true);
+    }
+  }
+});

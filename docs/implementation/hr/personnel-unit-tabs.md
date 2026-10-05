@@ -7,3 +7,7 @@ Units come from actual current employment assignments, not legacy account depart
 Current means both assignment and employment relationship have started, neither has ended, and the relationship is ACTIVE or SUSPENDED. All assignment types participate. Future, ended, cancelled and planned relationships remain accessible in personnel records but do not determine current-unit tabs. A unit with a still-current assignment remains visible even if its definition has since been disabled.
 
 The UI requests `unitAssignmentScope=current`; older structural-filter callers retain their existing dependency-date semantics. Unit filtering precedes search, focus resolution and pagination. Unit selection uses the existing URL state, resets pagination and closes the focused record. The endpoint exposes only unit IDs and names, not personnel membership sets. Existing permissions and records are unchanged.
+
+## Verification
+
+Current-unit grouping/collection tests, database-client ownership, design-system check, foundation (25), adoption (14), frontend and backend builds passed. Two focused browser tests passed on the existing local stack: 24-unit horizontal overflow containment at desktop/mobile widths, URL persistence and page reset, and read-only actual-local assignment membership. No personnel records were changed.

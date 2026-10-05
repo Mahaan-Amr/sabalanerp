@@ -39,6 +39,7 @@ import {
 } from '../services/hrOrganizationCapacity';
 import { assertAutomatedHrMigrationOperationAllowed } from '../services/hrMigrationReconciliation';
 import { getHrReconciliationWorkspace, recordHrReconciliationReview } from '../services/hrMigrationReconciliationStore';
+import { loadCurrentPersonnelUnits } from '../services/hrPersonnelUnits';
 import { buildPersonnelCollection, personnelOriginFeature } from '../services/hrPersonnelCollection';
 import { publishRealtime } from '../services/realtimePublisher';
 import { loadHrOperationalReference } from '../services/hrOperationalReferenceProjection';
@@ -1434,6 +1435,8 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
     const archived = textValue(req.query.archived) === 'true';
     const relationshipStatus = textValue(req.query.relationshipStatus);
     const organizationalUnitId = textValue(req.query.organizationalUnitId);
+    const currentUnitTabs = req.query.unitAssignmentScope === 'current';
+    const structuralUnitId = currentUnitTabs ? '' : organizationalUnitId;
     const workplaceId = textValue(req.query.workplaceId);
     const costCenterId = textValue(req.query.costCenterId);
     const dependencyAt = req.query.dependencyAt ? parseDate(req.query.dependencyAt, 'تاریخ وابستگی') : new Date();
@@ -1451,8 +1454,8 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
       ...(attention === 'missing-primary'
         ? { assignments: { none: { type: 'PRIMARY', effectiveTo: null } } }
         : {}),
-      ...((organizationalUnitId || workplaceId || costCenterId) ? { assignments: { some: {
-        ...(organizationalUnitId ? { organizationalUnitId } : {}),
+      ...((structuralUnitId || workplaceId || costCenterId) ? { assignments: { some: {
+        ...(structuralUnitId ? { organizationalUnitId: structuralUnitId } : {}),
         ...(workplaceId ? { workplaceId } : {}),
         ...(costCenterId ? { costCenterId } : {}),
         OR: [{ effectiveTo: null }, { effectiveTo: { gte: dependencyAt } }],
@@ -1460,7 +1463,7 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
     };
     const where: Prisma.PersonnelWhereInput = {
       archivedAt: archived ? { not: null } : null,
-      ...((relationshipStatus || attention === 'missing-primary' || organizationalUnitId || workplaceId || costCenterId) ? { hrEmploymentRelationships: { some: relationshipFilter } } : {})
+      ...((relationshipStatus || attention === 'missing-primary' || structuralUnitId || workplaceId || costCenterId) ? { hrEmploymentRelationships: { some: relationshipFilter } } : {})
     };
     // Authorization and structural filters are applied by middleware/where first. Search,
     // Persian collation, focus canonicalization, and pagination then operate on that complete set.
@@ -1471,7 +1474,12 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
       }),
       activeHrActionPermissionsForUser(prisma, actorId(req)),
     ]);
-    const collection = buildPersonnelCollection(authorizedRows, { search, page, focusId });
+    const units = currentUnitTabs ? await loadCurrentPersonnelUnits(prisma, authorizedRows.map((person) => person.id), filterNow) : [];
+    const selectedUnit = units.find((unit) => unit.id === organizationalUnitId);
+    const filteredRows = currentUnitTabs && organizationalUnitId
+      ? authorizedRows.filter((person) => selectedUnit?.personnelIds.has(person.id))
+      : authorizedRows;
+    const collection = buildPersonnelCollection(filteredRows, { search, page, focusId });
     const pageIds = collection.rows.map((person) => person.id);
     const unorderedRows = pageIds.length
       ? await prisma.personnel.findMany({ where: { id: { in: pageIds } }, include: personnelListInclude })
@@ -1489,7 +1497,7 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
       archivedByDisplayName: person.archivedBy ? archivedActorNames.get(person.archivedBy) || person.archivedBy : null,
       retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities, archived: Boolean(person.archivedAt) }),
     }));
-    res.json({ success: true, data, meta: collection.meta });
+    res.json({ success: true, data, meta: { ...collection.meta, ...(currentUnitTabs ? { organizationalUnits: units.map(({ id, name }) => ({ id, name })) } : {}) } });
   } catch (error) { handleError(res, error, 'List HR personnel'); }
 });
 

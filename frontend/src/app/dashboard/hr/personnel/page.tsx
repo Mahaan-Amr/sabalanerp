@@ -141,6 +141,7 @@ export default function HrPersonnelPage() {
     [listState, pathname, router],
   );
   const [rows, setRows] = useState<any[]>([]);
+  const [unitTabs, setUnitTabs] = useState<Array<{ id: string; name: string }>>([]);
   const [foundation, setFoundation] = useState<any>({
     positions: [],
     availableUsers: [],
@@ -198,6 +199,7 @@ export default function HrPersonnelPage() {
         hrAPI.getPersonnel({
           ...(search ? { search } : {}),
           archived: archiveView,
+          unitAssignmentScope: "current",
           ...(relationshipStatus ? { relationshipStatus } : {}),
           ...(attention ? { attention } : {}),
           ...(organizationalUnitId ? { organizationalUnitId } : {}),
@@ -223,6 +225,7 @@ export default function HrPersonnelPage() {
         performanceBadge: current.find((row: any) => row.id === person.id)?.performanceBadge,
       })));
       setMeta(nextMeta);
+      setUnitTabs(nextMeta.organizationalUnits || []);
       if (referenceResult.status === "fulfilled" && referenceResult.value) {
         const reference = referenceResult.value;
         setFoundation((current: any) => ({ ...current, positions: reference.data.data.positions || [] }));
@@ -883,6 +886,20 @@ export default function HrPersonnelPage() {
           </div>
         </div>
         {actionPermissions.includes('VIEW_PERFORMANCE_BADGE_LIST') && <ErpCard className="mb-4 p-4"><PerformanceBadgeBanner /></ErpCard>}
+        <div className="mb-4 min-w-0 max-w-full overflow-x-auto" aria-label="فیلتر واحدهای پرسنل" data-testid="personnel-unit-tabs">
+          <div className="w-max min-w-full">
+            <ErpSegmentedControl
+              value={organizationalUnitId}
+              options={[
+                { value: "", label: "همهٔ واحدها" },
+                ...unitTabs.map((unit) => ({ value: unit.id, label: unit.name })),
+                ...(organizationalUnitId && !unitTabs.some((unit) => unit.id === organizationalUnitId)
+                  ? [{ value: organizationalUnitId, label: "واحد انتخاب‌شده (بدون پرسنل)" }] : []),
+              ]}
+              onChange={(unitId) => replaceListState({ organizationalUnitId: unitId, page: 1, focus: "", panel: "" })}
+            />
+          </div>
+        </div>
         <div className="space-y-3">
           {rows.map((person) => (
             <PersonnelCard

@@ -124,7 +124,7 @@ export default function HrPersonnelPage() {
     dependencyAt,
   } = listState;
   const replaceListState = useCallback(
-    (patch: Partial<PersonnelListState>) => {
+    (patch: Partial<PersonnelListState>, options: { preserveScroll?: boolean } = {}) => {
       const nextState = { ...listState, ...patch };
       const resetsCollectionScroll = ([
         "view", "search", "page", "relationshipStatus", "attention",
@@ -133,10 +133,11 @@ export default function HrPersonnelPage() {
       const query = personnelListSearch(nextState);
       if (resetsCollectionScroll) {
         const scrollKey = `hr-personnel-scroll:${pathname}?${personnelListSearch({ ...nextState, focus: "", panel: "" })}`;
-        window.sessionStorage.removeItem(scrollKey);
+        if (options.preserveScroll) window.sessionStorage.setItem(scrollKey, String(window.scrollY));
+        else window.sessionStorage.removeItem(scrollKey);
       }
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-      if (resetsCollectionScroll) window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
+      if (resetsCollectionScroll && !options.preserveScroll) window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
     },
     [listState, pathname, router],
   );
@@ -845,7 +846,7 @@ export default function HrPersonnelPage() {
 
       {actionPermissions.includes('VIEW_PERFORMANCE_BADGE_LIST') && <ErpCard className="p-4"><PerformanceBadgeBanner /></ErpCard>}
       <div className="min-w-0" data-testid="personnel-list-toolbar">
-        <div className="grid min-w-0 grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)]">
+        <div className="grid min-w-0 grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(16rem,1fr)_minmax(0,max-content)]">
           <ErpField label="جست‌وجوی پرسنل" className="min-w-0">
             <ErpInput
               aria-label="جستجوی پرسنل"
@@ -865,7 +866,7 @@ export default function HrPersonnelPage() {
                 ...(organizationalUnitId && !unitTabs.some((unit) => unit.id === organizationalUnitId)
                   ? [{ value: organizationalUnitId, label: "واحد انتخاب‌شده (بدون پرسنل)" }] : []),
               ]}
-              onChange={(unitId) => replaceListState({ organizationalUnitId: unitId, page: 1, focus: "", panel: "" })}
+              onChange={(unitId) => replaceListState({ organizationalUnitId: unitId, page: 1, focus: "", panel: "" }, { preserveScroll: true })}
             />
           </div>
         </div>

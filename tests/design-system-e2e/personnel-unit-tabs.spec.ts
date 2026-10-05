@@ -3,13 +3,13 @@ import { loginAsAdmin, setViewportAndZoom, assertNoHorizontalOverflow } from './
 
 test('Personnel unit tabs scroll, preserve URL filtering and reset pagination', async ({ page }) => {
   await loginAsAdmin(page);
-  const units = Array.from({ length: 24 }, (_, i) => ({ id: `unit-${i}`, name: `واحد سازمانی ${i + 1}` }));
+  let units = Array.from({ length: 24 }, (_, i) => ({ id: `unit-${i}`, name: `واحد سازمانی ${i + 1}` }));
   await page.route('**/api/hr/authorization/me', route => route.fulfill({ json: { data: { actionPermissionCodes: [], effectiveAccess: { features: [{ feature: 'PERSONNEL', permission: 'view' }] } } } }));
   await page.route('**/api/hr/operational-reference/personnel', route => route.fulfill({ json: { data: { positions: [] } } }));
   await page.route(/\/api\/hr\/personnel(?:\?|$)/, route => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get('unitAssignmentScope')).toBe('current');
-    return route.fulfill({ json: { data: [], meta: { page: Number(url.searchParams.get('page') || 1), total: 0, totalPages: 2, organizationalUnits: units } } });
+    return route.fulfill({ json: { data: Array.from({ length: 10 }, (_, i) => ({ id: `scroll-person-${i}`, firstName: 'پرسنل', lastName: `آزمایشی ${i}`, hrEmploymentRelationships: [] })), meta: { page: Number(url.searchParams.get('page') || 1), total: 0, totalPages: 2, organizationalUnits: units } } });
   });
   await page.goto('/dashboard/hr/personnel?page=2');
   const tabs = page.getByTestId('personnel-unit-tabs');
@@ -35,6 +35,26 @@ test('Personnel unit tabs scroll, preserve URL filtering and reset pagination', 
   await expect(tabs.getByRole('button', { name: 'واحد سازمانی 24', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await tabs.getByRole('button', { name: 'همهٔ واحدها', exact: true }).click();
   await expect(page).not.toHaveURL(/organizationalUnitId/);
+  units = [
+    { id: 'administration', name: 'اداری' }, { id: 'cutting', name: 'خط برش' },
+    { id: 'hr-testing', name: 'واحد آزمایشی منابع انسانی' },
+  ];
+  await setViewportAndZoom(page, { width: 1218, height: 853 });
+  await page.reload();
+  await expect(tabs.getByRole('button')).toHaveCount(4);
+  expect(await tabs.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.evaluate(() => window.scrollTo({ top: 180 }));
+  const scrollBefore = await page.evaluate(() => window.scrollY);
+  expect(scrollBefore).toBeGreaterThan(50);
+  let documentRequests = 0;
+  page.on('request', request => { if (request.resourceType() === 'document') documentRequests++; });
+  const response = page.waitForResponse(response => /\/api\/hr\/personnel\?/.test(response.url()) && response.url().includes('organizationalUnitId=administration'));
+  await tabs.getByRole('button', { name: 'اداری', exact: true }).click();
+  await response;
+  await expect(tabs.getByRole('button', { name: 'اداری', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+  expect(documentRequests).toBe(0);
+
 });
 
 test('Personnel unit tabs use current assignments from the existing local database', async ({ page }) => {

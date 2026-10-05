@@ -231,9 +231,8 @@ export default function NotificationPoliciesPage() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="font-semibold text-[var(--sds-text-primary)]">
-                    {eventLabels[row.definition.type] || row.definition.type}
+                    {eventLabels[row.definition.type] || 'رویداد اعلان'}
                   </h2>
-                  <p className="mt-1 text-xs text-[var(--sds-text-muted)]" dir="ltr">{row.definition.type}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <ErpBadge tone={row.definition.mandatory ? 'danger' : row.policy.enabled ? 'success' : 'neutral'}>
@@ -261,7 +260,7 @@ export default function NotificationPoliciesPage() {
       <ErpSheet
         open={Boolean(selected && form)}
         onClose={() => { setSelected(null); setForm(null); }}
-        title={selected ? `سیاست ${eventLabels[selected.definition.type] || selected.definition.type}` : 'سیاست اعلان'}
+        title={selected ? `سیاست ${eventLabels[selected.definition.type] || 'رویداد اعلان'}` : 'سیاست اعلان'}
         footer={form ? (
           <div className="flex flex-wrap justify-end gap-2">
             <ErpButton label="انصراف" tone="neutral" variant="ghost" onClick={() => { setSelected(null); setForm(null); }} />

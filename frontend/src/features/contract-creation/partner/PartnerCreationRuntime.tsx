@@ -60,7 +60,7 @@ import { readPartnerCreationContext } from './partnerCreationContext';
 import { partnerProductEditEntry, partnerSaleEntryIssue } from './partnerProductEditEntry';
 import { partnerPaymentChoice } from './partnerPaymentMethodAdapter';
 import { paymentEntryFromPartnerInstallment, partnerInstallmentFromPaymentEntry } from './partnerPaymentEntryAdapter';
-import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment, partnerPaymentNeedsNationalCode } from './partnerPaymentValidation';
+import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment, partnerPaymentNeedsNationalCode, isRetainedPartnerPayment } from './partnerPaymentValidation';
 import { buildPartnerInquirySubjectOptions, type PartnerInquirySubjectOption } from './partnerInquirySubjectOptions';
 import { validateOptionalIranianMobile } from '@/lib/phoneFormat';
 
@@ -242,6 +242,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const [draftAccess, setDraftAccess] = useState<Access | null>(null);
   const [recoveryRevision, setRecoveryRevision] = useState(0);
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
+  const [recoveryTakeoverAllowed, setRecoveryTakeoverAllowed] = useState(false);
   const recoveryRevisionRef = useRef(0);
   recoveryRevisionRef.current = recoveryRevision;
   const recoveryStarting = useRef(false);
@@ -266,6 +267,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     !projectFormErrors.projectManagerNumber && !projectFormErrors.marketerPhoneNumber);
   const [customerNotice, setCustomerNotice] = useState<string | null>(null);
   const [wizard, setWizard] = useState<PartnerWizardDraft | null>(null);
+  const retainedPaymentPlan = useRef<CustomerPaymentPlan>();
+  const [correctionReason, setCorrectionReason] = useState<string | null>(null);
   const [editingCase, setEditingCase] = useState<PartnerCaseView | null>(null);
   const [paymentModal, setPaymentModal] = useState<{
     installment: PartnerPaymentInstallment;
@@ -321,7 +324,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const reacquireDraftAccess = useCallback(async (access: Access): Promise<Access | null> => {
     const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: access.recoveryId,
       browserSessionId: access.browserSessionId, baseRevision: access.baseRevision, takeover: false });
-    if (!lease.ok) { setRecoveryBlocked(true); setError(lease.error.message); return null; }
+    if (!lease.ok) { setRecoveryBlocked(true); setRecoveryTakeoverAllowed(lease.error.code === 'EDIT_SESSION_OWNED_ELSEWHERE'); setError(lease.error.message); return null; }
     const refreshed = { ...access, leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
     setDraftAccess(current => current?.recoveryId === access.recoveryId &&
       (current.leaseToken !== refreshed.leaseToken || current.baseRevision !== refreshed.baseRevision) ? refreshed : current);
@@ -503,7 +506,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             browserSessionId, baseRevision: candidate.baseRevision, takeover: false });
           if (!active) return;
           if (!lease.ok) {
-            setRecoveryBlocked(true); setError(lease.error.message);
+            setRecoveryBlocked(true); setRecoveryTakeoverAllowed(lease.error.code === 'EDIT_SESSION_OWNED_ELSEWHERE'); setError(lease.error.message);
           } else {
             const access: Access = { schemaVersion: 1, recoveryId: candidate.recoveryId, browserSessionId,
               leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
@@ -654,11 +657,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const browserSessionId = getPartnerBrowserSessionId(window.sessionStorage, partner.actorId);
       const baseRevision = candidate?.baseRevision ?? 0;
       const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId, browserSessionId, baseRevision, takeover });
-      if (!lease.ok) { setRecoveryBlocked(Boolean(candidate)); setError(lease.error.message); return; }
+      if (!lease.ok) { setRecoveryBlocked(Boolean(candidate)); setRecoveryTakeoverAllowed(lease.error.code === 'EDIT_SESSION_OWNED_ELSEWHERE'); setError(lease.error.message); return; }
+      setRecoveryTakeoverAllowed(false);
       const access: Access = { schemaVersion: 1, recoveryId, browserSessionId,
         leaseToken: lease.value.leaseToken, baseRevision: lease.value.baseRevision };
       const recovered = await ports.recovery.read(access);
-      if (!recovered.ok) { setError(recovered.error.message); return; }
+      if (!recovered.ok) { setRecoveryBlocked(true); setError(recovered.error.message); return; }
       if (recovered.value.recoveryId !== recoveryId) throw new Error('Recovery identity mismatch');
       if (!fresh && !requestedCaseId) {
         const entry = readSessionEntry(partner.actorId, recoveryId);
@@ -711,7 +715,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         if (!refreshed) return false;
         const result = await ports.recovery.checkpoint({ ...refreshed, expectedRecoveryRevision,
           idempotencyKey: `partner-checkpoint-${crypto.randomUUID()}`, draft });
-        if (!result.ok) { setRecoveryBlocked(true); setError(result.error.message); return false; }
+        if (!result.ok) { setRecoveryBlocked(true); setRecoveryTakeoverAllowed(false); setError(result.error.message); return false; }
         checkpointedInputRevision.current = result.value.inputRevision;
         recoveryRevisionRef.current = result.value.recoveryRevision;
         setRecoveryRevision(result.value.recoveryRevision);
@@ -1013,10 +1017,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   }, [editingCase, reacquireRuntime, submissionActorId, submissionRecoveryId]);
 
   const enterWizard = async (inquiry: PartnerInquiryView, runtimeOverride?: PersistedRuntime,
-    caseIdOverride?: string, caseNumberOverride?: string, onReady?: (draft: PartnerWizardDraft) => void) => {
+    caseIdOverride?: string, caseNumberOverride?: string, onReady?: (draft: PartnerWizardDraft) => void, reviewedCorrection = false) => {
     const currentRuntime = runtimeOverride ?? runtime;
     if (!currentRuntime || !context || context.kind !== 'PARTNER') return;
-    const publishWizard = (next: PartnerWizardDraft) => { setWizard(next); onReady?.(next); };
+    const publishWizard = (next: PartnerWizardDraft) => {
+      const opened = { ...next, step: partnerCaseResultStep(next.step, false, reviewedCorrection) };
+      setWizard(opened); onReady?.(opened);
+    };
     setError(null);
     const refreshed = await reacquireRuntime(currentRuntime);
     if (!refreshed) return;
@@ -1084,7 +1091,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const retailDiscount = intent.retailDiscount.currency === currency ? intent.retailDiscount : draft.intent.retailDiscount;
       const retailSummary = partnerRetailSummary(rows, retailDiscount, draft.serviceRows);
       const plansCompatible = !partnerDeliveryPlanIssue(deliveries, rows, draft.serviceRows)
-        && !firstPartnerPaymentPlanError(paymentPlan, today(), Boolean(editingCase))
+        && !firstPartnerPaymentPlanError(paymentPlan, today(), Boolean(editingCase), retainedPaymentPlan.current)
         && retailSummary.valid && remainingPartnerAmount(retailSummary.retail, paymentPlan.installments.map(item => item.amount.amount)) === '0';
       const nextIntent = { ...draft.intent, contractDate: intent.contractDate, customerId: nextCustomerId,
         ...(preservedProject ? { projectId: preservedProject.id } : {}), deliveries, customerPaymentPlan: paymentPlan,
@@ -1169,12 +1176,14 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         customerId: recoveredWizard.data.intent.customerId,
         contractDate: recoveredWizard.data.intent.contractDate,
         ...(recoveredWizard.data.intent.projectId ? { projectId: recoveredWizard.data.intent.projectId } : {}) };
+      retainedPaymentPlan.current = cases.data.cases[0].view.customerPaymentPlan;
+      setCorrectionReason(cases.data.cases[0].reviewedCorrection?.reason ?? null);
       setEditingCase(cases.data.cases[0].view);
       setCustomerId(value.customerId); setContractDate(value.contractDate!); setProjectId(value.projectId ?? '');
       persistRuntime(value);
       if (searchParams.get('configure') === '1') setSaleStep('products');
       else await enterWizardRef.current({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: matches.rows },
-        value, caseId, caseReference);
+        value, caseId, caseReference, undefined, Boolean(cases.data.cases[0].reviewedCorrection));
     })().catch(caught => setError(partnerCaseHasIntegrityError(caught)
       ? partnerCaseReviewMessage(caseReference)
       : 'بازیابی پرونده ذخیره‌شده انجام نشد؛ هیچ تغییری ثبت نشده است.'))
@@ -1247,7 +1256,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       handoverDate: paymentForm.handoverDate,
     };
     const installment = partnerInstallmentFromPaymentEntry(paymentModal.installment, entry);
-    const validation = validatePartnerPaymentInstallment(installment, today(), Boolean(editingCase));
+    const validation = validatePartnerPaymentInstallment(installment, today(), Boolean(editingCase),
+      retainedPaymentPlan.current?.installments.find(item => item.installmentId === installment.installmentId));
     if (Object.keys(validation).length > 0) {
       setPaymentModalErrors({
         amount: validation.amount,
@@ -1519,6 +1529,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       </div>
     </div>;
     if (step === 'payment') { const retailSummary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount, draft.serviceRows);
+      const editedPayment = paymentModal && paymentForm.method ? partnerInstallmentFromPaymentEntry(paymentModal.installment, {
+        ...paymentForm, id: paymentModal.installment.installmentId, method: paymentForm.method,
+        amount: Number(paymentForm.amount ?? 0), paymentDate: paymentForm.paymentDate ?? '',
+      }) : undefined;
+      const needsNationalCode = Boolean(editedPayment && !isRetainedPartnerPayment(editedPayment,
+        retainedPaymentPlan.current?.installments.find(item => item.installmentId === editedPayment.installmentId))
+        && partnerPaymentNeedsNationalCode(editedPayment.method, editedPayment.dueDate, today()));
       const remaining = retailSummary.valid ? remainingPartnerAmount(retailSummary.retail,
         draft.intent.customerPaymentPlan.installments.map(item => item.amount.amount)) : null;
       const remainingText = remaining === null ? 'مجموع اقساط از جمع نهایی بیشتر است.'
@@ -1589,10 +1606,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         currency={paymentModal.installment.amount.currency}
         fieldErrors={paymentModalErrors}
         isEdit={!paymentModal.isNew}
-        showNationalCode={partnerPaymentNeedsNationalCode(paymentForm.method === 'CUSTOMER_BALANCE' ? 'CREDIT' : 'BANK_TRANSFER',
-          paymentForm.paymentDate ?? '', today())}
-        nationalCodeRequired={partnerPaymentNeedsNationalCode(paymentForm.method === 'CUSTOMER_BALANCE' ? 'CREDIT' : 'BANK_TRANSFER',
-          paymentForm.paymentDate ?? '', today())}
+        showNationalCode={needsNationalCode}
+        nationalCodeRequired={needsNationalCode}
       />}
     </div>; }
     const customer = context.customers.find(item => item.id === draft.intent.customerId);
@@ -1695,12 +1710,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     </ErpNeumorphicWorkflowLayout>;
   }
   if (recoveryBlocked && !runtime) return <section dir="rtl" className="mx-auto max-w-3xl space-y-4">
-    <ContractCreationDraftPrompt mode="takeover" pending={pending}
+    {recoveryTakeoverAllowed ? <ContractCreationDraftPrompt mode="takeover" pending={pending}
       onResume={async () => { await openDraftRecovery(context, true); }}
-      onStartNew={() => discardDraftRecovery(context)} />
+      onStartNew={() => discardDraftRecovery(context)} /> : <ErpButton label="به‌روزرسانی" disabled={pending}
+        onClick={() => window.location.reload()} />}
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
-  if (wizard && submission) return <PartnerContractWizard draft={{ ...wizard, rows: presentPartnerRetailRows(wizard.rows, technicalDraft, technicalProducts) }} onChange={updateWizard} recovery={{ state: 'writable' }} externalError={error}
+  if (wizard && submission) return <PartnerContractWizard draft={{ ...wizard, rows: presentPartnerRetailRows(wizard.rows, technicalDraft, technicalProducts) }} onChange={updateWizard} recovery={{ state: 'writable' }} externalError={error} correctionReason={correctionReason}
     submission={submission} now={Date.now()} renderSection={renderSection}
     canonicalRetailReady={wizard.rows.every(row => Boolean(row.retailEffectiveUnitPrice))}
     onPreparePricingQuote={async current => {
@@ -1717,8 +1733,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       : step === 'delivery' ? partnerDeliveryPlanIssue(draft.intent.deliveries, draft.rows, draft.serviceRows)
       : step === 'payment' && !CustomerPaymentPlanSchema.safeParse(draft.intent.customerPaymentPlan).success
         ? 'برنامه پرداخت را کامل کنید.'
-      : step === 'payment' && firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today(), Boolean(editingCase))
-        ? firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today(), Boolean(editingCase))
+      : step === 'payment' && firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today(), Boolean(editingCase), retainedPaymentPlan.current)
+        ? firstPartnerPaymentPlanError(draft.intent.customerPaymentPlan, today(), Boolean(editingCase), retainedPaymentPlan.current)
       : step === 'payment' && (() => {
         const summary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount, draft.serviceRows);
         return remainingPartnerAmount(summary.valid && summary.retail ? summary.retail : '0',

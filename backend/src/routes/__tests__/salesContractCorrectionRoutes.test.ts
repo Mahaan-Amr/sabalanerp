@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import router from '../sales';
-import { createAccountingActionHandler, createAccountingCorrectionRequestHandler } from '../accounting';
+import accountingRouter, { createAccountingActionHandler, createAccountingCorrectionRequestHandler } from '../accounting';
 import dutyRouter, { serializeCrossWorkspaceDutyResponse } from '../hr-duties';
 
 const routes = (router as unknown as {
@@ -12,6 +12,11 @@ const sellerRequest = routes.find(({ path, methods }) => (
 ));
 assert.ok(sellerRequest, 'missing Seller-originated Contract correction request endpoint');
 assert.ok(sellerRequest.stack.length >= 5, 'Seller correction endpoint must retain auth, Sales permission, and validation middleware');
+
+const partnerRequest = (accountingRouter as any).stack.find((layer: any) =>
+  layer.route?.path === '/contracts/partner/:caseId/correction-requests' && layer.route.methods.post)?.route;
+assert.ok(partnerRequest, 'missing Partner correction endpoint');
+assert.ok(partnerRequest.stack.length >= 5, 'Partner correction must retain auth, workspace, narrow feature permission and validation');
 
 const dutyRoutes = (dutyRouter as unknown as {
   stack: Array<{ route?: { path: string; methods: Record<string, boolean> } }>;
@@ -74,6 +79,25 @@ const verifyAccountingOriginatedWriterIsLive = async () => {
   });
 };
 
-void Promise.all([verifyLegacyAccountingWriterIsGone(), verifyAccountingOriginatedWriterIsLive()])
+const verifyPartnerUsesOrdinaryCorrectionWorkflow = async () => {
+  let received: any;
+  const handler = createAccountingCorrectionRequestHandler(async (_database: any, input: any) => {
+    received = input;
+    return { correction: { id: 'partner-correction' }, duty: { id: 'manager-duty' }, replayed: false } as any;
+  }, async caseId => { assert.equal(caseId, 'partner-case'); return 'partner-customer-contract'; });
+  let statusCode = 200;
+  let payload: any;
+  await handler({ params: { caseId: 'partner-case' },
+    body: { category: 'PAYMENT_PLAN', priority: 'URGENT', reason: 'اصلاح برنامه پرداخت همکار' },
+    user: { id: 'accountant', role: 'ADMIN' }, get: () => 'partner-request-key',
+  } as any, { status(code: number) { statusCode = code; return this; },
+    json(body: any) { payload = body; return this; } } as any);
+  assert.equal(statusCode, 201);
+  assert.equal(payload.data.duty.id, 'manager-duty');
+  assert.deepEqual(received, { contractId: 'partner-customer-contract', actorUserId: 'accountant',
+    category: 'PAYMENT_PLAN', priority: 'URGENT', reason: 'اصلاح برنامه پرداخت همکار', idempotencyKey: 'partner-request-key' });
+};
+
+void Promise.all([verifyLegacyAccountingWriterIsGone(), verifyAccountingOriginatedWriterIsLive(), verifyPartnerUsesOrdinaryCorrectionWorkflow()])
   .then(() => console.log('Sales Contract correction route tests passed.'))
   .catch((error) => { console.error(error); process.exitCode = 1; });

@@ -1,3 +1,4 @@
+import { partnerReactivationAt } from './reactivationPricing';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
@@ -297,10 +298,10 @@ export async function currentPricingEvidenceIsValid(tx: Transaction, owner: Revi
     tx.partnerCaseRowBinding.count({ where: { caseId: owner.caseId, revision: owner.revision } }),
     tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
       select: { approvalId: true, approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } },
-        inquiry: { select: { caseId: true, caseRevision: true } } } } } } } }),
+        inquiry: { select: { caseId: true, caseRevision: true, submittedAt: true } } } } } } } }),
     tx.partnerMaterialInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: owner.revision },
       select: { approvalId: true, approval: { select: { expiresAt: true, row: { select: { outcome: true, successor: { select: { id: true } },
-        inquiry: { select: { caseId: true, caseRevision: true } } } } } } } }),
+        inquiry: { select: { caseId: true, caseRevision: true, submittedAt: true } } } } } } } }),
     tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`,
   ]);
   const root = await tx.partnerSaleCase.findUnique({ where: { id: owner.caseId }, select: { commercialFlowVersion: true, committedRevision: true } });
@@ -308,10 +309,11 @@ export async function currentPricingEvidenceIsValid(tx: Transaction, owner: Revi
   const frozen = committedRevision ? await tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: committedRevision }, select: { approvalId: true } }) : [];
   const frozenMaterials = committedRevision ? await tx.partnerMaterialInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: committedRevision }, select: { approvalId: true } }) : [];
   const frozenIds = new Set([...frozen, ...frozenMaterials].map(row => row.approvalId));
+  const reactivatedAt = await partnerReactivationAt(tx, owner.caseId);
   const instant = now[0]?.now;
   const valid = (usage: (typeof usages)[number]) => {
     const inquiry = usage.approval.row.inquiry;
-    return Boolean(instant) &&
+    return Boolean(instant) && (!reactivatedAt || !!inquiry.submittedAt && inquiry.submittedAt > reactivatedAt) &&
       inquiry.caseId === owner.caseId && inquiry.caseRevision !== null &&
       inquiry.caseRevision > 0 && inquiry.caseRevision <= owner.revision &&
       usage.approval.row.outcome === 'APPROVED' && (frozenIds.has(usage.approvalId) || !usage.approval.row.successor &&
@@ -413,7 +415,7 @@ Promise<ExecutionResult> {
       const correctionId = `commercial-cancel:${command.commandId}`, adjustmentId = randomUUID();
       await tx.partnerCorrectionOpportunity.create({ data: { id: correctionId, caseId, predecessorRevision: row.headRevision,
         scope: 'VOID', scopeHash: await canonicalHash({ permissionId: permission.id, reason: command.reason }), requesterId: dependencies.actorId,
-        approvedBy: permission.createdByUserId, approvedAt: permission.createdAt, expiresAt: permission.dueAt!, calendarVersion: 'COMMON_COMMERCIAL_PERMISSION_V1',
+        approvedBy: permission.managerApprovedBy, approvedAt: permission.managerApprovedAt, expiresAt: permission.dueAt!, calendarVersion: 'COMMON_COMMERCIAL_PERMISSION_V1',
         evidence: json({ permissionId: permission.id, reason: command.reason }) } });
       const adjustment = PartnerEventSchema.parse({ schemaVersion: 1, type: 'SABALAN_ADJUSTMENT', eventId: adjustmentId,
         commandId: `${command.commandId}:adjustment`, correlationId: command.correlationId, actorId: dependencies.actorId,
@@ -429,8 +431,7 @@ Promise<ExecutionResult> {
         correlationId: command.correlationId, actorId: dependencies.actorId, recordedAt: at.instant, effectiveDate: at.date,
         owner, correctionId, commitmentEventId: row.commitmentEventId, adjustmentEventIds: [adjustmentId], dependencyEvidenceIds: [permission.id], reason: command.reason });
       await tx.partnerSaleCase.update({ where: { id: caseId }, data: { state: 'VOIDED', stateRevision: { increment: 1 } } });
-      await tx.salesContract.update({ where: { id: row.customerContractId }, data: { status: 'CANCELLED', lostAt: new Date(at.instant),
-        isInactive: true, inactiveAt: new Date(at.instant), inactiveBy: dependencies.actorId, inactiveReason: command.reason } });
+      await tx.salesContract.update({ where: { id: row.customerContractId }, data: { status: 'CANCELLED', lostAt: new Date(at.instant) } });
       await tx.partnerCaseEvent.create({ data: { id: eventId, caseId, caseRevision: owner.revision, integrityHash: owner.integrityHash,
         sequence: sequence + 1, stateRevision: row.stateRevision + 1, type: voided.type, fromState: row.state, toState: 'VOIDED',
         actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,

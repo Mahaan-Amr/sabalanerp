@@ -1,3 +1,4 @@
+import { recordPartnerRecommitment } from './recommitment';
 import { readCasePricingResponse } from './pricingResponse';
 import { appendPartnerCommercialEvent } from './commercialEvents';
 import { randomUUID } from 'node:crypto';
@@ -88,6 +89,7 @@ export async function reconcilePartnerCommercialFinality(tx: Tx, caseId: string,
       actorId, commandId, correlationId: commandId, effectiveDate: new Date(`${event.effectiveDate}T00:00:00.000Z`),
       evidence: json({ publicEvent: event, commercialRevision: current.commercialRevision }) } });
   }
+  if (state === 'FINAL' && root.state === 'COMMITTED') await recordPartnerRecommitment(tx, root.id, actorId);
   const updated = await tx.salesContract.update({ where: { id: current.id }, data: { status } });
   if (state === 'FINAL' && contract.status !== 'SIGNED') await finishCommercialCorrection(tx, contract.id, actorId);
   if (updated.status !== current.status) await audit(tx, current.id, actorId, 'PARTNER_COMMERCIAL_STATUS_CHANGED', current, updated);
@@ -176,7 +178,7 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
   const inquiry = validPricing ? 'ACCEPTED' : response === 'EXPIRED' || response === 'REJECTED'
     || root.pricingState === 'INCOMPLETE' || root.pricingState === 'EXPIRED' ? 'CORRECTION_REQUIRED' : priceRejection ? 'REJECTED' : 'WAITING';
   return { version: 1, revision: contract.commercialRevision,
-    status: contract.commercialRevision > 1 && !salesApproved && !customerAccepted ? (expired ? 'EXPIRED' : ['CANCELLED', 'VOIDED'].includes(root.state) ? 'CANCELLED' : 'NOTE')
+    status: ['CANCELLED', 'VOIDED'].includes(root.state) ? 'CANCELLED' : contract.commercialRevision > 1 && !salesApproved && !customerAccepted ? (expired ? 'EXPIRED' : 'NOTE')
       : partnerCommercialStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing, pricingReceived: response === 'READY',
       expired,
       cancelled: ['CANCELLED', 'VOIDED'].includes(root.state) }), salesApproved, customerAccepted, inquiry,
@@ -185,7 +187,10 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
 }
 
 export async function assertPartnerFinancialFinality(tx: Tx, caseId: string) {
-  const { contract } = await lockPartnerCommercialContract(tx, caseId);
+  const { root, contract } = await lockPartnerCommercialContract(tx, caseId);
+  if (contract.isInactive || ['CANCELLED', 'VOIDED'].includes(root.state) || contract.status === 'CANCELLED') {
+    throw new Error('ثبت مالی برای قرارداد لغو یا غیرفعال مجاز نیست.');
+  }
   if (isPartnerCommercialFlow(contract) && (contract.status !== 'SIGNED' || partnerDeadlinePassed(contract)
     || contract.salesApprovalRevision !== contract.commercialRevision || contract.customerAcceptanceRevision !== contract.commercialRevision)) {
     throw new Error('ثبت مالی فقط پس از قطعی‌شدن نسخه جاری قرارداد همکار مجاز است.');

@@ -148,7 +148,7 @@ export function PartnerActivationPanel() {
         {!activation.gates.find(gate => gate.id === 'COHORT')?.ready &&
           <ErpInlineState kind="stale" title="حساب آماده است، اما توقف ثبت‌نام/عملیات فقط باید از کنترل مستقل عملیات و پس از بازبینی رخدادها باز شود." />}
         <div className="grid gap-2 sm:grid-cols-2">{activation.gates.map(gate => <div key={gate.id}
-          className="flex items-center justify-between gap-3 rounded-lg border p-3"><span>{gate.label}</span>
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><span>{gate.label}</span>
           <ErpBadge tone={gate.ready ? 'success' : 'warning'}>{gate.ready ? 'تکمیل' : 'ناقص'}</ErpBadge></div>)}</div>
         <ErpButton label="فعال‌سازی نهایی" disabled={!canActivate || pending} onClick={() => void activate()} />
       </ErpCard>}

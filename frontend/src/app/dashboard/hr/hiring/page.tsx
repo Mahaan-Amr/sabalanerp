@@ -837,7 +837,7 @@ export default function HiringCasesPage() {
             return (
               <div key={row.id} id={`hiring-case-${row.id}`} tabIndex={-1}>
               <ErpCard className="p-4">
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                   <div className="min-w-0">
                     <Link
                       className="font-black text-[var(--sds-text-primary)]"

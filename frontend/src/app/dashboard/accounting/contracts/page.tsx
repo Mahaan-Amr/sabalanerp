@@ -1,4 +1,5 @@
 'use client';
+import { accountingCorrectionFields } from '@/features/accounting/accountingCorrectionFields';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpButton, ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -30,6 +31,7 @@ import api, { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
+import AccountingCustomerCategoryBadge from '@/features/accounting/AccountingCustomerCategoryBadge';
 import { financialEvidenceReviewFromConflict } from '@/features/accounting/financialEvidenceReview';
 import {
   canonicalizeContractsQuery,
@@ -348,7 +350,9 @@ export default function AccountingContractsPage() {
       header: 'نام مشتری',
       mobileLabel: 'نام مشتری',
       priority: 'secondary',
-      cell: (contract) => <div>{contract.customer.displayName}{contract.partnerContext &&
+      cell: (contract) => <div><div className="flex flex-wrap items-center gap-2">
+        <span>{contract.customer.displayName}</span><AccountingCustomerCategoryBadge contract={contract} />
+      </div>{contract.partnerContext &&
         <p className="mt-1 text-xs sds-text-secondary">طرف‌حساب سبلان: {contract.partnerContext.debtor.displayName}</p>}</div>,
     },
     {
@@ -677,24 +681,7 @@ export default function AccountingContractsPage() {
         open={Boolean(correctionTarget)}
         title="درخواست اصلاح"
         description={correctionTarget ? `${correctionTarget.contractNumber} - ${correctionTarget.customer.displayName}` : undefined}
-        fields={[
-          { id: 'category', label: 'دسته اصلاح', type: 'select', defaultValue: 'OTHER', options: [
-            { label: 'هویت مشتری', value: 'CUSTOMER_IDENTITY' },
-            { label: 'مبلغ و قیمت', value: 'AMOUNT_PRICING' },
-            { label: 'برنامه پرداخت', value: 'PAYMENT_PLAN' },
-            { label: 'برنامه تحویل', value: 'DELIVERY_SCHEDULE' },
-            { label: 'مالیات', value: 'TAX_INFO' },
-            { label: 'اسناد و امضا', value: 'DOCUMENT_SIGNATURE' },
-            { label: 'سایر', value: 'OTHER' },
-          ] },
-          { id: 'priority', label: 'اولویت', type: 'select', defaultValue: 'MEDIUM', options: [
-            { label: 'کم', value: 'LOW' },
-            { label: 'متوسط', value: 'MEDIUM' },
-            { label: 'زیاد', value: 'HIGH' },
-            { label: 'فوری', value: 'URGENT' },
-          ] },
-          { id: 'reason', label: 'متن درخواست اصلاح', type: 'textarea', required: true },
-        ]}
+        fields={accountingCorrectionFields}
         submitLabel="ثبت درخواست"
         busy={Boolean(actionLoading)}
         error={actionError}

@@ -2,6 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { partnerAccountingContractRow } from '../accountingUnifiedContracts';
 
+test('cancelled Partner contract stays cancelled in Accounting despite retained financial history', () => {
+  const source = { id: 'voided-history', status: 'VOIDED', amount: { toString: () => '200' },
+    currency: 'IRT', createdAt: new Date(), partnerContext: {
+      caseNumber: 'case', customerContractNumber: '100634', internalRecordNumber: 'internal',
+      debtor: { displayName: 'همکار' }, endCustomer: { displayName: 'مشتری' }, actionUrl: '/case',
+      caseState: 'VOIDED', commercialStatus: 'CANCELLED', accountingWritable: false,
+    } };
+  const row = partnerAccountingContractRow(source);
+  assert.equal(row?.status, 'CANCELLED');
+  assert.equal(row?.accounting.eligibleForFinancialRecords, false);
+  assert.equal(row?.nextBestActions.find(action => action.kind === 'CREATE_CORRECTION_REQUEST')?.enabled, true);
+});
+
 test('Accounting list shows the end customer while preserving the internal debtor and amount', () => {
   const record = partnerAccountingContractRow({ id: 'invoice-1', status: 'DRAFT', amount: { toString: () => '1500000' },
     currency: 'IRT', createdAt: new Date('2026-09-26T09:00:00Z'), partnerContext: {

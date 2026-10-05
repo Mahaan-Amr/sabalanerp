@@ -147,7 +147,7 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
         </ErpCard>)}</div>
       </ErpSection>
       <ErpSection title="برنامه تحویل"><div className="space-y-3">{view.deliveries.map((delivery, index) => <ErpCard key={delivery.deliveryId} className="p-4">
-        <div className="flex items-center justify-between gap-2"><strong>تحویل {(index + 1).toLocaleString('fa-IR')} · {PersianCalendar.formatForDisplay(delivery.date)}</strong><ErpBadge tone="info"><FaTruck className="ml-1 inline" />{delivery.items.length.toLocaleString('fa-IR')} ردیف</ErpBadge></div>
+        <div className="flex flex-wrap items-center justify-between gap-2 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><strong>تحویل {(index + 1).toLocaleString('fa-IR')} · {PersianCalendar.formatForDisplay(delivery.date)}</strong><ErpBadge tone="info"><FaTruck className="ml-1 inline" />{delivery.items.length.toLocaleString('fa-IR')} ردیف</ErpBadge></div>
         <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{delivery.destination}</p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">{delivery.items.map(item => <ErpFieldView
           key={item.productRowId} label={view.products.find(product => product.productRowId === item.productRowId)?.description ?? 'محصول'}
@@ -182,7 +182,7 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
 }
 
 function PaymentPlan({ plan }: { plan: PartnerCaseView['customerPaymentPlan'] }) {
-  return <div className="space-y-3"><div className="flex items-center justify-between"><span className="text-sm text-[var(--sds-text-secondary)]">نسخه {plan.version.toLocaleString('fa-IR')}</span><ErpBadge tone="neutral">از {PersianCalendar.formatForDisplay(plan.effectiveDate)}</ErpBadge></div>
+  return <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><span className="text-sm text-[var(--sds-text-secondary)]">نسخه {plan.version.toLocaleString('fa-IR')}</span><ErpBadge tone="neutral">از {PersianCalendar.formatForDisplay(plan.effectiveDate)}</ErpBadge></div>
     {!plan.installments.length && <ErpBadge tone="warning">در انتظار ثبت حسابداری</ErpBadge>}
     {plan.installments.map(item => <ErpCard key={item.installmentId} className="p-3"><strong>{formatPartnerMoney(item.amount.amount, item.amount.currency)}</strong>
       <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{partnerPaymentMethodCopy[item.method]} · سررسید {PersianCalendar.formatForDisplay(item.dueDate)}</p></ErpCard>)}</div>;

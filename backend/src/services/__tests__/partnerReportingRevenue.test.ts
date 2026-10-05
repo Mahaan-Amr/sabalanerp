@@ -62,3 +62,26 @@ test('80-digit exact money remains unchanged in realization', () => {
   const rows = projectSabalanRevenue(contracts, [{ ...commitment, sabalanNetAmount: { amount, currency: 'IRR' } }], period);
   assert.equal(rows[0].amount, amount);
 });
+
+test('reactivation history follows a reviewed correction after renewed finality', async () => {
+  const { caseHistory } = await import('../partnerSales/reporting/history');
+  const base = { schemaVersion: 1 as const, commandId: 'cycle-command', correlationId: 'cycle-correlation', actorId: commitment.actorId,
+    recordedAt: '2026-08-03T08:00:00.000Z', effectiveDate: '2026-08-03', owner };
+  const voided = contracts.PartnerEventSchema.parse({ ...base, type: 'CASE_VOIDED', eventId: 'cycle-void', correctionId: 'cycle-cancel',
+    commitmentEventId: commitment.eventId, adjustmentEventIds: ['cycle-negative'], dependencyEvidenceIds: ['review'], reason: 'لغو' });
+  const activation = contracts.PartnerEventSchema.parse({ ...base, type: 'CASE_REACTIVATED', eventId: 'cycle-activation',
+    recordedAt: '2026-08-04T08:00:00.000Z', effectiveDate: '2026-08-04', cancellationEventId: voided.eventId, permissionId: 'manager-grant', reason: 'فعال‌سازی' });
+  const renewal = contracts.PartnerEventSchema.parse({ ...base, type: 'CASE_RECOMMITTED', eventId: 'cycle-renewal',
+    owner: { ...owner, revision: 2 }, recordedAt: '2026-08-05T08:00:00.000Z', effectiveDate: '2026-08-05',
+    reactivationEventId: activation.eventId, commitmentEventId: commitment.eventId, internalRecordId: 'internal-326',
+    sabalanNetAmount: { amount: '1600', currency: 'IRR' } });
+  const correction = contracts.PartnerEventSchema.parse({ ...base, type: 'CORRECTION_EFFECTIVE', eventId: 'cycle-correction',
+    owner: { ...owner, revision: 3 }, predecessor: renewal.owner, recordedAt: '2026-08-06T08:00:00.000Z', effectiveDate: '2026-08-06',
+    correctionId: 'reviewed-successor', scope: 'RETAIL_ONLY', gateEvidenceIds: ['fresh-acceptance'] });
+  if (correction.type !== 'CORRECTION_EFFECTIVE') throw new Error('Unexpected event type');
+  const history = caseHistory(contracts, [correction, renewal, activation, voided, commitment]);
+  assert.equal(history.effective?.revision, 3);
+  assert.equal(history.voided, undefined);
+  assert.equal(history.corrections.length, 1);
+  assert.throws(() => caseHistory(contracts, [commitment, voided, activation, renewal, { ...correction, predecessor: owner }]), { code: 'INTEGRITY_CONFLICT' });
+});

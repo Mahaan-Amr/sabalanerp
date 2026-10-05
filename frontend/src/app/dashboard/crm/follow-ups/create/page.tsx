@@ -107,7 +107,7 @@ export default function CreateFollowUpPage() {
   return (
     <ErpPage
       title="ثبت گزارش پیگیری"
-      eyebrow="CRM"
+      eyebrow="ارتباط با مشتری"
       description="گزارش اتفاق فعلی و اقدام بعدی لازم برای ادامه پیگیری."
       backHref="/dashboard/crm/follow-ups"
       actions={presentationScope === 'workspace' ? [] : [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving, onClick: () => document.getElementById('followup-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }]}
@@ -140,7 +140,6 @@ export default function CreateFollowUpPage() {
                   ...visibleProjects.map((project) => ({ value: project.id, label: project.title })),
                 ]}
                 searchable
-                clearable
                 noOptionsText="پروژه‌ای پیدا نشد"
               />
             </label>

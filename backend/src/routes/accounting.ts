@@ -762,9 +762,8 @@ router.get('/contracts/partner/:caseId/internal', accountingContractsView, async
     const writable = document.partnerContext.accountingWritable && (!document.commercial || document.commercial.status === 'FINAL');
     return res.json({ success: true, data: { ...document, actions: { canResolveFlag: canResolveFlag && writable,
       canVoidRecord: capabilities.START_ACCOUNTING_VOID_CASE,
-      canOpenEdit: !['CANCELLED', 'VOIDED'].includes(document.caseState || '') && access.features.some(feature => feature.workspace === WORKSPACES.ACCOUNTING &&
-        [FEATURES.ACCOUNTING_CORRECTIONS_MANAGE, FEATURES.ACCOUNTING_CORRECTIONS_APPROVE].includes(feature.feature as any) && ['edit', 'admin'].includes(feature.permission)),
-      canCreateInvoice: capabilities.CREATE_INVOICE && (writable || 'canRegister' in document && document.canRegister), canFlag: capabilities.FLAG_CONTRACT && writable, canRequestCorrection: capabilities.CREATE_CORRECTION_REQUEST && writable,
+      canCreateInvoice: capabilities.CREATE_INVOICE && (writable || 'canRegister' in document && document.canRegister), canFlag: capabilities.FLAG_CONTRACT && writable,
+      canRequestCorrection: capabilities.CREATE_CORRECTION_REQUEST && ['COMMITTED', 'VOIDED'].includes(document.caseState || ''),
       canReviewInvoice: capabilities.APPROVE_FINANCIAL_INVOICE && writable,
       canCreateReceivable: capabilities.CREATE_RECEIVABLE && writable } } });
   } catch (error) {
@@ -812,7 +811,7 @@ router.post('/contracts/partner/:caseId/edit-permission', protect,
           { correlationId: randomUUID(), reason: req.body.reason }).authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: req.params.caseId });
         if (!allowed.ok) throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
         const root = await tx.partnerSaleCase.findUnique({ where: { id: req.params.caseId } });
-        if (!root?.customerContractId || ['VOIDED', 'CANCELLED'].includes(root.state)) throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
+        if (!root?.customerContractId) throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
         const { openPartnerCommercialEditPermission } = await import('../services/crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter');
         return openPartnerCommercialEditPermission(tx, { contractId: root.customerContractId, actorUserId: req.user!.id,
           reason: String(req.body.reason).trim(), requestKey, now: new Date() });
@@ -829,47 +828,7 @@ router.post('/contracts/partner/:caseId/correction-requests', protect,
     body('category').optional().isIn(['CUSTOMER_IDENTITY', 'AMOUNT_PRICING', 'PAYMENT_PLAN',
       'DELIVERY_SCHEDULE', 'TAX_INFO', 'DOCUMENT_SIGNATURE', 'OTHER']),
     body('priority').optional().isIn(['LOW', 'MEDIUM', 'HIGH', 'URGENT'])],
-  async (req: AuthRequest, res: Response) => {
-    if (!validationResult(req).isEmpty()) return res.status(400).json({ success: false,
-      message: 'دلیل درخواست اصلاح را بررسی کنید.' });
-    const key = String(req.get('X-Idempotency-Key') || '');
-    if (!/^[0-9a-f-]{36}$/i.test(key)) return res.status(400).json({ success: false,
-      message: 'شناسه درخواست معتبر نیست؛ صفحه را تازه‌سازی و دوباره تلاش کنید.' });
-    try {
-      const data = await withPartnerInternalAccountingTarget(req.params.caseId, req.user!.id,
-        async (database, target) => {
-          const trackingCode = `partner-internal-correction:${key}`;
-          const prior = await database.accountingContractFlag.findUnique({ where: { trackingCode } });
-          if (prior) {
-            if (prior.sourceFinancialRecordId !== target.invoiceRecordId || prior.createdBy !== req.user!.id ||
-              prior.note !== String(req.body.reason).trim()) throw new Error('CORRECTION_IDEMPOTENCY_CONFLICT');
-            return { id: prior.id, replayed: true };
-          }
-          const flag = await database.accountingContractFlag.create({ data: {
-            contractId: target.customerContractId, sourceFinancialRecordId: target.invoiceRecordId,
-            trackingCode, category: req.body.category || 'OTHER', severity: 'BLOCKER',
-            title: 'درخواست اصلاح سند داخلی همکار', note: String(req.body.reason).trim(),
-            createdBy: req.user!.id,
-            evidence: { purpose: 'PARTNER_INTERNAL_CORRECTION_REQUEST', priority: req.body.priority || 'MEDIUM' },
-          } });
-          await database.accountingAuditLog.create({ data: {
-            action: 'REQUEST_PARTNER_INTERNAL_CORRECTION', actorId: req.user!.id,
-            recordId: target.invoiceRecordId, entityType: 'AccountingContractFlag', entityId: flag.id,
-            afterState: { id: flag.id, category: flag.category, severity: flag.severity,
-              reason: flag.note, purpose: 'PARTNER_INTERNAL_CORRECTION_REQUEST' }, note: flag.note,
-          } });
-          return { id: flag.id, replayed: false };
-        });
-      if (!data) return res.status(404).json({ success: false, message: 'این سند داخلی در دسترس شما نیست.' });
-      return res.status(data.replayed ? 200 : 201).json({ success: true, data });
-    } catch (error) {
-      if (error instanceof Error && error.message === 'CORRECTION_IDEMPOTENCY_CONFLICT')
-        return res.status(409).json({ success: false, message: 'این شناسه برای درخواست دیگری ثبت شده است.' });
-      console.error('Partner internal correction request failed:', error);
-      return res.status(409).json({ success: false,
-        message: 'درخواست اصلاح ثبت نشد. وضعیت پرونده را تازه‌سازی و دوباره بررسی کنید.' });
-    }
-  });
+  async (req: AuthRequest, res: Response) => createAccountingCorrectionRequestHandler()(req, res));
 
 router.post('/contracts/partner/:caseId/flags', accountingEdit,
   [body('note').isString().trim().isLength({ min: 3 }),
@@ -1189,14 +1148,20 @@ const correctionRequestFailure = (message: string) => ({
 
 export const createAccountingCorrectionRequestHandler = (
   requestCorrection: typeof requestAccountingSalesContractCorrection = requestAccountingSalesContractCorrection,
-) => async (req: AuthRequest & { params: { contractId: string } }, res: Response) => {
+  resolvePartnerContract: (caseId: string) => Promise<string | null> = async caseId => {
+    const root = await prisma.partnerSaleCase.findUnique({ where: { id: caseId }, select: { customerContractId: true } });
+    return root?.customerContractId ?? null;
+  },
+) => async (req: AuthRequest, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ success: false, message: 'اطلاعات درخواست اصلاح کامل یا معتبر نیست.' });
   }
   try {
+    const contractId = req.params.caseId ? await resolvePartnerContract(req.params.caseId) : req.params.contractId;
+    if (!contractId) throw new Error('CONTRACT_NOT_FOUND');
     const data = await requestCorrection(prisma, {
-      contractId: req.params.contractId,
+      contractId,
       actorUserId: req.user!.id,
       category: req.body.category || 'OTHER',
       priority: req.body.priority || 'MEDIUM',

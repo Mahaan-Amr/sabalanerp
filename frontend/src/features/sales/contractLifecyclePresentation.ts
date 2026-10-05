@@ -20,7 +20,7 @@ export type ContractLifecyclePresentation = {
 
 const legacyLabels: Record<string, string> = {
   DRAFT: 'پیش‌نویس', PENDING_APPROVAL: 'در انتظار تایید', APPROVED: 'تایید شده',
-  SIGNED: 'امضا شده', PRINTED: 'چاپ شده', CANCELLED: 'لغو شده', EXPIRED: 'منقضی شده',
+  QUOTED: 'استعلام شده', SIGNED: 'امضا شده', PRINTED: 'چاپ شده', CANCELLED: 'لغو شده', EXPIRED: 'منقضی شده',
 };
 const currentLabels: Record<string, string> = {
   ...legacyLabels, DRAFT: 'یادداشت', PENDING_APPROVAL: 'پیش‌نویس', APPROVED: 'امضا شده', SIGNED: 'قطعی',
@@ -31,7 +31,7 @@ export const isCurrentContractFlow = (contract: Pick<ContractLifecyclePresentati
 
 export const contractLifecycleLabel = (contract: Pick<ContractLifecyclePresentation, 'status' | 'commercialFlowVersion' | 'partnerCommercialStatus'>) =>
   (contract.partnerCommercialStatus ? partnerCommercialLabels[contract.partnerCommercialStatus as PartnerCommercialState['status']] : undefined) ||
-  (isCurrentContractFlow(contract) ? currentLabels : legacyLabels)[contract.status] || contract.status;
+  (isCurrentContractFlow(contract) ? currentLabels : legacyLabels)[contract.status] || (/^[^A-Za-z]+$/.test(contract.status) ? contract.status : 'وضعیت نامشخص');
 
 // Preserve historical stored evidence while using canonical filter labels.
 export const contractLifecycleFilterOptions = [

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { loginAsAdmin } from './support/design-system';
+import { loginAsAdmin, setTheme, assertNoHorizontalOverflow } from './support/design-system';
 import { partnerInputHash, type PartnerTechnicalDraft } from '../../packages/partner-sales-contracts/dist';
 
 const actorId = 'partner-entry-regression';
@@ -328,4 +328,69 @@ test('Partner payments require user entry and preserve remaining balance through
   await workflow(page).getByRole('button', { name: 'حذف پرداخت 1', exact: true }).click();
   await expect(remaining).toContainText('۱,۹۰۰');
   await expect(workflow(page).getByText('پرداخت ۱', { exact: true })).toHaveCount(0);
+});
+
+
+for (const width of [1280, 390]) test(`Reviewed Partner correction starts at date and preserves prior payment at ${width}px`, async ({ page }) => {
+  const { createPartnerFixtures } = await import('../../packages/partner-sales-contracts/dist/testing');
+  const fixture = createPartnerFixtures();
+  const caseId = fixture.partner.owner.caseId;
+  const intent = { ...fixture.draftSubmissionReference, recoveryId: oldRecoveryId, customerId: oldCustomer.id,
+    projectId: 'old-project', contractDate: '2026-09-30', preparationCompleted: false,
+    rows: [{ productRowId: 'old-product', retailUnitPrice: { amount: '1000', currency: 'IRT' } }],
+    customerPaymentPlan: { planId: 'manual-payments-plan', version: 1, effectiveDate: '2026-09-30', installments: [{ installmentId: 'retained-cash', method: 'CASH', subtype: 'CARD', dueDate: '2026-10-03', amount: { amount: '2000', currency: 'IRT' } }] },
+    deliveries: [{ deliveryId: 'payment-test-delivery', date: '2026-10-03', destination: 'تهران',
+      projectManagerName: 'مدیر آزمون', receiverName: 'تحویل‌گیرنده آزمون',
+      items: [{ productRowId: 'old-product', quantity: '2' }] }],
+    retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false };
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width, height: 900 });
+  await mockPartner(page, true);
+  await page.route('**/api/partner/cases/quote', route => {
+    const { intent: quotedIntent } = route.request().postDataJSON();
+    return route.fulfill({ json: { success: true, data: { schemaVersion: 1,
+      recoveryId: quotedIntent.recoveryId, recoveryRevision: quotedIntent.recoveryRevision,
+      graphHash: quotedIntent.graphHash, rows: [{ productRowId: 'old-product',
+        retailEffectiveUnitPrice: { amount: '1000', currency: 'IRT' },
+        retailLineTotal: { amount: '2000', currency: 'IRT' } }] } } });
+  });
+  await page.route('**/api/partner/cases/creation-context*', route => route.fulfill({ json: { success: true, data: {
+    schemaVersion: 1, kind: 'PARTNER', actorId, actorDisplayName: 'همکار آزمون', profileId: 'partner-entry-profile',
+    writable: true, inquiryIds: [], customers: [oldCustomer, newCustomer], projects,
+    recoverableDrafts: [{ recoveryId: oldRecoveryId, caseId, baseRevision: 0, updatedAt: new Date().toISOString() }],
+  } } }));
+  await page.route('**/api/partner/cases/query-v2', route => route.fulfill({ json: { success: true,
+    data: { cases: [{ view: { ...fixture.partner, state: 'COMMITTED', preparationCompleted: true, customerPaymentPlan: intent.customerPaymentPlan }, snapshotId: null,
+      reviewedCorrection: { requestId: 'reviewed-correction', reason: 'بررسی نشانی تحویل توسط حسابداری' },
+      actions: { canContinue: true, canPreview: false, canIssue: false, canFinalize: false, canSendConfirmation: false,
+        canRequestCorrection: false, canCancel: true, canRequestVoid: false } }] } } }));
+  await page.route('**/api/partner/cases/approval-matches', route => route.fulfill({ json: { success: true, data: {
+    schemaVersion: 1, recoveryId: oldRecoveryId, recoveryRevision: 1, rows: [], missingPricingSubjectIds: ['old-product'],
+  } } }));
+  await page.route(`**/api/partner/cases/drafts/${oldRecoveryId}/wizard`, route => route.fulfill({ json: { success: true,
+    data: { schemaVersion: 1, wizardRevision: 1, step: 'payment',
+      intent: route.request().method() === 'PUT' ? route.request().postDataJSON().intent : intent,
+      updatedAt: new Date().toISOString() },
+  } }));
+
+  await page.goto(`/dashboard/sales/contracts/create?caseId=${caseId}`);
+  await expect(workflow(page).getByText('اصلاح قرارداد با تأیید حسابداری — بررسی نشانی تحویل توسط حسابداری', { exact: true })).toBeVisible();
+  const progress = workflow(page).getByRole('navigation', { name: 'مراحل ویرایش قرارداد' });
+  if (width >= 640) await expect(progress.getByRole('button', { name: 'تاریخ قرارداد', exact: true })).toHaveAttribute('aria-current', 'step');
+  if (width < 640) {
+    await progress.getByRole('button', { name: /انتخاب مرحله ویرایش؛ مرحله فعلی تاریخ قرارداد/ }).click();
+    await page.getByRole('dialog', { name: 'انتخاب مرحله ویرایش', exact: true })
+      .getByRole('button', { name: /روش پرداخت/ }).click();
+  } else await progress.getByRole('button', { name: 'روش پرداخت', exact: true }).click();
+  await expect(workflow(page).getByText('پرداخت ۱', { exact: true })).toBeVisible();
+  await workflow(page).getByRole('button', { name: 'ویرایش پرداخت 1', exact: true }).click();
+  const edit = page.getByRole('dialog', { name: 'ویرایش پرداخت', exact: true });
+  await expect(edit.getByRole('textbox', { name: 'مبلغ (تومان)', exact: true })).toHaveValue('2,000');
+  await edit.getByRole('button', { name: 'ذخیره', exact: true }).click();
+  await expect(edit).toBeHidden();
+  await next(page).click();
+  if (width < 640) await expect(progress.getByRole('button', { name: /انتخاب مرحله ویرایش؛ مرحله فعلی تایید دیجیتال/ })).toBeVisible();
+  else await expect(progress.getByRole('button', { name: 'تایید دیجیتال', exact: true })).toHaveAttribute('aria-current', 'step');
+  await expect(workflow(page).getByText('کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است.', { exact: true })).toHaveCount(0);
+  for (const theme of ['light', 'dark'] as const) { await setTheme(page, theme); await assertNoHorizontalOverflow(page); }
 });

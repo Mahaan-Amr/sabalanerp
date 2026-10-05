@@ -65,7 +65,7 @@ export default function PersonalHubPage() {
               </div>
               <div className="mt-4">
                 <ErpSummaryGrid columns={3} items={[
-                  { label: 'نقش', value: roleLabels[profile.role] || profile.role },
+                  { label: 'نقش', value: roleLabels[profile.role] || 'نقش نامشخص' },
                   { label: 'واحد سازمانی', value: profile.department?.namePersian || '—' },
                   { label: 'ایمیل', value: profile.email || '—' },
                   { label: 'تلفن', value: profile.profile?.phone || '—' },

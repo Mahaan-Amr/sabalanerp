@@ -45,3 +45,14 @@ test('6 Aban is a future payment, while 6 Mehr in either numeral set is today', 
   assert.match(validatePartnerPaymentInstallment({ installmentId: 'future', dueDate: '2026-10-28', amount,
     method: 'BANK_TRANSFER' }, '2026-09-28').nationalCode!, /الزامی/);
 });
+
+
+test('an unchanged saved payment stays valid as the calendar advances; changed or new payments require ID', () => {
+  const saved = { installmentId: 'saved-cash', dueDate: '2026-10-03', method: 'BANK_TRANSFER' as const,
+    amount: { amount: '454005000', currency: 'IRT' as const } };
+  assert.deepEqual(validatePartnerPaymentInstallment(saved, '2026-10-05', true, saved), {});
+  assert.match(validatePartnerPaymentInstallment({ ...saved, dueDate: '2026-10-04' }, '2026-10-05', true, saved).nationalCode!, /الزامی/);
+  assert.match(validatePartnerPaymentInstallment({ ...saved, amount: { ...saved.amount, amount: '10' } }, '2026-10-05', true, saved).nationalCode!, /الزامی/);
+  assert.match(validatePartnerPaymentInstallment({ ...saved, method: 'CASH' }, '2026-10-05', true, saved).nationalCode!, /الزامی/);
+  assert.match(validatePartnerPaymentInstallment({ ...saved, installmentId: 'new' }, '2026-10-05', true, saved).nationalCode!, /الزامی/);
+});

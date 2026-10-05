@@ -6027,15 +6027,18 @@ model AccountingCommercialCustomerInvoice {
 model AccountingCustomerOpenItem {
   id              String                               @id @default(cuid())
   profileId       String
-  invoiceId       String
-  contractId      String
+  invoiceId       String?
+  contractId      String?
+  ledgerVoucherId String?
+  sourceKind      String                               @default("SALE")
+  description     String?
   kind            String
   originalRials   Decimal                              @db.Decimal(20, 0)
   dueAt           DateTime
   postedAt        DateTime
   createdAt       DateTime                             @default(now())
   profile         AccountingCustomerProfile            @relation(fields: [profileId], references: [id], onDelete: Restrict)
-  invoice         AccountingCommercialCustomerInvoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  invoice         AccountingCommercialCustomerInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
   allocationLines AccountingSettlementAllocationLine[]
 
   @@unique([invoiceId, kind])
@@ -6048,6 +6051,7 @@ model AccountingTreasuryTransaction {
   id                 String                              @id @default(cuid())
   profileId          String?
   contractId         String?
+  refundOfId         String?
   financialAccountId String
   kind               String
   direction          String
@@ -6069,6 +6073,7 @@ model AccountingTreasuryTransaction {
   @@unique([sourceType, sourceId, sourceVersion])
   @@index([profileId, occurredAt])
   @@index([financialAccountId, occurredAt])
+  @@index([refundOfId])
   @@map("accounting_treasury_transactions")
 }
 

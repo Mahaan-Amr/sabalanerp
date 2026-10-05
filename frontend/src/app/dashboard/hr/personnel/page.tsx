@@ -124,7 +124,7 @@ export default function HrPersonnelPage() {
     dependencyAt,
   } = listState;
   const replaceListState = useCallback(
-    (patch: Partial<PersonnelListState>) => {
+    (patch: Partial<PersonnelListState>, options: { preserveScroll?: boolean } = {}) => {
       const nextState = { ...listState, ...patch };
       const resetsCollectionScroll = ([
         "view", "search", "page", "relationshipStatus", "attention",
@@ -133,14 +133,16 @@ export default function HrPersonnelPage() {
       const query = personnelListSearch(nextState);
       if (resetsCollectionScroll) {
         const scrollKey = `hr-personnel-scroll:${pathname}?${personnelListSearch({ ...nextState, focus: "", panel: "" })}`;
-        window.sessionStorage.removeItem(scrollKey);
+        if (options.preserveScroll) window.sessionStorage.setItem(scrollKey, String(window.scrollY));
+        else window.sessionStorage.removeItem(scrollKey);
       }
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-      if (resetsCollectionScroll) window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
+      if (resetsCollectionScroll && !options.preserveScroll) window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
     },
     [listState, pathname, router],
   );
   const [rows, setRows] = useState<any[]>([]);
+  const [unitTabs, setUnitTabs] = useState<Array<{ id: string; name: string }>>([]);
   const [foundation, setFoundation] = useState<any>({
     positions: [],
     availableUsers: [],
@@ -198,6 +200,7 @@ export default function HrPersonnelPage() {
         hrAPI.getPersonnel({
           ...(search ? { search } : {}),
           archived: archiveView,
+          unitAssignmentScope: "current",
           ...(relationshipStatus ? { relationshipStatus } : {}),
           ...(attention ? { attention } : {}),
           ...(organizationalUnitId ? { organizationalUnitId } : {}),
@@ -223,6 +226,7 @@ export default function HrPersonnelPage() {
         performanceBadge: current.find((row: any) => row.id === person.id)?.performanceBadge,
       })));
       setMeta(nextMeta);
+      setUnitTabs(nextMeta.organizationalUnits || []);
       if (referenceResult.status === "fulfilled" && referenceResult.value) {
         const reference = referenceResult.value;
         setFoundation((current: any) => ({ ...current, positions: reference.data.data.positions || [] }));
@@ -840,17 +844,41 @@ export default function HrPersonnelPage() {
         </ErpSection>
       )}
 
+      {actionPermissions.includes('VIEW_PERFORMANCE_BADGE_LIST') && <ErpCard className="p-4"><PerformanceBadgeBanner /></ErpCard>}
+      <div className="min-w-0" data-testid="personnel-list-toolbar">
+        <div className="grid min-w-0 grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(16rem,1fr)_minmax(0,max-content)]">
+          <ErpField label="جست‌وجوی پرسنل" className="min-w-0">
+            <ErpInput
+              aria-label="جستجوی پرسنل"
+              placeholder="نام پرسنل…"
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") submitSearch(); }}
+            />
+          </ErpField>
+        <div className="min-w-0 max-w-full overflow-x-auto" aria-label="فیلتر واحدهای پرسنل" data-testid="personnel-unit-tabs">
+          <div className="w-max min-w-full">
+            <ErpSegmentedControl
+              value={organizationalUnitId}
+              options={[
+                { value: "", label: "همهٔ واحدها" },
+                ...unitTabs.map((unit) => ({ value: unit.id, label: unit.name })),
+                ...(organizationalUnitId && !unitTabs.some((unit) => unit.id === organizationalUnitId)
+                  ? [{ value: organizationalUnitId, label: "واحد انتخاب‌شده (بدون پرسنل)" }] : []),
+              ]}
+              onChange={(unitId) => replaceListState({ organizationalUnitId: unitId, page: 1, focus: "", panel: "" }, { preserveScroll: true })}
+            />
+          </div>
+        </div>
+        </div>
+        <div className="mt-2 min-h-5 text-xs text-[var(--sds-text-muted)]" role="status" aria-live="polite">
+          {resultsLoading ? "در حال به‌روزرسانی نتایج…" : null}
+        </div>
+      </div>
+
       <ErpSection
         title={archiveView ? "بایگانی پرسنل" : "فهرست پرسنل"}
         description={`${meta.total.toLocaleString("fa-IR")} پرونده`}
-        actions={[
-          {
-            label: "جستجو",
-            icon: FaSearch,
-            onClick: submitSearch,
-            tone: "neutral",
-          },
-        ]}
       >
         {(relationshipStatus || attention) && (
           <ErpCard className="mb-4 flex flex-wrap items-center justify-between gap-3 p-3">
@@ -865,24 +893,6 @@ export default function HrPersonnelPage() {
             <ErpButton label="حذف فیلتر" href="/dashboard/hr/personnel" tone="neutral" variant="ghost" />
           </ErpCard>
         )}
-        <div className="mb-4">
-          <ErpInput
-            aria-label="جستجوی پرسنل"
-
-            value={searchDraft}
-            onChange={(e) => {
-              setSearchDraft(e.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter") return;
-              submitSearch();
-            }}
-          />
-          <div className="mt-2 min-h-5 text-xs text-[var(--sds-text-muted)]" role="status" aria-live="polite">
-            {resultsLoading ? "در حال به‌روزرسانی نتایج…" : null}
-          </div>
-        </div>
-        {actionPermissions.includes('VIEW_PERFORMANCE_BADGE_LIST') && <ErpCard className="mb-4 p-4"><PerformanceBadgeBanner /></ErpCard>}
         <div className="space-y-3">
           {rows.map((person) => (
             <PersonnelCard

@@ -749,7 +749,7 @@ export const salesAPI = {
 // CRM Workspace API
 export const crmAPI = {
   // Customers
-  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string }) =>
+  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string; ownership?: string; isBlacklisted?: boolean; isLocked?: boolean }) =>
     api.get('/crm/customers', { params }),
 
   getCustomerOwners: () => api.get('/crm/customer-owners'),
@@ -986,9 +986,14 @@ export const inventoryAPI = {
 export const accountingAPI = {
   recordCustomerPaperSignature: (contractId: string, revision: number) => api.post(`/accounting/contracts/${contractId}/customer-paper-signature`, { revision }),
   getCustomerAccounts: (params?: { search?: string; asOf?: string }) => api.get('/accounting/ledger/customer-profiles', { params }),
+  getCustomerWorkspaceAccounts: (params?: { search?: string; asOf?: string; page?: number }) => api.get('/accounting/ledger/customer-accounts', { params }),
+  getCustomerWorkspace: (id: string) => api.get(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}`),
+  getCustomerWorkspaceContext: (id: string) => api.get(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/context`),
+  recordCustomerAccountOperation: (id: string, data: unknown) => api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/operations`, data),
+  recordCustomerWorkspaceTreasury: (id: string, data: unknown) => api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/treasury`, data),
   getCustomerAccountProjection: (id: string, params?: { asOf?: string }) => api.get(`/accounting/ledger/customer-profiles/${id}/projection`, { params }),
   exportCustomerStatement: (id: string, format: 'pdf' | 'xlsx', asOf: string) => api.get(`/accounting/ledger/customer-profiles/${id}/export.${format}`, { params: { asOf }, responseType: 'blob' }),
-  getTreasuryOverview: (bankLinePage = 1) => api.get('/accounting/ledger/treasury/overview', { params: { bankLinePage } }),
+  getTreasuryOverview: (bankLinePage = 1, checkId?: string) => api.get('/accounting/ledger/treasury/overview', { params: { bankLinePage, checkId } }),
   getTaxOverview: () => api.get('/accounting/ledger/tax/overview'),
   recordCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/receipts', data),
   allocateCustomerReceipt: (data: any) => api.post('/accounting/ledger/treasury/allocations', data),

@@ -18,12 +18,14 @@ export const PartnerCaseRuntimeActionsSchema = z.object({
   canSendConfirmation: z.boolean(),
   canRequestCorrection: z.boolean(),
   canCancel: z.boolean(),
+  canReactivate: z.boolean().optional(),
   canRequestVoid: z.boolean(),
 }).strict();
 
 export const PartnerCaseRuntimeRowSchema = z.object({
   view: PartnerCaseViewSchema,
   customerContractId: IdSchema.optional(),
+  reviewedCorrection: z.object({ requestId: IdSchema, reason: z.string().min(1) }).strict().optional(),
   commercial: PartnerCommercialStateSchema.optional(),
   pricingResponseState: z.enum(['READY', 'PARTIAL', 'WAITING', 'REJECTED', 'EXPIRED']).optional(),
   accountingCorrectionRequests: z.array(z.object({ id: IdSchema, reason: z.string().min(1),

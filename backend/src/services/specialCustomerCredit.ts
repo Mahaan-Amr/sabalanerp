@@ -27,11 +27,11 @@ export const consumedCustomerCredit = async (db: Db, contract: SalesContract) =>
     OR: [{ kind: 'RECEIVABLE', invoice: { status: 'POSTED' } }, { kind: 'CREDIT', invoice: { status: 'CREDIT_NOTE' } }] },
     select: { kind: true, originalRials: true, invoice: { select: { contractVersion: true, ledgerVoucherId: true } } } }) : [];
   const posted = new Set(authoritative.length ? (await db.accountingLedgerVoucher.findMany({ where: {
-    id: { in: ledgerItems.map(item => item.invoice.ledgerVoucherId) }, status: 'POSTED', bookId: { in: authoritative.map(run => run.bookId) } },
+    id: { in: ledgerItems.flatMap(item => item.invoice ? [item.invoice.ledgerVoucherId] : []) }, status: 'POSTED', bookId: { in: authoritative.map(run => run.bookId) } },
     select: { id: true } })).map(voucher => voucher.id) : []);
   const obligations = authoritative.length
-    ? ledgerItems.filter(row => posted.has(row.invoice.ledgerVoucherId))
-      .map(row => ({ amount: row.kind === 'CREDIT' ? row.originalRials.negated() : row.originalRials, revision: row.invoice.contractVersion }))
+    ? ledgerItems.filter(row => row.invoice && posted.has(row.invoice.ledgerVoucherId))
+      .map(row => ({ amount: row.kind === 'CREDIT' ? row.originalRials.negated() : row.originalRials, revision: row.invoice!.contractVersion }))
     : (await db.accountingReceivable.findMany({ where: { contractId: contract.id, status: { not: 'VOIDED' } }, select: { originalAmount: true, invoiceRecord: { select: { sourceSnapshot: true } } } }))
       .map(row => ({ amount: row.originalAmount, revision: (row.invoiceRecord?.sourceSnapshot as { commercialRevision?: number } | null)?.commercialRevision }));
   const approvedInvoices = !authoritative.length && !obligations.length ? await db.accountingFinancialRecord.findMany({ where: { contractId: contract.id,

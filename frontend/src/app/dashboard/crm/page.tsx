@@ -31,6 +31,7 @@ type DashboardData = {
   };
   nextActions: {
     overdue: any[];
+    overdueCount?: number;
     today: any[];
     upcoming: any[];
   };
@@ -66,20 +67,20 @@ export default function CrmWorkspacePage() {
   };
 
   if (loading) return <ErpLoading />;
-  if (error) return <ErpEmptyState icon={FaExclamationTriangle} title="خطا در داشبورد CRM" description={error} action={{ label: 'تلاش دوباره', onClick: fetchDashboard, tone: 'primary', variant: 'solid' }} />;
+  if (error) return <ErpEmptyState icon={FaExclamationTriangle} title="خطا در داشبورد ارتباط با مشتری" description={error} action={{ label: 'تلاش دوباره', onClick: fetchDashboard, tone: 'primary', variant: 'solid' }} />;
   if (!data) return <ErpEmptyState icon={FaUsers} title="داده‌ای برای نمایش وجود ندارد" />;
 
   const metrics: ErpMetric[] = [
-    { label: 'مخاطبین CRM', value: data.customers.total.toLocaleString('fa-IR'), hint: `${data.customers.active.toLocaleString('fa-IR')} فعال`, icon: FaUsers, tone: 'info' },
-    { label: 'پروژه‌های احتمالی', value: data.projects.total.toLocaleString('fa-IR'), hint: data.permissions.canManage ? 'نمای تیمی' : 'نمای فروشنده', icon: FaProjectDiagram, tone: 'primary' },
-    { label: 'سررسیدشده', value: data.nextActions.overdue.length.toLocaleString('fa-IR'), hint: 'اقدام‌های عقب‌افتاده', icon: FaBell, tone: data.nextActions.overdue.length ? 'danger' : 'success' },
-    { label: 'ارزش برآوردی', value: formatToman(data.projects.estimatedPipelineValue), hint: 'فقط پروژه‌های فعال', icon: FaChartLine, tone: 'warning' },
+    { href: '/dashboard/crm/customers', label: 'مخاطبین', value: data.customers.total.toLocaleString('fa-IR'), hint: `${data.customers.active.toLocaleString('fa-IR')} فعال`, icon: FaUsers, tone: 'info' },
+    { href: '/dashboard/crm/potential-projects', label: 'پروژه‌های احتمالی', value: data.projects.total.toLocaleString('fa-IR'), hint: data.permissions.canManage ? 'نمای تیمی' : 'نمای فروشنده', icon: FaProjectDiagram, tone: 'primary' },
+    { href: '/dashboard/crm/next-actions?due=overdue', label: 'سررسیدشده', value: (data.nextActions.overdueCount ?? data.nextActions.overdue.length).toLocaleString('fa-IR'), hint: 'اقدام‌های عقب‌افتاده', icon: FaBell, tone: data.nextActions.overdue.length ? 'danger' : 'success' },
+    { href: '/dashboard/crm/potential-projects?scope=pipeline', label: 'ارزش برآوردی', value: formatToman(data.projects.estimatedPipelineValue), hint: 'فقط پروژه‌های فعال', icon: FaChartLine, tone: 'warning' },
   ];
 
   const actionRow = (action: any) => (
     <Link key={action.id} href={action.potentialProject?.id ? `/dashboard/crm/potential-projects/${action.potentialProject.id}` : `/dashboard/crm/customers/${action.customer.id}`} className="block rounded-[var(--sds-radius-card)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]">
       <ErpCard interactive className="p-4">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{action.title}</p>
           <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{action.potentialProject?.title || crmPersonName(action.customer)}</p>
@@ -95,7 +96,7 @@ export default function CrmWorkspacePage() {
 
   return (
     <ErpPage
-      eyebrow="CRM"
+      eyebrow="ارتباط با مشتری"
       title="مدیریت ارتباط و پیگیری مشتری"
       actions={[{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaUserPlus, tone: 'primary', variant: 'solid' }]}
     >

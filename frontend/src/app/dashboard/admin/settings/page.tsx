@@ -106,7 +106,7 @@ export default function AdminSettingsPage() {
             <label className={labelClassName}>زبان پیش‌فرض</label>
             <ErpSelect value={settings.defaultLanguage} onChange={(event) => setSettings({ ...settings, defaultLanguage: event.target.value })} className={inputClassName}>
               <option value="fa">فارسی</option>
-              <option value="en">English</option>
+              <option value="en">انگلیسی</option>
             </ErpSelect>
           </div>
           <div>

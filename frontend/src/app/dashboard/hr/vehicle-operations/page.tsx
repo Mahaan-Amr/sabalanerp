@@ -25,6 +25,7 @@ import {
   ErpSheet,
   ErpWorkspacePage,
 } from "@/components/erp";
+import { readinessBlockerLabel } from '@/features/dispatch-master-data/readinessPresentation';
 import { dispatchMasterDataAPI } from "@/lib/api";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
@@ -252,7 +253,7 @@ export default function VehicleOperationsPage() {
                           {driver.readiness.blockers.length > 0 && (
                             <p className="mt-2 text-xs sds-text-muted">
                               نیازمند رسیدگی:{" "}
-                              {driver.readiness.blockers.join("، ")}
+                              {driver.readiness.blockers.map(readinessBlockerLabel).join("، ")}
                             </p>
                           )}
                         </div>

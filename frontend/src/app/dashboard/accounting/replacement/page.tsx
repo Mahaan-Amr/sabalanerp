@@ -137,7 +137,7 @@ export default function AccountingReplacementPage() {
     <ErpSection title="اجراهای مهاجرت و تطبیق">
       {!data?.migrations?.length ? <ErpEmptyState title="اجرای مهاجرتی ثبت نشده است." description="ابتدا بستهٔ هش‌شدهٔ سپیدار و نسخهٔ نگاشت را در مسیر عملیاتی بارگذاری کنید." /> :
         <div className="grid gap-3 lg:grid-cols-2">{data.migrations.map((run: any) => <ErpCard key={run.id}>
-          <div className="flex items-start justify-between gap-3"><div><p className="font-semibold">سپیدار · نگاشت نسخهٔ {Number(run.mappingVersion).toLocaleString('fa-IR')}</p><p className="sds-text-secondary mt-1 text-sm">{faDate(run.previewedAt)}</p></div><ErpBadge tone={run.status === 'RECONCILED' ? 'success' : 'warning'}>{statusFa[run.status] ?? 'نیازمند بررسی'}</ErpBadge></div>
+          <div className="flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><div><p className="font-semibold">سپیدار · نگاشت نسخهٔ {Number(run.mappingVersion).toLocaleString('fa-IR')}</p><p className="sds-text-secondary mt-1 text-sm">{faDate(run.previewedAt)}</p></div><ErpBadge tone={run.status === 'RECONCILED' ? 'success' : 'warning'}>{statusFa[run.status] ?? 'نیازمند بررسی'}</ErpBadge></div>
           <div className="sds-text-secondary mt-3 grid grid-cols-3 gap-2 text-sm"><span>ورودی: {run.inputCount.toLocaleString('fa-IR')}</span><span>پذیرفته: {run.acceptedCount.toLocaleString('fa-IR')}</span><span>ردشده: {run.rejectedCount.toLocaleString('fa-IR')}</span></div>
         </ErpCard>)}</div>}
     </ErpSection>

@@ -334,3 +334,18 @@ test('negative margin is reported without blocking an authorized below-cost sale
 });
 
 export { harness, query, root, commitment };
+
+
+test('numbered awaiting-pricing revisions do not invalidate the frozen committed report', () => {
+  const waiting = { ...fixture.partner, state: 'DRAFT' as const, sabalanTotals: undefined };
+  assert.equal(comparableCommercialRevision(waiting, {
+    wholesaleEnvelope: fixture.wholesaleEnvelope, retailEnvelope: fixture.retailEnvelope,
+  }), null);
+});
+
+
+test('a commitment referencing a missing pricing basis still fails closed', async () => {
+  const { service, data } = harness();
+  data.commercial = [];
+  await assert.rejects(service.query(query), { code: 'INTEGRITY_CONFLICT' });
+});

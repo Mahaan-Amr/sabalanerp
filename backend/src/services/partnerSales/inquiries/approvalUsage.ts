@@ -1,3 +1,4 @@
+import { inquiryBelongsToCurrentActivation } from '../cases/reactivationPricing';
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { ApprovedInquirySchema, canonicalHash, checkApprovalUse, partnerError,
@@ -29,6 +30,7 @@ export async function resolveApprovalForUse(tx: Prisma.TransactionClient, input:
         row.inquiry.caseRevision > input.pricingCaseRevision))) {
     return { ok: false, error: partnerError('NOT_FOUND') };
   }
+  if (input.caseId && !await inquiryBelongsToCurrentActivation(tx, input.caseId, input.binding.inquiryId)) return { ok: false, error: partnerError('APPROVAL_EXPIRED') };
   if (row.revision !== input.binding.revision) return { ok: false, error: partnerError('ROW_STALE') };
   const approval = ApprovedInquirySchema.safeParse({ schemaVersion: 1, approvalId: row.approval.id,
     inquiryId: row.inquiry.id, rowId: row.id, revision: row.revision, partnerSellerId: row.inquiry.profile.userId,

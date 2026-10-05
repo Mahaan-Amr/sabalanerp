@@ -8,7 +8,7 @@ const noop = () => {};
 const doc: PartnerInternalDocument = {
   id: 'internal-invoice', caseState: 'COMMITTED', status: 'DRAFT', amount: '12000000', currency: 'IRT',
   receivedAmount: '0', remainingAmount: '12000000', systemInvoiceNumber: null,
-  actions: { canCreateInvoice: true, canResolveFlag: false, canFlag: false, canRequestCorrection: false, canReviewInvoice: false, canCreateReceivable: false },
+  actions: { canOpenEdit: true, canCreateInvoice: true, canResolveFlag: false, canFlag: false, canRequestCorrection: false, canReviewInvoice: false, canCreateReceivable: false },
   partnerContext: { caseId: 'case-1', caseNumber: 'PC-secret', trackingNumber: 27, customerContractNumber: '100330',
     internalRecordNumber: 'PI-100330', debtor: { displayName: 'همکار آزمایشی' }, endCustomer: { displayName: 'مشتری نهایی' } },
   items: [{ productRowId: 'row-1', description: 'سنگ تست', quantity: '3', unit: 'count', unitPrice: '4000000', totalPrice: '12000000', details: ['لایه دوبل · جلو'] }],
@@ -29,7 +29,9 @@ test('all Partner sections share Accounting metrics/tabs and exclude customer pr
 });
 test('committed case never exposes ordinary hard-delete or duplicate invoice creation', () => {
   const html = render('summary');
-  assert.match(html, /disabled=""[^>]*title="پرونده همکار قطعی/);
+  assert.match(html, /پرونده شماره‌دار همکار حذف دائمی نمی‌شود/);
+  assert.doesNotMatch(html, /درخواست مجوز ویرایش و لغو/);
+  assert.equal((html.match(/درخواست اصلاح<\/span>/g) || []).length, 1);
   assert.match(html, /پیش‌نویس سند داخلی برای ثبت رکورد مالی باز می‌شود/);
   assert.doesNotMatch(html, /بررسی صورتحساب/);
   for (const label of ['چاپ نسخه اصلی', 'چاپ حسابداری', 'چاپ نمره کارگاه', 'چاپ سفارشی']) assert(html.includes(label));

@@ -135,7 +135,7 @@ export default function SupplyChainAccountingPage() {
           })}</div>}
         </ErpSection>
         <ErpSection title="مهاجرت افتتاحیه">
-          {!data?.migrations?.length ? <ErpEmptyState title="پیش‌نمایش افتتاحیه‌ای ثبت نشده است." /> : <div className="grid gap-3 md:grid-cols-2">{data.migrations.map((run: any) => <ErpCard key={run.id} className="p-4"><div className="flex items-center justify-between gap-3"><strong>نسخه نگاشت {Number(run.mappingVersion).toLocaleString('fa-IR')}</strong><ErpBadge tone={run.status === 'COMMITTED' ? 'success' : run.status === 'RECONCILED' ? 'info' : 'warning'}>{run.status === 'COMMITTED' ? 'ثبت‌شده' : run.status === 'RECONCILED' ? 'تطبیق‌شده' : 'پیش‌نمایش'}</ErpBadge></div><span className="mt-3 block text-sm">کنترل سپیدار: {rial(run.sepidarControlRials)} · {Number(run._count.items).toLocaleString('fa-IR')} قلم</span></ErpCard>)}</div>}
+          {!data?.migrations?.length ? <ErpEmptyState title="پیش‌نمایش افتتاحیه‌ای ثبت نشده است." /> : <div className="grid gap-3 md:grid-cols-2">{data.migrations.map((run: any) => <ErpCard key={run.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><strong>نسخه نگاشت {Number(run.mappingVersion).toLocaleString('fa-IR')}</strong><ErpBadge tone={run.status === 'COMMITTED' ? 'success' : run.status === 'RECONCILED' ? 'info' : 'warning'}>{run.status === 'COMMITTED' ? 'ثبت‌شده' : run.status === 'RECONCILED' ? 'تطبیق‌شده' : 'پیش‌نمایش'}</ErpBadge></div><span className="mt-3 block text-sm">کنترل سپیدار: {rial(run.sepidarControlRials)} · {Number(run._count.items).toLocaleString('fa-IR')} قلم</span></ErpCard>)}</div>}
         </ErpSection>
       </>}
 
@@ -144,7 +144,7 @@ export default function SupplyChainAccountingPage() {
       </ErpSection>}
 
       {tab === 'exceptions' && <ErpSection title="موارد متوقف‌شده بدون اثر دفترکل">
-        {!data?.exceptions?.length ? <ErpEmptyState title="استثنای بازی وجود ندارد." description="همه شواهد پذیرفته‌شده بدون اختلاف ثبت شده‌اند." /> : <div className="grid gap-3 lg:grid-cols-2">{data.exceptions.map((item: any) => <ErpCard key={item.id} className="p-4"><div className="flex items-start justify-between gap-3"><strong>{item.messagePersian}</strong><ErpBadge tone="danger">متوقف</ErpBadge></div><span className="mt-3 block text-sm text-[var(--sds-text-secondary)]">شناسه شاهد {item.sourceId} · نسخه {Number(item.sourceVersion).toLocaleString('fa-IR')} · {dateFa(item.createdAt)}</span></ErpCard>)}</div>}
+        {!data?.exceptions?.length ? <ErpEmptyState title="استثنای بازی وجود ندارد." description="همه شواهد پذیرفته‌شده بدون اختلاف ثبت شده‌اند." /> : <div className="grid gap-3 lg:grid-cols-2">{data.exceptions.map((item: any) => <ErpCard key={item.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><strong>{item.messagePersian}</strong><ErpBadge tone="danger">متوقف</ErpBadge></div><span className="mt-3 block text-sm text-[var(--sds-text-secondary)]">شناسه شاهد {item.sourceId} · نسخه {Number(item.sourceVersion).toLocaleString('fa-IR')} · {dateFa(item.createdAt)}</span></ErpCard>)}</div>}
       </ErpSection>}
 
       {tab === 'settings' && <>

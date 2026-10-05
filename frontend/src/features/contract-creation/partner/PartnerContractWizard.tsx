@@ -12,6 +12,7 @@ import { saveCompletedPartnerDraft, type PartnerDraftIntent, type createPartnerC
 import { inquiryRowState, isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import { partnerCaseReviewMessage, partnerDeliveryPlanIssue } from './partnerWizardEntry';
 import { partnerSalesActionFeedback } from '../../partner-sales/partnerSalesErrorMessage';
+import { contractCorrectionBannerTitle } from '../services/contractCorrectionPresentation';
 import { formatPartnerMoney } from '../../partner-sales/presentation';
 import { partnerTrackingCode, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 
@@ -90,6 +91,7 @@ export interface PartnerContractWizardProps {
   submission: ReturnType<typeof createPartnerCaseSubmission>;
   now: number;
   externalError?: string | null;
+  correctionReason?: string | null;
   mismatchedRowIds?: readonly string[];
   canonicalRetailReady?: boolean;
   renderSection: (step: Exclude<PartnerWizardStep, 'products' | 'pricing'>, draft: PartnerWizardDraft,
@@ -106,7 +108,7 @@ export interface PartnerContractWizardProps {
   onOpenCase: (caseId: string) => Promise<void> | void;
 }
 
-export function PartnerContractWizard({ draft, onChange, recovery, submission, now, externalError, mismatchedRowIds = [],
+export function PartnerContractWizard({ draft, onChange, recovery, submission, now, externalError, correctionReason, mismatchedRowIds = [],
   canonicalRetailReady = true, renderSection, validateStep, onReinquire, onEditProducts, onEditProduct,
   onSendConfirmation, onFinalize, onCaseNumbered, onOpenCase, onPreparePricingQuote, onRejectPrice }: PartnerContractWizardProps) {
   const result = useSyncExternalStore(submission.subscribe, submission.getSnapshot, submission.getSnapshot);
@@ -351,6 +353,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     clickableSteps={Boolean(result.case)}
     onStepClick={step => move(step - 1)}
     notices={<div className="mb-4 space-y-3">
+      {correctionReason && <ErpInlineState kind="stale" title={contractCorrectionBannerTitle(correctionReason)} />}
       {result.case && compactStatus && <ErpCard className="flex flex-wrap items-center gap-2 p-2">
         <span className="text-sm font-bold">{partnerTrackingCode(result.case.caseNumber, result.case.trackingNumber)}</span>
         <ErpBadge tone="neutral">قرارداد: {compactStatus.contract}</ErpBadge>

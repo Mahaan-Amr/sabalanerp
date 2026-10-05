@@ -50,7 +50,7 @@ function PreviewItem({ item, onOpen }: { item: NotificationItem; onOpen: (item: 
       <div className="flex items-start gap-3">
         <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${item.readAt ? 'bg-[var(--sds-border-strong)]' : 'bg-[var(--sds-accent)]'}`} aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-2 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
             <p className="line-clamp-1 font-bold sds-text-primary">{item.title}</p>
             <ErpBadge tone={toneByPriority[item.priority]}>{priorityLabel[item.priority]}</ErpBadge>
           </div>

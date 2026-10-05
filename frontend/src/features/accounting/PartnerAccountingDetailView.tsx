@@ -32,8 +32,7 @@ export type PartnerInternalDocument = {
 export type PartnerDetailSection = typeof accountingContractTabs[number]['value'];
 export const partnerQuantityLabel = (unit: string) => ({ meter: 'متر طول', count: 'عدد', squareMeter: 'متر مربع', ton: 'تن' } as Record<string, string>)[unit] || unit;
 
-export function PartnerAccountingDetailView({ onOpenEdit, financialVoidPanel, document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
-  onOpenEdit?: () => void;
+export function PartnerAccountingDetailView({ financialVoidPanel, document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
   financialVoidPanel?: React.ReactNode;
   onCreateReceivable?: () => void;
   invoiceOpen?: boolean; onOpenInvoice?: () => void; onApproveInvoice?: (payload: FinancialInvoiceApprovalPayload) => void | Promise<void>;
@@ -56,8 +55,8 @@ export function PartnerAccountingDetailView({ onOpenEdit, financialVoidPanel, do
       title={doc.receivables.length ? 'دریافتنی موجود است؛ سند تکراری ایجاد نمی‌شود.' : !issued ? 'ابتدا صورتحساب را تأیید مالی کنید.' : 'دریافتنی با تأیید جداگانه برای این صورتحساب ایجاد می‌شود.'} />
     {doc.receivables.length > 0 && <ErpButton label="مشاهده دریافتنی" icon={FaReceipt} tone="success" variant="outline" href={receivableHref} />}
     <ErpButton title={doc.preparationOnly ? "ابتدا رکورد مالی را ثبت کنید." : undefined} label="پرچم حسابداری" icon={FaFlag} tone="warning" onClick={onFlag} disabled={pending || !doc.actions.canFlag} />
-    <ErpButton title={doc.preparationOnly ? "ابتدا رکورد مالی را ثبت کنید." : undefined} label="درخواست اصلاح" icon={FaExclamationTriangle} tone="danger" onClick={onCorrection} disabled={pending || !doc.actions.canRequestCorrection} />
-  </div>{doc.preparationOnly && doc.commercial?.status === 'FINAL' && <ErpInlineState kind="permission" title="ابتدا رکورد مالی را ثبت کنید؛ سپس صورتحساب را تأیید مالی کنید تا دریافتنی ایجاد شود. پرچم و اصلاح پس از ثبت رکورد مالی فعال‌اند." className="mt-3" />}</ErpSection>;
+    <ErpButton label="درخواست اصلاح" icon={FaExclamationTriangle} tone="danger" onClick={onCorrection} disabled={pending || !doc.actions.canRequestCorrection} />
+  </div>{doc.preparationOnly && doc.commercial?.status === 'FINAL' && <ErpInlineState kind="permission" title="ابتدا رکورد مالی را ثبت کنید؛ سپس صورتحساب را تأیید مالی کنید تا دریافتنی ایجاد شود. پرچم پس از ثبت رکورد مالی فعال است." className="mt-3" />}</ErpSection>;
   const summary = <ErpSection title="خلاصه قرارداد"><ErpSummaryGrid columns={3} items={[
     { label: 'طرف‌حساب سبلان', value: context.debtor.displayName },
     { label: 'وضعیت قرارداد', value: <StatusBadge status={doc.caseState} label={doc.commercial ? partnerCommercialLabels[doc.commercial.status] : doc.caseState === 'COMMITTED' ? 'قطعی' : operationalStatusLabel(doc.caseState || '')} /> },
@@ -82,7 +81,6 @@ export function PartnerAccountingDetailView({ onOpenEdit, financialVoidPanel, do
     <ErpSegmentedControl value={section} onChange={onSection} options={[...accountingContractTabs]} />
     {section === 'summary' && <>
       <ErpSection title="مدیریت وضعیت قرارداد"><div className="flex flex-wrap gap-2">
-        {doc.actions.canOpenEdit && <ErpButton label="بازکردن ویرایش و لغو" onClick={onOpenEdit} disabled={pending} />}
         <ErpButton label="غیرفعال‌سازی" tone="warning" variant="outline" disabled title={lifecycleReason} />
         <ErpButton label="حذف دائمی" icon={FaTrashAlt} tone="danger" variant="outline" disabled title={lifecycleReason} />
       </div><ErpInlineState kind="permission" title={lifecycleReason} className="mt-3" />

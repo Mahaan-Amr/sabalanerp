@@ -283,7 +283,7 @@ export default function TaxOperationsPage() {
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 {data.rules?.map((item: any) => (
                   <ErpCard key={item.id} className="p-4">
-                    <div className="flex justify-between gap-3">
+                    <div className="flex flex-wrap justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                       <strong>
                         {item.code} · نسخه{" "}
                         {Number(item.version).toLocaleString("fa-IR")}
@@ -502,7 +502,7 @@ export default function TaxOperationsPage() {
             <div className="grid gap-3 md:grid-cols-2">
               {data.channels.map((row: any) => (
                 <ErpCard key={row.id} className="p-4">
-                  <div className="flex justify-between gap-3">
+                  <div className="flex flex-wrap justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                     <strong>
                       {row.providerName ||
                         (row.kind === "DIRECT" ? "ارسال مستقیم" : "شرکت معتمد")}

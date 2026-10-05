@@ -1,4 +1,5 @@
 const labels: Record<string, string> = {
+  RESTRICTED: 'محدودشده', NOT_READY: 'آماده نیست',
   ACTIVE: 'فعال', INACTIVE: 'غیرفعال', ARCHIVED: 'بایگانی‌شده', DRAFT: 'پیش‌نویس',
   PENDING: 'در انتظار بررسی', PENDING_APPROVAL: 'در انتظار تأیید', APPROVED: 'تأییدشده',
   REJECTED: 'ردشده', SIGNED: 'امضاشده', CANCELLED: 'لغوشده', VOIDED: 'باطل‌شده',

@@ -41,7 +41,7 @@ import { LAST_WORKSPACE_STORAGE_KEY, useWorkspace, WORKSPACES } from '@/contexts
 import { dashboardAPI } from '@/lib/api';
 import { formatPrice } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
-import { CONTRACT_STATUS_LABELS } from '@/lib/persianText';
+import { contractLifecycleLabel } from '@/features/sales/contractLifecyclePresentation';
 
 interface DashboardStats {
   contracts: {
@@ -65,6 +65,8 @@ interface DashboardStats {
 }
 
 interface RecentContract {
+  commercialFlowVersion?: number;
+  partnerCommercialStatus?: string;
   id: string;
   contractNumber: string;
   titlePersian: string;
@@ -289,7 +291,7 @@ export default function DashboardPage() {
                     </span>
                     <span className="shrink-0 text-left">
                       <strong className="block text-sm text-[var(--sds-text-primary)]">{contract.totalAmount == null ? '—' : amount(contract.totalAmount)}</strong>
-                      <ErpBadge tone={statusTone[contract.status] || 'neutral'}>{CONTRACT_STATUS_LABELS[contract.status] || contract.status}</ErpBadge>
+                      <ErpBadge tone={statusTone[contract.status] || 'neutral'}>{contractLifecycleLabel(contract)}</ErpBadge>
                     </span>
                   </Link>
                 );

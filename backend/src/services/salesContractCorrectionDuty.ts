@@ -2,15 +2,19 @@ import { AccountingRecordStatus, CorrectionRequestCategory, CorrectionRequestPri
 import { synchronizeCrossWorkspaceDutySource } from './crossWorkspaceDutyModule';
 import { completeSalesCorrectionEditDuty } from './crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter';
 import { isOrdinaryCommercialFlow, isCommerciallyFinal, lockOrdinaryContract } from './ordinaryContractLifecycle';
+import { partnerInactiveIsCancellation } from './partnerSales/cases/commercialEditPermission';
+import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
+import { lockPartnerCommercialContract } from './partnerSales/cases/commercialLifecycle';
 import { hasSpecialCustomerCreditAuthorization } from './specialCustomerCreditPolicy';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 
 const correctionSourceRecordId = async (database: Database, contractId: string) => {
+  const contract = await database.salesContract.findUnique({ where: { id: contractId }, select: { partnerCaseId: true } });
+  const root = contract?.partnerCaseId ? await database.partnerSaleCase.findUnique({ where: { id: contract.partnerCaseId }, select: { internalRecordId: true } }) : null;
   const records = await database.accountingFinancialRecord.findMany({
-    where: { contractId, kind: FinancialRecordKind.INVOICE_CANDIDATE },
-    select: { id: true, status: true, financiallyApprovedAt: true },
-    orderBy: { createdAt: 'desc' },
+    where: { ...(contract?.partnerCaseId ? { sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: root?.internalRecordId ?? '' } : { contractId }), kind: FinancialRecordKind.INVOICE_CANDIDATE },
+    select: { id: true, status: true, financiallyApprovedAt: true }, orderBy: { createdAt: 'desc' },
   });
   return (records.find(record => record.financiallyApprovedAt && record.status !== AccountingRecordStatus.VOIDED)
     ?? records.find(record => record.status !== AccountingRecordStatus.VOIDED)
@@ -72,9 +76,18 @@ export const requestAccountingSalesContractCorrection = (
   const reason = input.reason.trim();
   if (reason.length < 3) throw new Error('DUTY_REASON_REQUIRED');
   if (!input.idempotencyKey.trim()) throw new Error('DUTY_IDEMPOTENCY_KEY_REQUIRED');
-  const contract = await lockOrdinaryContract(tx, input.contractId);
+  const target = await tx.salesContract.findUnique({ where: { id: input.contractId }, select: { partnerCaseId: true } });
+  const pair = target?.partnerCaseId ? await lockPartnerCommercialContract(tx, target.partnerCaseId) : null;
+  const contract = pair?.contract ?? await lockOrdinaryContract(tx, input.contractId);
+  if (pair && !await partnerInactiveIsCancellation(tx, pair.contract)) throw new Error('CONTRACT_INACTIVE');
+  if (pair) {
+    const authority = await createAuditedPartnerAuthorization(tx, { actorId: input.actorUserId, purpose: 'ACCOUNTING', channel: 'API' },
+      { correlationId: input.idempotencyKey, reason }).authorize('ACCOUNTING_READ', { kind: 'CASE', id: pair.root.id });
+    if (!authority.ok) throw new Error('PARTNER_CORRECTION_FORBIDDEN');
+  }
+  if (pair && !pair.root.committedAt) throw new Error('مجوز حسابداری برای قرارداد قبلاً قطعی‌شده قابل درخواست است.');
   if (!contract) throw new Error('CONTRACT_NOT_FOUND');
-  if (contract.isInactive) throw new Error('CONTRACT_INACTIVE');
+  if (contract.isInactive && !(contract.partnerKind === 'PARTNER_CUSTOMER' && contract.status === 'CANCELLED')) throw new Error('CONTRACT_INACTIVE');
   if (isOrdinaryCommercialFlow(contract) && !isCommerciallyFinal(contract) && !hasSpecialCustomerCreditAuthorization(contract)) throw new Error('قرارداد باید قطعی باشد یا مجوز اعتباری مشتری خاص برای نسخه جاری داشته باشد.');
   if (!contract.responsibleSellerId) throw new Error('RESPONSIBLE_SELLER_REQUIRED');
 
@@ -201,7 +214,7 @@ export const requestSalesContractCorrection = (
   if (!input.idempotencyKey.trim()) throw new Error('DUTY_IDEMPOTENCY_KEY_REQUIRED');
   const contract = await tx.salesContract.findUnique({ where: { id: input.contractId } });
   if (!contract) throw new Error('CONTRACT_NOT_FOUND');
-  if (contract.isInactive) throw new Error('CONTRACT_INACTIVE');
+  if (contract.isInactive && !(contract.partnerKind === 'PARTNER_CUSTOMER' && contract.status === 'CANCELLED')) throw new Error('CONTRACT_INACTIVE');
   if (contract.responsibleSellerId !== input.actorUserId) throw new Error('DUTY_REQUESTER_NOT_RESPONSIBLE_SELLER');
   const replaySource = await tx.accountingCorrectionRequest.findUnique({
     where: { requestIdempotencyKey: input.idempotencyKey.trim() },

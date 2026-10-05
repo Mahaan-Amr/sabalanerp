@@ -599,9 +599,8 @@ export default function EditCustomerPage() {
                     value={project.projectType}
                     onChange={(value) => updateProject(index, 'projectType', value)}
                     placeholder="انتخاب نوع پروژه"
-                    options={PROJECT_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    options={[{ value: '', label: 'بدون نوع پروژه' }, ...PROJECT_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))]}
                     searchable
-                    clearable
                     noOptionsText="نوع پروژه‌ای پیدا نشد"
                   />
                   <ErpInput aria-label={`نام مدیر پروژه ${visibleIndex + 1}`} placeholder="نام مدیر پروژه" value={project.projectManagerName} onChange={(e) => updateProject(index, 'projectManagerName', e.target.value)} />

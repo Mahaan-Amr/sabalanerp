@@ -7,7 +7,7 @@ export type PartnerAccountingListSource = {
   partnerOpenCorrections?: number;
   partnerContext?: { caseNumber: string; trackingNumber?: number; customerContractNumber: string; internalRecordNumber: string;
     debtor: { displayName: string }; endCustomer: { displayName: string }; actionUrl: string;
-    accountingWritable?: boolean };
+    accountingWritable?: boolean; caseState?: string; commercialStatus?: string };
 };
 
 /** A committed internal sale is a financial source, never the Partner's private retail contract. */
@@ -26,11 +26,13 @@ export function partnerAccountingContractRow(record: PartnerAccountingListSource
   return {
     contractId: `partner:${record.id}`, contractNumber: context.customerContractNumber,
     titlePersian: 'فروش سبلان به همکار', contractDate: record.createdAt, createdAt: record.createdAt,
-    customer: { displayName: context.endCustomer.displayName }, status: 'COMMITTED',
+    customer: { displayName: context.endCustomer.displayName },
+    status: context.commercialStatus ? ({ NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', QUOTED: 'QUOTED', FINAL: 'SIGNED', EXPIRED: 'EXPIRED', CANCELLED: 'CANCELLED' } as Record<string, string>)[context.commercialStatus]
+      : ['CANCELLED', 'VOIDED'].includes(context.caseState || '') ? 'CANCELLED' : 'SIGNED',
     sourceKind: 'PARTNER_INTERNAL_RECORD', partnerContext: context,
     financialRecords: [{ id: record.id, kind: 'INVOICE_CANDIDATE', status: record.status,
       amount, currency: record.currency, createdAt: record.createdAt }],
-    accounting: { sourceStatus: approved ? 'HAS_FINANCIAL_RECORDS' : 'ELIGIBLE', eligibleForFinancialRecords: !approved,
+    accounting: { sourceStatus: approved ? 'HAS_FINANCIAL_RECORDS' : 'ELIGIBLE', eligibleForFinancialRecords: context.accountingWritable === true && !approved,
       invoiceStatus: record.status, receivableStatus, taxStatus: 'NOT_APPLICABLE',
       openFlags: record.partnerFlags?.length ?? 0,
       openBlockerFlags: record.partnerFlags?.filter(flag => flag.severity === 'BLOCKER').length ?? 0,
@@ -45,7 +47,7 @@ export function partnerAccountingContractRow(record: PartnerAccountingListSource
         : record.status === 'DRAFT' ? null : 'این سند قبلاً بررسی شده است.' },
     { kind: 'FLAG_CONTRACT', labelFa: 'پرچم حسابداری', enabled: context.accountingWritable === true,
       reason: context.accountingWritable ? null : 'مجوز ثبت پرچم برای این پرونده فعال نیست.' },
-    { kind: 'CREATE_CORRECTION_REQUEST', labelFa: 'درخواست اصلاح', enabled: context.accountingWritable === true,
-      reason: context.accountingWritable ? null : 'مجوز درخواست اصلاح برای این پرونده فعال نیست.' }],
+    { kind: 'CREATE_CORRECTION_REQUEST', labelFa: 'درخواست اصلاح', enabled: ['COMMITTED', 'VOIDED'].includes(context.caseState || ''),
+      reason: ['COMMITTED', 'VOIDED'].includes(context.caseState || '') ? null : 'مجوز درخواست اصلاح برای این پرونده فعال نیست.' }],
   };
 }

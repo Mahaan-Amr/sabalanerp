@@ -939,7 +939,7 @@ export default function SecurityVehiclesPage() {
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {pairs.map((pair) => (
                   <ErpCard key={pair.id} className="p-4">
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                       <div>
                         <p className="font-semibold sds-text-primary">
                           {pair.firstName} {pair.lastName}
@@ -1147,7 +1147,7 @@ export default function SecurityVehiclesPage() {
                     const snapshot = authorization.admissionSnapshot || {};
                     return (
                       <ErpCard key={authorization.id} className="p-4">
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                           <div>
                             <p className="font-semibold sds-text-primary">
                               بارنامه {authorization.dispatchNumber}

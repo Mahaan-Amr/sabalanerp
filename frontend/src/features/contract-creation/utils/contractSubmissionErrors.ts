@@ -8,6 +8,12 @@ export const getContractSubmissionRecovery = (
   isEditMode: boolean,
   code?: unknown
 ): { nextStep: string; uncertainMutation: boolean } => {
+  if (code === 'contract-item-has-downstream-evidence') {
+    return {
+      nextStep: 'ردیف قبلی را حفظ و اصلاح کنید؛ برای حذف آن، فرایند اصلاح مرتبط را از حسابداری پیگیری کنید.',
+      uncertainMutation: false
+    };
+  }
   if (code === 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED') {
     return {
       nextStep: 'درخواست اصلاح رسمی را از حسابداری آغاز کنید و پس از تأیید دوباره قرارداد را ویرایش کنید.',

@@ -589,16 +589,19 @@ type ContractRelationItem = NonNullable<
 export class ContractItemSynchronizationError extends Error {
   readonly code: 'contract-item-stable-identity-required' | 'contract-item-has-downstream-evidence';
   readonly status: 409 | 422;
+  readonly item?: { contractItemId: string; productRowId: string | null };
 
   constructor(
     code: ContractItemSynchronizationError['code'],
     message: string,
     status: ContractItemSynchronizationError['status'],
+    item?: ContractItemSynchronizationError['item'],
   ) {
     super(message);
     this.name = 'ContractItemSynchronizationError';
     this.code = code;
     this.status = status;
+    this.item = item;
   }
 }
 
@@ -665,6 +668,10 @@ export const synchronizeContractItems = async (
   contractId: string,
   items: readonly ContractRelationItem[],
   calculationPolicy: typeof CURRENT_CONTRACT_PRODUCT_POLICY,
+  retirement?: {
+    correctionId: string; retiredAt: Date; actorId: string;
+    contractRevision: number; contractData: unknown; reason: string;
+  },
 ) => {
   const productRowIds = items.map(item => item.productRowId?.trim()).filter(Boolean) as string[];
   if (productRowIds.length !== items.length || new Set(productRowIds).size !== productRowIds.length) {
@@ -675,9 +682,21 @@ export const synchronizeContractItems = async (
     );
   }
 
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "contract_items"
+    WHERE "contractId" = ${contractId} ORDER BY "id" FOR UPDATE`);
+  if (retirement && !await tx.accountingCorrectionRequest.findFirst({ where: {
+    id: retirement.correctionId, contractId, status: CorrectionRequestStatus.APPROVED_FOR_SALES_EDIT,
+  }, select: { id: true } })) {
+    throw new Error('Existing accounting financial record requires an approved formal correction');
+  }
+
   const existingItems = await tx.contractItem.findMany({
     where: { contractId },
-    select: { id: true, productRowId: true },
+    select: {
+      id: true, productRowId: true, retiredAt: true,
+      _count: { select: { logisticsLoadingLines: true, logisticsLoadingDriverAllocations: true, logisticsLoadingCorrections: true } },
+      shipmentQuantityEvidence: { select: { kind: true } },
+    },
   });
   const existingByProductRowId = new Map(
     existingItems.flatMap(item => item.productRowId ? [[item.productRowId, item] as const] : []),
@@ -686,6 +705,14 @@ export const synchronizeContractItems = async (
   for (const item of items) {
     const productRowId = item.productRowId!.trim();
     const existing = existingByProductRowId.get(productRowId);
+    if (existing?.retiredAt) {
+      throw new ContractItemSynchronizationError(
+        'contract-item-stable-identity-required',
+        'این ردیف از نسخه جاری کنار گذاشته شده است؛ محصول جایگزین را به‌صورت ردیف جدید اضافه کنید.',
+        422,
+        { contractItemId: existing.id, productRowId: existing.productRowId },
+      );
+    }
     const data = contractItemWriteData({ ...item, productRowId }, calculationPolicy);
     if (existing) {
       await tx.contractItem.update({ where: { id: existing.id }, data });
@@ -696,7 +723,37 @@ export const synchronizeContractItems = async (
 
   const retainedProductRowIds = new Set(productRowIds);
   for (const existing of existingItems) {
+    if (existing.retiredAt) continue;
     if (existing.productRowId && retainedProductRowIds.has(existing.productRowId)) continue;
+    if (retirement) {
+      // Financial correction preserves the old row and every foreign-key link.
+      // Physical work must be reconciled through its own correction workflow.
+      if (Object.values(existing._count).some(count => count > 0) ||
+          existing.shipmentQuantityEvidence.some(evidence => evidence.kind !== 'CONTRACTED_SET')) {
+        throw new ContractItemSynchronizationError(
+          'contract-item-has-downstream-evidence',
+          'این ردیف دارای سابقه بارگیری یا ارسال است؛ ابتدا اصلاح عملیات مرتبط را پیگیری کنید.',
+          409,
+          { contractItemId: existing.id, productRowId: existing.productRowId },
+        );
+      }
+      const productSnapshot = (retirement.contractData as any)?.products?.find(
+        (product: any) => product.rowId === existing.productRowId);
+      if (!productSnapshot) throw new ContractItemSynchronizationError(
+        'contract-item-stable-identity-required',
+        'سابقه کامل این ردیف قابل تشخیص نیست؛ پیش از حذف، اطلاعات قرارداد را بازبینی کنید.',
+        422, { contractItemId: existing.id, productRowId: existing.productRowId },
+      );
+      await tx.contractItem.update({ where: { id: existing.id }, data: {
+        retiredAt: retirement.retiredAt, retiredByCorrectionId: retirement.correctionId,
+        retirementEvidence: JSON.parse(JSON.stringify({
+          actorId: retirement.actorId, contractRevision: retirement.contractRevision,
+          reason: retirement.reason,
+          productSnapshot,
+        })),
+      } });
+      continue;
+    }
     try {
       await tx.contractItem.delete({ where: { id: existing.id } });
     } catch (error) {
@@ -705,6 +762,7 @@ export const synchronizeContractItems = async (
           'contract-item-has-downstream-evidence',
           'این ردیف محصول دارای سابقه مالی یا عملیاتی است و حذف آن مجاز نیست؛ ردیف را اصلاح کنید یا ابتدا فرایند اصلاح مرتبط را انجام دهید.',
           409,
+          { contractItemId: existing.id, productRowId: existing.productRowId },
         );
       }
       throw error;
@@ -1151,7 +1209,13 @@ export async function updateContract(
         }
       });
       await tx.payment.deleteMany({ where: { contractId } });
-      await synchronizeContractItems(tx, contractId, relations.items || [], calculationPolicy);
+      await synchronizeContractItems(tx, contractId, relations.items || [], calculationPolicy,
+        transactionCorrection && !transactionContract.partnerKind
+          ? { correctionId: transactionCorrection.id, retiredAt: new Date(), actorId: userId,
+            contractRevision: transactionContract.commercialRevision,
+            contractData: transactionContract.contractData,
+            reason: transactionCorrection.accountantNote || 'Approved accounting contract correction' }
+          : undefined);
 
       for (const delivery of relations.deliveries || []) {
         await tx.delivery.create({
@@ -1291,7 +1355,7 @@ export async function updateContract(
         realizedSeller: {
           select: { id: true, firstName: true, lastName: true, username: true }
         },
-        items: {
+        items: { where: { retiredAt: null },
           include: {
             product: true
           }
@@ -1374,7 +1438,7 @@ export async function getContract(contractId: string) {
           username: true,
         }
       },
-      items: {
+      items: { where: { retiredAt: null },
         include: {
           product: true
         }

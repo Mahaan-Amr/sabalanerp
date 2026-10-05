@@ -1,0 +1,5 @@
+# Retire removed contract rows through approved accounting corrections
+
+An approved accounting correction may remove a product from the current ordinary sales contract while preserving its original contract-item identity, commercial values, full product snapshot, approved pricing links and shipment quantity evidence. Removal records its correction, actor, time and previous commercial revision; retired identities cannot be reused, and current sales, accounting and new-loading consumers exclude them. Historical pricing and quantity views retain the row, including quantity views before retirement.
+
+Rows with loading allocations, loading corrections or physical shipment evidence remain blocked until the related operational correction is resolved. This preserves the financial and physical history instead of deleting referenced evidence or silently transferring it to a replacement product. Retirement is authorized only by the approved correction rechecked inside the locked contract update transaction.

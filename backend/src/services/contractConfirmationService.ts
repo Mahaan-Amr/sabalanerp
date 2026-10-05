@@ -209,7 +209,7 @@ export class ContractConfirmationService {
             primaryContact: true
           }
         },
-        items: {
+        items: { where: { retiredAt: null },
           include: {
             product: true
           }
@@ -510,7 +510,7 @@ export class ContractConfirmationService {
                 primaryContact: true
               }
             },
-            items: {
+            items: { where: { retiredAt: null },
               include: {
                 product: true
               }

@@ -251,6 +251,7 @@ const getProjectContracts = async (projectId: string, customerId: string) => {
     },
     include: {
       items: {
+        where: { retiredAt: null },
         include: { product: true },
         orderBy: { createdAt: 'asc' }
       }
@@ -556,7 +557,7 @@ const linePayloadToCreate = async (line: any) => {
     }
   });
 
-  if (!sourceItem) {
+  if (!sourceItem || sourceItem.retiredAt) {
     throw new Error('Source contract item not found');
   }
   if (sourceItem.contract.isInactive) {
@@ -720,7 +721,7 @@ const loadLoading = (id: string) => {
 const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string; quantity: number; unit: string }>, excludeLoadingId?: string) => {
   const itemIds = lines.map((line) => line.sourceContractItemId);
   const sourceItems = await prisma.contractItem.findMany({
-    where: { id: { in: itemIds } },
+    where: { id: { in: itemIds }, retiredAt: null },
     include: { contract: true, product: true }
   });
   const sourceById = new Map(sourceItems.map((item) => [item.id, item]));

@@ -553,7 +553,7 @@ export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
   if (input.lines.some(line => !('sourceContractItemId' in line))) throw new DispatchAllocationValidationError('Ordinary allocations require contract rows.');
   const ordinaryLines = input.lines as CanonicalAllocationLineInput[];
   const ids = ordinaryLines.map((line) => required(line.sourceContractItemId, 'sourceContractItemId'));
-  const items = await tx.contractItem.findMany({ where: { id: { in: ids } }, include: { contract: true, product: true } });
+  const items = await tx.contractItem.findMany({ where: { id: { in: ids }, retiredAt: null }, include: { contract: true, product: true } });
   await assertOrdinaryContractsDispatchEligible(tx, items.map(item => item.contractId), DispatchAllocationConflictError);
   const byId = new Map(items.map((item) => [item.id, item]));
   rows = ordinaryLines.map((line) => {
@@ -796,7 +796,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     include: { lines: true, queueTurn: true }, orderBy: { createdAt: 'asc' } }))
     .map(draft => ({ ...draft, lines: draft.lines.map(ordinaryDraftLine) }));
   if (refreshedDrafts.length !== draftIds.length) throw new DispatchAllocationConflictError('An allocation draft changed during finalization.');
-  const lockedItems = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, include: { contract: true } });
+  const lockedItems = await tx.contractItem.findMany({ where: { id: { in: itemIds }, retiredAt: null }, include: { contract: true } });
   await assertOrdinaryContractsDispatchEligible(tx, lockedItems.map(item => item.contractId), DispatchAllocationConflictError);
   const lockedItemsById = new Map(lockedItems.map((item) => [item.id, item]));
   for (const line of refreshedDrafts.flatMap((draft) => draft.lines)) {
@@ -909,7 +909,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
   if (!initialPredecessor.candidate) throw new DispatchAllocationConflictError('Only an Accounting candidate can have a successor.');
   if (!Array.isArray(input.lines) || input.lines.length === 0) throw new DispatchAllocationValidationError('At least one successor line is required.');
   const itemIds = input.lines.map((line) => required(line.sourceContractItemId, 'sourceContractItemId'));
-  const initiallyRequestedItems = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, select: { id: true, contractId: true } });
+  const initiallyRequestedItems = await tx.contractItem.findMany({ where: { id: { in: itemIds }, retiredAt: null }, select: { id: true, contractId: true } });
   const transferItemIds = [...new Set([...itemIds, ...initialPredecessorLines.map((line) => line.sourceContractItemId)])];
   const pricingContractIds = [...new Set([...initiallyRequestedItems.map((item) => item.contractId),
     ...initialPredecessorLines.map((line) => line.sourceContractId)])];
@@ -948,7 +948,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
   if (!['REJECTED', 'RETURNED'].includes(refreshedCandidate.status) && !stalePricingTransfer) {
     throw new DispatchAllocationConflictError('Only a rejected, returned, or stale-priced allocation can have a successor.');
   }
-  const items = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, include: { contract: true, product: true } });
+  const items = await tx.contractItem.findMany({ where: { id: { in: itemIds }, retiredAt: null }, include: { contract: true, product: true } });
   const byId = new Map(items.map((item) => [item.id, item]));
   const currencies = [...new Set(items.map((item) => item.contract.currency))];
   if (currencies.length !== 1) throw new DispatchAllocationConflictError('One successor revision cannot mix contract currencies.');

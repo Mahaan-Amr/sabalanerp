@@ -47,7 +47,7 @@ export const salesContractPrintableInclude = {
       username: true
     }
   },
-  items: {
+  items: { where: { retiredAt: null },
     include: {
       product: true
     }

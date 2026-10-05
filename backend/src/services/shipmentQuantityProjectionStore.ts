@@ -254,7 +254,7 @@ export const captureContractQuantityVersionAtFinancialApproval = async (
   tx: Prisma.TransactionClient,
   approval: { contractId: string; financialRecordId: string; approvedAt: Date },
 ) => {
-  const contract = await tx.salesContract.findUnique({ where: { id: approval.contractId }, include: { items: true } });
+  const contract = await tx.salesContract.findUnique({ where: { id: approval.contractId }, include: { items: { where: { retiredAt: null } } } });
   if (!contract) throw new Error('Financially approved contract not found for shipment quantity capture');
   const pricingVersion = await tx.contractApprovedPricingVersion.findUnique({
     where: { sourceFinancialRecordId_contractId: { sourceFinancialRecordId: approval.financialRecordId, contractId: approval.contractId } },
@@ -278,7 +278,7 @@ export const captureContractQuantityVersionAtFinancialApproval = async (
 export const captureFinanciallyApprovedContractQuantityVersions = async (prisma: PrismaClient, scope: Scope, cutoverAt = new Date()) => {
   const contracts = await prisma.salesContract.findMany({
     where: { ...(scope.contractId ? { id: scope.contractId } : {}), ...(scope.customerId ? { customerId: scope.customerId } : {}) },
-    include: { items: true },
+    include: { items: { where: { retiredAt: null } } },
   });
   const approvals = await prisma.accountingFinancialRecord.findMany({
     where: { contractId: { in: contracts.map((contract) => contract.id) }, financiallyApprovedAt: { not: null } },
@@ -417,7 +417,9 @@ export const readShipmentQuantityProjection = async (
     if (!approval) continue;
     contract.items.forEach((item) => {
       const stableRowId = item.productRowId || `missing:${item.id}`;
-      const resolution = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
+      const resolution = item.retiredAt
+        ? { snapshot: asRecord(item.retirementEvidence).productSnapshot, conflict: null }
+        : resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
       const snapshot = resolution.snapshot || {};
       const unit = inferUnit(item, snapshot);
       if (!explicitContractRows.has(item.id)) {
@@ -487,13 +489,20 @@ export const readShipmentQuantityProjection = async (
     }
     return [{ contractId: row.contractId, contractItemId: row.contractItemId, productRowId: row.productRowId, unit: row.unit, quantities: normalized.quantities, verifiedAt: row.lastVerifiedAt.toISOString() }];
   });
-  const result = projectShipmentQuantities(evidence, {
+  const cutoff = options.cutoff || new Date().toISOString();
+  const retiredIds = new Set(contracts.flatMap(contract => contract.items
+    .filter(item => item.retiredAt && item.retiredAt.toISOString() <= cutoff)
+    .map(item => item.id)));
+  const result = projectShipmentQuantities(evidence.filter(item => !retiredIds.has(item.contractItemId)), {
     ...options,
+    cutoff,
     lastVerifiedRows,
   });
   const presentation = new Map<string, { contractNumber: string; productName: string | null }>();
   for (const contract of contracts) contract.items.forEach((item) => {
-    const snapshot = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId }).snapshot || {};
+    const snapshot = item.retiredAt
+      ? asRecord(item.retirementEvidence).productSnapshot || {}
+      : resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId }).snapshot || {};
     presentation.set(item.id, {
       contractNumber: contract.contractNumber,
       productName: String(snapshot.name || snapshot.stoneName || snapshot.productName || '').trim() || null,

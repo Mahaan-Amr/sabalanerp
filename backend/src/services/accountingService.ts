@@ -981,7 +981,7 @@ const buildContractRow = async (contract: any, settings: any) => {
 
 const getAccountingInclude = () => ({
   customer: true,
-  items: { include: { product: true } },
+  items: { where: { retiredAt: null }, include: { product: true } },
   productGraphState: true,
   productGraphAudits: { orderBy: { resultRevision: 'desc' as const } },
   deliveries: { include: { products: true } },

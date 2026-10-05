@@ -5124,3 +5124,7 @@ _Avoid_: دریافت واقعی، تسویه خودکار در سررسید، �
 A **Current Partner Pricing Result Duty** is the sole actionable result duty for the newest Case pricing package and its current inquiry revision. Earlier results are **Superseded Result Duties**: `WAIVED`, displayed as `جایگزین‌شده` in history, with audit and assignment history retained. Superseding inbox work never deletes valid unchanged wholesale pricing evidence.
 
 A **Compatible Partner Preparation Plan** refers to delivery/service allocations with current row identities and exact quantities, and customer installments with current currency, valid payment terms and a sum equal to the current retail payable. Product edits preserve explicit plan values, invalidate completion when incompatible, and require owner correction rather than automatic installment adjustment or allocation trimming. Accounting Partner print variants retain the chosen layout and actual commercial status; unknown wholesale monetary values display `در انتظار استعلام`, without exposing customer retail prices.
+
+**ردیف کنارگذاشته‌شده قرارداد فروش عادی**:
+ردیف محصولی که با مجوز اصلاح حسابداری از نسخه جاری قرارداد خارج شده، ولی هویت و مشخصات قبلی و تمام سوابق مالی آن برای مراجعه تاریخی محفوظ است؛ محصول جایگزین ردیف مستقل دارد.
+_Avoid_: حذف سابقه، انتقال سابقه به محصول جایگزین، یا امکان بارگیری تازه از ردیف کنارگذاشته‌شده

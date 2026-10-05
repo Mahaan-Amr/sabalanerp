@@ -24,7 +24,7 @@ export const assertContractQuantityEvidenceReadyForFinalization = async (
   const contract = await tx.salesContract.findUnique({
     where: { id: contractId },
     include: {
-      items: true,
+      items: { where: { retiredAt: null } },
       deliveries: { include: { products: true } },
       productGraphState: true,
     },

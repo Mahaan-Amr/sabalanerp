@@ -1457,7 +1457,17 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
       return res.status(422).json({ success: false, code: error.code, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
     }
     if (error instanceof ContractItemSynchronizationError) {
-      return res.status(error.status).json({ success: false, code: error.code, error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.') });
+      return res.status(error.status).json({
+        success: false,
+        code: error.code,
+        error: salesBusinessErrorMessage(error.message, 'این عملیات فروش انجام نشد؛ اطلاعات را بررسی و دوباره تلاش کنید.'),
+        ...(error.item ? { details: [{
+          code: error.code,
+          path: 'products',
+          ...error.item,
+          message: error.message,
+        }] } : {}),
+      });
     }
     if (error.message === 'Contract not found') {
       return res.status(404).json({

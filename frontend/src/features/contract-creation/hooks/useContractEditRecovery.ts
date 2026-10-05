@@ -473,6 +473,14 @@ export const useContractEditRecovery = <Payload>({
     const status = error?.response?.status;
     if (status !== 409 && status !== 403) return null;
     const conflict = error?.response?.data?.conflict;
+    // Business-rule conflicts share HTTP 409 with edit ownership failures.
+    // Only the server's edit-session envelope may revoke the current lease.
+    if (!conflict || ![
+      'edit-session-missing',
+      'edit-session-owned-elsewhere',
+      'revision-conflict',
+      'draft-owner-mismatch'
+    ].includes(conflict.code)) return null;
     if (conflict?.code === 'revision-conflict' && (!scope || !isGenuineContractRevisionConflict({
       code: conflict.code,
       currentBaseRevision: conflict.currentBaseRevision,

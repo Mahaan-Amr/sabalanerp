@@ -89,7 +89,7 @@ export default function CreatePotentialProjectPage() {
   return (
     <ErpPage
       title="ثبت پروژه احتمالی"
-      eyebrow="CRM"
+      eyebrow="ارتباط با مشتری"
       description="پروژه یا فرصتی که هنوز به قرارداد فروش تبدیل نشده است."
       backHref="/dashboard/crm/potential-projects"
       actions={presentationScope === 'workspace' ? [] : [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', onClick: () => document.getElementById('potential-project-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })), icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving }]}

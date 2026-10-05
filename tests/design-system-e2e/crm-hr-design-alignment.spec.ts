@@ -78,7 +78,7 @@ test('CRM customer modal retains focus and pending protection through failed sav
       await new Promise<void>(resolve => { releaseSave = resolve; });
       return route.fulfill({ status: 500, json: { success: false, error: 'failed' } });
     }
-    return route.fulfill({ json: { success: true, data: {} } });
+    return route.fulfill({ json: { success: true, data: route.request().url().endsWith('/credit') ? { trustCategory: 'NORMAL', policyVersion: 1, limitRials: null, usedRials: '0', availableRials: null, deficitRials: '0', canManage: false } : {} } });
   });
   await page.goto('/dashboard/crm/customers/crm-parity');
   await expect(page.getByRole('heading', { name: 'مخاطبین', exact: true })).toBeVisible();
@@ -120,7 +120,7 @@ test('CRM removal confirmations preserve cancellation, failure recovery, and the
       await new Promise<void>(resolve => { releaseDelete = resolve; });
       return route.fulfill({ status: 500, json: { success: false } });
     }
-    return route.fulfill({ json: { success: true, data: {} } });
+    return route.fulfill({ json: { success: true, data: route.request().url().endsWith('/credit') ? { trustCategory: 'NORMAL', policyVersion: 1, limitRials: null, usedRials: '0', availableRials: null, deficitRials: '0', canManage: false } : {} } });
   });
   await page.goto('/dashboard/crm/customers/crm-removal');
   await expect(page.getByRole('heading', { name: 'مخاطبین', exact: true })).toBeVisible();

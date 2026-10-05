@@ -320,7 +320,7 @@ function AnchorList({
 function ValidationPanel() {
   return (
     <ErpCard tone="warning" className="space-y-3 p-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
         <p className="font-bold">آمادگی انتشار</p>
         <ErpBadge tone="warning">۲ مانع</ErpBadge>
       </div>
@@ -874,7 +874,7 @@ function LifecycleColumn({
   const rows = criteria.filter((item) => item.status === status);
   return (
     <ErpCard className="min-h-52 p-3">
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
         <p className="font-bold">{title}</p>
         <ErpBadge tone={statusTone(status)}>
           {rows.length.toLocaleString("fa-IR")}

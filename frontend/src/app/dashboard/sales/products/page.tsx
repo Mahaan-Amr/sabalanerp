@@ -315,10 +315,10 @@ export default function ProductsPage() {
           meta={`نمایش ${products.length.toLocaleString('fa-IR')} مورد در صفحه جاری`}
           filters={
             <>
-              <EnhancedDropdown label="نوع سنگ" value={filterType} onChange={resetToFirstPage(setFilterType)} placeholder="همه انواع" options={[{ value: 'all', label: 'همه انواع' }, ...stoneTypes.map((type) => ({ value: type, label: type }))]} searchable clearable={false} />
-              <EnhancedDropdown label="معدن" value={filterMine} onChange={resetToFirstPage(setFilterMine)} placeholder="همه معادن" options={[{ value: 'all', label: 'همه معادن' }, ...mines.map((mine) => ({ value: mine, label: mine }))]} searchable clearable={false} />
-              <EnhancedDropdown label="نوع پرداخت" value={filterFinish} onChange={resetToFirstPage(setFilterFinish)} placeholder="همه انواع" options={[{ value: 'all', label: 'همه انواع' }, ...finishes.map((finish) => ({ value: finish, label: finish }))]} searchable clearable={false} />
-              <EnhancedDropdown label="وضعیت" value={filterStatus} onChange={resetToFirstPage(setFilterStatus)} placeholder="همه وضعیت‌ها" options={[{ value: 'all', label: 'همه وضعیت‌ها' }, { value: 'active', label: 'فعال' }, { value: 'inactive', label: 'غیرفعال' }]} clearable={false} />
+              <EnhancedDropdown label="نوع سنگ" value={filterType} onChange={resetToFirstPage(setFilterType)} placeholder="همه انواع" options={[{ value: 'all', label: 'همه انواع' }, ...stoneTypes.map((type) => ({ value: type, label: type }))]} searchable />
+              <EnhancedDropdown label="معدن" value={filterMine} onChange={resetToFirstPage(setFilterMine)} placeholder="همه معادن" options={[{ value: 'all', label: 'همه معادن' }, ...mines.map((mine) => ({ value: mine, label: mine }))]} searchable />
+              <EnhancedDropdown label="نوع پرداخت" value={filterFinish} onChange={resetToFirstPage(setFilterFinish)} placeholder="همه انواع" options={[{ value: 'all', label: 'همه انواع' }, ...finishes.map((finish) => ({ value: finish, label: finish }))]} searchable />
+              <EnhancedDropdown label="وضعیت" value={filterStatus} onChange={resetToFirstPage(setFilterStatus)} placeholder="همه وضعیت‌ها" options={[{ value: 'all', label: 'همه وضعیت‌ها' }, { value: 'active', label: 'فعال' }, { value: 'inactive', label: 'غیرفعال' }]} />
             </>
           }
           actions={currentUser?.role === 'ADMIN' ? [

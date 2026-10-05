@@ -97,7 +97,7 @@ export default function HrMigrationRecordsPage() {
           <div className="space-y-3 md:hidden">
             {data.records.map((record) => (
               <ErpCard key={record.id} className="p-4">
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                   <div className="min-w-0">
                     <h2 className="font-bold text-[var(--sds-text-primary)]">{record.title}</h2>
                     <p className="mt-1 break-words text-xs text-[var(--sds-text-secondary)]" dir="auto">{record.subtitle || '—'}</p>

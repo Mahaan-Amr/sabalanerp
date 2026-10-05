@@ -47,6 +47,7 @@ import { readContractSubmissionDiagnostic } from "@/features/contract-creation/u
 import { hasHrFeature, type HrBaseFeature } from '@/features/hr/hrAccessNavigation';
 import { PersonalPerformanceBadge } from '@/features/hr/performance-badge/PerformanceBadge';
 import { deniesDashboardWorkspaceRoute } from './dashboardRouteGuard';
+import { installWorkspaceHistoryTracking } from '@/lib/workspaceBackNavigation';
 import { usesCrmPresentation } from '@/features/crm/crmPresentation';
 
 interface User {
@@ -186,6 +187,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     return () => observer.disconnect();
   }, [loading, user]);
   const searchParams = useSearchParams();
+  useEffect(() => installWorkspaceHistoryTracking(window), []);
   const { currentWorkspace, accessibleWorkspaces, loading: workspaceAccessLoading } = useWorkspace();
   const isHrWorkspace = pathname.startsWith("/dashboard/hr");
   const isSalesWorkspace = pathname.startsWith("/dashboard/sales");

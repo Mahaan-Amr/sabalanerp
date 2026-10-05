@@ -31,6 +31,7 @@ import PersianCalendar from '@/lib/persian-calendar';
 import { formatPrice } from '@/lib/numberFormat';
 import { getCrmPermissions } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
+import { contractLifecycleLabel } from '@/features/sales/contractLifecyclePresentation';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 import { CustomerRemovalConfirmation } from '@/features/crm/customer-workflow/CustomerRemovalConfirmation';
@@ -115,6 +116,8 @@ interface CrmCustomer {
   salesContracts: Array<{
     id: string;
     contractNumber: string;
+    commercialFlowVersion?: number;
+    partnerCommercialStatus?: string;
     status: string;
     totalAmount: number | null;
     createdAt: string;
@@ -510,7 +513,7 @@ export default function CustomerDetailPage() {
       case 'Inactive': return 'غیرفعال';
       case 'Prospect': return 'پتانسیل';
       case 'Lead': return 'سرنخ';
-      default: return status;
+      default: return /[A-Za-z]/.test(status) ? 'وضعیت نامشخص' : status;
     }
   };
 
@@ -550,7 +553,12 @@ export default function CustomerDetailPage() {
     feedback={error ? { kind: 'error', title: error } : undefined}
     actions={customer.canManageCustomerCard ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []}>
     <DirectCustomerTransfer customerId={customer.id} onTransferred={() => void fetchCustomer()} />
-    {customer.canManageCustomerCard && <CustomerWorkflowSection title="مدیریت مشتری"><ErpPressable disabled={cardActionPending} onClick={handleToggleBlacklist}>{customer.isBlacklisted ? 'حذف از بلک‌لیست' : 'افزودن به بلک‌لیست'}</ErpPressable><ErpPressable disabled={cardActionPending} onClick={handleToggleLock}>{customer.isLocked ? 'باز کردن قفل' : 'قفل کردن'}</ErpPressable></CustomerWorkflowSection>}
+    {customer.canManageCustomerCard && <CustomerWorkflowSection title="مدیریت مشتری">
+      <div className="flex flex-wrap gap-3">
+        <ErpButton label={customer.isBlacklisted ? 'حذف از لیست سیاه' : 'افزودن به لیست سیاه'} icon={customer.isBlacklisted ? FaCheckCircle : FaBan} tone={customer.isBlacklisted ? 'success' : 'danger'} variant="soft" disabled={cardActionPending} onClick={handleToggleBlacklist} />
+        <ErpButton label={customer.isLocked ? 'باز کردن قفل' : 'قفل کردن'} icon={customer.isLocked ? FaCheckCircle : FaLock} tone={customer.isLocked ? 'success' : 'warning'} variant="soft" disabled={cardActionPending} onClick={handleToggleLock} />
+      </div>
+    </CustomerWorkflowSection>}
     {!customer.partnerOwnerProfileId && <CustomerCreditPanel customerId={customer.id} onChanged={() => void fetchCustomer()} />}
     <CustomerWorkflowSection title="اطلاعات مشتری">
       <ErpInlineState kind="permission" title={customer.canManageCustomerCard ? "مدیریت کارت مشتری همکار" : "نمایش مدیریتی مشتری — دسترسی مشاهده اطلاعات"} />
@@ -676,7 +684,6 @@ export default function CustomerDetailPage() {
                           })),
                         ]}
                         searchable
-                        clearable
                         noOptionsText="فروشنده‌ای پیدا نشد"
                       />
                     ) : <ErpFieldView label="مسئول فروش" value={getOwnerLabel(customer.ownerUser)} />}
@@ -722,7 +729,7 @@ export default function CustomerDetailPage() {
                   <div className="space-y-3">
                     {customer.phoneNumbers.map((phone) => (
                       <ErpCard key={phone.id} className="flex items-center justify-between p-3">
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 flex-wrap items-center gap-3">
                           <FaPhone className="h-4 w-4 text-[var(--sds-text-muted)]" />
                           <span className="text-[var(--sds-text-primary)]">{phone.number}</span>
                           <span className="text-[var(--sds-text-muted)] text-sm">({phone.type})</span>
@@ -773,8 +780,8 @@ export default function CustomerDetailPage() {
                 <div className="space-y-4">
                   {customer.projectAddresses.map((address) => (
                     <ErpCard key={address.id} className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-3 mb-2">
                             <FaMapMarkerAlt className="h-5 w-5 text-[var(--sds-info)]" />
                             <h4 className="text-[var(--sds-text-primary)] font-medium">
@@ -891,8 +898,8 @@ export default function CustomerDetailPage() {
                 <div className="space-y-4">
                   {customer.contacts.map((contact) => (
                     <ErpCard key={contact.id} className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-3 mb-2">
                             <FaUser className="h-5 w-5 text-[var(--sds-success)]" />
                             <h4 className="text-[var(--sds-text-primary)] font-medium">
@@ -905,7 +912,7 @@ export default function CustomerDetailPage() {
                           {contact.position && (
                             <p className="text-[var(--sds-text-muted)] mb-1">{contact.position}</p>
                           )}
-                          <div className="flex items-center gap-4 text-[var(--sds-text-muted)] text-sm">
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[var(--sds-text-muted)] text-sm">
                             {contact.email && (
                               <span className="flex items-center gap-1">
                                 <FaEnvelope className="h-3 w-3" />
@@ -964,11 +971,11 @@ export default function CustomerDetailPage() {
                 <div className="space-y-4">
                   {customer.leads.map((lead) => (
                     <ErpCard key={lead.id} className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
                           <h4 className="text-[var(--sds-text-primary)] font-medium mb-1">{lead.companyName}</h4>
                           <p className="text-[var(--sds-text-muted)] mb-2">{lead.contactName}</p>
-                          <div className="flex items-center gap-4 text-[var(--sds-text-muted)] text-sm">
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[var(--sds-text-muted)] text-sm">
                             <span>ارزش مورد انتظار: {lead.expectedValue ? formatAmount(lead.expectedValue) : 'تعریف نشده'}</span>
                             <span>احتمال: {lead.probability}%</span>
                             <span>تاریخ: {formatDate(lead.createdAt)}</span>
@@ -996,17 +1003,17 @@ export default function CustomerDetailPage() {
                 <div className="space-y-4">
                   {customer.salesContracts.map((contract) => (
                     <ErpCard key={contract.id} className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
                           <h4 className="text-[var(--sds-text-primary)] font-medium mb-1">قرارداد شماره {contract.contractNumber}</h4>
-                          <div className="flex items-center gap-4 text-[var(--sds-text-muted)] text-sm">
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[var(--sds-text-muted)] text-sm">
                             <span>مبلغ: {formatAmount(contract.totalAmount)}</span>
                             <span>تاریخ: {formatDate(contract.createdAt)}</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 flex-wrap items-center gap-3">
                           <ErpButton label="مشاهده" icon={FaEye} href={`/dashboard/sales/contracts/${contract.id}`} variant="solid" />
-                          <ErpBadge tone={contract.status === 'Active' ? 'success' : contract.status === 'Lead' ? 'warning' : 'neutral'}>{getStatusLabel(contract.status)}</ErpBadge>
+                          <ErpBadge tone={contract.status === 'Active' ? 'success' : contract.status === 'Lead' ? 'warning' : 'neutral'}>{contractLifecycleLabel(contract)}</ErpBadge>
                         </div>
                       </div>
                     </ErpCard>
@@ -1021,24 +1028,9 @@ export default function CustomerDetailPage() {
       {/* Admin Actions */}
       {hasPermission('crm' as any, 'admin' as any) && (
         <CustomerWorkflowSection title="عملیات مدیریتی" collapsible>
-          <div className="flex items-center gap-4">
-            <ErpPressable type="button"
-              onClick={handleToggleBlacklist}
-              tone={customer.isBlacklisted ? 'success' : 'danger'}
-              variant="solid"
-            >
-              {customer.isBlacklisted ? <FaCheckCircle className="h-4 w-4" /> : <FaBan className="h-4 w-4" />}
-              {customer.isBlacklisted ? 'حذف از لیست سیاه' : 'افزودن به لیست سیاه'}
-            </ErpPressable>
-
-            <ErpPressable type="button"
-              onClick={handleToggleLock}
-              tone={customer.isLocked ? 'success' : 'warning'}
-              variant="solid"
-            >
-              {customer.isLocked ? <FaCheckCircle className="h-4 w-4" /> : <FaLock className="h-4 w-4" />}
-              {customer.isLocked ? 'باز کردن قفل' : 'قفل کردن'}
-            </ErpPressable>
+          <div className="flex flex-wrap gap-3">
+            <ErpButton label={customer.isBlacklisted ? 'حذف از لیست سیاه' : 'افزودن به لیست سیاه'} icon={customer.isBlacklisted ? FaCheckCircle : FaBan} tone={customer.isBlacklisted ? 'success' : 'danger'} variant="soft" disabled={cardActionPending} onClick={handleToggleBlacklist} />
+            <ErpButton label={customer.isLocked ? 'باز کردن قفل' : 'قفل کردن'} icon={customer.isLocked ? FaCheckCircle : FaLock} tone={customer.isLocked ? 'success' : 'warning'} variant="soft" disabled={cardActionPending} onClick={handleToggleLock} />
           </div>
         </CustomerWorkflowSection>
       )}
@@ -1090,9 +1082,8 @@ export default function CustomerDetailPage() {
                   value={projectFormData.projectType}
                   onChange={(value) => setProjectFormData(prev => ({ ...prev, projectType: value }))}
                   placeholder="انتخاب نوع پروژه"
-                  options={PROJECT_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                  options={[{ value: '', label: 'بدون نوع پروژه' }, ...PROJECT_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))]}
                   searchable
-                  clearable
                   noOptionsText="نوع پروژه‌ای پیدا نشد"
                 />
               </div>

@@ -1822,7 +1822,7 @@ export default function HiringCasePage() {
                 <div className="space-y-2">
                   {data.collateralItems.map((item: any) => (
                     <div key={item.id} className="rounded-lg border p-3">
-                      <div className="flex justify-between">
+                      <div className="flex flex-wrap justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                         <b>{hrDisplayLabel(item.type)}</b>
                         <ErpBadge>{hrDisplayLabel(item.status)}</ErpBadge>
                       </div>
@@ -2825,7 +2825,7 @@ function PreIdentitySection({
           };
           return (
             <div key={kind} className="space-y-3 border-t border-[var(--sds-border-default)] pt-4">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                 <b>{label}</b>
                 <ErpBadge
                   tone={
@@ -3450,7 +3450,7 @@ function FormalAssessmentPlanPanel({
               );
               return (
                 <div key={selection.assessmentKind} className="mt-3 rounded-xl border border-[var(--sds-border-default)] p-3">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                     <b>{formalAssessmentLabels[selection.assessmentKind]}</b>
                     <ErpBadge tone={pending ? "warning" : latest ? "success" : "warning"}>{pending ? (selection.executionMethod === "APPLICANT" ? "نسخه جدید در انتظار متقاضی" : "نسخه جدید در انتظار ثبت شرکت") : latest ? `تکمیل‌شده · نسخه ${latest.resultVersion}` : selection.executionMethod === "APPLICANT" ? "در انتظار متقاضی" : "در انتظار ثبت شرکت"}</ErpBadge>
                   </div>
@@ -3550,7 +3550,7 @@ function FormalAssessmentPlanPanel({
         <div className="space-y-3 p-4">
           {historyKind && resultsForKind(historyKind).map((result: any) => (
             <ErpCard key={result.id} className="p-3">
-              <div className="flex items-center justify-between gap-2"><b>نسخه {result.resultVersion}</b><ErpBadge tone={isKindActive(historyKind) && latestValidResultForKind(historyKind)?.id === result.id ? "success" : "neutral"}>{isKindActive(historyKind) && latestValidResultForKind(historyKind)?.id === result.id ? "نتیجه جاری" : "سابقه قدیمی"}</ErpBadge></div>
+              <div className="flex flex-wrap items-center justify-between gap-2 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><b>نسخه {result.resultVersion}</b><ErpBadge tone={isKindActive(historyKind) && latestValidResultForKind(historyKind)?.id === result.id ? "success" : "neutral"}>{isKindActive(historyKind) && latestValidResultForKind(historyKind)?.id === result.id ? "نتیجه جاری" : "سابقه قدیمی"}</ErpBadge></div>
               {result.status === "COMPLETED" ? <><div className="mt-2 grid gap-2 sm:grid-cols-2">{Object.entries(result.resultJson || {}).map(([key, value]) => <Metric key={key} label={formalAssessmentFields[historyKind]?.find((field) => field.key === key)?.label || key} value={String(value)} />)}</div>{result.resultExplanation && <p className="mt-2 text-sm"><b>توضیحات: </b>{result.resultExplanation}</p>}{result.correctionReason && <p className="mt-1 text-xs text-[var(--sds-text-muted)]"><b>دلیل نسخه اصلاحی: </b>{result.correctionReason}</p>}{result.attempts?.flatMap((attempt: any) => attempt.evidenceLinks || []).map((link: any) => link.hiringDocument && <ErpButton key={link.id} label={`دریافت ${link.hiringDocument.originalName}`} variant="ghost" onClick={() => void downloadFormalEvidence(link)} />)}</> : <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">نتیجه این نسخه تکمیل نشده است.</p>}
             </ErpCard>
           ))}

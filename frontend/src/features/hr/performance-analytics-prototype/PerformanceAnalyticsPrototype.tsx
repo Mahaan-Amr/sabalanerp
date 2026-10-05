@@ -268,7 +268,7 @@ function CalibrationPanel({ profile }: { profile: PermissionProfile }) {
   }
   return (
     <ErpCard className="space-y-4 p-4">
-      <div className="flex items-center justify-between gap-3"><p className="font-bold">تنوع ارزیاب</p><ErpBadge tone="warning">۲ هشدار تشخیصی</ErpBadge></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><p className="font-bold">تنوع ارزیاب</p><ErpBadge tone="warning">۲ هشدار تشخیصی</ErpBadge></div>
       <div className="space-y-3 text-sm">
         <div className="flex items-center justify-between gap-3"><span>تمرکز افراطی بر یک درجه</span><span className="font-bold">۳۶٪</span></div>
         <div className="flex items-center justify-between gap-3"><span>پراکندگی نامتعارف</span><span className="font-bold">۱ مورد</span></div>

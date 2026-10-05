@@ -178,7 +178,7 @@ export default function SupportTicketDetailPage() {
         {error && <ErpInlineState kind="error" title={error} />}
         <ErpCard className="p-4">
           <div className="flex flex-wrap gap-2">
-            <ErpBadge tone={ticket.restrictedIncident ? 'neutral' : 'info'}>{ticket.restrictedIncident ? 'رخداد حفاظت‌شده' : statusLabels[ticket.status] || ticket.status}</ErpBadge>
+            <ErpBadge tone={ticket.restrictedIncident ? 'neutral' : 'info'}>{ticket.restrictedIncident ? 'رخداد حفاظت‌شده' : statusLabels[ticket.status] || 'وضعیت نامشخص'}</ErpBadge>
             <ErpBadge tone={priority === 'URGENT' ? 'danger' : priority === 'HIGH' ? 'warning' : 'neutral'}>اولویت {priorityLabels[priority] || priority}</ErpBadge>
             <ErpBadge tone="neutral">{new Date(ticket.createdAt).toLocaleString('fa-IR')}</ErpBadge>
           </div>

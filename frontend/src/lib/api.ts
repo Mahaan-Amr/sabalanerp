@@ -749,7 +749,7 @@ export const salesAPI = {
 // CRM Workspace API
 export const crmAPI = {
   // Customers
-  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string }) =>
+  getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string; trustCategory?: string; ownership?: string; isBlacklisted?: boolean; isLocked?: boolean }) =>
     api.get('/crm/customers', { params }),
 
   getCustomerOwners: () => api.get('/crm/customer-owners'),

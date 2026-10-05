@@ -80,6 +80,7 @@ export default function CustomersPage() {
   const [deletionId, setDeletionId] = useState<string | null>(null);
   const [receiptId, setReceiptId] = useState<string | null>(null);
   const [management, setManagement] = useState({ canViewAllCustomers: false, canDeleteCustomers: false });
+  const [summary, setSummary] = useState({ blacklisted: 0, locked: 0 });
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [crmPermissions, setCrmPermissions] = useState({
     canViewCustomers: false,
@@ -155,6 +156,17 @@ export default function CustomersPage() {
         }
 
         setCustomers(filteredCustomers);
+        // Older local/API versions still expose the same scoped total through the register.
+        const summary = response.data.summary;
+        if (summary) {
+          setSummary(summary);
+        } else {
+          const [blacklisted, locked] = await Promise.all([
+            crmAPI.getCustomers({ ...params, page: 1, limit: 1, isBlacklisted: true }),
+            crmAPI.getCustomers({ ...params, page: 1, limit: 1, isLocked: true }),
+          ]);
+          setSummary({ blacklisted: blacklisted.data.pagination.total, locked: locked.data.pagination.total });
+        }
         setPagination((prev) => ({
           ...prev,
           total: response.data.pagination.total,
@@ -244,8 +256,8 @@ export default function CustomersPage() {
   const metrics: ErpMetric[] = [
     { label: 'کل نتایج', value: pagination.total.toLocaleString('fa-IR'), icon: FaUsers, tone: 'primary' },
     { label: 'نمایش فعلی', value: customers.length.toLocaleString('fa-IR'), icon: FaBuilding, tone: 'info' },
-    { label: 'بلک‌لیست', value: customers.filter((customer) => customer.isBlacklisted).length.toLocaleString('fa-IR'), icon: FaBan, tone: 'danger' },
-    { label: 'قفل‌شده', value: customers.filter((customer) => customer.isLocked).length.toLocaleString('fa-IR'), icon: FaLock, tone: 'warning' },
+    { label: 'بلک‌لیست', value: summary.blacklisted.toLocaleString('fa-IR'), icon: FaBan, tone: 'danger', onClick: () => handleFilterChange('isBlacklisted', true) },
+    { label: 'قفل‌شده', value: summary.locked.toLocaleString('fa-IR'), icon: FaLock, tone: 'warning', onClick: () => handleFilterChange('isLocked', true) },
   ];
 
   const columns: ErpColumn<CrmCustomer>[] = [
@@ -338,7 +350,7 @@ export default function CustomersPage() {
     <>
     {receiptId && <ErpInlineState kind="success" title={`مشتری حذف شد. رسید حذف: ${receiptId}`} />}
     <ErpListPage
-      eyebrow="CRM"
+      eyebrow="ارتباط با مشتری"
       title="مدیریت مشتریان"
       metrics={metrics}
       actions={crmPermissions.canCreateCustomers ? [{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaPlus, tone: 'primary', variant: 'solid' }] : []}
@@ -398,6 +410,18 @@ export default function CustomersPage() {
             { label: 'همه', value: '' },
             { label: 'خیر', value: 'false' },
             { label: 'بله', value: 'true' },
+          ],
+        },
+        {
+          id: 'lock',
+          label: 'قفل',
+          type: 'select',
+          value: filters.isLocked === null ? '' : filters.isLocked.toString(),
+          onChange: (value) => handleFilterChange('isLocked', value === '' ? null : value === 'true'),
+          options: [
+            { label: 'همه وضعیت‌های قفل', value: '' },
+            { label: 'بدون قفل', value: 'false' },
+            { label: 'قفل‌شده', value: 'true' },
           ],
         },
       ]}

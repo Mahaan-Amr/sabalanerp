@@ -1,6 +1,7 @@
 'use client';
 import { ErpInput } from '@/components/erp';
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { FaEye, FaPlus, FaProjectDiagram } from 'react-icons/fa';
 import { ErpBadge, ErpEmptyState, ErpListPage, ErpPagination, ErpSection, type ErpColumn } from '@/components/erp';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
@@ -25,6 +26,8 @@ const filterInputClass = 'mt-2 min-h-12 w-full rounded-lg border border-[var(--s
 const filterLabelClass = 'block text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]';
 
 export default function PotentialProjectsPage() {
+  const searchParams = useSearchParams();
+  const scope = searchParams.get('scope') === 'pipeline' ? 'pipeline' : undefined;
   const [rows, setRows] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -34,12 +37,13 @@ export default function PotentialProjectsPage() {
 
   useEffect(() => {
     fetchProjects();
-  }, [search, status, workType, pagination.page]);
+  }, [search, status, workType, scope, pagination.page]);
 
   const fetchProjects = async () => {
     setLoading(true);
     try {
       const response = await crmAPI.getPotentialProjects({
+        scope,
         page: pagination.page,
         limit: pagination.limit,
         search: search || undefined,
@@ -78,8 +82,8 @@ export default function PotentialProjectsPage() {
 
   return (
     <ErpListPage
-      title="پروژه‌های احتمالی"
-      eyebrow="CRM"
+      title={scope === 'pipeline' ? 'پروژه‌های فعال در برآورد' : 'پروژه‌های احتمالی'}
+      eyebrow="ارتباط با مشتری"
       actions={[
         { label: 'پروژه جدید', href: '/dashboard/crm/potential-projects/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
       ]}
@@ -119,7 +123,6 @@ export default function PotentialProjectsPage() {
               placeholder="همه وضعیت‌ها"
               options={[{ label: 'همه وضعیت‌ها', value: '' }, ...POTENTIAL_PROJECT_STATUSES.map((item) => ({ label: item, value: item }))]}
               searchable
-              clearable
             />
           </label>
           <label className={filterLabelClass}>
@@ -134,7 +137,6 @@ export default function PotentialProjectsPage() {
               placeholder="همه نوع‌ها"
               options={[{ label: 'همه نوع‌ها', value: '' }, ...CRM_WORK_TYPES.map((item) => ({ label: item, value: item }))]}
               searchable
-              clearable
             />
           </label>
         </div>

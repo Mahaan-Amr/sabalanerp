@@ -1123,7 +1123,7 @@ export default function CreateCustomerPage() {
 
               return (
                 <ErpCard key={customer.id} className="p-4">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                     <div>
                       <h4 className="font-semibold text-[var(--sds-text-primary)]">
                         {customer.firstName} {customer.lastName}

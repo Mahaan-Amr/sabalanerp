@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ErpPressable } from "./index";
 import { usePathname } from "next/navigation";
 import React, {
   forwardRef,
@@ -208,6 +209,7 @@ export interface ErpNeumorphicMetric {
   icon: IconType;
   tone?: ErpTone;
   href?: string;
+  onClick?: () => void;
   hint?: ReactNode;
 }
 
@@ -267,6 +269,10 @@ export function ErpNeumorphicMetricGrid({
           >
             {content}
           </Link>
+        ) : item.onClick ? (
+          <ErpPressable key={item.id} onClick={item.onClick} className="sds-neumorphic-card sds-neumorphic-interactive flex min-h-24 w-full items-center justify-between gap-3 p-4 text-start">
+            {content}
+          </ErpPressable>
         ) : (
           <ErpNeumorphicCard
             key={item.id}

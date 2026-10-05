@@ -85,7 +85,7 @@ export default function SupportHistoryPage() {
               {ticket.operationalTargetState === 'NEAR_BREACH' && <ErpBadge tone="warning">نزدیک به موعد</ErpBadge>}
               {ticket.operationalTargetState === 'OVERDUE' && <ErpBadge tone="danger">گذشته از موعد</ErpBadge>}
               <ErpBadge tone={ticketPriority === 'URGENT' ? 'danger' : ticketPriority === 'HIGH' ? 'warning' : 'neutral'}>{priorityLabels[ticketPriority] || ticketPriority}</ErpBadge>
-              <ErpBadge tone={ticket.status === 'CLOSED' ? 'neutral' : ticket.status === 'RESOLVED' ? 'success' : 'info'}>{statusLabels[ticket.status] || ticket.status}</ErpBadge>
+              <ErpBadge tone={ticket.status === 'CLOSED' ? 'neutral' : ticket.status === 'RESOLVED' ? 'success' : 'info'}>{statusLabels[ticket.status] || 'وضعیت نامشخص'}</ErpBadge>
             </div>
           </div>
         </ErpCard>

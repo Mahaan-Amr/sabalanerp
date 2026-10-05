@@ -9,6 +9,7 @@ export { ErpPresentationProvider, useErpPresentationScope } from './ErpPresentat
 export { default as ErpPersianDateField } from './ErpPersianDateField';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { workspaceBackDestination, WORKSPACE_HISTORY_KEY } from '@/lib/workspaceBackNavigation';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FaArrowRight, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
@@ -33,6 +34,8 @@ export type ErpAction = {
 };
 
 export type ErpMetric = {
+  onClick?: () => void;
+  href?: string;
   label: string;
   value: React.ReactNode;
   hint?: React.ReactNode;
@@ -467,7 +470,7 @@ export const ErpPressable = React.forwardRef<HTMLButtonElement, ErpPressableProp
 export function ErpBadge({ children, tone = 'neutral', variant = 'soft' }: WithChildren & { tone?: ErpTone; variant?: 'soft' | 'outline' | 'solid' }) {
   const solid = `sds-tone-${tone} sds-action-solid`;
   return (
-    <span className={cx('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold', variant === 'solid' ? solid : toneClasses[tone].badge)}>
+    <span className={cx('inline-flex min-w-0 max-w-full items-center break-words rounded-full border px-2.5 py-1 text-xs font-semibold [overflow-wrap:anywhere]', variant === 'solid' ? solid : toneClasses[tone].badge)}>
       {children}
     </span>
   );
@@ -520,8 +523,8 @@ export function ErpMetricGrid({ items }: { items: ErpMetric[] }) {
       {items.map((item) => {
         const tone = item.tone || 'neutral';
         const Icon = item.icon;
-        return (
-          <ErpCard key={item.label} tone={tone} className="p-4">
+        const card = (
+          <ErpCard key={item.label} tone={tone} className="p-4" interactive={Boolean(item.href || item.onClick)}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="sds-text-secondary text-xs">{item.label}</p>
@@ -536,6 +539,7 @@ export function ErpMetricGrid({ items }: { items: ErpMetric[] }) {
             </div>
           </ErpCard>
         );
+        return item.href ? <Link key={item.label} href={item.href} className="block min-w-0 rounded-[var(--sds-radius-card)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]">{card}</Link> : item.onClick ? <ErpPressable key={item.label} onClick={item.onClick} className="block min-w-0 w-full text-start p-0">{card}</ErpPressable> : card;
       })}
     </div>
   );
@@ -824,34 +828,7 @@ export function ErpPage({ eyebrow, title, description, actions = [], metrics = [
   metrics?: ErpMetric[];
   backHref?: string;
 }) {
-  const router = useRouter();
-  React.useEffect(() => {
-    const currentPath = `${window.location.pathname}${window.location.search}`;
-    const previousCurrentPath = window.sessionStorage.getItem('sabalanerp:currentPath');
-    if (previousCurrentPath && previousCurrentPath !== currentPath) {
-      window.sessionStorage.setItem('sabalanerp:previousPath', previousCurrentPath);
-    }
-    window.sessionStorage.setItem('sabalanerp:currentPath', currentPath);
-  }, []);
-
-  const handleBack = React.useCallback(() => {
-    if (!backHref) return;
-
-    const hasBrowserHistory = typeof window !== 'undefined' && window.history.length > 1;
-    const currentPath = `${window.location.pathname}${window.location.search}`;
-    const previousPath = window.sessionStorage.getItem('sabalanerp:previousPath');
-    const hasTrackedInAppHistory = Boolean(previousPath && previousPath !== currentPath);
-    const hasSameOriginReferrer = typeof document !== 'undefined'
-      && Boolean(document.referrer)
-      && document.referrer.startsWith(window.location.origin);
-
-    if (hasBrowserHistory && (hasTrackedInAppHistory || hasSameOriginReferrer)) {
-      router.back();
-      return;
-    }
-
-    router.push(backHref);
-  }, [backHref, router]);
+  const handleBack = useWorkspaceBack(backHref);
 
   return (
     <main className="sds-workspace mx-auto w-full max-w-7xl space-y-5">
@@ -914,12 +891,13 @@ export function ErpFilters({ filters }: { filters: ErpFilter[] }) {
                 value={filter.value}
                 onChange={filter.onChange}
                 placeholder={filter.label}
-                options={filter.options.map((option) => ({
+                options={(filter.options.some((option) => option.value === '')
+                  ? filter.options
+                  : [{ value: '', label: `بدون فیلتر ${filter.label}` }, ...filter.options]).map((option) => ({
                   value: option.value,
                   label: `${option.label}${option.count != null ? ` (${option.count})` : ''}`,
                 }))}
                 searchable
-                clearable
               />
             </label>
           );
@@ -1158,12 +1136,20 @@ export function ErpWorkspacePage({
   );
 }
 
-function ErpWorkspaceBackButton({ backHref }: { backHref: string }) {
+function useWorkspaceBack(backHref?: string) {
   const router = useRouter();
-  const handleBack = React.useCallback(() => {
-    if (typeof window !== 'undefined' && window.history.length > 1) router.back();
-    else router.push(backHref);
+  return React.useCallback(() => {
+    if (!backHref) return;
+    const current = `${window.location.pathname}${window.location.search}`;
+    const entry = window.history.state?.[WORKSPACE_HISTORY_KEY];
+    const destination = workspaceBackDestination(current, entry, backHref);
+    if (destination.useHistory && window.history.length > 1) router.back();
+    else router.push(destination.href);
   }, [backHref, router]);
+}
+
+function ErpWorkspaceBackButton({ backHref }: { backHref: string }) {
+  const handleBack = useWorkspaceBack(backHref);
   return <ErpIconButton label="بازگشت" onClick={handleBack} icon={FaArrowRight} tone="neutral" />;
 }
 

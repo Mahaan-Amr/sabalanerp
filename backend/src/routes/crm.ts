@@ -946,12 +946,17 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
       }
     });
 
-    const total = await prisma.crmCustomer.count({ where: whereClause });
+    const [total, blacklisted, locked] = await Promise.all([
+      prisma.crmCustomer.count({ where: whereClause }),
+      prisma.crmCustomer.count({ where: { ...whereClause, isBlacklisted: true } }),
+      prisma.crmCustomer.count({ where: { ...whereClause, isLocked: true } }),
+    ]);
 
     res.json({
       success: true,
       data: customers.map(customer => customer.partnerOwnerProfileId || (req.user.role !== 'ADMIN' && customer.ownerUserId !== req.user.id && !canAssign) ? managedCustomerResponse(customer, Boolean(customer.partnerOwnerProfileId) && req.user.role === 'ADMIN') : customer),
       permissions: { canViewAllCustomers: capabilities.canViewAllCustomers, canDeleteCustomers: capabilities.canDeleteCustomers },
+      summary: { blacklisted, locked },
       pagination: {
         page,
         limit,
@@ -2460,6 +2465,7 @@ router.get('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CRM
 
     const where: any = { isActive: true, partnerRevision: null };
     if (status) where.status = status;
+    if (scope === 'pipeline') where.status = { notIn: ['برنده شده', 'از دست رفته'], ...(status ? { equals: status } : {}) };
     if (workType) where.workType = workType;
     if (sellerId && canManage) where.responsibleSellerId = sellerId;
     if (scope === 'mine' || (!canManage && req.user?.role !== 'ADMIN')) where.responsibleSellerId = req.user.id;
@@ -2808,18 +2814,27 @@ router.get('/next-actions', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORK
     const canManage = await canManageCrmPipeline(req);
     const where: any = { ...ordinaryCrmRelatedVisibility };
     if (req.query.status) where.status = String(req.query.status);
+    if (req.query.due === 'overdue') {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      where.status = 'باز';
+      where.dueAt = { lt: startOfToday };
+    }
     if (req.query.customerId) where.customerId = String(req.query.customerId);
     if (req.query.potentialProjectId) where.potentialProjectId = String(req.query.potentialProjectId);
     if (!canManage && req.user?.role !== 'ADMIN') where.assignedToId = req.user.id;
 
-    const actions = await prisma.crmNextAction.findMany({
+    const page = Math.max(parseInt(req.query.page as string) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 100, 1), 100);
+    const [actions, total] = await Promise.all([prisma.crmNextAction.findMany({
       where,
       include: nextActionInclude,
       orderBy: [{ status: 'asc' }, { dueAt: 'asc' }],
-      take: 100
-    });
+      skip: (page - 1) * limit,
+      take: limit
+    }), prisma.crmNextAction.count({ where })]);
 
-    res.json({ success: true, data: actions.map(ordinaryCrmResponse) });
+    res.json({ success: true, data: actions.map(ordinaryCrmResponse), pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (error) {
     console.error('Get CRM next actions error:', error);
     res.status(500).json({ success: false, error: 'خطا در دریافت اقدام‌های بعدی' });
@@ -2885,6 +2900,7 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
       activeCustomers,
       totalProjects,
       overdueActions,
+      overdueCount,
       todayActions,
       upcomingActions,
       recentCustomers,
@@ -2906,6 +2922,7 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
         orderBy: { dueAt: 'asc' },
         take: 20
       }),
+      prisma.crmNextAction.count({ where: { status: 'باز', dueAt: { lt: startOfToday }, ...actionScope } }),
       prisma.crmNextAction.findMany({
         where: { status: 'باز', dueAt: { gte: startOfToday, lte: endOfToday }, ...actionScope },
         include: nextActionInclude,
@@ -3000,6 +3017,7 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
           estimatedPipelineValue: pipelineValue._sum.estimatedValue || 0
         },
         nextActions: {
+          overdueCount,
           overdue: overdueActions.map(ordinaryCrmResponse),
           today: todayActions.map(ordinaryCrmResponse),
           upcoming: upcomingActions.map(ordinaryCrmResponse)

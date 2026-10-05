@@ -42,6 +42,10 @@ Use action `variant` (`solid`, `soft`, `outline`, `ghost`) for emphasis and `ton
 
 Start with a single narrow-screen column. Add columns only at the breakpoint where the content needs them. Keep primary actions reachable, allow toolbars and segmented controls to wrap or scroll, avoid viewport-wide fixed dimensions, and verify RTL order rather than mirroring by assumption.
 
+Record headers must allow titles, status badges, and actions to wrap within the card. Bound each flex child to the available width; customer restriction actions use canonical buttons in a wrapping action group. Searchable selections clear through a field-specific empty choice in the list, without a separate cross button. Optional fields retain their meaningful empty choice; required and disabled choices retain their validation. The arrow aligns to the control rather than its label.
+
+Workspace back controls use a tracked browser entry only when its previous route belongs to the same workspace. Direct entry, login history, and cross-workspace history return to the workspace dashboard; a workspace landing page may declare the main dashboard as its parent. Summary cards that navigate use semantic links and open the same authorized population represented by their value. Summary cards that apply filters use semantic buttons; customer restriction counts cover all permitted matching results before pagination, preserve other filters, and open page one. Total-results and current-page counts remain informational.
+
 ## Accessibility contract
 
 - Use semantic controls; never put `onClick` on `div`, `span`, or `li`.

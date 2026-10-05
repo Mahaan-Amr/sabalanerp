@@ -23,7 +23,6 @@ interface EnhancedDropdownProps {
   className?: string;
   disabled?: boolean;
   searchable?: boolean;
-  clearable?: boolean;
   error?: string;
   label?: string;
   required?: boolean;
@@ -39,16 +38,15 @@ export default function EnhancedDropdown({
   options,
   value,
   onChange,
-  placeholder = 'Select...',
+  placeholder = 'انتخاب کنید',
   className = '',
   disabled = false,
   searchable = false,
-  clearable = false,
   error,
   label,
   required = false,
   maxHeight = 260,
-  noOptionsText = 'No options found',
+  noOptionsText = 'گزینه‌ای پیدا نشد',
   loading = false
 }: EnhancedDropdownProps) {
   const overlayPortalContainer = useErpOverlayPortalContainer();
@@ -98,6 +96,10 @@ export default function EnhancedDropdown({
 
     return { groups, ungrouped };
   }, [filteredOptions]);
+
+  const keyboardOptions = useMemo(() => [
+    ...groupedOptions.ungrouped, ...Object.values(groupedOptions.groups).flat(),
+  ], [groupedOptions]);
 
   const selectedOption = options.find((option) => option.value === value);
   const displayValue = selectedOption ? selectedOption.label : '';
@@ -197,12 +199,6 @@ export default function EnhancedDropdown({
     setHighlightedIndex(-1);
   };
 
-  const handleClear = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onChange('');
-    setSearchTerm('');
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isOpen) {
       if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
@@ -215,16 +211,16 @@ export default function EnhancedDropdown({
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setHighlightedIndex((prev) => (prev < filteredOptions.length - 1 ? prev + 1 : 0));
+        setHighlightedIndex((prev) => (prev < keyboardOptions.length - 1 ? prev + 1 : 0));
         break;
       case 'ArrowUp':
         e.preventDefault();
-        setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : filteredOptions.length - 1));
+        setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : keyboardOptions.length - 1));
         break;
       case 'Enter':
         e.preventDefault();
-        if (highlightedIndex >= 0 && filteredOptions[highlightedIndex]) {
-          handleOptionSelect(filteredOptions[highlightedIndex].value);
+        if (highlightedIndex >= 0 && keyboardOptions[highlightedIndex] && !keyboardOptions[highlightedIndex].disabled) {
+          handleOptionSelect(keyboardOptions[highlightedIndex].value);
         }
         break;
       case 'Escape':
@@ -245,7 +241,7 @@ export default function EnhancedDropdown({
       return (
         <div className="p-4 text-center text-sm sds-text-muted ">
           <div className="animate-spin w-6 h-6 border-2 border-[var(--sds-accent)] border-t-transparent rounded-full mx-auto mb-2" />
-          Loading...
+          در حال دریافت…
         </div>
       );
     }
@@ -339,47 +335,40 @@ export default function EnhancedDropdown({
         </label>
       )}
 
-      <ErpPressable
-        id={id}
-        ref={dropdownRef}
-        className={`sds-field flex min-h-11 w-full cursor-pointer items-center justify-between px-3 ${
-          disabled
-            ? 'cursor-not-allowed opacity-55'
-            : 'hover:border-[var(--sds-accent)]'
-        } ${error ? 'border-[var(--sds-danger)]' : ''} ${
-          isOpen ? 'border-[var(--sds-accent)] ring-2 ring-[var(--sds-focus-ring)]' : ''
-        }`}
-        onClick={() => !disabled && setIsOpen((prev) => !prev)}
-        onKeyDown={handleKeyDown}
-        disabled={disabled}
-        role="combobox"
-        aria-expanded={isOpen}
-        aria-controls={listboxId}
-        aria-haspopup="listbox"
-        aria-describedby={ariaDescribedBy}
-        aria-invalid={ariaInvalid}
-        aria-label={label || placeholder}
-      >
-        <div className="flex items-center space-x-2 space-x-reverse flex-1 min-w-0">
-          <span className={`truncate ${displayValue ? 'sds-text-primary ' : 'sds-text-muted '}`}>
-            {displayValue || placeholder}
-          </span>
-        </div>
-
-        <div className={`flex items-center space-x-2 space-x-reverse ${clearable && value ? 'ml-10' : ''}`}>
-          <FaChevronDown className={`text-xs sds-text-muted transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-        </div>
-      </ErpPressable>
-      {clearable && value && (
+      <div className="relative">
         <ErpPressable
-          onClick={handleClear}
-          aria-label="پاک‌کردن انتخاب"
-          className="absolute left-8 top-0 z-10 h-11 w-11 p-0 sds-text-muted hover:text-[var(--sds-danger)]"
-          type="button"
+          id={id}
+          ref={dropdownRef}
+          className={`sds-field flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 px-3 pl-10 ${
+            disabled
+              ? 'cursor-not-allowed opacity-55'
+              : 'hover:border-[var(--sds-accent)]'
+          } ${error ? 'border-[var(--sds-danger)]' : ''} ${
+            isOpen ? 'border-[var(--sds-accent)] ring-2 ring-[var(--sds-focus-ring)]' : ''
+          }`}
+          onClick={() => !disabled && setIsOpen((prev) => !prev)}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
+          role="combobox"
+          aria-expanded={isOpen}
+          aria-controls={listboxId}
+          aria-haspopup="listbox"
+          aria-describedby={ariaDescribedBy}
+          aria-invalid={ariaInvalid}
+          aria-label={label || placeholder}
         >
-          ×
+          <div className="flex items-center space-x-2 space-x-reverse flex-1 min-w-0">
+            <span className={`truncate ${displayValue ? 'sds-text-primary ' : 'sds-text-muted '}`}>
+              {displayValue || placeholder}
+            </span>
+          </div>
+
+          <div className="absolute left-3 top-1/2 flex -translate-y-1/2 items-center">
+            <FaChevronDown className={`text-xs sds-text-muted transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+          </div>
         </ErpPressable>
-      )}
+
+      </div>
 
       {error && <p className="mt-1 text-xs text-[var(--sds-danger)]">{error}</p>}
 
@@ -412,6 +401,7 @@ export default function EnhancedDropdown({
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="جستجو..."
+                    aria-label="جستجوی گزینه‌ها"
                     className="pr-10"
                   />
                 </div>

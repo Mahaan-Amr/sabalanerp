@@ -126,7 +126,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
       SICK_LEAVE: 'مرخصی استعلاجی',
       VACATION: 'مرخصی روزانه'
     };
-    return statusLabels[status] || status;
+    return statusLabels[status] || 'وضعیت نامشخص';
   };
 
   const getBatteryIcon = () => {

@@ -636,7 +636,7 @@ function GuidedVariant({
             if (activeIndex < criteria.length - 1) setActiveIndex((value) => value + 1);
           }}
         />
-        <div className="mt-6 flex items-center justify-between gap-2 border-t border-[var(--sds-border-default)] pt-4">
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--sds-border-default)] pt-4 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
           <ErpButton
             label="معیار قبلی"
             icon={FaArrowRight}
@@ -736,7 +736,7 @@ function WorksheetVariant({
                       : "p-4"
                   }
                 >
-                  <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                     <h3 className="font-semibold text-[var(--sds-text-primary)]">
                       {criterion.order.toLocaleString("fa-IR")}.{" "}
                       {criterion.title}
@@ -826,7 +826,7 @@ function DecisionDeskVariant({
                 key={key}
                 className="rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3"
               >
-                <div className="mb-3 flex items-center justify-between">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
                   <h3 className="text-sm font-semibold text-[var(--sds-text-primary)]">
                     {title}
                   </h3>
@@ -1074,7 +1074,7 @@ function DefaultCriteriaEditor({
       <div className="grid gap-3 lg:grid-cols-2">
         {interviewCriteria.map((criterion, index) => (
           <ErpCard key={criterion.id} className="p-4">
-            <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words">
               <span className="text-sm font-semibold text-[var(--sds-text-primary)]">
                 معیار {criterion.order.toLocaleString("fa-IR")}
               </span>
@@ -1767,7 +1767,7 @@ export function ProductionInterviewReport({
     <ErpSection title="جمع‌بندی مصاحبه"><p className="whitespace-pre-wrap">{state.decisionReason}</p></ErpSection>
     {history.length > 0 && <ErpSection title="تاریخچه نسخه‌ها">
       <ErpButton label={historyOpen ? "بستن تاریخچه" : "نمایش نسخه‌های قبلی"} variant="ghost" onClick={() => setHistoryOpen((open) => !open)} />
-      {historyOpen && <div className="mt-3 space-y-4">{history.map((item) => <ErpCard key={item.version} className="p-4">{item.evidenceJson ? <ProductionInterviewReport payload={item.evidenceJson} version={item.version} outcome={item.outcome} explanation={item.explanation} /> : <div className="flex items-center justify-between gap-3"><b>نسخه {item.version.toLocaleString("fa-IR")}</b><ErpBadge tone={item.outcome === "POSITIVE" ? "success" : "danger"}>{item.outcome === "POSITIVE" ? "مثبت" : "منفی"}</ErpBadge></div>}</ErpCard>)}</div>}
+      {historyOpen && <div className="mt-3 space-y-4">{history.map((item) => <ErpCard key={item.version} className="p-4">{item.evidenceJson ? <ProductionInterviewReport payload={item.evidenceJson} version={item.version} outcome={item.outcome} explanation={item.explanation} /> : <div className="flex flex-wrap items-center justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><b>نسخه {item.version.toLocaleString("fa-IR")}</b><ErpBadge tone={item.outcome === "POSITIVE" ? "success" : "danger"}>{item.outcome === "POSITIVE" ? "مثبت" : "منفی"}</ErpBadge></div>}</ErpCard>)}</div>}
     </ErpSection>}
   </div>;
 }

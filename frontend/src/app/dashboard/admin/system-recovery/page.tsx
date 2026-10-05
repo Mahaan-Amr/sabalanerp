@@ -326,7 +326,7 @@ export default function SystemRecoveryPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="sds-text-primary font-semibold">{operation.packageType === 'COMPLETE' ? 'بازیابی کامل' : 'آزمایشی پاک‌سازی‌شده'}</span>
-                    <ErpBadge tone={statusTone[operation.status] || 'neutral'}>{statusLabel[operation.status] || operation.status}</ErpBadge>
+                    <ErpBadge tone={statusTone[operation.status] || 'neutral'}>{statusLabel[operation.status] || 'وضعیت نامشخص'}</ErpBadge>
                   </div>
                   <div className="sds-text-muted mt-3 grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
                     <span>ایجاد: {PersianCalendar.formatForDisplay(operation.createdAt)}</span>

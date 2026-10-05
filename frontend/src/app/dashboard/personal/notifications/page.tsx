@@ -261,7 +261,7 @@ export default function NotificationCenterPage() {
                 <option value="">همه فضاهای کاری</option>{metadata.workspaces.map((value) => <option key={value} value={value}>{workspaceLabelFa(value)}</option>)}
               </ErpSelect>
               <ErpSelect aria-label="دسته رویداد" value={category} onChange={(event) => setCategory(event.target.value)}>
-                <option value="">همه دسته‌ها</option>{metadata.categories.map((value) => <option key={value} value={value}>{categoryLabels[value] || value}</option>)}
+                <option value="">همه دسته‌ها</option>{metadata.categories.map((value) => <option key={value} value={value}>{categoryLabels[value] || 'سایر اعلان‌ها'}</option>)}
               </ErpSelect>
             </div>
           </div>
@@ -286,7 +286,7 @@ export default function NotificationCenterPage() {
                     <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs sds-text-muted">
                       <time>{new Date(item.createdAt).toLocaleString('fa-IR')}</time>
                       {item.workspace && <span>{workspaceLabelFa(item.workspace)}</span>}
-                      {item.category && <span>{categoryLabels[item.category] || item.category}</span>}
+                      {item.category && <span>{categoryLabels[item.category] || 'سایر اعلان‌ها'}</span>}
                     </div>
                   </ErpPressable>
                   {item.type !== 'NEW_BROWSER_LOGIN' && <ErpButton label={item.readAt ? 'خوانده‌نشده' : 'خوانده شد'} icon={item.readAt ? FaBell : FaCheck} variant="ghost" tone="neutral" onClick={() => void toggleRead(item)} disabled={busy === `read:${item.id}`} />}

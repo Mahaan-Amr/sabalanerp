@@ -140,7 +140,7 @@ export function DestinationDutyQueue({ workspace, metricPresentation = 'default'
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="sds-text-primary text-base font-semibold">{duty.fields.title || actionLabel[duty.sourceActionCode] || 'وظیفه سازمانی'}</h2>
-                  <ErpBadge tone={duty.overdue ? 'danger' : duty.status === 'OPEN' ? 'info' : 'neutral'}>{statusLabel[duty.status] || duty.status}</ErpBadge>
+                  <ErpBadge tone={duty.overdue ? 'danger' : duty.status === 'OPEN' ? 'info' : 'neutral'}>{statusLabel[duty.status] || 'وضعیت نامشخص'}</ErpBadge>
                 </div>
                 <p className="sds-text-muted text-sm">مهلت: {duty.dueAtDisplay}</p>
                 {duty.overdue && <p className="text-sm font-semibold text-[var(--sds-danger)]">مهلت انجام گذشته است.</p>}

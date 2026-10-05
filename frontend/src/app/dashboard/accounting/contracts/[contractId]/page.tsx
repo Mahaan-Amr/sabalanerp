@@ -1,6 +1,7 @@
 "use client";
 import { accountingCorrectionFields } from "@/features/accounting/accountingCorrectionFields";
 import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
+import AccountingCustomerCategoryBadge from '@/features/accounting/AccountingCustomerCategoryBadge';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpInput, ErpSearchableSelect } from "@/components/erp";
 import { useCallback, useEffect, useState, use } from "react";
@@ -652,7 +653,10 @@ export default function AccountingContractDetailPage(props: {
     <ErpPage
       eyebrow="حسابداری"
       title={`پرونده حسابداری قرارداد ${contract.contractNumber}`}
-      description="نمای عملیاتی حسابداری از قرارداد، بدون تغییر دادن اصل قرارداد فروش."
+      description={<span className="flex flex-wrap items-center gap-2">
+        <span>{contract.customer?.displayName}</span>
+        <AccountingCustomerCategoryBadge contract={contract} />
+      </span>}
       backHref="/dashboard/accounting/contracts"
       actions={[
         {

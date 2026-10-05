@@ -31,6 +31,7 @@ import api, { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
+import AccountingCustomerCategoryBadge from '@/features/accounting/AccountingCustomerCategoryBadge';
 import { financialEvidenceReviewFromConflict } from '@/features/accounting/financialEvidenceReview';
 import {
   canonicalizeContractsQuery,
@@ -349,7 +350,9 @@ export default function AccountingContractsPage() {
       header: 'نام مشتری',
       mobileLabel: 'نام مشتری',
       priority: 'secondary',
-      cell: (contract) => <div>{contract.customer.displayName}{contract.partnerContext &&
+      cell: (contract) => <div><div className="flex flex-wrap items-center gap-2">
+        <span>{contract.customer.displayName}</span><AccountingCustomerCategoryBadge contract={contract} />
+      </div>{contract.partnerContext &&
         <p className="mt-1 text-xs sds-text-secondary">طرف‌حساب سبلان: {contract.partnerContext.debtor.displayName}</p>}</div>,
     },
     {

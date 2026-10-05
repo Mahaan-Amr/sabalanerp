@@ -55,6 +55,8 @@ const checkStatusFa: Record<string, string> = {
 };
 
 export default function TreasuryControlPage() {
+  const [focusedCheckId, setFocusedCheckId] = useState<string>();
+  useEffect(() => { const checkId = new URLSearchParams(window.location.search).get("checkId"); if (checkId) { setFocusedCheckId(checkId); setWorkspaceTab("cash"); setCashTab("checks"); } }, []);
   const [workspaceTab, setWorkspaceTab] = useState("bank");
   const [receiptTab, setReceiptTab] = useState("receipt");
   const [bankTab, setBankTab] = useState("import");
@@ -199,7 +201,7 @@ export default function TreasuryControlPage() {
     setError(null);
     try {
       const [overview, context, customers] = await Promise.all([
-        accountingAPI.getTreasuryOverview(bankLinePage),
+        accountingAPI.getTreasuryOverview(bankLinePage, focusedCheckId),
         accountingAPI.getLedgerContext(),
         accountingAPI.getCustomerAccounts(),
       ]);
@@ -214,7 +216,7 @@ export default function TreasuryControlPage() {
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [bankLinePage]);
+  }, [bankLinePage, focusedCheckId]);
   useEffect(() => {
     load();
   }, [load]);

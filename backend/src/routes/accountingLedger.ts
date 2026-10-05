@@ -10,6 +10,7 @@ import { createAccountingLedgerPrismaRepository, listLedgerVouchers, listPostedJ
 import { AccountingCustomerTreasuryError } from '../services/accountingCustomerTreasury';
 import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../services/accountingBankFileImport';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
+import { listCustomerWorkspaceAccounts, readCustomerWorkspace, readCustomerWorkspaceContext, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from '../services/accountingCustomerWorkspace';
 import {
   allocateCustomerReceiptPrisma,
   backfillApprovedSalesContractCustomers,
@@ -189,6 +190,38 @@ router.post('/evidence/vat-inputs', ...evidenceCommandAccess, run((req) => publi
   occurredAt: validDate(req.body.occurredAt, 'زمان شاهد ارزش افزوده'),
 })));
 
+router.get('/customer-accounts', ...viewAccess, run(req => listCustomerWorkspaceAccounts(prisma, {
+  search: String(req.query.search || ''), page: Number(req.query.page), pageSize: Number(req.query.pageSize),
+  asOf: validDate(req.query.asOf || new Date().toISOString(), 'زمان گزارش'),
+})));
+router.get('/customer-accounts/:id', ...viewAccess, run(async req => {
+  const [data, exportCapability, treasuryCapability, postingCapability] = await Promise.all([
+    readCustomerWorkspace(prisma, { id: req.params.id, userId: req.user!.id, asOf: validDate(req.query.asOf || new Date().toISOString(), 'زمان گزارش') }),
+    resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role, workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_CUSTOMER_STATEMENTS_EXPORT, requiredPermission: FEATURE_PERMISSIONS.VIEW }),
+    resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role, workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_TREASURY_MANAGE, requiredPermission: FEATURE_PERMISSIONS.EDIT }),
+    resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role, workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_CUSTOMER_POSTING_MANAGE, requiredPermission: FEATURE_PERMISSIONS.EDIT }),
+  ]);
+  const editable = ['edit', 'admin'].includes(req.workspacePermission || '');
+  return { ...data, capabilities: { canExport: Boolean(data.profile && exportCapability.allowed),
+    canManageTreasury: editable && treasuryCapability.allowed, canManageAccount: editable && postingCapability.allowed, canRefund: editable && postingCapability.allowed && treasuryCapability.allowed } };
+}));
+router.get('/customer-accounts/:id/context', ...editAccess, run(req => readCustomerWorkspaceContext(prisma, req.params.id)));
+router.post('/customer-accounts/:id/operations', ...customerPostingAccess, (req, res, next) => req.body.kind === 'REFUND' ? requireFeatureAccess(FEATURES.ACCOUNTING_TREASURY_MANAGE, FEATURE_PERMISSIONS.EDIT)(req, res, next) : next(), run(req => recordCustomerAccountOperation(prisma, req.params.id, {
+  kind: req.body.kind, amountRials: signedRials(req.body.amountRials), expectedBalanceRials: req.body.expectedBalanceRials == null ? undefined : signedRials(req.body.expectedBalanceRials),
+  periodId: String(req.body.periodId || ''), postingRuleId: String(req.body.postingRuleId || ''), counterAccountId: req.body.counterAccountId,
+  financialAccountId: req.body.financialAccountId, bankLedgerId: req.body.bankLedgerId, receiptId: req.body.receiptId, creditItemId: req.body.creditItemId,
+  occurredAt: validDate(req.body.occurredAt, 'تاریخ عملیات'), reason: String(req.body.reason || ''), reference: String(req.body.reference || ''),
+  confirmed: req.body.confirmed === true, idempotencyKey: String(req.body.idempotencyKey || ''), actor: actorOf(req),
+})));
+router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req => recordCustomerWorkspaceTreasury(prisma, req.params.id, {
+  kind: req.body.kind, amountRials: wholeRials(req.body.amountRials || '0'), occurredAt: validDate(req.body.occurredAt, 'تاریخ عملیات'),
+  periodId: String(req.body.periodId || ''), postingRuleId: String(req.body.postingRuleId || ''), financialAccountId: req.body.financialAccountId,
+  bankLedgerId: req.body.bankLedgerId, receiptId: req.body.receiptId, allocationId: req.body.allocationId,
+  allocations: (req.body.allocations || []).map((line: any) => ({ openItemId: String(line.openItemId), amountRials: wholeRials(line.amountRials) })),
+  reason: String(req.body.reason || ''), reference: String(req.body.reference || ''), confirmed: req.body.confirmed === true,
+  idempotencyKey: String(req.body.idempotencyKey || ''), actor: actorOf(req),
+})));
+
 router.get('/customer-profiles/:id/projection', ...viewAccess, run(async (req) => {
   const exportCapability = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
     workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_CUSTOMER_STATEMENTS_EXPORT,
@@ -224,7 +257,7 @@ router.get('/treasury/overview', ...viewAccess, run(async (req) => {
   const feature = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
     workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_TREASURY_MANAGE,
     requiredPermission: FEATURE_PERMISSIONS.EDIT });
-  return { ...await listTreasuryOverviewPrisma(prisma, { bankLinePage: Number(req.query.bankLinePage ?? 1) }),
+  return { ...await listTreasuryOverviewPrisma(prisma, { bankLinePage: Number(req.query.bankLinePage ?? 1), checkId: req.query.checkId ? String(req.query.checkId) : undefined }),
     capabilities: { canManage: feature.allowed && ['edit', 'admin'].includes(req.workspacePermission || ''),
       canConfigure: feature.allowed && req.workspacePermission === WORKSPACE_PERMISSIONS.ADMIN } };
 }));

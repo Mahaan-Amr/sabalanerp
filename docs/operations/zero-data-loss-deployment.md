@@ -115,6 +115,7 @@ Before public traffic opens, all of the following pass:
 - backend readiness and database query;
 - frontend, Inquiry, Nginx, and ClamAV health;
 - contract-product-graph migration audit and every release-specific acceptance command;
+- Partner customer contracts are audited through their canonical Case owner rather than migrated from customer display rows. The audit verifies reciprocal ownership, current revision provenance, canonical graph schema and hash, rebuilt projections, persisted customer output, currency and payable amount in one read snapshot. Missing or inconsistent evidence blocks release; valid Partner rows remain unchanged and are reported separately from migratable ordinary contracts;
 - a retained contract-by-contract financial-evidence preflight report with zero unresolved results; case resolution is atomic and is skipped entirely when any contract is unresolved;
 - while legacy Hiring onboarding rows remain, the read-only Start Preparation retirement audit proving zero open manual tasks, zero missing or duplicate system rows, and zero drift from contract, Payroll Participation, and insurance evidence;
 - isolated read/write smoke tests with deterministic cleanup;

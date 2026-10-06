@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 
 export type PartnerAccountingListSource = {
   id: string; status: string; amount: { toString(): string }; currency: string; createdAt: Date;
+  contractDate?: string | Date;
   receivables?: readonly { status: string; paidAmount: { toString(): string }; remainingAmount: { toString(): string } }[];
   partnerFlags?: readonly { severity: string }[];
   partnerOpenCorrections?: number;
@@ -25,7 +26,7 @@ export function partnerAccountingContractRow(record: PartnerAccountingListSource
   const approved = ['ISSUED', 'POSTED'].includes(record.status);
   return {
     contractId: `partner:${record.id}`, contractNumber: context.customerContractNumber,
-    titlePersian: 'فروش سبلان به همکار', contractDate: record.createdAt, createdAt: record.createdAt,
+    titlePersian: 'فروش سبلان به همکار', contractDate: record.contractDate ?? record.createdAt, createdAt: record.createdAt,
     customer: { displayName: context.endCustomer.displayName },
     status: context.commercialStatus ? ({ NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', QUOTED: 'QUOTED', FINAL: 'SIGNED', EXPIRED: 'EXPIRED', CANCELLED: 'CANCELLED' } as Record<string, string>)[context.commercialStatus]
       : ['CANCELLED', 'VOIDED'].includes(context.caseState || '') ? 'CANCELLED' : 'SIGNED',

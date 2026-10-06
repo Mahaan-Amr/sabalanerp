@@ -24,6 +24,16 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
   const createdAt = new Date(Date.now() - 60_000);
   const effectiveAt = new Date().toISOString();
   try {
+    await prisma.user.create({ data: { id: actor.userId, username: token, email: `${token}@example.invalid`,
+      password: 'fixture-not-a-login', firstName: 'QA', lastName: 'Accounting' } });
+    await prisma.department.create({ data: { id: `${token}-department`, name: token, namePersian: 'آزمون حسابداری' } });
+    await prisma.crmCustomer.create({ data: { id: `${token}-customer`, firstName: 'QA', lastName: 'Customer', createdBy: actor.userId } });
+    for (const id of [contractId, reusedContractId]) await prisma.salesContract.create({ data: {
+      id, contractNumber: id, title: token, titlePersian: 'آزمون ابطال', content: 'QA', status: 'SIGNED',
+      customerId: `${token}-customer`, departmentId: `${token}-department`, createdBy: actor.userId,
+      responsibleSellerId: actor.userId, totalAmount: 1000, currency: 'تومان',
+      commercialFlowVersion: 1, commercialRevision: 1, salesApprovalRevision: 1, customerAcceptanceRevision: 1,
+    } });
     const retained = await prisma.accountingFinancialRecord.create({ data: {
       kind: FinancialRecordKind.INVOICE_CANDIDATE, status: AccountingRecordStatus.ISSUED,
       sourceKind: AccountingSourceKind.SALES_CONTRACT, sourceId: contractId, contractId,
@@ -147,5 +157,9 @@ test('ordinary Accounting voids a duplicate invoice only after receipt reversal 
     await prisma.accountingPaymentStatus.deleteMany({ where: { contractId: { in: contractIds } } });
     await prisma.accountingReceivable.deleteMany({ where: { contractId: { in: contractIds } } });
     await prisma.accountingFinancialRecord.deleteMany({ where: { contractId: { in: contractIds } } });
+    await prisma.salesContract.deleteMany({ where: { id: { in: contractIds } } });
+    await prisma.crmCustomer.deleteMany({ where: { id: `${token}-customer` } });
+    await prisma.department.deleteMany({ where: { id: `${token}-department` } });
+    await prisma.user.deleteMany({ where: { id: actor.userId } });
   }
 });

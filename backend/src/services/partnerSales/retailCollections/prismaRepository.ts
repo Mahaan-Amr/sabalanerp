@@ -65,6 +65,7 @@ export function createPrismaRetailCollectionRepository(input: {
             id: true, state: true, headRevision: true, integrityHash: true,
             profile: { select: { userId: true } },
             head: { select: { internalProjection: true } },
+            revisions: { select: { revision: true, internalProjection: true } },
             paymentPlans: { where: { purpose: 'RETAIL' }, orderBy: { version: 'asc' }, select: { evidence: true, caseRevision: true } },
             events: { orderBy: { sequence: 'asc' }, select: { evidence: true } },
           } });
@@ -86,6 +87,18 @@ export function createPrismaRetailCollectionRepository(input: {
           if (!parsedPlans.length || parsedPlans.some(item => !item.success)) {
             return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           }
+          const planRevisionFacts: NonNullable<RetailCollectionSource['planRevisionFacts']> = Object.fromEntries(
+            row.paymentPlans.map(item => {
+              const revision = row.revisions.find(revision => revision.revision === item.caseRevision);
+              const retained = PartnerCaseViewSchema.safeParse(object(revision?.internalProjection)?.partner);
+              const plan = CustomerPaymentPlanSchema.parse(item.evidence);
+              if (!retained.success || retained.data.customerPaymentPlan.planId !== plan.planId) {
+                throw new Error('Payment plan revision evidence is inconsistent');
+              }
+              return [plan.planId, { retailPayable: { amount: retained.data.retailTotals.payable,
+                currency: retained.data.retailTotals.currency }, preparationCompleted: retained.data.preparationCompleted !== false }];
+            }),
+          );
           const receipts = await tx.partnerRetailReceipt.findMany({ where: { caseId: row.id }, orderBy: { recordedAt: 'asc' },
             select: { evidence: true } });
           const receiptRows = receipts.map(item => receiptEvidence(item.evidence));
@@ -98,6 +111,7 @@ export function createPrismaRetailCollectionRepository(input: {
             customerOutputPaymentPlan: view.data.customerPaymentPlan,
             privateReportPaymentPlan: view.data.customerPaymentPlan,
             planHistory: parsedPlans.map(item => item.success ? item.data : view.data.customerPaymentPlan),
+            planRevisionFacts,
             receipts: receiptRows as RetailCollectionReceipt[], events, permission,
           } };
         };

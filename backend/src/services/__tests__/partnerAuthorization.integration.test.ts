@@ -347,7 +347,7 @@ test('persisted approval, delivery and payment ids inherit only their exact auth
     await tx.partnerInquiryNotificationDelivery.create({ data: { eventId: inquiryEvent.id } });
     const output = await tx.partnerCustomerOutputSnapshot.create({ data: { id: `${sale.id}-output`, caseId: sale.id,
       caseRevision: 1, integrityHash: hash, contentHash: hash, contractNumber: sale.contractId, recipient: '09120000000',
-      expiresAt: new Date('2026-09-30'), content: {}, commandId: `${sale.id}-output-command` } });
+      recordedAt: new Date('2026-08-30'), expiresAt: new Date('2026-09-30'), content: {}, commandId: `${sale.id}-output-command` } });
     const correction = await tx.partnerCorrectionOpportunity.create({ data: { id: `${sale.id}-correction`, caseId: sale.id,
       predecessorRevision: 1, scope: 'RETAIL_ONLY', scopeHash: hash, requesterId: partner, approvedBy: responder,
       approvedAt: new Date('2026-08-30'), expiresAt: new Date('2026-09-30'), calendarVersion: 'fixture-v1', evidence: {} } });

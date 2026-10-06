@@ -5,8 +5,7 @@ import { partnerTrackingCode, type CaseState } from '@sabalanerp/partner-sales-c
 import { ErpBadge, ErpButton, ErpCard, ErpFieldView, ErpMetricGrid, ErpSheet, ErpWorkspacePage, type ErpAction } from '@/components/erp';
 import { FaChartLine, FaDownload, FaFileInvoiceDollar, FaWallet } from 'react-icons/fa';
 import { formatPartnerMoney, partnerChartMagnitude, subtractPartnerDecimal } from '../presentation';
-import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
-  type MouseHandlerDataParam } from 'recharts';
+import { FinancialTrendChart } from '@/components/reporting/FinancialTrendChart';
 
 type Currency = 'IRR' | 'IRT';
 type Metrics = { wholesalePurchases: string | null; retailSales: string | null; retailCollected: string | null; netComparableMargin: string | null };
@@ -54,30 +53,31 @@ function metricPresentation(value: string | null, currency: Currency) {
 export const partnerReportReceivable = (sales: string | null, collected: string | null) =>
   subtractPartnerDecimal(sales, collected);
 
-function PartnerFinancialCharts({ points, onOpenPoint }: { points: MonthlyPoint[]; onOpenPoint: (point: MonthlyPoint) => void }) {
+function PartnerFinancialCharts({ points, currency, onOpenPoint }: { points: MonthlyPoint[]; currency: Currency; onOpenPoint: (point: MonthlyPoint) => void }) {
   const chartPoints = points.map(point => ({ ...point, label: point.jalaliMonth,
     debt: partnerChartMagnitude(point.debtBalance), receivable: partnerChartMagnitude(point.receivableBalance),
     receiptValue: partnerChartMagnitude(point.receipts) }));
-  const tick = (value: number) => value.toLocaleString('fa-IR');
-  const openActive = (state: MouseHandlerDataParam) => {
-    const index = Number(state.activeTooltipIndex);
-    const point = Number.isSafeInteger(index) ? chartPoints[index] : undefined;
-    if (point) onOpenPoint(point);
-  };
+  const chart = (title: string, series: Array<{ key: string; label: string; color: string }>) => <ErpCard className="overflow-hidden">
+    <div className="flex items-start justify-between gap-3 p-4 sm:p-5">
+      <div><h3 className="sds-text-primary text-base font-semibold">{title}</h3>
+        <p className="sds-text-muted mt-1 text-sm">روند ماهانه · {currency === 'IRT' ? 'تومان' : 'ریال'}</p></div>
+      <span className="sds-neumorphic-icon sds-tone-primary inline-flex h-11 w-11 shrink-0 items-center justify-center" aria-hidden="true"><FaChartLine className="h-4 w-4" /></span>
+    </div>
+    <div className="px-2 pb-4 sm:px-4" aria-label={title}>
+      <FinancialTrendChart points={chartPoints} series={series} onSelect={onOpenPoint}
+        formatValue={(_value, key, point) => formatPartnerMoney(key === 'debt' ? point.debtBalance
+          : key === 'receivable' ? point.receivableBalance : point.receipts, currency)} />
+      <div className="mt-3 flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-[var(--sds-radius-card)] border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] p-2" aria-label={`جزئیات ماه‌های ${title}`}>
+        {points.map(point => <ErpButton key={point.jalaliMonth} variant="ghost" label={`جزئیات ${point.jalaliMonth}`} onClick={() => onOpenPoint(point)} />)}
+      </div>
+    </div>
+  </ErpCard>;
   return <div className="grid gap-4 xl:grid-cols-2">
-    <ErpCard className="p-4"><h3 className="mb-3 font-bold">نمودار مانده‌ها</h3>
-      <div className="h-64" role="img" aria-label="مقایسه بدهی به سبلان و مطالبات مشتریان"><ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 420, height: 256 }}>
-        <LineChart data={chartPoints} onClick={openActive}><CartesianGrid stroke="var(--sds-border-subtle)" vertical={false} />
-          <XAxis dataKey="label" /><YAxis tickFormatter={tick} /><Tooltip formatter={value => tick(Number(value ?? 0))} /><Legend />
-          <Line dataKey="debt" name="بدهی به سبلان" stroke="var(--sds-warning)" strokeWidth={3} />
-          <Line dataKey="receivable" name="مطالبات مشتری" stroke="var(--sds-accent)" strokeWidth={3} />
-        </LineChart></ResponsiveContainer></div></ErpCard>
-    <ErpCard className="p-4"><h3 className="mb-3 font-bold">نمودار دریافتی‌ها</h3>
-      <div className="h-64" role="img" aria-label="دریافتی واقعی از مشتریان"><ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 420, height: 256 }}>
-        <BarChart data={chartPoints} onClick={openActive}><CartesianGrid stroke="var(--sds-border-subtle)" vertical={false} />
-          <XAxis dataKey="label" /><YAxis tickFormatter={tick} /><Tooltip formatter={value => tick(Number(value ?? 0))} />
-          <Bar dataKey="receiptValue" name="دریافتی مشتری" fill="var(--sds-success)" radius={[8, 8, 0, 0]} />
-        </BarChart></ResponsiveContainer></div></ErpCard>
+    {chart('نمودار مانده‌ها', [
+      { key: 'debt', label: 'بدهی به سبلان', color: 'var(--sds-warning)' },
+      { key: 'receivable', label: 'مطالبات مشتری', color: 'var(--sds-accent)' },
+    ])}
+    {chart('نمودار دریافتی‌ها', [{ key: 'receiptValue', label: 'دریافتی مشتری', color: 'var(--sds-success)' }])}
   </div>;
 }
 
@@ -102,12 +102,13 @@ export function PartnerReportContent({ report, onOpenCase }: { report: PartnerRe
       <p className="text-xs text-[var(--sds-text-secondary)]">
         سود بازفروش، درآمد سبلان نیست و فقط در حساب فروشنده همکار و دید مدیریتی مجاز نمایش داده می‌شود.
       </p>
-      <PartnerFinancialCharts points={report.series?.find(series => series.currency === total.currency)?.points || []}
+      <PartnerFinancialCharts currency={total.currency} points={report.series?.find(series => series.currency === total.currency)?.points || []}
         onOpenPoint={point => setSelectedPoint({ currency: total.currency, point })} />
     </section>; })}
-    <div className="space-y-3">{report.rows.map(row => { const status = row.collectionStatus ? collectionCopy[row.collectionStatus] : null; return <ErpCard key={`${row.caseId}:${row.revision}`} className="p-4">
+    <div className="space-y-3">{report.rows.map(row => { const cancelled = ['CANCELLED', 'VOIDED'].includes(row.state) || row.history?.cancelled;
+      const status = cancelled ? ['لغو شده', 'danger'] as const : row.collectionStatus ? collectionCopy[row.collectionStatus] : null; return <ErpCard key={`${row.caseId}:${row.revision}`} className="p-4">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><strong>پرونده {partnerTrackingCode(row.caseNumber, row.trackingNumber)}</strong><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">قرارداد مشتری {row.customerContractNumber} · نسخه {row.revision.toLocaleString('fa-IR')}</p></div>
-        <div className="flex flex-wrap gap-2">{status && <ErpBadge tone={status[1]}>{status[0]}</ErpBadge>}{row.history?.superseded && <ErpBadge tone="purple">نسخه جایگزین‌شده</ErpBadge>}{row.history?.cancelled && <ErpBadge tone="danger">لغوشده</ErpBadge>}</div></div>
+        <div className="flex flex-wrap gap-2">{status && <ErpBadge tone={status[1]}>{status[0]}</ErpBadge>}{row.history?.superseded && <ErpBadge tone="purple">نسخه جایگزین‌شده</ErpBadge>}</div></div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><ErpFieldView label="فروش retail" value={metricPresentation(row.metrics.retailSales, row.currency)} />
         <ErpFieldView label="وصول مشتری" value={metricPresentation(row.metrics.retailCollected, row.currency)} tone={row.metrics.retailCollected === null ? 'neutral' : 'success'} />
         <ErpFieldView label="خرید wholesale" value={metricPresentation(row.metrics.wholesalePurchases, row.currency)} />

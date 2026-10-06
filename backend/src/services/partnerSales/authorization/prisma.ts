@@ -1,3 +1,4 @@
+import { partnerContractWasDeleted } from '../cases/operationalDeletion';
 import type { Prisma } from '@prisma/client';
 import { partnerError, type PartnerAction, type PartnerActionV2, type PartnerAuthorizationV2Port,
   type PermissionContext, type Result } from '@sabalanerp/partner-sales-contracts';
@@ -52,7 +53,8 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
     }
     if (root.kind === 'CASE') {
       await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${root.id} FOR UPDATE`;
-      profileId = (await tx.partnerSaleCase.findUnique({ where: { id: root.id }, select: { profileId: true } }))?.profileId ?? null;
+      const sale = await tx.partnerSaleCase.findUnique({ where: { id: root.id }, select: { profileId: true, customerContractId: true } });
+      profileId = sale && (!sale.customerContractId || !await partnerContractWasDeleted(tx, sale.customerContractId)) ? sale.profileId : null;
     }
     if (root.kind === 'CUSTOMER') {
       await tx.$queryRaw`SELECT id FROM crm_customers WHERE id = ${root.id} FOR UPDATE`;

@@ -1,7 +1,7 @@
 import { readPartnerCommercialState } from '../services/partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
 import { isOrdinaryCommercialFlow, commercialDeadlinePassed, isCommerciallyFinal, renewOrdinaryContract, readCommercialExpiryDays, lockOrdinaryContract, canManageCommercialSettings } from '../services/ordinaryContractLifecycle';
-import express, { Response } from 'express';
+import express, { Response, NextFunction } from 'express';
 import { randomUUID } from 'node:crypto';
 import {
   parseCanonicalProductGraph,
@@ -71,7 +71,7 @@ import { ContractPartyIdentityValidationError } from '../services/contractPartyI
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
 import { applyPartnerContractListScope, canPartnerReadSalesContract,
-  readPartnerProfileId } from '../services/partnerSales/contractVisibility';
+  readPartnerProfileId, ownsPartnerCustomerContract } from '../services/partnerSales/contractVisibility';
 import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, knownCustomerCreditFailure, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
 
 const sendUnexpectedSalesFailure = (
@@ -859,7 +859,16 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
 // @desc    Get sales contract by ID
 // @route   GET /api/sales/contracts/:id
 // @access  Private/Sales Workspace
-router.get('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_CONTRACTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+const requireSalesDetailRead = async (req: any, res: Response, next: NextFunction) => {
+  try {
+    if (await ownsPartnerCustomerContract(prisma, req.user.id, req.params.id)) return next();
+    return requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW)(req, res, error => {
+      if (error) return next(error);
+      return requireFeatureAccess(FEATURES.SALES_CONTRACTS_VIEW, FEATURE_PERMISSIONS.VIEW)(req, res, next);
+    });
+  } catch (error) { return next(error); }
+};
+router.get('/contracts/:id', protect, requireSalesDetailRead, async (req: any, res: Response) => {
   try {
     const contract = await getContract(req.params.id);
 

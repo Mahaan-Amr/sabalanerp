@@ -33,3 +33,17 @@ test('Partner detail access only accepts a contract owned by the same profile', 
     id: 'sabalan-contract-1', partnerCase: { is: { profileId: 'profile-1' } },
   } }]);
 });
+
+test('exact-target Partner admission cannot bypass general permissions for ordinary or foreign targets', async () => {
+  const { ownsPartnerCustomerContract } = await import('../partnerSales/contractVisibility');
+  let queried: unknown;
+  const database = { partnerProfile: { findUnique: async () => ({ id: 'owned-profile' }) },
+    salesContract: { count: async (query: unknown) => { queried = query; return 1; } } };
+  assert.equal(await ownsPartnerCustomerContract(database as never, 'partner', 'owned-contract'), true);
+  assert.deepEqual(queried, { where: { id: 'owned-contract', partnerKind: 'PARTNER_CUSTOMER',
+    partnerCase: { is: { profileId: 'owned-profile' } } } });
+  database.salesContract.count = async () => 0;
+  assert.equal(await ownsPartnerCustomerContract(database as never, 'partner', 'foreign-contract'), false);
+  assert.equal(await ownsPartnerCustomerContract({ ...database, partnerProfile: {
+    findUnique: async () => null } } as never, 'ordinary', 'ordinary-contract'), false);
+});

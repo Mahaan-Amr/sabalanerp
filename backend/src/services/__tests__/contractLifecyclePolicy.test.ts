@@ -63,4 +63,8 @@ assert.equal(mayDirectlyPerformContractLifecycleAction('USER', 'DEACTIVATE'), fa
 assert.equal(mayDirectlyPerformContractLifecycleAction('ADMIN', 'REACTIVATE'), true);
 assert.equal(mayDirectlyPerformContractLifecycleAction('MANAGER', 'REACTIVATE'), false);
 
+assert.deepEqual(contractHardDeleteEligibility({ status: 'DRAFT', requireNoOpenOperations: true,
+  dependencies: { ...noDeleteDependencies, openOperations: 1 } }).blockers,
+  [{ code: 'OPEN_OPERATIONS', count: 1, label: 'عملیات باز قرارداد' }],
+  'retained Partner cases must not hide an open loading when operationally deleted');
 console.log('Contract lifecycle policy tests passed.');

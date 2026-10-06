@@ -1,3 +1,5 @@
+import { readPartnerShipmentQuantityProjection } from './partnerSales/fulfillment/quantityStore';
+import { partnerContractWasDeleted } from './partnerSales/cases/operationalDeletion';
 import {
   AccountingRecordStatus,
   ContractLifecycleRequestKind,
@@ -66,6 +68,11 @@ export const getContractLifecycleDependencies = async (
   contractId: string,
   client: LifecycleClient = prisma,
 ) => {
+  const partner = await client.partnerSaleCase.findUnique({ where: { customerContractId: contractId },
+    select: { id: true, internalRecordId: true } });
+  const financialWhere: Prisma.AccountingFinancialRecordWhereInput = partner?.internalRecordId
+    ? { OR: [{ contractId }, { sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: partner.internalRecordId }] } : { contractId };
+  const invoiceLink = partner?.internalRecordId ? { sourceKind: 'PARTNER_INTERNAL_RECORD' as const, sourceId: partner.internalRecordId } : undefined;
   const [
     financialRecords,
     receivables,
@@ -80,29 +87,39 @@ export const getContractLifecycleDependencies = async (
     mutableFinancialWorkflows,
     openCorrections,
   ] = await Promise.all([
-    client.accountingFinancialRecord.findMany({ where: { contractId }, select: { id: true, kind: true, status: true, systemInvoiceNumber: true } }),
-    client.accountingReceivable.findMany({ where: { contractId }, select: { id: true, status: true } }),
-    client.accountingPaymentStatus.findMany({ where: { contractId }, select: { id: true, status: true, checkNumber: true } }),
-    client.accountingTaxRecord.findMany({ where: { contractId }, select: { id: true, submissionStatus: true, trackingCode: true } }),
+    client.accountingFinancialRecord.findMany({ where: financialWhere, select: { id: true, kind: true, status: true, systemInvoiceNumber: true } }),
+    client.accountingReceivable.findMany({ where: invoiceLink ? { OR: [{ contractId }, { invoiceRecord: invoiceLink }] } : { contractId }, select: { id: true, status: true } }),
+    client.accountingPaymentStatus.findMany({ where: invoiceLink ? { OR: [{ contractId }, { receivable: { invoiceRecord: invoiceLink } }] } : { contractId }, select: { id: true, status: true, checkNumber: true } }),
+    client.accountingTaxRecord.findMany({ where: invoiceLink ? { OR: [{ contractId }, { invoiceRecord: invoiceLink }] } : { contractId }, select: { id: true, submissionStatus: true, trackingCode: true } }),
     client.payment.findMany({ where: { contractId }, select: { id: true, status: true, checkNumber: true } }),
-    client.shipmentQuantityEvidence.findMany({ where: { contractId, kind: { in: conclusivePhysicalKinds } }, select: { id: true, kind: true, sourceId: true } }),
+    client.shipmentQuantityEvidence.findMany({ where: { ...(partner ? { OR: [{ contractId }, { partnerCaseId: partner.id }] } : { contractId }), kind: { in: conclusivePhysicalKinds } }, select: { id: true, kind: true, sourceId: true } }),
     client.delivery.findMany({ where: { contractId, status: DeliveryStatus.DELIVERED }, select: { id: true, status: true, deliveryDate: true } }),
     client.delivery.findMany({ where: { contractId, status: { in: [DeliveryStatus.SCHEDULED, DeliveryStatus.IN_TRANSIT] } }, select: { id: true, status: true, deliveryDate: true } }),
-    client.logisticsLoadingLine.findMany({ where: { sourceContractId: contractId, loading: { status: 'DRAFT' } }, select: { id: true, loadingId: true } }),
+    client.logisticsLoadingLine.findMany({ where: { ...(partner ? { OR: [{ sourceContractId: contractId }, { loading: { partnerCaseId: partner.id } }] } : { sourceContractId: contractId }), loading: { status: 'DRAFT' } }, select: { id: true, loadingId: true } }),
     client.shipmentQuantityProjection.findMany({ where: { contractId, finalizedReserved: { gt: 0 } }, select: { contractItemId: true, productRowId: true } }),
-    client.accountingFinancialRecord.findMany({ where: { contractId, status: { in: mutableFinancialStatuses } }, select: { id: true, kind: true, status: true, systemInvoiceNumber: true } }),
+    client.accountingFinancialRecord.findMany({ where: { AND: [financialWhere, { status: { in: mutableFinancialStatuses } }] }, select: { id: true, kind: true, status: true, systemInvoiceNumber: true } }),
     client.accountingCorrectionRequest.findMany({ where: { contractId, status: { in: activeCorrectionStatuses } }, select: { id: true, status: true } }),
   ]);
 
-  const financialDocuments = financialRecords.length + receivables.length + paymentStatuses.length + taxRecords.length + salesPayments.length;
+  const retailReceipts = partner ? await client.partnerRetailReceipt.findMany({ where: { caseId: partner.id }, select: { id: true, kind: true } }) : [];
+  const financialDocuments = retailReceipts.length + financialRecords.length + receivables.length + paymentStatuses.length + taxRecords.length + salesPayments.length;
   const conclusivePhysicalOperations = physicalEvidence.length + deliveredDeliveries.length;
-  const openLoadings = draftLoadingLines.length + reservedProjections.length;
+  const partnerQuantities = partner && await client.partnerFulfillmentLineage.count({ where: { caseId: partner.id } })
+    ? await readPartnerShipmentQuantityProjection(client, partner.id) : null;
+  const partnerReservations = partnerQuantities?.rows.filter(row => row.health !== 'CURRENT' || !row.quantities ||
+    new Prisma.Decimal(row.quantities.finalizedReserved).gt(0)) ?? [];
+  const partnerLoadings = partner ? await client.logisticsLoading.findMany({
+    where: { partnerCaseId: partner.id, status: { in: ['DRAFT', 'FINALIZED'] } },
+    select: { id: true, status: true, loadingNumber: true },
+  }) : [];
+  const openLoadings = draftLoadingLines.length + reservedProjections.length + partnerReservations.length + partnerLoadings.length;
   const financialWorkflows = mutableFinancialWorkflows.length + openCorrections.length;
 
   return {
     financialDocuments,
     conclusivePhysicalOperations,
     blockingFinancialDocuments: [
+      ...retailReceipts.map(row => ({ id: row.id, kind: `PARTNER_RETAIL_${row.kind}` })),
       ...financialRecords.map((row) => ({ id: row.id, kind: `FINANCIAL_${row.kind}`, status: row.status, reference: row.systemInvoiceNumber })),
       ...receivables.map((row) => ({ id: row.id, kind: 'RECEIVABLE', status: row.status })),
       ...paymentStatuses.map((row) => ({ id: row.id, kind: 'ACCOUNTING_PAYMENT', status: row.status, reference: row.checkNumber })),
@@ -120,6 +137,8 @@ export const getContractLifecycleDependencies = async (
       financialWorkflows,
       deliveryDetails: openDeliveries.map((row) => ({ id: row.id, kind: 'DELIVERY', status: row.status, reference: row.deliveryDate.toISOString() })),
       loadingDetails: [
+        ...partnerLoadings.map(row => ({ id: row.id, kind: 'PARTNER_LOADING', status: row.status, reference: row.loadingNumber })),
+        ...partnerReservations.map(row => ({ id: row.productRowId, kind: 'PARTNER_PHYSICAL_RESERVATION', status: row.health, reference: row.productRowId })),
         ...draftLoadingLines.map((row) => ({ id: row.id, kind: 'LOADING_LINE', status: 'DRAFT', reference: row.loadingId })),
         ...reservedProjections.map((row) => ({ id: row.contractItemId, kind: 'RESERVED_PROJECTION', status: 'RESERVED', reference: row.productRowId })),
       ],
@@ -131,7 +150,7 @@ export const getContractLifecycleDependencies = async (
   };
 };
 
-export const getContractLifecyclePreview = async (contractId: string) => {
+export const getContractLifecyclePreview = async (contractId: string, partnerLifecycle = false) => {
   const contract = await prisma.salesContract.findUnique({
     where: { id: contractId },
     select: {
@@ -146,7 +165,7 @@ export const getContractLifecyclePreview = async (contractId: string) => {
       partnerKind: true,
     },
   });
-  if (!contract) throw new Error('Contract not found');
+  if (!contract || partnerOwned(contract) && await partnerContractWasDeleted(prisma, contractId)) throw new Error('Contract not found');
   const dependencies = await getContractLifecycleDependencies(contractId);
   const pendingRequests = await prisma.contractLifecycleRequest.findMany({
     where: { contractId, status: ContractLifecycleRequestStatus.PENDING },
@@ -156,10 +175,10 @@ export const getContractLifecyclePreview = async (contractId: string) => {
     contract,
     dependencies,
     deleteEligibility: contractHardDeleteEligibility({ status: contract.status,
-      numberedPartnerCase: partnerOwned(contract), dependencies }),
+      numberedPartnerCase: partnerOwned(contract) && !partnerLifecycle, requireNoOpenOperations: partnerOwned(contract) && partnerLifecycle, dependencies }),
     deactivationEligibility: contractDeactivationEligibility({
       alreadyInactive: contract.isInactive,
-      numberedPartnerCase: partnerOwned(contract),
+      numberedPartnerCase: partnerOwned(contract) && !partnerLifecycle,
       openOperations: dependencies.openOperationsByKind,
     }),
     pendingRequests,
@@ -191,29 +210,35 @@ export const createContractLifecycleRequest = async ({
   kind,
   reason,
   actorId,
+  partnerLifecycle = false,
 }: {
+  partnerLifecycle?: boolean;
   contractId: string;
   kind: ContractLifecycleRequestKind;
   reason: string;
   actorId: string;
 }) => {
   const normalizedReason = requireReason(reason);
-  const contract = await prisma.salesContract.findUnique({ where: { id: contractId } });
-  if (!contract) throw new Error('Contract not found');
-  if (kind === ContractLifecycleRequestKind.DELETE && partnerOwned(contract)) {
+  const initial = await prisma.salesContract.findUnique({ where: { id: contractId }, select: { partnerCaseId: true } });
+  return prisma.$transaction(async tx => {
+  if (initial?.partnerCaseId) await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${initial.partnerCaseId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${contractId} FOR UPDATE`;
+  const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
+  if (!contract || partnerOwned(contract) && await partnerContractWasDeleted(tx, contractId)) throw new Error('Contract not found');
+  if (kind === ContractLifecycleRequestKind.DELETE && partnerOwned(contract) && !partnerLifecycle) {
     throw new Error(`${PARTNER_CASE_RETENTION_BLOCKER.label} قابل حذف نیست؛ برای نگهداری سابقه، پرونده را لغو کنید`);
   }
-  if (partnerOwned(contract)) throw new ContractLifecycleBlockedError([PARTNER_CASE_LIFECYCLE_BLOCKER]);
+  if (partnerOwned(contract) && !partnerLifecycle) throw new ContractLifecycleBlockedError([PARTNER_CASE_LIFECYCLE_BLOCKER]);
   if (kind === ContractLifecycleRequestKind.DELETE && contract.status !== ContractStatus.DRAFT && contract.status !== ContractStatus.CANCELLED) {
     throw new Error('Only draft or voided contracts can be requested for hard deletion');
   }
   if (kind === ContractLifecycleRequestKind.DEACTIVATE && contract.isInactive) throw new Error('Contract is already inactive');
   if (kind === ContractLifecycleRequestKind.REACTIVATE && !contract.isInactive) throw new Error('Contract is already active');
-  const existing = await prisma.contractLifecycleRequest.findFirst({
+  const existing = await tx.contractLifecycleRequest.findFirst({
     where: { contractId, kind, status: ContractLifecycleRequestStatus.PENDING },
   });
   if (existing) return existing;
-  return prisma.contractLifecycleRequest.create({
+  return tx.contractLifecycleRequest.create({
     data: {
       contractId,
       contractNumberSnapshot: contract.contractNumber,
@@ -222,6 +247,7 @@ export const createContractLifecycleRequest = async ({
       requestedBy: actorId,
       contractSnapshot: toJson(contract),
     },
+  });
   });
 };
 
@@ -250,7 +276,9 @@ export const executeContractLifecycleAction = async ({
   reason,
   actorId,
   requestId,
+  partnerLifecycle = false,
 }: {
+  partnerLifecycle?: boolean;
   contractId: string;
   action: ContractLifecycleAction;
   reason: string;
@@ -259,10 +287,10 @@ export const executeContractLifecycleAction = async ({
 }) => {
   const normalizedReason = requireReason(reason);
   const contract = await prisma.salesContract.findUnique({ where: { id: contractId } });
-  if (!contract) throw new Error('Contract not found');
-  const preview = await getContractLifecyclePreview(contractId);
+  if (!contract || partnerOwned(contract) && await partnerContractWasDeleted(prisma, contractId)) throw new Error('Contract not found');
+  const preview = await getContractLifecyclePreview(contractId, partnerLifecycle);
 
-  const eligibility = partnerOwned(contract) && action !== 'DELETE'
+  const eligibility = partnerOwned(contract) && !partnerLifecycle && action !== 'DELETE'
     ? { eligible: false, blockers: [PARTNER_CASE_LIFECYCLE_BLOCKER] }
     : action === 'DELETE'
     ? preview.deleteEligibility
@@ -299,15 +327,18 @@ export const executeContractLifecycleAction = async ({
   const result = await prisma.$transaction(async (tx) => {
     // Hold the parent row while dependency checks and the mutation run. Inserts
     // carrying a sales-contract FK cannot slip into this critical section.
+    if (partnerOwned(contract) && contract.partnerCaseId) {
+      await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${contract.partnerCaseId} FOR UPDATE`;
+    }
     await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${contractId} FOR UPDATE`;
     const lockedContract = await tx.salesContract.findUnique({ where: { id: contractId } });
-    if (!lockedContract) throw new Error('Contract not found');
+    if (!lockedContract || partnerOwned(lockedContract) && await partnerContractWasDeleted(tx, contractId)) throw new Error('Contract not found');
     const lockedDependencies = await getContractLifecycleDependencies(contractId, tx);
-    const lockedEligibility = partnerOwned(lockedContract) && action !== 'DELETE'
+    const lockedEligibility = partnerOwned(lockedContract) && !partnerLifecycle && action !== 'DELETE'
       ? { eligible: false, blockers: [PARTNER_CASE_LIFECYCLE_BLOCKER] }
       : action === 'DELETE'
       ? contractHardDeleteEligibility({ status: lockedContract.status,
-        numberedPartnerCase: partnerOwned(lockedContract), dependencies: lockedDependencies })
+        numberedPartnerCase: partnerOwned(lockedContract) && !partnerLifecycle, requireNoOpenOperations: partnerOwned(lockedContract) && partnerLifecycle, dependencies: lockedDependencies })
       : action === 'DEACTIVATE'
         ? contractDeactivationEligibility({ alreadyInactive: lockedContract.isInactive, openOperations: lockedDependencies.openOperationsByKind })
         : { eligible: lockedContract.isInactive, blockers: [] as ContractLifecycleBlocker[] };
@@ -381,6 +412,15 @@ export const executeContractLifecycleAction = async ({
     }
 
     await tx.accountingAuditLog.create({ data: lifecycleAudit({ action, actorId, contractId, contractNumber: contract.contractNumber, reason: normalizedReason, before: contract, after: { deleted: true } }) });
+    if (partnerOwned(lockedContract)) {
+      // Remove the operational contract irreversibly while preserving the exact
+      // Case/revision pair and immutable inquiry/approval history for audit.
+      await tx.salesContract.update({ where: { id: contractId }, data: {
+        isInactive: true, inactiveAt: now, inactiveBy: actorId, inactiveReason: normalizedReason,
+      } });
+      await tx.salesContractEditSession.deleteMany({ where: { contractId } });
+      return { id: contractId, contractNumber: contract.contractNumber, deleted: true, auditHistoryRetained: true };
+    }
     await tx.salesContractEditSession.deleteMany({ where: { contractId } });
     await tx.shipmentQuantityProjection.deleteMany({ where: { contractId } });
     await tx.shipmentQuantityEvidence.deleteMany({ where: { contractId } });
@@ -432,5 +472,6 @@ export const decideContractLifecycleRequest = async ({
     reason: reason?.trim() || request.reason,
     actorId,
     requestId,
+    partnerLifecycle: true,
   });
 };

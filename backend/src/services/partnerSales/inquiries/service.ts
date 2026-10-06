@@ -1,3 +1,4 @@
+import { partnerContractWasDeleted } from '../cases/operationalDeletion';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
@@ -9,6 +10,7 @@ import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '
 import { parseInquiryDefinition, type ConfigurationRef, type InquiryDefinition } from './definition';
 import { createPartnerInquiryQuery } from './query';
 import { sameCaseInquiryLineage } from './caseInquiryLineage';
+import { partnerTechnicalCaseIsEditable } from '../cases/commercialEditPermission';
 import {
   createPartnerPricingDuty,
   reassignPartnerPricingDuty,
@@ -357,10 +359,14 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${command.caseId} FOR UPDATE`;
         }
         const scopedCase = command.type === 'CASE_PRICING_SUBMIT' ? await tx.partnerSaleCase.findFirst({ where: {
-          id: command.caseId, profileId: profile.id, state: 'DRAFT', pricingState: { in: ['AWAITING_INQUIRY', 'EXPIRED', 'READY_TO_FINALIZE'] },
+          id: command.caseId, profileId: profile.id, state: { in: ['DRAFT', 'COMMITTED'] }, pricingState: { in: ['AWAITING_INQUIRY', 'EXPIRED', 'READY_TO_FINALIZE'] },
           headRevision: command.expected.revision, integrityHash: command.expected.integrityHash,
-        }, select: { id: true, headRevision: true } }) : undefined;
-        if (command.type === 'CASE_PRICING_SUBMIT' && !scopedCase) {
+        }, select: { id: true, headRevision: true, state: true, customerContractId: true } }) : undefined;
+        if (command.type === 'CASE_PRICING_SUBMIT' && (!scopedCase ||
+            (scopedCase.customerContractId && await partnerContractWasDeleted(tx, scopedCase.customerContractId)) ||
+            (scopedCase.state === 'COMMITTED' && (!scopedCase.customerContractId ||
+              !await partnerTechnicalCaseIsEditable(tx, { contractId: scopedCase.customerContractId,
+                caseState: scopedCase.state, actorId: dependencies.actorId }))))) {
           return { ok: false, error: partnerError('STATE_CONFLICT') };
         }
         let inquiry = await tx.partnerInquiry.findUnique({ where: { id: scope }, select: {

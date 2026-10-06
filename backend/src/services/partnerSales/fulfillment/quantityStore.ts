@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { canonicalHash, FulfillmentViewSchema, type FulfillmentView } from '@sabalanerp/partner-sales-contracts';
+import { canonicalHash, FulfillmentViewSchema, partnerError, type Result, type FulfillmentView } from '@sabalanerp/partner-sales-contracts';
 import { projectPartnerShipmentQuantities, type PartnerShipmentQuantityEvidence } from '../../shipmentQuantityProjection';
 import { guardReturnValidationFailure, shipmentQuantityEvidenceIntegrityHash,
   shipmentQuantitySourceFields, type PartnerPersistedShipmentEvidence } from '../../shipmentQuantityProjectionStore';
@@ -8,13 +8,32 @@ const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const conflict = (): never => { throw new Error('Partner shipment quantity evidence integrity conflict'); };
 
+/** Commercial corrections share the physical floor used by reviewed Logistics
+ * corrections. Caller holds the Case lock; repeat at finality because stock can
+ * be reserved while a corrected Contract awaits its approvals. */
+export async function validatePartnerCommercialPhysicalFloor(tx: Prisma.TransactionClient, caseId: string,
+  products: Array<{ productRowId: string; quantity: string; unit: string }>): Promise<Result<undefined>> {
+  if (!await tx.partnerFulfillmentLineage.count({ where: { caseId } })) return { ok: true, value: undefined };
+  const projection = await readPartnerShipmentQuantityProjection(tx, caseId);
+  for (const row of projection.rows) {
+    if (row.health !== 'CURRENT' || !row.quantities) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    const successor = products.find(product => product.productRowId === row.productRowId);
+    if ((successor && successor.unit !== row.unit) || new Prisma.Decimal(successor?.quantity ?? '0').lt(
+      new Prisma.Decimal(row.quantities.finalizedReserved).add(row.quantities.physicallyDispatched))) {
+      return { ok: false, error: { ...partnerError('DEPENDENCY_BLOCKED'),
+        message: 'مقدار قرارداد کمتر از مقدار رزروشده یا ارسال‌شده است؛ ابتدا رزرو یا برگشت کالا را در لجستیک تعیین تکلیف کنید.' } };
+    }
+  }
+  return { ok: true, value: undefined };
+}
+
 /** A command-side capture, under the same Case lock as lineage materialization.
  * Reads never manufacture contracted, reserved or dispatched evidence.
  */
 export async function capturePartnerContractedQuantities(tx: Prisma.TransactionClient, view: FulfillmentView) {
   const sale = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: view.owner.caseId }, select: {
     state: true, headRevision: true, integrityHash: true, internalRecordId: true, committedAt: true, committedRevision: true,
-    events: { where: { caseRevision: view.owner.revision, type: { in: ['CASE_COMMITTED', 'CORRECTION_EFFECTIVE'] } },
+    events: { where: { caseRevision: view.owner.revision, type: { in: ['CASE_COMMITTED', 'CORRECTION_EFFECTIVE', 'CASE_RECOMMITTED'] } },
       orderBy: { sequence: 'desc' }, take: 1, select: { recordedAt: true } } } });
   if (sale.state !== 'COMMITTED' || sale.headRevision !== view.owner.revision || sale.integrityHash !== view.owner.integrityHash ||
       sale.internalRecordId !== view.recordId || !sale.committedAt || !sale.events[0]) return conflict();
@@ -108,7 +127,7 @@ export async function readPartnerShipmentQuantityProjection(tx: Prisma.Transacti
   }
   const cutoff = options.cutoff ?? (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now.toISOString();
   const candidates = await tx.partnerCaseEvent.findMany({ where: { caseId,
-    type: { in: ['CASE_COMMITTED', 'CORRECTION_EFFECTIVE'] },
+    type: { in: ['CASE_COMMITTED', 'CORRECTION_EFFECTIVE', 'CASE_RECOMMITTED'] },
     ...(options.mode === 'AUDIT_KNOWN_AT' ? { recordedAt: { lte: new Date(cutoff) } } : {}) },
     orderBy: [{ caseRevision: 'desc' }, { sequence: 'desc' }],
     include: { revision: { include: { rowBindings: true } }, case: { select: { internalRecordId: true, committedAt: true } } } });

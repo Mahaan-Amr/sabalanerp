@@ -45,8 +45,7 @@ test('Partner layer controls belong only to the stair currently being configured
   draft = addPartnerTechnicalProduct(draft, slab, { family: 'slab', productRowId: 'slab-row',
     sourceBatchId: 'source-batch:slab' });
   const prepared = catalog.products.find(item => item.families.includes('prepared'))!;
-  draft = addPartnerTechnicalProduct(draft, prepared, { family: 'prepared', productRowId: 'prepared-row',
-    sourceBatchId: 'source-batch:prepared' });
+  draft = addPartnerTechnicalProduct(draft, prepared, { family: 'prepared', productRowId: 'prepared-row' });
   const longitudinal = catalog.products.find(item => item.families.includes('longitudinal'))!;
   draft = addPartnerTechnicalProduct(draft, longitudinal, { family: 'longitudinal', productRowId: 'longitudinal-row',
     sourceBatchId: 'source-batch:longitudinal' });
@@ -77,6 +76,7 @@ test('Partner stair defaults to system quantity and keeps a manually edited quan
   assert.equal(draft.rows[0].configuration.quantityMode, 'system');
   assert.equal(draft.stairSystems?.[0]?.quantity.totalSteps, 1);
   const edited = overridePartnerStairQuantity(draft, 'stair-row', '7');
+  assert.ok(edited.rows[0].family === 'stair');
   assert.equal(edited.rows[0].configuration.quantity, 7);
   assert.equal(edited.rows[0].configuration.quantityMode, 'manual');
   assert.equal(edited.stairSystems?.[0]?.quantity.totalSteps, 1);
@@ -87,7 +87,7 @@ test('reducing a longitudinal product from five pieces to four adjusts its full-
   const product = catalog.products.find(item => item.families.includes('longitudinal'))!;
   const draft = buildPartnerProductionTechnicalDraft({ family: 'longitudinal', product, quantity: '5',
     lengthMeters: '1', widthMeters: '0.25', sourceLengthMeters: '2', sourceWidthMeters: '1',
-    products: catalog.products, operationsCatalog: catalog.operations,
+    products: catalog.products, operationsCatalog: catalog.operations, includeRemainder: false,
   }, kind => `partner-quantity-${kind}`);
   const row = draft.rows[0];
   assert.equal(row.family, 'longitudinal');
@@ -111,7 +111,7 @@ test('reducing a longitudinal product from five pieces to four adjusts its full-
     const candidate = PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + nextQuantity + 1,
       rows: [{ ...reduced, configuration: { ...reduced.configuration, quantity: nextQuantity } }] });
     const result = previewPartnerTechnicalDraft(candidate, catalog);
-    assert.equal(result.ok, true, `quantity ${nextQuantity}: ${JSON.stringify(result.ok ? [] : result.conflicts)}`);
+    assert.equal(result.ok, true, `quantity ${nextQuantity}: ${JSON.stringify(result.ok ? [] : result.error)}`);
     assert.equal(reduced.operations.groups[0].scope, String(nextQuantity));
     const emptied = syncPartnerFullCoverageGroup(savedAfterIncrease, undefined);
     const enteredAfterBackspace = syncPartnerFullCoverageGroup({ ...emptied,
@@ -120,7 +120,7 @@ test('reducing a longitudinal product from five pieces to four adjusts its full-
       rows: [{ ...enteredAfterBackspace, configuration: { ...enteredAfterBackspace.configuration, quantity: nextQuantity } }] });
     const afterBackspacePreview = previewPartnerTechnicalDraft(afterBackspace, catalog);
     assert.equal(afterBackspacePreview.ok, true,
-      `backspace then ${nextQuantity}: ${JSON.stringify(afterBackspacePreview.ok ? [] : afterBackspacePreview.conflicts)}`);
+      `backspace then ${nextQuantity}: ${JSON.stringify(afterBackspacePreview.ok ? [] : afterBackspacePreview.error)}`);
     assert.equal(enteredAfterBackspace.operations.groups[0].scope, String(nextQuantity));
   }
 });
@@ -417,10 +417,11 @@ test('layer tools and finishings remain editable before its material preview suc
   const html = renderToStaticMarkup(<PartnerStairLayerEditor parentProductRowId="layer-parent" draft={draft}
     products={catalog.products} operations={catalog.operations} previewRows={preview.value.rows}
     previewDependents={preview.value.dependents} inventory={preview.value.inventory} onChange={() => undefined} />);
-  assert.equal((html.match(/افزودن ابزار/g) ?? []).length, 2);
-  assert.equal((html.match(/افزودن پرداخت/g) ?? []).length, 2);
+  assert.equal((html.match(/افزودن ابزار/g) ?? []).length, 1);
+  assert.equal((html.match(/افزودن پرداخت/g) ?? []).length, 1);
   assert.match(html, /سمت جلو/);
-  assert.match(html, /سمت چپ/);
+  assert.match(html, /aria-label="اعمال روی"/);
+  assert.match(html, />چپ</);
 });
 
 test('adding a tool to a stair layer keeps its generated group independent of the parent and other sides', () => {
@@ -493,13 +494,14 @@ test('cart summary uses derived area and customer material basis for each family
     const summary = partnerProductCartSummary(draft, preview);
     assert.ok(summary, family);
     assert.ok(summary.area !== null);
-    if (family === 'longitudinal') { assert.equal(summary.area, '0.2'); assert.equal(summary.materialTotal, '20'); }
-    if (family === 'stair' || family === 'prepared') assert.equal(summary.materialTotal, '200');
+    if (family === 'longitudinal') { assert.equal(summary.area, '0.2'); assert.equal(summary.materialTotal, '40'); }
+    if (family === 'stair') assert.equal(summary.materialTotal, '80');
+    if (family === 'prepared') assert.equal(summary.materialTotal, '200');
     if (family === 'slab' && preview.ok) {
       const calculation = preview.value.rows[0].calculation;
       assert.ok(calculation.ok);
       if (calculation.ok && 'finishedAreaSquareMeters' in calculation.result)
-        assert.equal(summary.materialTotal, String(calculation.result.packingPlan.consumedSources.length * 100));
+        assert.equal(summary.materialTotal, String(Number(calculation.result.materialAreaSquareMeters) * 100));
     }
     assert.equal(partnerProductCartSummary({ ...draft, inputRevision: draft.inputRevision + 1 }, preview), null);
   }

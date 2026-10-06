@@ -112,7 +112,7 @@ test('family-aware technical measures bind longitudinal quantity instead of the 
 });
 
 async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, string>) => Promise<void>,
-  approvalTtlMs = 48 * 60 * 60 * 1000) {
+  approvalTtlMs = 48 * 60 * 60 * 1000, pricingDefinition = false) {
   const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
   const rollback = new Error('rollback partner Case fixture');
   try {
@@ -158,7 +158,15 @@ async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, s
       await tx.partnerInquiryAssignment.create({ data: { id: ids.assignmentId, inquiryId: ids.inquiryId, revision: 1,
         responderId: ids.responderId, actorId: ids.responderId, reason: 'انتساب تست پرونده', eligibilityEvidence: { fixture: true } } });
       await tx.partnerInquiryRow.create({ data: { id: ids.inquiryRowId, inquiryId: ids.inquiryId, version: 1,
-        revision: 2, outcome: 'APPROVED', configurationHash, definition: { fixture: true } } });
+        revision: 2, outcome: 'APPROVED', configurationHash, definition: pricingDefinition ? {
+      version: 1, configurationRef: { recoveryId: `${ids.caseId}-recovery`, recoveryRevision: 1,
+        productRowId: `${ids.caseId}-product-row` }, identity: {
+        schemaVersion: 1, partnerSellerId: ids.partnerId, catalogProductId: 'catalog-stone', family: 'prepared', unit: 'count',
+        configuration: [{ key: 'technicalConfigurationHash', value: configurationHash }],
+        materialRateEvidenceId: 'fixture-rate', materialRateHash: configurationHash, components: [], currency: 'IRT',
+        calculationPolicyVersion: 'fixture-v1', roundingPolicyVersion: 'fixture-v1',
+      }, description: 'سنگ آماده', configuration: [{ label: 'تعداد', value: '۲' }],
+    } : { fixture: true } } });
       const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
       await tx.partnerInquiryApproval.create({ data: { id: ids.approvalId, rowId: ids.inquiryRowId,
         assignmentId: ids.assignmentId, actorId: ids.responderId, commandId: `${prefix}-approval-command`,
@@ -213,7 +221,8 @@ async function resolved(ids: Record<string, string>, caseId: string, revision = 
 function service(tx: Prisma.TransactionClient, ids: Record<string, string>, failpoint?: PartnerCaseDependencies['failpoint'],
   recordEvidenceReview: PartnerCaseDependencies['recordEvidenceReview'] = async () => undefined,
   authorizeProject: PartnerCaseDependencies['authorizeProject'] = async () =>
-    ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } })) {
+    ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } }),
+  transformResolved: (draft: ResolvedCaseDraft) => ResolvedCaseDraft = draft => draft) {
   return createPartnerCaseService({ actorId: ids.partnerId, transaction: async work => {
     await tx.$executeRaw`SAVEPOINT partner_case_service`;
     try {
@@ -229,13 +238,13 @@ function service(tx: Prisma.TransactionClient, ids: Record<string, string>, fail
     authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
     authorizeProject,
     recordEvidenceReview,
-    resolveDraft: async (_tx, input) => ({ ok: true, value: await resolved(ids, input.command.idempotency.targetId,
+    resolveDraft: async (_tx, input) => ({ ok: true, value: transformResolved(await resolved(ids, input.command.idempotency.targetId,
       input.command.type === 'CASE_DRAFT_REVISE' ? input.command.expected.revision + 1 : 1,
-      input.command.intent.customerId, input.command.intent.projectId) }),
+      input.command.intent.customerId, input.command.intent.projectId)) }),
     consumeRecovery: async () => ({ ok: true, value: undefined }), failpoint });
 }
 
-test('Case-scoped pricing creates the linked pair only during explicit finalization allocation', async () => {
+test('Case-scoped pricing retains one linked numbered note before pricing and commits only after current approvals', async () => {
   await fixture(async (tx, ids) => {
     const priced = await command(ids);
     const pricedIntent = { ...priced.intent, projectId: ids.firstProjectId,
@@ -252,9 +261,9 @@ test('Case-scoped pricing creates the linked pair only during explicit finalizat
     assert.equal(first.ok, true, JSON.stringify(first));
     if (!first.ok || !first.value.case) return;
     assert.equal(first.value.case.pricingState, 'AWAITING_INQUIRY');
-    assert.equal(await tx.sabalanToPartnerSaleRecord.count({ where: { caseId: ids.caseId } }), 0);
-    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 0);
-    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 1);
+    assert.equal(await tx.sabalanToPartnerSaleRecord.count({ where: { caseId: ids.caseId } }), 1);
+    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 1);
+    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
 
     const readyAt = new Date();
     await tx.partnerInquiry.update({ where: { id: ids.inquiryId }, data: { caseId: ids.caseId,
@@ -270,7 +279,7 @@ test('Case-scoped pricing creates the linked pair only during explicit finalizat
     if (!pricedRevision.ok || !pricedRevision.value.case) return;
     assert.equal(pricedRevision.value.case.pricingState, 'READY_TO_FINALIZE');
     assert.equal(await tx.partnerInquiryUsage.count({ where: { caseId: ids.caseId, caseRevision: 2 } }), 1);
-    assert.equal(await tx.sabalanToPartnerSaleRecord.count({ where: { caseId: ids.caseId } }), 0);
+    assert.equal(await tx.sabalanToPartnerSaleRecord.count({ where: { caseId: ids.caseId } }), 1);
 
     await tx.user.update({ where: { id: ids.partnerId }, data: { departmentId: ids.departmentId } });
     await tx.salesContractEditSession.create({ data: { draftId: input.intent.recoveryId,
@@ -309,14 +318,20 @@ test('Case-scoped pricing creates the linked pair only during explicit finalizat
       ...finalizeIntent, idempotency: { actorId: ids.partnerId, operation: 'CASE_COMMIT', targetId: ids.caseId,
         key: `${ids.caseId}-finalize`, payloadHash: await canonicalHash({ schemaVersion: 1,
           type: 'CASE_COMMIT', ...finalizeIntent }) } });
-    assert.equal(finalized.ok && finalized.value.case?.state, 'COMMITTED');
-    assert.equal((await tx.salesContract.findFirstOrThrow({ where: { partnerCaseId: ids.caseId } })).status, 'DRAFT');
+    assert.equal(finalized.ok ? null : finalized.error.code, 'STATE_CONFLICT', 'output evidence cannot bypass current commercial approvals');
+    const { approvePartnerCommercialSales, acceptPartnerCustomer, assertPartnerFinancialFinality } = await import('../partnerSales/cases/commercialLifecycle');
+    await assert.rejects(() => assertPartnerFinancialFinality(tx, ids.caseId), /قطعی/);
+    const commercial = await tx.salesContract.findFirstOrThrow({ where: { partnerCaseId: ids.caseId } });
+    await approvePartnerCommercialSales(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: commercial.commercialRevision });
+    await acceptPartnerCustomer(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: commercial.commercialRevision, method: 'DIGITAL' });
+    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).state, 'COMMITTED');
+    assert.equal((await tx.salesContract.findFirstOrThrow({ where: { partnerCaseId: ids.caseId } })).status, 'SIGNED');
     await tx.$executeRawUnsafe('SET CONSTRAINTS partner_exact_pair IMMEDIATE');
     await tx.$executeRawUnsafe('SET CONSTRAINTS partner_exact_pair DEFERRED');
   });
 });
 
-test('customer-complete save creates one numbered unpriced Case without operational projections', async () => {
+test('customer-complete save creates one linked numbered unpriced note without operational projections', async () => {
   await fixture(async (tx, ids) => {
     const priced = await command(ids);
     const intent = { ...priced.intent, rows: priced.intent.rows.map(({ approvedRowBinding: _binding, ...row }) => row) };
@@ -337,17 +352,17 @@ test('customer-complete save creates one numbered unpriced Case without operatio
     assert.equal(persisted.state, 'DRAFT');
     assert.equal(persisted.pricingState, 'AWAITING_INQUIRY');
     assert.equal(persisted.customerConfirmationState, 'NOT_SENT');
-    assert.equal(persisted.internalRecord, null);
+    assert.deepEqual(persisted.internalRecord, { pricingState: 'AWAITING_INQUIRY' });
     assert.equal(persisted.head.pricingState, 'AWAITING_INQUIRY');
     const projection = persisted.head.internalProjection as Record<string, unknown>;
     assert.equal('accounting' in projection, false);
     assert.equal('fulfillment' in projection, false);
-    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 1);
+    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
     assert.equal(await tx.partnerInquiryUsage.count({ where: { caseId: ids.caseId } }), 0);
     const replay = await service(tx, ids).execute(input);
     assert.equal(replay.ok && replay.value.replayed, true);
     assert.equal(await tx.partnerSaleCase.count({ where: { id: ids.caseId } }), 1);
-    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 1);
+    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
 
     const reason = 'لغو پرونده پیش از تکمیل استعلام';
     const payloadHash = await canonicalHash({ schemaVersion: 1, type: 'CASE_CANCEL', reason });
@@ -369,7 +384,7 @@ test('customer-complete save creates one numbered unpriced Case without operatio
     } });
     assert.equal(retained.state, 'CANCELLED');
     assert.equal(retained.events[0]?.reason, reason);
-    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 1);
+    assert.equal(await tx.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 3);
   });
 });
 
@@ -386,6 +401,7 @@ test('concurrent first-save retries create one numbered unpriced Case and one du
       await tx.user.create({ data: { id: ids.partnerId, username: ids.partnerId,
         email: `${ids.partnerId}@example.invalid`, password: 'not-a-login', firstName: 'Partner', lastName: 'Concurrent' } });
       await tx.department.create({ data: { id: ids.departmentId, name: ids.departmentId, namePersian: 'فروش هم‌زمان' } });
+      await tx.user.update({ where: { id: ids.partnerId }, data: { departmentId: ids.departmentId } });
       await tx.partnerProfile.create({ data: { id: ids.profileId, userId: ids.partnerId, state: 'ACTIVE' } });
       await tx.partnerCommercialAccount.create({ data: { id: ids.accountId, profileId: ids.profileId } });
       await tx.partnerReleaseCohort.create({ data: { id: ids.profileId, name: ids.profileId,
@@ -414,7 +430,8 @@ test('concurrent first-save retries create one numbered unpriced Case and one du
     assert.equal(second.ok, true, JSON.stringify(second));
     if (first.ok && second.ok) assert.deepEqual([first.value.replayed, second.value.replayed].sort(), [false, true]);
     assert.equal(await setup.partnerSaleCase.count({ where: { id: ids.caseId } }), 1);
-    assert.equal(await setup.partnerCommercialNumber.count({ where: { caseId: ids.caseId } }), 1);
+    assert.deepEqual((await setup.partnerCommercialNumber.findMany({ where: { caseId: ids.caseId },
+      select: { purpose: true } })).map(number => number.purpose).sort(), ['CASE', 'CUSTOMER', 'INTERNAL']);
     assert.equal(await setup.partnerCommandOutcome.count({ where: { actorId: ids.partnerId,
       operation: 'CASE_SUBMIT', targetScope: ids.caseId } }), 1);
 
@@ -518,7 +535,7 @@ async function allocateFixturePair(tx: Prisma.TransactionClient, ids: Record<str
   assert.equal(allocated.ok, true, JSON.stringify(allocated));
 }
 
-async function createApprovedInquiryForCase(tx: Prisma.TransactionClient, ids: Record<string, string>, caseId: string) {
+async function createApprovedInquiryForCase(tx: Prisma.TransactionClient, ids: Record<string, string>, caseId: string, wholesaleUnitPrice = '100') {
   const suffix = randomUUID();
   const inquiryId = `partner-inquiry-${suffix}`, rowId = `partner-inquiry-row-${suffix}`;
   const assignmentId = `partner-inquiry-assignment-${suffix}`;
@@ -533,13 +550,13 @@ async function createApprovedInquiryForCase(tx: Prisma.TransactionClient, ids: R
     revision: 2, outcome: 'APPROVED', configurationHash, definition: { fixture: true } } });
   await tx.partnerInquiryApproval.create({ data: { id: `partner-inquiry-approval-${suffix}`, rowId,
     assignmentId, actorId: ids.responderId, commandId: `partner-inquiry-command-${suffix}`,
-    authorizationEvidenceId: `partner-inquiry-evidence-${suffix}`, wholesaleUnitPrice: '100', currency: 'IRT',
+    authorizationEvidenceId: `partner-inquiry-evidence-${suffix}`, wholesaleUnitPrice, currency: 'IRT',
     evidenceHash: approvalEvidenceHash, approvedAt: clock.now,
     expiresAt: new Date(clock.now.getTime() + 48 * 60 * 60 * 1000) } });
   return { inquiryId, rowId, revision: 2 };
 }
 
-test('asynchronous preparation finishes before the original inquiry is answered without allocating a contract', async () => {
+test('asynchronous preparation finishes before the original inquiry is answered while retaining the same numbered note', async () => {
   await fixture(async (tx, ids) => {
     const base = await command(ids);
     const intent = { ...base.intent, preparationCompleted: false };
@@ -557,8 +574,8 @@ test('asynchronous preparation finishes before the original inquiry is answered 
     if (!completed.ok || !completed.value.case) return;
     assert.equal(completed.value.case.preparationCompleted, true);
     assert.equal(completed.value.case.pricingState, 'AWAITING_INQUIRY');
-    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 0);
-    assert.equal(await tx.sabalanToPartnerSaleRecord.count({ where: { caseId: ids.caseId } }), 0);
+    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 1);
+    assert.equal(await tx.sabalanToPartnerSaleRecord.count({ where: { caseId: ids.caseId } }), 1);
     await bindInquiryToCase(tx, ids, ids.caseId, 1);
     const acceptance = await withApprovedBinding(ids, await reviseCommand(ids,
       { ...submitted, intent: completedIntent }, 2, completed.value.case.owner.integrityHash, 'accept-late-price'));
@@ -566,7 +583,7 @@ test('asynchronous preparation finishes before the original inquiry is answered 
     assert.equal(accepted.ok, true, JSON.stringify(accepted));
     if (!accepted.ok || !accepted.value.case) return;
     assert.equal(accepted.value.case.pricingState, 'READY_TO_FINALIZE');
-    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 0);
+    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 1);
     await allocateFixturePair(tx, ids, { ...submitted, intent: acceptance.intent }, accepted.value.case.owner);
     assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 1);
   });
@@ -631,12 +648,12 @@ test('a customer-visible revision invalidates the sent version and requires conf
     const revised = await service(tx, ids).execute(await withApprovedBinding(ids, visibleDraft));
     assert.equal(revised.ok, true, JSON.stringify(revised));
     if (!revised.ok || !revised.value.case) return;
-    assert.equal(revised.value.case.state, 'DRAFT');
+    assert.equal(revised.value.case.state, 'AWAITING_CUSTOMER_CONFIRMATION');
     assert.equal(revised.value.case.customerConfirmationState, 'RECONFIRMATION_REQUIRED');
     const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, select: {
       state: true, customerConfirmationState: true, customerContract: { select: { status: true } },
     } });
-    assert.deepEqual(root, { state: 'DRAFT', customerConfirmationState: 'RECONFIRMATION_REQUIRED',
+    assert.deepEqual(root, { state: 'AWAITING_CUSTOMER_CONFIRMATION', customerConfirmationState: 'RECONFIRMATION_REQUIRED',
       customerContract: { status: 'DRAFT' } });
   });
 });
@@ -658,8 +675,8 @@ test('draft revision advances the atomic pair once and rejects a stale competing
       customerContract: { select: { partnerRevision: true, partnerIntegrityHash: true } },
     } });
     assert.equal(root.headRevision, 2);
-    assert.equal(root.internalRecord, null);
-    assert.equal(root.customerContract, null);
+    assert.deepEqual(root.internalRecord, { expectedRevision: 2 });
+    assert.deepEqual(root.customerContract, { partnerRevision: 2, partnerIntegrityHash: root.integrityHash });
     assert.equal(await tx.partnerCaseRevision.count({ where: { caseId: ids.caseId } }), 2);
     assert.equal(await tx.partnerInquiryUsage.count({ where: { caseId: ids.caseId } }), 0);
     const replay = await service(tx, ids).execute(revision);
@@ -738,17 +755,18 @@ test('an explicit Draft revision reauthorizes and snapshots a changed Customer a
       return { ok: true, value: { evidenceId: `${request.projectId}-authorization` } };
     }).execute(revisedCommand);
     assert.equal(revised.ok, true);
-    assert.deepEqual(projectChecks.sort(), [ids.firstProjectId,
+    assert.deepEqual(projectChecks.sort(), [ids.firstProjectId, ids.firstProjectId,
       ids.secondProjectId, ids.secondProjectId].sort());
     const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, select: {
       customerId: true, customerContract: { select: { customerId: true } },
       revisions: { orderBy: { revision: 'asc' }, select: { partySnapshots: true } },
     } });
     assert.equal(root.customerId, ids.secondCustomerId);
-    assert.equal(root.customerContract, null);
+    assert.deepEqual(root.customerContract, { customerId: ids.secondCustomerId });
     assert.notDeepEqual(root.revisions[0].partySnapshots, root.revisions[1].partySnapshots);
     assert.equal((await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: ids.firstProjectId } })).wonSalesContractId, null);
-    assert.equal((await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: ids.secondProjectId } })).wonSalesContractId, null);
+    assert.equal((await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: ids.secondProjectId } })).wonSalesContractId,
+      (await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).customerContractId);
   });
 });
 
@@ -797,7 +815,7 @@ test('a Project already won by another Case cannot be stolen by submit or Draft 
   });
 });
 
-test('an unchanged Project binding must still belong to the exact current customer contract', async () => {
+test('an unchanged Project binding cannot be claimed by a different customer contract', async () => {
   await fixture(async (tx, ids) => {
     const base = await command(ids);
     const intent = { ...base.intent, projectId: ids.firstProjectId };
@@ -813,8 +831,11 @@ test('an unchanged Project binding must still belong to the exact current custom
     assert.equal(priced.ok, true, JSON.stringify(priced));
     if (!priced.ok || !priced.value.case) return;
     await allocateFixturePair(tx, ids, pricedCommand, priced.value.case.owner);
+    const foreign = await tx.salesContract.create({ data: { contractNumber: `${ids.caseId}-foreign`, title: 'QA', titlePersian: 'QA',
+      content: 'QA', customerId: ids.customerId, departmentId: ids.departmentId, createdBy: ids.managerId,
+      responsibleSellerId: ids.managerId, totalAmount: 0 } });
     await tx.crmPotentialProject.update({ where: { id: ids.firstProjectId }, data: {
-      wonSalesContractId: null, partnerRevision: { increment: 1 } } });
+      wonSalesContractId: foreign.id, partnerRevision: { increment: 1 } } });
     const revised = await service(tx, ids).execute(await withApprovedBinding(ids,
       await reviseCommand(ids, { ...submitted, intent: pricedCommand.intent }, 2,
         priced.value.case.owner.integrityHash, 'missing-project-binding')));
@@ -841,8 +862,8 @@ test('graph mismatch and an injected pair failure leave no partial Case, records
       payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent: paymentIntent }) } };
     const paymentMismatch = await service(tx, ids, undefined,
       async (_tx, review) => { reviews.push(review); }).execute(paymentCommand);
-    assert.equal(paymentMismatch.ok ? null : paymentMismatch.error.code, 'INTEGRITY_CONFLICT');
-    assert.deepEqual(reviews.map(review => review.code), ['CONFIG_MISMATCH', 'INTEGRITY_CONFLICT']);
+    assert.equal(paymentMismatch.ok ? null : paymentMismatch.error.code, 'INVALID_PAYLOAD');
+    assert.deepEqual(reviews.map(review => review.code), ['CONFIG_MISMATCH']);
     assert.equal(await tx.partnerSaleCase.count({ where: { id: ids.caseId } }), 0);
     await tx.$executeRaw`SAVEPOINT partner_case_result_failure`;
     const recoveryDenied = createPartnerCaseService({ actorId: ids.partnerId,
@@ -929,13 +950,17 @@ test('service-only aggregate submits, allocates and commits a real Case without 
     const commit={trigger:'FINALIZED' as const,authenticatedOutputEvidenceId:'service-output-evidence',lossAccepted:false};
     const lifecycle=createPartnerCaseLifecycleService({actorId:ids.partnerId,cancellationPurpose:'PARTNER',transaction:async work=>work(tx),authorize:async()=>({ok:true,value:{evidenceId:'commit-auth'}}),verifyOutputEvidence:async()=>({ok:true,value:{evidenceId:commit.authenticatedOutputEvidenceId,occurredAt:new Date().toISOString(),outputHash:configurationHash}}),cancelConfirmationSessions:async()=>({ok:true,value:{invalidatedSessionIds:[],preservedSnapshotIds:[]}}),recordEvidenceReview:async()=>undefined});
     const committed=await lifecycle.execute({schemaVersion:1,type:'CASE_COMMIT',commandId:'service-commit',correlationId:'service-commit',expected:saved.value.case.owner,expectedState:'DRAFT',...commit,idempotency:{actorId:ids.partnerId,operation:'CASE_COMMIT',targetId:ids.caseId,key:'service-commit',payloadHash:await canonicalHash({schemaVersion:1,type:'CASE_COMMIT',...commit})}});
-    assert.equal(committed.ok,true,JSON.stringify(committed));if(committed.ok)assert.equal(committed.value.case?.state,'COMMITTED');
+    assert.equal(committed.ok ? null : committed.error.code, 'STATE_CONFLICT');
+    const { approvePartnerCommercialSales, acceptPartnerCustomer } = await import('../partnerSales/cases/commercialLifecycle');
+    await approvePartnerCommercialSales(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: 1 });
+    await acceptPartnerCustomer(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: 1, method: 'DIGITAL' });
+    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).state, 'COMMITTED');
     await tx.$executeRawUnsafe('SET CONSTRAINTS partner_exact_pair IMMEDIATE');
     await tx.$executeRawUnsafe('SET CONSTRAINTS partner_exact_pair DEFERRED');
   });
 });
 
-test('deferred pair guard rejects service-only rows without valid frozen catalog rate evidence', async () => {
+test('linked allocation rejects service-only rows without valid frozen catalog rate evidence', async () => {
   await fixture(async(tx,ids)=>{
     await tx.$executeRawUnsafe('SAVEPOINT invalid_service_evidence');
     const base=await resolved(ids,ids.caseId), submitted=await command(ids);
@@ -944,9 +969,10 @@ test('deferred pair guard rejects service-only rows without valid frozen catalog
     const source:ResolvedCaseDraft={...base,graph,rows:[],serviceRows:[{serviceRowId:'invalid-service-row',sourceType:'tool',catalogItemId:'tool',catalogSnapshotVersion:'2026-10-03T00:00:00.000Z',title:'خدمت',unit:'meter',quantity:'2',retailUnitPrice:{amount:'150',currency:'IRT'},wholesaleUnitPriceAmount:'100',rateEvidenceId:'not-a-catalog-rate-proof'}],technicalSnapshot:{...base.technicalSnapshot,graphHash,rows:[],serviceRows:[{serviceRowId:'invalid-service-row',quantity:'2',unit:'meter'}]},sabalanPaymentPlan:{...base.sabalanPaymentPlan,installments:[]}};
     const intent={...submitted.intent,graphHash,rows:[],serviceRows:[{serviceRowId:'invalid-service-row'}],deliveries:[{deliveryId:'service-execution',date:'2026-10-03',destination:'محل اجرای خدمت',items:[],serviceItems:[{serviceRowId:'invalid-service-row',quantity:'2'}]}]};
     const input={...submitted,intent,idempotency:{...submitted.idempotency,payloadHash:await canonicalHash({schemaVersion:1,type:'CASE_SUBMIT',intent})}};
-    const service=createPartnerCaseService({actorId:ids.partnerId,transaction:async work=>work(tx),authorize:async()=>({ok:true,value:{evidenceId:'auth'}}),authorizeProject:async()=>({ok:true,value:{evidenceId:'project-auth'}}),recordEvidenceReview:async()=>undefined,resolveDraft:async()=>({ok:true,value:source}),consumeRecovery:async()=>({ok:true,value:undefined})});
-    const saved=await service.execute(input);assert.equal(saved.ok,true,JSON.stringify(saved));
-    await assert.rejects(()=>tx.$executeRawUnsafe('SET CONSTRAINTS partner_exact_pair IMMEDIATE'),/valid catalog rate evidence/);
+    const cases = service(tx, ids, undefined, undefined, undefined, () => source);
+    const saved=await cases.execute(input);assert.equal(saved.ok ? null : saved.error.code, 'INTEGRITY_CONFLICT');
+    assert.equal(await tx.partnerSaleCase.count({ where: { id: ids.caseId } }), 0);
+    assert.equal(await tx.salesContract.count({ where: { partnerCaseId: ids.caseId } }), 0);
     await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT invalid_service_evidence');
     await tx.$executeRawUnsafe('RELEASE SAVEPOINT invalid_service_evidence');
   });
@@ -997,7 +1023,7 @@ test('new commercial flow permits customer acceptance before prices and resets b
 });
 
 
-test('local customer OTP preview matches the sent code, public response hides it and old code fails after edit', async () => {
+test('customer OTP is sent only through SMS, responses hide it and old code fails after edit', async () => {
   const { createPrismaPartnerConfirmationHooks } = await import('../partnerSales/customerOutput/prismaHooks');
   const previous = { node: process.env.NODE_ENV, sms: process.env.SMS_IR_ENVIRONMENT, preview: process.env.PARTNER_LOCAL_CONFIRMATION_PREVIEW };
   process.env.NODE_ENV = 'development'; process.env.SMS_IR_ENVIRONMENT = 'sandbox'; process.env.PARTNER_LOCAL_CONFIRMATION_PREVIEW = 'true';
@@ -1022,7 +1048,8 @@ test('local customer OTP preview matches the sent code, public response hides it
       } } });
       const sent = await hooks.sendForConfirmation({ contractId: root.customerContractId!, requestedBy: ids.partnerId });
       assert.equal(sent?.success, true, sent?.error);
-      assert.equal(sent?.data?.debugOtp, messages[0].code);
+      assert.match(messages[0].code, /^\d{6}$/);
+      assert.equal(JSON.stringify(sent).includes('debugOtp'), false);
       const stored = await tx.contractPublicConfirmation.findFirstOrThrow({ where: { contractId: root.customerContractId! } });
       assert.notEqual(stored.otpCodeHash, messages[0].code);
       assert.match(stored.otpCodeHash, /^[0-9a-f]{64}$/);
@@ -1368,6 +1395,18 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
   const { currentPricingEvidenceIsValid } = await import('../partnerSales/cases/lifecycle');
   await fixture(async (tx, ids) => {
     const final = await finalCommercialFixture(tx, ids);
+    const { capturePartnerContractedQuantities } = await import('../partnerSales/fulfillment/quantityStore');
+    const { FulfillmentViewSchema } = await import('@sabalanerp/partner-sales-contracts');
+    const initialHead = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: { caseId: ids.caseId, revision: final.owner.revision } } });
+    const physical = FulfillmentViewSchema.parse((initialHead.internalProjection as Prisma.JsonObject).fulfillment);
+    for (const product of physical.products) await tx.partnerFulfillmentLineage.create({ data: {
+      id: `${ids.caseId}-lineage`, caseId: ids.caseId, caseRevision: physical.owner.revision,
+      integrityHash: physical.owner.integrityHash, internalRecordId: physical.recordId,
+      productRowId: product.productRowId, quantity: product.quantity, unit: product.unit,
+      recipient: { customerId: ids.customerId, displayName: 'مشتری تست', phone: '09120000000', destination: 'مقصد تست' },
+      deliveryIds: physical.deliveries.map(delivery => delivery.deliveryId), commandId: `${ids.caseId}-lineage-command`,
+    } });
+    await capturePartnerContractedQuantities(tx, physical);
     const lifecycle = createPartnerCaseLifecycleService({ actorId: ids.partnerId, cancellationPurpose: 'PARTNER', transaction: work => work(tx),
       authorize: async () => ({ ok: true, value: { evidenceId: 'fixture-cancel' } }),
       verifyOutputEvidence: async () => ({ ok: false, error: { code: 'STATE_CONFLICT', status: 409, message: 'unused' } }),
@@ -1409,6 +1448,9 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
     await approvePartnerCommercialSales(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: current.commercialRevision });
     assert.equal((await readPartnerCommercialState(tx, ids.caseId))?.status, 'FINAL');
     assert.equal(await tx.partnerCaseEvent.count({ where: { caseId: ids.caseId, type: 'CASE_COMMITTED' } }), 1);
+    assert.equal(await tx.shipmentQuantityEvidence.count({ where: { partnerCaseId: ids.caseId,
+      partnerCaseRevision: saved.ok && saved.value.case ? saved.value.case.owner.revision : -1, kind: 'CONTRACTED_SET' } }), 1,
+      'reactivation finality publishes the new physical baseline once');
     assert.equal(await tx.partnerCaseEvent.count({ where: { caseId: ids.caseId, type: 'CASE_RECOMMITTED' } }), 1);
     assert.equal(await tx.partnerFinancialAdjustment.count({ where: { caseId: ids.caseId } }), 2);
     const adjustments = await tx.partnerFinancialAdjustment.findMany({ where: { caseId: ids.caseId } });
@@ -1430,12 +1472,9 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
       const row = await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } });
       await reactivatePartnerCase(tx, { ...input, expected, commercialRevision: row.commercialRevision, commandId: randomUUID() });
     };
-    const verification = await tx.crossWorkspaceDuty.findFirstOrThrow({ where: { sourceType: 'SALES_CONTRACT_CORRECTION',
-      sourceActionCode: 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION', status: 'OPEN',
-      sourceId: { in: (await tx.accountingCorrectionRequest.findMany({ where: { contractId: contract.id } })).map(row => row.id) } } });
-    const { respondToCrossWorkspaceDuty } = await import('../crossWorkspaceDutyModule');
-    await respondToCrossWorkspaceDuty(tx, { dutyId: verification.id, actorUserId: ids.managerId, actionCode: 'VERIFY', reason: 'بررسی نتیجه اصلاح پیش از درخواست بعدی',
-      expectedSourceVersion: verification.sourceVersion, expectedEnvelopeVersion: verification.envelopeVersion, policyVersion: 2, now: new Date() });
+    assert.equal(await tx.crossWorkspaceDuty.count({ where: { sourceType: 'SALES_CONTRACT_CORRECTION',
+      sourceActionCode: 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION',
+      sourceId: { in: (await tx.accountingCorrectionRequest.findMany({ where: { contractId: contract.id } })).map(row => row.id) } } }), 0);
     await grant();
     await reopen(await cancelCurrent());
     await reopen(await cancelCurrent());
@@ -1611,10 +1650,11 @@ test('committed Partner edit creation context retains its owned technical recove
   await fixture(async (tx, ids) => {
     const final = await finalCommercialFixture(tx, ids);
     const draftId = `recovery-${randomUUID()}`;
+    const [databaseClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
     await tx.salesContractEditSession.create({ data: { ownerUserId: ids.partnerId,
       purpose: 'PARTNER_TECHNICAL', schemaVersion: 1, contractId: final.root.customerContractId, draftId,
       baseRevision: 0, browserSessionId: randomUUID(), leaseToken: randomUUID(),
-      recovery: { kind: 'partner-technical-recovery', version: 1, recoveryRevision: 1, updatedAt: Date.now(),
+      recovery: { kind: 'partner-technical-recovery', version: 1, recoveryRevision: 1, updatedAt: databaseClock.now.getTime(),
         partnerCaseId: ids.caseId, draft: { schemaVersion: 1, inputRevision: 1, rows: [] }, validatedSnapshots: [] } } });
     const app = express();
     const database = { $transaction: (work: (client: Prisma.TransactionClient) => unknown) => work(tx) };
@@ -1655,9 +1695,107 @@ test('opening and returning an unchanged Partner correction preserves finality a
     assert.equal(after.signedAt?.getTime(), before.signedAt?.getTime());
     assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).integrityHash, final.owner.integrityHash);
     assert.equal(await tx.partnerFinancialAdjustment.count({ where: { caseId: ids.caseId } }), 0);
-    assert.equal((await tx.accountingCorrectionRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'SALES_EDITED');
+    assert.equal((await tx.accountingCorrectionRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'RESOLVED');
+    assert.equal(await tx.crossWorkspaceDuty.count({ where: { sourceId: request.id, sourceActionCode: 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION' } }), 0);
     const replay = await service(tx, ids).execute(unchanged);
     assert.ok(replay.ok && replay.value.replayed);
+    await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+  });
+});
+
+test('edited Partner note changes effective commitment only at renewed finality, once, without a second accounting approval', async () => {
+  const { approvePartnerCommercialSales, acceptPartnerCustomer, reconcilePartnerCommercialFinality } = await import('../partnerSales/cases/commercialLifecycle');
+  const { readPersistedPartnerEvents } = await import('../partnerSales/events/persisted');
+  const { caseHistory } = await import('../partnerSales/reporting/history');
+  const runtime = await import('@sabalanerp/partner-sales-contracts');
+  await fixture(async (tx, ids) => {
+    const final = await finalCommercialFixture(tx, ids);
+    const request = await approvePartnerEdit(tx, { contractId: final.root.customerContractId!, actorUserId: ids.responderId,
+      reason: 'اصلاح قرارداد و قیمت خرید', requestKey: randomUUID(), now: new Date() });
+    const { readCurrentPartnerCaseViews } = await import('../partnerSales/cases/lifecycle');
+    const { capturePartnerContractedQuantities } = await import('../partnerSales/fulfillment/quantityStore');
+    const previous = await readCurrentPartnerCaseViews(tx, ids.caseId);
+    assert.ok(previous);
+    const physical = runtime.FulfillmentViewSchema.parse((previous.row.head.internalProjection as Prisma.JsonObject).fulfillment);
+    for (const product of physical.products) await tx.partnerFulfillmentLineage.create({ data: {
+      id: `${ids.caseId}-lineage`, caseId: ids.caseId, caseRevision: physical.owner.revision,
+      integrityHash: physical.owner.integrityHash, internalRecordId: physical.recordId,
+      productRowId: product.productRowId, quantity: product.quantity, unit: product.unit,
+      recipient: { customerId: ids.customerId, displayName: 'مشتری تست', phone: '09120000000', destination: 'مقصد تست' },
+      deliveryIds: physical.deliveries.map(delivery => delivery.deliveryId), commandId: `${ids.caseId}-lineage-command`,
+    } });
+    await capturePartnerContractedQuantities(tx, physical);
+    const { shipmentQuantityEvidenceIntegrityHash } = await import('../shipmentQuantityProjectionStore');
+    const reservedAt = new Date();
+    const reservation = { id: `${ids.caseId}-reservation`, sourceKind: 'PARTNER_CASE' as const, contractId: null, contractItemId: null,
+      partnerCaseId: ids.caseId, partnerLineageId: `${ids.caseId}-lineage`, partnerCaseRevision: physical.owner.revision,
+      partnerIntegrityHash: physical.owner.integrityHash, productRowId: physical.products[0].productRowId, unit: physical.products[0].unit,
+      kind: 'ALLOCATION_FINALIZED' as const, quantity: '2.000', effectiveAt: reservedAt.toISOString(), recordedAt: reservedAt.toISOString(),
+      sourceType: 'PARTNER_TEST_RESERVATION', sourceId: `${ids.caseId}-reservation`, sourceVersion: 1, integrityHash: '', metadata: {} };
+    await tx.shipmentQuantityEvidence.create({ data: { ...reservation, integrityHash: shipmentQuantityEvidenceIntegrityHash(reservation),
+      effectiveAt: reservedAt, recordedAt: reservedAt } });
+    const cancellation = createPartnerCaseLifecycleService({ actorId: ids.partnerId, cancellationPurpose: 'PARTNER',
+      transaction: work => work(tx), authorize: async () => ({ ok: true, value: { evidenceId: 'reserved-cancel' } }),
+      verifyOutputEvidence: async () => ({ ok: false, error: { code: 'STATE_CONFLICT', status: 409, message: 'unused' } }),
+      cancelConfirmationSessions: async () => ({ ok: true, value: { invalidatedSessionIds: [], preservedSnapshotIds: [] } }),
+      recordEvidenceReview: async () => undefined });
+    const cancelReason = 'لغو با رزرو تعیین تکلیف نشده';
+    const cancelled = await cancellation.execute({ schemaVersion: 1, type: 'CASE_CANCEL', commandId: randomUUID(), correlationId: randomUUID(),
+      expected: final.owner, expectedState: 'COMMITTED', reason: cancelReason,
+      idempotency: { actorId: ids.partnerId, operation: 'CASE_CANCEL', targetId: ids.caseId, key: randomUUID(),
+        payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_CANCEL', reason: cancelReason }) } });
+    assert.equal(cancelled.ok ? null : cancelled.error.code, 'DEPENDENCY_BLOCKED',
+      'cancellation cannot leave finalized stock reservation active');
+    const reduced = await reviseCommand(ids, final.input, final.owner.revision, final.owner.integrityHash, 'below-reservation', 'COMMITTED');
+    const baseGraph = graphFor(physical.products[0].productRowId);
+    const reducedGraph = parseCanonicalProductGraph({ ...baseGraph, rows: baseGraph.rows.map(row => ({ ...row,
+      commercial: { requestedQuantity: '1', totalAmountToman: '100',
+        calculationSnapshot: { kind: 'readyPiece', unit: 'count', quantity: '1' } } })) });
+    const reducedHash = await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph: reducedGraph });
+    reduced.intent.graphHash = reducedHash;
+    reduced.intent.deliveries[0].items[0].quantity = '1';
+    reduced.intent.customerPaymentPlan.installments[0].amount.amount = '150';
+    reduced.idempotency.payloadHash = await canonicalHash({ schemaVersion: 1, type: reduced.type, intent: reduced.intent });
+    const blocked = await service(tx, ids, undefined, undefined, undefined, draft => ({ ...draft, graph: reducedGraph,
+      rows: draft.rows.map(row => ({ ...row, quantity: '1' })),
+      technicalSnapshot: { ...draft.technicalSnapshot, graphHash: reducedHash,
+        rows: draft.technicalSnapshot.rows.map(row => ({ ...row, quantity: '1' })) },
+      sabalanPaymentPlan: { ...draft.sabalanPaymentPlan, installments: draft.sabalanPaymentPlan.installments.map(item => ({
+        ...item, amount: { ...item.amount, amount: '100' } })) },
+    })).execute(reduced);
+    assert.equal(blocked.ok ? null : blocked.error.code, 'DEPENDENCY_BLOCKED', 'commercial editing cannot reduce already reserved stock');
+    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, final.owner.revision);
+    assert.equal(await tx.shipmentQuantityEvidence.count({ where: { partnerCaseId: ids.caseId } }), 2);
+    const binding = await createApprovedInquiryForCase(tx, ids, ids.caseId, '75');
+    const changed = await reviseCommand(ids, final.input, final.owner.revision, final.owner.integrityHash, 'revised-finality', 'COMMITTED');
+    changed.intent.rows[0].approvedRowBinding = binding;
+    changed.idempotency.payloadHash = await canonicalHash({ schemaVersion: 1, type: changed.type, intent: changed.intent });
+    const saved = await service(tx, ids, undefined, undefined, undefined, draft => ({ ...draft,
+      rows: draft.rows.map(row => ({ ...row, wholesaleUnitPriceAmount: '75' })),
+      sabalanPaymentPlan: { ...draft.sabalanPaymentPlan, installments: draft.sabalanPaymentPlan.installments.map(item => ({
+        ...item, amount: { ...item.amount, amount: '150' } })) },
+    })).execute(changed);
+    assert.ok(saved.ok && saved.value.case, JSON.stringify(saved));
+    const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: final.root.customerContractId! } });
+    assert.equal(contract.status, 'DRAFT');
+    assert.equal(await tx.partnerFinancialAdjustment.count({ where: { caseId: ids.caseId } }), 0);
+    await approvePartnerCommercialSales(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: contract.commercialRevision });
+    assert.equal(await tx.partnerFinancialAdjustment.count({ where: { caseId: ids.caseId } }), 0);
+    await acceptPartnerCustomer(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: contract.commercialRevision, method: 'DIGITAL' });
+    await reconcilePartnerCommercialFinality(tx, ids.caseId, ids.partnerId);
+    const adjustments = await tx.partnerFinancialAdjustment.findMany({ where: { caseId: ids.caseId } });
+    assert.equal(adjustments.length, 1);
+    assert.equal(adjustments[0].delta.toString(), '-50');
+    const rows = await tx.partnerCaseEvent.findMany({ where: { caseId: ids.caseId }, orderBy: { sequence: 'asc' } });
+    const events = readPersistedPartnerEvents({ id: ids.caseId, internalRecordId: final.root.internalRecordId! }, rows);
+    const history = caseHistory(runtime, events);
+    assert.equal(history.effective?.revision, saved.ok && saved.value.case?.owner.revision);
+    assert.equal(history.corrections.length, 1);
+    assert.equal(await tx.shipmentQuantityEvidence.count({ where: { partnerCaseId: ids.caseId,
+      partnerCaseRevision: saved.ok && saved.value.case ? saved.value.case.owner.revision : -1, kind: 'CONTRACTED_SET' } }), 1,
+      'renewed finality publishes the current physical obligation without deleting the previous baseline');
+    assert.equal((await tx.accountingCorrectionRequest.findUniqueOrThrow({ where: { id: request.id } })).status, 'RESOLVED');
+    assert.equal(await tx.crossWorkspaceDuty.count({ where: { sourceId: request.id, sourceActionCode: 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION' } }), 0);
     await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
   });
 });
@@ -1704,4 +1842,39 @@ test('approved committed Partner correction acquires reads and checkpoints its r
     assert.equal((await ports.lease.acquire({ ...input, takeover: true })).ok, false, 'takeover cannot bypass expired manager permission');
     assert.equal((await ports.recovery.read(access)).ok, false, 'an existing lease cannot bypass expired permission');
   });
+});
+
+
+test('approved finalized Partner correction can request a successor price while retaining finality until commercial save', async () => {
+  await fixture(async (tx, ids) => {
+    const final = await finalCommercialFixture(tx, ids);
+    const inquiries = createPartnerInquiryService({ actorId: ids.partnerId, transaction: work => work(tx),
+      authorize: async () => ({ ok: true, value: { evidenceId: 'fixture' } }),
+      resolveInitialResponder: async () => ({ ok: true, value: { responderId: ids.responderId, eligibilityEvidence: {} } }),
+      resolveConfiguration: async () => ({ ok: true, value: { identity: {
+        schemaVersion: 1, partnerSellerId: ids.partnerId, catalogProductId: 'catalog-stone', family: 'prepared', unit: 'count',
+        configuration: [{ key: 'technicalConfigurationHash', value: configurationHash }],
+        materialRateEvidenceId: 'fixture-rate', materialRateHash: configurationHash, components: [], currency: 'IRT',
+        calculationPolicyVersion: 'fixture-v1', roundingPolicyVersion: 'fixture-v1',
+      }, description: 'سنگ آماده', configuration: [{ label: 'تعداد', value: '۲' }] } }),
+    });
+    const payload = { schemaVersion: 1 as const, type: 'CASE_PRICING_SUBMIT' as const, caseId: ids.caseId,
+      inquiryId: `${ids.caseId}-correction-pricing`, expected: final.owner,
+      rows: [{ rowId: `${ids.caseId}-successor`, configuration: { recoveryId: `${ids.caseId}-recovery`,
+        recoveryRevision: 2, productRowId: `${ids.caseId}-product-row` },
+        predecessor: { rowId: ids.inquiryRowId, revision: 2, reason: 'کاهش قیمت' } }] };
+    const command = { ...payload, commandId: randomUUID(), correlationId: randomUUID(),
+      idempotency: { actorId: ids.partnerId, operation: payload.type, targetId: ids.caseId,
+        key: randomUUID(), payloadHash: await canonicalHash(payload) } };
+    assert.equal((await inquiries.execute(command)).ok, false, 'finalized inquiry needs reviewed permission');
+    await approvePartnerEdit(tx, { contractId: final.root.customerContractId!, actorUserId: ids.responderId,
+      reason: 'بررسی قیمت', requestKey: randomUUID(), now: new Date() });
+    const submitted = await inquiries.execute(command);
+    assert.ok(submitted.ok, JSON.stringify(submitted));
+    assert.equal((await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: payload.rows[0].rowId } })).outcome, 'PENDING');
+    assert.equal((await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: ids.inquiryRowId } })).outcome, 'APPROVED');
+    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).state, 'COMMITTED');
+    assert.equal((await tx.salesContract.findUniqueOrThrow({ where: { id: final.root.customerContractId! } })).status, 'SIGNED');
+    assert.ok((await inquiries.execute(command)).ok, 'same request replays');
+  }, 48 * 60 * 60 * 1000, true);
 });

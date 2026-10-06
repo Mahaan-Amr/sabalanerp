@@ -8,6 +8,34 @@ import type {
 } from '../partnerSales/retailCollections/repository';
 
 const hash = (value: string) => `sha256-v1:${value.repeat(64)}`;
+test('draft plan lineage and prior commercial amounts survive renewed finality', async () => {
+  const fixture = new RetailFixture();
+  const historical = structuredClone(initialPlan);
+  const draft: RetailCollectionSource['customerPaymentPlan'] = { planId: 'draft-plan', version: 1,
+    effectiveDate: historical.effectiveDate, installments: [] };
+  historical.version = 2;
+  historical.predecessorPlanId = draft.planId;
+  const current = structuredClone(initialPlan);
+  current.planId = 'renewed-plan'; current.version = 3; current.predecessorPlanId = historical.planId;
+  current.installments = current.installments.map(item => ({ ...item,
+    installmentId: `renewed-${item.installmentId}`, amount: { ...item.amount, amount: String(Number(item.amount.amount) * 2) } }));
+  fixture.source.retailPayable = { amount: '2000', currency: 'IRR' };
+  fixture.source.customerPaymentPlan = current;
+  fixture.source.customerOutputPaymentPlan = structuredClone(current);
+  fixture.source.privateReportPaymentPlan = structuredClone(current);
+  fixture.source.planHistory = [draft, historical, current];
+  fixture.source.planRevisionFacts = {
+    [draft.planId]: { retailPayable: { amount: '1000', currency: 'IRR' }, preparationCompleted: false },
+    [historical.planId]: { retailPayable: { amount: '1000', currency: 'IRR' }, preparationCompleted: true },
+    [current.planId]: { retailPayable: { amount: '2000', currency: 'IRR' }, preparationCompleted: true },
+  };
+  const service = createPartnerRetailCollectionsService(fixture);
+  const result = await service.read(fixture.source.owner);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.summary.balance, '2000');
+  fixture.source.planRevisionFacts[historical.planId].retailPayable.amount = '999';
+  assert.equal((await service.read(fixture.source.owner)).ok, false);
+});
 const initialPlan: RetailCollectionSource['customerPaymentPlan'] = {
   planId: 'plan-324-v1', version: 1, effectiveDate: '2026-08-01',
   installments: [

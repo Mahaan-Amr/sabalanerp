@@ -4,6 +4,24 @@ import { partnerPaymentChoice } from './partnerPaymentMethodAdapter';
 import type { CustomerPaymentPlan } from '@sabalanerp/partner-sales-contracts';
 
 type PartnerInstallment = CustomerPaymentPlan['installments'][number];
+const paymentTerms = (item: PartnerInstallment) => JSON.stringify([
+  item.method, partnerPaymentChoice(item), item.dueDate, item.amount.currency, item.amount.amount,
+  item.nationalCode?.trim() || null, item.check?.number?.trim() || null, item.check?.bank?.trim() || null,
+  item.check?.dueDate?.trim() || null, item.check?.ownerName?.trim() || null, item.check?.handoverDate?.trim() || null,
+]);
+
+/** Projection installment IDs belong to a revision. Match the loaded wizard's
+ * exact persisted terms once, consuming each saved installment at most once.
+ * Later new installments still cannot inherit this retained-payment exception. */
+export function retainedPartnerWizardPayments(saved: CustomerPaymentPlan, loaded: CustomerPaymentPlan): CustomerPaymentPlan {
+  const remaining = [...saved.installments];
+  return { ...saved, installments: loaded.installments.flatMap(item => {
+    const index = remaining.findIndex(candidate => paymentTerms(candidate) === paymentTerms(item));
+    if (index < 0) return [];
+    const [persisted] = remaining.splice(index, 1);
+    return [{ ...persisted, installmentId: item.installmentId }];
+  }) };
+}
 export type PartnerPaymentFieldErrors = Partial<Record<'amount' | 'date' | 'number' | 'bank' | 'ownerName' | 'handoverDate' | 'nationalCode', string>>;
 
 export function partnerPaymentNeedsNationalCode(method: PartnerInstallment['method'], date: string, currentDate: string): boolean {
@@ -20,13 +38,7 @@ export function partnerPaymentNeedsNationalCode(method: PartnerInstallment['meth
 /** Only the exact retained installment is grandfathered. Opening an editor
  * must not turn a formerly same-day payment into a new dated payment. */
 export function isRetainedPartnerPayment(installment: PartnerInstallment, saved?: PartnerInstallment): boolean {
-  const identity = (item: PartnerInstallment) => JSON.stringify([
-    item.installmentId, item.method, partnerPaymentChoice(item), item.dueDate,
-    item.amount.currency, item.amount.amount, item.nationalCode?.trim() || null,
-    item.check?.number?.trim() || null, item.check?.bank?.trim() || null, item.check?.dueDate?.trim() || null,
-    item.check?.ownerName?.trim() || null, item.check?.handoverDate?.trim() || null,
-  ]);
-  return Boolean(saved && identity(installment) === identity(saved));
+  return Boolean(saved && installment.installmentId === saved.installmentId && paymentTerms(installment) === paymentTerms(saved));
 }
 
 export function validatePartnerPaymentInstallment(installment: PartnerInstallment, currentDate: string,

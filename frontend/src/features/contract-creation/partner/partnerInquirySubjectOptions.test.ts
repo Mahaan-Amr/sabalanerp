@@ -8,7 +8,7 @@ test('initial inquiry options include primary and additional-material pricing su
   const primary = fixture.technicalSaved.rows[0].configurationRef;
   const additional = { ...primary, productRowId: 'additional-material-subject' };
   const options = buildPartnerInquirySubjectOptions({
-    saved: { ...fixture.technicalSaved, pricingSubjects: [
+    saved: { ...fixture.technicalSaved, replayed: false, pricingSubjects: [
       { configurationRef: primary, role: 'PRIMARY' },
       { configurationRef: additional, role: 'ADDITIONAL_MATERIAL' },
     ] },
@@ -20,7 +20,7 @@ test('initial inquiry options include primary and additional-material pricing su
       configuration: { kind: 'readyPiece', unit: 'count', quantity: '1' },
     }], dependents: [], stairSystems: [], editingValues: [] },
     catalog: [{ catalogItemId: 'catalog-stone', catalogSnapshotVersion: '2026-08-01T00:00:00.000Z',
-      name: 'سنگ اصلی', dimensions: {}, families: ['prepared'] }],
+      name: 'سنگ اصلی', code: 'TEST', dimensions: {}, families: ['prepared'], salesUnits: { prepared: 'count', volumetric: 'ton' }, attributes: { stoneType: 'تراورتن', mine: 'یزد', finish: 'صیقل', color: 'روشن', quality: 'درجه یک', cuttingDimension: 'طولی' }, isAvailable: true }],
   });
 
   assert.deepEqual(options.map(option => option.productRowId), [primary.productRowId, additional.productRowId]);
@@ -29,7 +29,7 @@ test('initial inquiry options include primary and additional-material pricing su
   assert.match(options[1].label, /جزء جانبی/);
 
   const withoutCatalog = buildPartnerInquirySubjectOptions({
-    saved: { ...fixture.technicalSaved, pricingSubjects: [{ configurationRef: primary, role: 'PRIMARY' }] },
+    saved: { ...fixture.technicalSaved, replayed: false, pricingSubjects: [{ configurationRef: primary, role: 'PRIMARY' }] },
     draft: { schemaVersion: 1, inputRevision: 1, rows: [], dependents: [], stairSystems: [], editingValues: [] },
     catalog: [],
   });

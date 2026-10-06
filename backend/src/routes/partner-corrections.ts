@@ -68,6 +68,12 @@ export function createPartnerCorrectionRouter(input: { database?: PrismaClient; 
             editableCustomerInstallmentIds } };
         }
         if (!opportunity) return { ok: true as const, value: null };
+        // Common commercial corrections finish through seller/customer finality;
+        // their durable evidence is not another one-shot editing opportunity.
+        if (opportunity.calendarVersion === 'COMMON_COMMERCIAL_FINALITY_V1') {
+          return { ok: true as const, value: { opportunityId: opportunity.id, scope: opportunity.scope,
+            status: 'EFFECTIVE', saved: true, editableCustomerInstallmentIds } };
+        }
         const rejected = opportunity.gates.some(gate => gate.outcome === 'REJECT');
         const effective = opportunity.gates.length >= 5 && !rejected;
         return { ok: true as const, value: { opportunityId: opportunity.id, scope: opportunity.scope,

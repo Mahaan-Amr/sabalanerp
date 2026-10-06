@@ -1,5 +1,6 @@
 import { ContractStatus, Prisma, type PrismaClient } from '@prisma/client';
 import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
+import { closePartnerCommercialEditPermission } from './crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter';
 import { withRecoveryBackgroundWrite } from './recoveryRuntime';
 import { assertContractQuantityEvidenceReadyForFinalization } from './contractQuantityEvidenceGuard';
 import { getEffectiveUserAccess } from './effectiveAccessService';
@@ -79,6 +80,19 @@ const audit = (tx: Database, contractId: string, actorId: string, action: string
 export const finishCommercialCorrection = async (tx: Database, contractId: string, actorId: string, specialCredit = false) => {
   const correction = await tx.accountingCorrectionRequest.findFirst({ where: { contractId, status: 'APPROVED_FOR_SALES_EDIT' } });
   if (!correction) return;
+  const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
+  if (contract?.partnerKind === 'PARTNER_CUSTOMER' && contract.partnerCaseId) {
+    // Partner corrections finish with renewed commercial finality (or an
+    // unchanged final return), without a second Accounting review round.
+    if (contract.status !== 'SIGNED' || contract.salesApprovalRevision !== contract.commercialRevision ||
+        contract.customerAcceptanceRevision !== contract.commercialRevision) return;
+    const duty = await tx.crossWorkspaceDuty.findFirst({ where: { sourceId: correction.id,
+      sourceType: 'SALES_CONTRACT_CORRECTION', sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN' } });
+    if (duty) await closePartnerCommercialEditPermission(tx as Prisma.TransactionClient, { dutyId: duty.id,
+      actorUserId: actorId, reason: 'اصلاح همکار با حفظ یا تکمیل تأییدهای نسخه جاری پایان یافت.', now: new Date(),
+      outcome: 'PARTNER_CORRECTION_FINALIZED' });
+    return;
+  }
   await completeSalesContractCorrectionEdit(tx, { contractId, actorUserId: actorId,
     note: specialCredit ? 'قرارداد اعتباری اصلاح‌شده مجدداً تأیید فروش شد.' : 'قرارداد اصلاح‌شده مجدداً قطعی شد.', policyVersion: 2, commercialFinality: true });
 };

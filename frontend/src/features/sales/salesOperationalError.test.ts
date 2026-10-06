@@ -116,7 +116,8 @@ test('safe 5xx mutation cause does not bypass reconciliation before retry', () =
 test('resolved failure envelopes cannot continue through a success path', () => {
   const response = { data: { success: false, error: 'اطلاعات نامعتبر است؛ مقادیر مشخص‌شده را اصلاح کنید.' } };
   assert.throws(() => assertSuccessfulSalesResponse(response), (failure: any) => failure.response === response);
-  assert.doesNotThrow(() => assertSuccessfulSalesResponse({ data: { success: true, data: { id: 'ok' } } }));
+  const success = { data: { success: true, data: { id: 'ok' } } };
+  assert.doesNotThrow(() => assertSuccessfulSalesResponse(success));
   assert.throws(() => assertSuccessfulSalesResult(response.data), (failure: any) => failure.response?.data === response.data);
 });
 

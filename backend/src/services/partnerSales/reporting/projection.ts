@@ -31,6 +31,13 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
     if (!value || runtime.checkExpectedRevision(ref, value.view.owner)) return conflict();
     return value;
   };
+  const voidRevision = (event: Extract<PartnerEvent, { type: 'CASE_VOIDED' }>) => {
+    const effective = [history.commitment, ...history.corrections, ...history.recommitments]
+      .filter(item => item && item.owner.revision <= event.owner.revision && item.recordedAt <= event.recordedAt)
+      .sort((left, right) => left!.owner.revision - right!.owner.revision).at(-1);
+    if (!effective) return conflict();
+    return revision(effective.owner);
+  };
   const sales: string[] = []; const margins: string[] = [];
   if (history.commitment) {
     const initial = revision(history.commitment.owner);
@@ -62,7 +69,7 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
     }
   }
   for (const event of history.voids.filter(item => inPeriod(item, period))) {
-    const voided = revision(event.owner);
+    const voided = voidRevision(event);
     // Cancelling an activation before renewed finality has no new retail sale
     // to reverse. Its audited wholesale adjustment is zero.
     const neutralization = events.filter(item => item.type === 'SABALAN_ADJUSTMENT' && event.adjustmentEventIds.includes(item.eventId));
@@ -101,7 +108,7 @@ function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: Par
     } else if (event.type === 'RETAIL_RECEIPT_REVERSED') {
       chartTransactions.push(transaction(event, 'CUSTOMER_RECEIPT_REVERSAL', '0', event.amount.amount, negate(event.amount.amount)));
     } else if (event.type === 'CASE_VOIDED') {
-      const voided = revision(event.owner);
+      const voided = voidRevision(event);
       const neutralization = events.filter(item => item.type === 'SABALAN_ADJUSTMENT' && event.adjustmentEventIds.includes(item.eventId));
       const emptyCycle = neutralization.length && sum(neutralization.map(item => item.type === 'SABALAN_ADJUSTMENT' ? item.delta : '0')) === '0';
       chartTransactions.push(transaction(event, 'VOID', '0', emptyCycle ? '0' : negate(voided.comparable.retail.amount)));

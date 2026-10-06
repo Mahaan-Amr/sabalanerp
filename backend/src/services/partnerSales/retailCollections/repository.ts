@@ -29,6 +29,9 @@ export type RetailCollectionSource = {
   customerOutputPaymentPlan: PaymentPlan;
   privateReportPaymentPlan: PaymentPlan;
   planHistory: readonly PaymentPlan[];
+  /** Immutable commercial facts from the revision that owns each saved plan.
+   * Draft plans may be incomplete; they are retained for lineage, not collection. */
+  planRevisionFacts?: Readonly<Record<string, { retailPayable: Money; preparationCompleted: boolean }>>;
   receipts: readonly RetailCollectionReceipt[];
   events: readonly PartnerEvent[];
   permission: PermissionContext;

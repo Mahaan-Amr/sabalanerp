@@ -43,16 +43,16 @@ test('service-only wizard recovery preserves separate service references and omi
   assert.equal(enterPartnerWizard({ base, validated, serviceRows: [], now: Date.now() }), null);
 });
 
-test('independent services never create or retain a delivery allocation', () => {
+test('invalid product allocations for services are retained for explicit repair', () => {
   const deliveries: any = [{ date: '2026-10-03', destination: 'یزد', projectManagerName: 'مدیر', receiverName: 'گیرنده',
     items: [{ productRowId: 'service:1', quantity: '1' }] }];
-  assert.deepEqual(reconcilePartnerDeliveriesToProducts(deliveries, []), []);
+  assert.deepEqual(reconcilePartnerDeliveriesToProducts(deliveries, []), deliveries);
   assert.ok(partnerDeliveryPlanIssue(deliveries, []));
   assert.equal(partnerDeliveryPlanIssue([], []), null);
 });
 
 
-test('service execution scheduling preserves separate IDs, trims changed quantities and requires full allocation', () => {
+test('service execution scheduling preserves separate IDs, retains changed quantities for explicit repair and requires full allocation', () => {
   const deliveries: any = [{ date: '2026-10-03', destination: 'یزد', projectManagerName: 'مدیر', receiverName: 'گیرنده',
     items: [], serviceItems: [{ serviceRowId: 'service:1', quantity: '1' }, { serviceRowId: 'service:2', quantity: '1' }] }];
   assert.equal(partnerDeliveryPlanIssue(deliveries, [], services), null);
@@ -61,7 +61,8 @@ test('service execution scheduling preserves separate IDs, trims changed quantit
   assert.ok(partnerDeliveryPlanIssue([{ ...deliveries[0], serviceItems: [{ serviceRowId: 'unknown', quantity: '1' }] }], [], services));
   const trimmed = reconcilePartnerDeliveriesToProducts(deliveries, [], [{ serviceRowId: 'service:1', quantity: '0.5' }]);
   assert.deepEqual(trimmed[0].items, []);
-  assert.deepEqual(trimmed[0].serviceItems, [{ serviceRowId: 'service:1', quantity: '0.5' }]);
+  assert.deepEqual(trimmed, deliveries);
+  assert.ok(partnerDeliveryPlanIssue(trimmed, [], [{ serviceRowId: 'service:1', quantity: '0.5' }]));
   assert.deepEqual(preservePartnerDeliveriesAcrossProductEdit(deliveries, [], ['service:1'])[0].serviceItems,
-    [{ serviceRowId: 'service:1', quantity: '1' }]);
+    deliveries[0].serviceItems);
 });

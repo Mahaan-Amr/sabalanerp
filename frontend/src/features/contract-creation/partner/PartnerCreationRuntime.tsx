@@ -60,7 +60,7 @@ import { readPartnerCreationContext } from './partnerCreationContext';
 import { partnerProductEditEntry, partnerSaleEntryIssue } from './partnerProductEditEntry';
 import { partnerPaymentChoice } from './partnerPaymentMethodAdapter';
 import { paymentEntryFromPartnerInstallment, partnerInstallmentFromPaymentEntry } from './partnerPaymentEntryAdapter';
-import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment, partnerPaymentNeedsNationalCode, isRetainedPartnerPayment } from './partnerPaymentValidation';
+import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment, partnerPaymentNeedsNationalCode, isRetainedPartnerPayment, retainedPartnerWizardPayments } from './partnerPaymentValidation';
 import { buildPartnerInquirySubjectOptions, type PartnerInquirySubjectOption } from './partnerInquirySubjectOptions';
 import { validateOptionalIranianMobile } from '@/lib/phoneFormat';
 
@@ -270,6 +270,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const retainedPaymentPlan = useRef<CustomerPaymentPlan>();
   const [correctionReason, setCorrectionReason] = useState<string | null>(null);
   const [editingCase, setEditingCase] = useState<PartnerCaseView | null>(null);
+  const readCommercialState = useCallback(async (view: PartnerCaseView) => {
+    const response = await api.post('/partner/cases/query-v2', { caseId: view.owner.caseId });
+    const parsed = PartnerCaseRuntimeResultSchema.parse(response.data?.data);
+    const row = parsed.cases.find(candidate => candidate.view.owner.caseId === view.owner.caseId &&
+      candidate.view.owner.revision === view.owner.revision && candidate.view.owner.integrityHash === view.owner.integrityHash);
+    return row?.commercial;
+  }, []);
   const [paymentModal, setPaymentModal] = useState<{
     installment: PartnerPaymentInstallment;
     isNew: boolean;
@@ -931,7 +938,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
               // Never resize deliveries or installments without the seller's choice.
               const deliveryIssue = partnerDeliveryPlanIssue(nextIntent.deliveries, quoted.rows, quoted.serviceRows);
               const paymentIssue = !CustomerPaymentPlanSchema.safeParse(nextIntent.customerPaymentPlan).success
-                || firstPartnerPaymentPlanError(nextIntent.customerPaymentPlan, today(), true)
+                || firstPartnerPaymentPlanError(nextIntent.customerPaymentPlan, today(), true, retainedPaymentPlan.current)
                 || remainingPartnerAmount(pricedSummary.retail, nextIntent.customerPaymentPlan.installments.map(item => item.amount.amount)) !== '0';
               setWizard({ ...current, intent: { ...current.intent, deliveries: nextIntent.deliveries,
                 customerPaymentPlan: nextIntent.customerPaymentPlan, preparationCompleted: false },
@@ -1176,7 +1183,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         customerId: recoveredWizard.data.intent.customerId,
         contractDate: recoveredWizard.data.intent.contractDate,
         ...(recoveredWizard.data.intent.projectId ? { projectId: recoveredWizard.data.intent.projectId } : {}) };
-      retainedPaymentPlan.current = cases.data.cases[0].view.customerPaymentPlan;
+      retainedPaymentPlan.current = retainedPartnerWizardPayments(cases.data.cases[0].view.customerPaymentPlan,
+        recoveredWizard.data.intent.customerPaymentPlan);
       setCorrectionReason(cases.data.cases[0].reviewedCorrection?.reason ?? null);
       setEditingCase(cases.data.cases[0].view);
       setCustomerId(value.customerId); setContractDate(value.contractDate!); setProjectId(value.projectId ?? '');
@@ -1404,7 +1412,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     if (step === 'date') return <ContractDateStepView creatorName={context.actorDisplayName}
       dateControl={<PersianCalendarComponent valueFormat="gregorian" value={draft.intent.contractDate} className="w-full"
         onChange={contractDate => updateWizard({ ...draft, intent: { ...draft.intent, contractDate } })} />}
-      numberNotice="شماره پس از ثبت موفق قرارداد تخصیص داده می‌شود." />;
+      numberNotice={editingCase?.customerContractNumber ? `شماره قرارداد ${editingCase.customerContractNumber} در اصلاح حفظ می‌شود.`
+        : 'شماره پس از ثبت موفق قرارداد تخصیص داده می‌شود.'} />;
     if (step === 'customer') return <ContractCustomerStepView
       customers={partnerCustomerOptions(context, customerSearchTerm)}
       selectedCustomer={selectedPartnerCustomer(context, draft.intent.customerId)}
@@ -1667,7 +1676,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           <ErpFieldView label="روش" value={partnerPaymentChoice(installment)} />
         </ErpCard>)}</div>
       </ErpNeumorphicDisclosure>
-      <ErpInlineState kind="empty" title="با «تأیید و نهایی‌سازی قرارداد»، شماره عمومی قرارداد تخصیص می‌یابد و تعهد خرید شما با مبلغ توافق‌شده سبلان برای حسابداری ثبت می‌شود." />
+      <ErpInlineState kind="empty" title="با «ثبت یادداشت قرارداد»، تغییرات ذخیره می‌شود. قطعی‌شدن و ثبت تعهد خرید پس از تأیید فروشنده، پذیرش مشتری و پذیرش قیمت معتبر انجام می‌شود." />
     </div>;
   };
 
@@ -1716,7 +1725,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         onClick={() => window.location.reload()} />}
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
-  if (wizard && submission) return <PartnerContractWizard draft={{ ...wizard, rows: presentPartnerRetailRows(wizard.rows, technicalDraft, technicalProducts) }} onChange={updateWizard} recovery={{ state: 'writable' }} externalError={error} correctionReason={correctionReason}
+  if (wizard && submission) return <PartnerContractWizard draft={{ ...wizard, rows: presentPartnerRetailRows(wizard.rows, technicalDraft, technicalProducts) }} onChange={updateWizard} recovery={{ state: 'writable' }} externalError={error} correctionReason={correctionReason} readCommercialState={readCommercialState}
     submission={submission} now={Date.now()} renderSection={renderSection}
     canonicalRetailReady={wizard.rows.every(row => Boolean(row.retailEffectiveUnitPrice))}
     onPreparePricingQuote={async current => {

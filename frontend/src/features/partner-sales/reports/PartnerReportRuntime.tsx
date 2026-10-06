@@ -8,6 +8,7 @@ import moment from 'moment-jalaali';
 import { ErpEmptyState, ErpField, ErpInlineState, ErpLoading, ErpSegmentedControl, ErpSelect, ErpToolbar } from '@/components/erp';
 import { FaChartLine } from 'react-icons/fa';
 import api from '@/lib/api';
+import { downloadBlobResponse } from '@/lib/downloadFile';
 import { PartnerReportView, type PartnerReportPresentation } from './PartnerReportView';
 import { PartnerAccountRuntime } from '../account/PartnerAccountRuntime';
 
@@ -96,10 +97,10 @@ function PartnerSalesReportRuntime() {
       const created = await api.post('/partner/reports/exports', query);
       const exportId = ((created.data as { data?: { exportId?: unknown } })?.data?.exportId);
       if (typeof exportId !== 'string') throw new Error('invalid');
-      const downloaded = await api.get(`/partner/reports/exports/${encodeURIComponent(exportId)}`);
-      const blob = new Blob([JSON.stringify((downloaded.data as { data?: unknown }).data, null, 2)], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url;
-      anchor.download = `partner-report-${from}-${to}.json`; anchor.click(); URL.revokeObjectURL(url);
+      const downloaded = await api.get(`/partner/reports/exports/${encodeURIComponent(exportId)}/pdf`, { responseType: 'blob' });
+      const blob = downloaded.data as Blob;
+      if (!(blob instanceof Blob) || !blob.type.includes('application/pdf')) throw new Error('invalid PDF');
+      downloadBlobResponse(downloaded, `partner-report-${from}-${to}.pdf`);
     } catch { setError('ساخت خروجی امن گزارش انجام نشد.'); }
     finally { setExporting(false); }
   };
@@ -114,7 +115,7 @@ function PartnerSalesReportRuntime() {
   const filters = <ErpToolbar search={{ value: search, placeholder: 'شماره پرونده یا قرارداد مشتری', onChange: setSearch }}
     filters={<ErpSelect aria-label="وضعیت" value={state} onChange={event => setState(event.target.value as StateFilter)}>
       <option value="">همه وضعیت‌ها</option><option value="DRAFT">پیش‌نویس</option><option value="AWAITING_CUSTOMER_CONFIRMATION">در انتظار تأیید مشتری</option>
-      <option value="CUSTOMER_APPROVED">تأیید مشتری</option><option value="COMMITTED">قطعی</option><option value="CANCELLED">لغوشده</option><option value="VOIDED">باطل‌شده</option>
+      <option value="CUSTOMER_APPROVED">تأیید مشتری</option><option value="COMMITTED">قطعی</option><option value="CANCELLED">لغو شده</option><option value="VOIDED">لغو شده</option>
     </ErpSelect>} actions={[]} />;
   if (pending && !report) return <>{periodControl}{filters}<ErpLoading /></>;
   if (!report) return <ErpInlineState kind="error" title={error || 'گزارش در دسترس نیست.'} action={{ label: 'تلاش مجدد', onClick: () => void load() }} />;

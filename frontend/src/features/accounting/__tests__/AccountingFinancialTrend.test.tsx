@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { FinancialTrendChart, FinancialTrendPlot } from '@/components/reporting/FinancialTrendChart';
 import { YAxis } from 'recharts';
 import { AccountingFinancialTrend } from '../AccountingFinancialTrend';
 import { ErpSegmentedControl } from '@/components/erp';
@@ -95,6 +96,7 @@ test('daily trend lets the value axis size itself to full compact Persian labels
   }) as React.ReactElement;
   const visit = (node: React.ReactNode): React.ReactElement | null => {
     if (!React.isValidElement(node)) return null;
+    if (node.type === FinancialTrendChart) return visit(FinancialTrendPlot({ ...(node.props as Parameters<typeof FinancialTrendPlot>[0]), gradientId: 'test-trend' }));
     if (node.type === YAxis) return node;
     for (const child of React.Children.toArray((node.props as { children?: React.ReactNode }).children)) {
       const match = visit(child);

@@ -46,7 +46,10 @@ export function PartnerContractCancellation({ caseId }: { caseId: string }) {
         void (cancelled ? reactivatePartnerCase(row, reason.trim(), commandId.current) : cancelPartnerCase(row.view, reason.trim())).then(async result => {
           assertSuccessfulSalesResult(result);
           setOpen(false); await reload();
-          if (cancelled) window.location.reload(); else router.refresh();
+          if (cancelled) window.location.reload();
+          else router.replace(row.customerContractId
+            ? `/dashboard/sales/contracts/${encodeURIComponent(row.customerContractId)}`
+            : `/dashboard/sales/partner-cases?caseId=${encodeURIComponent(caseId)}`);
         }).catch(failure => setError(partnerSalesActionFeedback(failure, cancelled ? 'فعال‌سازی قرارداد' : 'لغو قرارداد').message))
           .finally(() => { lifecycleFlight.current = false; setPending(false); });
       }} /> }>

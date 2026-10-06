@@ -1238,6 +1238,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       const row: any = existing ?? partnerAccountingContractRow({ ...document, amount: new Prisma.Decimal(document.amount) });
       if (!row) continue;
       row.partnerCommercialStatus = document.commercial.status;
+      row.contractDate = document.contractDate ?? row.contractDate;
       row.amountKnown = document.amountKnown; row.isInactive = document.isInactive;
       row.status = ({ NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', QUOTED: 'QUOTED', FINAL: 'SIGNED', EXPIRED: 'EXPIRED', CANCELLED: 'CANCELLED' } as Record<string, string>)[document.commercial.status];
       if (!existing) {

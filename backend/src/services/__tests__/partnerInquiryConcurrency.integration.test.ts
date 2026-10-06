@@ -152,7 +152,7 @@ function service(database: PrismaClient, actorId: string, purpose: 'PARTNER' | '
   return createPrismaPartnerInquiryService({ database, actorId, authorize: authorization(actorId, purpose, correlationId),
     resolveInitialResponder: async () => ({ ok: false, error: partnerError('NOT_ASSIGNED') }),
     resolveResponder: async (_tx, input) => ({ ok: true, value: { responderId: input.responderId, eligibilityEvidence: { fixture: true } } }),
-    resolveConfiguration: async (_tx, input) => ({ ok: true, value: { identity: identity(actorId),
+    resolveConfiguration: async (_tx, input) => ({ ok: true, value: { identity: identity(input.actorId),
       description: 'سنگ تست همزمانی', configuration: [{ label: 'ردیف', value: input.reference.productRowId }] } }) });
 }
 
@@ -161,7 +161,7 @@ test('two concurrent successors accept exactly one linear child', async () => {
   try {
     const make = async (suffix: string): Promise<PartnerCommand> => {
       const rows = [{ rowId: `${fixture.prefix}-${suffix}`, configuration: { recoveryId: `${fixture.prefix}-recovery`, recoveryRevision: 1,
-        productRowId: `${fixture.prefix}-${suffix}` }, predecessor: { rowId: `${fixture.prefix}-row`, revision: 2, reason: 'اصلاح همزمانی' } }];
+        productRowId: `${fixture.prefix}-row` }, predecessor: { rowId: `${fixture.prefix}-row`, revision: 2, reason: 'اصلاح همزمانی' } }];
       const intent = { schemaVersion: 1 as const, type: 'INQUIRY_SUBMIT' as const, partnerSellerId: fixture.partnerId, rows };
       return { ...intent, commandId: `${fixture.prefix}-command-${suffix}`, correlationId: `${fixture.prefix}-correlation-${suffix}`,
         idempotency: { actorId: fixture.partnerId, operation: 'INQUIRY_SUBMIT', targetId: fixture.inquiryId,
@@ -169,7 +169,7 @@ test('two concurrent successors accept exactly one linear child', async () => {
     };
     const outcomes = await Promise.all(['a', 'b'].map(async suffix => service(database, fixture.partnerId, 'PARTNER',
       `${fixture.prefix}-auth-${suffix}`).execute(await make(suffix))));
-    assert.equal(outcomes.filter(result => result.ok).length, 1);
+    assert.equal(outcomes.filter(result => result.ok).length, 1, JSON.stringify(outcomes));
     assert.equal(outcomes.find(result => !result.ok)?.error.code, 'STATE_CONFLICT');
     assert.equal(await database.partnerInquiryRow.count({ where: { predecessorId: `${fixture.prefix}-row` } }), 1);
   } finally { await cleanup(database, fixture); await database.$disconnect(); }
@@ -199,7 +199,7 @@ test('profile termination and responder approval have one first-valid commit', a
   const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } }); const fixture = await setup(database);
   try {
     const decisions = [{ rowId: `${fixture.prefix}-row`, expectedRevision: 1, outcome: 'APPROVED' as const,
-      wholesaleUnitPrice: { amount: '1000000', currency: 'IRT' as const }, note: 'قیمت همزمانی' }];
+      wholesaleUnitPrice: { amount: '1000000', currency: 'IRT' as const } }];
     const intent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: fixture.inquiryId,
       expectedAssignmentRevision: 1, decisions };
     const command = { ...intent, commandId: `${fixture.prefix}-decide`, correlationId: `${fixture.prefix}-decide`,
@@ -211,6 +211,6 @@ test('profile termination and responder approval have one first-valid commit', a
     const [decision] = await Promise.all([response, termination]);
     const approvalCount = await database.partnerInquiryApproval.count({ where: { rowId: `${fixture.prefix}-row` } });
     assert.equal(decision.ok ? approvalCount === 1 : approvalCount === 0, true);
-    if (!decision.ok) assert.ok(['PARTNER_NOT_ACTIVE', 'NOT_FOUND'].includes(decision.error.code));
+    if (!decision.ok) assert.ok(['PARTNER_NOT_ACTIVE', 'NOT_FOUND'].includes(decision.error.code), JSON.stringify(decision));
   } finally { await cleanup(database, fixture); await database.$disconnect(); }
 });

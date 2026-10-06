@@ -73,7 +73,7 @@ test('an accepted responder price never asks for an explanation', () => {
       unit: 'squareMeter', configuration: [], materialRateEvidenceId: 'internal-rate',
       materialRateHash: `sha256-v1:${'0'.repeat(64)}`, components: [], currency: 'IRT',
       calculationPolicyVersion: 'v1', roundingPolicyVersion: 'v1' },
-    used: false, state: 'PENDING', actions: [{ action: 'RESPOND', enabled: true }] }} canRespond
+    used: false, state: 'PENDING', actions: [{ action: 'INQUIRY_RESPOND', enabled: true }] }} canRespond
     status="در انتظار پاسخ" draft={{ amount: '25000', outcome: 'APPROVED', note: 'نباید ارسال شود' }}
     pending={false} onChange={() => undefined} />);
   assert.match(html, /ثبت قیمت سبلان/);

@@ -842,13 +842,14 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
 /** Shared permission completion retains the independent manager decision. */
 export const closePartnerCommercialEditPermission = async (database: Prisma.TransactionClient, input: {
   dutyId: string; actorUserId: string; reason: string; now: Date; expired?: boolean;
+  outcome?: 'PARTNER_CONTRACT_CANCELLED' | 'PARTNER_CORRECTION_FINALIZED';
 }) => {
   const duty = await database.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: input.dutyId } });
   if (duty.sourceType !== 'SALES_CONTRACT_CORRECTION' || duty.sourceActionCode !== 'SALES_EDIT_CONTRACT_CORRECTION' || duty.status !== 'OPEN') return;
   const status = input.expired ? 'CANCELLED' : 'COMPLETED';
   await database.crossWorkspaceDuty.update({ where: { id: duty.id }, data: { status,
     ...(input.expired ? {} : { respondedAt: input.now, respondedByUserId: input.actorUserId,
-      structuredResultJson: asJson({ actionCode: 'PARTNER_CONTRACT_CANCELLED', reason: input.reason }) }) } });
+      structuredResultJson: asJson({ actionCode: input.outcome ?? 'PARTNER_CONTRACT_CANCELLED', reason: input.reason }) }) } });
   await database.crossWorkspaceDutyAssignmentHistory.updateMany({ where: { dutyId: duty.id, endedAt: null },
     data: { endedAt: input.now, endReason: status, changedByUserId: input.actorUserId } });
   await database.crossWorkspaceDutyAuditVersion.create({ data: { dutyId: duty.id,

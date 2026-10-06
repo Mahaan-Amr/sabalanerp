@@ -6,6 +6,7 @@ import { ErpButton, ErpInlineState, ErpLoading, ErpSheet, ErpSummaryGrid, ErpTex
 import api, { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { defaultCustomPrintSettings, type SalesPdfVariant, type CustomPrintSettings, type CustomPrintPreset } from '@/features/accounting/AccountingCustomPrintSettings';
+import PartnerContractLifecyclePanel from '@/features/accounting/PartnerContractLifecyclePanel';
 import PartnerFinancialVoidPanel from '@/features/accounting/PartnerFinancialVoidPanel';
 import { accountingCorrectionFields } from '@/features/accounting/accountingCorrectionFields';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
@@ -124,7 +125,7 @@ export default function PartnerInternalAccountingContractPage() {
   if (!document) return <ErpInlineState kind="error" title={error!}
     action={{ label: 'تلاش دوباره', onClick: () => void load() }} />;
   return <>
-    <PartnerAccountingDetailView financialVoidPanel={<PartnerFinancialVoidPanel document={document} pending={pending} refresh={load} />} document={document} section={section} onSection={setSection}
+    <PartnerAccountingDetailView lifecyclePanel={<PartnerContractLifecyclePanel caseId={caseId} onChanged={load} />} financialVoidPanel={<PartnerFinancialVoidPanel document={document} pending={pending} refresh={load} />} document={document} section={section} onSection={setSection}
       invoiceOpen={invoiceOpen} onOpenInvoice={openInvoice} onApproveInvoice={approveInvoice}
       onCreateReceivable={() => { setError(undefined); setReceivableOpen(true); }}
       printVariant={printVariant} onPrintVariant={setPrintVariant} customPrintSettings={customPrintSettings}

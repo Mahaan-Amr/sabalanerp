@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
+import { ThemeContext } from '../../../contexts/ThemeContext';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { PartnerCaseRuntimeResultSchema } from '@sabalanerp/partner-sales-contracts';
@@ -12,6 +13,7 @@ import { RetailCollectionsPanel, type RetailCollectionHistory } from '../collect
 import { PartnerCorrectionPanel } from '../cases/PartnerCorrectionPanel';
 import { PartnerCaseSupplementary } from '../cases/PartnerCaseWorkspace';
 import ConfirmationContractView from '../../../app/contracts/confirm/ConfirmationContractView';
+import { partnerCaseListTag, partnerCaseListTags } from '../cases/partnerCaseList';
 import { partnerWizardCompactStatus } from '../../contract-creation/partner/PartnerContractWizard';
 
 test('Case details keep correction labels in Persian and do not contain the global account', () => {
@@ -83,8 +85,10 @@ test('private retail collection keeps historical plans visible and explains inde
 
 test('account panel is read-only and contains only accounting-backed partner-safe facts', () => {
   const fixture = createPartnerFixtures();
+  const sabalanPaymentPlan = fixture.partner.sabalanPaymentPlan;
+  assert.ok(sabalanPaymentPlan);
   const purchase = { owner: fixture.partner.owner, caseNumber: fixture.partner.caseNumber, trackingNumber: 313,
-    amount: { amount: '1600', currency: 'IRR' as const }, sabalanPaymentPlan: fixture.partner.sabalanPaymentPlan,
+    amount: { amount: '1600', currency: 'IRR' as const }, sabalanPaymentPlan,
     received: { amount: '600', currency: 'IRR' as const }, balance: { amount: '1000', currency: 'IRR' as const },
     status: 'PARTIALLY_PAID' as const };
   const tomanPurchase = { ...purchase, owner: { ...purchase.owner, revision: 2 }, caseNumber: 'CASE-IRT', trackingNumber: 314,
@@ -99,6 +103,31 @@ test('account panel is read-only and contains only accounting-backed partner-saf
   assert.match(html, /برنامه پرداخت به سبلان/);
   assert.match(html, /سررسید 2026-08-28/);
   assert.doesNotMatch(html, /قیمت مشتری|سود بازفروش|یادداشت حسابداری|Sepidar|ثبت دریافت/);
+});
+
+test('cancelled Case list and detail badges agree for retained cancellation states', () => {
+  const fixture = createPartnerFixtures();
+  for (const state of ['CANCELLED', 'VOIDED'] as const) {
+    const view = { ...fixture.partner, state };
+    assert.equal(partnerCaseListTags[partnerCaseListTag(view)].label, 'لغو شده');
+    const html = renderToStaticMarkup(<PartnerCaseDetailContent view={view} actions={{
+      canPreview: false, canIssue: false, canFinalize: false, canSendConfirmation: false,
+      canRequestCorrection: false, canCancel: false, canRequestVoid: false,
+    }} />);
+    assert.match(html, /لغو شده/);
+    assert.doesNotMatch(html, /باطل‌شده/);
+  }
+});
+
+test('cancelled report cards show cancellation instead of collection status even without optional history', () => {
+  for (const state of ['CANCELLED', 'VOIDED'] as const) {
+    const report: PartnerReportPresentation = { scopeLabel: 'حساب من', from: '2026-10-01', effectiveThrough: '2026-10-06', totals: [],
+      rows: [{ caseId: 'cancelled-case', revision: 8, caseNumber: 'CASE-479', customerContractNumber: '100343', state,
+        currency: 'IRT', collectionStatus: 'UNPAID', metrics: { retailSales: '0', retailCollected: '0', wholesalePurchases: '0', netComparableMargin: '0' } }] };
+    const html = renderToStaticMarkup(<PartnerReportContent report={report} onOpenCase={() => undefined} />);
+    assert.match(html, /لغو شده/);
+    assert.doesNotMatch(html, /وصول‌نشده/);
+  }
 });
 
 test('Concept C report keeps the two economic truths distinct and exposes scoped export', () => {
@@ -160,7 +189,7 @@ test('approved retail correction makes its deadline, one-save rule and fresh con
 
 test('a rejected customer revision is read-only and never appears approved', () => {
   const fixture = createPartnerFixtures();
-  const html = renderToStaticMarkup(<ConfirmationContractView
+  const html = renderToStaticMarkup(<ThemeContext.Provider value={{ theme: 'dark', toggleTheme: () => undefined, setTheme: () => undefined }}><ConfirmationContractView
     data={{
       contract: fixture.customer,
       verifiedAt: null,
@@ -178,7 +207,7 @@ test('a rejected customer revision is read-only and never appears approved', () 
     onVerify={() => undefined}
     onResend={() => undefined}
     onReject={() => undefined}
-  />);
+  /></ThemeContext.Provider>);
 
   assert.match(html, /رد این نسخه توسط مشتری ثبت شده است/);
   assert.doesNotMatch(html, /تایید شده در تاریخ|ثبت کد تایید|تایید قرارداد|ارسال مجدد کد/);
@@ -198,4 +227,16 @@ test('Partner wizard compact status keeps commercial, pricing and customer axes 
     pricing: 'در انتظار استعلام',
     customer: 'ارسال‌شده، بدون پاسخ',
   });
+});
+
+
+test('Partner wizard displays authoritative commercial finality rather than commitment history', () => {
+  const view = { ...createPartnerFixtures().partner, state: 'COMMITTED' as const };
+  const commercial = { version: 1 as const, revision: 2, status: 'NOTE' as const,
+    salesApproved: false, customerAccepted: false, inquiry: 'ACCEPTED' as const,
+    expiresAt: null, firstFinancialRecordAt: null };
+  assert.equal(partnerWizardCompactStatus(view, commercial).contract, 'یادداشت');
+  assert.equal(partnerWizardCompactStatus(view, { ...commercial, status: 'FINAL' }).contract, 'قطعی');
+  assert.equal(partnerWizardCompactStatus(view, { ...commercial, status: 'CANCELLED' }).contract, 'لغو شده');
+  assert.equal(partnerWizardCompactStatus(view).contract, 'در حال دریافت وضعیت');
 });

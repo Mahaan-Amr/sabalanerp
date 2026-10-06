@@ -18,7 +18,7 @@ test('pending Partner actions preserve their availability policy and block every
   assert.equal(ready.find(action => action.label === 'تأیید')?.disabled, false);
   assert(ready.some(action => action.label === 'ارسال پیامک تأیید'));
   const html = renderToStaticMarkup(<PartnerCaseDetailContent view={createPartnerFixtures().partner} actions={{ ...available, pending: true }} />);
-  const buttons = [...html.matchAll(/<button\b([^>]*)>/g)].map(match => match[1]);
+  const buttons = Array.from(html.matchAll(/<button\b([^>]*)>/g)).map(match => match[1]);
   // Navigation remains usable; mutation and PDF buttons are blocked.
   assert(buttons.filter(button => button.includes('disabled')).length >= 5);
 });

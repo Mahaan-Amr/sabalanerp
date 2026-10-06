@@ -23,6 +23,25 @@ const ownsRevision = (owner: { caseId: string; revision: number; integrityHash: 
 
 const integrityConflict = (): never => { throw new Error('Partner reporting integrity conflict'); };
 
+export function verifyPartnerReportingHead(projection: unknown, head: contracts.RevisionRef,
+  linked: { internalRecordId: string; customerContractNumber: string }) {
+  const source = object(projection);
+  const partner = contracts.PartnerCaseViewSchema.parse(source?.partner);
+  if (!ownsRevision(partner.owner, head) || (partner.customerContractNumber &&
+    partner.customerContractNumber !== linked.customerContractNumber)) integrityConflict();
+  // An approved commercial edit can await fresh wholesale prices. Its head
+  // then has no accounting/fulfillment projection; financial history is read
+  // below from the effective committed revision, never from an invented price.
+  if (!partner.sabalanTotals) {
+    if (source?.accounting !== undefined || source?.fulfillment !== undefined) integrityConflict();
+    return;
+  }
+  const internal = contracts.SabalanInternalRecordViewSchema.parse(source?.accounting);
+  const fulfillment = contracts.FulfillmentViewSchema.parse(source?.fulfillment);
+  if (!ownsRevision(internal.owner, head) || !ownsRevision(fulfillment.owner, head) ||
+    internal.recordId !== linked.internalRecordId || fulfillment.recordId !== linked.internalRecordId) integrityConflict();
+}
+
 export function createPrismaPartnerReportExportStore(database: PrismaClient): ReportExportStore {
   return {
     async get(id) {
@@ -103,11 +122,8 @@ async function caseEvidence(tx: Prisma.TransactionClient, root: Root, purpose: R
     throw new Error('Partner report root changed during snapshot');
   }
   const customerContractNumber = row.customerContract.contractNumber;
-  const currentInternal = contracts.SabalanInternalRecordViewSchema.parse(object(row.head.internalProjection)?.accounting);
-  const currentFulfillment = contracts.FulfillmentViewSchema.parse(object(row.head.internalProjection)?.fulfillment);
   const head = { caseId: row.id, revision: row.headRevision, integrityHash: row.integrityHash };
-  if (!ownsRevision(currentInternal.owner, head) || !ownsRevision(currentFulfillment.owner, head) ||
-      currentInternal.recordId !== row.internalRecordId || currentFulfillment.recordId !== row.internalRecordId) integrityConflict();
+  verifyPartnerReportingHead(row.head.internalProjection, head, { internalRecordId: row.internalRecordId, customerContractNumber });
   const events = readPersistedPartnerEvents({ ...row, internalRecordId: row.internalRecordId }, row.events);
   const history = caseHistory(contracts, visibleEvents(contracts, events, period));
   const stateEvent = row.events.filter(event => event.toState && event.recordedAt.toISOString() <= period.asOf &&

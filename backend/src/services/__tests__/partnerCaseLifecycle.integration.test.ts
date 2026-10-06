@@ -611,6 +611,7 @@ test('legacy operational pause does not block commitment', () => fixture(async (
   await tx.partnerCustomerOutputSnapshot.create({ data: { id: `${ids.caseId}-verified-snapshot`, caseId: ids.caseId,
     caseRevision: 1, integrityHash: owner.integrityHash, contentHash: String(customerOutput.outputHash),
     contractNumber: String(customerOutput.contractNumber), recipient: '+989121234567',
+    recordedAt: new Date('2026-08-30T07:30:00.000Z'),
     expiresAt: new Date('2026-09-30T00:00:00.000Z'), content: customerOutput,
     commandId: `${ids.caseId}-snapshot-command` } });
   await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: true } });
@@ -1772,5 +1773,17 @@ test('Partner independent financial void keeps the commercial contract and commi
     assert.equal((await adapter.enqueueCommitted(view, commitment)).ok, true);
     assert.equal(await net(), '1600');
     assert.equal((await database.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } })).firstFinancialRecordAt?.toISOString(), contract.firstFinancialRecordAt?.toISOString());
+  } finally { await database.$disconnect(); await temporary.cleanup(); }
+});
+
+test('Partner Accounting lifecycle shares ordinary requests and dependency guards while retaining deleted audit history', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
+  const database = temporary.client();
+  try {
+    const ids = idsFor(`partner-lifecycle-controls-${temporary.runId}`);
+    await database.$transaction(tx => seedCase(tx, ids));
+    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+      'backend/src/services/__tests__/partnerContractLifecycleProbe.ts'], { timeout: 30_000, env: { ...process.env,
+        DATABASE_URL: temporary.databaseUrl, PARTNER_LIFECYCLE_TEST_IDS: JSON.stringify(ids) } });
   } finally { await database.$disconnect(); await temporary.cleanup(); }
 });

@@ -25,6 +25,7 @@ import { subtract } from '../reporting/money';
 import { sum } from '../reporting/money';
 import { readPartnerCommercialEditPermission } from './commercialEditPermission';
 import { readPersistedPartnerEvents } from '../events/persisted';
+import { validatePartnerCommercialPhysicalFloor } from '../fulfillment/quantityStore';
 
 type Transaction = Prisma.TransactionClient;
 type Commit = Extract<ReturnType<typeof PartnerCommandSchema.parse>, { type: 'CASE_COMMIT' }>;
@@ -305,7 +306,12 @@ export async function currentPricingEvidenceIsValid(tx: Transaction, owner: Revi
     tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`,
   ]);
   const root = await tx.partnerSaleCase.findUnique({ where: { id: owner.caseId }, select: { commercialFlowVersion: true, committedRevision: true } });
-  const committedRevision = root?.commercialFlowVersion === 1 ? root.committedRevision : null;
+  // The initial commitment pointer is immutable. Renewed finality is retained
+  // as an effective correction/recommitment event, which freezes its prices.
+  const effective = root?.commercialFlowVersion === 1 ? await tx.partnerCaseEvent.findFirst({ where: {
+    caseId: owner.caseId, type: { in: ['CASE_COMMITTED', 'CORRECTION_EFFECTIVE', 'CASE_RECOMMITTED'] },
+  }, orderBy: { sequence: 'desc' }, select: { caseRevision: true } }) : null;
+  const committedRevision = root?.commercialFlowVersion === 1 ? effective?.caseRevision ?? root.committedRevision : null;
   const frozen = committedRevision ? await tx.partnerInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: committedRevision }, select: { approvalId: true } }) : [];
   const frozenMaterials = committedRevision ? await tx.partnerMaterialInquiryUsage.findMany({ where: { caseId: owner.caseId, caseRevision: committedRevision }, select: { approvalId: true } }) : [];
   const frozenIds = new Set([...frozen, ...frozenMaterials].map(row => row.approvalId));
@@ -380,6 +386,8 @@ Promise<ExecutionResult> {
           kind: { in: ['PHYSICAL_EXIT', 'MANUAL_OUTAGE_EXIT', 'LEGACY_DISPATCHED'] } }, select: { id: true } })) {
       return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
     }
+    const physicalFloor = await validatePartnerCommercialPhysicalFloor(tx, caseId, []);
+    if (!physicalFloor.ok) return physicalFloor;
     if (await tx.accountingFinancialVoidCase.findFirst({ where: { status: 'OPEN',
       metadata: { path: ['partnerCaseId'], equals: caseId } }, select: { id: true } })) {
       return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };

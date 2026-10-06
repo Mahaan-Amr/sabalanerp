@@ -17,13 +17,14 @@ test('cancelled Partner contract stays cancelled in Accounting despite retained 
 
 test('Accounting list shows the end customer while preserving the internal debtor and amount', () => {
   const record = partnerAccountingContractRow({ id: 'invoice-1', status: 'DRAFT', amount: { toString: () => '1500000' },
-    currency: 'IRT', createdAt: new Date('2026-09-26T09:00:00Z'), partnerContext: {
+    currency: 'IRT', createdAt: new Date('2026-09-26T09:00:00Z'), contractDate: '2026-10-06', partnerContext: {
       caseNumber: 'PC-c27668a2-7578-4229-a060-b1f7639b627f', customerContractNumber: '100329', internalRecordNumber: 'PI-100329',
       debtor: { displayName: 'فروشنده همکار' }, endCustomer: { displayName: 'مشتری نهایی' },
       actionUrl: '/dashboard/accounting/invoice-candidates?search=case',
     } });
   assert.ok(record);
   assert.equal(record.contractNumber, '100329');
+  assert.equal(record.contractDate, '2026-10-06', 'edited business date is independent of source creation time');
   assert.equal(record.customer.displayName, 'مشتری نهایی');
   assert.equal(record.partnerContext.debtor.displayName, 'فروشنده همکار');
   assert.equal(record.accounting.currency, 'IRT');

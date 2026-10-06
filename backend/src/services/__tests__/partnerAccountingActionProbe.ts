@@ -23,7 +23,8 @@ async function main() {
   try {
     await assert.rejects(executeAccountingAction({ kind: 'VOID_ACCOUNTING_RECORD', recordId,
       reason: 'آزمون منع دور زدن گردش اصلاح پرونده', externalReference: 'isolated-external-reference',
-      downstreamNote: 'isolated-test' }, actor), /گردش اصلاح پرونده همکار/);
+      downstreamNote: 'isolated-test' }, actor), error =>
+      error instanceof PartnerAccountingCommandError && error.code === 'FORBIDDEN');
     const record = await prisma.accountingFinancialRecord.findUniqueOrThrow({ where: { id: recordId } });
     assert.notEqual(record.status, 'VOIDED');
     const receivable = await prisma.accountingReceivable.findFirstOrThrow({ where: { invoiceRecordId: recordId } });

@@ -19,10 +19,10 @@ const input = {
     sourceBatchId: parseStableIdentity('source-batch', 'live-validation'),
     motherWidthMeters: parseCanonicalDecimal('0.4'),
     defaultMandatoryPercentage: parseCanonicalDecimal('20'),
-    sawKerfMeters: parseCanonicalDecimal('0.003'),
-    baseMaterialPricing: 'paid-source-zero' as const,
-    baseRateToman: parseCanonicalDecimal('0')
+    sawKerfMeters: parseCanonicalDecimal('0.003')
   }),
+  baseMaterialPricing: 'paid-source-zero' as const,
+  baseRateToman: parseCanonicalDecimal('0'),
   lengthMeters: parseCanonicalDecimal('5.001'),
   widthMeters: parseCanonicalDecimal('0.4'),
   quantity: 50,
@@ -80,6 +80,7 @@ const source = {
   rowId: 'live-source',
   remainingStoneSourceInventory: [{
     id: 'live-stock',
+    sourceCutId: 'live-source-cut',
     width: 40,
     length: 5,
     quantity: 50,

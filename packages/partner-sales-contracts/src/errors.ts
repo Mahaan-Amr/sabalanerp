@@ -10,6 +10,8 @@ export const ERROR_CATALOG = {
   INVALID_PAYLOAD: [400, 'اطلاعات ارسالی معتبر نیست؛ فیلدهای مشخص‌شده را اصلاح و دوباره تلاش کنید.'],
   ROW_STALE: [409, 'اطلاعات تغییر کرده است؛ صفحه را تازه کنید.'],
   INTEGRITY_CONFLICT: [409, 'شواهد پرونده با نسخه فعلی سازگار نیست؛ صفحه را تازه کنید و دوباره اقدام کنید.'],
+  TEMPORARY_FAILURE: [503, 'عملیات موقتاً انجام نشد؛ کمی بعد دوباره تلاش کنید.'],
+  INTERNAL_ERROR: [500, 'عملیات انجام نشد؛ کمی بعد دوباره تلاش کنید.'],
   PARTNER_NOT_ACTIVE: [409, 'حساب فروشنده همکار فعال نیست؛ ابتدا آن را در مدیریت همکاران فعال کنید.'],
   APPROVAL_EXPIRED: [409, 'اعتبار قیمت پایان یافته است؛ دوباره استعلام بگیرید.'],
   APPROVAL_SUPERSEDED: [409, 'قیمت جدید جایگزین شده است؛ اطلاعات را تازه کنید.'],
@@ -22,7 +24,7 @@ export const ERROR_CATALOG = {
   COHORT_NOT_READY: [409, 'امکان شروع فروش هنوز فعال نشده است؛ پس از فعال‌شدن دسترسی فروش، دوباره تلاش کنید.'],
 } as const;
 export type PartnerErrorCode = keyof typeof ERROR_CATALOG;
-export type PartnerError = { code: PartnerErrorCode; status: 400 | 403 | 404 | 409; message: string };
+export type PartnerError = { code: PartnerErrorCode; status: 400 | 403 | 404 | 409 | 500 | 503; message: string };
 export function partnerError(code: PartnerErrorCode): PartnerError {
   const [status, message] = ERROR_CATALOG[code];
   return { code, status, message };
@@ -36,7 +38,7 @@ export function publicError(error: PartnerError, supportReference: string) {
 }
 export const PartnerErrorSchema = z.object({
   code: z.enum(Object.keys(ERROR_CATALOG) as [PartnerErrorCode, ...PartnerErrorCode[]]),
-  status: z.union([z.literal(400), z.literal(403), z.literal(404), z.literal(409)]), message: z.string(),
+  status: z.union([z.literal(400), z.literal(403), z.literal(404), z.literal(409), z.literal(500), z.literal(503)]), message: z.string(),
 }).strict().refine(error => ERROR_CATALOG[error.code][0] === error.status && ERROR_CATALOG[error.code][1] === error.message);
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PartnerError };
 

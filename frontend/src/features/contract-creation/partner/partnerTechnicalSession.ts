@@ -60,6 +60,10 @@ export function createPartnerTechnicalSession(input: {
       if (disposed) return;
       if (!result.ok) {
         const error = PartnerErrorSchema.parse(result.error);
+        if (error.code === 'TEMPORARY_FAILURE' || error.code === 'INTERNAL_ERROR') {
+          publish({ ...state, error, phase: 'uncertain' });
+          return;
+        }
         pending = null;
         // Only a validation rejection is locally repairable. Ownership, stale
         // revision and operational gates require an explicit host refresh.
@@ -86,6 +90,10 @@ export function createPartnerTechnicalSession(input: {
       if (disposed) return;
       if (!result.ok) {
         const error = PartnerErrorSchema.parse(result.error);
+        if (error.code === 'TEMPORARY_FAILURE' || error.code === 'INTERNAL_ERROR') {
+          publish({ ...state, error, phase: 'uncertain' });
+          return;
+        }
         pendingSave = null;
         publish({ ...state, error, phase: error.code === 'INVALID_PAYLOAD' ? 'editing' : 'blocked' });
         return;

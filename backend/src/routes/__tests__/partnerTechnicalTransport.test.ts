@@ -34,3 +34,39 @@ test('technical transport resolves request-bound ports and keeps every response 
   assert.equal(body.code, 'FORBIDDEN');
   assert.equal(handlers.size, 6);
 });
+
+test('technical infrastructure failures have a matching sanitized support log instead of an integrity conflict', async () => {
+  for (const [failure, status, code, databaseCode] of [
+    [{ code: 'P2028', message: 'private lease token and SQL values' }, 503, 'TEMPORARY_FAILURE', 'P2028'],
+    [new Error('Connector error code: "40P01"; private parameters'), 503, 'TEMPORARY_FAILURE', '40P01'],
+    [new Error('unexpected private customer data'), 500, 'INTERNAL_ERROR', undefined],
+  ] as const) {
+    const handlers = new Map<string, any>();
+    const logs: unknown[] = [];
+    registerPartnerTechnicalRoutes({ post: (path, handler) => handlers.set(path, handler),
+      put: (path, handler) => handlers.set(path, handler) }, {
+      servicesFor: async () => { throw failure; }, reportFailure: value => { logs.push(value); },
+    });
+    let actualStatus = 200; let body: any;
+    const response: TechnicalResponse = { status: value => { actualStatus = value; return response; },
+      json: value => { body = value; }, setHeader: () => undefined };
+    await handlers.get('/recoveries/save')({ body: { password: 'secret', leaseToken: 'private' } }, response);
+    assert.equal(actualStatus, status);
+    assert.equal(body.code, code);
+    assert.deepEqual(logs, [{ supportReference: body.supportReference, code, ...(databaseCode ? { databaseCode } : {}) }]);
+    assert.doesNotMatch(JSON.stringify({ body, logs }), /private|secret|parameters|customer data/);
+  }
+});
+
+test('genuine evidence conflicts retain their business status', async () => {
+  let handler: any; const logs: unknown[] = [];
+  registerPartnerTechnicalRoutes({ post: (path, fn) => { if (path === '/recoveries/save') handler = fn; }, put: () => undefined }, {
+    servicesFor: async () => ({ saved: { save: async () => ({ ok: false, error: partnerError('INTEGRITY_CONFLICT') }) } } as any),
+    reportFailure: value => { logs.push(value); },
+  });
+  let status = 200; let body: any;
+  const response: TechnicalResponse = { status: value => { status = value; return response; },
+    json: value => { body = value; }, setHeader: () => undefined };
+  await handler({ body: {} }, response);
+  assert.equal(status, 409); assert.equal(body.code, 'INTEGRITY_CONFLICT'); assert.deepEqual(logs, []);
+});

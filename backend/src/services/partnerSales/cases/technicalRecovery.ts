@@ -10,13 +10,13 @@ import {
 import { CONTRACT_EDIT_LEASE_TTL_MS, CONTRACT_CREATION_DRAFT_TTL_MS } from '../../contractEditSessionService';
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../../contractRecoveryProtection';
 import { decodeTechnicalRecovery, decodeTechnicalReceipt, type TechnicalRecoveryRecord } from './technicalRecoveryRecords';
-import { lockPartnerOperationsControl } from '../authorization/technicalRollout';
+import { lockPartnerOperationsControl, lockPartnerOperationsControlForRead } from '../authorization/technicalRollout';
 import { readPartnerTechnicalSalesPolicy } from './technicalEvidence';
 import { decodeTechnicalSavedSnapshot } from './technicalSavedRecords';
 
 export interface PartnerTechnicalRecoveryDependencies {
   readonly actorId: string;
-  transaction<T>(work: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  transaction<T>(work: (transaction: Prisma.TransactionClient) => Promise<T>, operation?: 'READ' | 'CHECKPOINT' | 'SAVE'): Promise<T>;
   authorize(transaction: Prisma.TransactionClient, input: {
     actorId: string; recoveryId: string; operation: 'READ' | 'CHECKPOINT' | 'SAVE';
   }): Promise<Result<void>>;
@@ -37,8 +37,9 @@ export function createPrismaPartnerTechnicalRecoveryService(input: {
   database: PrismaClient; actorId: string; authorize: PartnerTechnicalRecoveryDependencies['authorize'];
 }): PartnerTechnicalRecoveryPort {
   return createPartnerTechnicalRecoveryService({ actorId: input.actorId, authorize: input.authorize,
-    transaction: work => input.database.$transaction(async tx => {
-      await lockPartnerOperationsControl(tx);
+    transaction: (work, operation) => input.database.$transaction(async tx => {
+      if (operation === 'READ') await lockPartnerOperationsControlForRead(tx);
+      else await lockPartnerOperationsControl(tx);
       return work(tx);
     }) });
 }
@@ -69,7 +70,7 @@ export function technicalRecoveryLease(dependencies: PartnerTechnicalRecoveryDep
         return { ok: false, error: partnerError('STATE_CONFLICT') };
       }
       return work(tx, session, recovery, now);
-    });
+    }, operation);
   };
 }
 

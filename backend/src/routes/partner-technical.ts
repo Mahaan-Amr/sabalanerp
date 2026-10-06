@@ -13,7 +13,8 @@ import { createPrismaPartnerTechnicalSaveService, type PartnerTechnicalSaveDepen
 import { createPartnerTechnicalEvidenceResolver } from '../services/partnerSales/cases/technicalEvidence';
 import { createPartnerTechnicalRecoveryAuthority } from '../services/partnerSales/authorization/technicalRecovery';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
-import { authorizePartnerTechnicalRollout } from '../services/partnerSales/authorization/technicalRollout';
+import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../services/partnerSales/authorization/technicalRollout';
+import { technicalTransportFailure, type TechnicalFailureDiagnostic } from './partnerTechnicalFailure';
 import { acquirePartnerTechnicalContractEditSession,
   acquireBoundPartnerTechnicalContractEditSession,
   PrismaContractEditSessionStore } from '../services/contractEditSessionService';
@@ -52,6 +53,7 @@ export function createPartnerTechnicalRequestServices(input: {
       const parsed = PartnerTechnicalLeaseRequestSchema.safeParse(request);
       if (!parsed.success) return Promise.resolve({ ok: false, error: partnerError('INVALID_PAYLOAD') });
       return input.database.$transaction(async tx => {
+        await lockPartnerOperationsControl(tx);
         await tx.$queryRaw`SELECT "draftId" FROM sales_contract_edit_sessions
           WHERE "draftId" = ${parsed.data.recoveryId} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM partner_profiles WHERE "userId" = ${input.actorId} FOR UPDATE`;
@@ -105,6 +107,7 @@ export function createPartnerTechnicalRequestServices(input: {
  * activate Partner navigation, cohorts or a pricing-evidence producer. */
 export function registerPartnerTechnicalRoutes(router: TechnicalRouter, dependencies: {
   servicesFor(request: TechnicalRequest): Promise<PartnerTechnicalServices>;
+  reportFailure?(diagnostic: TechnicalFailureDiagnostic): void;
 }) {
   const handle = (action: (services: PartnerTechnicalServices, body: unknown) => Promise<Result<unknown>>): Handler =>
     async (request, response) => {
@@ -115,10 +118,13 @@ export function registerPartnerTechnicalRoutes(router: TechnicalRouter, dependen
         if (result.ok) { response.json({ success: true, data: result.value }); return; }
         response.status(result.error.status).json({ success: false, code: result.error.code,
           error: result.error.message, supportReference: randomUUID() });
-      } catch {
-        const error = partnerError('INTEGRITY_CONFLICT');
+      } catch (failure) {
+        const supportReference = randomUUID();
+        const diagnostic = technicalTransportFailure(failure, supportReference);
+        (dependencies.reportFailure ?? (value => console.error('Partner technical request failed', value)))(diagnostic);
+        const error = partnerError(diagnostic.code);
         response.status(error.status).json({ success: false, code: error.code,
-          error: error.message, supportReference: randomUUID() });
+          error: error.message, supportReference });
       }
   };
   router.post('/recoveries/acquire', handle((ports, body) => ports.lease.acquire(body as never)));

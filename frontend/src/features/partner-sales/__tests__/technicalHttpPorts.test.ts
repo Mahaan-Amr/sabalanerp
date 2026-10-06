@@ -5,6 +5,20 @@ import { createPartnerTechnicalHttpPorts, createPartnerTechnicalPolicyHttpPort }
 const access = { schemaVersion: 1 as const, recoveryId: 'draft-1', browserSessionId: 'browser-1',
   leaseToken: 'lease-1', baseRevision: 0 };
 
+test('technical HTTP adapter preserves server failure categories without exposing private diagnostics', async () => {
+  for (const [status, code] of [[503, 'TEMPORARY_FAILURE'], [500, 'INTERNAL_ERROR']] as const) {
+    const ports = createPartnerTechnicalHttpPorts({ post: async () => {
+      throw { response: { status, data: { code, error: 'private exception text' } } };
+    }, put: async () => { throw new Error('unused'); } });
+    const result = await ports.saved.save({ ...access, expectedRecoveryRevision: 0,
+      idempotencyKey: 'save-1', draft: { schemaVersion: 1, inputRevision: 1, rows: [] } });
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error('Expected failure');
+    assert.equal(result.error.status, status); assert.equal(result.error.code, code);
+    assert.doesNotMatch(result.error.message, /private/);
+  }
+});
+
 test('technical HTTP ports validate requests and successful public responses at the transport boundary', async () => {
   const requests: Array<{ method: string; path: string; body: unknown }> = [];
   const client = {

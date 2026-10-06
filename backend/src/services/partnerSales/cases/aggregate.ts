@@ -509,6 +509,11 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
       return { ok: false, error: partnerError('INVALID_PAYLOAD') };
     }
     try { return await dependencies.transaction(async tx => {
+      // Recovery writers lock the edit session before Profile authorization.
+      // Case submission/revision must reserve that same row before acquiring
+      // Profile locks, because consumeRecovery later updates it (and its
+      // database persona guard also locks the Profile).
+      await tx.$queryRaw`SELECT "draftId" FROM sales_contract_edit_sessions WHERE "draftId" = ${command.intent.recoveryId} FOR UPDATE`;
       let mutated = false;
       const result = await (async (): Promise<CaseExecutionResult> => {
       const key = { actorId: dependencies.actorId, operation: command.type, targetScope: caseId,

@@ -5,12 +5,14 @@ import { canonicalHash, InquiryIdentitySchema, PartnerTechnicalSaveSchema, Partn
   type PartnerTechnicalSavePort, type PartnerTechnicalSavedView, type PartnerTechnicalDraft, type InquiryIdentity, type Result } from '@sabalanerp/partner-sales-contracts';
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../../contractRecoveryProtection';
 import { CONTRACT_EDIT_LEASE_TTL_MS, CONTRACT_CREATION_DRAFT_TTL_MS } from '../../contractEditSessionService';
-import { compilePartnerTechnicalGraph, type PartnerTechnicalGraphContext } from './technicalGraph';
+import { type PartnerTechnicalGraphContext } from './technicalGraph';
+import { compileOrReuseTechnicalSavedGraph } from './technicalSavedGraph';
 import { technicalRecoveryLease, technicalRecoveryJson as json, technicalDraftContent,
   type PartnerTechnicalRecoveryDependencies } from './technicalRecovery';
 import { encodeTechnicalSavedSnapshot, decodeTechnicalSavedSnapshot, decodeTechnicalSaveOutcome, type TechnicalSavedSnapshot } from './technicalSavedRecords';
 
 import { resolvePartnerTechnicalServices } from './technicalServices';
+import { lockPartnerOperationsControl, lockPartnerOperationsControlForRead } from '../authorization/technicalRollout';
 
 const SAVE_OPERATION = 'PARTNER_TECHNICAL_SAVE_V1';
 
@@ -27,7 +29,11 @@ export function createPrismaPartnerTechnicalSaveService(input: {
   database: PrismaClient; actorId: string; authorize: PartnerTechnicalSaveDependencies['authorize'];
   resolveEvidence: PartnerTechnicalSaveDependencies['resolveEvidence'];
 }): PartnerTechnicalSavePort {
-  return createPartnerTechnicalSaveService({ ...input, transaction: work => input.database.$transaction(work) });
+  return createPartnerTechnicalSaveService({ ...input, transaction: (work, operation) => input.database.$transaction(async tx => {
+    if (operation === 'READ') await lockPartnerOperationsControlForRead(tx);
+    else await lockPartnerOperationsControl(tx);
+    return work(tx);
+  }, { timeout: 20_000 }) });
 }
 
 export function createPartnerTechnicalSaveService(dependencies: PartnerTechnicalSaveDependencies): PartnerTechnicalSavePort {
@@ -99,7 +105,7 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         if (!evidence.ok) return { ok: false, error: partnerError(evidence.error.code) };
         const services = await resolvePartnerTechnicalServices(tx, command.draft);
         if (!services.ok) return services;
-        const compiled = compilePartnerTechnicalGraph(command.draft, evidence.value.context);
+        const compiled = compileOrReuseTechnicalSavedGraph(command.draft, evidence.value.context, previous);
         if (!compiled.ok) return compiled;
         const graph = compiled.value.graph;
         if (services.value.some(service => graph.rows.some(row => row.productRowId === service.serviceRowId))) return { ok: false, error: partnerError('INVALID_PAYLOAD') };

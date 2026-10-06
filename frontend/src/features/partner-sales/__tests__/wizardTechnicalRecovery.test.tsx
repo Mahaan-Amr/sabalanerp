@@ -14,6 +14,44 @@ const draft = (inputRevision: number, text: string) => PartnerTechnicalDraftSche
   editingValues: [{ entityId: 'unfinished-product', field: 'quantity', text }],
 });
 
+test('server failures retain the exact save/checkpoint for explicit retry without losing newer edits', async () => {
+  for (const code of ['TEMPORARY_FAILURE', 'INTERNAL_ERROR'] as const) {
+    for (const operation of ['save', 'checkpoint'] as const) {
+      const sent: (PartnerTechnicalSave | PartnerTechnicalCheckpoint)[] = [];
+      const write = async (command: PartnerTechnicalSave | PartnerTechnicalCheckpoint) => {
+        sent.push(structuredClone(command));
+        if (sent.length === 1) return { ok: false as const, error: partnerError(code) };
+        return { ok: true as const, value: { schemaVersion: 1 as const, recoveryId: access.recoveryId,
+          recoveryRevision: 1, inputRevision: command.draft.inputRevision,
+          updatedAt: '2026-08-29T00:00:01.000Z', replayed: true } };
+      };
+      const session = createPartnerTechnicalSession({ access,
+        recovered: { schemaVersion: 1, recoveryId: access.recoveryId, recoveryRevision: 0,
+          updatedAt: '2026-08-29T00:00:00.000Z', draft: { schemaVersion: 1, inputRevision: 0,
+            rows: [{ productRowId: 'configured-row', catalogItemId: 'catalog-row',
+              catalogSnapshotVersion: '2026-08-29T00:00:00.000Z', family: 'prepared',
+              configuration: { kind: 'readyPiece', unit: 'count', quantity: '2' } }] } },
+        recovery: { read: async () => { throw new Error('No implicit reload'); }, checkpoint: write },
+        saved: { readSaved: async () => { throw new Error('No implicit reload'); }, save: async command => {
+          const result = await write(command);
+          return result.ok ? { ok: true, value: { ...result.value, graphHash, rows: [{
+            configurationRef: { recoveryId: access.recoveryId, recoveryRevision: 1, productRowId: 'configured-row' },
+            quantity: '2', unit: 'count', configurationChange: 'NEW' }] } } : result;
+        } } });
+      await session[operation]();
+      assert.equal(session.getSnapshot().phase, 'uncertain');
+      session.edit(draft(1, 'ناقص'));
+      await session[operation]();
+      assert.equal(sent.length, 1);
+      await session.retry();
+      assert.deepEqual(sent[1], sent[0]);
+      assert.equal(session.getSnapshot().phase, 'editing');
+      assert.equal(session.getSnapshot().draft.editingValues?.[0].text, 'ناقص');
+      assert.equal(session.getSnapshot().recoveryRevision, 1);
+    }
+  }
+});
+
 test('explicit technical save waits for the pending checkpoint revision', async () => {
   let acknowledgeCheckpoint!: (saved: boolean) => void;
   let saveCalls = 0;

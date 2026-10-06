@@ -172,6 +172,7 @@ test('prepared subtype defaults use ordinary catalog naming inference including 
   for (const [name, kind] of [['سنگ کیوبیک', 'cubic'], ['قطعات آماده', 'readyPiece']] as const) {
     const draft = addPartnerTechnicalProduct({ schemaVersion: 1, inputRevision: 0, rows: [] }, { ...product, name },
       { family: 'prepared', productRowId: 'product-row:kind' });
+    assert.ok(draft.rows[0].family === 'prepared');
     assert.equal(draft.rows[0].configuration.kind, kind);
   }
 });

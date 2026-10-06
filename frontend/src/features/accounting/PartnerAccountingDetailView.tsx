@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { FaBalanceScale, FaFileInvoice, FaFlag, FaMoneyCheckAlt, FaReceipt, FaSync, FaTrashAlt, FaExclamationTriangle } from 'react-icons/fa';
+import { FaBalanceScale, FaFileInvoice, FaFlag, FaMoneyCheckAlt, FaReceipt, FaSync, FaExclamationTriangle } from 'react-icons/fa';
 import { partnerTrackingCode, partnerCommercialLabels } from '@sabalanerp/partner-sales-contracts';
 import { ErpButton, ErpCard, ErpInlineState, ErpPage, ErpSection, ErpSegmentedControl, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
 import { CompactQueueItem, FinancialInvoiceApprovalForm, type FinancialInvoiceApprovalPayload, StatusBadge, dateFa, invoiceStatusLabels, money, receivableStatusLabels, taxStatusLabels } from './accountingUi';
@@ -32,7 +32,8 @@ export type PartnerInternalDocument = {
 export type PartnerDetailSection = typeof accountingContractTabs[number]['value'];
 export const partnerQuantityLabel = (unit: string) => ({ meter: 'متر طول', count: 'عدد', squareMeter: 'متر مربع', ton: 'تن' } as Record<string, string>)[unit] || unit;
 
-export function PartnerAccountingDetailView({ financialVoidPanel, document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+export function PartnerAccountingDetailView({ lifecyclePanel, financialVoidPanel, document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+  lifecyclePanel?: React.ReactNode;
   financialVoidPanel?: React.ReactNode;
   onCreateReceivable?: () => void;
   invoiceOpen?: boolean; onOpenInvoice?: () => void; onApproveInvoice?: (payload: FinancialInvoiceApprovalPayload) => void | Promise<void>;
@@ -45,7 +46,6 @@ export function PartnerAccountingDetailView({ financialVoidPanel, document: doc,
   const context = doc.partnerContext;
   const issued = ['ISSUED', 'POSTED'].includes(doc.status);
   const receivableHref = `/dashboard/accounting/receivables?search=${encodeURIComponent(context.caseNumber)}`;
-  const lifecycleReason = 'پرونده شماره‌دار همکار حذف دائمی نمی‌شود؛ تغییر یا ابطال آن از مسیر بررسی‌شدهٔ پرونده انجام می‌شود.';
   const quickActions = <ErpSection title="اقدام سریع"><div className="space-y-2">
     <ErpButton label={doc.preparationOnly ? "ثبت رکورد مالی" : "ایجاد پیش‌نویس صورتحساب"} icon={FaFileInvoice} tone="info" onClick={onOpenInvoice}
       disabled={pending || !doc.actions.canCreateInvoice || issued || doc.status === 'VOIDED'}
@@ -80,12 +80,8 @@ export function PartnerAccountingDetailView({ financialVoidPanel, document: doc,
     {error && <ErpInlineState kind="error" title={error} />}
     <ErpSegmentedControl value={section} onChange={onSection} options={[...accountingContractTabs]} />
     {section === 'summary' && <>
-      <ErpSection title="مدیریت وضعیت قرارداد"><div className="flex flex-wrap gap-2">
-        <ErpButton label="غیرفعال‌سازی" tone="warning" variant="outline" disabled title={lifecycleReason} />
-        <ErpButton label="حذف دائمی" icon={FaTrashAlt} tone="danger" variant="outline" disabled title={lifecycleReason} />
-      </div><ErpInlineState kind="permission" title={lifecycleReason} className="mt-3" />
-        {doc.flags.filter(flag => flag.status === 'OPEN').map(flag => <ErpInlineState key={flag.id} kind="stale" title={flag.title} className="mt-3" />)}
-      </ErpSection>
+      {lifecyclePanel}
+      {doc.flags.filter(flag => flag.status === 'OPEN').map(flag => <ErpInlineState key={flag.id} kind="stale" title={flag.title} className="mt-3" />)}
       <ErpSection title="خروجی چاپ قرارداد"><AccountingContractPrintActions value={printVariant} options={Object.entries(salesPdfVariantLabels).map(([value, label]) => ({ value, label }))}
         onChange={value => onPrintVariant?.(value as SalesPdfVariant)} pending={pending} onDownload={() => onPdf(false)} onPrint={() => onPdf(true)} />
         {printVariant === 'custom' && setCustomPrintSettings && applyCustomPreset && <AccountingCustomPrintSettings

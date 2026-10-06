@@ -125,8 +125,8 @@ export function presentSavedTechnicalConfiguration(input: {
       draftRow.configuration.crossDimensionMeters, ' متر');
   }
   if ((draftRow?.family === 'longitudinal' || draftRow?.family === 'stair') && input.technicalPolicy) {
-    add('حکمی', input.technicalPolicy.mandatoryEnabled
-      ? `فعال · ${input.technicalPolicy.mandatoryPercentage}٪`
+    add('حکمی', (draftRow.configuration.mandatoryEnabled ?? input.technicalPolicy.mandatoryEnabled)
+      ? `فعال · ${draftRow.configuration.mandatoryPercentage ?? input.technicalPolicy.mandatoryPercentage}٪`
       : 'غیرفعال');
   }
   const remainder = input.dependents?.find(dependent => dependent.kind === 'remainder' &&

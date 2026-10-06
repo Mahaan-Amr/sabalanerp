@@ -731,6 +731,10 @@ router.post(
       res.status(403).json({ success: false, error: 'Admin approval is required for this lifecycle request' });
       return;
     }
+    const linked = await prisma.salesContract.findUnique({ where: { id: request.contractId }, select: { partnerCaseId: true } });
+    if (linked?.partnerCaseId && !await readPartnerInternalDocument(linked.partnerCaseId, req.user!.id)) {
+      res.status(404).json({ success: false, error: 'Lifecycle request not found' }); return;
+    }
     try {
       const data = await decideContractLifecycleRequest({
         requestId: request.id,
@@ -738,7 +742,7 @@ router.post(
         reason: req.body.reason,
         actorId: req.user!.id,
       });
-      res.json({ success: true, data });
+      res.json({ success: true, data: linked?.partnerCaseId ? { id: data.id, requestId: request.id, decision: req.body.decision } : data });
     } catch (error: any) {
       res.status(error instanceof ContractLifecycleBlockedError ? 409 : 400).json({
         success: false,
@@ -748,6 +752,47 @@ router.post(
     }
   },
 );
+
+// The Partner endpoint authorizes its Case and exposes only lifecycle metadata;
+// customer retail projections remain outside ordinary Accounting routes.
+async function partnerLifecycleContract(req: AuthRequest) {
+  if (!await readPartnerInternalDocument(req.params.caseId, req.user!.id)) throw new Error('Contract not found');
+  const root = await prisma.partnerSaleCase.findUnique({ where: { id: req.params.caseId }, select: { customerContractId: true } });
+  if (!root?.customerContractId) throw new Error('Contract not found');
+  return root.customerContractId;
+}
+router.get('/contracts/partner/:caseId/lifecycle', accountingContractsView, async (req: AuthRequest, res: Response) => {
+  try {
+    const preview = await getContractLifecyclePreview(await partnerLifecycleContract(req), true);
+    res.json({ success: true, data: { ...preview, pendingRequests: preview.pendingRequests.map(({ id, kind, reason, status }) => ({ id, kind, reason, status })),
+      permissions: { canDeactivate: mayDirectlyPerformContractLifecycleAction(req.user!.role, 'DEACTIVATE'),
+        canReactivate: mayDirectlyPerformContractLifecycleAction(req.user!.role, 'REACTIVATE'), canDelete: mayDirectlyPerformContractLifecycleAction(req.user!.role, 'DELETE') } } });
+  } catch (error: any) { res.status(error.message === 'Contract not found' ? 404 : 400).json({ success: false, error: error.message }); }
+});
+router.post('/contracts/partner/:caseId/lifecycle-requests', accountingEdit,
+  [body('kind').isIn(Object.values(ContractLifecycleRequestKind)), body('reason').isString().isLength({ min: 3 })],
+  async (req: AuthRequest, res: Response) => {
+    if (handleValidation(req, res)) return;
+    try {
+      const request = await createContractLifecycleRequest({ contractId: await partnerLifecycleContract(req), kind: req.body.kind,
+        reason: req.body.reason, actorId: req.user!.id, partnerLifecycle: true });
+      res.status(201).json({ success: true, data: { id: request.id, kind: request.kind, status: request.status, reason: request.reason } });
+    } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
+  });
+router.post('/contracts/partner/:caseId/lifecycle-actions', accountingEdit,
+  [body('action').isIn(['DELETE', 'DEACTIVATE', 'REACTIVATE']), body('reason').isString().isLength({ min: 3 })],
+  async (req: AuthRequest, res: Response) => {
+    if (handleValidation(req, res)) return;
+    if (!mayDirectlyPerformContractLifecycleAction(req.user!.role, req.body.action)) {
+      res.status(403).json({ success: false, error: 'Direct lifecycle action is not permitted for this role' }); return;
+    }
+    try {
+      const result = await executeContractLifecycleAction({ contractId: await partnerLifecycleContract(req), action: req.body.action,
+        reason: req.body.reason, actorId: req.user!.id, partnerLifecycle: true });
+      res.json({ success: true, data: { id: result.id, deleted: 'deleted' in result && result.deleted } });
+    } catch (error: any) { res.status(error instanceof ContractLifecycleBlockedError ? 409 : 400).json({ success: false,
+      error: error.message, blockers: error instanceof ContractLifecycleBlockedError ? error.blockers : undefined }); }
+  });
 
 router.get('/contracts/partner/:caseId/internal', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {

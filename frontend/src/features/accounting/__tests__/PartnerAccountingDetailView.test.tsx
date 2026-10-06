@@ -29,8 +29,8 @@ test('all Partner sections share Accounting metrics/tabs and exclude customer pr
 });
 test('committed case never exposes ordinary hard-delete or duplicate invoice creation', () => {
   const html = render('summary');
-  assert.match(html, /پرونده شماره‌دار همکار حذف دائمی نمی‌شود/);
   assert.doesNotMatch(html, /درخواست مجوز ویرایش و لغو/);
+  assert.doesNotMatch(html, /غیرفعال‌سازی<\/span>|حذف دائمی<\/span>/);
   assert.equal((html.match(/درخواست اصلاح<\/span>/g) || []).length, 1);
   assert.match(html, /پیش‌نویس سند داخلی برای ثبت رکورد مالی باز می‌شود/);
   assert.doesNotMatch(html, /بررسی صورتحساب/);
@@ -40,7 +40,7 @@ test('committed case never exposes ordinary hard-delete or duplicate invoice cre
 });
 test('draft action stays on the contract and opens the canonical inline financial form', () => {
   const closed = render('financial');
-  const links = [...closed.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map(match => match[0]);
+  const links = Array.from(closed.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)).map(match => match[0]);
   assert(!links.some(link => link.includes('ایجاد پیش‌نویس صورتحساب')));
   const opened = render('financial', true);
   for (const label of ['شماره فاکتور سیستمی', 'تاریخ فاکتور سیستمی', 'مبلغ سپیدار', 'تایید مالی']) assert(opened.includes(label), label);

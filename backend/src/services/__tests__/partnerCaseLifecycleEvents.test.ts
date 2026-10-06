@@ -31,7 +31,9 @@ test('customer status projection is monotonic when SIGNED and PRINTED arrive in 
   assert.equal(projectCustomerContractStatus('APPROVED', 'SIGNED'), 'SIGNED');
   assert.equal(projectCustomerContractStatus('SIGNED', 'PRINTED'), 'PRINTED');
   assert.equal(projectCustomerContractStatus('PRINTED', 'SIGNED'), 'PRINTED');
-  for (const invalid of ['DRAFT', 'PENDING_APPROVAL', 'CANCELLED', 'EXPIRED', 'COMMITTED'] as const) {
+  assert.equal(projectCustomerContractStatus('DRAFT', 'SIGNED'), 'SIGNED');
+  assert.equal(projectCustomerContractStatus('PENDING_APPROVAL', 'SIGNED'), 'SIGNED');
+  for (const invalid of ['CANCELLED', 'EXPIRED', 'COMMITTED'] as const) {
     assert.equal(projectCustomerContractStatus(invalid, 'SIGNED'), null);
   }
 });

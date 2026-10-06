@@ -31,7 +31,7 @@ for (const family of ['longitudinal', 'slab', 'stair', 'prepared'] as const) {
       idempotency: { actorId: 'partner', operation: 'CASE_SUBMIT', targetId: 'case', key: 'key', payloadHash: hash },
       intent: { customerId: 'customer', recoveryId: 'recovery', recoveryRevision: 1, graphHash: hash,
         sabalanTermsVersionId: 'terms', contractDate: '2026-10-01', rows: [{ productRowId: 'stone', retailUnitPrice: { amount: '0.5', currency: 'IRT' } }],
-        retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false, deliveries: [],
+        retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false, deliveries: [{ deliveryId: 'delivery', date: '2026-10-02', destination: 'Tehran', receiverName: 'Customer', projectManagerName: 'Manager', items: [{ productRowId: 'stone', quantity: '11' }] }],
         customerPaymentPlan: { planId: 'customer-plan', version: 1, effectiveDate: '2026-10-01', installments: [{ installmentId: 'pay',
           dueDate: '2026-10-01', method: 'CASH', amount: { amount: payable, currency: 'IRT' } }] } } });
     if (command.type !== 'CASE_SUBMIT') throw new Error('Wrong command');

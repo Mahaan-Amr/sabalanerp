@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validatePartnerPaymentInstallment } from './partnerPaymentValidation';
+import { validatePartnerPaymentInstallment, retainedPartnerWizardPayments } from './partnerPaymentValidation';
 
 test('Partner check validation matches ordinary owner, handover, due-date and dated payer requirements', () => {
   const errors = validatePartnerPaymentInstallment({ installmentId: 'installment-1', dueDate: '2026-09-17',
@@ -55,4 +55,20 @@ test('an unchanged saved payment stays valid as the calendar advances; changed o
   assert.match(validatePartnerPaymentInstallment({ ...saved, amount: { ...saved.amount, amount: '10' } }, '2026-10-05', true, saved).nationalCode!, /الزامی/);
   assert.match(validatePartnerPaymentInstallment({ ...saved, method: 'CASH' }, '2026-10-05', true, saved).nationalCode!, /الزامی/);
   assert.match(validatePartnerPaymentInstallment({ ...saved, installmentId: 'new' }, '2026-10-05', true, saved).nationalCode!, /الزامی/);
+});
+
+test('loaded wizard preserves historical payments across projection IDs without exempting new duplicates or changed terms', () => {
+  const saved = { planId: 'revision-plan', version: 3, effectiveDate: '2026-10-05', installments: [{
+    installmentId: 'revision-payment', dueDate: '2026-10-05', method: 'BANK_TRANSFER' as const,
+    subtype: 'SHIBA' as const, amount: { amount: '2952000', currency: 'IRT' as const },
+  }] };
+  const loaded = { ...saved, planId: 'wizard-plan', installments: [{ ...saved.installments[0], installmentId: 'wizard-payment' },
+    { ...saved.installments[0], installmentId: 'new-duplicate' }] };
+  const retained = retainedPartnerWizardPayments(saved, loaded);
+  assert.equal(retained.installments.length, 1);
+  assert.deepEqual(validatePartnerPaymentInstallment(loaded.installments[0], '2026-10-06', true, retained.installments[0]), {});
+  assert.match(validatePartnerPaymentInstallment(loaded.installments[1], '2026-10-06', true,
+    retained.installments.find(item => item.installmentId === 'new-duplicate')).nationalCode!, /الزامی/);
+  assert.equal(retainedPartnerWizardPayments(saved, { ...loaded, installments: [{ ...loaded.installments[0],
+    amount: { amount: '1', currency: 'IRT' } }] }).installments.length, 0);
 });

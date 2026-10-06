@@ -43,10 +43,13 @@ test('system stair count changes resize whole-product operations in both quantit
 
 test('mother stone length accepts decimal metres and centimetres and clearing restores the derived length', () => {
   const changed = updatePartnerStairMotherLength(draft, productRowId, '2.35', 'm');
+  assert.ok(changed.rows[0].family === 'stair');
   assert.equal(changed.rows[0].configuration.motherLengthMeters, '2.35');
   const centimetres = updatePartnerStairMotherLength(changed, productRowId, '235', 'cm');
+  assert.ok(centimetres.rows[0].family === 'stair');
   assert.equal(centimetres.rows[0].configuration.motherLengthMeters, '2.35');
   const cleared = updatePartnerStairMotherLength(centimetres, productRowId, '', 'cm');
+  assert.ok(cleared.rows[0].family === 'stair');
   assert.equal(cleared.rows[0].configuration.motherLengthMeters, undefined);
   assert.equal(cleared.rows[0].configuration.lengthMeters, '2');
   assert.equal(cleared.editingValues?.length, 0);

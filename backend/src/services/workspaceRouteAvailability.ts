@@ -1,3 +1,4 @@
+import { ownsPartnerCustomerContract } from './partnerSales/contractVisibility';
 import { canReadTransferNotice } from './partnerSales/crm/transferAccess';
 import type { PrismaClient } from '@prisma/client';
 import { resolveNarrowFeatureAccess } from './narrowFeatureAccess';
@@ -55,7 +56,7 @@ const rules: Rule[] = [
   { pattern: /^\/dashboard\/sales\/products\/create/, workspace: 'sales', features: ['sales_products_create'], level: 'edit' },
   { pattern: /^\/dashboard\/sales\/products/, workspace: 'sales', features: ['sales_products_view'] },
   { pattern: /^\/dashboard\/sales\/reports/, workspace: 'sales', features: ['sales_dashboard_view'] },
-  { pattern: /^\/dashboard\/crm\/customers\/create/, workspace: 'crm', features: ['crm_customers_create', 'sales_customers_create'], level: 'edit' },
+  { pattern: /^\/dashboard\/crm\/customers\/create/, workspace: 'crm', features: ['crm_customers_create', 'sales_customers_create'], level: 'edit', partnerProfileStates: ['ACTIVE'] },
   { pattern: /^\/dashboard\/crm\/customers\/[^/]+\/edit/, workspace: 'crm', features: ['crm_customers_edit', 'sales_customers_edit'], level: 'edit' },
   { pattern: /^\/dashboard\/crm\/customers/, workspace: 'crm', features: ['crm_customers_view', 'crm_customers_view_all', 'sales_customers_view'] },
   { pattern: /^\/dashboard\/crm\/potential-projects\/create/, workspace: 'crm', features: ['crm_potential_projects_create'], level: 'edit' },
@@ -85,6 +86,9 @@ export const resolveWorkspaceRouteAvailability = async (
   if (transferStatusId) { const allowed = await canReadTransferNotice(prisma, input.userId, transferStatusId);
     return { allowed, reason: allowed ? null : 'این درخواست در محدوده مجاز شما نیست.' }; }
   if (input.role === 'ADMIN' || /\/duties(?:\/|$)/.test(input.path)) return { allowed: true, reason: null };
+  const ownedDetailId = input.path.match(/^\/dashboard\/sales\/contracts\/([A-Za-z0-9:_-]+)(?:\/edit)?$/)?.[1];
+  if (ownedDetailId && !['create', 'collaboration'].includes(ownedDetailId) &&
+      await ownsPartnerCustomerContract(prisma, input.userId, ownedDetailId)) return { allowed: true, reason: null };
   const rule = rules.find((candidate) => candidate.pattern.test(input.path));
   if (!rule) {
     const workspace = input.path.match(/^\/dashboard\/(sales|crm|hr|accounting|inventory|security|bi|logistics)(?:\/|$)/)?.[1];

@@ -18,10 +18,12 @@ export const PARTNER_CASE_LIFECYCLE_BLOCKER: ContractLifecycleBlocker = {
 export const contractHardDeleteEligibility = ({
   status,
   numberedPartnerCase = false,
+  requireNoOpenOperations = false,
   dependencies,
 }: {
   status: string;
   numberedPartnerCase?: boolean;
+  requireNoOpenOperations?: boolean;
   dependencies: {
     financialDocuments: number;
     conclusivePhysicalOperations: number;
@@ -52,6 +54,9 @@ export const contractHardDeleteEligibility = ({
       label: 'عملیات فیزیکی قطعی',
       ...(dependencies.blockingPhysicalOperations ? { details: dependencies.blockingPhysicalOperations } : {}),
     });
+  }
+  if (requireNoOpenOperations && dependencies.openOperations > 0) {
+    blockers.push({ code: 'OPEN_OPERATIONS', count: dependencies.openOperations, label: 'عملیات باز قرارداد' });
   }
   return { eligible: blockers.length === 0, blockers };
 };

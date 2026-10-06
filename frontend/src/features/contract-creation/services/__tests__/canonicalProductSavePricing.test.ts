@@ -37,7 +37,7 @@ for (const part of ['tread', 'riser', 'landing'] as const) {
     meta: { pricing } } as ContractProduct;
   assert.equal(getContractProductPriceComponents(row).mandatoryAmount, 20);
   assert.equal(reconcileContractProductPricing(row).totalPrice, 120);
-  assert.ok(planLegacyProductGraphMigration({ contractId: 'pricing-test', revision: 1, calculationPolicy: graphPolicy, products: [row] }).ok);
+  assert.ok(planLegacyProductGraphMigration({ contractId: 'pricing-test', revision: 1, calculationPolicy: graphPolicy, products: [{ ...row }] }).ok);
   assert.equal(planLegacyProductGraphMigration({ contractId: 'pricing-test', revision: 1, calculationPolicy: graphPolicy,
     products: [{ ...row, totalPrice: 121 }] }).ok, false, 'real discrepancies remain blocked');
 }
@@ -58,7 +58,7 @@ for (const cuttingPricingMethod of ['lineBased', 'squareMeter'] as const) {
     cuttingCost: result.cuttingAmountToman, totalAmount: result.totalAmountToman });
   const row = { rowId: 'slab', productId: 'stone', productType: 'slab', slabPolicyInput: input,
     originalTotalPrice: pricing.materialBase, totalPrice: pricing.totalPrice, meta: { pricing } } as ContractProduct;
-  assert.ok(planLegacyProductGraphMigration({ contractId: 'pricing-test', revision: 1, calculationPolicy: graphPolicy, products: [row] }).ok);
+  assert.ok(planLegacyProductGraphMigration({ contractId: 'pricing-test', revision: 1, calculationPolicy: graphPolicy, products: [{ ...row }] }).ok);
 }
 const precise = canonicalProductSavePricing({ materialBase: '100', cuttingCost: '0.4', totalAmount: '100.4' }, '0.2');
 const exactSlab = reconcileContractProductPricing({ productType: 'slab', originalTotalPrice: 100,
@@ -71,7 +71,7 @@ for (const preparedKind of ['cubic', 'readyPiece'] as const) {
     const row = { rowId: `${preparedKind}-${preparedUnit}`, productId: 'stone', productType: 'prepared',
       preparedKind, preparedUnit, preparedQuantity: 1, quantity: 1, unitPrice: 100.4, pricePerSquareMeter: 100.4,
       originalTotalPrice: pricing.materialBase, totalPrice: pricing.totalPrice, meta: { pricing } } as ContractProduct;
-    assert.ok(planLegacyProductGraphMigration({ contractId: 'pricing-test', revision: 1, calculationPolicy: graphPolicy, products: [row] }).ok);
+    assert.ok(planLegacyProductGraphMigration({ contractId: 'pricing-test', revision: 1, calculationPolicy: graphPolicy, products: [{ ...row }] }).ok);
     assert.equal(row.totalPrice, 100.4);
     assert.equal(getContractPayableTotal([row, { ...row, rowId: `${row.rowId}-2` }]), 201, 'sum before rounding the payable');
   }
@@ -120,7 +120,7 @@ assert.equal(exactPreparedSubmission.totalPrice, exactPreparedAmount);
 assert.equal(getContractUnroundedPayableTotal([exactPrepared]), exactPreparedAmount);
 assert.equal(getContractPayableTotal([exactPrepared]), 15_241_577_654);
 assert.ok(planLegacyProductGraphMigration({ contractId: 'precise-prepared', revision: 1, calculationPolicy: graphPolicy,
-  products: [exactPreparedSubmission] }).ok, 'submission preserves independently replayable prepared money');
+  products: [{ ...exactPreparedSubmission }] }).ok, 'submission preserves independently replayable prepared money');
 assert.equal(serializeContractProductMonetaryAmounts({ ...exactPrepared, totalPrice: exactPrepared.totalPrice + 1 }).totalPrice,
   exactPrepared.totalPrice + 1, 'changed witnesses are not replaced by stale precise metadata');
 for (const kind of ['tool', 'cutting', 'finishing'] as const) {

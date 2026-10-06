@@ -8,7 +8,7 @@ import { partnerSaleReturnStep } from '../../contract-creation/partner/partnerWi
 
 test('price response continuation is explicit and returns to pricing', () => {
   assert.equal(partnerSaleReturnStep(new URLSearchParams('returnTo=contract&step=5')), 'pricing');
-  const labels = partnerCasePageActions({ canContinue: true, canReviewPricing: true, canEditDraft: true }).map(action => action.label);
+  const labels = partnerCasePageActions({ canContinue: true, canReviewPricing: true, canEditDraft: true, canPreview: false, canIssue: false, canCancel: false, canRequestVoid: false, canRequestCorrection: false }).map(action => action.label);
   assert.ok(labels.includes('ادامه تکمیل قرارداد'));
   assert.ok(labels.includes('ویرایش'));
 });
@@ -46,7 +46,7 @@ test('Partner contract toolbar uses existing actions and keeps the SMS label', (
     canSendConfirmation: true, canDownload: true, canPrint: true,
     onRequestCorrection: () => { called.push('edit'); }, onDownload: () => { called.push('pdf'); },
     onPrint: () => { called.push('print'); }, onSendConfirmation: () => { called.push('sms'); } });
-  assert.deepEqual(actions.map(item => item.label), ['ویرایش', 'دانلود PDF', 'پرینت', 'ارسال پیامک تأیید']);
+  assert.deepEqual(actions.map(item => item.label), ['درخواست اصلاح', 'دانلود PDF', 'پرینت', 'ارسال پیامک تأیید']);
   actions.forEach(action => action.onClick?.());
   assert.deepEqual(called, ['edit', 'pdf', 'print', 'sms']);
   assert.equal(partnerCasePageActions({ canPreview: false, canIssue: false, canRequestCorrection: false,

@@ -1,6 +1,7 @@
 import { finishCommercialCorrection } from '../../ordinaryContractLifecycle';
 import { inquiryBelongsToCurrentActivation } from './reactivationPricing';
 import { allocatePartnerLinkedPair } from './linkedPair';
+import { validatePartnerCommercialPhysicalFloor } from '../fulfillment/quantityStore';
 import { assertPartnerCommercialAvailable, resetPartnerCommercialApprovals, reconcilePartnerCommercialFinality } from './commercialLifecycle';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
@@ -283,6 +284,8 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   }
   const evidence = buildRevisionEvidence({ command, resolved: resolved.value, graph: validated.value.graph,
     graphHash: validated.value.graphHash, rows: approvedRows });
+  const physical = await validatePartnerCommercialPhysicalFloor(tx, caseId, approvedRows);
+  if (!physical.ok) return physical;
   if (!evidence.ok) {
     if (evidence.error.code === 'INTEGRITY_CONFLICT') await dependencies.recordEvidenceReview(tx, {
       caseId, profileId: current.profileId, correlationId: command.correlationId, code: 'INTEGRITY_CONFLICT',

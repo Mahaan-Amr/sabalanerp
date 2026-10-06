@@ -42,8 +42,8 @@ const stateCopy: Record<PartnerCaseView['state'], { label: string; tone: ErpTone
   AWAITING_CUSTOMER_CONFIRMATION: { label: 'در انتظار تأیید مشتری', tone: 'warning' },
   CUSTOMER_APPROVED: { label: 'تأییدشده مشتری', tone: 'info' },
   COMMITTED: { label: 'قطعی', tone: 'success' },
-  CANCELLED: { label: 'لغوشده', tone: 'danger' },
-  VOIDED: { label: 'باطل‌شده', tone: 'danger' },
+  CANCELLED: { label: 'لغو شده', tone: 'danger' },
+  VOIDED: { label: 'لغو شده', tone: 'danger' },
 };
 const historyCopy: Record<string, string> = {
   PARTNER_SELLER_SIGNED: 'ثبت امضای فروشنده',

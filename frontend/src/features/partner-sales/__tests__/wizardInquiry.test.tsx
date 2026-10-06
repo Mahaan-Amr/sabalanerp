@@ -43,9 +43,9 @@ test('re-inquiry continues from the latest rejected successor instead of resubmi
     approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined,
     successor: { inquiryId: 'successor-inquiry', rowId: 'successor-row', revision: 2, state: 'REJECTED' as const } };
   const successor = { ...predecessor, rowId: 'successor-row', revision: 2, successor: undefined };
-  const latest = await resolveLatestPartnerInquiryRow({ query: async () => ({ ok: true, value: {
+  const latest = await resolveLatestPartnerInquiryRow({ query: (async () => ({ ok: true, value: {
     ...fixture.inquiry, inquiryId: 'successor-inquiry', rows: [successor],
-  } }) }, predecessor);
+  } })) as PartnerQueryV2Port['query'] }, predecessor);
   assert.equal(latest.rowId, 'successor-row');
   assert.equal(latest.revision, 2);
 });
@@ -76,7 +76,7 @@ test('exact product-row references own entry; quantity and delivery changes do n
   const draft = enterPartnerWizard(input);
   assert.equal(draft?.rows[0].quantity, '250');
   assert.equal(draft?.intent.graphHash, fixture.technicalSaved.graphHash);
-  assert.equal(draft?.intent.rows[0].retailUnitPrice.amount, '800');
+  assert.equal(draft?.intent.rows[0].retailUnitPrice.amount, '');
   const explicitlyPriced = enterPartnerWizard({ ...input, retailUnitPrices: new Map([
     [fixture.configurationDraft.productRowId, { amount: '1250', currency: 'IRR' as const }],
   ]) });
@@ -215,7 +215,7 @@ test('saving one correction retains both rejected products and their reasons acr
       .map(row => ({ ...row, configurationRef: { ...row.configurationRef, recoveryRevision } })) };
   const draft = enterPartnerWizard({ inquiryRows: rejected, now: Date.parse('2026-08-27T09:00:00.000Z'), validated,
     base: { recoveryId: validated.recoveryId, recoveryRevision, customerId: '', contractDate: '2026-08-27',
-      customerPaymentPlan: fixture.partner.customerPaymentPlan, deliveries: [] } });
+      customerPaymentPlan: fixture.partner.customerPaymentPlan, retailDiscount: { amount: '0', currency: 'IRR' }, deliveries: [] } });
   assert.ok(draft);
   assert.equal(draft.rows.length, 2);
   draft.rows.forEach((row, index) => {

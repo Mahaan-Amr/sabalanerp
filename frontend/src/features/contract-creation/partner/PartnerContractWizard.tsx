@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { FaFileInvoiceDollar } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpInlineState, ErpLoading, ErpSheet, ErpFieldView, ErpTextarea } from '@/components/erp';
 import type { WizardStep } from '../components/shared/WizardProgressBar';
@@ -14,7 +14,7 @@ import { partnerCaseReviewMessage, partnerDeliveryPlanIssue } from './partnerWiz
 import { partnerSalesActionFeedback } from '../../partner-sales/partnerSalesErrorMessage';
 import { contractCorrectionBannerTitle } from '../services/contractCorrectionPresentation';
 import { formatPartnerMoney } from '../../partner-sales/presentation';
-import { partnerTrackingCode, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
+import { partnerCommercialLabels, partnerTrackingCode, type PartnerCommercialState, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 
 export type PartnerWizardStep = 'date' | 'customer' | 'project' | 'products' | 'pricing' | 'delivery' | 'payment' | 'confirmation';
 export interface PartnerWizardDraft {
@@ -63,8 +63,8 @@ export function requiredPartnerWizardStep(step: PartnerWizardStep, hasNumberedCa
   return step;
 }
 
-export function partnerWizardCompactStatus(view: PartnerCaseView) {
-  const contract = view.state === 'DRAFT' ? 'پیش‌نویس'
+export function partnerWizardCompactStatus(view: PartnerCaseView, commercial?: PartnerCommercialState) {
+  const contract = commercial ? partnerCommercialLabels[commercial.status] : view.state === 'COMMITTED' ? 'در حال دریافت وضعیت' : view.state === 'VOIDED' ? 'لغو شده' : view.state === 'DRAFT' ? 'پیش‌نویس'
     : view.state === 'AWAITING_CUSTOMER_CONFIRMATION' ? 'در انتظار مشتری'
       : view.state === 'CUSTOMER_APPROVED' ? 'تأییدشده مشتری' : view.state;
   const pricing = view.pricingState === 'READY_TO_FINALIZE' ? 'آماده نهایی‌سازی'
@@ -92,6 +92,7 @@ export interface PartnerContractWizardProps {
   now: number;
   externalError?: string | null;
   correctionReason?: string | null;
+  readCommercialState?: (view: PartnerCaseView) => Promise<PartnerCommercialState | undefined>;
   mismatchedRowIds?: readonly string[];
   canonicalRetailReady?: boolean;
   renderSection: (step: Exclude<PartnerWizardStep, 'products' | 'pricing'>, draft: PartnerWizardDraft,
@@ -108,7 +109,7 @@ export interface PartnerContractWizardProps {
   onOpenCase: (caseId: string) => Promise<void> | void;
 }
 
-export function PartnerContractWizard({ draft, onChange, recovery, submission, now, externalError, correctionReason, mismatchedRowIds = [],
+export function PartnerContractWizard({ draft, onChange, recovery, submission, now, externalError, correctionReason, readCommercialState, mismatchedRowIds = [],
   canonicalRetailReady = true, renderSection, validateStep, onReinquire, onEditProducts, onEditProduct,
   onSendConfirmation, onFinalize, onCaseNumbered, onOpenCase, onPreparePricingQuote, onRejectPrice }: PartnerContractWizardProps) {
   const result = useSyncExternalStore(submission.subscribe, submission.getSnapshot, submission.getSnapshot);
@@ -153,7 +154,17 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const rejectedRows = unusable.filter(({ inquiryRow }) => inquiryRow.state === 'REJECTED');
   const mutatePending = result.phase === 'submitting' || result.phase === 'uncertain';
   const disabled = recovery.state !== 'writable' || mutatePending || quotePending || actionPending;
-  const compactStatus = result.case ? partnerWizardCompactStatus(result.case) : null;
+  const [commercialSnapshot, setCommercialSnapshot] = useState<{ key: string; value: PartnerCommercialState } | null>(null);
+  const commercialKey = result.case ? `${result.case.owner.caseId}:${result.case.owner.revision}:${result.case.owner.integrityHash}` : '';
+  useEffect(() => {
+    let active = true;
+    if (result.case && readCommercialState) void readCommercialState(result.case).then(value => {
+      if (active && value) setCommercialSnapshot({ key: commercialKey, value });
+    }).catch(() => { if (active) setCommercialSnapshot(null); });
+    return () => { active = false; };
+  }, [commercialKey, readCommercialState]);
+  const compactStatus = result.case ? partnerWizardCompactStatus(result.case,
+    commercialSnapshot?.key === commercialKey ? commercialSnapshot.value : undefined) : null;
   const customerNotSent = result.case && ['NOT_SENT', 'RECONFIRMATION_REQUIRED']
     .includes(result.case.customerConfirmationState) && !confirmationSent;
   const pricingReady = Boolean(result.case && (pricingEntries.length > 0 || Boolean(draft.serviceRows?.length)) && unusable.length === 0 &&
@@ -402,7 +413,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   >
     <div className="min-w-0 space-y-4" aria-label="ایجاد پرونده فروش همکار">
       <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{visibleSteps[stepIndex]?.label}</h2>
-      {draft.intent.preparationCompleted && <ErpInlineState kind="success" title="پیش‌نویس تکمیل و ذخیره شده است؛ قطعی‌شدن قرارداد پس از توافق قیمت انجام می‌شود." />}
+      {draft.intent.preparationCompleted && <ErpInlineState kind="success" title="اطلاعات قرارداد تکمیل شده است؛ تغییرات این مرحله با «ثبت یادداشت قرارداد» ذخیره می‌شود." />}
       <ErpSheet open={commitOpen} onClose={() => { if (!actionPending) setCommitOpen(false); }} presentation="modal" pending={actionPending}
         title="نهایی‌سازی خرید از سبلان و ایجاد قرارداد مشتری"
         footer={<ErpButton label="پذیرش مبلغ خرید و نهایی‌سازی" disabled={disabled || !pricingReady || !summary.valid || summary.wholesale === undefined} onClick={() => void commit()} />}>

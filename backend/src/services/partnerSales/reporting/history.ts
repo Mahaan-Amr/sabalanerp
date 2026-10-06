@@ -27,7 +27,11 @@ export function caseHistory(runtime: ContractRuntime, events: PartnerEvent[]) {
   const voids = events.filter((event): event is Extract<PartnerEvent, { type: 'CASE_VOIDED' }> => event.type === 'CASE_VOIDED');
   if (voids.length > 1) conflict();
   const voided = voids[0];
-  if (voided && (!effective || runtime.checkExpectedRevision(voided.owner, effective) || voided.effectiveDate < effectiveDate!)) conflict();
+  // Cancellation can occur while an approved successor is still a note. It
+  // closes that head, but reverses only the last effective commercial sale.
+  if (voided && (!effective || voided.owner.caseId !== effective.caseId || voided.owner.revision < effective.revision
+    || (voided.owner.revision === effective.revision && runtime.checkExpectedRevision(voided.owner, effective))
+    || voided.effectiveDate < effectiveDate!)) conflict();
   return { commitment, corrections: unique, effective, voided, voids, recommitments: [] as Extract<PartnerEvent, { type: 'CASE_RECOMMITTED' }>[], reactivated: false };
 }
 

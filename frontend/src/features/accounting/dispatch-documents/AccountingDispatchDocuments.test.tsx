@@ -10,7 +10,7 @@ const noop = () => undefined;
 test('issued case exposes two retained downloads and exactly three primary print actions without technical guidance', async () => {
   const workspace = await createFixtureDispatchDocumentsClient('MANAGE').load();
   const item = workspace.cases.find((candidate) => candidate.id === 'dispatch-issued')!;
-  const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} rejectionReason="" onRejectionReason={noop} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
+  const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
   assert.match(html, /دانلود بارنامه/);
   assert.match(html, /دانلود صورت‌حساب/);
   assert.equal((html.match(/چاپ بارنامه/g) || []).length, 1);
@@ -22,7 +22,7 @@ test('issued case exposes two retained downloads and exactly three primary print
 test('view-only case has permitted documents but no mutation control', async () => {
   const workspace = await createFixtureDispatchDocumentsClient('VIEW').load();
   const item = workspace.cases.find((candidate) => candidate.id === 'dispatch-issued')!;
-  const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} rejectionReason="" onRejectionReason={noop} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
+  const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
   assert.match(html, /دانلود بارنامه/);
   assert.doesNotMatch(html, /جایگزینی بسته اسناد/);
   assert.doesNotMatch(html, /پذیرش و صدور/);
@@ -31,7 +31,7 @@ test('view-only case has permitted documents but no mutation control', async () 
 test('blocked case names evidence and owning recovery path without an Accounting bypass', async () => {
   const workspace = await createFixtureDispatchDocumentsClient('MANAGE').load();
   const item = workspace.cases.find((candidate) => candidate.id === 'dispatch-blocked')!;
-  const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} rejectionReason="" onRejectionReason={noop} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
+  const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
   assert.match(html, /ردیف پایدار ۱۱/);
   assert.match(html, /بازگشت به لجستیک/);
   assert.doesNotMatch(html, /پذیرش و صدور/);
@@ -41,7 +41,7 @@ test('issued history without a complete retained pair names the evidence gap and
   const workspace = await createFixtureDispatchDocumentsClient('MANAGE').load();
   const item = structuredClone(workspace.cases.find((candidate) => candidate.id === 'dispatch-issued')!);
   item.bundle!.artifacts = item.bundle!.artifacts.filter((artifact) => artifact.kind === 'WAYBILL');
-  const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} rejectionReason="" onRejectionReason={noop} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
+  const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
   assert.match(html, /بسته کامل بارنامه و صورت‌حساب در این نما قابل اثبات نیست/);
   assert.equal((html.match(/disabled=""/g) || []).length, 5); // two downloads plus three print actions
 });

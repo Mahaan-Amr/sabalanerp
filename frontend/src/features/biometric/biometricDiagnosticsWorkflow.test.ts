@@ -5,16 +5,16 @@ import {
   loadBiometricDiagnostics,
 } from './biometricDiagnosticsWorkflow';
 
-const serverDiagnostics = { platform: { connector: 0 } };
+const serverDiagnostics = { platform: { connector: 0, confirmation: 0, authorization: 0, projection: 0, auditIntegrity: 0, outage: 0, sms: 0 } };
 const localStatus = {
   workstationId: 'SABALAN-LOCAL-BIOMINI',
-  availability: 'AVAILABLE',
+  availability: 'AVAILABLE' as const,
 };
 const issuedCommand = { command: { commandId: 'challenge-1' } };
 const connectorResult = { response: { status: 'AVAILABLE' }, signature: 'signed-result' };
 const completedDiagnostics = {
-  mode: 'PHYSICAL',
-  availability: 'AVAILABLE',
+  mode: 'PHYSICAL' as const,
+  availability: 'AVAILABLE' as const,
   liveEnrollmentEnabled: true,
   checkedAt: '2026-09-22T08:00:00.000Z',
   device: { model: 'BioMini SLIM 2', serial: 'serial-1', connectorVersion: '1.0.0', sdkVersion: '3.11.1.595' },

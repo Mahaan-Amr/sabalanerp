@@ -5,6 +5,7 @@ import { readCurrentPartnerCaseViews } from './lifecycle';
 import { readPersistedPartnerEvents } from '../events/persisted';
 import { subtract, sum } from '../reporting/money';
 import { caseComparableAmount } from '../reporting/comparable';
+import { synchronizePartnerContractedQuantities, validatePartnerCommercialPhysicalFloor } from '../fulfillment/quantityStore';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
@@ -15,6 +16,9 @@ export async function recordPartnerRecommitment(tx: Prisma.TransactionClient, ca
   if (!reactivation || rows.some(row => row.sequence > reactivation.sequence && ['CASE_COMMITTED', 'CASE_RECOMMITTED'].includes(row.type))) return;
   const views = await readCurrentPartnerCaseViews(tx, caseId);
   if (!views?.accounting || !views.row.internalRecordId || !views.row.commitmentEventId) throw new Error('شواهد تعهد خرید کامل نیست.');
+  const physicalFloor = await validatePartnerCommercialPhysicalFloor(tx, caseId,
+    views.accounting.products.filter(product => product.productType !== 'service'));
+  if (!physicalFloor.ok) throw new Error(physicalFloor.error.message);
   const root = views.row;
   const events = readPersistedPartnerEvents({ id: caseId, internalRecordId: root.internalRecordId! }, rows);
   const net = sum(events.flatMap(event => event.type === 'CASE_COMMITTED' ? [event.sabalanNetAmount.amount]
@@ -48,4 +52,5 @@ export async function recordPartnerRecommitment(tx: Prisma.TransactionClient, ca
     integrityHash: owner.integrityHash, sequence: (rows.at(-1)?.sequence ?? 0) + 2, stateRevision: current.stateRevision,
     type: recommit.type, fromState: 'COMMITTED', toState: 'COMMITTED', actorId, commandId, correlationId: commandId,
     recordedAt: clock.now, effectiveDate: new Date(`${recommit.effectiveDate}T00:00:00Z`), evidence: json({ publicEvent: recommit }) } });
+  await synchronizePartnerContractedQuantities(tx, caseId);
 }

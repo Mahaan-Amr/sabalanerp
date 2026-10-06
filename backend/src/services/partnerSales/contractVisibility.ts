@@ -31,3 +31,16 @@ export async function canPartnerReadSalesContract(
     partnerCase: { is: { profileId } },
   } })) === 1;
 }
+
+/** Exact-target admission for Partner self-service. General Sales grants still
+ * govern ordinary contracts and lists; handlers retain audited CASE_READ. */
+export async function ownsPartnerCustomerContract(
+  database: PartnerContractVisibilityDatabase,
+  userId: string,
+  contractId: string,
+): Promise<boolean> {
+  const profile = await database.partnerProfile.findUnique({ where: { userId }, select: { id: true } });
+  if (!profile) return false;
+  return (await database.salesContract.count({ where: { id: contractId,
+    partnerKind: 'PARTNER_CUSTOMER', partnerCase: { is: { profileId: profile.id } } } })) === 1;
+}

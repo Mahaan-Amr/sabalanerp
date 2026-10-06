@@ -19,7 +19,7 @@ const expected = [
   [7, 'الگو', 'آن‌گونه که باید باشی', 'DIAMOND', 'II'],
 ];
 
-for (const [index, code] of codes.entries()) {
+for (const [index, code] of Array.from(codes.entries())) {
   const [ordinal, labelFa, meaningFa, stoneFamily, romanNumeral] = expected[index] as [
     number, string, string, 'TURQUOISE' | 'RUBY' | 'DIAMOND', 'I' | 'II' | 'III',
   ];

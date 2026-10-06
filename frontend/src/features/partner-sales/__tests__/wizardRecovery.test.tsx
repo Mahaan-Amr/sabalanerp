@@ -6,7 +6,7 @@ import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures'
 import { PartnerContractWizard, partnerCaseNeedsAutomaticPricingInquiry, partnerWizardStepsForDraft,
   requiredPartnerWizardStep, type PartnerWizardDraft } from '../../contract-creation/partner/PartnerContractWizard';
 import { createPartnerCaseSubmission, saveCompletedPartnerDraft } from '../../contract-creation/partner/partnerCaseSubmission';
-import { remainingPartnerAmount, defaultPartnerRetailRows, partnerRetailIntentRows,
+import { remainingPartnerAmount, defaultPartnerRetailRows, partnerMoneyText, partnerRetailIntentRows,
   partnerRetailSummary } from '../../contract-creation/partner/partnerRetail';
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
 import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
@@ -44,6 +44,7 @@ test('pricing refresh reads published inquiry identities without inventing IDs f
     [fixture.inquiry.rows[0].approvedRowBinding!.inquiryId]);
 });
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
+rows[0].retailUnitPrice = { amount: '1000', currency: 'IRR' };
 rows[0].wholesaleUnitPrice = { amount: '800', currency: 'IRR' };
 const draft: PartnerWizardDraft = { step: 'products', rows, intent: {
   ...fixture.draftSubmissionReference, contractDate: '2026-08-27',
@@ -180,21 +181,16 @@ test('product editing preserves user deliveries without adding schedules for new
       { productRowId: 'row-a', quantity: '3' }, { productRowId: 'removed-row', quantity: '1' },
     ] },
   ];
-  assert.deepEqual(preservePartnerDeliveriesAcrossProductEdit(previous, ['row-a', 'row-b', 'row-c']), [
-    { ...previous[0] },
-    { ...previous[1], items: [{ productRowId: 'row-a', quantity: '3' }] },
-  ]);
+  assert.deepEqual(preservePartnerDeliveriesAcrossProductEdit(previous, ['row-a', 'row-b', 'row-c']), previous);
   assert.deepEqual(preservePartnerDeliveriesAcrossProductEdit([], ['row-a', 'row-c']), []);
 });
 
-test('a corrected product quantity trims stale delivery allocations before price acceptance', () => {
+test('a corrected product quantity retains entered allocations and requires explicit reconciliation', () => {
   const deliveries = [{ deliveryId: 'delivery-a', date: '2026-09-01', destination: 'مقصد',
     items: [{ productRowId: 'stone-row', quantity: '500' }, { productRowId: 'other-row', quantity: '100' }] }];
   assert.deepEqual(reconcilePartnerDeliveriesToProducts(deliveries,
-    [{ productRowId: 'stone-row', quantity: '300' }, { productRowId: 'other-row', quantity: '100' }]), [
-    { ...deliveries[0], items: [{ productRowId: 'stone-row', quantity: '300' },
-      { productRowId: 'other-row', quantity: '100' }] },
-  ]);
+    [{ productRowId: 'stone-row', quantity: '300' }, { productRowId: 'other-row', quantity: '100' }]), deliveries);
+  assert.ok(partnerDeliveryPlanIssue(deliveries, [{ productRowId: 'stone-row', quantity: '300' }, { productRowId: 'other-row', quantity: '100' }]));
 });
 
 test('Partner inserts Case-scoped pricing immediately after the ordinary product step', () => {
@@ -287,7 +283,7 @@ test('expiry during the wizard retains entered retail data and exposes inline re
   assert.match(html, /اعتبار قیمت پایان یافته/);
   assert.match(html, /اعتبار تا/);
   assert.match(html, /استعلام مجدد/);
-  assert.match(html, /800 ریال/);
+  assert.ok(html.includes(partnerMoneyText('800', 'IRR')));
   assert.doesNotMatch(html, /استعلام مجدد کل بسته|در انتظار پاسخ/);
   assert.doesNotMatch(html, /قیمت سبلان: در انتظار استعلام/);
 });
@@ -348,7 +344,7 @@ test('the pricing step reveals each Sabalan offer and exposes explicit partner a
     now={Date.parse('2026-08-27T09:00:00.000Z')} renderSection={() => null} validateStep={() => null}
     onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /قیمت پیشنهادی سبلان/);
-  assert.match(html, /800 ریال/);
+  assert.ok(html.includes(partnerMoneyText('800', 'IRR')));
   assert.match(html, /پذیرش قیمت‌ها/);
   assert.doesNotMatch(html, /در انتظار تکمیل استعلام|ساخت پرونده و ورود به Wizard/);
 });
@@ -445,15 +441,16 @@ test('returning to product edits restores the same recovery customer, project an
 });
 
 
-test('delivery scheduling is optional but a user-added plan must remain complete', () => {
+test('delivery scheduling requires complete allocations and allows empty product drafts', () => {
+  assert.equal(partnerDeliveryPlanIssue([], []), null);
   const rows = [{ productRowId: 'row-a', quantity: '5' }];
-  assert.equal(partnerDeliveryPlanIssue([], rows), null);
+  assert.ok(partnerDeliveryPlanIssue([], rows));
   const delivery = { deliveryId: 'user-delivery', date: '2026-09-30', destination: 'مقصد',
     receiverName: 'گیرنده', projectManagerName: 'مدیر', items: [{ productRowId: 'row-a', quantity: '5' }] };
   assert.equal(partnerDeliveryPlanIssue([delivery], rows), null);
   assert.match(partnerDeliveryPlanIssue([{ ...delivery, items: [] }], rows)!, /کامل کنید/);
   assert.match(partnerDeliveryPlanIssue([{ ...delivery, items: [{ productRowId: 'row-a', quantity: '4' }] }], rows)!, /دقیقاً/);
-  assert.equal(partnerDeliveryPlanIssue([], rows), null);
+  assert.ok(partnerDeliveryPlanIssue([], rows));
 });
 
 test('returning to a specific customer draft never restores the latest unrelated inquiry', () => {
@@ -496,7 +493,7 @@ test('completed draft navigation waits for successful persistence and opens the 
     const controller = createPartnerCaseSubmission({ actorId: fixture.profile.partnerSellerId,
       commands: { execute: async command => {
         persisted = succeeds;
-        return succeeds ? { ok: true as const, value: { commandId: command.commandId, case: fixture.partner } }
+        return succeeds ? { ok: true as const, value: { commandId: command.commandId, replayed: false, eventIds: [], case: fixture.partner } }
           : { ok: false as const, error: partnerError('FORBIDDEN') };
       } },
       recovery: { pending: () => null, savePending: async () => undefined, clearPending: async () => undefined,

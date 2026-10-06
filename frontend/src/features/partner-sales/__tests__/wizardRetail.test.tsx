@@ -20,11 +20,12 @@ test('periodic price refresh keeps the quoted delivery-unit total for the 100329
   assert.equal(summary.loss, false);
 });
 
-test('retail defaults to approval but a retail-only discount can create a confirmable loss', () => {
+test('retail requires an explicit seller price and a retail-only discount can create a confirmable loss', () => {
   const { inquiry, configurationDraft } = createPartnerFixtures();
   const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '2.000', unit: 'm', inquiryRow: inquiry.rows[0] }]);
   rows[0].wholesaleUnitPrice = { amount: '800', currency: 'IRR' };
-  assert.equal(rows[0].retailUnitPrice.amount, '800');
+  assert.equal(rows[0].retailUnitPrice.amount, '');
+  rows[0].retailUnitPrice = { amount: '800', currency: 'IRR' };
   const discount = { amount: '100', currency: 'IRR' as const };
   const summary = partnerRetailSummary(rows, discount);
   assert.equal(summary.wholesale, '1600');
@@ -77,7 +78,7 @@ test('retail preview rounds only payable totals above the safe integer range', (
   inquiry.rows[0].approvedPrice = { amount: '9007199254740993.01', currency: 'IRR' };
   const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '0.1', unit: 'm', inquiryRow: inquiry.rows[0] }]);
   rows[0].wholesaleUnitPrice = { amount: '9007199254740993.01', currency: 'IRR' };
-  rows[0].retailUnitPrice.amount = '9007199254740993.02';
+  rows[0].retailUnitPrice = { amount: '9007199254740993.02', currency: 'IRR' };
   const summary = partnerRetailSummary(rows, { amount: '0', currency: 'IRR' });
   assert.equal(summary.wholesale, '900719925474099');
   assert.equal(summary.retail, '900719925474099');

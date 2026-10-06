@@ -17,8 +17,8 @@ export const partnerCaseListTags = {
   CUSTOMER_PENDING: { label: 'در انتظار تأیید مشتری', tone: 'info' },
   CUSTOMER_APPROVED: { label: 'تأییدشده مشتری', tone: 'success' },
   COMMITTED: { label: 'قطعی', tone: 'success' },
-  CANCELLED: { label: 'لغوشده', tone: 'neutral' },
-  VOIDED: { label: 'باطل‌شده', tone: 'danger' },
+  CANCELLED: { label: 'لغو شده', tone: 'danger' },
+  VOIDED: { label: 'لغو شده', tone: 'danger' },
 } satisfies Record<string, { label: string; tone: ErpTone }>;
 export type PartnerCaseListTag = keyof typeof partnerCaseListTags;
 

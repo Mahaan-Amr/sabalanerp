@@ -2,16 +2,7 @@
 
 import React from 'react';
 import { FaChartLine } from 'react-icons/fa';
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import { FinancialTrendChart } from '@/components/reporting/FinancialTrendChart';
 import { ErpCard, ErpInlineState, ErpSegmentedControl, ErpSkeleton } from '@/components/erp';
 import {
   financialTrendToman,
@@ -35,27 +26,6 @@ const seriesLabels: Record<SeriesKey, string> = {
   received: 'دریافت‌شده',
   outstanding: 'مانده مطالبات',
 };
-
-function DrilldownDot({ cx, cy, payload, stroke }: {
-  cx?: number;
-  cy?: number;
-  payload?: any;
-  series: SeriesKey;
-  stroke: string;
-}) {
-  if (!payload || typeof cx !== 'number' || typeof cy !== 'number') return null;
-  return (
-    <circle
-      cx={cx}
-      cy={cy}
-      r={payload.marker ? 4 : 2.5}
-      fill="var(--sds-surface-raised)"
-      stroke={stroke}
-      strokeWidth={2.5}
-      aria-hidden="true"
-    />
-  );
-}
 
 export function AccountingFinancialTrend({
   range,
@@ -115,26 +85,12 @@ export function AccountingFinancialTrend({
 
       {source && !empty && (
         <div className="px-2 pb-4 sm:px-4" aria-busy={state.status === 'loading'}>
-          <div className={compact ? 'h-52' : 'h-72'} dir="ltr">
-            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 320, height: compact ? 208 : 288 }}>
-              <AreaChart data={chartData} margin={{ top: 10, right: 8, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="financial-trend-invoiced-fill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--sds-accent)" stopOpacity={0.24} />
-                    <stop offset="95%" stopColor="var(--sds-accent)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="var(--sds-border-subtle)" strokeDasharray="3 5" vertical={false} />
-                <XAxis dataKey="label" interval={source.range === '1m' ? 0 : 'preserveStartEnd'} tickFormatter={(label, index) => source.range !== '1m' || chartData[index]?.marker ? label : ''} minTickGap={12} tick={{ fill: 'var(--sds-text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={(value) => compactToman.format(value)} tick={{ fill: 'var(--sds-text-muted)', fontSize: 11 }} tickMargin={8} axisLine={false} tickLine={false} width="auto" />
-                <Tooltip formatter={(value) => formatToman(Number(value))} contentStyle={{ background: 'var(--sds-surface-overlay)', border: '1px solid var(--sds-border-default)', borderRadius: 'var(--sds-radius-card)', color: 'var(--sds-text-primary)' }} />
-                <Legend wrapperStyle={{ color: 'var(--sds-text-secondary)', fontSize: 11 }} />
-                <Area name={seriesLabels.invoiced} dataKey="invoiced" type="monotone" stroke="var(--sds-accent)" fill="url(#financial-trend-invoiced-fill)" strokeWidth={2.5} dot={(props) => <DrilldownDot {...props} series="invoiced" stroke="var(--sds-accent)" />} />
-                <Area name={seriesLabels.received} dataKey="received" type="monotone" stroke="var(--sds-success)" fill="transparent" strokeWidth={2.5} dot={(props) => <DrilldownDot {...props} series="received" stroke="var(--sds-success)" />} />
-                <Area name={seriesLabels.outstanding} dataKey="outstanding" type="monotone" stroke="var(--sds-warning)" fill="transparent" strokeWidth={2.5} dot={(props) => <DrilldownDot {...props} series="outstanding" stroke="var(--sds-warning)" />} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <FinancialTrendChart points={chartData} compact={compact} daily={source.range === '1m'}
+            formatValue={value => formatToman(value)} series={[
+              { key: 'invoiced', label: seriesLabels.invoiced, color: 'var(--sds-accent)' },
+              { key: 'received', label: seriesLabels.received, color: 'var(--sds-success)' },
+              { key: 'outstanding', label: seriesLabels.outstanding, color: 'var(--sds-warning)' },
+            ]} />
           <div
             className="mt-3 max-h-40 space-y-2 overflow-y-auto rounded-[var(--sds-radius-card)] border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] p-2"
             aria-label="پیوندهای نقاط روند مالی"

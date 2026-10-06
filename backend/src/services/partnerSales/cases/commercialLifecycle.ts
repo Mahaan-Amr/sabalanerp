@@ -1,4 +1,5 @@
 import { recordPartnerRecommitment } from './recommitment';
+import { recordPartnerCommercialCorrectionFinality } from './commercialCorrectionFinality';
 import { readCasePricingResponse } from './pricingResponse';
 import { appendPartnerCommercialEvent } from './commercialEvents';
 import { randomUUID } from 'node:crypto';
@@ -89,7 +90,10 @@ export async function reconcilePartnerCommercialFinality(tx: Tx, caseId: string,
       actorId, commandId, correlationId: commandId, effectiveDate: new Date(`${event.effectiveDate}T00:00:00.000Z`),
       evidence: json({ publicEvent: event, commercialRevision: current.commercialRevision }) } });
   }
-  if (state === 'FINAL' && root.state === 'COMMITTED') await recordPartnerRecommitment(tx, root.id, actorId);
+  if (state === 'FINAL' && root.state === 'COMMITTED') {
+    await recordPartnerRecommitment(tx, root.id, actorId);
+    await recordPartnerCommercialCorrectionFinality(tx, root.id, current, actorId);
+  }
   const updated = await tx.salesContract.update({ where: { id: current.id }, data: { status } });
   if (state === 'FINAL' && contract.status !== 'SIGNED') await finishCommercialCorrection(tx, contract.id, actorId);
   if (updated.status !== current.status) await audit(tx, current.id, actorId, 'PARTNER_COMMERCIAL_STATUS_CHANGED', current, updated);

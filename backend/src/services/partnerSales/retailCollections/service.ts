@@ -60,7 +60,11 @@ function validateSource(source: RetailCollectionSource, expected: RevisionRef, c
   const versions = new Set<number>();
   const installmentIds = new Set<string>();
   for (const plan of orderedPlans) {
-    if (planIds.has(plan.planId) || versions.has(plan.version) || plan.installments.length === 0) return failure('INTEGRITY_CONFLICT');
+    const facts = source.planRevisionFacts?.[plan.planId];
+    if (source.planRevisionFacts && (!facts || !contracts.MoneySchema.safeParse(facts.retailPayable).success
+      || facts.retailPayable.currency !== payable.data.currency)) return failure('INTEGRITY_CONFLICT');
+    if (planIds.has(plan.planId) || versions.has(plan.version)
+      || (plan.installments.length === 0 && (plan.planId === current.data.planId || facts?.preparationCompleted !== false))) return failure('INTEGRITY_CONFLICT');
     planIds.add(plan.planId); versions.add(plan.version);
     if (plan.installments.some(item => item.amount.amount === '0' || item.amount.currency !== payable.data.currency
       || item.dueDate < plan.effectiveDate
@@ -150,11 +154,14 @@ function project(source: RetailCollectionSource): Result<RetailCollectionView> {
   if ([...allocations.value].some(([installmentId, amount]) => !installments.has(installmentId)
     || subtract(installments.get(installmentId)!.amount.amount, amount).startsWith('-'))) return failure('INTEGRITY_CONFLICT');
   for (const plan of source.planHistory) {
+    const facts = source.planRevisionFacts?.[plan.planId];
+    if (facts?.preparationCompleted === false && plan.planId !== source.customerPaymentPlan.planId) continue;
     const receiptsBefore = source.receipts.filter(item => item.effectiveDate < plan.effectiveDate);
     const collectedBefore = subtract(sum(receiptsBefore.filter(item => item.kind === 'RECEIPT').map(item => item.amount.amount)),
       sum(receiptsBefore.filter(item => item.kind === 'REVERSAL').map(item => item.amount.amount)));
     const scheduled = sum(plan.installments.map(item => item.amount.amount));
-    if (subtract(source.retailPayable.amount, collectedBefore) !== scheduled) return failure('INTEGRITY_CONFLICT');
+    const payable = plan.planId === source.customerPaymentPlan.planId ? source.retailPayable : facts?.retailPayable ?? source.retailPayable;
+    if (subtract(payable.amount, collectedBefore) !== scheduled) return failure('INTEGRITY_CONFLICT');
   }
   const receivedTotal = sum(received);
   const reversedTotal = sum(reversed);

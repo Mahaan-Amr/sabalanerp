@@ -9,8 +9,8 @@ const snapshots = createCustomerOutputSnapshots(contracts);
 
 /** PDF availability depends on authorized frozen Case content, not an SMS session. */
 export function casePdfAvailability(input: { authorized: boolean; state: string; hasContent: boolean; hasSnapshot: boolean; commercialFlow?: boolean }) {
-  return { canPreview: input.authorized && (input.hasSnapshot || ((input.state === 'COMMITTED' || input.commercialFlow) && input.hasContent)),
-    canIssue: input.authorized && (input.state === 'COMMITTED' || input.commercialFlow) && input.hasContent };
+  return { canPreview: input.authorized && (input.hasSnapshot || ((input.state === 'COMMITTED' || input.commercialFlow === true) && input.hasContent)),
+    canIssue: input.authorized && (input.state === 'COMMITTED' || input.commercialFlow === true) && input.hasContent };
 }
 
 /** Caller owns the Case lock and has authorized CUSTOMER_OUTPUT. Never changes

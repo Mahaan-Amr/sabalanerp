@@ -1,6 +1,8 @@
 'use client';
 
-import { ErpDisclosure, ErpField, ErpInput, ErpSelect, useErpPresentationScope } from '@/components/erp';
+import { ErpField, ErpInput, ErpTextarea } from '@/components/erp';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
+import { FaUser } from 'react-icons/fa';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 
 export type CustomerProjectFormValue = {
@@ -26,24 +28,23 @@ export function CustomerProjectFormFields({ value, onChange, errors = {} }: {
   onChange: <K extends keyof CustomerProjectFormValue>(field: K, next: CustomerProjectFormValue[K]) => void;
   errors?: Partial<Record<keyof CustomerProjectFormValue, string>>;
 }) {
-  const scope = useErpPresentationScope();
   const supplementary = <>
-    <div className="border-t border-[var(--sds-border-subtle)] pt-5">
-      <h3 className="mb-4 font-semibold text-[var(--sds-text-primary)]">اطلاعات مدیر پروژه</h3>
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+    <div className="border-t border-[var(--sds-border-default)] pt-4">
+      <h4 className="mb-4 flex items-center gap-2 text-lg font-medium text-[var(--sds-text-primary)]"><FaUser className="text-[var(--sds-accent)]" />اطلاعات مدیر پروژه</h4>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <ErpField label="نام مدیر پروژه">
           <ErpInput value={value.projectManagerName} maxLength={500}
             onChange={event => onChange('projectManagerName', event.target.value)} placeholder="نام مدیر پروژه" />
         </ErpField>
-        <ErpField label="شماره تماس مدیر پروژه" error={errors.projectManagerNumber}>
+        <ErpField label="شماره مدیر پروژه" error={errors.projectManagerNumber}>
           <ErpInput value={value.projectManagerNumber} maxLength={30}
             onChange={event => onChange('projectManagerNumber', event.target.value)} placeholder="شماره تماس مدیر پروژه" />
         </ErpField>
       </div>
     </div>
-    <div className="border-t border-[var(--sds-border-subtle)] pt-5">
-      <h3 className="mb-4 font-semibold text-[var(--sds-text-primary)]">اطلاعات بازاریاب</h3>
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+    <div className="border-t border-[var(--sds-border-default)] pt-4">
+      <h4 className="mb-4 flex items-center gap-2 text-lg font-medium text-[var(--sds-text-primary)]"><FaUser className="text-[var(--sds-info)]" />اطلاعات بازاریاب</h4>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <ErpField label="نام بازاریاب">
           <ErpInput value={value.marketerFirstName} maxLength={500}
             onChange={event => onChange('marketerFirstName', event.target.value)} placeholder="نام بازاریاب" />
@@ -59,28 +60,25 @@ export function CustomerProjectFormFields({ value, onChange, errors = {} }: {
       </div>
     </div>
   </>;
-  return <div className="space-y-6">
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+  return <div className="space-y-4">
+    <div className="grid grid-cols-1 gap-4">
       <ErpField label="نام پروژه" error={errors.projectName} required>
         <ErpInput value={value.projectName} maxLength={300}
-          onChange={event => onChange('projectName', event.target.value)} placeholder="نام پروژه" />
+          onChange={event => onChange('projectName', event.target.value)} placeholder="نام پروژه" required />
       </ErpField>
-      <ErpField label="آدرس پروژه" error={errors.projectAddress} required>
-        <ErpInput value={value.projectAddress} maxLength={1000}
-          onChange={event => onChange('projectAddress', event.target.value)} placeholder="آدرس پروژه" />
+      <ErpField label="آدرس" error={errors.projectAddress} required>
+        <ErpTextarea value={value.projectAddress} maxLength={1000} rows={3}
+          onChange={event => onChange('projectAddress', event.target.value)} placeholder="آدرس پروژه" required />
       </ErpField>
-      <ErpField label="شهر پروژه">
+      <ErpField label="شهر">
         <ErpInput value={value.projectCity} maxLength={500}
-          onChange={event => onChange('projectCity', event.target.value)} placeholder="شهر پروژه" />
+          onChange={event => onChange('projectCity', event.target.value)} placeholder="شهر" />
       </ErpField>
-      <ErpField label="نوع پروژه">
-        <ErpSelect value={value.projectType} onChange={event => onChange('projectType', event.target.value)}>
-          <option value="">نوع پروژه را انتخاب کنید</option>
-          {PROJECT_TYPE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </ErpSelect>
-      </ErpField>
+      <EnhancedDropdown label="نوع پروژه" value={value.projectType}
+        onChange={next => onChange('projectType', next)} placeholder="انتخاب نوع پروژه"
+        options={[{ value: '', label: 'بدون نوع پروژه' }, ...PROJECT_TYPE_OPTIONS]}
+        searchable noOptionsText="نوع پروژه‌ای پیدا نشد" />
     </div>
-    {scope === 'workspace' ? <ErpDisclosure title="مدیر پروژه و بازاریاب • اختیاری"
-      expanded={Boolean(errors.projectManagerNumber || errors.marketerPhoneNumber)}>{supplementary}</ErpDisclosure> : supplementary}
+    {supplementary}
   </div>;
 }

@@ -191,7 +191,8 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
   liveErrors = {},
   onEntryValidityChange,
   technicalMandatory,
-  onTechnicalMandatoryChange
+  onTechnicalMandatoryChange,
+  retailPriceControl
 }: {
   input: Input;
   onChange: (input: Input) => void;
@@ -202,6 +203,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
   onEntryValidityChange?: (fieldId: string, invalid: boolean) => void;
   technicalMandatory?: { enabled: boolean; percentage: string };
   onTechnicalMandatoryChange?: (value: { enabled: boolean; percentage: string }) => void;
+  retailPriceControl?: React.ReactNode;
 }) {
   const pricingVisible = useProductPricingVisibility();
   const pricedInput = isPricedInput(input) ? input : undefined;
@@ -466,6 +468,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
         <div role="alert" className={errorClass}>{liveErrors.source}</div>
       )}
 
+      {retailPriceControl}
       {showPricing && (pricedInput?.baseMaterialPricing === 'paid-source-zero' ? (
         <ErpInlineState
           kind="empty"
@@ -483,13 +486,13 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
         />
       ))}
 
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-[var(--sds-border-default)] py-2 dark:border-[var(--sds-border-subtle)]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-[var(--sds-border-default)] py-2 dark:border-[var(--sds-border-subtle)]">
         {technicalMandatory && onTechnicalMandatoryChange && <>
-          <label className="inline-flex items-center gap-2 text-xs font-semibold">
+          <label className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs font-semibold">
             <CompactSwitch label="حکمی" checked={technicalMandatory.enabled}
               onChange={enabled => onTechnicalMandatoryChange({ ...technicalMandatory, enabled })} />حکمی
           </label>
-          <div className="w-28"><CompactDecimalField id="partner-longitudinal-mandatory-percentage"
+          <div className="w-24 shrink-0"><CompactDecimalField id="partner-longitudinal-mandatory-percentage"
             label="درصد حکمی" value={technicalMandatory.percentage}
             onValueChange={value => { try { const percentage = parseCanonicalDecimal(value);
               if (Number(percentage) > 0 && Number(percentage) <= 100) onTechnicalMandatoryChange({ ...technicalMandatory, percentage });
@@ -497,7 +500,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
         </>}
         {showPricing && pricedInput && pricedInput.baseMaterialPricing !== 'paid-source-zero' && (
           <>
-            <label className="inline-flex items-center gap-2 text-xs font-semibold">
+            <label className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs font-semibold">
               <CompactSwitch
                 label="حکمی"
                 checked={pricedInput.mandatoryEnabled}
@@ -505,7 +508,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
               />
               حکمی
             </label>
-            <div className="w-28">
+            <div className="w-24 shrink-0">
               <CompactDecimalField
                 id="longitudinal-mandatory-percentage"
                 label="درصد حکمی"
@@ -529,7 +532,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
             </div>
           </>
         )}
-        <label className="inline-flex items-center gap-2 text-xs font-semibold">
+        <label className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs font-semibold">
           <CompactSwitch
             label="خوراک اره"
             checked={input.sawKerfEnabled}
@@ -538,7 +541,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
           />
           خوراک اره
         </label>
-        <label className="inline-flex items-center gap-2 text-xs font-semibold">
+        <label className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs font-semibold">
           <CompactSwitch
             label="برش کالیبر"
             checked={resolved?.calibrationEnabled ?? input.calibrationEnabled}

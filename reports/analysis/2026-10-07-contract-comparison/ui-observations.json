@@ -1,0 +1,378 @@
+[
+  {
+    "kind": "ordinary",
+    "width": 1280,
+    "theme": "light",
+    "overflow": false,
+    "mainText": "ایجاد قرارداد\nتاریخ قرارداد\nتاریخ قرارداد\nانتخاب مشتری\nانتخاب مشتری\nمدیریت پروژه\nمدیریت پروژه\nانتخاب محصولات\nانتخاب محصولات\nبرنامه تحویل\nبرنامه تحویل\nروش پرداخت\nروش پرداخت\nتایید دیجیتال\nتایید دیجیتال\n\nکاربر ایجادکننده\n\nمدیر سیستم\nتاریخ قرارداد *\nچهارشنبه 1405/07/15\nپیش‌نمایش شماره احتمالی قرارداد\n\nشماره نهایی هنگام ثبت قرارداد در سرور قطعی می‌شود.\n\nبعدی\nمرحله ۱ از ۷\nقبلی"
+  },
+  {
+    "kind": "ordinary",
+    "width": 1280,
+    "theme": "dark",
+    "overflow": false,
+    "mainText": "ایجاد قرارداد\nتاریخ قرارداد\nتاریخ قرارداد\nانتخاب مشتری\nانتخاب مشتری\nمدیریت پروژه\nمدیریت پروژه\nانتخاب محصولات\nانتخاب محصولات\nبرنامه تحویل\nبرنامه تحویل\nروش پرداخت\nروش پرداخت\nتایید دیجیتال\nتایید دیجیتال\n\nکاربر ایجادکننده\n\nمدیر سیستم\nتاریخ قرارداد *\nچهارشنبه 1405/07/15\nپیش‌نمایش شماره احتمالی قرارداد\n\nشماره نهایی هنگام ثبت قرارداد در سرور قطعی می‌شود.\n\nبعدی\nمرحله ۱ از ۷\nقبلی"
+  },
+  {
+    "kind": "ordinary",
+    "width": 390,
+    "theme": "light",
+    "overflow": false,
+    "mainText": "ایجاد قرارداد\n\nمرحله ۱ از ۷\n\nتاریخ قرارداد\n\nکاربر ایجادکننده\n\nمدیر سیستم\nتاریخ قرارداد *\nچهارشنبه 1405/07/15\nپیش‌نمایش شماره احتمالی قرارداد\n\nشماره نهایی هنگام ثبت قرارداد در سرور قطعی می‌شود.\n\nبعدی\nمرحله ۱ از ۷\nقبلی"
+  },
+  {
+    "kind": "ordinary",
+    "width": 390,
+    "theme": "dark",
+    "overflow": false,
+    "mainText": "ایجاد قرارداد\n\nمرحله ۱ از ۷\n\nتاریخ قرارداد\n\nکاربر ایجادکننده\n\nمدیر سیستم\nتاریخ قرارداد *\nچهارشنبه 1405/07/15\nپیش‌نمایش شماره احتمالی قرارداد\n\nشماره نهایی هنگام ثبت قرارداد در سرور قطعی می‌شود.\n\nبعدی\nمرحله ۱ از ۷\nقبلی"
+  },
+  {
+    "kind": "ordinary",
+    "calendarButtons": [
+      {
+        "date": "1405/07/01",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/02",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/03",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/04",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/05",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/06",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/07",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/08",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/09",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/10",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/11",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/12",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/13",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/14",
+        "disabled": true,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/15",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/16",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/17",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/18",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/19",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/20",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/21",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/22",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/23",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/24",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/25",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/26",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/27",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/28",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/29",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/30",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/31",
+        "disabled": false,
+        "ariaDisabled": null
+      }
+    ]
+  },
+  {
+    "kind": "partner",
+    "width": 1280,
+    "theme": "light",
+    "overflow": false,
+    "mainText": "ایجاد فروش همکار\nتاریخ قرارداد\nتاریخ قرارداد\nانتخاب مشتری\nانتخاب مشتری\nمدیریت پروژه\nمدیریت پروژه\nانتخاب محصولات\nانتخاب محصولات\nاستعلام قیمت\nاستعلام قیمت\nبرنامه تحویل\nبرنامه تحویل\nروش پرداخت\nروش پرداخت\nتایید دیجیتال\nتایید دیجیتال\n\nکاربر ایجادکننده\n\nفروشنده همکار آزمایشی\nتاریخ قرارداد *\nچهارشنبه 1405/07/15\n\nشماره پس از ثبت موفق قرارداد تخصیص داده می‌شود.\n\nبعدی\nمرحله ۱ از ۸\nقبلی"
+  },
+  {
+    "kind": "partner",
+    "width": 1280,
+    "theme": "dark",
+    "overflow": false,
+    "mainText": "ایجاد فروش همکار\nتاریخ قرارداد\nتاریخ قرارداد\nانتخاب مشتری\nانتخاب مشتری\nمدیریت پروژه\nمدیریت پروژه\nانتخاب محصولات\nانتخاب محصولات\nاستعلام قیمت\nاستعلام قیمت\nبرنامه تحویل\nبرنامه تحویل\nروش پرداخت\nروش پرداخت\nتایید دیجیتال\nتایید دیجیتال\n\nکاربر ایجادکننده\n\nفروشنده همکار آزمایشی\nتاریخ قرارداد *\nچهارشنبه 1405/07/15\n\nشماره پس از ثبت موفق قرارداد تخصیص داده می‌شود.\n\nبعدی\nمرحله ۱ از ۸\nقبلی"
+  },
+  {
+    "kind": "partner",
+    "width": 390,
+    "theme": "light",
+    "overflow": false,
+    "mainText": "ایجاد فروش همکار\n\nمرحله ۱ از ۸\n\nتاریخ قرارداد\n\nکاربر ایجادکننده\n\nفروشنده همکار آزمایشی\nتاریخ قرارداد *\nچهارشنبه 1405/07/15\n\nشماره پس از ثبت موفق قرارداد تخصیص داده می‌شود.\n\nبعدی\nمرحله ۱ از ۸\nقبلی"
+  },
+  {
+    "kind": "partner",
+    "width": 390,
+    "theme": "dark",
+    "overflow": false,
+    "mainText": "ایجاد فروش همکار\n\nمرحله ۱ از ۸\n\nتاریخ قرارداد\n\nکاربر ایجادکننده\n\nفروشنده همکار آزمایشی\nتاریخ قرارداد *\nچهارشنبه 1405/07/15\n\nشماره پس از ثبت موفق قرارداد تخصیص داده می‌شود.\n\nبعدی\nمرحله ۱ از ۸\nقبلی"
+  },
+  {
+    "kind": "partner",
+    "calendarButtons": [
+      {
+        "date": "1405/07/01",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/02",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/03",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/04",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/05",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/06",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/07",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/08",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/09",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/10",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/11",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/12",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/13",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/14",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/15",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/16",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/17",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/18",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/19",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/20",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/21",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/22",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/23",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/24",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/25",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/26",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/27",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/28",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/29",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/30",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "date": "1405/07/31",
+        "disabled": false,
+        "ariaDisabled": null
+      }
+    ]
+  }
+]

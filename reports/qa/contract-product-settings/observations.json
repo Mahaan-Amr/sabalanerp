@@ -1,0 +1,26 @@
+[
+  {
+    "width": 800,
+    "theme": "light",
+    "lengthFont": "14px",
+    "priceFont": "14px"
+  },
+  {
+    "width": 800,
+    "theme": "dark",
+    "lengthFont": "14px",
+    "priceFont": "14px"
+  },
+  {
+    "width": 390,
+    "theme": "light",
+    "lengthFont": "14px",
+    "priceFont": "14px"
+  },
+  {
+    "width": 390,
+    "theme": "dark",
+    "lengthFont": "14px",
+    "priceFont": "14px"
+  }
+]

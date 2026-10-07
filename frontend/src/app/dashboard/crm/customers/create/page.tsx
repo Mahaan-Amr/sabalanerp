@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   FaArrowRight,
+  FaChevronDown,
   FaSave,
   FaPlus,
   FaTrash,
@@ -868,17 +869,17 @@ export default function CreateCustomerPage() {
             </div>
 
             {/* Collapsible Additional Information Section */}
-            <div className="mt-8">
+            <div className="mt-4">
               <ErpPressable
                 type="button"
                 onClick={() => setShowAdditionalInfo(!showAdditionalInfo)}
                 aria-expanded={showAdditionalInfo}
-                variant="outline"
-                className="w-full justify-between p-4"
+                variant="ghost"
+                className="inline-flex flex-nowrap items-center gap-2 whitespace-nowrap px-3 py-2"
               >
-                <span className="text-lg font-medium">اطلاعات تکمیلی</span>
-                <span className={`transform transition-transform ${showAdditionalInfo ? 'rotate-180' : ''}`}>
-                  <FaArrowRight className="h-4 w-4" />
+                <span className="text-sm font-medium">اطلاعات تکمیلی</span>
+                <span className={`inline-flex transform transition-transform ${showAdditionalInfo ? 'rotate-180' : ''}`}>
+                  <FaChevronDown className="h-4 w-4" />
                 </span>
               </ErpPressable>
 

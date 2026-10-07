@@ -204,7 +204,7 @@ const WORKFLOW_NOTIFICATIONS = {
   SUBMISSION_ACCEPTED: { title: 'نتیجه بررسی ارزیابی', message: 'ارسال ارزیابی شما بررسی و پذیرفته شد.' },
   SUBMISSION_REJECTED: { title: 'نیاز به اصلاح ارزیابی', message: 'ارسال ارزیابی شما برای اصلاح بازگردانده شد.' },
   STRUCTURAL_BLOCKER: { title: 'مانع ساختاری ارزیابی', message: 'یک پرونده ارزیابی عملکرد به اصلاح سابقه سازمانی نیاز دارد.' },
-  RESULT_CHANGED: { title: 'به‌روزرسانی سطح عملکرد', message: 'خلاصه سطح عملکرد شما به‌روزرسانی شد.' },
+  RESULT_CHANGED: { title: 'به‌روزرسانی نشان رشد', message: 'خلاصه نشان رشد شما به‌روزرسانی شد.' },
 } as const;
 
 export type PerformanceWorkflowNotificationKind = keyof typeof WORKFLOW_NOTIFICATIONS;

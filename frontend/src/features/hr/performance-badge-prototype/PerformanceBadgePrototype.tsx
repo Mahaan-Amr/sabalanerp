@@ -249,7 +249,7 @@ function CompactPerformanceBadge({
     <ErpPressable
       type="button"
       onClick={onOpen}
-      aria-label={`سطح عملکرد: ${level.label}؛ مشاهده جزئیات`}
+      aria-label={`نشان رشد: ${level.label}؛ مشاهده جزئیات`}
       tone={level.tone}
       variant="ghost"
       className="min-h-12 whitespace-nowrap px-1"
@@ -348,7 +348,7 @@ export function PerformanceBadgeHeaderPrototype({
       <ErpSheet
         open={open}
         onClose={() => setOpen(false)}
-        title="خلاصه شخصی سطح عملکرد"
+        title="خلاصه شخصی نشان رشد"
         presentation="modal"
       >
         <LevelDetails level={level} />
@@ -369,7 +369,7 @@ function Filters({
       <ErpField label="جست‌وجوی پرسنل">
         <ErpInput placeholder="نام، شماره پرسنلی یا جایگاه" />
       </ErpField>
-      <ErpField label="سطح عملکرد">
+      <ErpField label="نشان رشد">
         <ErpSelect defaultValue="all">
           <option value="all">همه سطح‌ها</option>
           <option value="outstanding">عملکرد برجسته</option>
@@ -412,7 +412,7 @@ export default function PerformanceBadgePrototype() {
   return (
     <ErpPage
       eyebrow="Prototype موقت · منابع انسانی"
-      title="نشان سطح عملکرد در فهرست پرسنل"
+      title="نشان رشد در فهرست پرسنل"
       description="مدال جواهری تطبیقی · قاب و سنگ سه‌بعدی متناسب با پوستهٔ روشن یا تیره نمایش داده می‌شوند."
       actions={[
         {
@@ -455,7 +455,7 @@ export default function PerformanceBadgePrototype() {
           <div className="grid min-w-[760px] grid-cols-[minmax(220px,1fr)_minmax(170px,1fr)_250px_210px] gap-3 border-b border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-xs font-bold text-[var(--sds-text-muted)]">
             <span>پرسنل</span>
             <span>جایگاه</span>
-            <span>سطح عملکرد جاری</span>
+            <span>نشان رشد جاری</span>
             <span>{analysis ? "بازبینی" : "وضعیت استخدام"}</span>
           </div>
           <div className="divide-y divide-[var(--sds-border-subtle)]">
@@ -499,7 +499,7 @@ export default function PerformanceBadgePrototype() {
       <ErpSheet
         open={Boolean(selected)}
         onClose={() => setSelected(null)}
-        title="جزئیات سطح عملکرد"
+        title="جزئیات نشان رشد"
         presentation="modal"
       >
         {selected ? <LevelDetails level={selected} /> : null}

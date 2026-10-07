@@ -62,9 +62,9 @@ test('Personnel profile preserves independent disclosure and schedule draft conf
 test('Seven floating stones preserve roadmap order, current emphasis and responsive profiles', async ({ page }) => {
   await fixture(page, true);
   const row = page.locator('[data-personnel-id="badge-profile-qa"]');
-  await expect(row.getByRole('button', { name: 'سطح عملکرد: ستون' })).toBeVisible();
-  await row.getByRole('button', { name: 'سطح عملکرد: ستون' }).click();
-  const roadmapDialog = page.getByRole('dialog', { name: 'خلاصه سطح عملکرد' });
+  await expect(row.getByRole('button', { name: 'نشان رشد: ستون' })).toBeVisible();
+  await row.getByRole('button', { name: 'نشان رشد: ستون' }).click();
+  const roadmapDialog = page.getByRole('dialog', { name: 'خلاصه نشان رشد' });
   await expect(roadmapDialog.getByRole('button')).toHaveCount(8); // seven stages and canonical close
   await expect(roadmapDialog.locator('[aria-current="step"]')).toHaveCount(1);
   await page.keyboard.press('Escape');

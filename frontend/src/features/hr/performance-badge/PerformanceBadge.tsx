@@ -20,7 +20,7 @@ export function PerformanceBadge({ badge, onAppeal, compact = true }: { badge: P
     <ErpPressable
       type="button"
       onClick={(event) => { event.stopPropagation(); setOpen(true); }}
-      aria-label={`سطح عملکرد: ${presentation.labelFa}${badge.officialResult === false ? '، بدون نتیجه رسمی' : ''}`}
+      aria-label={`نشان رشد: ${presentation.labelFa}${badge.officialResult === false ? '، بدون نتیجه رسمی' : ''}`}
       title={presentation.labelFa}
       className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 px-2 py-1 text-right"
     >
@@ -28,7 +28,7 @@ export function PerformanceBadge({ badge, onAppeal, compact = true }: { badge: P
       {!compact && <span className="text-sm font-bold">{presentation.labelFa} <bdi dir="ltr" className={`${styles.roman} font-serif text-xs`}>{performanceStoneIndex(badge) >= 0 ? PERFORMANCE_BADGE_ROADMAP[performanceStoneIndex(badge)].romanNumeral : undefined}</bdi></span>}
       <span className="sr-only">{presentation.meaningFa}</span>
     </ErpPressable>
-    <ErpSheet open={open} onClose={() => !appealPending && setOpen(false)} title="خلاصه سطح عملکرد" presentation="modal" size="wide" scope="workspace" pending={appealPending}>
+    <ErpSheet open={open} onClose={() => !appealPending && setOpen(false)} title="خلاصه نشان رشد" presentation="modal" size="wide" scope="workspace" pending={appealPending}>
       <div className="space-y-4" dir="rtl">
         <PerformanceBadgeRoadmap badge={badge} />
         {badge.details && <>

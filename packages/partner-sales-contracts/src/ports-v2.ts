@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Result } from './errors';
 import { PartnerInquiryViewV2 } from './inquiry-v2';
 import { IdSchema } from './primitives';
-import { PartnerManagementWorkspaceViewV2, ResponderInquiryViewV2, ResponderWorkspaceViewV2 } from './workspaces-v2';
+import { PartnerManagementWorkspaceViewV2, ResponderInquiryViewV2, ResponderWorkspaceViewV2, ResponderQueueCursorSchema } from './workspaces-v2';
 
 const page = { cursor: IdSchema.optional(), limit: z.number().int().min(1).max(100).optional() };
 export const PartnerQueryV2Schema = z.discriminatedUnion('purpose', [
@@ -12,7 +12,11 @@ export const PartnerQueryV2Schema = z.discriminatedUnion('purpose', [
     section: z.enum(['PROFILES', 'TRANSFERS']).optional(), history: z.boolean().optional(),
     transferStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(), search: z.string().trim().max(200).optional(), transferId: IdSchema.optional() }).strict(),
   z.object({ schemaVersion: z.literal(2), purpose: z.literal('RESPONDER_WORKSPACE'), ...page,
-    view: z.enum(['pending', 'answered', 'history']).optional(), search: z.string().trim().max(200).optional() }).strict(),
+    cursor: ResponderQueueCursorSchema.optional(),
+    contractId: IdSchema.optional(), summaryOnly: z.boolean().optional(),
+    view: z.enum(['all', 'pending', 'answered', 'history']).optional(),
+    status: z.enum(['all', 'approved', 'rejected', 'expired', 'cancelled', 'superseded']).optional(),
+    search: z.string().trim().max(200).optional() }).strict(),
 ]);
 export type PartnerQueryV2 = z.infer<typeof PartnerQueryV2Schema>;
 export interface PartnerQueryV2Results {

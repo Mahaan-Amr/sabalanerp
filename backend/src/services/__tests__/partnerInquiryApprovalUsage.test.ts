@@ -25,6 +25,7 @@ test('an exact usage retry returns its immutable snapshot without revalidating a
     productRowId: 'case-row-usage-replay', approval });
   let currentApprovalReads = 0;
   const tx = {
+    partnerCaseEvent: { findFirst: async () => null },
     partnerCaseRowBinding: { findUnique: async () => ({ configurationHash: approval.configurationHash }) },
     partnerInquiryUsage: { findUnique: async () => ({ id: 'usage-replay', approvalId: approval.approvalId,
       approvalSnapshot: approval, evidenceHash, usedAt: new Date('2026-08-20T11:00:00.000Z') }) },
@@ -45,6 +46,7 @@ test('an exact usage retry returns its immutable snapshot without revalidating a
 
 test('unchanged pricing survives later draft preparation revisions but cannot come from a future revision', async () => {
   const tx = {
+    partnerCaseEvent: { findFirst: async () => null },
     $queryRaw: async () => [{ now: new Date('2026-08-21T10:00:00.000Z') }],
     partnerInquiryRow: { findFirst: async () => ({ id: approval.rowId, revision: approval.revision,
       configurationHash: approval.configurationHash, predecessorId: null, predecessor: null, successor: null,
@@ -79,6 +81,7 @@ test('unchanged pricing survives later draft preparation revisions but cannot co
 
 test('a successor to a rejected row uses its own approval clock and omits absent supersession evidence', async () => {
   const tx = {
+    partnerCaseEvent: { findFirst: async () => null },
     $queryRaw: async () => [{ now: new Date('2026-08-21T10:00:00.000Z') }],
     partnerInquiryRow: { findFirst: async () => ({ id: approval.rowId, revision: approval.revision,
       configurationHash: approval.configurationHash, predecessorId: 'rejected-row',

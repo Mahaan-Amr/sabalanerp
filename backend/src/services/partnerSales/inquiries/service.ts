@@ -47,6 +47,12 @@ export interface PartnerInquiryDependencies {
   resolveConfiguration(tx: Transaction, input: { actorId: string; reference: ConfigurationRef }): Promise<Result<{
     identity: InquiryIdentity; description: string; configuration: Array<{ label: string; value: string }>;
     paidSourceProductRowId?: string;
+    measures?: { lengthMeters?: string; areaSquareMeters?: string; count?: string; consumedAreaSquareMeters?: string };
+    mandatoryDefaultPercentage?: string;
+    /** Private calculator over verified frozen evidence; never serialized. */
+    quoteWholesale?(rateToman: string, mandatory: unknown,
+      layerQuotes: ReadonlyMap<string, { catalogProductId: string; rateToman: string; mandatory?: unknown }>):
+      import('@sabalanerp/partner-sales-contracts').WholesalePricingBreakdown | undefined;
   }>>;
 }
 
@@ -176,6 +182,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         const predecessorApprovalId = row.predecessor?.approval?.id;
         const evidenceHash = await canonicalHash({ schemaVersion: 1, identity: definition.identity,
           wholesaleUnitPrice: decision.wholesaleUnitPrice, assignmentId: assignment.id,
+          ...(decision.wholesaleMandatory ? { wholesaleMandatory: decision.wholesaleMandatory } : {}),
           assignmentRevision: assignment.revision, authorizationEvidenceId: authorization.value.evidenceId,
           ...(predecessorApprovalId ? { predecessorApprovalId,
             ...(definition.predecessorReason ? { supersessionReason: definition.predecessorReason } : {}) } : {}) });
@@ -183,6 +190,7 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
           actorId: dependencies.actorId, commandId: `${command.commandId}:${row.id}`,
           authorizationEvidenceId: authorization.value.evidenceId,
           wholesaleUnitPrice: decision.wholesaleUnitPrice.amount, currency: decision.wholesaleUnitPrice.currency,
+          ...(decision.wholesaleMandatory ? { wholesaleMandatory: decision.wholesaleMandatory } : {}),
           evidenceHash,
           ...(predecessorApprovalId && definition.predecessorReason
             ? { supersessionReason: definition.predecessorReason } : {}), approvedAt: clock.now,

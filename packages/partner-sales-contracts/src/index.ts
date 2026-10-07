@@ -36,3 +36,5 @@ export * from './input-normalization';
 
 export * from './technical-services';
 export * from './commercial-lifecycle';
+
+export * from './wholesale-pricing';

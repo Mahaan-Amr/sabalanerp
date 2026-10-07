@@ -178,8 +178,8 @@ export function PartnerCaseRuntime() {
     const listing = partnerCaseListPage(rows, search, tag, page);
     const columns: ErpColumn<PartnerCaseRuntimeRow>[] = [
       { id: 'number', header: 'قرارداد', priority: 'primary', cell: row => <div>
-        <strong>{partnerCustomerContractLabel(row.view.caseNumber, row.view.customerContractNumber, row.view.trackingNumber)}</strong>
-        <p className="sds-text-secondary mt-1 text-xs">کد پیگیری {partnerTrackingCode(row.view.caseNumber, row.view.trackingNumber)}</p>
+        <strong>{row.view.customerContractNumber ? 'شماره قرارداد' : 'کد پیگیری'} {partnerCustomerContractLabel(row.view.caseNumber, row.view.customerContractNumber, row.view.trackingNumber)}</strong>
+        {row.view.customerContractNumber && <p className="sds-text-secondary mt-1 text-xs">کد پیگیری {partnerTrackingCode(row.view.caseNumber, row.view.trackingNumber)}</p>}
       </div> },
       { id: 'status', header: 'وضعیت', priority: 'secondary', cell: row => {
         const status = partnerCaseListTags[partnerCaseListTag(row.view, row.pricingResponseState, row.commercial)];

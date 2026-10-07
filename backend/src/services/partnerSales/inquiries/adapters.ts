@@ -1,10 +1,13 @@
-import type { Prisma } from '@prisma/client';
+import { describeWholesaleAncillaryCharges } from './ancillaryCharges';
+import { multiply, sum } from '../reporting/money';
+import { calculatePartnerCanonicalWholesale, partnerQuotedQuantity, readWholesaleMandatory } from '../cases/canonicalWholesale';
 import type { CanonicalProductGraph } from '@sabalanerp/contract-product-graph';
-import { canonicalHash, partnerError, type PartnerTechnicalDraft, type PartnerTechnicalOperation,
+import { WHOLESALE_MANDATORY_DEFAULT_PERCENTAGE, canonicalHash, partnerError, type PartnerTechnicalDraft, type PartnerTechnicalOperation,
   type PartnerTechnicalProduct, type Result } from '@sabalanerp/partner-sales-contracts';
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { resolveScopedActions } from '../../effectiveAccessService';
-import { decodeTechnicalSavedSnapshot } from '../cases/technicalSavedRecords';
+import { decodeTechnicalSavedSnapshot, type TechnicalSavedSnapshot } from '../cases/technicalSavedRecords';
 import { readSubmittedTechnicalSnapshots } from '../cases/submissionEvidence';
 import type { PartnerInquiryDependencies } from './service';
 import { resolvePartnerWorkspaceAuthority } from '../authorization/workspaceAuthority';
@@ -168,16 +171,43 @@ export function presentSavedTechnicalConfiguration(input: {
 /** Resolves an opaque saved reference from the protected recovery journal. The
  * returned public display is rebuilt from its frozen safe catalog projection;
  * private rates, graph context and pricing hashes never leave this adapter. */
-export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['resolveConfiguration'] = async (tx, input) => {
-  const session = await tx.salesContractEditSession.findUnique({ where: { draftId: input.reference.recoveryId },
-    select: { ownerUserId: true, recovery: true } });
-  if (session && session.ownerUserId !== input.actorId) return { ok: false, error: partnerError('NOT_FOUND') };
-  const history = session?.recovery && typeof session.recovery === 'object' && !Array.isArray(session.recovery)
-    ? (session.recovery as Record<string, unknown>).validatedSnapshots
-    : await readSubmittedTechnicalSnapshots(tx, input.actorId, input.reference.recoveryId);
-  if (!Array.isArray(history)) return { ok: false, error: partnerError('NOT_FOUND') };
-  for (const record of history) {
-    const snapshot = await decodeTechnicalSavedSnapshot(record);
+type SavedHistoryCache = Map<string, Promise<TechnicalSavedSnapshot[] | undefined>>;
+
+/** Cache verified evidence only within one database snapshot, never across requests
+ * or transactions. Ownership and integrity validation remain identical. */
+export function createSavedTechnicalConfigurationResolver(): PartnerInquiryDependencies['resolveConfiguration'] {
+  const transactions = new WeakMap<object, SavedHistoryCache>();
+  return (tx, input) => {
+    let cache = transactions.get(tx);
+    if (!cache) { cache = new Map(); transactions.set(tx, cache); }
+    return resolveSavedConfiguration(tx, input, cache);
+  };
+}
+export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['resolveConfiguration'] = (tx, input) =>
+  resolveSavedConfiguration(tx, input);
+
+async function resolveSavedConfiguration(tx: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[0],
+  input: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[1], cache?: SavedHistoryCache):
+  ReturnType<PartnerInquiryDependencies['resolveConfiguration']> {
+  const key = JSON.stringify([input.actorId, input.reference.recoveryId]);
+  let reading = cache?.get(key);
+  if (!reading) {
+    reading = (async () => {
+      const session = await tx.salesContractEditSession.findUnique({ where: { draftId: input.reference.recoveryId },
+        select: { ownerUserId: true, recovery: true } });
+      if (session && session.ownerUserId !== input.actorId) return undefined;
+      const history = session?.recovery && typeof session.recovery === 'object' && !Array.isArray(session.recovery)
+        ? (session.recovery as Record<string, unknown>).validatedSnapshots
+        : await readSubmittedTechnicalSnapshots(tx, input.actorId, input.reference.recoveryId);
+      if (!Array.isArray(history)) return undefined;
+      const decoded = await Promise.all(history.map(record => decodeTechnicalSavedSnapshot(record)));
+      return decoded.filter((record): record is TechnicalSavedSnapshot => record !== undefined);
+    })();
+    cache?.set(key, reading);
+  }
+  const history = await reading;
+  if (!history) return { ok: false, error: partnerError('NOT_FOUND') };
+  for (const snapshot of history) {
     if (!snapshot || snapshot.view.recoveryRevision !== input.reference.recoveryRevision) continue;
     const saved = snapshot.view.rows.find(row => row.configurationRef.productRowId === input.reference.productRowId);
     const identity = snapshot.identities.find(row => row.productRowId === input.reference.productRowId)?.identity;
@@ -195,8 +225,28 @@ export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['res
           layer.source.catalogItemId !== identity.catalogProductId || typeof product?.name !== 'string' || typeof product.code !== 'string') {
         return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
       }
+      const frozenLayer = snapshot.graph.layerConfigurations.find(item => item.layerConfigurationId === layerId);
+      if (!frozenLayer) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+      const strips = frozenLayer.result.physicalStrips;
       return { ok: true, value: { identity, description: product.name,
-        configuration: [{ label: 'کد سنگ', value: product.code }, { label: 'کاربرد', value: 'سنگ جدید لایه' }] } };
+        quoteWholesale: (rate, mandatory) => {
+          const policy = readWholesaleMandatory(mandatory);
+          if (!policy) return undefined;
+          const materialAmount = multiply(frozenLayer.result.materialSourceSplit.newMaterialSquareMeters, rate);
+          const amount = policy.enabled ? multiply(materialAmount, new Prisma.Decimal(policy.percentage).div(100).toFixed()) : '0';
+          return { materialAmount, componentAmount: '0', totalAmount: sum([materialAmount, amount]),
+            mandatoryCharges: policy.enabled ? [{ subjectId: input.reference.productRowId, basisAmount: materialAmount, percentage: policy.percentage, amount }] : [] };
+        },
+        measures: {
+          lengthMeters: sum(strips.map(strip => multiply(strip.lengthMeters, String(strip.quantity)))),
+          areaSquareMeters: sum(strips.map(strip => multiply(multiply(strip.lengthMeters, strip.widthMeters), String(strip.quantity)))),
+          count: String(frozenLayer.result.physicalStripCount), consumedAreaSquareMeters: frozenLayer.result.materialSourceSplit.newMaterialSquareMeters,
+        },
+        mandatoryDefaultPercentage: WHOLESALE_MANDATORY_DEFAULT_PERCENTAGE,
+        configuration: [{ label: 'کد سنگ', value: product.code }, { label: 'کاربرد', value: 'سنگ جدید لایه' },
+          { label: 'تعداد', value: `${frozenLayer.result.physicalStripCount} عدد` },
+          { label: 'سنگ اصلی', value: product.name },
+          { label: 'متراژ سنگ مصرفی اصلی', value: `${frozenLayer.result.materialSourceSplit.newMaterialSquareMeters} متر مربع` }] } };
     }
     if (!saved || !identity || !graphRow || saved.configurationRef.recoveryId !== input.reference.recoveryId ||
         saved.configurationRef.recoveryRevision !== input.reference.recoveryRevision || typeof product?.name !== 'string' ||
@@ -214,12 +264,37 @@ export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['res
         ...details.map(fact => ({ label: `فرزند · ${fact.label}`, value: fact.value }))];
     });
     return { ok: true, value: { identity, description: product.name,
+      quoteWholesale: (rate, mandatory, layerQuotes) => {
+        const rates = new Map<string, string>(), policies = new Map<string, unknown>();
+        for (const [subjectId, quote] of layerQuotes) {
+          rates.set(quote.catalogProductId, quote.rateToman);
+          policies.set(subjectId.replace(/^layer-material:/, ''), quote.mandatory);
+        }
+        const pricing = calculatePartnerCanonicalWholesale(graphRow, paidChild ? '0' : rate, snapshot.graph.layerConfigurations, rates, mandatory, policies).wholesalePricing;
+        if (!pricing) return undefined;
+        const ancillaryCharges = describeWholesaleAncillaryCharges(graphRow, snapshot.graph, pricing, mandatory, policies);
+        return { ...pricing, ...(ancillaryCharges ? { ancillaryCharges } : {}) };
+      },
+      measures: {
+        ...(graphRow.commercial.requestedLengthMeters ? { lengthMeters: multiply(graphRow.commercial.requestedLengthMeters,
+          graphRow.commercial.calculationSnapshot?.quantityMode === 'total-linear-meters' ? '1' : graphRow.commercial.requestedQuantity ?? '1') } : {}),
+        ...(graphRow.commercial.requestedAreaSquareMeters ? { areaSquareMeters: graphRow.commercial.requestedAreaSquareMeters } : {}),
+        ...(graphRow.commercial.requestedQuantity &&
+          (!['prepared', 'volumetric'].includes(graphRow.productType) || identity.unit === 'count')
+          ? { count: graphRow.commercial.requestedQuantity } : {}),
+        ...(identity.unit === 'squareMeter' && graphRow.commercial.calculationSnapshot?.partnerPricingBasis === 'ordinary-sale-v1' && ['longitudinal', 'slab', 'stair'].includes(graphRow.productType)
+          ? { consumedAreaSquareMeters: partnerQuotedQuantity(graphRow).toFixed() } : {}),
+      },
+      mandatoryDefaultPercentage: WHOLESALE_MANDATORY_DEFAULT_PERCENTAGE,
       ...(paidChild?.kind === 'remainder' ? { paidSourceProductRowId: paidChild.sourceProductRowId } : {}),
       configuration: [...presentSavedTechnicalConfiguration({ productRowId: input.reference.productRowId,
         family: identity.family, product, draftRow, areaSquareMeters: graphRow.commercial?.requestedAreaSquareMeters,
         dependents: snapshot.draft.dependents,
         operations: context.catalog?.operations ?? [], graphOperations: snapshot.graph,
-        technicalPolicy: context.technicalPolicy }), ...childFacts] } };
+        technicalPolicy: context.technicalPolicy }),
+        { label: 'سنگ اصلی', value: product.name },
+        ...(identity.unit === 'squareMeter' && ['longitudinal', 'slab', 'stair'].includes(graphRow.productType)
+          ? [{ label: 'متراژ سنگ مصرفی اصلی', value: `${partnerQuotedQuantity(graphRow).toFixed()} متر مربع` }] : []), ...childFacts] } };
   }
   return { ok: false, error: partnerError('NOT_FOUND') };
 };

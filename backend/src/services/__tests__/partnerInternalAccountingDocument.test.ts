@@ -56,3 +56,29 @@ test('internal Partner PDF uses the Sabalan debtor and amount without leaking re
   const custom = renderPartnerInternalDocumentHtml(document as unknown as Parameters<typeof renderPartnerInternalDocumentHtml>[0], { variant: 'custom', customPrint: { showPrices: false, showTotals: false } });
   assert.doesNotMatch(custom, /120000000|۱۲۰٬۰۰۰٬۰۰۰|۶۰٬۰۰۰٬۰۰۰/);
 });
+
+test('frozen wholesale mandatory prints separately without repricing customer money or double charging the total', () => {
+  const breakdown = { materialAmount: '18000000', componentAmount: '1000000', totalAmount: '22600000',
+    mandatoryCharges: [{ subjectId: 'row-1', basisAmount: '18000000', percentage: '20', amount: '3600000' }] };
+  const content = projectPartnerInternalContent({ partnerPreparation: {
+    owner: { caseId: 'case-1', revision: 1, integrityHash: `sha256-v1:${'a'.repeat(64)}` },
+    products: [{ productRowId: 'row-1', description: 'اسلب', quantity: '18', unit: 'squareMeter',
+      wholesaleUnitPrice: '1255555.5555555555556', wholesaleLineTotal: '22600000',
+      wholesalePricing: breakdown, approvalEvidenceId: 'approval-1' }],
+    totals: { net: '22600000', discount: '0', tax: '0', charges: '0', payable: '22600000', currency: 'IRT' },
+    paymentPlan: { planId: 'plan-1', version: 1, effectiveDate: '2026-10-07', installments: [] },
+  } });
+  assert.deepEqual(content.items[0]?.wholesalePricing, breakdown);
+  const document = { id: 'record-1', amount: '22600000', currency: 'IRT', createdAt: new Date('2026-10-07'),
+    partnerContext: { customerContractNumber: '100001', internalRecordNumber: '100001', debtor: { displayName: 'همکار' }, endCustomer: { displayName: 'مشتری' } },
+    ...content, deliveries: [] } as unknown as Parameters<typeof renderPartnerInternalDocumentHtml>[0];
+  const html = renderPartnerInternalDocumentHtml(document);
+  assert.match(html, /حکمی سبلان ۲۰٪/);
+  assert.match(html, /۳۶٬۰۰۰٬۰۰۰ ریال/);
+  assert.match(html, /۱۸۰٬۰۰۰٬۰۰۰ ریال/);
+  assert.match(html, /۱۰٬۰۰۰٬۰۰۰ ریال/);
+  assert.match(html, /جمع خرید از سبلان: 226000000 ریال/);
+  for (const options of [{ variant: 'workshop' as const }, { variant: 'custom' as const, customPrint: { showPrices: false, showTotals: false } }]) {
+    assert.doesNotMatch(renderPartnerInternalDocumentHtml(document, options), /۳۶٬۰۰۰٬۰۰۰|۱۸۰٬۰۰۰٬۰۰۰|۱۰٬۰۰۰٬۰۰۰/);
+  }
+});

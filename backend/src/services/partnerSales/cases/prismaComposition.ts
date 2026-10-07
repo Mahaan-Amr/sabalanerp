@@ -219,7 +219,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
   const approvalRowIds = [...new Set([...command.intent.rows.flatMap(row => row.approvedRowBinding ? [row.approvedRowBinding.rowId] : []),
     ...materialBindings.map(row => row.approvedRowBinding.rowId)])];
   const approvals = await tx.partnerInquiryApproval.findMany({ where: { rowId: { in: approvalRowIds } },
-    select: { rowId: true, wholesaleUnitPrice: true, currency: true,
+    select: { rowId: true, wholesaleUnitPrice: true, wholesaleMandatory: true, currency: true,
       row: { select: { configurationHash: true, definition: true } } } });
   if (approvals.length !== approvalRowIds.length || new Set(approvals.map(item => item.rowId)).size !== approvals.length) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
@@ -230,6 +230,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
       binding.pricingSubjectId === item.productRowId))) return { ok: false, error: partnerError('CONFIG_MISMATCH') };
   const additionalMaterialApprovals: ResolvedCaseDraft['additionalMaterialApprovals'] = [];
   const additionalRates = new Map<string, string>();
+  const additionalMandatoryPolicies = new Map<string, unknown>();
   for (const identity of supplemental) {
     const binding = materialBindings.find(item => item.pricingSubjectId === identity.productRowId);
     if (!binding) continue;
@@ -248,6 +249,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     const previousRate = additionalRates.get(identity.identity.catalogProductId);
     if (previousRate && previousRate !== rate) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     additionalRates.set(identity.identity.catalogProductId, rate);
+    if (identity.productRowId.startsWith('layer-material:')) additionalMandatoryPolicies.set(identity.productRowId.slice('layer-material:'.length), approval.wholesaleMandatory);
     additionalMaterialApprovals.push({ pricingSubjectId: identity.productRowId, configurationHash,
       catalogProductId: identity.identity.catalogProductId, wholesaleUnitPriceAmount: rate });
   }
@@ -288,7 +290,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
     let wholesale: ReturnType<typeof calculatePartnerCanonicalWholesale> | undefined;
     if (approval && materialPricingReady) {
       try { wholesale = calculatePartnerCanonicalWholesale(row, paidRemainder ? '0' : approval.wholesaleUnitPrice.toString(),
-        saved.graph.layerConfigurations, additionalRates); }
+        saved.graph.layerConfigurations, additionalRates, approval.wholesaleMandatory, additionalMandatoryPolicies); }
       catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
     }
     const commercialQuantity = new Prisma.Decimal(view.quantity);
@@ -302,7 +304,7 @@ export async function resolvePrismaPartnerCaseDraft(tx: Transaction, input: {
       retailUnitPriceAmount: new Prisma.Decimal(retail.totalAmount).div(commercialQuantity).toString(),
       retailLineTotalAmount: retail.totalAmount,
       ...(wholesale ? { wholesaleUnitPriceAmount: new Prisma.Decimal(wholesale.totalAmount).div(commercialQuantity).toString(),
-        wholesaleLineTotalAmount: wholesale.totalAmount } : {}) });
+        wholesaleLineTotalAmount: wholesale.totalAmount, ...(wholesale.wholesalePricing ? { wholesalePricing: wholesale.wholesalePricing } : {}) } : {}) });
   }
   const planVersion = command.type === 'CASE_DRAFT_REVISE' ? command.expected.revision + 1 : 1;
   const caseId = command.idempotency.targetId;

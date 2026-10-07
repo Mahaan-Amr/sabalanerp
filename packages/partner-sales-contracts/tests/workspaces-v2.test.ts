@@ -1,9 +1,17 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { ActionAvailabilityV2Schema, PartnerManagementWorkspaceViewV2Schema,
-  PartnerActionV2Schema, ResponderWorkspaceViewV2Schema, partnerError,
+  PartnerActionV2Schema, PartnerQueryV2Schema, ResponderWorkspaceViewV2Schema, partnerError,
   type DuplicateCustomerMatch } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
+
+test('contract queue cursors can carry ordering evidence for a maximum-length root identity', () => {
+  const cursor = Buffer.from(JSON.stringify({ rank: 0, time: 1791297600000, id: 'a'.repeat(160) })).toString('base64url');
+  assert.ok(cursor.length > 160);
+  assert.ok(PartnerQueryV2Schema.safeParse({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', cursor, view: 'all', status: 'expired' }).success);
+  assert.ok(ResponderWorkspaceViewV2Schema.safeParse({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', actorId: 'actor', inquiries: [], nextCursor: cursor }).success);
+  assert.equal(PartnerQueryV2Schema.safeParse({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', cursor: 'x'.repeat(513) }).success, false);
+});
 
 test('management gives authorized identity creation a safe evidence selection without raw writes or permission contexts', () => {
   const profile = createPartnerFixtures().profile;

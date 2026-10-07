@@ -8,6 +8,29 @@ const row = (commercial: CanonicalProductRow['commercial']): CanonicalProductRow
   catalogSnapshotVersion: 'catalog-v1', productType: 'longitudinal', contractualTitle: 'سنگ طولی', commercial,
 });
 
+test('explicit wholesale mandatory replaces only the wholesale percentage and cross cutting, preserving retail and longitudinal cutting', () => {
+  for (const retailMandatory of [false, true]) {
+    const product = { ...row({ requestedAreaSquareMeters: decimal('4'), baseAmountToman: decimal('400'),
+      totalAmountToman: decimal(retailMandatory ? '530' : '450'), calculationSnapshot: {
+        partnerPricingBasis: 'ordinary-sale-v1', mandatoryEnabled: retailMandatory,
+        mandatoryPercentage: '20', mandatoryAmountToman: retailMandatory ? '80' : '0',
+        consumedMotherAreaSquareMeters: '4',
+        pricingLines: [{ lineId: 'base-material', quantity: '4', rateToman: '100', amountToman: '400' },
+          { lineId: 'crossCutRateToman', quantity: '2', rateToman: '10', amountToman: '20' },
+          { lineId: 'longitudinalCutRateToman', quantity: '3', rateToman: '10', amountToman: '30' }],
+      } }), productType: 'stair' as const };
+    const unchanged = JSON.stringify(product);
+    const enabled = calculatePartnerCanonicalWholesale(product, '150', [], new Map(), { enabled: true, percentage: '10' });
+    assert.equal(enabled.materialAmount, '600');
+    assert.equal(enabled.componentAmount, '90', '60 mandatory + 30 longitudinal, cross cutting free');
+    const disabled = calculatePartnerCanonicalWholesale(product, '150', [], new Map(), { enabled: false, percentage: '10' });
+    assert.equal(disabled.componentAmount, '50', 'longitudinal and cross cutting charged, wholesale percentage removed');
+    const retail = calculatePartnerCanonicalRetail(product, '200');
+    assert.equal(retail.componentAmount, retailMandatory ? '210' : '50');
+    assert.equal(JSON.stringify(product), unchanged, 'physical and retail evidence remains immutable');
+  }
+});
+
 test('approved main-stone rate replaces only canonical material while all ordinary components remain', () => {
   const result = calculatePartnerCanonicalWholesale(row({ requestedAreaSquareMeters: decimal('4'), baseRateToman: decimal('1000000'), baseAmountToman: decimal('4000000'),
     totalAmountToman: decimal('4750000') }), '1600000');
@@ -43,6 +66,15 @@ test('a different main stone in a layer requires and uses its own approved rate'
   assert.deepEqual(calculatePartnerCanonicalWholesale(product, '150', [layer], new Map([['stone-2', '300']])), {
     materialQuantity: '4', materialAmount: '1200', componentAmount: '150', totalAmount: '1350',
   });
+  layer.layerConfigurationId = 'layer-2';
+  layer.result.cuttingPricingLines = [{ lineId: 'layer-2:cut:cross', quantity: '2', rateToman: '10', amountToman: '20' }];
+  const independentlyMandatory = calculatePartnerCanonicalWholesale(product, '150', [layer], new Map([['stone-2', '250']]),
+    { enabled: false, percentage: '20' }, new Map([['layer-2', { enabled: true, percentage: '10' }]]));
+  assert.equal(independentlyMandatory.materialAmount, '1100');
+  assert.equal(independentlyMandatory.componentAmount, '180', 'the layer adds its own 50 percentage charge and waives its own 20 cross cutting');
+  const noMandatory = calculatePartnerCanonicalWholesale(product, '150', [layer], new Map([['stone-2', '250']]),
+    { enabled: false, percentage: '20' }, new Map([['layer-2', { enabled: false, percentage: '10' }]]));
+  assert.equal(noMandatory.componentAmount, '150');
 });
 
 test('stair and slab quotes use the negotiated family unit instead of square-meter material area', () => {
@@ -114,4 +146,23 @@ test('legacy mandatory amounts remain frozen without the new pricing basis marke
     totalAmountToman: decimal('530'), calculationSnapshot: { mandatoryEnabled: true,
       mandatoryPercentage: '20', mandatoryAmountToman: '80' } });
   assert.equal(calculatePartnerCanonicalWholesale(product, '200').componentAmount, '130');
+});
+
+
+test('twenty percent breakdown preserves the canonical total, retail and paid-stone boundary', () => {
+  const product = row({ requestedAreaSquareMeters: decimal('18'), baseAmountToman: decimal('18000000'),
+    totalAmountToman: decimal('19000000') });
+  const retailBefore = calculatePartnerCanonicalRetail(product, '2000000');
+  const wholesale = calculatePartnerCanonicalWholesale(product, '1000000', [], new Map(), { enabled: true, percentage: '20' });
+  assert.deepEqual(wholesale.wholesalePricing, { materialAmount: '18000000', componentAmount: '1000000',
+    totalAmount: '22600000', mandatoryCharges: [{ subjectId: 'row-1', basisAmount: '18000000', percentage: '20', amount: '3600000' }] });
+  assert.equal(wholesale.totalAmount, '22600000');
+  assert.deepEqual(calculatePartnerCanonicalRetail(product, '2000000'), retailBefore);
+  const disabled = calculatePartnerCanonicalWholesale(product, '1000000', [], new Map(), { enabled: false, percentage: '20' });
+  assert.deepEqual(disabled.wholesalePricing?.mandatoryCharges, []);
+  assert.equal(disabled.totalAmount, '19000000');
+  const paid = calculatePartnerCanonicalWholesale(row({ requestedAreaSquareMeters: decimal('18'), baseAmountToman: decimal('0'),
+    totalAmountToman: decimal('1000000') }), '1000000', [], new Map(), { enabled: true, percentage: '20' });
+  assert.equal(paid.totalAmount, '1000000');
+  assert.deepEqual(paid.wholesalePricing?.mandatoryCharges, []);
 });

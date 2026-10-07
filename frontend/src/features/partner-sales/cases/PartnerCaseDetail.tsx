@@ -56,7 +56,7 @@ export function PartnerCaseDetail({ view, actions, customerOutput, history, comm
   customerOutput?: CustomerContractOutput; history?: PartnerCaseRuntimeRow['history']; commercial?: PartnerCommercialState; children?: React.ReactNode }) {
   const status = commercial ? { label: partnerCommercialLabels[commercial.status], tone: (commercial.status === 'FINAL' ? 'success' : 'neutral') as ErpTone } : stateCopy[view.state];
   const pageActions = partnerCasePageActions(actions);
-  return <ErpPage eyebrow="پرونده فروش همکار" title={`پرونده ${partnerCustomerContractLabel(view.caseNumber, view.customerContractNumber, view.trackingNumber)}`} description={`کد پیگیری: ${partnerTrackingCode(view.caseNumber, view.trackingNumber)}`}
+  return <ErpPage eyebrow="پرونده فروش همکار" title={`${view.customerContractNumber ? 'شماره قرارداد' : 'کد پیگیری'} ${partnerCustomerContractLabel(view.caseNumber, view.customerContractNumber, view.trackingNumber)}`} description={`کد پیگیری: ${partnerTrackingCode(view.caseNumber, view.trackingNumber)}`}
     backHref="/dashboard/sales/partner-cases" actions={pageActions} metrics={partnerCaseMetrics(view, status)}><PartnerCaseDetailContent
       view={view} actions={actions} customerOutput={customerOutput} history={history} commercial={commercial} />{children}
   </ErpPage>;
@@ -105,7 +105,7 @@ export function PartnerCaseDetailContent({ view, actions, customerOutput, histor
     {section === 'summary' && <ErpTwoColumn main={<ErpSection title="اطلاعات قرارداد">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <ErpFieldView label="کد پیگیری" value={partnerTrackingCode(view.caseNumber, view.trackingNumber)} />
-        <ErpFieldView label="شماره قرارداد مشتری" value={view.customerContractNumber ?? 'در انتظار صدور'} />
+        <ErpFieldView label="شماره قرارداد مشتری" value={view.customerContractNumber ? partnerCustomerContractLabel('', view.customerContractNumber) : 'در انتظار صدور'} />
         <ErpFieldView label="وضعیت قرارداد" value={commercial ? partnerCommercialLabels[commercial.status] : stateCopy[view.state].label} />
         {commercial && <ErpFieldView label="وضعیت استعلام" value={partnerInquiryLabels[commercial.inquiry]} />}
         <ErpFieldView label="تأیید مشتری" value={{ NOT_SENT: 'ارسال نشده', SENT: 'در انتظار تأیید',

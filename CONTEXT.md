@@ -2,6 +2,22 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**استعلام نشده در استعلام های همکار**:
+قرارداد فروش همکار که دست‌کم یک ردیف از درخواست جاری آن هنوز پاسخ سبلان ندارد؛ پاسخ‌گرفتن بخشی از ردیف‌ها این وضعیت را تغییر نمی‌دهد.
+_Avoid_: نداشتن هیچ پاسخ، رد قیمت توسط همکار، یا منقضی‌شدن قیمت پاسخ‌داده‌شده
+
+**استعلام شده در استعلام های همکار**:
+قرارداد فروش همکار که همه ردیف‌های درخواست جاری آن پاسخ سبلان گرفته‌اند؛ پاسخ می‌تواند قیمت پیشنهادی یا رد جهت اصلاح باشد و به‌تنهایی به معنای پذیرش قیمت، معتبرماندن قیمت یا قطعی‌شدن قرارداد نیست.
+_Avoid_: تأیید همه قیمت‌ها، پذیرش همکار، اعتبار دائمی پیشنهاد، یا قرارداد قطعی
+
+**گروه محصولات در پاسخ استعلام همکار**:
+ردیف‌های یک قرارداد با نام، کد و نوع محصول یکسان و واحد قیمت مشترک که مجموع طول واقعی، مساحت، تعداد و مصرف سنگ اصلی آن‌ها برای پاسخ سبلان نمایش داده می‌شود؛ این مقادیر معنای همان سفارش و محاسبه فروش سبلان را حفظ می‌کنند؛ تعداد ثبت‌نشده به تعداد فرضی تبدیل نمی‌شود و مساحت سفارش با متراژ مصرف سنگ یکی نیست. تفاوت ابعاد و خدمات، هویت و جزئیات ردیف‌های اصلی را از بین نمی‌برد.
+_Avoid_: ادغام دائمی ردیف‌ها، جمع واحدهای ناسازگار، یا یکی‌دانستن مساحت محصول و مصرف سنگ اصلی
+
+**حکمی سبلان در پاسخ استعلام همکار**:
+افزایش درصدی مستقل بر مبلغ سنگ در توافق سبلان با فروشنده همکار، با درصد پیش‌فرض ۲۰٪ برای پیشنهاد جدید و درصد قابل ویرایش؛ درصد و مبلغ حکمی و جمع خرید در استعلام همکار و سند داخلی حسابداری از ترکیب محاسبه همان توافق نمایش داده می‌شوند و جمع خرید شامل آن است. فعال‌بودن آن برش عرضی این توافق را بدون مبلغ قابل دریافت می‌کند و هزینه برش طولی و محاسبات فیزیکی را حفظ می‌کند.
+_Avoid_: تغییر حکمی یا قیمت توافق همکار با مشتری، حذف عملیات برش، یا رایگان‌کردن برش طولی
+
 **پذیرش مشتری در گردش جدید فروش همکار**:
 پذیرش نسخه مشخص قرارداد فروش همکار به مشتری، مستقل از پاسخ و پذیرش استعلام قیمت خرید همکار از سبلان. مشتری فقط اطلاعات و قیمت فروش خودش را می‌بیند و می‌تواند همان نسخه را بپذیرد یا رد کند.
 _Avoid_: پذیرش قیمت خرید از سبلان، افشای قیمت عمده یا سود همکار، یا وابسته‌کردن مشاهده و پذیرش مشتری به تکمیل استعلام
@@ -2095,7 +2111,7 @@ _Avoid_: combining طول and عرض into one ابعاد column, repeating unit 
 An explicit percentage-based price increase applied to a contract product when the product is marked as mandatory.
 For a longitudinal stone row, entering a positive تعداد automatically changes طول to mean the length of each physical piece, marks the row as حکمی, and activates the configured حکمی percentage without a second confirmation. The UI shows the active percentage in the calculation summary without interrupting the seller's entry flow.
 The seller can directly and easily edit the active حکمی percentage or turn حکمی off after its automatic activation, without a warning or confirmation. Turning it off removes only the percentage price increase: positive تعداد still means physical piece count, طول remains the length of each piece, and packing, cutting, consumption, and remaining-stone calculations remain piece-based. The saved row snapshots the final enabled state and percentage actually used so later default changes do not reprice the contract.
-The Partner Seller has the same per-row choice: the current Partner policy supplies the initial percentage and enabled state, while the row's final explicit choice governs its saved customer and Sabalan calculations.
+The Partner Seller has the same per-row customer-sale choice: the frozen Partner policy supplies the initial percentage and enabled state. New Sabalan inquiry approvals snapshot a separate wholesale choice and percentage; that choice governs Sabalan-to-Partner amounts without changing customer-sale geometry or pricing. Approvals without this explicit wholesale policy retain their original shared interpretation.
 When تعداد is cleared, طول returns to aggregate متر طول and the automatically activated حکمی state turns off without confirmation. The last percentage edited in that open product configuration remains dormant; if positive تعداد is entered again, حکمی reactivates with that percentage. A newly configured product starts from the current default percentage.
 _Avoid_: leaving a positive-count longitudinal row in aggregate-length mode, requiring a duplicate confirmation after تعداد activates حکمی, coupling piece-based geometry to the final حکمی toggle, preventing the seller from editing or disabling the row's percentage increase, showing a warning when حکمی is disabled or تعداد is cleared, discarding the seller's percentage during the same configuration session, carrying a prior product's percentage into a new product, hiding the active percentage from the summary, repricing a saved row from a later default, or printing or charging حکمی on a row that was neither activated by positive تعداد nor explicitly marked mandatory
 

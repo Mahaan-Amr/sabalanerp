@@ -1,3 +1,4 @@
+import { WholesaleMandatoryPolicySchema, WholesalePricingBreakdownSchema } from './wholesale-pricing';
 import { z } from 'zod';
 import { ApprovedRowBindingSchema, PartnerConfigurationRefSchema, PartnerInquiryViewSchema } from './inquiry';
 import { PersianReasonSchema, TextSchema } from './primitives';
@@ -13,6 +14,8 @@ export const PartnerInquiryRowV2Schema = rowV1.extend({
   // Resolved by the owner; never inferred from inquiry/catalog IDs by the browser.
   configurationRef: PartnerConfigurationRefSchema,
   sellerNote: TextSchema.optional(),
+  wholesaleMandatory: WholesaleMandatoryPolicySchema.optional(),
+  wholesalePricing: WholesalePricingBreakdownSchema.optional(),
   predecessor: InquiryPredecessorV2Schema.optional(),
   successor: InquirySuccessorV2Schema.optional(),
 }).strict();
@@ -22,7 +25,7 @@ export const PartnerInquiryViewV2Schema = inquiryV1.extend({
   rows: z.array(PartnerInquiryRowV2Schema),
 }).strict().superRefine((view, context) => {
   const oldReader = PartnerInquiryViewSchema.safeParse({ ...view, schemaVersion: 1,
-    rows: view.rows.map(({ configurationRef, sellerNote, predecessor, successor, ...row }) => row),
+    rows: view.rows.map(({ configurationRef, sellerNote, predecessor, successor, wholesaleMandatory, wholesalePricing, ...row }) => row),
   });
   if (!oldReader.success) for (const issue of oldReader.error.issues) context.addIssue(issue);
   const seen = new Set<string>();

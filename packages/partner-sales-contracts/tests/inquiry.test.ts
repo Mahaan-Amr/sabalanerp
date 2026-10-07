@@ -21,6 +21,15 @@ test('approval is reusable until exactly 48 hours and cannot cross Partner or co
   assert.equal(ApprovedInquirySchema.safeParse({ ...approval, expiresAt: '2026-08-30T08:00:00.000Z' }).success, false);
 });
 
+test('wholesale mandatory is optional for legacy evidence, independently snapshotted and bounded', () => {
+  assert.equal('wholesaleMandatory' in ApprovedInquirySchema.parse(approval), false);
+  const explicit = ApprovedInquirySchema.parse({ ...approval, wholesaleMandatory: { enabled: true, percentage: '۱۲.۵' } });
+  assert.deepEqual(explicit.wholesaleMandatory, { enabled: true, percentage: '12.5' });
+  for (const percentage of ['-1', '100.01', 'نامعتبر']) assert.equal(ApprovedInquirySchema.safeParse({
+    ...approval, wholesaleMandatory: { enabled: true, percentage },
+  }).success, false);
+});
+
 test('main-stone approval identity is stable across non-stone pricing evidence changes', async () => {
   const pricingSubjectHash = 'sha256-v1:' + 'c'.repeat(64);
   const identity = {

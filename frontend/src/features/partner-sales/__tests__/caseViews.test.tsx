@@ -1,3 +1,5 @@
+import { PartnerInquiryProductFacts } from '../inquiries/PartnerInquiryProductFacts';
+import { PartnerWholesalePricingSummary } from '../inquiries/PartnerWholesalePricingSummary';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
@@ -96,8 +98,8 @@ test('account panel is read-only and contains only accounting-backed partner-saf
   const html = renderToStaticMarkup(<PartnerAccountPanel view={{ ...fixture.account, purchases: [purchase, tomanPurchase] }} />);
   assert.match(html, /حساب من با سبلان/);
   assert.match(html, /فقط‌خواندنی/);
-  assert.match(html, /همکار-۰۰۳۱۳/);
-  assert.match(html, /همکار-۰۰۳۱۴/);
+  assert.match(html, /۰۰۳۱۳/);
+  assert.match(html, /۰۰۳۱۴/);
   assert.doesNotMatch(html, /FIXTURE-CASE-313|CASE-IRT/);
   assert.match(html, /تومان/);
   assert.match(html, /برنامه پرداخت به سبلان/);
@@ -239,4 +241,45 @@ test('Partner wizard displays authoritative commercial finality rather than comm
   assert.equal(partnerWizardCompactStatus(view, { ...commercial, status: 'FINAL' }).contract, 'قطعی');
   assert.equal(partnerWizardCompactStatus(view, { ...commercial, status: 'CANCELLED' }).contract, 'لغو شده');
   assert.equal(partnerWizardCompactStatus(view).contract, 'در حال دریافت وضعیت');
+});
+
+
+test('Partner quotation shows the twenty percent Sabalan charge and all-in purchase amount separately', () => {
+  const html = renderToStaticMarkup(<PartnerWholesalePricingSummary policy={{ enabled: true, percentage: '20' }}
+    pricing={{ materialAmount: '18000000', componentAmount: '0', totalAmount: '21600000',
+      mandatoryCharges: [{ subjectId: 'slab-row', basisAmount: '18000000', percentage: '20', amount: '3600000' }] }} />);
+  assert.match(html, /حکمی سبلان/);
+  assert.match(html, /۲۰٪/);
+  assert.match(html, /۳٬۶۰۰٬۰۰۰/);
+  assert.match(html, /۲۱٬۶۰۰٬۰۰۰/);
+  assert.match(html, /جمع خرید این محصول از سبلان/);
+  assert.doesNotMatch(html, /قیمت مشتری|input|button/);
+});
+
+
+test('inquiry facts distinguish the product family, count and canonical stone consumption without inventing count', () => {
+  const configuration = [{ label: 'خانواده محصول', value: 'پله' }, { label: 'تعداد', value: '50 عدد' },
+    { label: 'سنگ اصلی', value: 'ترامیت سمیرم' }, { label: 'متراژ سنگ مصرفی اصلی', value: '3.2 متر مربع' }];
+  const html = renderToStaticMarkup(<PartnerInquiryProductFacts configuration={configuration} />);
+  for (const value of ['پله', '۵۰ عدد', 'ترامیت سمیرم', '۳.۲ متر مربع', 'متراژ سنگ مصرفی اصلی']) assert.ok(html.includes(value));
+  const unknownCount = renderToStaticMarkup(<PartnerInquiryProductFacts configuration={configuration.filter(fact => fact.label !== 'تعداد')} />);
+  assert.match(unknownCount, /ثبت نشده/);
+  assert.doesNotMatch(unknownCount, /۵۰ عدد/);
+});
+
+
+test('inquiry purchase summary itemizes named ancillary fees and omits empty and zero fees', () => {
+  const pricing = { materialAmount: '16000000', componentAmount: '4000000', totalAmount: '23200000',
+    mandatoryCharges: [{ subjectId: 'row', basisAmount: '16000000', percentage: '20', amount: '3200000' }],
+    ancillaryCharges: [{ id: 'tool-1', label: 'ابزار: کله بر', amount: '4000000', quantity: '80', unitPrice: '50000', unit: 'meter' }, { id: 'zero', label: 'برش عرضی', amount: '0' }] };
+  const html = renderToStaticMarkup(<PartnerWholesalePricingSummary pricing={pricing} />);
+  assert.match(html, /سایر هزینه‌های ثبت‌شده/);
+  assert.match(html, /ابزار: کله بر/);
+  assert.match(html, /۴٬۰۰۰٬۰۰۰/);
+  assert.doesNotMatch(html, /۸۰ متر|۵۰٬۰۰۰|×/);
+  assert.doesNotMatch(html, /برش عرضی/);
+  for (const ancillaryCharges of [[], [{ id: 'zero', label: 'برش عرضی', amount: '0' }]]) {
+    const empty = renderToStaticMarkup(<PartnerWholesalePricingSummary pricing={{ ...pricing, componentAmount: '0', ancillaryCharges }} />);
+    assert.doesNotMatch(empty, /سایر هزینه‌های ثبت‌شده|برش عرضی/);
+  }
 });

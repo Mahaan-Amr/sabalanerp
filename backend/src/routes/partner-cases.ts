@@ -1,3 +1,5 @@
+import { readWholesaleMandatory } from '../services/partnerSales/cases/canonicalWholesale';
+import { previewPartnerWholesaleRows } from '../services/partnerSales/inquiries/wholesalePricing';
 import { canManageCommercialSettings } from '../services/ordinaryContractLifecycle';
 import { appendPartnerCommercialEvent } from '../services/partnerSales/cases/commercialEvents';
 import { approvePartnerCommercialSales, readPartnerCommercialState, resetPartnerCommercialApprovals, lockPartnerCommercialContract, assertPartnerCommercialAvailable } from '../services/partnerSales/cases/commercialLifecycle';
@@ -431,7 +433,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           select: { id: true, revision: true, configurationHash: true, definition: true,
             inquiry: { select: { caseRevision: true } },
             successor: { select: { outcome: true } }, approval: { select: { wholesaleUnitPrice: true, currency: true,
-              approvedAt: true, expiresAt: true, note: true, usages: { include: { binding: { include: {
+              approvedAt: true, expiresAt: true, note: true, wholesaleMandatory: true, usages: { include: { binding: { include: {
                 caseRevision: { include: { case: { select: { caseNumber: true } } } },
               } } } }, materialUsages: { select: { caseId: true, caseRevision: true, pricingSubjectId: true } } } },
             inquiryId: true } });
@@ -463,6 +465,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
               productRowId: identityRow.productRowId },
             ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
             approvedPrice: { amount: matched.approval.wholesaleUnitPrice.toString(), currency: matched.approval.currency as 'IRR' | 'IRT' },
+            ...(matched.approval.wholesaleMandatory ? { wholesaleMandatory: readWholesaleMandatory(matched.approval.wholesaleMandatory) } : {}),
             approvedAt: matched.approval.approvedAt.toISOString(), expiresAt: matched.approval.expiresAt.toISOString(),
             ...(matched.approval.note ? { noteOrReason: matched.approval.note } : {}),
             usedCaseNumbers: matched.approval.usages.map(usage => usage.binding.caseRevision.case.caseNumber),
@@ -470,7 +473,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         }
         const view = partnerContracts.PartnerApprovalMatchSetSchema.safeParse({ schemaVersion: 1,
           recoveryId: saved.view.recoveryId, recoveryRevision: saved.view.recoveryRevision,
-          rows, missingPricingSubjectIds });
+          rows: await previewPartnerWholesaleRows(tx, { actorId: request.user!.id, profileId: profile.id,
+            caseId: parsed.data.caseId, rows, resolveConfiguration: resolveSavedTechnicalConfiguration }), missingPricingSubjectIds });
         return view.success ? { ok: true as const, value: view.data }
           : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
       });

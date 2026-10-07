@@ -452,7 +452,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show: partnerRouteAccess['/dashboard/sales/partners'] === true },
           {
             name: "Partner Inquiries",
-            namePersian: "پاسخ‌گویی استعلام همکاران",
+            namePersian: "استعلام های همکار",
             href: "/dashboard/sales/partner-inquiries",
             icon: FaClipboardList,
             show: partnerRouteAccess['/dashboard/sales/partner-inquiries'] === true,

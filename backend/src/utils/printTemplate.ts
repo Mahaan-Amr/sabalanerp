@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { contractStatusLabel } from './contractStatusLabel';
 import path from 'path';
-import type { CustomerContractOutput } from '../../../packages/partner-sales-contracts';
+import { WholesalePricingBreakdownSchema, type WholesalePricingBreakdown, type CustomerContractOutput } from '../../../packages/partner-sales-contracts';
 import { parseCanonicalProductGraph, projectCanonicalRemainderConsumption,
   type CanonicalProjectedRemainderConsumption } from '@sabalanerp/contract-product-graph';
 
@@ -114,6 +114,7 @@ interface NormalizedLayerDetails {
 }
 
 interface NormalizedProduct {
+  frozenPricingBreakdown?: WholesalePricingBreakdown;
   billingUnit?: string;
   billingQuantity?: number;
   id: string;
@@ -1318,6 +1319,7 @@ const normalizeProducts = (
   }
 
   return relationItems.map((item: any, index: number) => ({
+    ...(item?.frozenPricingBreakdown ? { frozenPricingBreakdown: WholesalePricingBreakdownSchema.parse(item.frozenPricingBreakdown) } : {}),
     id: item?.id || `item-${index}`,
     rowId: String(item?.productRowId || ''),
     code: item?.product?.code || EMPTY,
@@ -2036,7 +2038,7 @@ const buildFlatProductRows = (
       }
       return;
     }
-    const baseAmount = product.isFromRemainingStone
+    const baseAmount = product.frozenPricingBreakdown ? toNumber(product.frozenPricingBreakdown.materialAmount) : product.isFromRemainingStone
       ? 0
       : product.originalTotalPrice > 0
         ? product.originalTotalPrice
@@ -2063,6 +2065,7 @@ const buildFlatProductRows = (
       (sourceMaterial) => sourceMaterial.presentsMaterialCharge
     );
     const presentMaterialChargeOnSource =
+      !product.frozenPricingBreakdown &&
       !isSummarized &&
       showExplanatoryRows &&
       pricedSourceMaterialIndex >= 0;
@@ -2074,11 +2077,32 @@ const buildFlatProductRows = (
       category: product.stairPart !== EMPTY ? product.stairPart : 'محصول',
       ...splitDimensionColumns(product.dimensions),
       ...productQuantityColumns,
-      rate: presentMaterialChargeOnSource ? '' : formatPrintMoneyCell(product.unitPrice, currency, options),
-      total: presentMaterialChargeOnSource ? '' : formatPrintMoneyCell(baseAmount, currency, options)
+      rate: presentMaterialChargeOnSource ? '' : formatPrintMoneyCell(product.frozenPricingBreakdown && product.billingQuantity
+        ? baseAmount / product.billingQuantity : product.unitPrice, currency, options),
+      total: presentMaterialChargeOnSource ? '' : formatPrintMoneyCell(isSummarized && product.frozenPricingBreakdown
+        ? product.totalPrice : baseAmount, currency, options)
     });
 
     if (isSummarized) return;
+
+    if (product.frozenPricingBreakdown) {
+      for (const charge of product.frozenPricingBreakdown.mandatoryCharges) rows.push({
+        groupKey, indexLabel: '', code: '',
+        description: `حکمی سبلان ${toFaNumber(toNumber(charge.percentage))}٪${charge.subjectId.startsWith('layer-material:') ? ' · سنگ جدید لایه' : ''}`,
+        category: 'حکمی', length: '', width: '', ...emptyMeasurementCells(),
+        rate: `${toFaNumber(toNumber(charge.percentage))}٪`, total: formatPrintMoneyCell(toNumber(charge.amount), currency, options)
+      });
+      if (toNumber(product.frozenPricingBreakdown.componentAmount) > 0) rows.push({
+        groupKey, indexLabel: '', code: '', description: 'خدمات و هزینه‌های جانبی سبلان', category: 'خدمات',
+        length: '', width: '', ...emptyMeasurementCells(), rate: '',
+        total: formatPrintMoneyCell(toNumber(product.frozenPricingBreakdown.componentAmount), currency, options)
+      });
+      if (showNotes && product.description && product.description !== EMPTY) rows.push({
+        groupKey, indexLabel: '', code: '', description: product.description, category: 'توضیحات',
+        length: '', width: '', ...emptyMeasurementCells(), rate: '', total: '', renderAsNoteRow: true
+      });
+      return;
+    }
 
     if (showExplanatoryRows) {
       sourceMaterialRows.forEach((sourceMaterial, sourceMaterialIndex) => {

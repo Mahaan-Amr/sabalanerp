@@ -46,7 +46,9 @@ export const PartnerDraftEditLeaseSchema = z.object({
   baseRevision: z.number().int().nonnegative().safe(),
 }).strict();
 const decision = z.discriminatedUnion('outcome', [
-  z.object({ rowId: IdSchema, expectedRevision: RevisionSchema, outcome: z.literal('APPROVED'), wholesaleUnitPrice: MoneySchema }).strict(),
+  z.object({ rowId: IdSchema, expectedRevision: RevisionSchema, outcome: z.literal('APPROVED'), wholesaleUnitPrice: MoneySchema,
+    wholesaleMandatory: z.object({ enabled: z.boolean(), percentage: DecimalSchema
+      .refine(value => Number(value) <= 100, 'Percentage must be between zero and 100') }).strict().optional() }).strict(),
   z.object({ rowId: IdSchema, expectedRevision: RevisionSchema, outcome: z.literal('REJECTED'), reason: PersianReasonSchema }).strict(),
 ]);
 export const PartnerCommandSchema = z.discriminatedUnion('type', [

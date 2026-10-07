@@ -1,3 +1,4 @@
+import { WholesalePricingBreakdownSchema } from './wholesale-pricing';
 import { z } from 'zod';
 import { CaseStateSchema, CustomerPaymentPlanSchema, DateSchema, DecimalSchema, DeliverySchema, DisplayPartySchema, CustomerDisplayPartySchema, HashSchema, IdSchema, InstantSchema, MoneySchema, PartnerCustomerConfirmationStateSchema, PartnerPricingStateSchema, PaymentPlanSchema, ProductDisplaySchema, RevisionRefSchema, RevisionSchema, SignedDecimalSchema, TextSchema, TotalsSchema } from './primitives';
 
@@ -38,7 +39,7 @@ export const PartnerCaseViewSchema = z.object({
   catalogLayerRates: z.array(z.object({ parentProductRowId: IdSchema, layerTitle: TextSchema,
     layerUnit: z.enum(['set', 'physicalPiece', 'meter', 'squareMeter']),
     rateToman: DecimalSchema }).strict()).optional(),
-  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema.optional(), retailUnitPrice: DecimalSchema }).strict()),
+  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema.optional(), wholesalePricing: WholesalePricingBreakdownSchema.optional(), retailUnitPrice: DecimalSchema }).strict()),
   retailTotals: TotalsSchema, sabalanTotals: TotalsSchema.optional(), resaleDifference: SignedDecimalSchema.optional(),
   customerPaymentPlan: CustomerPaymentPlanSchema, sabalanPaymentPlan: PaymentPlanSchema.optional(), deliveries: z.array(DeliverySchema),
 }).strict().superRefine((value, context) => {
@@ -51,7 +52,7 @@ export const SabalanInternalRecordViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('ACCOUNTING'), sourceKind: z.literal('SABALAN_TO_PARTNER'),
   owner: RevisionRefSchema, recordId: IdSchema, recordNumber: IdSchema, caseNumber: IdSchema, customerContractNumber: IdSchema,
   commercialAccountId: IdSchema, debtor: DisplayPartySchema, state: CaseStateSchema,
-  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema, wholesaleLineTotal: DecimalSchema.optional(), approvalEvidenceId: IdSchema.optional(), serviceRateEvidenceId: HashSchema.optional(), productType: TextSchema.optional() }).strict().refine(row => row.productType === 'service'
+  products: z.array(ProductDisplaySchema.extend({ wholesaleUnitPrice: DecimalSchema, wholesaleLineTotal: DecimalSchema.optional(), wholesalePricing: WholesalePricingBreakdownSchema.optional(), approvalEvidenceId: IdSchema.optional(), serviceRateEvidenceId: HashSchema.optional(), productType: TextSchema.optional() }).strict().refine(row => row.productType === 'service'
     ? Boolean(row.serviceRateEvidenceId) && !row.approvalEvidenceId
     : Boolean(row.approvalEvidenceId) && !row.serviceRateEvidenceId, 'Stone rows require approval; independent services require catalog rate evidence')),
   totals: TotalsSchema, sabalanPaymentPlan: PaymentPlanSchema,

@@ -1,6 +1,16 @@
 import type { PartnerTechnicalDraft, previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { partnerPriceLineTotal } from './partnerRetail';
 
+/** Display the canonical Sales calculation's finished customer area. This is
+ * a projection, not a geometry or pricing calculation. */
+export function partnerCustomerOrderArea(facts: unknown): string | undefined {
+  if (!facts || typeof facts !== 'object') return undefined;
+  const area = 'finishedAreaSquareMeters' in facts ? facts.finishedAreaSquareMeters
+    : 'requestedAreaSquareMeters' in facts ? facts.requestedAreaSquareMeters
+    : 'squareMeters' in facts ? facts.squareMeters : undefined;
+  return typeof area === 'string' ? area : undefined;
+}
+
 /** Customer material subtotal on the same family basis as canonicalRetail.
  * Service charges require the server quote and are not estimated here. */
 export function partnerProductCartSummary(draft: PartnerTechnicalDraft, preview: ReturnType<typeof previewPartnerTechnicalDraft>) {

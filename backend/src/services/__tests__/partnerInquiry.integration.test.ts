@@ -6,6 +6,7 @@ import { canonicalHash, type InquiryIdentity, type PartnerCommand } from '@sabal
 import { createPartnerInquiryService } from '../partnerSales/inquiries/service';
 import { appendAuthorizationDecision, readAuthorizationDecisionByCorrelation } from '../effectiveAuthorization/audit';
 import { ensureMissingResponderSupport } from '../partnerSales/inquiries/adapters';
+import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
 import { resolveApprovalForUse } from '../partnerSales/inquiries/approvalUsage';
 
 function localDatabaseUrl(): string {
@@ -186,7 +187,7 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     assert.equal((await partner.execute({ ...initial, rows, idempotency: { ...initial.idempotency, payloadHash } })).ok, true);
     const decisions = [
       { rowId: 'row-1', expectedRevision: 1, outcome: 'APPROVED' as const,
-        wholesaleUnitPrice: { amount: '1250000', currency: 'IRT' as const } },
+        wholesaleUnitPrice: { amount: '1250000', currency: 'IRT' as const }, wholesaleMandatory: { enabled: true, percentage: '12.5' } },
       { rowId: 'row-2', expectedRevision: 99, outcome: 'REJECTED' as const, reason: 'رد تستی ردیف قدیمی' },
     ];
     const intent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
@@ -205,9 +206,11 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     assert.equal(result.value.batch.outcomes[0].ok, true);
     assert.equal(result.value.batch.outcomes[1].ok ? null : result.value.batch.outcomes[1].error.code, 'ROW_STALE');
     const approval = await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'row-1' } });
+    assert.deepEqual(approval.wholesaleMandatory, { enabled: true, percentage: '12.5' });
     assert.equal(approval.expiresAt.getTime() - approval.approvedAt.getTime(), 48 * 60 * 60 * 1000);
     const reusable = await resolveApprovalForUse(tx, { binding: { inquiryId: ids.inquiryId, rowId: 'row-1', revision: 2 },
       partnerSellerId: ids.actorId, configurationHash: (await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-1' } })).configurationHash });
+    if (reusable.ok) assert.deepEqual(reusable.value.wholesaleMandatory, { enabled: true, percentage: '12.5' });
     assert.equal(reusable.ok, true);
     assert.equal((await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-2' } })).outcome, 'PENDING');
     const responderView = await responder.query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: ids.inquiryId });
@@ -218,6 +221,8 @@ test('bulk responder decision commits valid rows independently, preserves stale 
         [{ label: 'ردیف', value: 'row-2' }]);
       assert.equal(typeof responderView.value.submittedAt, 'string');
       assert.equal(responderView.value.rows.find(row => row.rowId === 'row-1')?.state, 'APPROVED');
+      assert.equal(responderView.value.rows.find(row => row.rowId === 'row-2')?.answeredAt, undefined);
+      assert.equal(responderView.value.rows.find(row => row.rowId === 'row-2')?.noteOrReason, undefined, 'a failed rejection is not a recorded response');
       assert.deepEqual(responderView.value.rows.find(row => row.rowId === 'row-2')?.actions,
         [{ action: 'INQUIRY_RESPOND', enabled: true }]);
       assert.equal(JSON.stringify(responderView.value).includes('configurationRef'), false);
@@ -333,11 +338,16 @@ test('responder can decide pending rows in separate commands after an earlier ro
   });
 });
 
-test('sales management response atomically takes over an open inquiry and preserves the prior responder evidence', async () => {
+for (const role of ['MANAGER', 'ADMIN'] as const) test(`${role} response uses persisted authorization, atomically takes over and preserves the prior responder evidence`, async () => {
   await fixture(async (tx, ids) => {
     const managerId = `sales-manager-${randomUUID()}`;
     await tx.user.create({ data: { id: managerId, username: managerId, email: `${managerId}@example.invalid`,
-      password: 'not-a-login', firstName: 'Sales', lastName: 'Manager', role: 'MANAGER' } });
+      password: 'not-a-login', firstName: 'Sales', lastName: 'Manager', role } });
+    if (role === 'MANAGER') {
+      await tx.workspacePermission.create({ data: { userId: managerId, workspace: 'sales', permissionLevel: 'admin' } });
+      await tx.featurePermission.create({ data: { userId: managerId, workspace: 'sales',
+        feature: 'sales_partner_sellers_manage', permissionLevel: 'admin' } });
+    }
     const shared = {
       transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
       resolveInitialResponder: async () => ({ ok: true as const, value: {
@@ -351,11 +361,22 @@ test('sales management response atomically takes over an open inquiry and preser
       authorize: async () => ({ ok: true as const, value: { evidenceId: 'partner-fixture' } }) });
     assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId))).ok, true);
     const manager = createPartnerInquiryService({ actorId: managerId, ...shared,
-      authorize: async () => ({ ok: true as const, value: {
-        evidenceId: 'management-override-fixture', managementOverride: true,
-      } }) });
+      authorize: async (database, input) => {
+        const correlationId = randomUUID();
+        const policy = createAuditedPartnerAuthorization(database, { actorId: managerId, purpose: input.purpose,
+          channel: 'API' }, { correlationId, reason: input.reason });
+        const result = await policy.authorize(input.action, input.root);
+        if (!result.ok) return result;
+        const evidence = await readAuthorizationDecisionByCorrelation(database, { domain: 'PARTNER', actorId: managerId,
+          action: input.action, rootKind: input.root.kind, rootId: input.root.id, purpose: input.purpose,
+          channel: 'API', correlationId, allowed: true });
+        assert.ok(evidence);
+        return { ok: true as const, value: { evidenceId: evidence.id,
+          managementOverride: result.value.isAdmin || result.value.scope === 'COMPANY' } };
+      } });
     const query = await manager.query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: ids.inquiryId });
-    assert.equal(query.ok, true);
+    assert.equal(query.ok, true, JSON.stringify(query));
+    if (query.ok) assert.equal(query.value.actions.find(action => action.action === 'INQUIRY_RESPOND')?.enabled, true);
     const staleIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
       expectedAssignmentRevision: 1, decisions: [{ rowId: 'row-1', expectedRevision: 99,
         outcome: 'REJECTED' as const, reason: 'رد آزمایشی نسخه منقضی' }] };
@@ -375,7 +396,8 @@ test('sales management response atomically takes over an open inquiry and preser
       correlationId: 'management-takeover-decision', idempotency: { actorId: managerId,
         operation: 'INQUIRY_DECIDE', targetId: ids.inquiryId, key: 'management-takeover-decision',
         payloadHash: await canonicalHash(intent) } });
-    assert.equal(result.ok, true);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (result.ok) assert.equal(result.value.batch?.outcomes[0]?.ok, true, JSON.stringify(result.value));
     const packageWindow = await tx.partnerInquiry.findUniqueOrThrow({ where: { id: ids.inquiryId },
       select: { pricingReadyAt: true, pricingExpiresAt: true } });
     assert.ok(packageWindow.pricingReadyAt);

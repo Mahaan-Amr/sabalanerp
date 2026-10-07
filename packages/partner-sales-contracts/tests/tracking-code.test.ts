@@ -8,8 +8,8 @@ test('only a numbered Case exposes a customer-facing tracking label', () => {
   assert.equal(partnerTrackingCode(first), 'همکار');
   assert.equal(partnerTrackingCode(second), 'همکار');
   assert.equal(partnerTrackingCode(first), partnerTrackingCode(first));
-  assert.equal(partnerCustomerContractLabel(first, '100329'), '100329');
+  assert.equal(partnerCustomerContractLabel(first, '100329'), '۱۰۰۳۲۹');
   assert.equal(partnerCustomerContractLabel(first), partnerTrackingCode(first));
-  assert.equal(partnerTrackingCode(first, 329), 'همکار-۰۰۳۲۹');
-  assert.equal(partnerCustomerContractLabel(first, null, 329), 'همکار-۰۰۳۲۹');
+  assert.equal(partnerTrackingCode(first, 329), '۰۰۳۲۹');
+  assert.equal(partnerCustomerContractLabel(first, null, 329), '۰۰۳۲۹');
 });

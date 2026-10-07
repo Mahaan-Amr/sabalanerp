@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import type { WholesalePricingBreakdown } from '@sabalanerp/partner-sales-contracts';
 import {
   parseCanonicalDecimal,
   type CanonicalLayerConfiguration,
@@ -10,13 +11,20 @@ export type PartnerCanonicalWholesale = {
   materialAmount: string;
   componentAmount: string;
   totalAmount: string;
+  wholesalePricing?: WholesalePricingBreakdown;
 };
 
 const canonical = (value: Prisma.Decimal.Value) => parseCanonicalDecimal(new Prisma.Decimal(value).toFixed());
 const isObjectRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+export function readWholesaleMandatory(value: unknown): { enabled: boolean; percentage: string } | undefined {
+  if (value == null) return undefined;
+  if (!isObjectRecord(value) || typeof value.enabled !== 'boolean' || typeof value.percentage !== 'string' ||
+      !/^(0|[1-9]\d*)(\.\d+)?$/.test(value.percentage) || new Prisma.Decimal(value.percentage).gt(100)) throw new Error('Invalid wholesale mandatory policy');
+  return { enabled: value.enabled, percentage: value.percentage };
+}
 
-function partnerQuotedQuantity(row: CanonicalProductRow) {
+export function partnerQuotedQuantity(row: CanonicalProductRow) {
   const snapshot = row.commercial.calculationSnapshot;
   if (snapshot?.partnerPricingBasis === 'ordinary-sale-v1') {
     if (row.productType !== 'prepared') {
@@ -60,7 +68,8 @@ function partnerQuotedQuantity(row: CanonicalProductRow) {
  * and its percentage charge use this agreement's rate; paid material stays paid. */
 export function calculatePartnerCanonicalWholesale(row: CanonicalProductRow,
   approvedMaterialRateToman: string, layers: readonly CanonicalLayerConfiguration[] = [],
-  additionalMaterialRates: ReadonlyMap<string, string> = new Map()): PartnerCanonicalWholesale {
+  additionalMaterialRates: ReadonlyMap<string, string> = new Map(), wholesaleMandatory?: unknown,
+  additionalMandatoryPolicies: ReadonlyMap<string, unknown> = new Map()): PartnerCanonicalWholesale {
   const base = new Prisma.Decimal(row.commercial.baseAmountToman ?? '0');
   const total = new Prisma.Decimal(row.commercial.totalAmountToman ?? '0');
   const snapshot = row.commercial.calculationSnapshot;
@@ -78,6 +87,13 @@ export function calculatePartnerCanonicalWholesale(row: CanonicalProductRow,
   }, new Prisma.Decimal(0));
   const materialAmount = materialQuantity.mul(approvedMaterialRateToman);
   let componentAmount = total.minus(base).minus(originalLayerMaterial);
+  const explicitMandatory = readWholesaleMandatory(wholesaleMandatory);
+  const mandatoryCharges: WholesalePricingBreakdown['mandatoryCharges'] = [];
+  const addMandatory = (subjectId: string, basis: Prisma.Decimal, percentage: string) => {
+    const amount = basis.mul(percentage).div(100);
+    mandatoryCharges.push({ subjectId, basisAmount: canonical(basis), percentage, amount: canonical(amount) });
+    return amount;
+  };
   if (chargeMaterial && snapshot?.partnerPricingBasis === 'ordinary-sale-v1' && snapshot.mandatoryEnabled === true) {
     if (typeof snapshot.mandatoryPercentage !== 'string' || typeof snapshot.mandatoryAmountToman !== 'string') {
       throw new Error('Canonical mandatory pricing evidence is missing');
@@ -89,11 +105,43 @@ export function calculatePartnerCanonicalWholesale(row: CanonicalProductRow,
     }
     componentAmount = componentAmount.minus(originalMandatory);
     if (componentAmount.isNegative()) throw new Error('Canonical component amount is invalid');
-    componentAmount = componentAmount.plus(materialAmount.mul(percentage).div(100));
+    if (explicitMandatory === undefined) componentAmount = componentAmount.plus(addMandatory(row.productRowId, materialAmount, canonical(percentage)));
+  }
+  if (chargeMaterial && explicitMandatory) {
+    if (explicitMandatory.enabled) componentAmount = componentAmount.plus(addMandatory(row.productRowId, materialAmount, explicitMandatory.percentage));
+    const lines = Array.isArray(snapshot?.pricingLines) ? snapshot.pricingLines.filter(isObjectRecord) : [];
+    const crossCuts = lines.filter(line => line.lineId === 'crossCutRateToman' || line.lineId === 'cross-cut');
+    for (const line of crossCuts) {
+      if (typeof line.amountToman !== 'string' || typeof line.quantity !== 'string' || typeof line.rateToman !== 'string') {
+        throw new Error('Missing frozen cross-cut pricing evidence');
+      }
+      componentAmount = componentAmount.minus(line.amountToman);
+      if (!explicitMandatory.enabled) componentAmount = componentAmount.plus(new Prisma.Decimal(line.quantity).mul(line.rateToman));
+    }
+  }
+  for (const layer of rowLayers) {
+    if (layer.input.source.kind !== 'new-material') continue;
+    const mainStone = layer.input.source.catalogProductId === row.catalogProductId;
+    const policy = mainStone ? explicitMandatory : readWholesaleMandatory(additionalMandatoryPolicies.get(layer.layerConfigurationId));
+    if (!policy) continue;
+    const rate = mainStone ? approvedMaterialRateToman : additionalMaterialRates.get(layer.input.source.catalogProductId);
+    if (!rate) throw new Error('Approved additional material rate is missing');
+    if (policy.enabled) componentAmount = componentAmount.plus(addMandatory(`layer-material:${layer.layerConfigurationId}`,
+      new Prisma.Decimal(layer.result.materialSourceSplit.newMaterialSquareMeters).mul(rate), policy.percentage));
+    for (const line of layer.result.cuttingPricingLines ?? []) if (line.lineId.endsWith(':cut:cross')) {
+      componentAmount = componentAmount.minus(line.amountToman);
+      if (!policy.enabled) componentAmount = componentAmount.plus(new Prisma.Decimal(line.quantity).mul(line.rateToman));
+    }
   }
   if (componentAmount.isNegative()) throw new Error('Canonical component amount is invalid');
-  return { materialQuantity: canonical(materialQuantity), materialAmount: canonical(materialAmount.plus(repricedLayerMaterial)),
-    componentAmount: canonical(componentAmount), totalAmount: canonical(materialAmount.plus(repricedLayerMaterial).plus(componentAmount)) };
+  const finalMaterial = canonical(materialAmount.plus(repricedLayerMaterial));
+  const finalTotal = canonical(materialAmount.plus(repricedLayerMaterial).plus(componentAmount));
+  return { materialQuantity: canonical(materialQuantity), materialAmount: finalMaterial,
+    componentAmount: canonical(componentAmount), totalAmount: finalTotal,
+    ...(explicitMandatory || additionalMandatoryPolicies.size ? { wholesalePricing: {
+      materialAmount: finalMaterial, componentAmount: canonical(componentAmount.minus(mandatoryCharges.reduce((sum, line) => sum.plus(line.amount), new Prisma.Decimal(0)))),
+      totalAmount: finalTotal, mandatoryCharges,
+    } } : {}) };
 }
 
 /** Applies the Partner's customer-facing stone rate to the same canonical

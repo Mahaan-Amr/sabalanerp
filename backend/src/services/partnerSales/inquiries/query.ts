@@ -1,3 +1,4 @@
+import { previewPartnerWholesaleRows } from './wholesalePricing';
 import {
   PartnerInquiryViewV2Schema, PartnerQueryV2Schema, ResponderInquiryViewV2Schema, partnerError,
   type PartnerQueryV2Port,
@@ -19,10 +20,11 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
     return dependencies.transaction(async tx => {
       const inquiry = await tx.partnerInquiry.findUnique({ where: { id: inquiryId }, select: {
         id: true, profileId: true, submittedAt: true, pricingReadyAt: true, pricingExpiresAt: true,
-        case: { select: { id: true, caseNumber: true, customerContract: { select: { contractNumber: true } } } },
+        case: { select: { id: true, caseNumber: true, trackingCode: { select: { number: true } },
+          customer: { select: { firstName: true, lastName: true, companyName: true } }, customerContract: { select: { contractNumber: true } } } },
         profile: { select: { user: { select: { id: true, firstName: true, lastName: true } } } },
         assignments: { orderBy: { revision: 'desc' }, take: 1, select: { id: true, revision: true, responderId: true } },
-        events: { orderBy: { revision: 'asc' }, select: { type: true, reason: true, evidence: true } },
+        events: { orderBy: { revision: 'asc' }, select: { type: true, reason: true, evidence: true, recordedAt: true } },
         rows: { orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }], include: {
           predecessor: { select: { id: true, revision: true, inquiryId: true } },
           successor: { select: { id: true, revision: true, inquiryId: true, outcome: true, approval: { select: { expiresAt: true } } } },
@@ -44,16 +46,22 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         outcome !== 'APPROVED' ? outcome : superseded ? 'SUPERSEDED'
           : expiresAt && clock.now.getTime() >= expiresAt.getTime() ? 'EXPIRED' : 'APPROVED';
       const reasons = new Map<string, string>();
+      const answeredAt = new Map<string, string>();
       for (const event of inquiry.events) {
         if (event.type === 'INQUIRY_CANCELLED' && event.reason) {
           const evidence = event.evidence as { rowIds?: unknown };
           if (Array.isArray(evidence.rowIds)) for (const rowId of evidence.rowIds) if (typeof rowId === 'string') reasons.set(rowId, event.reason);
         }
         if (event.type === 'INQUIRY_DECIDED' || event.type === 'INQUIRY_PARTIALLY_DECIDED') {
-          const evidence = event.evidence as { decisions?: unknown };
+          const evidence = event.evidence as { decisions?: unknown; batch?: { outcomes?: Array<{ rowId: string; ok: boolean }> } };
           if (Array.isArray(evidence.decisions)) for (const decision of evidence.decisions) {
+            if (decision && typeof decision === 'object' && typeof (decision as { rowId?: unknown }).rowId === 'string' &&
+                evidence.batch?.outcomes?.some(outcome => outcome.ok && outcome.rowId === (decision as { rowId: string }).rowId)) {
+              answeredAt.set((decision as { rowId: string }).rowId, event.recordedAt.toISOString());
+            }
             if (decision && typeof decision === 'object' && (decision as { outcome?: unknown }).outcome === 'REJECTED' &&
-                typeof (decision as { rowId?: unknown }).rowId === 'string' && typeof (decision as { reason?: unknown }).reason === 'string') {
+                typeof (decision as { rowId?: unknown }).rowId === 'string' && typeof (decision as { reason?: unknown }).reason === 'string' &&
+                evidence.batch?.outcomes?.some(outcome => outcome.ok && outcome.rowId === (decision as { rowId: string }).rowId)) {
               reasons.set((decision as { rowId: string }).rowId, (decision as { reason: string }).reason);
             }
           }
@@ -121,6 +129,10 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
             previousId = previous.predecessorId ?? undefined;
           }
           return { rowId: row.id, revision: row.revision, identity: definition.identity,
+            submittedAt: row.submittedAt.toISOString(),
+            ...(technical.ok ? { measures: technical.value.measures, mandatoryDefaultPercentage: technical.value.mandatoryDefaultPercentage } : {}),
+            ...(answeredAt.get(row.id) ? { answeredAt: answeredAt.get(row.id) } : {}),
+            ...(row.approval?.wholesaleMandatory ? { wholesaleMandatory: row.approval.wholesaleMandatory } : {}),
             description: definition.description, configuration,
             ...(definition.predecessorReason ? { partnerRejectionReason: definition.predecessorReason } : {}),
             negotiationHistory,
@@ -139,6 +151,8 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         if (responseRows.some(row => row === null)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
         const view = ResponderInquiryViewV2Schema.safeParse({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: inquiry.id,
           ...(inquiry.case ? { caseId: inquiry.case.id, caseNumber: inquiry.case.caseNumber,
+            ...(inquiry.case.trackingCode ? { trackingNumber: inquiry.case.trackingCode.number } : {}),
+            customerDisplayName: inquiry.case.customer.companyName || `${inquiry.case.customer.firstName} ${inquiry.case.customer.lastName}`.trim() || 'نام مشتری ثبت نشده',
             ...(inquiry.case.customerContract ? { customerContractNumber: inquiry.case.customerContract.contractNumber } : {}) } : {}),
           submittedAt: inquiry.submittedAt?.toISOString(),
           partnerDisplayName: `${inquiry.profile.user.firstName} ${inquiry.profile.user.lastName}`.trim(),
@@ -153,6 +167,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         const successor = row.successor;
         return { rowId: row.id, revision: row.revision, description: definition.description,
           state: currentState, configuration: definition.configuration, configurationRef: definition.configurationRef,
+          ...(row.approval?.wholesaleMandatory ? { wholesaleMandatory: row.approval.wholesaleMandatory } : {}),
           ...(definition.sellerNote ? { sellerNote: definition.sellerNote } : {}),
           ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
             approvedAt: row.approval.approvedAt.toISOString(),
@@ -169,7 +184,10 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
         };
       });
       if (rows.some(row => row === null)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
-      const view = PartnerInquiryViewV2Schema.safeParse({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId: inquiry.id, rows });
+      const baseView = PartnerInquiryViewV2Schema.safeParse({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId: inquiry.id, rows });
+      if (!baseView.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
+      const view = PartnerInquiryViewV2Schema.safeParse({ ...baseView.data, rows: await previewPartnerWholesaleRows(tx, { actorId: inquiry.profile.user.id, profileId: inquiry.profileId,
+        caseId: inquiry.case?.id, rows: baseView.data.rows, resolveConfiguration: dependencies.resolveConfiguration }) });
       return view.success ? { ok: true, value: view.data } as never : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
     });
   };

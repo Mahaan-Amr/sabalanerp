@@ -43,6 +43,7 @@ export async function buildCaseProjections(input: { caseId: string; revision: nu
       debtor: input.evidence.partySnapshots.partner, state: input.state,
       products: input.evidence.products.map(row => ({ ...product(row), wholesaleUnitPrice: row.wholesaleUnitPrice!,
         ...(row.wholesaleLineTotal !== undefined ? { wholesaleLineTotal: row.wholesaleLineTotal } : {}),
+        ...(row.wholesalePricing ? { wholesalePricing: row.wholesalePricing } : {}),
         ...(row.approvalEvidenceId ? { approvalEvidenceId: row.approvalEvidenceId } : { productType: 'service', serviceRateEvidenceId: row.configurationHash }) })), totals: input.evidence.wholesaleEnvelope.totals,
       sabalanPaymentPlan: input.evidence.paymentEvidence.sabalanPaymentPlan! }) : undefined;
     const fulfillment = priced && linked ? FulfillmentViewSchema.parse({ schemaVersion: 1, purpose: 'FULFILLMENT',
@@ -60,7 +61,7 @@ export async function buildCaseProjections(input: { caseId: string; revision: nu
           layerTitle: layer.input.layerTitle, layerUnit: layer.input.layerUnit,
           rateToman: layer.input.layerRateToman })) } : {}),
       products: input.evidence.products.map(row => ({ ...product(row), ...(priced
-        ? { wholesaleUnitPrice: row.wholesaleUnitPrice } : {}), retailUnitPrice: row.retailUnitPrice })),
+        ? { wholesaleUnitPrice: row.wholesaleUnitPrice, ...(row.wholesalePricing ? { wholesalePricing: row.wholesalePricing } : {}) } : {}), retailUnitPrice: row.retailUnitPrice })),
       retailTotals: input.evidence.retailEnvelope.totals,
       ...(priced ? { sabalanTotals: input.evidence.wholesaleEnvelope.totals,
         resaleDifference: input.evidence.resaleDifference } : {}),

@@ -21,7 +21,7 @@ export async function resolveApprovalForUse(tx: Prisma.TransactionClient, input:
         profile: { select: { state: true, userId: true } } } },
       approval: { select: { id: true, actorId: true, assignmentId: true, commandId: true,
         authorizationEvidenceId: true, wholesaleUnitPrice: true, currency: true, evidenceHash: true,
-        note: true, supersessionReason: true, approvedAt: true, expiresAt: true,
+        note: true, wholesaleMandatory: true, supersessionReason: true, approvedAt: true, expiresAt: true,
         assignment: { select: { revision: true } } } },
     } });
   if (!row?.approval || row.inquiry.profile.userId !== input.partnerSellerId ||
@@ -34,6 +34,7 @@ export async function resolveApprovalForUse(tx: Prisma.TransactionClient, input:
   if (row.revision !== input.binding.revision) return { ok: false, error: partnerError('ROW_STALE') };
   const approval = ApprovedInquirySchema.safeParse({ schemaVersion: 1, approvalId: row.approval.id,
     inquiryId: row.inquiry.id, rowId: row.id, revision: row.revision, partnerSellerId: row.inquiry.profile.userId,
+    ...(row.approval.wholesaleMandatory ? { wholesaleMandatory: row.approval.wholesaleMandatory } : {}),
     configurationHash: row.configurationHash, evidenceHash: row.approval.evidenceHash,
     wholesaleUnitPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
     approvedAt: row.approval.approvedAt.toISOString(),

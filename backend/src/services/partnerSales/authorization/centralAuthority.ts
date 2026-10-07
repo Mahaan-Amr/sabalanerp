@@ -35,5 +35,5 @@ export async function readPartnerRouteAuthority(tx: Prisma.TransactionClient, ac
   const current = await readScopedActions(tx, actorId, 'PARTNER');
   const workspace = await resolvePartnerWorkspaceAuthority(tx, actorId);
   return { ...current, grants: [...current.grants,
-    ...workspace.grants.filter(grant => grant.purpose === 'RESPONDER' && grant.scope === 'ASSIGNED')] };
+    ...workspace.grants.filter(grant => grant.purpose === 'RESPONDER' && ['ASSIGNED', 'COMPANY'].includes(grant.scope))] };
 }

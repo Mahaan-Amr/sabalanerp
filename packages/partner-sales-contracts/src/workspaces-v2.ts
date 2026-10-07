@@ -3,7 +3,7 @@ import { PartnerActionSchema, PermissionContext } from './authorization';
 import { PartnerErrorSchema, Result } from './errors';
 import { PRICE_APPROVAL_VALIDITY_MS, ResponderInquiryViewSchema } from './inquiry';
 import { InquiryRowStateV2Schema } from './inquiry-v2';
-import { IdSchema, InstantSchema, PersianReasonSchema, RevisionSchema, TextSchema } from './primitives';
+import { DecimalSchema, IdSchema, InstantSchema, PersianReasonSchema, RevisionSchema, TextSchema } from './primitives';
 import { DuplicateCustomerMatchSchema, PartnerProfileViewSchema } from './projections';
 import { PartnerDirectActivationBlockerV4Schema } from './direct-activation-v4';
 
@@ -72,6 +72,10 @@ export const PartnerManagementWorkspaceViewV2Schema = z.object({
   }
 });
 export type PartnerManagementWorkspaceViewV2 = z.infer<typeof PartnerManagementWorkspaceViewV2Schema>;
+export const RESPONDER_CONTRACT_PAGE_SIZE = 20;
+
+// A queue cursor carries ordering evidence as well as an internal root ID.
+export const ResponderQueueCursorSchema = z.string().min(1).max(512).regex(/^[A-Za-z0-9_-]+$/);
 
 const responderRow = ResponderInquiryViewSchema.shape.rows.element.extend({
   description: TextSchema,
@@ -81,6 +85,12 @@ const responderRow = ResponderInquiryViewSchema.shape.rows.element.extend({
   noteOrReason: TextSchema.optional(), actions,
   partnerRejectionReason: PersianReasonSchema.optional(),
   superseded: z.boolean().optional(),
+  answeredAt: InstantSchema.optional(),
+  submittedAt: InstantSchema.optional(),
+  measures: z.object({ lengthMeters: DecimalSchema.optional(), areaSquareMeters: DecimalSchema.optional(),
+    count: DecimalSchema.optional(), consumedAreaSquareMeters: DecimalSchema.optional() }).strict().optional(),
+  wholesaleMandatory: z.object({ enabled: z.boolean(), percentage: DecimalSchema.refine(value => Number(value) <= 100) }).strict().optional(),
+  mandatoryDefaultPercentage: DecimalSchema.refine(value => Number(value) <= 100).optional(),
   negotiationHistory: z.array(z.object({ rowId: IdSchema, offeredAt: InstantSchema.optional(),
     price: z.object({ amount: z.string(), currency: z.enum(['IRR', 'IRT']) }).strict().optional(),
     rejectionReason: PersianReasonSchema.optional() }).strict()).optional(),
@@ -101,14 +111,23 @@ const responderRow = ResponderInquiryViewSchema.shape.rows.element.extend({
 export const ResponderInquiryViewV2Schema = ResponderInquiryViewSchema.extend({
   schemaVersion: z.literal(2), submittedAt: InstantSchema, actions,
   caseId: IdSchema.optional(), caseNumber: TextSchema.optional(), customerContractNumber: TextSchema.optional(),
+  trackingNumber: z.number().int().positive().optional(), customerDisplayName: TextSchema.optional(),
   rows: z.array(responderRow).refine(rows => new Set(rows.map(row => row.rowId)).size === rows.length, 'Duplicate inquiry row'),
 }).strict();
 export type ResponderInquiryViewV2 = z.infer<typeof ResponderInquiryViewV2Schema>;
+export const ResponderContractSummaryV2Schema = z.object({
+  id: IdSchema, customer: TextSchema, partnerDisplayName: TextSchema, label: TextSchema,
+  pending: z.boolean(), requestedAt: InstantSchema, answeredAt: InstantSchema.optional(),
+  answeredRows: z.number().int().nonnegative(), currentRows: z.number().int().nonnegative(), cancelled: z.boolean(),
+}).strict();
+export type ResponderContractSummaryV2 = z.infer<typeof ResponderContractSummaryV2Schema>;
 export const ResponderWorkspaceViewV2Schema = z.object({
   schemaVersion: z.literal(2), purpose: z.literal('RESPONDER_WORKSPACE'), actorId: IdSchema,
   inquiries: z.array(ResponderInquiryViewV2Schema)
     .refine(values => new Set(values.map(value => value.inquiryId)).size === values.length, 'Duplicate inquiry'),
+  contracts: z.array(ResponderContractSummaryV2Schema)
+    .refine(values => new Set(values.map(value => value.id)).size === values.length, 'Duplicate contract').optional(),
   contractCounts: z.object({ pending: z.number().int().nonnegative(), answered: z.number().int().nonnegative(), history: z.number().int().nonnegative() }).strict().optional(),
-  nextCursor: IdSchema.optional(),
+  nextCursor: ResponderQueueCursorSchema.optional(),
 }).strict();
 export type ResponderWorkspaceViewV2 = z.infer<typeof ResponderWorkspaceViewV2Schema>;

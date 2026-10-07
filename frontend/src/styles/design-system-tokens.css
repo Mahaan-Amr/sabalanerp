@@ -220,6 +220,12 @@
   box-shadow: var(--sds-shadow-focus), var(--sds-neu-shadow-card);
 }
 
+.sds-disclosure-shadow > .sds-action,
+.sds-disclosure-shadow > .sds-action:hover {
+  background: transparent;
+  color: inherit;
+}
+
 :is(.sds-sales-dashboard-scope, .sds-neumorphic-workflow-scope) .sds-workspace-surface,
 :is(.sds-sales-dashboard-scope, .sds-neumorphic-workflow-scope) .sds-card {
   border-color: var(--sds-border-subtle);

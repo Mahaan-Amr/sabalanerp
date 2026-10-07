@@ -40,7 +40,9 @@ export function checkPartnerDomainRestrictions(action: PartnerAction, input: Per
   if (partnerAuthored.includes(action) && !isOwner) return partnerError('FORBIDDEN');
   if (partnerAuthored.includes(action) && context.partnerStatus !== 'ACTIVE') return partnerError('PARTNER_NOT_ACTIVE');
   if (action === 'INQUIRY_RESPOND') {
-    if (context.persona !== 'INTERNAL' || !context.assignment?.eligible || context.assignment.actorId !== context.actorId) return partnerError('NOT_ASSIGNED');
+    const companyResponse = context.purpose === 'RESPONDER' && context.root.kind === 'INQUIRY' && context.scope === 'COMPANY';
+    if (context.persona !== 'INTERNAL' || (!companyResponse &&
+        (!context.assignment?.eligible || context.assignment.actorId !== context.actorId))) return partnerError('NOT_ASSIGNED');
     if (context.partnerStatus !== 'ACTIVE') return partnerError('PARTNER_NOT_ACTIVE');
   }
   if (['FINANCIAL_PROCESS', 'FINANCIAL_APPROVE'].includes(action) && (!context.requesterId || context.requesterId === context.actorId)) return partnerError('FORBIDDEN');

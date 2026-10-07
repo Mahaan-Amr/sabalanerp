@@ -27,7 +27,7 @@ import { partnerRemainderChildren } from './partnerDependentPresentation';
 import { RemainingInventorySelector } from '../components/steps/RemainingInventorySelector';
 import { partnerTechnicalConflictMessage, partnerTechnicalSaveIssue } from './partnerCreationFlow';
 import { PartnerRemainderConfigurationFlow, type PartnerRemainderSelection } from './PartnerRemainderConfigurationFlow';
-import { partnerProductCartSummary } from './partnerProductCartSummary';
+import { partnerProductCartSummary, partnerCustomerOrderArea } from './partnerProductCartSummary';
 import { clonePartnerLayerOperations, partnerLayerSharedOperations } from './partnerLayerOperations';
 import { partnerMoneyText } from './partnerRetail';
 import { partnerQuantityUnitCopy } from '../../partner-sales/presentation';
@@ -263,6 +263,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
       }
       const calculation = preview.ok ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.calculation : undefined;
       const facts = calculation?.ok ? calculation.result as unknown as Record<string, unknown> : undefined;
+      const customerOrderArea = partnerCustomerOrderArea(facts);
       const geometry = row.family === 'prepared'
         ? `${formatDisplayNumber(Number(row.configuration.quantity) || 0)} ${partnerQuantityUnitCopy[row.configuration.unit] ?? row.configuration.unit}`
         : `${formatDisplayNumber(Number(facts?.lengthMeters) || 0)} متر × ${formatDisplayNumber(Number(facts && ('widthMeters' in facts ? facts.widthMeters : facts.crossDimensionMeters)) || 0)} متر`;
@@ -277,6 +278,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
           <div className="min-w-0"><div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <strong className="sds-text-primary text-sm">{row.contractualTitle || product.name}</strong><span className="sds-text-muted text-xs">{labels[row.family]}</span>
           </div><div className="sds-text-secondary mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"><span>{geometry}</span>
+            {customerOrderArea !== undefined && <span>مساحت سفارش مشتری: {formatSquareMeters(customerOrderArea)}</span>}
             {physicalCount !== null && Number.isSafeInteger(physicalCount) && physicalCount > 0 &&
               <span>تعداد: {formatDisplayNumber(physicalCount)} عدد</span>}
             {row.retailUnitPrice?.amount && retailUnitLabel && <strong className="sds-text-primary">{formatPrice(Number(row.retailUnitPrice.amount), 'تومان')} · {retailUnitLabel}</strong>}

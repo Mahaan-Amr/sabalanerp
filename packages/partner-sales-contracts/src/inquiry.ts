@@ -23,6 +23,7 @@ export const ApprovedInquirySchema = z.object({
   schemaVersion: z.literal(1), approvalId: IdSchema, inquiryId: IdSchema, rowId: IdSchema,
   revision: RevisionSchema, partnerSellerId: IdSchema, configurationHash: HashSchema, evidenceHash: HashSchema,
   wholesaleUnitPrice: MoneySchema, approvedAt: InstantSchema, expiresAt: InstantSchema, note: TextSchema.optional(),
+  wholesaleMandatory: z.object({ enabled: z.boolean(), percentage: DecimalSchema.refine(value => Number(value) <= 100) }).strict().optional(),
   predecessorApprovalId: IdSchema.optional(),
   supersessionReason: PersianReasonSchema.optional(),
   decision: z.object({ actorId: IdSchema, assignmentId: IdSchema, assignmentRevision: RevisionSchema,

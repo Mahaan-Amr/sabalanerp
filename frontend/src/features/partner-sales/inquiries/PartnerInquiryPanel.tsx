@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { PartnerWholesalePricingSummary } from './PartnerWholesalePricingSummary';
 import { ErpBadge, ErpButton, ErpCard, ErpInlineState } from '@/components/erp';
 import {
   inquiryMoney, inquiryRowState, inquiryStateLabel, inquirySummary,
@@ -37,6 +38,7 @@ export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinqu
             {row.configuration.map((fact, index) => <div key={`${fact.label}:${index}`} className="flex flex-wrap gap-1"><dt>{fact.label}:</dt><dd className="break-words">{fact.value}</dd></div>)}
           </dl>
           {row.approvedPrice && <p className="text-sm">قیمت فروش سبلان به شما: <strong>{inquiryMoney(row)}</strong></p>}
+          <PartnerWholesalePricingSummary policy={row.wholesaleMandatory} pricing={row.wholesalePricing} currency={row.approvedPrice?.currency} />
           {row.expiresAt && <p className="text-sm text-[var(--sds-text-secondary)]">اعتبار تا {new Date(row.expiresAt).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' })}</p>}
           {row.noteOrReason && <p className="break-words text-sm">{row.noteOrReason}</p>}
           {row.predecessor && <div className="space-y-1 text-sm text-[var(--sds-text-secondary)]">

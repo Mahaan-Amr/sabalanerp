@@ -7,8 +7,11 @@ import {
   FaPlus,
   FaCog,
   FaUsers,
+  FaClipboardList,
 } from 'react-icons/fa';
 import { ErpNeumorphicActionGrid, ErpWorkspacePage } from '@/components/erp';
+import { ResponderWorkspaceViewV2Schema } from '@sabalanerp/partner-sales-contracts';
+import { createPartnerWorkspaceHttpPort } from '@/features/partner-sales/workspaces/partnerWorkspaceHttpPort';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace, WORKSPACE_PERMISSIONS, WORKSPACES } from '@/contexts/WorkspaceContext';
 import { dashboardAPI, salesAPI } from '@/lib/api';
@@ -55,6 +58,15 @@ export default function SalesWorkspacePage() {
     return () => { active = false; };
   }, [user?.id]);
   const [canViewPartnerCases, setCanViewPartnerCases] = useState(false);
+  const [pendingPartnerContracts, setPendingPartnerContracts] = useState<number | null>(null);
+  useEffect(() => {
+    let active = true;
+    setPendingPartnerContracts(null);
+    if (user) void createPartnerWorkspaceHttpPort().query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', summaryOnly: true })
+      .then(result => { if (active && result.ok) setPendingPartnerContracts(ResponderWorkspaceViewV2Schema.parse(result.value).contractCounts?.pending ?? 0); })
+      .catch(() => { if (active) setPendingPartnerContracts(null); });
+    return () => { active = false; };
+  }, [user?.id]);
   useEffect(() => {
     let active = true;
     setCanViewPartnerCases(false);
@@ -65,7 +77,13 @@ export default function SalesWorkspacePage() {
   }, [user?.id]);
   const canViewSellerComparisons = user?.role === 'ADMIN' || hasPermission(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN);
   const salesActions = [
-    ...baseSalesActions,
+    baseSalesActions[0],
+    ...(pendingPartnerContracts !== null ? [{
+      title: `استعلام های همکار (${pendingPartnerContracts.toLocaleString('fa-IR')})`,
+      href: '/dashboard/sales/partner-inquiries?view=pending',
+      icon: FaClipboardList,
+    }] : []),
+    ...baseSalesActions.slice(1),
     ...(canManageSettings ? [{ title: 'تنظیمات فروش', href: '/dashboard/sales/settings', icon: FaCog }] : []),
     ...(canViewPartnerCases ? [{
       title: 'پیش‌نویس‌ها و پرونده‌های من',

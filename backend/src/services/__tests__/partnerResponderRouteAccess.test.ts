@@ -36,6 +36,9 @@ const run = async () => {
     }
   }
   for (const scenario of [
+    { name: 'company manager permission', feature: 'sales_partner_sellers_manage', level: 'admin', active: true, expiresAt: null, workspace: true, allowed: true, respond: false },
+    { name: 'insufficient company management level', feature: 'sales_partner_sellers_manage', level: 'edit', active: true, expiresAt: null, workspace: true, allowed: false, respond: false },
+    { name: 'revoked company management permission', feature: 'sales_partner_sellers_manage', level: 'admin', active: false, expiresAt: null, workspace: true, allowed: false, respond: false },
     { name: 'view only', feature: 'sales_partner_inquiries_view', level: 'view', active: true, expiresAt: null, workspace: true, allowed: true, respond: false },
     { name: 'insufficient response level', feature: 'sales_partner_inquiries_respond', level: 'view', active: true, expiresAt: null, workspace: true, allowed: false, respond: false },
     { name: 'revoked response', feature: 'sales_partner_inquiries_respond', level: 'edit', active: false, expiresAt: null, workspace: true, allowed: false, respond: false },

@@ -1107,12 +1107,26 @@ test('commercial finality waits for both approvals, creates no automatic financi
     await tx.partnerInquiry.update({ where: { id: ids.inquiryId }, data: { caseId: ids.caseId, caseRevision: 1, pricingReadyAt: now, pricingExpiresAt: new Date(now.getTime() + 48 * 3600000) } });
     const revision = await reviseCommand(ids, { ...input, intent }, 1, created.value.case.owner.integrityHash, 'final-price-accept');
     const pricingIntent = { ...revision.intent, recoveryRevision: 2, deliveries: input.intent.deliveries.map(item => ({ ...item, deliveryId: `${item.deliveryId}-priced` })) };
-    const priced = await service(tx, ids).execute({ ...revision, intent: pricingIntent, idempotency: { ...revision.idempotency, payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent: pricingIntent }) } });
+    const pricing = { materialAmount: '200', componentAmount: '0', totalAmount: '240',
+      mandatoryCharges: [{ subjectId: `${ids.caseId}-product-row`, basisAmount: '200', percentage: '20', amount: '40' }] };
+    const priced = await service(tx, ids, undefined, undefined, undefined, draft => ({ ...draft,
+      rows: draft.rows.map(row => ({ ...row, wholesaleUnitPriceAmount: '120', wholesaleLineTotalAmount: '240', wholesalePricing: pricing })),
+      sabalanPaymentPlan: { ...draft.sabalanPaymentPlan, installments: draft.sabalanPaymentPlan.installments.map(item => ({ ...item, amount: { amount: '240', currency: 'IRT' } })) },
+    })).execute({ ...revision, intent: pricingIntent, idempotency: { ...revision.idempotency, payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent: pricingIntent }) } });
     assert.equal(priced.ok, true, JSON.stringify(priced));
     assert.equal((await readPartnerCommercialState(tx, ids.caseId))?.status, 'FINAL');
     const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } });
     assert.equal(await tx.accountingFinancialRecord.count({ where: { sourceId: root.internalRecordId } }), 0);
     const views = await readCurrentPartnerCaseViews(tx, ids.caseId); assert.ok(views?.accounting);
+    assert.deepEqual(views?.accounting?.products[0].wholesalePricing, pricing);
+    const frozen = await tx.partnerCaseRevision.findFirstOrThrow({ where: { caseId: ids.caseId }, orderBy: { revision: 'desc' } });
+    assert.doesNotMatch(JSON.stringify(frozen.retailEnvelope), /wholesalePricing|mandatoryCharges/);
+    assert.equal(views?.partner.retailTotals.payable, '300');
+    const customerOutput = (await import('@sabalanerp/partner-sales-contracts')).CustomerContractOutputSchema.parse(frozen.customerProjection);
+    assert.equal(customerOutput.totals.payable, '300');
+    assert.doesNotMatch(JSON.stringify(customerOutput), /wholesalePricing|mandatoryCharges|حکمی سبلان/);
+    const { projectPartnerInternalContent } = await import('../partnerSales/accounting/internalDocumentContent');
+    assert.deepEqual(projectPartnerInternalContent({ partnerPreparation: { ...views!.accounting!, paymentPlan: views!.accounting!.sabalanPaymentPlan } }, frozen.graph).items[0].wholesalePricing, pricing);
     const commitment = PartnerEventSchema.parse((await tx.partnerCaseEvent.findFirstOrThrow({ where: { caseId: ids.caseId, type: 'CASE_COMMITTED' } })).evidence && ((await tx.partnerCaseEvent.findFirstOrThrow({ where: { caseId: ids.caseId, type: 'CASE_COMMITTED' } })).evidence as Prisma.JsonObject).publicEvent);
     assert.equal(commitment.type, 'CASE_COMMITTED');
     if (commitment.type !== 'CASE_COMMITTED') return;
@@ -1122,11 +1136,12 @@ test('commercial finality waits for both approvals, creates no automatic financi
     const accounting = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database, actorId: ids.responderId, correlationId: randomUUID() }));
     const saved = await accounting.enqueueCommitted({ ...views!.accounting!, state: 'COMMITTED' }, commitment);
     assert.equal(saved.ok, true, JSON.stringify(saved));
-    assert.equal((await tx.salesContract.findUniqueOrThrow({ where: { id: root.customerContractId! } })).realizedAmount?.toString(), '200', 'wholesale total, not retail 300');
+    assert.equal((await tx.salesContract.findUniqueOrThrow({ where: { id: root.customerContractId! } })).realizedAmount?.toString(), '240', 'wholesale total includes twenty percent mandatory; retail remains 300');
     assert.equal(await tx.salesReportingEvent.count({ where: { contractId: root.customerContractId! } }), 1);
     assert.equal((await accounting.enqueueCommitted({ ...views!.accounting!, state: 'COMMITTED' }, commitment)).ok, true);
     assert.equal(await tx.salesReportingEvent.count({ where: { contractId: root.customerContractId! } }), 1);
     const record = await tx.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: root.internalRecordId } });
+    assert.deepEqual(projectPartnerInternalContent(record.sourceSnapshot, frozen.graph).items[0].wholesalePricing, pricing);
     await tx.accountingFinancialRecord.delete({ where: { id: record.id } });
     await reconcilePartnerFinancialRealization(tx, root.id, ids.responderId, `test-reversal:${root.id}`);
     const events = await tx.salesReportingEvent.findMany({ where: { contractId: root.customerContractId! } });
@@ -1581,7 +1596,7 @@ test('committed Partner cancellation requires the common permission and neutrali
   });
 });
 
-test('responder SQL pages five authorized contracts with package grouping, global search and independent tab counts', async () => {
+test('responder SQL pages twenty authorized contracts with package grouping, global search and independent tab counts', async () => {
   const { createPrismaPartnerWorkspaceQuery } = await import('../partnerSales/workspaces/prisma');
   await fixture(async (tx, ids) => {
     const allow = async () => ({ ok: true as const, value: { evidenceId: 'fixture-inbox' } });
@@ -1592,9 +1607,9 @@ test('responder SQL pages five authorized contracts with package grouping, globa
         materialRateEvidenceId: 'fixture-rate', materialRateHash: configurationHash, components: [], currency: 'IRT',
         calculationPolicyVersion: 'fixture-v1', roundingPolicyVersion: 'fixture-v1' }, description: 'سنگ آماده', configuration: [{ label: 'تعداد', value: '۲' }] } }) });
     const caseIds: string[] = [];
-    for (let index = 0; index < 12; index++) {
+    for (let index = 41; index >= 0; index--) {
       const caseId = `${ids.caseId}-inbox-${String(index).padStart(2, '0')}`, caseIdsScoped = { ...ids, caseId };
-      caseIds.push(caseId);
+      caseIds[index] = caseId;
       const saved = await service(tx, caseIdsScoped).execute(await command(caseIdsScoped));
       assert.ok(saved.ok && saved.value.case, JSON.stringify(saved));
       if (!saved.ok || !saved.value.case) return;
@@ -1609,6 +1624,7 @@ test('responder SQL pages five authorized contracts with package grouping, globa
     const database = new Proxy(tx, { get(target, key) { if (key === '$transaction') return async (work: (value: Prisma.TransactionClient) => unknown) => work(tx); return Reflect.get(target, key); } }) as unknown as PrismaClient;
     // Explicit per-fixture read avoids unrelated manager-visible local inquiries.
     await tx.user.update({ where: { id: ids.responderId }, data: { role: 'USER' } });
+    await tx.featurePermission.create({ data: { userId: ids.responderId, workspace: 'sales', feature: 'sales_partner_inquiries_view', permissionLevel: 'view' } });
     const resolveConfiguration = async () => ({ ok: true as const, value: { identity: { schemaVersion: 1 as const, partnerSellerId: ids.partnerId,
       catalogProductId: 'catalog-stone', family: 'prepared' as const, unit: 'count' as const, configuration: [{ key: 'technicalConfigurationHash', value: configurationHash }],
       materialRateEvidenceId: 'fixture-rate', materialRateHash: configurationHash, components: [], currency: 'IRT' as const,
@@ -1617,29 +1633,61 @@ test('responder SQL pages five authorized contracts with package grouping, globa
     const first = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending', limit: 50 });
     assert.ok(first.ok, JSON.stringify(first));
     if (!first.ok) return;
-    assert.equal(new Set(first.value.inquiries.map(item => item.caseId)).size, 5);
-    assert.equal(first.value.contractCounts?.pending, 12);
+    assert.equal(new Set(first.value.contracts!.map(item => item.id)).size, 20);
+    assert.equal(first.value.contractCounts?.pending, 42);
+    assert.deepEqual(first.value.inquiries, [], 'list omits full product and response projections');
+    assert.deepEqual(first.value.contracts!.map(item => item.id), [...caseIds].reverse().slice(0, 20), 'oldest outstanding request first, independent of identifiers');
     assert.ok(first.value.nextCursor);
     const next = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending', cursor: first.value.nextCursor });
-    assert.ok(next.ok && next.value.inquiries.length === 5, JSON.stringify(next));
+    assert.ok(next.ok && next.value.contracts!.length === 20, JSON.stringify(next));
     if (!next.ok) return;
     const last = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending', cursor: next.value.nextCursor });
-    assert.ok(last.ok && last.value.inquiries.length === 2 && !last.value.nextCursor, JSON.stringify(last));
-    const contract = await tx.salesContract.findFirstOrThrow({ where: { partnerCaseId: caseIds[11] } });
+    assert.ok(last.ok && last.value.contracts!.length === 2 && !last.value.nextCursor, JSON.stringify(last));
+    const contract = await tx.salesContract.findFirstOrThrow({ where: { partnerCaseId: caseIds[41] } });
     const searched = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending', search: contract.contractNumber });
-    assert.ok(searched.ok && searched.value.inquiries.length === 1, JSON.stringify(searched));
+    assert.ok(searched.ok && searched.value.contracts!.length === 1, JSON.stringify(searched));
     const blank = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'answered', search: contract.contractNumber });
-    assert.ok(blank.ok && blank.value.inquiries.length === 0 && blank.value.contractCounts?.pending === 1, JSON.stringify(blank));
+    assert.ok(blank.ok && blank.value.contracts!.length === 0 && blank.value.contractCounts?.pending === 1, JSON.stringify(blank));
     const denied = createPrismaPartnerWorkspaceQuery({ database, actorId: ids.responderId, correlationId: randomUUID(),
-      resolveConfiguration, authorize: async (_tx, request) => request.root.id === `${caseIds[11]}-pricing`
+      resolveConfiguration, authorize: async (_tx, request) => request.root.id === `${caseIds[41]}-pricing`
         ? { ok: false, error: { code: 'FORBIDDEN', status: 403, message: 'دسترسی مجاز نیست' } } : allow() });
     const deniedCounts = await denied.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending' });
-    assert.ok(deniedCounts.ok && deniedCounts.value.contractCounts?.pending === 11, JSON.stringify(deniedCounts));
+    assert.ok(deniedCounts.ok && deniedCounts.value.contractCounts?.pending === 41, JSON.stringify(deniedCounts));
     const deniedSearch = await denied.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending', search: contract.contractNumber });
-    assert.ok(deniedSearch.ok && deniedSearch.value.contractCounts?.pending === 0 && deniedSearch.value.inquiries.length === 0, JSON.stringify(deniedSearch));
+    assert.ok(deniedSearch.ok && deniedSearch.value.contractCounts?.pending === 0 && deniedSearch.value.contracts!.length === 0, JSON.stringify(deniedSearch));
     const foreign = createPrismaPartnerWorkspaceQuery({ database, actorId: ids.partnerId, correlationId: randomUUID(), authorize: allow, resolveConfiguration });
     const hidden = await foreign.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending' });
-    assert.ok(hidden.ok && hidden.value.inquiries.length === 0 && hidden.value.contractCounts?.pending === 0, JSON.stringify(hidden));
+    assert.ok(!hidden.ok && hidden.error.code === 'FORBIDDEN', JSON.stringify(hidden));
+    const responder = createPartnerInquiryService({ actorId: ids.responderId, transaction: work => work(tx), authorize: allow,
+      resolveInitialResponder: async () => ({ ok: true, value: { responderId: ids.responderId, eligibilityEvidence: {} } }), resolveConfiguration });
+    for (const index of [41, 40]) {
+      const inquiryId = `${caseIds[index]}-pricing`;
+      const payload = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId, expectedAssignmentRevision: 1,
+        decisions: [{ rowId: `${inquiryId}-row`, expectedRevision: 1, outcome: 'REJECTED' as const, reason: 'اصلاح مشخصات محصول' }] };
+      assert.ok((await responder.execute({ ...payload, commandId: `${inquiryId}-answer`, correlationId: `${inquiryId}-answer`,
+        idempotency: { actorId: ids.responderId, operation: payload.type, targetId: inquiryId, key: `${inquiryId}-answer`, payloadHash: await canonicalHash(payload) } })).ok);
+    }
+    const answered = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'answered', status: 'rejected' });
+    assert.ok(answered.ok, JSON.stringify(answered));
+    if (answered.ok) {
+      assert.deepEqual(answered.value.contracts!.map(item => item.id), [caseIds[40], caseIds[41]], 'latest completed response first');
+      assert.equal(answered.value.contractCounts?.answered, 2);
+      assert.ok(answered.value.contracts!.every(item => item.answeredAt));
+    }
+    const direct = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', contractId: caseIds[41], view: 'all' });
+    assert.ok(direct.ok && direct.value.inquiries.length === 1 && direct.value.inquiries[0].caseId === caseIds[41], JSON.stringify(direct));
+    if (direct.ok && answered.ok) {
+      const detail = direct.value.inquiries[0];
+      const summary = answered.value.contracts!.find(item => item.id === detail.caseId)!;
+      assert.equal(summary.customer, detail.customerDisplayName);
+      assert.equal(summary.partnerDisplayName, detail.partnerDisplayName);
+      assert.equal(summary.currentRows, detail.rows.filter(row => !row.superseded).length);
+      assert.equal(summary.answeredRows, detail.rows.filter(row => !row.superseded && ['APPROVED', 'REJECTED', 'EXPIRED'].includes(row.state)).length);
+      assert.equal(summary.answeredAt, detail.rows[0].answeredAt);
+    }
+    const all = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE' });
+    assert.ok(all.ok && all.value.contractCounts?.pending === 40 && all.value.contractCounts?.answered === 3, JSON.stringify(all));
+    if (all.ok) assert.deepEqual(all.value.contracts!.map(item => item.id), [...caseIds].reverse().slice(2, 22));
   });
 });
 

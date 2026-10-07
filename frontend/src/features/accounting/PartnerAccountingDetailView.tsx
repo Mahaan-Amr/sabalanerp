@@ -20,7 +20,7 @@ export type PartnerInternalDocument = {
   voidWorkflows?: import('./AccountingVoidWorkflowPanel').AccountingVoidWorkflowView[];
   partnerContext: { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string;
     internalRecordNumber: string; debtor: { displayName: string }; endCustomer: { displayName: string } };
-  items: Array<{ productRowId?: string; description: string; quantity: string; unit: string; unitPrice: string; totalPrice: string; details?: string[] }>;
+  items: Array<{ wholesalePricing?: import('@sabalanerp/partner-sales-contracts').WholesalePricingBreakdown; productRowId?: string; description: string; quantity: string; unit: string; unitPrice: string; totalPrice: string; details?: string[] }>;
   totals?: { net: string; discount: string; tax: string; charges: string; payable: string };
   paymentPlan?: { installments: Array<{ installmentId: string; dueDate: string; amount: { amount: string; currency: string }; method: string }> };
   deliveries?: Array<{ deliveryId: string; date: string; destination: string; receiverName?: string; items: Array<{ productRowId: string; quantity: string }> }>;
@@ -96,6 +96,9 @@ export function PartnerAccountingDetailView({ lifecyclePanel, financialVoidPanel
         <CompactQueueItem icon={FaFileInvoice} title={item.description}
           meta={`مقدار: ${item.quantity} ${partnerQuantityLabel(item.unit)}${doc.amountKnown === false ? '' : ` · قیمت واحد: ${money(item.unitPrice, doc.currency)}`}`}
           amount={doc.amountKnown === false ? 'قیمت تعیین نشده' : money(item.totalPrice, doc.currency)} />
+        {doc.amountKnown !== false && item.wholesalePricing && <div className="mt-2 space-y-1 text-sm sds-text-secondary">
+          {item.wholesalePricing.mandatoryCharges.map(charge => <p key={charge.subjectId}>حکمی سبلان {charge.percentage.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])}٪: {money(charge.amount, doc.currency)}</p>)}
+        </div>}
         {item.details?.length ? <p className="mt-2 text-sm sds-text-secondary">{item.details.join(' · ')}</p> : null}
       </div>)}</div>
     </ErpSection>} aside={summary} />}

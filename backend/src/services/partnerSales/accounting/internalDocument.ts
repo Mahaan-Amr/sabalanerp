@@ -131,7 +131,8 @@ export function partnerInternalPrintInput(document: NonNullable<Awaited<ReturnTy
       width: 'widthMeters' in item ? Number(item.widthMeters) : undefined, widthUnit: 'm',
       squareMeters: 'areaSquareMeters' in item ? Number(item.areaSquareMeters) : undefined,
       dimensions: (item.details || []).filter(detail => /^(طول|عرض|مساحت):/.test(detail)).join('، '),
-      unitPrice: Number(item.unitPrice), totalPrice: Number(item.totalPrice) })),
+      unitPrice: Number(item.unitPrice), totalPrice: Number(item.totalPrice),
+      ...('wholesalePricing' in item && item.wholesalePricing ? { frozenPricingBreakdown: item.wholesalePricing } : {}) })),
     contractData: {
       project: { projectName: document.project?.title, address: document.project?.address },
       discount: { amount: Number(totals?.discount || 0), inputMode: 'AMOUNT_TOMAN' },

@@ -11899,6 +11899,7 @@ model PartnerInquiryApproval {
   commandId               String                        @unique
   authorizationEvidenceId String
   wholesaleUnitPrice      Decimal                       @db.Decimal
+  wholesaleMandatory      Json?
   currency                String
   evidenceHash            String
   note                    String?

@@ -1,4 +1,6 @@
 'use client';
+import { PartnerInquiryProductFacts } from '../../partner-sales/inquiries/PartnerInquiryProductFacts';
+import { PartnerWholesalePricingSummary } from '../../partner-sales/inquiries/PartnerWholesalePricingSummary';
 
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { FaFileInvoiceDollar } from 'react-icons/fa';
@@ -466,9 +468,11 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
                     : rowState === 'EXPIRED' ? 'اعتبار قیمت پایان یافته' : rowState === 'PENDING' ? 'در انتظار پاسخ' : 'نیازمند استعلام'}
                 </ErpBadge>
               </div>
+              <PartnerInquiryProductFacts configuration={inquiryRow.configuration} />
               <p className="text-sm sds-text-secondary">قیمت پیشنهادی سبلان: <strong className="sds-text-primary">
                 {price ? partnerMoneyText(price.amount, price.currency) : '—'}
               </strong></p>
+              <PartnerWholesalePricingSummary policy={inquiryRow.wholesaleMandatory} pricing={inquiryRow.wholesalePricing} currency={price?.currency} />
               {rowState === 'EXPIRED' && expiresAt && <p className="text-sm sds-text-secondary">اعتبار تا {expiresAt}</p>}
               {usable && onRejectPrice && <ErpButton label="رد قیمت و درخواست پیشنهاد مجدد" tone="danger" variant="outline" disabled={disabled || inquiryRow.successor?.state === 'PENDING'}
                 onClick={() => { setRejectReason(''); setRejectTarget(inquiryRow); }} />}

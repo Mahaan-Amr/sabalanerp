@@ -63,3 +63,17 @@ test('non-Admin actors retain the same exceptions and hidden/expired authority f
   assert.equal(checkPartnerDomainRestrictions('CASE_DRAFT_WRITE', { ...context, actorId: 'partner', persona: 'PARTNER', scope: 'OWN' }), null);
   assert.equal(checkPartnerDomainRestrictions('CASE_DRAFT_WRITE', { ...context, actorId: 'partner', persona: 'PARTNER', scope: 'OWN', partnerStatus: 'SUSPENDED' })?.code, 'PARTNER_NOT_ACTIVE');
 });
+
+
+test('company response authority overrides assignment only for internal responder inquiry purpose', () => {
+  const context = PermissionContextSchema.parse({ actorId: 'manager', persona: 'INTERNAL', isAdmin: false,
+    partnerSellerId: 'partner', partnerStatus: 'ACTIVE', root: { kind: 'INQUIRY', id: 'inquiry' },
+    purpose: 'RESPONDER', channel: 'API', scope: 'COMPANY', resourceVisible: true, actionGranted: true,
+    authorizationRevision: 1, lifecycleRevision: 1, evaluatedAt: '2026-10-07T08:00:00.000Z' });
+  assert.equal(checkPartnerDomainRestrictions('INQUIRY_RESPOND', context), null);
+  assert.equal(checkPartnerDomainRestrictions('INQUIRY_RESPOND', { ...context, actionGranted: false })?.code, 'FORBIDDEN');
+  assert.equal(checkPartnerDomainRestrictions('INQUIRY_RESPOND', { ...context, purpose: 'MANAGEMENT' })?.code, 'NOT_ASSIGNED');
+  assert.equal(checkPartnerDomainRestrictions('INQUIRY_RESPOND', { ...context, persona: 'PARTNER' })?.code, 'NOT_ASSIGNED');
+  assert.equal(checkPartnerDomainRestrictions('INQUIRY_RESPOND', { ...context, scope: 'ASSIGNED' })?.code, 'NOT_ASSIGNED');
+  assert.equal(checkPartnerDomainRestrictions('INQUIRY_RESPOND', { ...context, partnerStatus: 'SUSPENDED' })?.code, 'PARTNER_NOT_ACTIVE');
+});

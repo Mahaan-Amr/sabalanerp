@@ -47,7 +47,7 @@ test('suspension blocks a new commitment but not named cancellation or committed
   assert.equal((await publicChannel.authorize('CASE_READ', evidence.resource!.root)).ok, false);
 });
 
-test('wrong-purpose grant cannot disclose existence and responder read requires a current assignment', async () => {
+test('wrong-purpose grant cannot disclose existence and assigned responder read requires a current assignment', async () => {
   const { evidence, source } = fixture();
   evidence.actor = { id: 'internal-a', active: true, role: 'USER' };
   evidence.grants = [{ action: 'CASE_READ', rootKind: 'CASE', purpose: 'CRM', scope: 'COMPANY' }];
@@ -55,7 +55,7 @@ test('wrong-purpose grant cannot disclose existence and responder read requires 
   const result = await crm.authorize('CASE_READ', evidence.resource!.root);
   assert.equal(result.ok ? null : result.error.status, 404);
   evidence.resource!.root.kind = 'INQUIRY';
-  evidence.grants = [{ action: 'INQUIRY_READ', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'COMPANY' }];
+  evidence.grants = [{ action: 'INQUIRY_READ', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' }];
   const responder = createPartnerAuthorization(source, { actorId: 'internal-a', purpose: 'RESPONDER', channel: 'DETAIL' });
   assert.equal((await responder.authorize('INQUIRY_READ', evidence.resource!.root)).ok, false);
 });
@@ -135,7 +135,7 @@ test('HR, CRM, responder, Accounting and Logistics permissions are confined to t
   }
 });
 
-test('ADMIN retains company management but cannot bypass any of the four Partner domain exceptions', async () => {
+test('ADMIN can respond company-wide while Partner ownership and financial separation remain enforced', async () => {
   const { evidence, source } = fixture();
   evidence.actor = { id: 'admin-a', active: true, role: 'ADMIN' };
   const authorize = (action: PartnerAction, purpose: PermissionContext['purpose']) =>
@@ -145,11 +145,11 @@ test('ADMIN retains company management but cannot bypass any of the four Partner
     assert.equal((await authorize(action, 'PARTNER')).ok, false, action);
   }
   evidence.resource!.root.kind = 'INQUIRY';
-  assert.equal((await authorize('INQUIRY_RESPOND', 'RESPONDER')).ok, false);
+  assert.equal((await authorize('INQUIRY_RESPOND', 'RESPONDER')).ok, true);
   evidence.resource!.assignment = { actorId: 'admin-a', eligible: true, assignmentId: 'assigned', revision: 1 };
   assert.equal((await authorize('INQUIRY_RESPOND', 'RESPONDER')).ok, true);
   evidence.resource!.assignment.actorId = 'responder-b';
-  assert.equal((await authorize('INQUIRY_RESPOND', 'RESPONDER')).ok, false);
+  assert.equal((await authorize('INQUIRY_RESPOND', 'RESPONDER')).ok, true);
   evidence.resource!.root.kind = 'CASE';
   evidence.resource!.requesterId = 'admin-a';
   for (const action of ['FINANCIAL_PROCESS', 'FINANCIAL_APPROVE'] as const) {
@@ -221,4 +221,23 @@ test('fixed Partner capabilities ignore internal grants and preserve pending/sus
     assert.equal(write.ok, false, state);
     assert.equal(write.ok ? null : write.error.status, state === 'PENDING' ? 404 : 409);
   }
+});
+
+
+test('company manager response uses real authorization and availability; title, assigned scope and expiry cannot override assignment', async () => {
+  const { evidence, source } = fixture();
+  evidence.actor = { id: 'manager-a', active: true, role: 'MANAGER' };
+  evidence.resource!.root = { kind: 'INQUIRY', id: 'inquiry-a' };
+  evidence.resource!.assignment = { actorId: 'seller-a', eligible: true, assignmentId: 'assignment-a', revision: 1 };
+  const policy = createPartnerAuthorization(source, { actorId: 'manager-a', purpose: 'RESPONDER', channel: 'API' });
+  assert.equal((await policy.authorize('INQUIRY_RESPOND', evidence.resource!.root)).ok, false);
+  evidence.grants = [{ action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'COMPANY' }];
+  const allowed = await policy.authorize('INQUIRY_RESPOND', evidence.resource!.root);
+  assert.equal(allowed.ok, true);
+  const availability = await projectActionAvailability(policy, evidence.resource!.root, ['INQUIRY_RESPOND']);
+  assert.equal(availability[0].enabled, true);
+  evidence.grants[0].scope = 'ASSIGNED';
+  assert.equal((await policy.authorize('INQUIRY_RESPOND', evidence.resource!.root)).ok, false);
+  evidence.grants[0].scope = 'COMPANY'; evidence.grants[0].expiresAt = evidence.evaluatedAt;
+  assert.equal((await policy.authorize('INQUIRY_RESPOND', evidence.resource!.root)).ok, false);
 });

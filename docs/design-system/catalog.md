@@ -19,6 +19,8 @@ Import from `@/components/erp`. Prefer a workflow-sized composition over rebuild
 
 `ErpListPage` supports `sectionNavigation` before filters and `rowActionMode="menu"` for a labeled primary row action with secondary actions in the canonical portal menu. Its default icon presentation remains available.
 
+`ErpDisclosure hoverEffect="shadow"` uses the shared card hover shadow while preserving the header colors. The default disclosure presentation remains unchanged.
+
 `ErpActionMenu portal` escapes scrolling containers on desktop and uses the canonical focused sheet on mobile. `ErpNeumorphicWorkflowProgress` steps may specify `disabled` and `disabledReason` to preserve workflow prerequisites. `ErpSummaryGrid` supports two, three or four columns.
 
 If a canonical interface owns behavior, do not reproduce that behavior locally. Add a generic capability to the canonical module when it benefits multiple domains. Keep domain compositions close to their feature.

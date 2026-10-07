@@ -47,6 +47,7 @@ export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: u
     products: array(preparation.products).map(row => ({ productRowId: row.productRowId, description: row.description,
       quantity: row.quantity, unit: row.unit, wholesaleUnitPrice: row.wholesaleUnitPrice,
       ...(row.wholesaleLineTotal !== undefined ? { wholesaleLineTotal: row.wholesaleLineTotal } : {}),
+      ...(row.wholesalePricing !== undefined ? { wholesalePricing: row.wholesalePricing } : {}),
       ...(row.approvalEvidenceId ? { approvalEvidenceId: row.approvalEvidenceId } : { productType: row.productType, serviceRateEvidenceId: row.serviceRateEvidenceId }) })),
     totals: preparation.totals, sabalanPaymentPlan: preparation.paymentPlan,
   });
@@ -60,6 +61,7 @@ export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: u
       productType: product.productType === 'service' ? 'service' : physical.productType,
       quantity: product.quantity, unit: product.unit,
       unitPrice: product.wholesaleUnitPrice,
+      ...(product.wholesalePricing ? { wholesalePricing: product.wholesalePricing } : {}),
       totalPrice: product.wholesaleLineTotal ?? new ExactDecimal(product.quantity).mul(product.wholesaleUnitPrice).toFixed() };
   });
   return { items, totals: parsed.data.totals, paymentPlan: parsed.data.sabalanPaymentPlan };

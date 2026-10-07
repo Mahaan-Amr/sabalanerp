@@ -1,6 +1,8 @@
+import { WHOLESALE_MANDATORY_DEFAULT_PERCENTAGE } from '@sabalanerp/partner-sales-contracts';
 import type { InquiryBatchResult, PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 
-export type ResponseDraft = { outcome: 'APPROVED' | 'REJECTED'; amount: string; note: string };
+export type ResponseDraft = { outcome: 'APPROVED' | 'REJECTED'; amount: string; note: string;
+  mandatoryEnabled?: boolean; mandatoryPercentage?: string };
 export type ResponseDrafts = Record<string, ResponseDraft>;
 type Decision = Extract<PartnerCommand, { type: 'INQUIRY_DECIDE' }>['decisions'][number];
 
@@ -32,9 +34,12 @@ export function responseDecisions(rows: readonly { rowId: string; revision: numb
       else decisions.push({ rowId: row.rowId, expectedRevision: row.revision, outcome: 'REJECTED', reason: note });
     } else {
       const amount = exactAmount(draft.amount);
-      if (amount === null) errors[row.rowId] = 'قیمت هر واحد را با رقم و بدون جداکننده بنویسید.';
+      const percentage = exactAmount(draft.mandatoryPercentage ?? WHOLESALE_MANDATORY_DEFAULT_PERCENTAGE);
+      if (percentage === null || Number(percentage) > 100) errors[row.rowId] = 'درصد حکمی باید بین صفر و صد باشد.';
+      else if (amount === null || !/[1-9]/.test(amount)) errors[row.rowId] = 'قیمت هر واحد باید عددی مثبت باشد.';
       else decisions.push({ rowId: row.rowId, expectedRevision: row.revision, outcome: 'APPROVED',
-        wholesaleUnitPrice: { amount, currency: row.currency } });
+        wholesaleUnitPrice: { amount, currency: row.currency },
+        ...(draft.mandatoryEnabled !== undefined ? { wholesaleMandatory: { enabled: draft.mandatoryEnabled, percentage: percentage! } } : {}) });
     }
   }
   if (Object.keys(errors).length) return { ok: false, errors };

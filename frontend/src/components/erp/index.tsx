@@ -1180,15 +1180,16 @@ export function ErpNeumorphicWorkflowLayout({
 }
 
 /** A mounted disclosure keeps draft values and opens when a hidden field becomes invalid. */
-export function ErpDisclosure({ title, children, expanded = false, className }: React.PropsWithChildren<{
+export function ErpDisclosure({ title, children, expanded = false, className, hoverEffect = 'default' }: React.PropsWithChildren<{
   title: React.ReactNode;
   expanded?: boolean;
   className?: string;
+  hoverEffect?: 'default' | 'shadow';
 }>) {
   const [open, setOpen] = React.useState(expanded);
   const panelId = React.useId();
   React.useEffect(() => { if (expanded) setOpen(true); }, [expanded]);
-  return <ErpCard className={cx('p-4 sm:p-5', className)}>
+  return <ErpCard className={cx('p-4 sm:p-5', hoverEffect === 'shadow' && 'sds-disclosure-shadow sds-neumorphic-interactive', className)}>
     <ErpPressable type="button" variant="ghost" className="flex w-full items-center justify-between gap-3 text-right"
       aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
       <span className="font-semibold">{title}</span>

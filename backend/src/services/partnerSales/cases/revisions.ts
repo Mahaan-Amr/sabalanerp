@@ -3,6 +3,7 @@ import {
   CaseDraftIntentSchema, PaymentPlanSchema, canonicalHash, partnerError, roundPartnerContractTotals,
   type ApprovedInquiry, type PartnerCommand, type PartnerTechnicalSavedView, type Result,
 } from '@sabalanerp/partner-sales-contracts';
+import type { WholesalePricingBreakdown } from '@sabalanerp/partner-sales-contracts';
 import { technicalGraphMeasures } from './technicalGraphMeasures';
 import { multiply, subtract, sum } from '../reporting/money';
 
@@ -17,7 +18,7 @@ export type ResolvedCaseDraft = {
   technicalSnapshot: PartnerTechnicalSavedView;
   rows: Array<{ productRowId: string; configurationHash: string; quantity: string; unit: string;
     precisionPolicyVersion: string; description: string; productCode?: string; retailUnitPriceAmount: string;
-    wholesaleUnitPriceAmount?: string; retailLineTotalAmount?: string; wholesaleLineTotalAmount?: string }>;
+    wholesaleUnitPriceAmount?: string; wholesalePricing?: WholesalePricingBreakdown; retailLineTotalAmount?: string; wholesaleLineTotalAmount?: string }>;
   partner: DisplayParty; customer: Omit<DisplayParty, 'address'> & { address?: string }; project?: { title: string; address?: string }; legalText: string;
   sabalanPaymentPlan: ReturnType<typeof PaymentPlanSchema.parse>;
   additionalMaterialApprovals?: Array<{ pricingSubjectId: string; configurationHash: string;
@@ -81,6 +82,7 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
     quantity: row.quantity, unit: row.unit, ...(row.wholesaleUnitPriceAmount !== undefined
       ? { wholesaleUnitPrice: row.wholesaleUnitPriceAmount } : {}),
     ...(row.wholesaleLineTotalAmount !== undefined ? { wholesaleLineTotal: row.wholesaleLineTotalAmount } : {}),
+    ...(row.wholesalePricing ? { wholesalePricing: row.wholesalePricing } : {}),
     retailUnitPrice: row.retailUnitPrice.amount, ...(row.approval ? { approvalEvidenceId: row.approval.approvalId } : {}),
     configurationHash: row.configurationHash, ...(row.productCode ? { productCode: row.productCode } : {}),
     ...(graph ? { productType: graph.productType, ...(graph.lengthMeters ? { lengthMeters: graph.lengthMeters } : {}),
@@ -149,7 +151,7 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
       products: products.map(({ retailUnitPrice: _retail, ...row }) => row),
       totals: wholesaleTotals!, termsVersionId: input.resolved.sabalanTermsVersionId }
       : { schemaVersion: 1, status: 'UNPRICED' as const, products: [] },
-    retailEnvelope: { schemaVersion: 1, products: products.map(({ wholesaleUnitPrice: _wholesale, wholesaleLineTotal: _wholesaleTotal, approvalEvidenceId: _approval,
+    retailEnvelope: { schemaVersion: 1, products: products.map(({ wholesaleUnitPrice: _wholesale, wholesaleLineTotal: _wholesaleTotal, wholesalePricing: _wholesalePricing, approvalEvidenceId: _approval,
       configurationHash: _configuration, ...row }) => row), totals: retailTotals,
       belowCostConfirmed: input.command.intent.belowCostConfirmed,
       ...(input.command.intent.preparationCompleted !== undefined

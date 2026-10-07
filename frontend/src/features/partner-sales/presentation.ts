@@ -64,6 +64,18 @@ export function multiplyPartnerDecimal(left: string, right: string): string | nu
   return first && second ? exactText({ digits: first.digits * second.digits, scale: first.scale + second.scale }) : null;
 }
 
+export function sumPartnerDecimals(values: readonly string[]): string | null {
+  let total: ExactDecimal = { digits: BigInt(0), scale: 0 };
+  for (const value of values) {
+    const next = exactDecimal(value);
+    if (!next) return null;
+    const scale = Math.max(total.scale, next.scale);
+    total = { scale, digits: total.digits * BigInt(`1${'0'.repeat(scale - total.scale)}`)
+      + next.digits * BigInt(`1${'0'.repeat(scale - next.scale)}`) };
+  }
+  return exactText(total);
+}
+
 export function partnerChartMagnitude(value: string | null | undefined) {
   if (!value) return 0;
   const decimal = exactDecimal(value);

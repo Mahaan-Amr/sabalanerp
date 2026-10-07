@@ -157,6 +157,7 @@ import {
   validateDraftRequiredFields,
   clearDraftFieldError
 } from '@/features/contract-creation/services/stairValidationService';
+import { createStairDraftForStone, hasStairEntryChanges } from '@/features/contract-creation/services/stairStoneSelection';
 import {
   executeStairCreateTransaction,
   hasMeaningfulStairDraft,
@@ -826,6 +827,7 @@ export default function CreateContractWizard({
       numberOfStaircases: '',
       stepsPerStaircase: ''
     });
+  const stairEntryBaselinesRef = useRef<Partial<Record<StairStepperPart, StairPartDraftV2>>>({});
   const [stairQuantityManuallyEdited, setStairQuantityManuallyEdited] = useState({
     tread: false,
     riser: false
@@ -842,12 +844,16 @@ export default function CreateContractWizard({
         toStaircaseQuantityIntent(next)
       ).totalSteps;
       if (!stairQuantityManuallyEdited.tread) {
+        const baseline = stairEntryBaselinesRef.current.tread;
+        if (baseline) stairEntryBaselinesRef.current.tread = { ...baseline, quantity: totalSteps };
         stairSystemV2.setDraftTread(current => ({
           ...current,
           quantity: totalSteps
         }));
       }
       if (!stairQuantityManuallyEdited.riser) {
+        const baseline = stairEntryBaselinesRef.current.riser;
+        if (baseline) stairEntryBaselinesRef.current.riser = { ...baseline, quantity: totalSteps };
         stairSystemV2.setDraftRiser(current => ({
           ...current,
           quantity: totalSteps
@@ -2606,6 +2612,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     const savedStairSystem = draft.stairSystemV2 || {};
+    stairEntryBaselinesRef.current = (savedStairSystem.entryBaselines || {}) as Partial<Record<StairStepperPart, StairPartDraftV2>>;
     if (savedStairSystem.draftTread) stairSystemV2.setDraftTread(savedStairSystem.draftTread as StairPartDraftV2);
     if (savedStairSystem.draftRiser) stairSystemV2.setDraftRiser(savedStairSystem.draftRiser as StairPartDraftV2);
     if (savedStairSystem.draftLanding) stairSystemV2.setDraftLanding(savedStairSystem.draftLanding as StairPartDraftV2);
@@ -2920,6 +2927,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         stairActivePart: stairSystemV2.stairActivePart,
         stairSessionId: stairSystemV2.stairSessionId,
         stairSessionItems: stairSystemV2.stairSessionItems,
+        entryBaselines: stairEntryBaselinesRef.current,
         quantityDraft: stairQuantityDraft,
         quantityManuallyEdited: stairQuantityManuallyEdited
       }
@@ -3227,13 +3235,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   const setActivePart = (part: StairStepperPart) => {
     stairSystemV2.setStairActivePart(part);
-    const currentDraft =
-      part === 'tread' ? stairSystemV2.draftTread :
-      part === 'riser' ? stairSystemV2.draftRiser :
-      stairSystemV2.draftLanding;
-    if (!currentDraft.stoneId && stairSystemV2.lastSelectedStoneProduct && !stairSystemV2.autoFillOptOut[part]) {
-      selectProductForStairPart(part, stairSystemV2.lastSelectedStoneProduct);
-    }
     // Note: Search term will be synced via useEffect below to ensure we read latest state
   };
 
@@ -3267,6 +3268,40 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2.draftLanding.stoneProduct?.id,
     stairSystemV2.draftLanding.stoneLabel
   ]);
+
+  const getInitialStairPartQuantity = (part: StairStepperPart): number | null => {
+    if (part === 'landing') return null;
+    try {
+      return resolveStaircaseQuantity(toStaircaseQuantityIntent(stairQuantityDraft)).totalSteps;
+    } catch {
+      return null;
+    }
+  };
+
+  const selectStoneForStairSession = (product: Product, initialize = false) => {
+    if (!initialize && getActiveDraft()[0].stoneId === product.id) {
+      stairSystemV2.setStoneSearchTerm(generateFullProductName(product));
+      return;
+    }
+    for (const part of ['tread', 'riser', 'landing'] as const) {
+      const draft = createStairDraftForStone(part, product, initialize ? null : getInitialStairPartQuantity(part));
+      stairEntryBaselinesRef.current[part] = draft;
+      const setter = part === 'tread' ? stairSystemV2.setDraftTread :
+        part === 'riser' ? stairSystemV2.setDraftRiser : stairSystemV2.setDraftLanding;
+      setter(draft);
+    }
+    setStairQuantityManuallyEdited({ tread: false, riser: false });
+    stairSystemV2.setLastSelectedStoneProduct(product);
+    stairSystemV2.setLastSelectedStoneLabel(generateFullProductName(product));
+    stairSystemV2.setStoneSearchTerm(generateFullProductName(product));
+    stairSystemV2.setAutoFillOptOut({ tread: false, riser: false, landing: false });
+    stairSystemV2.setStairDraftErrors({ tread: {}, riser: {}, landing: {} });
+    stairSystemV2.setToolsSearchTerm('');
+    stairSystemV2.setToolsDropdownOpen(false);
+    stairSystemV2.setLayerStoneSearchTerm('');
+    stairSystemV2.setLayerStoneDropdownOpen(false);
+    setErrors({});
+  };
 
   // Helper function to select a product for a specific stair part
   const selectProductForStairPart = (partType: 'tread' | 'riser' | 'landing', product: Product) => {
@@ -3348,31 +3383,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     if (selectedProductType === 'stair') {
-      const freshStairDefaults = getFreshContractProductDefaults('stair');
-
-        const productLabel = product.namePersian || product.name || '';
         stairSystemV2.reset();
-        const freshTreadDraft = createFreshStairPartDraft('tread');
         setStairQuantityDraft({
-          mode: 'steps',
-          totalSteps: '',
-          numberOfStaircases: '',
-          stepsPerStaircase: ''
+          mode: 'steps', totalSteps: '', numberOfStaircases: '', stepsPerStaircase: ''
         });
-        setStairQuantityManuallyEdited({ tread: false, riser: false });
-
-        stairSystemV2.setDraftTread({
-          ...freshTreadDraft,
-          stoneId: product.id,
-          stoneLabel: productLabel,
-          contractualTitle: productLabel,
-          stoneProduct: product,
-          pricePerSquareMeter: null,
-          thicknessCm: product.thicknessValue || null,
-          calibrationCutEnabled: freshStairDefaults.calibrationCutEnabled
-        });
-
-        stairSystemV2.setStoneSearchTerm(productLabel);
+        selectStoneForStairSession(product, true);
         setProductConfig({
           productId: product.id,
           product,
@@ -6739,7 +6754,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     type="button"
                                     className="w-full text-right px-4 py-2.5 hover:bg-[var(--sds-accent-soft)] dark:hover:bg-[var(--sds-accent-soft)] text-sm border-b border-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)] last:border-0 transition-colors"
                                     onClick={() => {
-                                      selectProductForStairPart(stairSystemV2.stairActivePart, p);
+                                      if (isEditMode) {
+                                        selectProductForStairPart(stairSystemV2.stairActivePart, p);
+                                      } else {
+                                        selectStoneForStairSession(p);
+                                      }
                                     }}
                                   >
                                     {/* 🎯 Show complete product name using generateFullProductName */}
@@ -10774,12 +10793,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
                   // Reset fields for quick next entry (keep unit toggle)
                   const [, setDraft] = getActiveDraft();
-                  setDraft({
-                    ...createFreshStairPartDraft(stairSystemV2.stairActivePart),
+                  const nextDraft = {
+                    ...(draft.stoneProduct
+                      ? createStairDraftForStone(stairSystemV2.stairActivePart, draft.stoneProduct,
+                          getInitialStairPartQuantity(stairSystemV2.stairActivePart))
+                      : createFreshStairPartDraft(stairSystemV2.stairActivePart)),
                     lengthUnit: draft.lengthUnit || 'm',
                     standardLengthUnit: draft.lengthUnit || 'm'
-                  });
-                  stairSystemV2.setStoneSearchTerm('');
+                  };
+                  stairEntryBaselinesRef.current[stairSystemV2.stairActivePart] = nextDraft;
+                  setDraft(nextDraft);
+                  if (stairSystemV2.stairActivePart !== 'landing') {
+                    setStairQuantityManuallyEdited(prev => ({ ...prev, [stairSystemV2.stairActivePart]: false }));
+                  }
+                  stairSystemV2.setStoneSearchTerm(nextDraft.stoneLabel || '');
                   stairSystemV2.setToolsSearchTerm('');
                   stairSystemV2.setToolsDropdownOpen(false);
                   setErrors({});
@@ -10806,7 +10833,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   commitStagedStairSessionRef.current = false;
                   if (
                     !commitStagedSession &&
-                    hasMeaningfulStairDraft(activeDraft)
+                    (isEditMode || !stairEntryBaselinesRef.current[stairSystemV2.stairActivePart]
+                      ? hasMeaningfulStairDraft(activeDraft)
+                      : hasStairEntryChanges(activeDraft, stairEntryBaselinesRef.current[stairSystemV2.stairActivePart]!))
                   ) {
                     requestedStairFooterActionRef.current = 'finish';
                     stairStageButtonRef.current?.click();

@@ -8,6 +8,9 @@ import {
   type StairDraftBuildResult
 } from '../stairConfigurationTransaction';
 
+import { createStairDraftForStone, hasStairEntryChanges } from '../stairStoneSelection';
+import type { Product, StairStepperPart } from '../../types/contract.types';
+
 type TestRow = {
   rowId: string;
 };
@@ -191,4 +194,44 @@ test('discard confirmation is required for either a changed draft or staged row'
     drafts: [{ ...pristine, description: 'changed' }],
     stagedRowCount: 0
   }), true);
+});
+
+
+test('retained stone finishes without duplication; incomplete next rows still reject atomically', () => {
+  const stone: Product = {
+    id: 'stone-selection-test', code: 'QA-STONE', name: 'Stone', namePersian: 'گوهره',
+    currency: 'تومان', isAvailable: true, cuttingDimensionNamePersian: 'طولی',
+    stoneTypeNamePersian: 'مرمریت', widthValue: 40, thicknessValue: 2,
+    widthName: '40', thicknessName: '2', mineNamePersian: 'خرم آباد',
+    finishNamePersian: 'صیقل', colorNamePersian: '', qualityNamePersian: ''
+  };
+  const baseline = createStairDraftForStone('riser', stone, 40);
+  const staged = [{ rowId: 'already-staged-riser' }];
+  const result = executeStairCreateTransaction({
+    action: 'finish', stagedItems: staged,
+    activeDraftMeaningful: hasStairEntryChanges(baseline, baseline),
+    buildActiveDraft: () => { throw new Error('retained stone is not another row'); }
+  });
+  assert.equal(result.status, 'committed');
+  assert.deepEqual('sessionItems' in result && result.sessionItems, staged);
+  for (const change of [{ lengthValue: 1.35 }, { widthCm: 14.5 },
+    { pricePerSquareMeter: 1000000 }, { quantity: 39 }, { description: 'ردیف بعدی' }]) {
+    const incomplete = { ...baseline, ...change };
+    const rejected = executeStairCreateTransaction({
+      action: 'finish', stagedItems: staged,
+      activeDraftMeaningful: hasStairEntryChanges(incomplete, baseline),
+      buildActiveDraft: () => ({ ok: false, issue: {
+        code: 'REQUIRED_INPUT', message: 'complete the row', phase: 'validate', focusTarget: 'length'
+      } })
+    });
+    assert.equal(rejected.status, 'rejected');
+    assert.deepEqual('preservedSessionItems' in rejected && rejected.preservedSessionItems, staged);
+  }
+  const nextStone = { ...stone, id: 'next-stone', namePersian: 'تراورتن', widthValue: 35 };
+  const drafts = (['tread', 'riser', 'landing'] as StairStepperPart[]).map(part =>
+    createStairDraftForStone(part, nextStone));
+  assert.ok(drafts.every(draft => draft.stoneId === nextStone.id &&
+    draft.contractualTitle && draft.pricePerSquareMeter === null &&
+    !draft.lengthValue && !draft.description && !draft.tools?.length));
+  assert.notEqual(drafts[0].operationPolicyInput?.productRowId, drafts[1].operationPolicyInput?.productRowId);
 });

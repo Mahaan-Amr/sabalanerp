@@ -169,7 +169,7 @@ router.get('/metadata', async (req: AuthRequest, res) => {
 
 router.put('/read-all', async (req: AuthRequest, res) => {
   const rows = await prisma.notification.findMany({
-    where: { userId: req.user!.id, readAt: null, type: { not: 'NEW_BROWSER_LOGIN' } },
+    where: { userId: req.user!.id, readAt: null },
     select: { id: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
   });
   const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows);
@@ -188,9 +188,6 @@ router.put('/:id/read', async (req: AuthRequest, res) => {
   if (!notification) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
   const [authorized] = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, [notification]);
   if (!authorized) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
-  if (notification.type === 'NEW_BROWSER_LOGIN') {
-    return res.status(409).json({ success: false, error: 'این هشدار باید در بخش امنیت حساب تعیین تکلیف شود.' });
-  }
   await prisma.notification.update({
     where: { id: notification.id },
     data: { readAt: new Date() },
@@ -206,9 +203,6 @@ router.delete('/:id/read', async (req: AuthRequest, res) => {
   if (!notification) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
   const [authorized] = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, [notification]);
   if (!authorized) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
-  if (notification.type === 'NEW_BROWSER_LOGIN') {
-    return res.status(409).json({ success: false, error: 'وضعیت هشدار امنیتی فقط با تعیین تکلیف ورود تغییر می‌کند.' });
-  }
   await prisma.notification.update({ where: { id: notification.id }, data: { readAt: null } });
   res.json({ success: true });
 });
@@ -220,7 +214,7 @@ router.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'تصمیم امنیتی معتبر نیست.' });
     const notification = await prisma.notification.findFirst({
-      where: { id: req.params.id, userId: req.user!.id, type: 'NEW_BROWSER_LOGIN', readAt: null },
+      where: { id: req.params.id, userId: req.user!.id, type: 'NEW_BROWSER_LOGIN' },
       include: { event: true },
     });
     const sessionId = notification?.event?.resourceType === 'AuthSession'

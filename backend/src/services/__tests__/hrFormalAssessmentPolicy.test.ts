@@ -160,6 +160,20 @@ const schemaTwoAnswers = Object.fromEntries(schemaTwoCriteria.map(({ stableId: c
 }]));
 assert.doesNotThrow(() => assertGuidedHrInterviewEvidence({
   schemaVersion: 2,
+  criteriaTemplateVersion: 2,
+  criteriaSnapshot: schemaTwoCriteria.map((criterion) => ({
+    ...criterion,
+    isActive: criterion.stableId !== "personalityTestSummary",
+  })),
+  state: {
+    answers: Object.fromEntries(Object.entries(schemaTwoAnswers).filter(([id]) => id !== "personalityTestSummary")),
+    decision: "POSITIVE",
+    decisionReason: "Inactive personality summary does not require an answer.",
+  },
+  customCriteria: [],
+}));
+assert.doesNotThrow(() => assertGuidedHrInterviewEvidence({
+  schemaVersion: 2,
   criteriaTemplateVersion: 1,
   criteriaSnapshot: schemaTwoCriteria,
   state: {

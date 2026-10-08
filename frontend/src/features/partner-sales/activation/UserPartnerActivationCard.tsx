@@ -140,7 +140,7 @@ export function UserPartnerActivationSection({ userId }: { userId: string }) {
           { label: 'پرونده‌ها', value: subject.caseCount.toLocaleString('fa-IR') },
           { label: 'پاسخ‌دهنده قیمت', value: view.responders.find(row => row.id === subject.responderId)?.label ?? subject.responderId ?? '—' },
           { label: 'تاریخ تبدیل', value: subject.convertedAt ? new Date(subject.convertedAt).toLocaleString('fa-IR') : '—' },
-          { label: 'تبدیل‌کننده', value: subject.convertedBy ?? '—' },
+          { label: 'تبدیل‌کننده', value: subject.convertedByLabel ?? (subject.convertedBy ? 'نامشخص — داده تاریخی' : '—') },
         ]} />}
       {message && <ErpInlineState kind={message.kind} title={message.text} />}
       {subject.blockers.map(blocker => <ErpInlineState key={`${blocker.action}:${blocker.code}`} kind="stale"

@@ -673,6 +673,7 @@ export interface ContractWizardData {
     phoneNumber: string | null;
     contractId: string | null;
     contractStatus?: string | null;
+    cancellationPending?: boolean;
     commercialFlowVersion?: number;
     confirmationSent: boolean;
     confirmationStatus: 'PENDING' | 'VERIFIED' | 'EXPIRED' | 'CANCELLED' | null;

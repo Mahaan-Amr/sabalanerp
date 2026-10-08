@@ -21,6 +21,7 @@ import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatory
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
 import { reconcileContractProductPricing, serializeContractProductMonetaryAmounts } from '../utils/contractProductPricing';
 import { serializeContractServiceRow } from '../utils/contractServiceRows';
+import { contractDiscountSnapshotError, getContractDiscountBaseSubtotal } from '../utils/contractDiscountEdit';
 import { prepareContractSubmissionFinancials } from '../utils/contractSubmissionFinancials';
 import { reconcileContractProductGraph } from '../utils/contractProductGraphReconciliation';
 import {
@@ -42,6 +43,7 @@ import { finalizeSuccessfulContractCommit } from '../utils/contractCreationCompl
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '@/features/sales/salesOperationalError';
 
 interface UseContractSubmissionOptions {
+  discountValidationError?: string | null;
   wizardData: ContractWizardData;
   updateWizardData: (updates: Partial<ContractWizardData>) => void;
   setCurrentStep: (step: number) => void;
@@ -82,6 +84,7 @@ const toIsoDate = (value?: string | null): string | undefined => {
 
 export const useContractSubmission = (options: UseContractSubmissionOptions) => {
   const {
+    discountValidationError,
     wizardData,
     updateWizardData,
     setCurrentStep,
@@ -115,6 +118,11 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
 
   const handleCreateContract = useCallback(async () => {
     setGeneralErrorKind?.('error');
+    if (discountValidationError) {
+      setErrors({ discount: discountValidationError });
+      setCurrentStep(6);
+      return;
+    }
     const isEditMode = mode === 'edit';
     const editContractId = contractId;
     if (isEditMode) {
@@ -303,6 +311,12 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           finishingCost: product.finishingCost ?? finishing.cost
         });
       });
+      const discountError = contractDiscountSnapshotError(wizardData.discount, getContractDiscountBaseSubtotal(normalizedProducts));
+      if (discountError) {
+        setErrors({ discount: discountError });
+        setCurrentStep(6);
+        return;
+      }
       const monetaryProducts = normalizedProducts.map(serializeContractProductMonetaryAmounts);
       const {
         totalAmount,
@@ -342,6 +356,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       
       // Create/update contract
       const contractData = {
+        ...(isEditMode && wizardData.signature?.cancellationPending ? { cancelContract: true } : {}),
         title: 'قرارداد فروش سنگ',
         titlePersian: 'قرارداد فروش سنگ',
         customerId: wizardData.customerId,
@@ -359,6 +374,9 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         }),
         contractData: {
           ...wizardData,
+          signature: wizardData.signature
+            ? { ...wizardData.signature, cancellationPending: undefined }
+            : wizardData.signature,
           ...(monetaryRounding ? { monetaryRounding } : {}),
           contractNumber: wizardData.contractNumber,
           contractDate: wizardData.contractDate,
@@ -523,6 +541,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     setLoading,
     validateCurrentStep,
     validateAllSteps,
+    discountValidationError,
     generateContractHTML,
     userDepartment,
     departments,

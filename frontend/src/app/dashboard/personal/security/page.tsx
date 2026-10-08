@@ -42,7 +42,7 @@ export default function PersonalSecurityPage() {
     setLoading(true); setError('');
     try {
       const [sessionsResponse, meResponse, alertsResponse] = await Promise.all([
-        authAPI.getSessions(), authAPI.getMe(), notificationsAPI.list({ state: 'UNREAD', category: 'SECURITY', limit: 100 }),
+        authAPI.getSessions(), authAPI.getMe(), notificationsAPI.list({ state: 'ALL', category: 'SECURITY', limit: 100 }),
       ]);
       const nextSessions = sessionsResponse.data.data || [];
       setSessions(nextSessions);
@@ -52,7 +52,7 @@ export default function PersonalSecurityPage() {
       const params = new URLSearchParams(window.location.search);
       const requestedSessionId = params.get('session') || '';
       const requestedNotificationId = params.get('notification') || '';
-      const defaultAlert = nextAlerts.find((item: any) => item.sessionId
+      const defaultAlert = nextAlerts.find((item: any) => !item.readAt && item.sessionId
         && nextSessions.some((session: Session) => session.id === item.sessionId));
       setHighlightedSessionId(requestedSessionId || defaultAlert?.sessionId || '');
       setHighlightedNotificationId(requestedNotificationId || defaultAlert?.id || '');

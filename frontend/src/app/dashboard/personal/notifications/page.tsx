@@ -162,15 +162,16 @@ export default function NotificationCenterPage() {
   };
 
   const openItem = async (item: NotificationItem) => {
-    if (item.type === 'NEW_BROWSER_LOGIN') {
-      router.push(securityNotificationUrl(item));
-      return;
+    try {
+      if (!item.readAt) {
+        await notificationsAPI.markRead(item.id);
+        setItems((current) => current.map((row) => row.id === item.id ? { ...row, readAt: new Date().toISOString() } : row));
+      }
+      const destination = item.type === 'NEW_BROWSER_LOGIN' ? securityNotificationUrl(item) : item.actionUrl;
+      if (destination) router.push(destination);
+    } catch (requestError: any) {
+      setError(requestError.response?.data?.error || 'ثبت وضعیت اعلان انجام نشد.');
     }
-    if (!item.readAt) {
-      await notificationsAPI.markRead(item.id);
-      setItems((current) => current.map((row) => row.id === item.id ? { ...row, readAt: new Date().toISOString() } : row));
-    }
-    if (item.actionUrl) router.push(item.actionUrl);
   };
 
   const toggleRead = async (item: NotificationItem) => {
@@ -279,8 +280,8 @@ export default function NotificationCenterPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="font-black sds-text-primary">{item.title}</h2>
                       <ErpBadge tone={priorityTones[item.priority]}>{priorityLabels[item.priority]}</ErpBadge>
-                      {item.type === 'NEW_BROWSER_LOGIN' && !item.readAt && <ErpBadge tone="danger"><FaShieldAlt className="ml-1 inline" />نیازمند بررسی</ErpBadge>}
-                      {item.type === 'NEW_BROWSER_LOGIN' && item.readAt && <ErpBadge tone="neutral"><FaShieldAlt className="ml-1 inline" />تعیین تکلیف‌شده</ErpBadge>}
+                      {item.type === 'NEW_BROWSER_LOGIN' && !item.readAt && <ErpBadge tone="danger"><FaShieldAlt className="ml-1 inline" />خوانده‌نشده</ErpBadge>}
+                      {item.type === 'NEW_BROWSER_LOGIN' && item.readAt && <ErpBadge tone="neutral"><FaShieldAlt className="ml-1 inline" />خوانده‌شده</ErpBadge>}
                     </div>
                     <p className="mt-1 text-sm leading-6 sds-text-muted">{item.message}</p>
                     <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs sds-text-muted">
@@ -289,7 +290,7 @@ export default function NotificationCenterPage() {
                       {item.category && <span>{categoryLabels[item.category] || 'سایر اعلان‌ها'}</span>}
                     </div>
                   </ErpPressable>
-                  {item.type !== 'NEW_BROWSER_LOGIN' && <ErpButton label={item.readAt ? 'خوانده‌نشده' : 'خوانده شد'} icon={item.readAt ? FaBell : FaCheck} variant="ghost" tone="neutral" onClick={() => void toggleRead(item)} disabled={busy === `read:${item.id}`} />}
+                  <ErpButton label={item.readAt ? 'خوانده‌نشده' : 'خوانده شد'} icon={item.readAt ? FaBell : FaCheck} variant="ghost" tone="neutral" onClick={() => void toggleRead(item)} disabled={busy === `read:${item.id}`} />
                 </article>
               ))}
             </div>

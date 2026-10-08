@@ -163,7 +163,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
     wizardData.contractDate,
     PersianCalendar.now()
   );
-  const contractStatusAction = getContractStatusAction(signature?.contractStatus);
+  const contractStatusAction = getContractStatusAction(signature?.contractStatus, signature?.cancellationPending);
 
   return (
     <div className="space-y-6">
@@ -482,7 +482,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
           <div className="flex flex-wrap gap-3">
             <ErpPressable
               onClick={onSendForConfirmation}
-              disabled={sendingCode}
+              disabled={sendingCode || signature?.cancellationPending}
               className="px-4 py-2 bg-[var(--sds-accent-soft)] hover:bg-[var(--sds-accent-soft)] text-[var(--sds-text-inverse)] rounded-lg disabled:opacity-50 flex items-center gap-2"
             >
               {sendingCode ? <FaSpinner className="animate-spin" /> : null}
@@ -490,7 +490,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
             </ErpPressable>
             <ErpPressable
               onClick={onResendConfirmation}
-              disabled={sendingCode || !signature?.confirmationSent}
+              disabled={sendingCode || signature?.cancellationPending || !signature?.confirmationSent}
               className="px-4 py-2 bg-[var(--sds-info-surface)] hover:bg-[var(--sds-info-surface)] text-[var(--sds-text-inverse)] rounded-lg disabled:opacity-50"
             >
               ارسال مجدد کد
@@ -513,6 +513,10 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
               icon={contractStatusAction.action === 'reactivate' ? FaCheckCircle : FaTimesCircle}
             />
           </div>
+
+          {signature?.cancellationPending && (
+            <ErpInlineState kind="empty" title="لغو قرارداد با «ذخیره تغییرات» ثبت می‌شود." className="mt-3" />
+          )}
 
           {signature?.contractId && (
             <div className="mt-4 pt-4 border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">

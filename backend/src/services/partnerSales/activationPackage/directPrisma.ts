@@ -182,6 +182,13 @@ export function createPrismaPartnerDirectActivation(input: {
               owner: 'مدیر واحد مربوط', nextStep: 'دسترسی‌ها و مسئولیت‌های داخلی را لغو یا منتقل کنید و دوباره تلاش کنید.' }] : []),
           ] : [];
           const activation = user.partnerProfile?.events[0];
+          const converter = activation ? await tx.user.findUnique({ where: { id: activation.actorId },
+            select: { firstName: true, lastName: true, username: true, erasedAt: true, erasedDisplayName: true } }) : null;
+          const convertedByLabel = converter
+            ? converter.erasedAt
+              ? `کاربر حذف‌شده${converter.erasedDisplayName ? ` — ${converter.erasedDisplayName}` : ''}`
+              : `${label(converter)} (@${converter.username})`
+            : 'نامشخص — داده تاریخی';
           const view = PartnerDirectActivationViewV4Schema.parse({ schemaVersion: 4,
             purpose: 'PARTNER_DIRECT_ACTIVATION', actorId: input.actorId,
             subject: { userId: user.id, displayName: label(user), active: user.isActive, role: user.role,
@@ -190,7 +197,8 @@ export function createPrismaPartnerDirectActivation(input: {
                 responderId: user.partnerProfile.responderAssignments[0]?.responderId,
                 customerCount: user.partnerProfile._count.customers, inquiryCount: user.partnerProfile._count.inquiries,
                 caseCount: user.partnerProfile._count.saleCases } : { customerCount: 0, inquiryCount: 0, caseCount: 0 }),
-              ...(activation ? { convertedAt: activation.recordedAt.toISOString(), convertedBy: activation.actorId } : {}),
+              ...(activation ? { convertedAt: activation.recordedAt.toISOString(), convertedBy: activation.actorId,
+                convertedByLabel } : {}),
               canActivate, ...(blocker ? { blocker } : {}), canRevert, ...(revertBlocker ? { revertBlocker } : {}),
               priorResponsibilityCount, blockers: [...activationBlockers, ...revertBlockers, ...reactivationBlockers] }, responders });
           return { ok: true as const, value: view };

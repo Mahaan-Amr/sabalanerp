@@ -11,6 +11,13 @@ test('customer credit validation preserves its actionable cause and status on Sa
   assert.equal(knownCustomerCreditFailure(new Error('database unavailable')), undefined);
 });
 
+test('approved cancellation denial stays an actionable permission failure on editor save', () => {
+  const message = 'این قرارداد تایید شده است و بدون دسترسی ویژه قابل لغو نیست';
+  assert.deepEqual(knownContractUpdateBusinessFailure(message), {
+    status: 403, body: { success: false, code: 'SALES_CONTRACT_CANCELLATION_DENIED', error: message },
+  });
+});
+
 test('unexpected sales response keeps the technical reference without sending the user to support', () => {
   const response = unexpectedSalesErrorResponse({
     code: 'SALES_CONTRACT_CREATE_UNEXPECTED',

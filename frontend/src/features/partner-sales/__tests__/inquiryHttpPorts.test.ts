@@ -1,7 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
-import { createPartnerInquiryHttpPorts } from '../inquiries/partnerInquiryHttpPorts';
+import { createPartnerInquiryHttpPorts, INQUIRY_DECISION_REQUEST_TIMEOUT_MS } from '../inquiries/partnerInquiryHttpPorts';
+import { PartnerCommandSession } from '../management/commandSession';
+
+test('a decision transport timeout keeps the exact command for receipt retry and bounds request duration', async () => {
+  const calls: unknown[] = [];
+  const ports = createPartnerInquiryHttpPorts({ async post(_path, body, options) {
+    calls.push(body);
+    assert.equal(options?.timeout, INQUIRY_DECISION_REQUEST_TIMEOUT_MS);
+    if (calls.length === 1) throw Object.assign(new Error('timeout'), { code: 'ECONNABORTED' });
+    const command = body as { commandId: string };
+    return { data: { success: true, data: { commandId: command.commandId, replayed: true, eventIds: ['event'],
+      batch: { schemaVersion: 1, commandId: command.commandId,
+        outcomes: [{ ok: true, rowId: 'row', outcomeId: 'outcome', revision: 2, outcome: 'APPROVED' }] } } } };
+  } });
+  const session = new PartnerCommandSession(ports.commands, 'responder');
+  const intent = { type: 'INQUIRY_DECIDE' as const, inquiryId: 'inquiry', expectedAssignmentRevision: 1,
+    decisions: [{ rowId: 'row', expectedRevision: 1, outcome: 'APPROVED' as const,
+      wholesaleUnitPrice: { amount: '2500000', currency: 'IRT' as const } }] };
+  assert.equal((await session.submit(intent, 'inquiry')).kind, 'uncertain');
+  assert.equal((await session.submit(intent, 'inquiry')).kind, 'blocked');
+  assert.equal((await session.retry()).kind, 'success');
+  assert.deepEqual(calls[0], calls[1]);
+});
 
 test('inquiry HTTP ports validate commands and v2 queries before transport and reject corrupt success envelopes', async () => {
   const calls: Array<{ path: string; body: unknown }> = [];

@@ -416,7 +416,7 @@ for (const expireLease of [false, true]) test(expireLease
   }
   if (!expireLease) await page.getByRole('dialog', { name: 'تنظیمات محصول', exact: true }).screenshot({ path: '/tmp/partner-layer-modal-contrast.png' });
   if (expireLease) {
-    await page.getByRole('textbox', { name: /قیمت فروش به مشتری/ }).fill('1000000');
+    await page.getByRole('textbox', { name: 'فی هر مترمربع (تومان)', exact: true }).fill('1000000');
     // Simulate the server's 75-second lease expiring while the user configures
     // the modal. Committing that product must renew only this editor's lease.
     leaseExpired = true;

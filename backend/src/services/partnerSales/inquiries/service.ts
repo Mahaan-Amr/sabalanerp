@@ -24,6 +24,8 @@ type AuthorizationRequest = { actorId: string; action: 'INQUIRY_READ' | 'INQUIRY
 
 export interface PartnerInquiryDependencies {
   actorId: string;
+  /** Safe phase durations only; no identifiers, payloads or authorization evidence. */
+  observeTiming?(phase: 'transaction' | 'operations_lock' | 'inquiry_lock' | 'configuration', durationMs: number): void;
   /** Enabled only by the atomic product revision route. Ordinary row re-inquiries keep independent pending work. */
   replacePendingCaseInquiries?: boolean;
   transaction<T>(run: (tx: Transaction) => Promise<T>): Promise<T>;
@@ -66,10 +68,30 @@ async function publishCommitted<T extends Result<{ replayed: boolean; eventIds: 
 }
 
 export function createPrismaPartnerInquiryService(input: Omit<PartnerInquiryDependencies, 'transaction'> & { database: PrismaClient }) {
-  return createPartnerInquiryService({ ...input, transaction: run => input.database.$transaction(async tx => {
-    await lockPartnerOperationsControl(tx);
-    return run(tx);
-  }, { timeout: 30_000 }) });
+  // The source event and idempotent receipt commit together. The durable inquiry
+  // worker owns notification delivery, including retries after process restarts.
+  return createPartnerInquiryService({ ...input, publishCommittedEvents: undefined,
+    resolveConfiguration: async (tx, reference) => {
+      const started = performance.now();
+      try { return await input.resolveConfiguration(tx, reference); }
+      finally { observeTiming(input, 'configuration', started); }
+    },
+    transaction: async run => {
+      const started = performance.now();
+      try {
+        return await input.database.$transaction(async tx => {
+          const locking = performance.now();
+          await lockPartnerOperationsControl(tx);
+          observeTiming(input, 'operations_lock', locking);
+          return run(tx);
+        }, { timeout: 30_000 });
+      } finally { observeTiming(input, 'transaction', started); }
+    } });
+}
+
+function observeTiming(dependencies: Pick<PartnerInquiryDependencies, 'observeTiming'>,
+  phase: Parameters<NonNullable<PartnerInquiryDependencies['observeTiming']>>[0], started: number) {
+  try { dependencies.observeTiming?.(phase, performance.now() - started); } catch { /* diagnostics cannot change a command */ }
 }
 
 function decodeReceipt(value: unknown): { commandId: string; eventIds: string[] } | undefined {
@@ -110,7 +132,9 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         ? { ok: true, value: { commandId: receipt.commandId, replayed: true, batch: receipt.batch, eventIds: receipt.eventIds } } as const
         : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
     }
+    const locking = performance.now();
     await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${command.inquiryId} FOR UPDATE`;
+    observeTiming(dependencies, 'inquiry_lock', locking);
     const inquiry = await tx.partnerInquiry.findUnique({ where: { id: command.inquiryId },
       select: { id: true, profileId: true, revision: true, submittedAt: true, profile: { select: { userId: true } } } });
     if (!inquiry) return { ok: false, error: partnerError('NOT_FOUND') } as const;

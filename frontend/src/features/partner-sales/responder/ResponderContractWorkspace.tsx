@@ -13,6 +13,7 @@ import { responderContracts, responderProductGroups } from './responderContracts
 import { ResponseRow } from './ResponseRow';
 import { responseDecisions, settleResponseDrafts, type ResponseDrafts } from './responseDraft';
 import { formatPartnerMoney } from '../presentation';
+import { ResponderRefreshState, useResponderRefresh } from './useResponderRefresh';
 
 type Job = { inquiryId: string; assignmentRevision: number; decisions: Extract<PartnerCommand, { type: 'INQUIRY_DECIDE' }>['decisions'] };
 const states = { PENDING: 'نیازمند پاسخ', APPROVED: 'قیمت ارائه‌شده', REJECTED: 'رد جهت اصلاح', EXPIRED: 'قیمت منقضی‌شده', SUPERSEDED: 'جایگزین‌شده', CANCELLED: 'لغوشده' };
@@ -31,6 +32,7 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
     return response.ok ? { ok: true as const, value: ResponderWorkspaceViewV2Schema.parse(response.value) } : response;
   }, [contractId, inquiryId, queryPort, inquiryQueryPort]);
   const resource = useWorkspaceQuery(load, contractId ?? inquiryId);
+  const fresh = useResponderRefresh(resource.refresh, contractId ?? inquiryId ?? 'default');
   const inquiries = resource.view?.inquiries ?? [];
   const contract = responderContracts(inquiries)[0];
   const groups = responderProductGroups(inquiries);
@@ -63,7 +65,7 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
   }, [resource.view?.actorId, sessions]);
 
   async function send(retry = false) {
-    if (running.current || !review || (!resource.view && !retry) || !actor.current) return;
+    if (running.current || fresh.blocked || !review || (!resource.view && !retry) || !actor.current) return;
     const actorId = actor.current;
     running.current = true; setPending(true);
     try {
@@ -85,7 +87,7 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
         if (!resource.view) break;
       }
       setReview(null);
-      await resource.refresh().catch(() => undefined);
+      void fresh.refresh();
     } finally { running.current = false; setPending(false); }
   }
   function prepare() {
@@ -101,16 +103,17 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
     setErrors({}); setFeedback(null); setReview(jobs);
   }
   return <div className="mx-auto w-full max-w-5xl"><ErpPage title={contract?.label ?? 'استعلام های همکار'} eyebrow={contract?.customer} description={inquiries[0]?.partnerDisplayName}
-    backHref="/dashboard/sales/partner-inquiries" actions={[{ label: 'به‌روزرسانی', variant: 'outline', disabled: locked, onClick: () => void resource.refresh().catch(() => undefined) }]}>
+    backHref="/dashboard/sales/partner-inquiries" actions={[{ label: 'به‌روزرسانی', variant: 'outline', disabled: locked || fresh.state === 'loading', onClick: () => void fresh.refresh() }]}>
     {resource.loading && !resource.view && <ErpLoading />}
-    {resource.error && <ErpInlineState kind="error" title={resource.error} />}
-    <CommandFeedbackView feedback={feedback} pending={pending} onRetry={() => void send(true)} onRefresh={() => void resource.refresh().catch(() => undefined)} />
+    {resource.error && fresh.state === 'idle' && <ErpInlineState kind="error" title={resource.error} />}
+    <CommandFeedbackView feedback={feedback} pending={pending} onRetry={() => void send(true)} onRefresh={() => void fresh.refresh()} />
+    <ResponderRefreshState state={fresh.state} recorded={feedback?.kind === 'success'} onRefresh={() => void fresh.refresh()} />
     {errors.selection && <ErpInlineState kind="error" title={errors.selection} />}
     {!resource.loading && !resource.error && !contract && <ErpEmptyState title="قرارداد قابل مشاهده‌ای پیدا نشد." />}
     <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">{groups.map((group, index) => {
       const members = group.rows.filter(row => editable.has(row.rowId));
       const draft = members.map(row => drafts[row.rowId]).find(Boolean) ?? { outcome: 'APPROVED' as const, amount: '', note: '', mandatoryEnabled: false, mandatoryPercentage: WHOLESALE_MANDATORY_DEFAULT_PERCENTAGE };
-      return <ResponseRow key={group.key} row={group.display} number={index + 1} draft={draft} pending={locked || resource.loading || Boolean(resource.error)}
+      return <ResponseRow key={group.key} row={group.display} number={index + 1} draft={draft} pending={locked || fresh.blocked || resource.loading || Boolean(resource.error)}
         canRespond={members.length > 0} error={group.rows.map(row => errors[row.rowId]).find(Boolean)}
         onChange={next => setDrafts(previous => ({ ...previous, ...Object.fromEntries(members.map(row => [row.rowId, next])) }))}
         status={<ErpDisclosure hoverEffect="shadow" title={`جزئیات ${group.rows.length.toLocaleString('fa-IR')} ردیف اصلی`}>
@@ -136,7 +139,7 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
         {row.noteOrReason && <p>{row.noteOrReason}</p>}
       </div>)}
     </ErpDisclosure>}
-    {editable.size > 0 && <ErpButton label="مرور و ثبت قیمت" disabled={locked || resource.loading || Boolean(resource.error)} onClick={prepare} />}
+    {editable.size > 0 && <ErpButton label="مرور و ثبت قیمت" disabled={locked || fresh.blocked || resource.loading || Boolean(resource.error)} onClick={prepare} />}
     <ErpSheet open={Boolean(review)} onClose={() => setReview(null)} title="مرور پاسخ قیمت" presentation="modal" pending={locked}
       footer={<ErpButton label="ثبت پاسخ‌ها" disabled={locked || resource.loading || Boolean(resource.error)} onClick={() => void send()} />}>
       {groups.filter(group => group.rows.some(row => review?.some(job => job.decisions.some(decision => decision.rowId === row.rowId)))).map(group => {

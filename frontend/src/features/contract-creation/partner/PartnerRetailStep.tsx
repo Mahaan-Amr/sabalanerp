@@ -11,11 +11,12 @@ export interface PartnerRetailStepProps {
   discount: Money;
   belowCostConfirmed: boolean;
   disabled: boolean;
+  summaryOnly?: boolean;
   onRowsChange: (rows: PartnerRetailRow[]) => void;
   onConfirmLoss: (confirmed: boolean) => void;
 }
 
-export function PartnerRetailStep({ rows, serviceRows = [], discount, belowCostConfirmed, disabled, onRowsChange, onConfirmLoss }: PartnerRetailStepProps) {
+export function PartnerRetailStep({ rows, serviceRows = [], discount, belowCostConfirmed, disabled, summaryOnly = false, onRowsChange, onConfirmLoss }: PartnerRetailStepProps) {
   const summary = partnerRetailSummary(rows, discount, serviceRows);
   const groups = partnerRetailGroups(rows);
   const renderRow = (row: PartnerRetailRow, child = false) => { const rowSummary = partnerRetailRowSummary(row); return <div data-retail-row-id={row.productRowId} className="space-y-3">
@@ -40,7 +41,7 @@ export function PartnerRetailStep({ rows, serviceRows = [], discount, belowCostC
       {rowSummary?.loss && <ErpInlineState kind="stale" title="قیمت فروش این ردیف از قیمت خرید شما کمتر است." />}
     </div>; };
   return <section aria-label="قیمت فروش به مشتری" className="min-w-0 space-y-4" dir="rtl">
-    <p className="sds-text-secondary text-sm">{groups.length.toLocaleString('fa-IR')} محصول</p>
+    {!summaryOnly && <><p className="sds-text-secondary text-sm">{groups.length.toLocaleString('fa-IR')} محصول</p>
     {groups.map(group => <ErpCard key={group.root.productRowId} className="space-y-4 p-4">
       {renderRow(group.root)}
       {group.children.map(child => <ErpCard key={child.productRowId} className="space-y-3 p-4">{renderRow(child, true)}</ErpCard>)}
@@ -49,6 +50,7 @@ export function PartnerRetailStep({ rows, serviceRows = [], discount, belowCostC
       <h3 className="sds-text-primary font-semibold">{row.title}</h3>
       <p className="sds-text-secondary text-sm">خدمت مستقل · {row.quantity} · {partnerMoneyText(row.retailUnitPrice.amount, row.retailUnitPrice.currency)}</p>
     </ErpCard>)}
+    </>}
     {!summary.valid ? <ErpInlineState kind="error" title={summary.message} /> : <>
       <dl className="grid gap-3 sm:grid-cols-2">
         <div><dt className="text-sm text-[var(--sds-text-secondary)]">جمع فروش پس از تخفیف</dt><dd className="mt-1 font-bold">{partnerMoneyText(summary.retail, discount.currency)}</dd></div>

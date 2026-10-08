@@ -9,7 +9,7 @@ import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales
 import { createPartnerTechnicalRecoveryAuthority } from '../partnerSales/authorization/technicalRecovery';
 import { createPartnerTechnicalEvidenceResolver } from '../partnerSales/cases/technicalEvidence';
 import { compilePartnerTechnicalGraph } from '../partnerSales/cases/technicalGraph';
-import { resolveSavedTechnicalConfiguration } from '../partnerSales/inquiries/adapters';
+import { createSavedTechnicalConfigurationResolver, resolveSavedTechnicalConfiguration } from '../partnerSales/inquiries/adapters';
 
 function localDatabaseUrl(): string {
   const value = process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL;
@@ -174,6 +174,26 @@ test('real database policy and private catalog evidence produce a validated safe
     const inquiryConfiguration = await resolveSavedTechnicalConfiguration(tx, { actorId,
       reference: result.value.rows[0].configurationRef });
     assert.equal(inquiryConfiguration.ok, true);
+    let snapshotReads = 0;
+    const snapshotTx = () => new Proxy(tx, { get(target, key) {
+      if (key === 'salesContractEditSession') return new Proxy(target.salesContractEditSession, { get(model, method) {
+        if (method === 'findUnique') return (...args: Parameters<typeof model.findUnique>) => {
+          snapshotReads++; return model.findUnique(...args);
+        };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(target, key);
+    } });
+    const resolver = createSavedTechnicalConfigurationResolver();
+    const firstSnapshot = snapshotTx();
+    const reference = result.value.rows[0].configurationRef;
+    const repeated = await Promise.all([resolver(firstSnapshot, { actorId, reference }), resolver(firstSnapshot, { actorId, reference })]);
+    assert.ok(repeated.every(item => item.ok));
+    assert.equal(snapshotReads, 1, 'multiple row resolutions share one verified history read');
+    assert.equal((await resolver(snapshotTx(), { actorId, reference })).ok, true);
+    assert.equal(snapshotReads, 2, 'another transaction must reread current evidence');
+    assert.equal((await resolver(firstSnapshot, { actorId: `foreign-${actorId}`, reference })).ok, false,
+      'cached evidence cannot cross the actor boundary');
     if (inquiryConfiguration.ok) {
       assert.equal(inquiryConfiguration.value.description, 'سنگ تست فنی');
       assert.equal(inquiryConfiguration.value.measures?.count, '2');

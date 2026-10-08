@@ -3,7 +3,7 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { canonicalHash, type InquiryIdentity, type PartnerCommand } from '@sabalanerp/partner-sales-contracts';
-import { createPartnerInquiryService } from '../partnerSales/inquiries/service';
+import { createPartnerInquiryService, createPrismaPartnerInquiryService } from '../partnerSales/inquiries/service';
 import { appendAuthorizationDecision, readAuthorizationDecisionByCorrelation } from '../effectiveAuthorization/audit';
 import { ensureMissingResponderSupport } from '../partnerSales/inquiries/adapters';
 import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
@@ -45,6 +45,49 @@ const identity = (actorId: string): InquiryIdentity => ({ schemaVersion: 1, part
   configuration: [{ key: 'technicalConfigurationHash', value: `sha256-v1:${'1'.repeat(64)}` }],
   materialRateEvidenceId: 'material-evidence-1', materialRateHash: `sha256-v1:${'2'.repeat(64)}`,
   components: [], currency: 'IRT', calculationPolicyVersion: 'calculation-v1', roundingPolicyVersion: 'rounding-v2' });
+
+test('HTTP inquiry decision returns the durable receipt without waiting for notification delivery', async () => {
+  await fixture(async (tx, ids) => {
+    const shared = {
+      authorize: async () => ({ ok: true as const, value: { evidenceId: 'authorization-fixture' } }),
+      resolveInitialResponder: async () => ({ ok: true as const, value: { responderId: ids.responderId, eligibilityEvidence: { source: 'fixture' } } }),
+      resolveConfiguration: async () => ({ ok: true as const, value: { identity: identity(ids.actorId), description: 'سنگ تست', configuration: [] } }),
+    };
+    const partner = createPartnerInquiryService({ ...shared, actorId: ids.actorId, transaction: run => run(tx) });
+    assert.equal((await partner.execute(await submit(ids.actorId, ids.inquiryId))).ok, true);
+    let release!: () => void;
+    const delivery = new Promise<void>(resolve => { release = resolve; });
+    let deliveryCalls = 0;
+    const timings: string[] = [];
+    // Use the production factory while the enclosing fixture rolls back all writes.
+    const database = { $transaction: (run: (database: Prisma.TransactionClient) => Promise<unknown>) => run(tx) } as unknown as PrismaClient;
+    const responder = createPrismaPartnerInquiryService({ ...shared, database, actorId: ids.responderId,
+      observeTiming: (phase, duration) => { assert.ok(duration >= 0); timings.push(phase); },
+      publishCommittedEvents: async () => { deliveryCalls++; await delivery; } });
+    const intent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions: [{ rowId: 'row-1', expectedRevision: 1, outcome: 'APPROVED' as const,
+        wholesaleUnitPrice: { amount: '2500000', currency: 'IRT' as const } }] };
+    const id = randomUUID();
+    const command = { ...intent, commandId: id, correlationId: id, idempotency: { actorId: ids.responderId,
+      operation: 'INQUIRY_DECIDE', targetId: ids.inquiryId, key: id, payloadHash: await canonicalHash(intent) } };
+    const started = performance.now();
+    const work = responder.execute(command);
+    try {
+      const result = await Promise.race([work, new Promise<'notification blocked receipt'>(resolve => setTimeout(() => resolve('notification blocked receipt'), 750))]);
+      assert.notEqual(result, 'notification blocked receipt');
+      if (typeof result === 'string' || !result.ok) throw new Error('Missing successful receipt');
+      assert.equal(deliveryCalls, 0, 'the durable worker owns delivery; no per-request dispatch');
+      for (const phase of ['transaction', 'operations_lock', 'inquiry_lock', 'configuration']) assert.ok(timings.includes(phase), phase);
+      assert.equal(result.value.batch?.outcomes[0].ok, true);
+      assert.equal(await tx.partnerInquiryEvent.count({ where: { id: { in: [...result.value.eventIds] } } }), 1);
+      assert.equal(await tx.partnerInquiryApproval.count({ where: { rowId: 'row-1' } }), 1);
+      const replay = await responder.execute(command);
+      assert.equal(replay.ok && replay.value.replayed, true);
+      assert.equal(await tx.partnerInquiryApproval.count({ where: { rowId: 'row-1' } }), 1);
+      console.log(JSON.stringify({ probe: 'inquiry-receipt-with-blocked-notification', elapsedMs: Math.round(performance.now() - started), deliveryCalls }));
+    } finally { release(); await work; }
+  });
+});
 
 async function submit(actorId: string, inquiryId: string, rowId = 'row-1', predecessor?: { rowId: string; revision: number; reason?: string }, productRowId = rowId) {
   const rows = [{ rowId, configuration: { recoveryId: 'recovery-1', recoveryRevision: 1, productRowId }, ...(predecessor ? { predecessor } : {}) }];

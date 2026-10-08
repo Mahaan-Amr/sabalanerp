@@ -238,7 +238,7 @@ test('sidebar new-contract entry preserves the live draft choice without silentl
   expect(state.acquisitions.every(id => id === oldRecoveryId)).toBe(true);
 });
 
-test('a newly initialized Partner wizard persists no automatic payment', async ({ page }) => {
+test('a newly initialized Partner wizard persists no automatic payment or discount', async ({ page }) => {
   await loginAsAdmin(page);
   await mockPartner(page, true);
   await seedStale(page);
@@ -247,9 +247,13 @@ test('a newly initialized Partner wizard persists no automatic payment', async (
     const value = localStorage.getItem(`partner-wizard-draft:${actorId}:${oldRecoveryId}`);
     return value ? JSON.parse(value).draft.intent.customerPaymentPlan.installments : null;
   }, { actorId, oldRecoveryId })).toEqual([]);
+  await expect.poll(() => page.evaluate(({ actorId, oldRecoveryId }) => {
+    const value = localStorage.getItem(`partner-wizard-draft:${actorId}:${oldRecoveryId}`);
+    return value ? JSON.parse(value).draft.intent.retailDiscount.amount : null;
+  }, { actorId, oldRecoveryId })).toBe('0');
 });
 
-test('Partner payments require user entry and preserve remaining balance through add edit delete and discount', async ({ page }) => {
+test('Partner payments have no discount editor and preserve the full balance through add edit delete', async ({ page }) => {
   const { createPartnerFixtures } = await import('../../packages/partner-sales-contracts/dist/testing');
   const fixture = createPartnerFixtures();
   const caseId = fixture.partner.owner.caseId;
@@ -291,7 +295,9 @@ test('Partner payments require user entry and preserve remaining balance through
   await page.goto(`/dashboard/sales/contracts/create?caseId=${caseId}`);
   await workflow(page).getByRole('button', { name: 'مرحله بعدی', exact: true }).click();
   await next(page).click();
-  const remaining = workflow(page).getByText('مانده قابل تخصیص').locator('..');
+  const remaining = workflow(page).getByText('باقیمانده:', { exact: true }).locator('..');
+  await expect(workflow(page).getByRole('textbox', { name: /تخفیف/ })).toHaveCount(0);
+  await expect(workflow(page).getByRole('radio', { name: 'درصد', exact: true })).toHaveCount(0);
   await expect(workflow(page).getByText('پرداخت ۱', { exact: true })).toHaveCount(0);
   await expect(remaining).toContainText('۲,۰۰۰');
   await workflow(page).getByRole('button', { name: 'افزودن پرداخت', exact: true }).click();
@@ -320,14 +326,33 @@ test('Partner payments require user entry and preserve remaining balance through
   await edit.getByRole('textbox', { name: 'مبلغ (تومان)', exact: true }).fill('700');
   await edit.getByRole('button', { name: 'ذخیره', exact: true }).click();
   await expect(remaining).toContainText('۱,۳۰۰');
-  await workflow(page).getByRole('textbox', { name: 'مبلغ تخفیف (تومان)', exact: true }).fill('100');
-  await expect(remaining).toContainText('۱,۲۰۰');
+  await expect(workflow(page).getByRole('textbox', { name: /تخفیف/ })).toHaveCount(0);
+  await expect(remaining).toContainText('۱,۳۰۰');
   await workflow(page).getByRole('button', { name: 'ویرایش پرداخت 1', exact: true }).click();
   await expect(edit.getByRole('textbox', { name: 'مبلغ (تومان)', exact: true })).toHaveValue('700');
   await edit.getByRole('button', { name: 'بستن', exact: true }).click();
   await workflow(page).getByRole('button', { name: 'حذف پرداخت 1', exact: true }).click();
-  await expect(remaining).toContainText('۱,۹۰۰');
+  await expect(remaining).toContainText('۲,۰۰۰');
   await expect(workflow(page).getByText('پرداخت ۱', { exact: true })).toHaveCount(0);
+  await expect(workflow(page).getByText('هنوز پرداختی ثبت نشده است', { exact: true })).toBeVisible();
+  await workflow(page).getByRole('button', { name: 'ایجاد پرداخت جدید', exact: true }).click();
+  await dialog.getByLabel('نوع پرداخت').selectOption('CASH_SHIBA');
+  await dialog.getByRole('textbox', { name: 'مبلغ (تومان)', exact: true }).fill('2100');
+  await dialog.getByRole('button', { name: 'ذخیره', exact: true }).click();
+  await expect(workflow(page).getByText(/جمع پرداخت‌ها ۱۰۰ تومان بیشتر از مبلغ قرارداد/)).toBeVisible();
+  await next(page).click();
+  await expect(workflow(page).getByText('جمع اقساط باید با مبلغ فروش برابر باشد.', { exact: true })).toBeVisible();
+  await workflow(page).getByRole('button', { name: 'ویرایش پرداخت 1', exact: true }).click();
+  await edit.getByRole('textbox', { name: 'مبلغ (تومان)', exact: true }).fill('2000');
+  await edit.getByRole('button', { name: 'ذخیره', exact: true }).click();
+  await expect(workflow(page).getByText('مجموع پرداخت‌ها با مبلغ قرارداد برابر است', { exact: true })).toBeVisible();
+  await expect(workflow(page).getByText('جمع اقساط باید با مبلغ فروش برابر باشد.', { exact: true })).toHaveCount(0);
+  for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await setTheme(page, theme);
+    await assertNoHorizontalOverflow(page);
+    await page.screenshot({ path: `reports/qa/partner-payment/payment-${width}-${theme}.png`, fullPage: true });
+  }
 });
 
 
@@ -392,5 +417,24 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
   if (width < 640) await expect(progress.getByRole('button', { name: /انتخاب مرحله ویرایش؛ مرحله فعلی تایید دیجیتال/ })).toBeVisible();
   else await expect(progress.getByRole('button', { name: 'تایید دیجیتال', exact: true })).toHaveAttribute('aria-current', 'step');
   await expect(workflow(page).getByText('کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است.', { exact: true })).toHaveCount(0);
-  for (const theme of ['light', 'dark'] as const) { await setTheme(page, theme); await assertNoHorizontalOverflow(page); }
+  await expect(workflow(page).getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible();
+  await expect(workflow(page).getByRole('heading', { name: 'اطلاعات مشتری', exact: true })).toBeVisible();
+  await expect(workflow(page).getByRole('heading', { name: 'جمع‌بندی مالی', exact: true })).toBeVisible();
+  await expect(workflow(page).getByRole('table', { name: 'محصولات قرارداد', exact: true })).toBeVisible();
+  await expect(workflow(page).getByText('تخفیف ثبت‌شدهٔ قبلی', { exact: true })).toHaveCount(0);
+  await workflow(page).locator('summary').filter({ hasText: 'برنامه پرداخت (1)' }).click();
+  const payments = workflow(page).getByRole('table', { name: 'برنامه پرداخت', exact: true });
+  await expect(payments.getByText('نقدی (کارت‌خوان)', { exact: true })).toBeVisible();
+  await expect(payments.getByText('1405/07/11', { exact: true })).toBeVisible();
+  await expect(workflow(page).getByRole('heading', { name: 'عملیات تأیید قرارداد', exact: true })).toBeVisible();
+  for (const theme of ['light', 'dark'] as const) {
+    await setTheme(page, theme); await assertNoHorizontalOverflow(page);
+    await page.screenshot({ path: `reports/qa/partner-confirmation/confirmation-${width}-${theme}.png`, fullPage: true });
+  }
+  await workflow(page).getByRole('button', { name: 'لغو قرارداد', exact: true }).click();
+  const cancel = page.getByRole('dialog', { name: 'لغو قرارداد', exact: true });
+  await expect(cancel).toBeVisible();
+  await expect(cancel.getByRole('button', { name: 'تأیید لغو قرارداد', exact: true })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(cancel).toBeHidden();
 });

@@ -142,7 +142,7 @@ test('numbered Case integrity failures identify the Case for support while trans
   assert.equal(partnerCaseHasIntegrityError(partnerError('INTEGRITY_CONFLICT')), true);
   assert.equal(partnerCaseHasIntegrityError({ response: { data: { error: partnerError('INTEGRITY_CONFLICT') } } }), true);
   assert.equal(partnerCaseHasIntegrityError(new Error('offline')), false);
-  assert.match(partnerCaseReviewMessage('PC-123', 313), /همکار-۰۰۳۱۳/);
+  assert.match(partnerCaseReviewMessage('PC-123', 313), /کد پرونده ۰۰۳۱۳/);
   assert.match(partnerCaseReviewMessage('PC-123', 313), /پشتیبانی/);
 });
 
@@ -203,7 +203,7 @@ test('Partner inserts Case-scoped pricing immediately after the ordinary product
 });
 
 test('late-step recovery requires numbering but never waits for Sabalan pricing', () => {
-  assert.equal(requiredPartnerWizardStep('confirmation', false, false), 'products');
+  assert.equal(requiredPartnerWizardStep('confirmation', false, false), 'pricing');
   assert.equal(requiredPartnerWizardStep('confirmation', true, false), 'confirmation');
   assert.equal(requiredPartnerWizardStep('confirmation', true, true), 'confirmation');
 });
@@ -255,7 +255,8 @@ test('unsubmitted placeholder prices explain automatic pricing instead of claimi
   const html = renderToStaticMarkup(<PartnerContractWizard draft={pendingDraft} onChange={() => undefined}
     recovery={{ state: 'writable' }} submission={submission()} now={Date.parse('2026-08-27T09:00:00.000Z')}
     renderSection={() => null} validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
-  assert.match(html, /با ادامه از این مرحله.*پرونده شماره‌دار.*فروشنده سبلان/);
+  assert.match(html, /تلاش مجدد برای ارسال استعلام/);
+  assert.doesNotMatch(html, /قیمت فروش به مشتری —/);
   assert.doesNotMatch(html, /بسته قیمت این پرونده منقضی شده|استعلام مجدد/);
 });
 
@@ -294,7 +295,8 @@ test('a changed technical row keeps the wizard inputs and defers its first inqui
     mismatchedRowIds={[fixture.inquiry.rows[0].rowId]} renderSection={() => <p>preserved-review</p>}
     validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /قیمت فروش به مشتری/);
-  assert.match(html, /ارسال برای استعلام قیمت/);
+  assert.match(html, /تلاش مجدد برای ارسال استعلام/);
+  assert.doesNotMatch(html, /قیمت فروش به مشتری —/);
   assert.doesNotMatch(html, /استعلام مجدد/);
 });
 
@@ -305,8 +307,8 @@ test('inquiry send stays clickable when the background retail quote has not popu
     now={Date.parse('2026-08-27T09:00:00.000Z')} canonicalRetailReady={false}
     onPreparePricingQuote={async current => current} renderSection={() => null}
     validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
-  const action = html.slice(0, html.indexOf('ارسال برای استعلام قیمت')).split('<button').at(-1) ?? '';
-  assert.doesNotMatch(action, /\bdisabled\b/);
+  const action = html.slice(0, html.indexOf('تلاش مجدد برای ارسال استعلام')).split('<button').at(-1) ?? '';
+  assert.doesNotMatch(action, /\sdisabled=""/);
 });
 
 test('the numbered pricing step allows delivery while Sabalan has not answered every product', () => {
@@ -405,7 +407,7 @@ test('an evidence conflict gives the Partner a simple review action with the num
     recovery={{ state: 'writable' }} submission={rejected} now={Date.parse('2026-08-27T09:00:00.000Z')}
     renderSection={() => null} validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
   assert.match(html, /این پرونده نیاز به بررسی دارد/);
-  assert.match(html, /همکار-۰۰۳۱۳/);
+  assert.match(html, /کد پرونده ۰۰۳۱۳/);
   assert.doesNotMatch(html, new RegExp(existing.caseNumber));
   assert.doesNotMatch(html, /شواهد پرونده با نسخه فعلی سازگار نیست/);
 });
@@ -528,4 +530,24 @@ test('initial reviewed correction opens at date, while pricing results and subse
   assert.equal(partnerCaseResultStep('payment', true, true), 'date');
   assert.equal(partnerCaseResultStep('confirmation', true, true), 'date');
   assert.equal(partnerCaseResultStep('products', true), 'pricing');
+});
+
+
+test('pricing has no duplicated retail input and retains the loss acknowledgment', () => {
+  const lossRows = draft.rows.map(row => ({ ...row, wholesaleUnitPrice: { amount: '1500', currency: 'IRR' as const } }));
+  const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, rows: lossRows, step: 'pricing' }}
+    onChange={() => undefined} recovery={{ state: 'writable' }} submission={submission(fixture.partner)}
+    now={Date.parse('2026-08-27T09:00:00.000Z')} renderSection={() => null} validateStep={() => null}
+    onReinquire={() => undefined} onEditProducts={() => undefined} onOpenCase={() => undefined} />);
+  assert.match(html, /زیان را بررسی کرده‌ام و ادامه می‌دهم/);
+  assert.match(html, /ویرایش محصولات/);
+  assert.doesNotMatch(html, /قیمت فروش به مشتری —/);
+  assert.doesNotMatch(html, /data-retail-row-id/);
+});
+
+test('service-only drafts keep the ordinary seven-step sequence', () => {
+  const serviceOnly = { ...draft, rows: [], serviceRows: [{ serviceRowId: 'service-1', title: 'خدمت',
+    quantity: '1', unit: 'count', retailUnitPrice: { amount: '1000', currency: 'IRR' as const }, wholesaleUnitPrice: { amount: '800', currency: 'IRR' as const } }] };
+  assert.equal(partnerWizardStepsForDraft(serviceOnly).length, 7);
+  assert.equal(partnerWizardStepsForDraft(serviceOnly).some(step => step.id === 'pricing'), false);
 });

@@ -9,6 +9,7 @@ import { getPartnerSalesErrorMessage } from '../partnerSalesErrorMessage';
 import { ResponseRow } from './ResponseRow';
 import { ResponseReview } from './ResponseReview';
 import { responseDecisions, settleResponseDrafts, type ResponseDrafts } from './responseDraft';
+import { ResponderRefreshState, useResponderRefresh } from './useResponderRefresh';
 
 type InquiryDisplay = Pick<PartnerQueryV2Results['RESPONDER_INQUIRY'], 'inquiryId' | 'assignmentRevision' | 'partnerDisplayName' | 'submittedAt' | 'rows'>;
 type Decisions = Extract<PartnerCommand, { type: 'INQUIRY_DECIDE' }>['decisions'];
@@ -23,13 +24,13 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
   const [review, setReview] = useState<Decisions | null>(null);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<CommandFeedback | null>(null);
-  const [needsRefresh, setNeedsRefresh] = useState(false);
+  const fresh = useResponderRefresh(refresh, inquiry.inquiryId);
   const running = useRef(false);
   const locked = pending || feedback?.kind === 'uncertain';
   useEffect(() => {
-    onLockChange(locked);
+    onLockChange(locked || fresh.blocked);
     return () => onLockChange(false);
-  }, [locked, onLockChange]);
+  }, [locked, fresh.blocked, onLockChange]);
   const editableRowsKey = editableRowIds.join('\u0000');
   const pendingRowsKey = inquiry.rows.filter(row => row.state === 'PENDING').map(row => row.rowId).join('\u0000');
   const signature = JSON.stringify([inquiry.assignmentRevision, inquiry.rows.map(row => [row.rowId, row.revision]), editableRowsKey]);
@@ -44,13 +45,10 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
 
   async function reload() {
     if (running.current) return;
-    setPending(true);
-    try { await refresh(); setNeedsRefresh(false); }
-    catch { setNeedsRefresh(true); }
-    finally { setPending(false); }
+    await fresh.refresh();
   }
   async function send(retry = false) {
-    if (running.current || (!review && !retry)) return;
+    if (running.current || fresh.blocked || (!review && !retry)) return;
     running.current = true; setPending(true);
     try {
       const outcome = retry ? await session.retry() : await session.submit({ type: 'INQUIRY_DECIDE', inquiryId: inquiry.inquiryId,
@@ -62,8 +60,7 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
         setDrafts(previous => settleResponseDrafts(previous, outcome.batch!));
         setErrors(Object.fromEntries(outcome.batch.outcomes.filter(row => !row.ok).map(row => [row.rowId, !row.ok ? getPartnerSalesErrorMessage(row.error) : ''])));
       }
-      try { await refresh(); setNeedsRefresh(false); }
-      catch { setNeedsRefresh(true); }
+      void fresh.refresh();
     } finally { running.current = false; setPending(false); }
   }
   const rowNumbers = Object.fromEntries(inquiry.rows.map((row, index) => [row.rowId, index + 1]));
@@ -73,16 +70,15 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
       <p className="text-sm sds-text-secondary">ارسال‌شده در {new Date(inquiry.submittedAt).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran', dateStyle: 'long', timeStyle: 'short' })} · {inquiry.rows.length.toLocaleString('fa-IR')} ردیف</p>
     </div>
     <CommandFeedbackView feedback={feedback} pending={pending} onRetry={() => void send(true)} onRefresh={() => void reload()} />
-    {needsRefresh && <ErpInlineState kind="stale" className="flex-col items-start" title="وضعیت تازه دریافت نشد؛ پیش از اقدام بعدی دوباره دریافت کنید."
-      action={{ label: 'دریافت وضعیت تازه', onClick: () => void reload(), disabled: pending }} />}
+    <ResponderRefreshState state={fresh.state} recorded={feedback?.kind === 'success'} onRefresh={() => void reload()} />
     {errors.selection && <ErpInlineState kind="error" title={errors.selection} />}
     <div className="grid gap-4">
       {inquiry.rows.map((row, index) => <ResponseRow key={row.rowId} row={row} number={index + 1}
         canRespond={editableRowIds.includes(row.rowId)} status={rowStatus[row.rowId]} error={errors[row.rowId]}
-        draft={drafts[row.rowId] || { outcome: 'APPROVED', amount: '', note: '' }} pending={locked || needsRefresh}
+        draft={drafts[row.rowId] || { outcome: 'APPROVED', amount: '', note: '' }} pending={locked || fresh.blocked}
         onChange={draft => setDrafts(previous => ({ ...previous, [row.rowId]: draft }))} />)}
     </div>
-    {editableRowIds.length > 0 && <ErpButton label="بررسی پاسخ‌های واردشده" disabled={locked || needsRefresh} onClick={() => {
+    {editableRowIds.length > 0 && <ErpButton label="بررسی پاسخ‌های واردشده" disabled={locked || fresh.blocked} onClick={() => {
       const result = responseDecisions(inquiry.rows.filter(row => editableRowIds.includes(row.rowId))
         .map(row => ({ rowId: row.rowId, revision: row.revision, currency: row.identity.currency })), drafts);
       if (!result.ok) { setErrors(result.errors); return; }
@@ -90,7 +86,7 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
     }} />}
     <ErpSheet open={Boolean(review)} onClose={() => setReview(null)} title="بررسی پاسخ قیمت" presentation="modal" pending={locked}
       footer={<div className="flex flex-wrap gap-2">
-        <ErpButton label={pending ? 'در حال ثبت…' : 'ثبت پاسخ‌ها'} disabled={locked || needsRefresh} onClick={() => void send()} />
+        <ErpButton label={pending ? 'در حال ثبت…' : 'ثبت پاسخ‌ها'} disabled={locked || fresh.blocked} onClick={() => void send()} />
         <ErpButton label="بازگشت به ردیف‌ها" variant="outline" disabled={locked} onClick={() => setReview(null)} />
       </div>}>
       {review && <ResponseReview decisions={review} rowNumbers={rowNumbers} />}

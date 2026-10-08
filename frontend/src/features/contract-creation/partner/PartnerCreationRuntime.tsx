@@ -1,4 +1,5 @@
 'use client';
+import { PartnerConfirmationStep } from './PartnerConfirmationStep';
 import { PartnerContractCancellation } from '@/features/partner-sales/cases/PartnerContractCancellation';
 
 import { partnerRetailPresentation, presentPartnerRetailRows } from './partnerRetailPresentation';
@@ -14,7 +15,7 @@ import {
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct, type PartnerTechnicalServiceCatalogItem,
   type CustomerPaymentPlan,
 } from '@sabalanerp/partner-sales-contracts';
-import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpNeumorphicCard, ErpNeumorphicDisclosure, ErpNeumorphicWorkflowLayout, ErpPressable, ErpRialInput, ErpSheet } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField, ErpIconButton, ErpInlineState, ErpInput, ErpLoading, ErpNeumorphicCard, ErpNeumorphicWorkflowLayout, ErpPressable, ErpRialInput, ErpSheet, ErpSummaryGrid } from '@/components/erp';
 import api from '@/lib/api';
 import { createPartnerTechnicalHttpPorts } from './partnerTechnicalHttpPorts';
 import { createPartnerInquiryHttpPorts } from '../../partner-sales/inquiries/partnerInquiryHttpPorts';
@@ -29,8 +30,8 @@ import { ContractCreationDraftPrompt } from '../components/shared/ContractCreati
 import { CustomerProjectFormFields, emptyCustomerProjectFormValue } from '../../crm/customer-workflow/CustomerProjectFormFields';
 import { ContractCustomerStepView, ContractDateStepView, ContractDeliveryDetailsFields, ContractProjectStepView,
   type ContractCustomerOption, type ContractProjectOption } from '../components/shared/ContractWizardStepViews';
-import { ContractPaymentEntriesList } from '../components/shared/ContractPaymentEntriesList';
-import { ContractDiscountEditor } from '../components/shared/ContractDiscountEditor';
+import { ContractPaymentEntriesSection } from '../components/shared/ContractPaymentEntriesSection';
+
 import { PaymentEntryModal } from '../components/modals/PaymentEntryModal';
 import type { PaymentEntry } from '../types/contract.types';
 import PersianCalendarComponent from '@/components/PersianCalendar';
@@ -44,13 +45,16 @@ import { enterPartnerWizard, partnerDeliveryPlanIssue, preservePartnerDeliveries
   partnerCaseResultStep, partnerCaseHasIntegrityError, partnerCaseReviewMessage,
   latestMatchingPartnerInquiryRow, partnerCasePricingInquiryIds, partnerFinalizedContractPath, partnerRequoteInquiryId } from './partnerWizardEntry';
 import { partnerMoneyText, partnerRetailIntentRows, refreshPartnerInquiryRow,
-  partnerRetailDiscountFromPercent, partnerRetailSubtotal, partnerRetailSummary, remainingPartnerAmount, newPartnerPaymentInstallment } from './partnerRetail';
+  partnerRetailDiscountFromPercent, partnerPaymentAllocation, partnerRetailSummary, remainingPartnerAmount, stepPartnerDeliveryAmount, newPartnerPaymentInstallment } from './partnerRetail';
+import { coalescePartnerCatalogReads, loadPartnerCreationCatalog } from './partnerCreationCatalogLoader';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
 import { PartnerStandaloneServiceEditor, partnerServiceDraftReady } from './PartnerStandaloneServiceEditor';
 import { finalizePartnerCase, sendPartnerConfirmation } from '../../partner-sales/cases/partnerCaseHttpPort';
 import { PartnerQuickInquiryEditor, type PartnerInquiryDimensions } from './PartnerQuickInquiryEditor';
 import { isPartnerContractConfigurationComplete, removePartnerTechnicalProduct } from './partnerTechnicalDraftAdapter';
-import { normalizeNumericText } from '@/lib/numberFormat';
+import { normalizeNumericText, formatDisplayNumber } from '@/lib/numberFormat';
+import { FaPlus, FaTrash } from 'react-icons/fa';
+import { ContractDeliveryQuantityControl } from '../components/shared/ContractDeliveryQuantityControl';
 import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
 import { commitPartnerTechnicalDraft } from './partnerTechnicalCommit';
 import { repairPartnerTechnicalOperationIds } from './partnerTechnicalOperationIds';
@@ -58,7 +62,6 @@ import { getPartnerBrowserSessionId } from './partnerBrowserSession';
 import { canSubmitPartnerTechnicalAction, partnerTechnicalSaveIssue, showPartnerContractConfigurationWarning } from './partnerCreationFlow';
 import { readPartnerCreationContext } from './partnerCreationContext';
 import { partnerProductEditEntry, partnerSaleEntryIssue } from './partnerProductEditEntry';
-import { partnerPaymentChoice } from './partnerPaymentMethodAdapter';
 import { paymentEntryFromPartnerInstallment, partnerInstallmentFromPaymentEntry } from './partnerPaymentEntryAdapter';
 import { firstPartnerPaymentPlanError, validatePartnerPaymentInstallment, partnerPaymentNeedsNationalCode, isRetainedPartnerPayment, retainedPartnerWizardPayments } from './partnerPaymentValidation';
 import { buildPartnerInquirySubjectOptions, type PartnerInquirySubjectOption } from './partnerInquirySubjectOptions';
@@ -220,7 +223,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const searchParams = useSearchParams();
   const freshInquiryRef = useRef(shouldStartFreshPartnerCreation(searchParams));
   const [context, setContext] = useState<PartnerCreationContext | null>(null);
-  const [discountEntryMode, setDiscountEntryMode] = useState<'percent' | 'amount'>('amount');
+
   const [cartTotalAttempt, setCartTotalAttempt] = useState(0);
   const [cartTotal, setCartTotal] = useState<{ key: string; total?: ReturnType<typeof MoneySchema.parse>; failed?: boolean } | null>(null);
   const [runtime, setRuntime] = useState<PersistedRuntime | null>(null);
@@ -228,6 +231,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const finalizationFlight = useRef(false);
   runtimeRef.current = runtime;
   const [catalogState, setCatalogState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [catalogDependenciesState, setCatalogDependenciesState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const pricingRefreshFlight = useRef(false);
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const catalogActorId = context?.kind === 'PARTNER' ? context.actorId : null;
   const catalogWritable = context?.kind === 'PARTNER' && context.writable;
@@ -326,7 +331,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const retailPricesReady = mode === 'inquiry' || (technicalDraft.rows.every(row => Number(row.retailUnitPrice?.amount) > 0)
     && (technicalDraft.dependents ?? []).every(row => row.kind !== 'layer' || row.source?.kind !== 'new-material'
       || Number(row.source.retailUnitPrice?.amount) > 0) && partnerServiceDraftReady(technicalDraft));
-  const technicalActionReady = catalogState === 'ready' && retailPricesReady && canSubmitPartnerTechnicalAction({ mode, pending, technicalReady,
+  const technicalActionReady = catalogState === 'ready' && catalogDependenciesState === 'ready' && retailPricesReady && canSubmitPartnerTechnicalAction({ mode, pending, technicalReady,
     contractConfigurationReady, quickDimensionsValid, hasDraftAccess: Boolean(draftAccess) });
 
   const reacquireDraftAccess = useCallback(async (access: Access): Promise<Access | null> => {
@@ -613,34 +618,32 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     finally { setPending(false); }
   };
 
+  // Reads must never be shared across authenticated creators, even in StrictMode.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- actor identity scopes the in-flight map
+  const catalogReader = useMemo(() => coalescePartnerCatalogReads(readCatalogPages), [catalogActorId]);
   useEffect(() => {
     if (!catalogActorId || !catalogWritable) return;
     let active = true;
     setCatalogState('loading');
-    // Authorization locks the same profile for each request. Avoid competing
-    // catalog transactions, and publish only a complete, validated catalog.
-    void (async () => {
-      const productPages = await readCatalogPages('PRODUCT');
+    setCatalogDependenciesState('loading');
+    let productsPublished = false;
+    // Publish each useful resource as it arrives. Keep profile-locking requests
+    // sequential, and do not allow a technical save before dependencies arrive.
+    void loadPartnerCreationCatalog(catalogReader, products => {
+      productsPublished = true;
       if (!active) return;
-      const toolPages = await readCatalogPages('TOOL');
+      setCatalog(products); setCatalogState('ready');
+    }, (operations, services) => {
       if (!active) return;
-      const finishingPages = await readCatalogPages('FINISHING');
+      setOperations(operations); setServiceCatalog(services);
+      setCatalogDependenciesState('ready');
+    }, () => active).catch(() => {
       if (!active) return;
-      const layerPages = await readCatalogPages('LAYER');
-      const servicePages: PartnerTechnicalCatalogPage[] = [];
-      for (const sourceType of ['tool', 'cutting', 'finishing'] as const) {
-        if (!active) return;
-        servicePages.push(...await readCatalogPages('SERVICE', sourceType));
-      }
-      if (!active) return;
-      setCatalog(productPages.flatMap(page => page.kind === 'PRODUCT' ? page.items : []).filter(item => item.isAvailable));
-      setServiceCatalog(servicePages.flatMap(page => page.kind === 'SERVICE' ? page.items : []));
-      setOperations([...toolPages, ...finishingPages, ...layerPages].flatMap<PartnerTechnicalOperation>(page =>
-        page.kind === 'TOOL' || page.kind === 'FINISHING' || page.kind === 'LAYER' ? page.items : []));
-      setCatalogState('ready');
-    })().catch(() => { if (active) setCatalogState('error'); });
+      if (!productsPublished) setCatalogState('error');
+      setCatalogDependenciesState('error');
+    });
     return () => { active = false; };
-  }, [catalogActorId, catalogWritable, catalogAttempt]);
+  }, [catalogActorId, catalogWritable, catalogAttempt, catalogReader]);
 
   const openDraftRecovery = useCallback(async (partner: PartnerContext, takeover: boolean, fresh = false) => {
     if (recoveryStarting.current || (runtime && !fresh)) return;
@@ -937,13 +940,9 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             result.case.owner.caseId, undefined, current => {
               // Send the inquiry first, then repair the preserved commercial plans.
               // Never resize deliveries or installments without the seller's choice.
-              const deliveryIssue = partnerDeliveryPlanIssue(nextIntent.deliveries, quoted.rows, quoted.serviceRows);
-              const paymentIssue = !CustomerPaymentPlanSchema.safeParse(nextIntent.customerPaymentPlan).success
-                || firstPartnerPaymentPlanError(nextIntent.customerPaymentPlan, today(), true, retainedPaymentPlan.current)
-                || remainingPartnerAmount(pricedSummary.retail, nextIntent.customerPaymentPlan.installments.map(item => item.amount.amount)) !== '0';
               setWizard({ ...current, intent: { ...current.intent, deliveries: nextIntent.deliveries,
                 customerPaymentPlan: nextIntent.customerPaymentPlan, preparationCompleted: false },
-                step: deliveryIssue ? 'delivery' : paymentIssue ? 'payment' : 'pricing' });
+                step: current.rows.length || current.materialInquiryRows?.length ? 'pricing' : 'delivery' });
             });
           router.replace(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(result.case.owner.caseId)}`);
         }
@@ -1029,7 +1028,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     const currentRuntime = runtimeOverride ?? runtime;
     if (!currentRuntime || !context || context.kind !== 'PARTNER') return;
     const publishWizard = (next: PartnerWizardDraft) => {
-      const opened = { ...next, step: partnerCaseResultStep(next.step, false, reviewedCorrection) };
+      const opened = { ...next, step: partnerCaseResultStep(next.step === 'products' ? 'pricing' : next.step, false, reviewedCorrection) };
       setWizard(opened); onReady?.(opened);
     };
     setError(null);
@@ -1067,7 +1066,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         customerPaymentPlan: { planId: `partner-customer-plan-${crypto.randomUUID()}`, version: 1,
           effectiveDate: selectedContractDate, installments: [] },
         deliveries: [],
-        retailDiscount: { amount: '0', currency }, retailDiscountPercent: '0',
+        retailDiscount: { amount: '0', currency },
       } });
     if (!draft) { setError('همه ردیف‌های فنی باید پاسخ معتبر و جاری داشته باشند.'); return; }
     draft.step = 'products';
@@ -1287,7 +1286,10 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     closePartnerPaymentModal();
   };
 
-  const quoteReady = Boolean(wizard?.intent.projectId);
+  // Initial pricing prepares its quote explicitly. Background refresh starts
+  // only for an existing case, outside a technical save, to avoid competing
+  // quote transactions during the transition from the product editor.
+  const quoteReady = Boolean(wizard?.intent.projectId && editingCase && !pending);
   const quoteKey = wizard && quoteReady ? JSON.stringify({ recoveryId: wizard.intent.recoveryId,
     recoveryRevision: wizard.intent.recoveryRevision, graphHash: wizard.intent.graphHash,
     customerId: wizard.intent.customerId, projectId: wizard.intent.projectId,
@@ -1317,12 +1319,15 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed by price-bearing identities only
   }, [quoteKey, quoteReady]);
 
+  const pricingRefreshStep = wizard?.step;
   useEffect(() => {
-    if (!wizardRecoveryId || !runtime) return;
+    if (!wizardRecoveryId || !runtime || !pricingRefreshStep || !['pricing', 'confirmation'].includes(pricingRefreshStep)) return;
     let cancelled = false;
     const refresh = async () => {
       const activeCaseId = submission?.getSnapshot().case?.owner.caseId;
-      if (!activeCaseId) return;
+      if (!activeCaseId || pricingRefreshFlight.current) return;
+      pricingRefreshFlight.current = true;
+      try {
       const rowsFromCase = await readCasePricingRows(runtime.saved, activeCaseId);
       if (cancelled || finalizationFlight.current) return;
       setWizard(current => {
@@ -1338,11 +1343,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         return { ...current, rows, materialInquiryRows, intent: { ...current.intent,
           rows: partnerRetailIntentRows(rows), additionalMaterialApprovals } };
       });
+      } finally { pricingRefreshFlight.current = false; }
     };
     void refresh().catch(() => undefined);
     const timer = window.setInterval(() => void refresh().catch(() => undefined), 5_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [readCasePricingRows, runtime, submission, wizardRecoveryId]);
+  }, [readCasePricingRows, runtime, submission, wizardRecoveryId, pricingRefreshStep]);
 
   const reinquiryCommands = useRef(new Map<string, ReturnType<typeof PartnerCommandSchema.parse>>());
   const reinquireFromWizard = async (requestedRow?: PartnerInquiryRow, reason?: string) => {
@@ -1445,9 +1451,17 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       </div>;
     }
     if (step === 'delivery') return <div className="mx-auto max-w-4xl space-y-4">
-      {draft.intent.deliveries.map((delivery, index) => <ErpNeumorphicCard key={delivery.deliveryId} className="space-y-4 p-6">
-      <div className="flex items-center justify-between"><h3 className="font-semibold">تحویل {(index + 1).toLocaleString('fa-IR')}</h3>
-        <ErpButton label="حذف تحویل" tone="danger" variant="outline"
+      <div className="mb-4 flex items-center justify-between">
+        <h4 className="sds-text-primary text-lg font-medium">لیست تحویل‌ها</h4>
+        <ErpButton label="افزودن تحویل" icon={FaPlus} variant="outline" tone="neutral"
+          onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
+            deliveries: [...draft.intent.deliveries, { deliveryId: `partner-delivery-${crypto.randomUUID()}`,
+              date: addDays(draft.intent.contractDate, 7), destination: context.customers.find(item => item.id === draft.intent.customerId)?.address ?? '',
+              receiverName: context.customers.find(item => item.id === draft.intent.customerId)?.displayName, items: [] }] } })} />
+      </div>
+      {draft.intent.deliveries.map((delivery, index) => <ErpNeumorphicCard key={delivery.deliveryId} className="p-6">
+      <div className="mb-4 flex items-start justify-between"><h3 className="sds-text-primary font-semibold">تحویل {index + 1}</h3>
+        <ErpIconButton label={`حذف تحویل ${index + 1}`} title="حذف تحویل" icon={FaTrash} tone="danger"
           onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
             deliveries: draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId) } })} /></div>
       {(delivery.items.some(item => !draft.rows.some(row => row.productRowId === item.productRowId)) ||
@@ -1475,9 +1489,11 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             ...(updates.notes !== undefined ? { notes: updates.notes || undefined } : {}),
           } : item),
         } })} />
-      <ErpNeumorphicCard className="space-y-3 p-4"><h4 className="text-sm font-semibold">محصولات این تحویل</h4>
+      {(draft.rows.length > 0 || Boolean(draft.serviceRows?.length)) && <ErpNeumorphicCard className="mt-4 p-4"><h6 className="sds-text-primary mb-1 text-sm font-semibold">محصولات این تحویل</h6>
+        <p className="sds-text-secondary mb-3 text-xs">مقدار تحویل هر محصول را با واحد خودش مشخص کنید. مجموع تحویل‌ها نباید از مقدار کل قرارداد بیشتر شود.</p>
+        <div className="space-y-4">
         {draft.rows.map(row => {
-          const unitLabel = partnerQuantityUnitCopy[row.unit] ?? row.unit;
+          const unitLabel = row.unit === 'meter' ? 'متر طول' : partnerQuantityUnitCopy[row.unit] ?? row.unit;
           const current = delivery.items.find(item => item.productRowId === row.productRowId)?.quantity ?? '0';
           const others = draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId)
             .flatMap(item => item.items.filter(product => product.productRowId === row.productRowId).map(product => product.quantity));
@@ -1491,22 +1507,30 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
                 items: [...item.items.filter(product => product.productRowId !== row.productRowId),
                   ...(Number(quantity) > 0 ? [{ productRowId: row.productRowId, quantity }] : [])] }) } });
           };
-          return <ErpCard key={row.productRowId} className="space-y-2 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{row.inquiryRow.description}</strong>
-              <ErpField label={`مقدار (${unitLabel})`}><ErpInput inputMode="decimal" value={current}
-                onChange={event => updateQuantity(event.target.value)} /></ErpField></div>
-            <div className="sds-text-secondary flex flex-wrap gap-3 text-xs"><span>کل قرارداد: {row.quantity} {unitLabel}</span>
-              <span>تحویل‌های دیگر: {maximum === null ? 'نامعتبر' : remainingPartnerAmount(row.quantity, [maximum])} {unitLabel}</span>
-              <span>مانده: {unallocated ?? 'نامعتبر'} {unitLabel}</span>
-              {maximum !== null && current !== maximum && <ErpPressable type="button"
-                onClick={() => updateQuantity(maximum)}>پر کردن ({maximum})</ErpPressable>}</div>
+          const configuration = technicalDraft.rows.find(item => item.productRowId === row.productRowId)?.configuration;
+          const width = configuration && ('widthMeters' in configuration ? configuration.widthMeters
+            : 'crossDimensionMeters' in configuration ? configuration.crossDimensionMeters : undefined);
+          const stepQuantity = (direction: -1 | 1) => {
+            const quantity = maximum !== null ? stepPartnerDeliveryAmount(current, maximum, direction) : null;
+            if (quantity !== null) updateQuantity(quantity);
+          };
+          return <ErpNeumorphicCard key={row.productRowId} className="space-y-2 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2"><span className="sds-text-primary text-sm font-medium">{row.inquiryRow.description}</span>
+              {width && <span className="sds-text-muted basis-full text-xs font-medium">عرض درخواستی: {formatDisplayNumber(Number(width) * 100)}cm</span>}
+              <ContractDeliveryQuantityControl label={`مقدار تحویل ${row.inquiryRow.description} (${unitLabel})`}
+                value={current} maximum={Number(maximum ?? current)} count={row.unit === 'count'}
+                onTextChange={value => updateQuantity(normalizeNumericText(value) || '0')}
+                onDecrease={() => stepQuantity(-1)} onIncrease={() => stepQuantity(1)} /></div>
+            <div className="sds-text-muted flex flex-wrap items-center gap-3 text-xs"><span>کل قرارداد: <strong className="sds-text-secondary">{formatDisplayNumber(row.quantity)} {unitLabel}</strong></span>
+              <span>ارسال‌شده در تحویل‌های دیگر: <strong className="sds-text-secondary">{maximum === null ? 'نامعتبر' : formatDisplayNumber(remainingPartnerAmount(row.quantity, [maximum]) ?? '0')} {unitLabel}</strong></span>
+              <span className="font-medium text-[var(--sds-accent)]">مانده: <strong>{maximum === null ? 'نامعتبر' : formatDisplayNumber(maximum)} {unitLabel}</strong></span>
+              {maximum !== null && Number(current) < Number(maximum) && <ErpPressable type="button" className="font-medium text-[var(--sds-accent)] hover:underline"
+                onClick={() => updateQuantity(maximum)}>پر کردن ({formatDisplayNumber(maximum)})</ErpPressable>}</div>
             {showValidationErrors && unallocated !== '0' && <ErpInlineState kind="stale"
               title="جمع مقدارهای تحویل باید دقیقاً با مقدار قرارداد برابر باشد." />}
-          </ErpCard>;
+          </ErpNeumorphicCard>;
         })}
-      </ErpNeumorphicCard>
-      {Boolean(draft.serviceRows?.length) && <ErpNeumorphicCard className="space-y-3 p-4"><h4 className="text-sm font-semibold">اجرای خدمات این برنامه</h4>
-        {draft.serviceRows!.map(row => {
+        {(draft.serviceRows ?? []).map(row => {
           const unitLabel = partnerQuantityUnitCopy[row.unit] ?? row.unit;
           const current = delivery.serviceItems?.find(item => item.serviceRowId === row.serviceRowId)?.quantity ?? '0';
           const others = draft.intent.deliveries.filter(item => item.deliveryId !== delivery.deliveryId)
@@ -1522,24 +1546,25 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           };
           const unallocated = remainingPartnerAmount(row.quantity, draft.intent.deliveries.flatMap(item =>
             (item.serviceItems ?? []).filter(service => service.serviceRowId === row.serviceRowId).map(service => service.quantity)));
-          return <ErpCard key={row.serviceRowId} className="space-y-2 p-3">
-            <strong className="sds-text-primary text-sm">{row.title}</strong>
-            <ErpField label={`مقدار اجرای ${row.title} (${unitLabel})`}><ErpInput inputMode="decimal" value={current}
-              onChange={event => updateQuantity(event.target.value)} /></ErpField>
-            <div className="sds-text-secondary flex flex-wrap gap-3 text-xs"><span>کل قرارداد: {row.quantity} {unitLabel}</span><span>مانده: {unallocated ?? 'نامعتبر'} {unitLabel}</span>
-              {maximum !== null && current !== maximum && <ErpPressable type="button" onClick={() => updateQuantity(maximum)}>پر کردن ({maximum})</ErpPressable>}</div>
+          const stepQuantity = (direction: -1 | 1) => {
+            const quantity = maximum !== null ? stepPartnerDeliveryAmount(current, maximum, direction) : null;
+            if (quantity !== null) updateQuantity(quantity);
+          };
+          return <ErpNeumorphicCard key={row.serviceRowId} className="space-y-2 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2"><span className="sds-text-primary text-sm font-medium">{row.title}</span>
+              <ContractDeliveryQuantityControl label={`مقدار اجرای ${row.title} (${unitLabel})`} value={current}
+                maximum={Number(maximum ?? current)} count={row.unit === 'count'} onTextChange={value => updateQuantity(value || '0')}
+                onDecrease={() => stepQuantity(-1)} onIncrease={() => stepQuantity(1)} /></div>
+            <div className="sds-text-muted flex flex-wrap items-center gap-3 text-xs"><span>کل قرارداد: <strong className="sds-text-secondary">{formatDisplayNumber(row.quantity)} {unitLabel}</strong></span>
+              <span>زمان‌بندی‌شده در تحویل‌های دیگر: <strong className="sds-text-secondary">{maximum === null ? 'نامعتبر' : formatDisplayNumber(remainingPartnerAmount(row.quantity, [maximum]) ?? '0')} {unitLabel}</strong></span>
+              <span className="font-medium text-[var(--sds-accent)]">مانده: <strong>{maximum === null ? 'نامعتبر' : formatDisplayNumber(maximum)} {unitLabel}</strong></span>
+              {maximum !== null && Number(current) < Number(maximum) && <ErpPressable type="button" className="font-medium text-[var(--sds-accent)] hover:underline"
+                onClick={() => updateQuantity(maximum)}>پر کردن ({formatDisplayNumber(maximum)})</ErpPressable>}</div>
             {showValidationErrors && unallocated !== '0' && <ErpInlineState kind="stale" title="مقدار اجرای خدمت باید دقیقاً با مقدار قرارداد برابر باشد." />}
-          </ErpCard>;
+          </ErpNeumorphicCard>;
         })}
-      </ErpNeumorphicCard>}
+        </div></ErpNeumorphicCard>}
     </ErpNeumorphicCard>)}
-      <div className="flex items-center justify-center gap-3">
-        <ErpButton label="افزودن تحویل" onClick={() => updateWizard({ ...draft, intent: { ...draft.intent,
-          deliveries: [...draft.intent.deliveries, { deliveryId: `partner-delivery-${crypto.randomUUID()}`,
-            date: addDays(draft.intent.contractDate, 7), destination: context.customers.find(item => item.id === draft.intent.customerId)?.address ?? '',
-            receiverName: context.customers.find(item => item.id === draft.intent.customerId)?.displayName,
-            items: [] }] } })} />
-      </div>
     </div>;
     if (step === 'payment') { const retailSummary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount, draft.serviceRows);
       const editedPayment = paymentModal && paymentForm.method ? partnerInstallmentFromPaymentEntry(paymentModal.installment, {
@@ -1553,54 +1578,47 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         draft.intent.customerPaymentPlan.installments.map(item => item.amount.amount)) : null;
       const remainingText = remaining === null ? 'مجموع اقساط از جمع نهایی بیشتر است.'
         : partnerMoneyText(remaining, draft.intent.retailDiscount.currency);
-      const retailSubtotal = partnerRetailSubtotal(draft.rows, draft.intent.retailDiscount.currency, draft.serviceRows); return <div className="space-y-3">
-      <ContractDiscountEditor mode={discountEntryMode}
-        value={discountEntryMode === 'amount' ? draft.intent.retailDiscount.amount : draft.intent.retailDiscountPercent ??
-          (retailSubtotal && Number(retailSubtotal) > 0 ? String(Number((Number(draft.intent.retailDiscount.amount) * 100 / Number(retailSubtotal)).toFixed(2))) : '0')}
-        label={discountEntryMode === 'amount' ? 'مبلغ تخفیف (تومان)' : 'درصد تخفیف'} max="100"
-        onModeChange={mode => {
-          setDiscountEntryMode(mode);
-          if (mode === 'amount') updateWizard({ ...draft, intent: { ...draft.intent, retailDiscountPercent: undefined } });
-        }}
-        description="این تخفیف فقط از قیمت فروش شما به مشتری کم می‌شود و قیمت توافق‌شده سبلان را تغییر نمی‌دهد."
-        summaryItems={retailSummary.valid ? [
-          { label: 'جمع قبل از تخفیف', value: retailSubtotal
-            ? partnerMoneyText(retailSubtotal, draft.intent.retailDiscount.currency) : '—' },
-          { label: 'جمع فروش پس از تخفیف', value: partnerMoneyText(retailSummary.retail, draft.intent.retailDiscount.currency) },
-          { label: 'سود/زیان', value: retailSummary.difference === undefined ? 'پس از تکمیل استعلام'
-            : partnerMoneyText(retailSummary.difference, draft.intent.retailDiscount.currency) },
-        ] : []}
-        error={!retailSummary.valid && retailSummary.field === 'discount' ? retailSummary.message : undefined}
-        onValueChange={percent => {
-          if (discountEntryMode === 'amount') {
-            const amount = normalizeNumericText(percent).replace(/,/g, '') || '0';
-            updateWizard({ ...draft, intent: { ...draft.intent, retailDiscount: { ...draft.intent.retailDiscount, amount },
-              retailDiscountPercent: undefined, belowCostConfirmed: false } });
-            return;
-          }
-          const normalizedPercent = String(Math.min(Math.max(Number(percent) || 0, 0), 100));
-          const retailDiscount = partnerRetailDiscountFromPercent(draft.rows, normalizedPercent,
-            draft.intent.retailDiscount.currency, draft.serviceRows);
-          if (!retailDiscount) return;
-          updateWizard({ ...draft, intent: { ...draft.intent,
-            retailDiscount, retailDiscountPercent: normalizedPercent, belowCostConfirmed: false } });
-        }} />
+      const allocation = retailSummary.valid ? partnerPaymentAllocation(
+        { amount: retailSummary.retail, currency: draft.intent.retailDiscount.currency }, draft.intent.customerPaymentPlan.installments) : null;
+      const moneyText = (amount: string) => partnerMoneyText(amount, draft.intent.retailDiscount.currency);
+      const addPayment = () => retailSummary.valid && openPartnerPaymentModal(newPartnerPaymentInstallment(
+        draft.intent.retailDiscount.currency, `partner-installment-${crypto.randomUUID()}`, today()),
+        true, false, remaining === null ? undefined : Number(remaining));
+      return <div className="space-y-6">
+      <p className="sds-text-secondary text-center text-sm">جمع پرداخت‌ها باید با مبلغ قرارداد برابر باشد.</p>
+      <div className="mx-auto max-w-4xl space-y-4">
+      {Number(draft.intent.retailDiscount.amount) > 0 && <ErpInlineState kind="stale"
+        title={`این پیش‌نویس از قبل تخفیف ثبت‌شدهٔ ${moneyText(draft.intent.retailDiscount.amount)} دارد؛ مبلغ آن در جمع قرارداد حفظ شده است.`} />}
+      <ErpNeumorphicCard className="p-4">
+        <ErpSummaryGrid columns={3} items={[
+          { label: 'مبلغ قرارداد:', value: retailSummary.valid ? moneyText(retailSummary.retail) : '—' },
+          { label: 'جمع پرداخت:', value: allocation ? moneyText(allocation.paid) : '—',
+            tone: allocation?.state === 'matched' ? 'success' : allocation?.state === 'over' ? 'danger' : 'warning' },
+          ...(allocation?.state !== 'over' ? [{ label: 'باقیمانده:', value: allocation ? moneyText(allocation.remaining) : '—',
+            tone: (allocation?.state === 'matched' ? 'success' : 'warning') as 'success' | 'warning' }] : []),
+        ]} />
+        {allocation?.state === 'short' && <div className="mt-3"><ErpInlineState kind="stale"
+          title={`مجموع پرداخت‌ها (${moneyText(allocation.paid)}) کمتر از مبلغ قرارداد (${retailSummary.valid ? moneyText(retailSummary.retail) : '—'}) است`} /></div>}
+        {allocation?.state === 'over' && <div className="mt-3"><ErpInlineState kind="error"
+          title={`جمع پرداخت‌ها ${moneyText(allocation.extra)} بیشتر از مبلغ قرارداد است. مبلغ پرداخت‌ها را اصلاح کنید.`} /></div>}
+        {allocation?.state === 'matched' && Number(allocation.paid) > 0 && <div className="mt-3"><ErpInlineState kind="success"
+          title="مجموع پرداخت‌ها با مبلغ قرارداد برابر است" /></div>}
+        {(!retailSummary.valid || !allocation) && <ErpInlineState kind="error"
+          title={!retailSummary.valid ? retailSummary.message : 'مبلغ یا واحد پول پرداخت‌ها نامعتبر است.'} />}
+      </ErpNeumorphicCard>
       {retailSummary.valid && retailSummary.loss && <ErpInlineState kind="stale"
-        title="پس از تخفیف، مبلغ فروش به مشتری از مبلغ خرید شما کمتر است." />}
+        title="مبلغ فروش به مشتری از مبلغ خرید شما کمتر است." />}
       {retailSummary.valid && retailSummary.loss && <ErpCheckbox label="زیان را بررسی کرده‌ام و ادامه می‌دهم"
         checked={draft.intent.belowCostConfirmed}
         onChange={event => updateWizard({ ...draft, intent: { ...draft.intent, belowCostConfirmed: event.target.checked } })} />}
-      <ContractPaymentEntriesList currency={draft.intent.retailDiscount.currency === 'IRR' ? 'ریال' : 'تومان'}
+      <ContractPaymentEntriesSection currency={draft.intent.retailDiscount.currency === 'IRR' ? 'ریال' : 'تومان'}
         payments={draft.intent.customerPaymentPlan.installments.map(paymentEntryFromPartnerInstallment)}
+        remaining={allocation?.state === 'short' ? remainingText : undefined} disabled={!retailSummary.valid || !allocation}
+        onAdd={addPayment}
         onEdit={(_payment, index) => openPartnerPaymentModal(draft.intent.customerPaymentPlan.installments[index], false, index === 0)}
         onRemove={index => updateWizard({ ...draft, intent: { ...draft.intent,
           customerPaymentPlan: { ...draft.intent.customerPaymentPlan,
             installments: draft.intent.customerPaymentPlan.installments.filter((_, itemIndex) => itemIndex !== index) } } })} />
-      {retailSummary.valid && <ErpFieldView label="مانده قابل تخصیص" value={remainingText} />}
-      <ErpButton label="افزودن پرداخت" variant="outline" disabled={!retailSummary.valid}
-        onClick={() => retailSummary.valid && openPartnerPaymentModal(newPartnerPaymentInstallment(
-          draft.intent.retailDiscount.currency,
-          `partner-installment-${crypto.randomUUID()}`, today()), true, false, remaining === null ? undefined : Number(remaining))} />
       {paymentModal && <PaymentEntryModal dateFormat="gregorian" requireMethodSelection
         isOpen
         existingContract={Boolean(editingCase)}
@@ -1622,66 +1640,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         showNationalCode={needsNationalCode}
         nationalCodeRequired={needsNationalCode}
       />}
-    </div>; }
+    </div></div>; }
     const customer = context.customers.find(item => item.id === draft.intent.customerId);
     const caseView = submission?.getSnapshot().case ?? editingCase;
-    const retailSummary = partnerRetailSummary(draft.rows, draft.intent.retailDiscount, draft.serviceRows);
-    return <div className="mx-auto max-w-6xl space-y-6">
-      {caseView && <PartnerContractCancellation caseId={caseView.owner.caseId} />}
-      <ErpNeumorphicCard className="space-y-5 p-6">
-        <h3 className="text-2xl font-bold">خلاصه قرارداد</h3>
-        <div className="grid gap-4 md:grid-cols-2">
-          <ErpNeumorphicCard className="grid gap-3 p-4 sm:grid-cols-2">
-            <ErpFieldView label="کد پیگیری" value={caseView ? partnerTrackingCode(caseView.caseNumber, caseView.trackingNumber) : 'پس از ثبت'} tone="primary" />
-            <ErpFieldView label="تاریخ قرارداد" value={draft.intent.contractDate} />
-          </ErpNeumorphicCard>
-          <ErpNeumorphicCard className="grid gap-3 p-4 sm:grid-cols-2">
-            <ErpFieldView label="مشتری" value={customer?.displayName ?? '—'} />
-            <ErpFieldView label="شماره موبایل تأیید" value={customer?.phone ?? 'موبایل معتبر ثبت نشده'} />
-          </ErpNeumorphicCard>
-        </div>
-        <ErpNeumorphicCard className="grid gap-3 p-4 sm:grid-cols-3">
-          <ErpFieldView label="مبلغ فروش به مشتری" value={retailSummary.valid
-            ? partnerMoneyText(retailSummary.retail, draft.intent.retailDiscount.currency) : '—'} tone="primary" />
-          <ErpFieldView label="مبلغ توافق‌شده با سبلان" value={retailSummary.valid && retailSummary.wholesale
-            ? partnerMoneyText(retailSummary.wholesale, draft.intent.retailDiscount.currency) : '—'} tone="info" />
-          <ErpFieldView label="تخفیف مشتری" value={partnerMoneyText(draft.intent.retailDiscount.amount, draft.intent.retailDiscount.currency)} tone="success" />
-        </ErpNeumorphicCard>
-      </ErpNeumorphicCard>
-      <ErpNeumorphicDisclosure open>
-        <summary className="cursor-pointer px-4 py-3 font-semibold">محصولات قرارداد ({draft.rows.length.toLocaleString('fa-IR')})</summary>
-        <div className="space-y-3 px-4 pb-4">{draft.rows.map(row => <ErpCard key={row.productRowId} className="p-4">
-          <p className="font-semibold">{row.inquiryRow.description}</p>
-          <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">مقدار: {row.quantity} {partnerQuantityUnitCopy[row.unit] ?? row.unit} · قیمت فروش واحد: {partnerMoneyText(row.retailUnitPrice.amount, row.retailUnitPrice.currency)}</p>
-        </ErpCard>)}</div>
-      </ErpNeumorphicDisclosure>
-      {Boolean(draft.serviceRows?.length) && <ErpNeumorphicDisclosure open>
-        <summary className="cursor-pointer px-4 py-3 font-semibold">خدمات مستقل ({draft.serviceRows!.length.toLocaleString('fa-IR')})</summary>
-        <div className="space-y-3 px-4 pb-4">{draft.serviceRows!.map(row => <ErpCard key={row.serviceRowId} className="p-4">
-          <p className="font-semibold">{row.title}</p><p className="sds-text-secondary mt-1 text-sm">{row.quantity} {partnerQuantityUnitCopy[row.unit] ?? row.unit} · {partnerMoneyText(row.retailUnitPrice.amount, row.retailUnitPrice.currency)}</p>
-        </ErpCard>)}</div>
-      </ErpNeumorphicDisclosure>}
-      <ErpNeumorphicDisclosure>
-        <summary className="cursor-pointer px-4 py-3 font-semibold">برنامه تحویل ({draft.intent.deliveries.length.toLocaleString('fa-IR')})</summary>
-        <div className="space-y-3 px-4 pb-4">{draft.intent.deliveries.map((delivery, index) => <ErpCard key={delivery.deliveryId} className="grid gap-3 p-4 sm:grid-cols-3">
-          <ErpFieldView label={`تحویل ${(index + 1).toLocaleString('fa-IR')}`} value={delivery.date} />
-          <ErpFieldView label="تحویل‌گیرنده" value={delivery.receiverName ?? '—'} />
-          <ErpFieldView label="نشانی" value={delivery.destination} />
-          {(delivery.serviceItems ?? []).map(item => <ErpFieldView key={item.serviceRowId}
-            label={`اجرای خدمت: ${draft.serviceRows?.find(row => row.serviceRowId === item.serviceRowId)?.title ?? 'خدمت'}`}
-            value={item.quantity} />)}
-        </ErpCard>)}</div>
-      </ErpNeumorphicDisclosure>
-      <ErpNeumorphicDisclosure>
-        <summary className="cursor-pointer px-4 py-3 font-semibold">برنامه پرداخت ({draft.intent.customerPaymentPlan.installments.length.toLocaleString('fa-IR')})</summary>
-        <div className="space-y-3 px-4 pb-4">{draft.intent.customerPaymentPlan.installments.map((installment, index) => <ErpCard key={installment.installmentId} className="grid gap-3 p-4 sm:grid-cols-3">
-          <ErpFieldView label={`پرداخت ${(index + 1).toLocaleString('fa-IR')}`} value={partnerMoneyText(installment.amount.amount, installment.amount.currency)} />
-          <ErpFieldView label="سررسید" value={installment.dueDate} />
-          <ErpFieldView label="روش" value={partnerPaymentChoice(installment)} />
-        </ErpCard>)}</div>
-      </ErpNeumorphicDisclosure>
-      <ErpInlineState kind="empty" title="با «ثبت یادداشت قرارداد»، تغییرات ذخیره می‌شود. قطعی‌شدن و ثبت تعهد خرید پس از تأیید فروشنده، پذیرش مشتری و پذیرش قیمت معتبر انجام می‌شود." />
-    </div>;
+    return <PartnerConfirmationStep draft={draft} caseView={caseView} customer={customer}
+      technicalDraft={technicalDraft} technicalPreview={technicalPreview.ok ? technicalPreview.value : undefined} products={technicalProducts}
+      actions={caseView ? <PartnerContractCancellation caseId={caseView.owner.caseId} presentation="wizard" /> : undefined} />;
   };
 
   if (!context) return error ? <ErpInlineState kind="error" title={error} /> : <ErpLoading />;
@@ -1855,8 +1819,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       loading: pending,
       canGoPrevious: !pending && saleStepIndex > 0,
       canGoNext: !pending && (saleStep !== 'products' || technicalActionReady),
-      labels: { next: saleStep === 'products'
-        ? editingCase ? 'ادامه و استعلام محصولات' : 'ادامه تکمیل قرارداد' : 'بعدی' }
+      labels: { next: saleStep === 'products' ? 'ادامه و استعلام محصولات' : 'بعدی' }
     }}
   >
     <div className="space-y-4">
@@ -1893,11 +1856,17 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         </ErpSheet>
       </div>; })()}
       {saleStep === 'products' && <>
+        {catalogState === 'ready' && catalogDependenciesState === 'loading' &&
+          <ErpInlineState kind="empty" title="در حال دریافت ابزار، پرداخت و خدمات" />}
+        {catalogState === 'ready' && catalogDependenciesState === 'error' &&
+          <ErpInlineState kind="error" title="دریافت ابزار، پرداخت یا خدمات انجام نشد."
+            action={{ label: 'تلاش مجدد', onClick: () => setCatalogAttempt(attempt => attempt + 1) }} />}
         {searchParams.get('focusProductRowId') && runtime?.knownInquiryRows?.find(row =>
           row.configurationRef.productRowId === searchParams.get('focusProductRowId'))?.noteOrReason &&
           <ErpInlineState kind="stale" title={runtime.knownInquiryRows.find(row =>
             row.configurationRef.productRowId === searchParams.get('focusProductRowId'))!.noteOrReason!} />}
         <PartnerTechnicalDraftEditor draft={technicalDraft} products={technicalProducts} currentProducts={catalog}
+          dependenciesReady={catalogDependenciesState === 'ready'}
           operations={technicalOperations}
           retailOperationCatalog={serviceCatalog}
           catalogState={catalogState} onRetryCatalog={() => setCatalogAttempt(attempt => attempt + 1)}

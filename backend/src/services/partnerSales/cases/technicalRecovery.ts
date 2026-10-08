@@ -11,6 +11,7 @@ import { CONTRACT_EDIT_LEASE_TTL_MS, CONTRACT_CREATION_DRAFT_TTL_MS } from '../.
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../../contractRecoveryProtection';
 import { decodeTechnicalRecovery, decodeTechnicalReceipt, type TechnicalRecoveryRecord } from './technicalRecoveryRecords';
 import { lockPartnerOperationsControl, lockPartnerOperationsControlForRead } from '../authorization/technicalRollout';
+import { PARTNER_CREATION_TRANSACTION_OPTIONS } from '../creationTransactionBudget';
 import { readPartnerTechnicalSalesPolicy } from './technicalEvidence';
 import { decodeTechnicalSavedSnapshot } from './technicalSavedRecords';
 
@@ -41,7 +42,7 @@ export function createPrismaPartnerTechnicalRecoveryService(input: {
       if (operation === 'READ') await lockPartnerOperationsControlForRead(tx);
       else await lockPartnerOperationsControl(tx);
       return work(tx);
-    }) });
+    }, PARTNER_CREATION_TRANSACTION_OPTIONS) });
 }
 
 /** Shared serialization and authority gate for checkpoint and validated save. */

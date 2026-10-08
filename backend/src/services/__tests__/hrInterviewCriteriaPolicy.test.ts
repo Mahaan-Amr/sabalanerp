@@ -16,9 +16,18 @@ assert.throws(() => normalizeInterviewCriteriaPublication([
   { stableId: 'x', title: 'x', answerType: 'TEXT', isActive: true },
   { stableId: 'x', title: 'duplicate', answerType: 'TEXT', isActive: true },
 ]), /unique/i);
-assert.throws(() => normalizeInterviewCriteriaPublication([
+const inactivePublication = normalizeInterviewCriteriaPublication([
   ...DEFAULT_INTERVIEW_CRITERIA.slice(0, 17),
   { ...PERSONALITY_TEST_SUMMARY_CRITERION, isActive: false },
+]);
+assert.deepEqual(inactivePublication[17], { ...PERSONALITY_TEST_SUMMARY_CRITERION, isActive: false, order: 18 });
+const reactivatedPublication = normalizeInterviewCriteriaPublication(
+  inactivePublication.map((criterion) => ({ ...criterion, isActive: true })),
+);
+assert.deepEqual(reactivatedPublication[17], publication[17]);
+assert.throws(() => normalizeInterviewCriteriaPublication([
+  ...DEFAULT_INTERVIEW_CRITERIA.slice(0, 17),
+  { ...PERSONALITY_TEST_SUMMARY_CRITERION, title: 'changed' },
 ]), /قابل تغییر/);
 assert.throws(() => normalizeInterviewCriteriaPublication([
   ...DEFAULT_INTERVIEW_CRITERIA.slice(0, 16),

@@ -23,6 +23,7 @@ interface FormattedNumberInputProps {
   onBlur?: () => void;
   formatWhileTyping?: boolean;
   decimalScale?: number | null;
+  commitOnBlur?: boolean;
   'aria-invalid'?: boolean;
   'aria-describedby'?: string;
 }
@@ -43,6 +44,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   onBlur,
   formatWhileTyping = true,
   decimalScale = 4,
+  commitOnBlur = true,
   'aria-invalid': ariaInvalid,
   'aria-describedby': ariaDescribedBy
 }) => {
@@ -95,20 +97,22 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
 
     if (!rawValue) {
       setDisplayValue('');
-      onTextChange?.('');
-      onChange?.(min ?? 0);
+      if (commitOnBlur) {
+        onTextChange?.('');
+        onChange?.(min ?? 0);
+      }
       onBlur?.();
       return;
     }
 
     const roundedValue = roundToScale(clamp(parseFormattedNumber(rawValue)));
     setDisplayValue(formatNumberForScale(roundedValue));
-    onTextChange?.(
+    if (commitOnBlur) onTextChange?.(
       decimalScale === null
         ? formatNumericInputText(rawValue).canonicalText
         : String(roundedValue)
     );
-    onChange?.(roundedValue);
+    if (commitOnBlur) onChange?.(roundedValue);
     onBlur?.();
   };
 

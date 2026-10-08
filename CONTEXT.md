@@ -107,6 +107,10 @@ _Avoid_: انتظار برای تأیید مالی یا تسویه، ثبت فر
 مهلت تقویمی مختص هر قرارداد در گردش جدید فروش عادی، از ایجاد سیستمی یا نخستین ورود قرارداد قدیمی به گردش جدید، برای ثبت رکورد مالی؛ تغییر تنظیم مدیر و ویرایش عادی، مهلت اختصاص‌یافته را از نو شروع نمی‌کنند.
 _Avoid_: تاریخ تجاری قرارداد، مهلت اصلاح قرارداد دارای رکورد مالی، یا تغییر خودکار مهلت قراردادهای جاری با تغییر تنظیم عمومی
 
+**لغو در ویرایش قرارداد فروش عادی**:
+انتخاب لغو در فرم ویرایش که همراه با تغییرات همان فرم، با «ذخیره تغییرات» نهایی می‌شود؛ ذخیره ناموفق، لغو را نیز ثبت نمی‌کند.
+_Avoid_: لغو قطعی پیش از ذخیره فرم، فعال‌شدن قرارداد با ذخیره ویرایش‌ها، یا تمدید مهلت انقضا با لغو
+
 **Contract Hard Deletion**:
 The irreversible removal of a Draft or Voided sales Contract after Admin approval, permitted only when the Contract has no financial document and no conclusive physical operation. An Accountant or Manager may request deletion, while an Admin may either decide that request or initiate and approve deletion directly; the reason, actors, dependency check, and outcome remain in the audit history after the Contract is removed. Any blocking dependency prevents deletion and is identified explicitly to the Admin.
 _Avoid_: deleting an active Contract, treating disappearance from ordinary lists as deletion, cascading through financial or conclusive physical evidence, requiring a second actor for an Admin-initiated deletion, allowing Manager approval alone, losing the deletion audit record, or reporting an unexplained deletion failure
@@ -2142,6 +2146,10 @@ _Avoid_: applying تخفیف to the full contract total including add-ons, or se
 **خروجی تخفیف قرارداد**:
 The saved contract discount snapshot shown in PDF and print output, including the applied percentage and amount. Existing contracts keep their saved discount details even when discount ranges change later.
 _Avoid_: recalculating old contract discounts from current بازه تخفیف rules
+
+**بازثبت تخفیف پس از اصلاح اقلام**:
+When the eligible base stone subtotal changes on a Contract with a positive discount, saving requires Sales to explicitly enter the discount amount or percentage again for the new subtotal. Until that entry, the previously agreed amount and percentage remain unchanged and saving is blocked with an understandable Persian error. An entered discount above its allowed cap also blocks saving and remains visible for correction. Switching between amount and percentage is not a new discount entry. A later change to the eligible subtotal requires another entry. With an unchanged eligible subtotal, the historical discount and its saved range remain unchanged.
+_Avoid_: automatically increasing or decreasing an agreed discount amount or percentage, silently reducing an invalid entry to the cap, treating an entry made for an earlier subtotal as current, or postponing discount inconsistency detection until financial approval
 
 **Legacy No-Discount Evidence**:
 An explicit null discount snapshot from the legacy Sales wizard is affirmative historical evidence that no discount was applied; an older absent discount field has the same meaning only when its frozen payable total exactly reconciles with its frozen gross product total and no positive-discount evidence exists. Qualifying evidence may be normalized during financial approval to auditable explicit zero-discount evidence from the Contract's frozen commercial values without reopening the Contract, while any mismatch remains blocked for human review.

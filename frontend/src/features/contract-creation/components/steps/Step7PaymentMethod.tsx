@@ -96,11 +96,11 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
           />
         </div>
         <ContractDiscountEditor
+          commitOnBlur={false}
           mode={discountEntryMode === 'PERCENT' ? 'percent' : 'amount'}
           value={discountEntryMode === 'PERCENT' ? String(discountPercentInput) : String(Math.round(discountAmount))}
           label={discountEntryMode === 'PERCENT' ? 'درصد تخفیف' : 'مبلغ تخفیف (تومان)'}
-          max={discountEntryMode === 'PERCENT' ? String(maxDiscountPercent) : undefined}
-          disabled={!hasMatchingDiscountRange || baseSubtotal <= 0}
+          error={errors.discount}
           description="تخفیف فقط روی جمع پایه محصولات سنگی اعمال می‌شود."
           summaryItems={[
             { label: 'جمع پایه', value: formatPrice(baseSubtotal, 'تومان') },
@@ -108,7 +108,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
             { label: 'سقف مجاز', value: `${formatPrice(maxDiscountAmount, 'تومان')} (${formatDisplayNumber(maxDiscountPercent)}٪)` },
           ]}
           warning={!hasMatchingDiscountRange && baseSubtotal > 0 ? 'برای این مبلغ پایه، بازه تخفیف فعالی تعریف نشده است.' : undefined}
-          result={discountAmount > 0 ? `تخفیف اعمال‌شده: ${formatPrice(discountAmount, 'تومان')} (حدود ${formatDisplayNumber(Number(discountPercent.toFixed(2)))}٪)` : undefined}
+          result={!errors.discount && discountAmount > 0 ? `تخفیف اعمال‌شده: ${formatPrice(discountAmount, 'تومان')} (حدود ${formatDisplayNumber(Number(discountPercent.toFixed(2)))}٪)` : undefined}
           onValueChange={value => {
             if (discountEntryMode === 'PERCENT') onDiscountPercentChange(Number(value) || 0);
             else onDiscountAmountChange(Number(value) || 0);

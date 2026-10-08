@@ -1,10 +1,12 @@
 export type ContractStatusAction = {
-  action: 'cancel' | 'reactivate';
-  label: 'لغو قرارداد' | 'فعال‌سازی قرارداد';
-  tone: 'danger' | 'success';
+  action: 'cancel' | 'reactivate' | 'withdraw-cancel';
+  label: 'لغو قرارداد' | 'فعال‌سازی قرارداد' | 'انصراف از لغو';
+  tone: 'danger' | 'success' | 'neutral';
 };
 
-export const getContractStatusAction = (status?: string | null): ContractStatusAction =>
-  status === 'CANCELLED'
+export const getContractStatusAction = (status?: string | null, cancellationPending = false): ContractStatusAction =>
+  cancellationPending
+    ? { action: 'withdraw-cancel', label: 'انصراف از لغو', tone: 'neutral' }
+    : status === 'CANCELLED'
     ? { action: 'reactivate', label: 'فعال‌سازی قرارداد', tone: 'success' }
     : { action: 'cancel', label: 'لغو قرارداد', tone: 'danger' };

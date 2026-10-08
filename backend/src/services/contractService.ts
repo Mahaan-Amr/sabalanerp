@@ -3,6 +3,7 @@ import { synchronizeSellerCredit } from './contractDispatchCredit';
 import { validateSpecialCustomerCreditPlan } from './specialCustomerCredit';
 import { refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
 import { closeContractDispatchDuty } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
+import { contractConfirmationService, type RequestEvidenceMeta } from './contractConfirmationService';
 import { commercialStartFields, isOrdinaryCommercialFlow, assertCommercialActionAvailable, invalidateCommercialApprovals, approveOrdinarySales, lockOrdinaryContract } from './ordinaryContractLifecycle';
 import { randomUUID } from 'node:crypto';
 // Contract service
@@ -36,6 +37,7 @@ import { sanitizeContractDataCustomerSnapshot } from './contractSnapshotBoundary
 import { assertContractQuantityEvidenceReadyForFinalization } from './contractQuantityEvidenceGuard';
 import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
 import { assertContractPayableTotal, sealContractPayableTotal } from './contractPayableTotal';
+import { assertContractDiscountReadyForSave } from './contractDiscountSavePolicy';
 import { provisionApprovedSalesContractCustomer } from './accountingCustomerTreasuryPrisma';
 import {
   validateContractPartyChangeCompleteness,
@@ -528,6 +530,7 @@ export interface ContractTransactionRunner {
 const CONTRACT_CREATE_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const;
 
 export interface UpdateContractData {
+  cancelContract?: boolean;
   customerId?: string;
   title?: string;
   titlePersian?: string;
@@ -838,6 +841,7 @@ export async function createContract(
         const monetaryPlan = buildLegacyContractMigrationPlan({ id: `new-contract:${contractNumber}`,
           totalAmount: data.totalAmount ?? null, contractData }, 1, CURRENT_CONTRACT_PRODUCT_POLICY_V3, true);
         if (!monetaryPlan.ok) throw new ContractProductGraphValidationError(monetaryPlan.conflicts, contractData);
+        assertContractDiscountReadyForSave(contractData, projectCanonicalProductGraph(monetaryPlan.graph, 'accounting').products);
         const monetary = sealContractPayableTotal(monetaryPlan.reconciliation.canonicalTotalAmountToman,
           contractData, data.totalAmount, data.currency || 'تومان');
         contractData = monetary.contractData;
@@ -1025,7 +1029,8 @@ export async function updateContract(
   contractId: string,
   data: UpdateContractData,
   userId: string,
-  client: PrismaClient = prisma
+  client: PrismaClient = prisma,
+  options: { cancellationAuthority?: { canCancelApproved: boolean; meta?: RequestEvidenceMeta } } = {}
 ) {
   // Get existing contract
   const contract = await client.salesContract.findUnique({
@@ -1097,6 +1102,14 @@ export async function updateContract(
     }
     if (!validateContractAccess(transactionContract, user)) throw new Error('Access denied');
     if (transactionContract.isInactive) throw new Error('Contract cannot be modified in current status');
+    if (data.cancelContract === true) {
+      if (!options.cancellationAuthority || transactionContract.partnerKind || transactionContract.partnerCaseId) {
+        throw new Error('Access denied');
+      }
+      if (transactionContract.status === 'APPROVED' && !options.cancellationAuthority.canCancelApproved) {
+        throw new Error('این قرارداد تایید شده است و بدون دسترسی ویژه قابل لغو نیست');
+      }
+    }
     const transactionCorrection = await getApprovedSalesCorrection(contractId, tx);
     const transactionFinancialApproval = await tx.accountingFinancialRecord.findFirst({
       where: { contractId, financiallyApprovedAt: { not: null } },
@@ -1168,6 +1181,7 @@ export async function updateContract(
       totalAmount: data.totalAmount ?? transactionContract.totalAmount, contractData: nextContractData },
       (existingGraph?.revision ?? 0) + 1, calculationPolicy, true);
     if (!preparedGraph.ok) throw new ContractProductGraphValidationError(preparedGraph.conflicts, nextContractData);
+    assertContractDiscountReadyForSave(nextContractData, projectCanonicalProductGraph(preparedGraph.graph, 'accounting').products);
     if (transactionContract.status === 'DRAFT' && !transactionFinancialRecord) {
       const monetary = sealContractPayableTotal(preparedGraph.reconciliation.canonicalTotalAmountToman,
         nextContractData, data.totalAmount ?? transactionContract.totalAmount, data.currency || transactionContract.currency || 'تومان');
@@ -1387,6 +1401,19 @@ export async function updateContract(
     }
     await synchronizeSellerCredit(tx, persistedContract, userId);
     await validateSpecialCustomerCreditPlan(tx, persistedContract);
+    if (data.cancelContract === true) {
+      const cancellation = await contractConfirmationService.cancelContract({
+        contractId, requestedBy: userId, transaction: tx,
+        canCancelApproved: options.cancellationAuthority!.canCancelApproved,
+        meta: options.cancellationAuthority!.meta,
+      });
+      if (!cancellation.success) throw new Error(cancellation.error);
+      if (transactionCorrection) await completeSalesContractCorrectionEdit(tx, {
+        contractId, actorUserId: userId, policyVersion: 2,
+        note: data.notes || 'لغو و ویرایش قرارداد با یک ذخیره ثبت شد.',
+      });
+      return { ...persistedContract, ...await tx.salesContract.findUniqueOrThrow({ where: { id: contractId } }) };
+    }
     return persistedContract;
   });
 

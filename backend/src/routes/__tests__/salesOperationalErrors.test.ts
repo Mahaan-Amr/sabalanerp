@@ -81,6 +81,10 @@ test('customer name mismatch remains actionable instead of becoming a generic re
 });
 
 test('a signed contract edit requires Accounting correction instead of an unexpected 500', () => {
+  const expired = knownContractUpdateBusinessFailure('DUTY_SALES_EDIT_EXPIRED');
+  assert.equal(expired?.status, 409);
+  assert.equal(expired?.body.code, 'DUTY_SALES_EDIT_EXPIRED');
+  assert.match(expired!.body.error, /مهلت اصلاح پایان یافته/);
   assert.deepEqual(knownContractUpdateBusinessFailure(
     'Signed contract commercial evidence can only change through an approved formal correction',
   ), {

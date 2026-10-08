@@ -42,6 +42,7 @@ const actionPresentation: Record<string, { label: string; icon: typeof FaCheck; 
   RETURN_TO_SELLER: { label: 'بازگرداندن', icon: FaReply, tone: 'warning' },
   DECLINE: { label: 'رد درخواست', icon: FaTimes, tone: 'danger' },
   VERIFY: { label: 'تأیید اصلاح', icon: FaCheck, tone: 'success' },
+  EDIT_PERIOD_EXPIRED: { label: 'مهلت پایان‌یافته؛ ارجاع به حسابداری', icon: FaReply, tone: 'warning' },
 };
 const fieldLabel: Record<string, string> = { title: 'عنوان', description: 'خلاصه لازم', dueAt: 'مهلت' };
 const evidenceLabel: Record<string, string> = {
@@ -56,6 +57,7 @@ const eventLabel: Record<string, string> = {
   QUEUED: 'ارسال به صف مشترک', MIGRATED_TO_SHARED_DECISION: 'تبدیل به تصمیم مشترک',
   WORKSPACE_ADMIN_SELF_DECISION: 'تصمیم مدیر فضای کاری روی درخواست خود',
   SYSTEM_ADMIN_SELF_DECISION: 'تصمیم مدیر سیستم روی درخواست خود',
+  EDIT_PERIOD_EXPIRED: 'مهلت پایان‌یافته؛ ارجاع به حسابداری',
 };
 const systemReasonLabel: Record<string, string> = {
   SOURCE_CHANGED: 'تغییر وضعیت منبع', RESPONSIBILITY_CHANGED: 'تغییر مسئولیت سازمانی',
@@ -142,7 +144,7 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
 
   const respond = (actionCode: string) => {
     if (!state.data || pendingAction) return;
-    if (!['APPROVE', 'FORWARD_TO_MANAGER', 'VERIFY'].includes(actionCode) && reason.trim().length < 3) {
+    if ((state.data.responseRequiresReason || !['APPROVE', 'FORWARD_TO_MANAGER', 'VERIFY'].includes(actionCode)) && reason.trim().length < 3) {
       setReasonError('برای این اقدام، دلیل کوتاه و روشن وارد کنید.');
       return;
     }
@@ -372,7 +374,7 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
         <ErpSection title="ثبت نتیجه" description="نتیجه مستقیماً و یک‌بار به فرایند مبدأ بازگردانده می‌شود.">
           {correctionAction && (
             <div className="mb-4">
-              <label className="sds-text-secondary mb-3 block text-sm font-semibold" htmlFor="duty-reason">دلیل بازگشت برای اصلاح</label>
+              <label className="sds-text-secondary mb-3 block text-sm font-semibold" htmlFor="duty-reason">دلیل اقدام</label>
               <ErpTextarea
                 id="duty-reason"
                 value={reason}
@@ -384,7 +386,7 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
               <p id="duty-reason-hint" className="sds-text-muted mt-2 text-xs">مشکل و اقدام اصلاحی لازم را کوتاه و روشن بنویسید.</p>
               {reasonError && <p id="duty-reason-error" role="alert" className="mt-2 text-sm font-semibold text-[var(--sds-danger)]">{reasonError}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
-                <ErpButton label="ثبت بازگشت برای اصلاح" tone="warning" disabled={Boolean(pendingAction) || state.loading || state.stale} onClick={() => respond(correctionAction)} />
+                <ErpButton label="ثبت تصمیم" tone="warning" disabled={Boolean(pendingAction) || state.loading || state.stale} onClick={() => respond(correctionAction)} />
                 <ErpButton label="انصراف" variant="soft" disabled={Boolean(pendingAction)} onClick={() => { setCorrectionAction(null); setReason(''); setReasonError(null); }} />
               </div>
             </div>
@@ -396,12 +398,15 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
               return (
                 <ErpButton
                   key={actionCode}
-                  label={pendingAction === actionCode ? 'در حال ثبت…' : presentation.label}
+                  label={pendingAction === actionCode ? 'در حال ثبت…'
+                    : duty.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION' && actionCode === 'VERIFY' && duty.responseRequiresReason ? 'بستن درخواست'
+                    : duty.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION' && actionCode === 'RETURN_TO_SELLER' ? 'درخواست فرصت مجدد از مدیر'
+                    : presentation.label}
                   icon={presentation.icon}
                   tone={presentation.tone}
                   variant={actionCode === 'APPROVE' ? 'solid' : 'soft'}
                   disabled={Boolean(pendingAction) || state.loading || state.stale || Boolean(correctionAction && correctionAction === actionCode)}
-                  onClick={() => ['APPROVE', 'FORWARD_TO_MANAGER', 'VERIFY'].includes(actionCode)
+                  onClick={() => !duty.responseRequiresReason && ['APPROVE', 'FORWARD_TO_MANAGER', 'VERIFY'].includes(actionCode)
                     ? respond(actionCode) : setCorrectionAction(actionCode)}
                 />
               );

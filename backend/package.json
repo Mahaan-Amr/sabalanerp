@@ -45,7 +45,7 @@
     "test:hr-redesign-data-contracts": "tsx src/services/__tests__/hrRedesignDataContracts.test.ts && tsx src/services/__tests__/hrAuthorizationPolicy.test.ts && tsx src/routes/__tests__/hrRedesignRoutes.test.ts && tsx src/routes/__tests__/hrAuthorizationRoutes.test.ts",
     "test:hr-duty-engine": "tsx src/services/__tests__/hrDutyEngine.test.ts && tsx src/services/__tests__/hrDutyNotificationAuthorization.test.ts && tsx src/routes/__tests__/hrDutyRoutes.test.ts && tsx src/services/__tests__/hrDutyEngine.integration.test.ts",
     "test:cross-workspace-duty-phase1": "tsx --test src/services/__tests__/crossWorkspaceDutyModule.integration.test.ts src/services/__tests__/crossWorkspaceDutyInbox.integration.test.ts && npm run test:hr-duty-engine",
-    "test:sales-contract-correction-duty": "tsx --test src/services/__tests__/salesContractCorrectionDuty.integration.test.ts && tsx src/routes/__tests__/salesContractCorrectionRoutes.test.ts",
+    "test:sales-contract-correction-duty": "tsx --test src/services/__tests__/salesContractCorrectionDuty.integration.test.ts src/services/__tests__/expiredSalesCorrection.integration.test.ts && tsx src/routes/__tests__/salesContractCorrectionRoutes.test.ts",
     "test:hr-duty-baseline": "tsx --test src/services/__tests__/hrDutyBaselineReport.integration.test.ts src/services/__tests__/hrDutyBaselineCommand.integration.test.ts",
     "test:hr-organization-capacity": "tsx src/services/__tests__/hrOrganizationCapacity.test.ts && tsx src/services/__tests__/hrOrganizationCapacity.integration.test.ts",
     "test:hr-redesign-migration": "tsx src/services/__tests__/hrRedesignDataMigration.integration.test.ts",

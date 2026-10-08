@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { FaClock, FaExclamationTriangle, FaInbox, FaSync, FaUserCheck, FaUserShield } from 'react-icons/fa';
 import {
   ErpBadge,
@@ -8,6 +8,8 @@ import {
   ErpCard,
   ErpEmptyState,
   ErpInlineState,
+  ErpField,
+  ErpInput,
   ErpMetricGrid,
   ErpNeumorphicMetricGrid,
   type ErpNeumorphicMetric,
@@ -40,20 +42,28 @@ type QueueData = { summary: DestinationDutySummary; duties: DestinationDuty[]; v
 
 export function DestinationDutyQueue({ workspace, metricPresentation = 'default' }: { workspace: string; metricPresentation?: 'default' | 'neumorphic' }) {
   const [view, setView] = useState<DestinationDutyView>('assigned');
+  const [search, setSearch] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
+  const requestSequence = useRef(0);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setHistorySearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
   const [state, dispatch] = useReducer(
     reduceDestinationDutyState<QueueData>,
     initialDestinationDutyState as typeof initialDestinationDutyState & { data: QueueData | null },
   );
 
   const load = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     dispatch({ type: 'start' });
     try {
       const [summary, duties] = await Promise.all([
         hrDutyApi.summary(workspace),
-        hrDutyApi.list(workspace, view),
+        hrDutyApi.list(workspace, view, historySearch),
       ]);
       let resolvedSummary = summary.data.data;
-      if (view === 'history' && duties.data.data.length > 0) {
+      if (view === 'history' && !historySearch && duties.data.data.length > 0) {
         const seenThrough = duties.data.data.reduce((latest, duty) => (
           duty.updatedAt > latest ? duty.updatedAt : latest
         ), duties.data.data[0].updatedAt);
@@ -75,14 +85,15 @@ export function DestinationDutyQueue({ workspace, metricPresentation = 'default'
           // Available work remains readable; the badge stays until acknowledgement succeeds.
         }
       }
-      dispatch({ type: 'success', data: { summary: resolvedSummary, duties: duties.data.data, view } });
+      if (sequence === requestSequence.current) dispatch({ type: 'success', data: { summary: resolvedSummary, duties: duties.data.data, view } });
     } catch (error) {
+      if (sequence !== requestSequence.current) return;
       dispatch({ type: 'failure', message: getSalesOperationalErrorMessage(error, {
         failedAction: 'به‌روزرسانی وظایف',
         nextStep: 'صفحه را تازه‌سازی و دوباره تلاش کنید.',
       }) });
     }
-  }, [view, workspace]);
+  }, [view, workspace, historySearch]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -125,11 +136,15 @@ export function DestinationDutyQueue({ workspace, metricPresentation = 'default'
         : <ErpMetricGrid items={metrics} />}
       <ErpSection>
         <ErpSegmentedControl options={options} value={displayedView} onChange={setView} />
+        {view === 'history' && <ErpField label="جست‌وجوی سوابق" className="mt-4">
+          <ErpInput type="search" value={search} onChange={event => setSearch(event.target.value)}
+            placeholder="شماره قرارداد، نام مشتری یا عنوان وظیفه" maxLength={200} />
+        </ErpField>}
       </ErpSection>
       {state.loading && <ErpInlineState kind="empty" title="در حال به‌روزرسانی" />}
       {!duties.length ? (
         <ErpEmptyState
-          title={dutyQueueEmptyTitle(displayedView)}
+          title={displayedView === 'history' && historySearch ? 'سابقه‌ای با این عبارت پیدا نشد.' : dutyQueueEmptyTitle(displayedView)}
           description="این شمارش واقعی است و با به‌روزرسانی تغییر می‌کند."
           icon={FaInbox}
         />
@@ -140,7 +155,7 @@ export function DestinationDutyQueue({ workspace, metricPresentation = 'default'
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="sds-text-primary text-base font-semibold">{duty.fields.title || actionLabel[duty.sourceActionCode] || 'وظیفه سازمانی'}</h2>
-                  <ErpBadge tone={duty.overdue ? 'danger' : duty.status === 'OPEN' ? 'info' : 'neutral'}>{statusLabel[duty.status] || 'وضعیت نامشخص'}</ErpBadge>
+                  <ErpBadge tone={duty.overdue ? 'danger' : duty.status === 'OPEN' ? 'info' : 'neutral'}>{(duty.result as { actionCode?: string } | null)?.actionCode === 'EDIT_PERIOD_EXPIRED' ? 'مهلت پایان‌یافته؛ ارجاع به حسابداری' : statusLabel[duty.status] || 'وضعیت نامشخص'}</ErpBadge>
                 </div>
                 <p className="sds-text-muted text-sm">مهلت: {duty.dueAtDisplay}</p>
                 {duty.overdue && <p className="text-sm font-semibold text-[var(--sds-danger)]">مهلت انجام گذشته است.</p>}

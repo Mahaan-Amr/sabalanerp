@@ -105,6 +105,7 @@ interface UseContractEditRecoveryInput<Payload> {
   onCreationDraftUnavailable?: () => void;
   onRecoveryAvailable?: (payload: Payload) => void;
   onRestore: (payload: Payload) => void;
+  correctionExpiresAt?: string | null;
 }
 
 export const useContractEditRecovery = <Payload>({
@@ -115,7 +116,8 @@ export const useContractEditRecovery = <Payload>({
   onDraftDiscovered,
   onCreationDraftUnavailable,
   onRecoveryAvailable,
-  onRestore
+  onRestore,
+  correctionExpiresAt,
 }: UseContractEditRecoveryInput<Payload>) => {
   const scopeKey = scope ? getContractRecoveryStorageKey(scope) : null;
   const [browserSessionId] = useState(getOrCreateContractBrowserSessionId);
@@ -187,6 +189,11 @@ export const useContractEditRecovery = <Payload>({
 
   const acquire = useCallback(async (takeover: boolean): Promise<boolean> => {
     if (!scope || !scopeKey || deactivatedRef.current) return false;
+    if (correctionExpiresAt && Date.parse(correctionExpiresAt) <= Date.now()) {
+      setBlockReason('correction-expired');
+      setReady(true);
+      return false;
+    }
     const local = parseContractRecoveryEnvelope<Payload>(
       window.localStorage.getItem(scopeKey),
       scope
@@ -248,7 +255,20 @@ export const useContractEditRecovery = <Payload>({
     } finally {
       if (takeover) setTakeoverPending(false);
     }
-  }, [applyNewestRecovery, browserSessionId, checkpointState, contractId, scope, scopeKey]);
+  }, [applyNewestRecovery, browserSessionId, checkpointState, contractId, scope, scopeKey, correctionExpiresAt]);
+
+  useEffect(() => {
+    if (!ready || !correctionExpiresAt) return;
+    const deadline = Date.parse(correctionExpiresAt);
+    if (!Number.isFinite(deadline)) return;
+    const check = () => {
+      if (Date.now() >= deadline) setBlockReason('correction-expired');
+    };
+    check();
+    const timer = window.setInterval(check, 1_000);
+    window.addEventListener('focus', check);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', check); };
+  }, [correctionExpiresAt, ready]);
 
   useEffect(() => {
     if (!scope || !scopeKey) return;
@@ -470,6 +490,10 @@ export const useContractEditRecovery = <Payload>({
   }, [clearLocalRecovery]);
 
   const reportMutationFailure = useCallback((error: any): string | null => {
+    if (error?.response?.data?.code === 'DUTY_SALES_EDIT_EXPIRED') {
+      setBlockReason('correction-expired');
+      return getContractEditRecoveryMessage('correction-expired');
+    }
     const status = error?.response?.status;
     if (status !== 409 && status !== 403) return null;
     const conflict = error?.response?.data?.conflict;

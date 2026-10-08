@@ -94,6 +94,7 @@ export interface PartnerContractWizardProps {
   now: number;
   externalError?: string | null;
   correctionReason?: string | null;
+  correctionDueAt?: string | null;
   readCommercialState?: (view: PartnerCaseView) => Promise<PartnerCommercialState | undefined>;
   mismatchedRowIds?: readonly string[];
   canonicalRetailReady?: boolean;
@@ -111,11 +112,21 @@ export interface PartnerContractWizardProps {
   onOpenCase: (caseId: string) => Promise<void> | void;
 }
 
-export function PartnerContractWizard({ draft, onChange, recovery, submission, now, externalError, correctionReason, readCommercialState, mismatchedRowIds = [],
+export function PartnerContractWizard({ draft, onChange, recovery, submission, now, externalError, correctionReason, correctionDueAt, readCommercialState, mismatchedRowIds = [],
   canonicalRetailReady = true, renderSection, validateStep, onReinquire, onEditProducts, onEditProduct,
   onSendConfirmation, onFinalize, onCaseNumbered, onOpenCase, onPreparePricingQuote, onRejectPrice }: PartnerContractWizardProps) {
   const result = useSyncExternalStore(submission.subscribe, submission.getSnapshot, submission.getSnapshot);
   const [error, setError] = useState<string | null>(null);
+  const [clock, setClock] = useState(now);
+  useEffect(() => {
+    if (!correctionDueAt) return;
+    const check = () => setClock(Date.now());
+    check();
+    const timer = window.setInterval(check, 1_000);
+    window.addEventListener('focus', check);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', check); };
+  }, [correctionDueAt]);
+  const correctionExpired = Boolean(correctionDueAt && Date.parse(correctionDueAt) <= Math.max(now, clock));
   const [discardOpen, setDiscardOpen] = useState(false);
   const [recoveryPending, setRecoveryPending] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
@@ -155,7 +166,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const expiredRows = unusable.filter(({ inquiryRow }) => inquiryRowState(inquiryRow, now) === 'EXPIRED');
   const rejectedRows = unusable.filter(({ inquiryRow }) => inquiryRow.state === 'REJECTED');
   const mutatePending = result.phase === 'submitting' || result.phase === 'uncertain';
-  const disabled = recovery.state !== 'writable' || mutatePending || quotePending || actionPending;
+  const disabled = correctionExpired || recovery.state !== 'writable' || mutatePending || quotePending || actionPending;
   const [commercialSnapshot, setCommercialSnapshot] = useState<{ key: string; value: PartnerCommercialState } | null>(null);
   const commercialKey = result.case ? `${result.case.owner.caseId}:${result.case.owner.revision}:${result.case.owner.integrityHash}` : '';
   useEffect(() => {
@@ -366,7 +377,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     clickableSteps={Boolean(result.case)}
     onStepClick={step => move(step - 1)}
     notices={<div className="mb-4 space-y-3">
-      {correctionReason && <ErpInlineState kind="stale" title={contractCorrectionBannerTitle(correctionReason)} />}
+      {correctionExpired ? <ErpInlineState kind="stale"
+        title="مهلت اصلاح پایان یافته؛ درخواست به حسابداری ارجاع شد. تغییرات ذخیره‌نشده برای بازیابی حفظ شده است."
+        action={{ label: 'مشاهده وظایف فروش', href: '/dashboard/sales/duties' }} />
+        : correctionReason && <ErpInlineState kind="stale" title={contractCorrectionBannerTitle(correctionReason)} />}
       {['pricing', 'confirmation'].includes(draft.step) && result.case && compactStatus && <ErpCard className="flex flex-wrap items-center gap-2 p-2">
         <span className="text-sm font-bold">{partnerTrackingCode(result.case.caseNumber, result.case.trackingNumber)}</span>
         <ErpBadge tone="neutral">قرارداد: {compactStatus.contract}</ErpBadge>

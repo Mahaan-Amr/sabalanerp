@@ -270,6 +270,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const [wizard, setWizard] = useState<PartnerWizardDraft | null>(null);
   const retainedPaymentPlan = useRef<CustomerPaymentPlan>();
   const [correctionReason, setCorrectionReason] = useState<string | null>(null);
+  const [correctionDueAt, setCorrectionDueAt] = useState<string | null>(null);
   const [editingCase, setEditingCase] = useState<PartnerCaseView | null>(null);
   const readCommercialState = useCallback(async (view: PartnerCaseView) => {
     const response = await api.post('/partner/cases/query-v2', { caseId: view.owner.caseId });
@@ -1187,6 +1188,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       retainedPaymentPlan.current = retainedPartnerWizardPayments(cases.data.cases[0].view.customerPaymentPlan,
         recoveredWizard.data.intent.customerPaymentPlan);
       setCorrectionReason(cases.data.cases[0].reviewedCorrection?.reason ?? null);
+      setCorrectionDueAt(cases.data.cases[0].reviewedCorrection?.dueAt ?? null);
       setEditingCase(cases.data.cases[0].view);
       setCustomerId(value.customerId); setContractDate(value.contractDate!); setProjectId(value.projectId ?? '');
       persistRuntime(value);
@@ -1729,7 +1731,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         onClick={() => window.location.reload()} />}
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
-  if (wizard && submission) return <PartnerContractWizard draft={{ ...wizard, rows: presentPartnerRetailRows(wizard.rows, technicalDraft, technicalProducts) }} onChange={updateWizard} recovery={{ state: 'writable' }} externalError={error} correctionReason={correctionReason} readCommercialState={readCommercialState}
+  if (wizard && submission) return <PartnerContractWizard draft={{ ...wizard, rows: presentPartnerRetailRows(wizard.rows, technicalDraft, technicalProducts) }} onChange={updateWizard} recovery={{ state: 'writable' }} externalError={error} correctionReason={correctionReason} correctionDueAt={correctionDueAt} readCommercialState={readCommercialState}
     submission={submission} now={Date.now()} renderSection={renderSection}
     canonicalRetailReady={wizard.rows.every(row => Boolean(row.retailEffectiveUnitPrice))}
     onPreparePricingQuote={async current => {

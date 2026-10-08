@@ -1549,10 +1549,23 @@ test('one Accounting permission permits repeated Partner edits, resets both appr
       twice.value.case.owner.integrityHash, 'shared-edit-expired', 'COMMITTED');
     assert.equal((await service(tx, ids).execute(third)).ok, false);
     assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, twice.value.case.owner.revision);
-    const renewed = await openPartnerCommercialEditPermission(tx, { contractId: contract.id, actorUserId: ids.responderId,
-      reason: 'تمدید دسترسی مشترک', requestKey: randomUUID(), now: new Date() });
-    assert.notEqual(renewed.id, grant.id);
-    assert.equal((await tx.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty!.id } })).status, 'CANCELLED');
+    const { completeSalesContractCorrectionEdit } = await import('../salesContractCorrectionDuty');
+    const { respondToCrossWorkspaceDuty } = await import('../crossWorkspaceDutyModule');
+    const { listCrossWorkspaceDuties } = await import('../crossWorkspaceDutyInbox');
+    const expired = await completeSalesContractCorrectionEdit(tx, { contractId: contract.id,
+      actorUserId: 'system:commercial-correction-expiry', note: 'مهلت پایان یافته', now: new Date(), policyVersion: 2, periodExpired: true });
+    assert.equal(expired.successor.sourceActionCode, 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION');
+    assert.ok((await listCrossWorkspaceDuties(tx, { actorUserId: ids.managerId, workspaceCode: 'accounting', view: 'assigned' }))
+      .some(row => row.id === expired.successor.id));
+    const review = await respondToCrossWorkspaceDuty(tx, { dutyId: expired.successor.id, actorUserId: ids.managerId,
+      actionCode: 'RETURN_TO_SELLER', expectedSourceVersion: expired.successor.sourceVersion, expectedEnvelopeVersion: expired.successor.envelopeVersion,
+      reason: 'درخواست فرصت تازه', now: new Date(), policyVersion: 2 });
+    const renewal = await respondToCrossWorkspaceDuty(tx, { dutyId: review.successor.id, actorUserId: ids.managerId,
+      actionCode: 'APPROVE', expectedSourceVersion: review.successor.sourceVersion, expectedEnvelopeVersion: review.successor.envelopeVersion,
+      reason: 'تأیید مدیر حسابداری', now: new Date(), policyVersion: 2 });
+    assert.equal(renewal.correction.id, grant.id, 'renewal preserves the single correction chain');
+    assert.notEqual(renewal.successor.id, duty!.id);
+    assert.equal((await tx.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty!.id } })).status, 'COMPLETED');
     assert.equal((await service(tx, ids).execute(third)).ok, true);
     const { approvePartnerCommercialSales, acceptPartnerCustomer } = await import('../partnerSales/cases/commercialLifecycle');
     const savedContract = await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } });

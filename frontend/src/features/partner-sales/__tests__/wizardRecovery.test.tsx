@@ -276,6 +276,16 @@ test('an active competing location presents one takeover decision without a sepa
   assert.doesNotMatch(html, /ادامه پیش‌نویس<|قیمت فروش به مشتری —/);
 });
 
+test('correction deadline keeps the Partner editor mounted and disables saving with a clear Accounting handoff', () => {
+  const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'date' }} onChange={() => undefined}
+    recovery={{ state: 'writable' }} submission={submission()} now={Date.parse('2026-08-27T09:00:00.000Z')}
+    correctionReason="اصلاح مجاز" correctionDueAt="2026-08-27T09:00:00.000Z"
+    renderSection={() => <p>retained-unsaved-form</p>} validateStep={() => null} onReinquire={() => undefined} onOpenCase={() => undefined} />);
+  assert.match(html, /مهلت اصلاح پایان یافته/);
+  assert.match(html, /retained-unsaved-form/);
+  assert.match(html, /<fieldset disabled=""/);
+});
+
 test('expiry during the wizard retains entered retail data and exposes inline re-inquiry', () => {
   const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'pricing' }} onChange={() => undefined}
     recovery={{ state: 'writable' }} submission={submission({ ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY' })} now={Date.parse(fixture.approval.expiresAt)}

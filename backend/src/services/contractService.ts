@@ -1138,7 +1138,7 @@ export async function updateContract(
         sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: transactionCorrection.id,
         sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN',
       } });
-      if (!correctionDuty || correctionDuty.dueAt < new Date()) throw new Error('DUTY_SALES_EDIT_EXPIRED');
+      if (!correctionDuty || correctionDuty.dueAt <= new Date()) throw new Error('DUTY_SALES_EDIT_EXPIRED');
       if (user.role !== 'ADMIN' && correctionDuty.currentAssigneeUserId !== userId) throw new Error('Access denied');
     }
 
@@ -1490,6 +1490,10 @@ export async function getContract(contractId: string) {
     select: { id: true, financiallyApprovedAt: true }
   });
   const approvedSalesCorrection = await getApprovedSalesCorrection(contractId);
+  const correctionOpportunity = approvedSalesCorrection ? await prisma.crossWorkspaceDuty.findFirst({ where: {
+    sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: approvedSalesCorrection.id,
+    sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN', dueAt: { gt: new Date() },
+  }, select: { dueAt: true } }) : null;
   const existingFinancialRecord = await prisma.accountingFinancialRecord.findFirst({ where: { contractId }, select: { id: true } });
   const accountingSummaries = await buildAccountingSummaryForContracts([contract]);
 
@@ -1503,14 +1507,15 @@ export async function getContract(contractId: string) {
         )
       : null,
     accountingEditLocked: Boolean(existingFinancialRecord || contract.firstFinancialRecordAt) || (!isOrdinaryCommercialFlow(contract) && ['SIGNED', 'PRINTED'].includes(contract.status)),
-    canOpenCorrectionEdit: Boolean(approvedSalesCorrection),
-    activeCorrectionRequest: approvedSalesCorrection ? {
+    canOpenCorrectionEdit: Boolean(correctionOpportunity),
+    activeCorrectionRequest: approvedSalesCorrection && correctionOpportunity ? {
       id: approvedSalesCorrection.id,
       category: approvedSalesCorrection.category,
       priority: approvedSalesCorrection.priority,
       status: approvedSalesCorrection.status,
       accountantNote: approvedSalesCorrection.accountantNote,
-      resolutionNote: approvedSalesCorrection.resolutionNote
+      resolutionNote: approvedSalesCorrection.resolutionNote,
+      dueAt: correctionOpportunity.dueAt,
     } : null,
     accountingFinanciallyApprovedAt: financiallyApprovedRecord?.financiallyApprovedAt || null,
     accounting: accountingSummaries.get(contract.id) || null

@@ -4,7 +4,8 @@ export type ContractEditRecoveryBlockReason =
   | 'recovery-conflict'
   | 'takeover-failed'
   | 'permission'
-  | 'ownership-lost';
+  | 'ownership-lost'
+  | 'correction-expired';
 
 type ContractEditRecoveryFailurePhase = 'acquire' | 'takeover' | 'checkpoint';
 
@@ -73,5 +74,6 @@ export const getContractEditRecoveryMessage = (
   'recovery-conflict': 'همگام‌سازی امن پیش‌نویس با سرور ممکن نشد؛ برای جلوگیری از بازنویسی، ادامه متوقف شد',
   'takeover-failed': 'انتقال اختیار ویرایش انجام نشد؛ دوباره تلاش کنید',
   permission: 'شما اجازه ویرایش این قرارداد را ندارید',
-  'ownership-lost': 'اختیار ویرایش این قرارداد به محل دیگری منتقل شده است'
+  'ownership-lost': 'اختیار ویرایش این قرارداد به محل دیگری منتقل شده است',
+  'correction-expired': 'مهلت اصلاح پایان یافته؛ درخواست به حسابداری ارجاع شد. تغییرات ذخیره‌نشده برای بازیابی حفظ شده است.'
 })[reason];

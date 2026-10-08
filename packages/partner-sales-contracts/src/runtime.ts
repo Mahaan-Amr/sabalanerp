@@ -25,7 +25,7 @@ export const PartnerCaseRuntimeActionsSchema = z.object({
 export const PartnerCaseRuntimeRowSchema = z.object({
   view: PartnerCaseViewSchema,
   customerContractId: IdSchema.optional(),
-  reviewedCorrection: z.object({ requestId: IdSchema, reason: z.string().min(1) }).strict().optional(),
+  reviewedCorrection: z.object({ requestId: IdSchema, reason: z.string().min(1), dueAt: InstantSchema.optional() }).strict().optional(),
   commercial: PartnerCommercialStateSchema.optional(),
   pricingResponseState: z.enum(['READY', 'PARTIAL', 'WAITING', 'REJECTED', 'EXPIRED']).optional(),
   accountingCorrectionRequests: z.array(z.object({ id: IdSchema, reason: z.string().min(1),

@@ -220,6 +220,10 @@ const authorizeLoadedDuty = async (
   knownManager?: boolean,
   summaryOnly = false,
 ) => {
+  if (duty.status === 'OPEN' && duty.sourceType === 'SALES_CONTRACT_CORRECTION'
+    && duty.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION' && duty.dueAt <= now) {
+    throw new Error('DUTY_SALES_EDIT_EXPIRED');
+  }
   const source = await loadCrossWorkspaceDutySourceProjection(database, {
     sourceType: duty.sourceType,
     sourceId: duty.sourceId,
@@ -328,7 +332,7 @@ export const getCrossWorkspaceDutyDetail = async (
 
 export const listCrossWorkspaceDuties = async (
   database: Database,
-  input: { actorUserId: string; workspaceCode: string; view: 'assigned' | 'available' | 'triage' | 'history'; now?: Date; summaryOnly?: boolean },
+  input: { actorUserId: string; workspaceCode: string; view: 'assigned' | 'available' | 'triage' | 'history'; now?: Date; summaryOnly?: boolean; search?: string },
 ) => {
   const now = input.now ?? new Date();
   const workspaceCode = crossWorkspaceDutyDestinationCode(input.workspaceCode);
@@ -397,7 +401,14 @@ export const listCrossWorkspaceDuties = async (
     const rows = await Promise.all(duties.slice(offset, offset + 4).map(project));
     for (const row of rows) if (row) visible.push(row);
   }
-  return visible;
+  // Search only authorized, already redacted fields. Hidden source evidence
+  // must never become discoverable through a match or a result count.
+  const normalize = (value: string) => value.normalize('NFKC')
+    .replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/\u200c/g, ' ').toLocaleLowerCase().trim();
+  const query = input.view === 'history' ? normalize((input.search || '').slice(0, 200)) : '';
+  return query ? visible.filter(row => normalize([row.fields.title, row.fields.description].filter(Boolean).join(' ')).includes(query)) : visible;
 };
 
 export const getCrossWorkspaceDutySummary = async (

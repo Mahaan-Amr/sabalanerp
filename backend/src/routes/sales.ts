@@ -819,8 +819,13 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     const financiallyApprovedByContractId = new Map(
       financiallyApprovedRecords.map((record) => [record.contractId, record.financiallyApprovedAt] as const)
     );
+    const currentOpportunities = await prisma.crossWorkspaceDuty.findMany({ where: {
+      sourceType: 'SALES_CONTRACT_CORRECTION', sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN',
+      dueAt: { gt: new Date() }, sourceId: { in: approvedCorrectionRequests.map(request => request.id) },
+    }, select: { sourceId: true } });
+    const currentOpportunityIds = new Set(currentOpportunities.map(duty => duty.sourceId));
     const approvedCorrectionByContractId = new Map(
-      approvedCorrectionRequests.map((request) => [request.contractId, request] as const)
+      approvedCorrectionRequests.filter(request => currentOpportunityIds.has(request.id)).map((request) => [request.contractId, request] as const)
     );
     const contractsWithAccountingLock = await Promise.all(contracts.map(async (contract) => ({
       ...contract,

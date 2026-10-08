@@ -407,7 +407,16 @@ const claimRequiresReason: CrossWorkspaceDutySourceAdapter['claimRequiresReason'
     && await isSystemAdmin(database, input.actorUserId));
 };
 
-const responseRequiresReason: CrossWorkspaceDutySourceAdapter['responseRequiresReason'] = async () => false;
+const hasExpiredOpportunity = async (database: Parameters<CrossWorkspaceDutySourceAdapter['respond']>[0], sourceId: string) => Boolean(
+  await database.crossWorkspaceDuty.findFirst({ where: { sourceId, sourceType: 'SALES_CONTRACT_CORRECTION',
+    sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'COMPLETED',
+    structuredResultJson: { path: ['actionCode'], equals: 'EDIT_PERIOD_EXPIRED' },
+  }, select: { id: true } }),
+);
+const responseRequiresReason: CrossWorkspaceDutySourceAdapter['responseRequiresReason'] = async (database, input) => {
+  const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
+  return Boolean(duty?.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION' && await hasExpiredOpportunity(database, duty.sourceId));
+};
 
 const canAccessSharedDecision: CrossWorkspaceDutySourceAdapter['canAccessSharedDecision'] = async (database, input) => {
   const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
@@ -671,7 +680,7 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   const correction = await database.accountingCorrectionRequest.findUnique({ where: { id: duty.sourceId } });
   if (!correction || correction.dutySourceVersion !== duty.sourceVersion) throw new Error('SOURCE_STATE_CHANGED');
 
-  let nextStatus: 'ACKNOWLEDGED' | 'APPROVED_FOR_SALES_EDIT' | 'RESOLVED' | 'CANCELLED';
+  let nextStatus: 'ACKNOWLEDGED' | 'APPROVED_FOR_SALES_EDIT' | 'SALES_EDITED' | 'RESOLVED' | 'CANCELLED';
   let nextAction: string | null;
   let nextAssignee: string | null;
   let dueAt: Date | null;
@@ -710,15 +719,43 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
       dueAt = addTehranWorkingDays(now, 3);
     } else if (input.actionCode === 'DECLINE') {
       if (!input.reason?.trim()) throw new Error('REASON_REQUIRED');
-      nextStatus = 'CANCELLED';
-      nextAction = null;
+      // A refused renewal still needs Accounting disposition. The initial
+      // manager refusal retains its existing cancellation semantics.
+      const renewal = await database.crossWorkspaceDuty.findFirst({ where: {
+        sourceId: correction.id, sourceType: 'SALES_CONTRACT_CORRECTION',
+        sourceActionCode: 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION', status: 'COMPLETED',
+      } });
+      nextStatus = renewal ? 'SALES_EDITED' : 'CANCELLED';
+      nextAction = renewal ? 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION' : null;
       nextAssignee = null;
-      dueAt = null;
+      dueAt = renewal ? addTehranWorkingDays(now, 1) : null;
     } else throw new Error('ACTION_NOT_ALLOWED');
   } else if (duty.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION') {
     await assertAccountingActor(database, input.actorUserId, ACCOUNTING_CORRECTION_FEATURES.VERIFY, now);
     if (input.actionCode === 'VERIFY') {
-      await assertCorrectionFinancialWorkflowReady(database, correction.id);
+      const closeExpired = await hasExpiredOpportunity(database, correction.id);
+      if (closeExpired && String(input.reason ?? '').trim().length < 3) throw new Error('REASON_REQUIRED');
+      try {
+        if (closeExpired) {
+          const contract = await database.salesContract.findUniqueOrThrow({ where: { id: correction.contractId! }, select: { partnerCaseId: true } });
+          const root = contract.partnerCaseId ? await database.partnerSaleCase.findUnique({ where: { id: contract.partnerCaseId }, select: { internalRecordId: true } }) : null;
+          const records = await database.accountingFinancialRecord.count({ where: { OR: [
+            { contractId: correction.contractId },
+            ...(root?.internalRecordId ? [{ sourceKind: 'PARTNER_INTERNAL_RECORD' as const, sourceId: root.internalRecordId }] : []),
+          ] } });
+          const [receivables, payments, taxes] = await Promise.all([
+            database.accountingReceivable.count({ where: { contractId: correction.contractId } }),
+            database.accountingPaymentStatus.count({ where: { contractId: correction.contractId } }),
+            database.accountingTaxRecord.count({ where: { contractId: correction.contractId } }),
+          ]);
+          if (records || receivables || payments || taxes) await assertCorrectionFinancialWorkflowReady(database, correction.id);
+        } else await assertCorrectionFinancialWorkflowReady(database, correction.id);
+      } catch (error) {
+        if (error instanceof Error && /CORRECTION_|PARTNER_|[\u0600-\u06ff]/.test(error.message)) {
+          throw new Error('DUTY_CORRECTION_FINANCIAL_WORKFLOW_INCOMPLETE');
+        }
+        throw error;
+      }
       nextStatus = 'RESOLVED';
       nextAction = null;
       nextAssignee = null;
@@ -870,12 +907,15 @@ export const openPartnerCommercialEditPermission = async (database: Prisma.Trans
   if (!contract?.partnerCaseId || contract.partnerKind !== 'PARTNER_CUSTOMER' || (contract.isInactive && contract.status !== 'CANCELLED') || !contract.responsibleSellerId) {
     throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
   }
+  await database.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${contract.partnerCaseId} FOR UPDATE`;
+  await database.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${contract.id} FOR UPDATE`;
   const expired = await database.crossWorkspaceDuty.findMany({ where: { sourceType: 'SALES_CONTRACT_CORRECTION',
     sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN', dueAt: { lte: input.now },
     sourceId: { in: (await database.accountingCorrectionRequest.findMany({ where: { contractId: contract.id,
       status: 'APPROVED_FOR_SALES_EDIT' }, select: { id: true } })).map(item => item.id) } } });
-  for (const duty of expired) await closePartnerCommercialEditPermission(database, { dutyId: duty.id,
-    actorUserId: input.actorUserId, reason: 'مهلت مجوز مشترک پایان یافته است.', now: input.now, expired: true });
+  for (const duty of expired) await completeSalesCorrectionEditDuty(database, { contractId: contract.id,
+    actorUserId: input.actorUserId, note: 'مهلت مجوز مشترک پایان یافته؛ درخواست به حسابداری ارجاع شد.',
+    policyVersion: 2, now: input.now, periodExpired: true });
   const { requestAccountingSalesContractCorrection } = await import('../salesContractCorrectionDuty');
   const result = await requestAccountingSalesContractCorrection(database, {
     contractId: contract.id, actorUserId: input.actorUserId, reason: input.reason,
@@ -913,20 +953,13 @@ export const completeSalesCorrectionEditDuty = async (
   const commercialClosing = input.commercialFinality || input.periodExpired;
   if (commercialClosing) {
     const contract = await database.salesContract.findUnique({ where: { id: input.contractId } });
-    if (!contract || !((contract.commercialFlowVersion === 1 && !contract.partnerKind && !contract.partnerCaseId) || (contract.partnerKind === 'PARTNER_CUSTOMER' && contract.partnerCaseId))) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
+    if (!contract || (input.commercialFinality && !((contract.commercialFlowVersion === 1 && !contract.partnerKind && !contract.partnerCaseId) || (contract.partnerKind === 'PARTNER_CUSTOMER' && contract.partnerCaseId)))) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
     if (input.commercialFinality && !hasSpecialCustomerCreditAuthorization(contract) && (contract.status !== 'SIGNED' || (contract.commercialFlowVersion === 2 || !contract.partnerKind) && (contract.salesApprovalRevision !== contract.commercialRevision
       || contract.customerAcceptanceRevision !== contract.commercialRevision))) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
-    if (input.periodExpired && salesDuty.dueAt >= input.now) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
+    if (input.periodExpired && salesDuty.dueAt > input.now) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
   }
   if (!commercialClosing && salesDuty.currentAssigneeUserId !== input.actorUserId && !actorIsAdmin) throw new Error('ASSIGNEE_CHANGED');
-  const expiredAdminOverride = !commercialClosing && salesDuty.dueAt < input.now && actorIsAdmin;
-  if (!commercialClosing && salesDuty.dueAt < input.now && !actorIsAdmin) throw new Error('DUTY_SALES_EDIT_EXPIRED');
-  if (expiredAdminOverride) await database.crossWorkspaceDutyAuditVersion.create({ data: {
-    dutyId: salesDuty.id, version: await nextAuditVersion(database, salesDuty.id), eventCode: 'ADMIN_OVERRIDE_EXPIRED_DUTY',
-    actorUserId: input.actorUserId, sourceVersion: salesDuty.sourceVersion, envelopeVersion: salesDuty.envelopeVersion,
-    policyVersion: input.policyVersion, reason: input.note || 'اجرای اضطراری پس از مهلت',
-    afterJson: asJson({ dueAt: salesDuty.dueAt, overriddenAt: input.now }),
-  } });
+  if (!commercialClosing && salesDuty.dueAt <= input.now) throw new Error('DUTY_SALES_EDIT_EXPIRED');
   const processorDuty = await database.crossWorkspaceDuty.findFirst({
     where: {
       sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: correction.id,
@@ -1048,14 +1081,14 @@ export const salesContractCorrectionDutyAdapter = {
     if (!correction?.contractId) throw new Error('DUTY_SOURCE_CHANGED');
     const contract = await database.salesContract.findUnique({
       where: { id: correction.contractId },
-      select: { contractNumber: true, partnerCaseId: true },
+      select: { contractNumber: true, partnerCaseId: true, customer: { select: { firstName: true, lastName: true } } },
     });
     if (!contract) throw new Error('DUTY_SOURCE_CHANGED');
     return {
       title: `اصلاح قرارداد ${contract.contractNumber}`,
-      description: input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
+      description: `مشتری: ${[contract.customer.firstName, contract.customer.lastName].filter(Boolean).join(' ')}\n` + (input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
         ? `${correction.accountantNote}\nمبلغ اصلاح‌شده و رکورد مالی قبلی را در قرارداد بررسی کنید؛ در صورت نیاز ابطال و جایگزینی را پیش از تأیید تکمیل کنید.`
-        : correction.accountantNote,
+        : correction.accountantNote),
       ...(input.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION'
         ? { destinationHref: `/dashboard/sales/contracts/${correction.contractId}/edit` }
         : input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'

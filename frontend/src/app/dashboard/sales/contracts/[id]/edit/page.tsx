@@ -37,6 +37,7 @@ interface ContractForEdit extends ContractLifecyclePresentation {
     priority?: string;
     accountantNote: string;
     resolutionNote?: string | null;
+    dueAt?: string;
   } | null;
   contractData?: ContractWizardData | null;
   payments?: Array<{ paymentMethod: string; paymentDate?: string | null }>;
@@ -209,6 +210,7 @@ export default function SalesContractEditPage() {
         mode="edit"
         contractId={contract.id}
         initialContractStatus={contract.status}
+        correctionExpiresAt={contract.activeCorrectionRequest?.dueAt}
         initialWizardData={{
           ...contract.contractData,
           payment: { ...contract.contractData.payment, payments: contract.contractData.payment.payments.map(payment => {

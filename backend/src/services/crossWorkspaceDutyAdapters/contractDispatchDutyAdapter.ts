@@ -78,14 +78,14 @@ export const contractDispatchDutyAdapter: CrossWorkspaceDutySourceAdapter = {
   canReassign: async () => false, reassign: async () => { throw new Error('DUTY_REASSIGNMENT_NOT_ALLOWED'); },
   listEligibleAssignees: async () => [], reconcileAssignment: async () => null,
   loadInboxProjection: async (db, input) => {
-    const request = await db.contractDispatchAuthority.findUnique({ where: { id: input.sourceId }, include: { contract: true } });
+    const request = await db.contractDispatchAuthority.findUnique({ where: { id: input.sourceId }, include: { contract: { include: { customer: { select: { firstName: true, lastName: true } } } } } });
     if (!request) {
       const archived = await db.accountingAuditLog.findFirst({ where: { entityId: input.sourceId, action: 'DISPATCH_AUTHORITY_ARCHIVED_BY_HARD_DELETE' }, orderBy: { createdAt: 'desc' } });
       const before = archived?.beforeState as { contractNumber?: string } | null;
       return { title: `سابقه مجوز یا ضمانت — ${before?.contractNumber ?? ''}`, description: 'قرارداد از مسیر مجاز حذف شده و سابقه تصمیم در ممیزی حفظ شده است.', sourceIsCurrent: false };
     }
     return { title: `${request?.kind === 'TRANSFER' ? 'پذیرش انتقال ضمانت' : ['DATE','CUSTOMER_DATE'].includes(request.kind) ? 'تغییر وعده پرداخت' : 'درخواست تأیید مدیریتی'} — ${request?.contract.contractNumber ?? ''}`,
-      description: request ? `وعده پرداخت: ${request.promisedDate.toLocaleDateString('fa-IR', { timeZone: 'UTC' })}${request.reason ? ` — ${request.reason}` : ''}` : null,
+      description: request ? `مشتری: ${[request.contract.customer.firstName, request.contract.customer.lastName].filter(Boolean).join(' ')}\nوعده پرداخت: ${request.promisedDate.toLocaleDateString('fa-IR', { timeZone: 'UTC' })}${request.reason ? ` — ${request.reason}` : ''}` : null,
       sourceIsCurrent: !!request && request.status === 'PENDING' && request.revision === request.contract.commercialRevision
         && !request.contract.isInactive && !['CANCELLED','EXPIRED'].includes(request.contract.status),
       destinationHref: `/dashboard/accounting/contracts/${request?.contractId ?? ''}` };

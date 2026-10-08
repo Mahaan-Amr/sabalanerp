@@ -12,7 +12,7 @@ import {
 } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 
-export function ContractDateStepView({ creatorName, dateControl, error, numberPreview, numberNotice }: {
+export function ContractDateStepView({ creatorName, dateControl, error, numberPreview, numberNotice, numberLabel = 'پیش‌نمایش شماره احتمالی قرارداد' }: {
   creatorName?: string;
   dateControl: React.ReactElement<{
     id?: string;
@@ -21,6 +21,7 @@ export function ContractDateStepView({ creatorName, dateControl, error, numberPr
   }>;
   error?: string;
   numberPreview?: string;
+  numberLabel?: string;
   numberNotice: string;
 }) {
   return <div className="mx-auto max-w-md space-y-6">
@@ -33,7 +34,7 @@ export function ContractDateStepView({ creatorName, dateControl, error, numberPr
     <ErpField label="تاریخ قرارداد" error={error} required>{dateControl}</ErpField>
     <div>
       {numberPreview !== undefined && <>
-        <ErpField label="پیش‌نمایش شماره احتمالی قرارداد" hint={numberNotice}>
+        <ErpField label={numberLabel} hint={numberNotice}>
           <ErpInput type="text" value={numberPreview} readOnly className="w-full" />
         </ErpField>
       </>}
@@ -140,21 +141,23 @@ export function ContractCustomerStepView({ customers, selectedCustomer, selected
       const selectedRow = customer.id === selectedCustomerId;
       return <ErpNeumorphicInteractiveCard key={customer.id} type="button" aria-pressed={selectedRow} onClick={() => onSelect(customer.id)}
         className={`rounded-xl p-4 text-right ${selectedRow ? 'border-[var(--sds-accent)] bg-[var(--sds-accent-soft)]' : ''}`}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0"><h4 className="break-words text-base font-semibold text-[var(--sds-text-primary)]">{customer.title}</h4>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1"><h4 className="break-words text-sm font-semibold text-[var(--sds-text-primary)]">{customer.title}</h4>
             {customer.companyName && <p className="mt-1 flex items-center gap-2 text-sm text-[var(--sds-text-secondary)]"><FaBuilding className="h-3.5 w-3.5" /><span className="truncate">{customer.companyName}</span></p>}
           </div>
+          {customer.phone && !customer.companyName && !customer.type && !customer.status && !customer.ownerLabel &&
+            <span dir="ltr" className="inline-flex items-center gap-1 text-xs text-[var(--sds-text-secondary)]"><FaPhone className="h-3 w-3" />{customer.phone}</span>}
           <span className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${selectedRow ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent-on-soft)]' : 'bg-[var(--sds-surface-subtle)] text-[var(--sds-text-muted)]'}`}>
             {selectedRow ? <FaCheck className="h-4 w-4" /> : <FaUser className="h-4 w-4" />}
             <span className="sr-only">{selectedRow ? 'انتخاب‌شده' : 'انتخاب‌نشده'}</span>
           </span>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-[var(--sds-text-secondary)]">
+        {(customer.companyName || customer.type || customer.status || customer.ownerLabel) && <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--sds-text-secondary)]">
           {customer.type && <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1">{customer.type}</span>}
           {customer.status && <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1">{customer.status}</span>}
           {customer.phone && <span className="inline-flex items-center gap-1 rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1"><FaPhone className="h-3 w-3" />{customer.phone}</span>}
           {customer.ownerLabel && <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1">مسئول فروش: {customer.ownerLabel}</span>}
-        </div>
+        </div>}
       </ErpNeumorphicInteractiveCard>;
     })}</div>}
     </div>

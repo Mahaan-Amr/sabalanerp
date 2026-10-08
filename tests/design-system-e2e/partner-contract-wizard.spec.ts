@@ -62,12 +62,14 @@ test('Partner creation consumes the shared eight-step date, customer, and projec
       kind: 'PARTNER',
       actorId: 'partner-e2e',
       actorDisplayName: 'فروشنده همکار آزمایشی',
+      contractNumberPreview: '100777',
       profileId: 'partner-profile-e2e',
       writable: true,
       inquiryIds: [],
       recoverableDrafts: [],
       customers: [{ id: 'partner-customer-e2e', displayName: 'مشتری همکار آزمایشی', address: 'تهران', phone: '09120000000' }],
-      projects: [{ id: 'partner-project-e2e', customerId: 'partner-customer-e2e', title: 'پروژه همکار آزمایشی' }],
+      projects: [{ id: 'partner-project-e2e', customerId: 'partner-customer-e2e', title: 'پروژه همکار آزمایشی',
+        address: 'خیابان آزمایشی، کوچه ۱۰', city: 'شیراز' }],
     } }),
   }));
   await page.route('**/api/partner/technical/catalog/query', async route => {
@@ -79,12 +81,13 @@ test('Partner creation consumes the shared eight-step date, customer, and projec
 
   await page.goto('/dashboard/sales/contracts/create?newInquiry=1');
   const workflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
-  await expect(workflow.getByRole('heading', { name: 'ایجاد فروش همکار', exact: true })).toBeVisible();
+  await expect(workflow.getByRole('heading', { name: 'ایجاد قرارداد همکار', exact: true })).toBeVisible();
   const progress = workflow.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' });
   await expect(progress.getByRole('button')).toHaveCount(8);
   await expect(workflow.getByText('فروشنده همکار آزمایشی', { exact: true })).toBeVisible();
   await expect(workflow.getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last()).toBeVisible();
   await expect(workflow.getByText('شماره پس از ثبت موفق قرارداد تخصیص داده می‌شود.', { exact: true })).toBeVisible();
+  await expect(workflow.getByRole('textbox', { name: 'پیش‌نمایش شماره احتمالی قرارداد همکار', exact: true })).toHaveValue('100777');
 
   // Partner persists Gregorian dates but opens the same Jalali picker as ordinary Sales.
   const dateTrigger = workflow.getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last();
@@ -114,6 +117,16 @@ test('Partner creation consumes the shared eight-step date, customer, and projec
 
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
   const project = workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ });
+  await expect(project.getByText('خیابان آزمایشی، کوچه ۱۰', { exact: true })).toBeVisible();
+  await expect(project.getByText('شیراز', { exact: true })).toBeVisible();
+  await workflow.getByRole('button', { name: 'ایجاد پروژه', exact: true }).click();
+  const projectDialog = page.getByRole('dialog', { name: 'افزودن آدرس پروژه' });
+  await expect(projectDialog).toBeVisible();
+  await expect(projectDialog.getByRole('textbox', { name: 'آدرس', exact: true })).toHaveAttribute('rows', '3');
+  await expect(projectDialog.getByRole('textbox', { name: 'شهر', exact: true })).toBeVisible();
+  await expect(projectDialog.getByRole('button', { name: 'افزودن', exact: true })).toBeDisabled();
+  await projectDialog.getByRole('button', { name: 'انصراف', exact: true }).click();
+  await expect(projectDialog).toHaveCount(0);
   await project.focus();
   await page.keyboard.press('Enter');
   await expect(project).toHaveAttribute('aria-pressed', 'true');
@@ -193,7 +206,7 @@ test('a resumed Partner inquiry stays inside the shared eight-step contract wiza
   await page.goto('/dashboard/sales/contracts/create?draftId=partner-recovery-e2e');
   await setTheme(page, 'light');
   const workflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
-  await expect(workflow.getByRole('heading', { name: 'ایجاد فروش همکار', exact: true })).toBeVisible();
+  await expect(workflow.getByRole('heading', { name: 'ایجاد قرارداد همکار', exact: true })).toBeVisible();
   await expect(workflow.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' }).getByRole('button')).toHaveCount(8);
   await expect(workflow).toHaveCSS('direction', 'rtl');
   const previous = workflow.getByRole('button', { name: 'قبلی', exact: true });
@@ -249,7 +262,7 @@ test('a new price inquiry directs the Partner into numbered contract preparation
   await expect(page.getByRole('button', { name: /پروژه/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'ایجاد قرارداد فروش همکار', exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard\/sales\/contracts\/create$/);
-  await expect(page.getByRole('heading', { name: 'ایجاد فروش همکار', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'ایجاد قرارداد همکار', exact: true })).toBeVisible();
 });
 
 

@@ -5,6 +5,7 @@ import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpPressable, ErpInput, ErpSelect } from '@/components/erp';
 import {
   calculateProductOperations,
+  multiplyContractMonetaryAmounts,
   parseCanonicalDecimal,
   parseStableIdentity,
   splitOperationGroup,
@@ -49,6 +50,12 @@ const draftIdentity = (prefix: string) => {
 
 const operationUnitLabel = (unit: 'meter' | 'squareMeter') =>
   unit === 'meter' ? 'm' : 'm²';
+
+function RetailOperationPrice({ rate, unit, quantity }: { rate?: string; unit: 'meter' | 'squareMeter'; quantity?: string }) {
+  return <><span>{rate === undefined ? 'نرخ ثبت نشده' : `${formatPrice(rate)} / ${operationUnitLabel(unit)}`}</span>
+    <span className="font-semibold">{rate !== undefined && quantity !== undefined
+      ? formatPrice(multiplyContractMonetaryAmounts(rate, quantity)) : '—'}</span></>;
+}
 
 const resolveDisplayedOverride = (
   override: OperationQuantityOverride | undefined,
@@ -160,7 +167,8 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
   loadTools,
   loadFinishings,
   toolCacheKey = 'contract-product-tools',
-  finishingCacheKey = 'contract-product-finishings'
+  finishingCacheKey = 'contract-product-finishings',
+  retailRateFor
 }: {
   input: Input;
   onChange: (input: Input) => void;
@@ -168,6 +176,8 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
   loadFinishings: () => Promise<readonly OperationCatalogItem[]>;
   toolCacheKey?: string;
   finishingCacheKey?: string;
+  /** Authorized customer-sale suggestion for display only; never enters technical selections. */
+  retailRateFor?: (kind: 'tool' | 'finishing', item: OperationCatalogItem) => string | undefined;
 }) {
   const pricingVisible = useProductPricingVisibility();
   const showPricing = pricingVisible && !('inputRevision' in input);
@@ -395,7 +405,7 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
               ? <div className="min-h-9 py-2 text-xs text-[var(--sds-danger)]">دریافت ابزار انجام نشد</div>
               : (
                   <CatalogResults
-                    showPricing={showPricing}
+                    showPricing={showPricing || Boolean(retailRateFor)}
                     kind="tool"
                     items={toolCatalog.data ?? []}
                     onSelect={addTool}
@@ -436,6 +446,8 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(tool.unit)}</span>
                 {showPricing && <span>{!('rateToman' in tool) || tool.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(tool.rateToman)}</span>}
                 {showPricing && <span className="font-semibold">{calculated && 'amountToman' in calculated && typeof calculated.amountToman === 'string' ? formatPrice(calculated.amountToman) : '—'}</span>}
+                {!showPricing && retailRateFor && <RetailOperationPrice rate={retailRateFor('tool', tool)}
+                  unit={tool.unit} quantity={calculated?.finalQuantity} />}
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی
@@ -637,7 +649,7 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
               ? <div className="min-h-9 py-2 text-xs text-[var(--sds-danger)]">دریافت پرداخت انجام نشد</div>
               : (
                   <CatalogResults
-                    showPricing={showPricing}
+                    showPricing={showPricing || Boolean(retailRateFor)}
                     kind="finishing"
                     items={finishingCatalog.data ?? []}
                     onSelect={addFinishing}
@@ -668,6 +680,8 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(finishing.unit)}</span>
                 {showPricing && <span>{!('rateToman' in finishing) || finishing.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(finishing.rateToman)}</span>}
                 {showPricing && <span className="font-semibold">{calculated && 'amountToman' in calculated && typeof calculated.amountToman === 'string' ? formatPrice(calculated.amountToman) : '—'}</span>}
+                {!showPricing && retailRateFor && <RetailOperationPrice rate={retailRateFor('finishing', finishing)}
+                  unit={finishing.unit} quantity={calculated?.finalQuantity} />}
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی

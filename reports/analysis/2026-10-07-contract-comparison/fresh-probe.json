@@ -1,0 +1,158 @@
+{
+  "delivery005Short": "مقدار تحویل هر محصول باید دقیقاً با مقدار قرارداد برابر باشد.",
+  "exactDecimalPayments": "0",
+  "persianDeliveryInput": {
+    "raw": null,
+    "normalized": "0",
+    "rawNumeric": "NaN"
+  },
+  "arabicDeliveryInput": {
+    "raw": null,
+    "normalized": "0",
+    "rawNumeric": "NaN"
+  },
+  "removedRowPlanRetained": "product-row:1",
+  "removedRowPlanBlocked": "تحویل فقط برای محصولات قرارداد قابل ثبت است.",
+  "paymentAdapterPrecision": {
+    "before": "123456789.123456789",
+    "after": "123456789.12345679"
+  },
+  "newDatedPaymentDuringEdit": {
+    "nationalCode": "کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است."
+  },
+  "retainedDatedPaymentDuringEdit": {},
+  "incompleteWholesaleSummary": {
+    "valid": true,
+    "pricingReady": false,
+    "retail": "200",
+    "loss": false
+  },
+  "graphInitial": {
+    "conflicts": [],
+    "rows": [
+      {
+        "id": "product:audit-1",
+        "ok": true
+      }
+    ],
+    "children": [
+      {
+        "id": "remainder-product:audit-5",
+        "ok": true
+      }
+    ],
+    "inventory": []
+  },
+  "graphChildConflictAfterQuantityDecrease": {
+    "conflicts": [],
+    "rows": [
+      {
+        "id": "product:audit-1",
+        "ok": true
+      }
+    ],
+    "children": [
+      {
+        "id": "remainder-product:audit-5",
+        "ok": false,
+        "diagnostic": [
+          {
+            "code": "selected-remainder-insufficient",
+            "path": [
+              "childIntents",
+              "0",
+              "selectedRemainingStoneId"
+            ],
+            "message": "The selected remainder does not have enough capacity.",
+            "childProductRowId": "remainder-product:audit-5",
+            "sourceRemainingStoneId": "product:audit-1:base-remainder:1"
+          }
+        ]
+      }
+    ],
+    "inventory": [
+      {
+        "owner": "product:audit-1",
+        "width": "0.15",
+        "length": "1",
+        "quantity": 1
+      }
+    ]
+  },
+  "graphChildFitsAfterQuantityIncrease": {
+    "conflicts": [],
+    "rows": [
+      {
+        "id": "product:audit-1",
+        "ok": true
+      }
+    ],
+    "children": [
+      {
+        "id": "remainder-product:audit-5",
+        "ok": true
+      }
+    ],
+    "inventory": [
+      {
+        "owner": "product:audit-1",
+        "width": "0.15",
+        "length": "1",
+        "quantity": 1
+      }
+    ]
+  },
+  "graphSourceDuplication": {
+    "originalUnchanged": true,
+    "rows": [
+      "product:audit-1",
+      "product-row:duplicate-6"
+    ],
+    "childOwner": "product:audit-1",
+    "summary": {
+      "conflicts": [],
+      "rows": [
+        {
+          "id": "product:audit-1",
+          "ok": true
+        },
+        {
+          "id": "product-row:duplicate-6",
+          "ok": true
+        }
+      ],
+      "children": [
+        {
+          "id": "remainder-product:audit-5",
+          "ok": true
+        }
+      ],
+      "inventory": [
+        {
+          "owner": "product-row:duplicate-6",
+          "width": "0.15",
+          "length": "1",
+          "quantity": 2
+        }
+      ]
+    }
+  },
+  "graphDeleteChildRestoresInventory": {
+    "conflicts": [],
+    "rows": [
+      {
+        "id": "product:audit-1",
+        "ok": true
+      }
+    ],
+    "children": [],
+    "inventory": [
+      {
+        "owner": "product:audit-1",
+        "width": "0.15",
+        "length": "1",
+        "quantity": 2
+      }
+    ]
+  }
+}

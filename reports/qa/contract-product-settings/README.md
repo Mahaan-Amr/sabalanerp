@@ -1,0 +1,9 @@
+# Partner product settings — 2026-10-07
+
+- Partner customer stone-rate field uses the ordinary label and a shared geometry-section slot immediately after area, before mandatory/kerf/calibration controls. Slab also uses its canonical material-rate position; prepared/stair retain their own customer pricing state.
+- Partner rate/title/description labels use 12px and inputs 14px, matching the canonical ordinary compact fields. Longitudinal control labels cannot wrap internally; the percentage control and spacing are compact while retaining accessible touch targets.
+- Tools and finishings display the already-authorized SERVICE catalog retail suggestions, matched by kind, ID, exact snapshot and unit. No wholesale or purchase prices are introduced. The strict technical catalog and saved operation selections remain rate-free. Selected rows display exact decimal rate × canonical final quantity, including edge selection and quantity overrides; authoritative server pricing and save behavior are unchanged.
+
+Validation: design-system check, 25 foundation tests, 14 adoption tests, frontend production build/type checking, five related behavioral tests and the new retail-operation regression passed. Targeted shared Partner creation E2E passed. The local browser probe `verify.mjs` verified price placement, list rates/units, selected tool/finishing amounts, edge-dependent updates, 800px and 390px light/dark rendering. Example: 1.2m × 40cm × 12 pieces gives 5.76m²; front tool at 200000/m is 2880000, front+back is 5760000; finishing at 800000/m² is 4608000. No product or commercial contract was submitted; Partner responses are mocked.
+
+Screenshots and measured sizes are alongside this report. Existing `sabalanerp-local` frontend was rebuilt using the normal Compose source; no second stack or backend schema change.

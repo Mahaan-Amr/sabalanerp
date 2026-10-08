@@ -44,7 +44,7 @@ import { dispatchPartnerInquiryEvents, inquiryNotificationAccess } from '../serv
 import { completePartnerPricingResultDutiesForCase } from '../services/crossWorkspaceDutyAdapters/partnerPricingDutyAdapter';
 import { partnerTechnicalCaseIsEditable } from '../services/partnerSales/cases/commercialEditPermission';
 import { shouldExposePartnerRecovery } from '../services/partnerSales/cases/recoveryVisibility';
-import { generateContractNumberAssignment } from '../services/contractNumberService';
+import { generateContractNumberAssignment, getNextContractNumberPreview } from '../services/contractNumberService';
 import { enqueueCommittedPartnerCase } from '../services/partnerSales/accounting/commitQueue';
 import { meaningfulPartnerWizardUpdatedAt, reconcilePartnerCreationDrafts } from '../services/partnerSales/cases/partnerDraftRetention';
 
@@ -200,6 +200,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           actorId: request.user!.id,
           actorDisplayName: `${profile.user.firstName} ${profile.user.lastName}`.trim() || profile.user.username,
           profileId: profile.id, writable, ...(blockedCode ? { blockedCode } : {}),
+          ...(writable ? { contractNumberPreview: (await getNextContractNumberPreview(request.user!.id, tx)).contractNumber } : {}),
           ...(profile.inquiries[0] ? { latestInquiryId: profile.inquiries[0].id } : {}),
           inquiryIds: profile.inquiries.map(inquiry => inquiry.id),
           ...(recoverableDraft ? { recoverableDraft: { recoveryId: recoverableDraft.draftId,

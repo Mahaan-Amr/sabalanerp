@@ -360,14 +360,14 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     finally { confirmationFlight.current = false; setActionPending(false); }
   };
   return <ContractWizardFrame
-    title="ایجاد فروش همکار"
+    title="ایجاد قرارداد همکار"
     currentStep={stepIndex + 1}
     steps={visiblePresentationSteps}
     clickableSteps={Boolean(result.case)}
     onStepClick={step => move(step - 1)}
     notices={<div className="mb-4 space-y-3">
       {correctionReason && <ErpInlineState kind="stale" title={contractCorrectionBannerTitle(correctionReason)} />}
-      {result.case && compactStatus && <ErpCard className="flex flex-wrap items-center gap-2 p-2">
+      {['pricing', 'confirmation'].includes(draft.step) && result.case && compactStatus && <ErpCard className="flex flex-wrap items-center gap-2 p-2">
         <span className="text-sm font-bold">{partnerTrackingCode(result.case.caseNumber, result.case.trackingNumber)}</span>
         <ErpBadge tone="neutral">قرارداد: {compactStatus.contract}</ErpBadge>
         <ErpBadge tone={pricingReady || result.case.pricingState === 'READY_TO_FINALIZE' ? 'success' : rejectedRows.length ? 'danger' : 'warning'}>
@@ -389,7 +389,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         action={{ label: 'تلاش مجدد برای پاک‌سازی بازیابی', onClick: () => void submission.retry() }} />}
       {awaitingInitialPricing && draft.step === 'products' && <ErpInlineState kind="empty"
         title="با ادامه از این مرحله، پرونده شماره‌دار می‌شود و استعلام قیمت برای فروشنده سبلان ارسال خواهد شد." />}
-      {waitingForSabalan && <ErpInlineState kind="empty"
+      {draft.step === 'pricing' && waitingForSabalan && <ErpInlineState kind="empty"
         title="استعلام قیمت برای فروشنده سبلان ارسال شده است و در وظایف بین‌واحدی او قرار دارد. پس از ثبت پاسخ، قیمت خرید شما در همین پرونده نمایش داده می‌شود." />}
       {unsentRows.some(row => row.inquiryRow.submissionState === 'UNSENT') && <ErpInlineState kind="stale"
         title="محصول اصلاح‌شده ذخیره شده است. برای دریافت قیمت تازه، استعلام همان محصول را ارسال کنید." />}
@@ -414,7 +414,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     }}
   >
     <div className="min-w-0 space-y-4" aria-label="ایجاد پرونده فروش همکار">
-      <h2 ref={heading} tabIndex={-1} className="text-lg font-bold">{visibleSteps[stepIndex]?.label}</h2>
+      <h2 ref={heading} tabIndex={-1} className={['date', 'customer', 'project', 'products'].includes(draft.step) ? 'sr-only' : 'text-lg font-bold'}>{visibleSteps[stepIndex]?.label}</h2>
       {draft.intent.preparationCompleted && <ErpInlineState kind="success" title="اطلاعات قرارداد تکمیل شده است؛ تغییرات این مرحله با «ثبت یادداشت قرارداد» ذخیره می‌شود." />}
       <ErpSheet open={commitOpen} onClose={() => { if (!actionPending) setCommitOpen(false); }} presentation="modal" pending={actionPending}
         title="نهایی‌سازی خرید از سبلان و ایجاد قرارداد مشتری"

@@ -30,7 +30,7 @@ import { useWorkspace } from '@/contexts/WorkspaceContext';
 import PersianCalendar from '@/lib/persian-calendar';
 import { formatPrice } from '@/lib/numberFormat';
 import { getCrmPermissions } from '@/lib/permissions';
-import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
+import { CustomerProjectFormFields } from '@/features/crm/customer-workflow/CustomerProjectFormFields';
 import { contractLifecycleLabel } from '@/features/sales/contractLifecyclePresentation';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
@@ -1045,113 +1045,12 @@ export default function CustomerDetailPage() {
       >
             <form onSubmit={handleSubmitProject} className="space-y-4">
               {projectSubmitError && <ErpInlineState kind="error" title={projectSubmitError} />}
-              <CustomerWorkflowField label="نام پروژه" required>
-                <ErpInput
-                  type="text"
-                  value={projectFormData.projectName}
-                  onChange={(e) => setProjectFormData(prev => ({ ...prev, projectName: e.target.value }))}
-                  placeholder="نام پروژه"
-                  required
-                />
-              </CustomerWorkflowField>
-
-              <CustomerWorkflowField label="آدرس" required>
-                <ErpTextarea
-                  value={projectFormData.address}
-                  onChange={(e) => setProjectFormData(prev => ({ ...prev, address: e.target.value }))}
-                  placeholder="آدرس پروژه"
-                  rows={3}
-                  required
-                />
-              </CustomerWorkflowField>
-
-              <div className="grid grid-cols-1 gap-4">
-                <CustomerWorkflowField label="شهر">
-                  <ErpInput
-                    type="text"
-                    value={projectFormData.city}
-                    onChange={(e) => setProjectFormData(prev => ({ ...prev, city: e.target.value }))}
-                    placeholder="شهر"
-                  />
-                </CustomerWorkflowField>
-              </div>
-
-              <div>
-                <EnhancedDropdown
-                  label="نوع پروژه"
-                  value={projectFormData.projectType}
-                  onChange={(value) => setProjectFormData(prev => ({ ...prev, projectType: value }))}
-                  placeholder="انتخاب نوع پروژه"
-                  options={[{ value: '', label: 'بدون نوع پروژه' }, ...PROJECT_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))]}
-                  searchable
-                  noOptionsText="نوع پروژه‌ای پیدا نشد"
-                />
-              </div>
-
-              {/* Project Manager Information */}
-              <div className="border-t border-[var(--sds-border-default)] pt-4">
-                <h4 className="text-lg font-medium text-[var(--sds-text-primary)] mb-4 flex items-center gap-2">
-                  <FaUser className="text-[var(--sds-accent)]" />
-                  اطلاعات مدیر پروژه
-                </h4>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <CustomerWorkflowField label="نام مدیر پروژه">
-                    <ErpInput
-                      type="text"
-                      value={projectFormData.projectManagerName}
-                      onChange={(e) => setProjectFormData(prev => ({ ...prev, projectManagerName: e.target.value }))}
-                      placeholder="نام مدیر پروژه"
-                    />
-                  </CustomerWorkflowField>
-
-                  <CustomerWorkflowField label="شماره مدیر پروژه">
-                    <ErpInput
-                      type="text"
-                      value={projectFormData.projectManagerNumber}
-                      onChange={(e) => setProjectFormData(prev => ({ ...prev, projectManagerNumber: e.target.value }))}
-                      placeholder="شماره تماس مدیر پروژه"
-                    />
-                  </CustomerWorkflowField>
-                </div>
-              </div>
-
-              <div className="border-t border-[var(--sds-border-default)] pt-4">
-                <h4 className="text-lg font-medium text-[var(--sds-text-primary)] mb-4 flex items-center gap-2">
-                  <FaUser className="text-[var(--sds-info)]" />
-                  اطلاعات بازاریاب
-                </h4>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <CustomerWorkflowField label="نام بازاریاب">
-                    <ErpInput
-                      type="text"
-                      value={projectFormData.marketerFirstName}
-                      onChange={(e) => setProjectFormData(prev => ({ ...prev, marketerFirstName: e.target.value }))}
-                      placeholder="نام بازاریاب"
-                    />
-                  </CustomerWorkflowField>
-
-                  <CustomerWorkflowField label="نام خانوادگی بازاریاب">
-                    <ErpInput
-                      type="text"
-                      value={projectFormData.marketerLastName}
-                      onChange={(e) => setProjectFormData(prev => ({ ...prev, marketerLastName: e.target.value }))}
-                      placeholder="نام خانوادگی بازاریاب"
-                    />
-                  </CustomerWorkflowField>
-
-                  <CustomerWorkflowField label="شماره تماس بازاریاب" className="md:col-span-2">
-                    <ErpInput
-                      type="text"
-                      value={projectFormData.marketerPhoneNumber}
-                      onChange={(e) => setProjectFormData(prev => ({ ...prev, marketerPhoneNumber: e.target.value }))}
-                      placeholder="شماره تماس بازاریاب"
-                    />
-                  </CustomerWorkflowField>
-                </div>
-              </div>
-
+              <CustomerProjectFormFields value={{
+                ...projectFormData, projectAddress: projectFormData.address, projectCity: projectFormData.city,
+              }} onChange={(field, value) => {
+                const key = field === 'projectAddress' ? 'address' : field === 'projectCity' ? 'city' : field;
+                setProjectFormData(prev => ({ ...prev, [key]: value }));
+              }} />
               <div className="flex items-center gap-4 pt-4">
                 <ErpPressable
                   type="submit"

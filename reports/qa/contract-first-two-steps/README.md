@@ -1,0 +1,13 @@
+# اصلاح دو مرحلهٔ نخست قرارداد همکار — ۲۰۲۶-۱۰-۰۷
+
+درخواست تأییدشده کاربر: پیش‌نمایش شمارهٔ احتمالی قرارداد همکار، عنوان «ایجاد قرارداد همکار»، یکسان‌بودن component sizing با عادی، حذف ازدحام وضعیت پرونده از مراحل نخست، شماره تلفن inline برای کارت تک‌اطلاعاتی و نام کوچک‌تر، دکمهٔ فشردهٔ اطلاعات تکمیلی در فرم مشترک مشتری.
+
+پیاده‌سازی: date view مشترک label قابل تنظیم دارد؛ Partner creation context یک فیلد اختیاری شمارهٔ public بعدی دارد که همان read-only number service را داخل transaction فعلی مصرف می‌کند. شماره رزرو نمی‌شود و در اصلاح، شماره موجود مقدم است. هویت tracking Case با شماره قرارداد مشتری عوض نشده است. status card و پیام انتظار فقط در مراحل مرتبط نمایش دارند؛ خطای autosave/recovery همچنان برای پیشگیری از گم‌شدن داده دیده می‌شود. heading تکراری date/customer visually hidden و focus target حفظ شده است. کارت تک‌اطلاعاتی نام/تلفن/icon در یک ردیف دارد و metadata کارت کامل حفظ می‌شود. supplementary disclosure دکمه ghost با chevron و حداقل target44 است؛ باز/بسته‌شدن و اطلاعات فرم محفوظ‌اند.
+
+اعتبارسنجی: shared step tests ۲ و frame test۱ پاس؛ design-system check، foundation25، adoption14، architecture ownership و diff whitespace پاس. frontend و backend production source builds پاس. اولیه frontend با کمبود حافظه و backend با generated Prisma قدیمی شکست خوردند؛ frontend دوباره build شد و Prisma client با schema جاری regenerate شد، بدون migration یا تغییر schema.
+
+مرورگر suite partner-contract-wizard: ۷ پاس، ۱ شکست قدیمی toolbar برای COMMITTED و انتظار Edit به‌جای Request correction؛ همان یافته قبلی audit است. تست date/customer/project مشترک با عنوان و شماره جدید پاس شد. `verify.mjs` دو مسیر را در1280/390 و تم‌های روشن/تاریک بررسی می‌کند؛ اندازه فونت فیلد preview در هر دو14px، عدم overflow، تلفن inline، دکمه مکمل width<230 و height44..48، toggle aria-expanded و screenshots. Partner APIها mock و ordinary recovery برای حفظ draft قبلی intercept شده‌اند. ثبت مشتری/قرارداد انجام نشده است.
+
+محیط: همان sabalanerp-local استفاده شد. frontend image از source rebuild و نصب شد. backend Docker image rebuild و docker:verify به‌علت TLS دانلود Prisma شکست خوردند؛ source build پاس بود، بنابراین فایل compiled route و package runtime در container موجود همگام و همان سرویس restart شد. این همگام‌سازی **موقت محلی** است؛ recreate از image قدیمی آن را از بین می‌برد و بعد از رفع اتصال، backend image باید از source ساخته شود. prisma/schema/داده/volume عوض نشدند. preview-runtime.cjs read-only در دیتابیس موجود next-number و schema جاری را سنجید و پاس شد. readiness و login موجود سالم‌اند. هیچ deploy تولید یا انتشار Git انجام نشده است.
+
+تصاویر: `partner-date-390-light.png`، `partner-customers-390-dark.png` و `partner-customer-create-390-dark.png`؛ counterpartهای ordinary در همین پوشه. مشاهده‌های اندازه در observations.json ثبت شده‌اند.

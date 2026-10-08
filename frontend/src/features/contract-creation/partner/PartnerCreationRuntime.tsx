@@ -155,7 +155,8 @@ function partnerProjectSelection(context: PartnerContext, customerId: string): {
   return {
     customerName: context.customers.find(customer => customer.id === customerId)?.displayName,
     projects: context.projects.filter(project => project.customerId === customerId)
-      .map(project => ({ id: project.id, title: project.title })),
+      .map(project => ({ id: project.id, title: project.title, address: project.address,
+        city: project.city, managerName: project.projectManagerName, managerPhone: project.projectManagerNumber })),
   };
 }
 
@@ -606,7 +607,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       projectCommandRef.current = null;
       const activeRuntime = runtimeRef.current;
       if (activeRuntime) persistRuntime({ ...activeRuntime, customerId: selectedCustomerId, projectId: created.id });
-      setCustomerNotice('پروژه ثبت و انتخاب شد.');
+      setCustomerNotice(null);
       return created;
     } catch { setError('ثبت پروژه انجام نشد. اطلاعات را بررسی و دوباره تلاش کنید.'); }
     finally { setPending(false); }
@@ -1410,6 +1411,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     showValidationErrors: boolean) => {
     if (!context || context.kind !== 'PARTNER') return null;
     if (step === 'date') return <ContractDateStepView creatorName={context.actorDisplayName}
+      numberLabel="پیش‌نمایش شماره احتمالی قرارداد همکار"
+      numberPreview={editingCase?.customerContractNumber ?? context.contractNumberPreview ?? '—'}
       dateControl={<PersianCalendarComponent valueFormat="gregorian" value={draft.intent.contractDate} className="w-full"
         onChange={contractDate => updateWizard({ ...draft, intent: { ...draft.intent, contractDate } })} />}
       numberNotice={editingCase?.customerContractNumber ? `شماره قرارداد ${editingCase.customerContractNumber} در اصلاح حفظ می‌شود.`
@@ -1431,10 +1434,11 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         projects={selection.projects}
         selectedProjectId={draft.intent.projectId} onCreate={() => setShowProjectForm(true)}
         onSelect={value => updateWizard({ ...draft, intent: { ...draft.intent, projectId: value } })} />
-      <ErpSheet open={showProjectForm} onClose={() => setShowProjectForm(false)} title="ثبت پروژه جدید"
-        presentation="modal" pending={pending} footer={<ErpButton label="ثبت و انتخاب پروژه"
+      <ErpSheet open={showProjectForm} onClose={() => setShowProjectForm(false)} title="افزودن آدرس پروژه"
+        presentation="modal" pending={pending} footer={<div className="flex flex-wrap items-center gap-4"><ErpButton label="افزودن"
           disabled={pending || !projectFormValid} onClick={() => void createProject(context, draft.intent.customerId)
-            .then(created => created && updateWizard({ ...draft, intent: { ...draft.intent, projectId: created.id } }))} />}>
+            .then(created => created && updateWizard({ ...draft, intent: { ...draft.intent, projectId: created.id } }))} />
+          <ErpButton label="انصراف" variant="ghost" disabled={pending} onClick={() => setShowProjectForm(false)} /></div>}>
         <CustomerProjectFormFields value={projectForm} errors={projectFormErrors}
           onChange={(field, value) => setProjectForm(current => ({ ...current, [field]: value }))} />
       </ErpSheet>
@@ -1834,7 +1838,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     void openInitialInquiry();
   };
   return <ContractWizardFrame
-    title="ایجاد فروش همکار"
+    title="ایجاد قرارداد همکار"
     currentStep={saleStepIndex + 1}
     steps={partnerWizardPresentationSteps}
     notices={<div className="mb-4 space-y-3">
@@ -1857,6 +1861,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   >
     <div className="space-y-4">
       {saleStep === 'date' && <ContractDateStepView creatorName={context.actorDisplayName}
+        numberLabel="پیش‌نمایش شماره احتمالی قرارداد همکار"
+        numberPreview={editingCase?.customerContractNumber ?? context.contractNumberPreview ?? '—'}
         dateControl={<PersianCalendarComponent valueFormat="gregorian" value={contractDate} onChange={value => {
           setContractDate(value); if (runtime) persistRuntime({ ...runtime, contractDate: value });
         }} className="w-full" />}
@@ -1877,10 +1883,11 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           selectedProjectId={projectId} onSelect={value => {
             setProjectId(value); if (runtime) persistRuntime({ ...runtime, projectId: value });
           }} onCreate={() => setShowProjectForm(true)} />
-        <ErpSheet open={showProjectForm} onClose={() => setShowProjectForm(false)} title="ثبت پروژه جدید"
-          presentation="modal" pending={pending} footer={<ErpButton label="ثبت و انتخاب پروژه"
+        <ErpSheet open={showProjectForm} onClose={() => setShowProjectForm(false)} title="افزودن آدرس پروژه"
+          presentation="modal" pending={pending} footer={<div className="flex flex-wrap items-center gap-4"><ErpButton label="افزودن"
             disabled={pending || !projectFormValid}
-            onClick={() => void createProject(context)} />}>
+            onClick={() => void createProject(context)} />
+            <ErpButton label="انصراف" variant="ghost" disabled={pending} onClick={() => setShowProjectForm(false)} /></div>}>
           <CustomerProjectFormFields value={projectForm} errors={projectFormErrors}
             onChange={(field, value) => setProjectForm(current => ({ ...current, [field]: value }))} />
         </ErpSheet>
@@ -1892,6 +1899,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             row.configurationRef.productRowId === searchParams.get('focusProductRowId'))!.noteOrReason!} />}
         <PartnerTechnicalDraftEditor draft={technicalDraft} products={technicalProducts} currentProducts={catalog}
           operations={technicalOperations}
+          retailOperationCatalog={serviceCatalog}
           catalogState={catalogState} onRetryCatalog={() => setCatalogAttempt(attempt => attempt + 1)}
           sawKerfMeters={retainedCatalog?.sawKerfMeters ?? '0.003'}
           mandatoryDefaults={mandatoryDefaults}

@@ -66,6 +66,7 @@ export const PartnerCreationContextSchema = z.discriminatedUnion('kind', [
   z.object({ schemaVersion: z.literal(1), kind: z.literal('ORDINARY_SALES') }).strict(),
   z.object({ schemaVersion: z.literal(1), kind: z.literal('PARTNER'), actorId: IdSchema,
     actorDisplayName: z.string().trim().min(1).max(240).optional(),
+    contractNumberPreview: z.string().regex(/^\d+$/).optional(),
     profileId: IdSchema, writable: z.boolean(), blockedCode: z.string().optional(),
     sabalanTermsVersionId: IdSchema.optional(), latestInquiryId: IdSchema.optional(),
     inquiryIds: z.array(IdSchema).max(100),

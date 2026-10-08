@@ -1,0 +1,92 @@
+[
+  {
+    "kind": "ordinary",
+    "fonts": [
+      {
+        "name": "نام پروژه",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "آدرس",
+        "font": "14px",
+        "height": 86
+      },
+      {
+        "name": "شهر",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "نام مدیر پروژه",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "شماره مدیر پروژه",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "نام بازاریاب",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "نام خانوادگی بازاریاب",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "شماره تماس بازاریاب",
+        "font": "14px",
+        "height": 46
+      }
+    ]
+  },
+  {
+    "kind": "partner",
+    "fonts": [
+      {
+        "name": "نام پروژه",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "آدرس",
+        "font": "14px",
+        "height": 86
+      },
+      {
+        "name": "شهر",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "نام مدیر پروژه",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "شماره مدیر پروژه",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "نام بازاریاب",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "نام خانوادگی بازاریاب",
+        "font": "14px",
+        "height": 46
+      },
+      {
+        "name": "شماره تماس بازاریاب",
+        "font": "14px",
+        "height": 46
+      }
+    ]
+  }
+]

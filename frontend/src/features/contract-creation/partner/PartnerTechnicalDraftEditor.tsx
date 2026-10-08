@@ -33,6 +33,8 @@ import { partnerMoneyText } from './partnerRetail';
 import { partnerQuantityUnitCopy } from '../../partner-sales/presentation';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
+const catalogLabels: Record<ContractCatalogFamily, string> = { prepared: 'آماده', longitudinal: 'طولی', slab: 'اسلب', stair: 'پله' };
+const RetailOperationCatalog = React.createContext<readonly import('@sabalanerp/partner-sales-contracts').PartnerTechnicalServiceCatalogItem[]>([]);
 const nextDraft = (draft: PartnerTechnicalDraft, rows: PartnerTechnicalDraft['rows']) => PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: draft.inputRevision + 1, rows });
 const replaceRow = (draft: PartnerTechnicalDraft, row: PartnerTechnicalDraft['rows'][number]) => nextDraft(draft, draft.rows.map(item => item.productRowId === row.productRowId ? row : item));
 const editText = (draft: PartnerTechnicalDraft, entityId: string, field: NonNullable<PartnerTechnicalDraft['editingValues']>[number]['field'], fallback: unknown) =>
@@ -145,9 +147,10 @@ function productForCanonical(product: PartnerTechnicalProduct): Product {
     qualityNamePersian: product.attributes.quality };
 }
 
-export function PartnerTechnicalDraftEditor({ draft, products, currentProducts = products, catalogState = 'ready', onRetryCatalog, operations, mandatoryDefaults = { enabled: false, percentage: '20' }, sawKerfMeters = '0.003', preview: suppliedPreview, finalTotal, finalTotalStatus, onRetryTotal, focusProductRowId, onChange }: {
+export function PartnerTechnicalDraftEditor({ draft, products, currentProducts = products, catalogState = 'ready', onRetryCatalog, operations, retailOperationCatalog = [], mandatoryDefaults = { enabled: false, percentage: '20' }, sawKerfMeters = '0.003', preview: suppliedPreview, finalTotal, finalTotalStatus, onRetryTotal, focusProductRowId, onChange }: {
   draft: PartnerTechnicalDraft; products: PartnerTechnicalProduct[]; operations: PartnerTechnicalOperation[]; sawKerfMeters?: string;
   currentProducts?: PartnerTechnicalProduct[];
+  retailOperationCatalog?: readonly import('@sabalanerp/partner-sales-contracts').PartnerTechnicalServiceCatalogItem[];
   catalogState?: 'loading' | 'ready' | 'error';
   onRetryCatalog?: () => void;
   mandatoryDefaults?: { enabled: boolean; percentage: string };
@@ -203,13 +206,13 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
         : { family: selectedFamily, productRowId, sourceBatchId };
     setModal({ draft: addPartnerTechnicalProduct(draft, product, input), productRowId, mode: 'create' });
   };
-  return <TechnicalProductConfiguration><section className="space-y-4" aria-label="محصولات فروش همکار">
+  return <RetailOperationCatalog.Provider value={retailOperationCatalog}><TechnicalProductConfiguration><section className="space-y-4" aria-label="محصولات فروش همکار">
     {catalogState !== 'ready' && <ErpInlineState kind={catalogState === 'error' ? 'error' : 'empty'}
       title={catalogState === 'error' ? 'دریافت کاتالوگ فنی انجام نشد؛ محصولات قرارداد حفظ شده‌اند.' : 'در حال دریافت کاتالوگ محصولات'}
       action={catalogState === 'error' && onRetryCatalog ? { label: 'تلاش مجدد دریافت کاتالوگ', onClick: onRetryCatalog } : undefined} />}
     {catalogState === 'ready' && <ContractProductCatalog query={query} onQueryChange={setQuery} activeType={family} onTypeChange={setFamily}
       searchId="partner-contract-product-search"
-      typeOptions={partnerSelectableFamilies.map(value => ({ id: value, label: labels[value],
+      typeOptions={partnerSelectableFamilies.map(value => ({ id: value, label: catalogLabels[value],
         count: currentProducts.filter(product => product.isAvailable && product.families.includes(value)).length }))}
       items={available.map(product => ({ id: product.catalogItemId, name: product.name,
         facts: [product.code, product.attributes.stoneType, product.dimensions.motherWidthCentimeters
@@ -320,7 +323,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
         row={{ productRowId }}
         calculation={calculation} catalog={operations} onChange={onChange} intentOverride={intent ?? { groups: [], tools: [], finishings: [] }}
         onOperationsChange={onOperationsChange} />} />}
-  </section></TechnicalProductConfiguration>;
+  </section></TechnicalProductConfiguration></RetailOperationCatalog.Provider>;
 }
 
 function PartnerProductConfigurationFlow({ state, products, operations, sawKerfMeters, mandatoryDefaults, onDraftChange, onClose, onSave }: {
@@ -350,6 +353,13 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
         item.source?.kind === 'new-material' && (!item.source.retailUnitPrice || Number(item.source.retailUnitPrice.amount) <= 0))
       ? 'قیمت فروش سنگ جدید لایه به مشتری را وارد کنید.'
       : preview.ok && preview.value.conflicts.length > 0 ? partnerTechnicalConflictMessage(preview.value.conflicts[0], 'مشخصات محصول‌ها را بررسی کنید.') : undefined;
+  const retailPriceControl = row.family !== 'volumetric' ? <ErpField
+    label={<span className="text-xs font-semibold">{partnerRetailPriceUnitLabel({ family: row.family,
+      ...(row.family === 'stair' ? { part: row.configuration.part } : {}) })}</span>}
+    required><ErpRialInput dir="ltr" className="text-sm"
+      value={row.retailUnitPrice?.amount ?? ''}
+      onValueChange={amount => onDraftChange(setPartnerTechnicalRetailUnitPrice(state.draft, row.productRowId, amount))} />
+  </ErpField> : null;
   return <CentralProductModalShell open title={state.mode === 'edit' ? 'ویرایش تنظیمات محصول' : 'تنظیمات محصول'}
     view="main" onClose={onClose} primaryLabel={state.mode === 'edit' ? 'ذخیره تغییرات' : 'افزودن محصول'} pending={false}
     onPrimary={() => { if (!blockingConflict) onSave(); }} error={blockingConflict}>
@@ -365,7 +375,7 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
           .filter(Boolean).join(' · ')}
       </div>
       {(row.family === 'longitudinal' || row.family === 'slab') && <div className="border-b border-[var(--sds-border-subtle)] py-3">
-        <ErpField label="عنوان محصول"><ErpInput value={row.contractualTitle ?? product.name} maxLength={300}
+        <ErpField label={<span className="text-xs font-semibold">عنوان محصول</span>}><ErpInput className="text-sm" value={row.contractualTitle ?? product.name} maxLength={300}
           onChange={event => onDraftChange(updatePartnerTechnicalPresentation(state.draft, row.productRowId,
             { contractualTitle: event.target.value }))} /></ErpField>
       </div>}
@@ -383,6 +393,7 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
         requestedAreaSquareMeters: row.configuration.requestedAreaSquareMeters ? parseCanonicalDecimal(row.configuration.requestedAreaSquareMeters) : undefined,
         motherWidthMeters: parseCanonicalDecimal(String(Number(product.dimensions.motherWidthCentimeters ?? '0') / 100)),
         sawKerfMeters: parseCanonicalDecimal(sawKerfMeters) } as LongitudinalTechnicalInput}
+        retailPriceControl={retailPriceControl}
         technicalMandatory={{ enabled: row.configuration.mandatoryEnabled ?? mandatoryDefaults.enabled,
           percentage: row.configuration.mandatoryPercentage ?? mandatoryDefaults.percentage }}
         onTechnicalMandatoryChange={value => onDraftChange(replaceRow(state.draft, { ...row,
@@ -394,29 +405,23 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
           const updated = syncPartnerFullCoverageGroup(row, configuration.quantity);
           onDraftChange(replaceRow(state.draft, { ...updated, configuration: { ...row.configuration,
             ...configuration } as typeof row.configuration })); }} />}
-      {row.family === 'slab' && <SlabProductSection input={partnerSlabTechnicalInput(row.configuration, state.draft.inputRevision, sawKerfMeters)}
+      {row.family === 'slab' && <SlabProductSection retailPriceControl={retailPriceControl} input={partnerSlabTechnicalInput(row.configuration, state.draft.inputRevision, sawKerfMeters)}
         sawKerfMeters={parseCanonicalDecimal(sawKerfMeters)} showValidation onChange={input => {
           const { inputRevision, kerfMeters, ...configuration } = input; void inputRevision; void kerfMeters;
           onDraftChange(replaceRow(state.draft, { ...row, configuration: { ...configuration,
             sawKerfEnabled: Number(kerfMeters) > 0 } as unknown as typeof row.configuration })); }} />}
       {row.family === 'stair' && <StairEditor key={row.productRowId} draft={state.draft} row={row} product={product}
         mandatoryDefaults={mandatoryDefaults} onChange={onDraftChange} />}
+      {(row.family === 'prepared' || row.family === 'stair') && retailPriceControl}
       {!['prepared', 'volumetric'].includes(row.family) && calculation?.ok && <div id="product-operations" tabIndex={-1}>
         <OperationsEditor draft={state.draft} row={row as Extract<typeof row, { family: 'longitudinal' | 'slab' | 'stair' }>}
           calculation={calculation.result as unknown as Record<string, unknown>} catalog={operations} onChange={onDraftChange} />
       </div>}
-      {(row.family === 'longitudinal' || row.family === 'slab') && <ErpField label="توضیحات">
+      {(row.family === 'longitudinal' || row.family === 'slab') && <ErpField label={<span className="text-xs font-semibold">توضیحات</span>}>
         <AutoGrowingDescription value={row.description ?? ''} maxLength={2000}
           onChange={event => onDraftChange(updatePartnerTechnicalPresentation(state.draft, row.productRowId,
             { description: event.target.value }))} />
       </ErpField>}
-      {row.family !== 'volumetric' && <div className="border-t border-[var(--sds-border-subtle)] py-3"><ErpField
-        label={`قیمت فروش به مشتری — ${partnerRetailPriceUnitLabel({ family: row.family,
-          ...(row.family === 'stair' ? { part: row.configuration.part } : {}) })}`} required
-        hint="فقط نرخ سنگ را وارد کنید؛ برش، چسب و سایر هزینه‌ها توسط سیستم محاسبه می‌شوند."><ErpRialInput dir="ltr"
-          value={row.retailUnitPrice?.amount ?? ''}
-          onValueChange={amount => onDraftChange(setPartnerTechnicalRetailUnitPrice(state.draft, row.productRowId, amount))} />
-      </ErpField></div>}
       {(state.draft.contractConfigurationRequiredProductRowIds ?? []).includes(row.productRowId) && <ErpCheckbox
         checked={(state.draft.contractConfiguredProductRowIds ?? []).includes(row.productRowId)}
         label="مشخصات واقعی قرارداد تأیید شد"
@@ -650,12 +655,17 @@ function OperationsEditor({ draft, row, calculation, catalog, onChange, intentOv
   operationScopeId?: string;
   intentOverride?: NonNullable<Extract<PartnerTechnicalDraft['rows'][number], { family: 'stair' }>['operations']>;
   onOperationsChange?: (operations: NonNullable<Extract<PartnerTechnicalDraft['rows'][number], { family: 'stair' }>['operations']>) => void }) {
+  const retailCatalog = React.useContext(RetailOperationCatalog);
+  const retailRateFor = (kind: 'tool' | 'finishing', item: { catalogItemId: string; catalogSnapshotVersion: string; unit: 'meter' | 'squareMeter' }) =>
+    retailCatalog.find(rate => rate.sourceType === kind && rate.catalogItemId === item.catalogItemId &&
+      rate.catalogSnapshotVersion === item.catalogSnapshotVersion && rate.unit === item.unit)?.suggestedRetailUnitPrice?.amount;
   const intent = intentOverride ?? row.operations ?? { groups: [], tools: [], finishings: [] };
   const input = createPartnerTechnicalOperationInput({ inputRevision: draft.inputRevision, productRowId: row.productRowId,
     calculation, catalog, intent, operationScopeId });
   const operationCatalog = catalog.filter((item): item is Extract<PartnerTechnicalOperation, { kind: 'TOOL' | 'FINISHING' }> => item.kind !== 'LAYER');
-  return <OperationCollectionsSection input={input} loadTools={async () => operationCatalog.filter(item => item.kind === 'TOOL')}
-    loadFinishings={async () => operationCatalog.filter(item => item.kind === 'FINISHING')}
+  return <OperationCollectionsSection input={input} retailRateFor={retailRateFor}
+    loadTools={async () => operationCatalog.filter(item => item.kind === 'TOOL').map(item => ({ ...item, rateToman: retailRateFor('tool', item) }))}
+    loadFinishings={async () => operationCatalog.filter(item => item.kind === 'FINISHING').map(item => ({ ...item, rateToman: retailRateFor('finishing', item) }))}
     toolCacheKey={`partner-tools:${row.productRowId}`} finishingCacheKey={`partner-finishings:${row.productRowId}`}
     onChange={value => {
       const operations = { groups: value.groups.map(group => ({ operationGroupId: String(group.operationGroupId), scope: String(group.scope) })),

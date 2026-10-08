@@ -272,6 +272,7 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
   liveErrors = {},
   onEntryValidityChange,
   sawKerfMeters,
+  retailPriceControl,
   createSourceIdentity = () =>
     parseStableIdentity('slab-source-row', crypto.randomUUID())
 }: {
@@ -284,6 +285,7 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
   onEntryValidityChange?: (fieldId: string, invalid: boolean) => void;
   /** Server-projected technical catalog fact. No implicit Partner kerf policy. */
   sawKerfMeters?: CanonicalDecimal;
+  retailPriceControl?: React.ReactNode;
   createSourceIdentity?: () => StableIdentity<'slab-source-row'>;
 }) {
   const pricingVisible = useProductPricingVisibility();
@@ -393,6 +395,7 @@ export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnical
       </div>
       {conflict('slab') && <div role="alert" className={errorClass}>{conflict('slab')}</div>}
 
+      {retailPriceControl}
       {showPricing && <SlabField
         id="slab-base-rate"
         label="فی سنگ مادر مصرفی"

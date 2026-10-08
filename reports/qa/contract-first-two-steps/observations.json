@@ -1,0 +1,68 @@
+[
+  {
+    "kind": "ordinary",
+    "width": 1280,
+    "theme": "light",
+    "previewFont": "14px"
+  },
+  {
+    "kind": "ordinary",
+    "width": 1280,
+    "theme": "dark",
+    "previewFont": "14px"
+  },
+  {
+    "kind": "ordinary",
+    "width": 390,
+    "theme": "light",
+    "previewFont": "14px"
+  },
+  {
+    "kind": "ordinary",
+    "width": 390,
+    "theme": "dark",
+    "previewFont": "14px"
+  },
+  {
+    "kind": "ordinary",
+    "additionalButton": {
+      "x": 216.390625,
+      "y": 902,
+      "width": 140.609375,
+      "height": 44
+    }
+  },
+  {
+    "kind": "partner",
+    "width": 1280,
+    "theme": "light",
+    "previewFont": "14px"
+  },
+  {
+    "kind": "partner",
+    "width": 1280,
+    "theme": "dark",
+    "previewFont": "14px"
+  },
+  {
+    "kind": "partner",
+    "width": 390,
+    "theme": "light",
+    "previewFont": "14px"
+  },
+  {
+    "kind": "partner",
+    "width": 390,
+    "theme": "dark",
+    "previewFont": "14px"
+  },
+  {
+    "kind": "partner",
+    "additionalButton": {
+      "x": 216.390625,
+      "y": 902,
+      "width": 140.609375,
+      "height": 44
+    }
+  }
+]

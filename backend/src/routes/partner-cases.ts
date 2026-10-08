@@ -1,4 +1,6 @@
 import { readWholesaleMandatory } from '../services/partnerSales/cases/canonicalWholesale';
+import { PARTNER_CREATION_TRANSACTION_OPTIONS } from '../services/partnerSales/creationTransactionBudget';
+import { technicalTransportFailure, type TechnicalFailureDiagnostic } from './partnerTechnicalFailure';
 import { previewPartnerWholesaleRows } from '../services/partnerSales/inquiries/wholesalePricing';
 import { canManageCommercialSettings } from '../services/ordinaryContractLifecycle';
 import { appendPartnerCommercialEvent } from '../services/partnerSales/cases/commercialEvents';
@@ -74,7 +76,8 @@ function respond(response: Response, result: Result<unknown>) {
 export { allocatePartnerLinkedPair } from '../services/partnerSales/cases/linkedPair';
 import { allocatePartnerLinkedPair } from '../services/partnerSales/cases/linkedPair';
 
-export function createPartnerCaseRouter(input: { database?: PrismaClient; authenticate?: RequestHandler } = {}) {
+export function createPartnerCaseRouter(input: { database?: PrismaClient; authenticate?: RequestHandler;
+  reportCreationFailure?(diagnostic: TechnicalFailureDiagnostic): void } = {}) {
   assertPartnerCasePrismaClientCompatibility();
   const prisma = input.database ?? applicationPrisma;
   const router = Router();
@@ -91,7 +94,6 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         if (requestedCaseId && !requestedCase) return { ok: false as const, error: partnerError('NOT_FOUND') };
         const profile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: {
           id: true, state: true,
-          commercialAccount: { select: { terms: { orderBy: [{ effectiveDate: 'desc' }, { version: 'desc' }] } } },
           inquiries: { ...(requestedCaseId ? { where: { caseId: requestedCaseId } } : {}),
             orderBy: { createdAt: 'desc' }, take: 100, select: { id: true } },
           customers: { where: { isActive: true }, orderBy: { createdAt: 'desc' }, select: {
@@ -238,9 +240,17 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         });
         return value.success ? { ok: true as const, value: value.data }
           : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
-      });
+      }, PARTNER_CREATION_TRANSACTION_OPTIONS);
       respond(response, result);
-    } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+    } catch (failure) {
+      const supportReference = randomUUID();
+      const diagnostic = technicalTransportFailure(failure, supportReference);
+      (input.reportCreationFailure ?? (value => console.error('Partner creation context failed', value)))(diagnostic);
+      const error = partnerError(diagnostic.code === 'TEMPORARY_FAILURE' ? 'TEMPORARY_FAILURE' : 'INTEGRITY_CONFLICT');
+      response.setHeader('Cache-Control', 'private, no-store');
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      response.status(error.status).json({ success: false, code: error.code, error: error.message, supportReference });
+    }
   });
   router.patch('/drafts/:recoveryId', async (request: AuthRequest, response) => {
     if (!request.user || typeof request.body?.title !== 'string' || !request.body.title.trim() ||

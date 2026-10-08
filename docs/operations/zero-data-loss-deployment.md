@@ -103,6 +103,7 @@ Failure before `MUTATION_STARTED` removes maintenance and resumes the unchanged 
 - Checkpoint creation and remote verification before mutation: a configurable 10-minute to 4-hour fail-closed window (1 hour by default), sized for the independent off-server store; expiry aborts without rollback.
 - Migration, startup, and mandatory gates after mutation: at most fifteen minutes, then begin rollback.
 - Transient idempotent operations may retry three times with bounded exponential backoff.
+- Remote checkpoint checksum read-back uses bounded 1 MiB reads and may restart the complete hash up to three times after a transient storage or connection error, including a stream-close error. Persistent read failures and checksum mismatches still abort before mutation; a partial read never establishes verification.
 - Migration, promotion, database rename, filesystem swap, and restore are never blindly repeated; the durable journal determines resume or rollback.
 - Rollback has operational timeouts and alerts but never opens an unverified state merely to meet a duration target.
 

@@ -2,11 +2,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpField, ErpInlineState, ErpSection, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpField, ErpInlineState, ErpNeumorphicCard, ErpSection, ErpSheet, ErpTextarea } from '@/components/erp';
 import { cancelPartnerCase, reactivatePartnerCase, readPartnerCases, sendPartnerConfirmation } from './partnerCaseHttpPort';
 import { partnerSalesActionFeedback } from '../partnerSalesErrorMessage';
 import { assertSuccessfulSalesResult } from '@/features/sales/salesOperationalError';
-export function PartnerContractCancellation({ caseId }: { caseId: string }) {
+export function PartnerContractCancellation({ caseId, presentation }: { caseId: string; presentation?: 'wizard' }) {
   const router = useRouter();
   const [row, setRow] = useState<PartnerCaseRuntimeRow>();
   const [open, setOpen] = useState(false);
@@ -21,7 +21,7 @@ export function PartnerContractCancellation({ caseId }: { caseId: string }) {
   const reload = useCallback(async () => { const next = await readPartnerCases(caseId); setRow(next.find(item => item.view.owner.caseId === caseId)); }, [caseId]);
   useEffect(() => { let active = true; setRow(undefined); void readPartnerCases(caseId).then(rows => { if (active) setRow(rows.find(item => item.view.owner.caseId === caseId)); }).catch(() => { if (active) setRow(undefined); }); return () => { active = false; }; }, [caseId]);
   if (!row || (!row.actions.canCancel && !row.actions.canSendConfirmation && !cancelled)) return null;
-  return <ErpSection title="عملیات تأیید قرارداد">
+  const content = <>
     <div className="flex flex-wrap gap-3">
       {row.actions.canSendConfirmation && <ErpButton label="ارسال پیامک تأیید" tone="primary" disabled={pending} onClick={() => {
         if (confirmationFlight.current) return;
@@ -56,5 +56,8 @@ export function PartnerContractCancellation({ caseId }: { caseId: string }) {
       <ErpField label={cancelled ? 'دلیل فعال‌سازی' : 'دلیل لغو'}><ErpTextarea value={reason} onChange={event => setReason(event.target.value)} /></ErpField>
       {error && <ErpInlineState kind="error" title={error} />}
     </ErpSheet>
-  </ErpSection>;
+  </>;
+  return presentation === 'wizard' ? <ErpNeumorphicCard className="p-6">
+    <h4 className="sds-text-primary mb-4 font-semibold">عملیات تأیید قرارداد</h4>{content}
+  </ErpNeumorphicCard> : <ErpSection title="عملیات تأیید قرارداد">{content}</ErpSection>;
 }

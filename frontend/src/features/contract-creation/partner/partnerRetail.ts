@@ -221,6 +221,30 @@ export function remainingPartnerAmount(total: string, allocated: readonly string
   } catch { return null; }
 }
 
+/** Exact payment summary, including over-allocation; never changes installments. */
+export function partnerPaymentAllocation(total: Money, installments: readonly { amount: Money }[]) {
+  try {
+    const paid = installments.reduce((sum, installment) => {
+      if (installment.amount.currency !== total.currency) throw new Error('currency mismatch');
+      return add(sum, decimal(installment.amount.amount));
+    }, decimal('0'));
+    const balance = add(decimal(total.amount), paid, true);
+    return { paid: display(paid), remaining: display(balance),
+      extra: balance.digits < BigInt(0) ? display({ ...balance, digits: -balance.digits }) : '0',
+      state: balance.digits === BigInt(0) ? 'matched' as const : balance.digits > BigInt(0) ? 'short' as const : 'over' as const };
+  } catch { return null; }
+}
+
+export function stepPartnerDeliveryAmount(current: string, maximum: string, direction: -1 | 1): string | null {
+  try {
+    let next = add(decimal(current), decimal('1'), direction === -1);
+    const ceiling = decimal(maximum);
+    if (next.digits < BigInt(0)) next = decimal('0');
+    if (add(ceiling, next, true).digits < BigInt(0)) next = ceiling;
+    return display(next);
+  } catch { return null; }
+}
+
 /** Unsaved backing identity; the payment form requires an explicit method and amount. */
 export function newPartnerPaymentInstallment(currency: Money['currency'], installmentId: string, currentDate: string): PartnerDraftIntent['customerPaymentPlan']['installments'][number] {
   return {

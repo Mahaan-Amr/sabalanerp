@@ -4,10 +4,9 @@ import { PartnerCommandSchema, partnerError, type Result } from '@sabalanerp/par
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { createPrismaPartnerInquiryService, type PartnerInquiryDependencies } from '../services/partnerSales/inquiries/service';
-import { ensureMissingResponderSupport, resolveEligibleResponder, resolveProfileResponder, resolveSavedTechnicalConfiguration } from '../services/partnerSales/inquiries/adapters';
+import { createSavedTechnicalConfigurationResolver, ensureMissingResponderSupport, resolveEligibleResponder, resolveProfileResponder } from '../services/partnerSales/inquiries/adapters';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readAuthorizationDecisionByCorrelation } from '../services/effectiveAuthorization/audit';
-import { dispatchPartnerInquiryEvents, inquiryNotificationAccess } from '../services/partnerSales/notifications/inquiryDelivery';
 
 function correlation(request: Request): string {
   const supplied = request.get('X-Correlation-Id');
@@ -25,7 +24,7 @@ function respond(response: Response, result: Result<unknown>) {
 export function createPartnerInquiryRouter() {
   const router = Router();
   router.use(protect);
-  const serviceFor = (request: AuthRequest) => {
+  const serviceFor = (request: AuthRequest, observeTiming?: PartnerInquiryDependencies['observeTiming']) => {
     if (!request.user) throw new Error('Authentication required');
     const correlationId = correlation(request);
     const authorize: PartnerInquiryDependencies['authorize'] = async (tx, input) => {
@@ -42,16 +41,22 @@ export function createPartnerInquiryRouter() {
     };
     return createPrismaPartnerInquiryService({ database: prisma, actorId: request.user.id, authorize,
       resolveInitialResponder: resolveProfileResponder, resolveResponder: resolveEligibleResponder,
-      resolveConfiguration: resolveSavedTechnicalConfiguration, ensureMissingResponderSupport,
-      publishCommittedEvents: eventIds => dispatchPartnerInquiryEvents(prisma, eventIds, inquiryNotificationAccess) });
+      resolveConfiguration: createSavedTechnicalConfigurationResolver(), ensureMissingResponderSupport, observeTiming });
   };
   router.post('/commands', async (request: AuthRequest, response) => {
     const command = PartnerCommandSchema.safeParse(request.body);
     if (command.success && command.data.type === 'INQUIRY_SUBMIT') {
       respond(response, { ok: false, error: partnerError('STATE_CONFLICT') }); return;
     }
-    try { respond(response, await serviceFor(request).execute(request.body)); }
-    catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
+    const timings = new Map<string, number>();
+    const started = performance.now();
+    const finish = () => response.setHeader('Server-Timing', [...timings, ['total', performance.now() - started] as const]
+      .map(([phase, duration]) => `${phase};dur=${duration.toFixed(1)}`).join(', '));
+    try {
+      const result = await serviceFor(request, (phase, duration) => timings.set(phase, (timings.get(phase) ?? 0) + duration)).execute(request.body);
+      finish(); respond(response, result);
+    }
+    catch { finish(); respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
   });
   router.post('/query-v2', async (request: AuthRequest, response) => {
     try { respond(response, await serviceFor(request).query(request.body as never)); }

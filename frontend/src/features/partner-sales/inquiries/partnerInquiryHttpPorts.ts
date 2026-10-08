@@ -6,7 +6,10 @@ import {
 import api from '@/lib/api';
 
 type HttpResponse = { data: unknown };
-export interface PartnerInquiryHttpClient { post(path: string, body: unknown): Promise<HttpResponse> }
+export interface PartnerInquiryHttpClient { post(path: string, body: unknown, options?: { timeout: number }): Promise<HttpResponse> }
+// Covers the 30s server transaction plus pool/transport time. An expired request
+// is an uncertain result, never permission to submit a new financial command.
+export const INQUIRY_DECISION_REQUEST_TIMEOUT_MS = 45_000;
 
 function businessFailure(error: unknown): Result<never> | null {
   const response = (error as { response?: { status?: unknown; data?: unknown } } | null)?.response;
@@ -33,7 +36,8 @@ export function createPartnerInquiryHttpPorts(client: PartnerInquiryHttpClient =
       return { ok: false, error: partnerError('INVALID_PAYLOAD') };
     }
     try {
-      const value = successData(await client.post('/partner/inquiries/commands', command.data));
+      const value = successData(await client.post('/partner/inquiries/commands', command.data,
+        command.data.type === 'INQUIRY_DECIDE' ? { timeout: INQUIRY_DECISION_REQUEST_TIMEOUT_MS } : undefined));
       if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
       const row = value as Record<string, unknown>;
       const commandId = IdSchema.safeParse(row.commandId), eventIds = Array.isArray(row.eventIds) ? row.eventIds.map(id => IdSchema.safeParse(id)) : [];

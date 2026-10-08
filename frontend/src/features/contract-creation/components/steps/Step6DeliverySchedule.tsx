@@ -1,10 +1,10 @@
-﻿// Step 6: Delivery Schedule Component
+// Step 6: Delivery Schedule Component
 // Delivery schedule management
 
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { ErpNeumorphicCard, ErpPressable } from '@/components/erp';
-import { FaPlus, FaTrash, FaChevronUp, FaChevronDown } from 'react-icons/fa';
-import FormattedNumberInput from '@/components/FormattedNumberInput';
+import { ErpButton, ErpIconButton, ErpNeumorphicCard, ErpPressable } from '@/components/erp';
+import { FaPlus, FaTrash } from 'react-icons/fa';
+import { ContractDeliveryQuantityControl } from '../shared/ContractDeliveryQuantityControl';
 import { formatDisplayNumber } from '@/lib/numberFormat';
 import type { ContractWizardData, DeliverySchedule, DeliveryProductItem } from '../../types/contract.types';
 import {
@@ -196,13 +196,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
           <h4 className="text-lg font-medium text-[var(--sds-text-primary)]">
             لیست تحویل‌ها
           </h4>
-          <ErpPressable
-            onClick={handleAddDelivery}
-            className="sds-tone-primary sds-action-solid flex items-center gap-2 px-4 py-2 font-medium"
-          >
-            <FaPlus className="w-4 h-4" />
-            افزودن تحویل
-          </ErpPressable>
+          <ErpButton onClick={handleAddDelivery} label="افزودن تحویل" icon={FaPlus} variant="outline" tone="neutral" />
         </div>
 
         {wizardData.deliveries.length === 0 ? (
@@ -230,14 +224,12 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                   <h5 className="font-semibold text-[var(--sds-text-primary)]">
                     تحویل {index + 1}
                   </h5>
-                  <ErpPressable
+                  <ErpIconButton
                     onClick={() => handleRemoveDelivery(index)}
-                    className="p-2 text-[var(--sds-danger)] dark:text-[var(--sds-danger)] hover:bg-[var(--sds-danger-surface)] dark:hover:bg-[var(--sds-danger-surface)] rounded-lg transition-colors"
-                    aria-label={`حذف تحویل ${index + 1}`}
+                    tone="danger" icon={FaTrash}
+                    label={`حذف تحویل ${index + 1}`}
                     title="حذف تحویل"
-                  >
-                    <FaTrash className="w-4 h-4" />
-                  </ErpPressable>
+                  />
                 </div>
 
                 <ContractDeliveryDetailsFields value={{ date: delivery.deliveryDate,
@@ -288,34 +280,8 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                                   {widthSummary}
                                 </span>
                               )}
-                              <div className="flex items-center gap-1">
-                                <ErpPressable
-                                  type="button"
-                                  onClick={() => setQty(currentQty - 1)}
-                                  disabled={currentQty <= 0}
-                                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
-                                  aria-label="کم کردن"
-                                >
-                                  <FaChevronDown className="w-3.5 h-3.5" />
-                                </ErpPressable>
-                                <FormattedNumberInput
-                                  value={currentQty}
-                                  onChange={(value) => setQty(value)}
-                                  min={0}
-                                  max={maxForThisDelivery}
-                                  step={deliveryUnit === 'count' ? 1 : 0.01}
-                                  className="w-20 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 py-1.5 text-center text-sm text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
-                                />
-                                <ErpPressable
-                                  type="button"
-                                  onClick={() => setQty(currentQty + 1)}
-                                  disabled={currentQty >= maxForThisDelivery}
-                                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
-                                  aria-label="زیاد کردن"
-                                >
-                                  <FaChevronUp className="w-3.5 h-3.5" />
-                                </ErpPressable>
-                              </div>
+                              <ContractDeliveryQuantityControl value={currentQty} maximum={maxForThisDelivery} count={deliveryUnit === 'count'}
+                                onChange={setQty} onDecrease={() => setQty(currentQty - 1)} onIncrease={() => setQty(currentQty + 1)} />
                             </div>
                             <div className="flex flex-wrap items-center gap-3 text-xs">
                               <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
@@ -351,40 +317,14 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                         return (
                           <ErpNeumorphicCard
                             key={serviceRow.id}
-                            className="space-y-2 border-[var(--sds-success-border)] p-3"
+                            className="space-y-2 p-3"
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <span className="text-sm font-medium text-[var(--sds-text-primary)]">
                                 {serviceRow.title}
                               </span>
-                              <div className="flex items-center gap-1">
-                                <ErpPressable
-                                  type="button"
-                                  onClick={() => setQty(currentQty - 1)}
-                                  disabled={currentQty <= 0}
-                                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
-                                  aria-label="کم کردن"
-                                >
-                                  <FaChevronDown className="w-3.5 h-3.5" />
-                                </ErpPressable>
-                                <FormattedNumberInput
-                                  value={currentQty}
-                                  onChange={(value) => setQty(value)}
-                                  min={0}
-                                  max={maxForThisDelivery}
-                                  step={serviceRow.unit === 'count' ? 1 : 0.01}
-                                  className="w-20 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 py-1.5 text-center text-sm text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
-                                />
-                                <ErpPressable
-                                  type="button"
-                                  onClick={() => setQty(currentQty + 1)}
-                                  disabled={currentQty >= maxForThisDelivery}
-                                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
-                                  aria-label="زیاد کردن"
-                                >
-                                  <FaChevronUp className="w-3.5 h-3.5" />
-                                </ErpPressable>
-                              </div>
+                              <ContractDeliveryQuantityControl value={currentQty} maximum={maxForThisDelivery} count={serviceRow.unit === 'count'}
+                                onChange={setQty} onDecrease={() => setQty(currentQty - 1)} onIncrease={() => setQty(currentQty + 1)} />
                             </div>
                             <div className="flex flex-wrap items-center gap-3 text-xs">
                               <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">

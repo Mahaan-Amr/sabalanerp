@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { sha256File } from './recoveryCrypto';
 import { planLocalCheckpointCleanup, planRemoteCheckpointRetention, type LocalCheckpointArtifact } from './deploymentCheckpointPolicy';
 
@@ -35,9 +36,20 @@ type FilesystemRemoteCheckpointStoreOptions = {
   maxTransientUploadRetries?: number;
   retryDelayMs?: number;
   copyRange?: CheckpointRangeCopier;
+  readChecksum?: (filePath: string) => Promise<string>;
 };
 
 const transientRemoteStorageCodes = new Set(['EIO', 'ESTALE', 'ENOTCONN', 'ECONNRESET', 'ETIMEDOUT']);
+
+const remoteCheckpointChecksum = async (filePath: string): Promise<string> => {
+  const hash = createHash('sha256');
+  // Larger bounded reads let SSHFS pipeline requests across a high-latency link.
+  // Every byte still participates in the independently read-back checksum.
+  for await (const chunk of fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 })) {
+    hash.update(chunk);
+  }
+  return hash.digest('hex');
+};
 
 const defaultCopyRange: CheckpointRangeCopier = async (sourcePath, temporaryPath, start) => {
   const { pipeline } = await import('node:stream/promises');
@@ -139,9 +151,21 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       }
     }
+    const readBackChecksum = async () => {
+      for (let retry = 0; ; retry += 1) {
+        try {
+          return await (this.options.readChecksum ?? remoteCheckpointChecksum)(temporary);
+        } catch (error: any) {
+          if (!transientRemoteStorageCodes.has(error?.code) || retry >= 3) throw error;
+          // Restart the whole hash after a broken handle, including close errors.
+          // An interrupted or partially read stream can never prove this archive.
+          await new Promise(resolve => setTimeout(resolve, Math.min(retryDelayMs * 2 ** retry, 30_000)));
+        }
+      }
+    };
     const [sourceChecksum, uploadedChecksum, stat] = await Promise.all([
       expectedChecksum ? Promise.resolve(expectedChecksum) : sha256File(sourcePath),
-      sha256File(temporary),
+      readBackChecksum(),
       fs.promises.stat(temporary),
     ]);
     if (sourceChecksum !== uploadedChecksum) {

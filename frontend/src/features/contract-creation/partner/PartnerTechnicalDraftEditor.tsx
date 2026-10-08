@@ -147,11 +147,12 @@ function productForCanonical(product: PartnerTechnicalProduct): Product {
     qualityNamePersian: product.attributes.quality };
 }
 
-export function PartnerTechnicalDraftEditor({ draft, products, currentProducts = products, catalogState = 'ready', onRetryCatalog, operations, retailOperationCatalog = [], mandatoryDefaults = { enabled: false, percentage: '20' }, sawKerfMeters = '0.003', preview: suppliedPreview, finalTotal, finalTotalStatus, onRetryTotal, focusProductRowId, onChange }: {
+export function PartnerTechnicalDraftEditor({ draft, products, currentProducts = products, catalogState = 'ready', dependenciesReady = true, onRetryCatalog, operations, retailOperationCatalog = [], mandatoryDefaults = { enabled: false, percentage: '20' }, sawKerfMeters = '0.003', preview: suppliedPreview, finalTotal, finalTotalStatus, onRetryTotal, focusProductRowId, onChange }: {
   draft: PartnerTechnicalDraft; products: PartnerTechnicalProduct[]; operations: PartnerTechnicalOperation[]; sawKerfMeters?: string;
   currentProducts?: PartnerTechnicalProduct[];
   retailOperationCatalog?: readonly import('@sabalanerp/partner-sales-contracts').PartnerTechnicalServiceCatalogItem[];
   catalogState?: 'loading' | 'ready' | 'error';
+  dependenciesReady?: boolean;
   onRetryCatalog?: () => void;
   mandatoryDefaults?: { enabled: boolean; percentage: string };
   preview?: ReturnType<typeof previewPartnerTechnicalDraft>;
@@ -312,6 +313,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
     </ErpCard></section>
     {partnerTechnicalSaveIssue(preview) && <ErpInlineState kind="stale" title={partnerTechnicalSaveIssue(preview)!} />}
     {modal && <PartnerProductConfigurationFlow state={modal} products={products} operations={operations} sawKerfMeters={sawKerfMeters}
+      dependenciesReady={dependenciesReady}
       mandatoryDefaults={mandatoryDefaults}
       onDraftChange={next => setModal(current => current ? { ...current, draft: next } : current)} onClose={() => setModal(null)}
       onSave={() => { onChange(modal.draft); setModal(null); }} />}
@@ -326,10 +328,11 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
   </section></TechnicalProductConfiguration></RetailOperationCatalog.Provider>;
 }
 
-function PartnerProductConfigurationFlow({ state, products, operations, sawKerfMeters, mandatoryDefaults, onDraftChange, onClose, onSave }: {
+function PartnerProductConfigurationFlow({ state, products, operations, sawKerfMeters, mandatoryDefaults, dependenciesReady, onDraftChange, onClose, onSave }: {
   state: { draft: PartnerTechnicalDraft; productRowId: string; mode: 'create' | 'edit' };
   products: PartnerTechnicalProduct[];
   operations: PartnerTechnicalOperation[];
+  dependenciesReady: boolean;
   sawKerfMeters: string;
   mandatoryDefaults: { enabled: boolean; percentage: string };
   onDraftChange: (draft: PartnerTechnicalDraft) => void;
@@ -346,7 +349,8 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
     ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.calculation
     : undefined;
   const rowOperations = preview.ok ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.operations : undefined;
-  const blockingConflict = calculation && !calculation.ok ? partnerTechnicalConflictMessage(calculation.conflicts[0], 'مشخصات این محصول را کامل کنید.')
+  const blockingConflict = !dependenciesReady ? 'ابزار، پرداخت و خدمات هنوز آماده نیستند؛ پس از دریافت آن‌ها می‌توانید محصول را ذخیره کنید.'
+    : calculation && !calculation.ok ? partnerTechnicalConflictMessage(calculation.conflicts[0], 'مشخصات این محصول را کامل کنید.')
     : rowOperations && !rowOperations.ok ? partnerTechnicalConflictMessage(rowOperations.conflicts[0], 'عملیات این محصول را بررسی کنید.')
     : !(Number(row.retailUnitPrice?.amount) > 0) ? 'قیمت فروش سنگ به مشتری را وارد کنید.'
       : state.draft.dependents?.some(item => item.kind === 'layer' && item.parentProductRowId === row.productRowId &&
